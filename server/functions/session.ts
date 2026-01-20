@@ -1,91 +1,158 @@
-import type { SessionLayout } from "config";
+/**
+ * Session management utilities for Redis-backed user sessions.
+ * 
+ * Features:
+ * - Save/retrieve/delete sessions from Redis
+ * - Configurable session expiry (config.sessionExpiryDays)
+ * - Optional single-session-per-user enforcement (config.singleSessionPerUser)
+ * - Real-time session updates to connected clients
+ */
+
+// import type { SessionLayout } from "config";
+
+import config, { SessionLayout } from "../../config";
 import redis from "./redis";
-// import { logout } from "../sockets/utils/logout";
+import { captureException } from "../utils/sentry";
 
+/** Convert days to seconds for Redis TTL */
+const SESSION_TTL = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
+
+/**
+ * Save or update a user session in Redis.
+ * 
+ * @param token - The session token (unique identifier)
+ * @param data - The session data to store
+ * @param newUser - If true, this is a new login (triggers single-session enforcement)
+ */
 const saveSession = async (token: string, data: SessionLayout, newUser?: boolean) => {
-  await redis.set(`${process.env.PROJECT_NAME}-session:${token}`, JSON.stringify(data));
-  await redis.expire(`${process.env.PROJECT_NAME}-session:${token}`, 60 * 60 * 24 * 7); //? 7 days
+  try {
+    const sessionKey = `${process.env.PROJECT_NAME}-session:${token}`;
+    await redis.set(sessionKey, JSON.stringify(data));
+    await redis.expire(sessionKey, SESSION_TTL);
 
-  const { ioInstance } = await import('../sockets/socket');
+    const { ioInstance } = await import('../sockets/socket');
+    const io = ioInstance;
+    if (!io) { return; }
 
-  const io = ioInstance;
-  if (!io) { return false; } //? if this fails we are fucked but it should never fail
+    // Handle single-session enforcement on new login
+    if (newUser && config.singleSessionPerUser !== false) {
+      const userId = data?.id;
+      if (!userId) return;
 
-  if (newUser) { //? new user is true when someone logs in
-    const userId = data?.id;
-    if (!userId) return;
+      const activeUsersKey = `${process.env.PROJECT_NAME}-activeUsers:${userId}`;
+      const previousTokens = await redis.smembers(activeUsersKey);
 
-    const tokensOfPreviousUsersKey = `${process.env.PROJECT_NAME}-activeUsers:${userId}`
-    const tokensOfPreviousUsers = await redis.smembers(tokensOfPreviousUsersKey);
+      if (previousTokens.length > 0) {
+        const { logout } = await import('../sockets/utils/logout');
 
-    const { logout } = await import('../sockets/utils/logout');
-
-    await Promise.all(tokensOfPreviousUsers.map(async (tokenOfPreviousUser) => {
-      const sockets = io.sockets.adapter.rooms.get(tokenOfPreviousUser); // Set of socket IDs
-      if (sockets) { //? if we found a client it means the user is still connected
-        console.log('remving old session data from sockets', 'green')
-        for (const socketId of sockets) {
-          const socket = io.sockets.sockets.get(socketId);
-          if (socket) {
-            await logout({ token: tokenOfPreviousUser, socket, userId });
+        // Kick all previous sessions for this user
+        await Promise.all(previousTokens.map(async (previousToken) => {
+          const sockets = io.sockets.adapter.rooms.get(previousToken);
+          if (sockets) {
+            console.log(`Kicking previous session for user ${userId}`, 'yellow');
+            for (const socketId of sockets) {
+              const socket = io.sockets.sockets.get(socketId);
+              if (socket) {
+                await logout({ token: previousToken, socket, userId });
+              }
+            }
+          } else {
+            // No active sockets, just clean up Redis
+            await redis.del(`${process.env.PROJECT_NAME}-session:${previousToken}`);
+            await redis.srem(activeUsersKey, previousToken);
           }
-        }
-      } else {
-        //? if we didnt find any clients it means the user is not connected, we can just delete there session data
-        await redis.del(`${process.env.PROJECT_NAME}-session:${tokenOfPreviousUser}`);
-        await redis.srem(tokensOfPreviousUsersKey, tokenOfPreviousUser);
-      }
-    }));
-
-    await redis.sadd(tokensOfPreviousUsersKey, token);
-    await redis.expire(tokensOfPreviousUsersKey, 60 * 60 * 24 * 7); //? 7 days
-  }
-
-  if (io.sockets.adapter.rooms.has(token)) {
-    io.to(token).emit('updateSession', JSON.stringify(data));
-  }
-};
-
-const getSession = async (token: string | null) => {
-  if (!token) return {};
-  const session = await redis.get(`${process.env.PROJECT_NAME}-session:${token}`);
-  if (!session) { return {} };
-  const formattedSession = JSON.parse(session);
-  if (!formattedSession) { return {} };
-  return {...formattedSession, token: token};
-};
-
-const deleteSession = async (token: string) => {
-  const user = await redis.get(`${process.env.PROJECT_NAME}-session:${token}`);
-
-  if (user) {
-    const userId = JSON.parse(user)?.id;
-    if (userId) {
-      const tokensOfPreviousUsers = `${process.env.PROJECT_NAME}-activeUsers:${userId}`;
-      const { ioInstance } = await import('../sockets/socket');
-      // ioInstance?.to(token).emit('forceLogout');
-      if (ioInstance?.sockets.adapter.rooms.has(token)) {
-        ioInstance.to(token).emit('forceLogout');
+        }));
       }
 
-      await redis.srem(tokensOfPreviousUsers, token);
+      // Track the new session
+      await redis.sadd(activeUsersKey, token);
+      await redis.expire(activeUsersKey, SESSION_TTL);
     }
-  }
 
-  await redis.del(`${process.env.PROJECT_NAME}-session:${token}`);
-  return true;
+    // Broadcast session updates to connected clients
+    if (io.sockets.adapter.rooms.has(token)) {
+      io.to(token).emit('updateSession', JSON.stringify(data));
+    }
+  } catch (error) {
+    console.log('Error saving session:', error, 'red');
+    captureException(error, { fn: 'saveSession', token });
+  }
 };
 
-const getAllSessions = async () => {
-  const sessions = await redis.keys(`${process.env.PROJECT_NAME}-session:*`);
-  const sessionData = await Promise.all(sessions.map((session) => redis.get(session)));
-  return sessionData.map((session) => JSON.parse(session || "{}")); 
-}
+/**
+ * Retrieve a user session from Redis.
+ * 
+ * @param token - The session token
+ * @returns The session data or null if not found
+ */
+const getSession = async (token: string | null): Promise<SessionLayout | null> => {
+  if (!token) return null;
 
-// const clearAllSessions = async () => {
-//   const sessions = await redis.keys("*");
-//   await Promise.all(sessions.map((session) => redis.del(session)));
-//   return true; 
-// }
+  try {
+    const session = await redis.get(`${process.env.PROJECT_NAME}-session:${token}`);
+    if (!session) return null;
+
+    const parsed = JSON.parse(session);
+    if (!parsed) return null;
+
+    return { ...parsed, token };
+  } catch (error) {
+    console.log('Error getting session:', error, 'red');
+    captureException(error, { fn: 'getSession', token });
+    return null;
+  }
+};
+
+/**
+ * Delete a user session from Redis and notify connected clients.
+ * 
+ * @param token - The session token to delete
+ * @returns true if successful
+ */
+const deleteSession = async (token: string): Promise<boolean> => {
+  try {
+    const user = await redis.get(`${process.env.PROJECT_NAME}-session:${token}`);
+
+    if (user) {
+      const userId = JSON.parse(user)?.id;
+      if (userId) {
+        const activeUsersKey = `${process.env.PROJECT_NAME}-activeUsers:${userId}`;
+        const { ioInstance } = await import('../sockets/socket');
+
+        // Notify connected clients to logout
+        if (ioInstance?.sockets.adapter.rooms.has(token)) {
+          ioInstance.to(token).emit('forceLogout');
+        }
+
+        await redis.srem(activeUsersKey, token);
+      }
+    }
+
+    await redis.del(`${process.env.PROJECT_NAME}-session:${token}`);
+    return true;
+  } catch (error) {
+    console.log('Error deleting session:', error, 'red');
+    captureException(error, { fn: 'deleteSession', token });
+    return false;
+  }
+};
+
+/**
+ * Get all active sessions (admin utility).
+ * 
+ * @returns Array of all session data
+ */
+const getAllSessions = async (): Promise<SessionLayout[]> => {
+  try {
+    const keys = await redis.keys(`${process.env.PROJECT_NAME}-session:*`);
+    const sessions = await Promise.all(keys.map((key) => redis.get(key)));
+    return sessions.map((s) => JSON.parse(s || "{}"));
+  } catch (error) {
+    console.log('Error getting all sessions:', error, 'red');
+    captureException(error, { fn: 'getAllSessions' });
+    return [];
+  }
+};
 
 export { saveSession, getSession, deleteSession, getAllSessions };
+

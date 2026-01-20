@@ -1,5 +1,9 @@
 import dotenv from 'dotenv';
+import { initializeSentry, captureException } from './utils/sentry';
+
 dotenv.config();
+initializeSentry();
+
 import http from 'http';
 import getParams from './utils/getParams';
 import { loginWithCredentials, loginCallback } from './auth/login';
@@ -25,7 +29,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     res.setHeader('Content-Type', 'text/plain');
     return res.end('Forbidden');
   }
-  
+
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -67,11 +71,11 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   params = await getParams({ method, req, res, queryString });
 
   //? we log the request and if there are any params we log them with the request
-  if (params && typeof params == 'object' && Object.keys(params).length !== 0) { 
-    console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(params)}`, 'magenta') 
-  } else { 
-    console.log(`method: ${method}, url: ${routePath}`, 'magenta'); 
-    params = {}; 
+  if (params && typeof params == 'object' && Object.keys(params).length !== 0) {
+    console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(params)}`, 'magenta')
+  } else {
+    console.log(`method: ${method}, url: ${routePath}`, 'magenta');
+    params = {};
   }
 
   //? we dont use zod cause it doesnt allow you to pass in a id in the url
@@ -80,7 +84,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     await serveAvatar({ routePath, res });
     return;
   }
-    
+
   //? triggers when logging in
   //? when using the credentials provider all the logic happends here else we redirect to the oauth provider and all the logic happends in the auth/callback api
   if (z.string().startsWith('/auth/api').safeParse(routePath).success) {
@@ -92,7 +96,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       res.writeHead(302, {
         'Location': `${provider.authorizationURL}?client_id=${provider.clientID}&redirect_uri=${provider.callbackURL}&scope=${provider.scope.join('%20')}&response_type=code&prompt=select_account`,
       });
-      return res.end(); 
+      return res.end();
     }
 
     //? here all the logic happends for login or creating an account with credentials
@@ -110,7 +114,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     }
 
     //? if it was successful then we apply the cookie and return the user id and reason for the login or account creation
-    if (newToken) { 
+    if (newToken) {
       if (token) { await deleteSession(token); }
 
       console.log('setting cookie with newToken: ', newToken, 'green');
@@ -121,9 +125,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
       res.setHeader("Set-Cookie", `token=${newToken}; ${cookieOptions}`);
       // return res.end(JSON.stringify({ status, reason, session })) 
-    // } else { 
+      // } else { 
     }
-    return res.end(JSON.stringify({ status, reason, session, newToken })) 
+    return res.end(JSON.stringify({ status, reason, session, newToken }))
 
   } else if (z.string().startsWith('/auth/callback').safeParse(routePath).success) {
     //? this endpoint is triggerd by the oauth provider after the user has logged in
@@ -143,7 +147,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     //? we set the cookie with the new token and redirect the user to the frontend
     console.log('setting cookie with newToken: ', newToken, 'green');
     const cookieOptions = `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800; ${process.env.SECURE == 'true' ? "Secure;" : ""}`
-      
+
     const location = process.env.DNS
 
     if (process.env.VITE_SESSION_BASED_TOKEN == 'true') {
@@ -166,11 +170,11 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     .safeParse(routePath).success) {
     //? if the request is a file with one of the following extensions then we serve it
     //? png|jpg|jpeg|gif|svg|html|css|js
-    return serveFile(req, res); 
+    return serveFile(req, res);
 
   } else { // for the index.html
     //? if the request doesnt fit any of the above then we serve the index.html file
-    return serveFile({url: '/'}, res);
+    return serveFile({ url: '/' }, res);
   }
 }
 
@@ -185,12 +189,12 @@ const port: string = process.env.SERVER_PORT || '80';
     initRepl();
   }
 
-  const httpServer = http.createServer(async(req, res) => { ServerRequest(req, res) });
+  const httpServer = http.createServer(async (req, res) => { ServerRequest(req, res) });
   loadSocket(httpServer);
   // @ts-ignore // typescript thinks ip needs to be a number
   httpServer.listen(port, ip, () => {
-    console.log(`Server is running on http://${ip}:${port}/`, 'green'); 
+    console.log(`Server is running on http://${ip}:${port}/`, 'green');
   });
-  
-  
+
+
 })()

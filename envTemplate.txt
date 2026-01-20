@@ -104,7 +104,43 @@ DEV_DISCORD_CLIENT_SECRET=xxxxxxx
 # X_CLIENT_ID=a
 # X_CLIENT_SECRET=a
 
+# ============================================
+# DATABASE CONFIGURATION
+# ============================================
+# Set the DATABASE_URL based on your chosen database provider.
+# This must match the datasource in prisma/schema.prisma
+# 
+# After changing providers:
+# 1. Update prisma/schema.prisma datasource
+# 2. Update DATABASE_URL below
+# 3. Run: npx prisma generate && npx prisma db push
+# ============================================
 
+# --- MYSQL (Default) ---
+DATABASE_URL="mysql://root:password@localhost:3306/luckystack"
 
-# DATABASE_URL="provider://user:password@host:port/database"
-# example: DATABASE_URL="mysql://root:@localhost:3306/test"
+# --- POSTGRESQL ---
+# DATABASE_URL="postgresql://postgres:password@localhost:5432/luckystack"
+
+# --- MONGODB ---
+# Local: DATABASE_URL="mongodb://localhost:27017/luckystack"
+# Atlas: DATABASE_URL="mongodb+srv://user:password@cluster.mongodb.net/luckystack"
+
+# --- SQLITE (No server needed - great for development) ---
+# DATABASE_URL="file:./dev.db"
+
+# ============================================
+# SENTRY ERROR MONITORING (Optional)
+# ============================================
+# Get your DSN from https://sentry.io
+# Create a project for Node.js (server) and React (client)
+
+# Server-side Sentry DSN
+SENTRY_DSN=
+# Set to 'true' to enable Sentry in development
+SENTRY_ENABLED=false
+
+# Client-side Sentry DSN (must be prefixed with VITE_)
+VITE_SENTRY_DSN=
+# Set to 'true' to enable Sentry in development
+VITE_SENTRY_ENABLED=false

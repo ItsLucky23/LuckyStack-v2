@@ -6,11 +6,12 @@
 
 import { Server, Socket } from "socket.io";
 import { deleteSession, getSession } from "../../functions/session";
-import handleSyncRequest from "../handleSyncRequest";
 import { ioInstance } from "../socket";
+import { extractTokenFromSocket } from "../../utils/extractToken";
+import type { SessionLayout } from "../../../config";
 
 export const disconnectTimers = new Map<string, NodeJS.Timeout>();
-export const disconnectReasonsWeIgnore: string[] = ['ping timeout', ];
+export const disconnectReasonsWeIgnore: string[] = ['ping timeout'];
 export const disconnectReasonsWeAllow: string[] = ['transport close', 'transport error'];
 export const tempDisconnectedSockets = new Set<string>();
 export const clientSwitchedTab = new Set<string>();
@@ -23,7 +24,7 @@ export const socketConnected = async ({
   io: Server
 }) => {
   const timer = disconnectTimers.get(token);
-  if (timer) { 
+  if (timer) {
     console.log(`user came back with token: ${token}`, 'yellow');
     clearTimeout(timer);
     disconnectTimers.delete(token);
@@ -49,18 +50,18 @@ export const socketLeaveRoom = async ({ token, socket, newPath }: {
   token: string | null,
   socket: Socket,
   newPath: string | null
-}) => {
+}): Promise<SessionLayout | null> => {
 
   //? retrieve users session data
-  if (!token) { 
-    console.log('trying to update room peers but no token provided', 'red'); 
-    return;
+  if (!token) {
+    console.log('trying to update room peers but no token provided', 'red');
+    return null;
   }
 
   const user = await getSession(token);
-  if (!user?.id) { 
-    console.log(`no session data for given token: ${token}`, 'red'); 
-    return;
+  if (!user?.id) {
+    console.log(`no session data for given token: ${token}`, 'red');
+    return null;
   }
 
   const { pathName, searchParams } = user.location || {};
@@ -71,13 +72,13 @@ export const socketLeaveRoom = async ({ token, socket, newPath }: {
   //? EXAMPLE USAGE
   /////////////
 
-  
+
   // console.log(`
   //   check1: ${pathName == '/games/test123'}
   //   check2: ${user.code}
   //   check3: ${!newPath || newPath !== pathName}
   // `, 'cyan');
-  
+
   // //? if user is at a certain location we run a sync function to update the other players that are in the same room has him
   // if (
   //   pathName == '/games/test123' &&
@@ -102,19 +103,19 @@ export const socketLeaveRoom = async ({ token, socket, newPath }: {
 
 }
 
-const getDisconnectTime = ({ 
-  token, 
-  reason 
+const getDisconnectTime = ({
+  token,
+  reason
 }: {
   token: string,
   reason: string | undefined
 }) => {
-  return clientSwitchedTab.has(token) 
-    ? 20000 
+  return clientSwitchedTab.has(token)
+    ? 20000
     // ? 3000 
-    : disconnectReasonsWeAllow.includes(reason ?? "NULL") 
-    ? 60000 
-    : 2000
+    : disconnectReasonsWeAllow.includes(reason ?? "NULL")
+      ? 60000
+      : 2000
 }
 
 export const socketDisconnecting = async ({
@@ -129,7 +130,7 @@ export const socketDisconnecting = async ({
 
   if (disconnectReasonsWeIgnore.includes(reason)) {
     console.log(`user disconnected but we ignore it, reason: ${reason}`, 'yellow');
-    return; 
+    return;
   }
 
   if (!token) { return; }
@@ -147,7 +148,7 @@ export const socketDisconnecting = async ({
     clientSwitchedTab.delete(token);
   }
 
-  console.log(`user disconnected, reason: ${reason}, timer: ${time/1000} seconds`, 'yellow');
+  console.log(`user disconnected, reason: ${reason}, timer: ${time / 1000} seconds`, 'yellow');
 
   const timeout = setTimeout(async () => {
     if (tempDisconnectedSockets.has(token)) {
@@ -163,7 +164,7 @@ export const socketDisconnecting = async ({
       await deleteSession(token);
     }
 
-    console.log(`user fully disconnected, reason: ${reason}, timer : ${time/1000} seconds, deleteSessionOnDisconnect: ${deleteSessionOnDisconnect}`, 'yellow');
+    console.log(`user fully disconnected, reason: ${reason}, timer : ${time / 1000} seconds, deleteSessionOnDisconnect: ${deleteSessionOnDisconnect}`, 'yellow');
   }, time);
 
   if (disconnectTimers.has(token)) {
@@ -187,38 +188,34 @@ const informRoomPeers = async ({
   event: 'userAfk' | 'userBack',
   extraData?: any
 }) => {
-  if (!io) { 
+  if (!io) {
     console.log('no io instance found to inform room peers', 'red');
-    return; 
+    return;
   }
 
   const session = await getSession(token);
-  if (session.code) {
-    const roomSockets = io.sockets.adapter.rooms.get(session.code);
-    console.log(roomSockets);
-    
-    for (const socketId of roomSockets || []) {
-      const tempSocket = io.sockets.sockets.get(socketId as string);
-      if (!tempSocket) { continue; }
+  if (!session || !session.code) { return; }
 
-      if (extraData?.ignoreSelf) {
-        console.log(' skipping self emit ');
-        
-        const tempCookie = tempSocket.handshake.headers.cookie; // get the cookie from the socket connection
-        const tempSessionToken = tempSocket.handshake.auth?.token
-        const tempToken = tempCookie && process.env.VITE_SESSION_BASED_TOKEN === 'false' ? tempCookie.split("=")[1] 
-          : tempSessionToken && process.env.VITE_SESSION_BASED_TOKEN === 'true' ? tempSessionToken
-          : null; 
+  const roomSockets = io.sockets.adapter.rooms.get(session.code);
+  console.log(roomSockets);
 
-        if (token == tempToken) { continue; } //? we dont send the event to the client who called the event
-      }
+  for (const socketId of roomSockets || []) {
+    const tempSocket = io.sockets.sockets.get(socketId as string);
+    if (!tempSocket) { continue; }
 
-      if (event == 'userAfk') {
-        console.log({ userId: session.id, endTime: Date.now() + (extraData?.time || 0) });
-        tempSocket?.emit('userAfk', { userId: session.id, endTime: Date.now() + (extraData?.time || 0) });
-      } else if (event == 'userBack') {
-        tempSocket?.emit('userBack', { userId: session.id });
-      }
+    if (extraData?.ignoreSelf) {
+      console.log(' skipping self emit ');
+
+      const tempToken = extractTokenFromSocket(tempSocket);
+
+      if (token == tempToken) { continue; } //? we dont send the event to the client who called the event
+    }
+
+    if (event == 'userAfk') {
+      console.log({ userId: session.id, endTime: Date.now() + (extraData?.time || 0) });
+      tempSocket?.emit('userAfk', { userId: session.id, endTime: Date.now() + (extraData?.time || 0) });
+    } else if (event == 'userBack') {
+      tempSocket?.emit('userBack', { userId: session.id });
     }
   }
 }

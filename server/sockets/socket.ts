@@ -8,6 +8,7 @@ import handleSyncRequest from "./handleSyncRequest";
 import allowedOrigin from '../auth/checkOrigin';
 import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from './utils/activityBroadcaster';
 import config, { SessionLayout } from '../../config';
+import { extractTokenFromSocket } from '../utils/extractToken';
 
 export type apiMessage = {
   name: string;
@@ -30,7 +31,7 @@ export default function loadSocket(httpServer: any) {
 
   //? here we create the SocketIOServer instance
   const io = new SocketIOServer(httpServer, {
-    cors: { 
+    cors: {
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       origin: (origin, callback) => {
         if (!origin || allowedOrigin(origin)) {
@@ -45,18 +46,12 @@ export default function loadSocket(httpServer: any) {
   });
 
   ioInstance = io;
-  
+
   console.log('SocketIO server initialized', 'green');
 
-  //? when a client connects to the SocketIO server we define there cookies and define some events to work with the exports of serverRequest.ts on the client
+  //? when a client connects to the SocketIO server we extract their token and set up event handlers
   io.on('connection', (socket) => {
-    const cookie = socket.handshake.headers.cookie; // get the cookie from the socket connection
-    const sessionToken = socket.handshake.auth?.token;
-    const token = 
-      cookie && process.env.VITE_SESSION_BASED_TOKEN === 'false' ? cookie.split("=")[1] 
-      : sessionToken && process.env.VITE_SESSION_BASED_TOKEN === 'true'? sessionToken
-      : null; 
-
+    const token = extractTokenFromSocket(socket);
 
     if (token) {
       socketConnected({ token, io });
@@ -70,14 +65,23 @@ export default function loadSocket(httpServer: any) {
     });
     socket.on('joinRoom', async (data) => {
       const { group, responseIndex } = data;
+      if (!token) {
+        socket.emit(`joinRoom-${responseIndex}`, { error: 'Not authenticated' });
+        return;
+      }
+      const session = await getSession(token);
+      if (!session) {
+        socket.emit(`joinRoom-${responseIndex}`, { error: 'Session not found' });
+        return;
+      }
       await socket.join(group);
-      await saveSession(token, { ...await getSession(token), code: group });
+      await saveSession(token, { ...session, code: group });
       socket.emit(`joinRoom-${responseIndex}`);
       console.log(`Socket ${socket.id} joined group ${group}`, 'cyan');
     });
 
     socket.on('disconnect', async (reason) => {
-      if (config.socketActivityBroadcaster) {
+      if (config.socketActivityBroadcaster && token) {
         socketDisconnecting({ token, socket, reason });
       } else {
         if (!token) { return; }
@@ -86,9 +90,10 @@ export default function loadSocket(httpServer: any) {
     });
 
     socket.on('updateLocation', async (newLocation) => {
+      if (!token) { return; }
       console.log('updating location to: ', newLocation.pathName, 'yellow')
 
-      let returnedUser: SessionLayout | undefined;
+      let returnedUser: SessionLayout | null = null;
       if (config.socketActivityBroadcaster) {
         returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
       }
@@ -101,14 +106,14 @@ export default function loadSocket(httpServer: any) {
       return await saveSession(token, user);
     });
 
-    if (config.socketActivityBroadcaster) {
+    if (config.socketActivityBroadcaster && token) {
       initAcitivityBroadcaster({ socket, token });
     }
 
     if (token) {
       socket.join(token);
     }
-  
+
   });
   return io;
 }

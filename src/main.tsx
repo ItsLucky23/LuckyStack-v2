@@ -13,6 +13,9 @@ import { AvatarProvider } from './_components/AvatarProvider'
 import { SessionProvider } from './_providers/SessionProvider'
 import { TranslationProvider } from './_components/TranslationProvider'
 import { SocketStatusProvider } from './_providers/socketStatusProvider'
+import { initializeSentry, SentryErrorBoundary } from './_functions/sentry'
+
+initializeSentry();
 
 type PageWithTemplate = React.ComponentType & { template?: Template };
 const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?: Template }>) => {
@@ -26,8 +29,8 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
     const subPath = routePath.endsWith('/page')
       ? routePath.slice(0, -5)
       : routePath.endsWith('page')
-      ? '/'
-      : false;
+        ? '/'
+        : false;
     if (!subPath) continue;
 
     const template = module.template ?? 'plain';
@@ -37,9 +40,9 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
       path: subPath,
       element: (
         <LocationProvider>
-            <TemplateProvider key={`${template}-${subPath}`} initialTemplate={template}>
-              <Page />
-            </TemplateProvider>
+          <TemplateProvider key={`${template}-${subPath}`} initialTemplate={template}>
+            <Page />
+          </TemplateProvider>
         </LocationProvider>
       ),
     });
@@ -48,34 +51,54 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
   return routes;
 };
 
-//! eslint will tell you that the as Record<string, { default: React.ComponentType }> is not needed but it is for typescript to know what the type of pages is
 const pages = import.meta.glob('./**/*.tsx', { eager: true }) as Record<
   string,
   { default: React.ComponentType; template?: Template }
 >;
+
+// Import error page for router error handling
+import ErrorPage from './_components/ErrorPage';
+
 const router = createBrowserRouter([{
   path: '/',
+  errorElement: <ErrorPage />,
   children: getRoutes(pages)
 }])
 
 if (mobileConsole) { new VConsole(); }
 
+// Error fallback component for Sentry ErrorBoundary
+const ErrorFallback = () => (
+  <div className="w-full h-screen flex flex-col items-center justify-center bg-background text-foreground">
+    <h1 className="text-2xl font-bold mb-4">Something went wrong</h1>
+    <p className="text-muted-foreground mb-4">An unexpected error occurred. Please refresh the page.</p>
+    <button
+      onClick={() => window.location.reload()}
+      className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:opacity-90"
+    >
+      Refresh Page
+    </button>
+  </div>
+);
+
 const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
-    <div className='w-full h-safe m-0 p-0 overflow-hidden'>
-      <Toaster richColors />
+    <SentryErrorBoundary fallback={<ErrorFallback />}>
+      <div className='w-full h-safe m-0 p-0 overflow-hidden'>
+        <Toaster richColors />
         <SocketStatusProvider>
           <SessionProvider>
             <TranslationProvider>
               <AvatarProvider>
                 <MenuHandlerProvider>
-                    <RouterProvider router={router}/>
+                  <RouterProvider router={router} />
                 </MenuHandlerProvider>
               </AvatarProvider>
             </TranslationProvider>
           </SessionProvider>
         </SocketStatusProvider>
-    </div>
+      </div>
+    </SentryErrorBoundary>
   );
 }

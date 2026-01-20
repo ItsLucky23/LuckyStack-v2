@@ -4,115 +4,11 @@ import { syncs, functions } from '../prod/generatedApis'
 import { ioInstance, syncMessage } from "./socket";
 import { Socket } from "socket.io";
 import { getSession } from "../functions/session";
-import { SessionLayout } from "config";
+import { SessionLayout } from "../../config";
+import { validateRequest } from "../utils/validateRequest";
+import { extractTokenFromSocket } from "../utils/extractToken";
 
 const functionsObject = process.env.NODE_ENV == 'development' ? devFunctions : functions;
-
-const isFalsy = (value: any) => {
-  return (
-    value === false ||
-    value === 0 ||
-    value === 0n ||
-    value === '' ||
-    value === null ||
-    value === undefined ||
-    (typeof value === 'number' && isNaN(value))
-  );
-}
-
-const validateRequest = ({ auth, user }: {
-  auth: {
-    login: boolean;
-    additional?: {
-      key: string;
-      type?: 'string' | 'number' | 'boolean' | 'object' | 'function' | 'undefined';
-      value?: any;
-      mustBeFalsy?: boolean;
-      nullish?: boolean;
-    }[]
-  }, 
-  user: SessionLayout
-}) => {
-
-  //? if the additional key is an array we check if the following
-  //? if it has a key and a type we check if the user has the key and if the value is of the correct type
-  //? if it has a key and a value we check if the user has the key and if the value is the same as the given value
-  //? examples:
-  //? { key: 'admin', type: 'boolean' } -> checks if the user has the key admin and if the value is of type boolean
-  //? { key: 'admin', value: true } -> checks if the user has the key admin and if the value is true   
-
-  if (auth.additional) {
-    for (const condition of auth.additional) {
-
-      if (!condition.key) { 
-        return {
-          error: true,
-          message: `Missing key in auth.additional condition`,
-        };
-      }
-
-      if (!(condition.key in user)) {
-        return { status: "error", message: `Key ${condition.key} not found in user session` };
-      }
-
-      const val = user?.[condition.key as keyof SessionLayout];
-
-      //? If nullish flag is set, check accordingly
-      if (typeof condition.nullish === 'boolean') {
-        const isNullish = val === null || val === undefined;
-        if (condition.nullish && !isNullish) {
-          return {
-            error: true,
-            message: `Expected ${condition.key} to be null or undefined`,
-          };
-        }
-        if (!condition.nullish && isNullish) {
-          return {
-            error: true,
-            message: `Expected ${condition.key} to be not null and not undefined`,
-          };
-        }
-      }
-
-      //? Check type if specified (skip null or undefined values)
-      if (condition.type && val != null) {
-        if (typeof val !== condition.type) {
-          return {
-            error: true,
-            message: `Expected ${condition.key} to be of type ${condition.type}`,
-          };
-        }
-      }
-
-      //? Check exact value if specified (strict equality)
-      if ('value' in condition) {
-        if (val !== condition.value) {
-          return {
-            error: true,
-            message: `Expected ${condition.key} to equal ${JSON.stringify(condition.value)}`,
-          };
-        }
-      }
-
-      //? Check truthy/falsy if specified
-      if (typeof condition.mustBeFalsy === 'boolean') {
-        if (condition.mustBeFalsy && !isFalsy(val)) {
-          return {
-            error: true,
-            message: `Expected ${condition.key} to be falsy`,
-          };
-        }
-        if (!condition.mustBeFalsy && isFalsy(val)) {
-          return {
-            error: true,
-            message: `Expected ${condition.key} to be truthy`,
-          };
-        }
-      }
-    }
-  
-  }
-}
 
 
 // export default async function handleSyncRequest({ name, clientData, user, serverData, roomCode }: syncMessage) {
@@ -123,11 +19,11 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 }) {
 
   if (!ioInstance) { return; }
-  
+
   //? first we validate the data
-  if (typeof msg!= 'object' ) {
-    console.log('message','socket message was not a json object', 'red')
-    return socket.emit('sync','socket message was not a json object');
+  if (typeof msg != 'object') {
+    console.log('message', 'socket message was not a json object', 'red')
+    return socket.emit('sync', 'socket message was not a json object');
   }
 
   const { name, data, cb, receiver, responseIndex, ignoreSelf } = msg;
@@ -139,7 +35,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   if (!cb || typeof cb != 'string') {
     return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `socket message was incomplete, cb: ${cb}` });
   }
-  
+
   if (!receiver) {
     console.log('receiver / roomCode: ', receiver, 'red')
     return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `socket message was incomplete, needs a receiver / roomCode: ${receiver}` });
@@ -154,7 +50,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
   console.log(syncObject)
   //? we check if there is a client file or/and a server file, if they both dont exist we abort
-  if (!syncObject[`${name}_client`] && !syncObject[`${name}_server`]) { 
+  if (!syncObject[`${name}_client`] && !syncObject[`${name}_server`]) {
     console.log("ERROR!!!, ", `you need ${name}_client or ${name}_server file to sync`, 'red');
     return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `you need ${name}_client or ${name}_server file to sync` });
   }
@@ -164,17 +60,17 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     const { auth, main: serverMain } = syncObject[`${name}_server`];
 
     //? if the login key is true we check if the user has an id in the session object
-    if (auth.login) { 
-      if (!user?.id) { 
+    if (auth.login) {
+      if (!user?.id) {
         console.log(`ERROR!!!, not logged in but sync requires login`, 'red');
-        return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: 'not logged in but sync requires login' }); 
+        return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: 'not logged in but sync requires login' });
       }
     }
 
-    const notValid = validateRequest({ auth, user: user as SessionLayout });
-    if (notValid) { 
-      console.log('ERROR!!!, ', notValid.message, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, notValid); 
+    const validationResult = validateRequest({ auth, user: user as SessionLayout });
+    if (validationResult.status === 'error') {
+      console.log('ERROR!!!, ', validationResult.message, 'red');
+      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, validationResult);
     }
 
     //? if the user has passed all the checks we call the preload sync function and return the result
@@ -202,7 +98,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     : ioInstance.sockets.adapter.rooms.get(receiver) //? Set of socket IDs in room
 
   //? now we check if we found any sockets
-  if (!sockets) { 
+  if (!sockets) {
     console.log('data: ', msg, 'red');
     console.log('receiver: ', receiver, 'red');
     console.log('no sockets found', 'red');
@@ -222,12 +118,8 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
     if (!tempSocket) { continue; }
 
-    //? check if they have a token stored in there cookie or session based on the settings
-    const tempCookie = tempSocket.handshake.headers.cookie; // get the cookie from the socket connection
-    const tempSessionToken = tempSocket.handshake.auth?.token
-    const tempToken = tempCookie && process.env.VITE_SESSION_BASED_TOKEN === 'false' ? tempCookie.split("=")[1] 
-      : tempSessionToken && process.env.VITE_SESSION_BASED_TOKEN === 'true' ? tempSessionToken
-      : null; 
+    //? check if they have a token stored in their cookie or session based on the settings
+    const tempToken = extractTokenFromSocket(tempSocket);
 
     //? here we get the users session of the client and run the sync function with the data and the users session data
     const user = await getSession(tempToken);
@@ -245,29 +137,29 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       //? if we return error we dont want this client to get the event
       else if (clientSyncResult?.status == 'error') { continue; }
       else if (clientSyncResult?.status == 'success') {
-        const result = { 
-          cb, 
-          serverData, 
-          clientData: clientSyncResult, 
-          message: clientSyncResult.message || `${name} sync success`, 
-          status: 'success' 
+        const result = {
+          cb,
+          serverData,
+          clientData: clientSyncResult,
+          message: clientSyncResult.message || `${name} sync success`,
+          status: 'success'
         };
         console.log(result, 'blue')
         tempSocket.emit(`sync`, result);
-      } 
+      }
     } else {
       //? if there is no client function we still want to send the server data to the clients
-      const result = { 
-        cb, 
-        serverData, 
-        clientData: {}, 
-        message: `${name} sync success`, 
-        status: 'success' 
+      const result = {
+        cb,
+        serverData,
+        clientData: {},
+        message: `${name} sync success`,
+        status: 'success'
       };
       console.log(result, 'blue')
       tempSocket.emit(`sync`, result);
     }
   }
 
-  return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { success: true, message: `sync ${name} success` });
+  return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: 'success', message: `sync ${name} success` });
 }

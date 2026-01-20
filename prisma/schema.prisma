@@ -1,21 +1,85 @@
+// ============================================
+// LUCKYSTACK DATABASE CONFIGURATION
+// ============================================
+// Prisma supports multiple database providers. 
+// Uncomment ONE datasource block below based on your choice.
+// After changing, run: npx prisma generate && npx prisma db push
+// ============================================
+
 generator client {
   provider = "prisma-client-js"
 }
 
+// ============================================
+// DATABASE PROVIDER OPTIONS
+// ============================================
+// Uncomment the datasource for your database. Only ONE should be active!
+// ============================================
+
+// --- MYSQL (Default) ---
 datasource db {
   provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
+// --- POSTGRESQL ---
+// datasource db {
+//   provider = "postgresql"
+//   url      = env("DATABASE_URL")
+// }
+
+// --- MONGODB ---
+// Note: MongoDB requires different schema syntax (see model comments below)
+// datasource db {
+//   provider = "mongodb"
+//   url      = env("DATABASE_URL")
+// }
+
+// --- SQLITE (Development only - no server needed) ---
+// datasource db {
+//   provider = "sqlite"
+//   url      = "file:./dev.db"
+// }
+
+// ============================================
+// USER MODEL
+// ============================================
+// This is the default user model. Extend as needed.
+// 
+// Database-specific syntax differences:
+// 
+// MySQL/PostgreSQL:
+//   id        String  @id @default(uuid())
+//   avatar    String  @db.VarChar(512)
+// 
+// MongoDB:
+//   id        String  @id @default(auto()) @map("_id") @db.ObjectId
+//   avatar    String
+// 
+// SQLite:  
+//   id        String  @id @default(uuid())
+//   avatar    String  // No @db.VarChar for SQLite
+// ============================================
+
 model user {
+  // For MySQL/PostgreSQL (default):
   id        String    @id @default(uuid())
+  
+  // For MongoDB, replace the above with:
+  // id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  
   email     String
   name      String
   password  String?
-  admin     Boolean @default(false)
-  avatar    String @db.VarChar(512) @default("")
-  language  String @default("en")
-  theme     THEME @default(dark)
+  admin     Boolean   @default(false)
+  
+  // For MySQL/PostgreSQL:
+  avatar    String    @db.VarChar(512) @default("")
+  // For MongoDB/SQLite, use:
+  // avatar    String    @default("")
+  
+  language  String    @default("en")
+  theme     THEME     @default(dark)
   provider  PROVIDERS
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -38,14 +102,15 @@ enum PROVIDERS {
   instagram
 }
 
-// Command:               Purpose
-/*
-npx prisma format:	      Auto-format your schema.prisma file (fixes spacing, indentation, style)
-npx prisma validate:	    Validate that your schema.prisma is correct (syntax & relational rules)
-npx prisma generate:	    Generate the Prisma Client (after changing schema or installing Prisma)
-npx prisma db pull:	      Pull the current database structure into your Prisma schema (reverse-engineer an existing database)
-npx prisma db push:	      Push your Prisma schema to the database — creates tables based on schema (development only, no migrations)
-npx prisma migrate dev:	  Create a new migration based on schema changes and apply it to the database
-npx prisma migrate reset:	Reset the database: drops all tables, re-applies migrations, and runs seed scripts if any
-npx prisma studio:      	Open Prisma Studio (a GUI to view and edit database records easily)
-*/
+// ============================================
+// PRISMA CLI COMMANDS REFERENCE
+// ============================================
+// npx prisma format       - Auto-format schema file
+// npx prisma validate     - Validate schema syntax
+// npx prisma generate     - Generate Prisma Client
+// npx prisma db pull      - Sync schema from existing database
+// npx prisma db push      - Push schema to database (dev only)
+// npx prisma migrate dev  - Create and apply migration
+// npx prisma migrate reset- Reset database and reapply migrations
+// npx prisma studio       - Open database GUI
+// ============================================
