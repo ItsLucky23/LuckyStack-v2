@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import notify from "src/_functions/notify";
 import { syncRequest, useSyncEvents } from "src/_sockets/syncRequest";
 import { apiRequest } from "src/_sockets/apiRequest";
+import type { ApiName } from "src/_sockets/apiTypes.generated";
 import { useSession } from "src/_providers/SessionProvider";
 import { Link } from "react-router-dom";
 
@@ -27,8 +28,9 @@ export default function ExamplesPage() {
     setApiResults(prev => [{ name, result, ts: new Date().toLocaleTimeString() }, ...prev.slice(0, 4)]);
   };
 
-  const callApi = async (name: string, data?: any) => {
-    const result = await apiRequest({ name, data });
+  // Helper for dynamic API calls - uses type assertion for flexibility
+  const callApi = async (name: ApiName<'examples'>, data?: any) => {
+    const result = await apiRequest<'examples'>({ name, data });
     logResult(name, result);
   };
 
@@ -151,13 +153,13 @@ export default function ExamplesPage() {
             <p className="text-xs text-muted">Test schema validation with valid/invalid data</p>
             <div className="flex gap-2 mt-auto">
               <button
-                onClick={() => callApi('testApi', { name: 'John', email: 'john@test.com' })}
+                onClick={() => callApi('maintest', { name: 'John', email: 'john@test.com', test: 123 })}
                 className="flex-1 px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
               >
                 ✓ Valid
               </button>
               <button
-                onClick={() => callApi('testApi', { name: '', email: 'bad-email' })}
+                onClick={() => callApi('maintest', { name: '', email: 'bad-email', test: 0 })}
                 className="flex-1 px-4 h-9 bg-wrong text-white rounded-md hover:bg-wrong-hover transition-colors text-sm cursor-pointer"
               >
                 ✗ Invalid

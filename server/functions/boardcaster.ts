@@ -20,22 +20,22 @@ export default async function boardcaster({
   const sockets = io.sockets.adapter.rooms.get(code);
   if (!sockets) { return; }
 
-  
+
   for (const socketId of sockets || []) {
     const tempSocket = io.sockets.sockets.get(socketId as string);
     if (!tempSocket) { continue; }
 
     if (ignoreSelf || session) {
-      
+
       const tempCookie = tempSocket.handshake.headers.cookie; // get the cookie from the socket connection
       const tempSessionToken = tempSocket.handshake.auth?.token
-      const tempToken = tempCookie && process.env.VITE_SESSION_BASED_TOKEN === 'false' ? tempCookie.split("=")[1] 
+      const tempToken = tempCookie && process.env.VITE_SESSION_BASED_TOKEN === 'false' ? tempCookie.split("=")[1]
         : tempSessionToken && process.env.VITE_SESSION_BASED_TOKEN === 'true' ? tempSessionToken
-        : null; 
+          : null;
 
-      if (ignoreSelf == tempToken) { 
+      if (ignoreSelf == tempToken) {
         console.log(' skipping self emit ');
-        continue; 
+        continue;
       } //? we dont send the event to the client who called the event
 
 
@@ -48,5 +48,5 @@ export default async function boardcaster({
       tempSocket.emit(event, { ...data });
     }
   }
-  
+
 }

@@ -12,17 +12,17 @@ export default function middlewareHandler({ location, searchParams, session }: {
 
   switch (location) {
     case '/test':
-      if (session?.email && session?.provider) { 
-        return { success: true }; 
+      if (session?.email && session?.provider) {
+        return { success: true };
       }
       return { redirect: '/login' };
 
     case '/admin':
       if (session?.email && session?.provider && session?.admin === true) {
-        return { success: true }; 
+        return { success: true };
       } else if (!session?.email || !session?.provider) {
         return { redirect: '/login' };
-      } else if (!session?.admin) { 
+      } else if (!session?.admin) {
         notify.error({ key: 'middleware.notAdmin' });
       }
       return
@@ -42,6 +42,13 @@ export default function middlewareHandler({ location, searchParams, session }: {
       }
 
     case '/games':
+      if (session?.email && session?.provider) {
+        return { success: true };
+      } else {
+        return { redirect: '/login' };
+      }
+
+    case '/examples':
       if (session?.email && session?.provider) {
         return { success: true };
       } else {
