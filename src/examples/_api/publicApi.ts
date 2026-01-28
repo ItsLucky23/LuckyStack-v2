@@ -1,23 +1,27 @@
-/**
- * Public API - Can be called by anyone
- * 
- * This API doesn't require any authentication.
- * Perfect for health checks, public data, etc.
- */
+import { AuthProps, SessionLayout } from '../../../config';
+import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
-import { AuthProps } from 'config';
-
-// No authentication required
 export const auth: AuthProps = {
   login: false,
+  additional: [
+
+  ]
 };
 
-export const main = async () => {
+export interface ApiParams {
+  data: {
+    message: string;
+  };
+  user: SessionLayout;
+  functions: Functions;
+}
+
+export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
+  console.log("received message: " + data.message);
   return {
     status: 'success',
     result: {
       message: 'This API can be called without logging in!',
-      timestamp: new Date().toISOString(),
       serverTime: Date.now()
     }
   };

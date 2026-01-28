@@ -16,10 +16,6 @@ export interface apiRequestResponse {
   messageParams?: Record<string, any>;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Type helpers for apiRequest
-// ═══════════════════════════════════════════════════════════════════════════════
-
 // Union of all API calls across all pages
 type ApiCallUnion = {
   [P in PagePath]: {
@@ -84,6 +80,12 @@ export function apiRequest<N extends AllApiNames>(
 // Overload 3: Special system APIs (logout, session)
 export function apiRequest(
   params: { name: 'logout' | 'session' }
+): Promise<apiRequestResponse>;
+
+// Overload 4: Legacy/untyped fallback - accepts any string name
+// Use this when enableTypeGeneration is false or for dynamic API names
+export function apiRequest(
+  params: { name: string; data?: any }
 ): Promise<apiRequestResponse>;
 
 // Implementation (not exposed to TypeScript - only runtime)

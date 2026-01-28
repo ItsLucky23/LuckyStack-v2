@@ -1,6 +1,6 @@
 /**
- * Auto-generated type map for all API endpoints.
- * Enables type-safe apiRequest calls.
+ * Auto-generated type map for all API and Sync endpoints.
+ * Enables type-safe apiRequest and syncRequest calls.
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -18,52 +18,84 @@ export interface Functions {
   [key: string]: any; // allows for other functions that are not defined as a type but do exist in the functions folder
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// API Type Definitions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type ApiResponse<T = any> =
+  | { status: 'success'; result: T }
+  | { status: 'error'; message?: string; errors?: any };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// API Type Map
+// ═══════════════════════════════════════════════════════════════════════════════
+
 export interface ApiTypeMap {
   'examples': {
     'adminOnly': {
-      input: Record<string, any>;
-      output: { status: string; result: { message: string; adminInfo: { userId: string; email: string; isAdmin: boolean; accessedAt: string } } };
-    };
-    'jow': {
-      input: { email: string; };
-      output: { status: string; result: { age: any } };
-    };
-    'maintest': {
-      input: { name: string; email: string; test: number; };
-      output: { status: string; result: { data: { name: string; email: string; test: number; }; data2: { name: string; email: string; test: number; }; name: string; name123: number } };
+      input: { };
+      output: { status: 'success'; result: { message: string; adminInfo: { userId: any; email: any; isAdmin: boolean; accessedAt: Date } } };
     };
     'publicApi': {
-      input: Record<string, any>;
-      output: { status: string; result: { message: string; timestamp: string; serverTime: string } };
+      input: { message: string; };
+      output: { status: 'success'; result: { message: string; serverTime: Date } };
     };
     'toggleAdmin': {
-      input: Record<string, any>;
-      output: { status: string; result: { message: string; admin: any; previousStatus: boolean } };
-    };
-  };
-  'examples/examples2': {
-    'jow': {
-      input: { name: string; };
-      output: { status: string; result: { name: string } };
-    };
-    'skibidi': {
-      input: { name: string; };
-      output: { status: string; result: { name: any } };
+      input: { };
+      output: { status: 'success'; result: { message: string; admin: any; previousStatus: any } };
     };
   };
   'settings': {
     'updateUser': {
       input: Record<string, any>;
-      output: { status: string; result: any };
+      output: { status: 'error' } | { status: 'success' };
     };
   };
 }
 
-// Type helpers
-export type PagePath = keyof ApiTypeMap;
-export type ApiName<P extends PagePath> = keyof ApiTypeMap[P];
-export type ApiInput<P extends PagePath, N extends ApiName<P>> = ApiTypeMap[P][N] extends { input: infer I } ? I : never;
-export type ApiOutput<P extends PagePath, N extends ApiName<P>> = ApiTypeMap[P][N] extends { output: infer O } ? O : never;
+// API Type helpers - fall back to permissive types when map is empty
+type _PagePath = keyof ApiTypeMap;
+export type PagePath = _PagePath extends never ? string : _PagePath;
+export type ApiName<P extends PagePath> = P extends _PagePath ? keyof ApiTypeMap[P] : string;
+export type ApiInput<P extends PagePath, N extends ApiName<P>> = P extends _PagePath ? (ApiTypeMap[P][N & keyof ApiTypeMap[P]] extends { input: infer I } ? I : any) : any;
+export type ApiOutput<P extends PagePath, N extends ApiName<P>> = P extends _PagePath ? (ApiTypeMap[P][N & keyof ApiTypeMap[P]] extends { output: infer O } ? O : any) : any;
 
 // Full API path helper (can be used for debugging)
 export type FullApiPath<P extends PagePath, N extends ApiName<P>> = `api/${P}/${N & string}`;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sync Type Definitions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type SyncServerResponse<T = any> =
+  | { status: 'success' } & T
+  | { status: 'error'; message?: string };
+
+export type SyncClientResponse<T = any> =
+  | { status: 'success' } & T
+  | { status: 'error'; message?: string };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sync Type Map
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface SyncTypeMap {
+  'examples': {
+    'updateCounter': {
+      clientInput: { };
+      serverData: { status: 'success'; increase: any };
+      clientOutput: { status: 'success'; randomKey: boolean };
+    };
+  };
+}
+
+// Sync Type helpers - fall back to permissive types when map is empty
+type _SyncPagePath = keyof SyncTypeMap;
+export type SyncPagePath = _SyncPagePath extends never ? string : _SyncPagePath;
+export type SyncName<P extends SyncPagePath> = P extends _SyncPagePath ? keyof SyncTypeMap[P] : string;
+export type SyncClientInput<P extends SyncPagePath, N extends SyncName<P>> = P extends _SyncPagePath ? (SyncTypeMap[P][N & keyof SyncTypeMap[P]] extends { clientInput: infer C } ? C : any) : any;
+export type SyncServerData<P extends SyncPagePath, N extends SyncName<P>> = P extends _SyncPagePath ? (SyncTypeMap[P][N & keyof SyncTypeMap[P]] extends { serverData: infer S } ? S : any) : any;
+export type SyncClientOutput<P extends SyncPagePath, N extends SyncName<P>> = P extends _SyncPagePath ? (SyncTypeMap[P][N & keyof SyncTypeMap[P]] extends { clientOutput: infer O } ? O : any) : any;
+
+// Full Sync path helper (can be used for debugging)
+export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>> = `sync/${P}/${N & string}`;

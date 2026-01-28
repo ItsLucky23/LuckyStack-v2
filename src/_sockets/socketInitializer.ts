@@ -50,15 +50,15 @@ export function useSocket(session: SessionLayout | null) {
       if (!config.socketActivityBroadcaster) { return; }
 
       console.log(document.visibilityState)
-        if (!socket) { return; }
+      if (!socket) { return; }
 
       //? user switched tab or navigated away
       if (document.visibilityState === "hidden") {
         socket.emit("intentionalDisconnect");
 
-      //? user switched back to the tab
+        //? user switched back to the tab
       } else if (document.visibilityState === "visible") {
-        if (socketStatus.self.status !== "CONNECTED") { 
+        if (socketStatus.self.status !== "CONNECTED") {
           socket.connect();
         }
         socket?.emit("intentionalReconnect");
@@ -68,7 +68,7 @@ export function useSocket(session: SessionLayout | null) {
 
     if (config.socketActivityBroadcaster) {
       initSyncRequest({
-        socketStatus, 
+        socketStatus,
         setSocketStatus,
         sessionRef: sessionRef as RefObject<SessionLayout>
       })
@@ -93,7 +93,7 @@ export function useSocket(session: SessionLayout | null) {
       });
 
     }
-    
+
     socket.on("logout", (status: "success" | "error") => {
       if (status === "success") {
         if (import.meta.env.VITE_SESSION_BASED_TOKEN === "true") {
@@ -106,9 +106,9 @@ export function useSocket(session: SessionLayout | null) {
       }
     });
 
-    socketInstance.on("sync", ({ cb, clientData, serverData, message, status }) => {
+    socketInstance.on("sync", ({ cb, clientOutput, serverData, message, status }) => {
       const path = window.location.pathname;
-      if (dev) console.log("Server Sync Response:", { cb, clientData, serverData, status, message });
+      if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverData, status, message });
 
       if (status === "error") {
         if (dev) {
@@ -118,7 +118,7 @@ export function useSocket(session: SessionLayout | null) {
         return;
       }
 
-      triggerSyncEvent(`sync${path}/${cb}`, clientData, serverData);
+      triggerSyncEvent(`sync${path}/${cb}`, clientOutput, serverData);
     });
 
 
@@ -128,13 +128,13 @@ export function useSocket(session: SessionLayout | null) {
         socketInstance = null;
         socket = null;
         setSocketStatus(prev => ({
-        ...prev,
-        self: {
-          status: "DISCONNECTED",
-          reconnectAttempt: undefined,
-          endTime: undefined,
-        }
-      }));
+          ...prev,
+          self: {
+            status: "DISCONNECTED",
+            reconnectAttempt: undefined,
+            endTime: undefined,
+          }
+        }));
       }
 
       document.removeEventListener("visibilitychange", handleVisibility)
@@ -152,12 +152,12 @@ export const waitForSocket = async () => {
   while (!socket) {
     await new Promise((resolve) => setTimeout(resolve, 10));
     i++
-    if (i > 500) { 
+    if (i > 500) {
       if (dev) {
         console.error("Socket is not initialized, giving up");
         toast.error("Socket is not initialized, giving up");
       }
-      return false 
+      return false
     } //? we give it 500 * 10 so 5000ms or 5s to load the socket connection
   }
 
@@ -166,31 +166,31 @@ export const waitForSocket = async () => {
 
 export const joinRoom = async (group: string) => {
   return new Promise(async (resolve) => {
-    if (!group || typeof group!== "string") {
+    if (!group || typeof group !== "string") {
       if (dev) {
         console.error("Invalid group");
         toast.error("Invalid group");
       }
       return resolve(null);
     }
-  
+
     if (!await waitForSocket()) { return resolve(null); }
     if (!socket) { return resolve(null); }
-  
+
     const tempIndex = incrementResponseIndex();
     socket.emit('joinRoom', { group, responseIndex: tempIndex });
-  
+
     socket.once(`joinRoom-${tempIndex}`, () => {
       return resolve(true);
     });
   })
 }
 
-export const updateLocationRequest = async ({ location }: {location: {pathName: string, searchParams: Record<string, string>}}) => {
+export const updateLocationRequest = async ({ location }: { location: { pathName: string, searchParams: Record<string, string> } }) => {
   if (!location.pathName || !location.searchParams) {
     if (dev) {
       console.error("Invalid location");
-      toast.error("Invalid location"); 
+      toast.error("Invalid location");
     }
     return null;
   }

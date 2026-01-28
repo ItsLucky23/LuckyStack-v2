@@ -46,6 +46,7 @@ export const setupWatchers = () => {
       initializeApis();
     } else if (normalizedPath.includes('_sync/')) {
       console.log(`[Watcher] Reloading Sync due to change in: ${normalizedPath}`);
+      tryCatch(generateTypeMapFile);
       initializeSyncs();
     }
   };
@@ -64,6 +65,7 @@ export const setupWatchers = () => {
       initializeApis();
     } else if (normalizedPath.includes('_sync/')) {
       console.log(`[Watcher] Sync file deleted: ${normalizedPath}`);
+      generateTypeMapFile();
       initializeSyncs();
     }
   };

@@ -1,24 +1,17 @@
-/**
- * Toggle Admin Status API
- * 
- * Toggles the current user's admin status (admin = !admin).
- * Requires the user to be logged in.
- */
-
-import { PrismaClient } from '@prisma/client';
-import { AuthProps, SessionLayout } from 'config';
+import { AuthProps, SessionLayout } from '../../../config';
+import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
 export const auth: AuthProps = {
   login: true,
 };
 
-interface ApiParams {
-  data: Record<string, any>;
-  functions: { prisma: PrismaClient; saveSession: any;[key: string]: any };
+export interface ApiParams {
+  data: {};
   user: SessionLayout;
+  functions: Functions;
 }
 
-export const main = async ({ functions, user }: ApiParams) => {
+export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const { prisma, saveSession } = functions;
 
   // Toggle admin status

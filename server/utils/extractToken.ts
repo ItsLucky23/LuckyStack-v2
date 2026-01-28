@@ -1,8 +1,3 @@
-/**
- * Shared utility for extracting authentication tokens from Socket.io connections.
- * Supports both cookie-based and session-based token storage.
- */
-
 import { Socket } from 'socket.io';
 
 /**

@@ -20,18 +20,13 @@ export default function ExamplesPage() {
 
   const { upsertSyncEventCallback } = useSyncEvents();
 
-  upsertSyncEventCallback('updateCounter', ({ serverData }) => {
+  upsertSyncEventCallback('updateCounter', ({ serverData, clientOutput }) => {
+    console.log(clientOutput)
     setCounter(prev => serverData.increase ? prev + 1 : prev - 1);
   });
 
   const logResult = (name: string, result: any) => {
     setApiResults(prev => [{ name, result, ts: new Date().toLocaleTimeString() }, ...prev.slice(0, 4)]);
-  };
-
-  // Helper for dynamic API calls - uses type assertion for flexibility
-  const callApi = async (name: ApiName<'examples'>, data?: any) => {
-    const result = await apiRequest<'examples'>({ name, data });
-    logResult(name, result);
   };
 
   return (
@@ -116,7 +111,7 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🌐 Public API</h3>
             <p className="text-xs text-muted">No login needed</p>
             <button
-              onClick={() => callApi('publicApi')}
+              onClick={async () => await apiRequest({ name: 'publicApi', data: { message: "Hello World" } })}
               className="mt-auto px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
             >
               Call API
@@ -128,7 +123,7 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🔄 Toggle Admin</h3>
             <p className="text-xs text-muted">Requires login</p>
             <button
-              onClick={() => callApi('toggleAdmin')}
+              onClick={async () => await apiRequest({ name: 'toggleAdmin' })}
               className="mt-auto px-4 h-9 bg-orange-500 text-white rounded-md hover:bg-orange-600 transition-colors text-sm cursor-pointer"
             >
               Toggle
@@ -140,31 +135,11 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🔐 Admin Only</h3>
             <p className="text-xs text-muted">admin: true required</p>
             <button
-              onClick={() => callApi('adminOnly')}
+              onClick={async () => await apiRequest({ name: 'adminOnly' })}
               className="mt-auto px-4 h-9 bg-wrong text-white rounded-md hover:bg-wrong-hover transition-colors text-sm cursor-pointer"
             >
               Call API
             </button>
-          </div>
-
-          {/* Zod Validation - Wide */}
-          <div className="md:col-span-2 bg-container border border-container-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">📝 Zod Validation</h3>
-            <p className="text-xs text-muted">Test schema validation with valid/invalid data</p>
-            <div className="flex gap-2 mt-auto">
-              <button
-                onClick={() => callApi('maintest', { name: 'John', email: 'john@test.com', test: 123 })}
-                className="flex-1 px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
-              >
-                ✓ Valid
-              </button>
-              <button
-                onClick={() => callApi('maintest', { name: '', email: 'bad-email', test: 0 })}
-                className="flex-1 px-4 h-9 bg-wrong text-white rounded-md hover:bg-wrong-hover transition-colors text-sm cursor-pointer"
-              >
-                ✗ Invalid
-              </button>
-            </div>
           </div>
 
           {/* Notification - Wide */}

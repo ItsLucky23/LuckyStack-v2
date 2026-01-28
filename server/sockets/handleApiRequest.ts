@@ -7,7 +7,6 @@ import config, { SessionLayout } from '../../config';
 import { Socket } from 'socket.io';
 import { logout } from './utils/logout';
 import { validateRequest } from '../utils/validateRequest';
-import { validateWithSchema, isZodSchema } from '../utils/zodValidation';
 import { captureException } from '../utils/sentry';
 
 type handleApiRequestType = {
@@ -82,25 +81,10 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     return socket.emit(`apiResponse-${responseIndex}`, authResult);
   }
 
-  //? Zod schema validation (if schema is exported and validation is enabled)
-  let validatedData = data;
-  if (config.enableZodValidation !== false && schema && isZodSchema(schema)) {
-    const validationResult = validateWithSchema(schema, data);
-    if (validationResult.status === 'error') {
-      console.log(`ERROR: Validation failed for ${name}`, 'red');
-      return socket.emit(`apiResponse-${responseIndex}`, {
-        status: 'error',
-        message: validationResult.message,
-        errors: validationResult.errors
-      });
-    }
-    validatedData = validationResult.data;
-  }
-
   //? Execute the API handler
   const functionsObject = process.env.NODE_ENV == 'development' ? devFunctions : functions;
   const [error, result] = await tryCatch(
-    async () => await main({ data: validatedData, user, functions: functionsObject })
+    async () => await main({ data, user, functions: functionsObject })
   );
 
   if (error) {
@@ -112,7 +96,15 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     });
   } else if (result) {
     console.log(`api: ${name} completed`, 'blue');
-    socket.emit(`apiResponse-${responseIndex}`, { status: "success", result });
+
+    // Check if result is already formatted as ApiResponse (has status='success' or 'error')
+    // This allows users to return strict ApiResponse objects without double-wrapping
+    if (result && typeof result === 'object' && (result.status === 'success' || result.status === 'error')) {
+      socket.emit(`apiResponse-${responseIndex}`, result);
+    } else {
+      // Legacy/Convenience: Wrap raw data in success response
+      socket.emit(`apiResponse-${responseIndex}`, { status: "success", result });
+    }
   } else {
     console.log(`WARNING: ${name} returned nothing`, 'yellow');
     socket.emit(`apiResponse-${responseIndex}`, {

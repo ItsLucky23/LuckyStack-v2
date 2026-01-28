@@ -1,10 +1,11 @@
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
 import { AuthProps, SessionLayout } from '{{REL_PATH}}config';
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { Functions } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
+import { Functions, ApiResponse } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 export const auth: AuthProps = {
-  login: false,
+  login: true,
+  additional: []
 };
 
 export interface ApiParams {
@@ -17,7 +18,7 @@ export interface ApiParams {
   functions: Functions;
 }
 
-export const main = async ({ data, user, functions }: ApiParams) => {
+export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   return {
     status: 'success',
     result: {

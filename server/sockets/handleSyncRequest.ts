@@ -74,7 +74,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
 
     //? if the user has passed all the checks we call the preload sync function and return the result
-    const [serverSyncError, serverSyncResult] = await tryCatch(async () => await serverMain({ clientData: data, user, functions: functionsObject, roomCode: receiver }));
+    const [serverSyncError, serverSyncResult] = await tryCatch(async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }));
     if (serverSyncError) {
       console.log('ERROR!!!, ', serverSyncError.message, 'red');
       return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: serverSyncError.message });
@@ -131,7 +131,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
 
     if (syncObject[`${name}_client`]) {
-      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${name}_client`]({ clientData: data, user, functions: functionsObject, serverData, roomCode: receiver }));
+      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${name}_client`]({ clientInput: data, user, functions: functionsObject, serverData, roomCode: receiver }));
       // if (clientSyncError) { socket.emit(`sync-${responseIndex}`, { status: "error", message: clientSyncError }); }
       if (clientSyncError) { tempSocket.emit(`sync`, { status: "error", message: clientSyncError }) }
       //? if we return error we dont want this client to get the event
@@ -140,7 +140,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         const result = {
           cb,
           serverData,
-          clientData: clientSyncResult,
+          clientOutput: clientSyncResult,  // Return from _client file (success only)
           message: clientSyncResult.message || `${name} sync success`,
           status: 'success'
         };
@@ -152,7 +152,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       const result = {
         cb,
         serverData,
-        clientData: {},
+        clientOutput: {},  // No client file, so empty output
         message: `${name} sync success`,
         status: 'success'
       };

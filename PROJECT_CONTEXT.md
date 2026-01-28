@@ -8,7 +8,7 @@
 # UI-Builder Project Context
 
 > **Human-readable documentation for AI assistants to understand this project.**  
-> Last updated: 2025-01-11
+> Last updated: 2026-01-28
 
 ---
 
@@ -33,7 +33,7 @@ The framework is a **custom-built React + Node.js stack** inspired by Next.js bu
 
 | File | Purpose |
 |------|---------|
-| `config.ts` | Main app configuration (URLs, defaults, session layout). Gitignored - use `configTemplate.txt` |
+| `config.ts` | Main app configuration (URLs, defaults, session layout, feature flags). Gitignored - use `configTemplate.txt` |
 | `envTemplate.txt` | Template for `.env` file with database, OAuth, and server secrets |
 | `vite.config.ts` | Vite bundler config with path aliases (`src/`, `config`) and exclusions for server files |
 | `index.html` | Entry point with two root divs: `#root` (app) and `#portalRoot` (modals/overlays z-999999999) |
@@ -113,6 +113,8 @@ When a user logs in, the system automatically kicks all previous sessions for th
 |------|---------|
 | `loader.ts` | Hot-reloads `_api` and `_sync` files without server restart |
 | `hotReload.ts` | File watcher that triggers reloads on changes |
+| `typeMapGenerator.ts` | Generates `apiTypes.generated.ts` with type-safe API/Sync types |
+| `templateInjector.ts` | Auto-injects templates into new empty API/Sync files |
 
 ### `server/sockets/utils/` - Socket Utilities
 | File | Purpose |
@@ -150,15 +152,100 @@ SocketStatusProvider   # Socket connection status
 
 These are the core functions for communicating with the backend:
 
-#### `apiRequest({ name, data })` → Promise
-- Sends RPC-style request over socket
+#### `apiRequest({ name, data })` → Promise (Type-Safe)
+- **Fully type-safe API calls** - TypeScript validates API names, input data, and output types
 - Auto-prefixes with current path: `api/{path}/{name}`
 - Has abort controllers for duplicate GET-like requests
 
-#### `syncRequest({ name, data, receiver, ignoreSelf })` → Promise  
+**Type System Features:**
+1. **Automatic type inference** - No manual type parameters needed for most cases
+2. **Union types for duplicate names** - If same API name exists on multiple pages, accepts union of all input types
+3. **Optional page path** - Pass `<'page/path'>` for exact types when duplicate names exist
+4. **Required data validation** - `data` is required when API expects specific fields, optional for `Record<string, any>`
+5. **Errors for invalid names** - TypeScript error if API name doesn't exist
+
+**Examples:**
+```typescript
+// Auto-typed - works for unique API names
+const result = await apiRequest({ name: 'adminOnly', data: {} });
+
+// Union type - 'jow' exists on multiple pages
+const result = await apiRequest({ 
+  name: 'jow', 
+  data: { email: 'x' } // OR { name: 'x' }
+});
+
+// Exact typing with page path
+const result = await apiRequest<'examples/examples2'>({ 
+  name: 'jow',
+  data: { name: 'john' } // Must be { name: string }
+});
+
+// Error: API doesn't exist
+const result = await apiRequest({ name: 'invalid' }); // ❌ TypeScript error
+
+// Error: missing required data
+const result = await apiRequest({ name: 'jow' }); // ❌ Property 'data' is missing
+```
+
+**Type Generation:**
+- Types are auto-generated in `src/_sockets/apiTypes.generated.ts` by `server/dev/typeMapGenerator.ts`
+- Watches `_api` folders and extracts input/output types from `ApiParams` interface and `main` function return type
+- Regenerates on file changes via `server/dev/hotReload.ts`
+
+#### `syncRequest({ name, data, receiver, ignoreSelf })` → Promise (Type-Safe)
 - Sends real-time events to other clients in same room
 - `receiver` is the room code (e.g., "abc123")
 - `ignoreSelf` prevents the sender from receiving the event
+- **Fully type-safe** - sync names, clientData, and serverData are validated
+
+**Type System Features:**
+1. **Automatic type inference** - No manual type parameters needed 
+2. **Union types for duplicate names** - Same as apiRequest
+3. **Optional page path** - Pass `<'page/path'>` for exact types
+4. **Required data validation** - `data` required when sync expects specific fields
+
+**Examples:**
+```typescript
+// Type-safe sync with auto-complete
+await syncRequest({ 
+  name: 'updateCounter', // ← Autocomplete for sync names
+  data: { increase: true }, // ← Type-checked
+  receiver: roomCode
+});
+
+// Exact typing with page path
+await syncRequest<'examples'>({ 
+  name: 'updateCounter',
+  data: { increase: true },
+  receiver: roomCode
+});
+```
+
+#### `useSyncEvents()` Hook (Type-Safe)
+```typescript
+const { upsertSyncEventCallback } = useSyncEvents();
+
+// Type-safe: clientOutput and serverData are inferred from sync definition
+upsertSyncEventCallback('updateCounter', ({ clientOutput, serverData }) => {
+  console.log(clientOutput.randomKey); // ← Type from _client file return (success only)
+  console.log(serverData.increase);    // ← Type from _server file return
+});
+```
+
+**Sync Type System:**
+The sync type system has three distinct data types that flow through the system:
+
+| Type | Source | Description |
+|------|--------|-------------|
+| `clientInput` | Sender's `data` param | Original data passed to `syncRequest({ data: ... })` |
+| `serverData` | `_server.ts` return | Data returned from server-side sync handler |
+| `clientOutput` | `_client.ts` return | Data returned from client-side handler (success only) |
+
+**Type Generation:**
+- Types auto-generated in `src/_sockets/apiTypes.generated.ts`
+- Watches `_sync/*_server.ts` and `_sync/*_client.ts` files
+- `clientOutput` only includes successful returns (error returns are filtered out)
 
 #### `joinRoom(code)` → Promise
 - Joins a socket room for sync events
@@ -211,9 +298,10 @@ Pages export a `template` constant to specify their wrapper:
 - Call from client: `apiRequest({ name: '{name}' })`
 
 **Sync Routes** (real-time client-server events):
-- `src/{page}/_sync/{name}_server.ts` - Runs on server for validation
-- `src/{page}/_sync/{name}_client.ts` - Runs on receiving clients
-- Call from client: `syncRequest({ name: '{name}', receiver: 'room-code' })`
+- `src/{page}/_sync/{name}_server.ts` - Runs on server for validation, returns `serverData`
+- `src/{page}/_sync/{name}_client.ts` - Runs on receiving clients, returns `clientOutput`
+- Both files use `clientInput` in SyncParams for the original sender's data
+- Call from client: `syncRequest({ name: '{name}', data: clientInput, receiver: 'room-code' })`
 
 ---
 

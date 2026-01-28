@@ -1,11 +1,5 @@
-/**
- * Admin Only API
- * 
- * This API can ONLY be called by users with admin: true.
- * Use this for privileged operations.
- */
-
-import { AuthProps, SessionLayout } from 'config';
+import { AuthProps, SessionLayout } from '../../../config';
+import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
 export const auth: AuthProps = {
   login: true,
@@ -14,12 +8,13 @@ export const auth: AuthProps = {
   ]
 };
 
-interface ApiParams {
-  data: Record<string, any>;
+export interface ApiParams {
+  data: {};
   user: SessionLayout;
+  functions: Functions;
 }
 
-export const main = async ({ user }: ApiParams) => {
+export const main = async ({ user }: ApiParams): Promise<ApiResponse> => {
   return {
     status: 'success',
     result: {

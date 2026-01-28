@@ -1,35 +1,31 @@
-/**
- * Sync Client Handler
- * 
- * This runs for EACH client that might receive the sync event.
- * Return { status: 'success' } to allow the client to receive the event.
- * Return { status: 'error' } to skip this client.
- */
+import { SessionLayout } from '../../../config';
+import { Functions, SyncClientResponse } from '../../_sockets/apiTypes.generated';
 
-import { ClientSyncProps } from "config";
 
-const main = ({ user, clientData }: ClientSyncProps) => {
-  // Allow all clients on the /examples page to receive the event
-  // In a real app, you might filter by user.id, user.admin, etc.
+export interface SyncParams {
+  clientInput: {
+    increase: boolean;
+  };
+  serverData: {
+    status: string;
+    increase: boolean;
+  };
+  user: SessionLayout; // session data from any user that is in the room
+  functions: Functions; // contains all functions that are available on the server in the functions folder
+  roomCode: string; // room code
+}
 
+export const main = async ({ user, clientInput, serverData, functions, roomCode }: SyncParams): Promise<SyncClientResponse> => {
   console.log('Sync client check:', user?.location?.pathName);
 
   // Check if user is on the examples page
   if (user?.location?.pathName === '/examples') {
     return {
       status: 'success',
-      // You can add additional data here that will be passed to the client
-      processed: true
+      randomKey: true,
     };
-  }
-
-  // Also allow for /test (legacy)
-  if (user?.location?.pathName === '/test') {
-    return { status: 'success' };
   }
 
   // Return error to skip other clients
   return { status: 'error' };
-}
-
-export { main }
+};
