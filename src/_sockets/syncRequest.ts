@@ -71,12 +71,6 @@ export function syncRequest<N extends AllSyncNames>(
   params: SyncParams<N>
 ): Promise<boolean>;
 
-// Overload 3: Legacy/untyped fallback - accepts any string name
-// Use this when enableTypeGeneration is false or for dynamic sync names
-export function syncRequest(
-  params: { name: string; data?: any; receiver: string; ignoreSelf?: boolean }
-): Promise<boolean>;
-
 // Implementation
 export function syncRequest(
   params: { name: string; data?: any; receiver: string; ignoreSelf?: boolean }

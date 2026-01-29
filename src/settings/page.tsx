@@ -21,7 +21,7 @@ export default function Home() {
   const setLanguage = useUpdateLanguage();
   const translate = useTranslator();
 
-  const [newLanguage, setNewLanguage] = useState<'nl' | 'en' | 'de' | 'fr'>(session?.language as 'nl' | 'en' |'de' | 'fr' || '');
+  const [newLanguage, setNewLanguage] = useState<'nl' | 'en' | 'de' | 'fr'>(session?.language as 'nl' | 'en' | 'de' | 'fr' || '');
   const [newAvatar, setNewAvatar] = useState<string>(session?.avatar || '');
   const [newName, setNewName] = useState<string>(session?.name || '');
   const [newTheme, setNewTheme] = useState<'light' | 'dark'>(session?.theme || 'dark');
@@ -35,11 +35,11 @@ export default function Home() {
     url.search = ""; // remove query params
   }
 
-  const displayUrl = newAvatar.includes('base64') 
-    ? url?.toString() 
+  const displayUrl = newAvatar.includes('base64')
+    ? url?.toString()
     : newAvatar.startsWith("http")
-    ? newAvatar
-    : `${backendUrl}/uploads/${session.avatar}`
+      ? newAvatar
+      : `${backendUrl}/uploads/${session.avatar}`
   console.log(displayUrl)
 
   const saveUser = useCallback(async () => {
@@ -53,12 +53,12 @@ export default function Home() {
       return;
     }
     const response = await apiRequest({
-      name: 'updateUser',
+      name: "updateUser",
       data: {
-        language: newLanguage != session.language? newLanguage : undefined,
-        avatar: newAvatar != session.avatar? newAvatar : undefined,
-        name: newName != session.name? newName : undefined,
-        theme: newTheme != session.theme? newTheme : undefined,
+        language: newLanguage != session.language ? newLanguage : undefined,
+        avatar: newAvatar != session.avatar ? newAvatar : undefined,
+        name: newName != session.name ? newName : undefined,
+        theme: newTheme != session.theme ? newTheme : undefined,
       },
     }) as apiRequestReponse
     if (response.status === 'success') {
@@ -72,7 +72,7 @@ export default function Home() {
   //? we trigger saveUser when the newAvatar changes so that the avatar is saved immidiatly, we dont call the saveUser in the onchange callback cause than it causes a race codition between the function calling and newAvatar having the new value
   useEffect(() => {
     if (!newAvatar) return;
-    
+
     saveUser();
   }, [newAvatar])
 
@@ -81,8 +81,8 @@ export default function Home() {
       <div className="bg-container border-2 border-container-border flex flex-col p-8 gap-4 rounded-2xl max-w-[360px] w-[90%]">
 
         <div className="flex gap-4 items-center">
-          { newAvatar || session.avatar ? (
-            <img src={displayUrl} 
+          {newAvatar || session.avatar ? (
+            <img src={displayUrl}
               className="rounded-xl min-w-28 max-w-28 object-cover aspect-square select-none"></img>
           ) : (
             <div className="rounded-xl min-w-28 max-w-28 object-cover aspect-square select-none">
@@ -107,14 +107,14 @@ export default function Home() {
                   if (!file) return;
                   const maxSize = 4 * 1024 * 1024; // 4 MB
                   if (file.size > maxSize) {
-                    notify.error({ key:'settings.sizeToLarge' })
+                    notify.error({ key: 'settings.sizeToLarge' })
                     return;
                   }
 
                   notify.info({ key: 'settings.loadingImg' })
                   const reader = new FileReader();
                   reader.onload = async () => {
-                    setNewAvatar(prevUrl => `${reader.result}?v=${incrementAvatarVersion(prevUrl||"")}`)
+                    setNewAvatar(prevUrl => `${reader.result}?v=${incrementAvatarVersion(prevUrl || "")}`)
                     notify.success({ key: 'settings.imgLoaded' })
                   };
                   reader.readAsDataURL(file);
@@ -142,14 +142,14 @@ export default function Home() {
             </button> */}
             <div className="text-muted text-sm">
               {/* JPG, GIV or PNG. 1MB max. */}
-              {translate({ key:'settings.changeAvatarDescription' })}
+              {translate({ key: 'settings.changeAvatarDescription' })}
             </div>
           </div>
         </div>
 
         <div className="space-y-2 w-full">
           <div className="text-lg font-semibold">Name</div>
-          <input 
+          <input
             className={`w-full bg-container2 border-container2-border border-2 focus:outline-0 focus:border-container3-border transition-all duration-150 p-2 rounded-md`}
             value={newName}
             onChange={(e) => { setNewName(e.target.value) }}
@@ -159,25 +159,25 @@ export default function Home() {
         <div className="w-full flex flex-col gap-2">
           <div className="text-lg font-semibold">
             {/* Language */}
-            {translate({ key:'settings.language.title' })}
+            {translate({ key: 'settings.language.title' })}
           </div>
           <div className="flex w-full gap-2">
             <button
-              onClick={() => { 
+              onClick={() => {
                 setNewLanguage('nl');
                 setLanguage('nl');
-               }}
+              }}
               className={`w-full border-2 p-2 rounded-md
                 ${newLanguage == 'nl' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
                 hover:bg-container3 hover:border-container3-border transition-all duration-300
               `}
             >
               {/* NL */}
-              {translate({ key:'settings.language.nl' })}
+              {translate({ key: 'settings.language.nl' })}
             </button>
             <button
-              onClick={() => { 
-                setNewLanguage('en'); 
+              onClick={() => {
+                setNewLanguage('en');
                 setLanguage('en');
               }}
               className={`w-full border-2 p-2 rounded-md
@@ -186,11 +186,11 @@ export default function Home() {
               `}
             >
               {/* EN */}
-              {translate({ key:'settings.language.en' })}
+              {translate({ key: 'settings.language.en' })}
             </button>
             <button
-              onClick={() => { 
-                setNewLanguage('de'); 
+              onClick={() => {
+                setNewLanguage('de');
                 setLanguage('de');
               }}
               className={`w-full border-2 p-2 rounded-md
@@ -199,11 +199,11 @@ export default function Home() {
               `}
             >
               {/* DE */}
-              {translate({ key:'settings.language.de' })}
+              {translate({ key: 'settings.language.de' })}
             </button>
             <button
-              onClick={() => { 
-                setNewLanguage('fr'); 
+              onClick={() => {
+                setNewLanguage('fr');
                 setLanguage('fr');
               }}
               className={`w-full border-2 p-2 rounded-md
@@ -212,7 +212,7 @@ export default function Home() {
               `}
             >
               {/* FR */}
-              {translate({ key:'settings.language.fr' })}
+              {translate({ key: 'settings.language.fr' })}
             </button>
           </div>
         </div>
@@ -220,13 +220,13 @@ export default function Home() {
         <div className="w-full flex flex-col gap-2">
           <div className="text-lg font-semibold">
             {/* Theme */}
-            {translate({ key:'settings.theme.title' })}
+            {translate({ key: 'settings.theme.title' })}
           </div>
           <div className="flex w-full gap-2">
             <button
-              onClick={() => { 
+              onClick={() => {
                 setNewTheme('light');
-                updateTheme('light'); 
+                updateTheme('light');
               }}
               className={`w-full border-2 p-2 rounded-md
                 ${newTheme == 'light' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
@@ -234,12 +234,12 @@ export default function Home() {
               `}
             >
               {/* Light mode */}
-              {translate({ key:'settings.theme.light' })}
+              {translate({ key: 'settings.theme.light' })}
             </button>
             <button
-              onClick={() => { 
+              onClick={() => {
                 setNewTheme('dark');
-                updateTheme('dark'); 
+                updateTheme('dark');
               }}
               className={`w-full border-2 p-2 rounded-md
                 ${newTheme == 'dark' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
@@ -247,17 +247,17 @@ export default function Home() {
               `}
             >
               {/* Dark mode */}
-              {translate({ key:'settings.theme.dark' })}
+              {translate({ key: 'settings.theme.dark' })}
             </button>
           </div>
         </div>
 
-        <button 
+        <button
           className="w-full bg-blue-500 text-white py-2 rounded-lg"
           onClick={saveUser}
         >
           {/* Save data */}
-          {translate({ key:'settings.saveChanges' })}
+          {translate({ key: 'settings.saveChanges' })}
         </button>
 
       </div>

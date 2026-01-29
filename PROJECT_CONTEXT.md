@@ -33,7 +33,7 @@ The framework is a **custom-built React + Node.js stack** inspired by Next.js bu
 
 | File | Purpose |
 |------|---------|
-| `config.ts` | Main app configuration (URLs, defaults, session layout, feature flags). Gitignored - use `configTemplate.txt` |
+| `config.ts` | Main app configuration (URLs, defaults, session layout). Gitignored - use `configTemplate.txt` |
 | `envTemplate.txt` | Template for `.env` file with database, OAuth, and server secrets |
 | `vite.config.ts` | Vite bundler config with path aliases (`src/`, `config`) and exclusions for server files |
 | `index.html` | Entry point with two root divs: `#root` (app) and `#portalRoot` (modals/overlays z-999999999) |
@@ -113,8 +113,6 @@ When a user logs in, the system automatically kicks all previous sessions for th
 |------|---------|
 | `loader.ts` | Hot-reloads `_api` and `_sync` files without server restart |
 | `hotReload.ts` | File watcher that triggers reloads on changes |
-| `typeMapGenerator.ts` | Generates `apiTypes.generated.ts` with type-safe API/Sync types |
-| `templateInjector.ts` | Auto-injects templates into new empty API/Sync files |
 
 ### `server/sockets/utils/` - Socket Utilities
 | File | Purpose |

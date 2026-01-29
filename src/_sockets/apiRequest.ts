@@ -82,12 +82,6 @@ export function apiRequest(
   params: { name: 'logout' | 'session' }
 ): Promise<apiRequestResponse>;
 
-// Overload 4: Legacy/untyped fallback - accepts any string name
-// Use this when enableTypeGeneration is false or for dynamic API names
-export function apiRequest(
-  params: { name: string; data?: any }
-): Promise<apiRequestResponse>;
-
 // Implementation (not exposed to TypeScript - only runtime)
 export function apiRequest(params: any): Promise<any> {
   const { name } = params;
