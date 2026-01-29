@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import notify from "src/_functions/notify";
 import { syncRequest, useSyncEvents } from "src/_sockets/syncRequest";
 import { apiRequest } from "src/_sockets/apiRequest";
-import type { ApiName } from "src/_sockets/apiTypes.generated";
 import { useSession } from "src/_providers/SessionProvider";
 import { Link } from "react-router-dom";
 
@@ -66,7 +65,10 @@ export default function ExamplesPage() {
                   </p>
                 </div>
                 <button
-                  onClick={() => apiRequest({ name: 'logout' })}
+                  onClick={async () => {
+                    const result = await apiRequest({ name: 'logout' })
+                    logResult('logout', result)
+                  }}
                   className="mt-auto px-4 h-9 bg-container2 border border-container2-border text-commen rounded-md hover:bg-container2-hover transition-colors text-sm"
                 >
                   Logout
@@ -111,7 +113,10 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🌐 Public API</h3>
             <p className="text-xs text-muted">No login needed</p>
             <button
-              onClick={async () => await apiRequest({ name: 'publicApi', data: { message: "Hello World" } })}
+              onClick={async () => {
+                const result = await apiRequest({ name: 'publicApi', data: { message: "Hello World" } })
+                logResult('publicApi', result)
+              }}
               className="mt-auto px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
             >
               Call API
@@ -123,7 +128,10 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🔄 Toggle Admin</h3>
             <p className="text-xs text-muted">Requires login</p>
             <button
-              onClick={async () => await apiRequest({ name: 'toggleAdmin' })}
+              onClick={async () => {
+                const result = await apiRequest({ name: 'toggleAdmin' })
+                logResult('toggleAdmin', result)
+              }}
               className="mt-auto px-4 h-9 bg-orange-500 text-white rounded-md hover:bg-orange-600 transition-colors text-sm cursor-pointer"
             >
               Toggle
@@ -135,7 +143,10 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🔐 Admin Only</h3>
             <p className="text-xs text-muted">admin: true required</p>
             <button
-              onClick={async () => await apiRequest({ name: 'adminOnly' })}
+              onClick={async () => {
+                const result = await apiRequest({ name: 'adminOnly' })
+                logResult('adminOnly', result)
+              }}
               className="mt-auto px-4 h-9 bg-wrong text-white rounded-md hover:bg-wrong-hover transition-colors text-sm cursor-pointer"
             >
               Call API
