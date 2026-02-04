@@ -5,7 +5,7 @@ import { syncRequest, useSyncEvents } from "src/_sockets/syncRequest";
 import { apiRequest } from "src/_sockets/apiRequest";
 import type { ApiName } from "src/_sockets/apiTypes.generated";
 import { useSession } from "src/_providers/SessionProvider";
-import { Link } from "react-router-dom";
+import { data, Link } from "react-router-dom";
 
 export const template = 'home';
 
@@ -32,6 +32,13 @@ export default function ExamplesPage() {
   return (
     <div className="w-full h-full bg-background overflow-y-auto">
       <div className="max-w-6xl mx-auto p-6 flex flex-col gap-6">
+
+        {/* TEST */}
+        <div onClick={async () => {
+          syncRequest({ name: "pp", receiver: "123", data: { message: "hello", targetUserId: "123" } })
+        }}>
+
+        </div>
 
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -111,7 +118,7 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🌐 Public API</h3>
             <p className="text-xs text-muted">No login needed</p>
             <button
-              onClick={async () => await apiRequest({ name: 'publicApi', data: { message: "Hello World" } })}
+              onClick={async () => { const result = await apiRequest<"examples", "publicApi">({ name: "publicApi", data: { message: "" } }) }}
               className="mt-auto px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
             >
               Call API
@@ -123,7 +130,8 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🔄 Toggle Admin</h3>
             <p className="text-xs text-muted">Requires login</p>
             <button
-              onClick={async () => await apiRequest({ name: 'toggleAdmin' })}
+              // onClick={async () => await apiRequest({ name: 'toggleAdmin' })}
+              onClick={async () => { const result = await apiRequest({ name: "publicApi", data: { message: "" } }) }}
               className="mt-auto px-4 h-9 bg-orange-500 text-white rounded-md hover:bg-orange-600 transition-colors text-sm cursor-pointer"
             >
               Toggle

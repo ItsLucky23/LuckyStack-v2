@@ -15,41 +15,42 @@ import type {
 // Type Helpers for Sync Requests
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Build a union of all sync calls: { name, clientInput, serverData, clientOutput }
-type SyncCallUnion = {
-  [P in SyncPagePath]: {
-    [N in SyncName<P>]: {
-      name: N;
-      clientInput: SyncClientInput<P, N>;
-      serverData: SyncServerData<P, N>;
-      clientOutput: SyncClientOutput<P, N>;
-    };
-  }[SyncName<P>];
+// Check if data input is required (i.e., T does NOT allow empty object)
+// Unions like {a:1} | {b:1} do NOT allow {}, so data will be required
+type DataRequired<T> = {} extends T ? false : true;
+
+// Force expansion of types to clear aliases in tooltips
+type Prettify<T> = { [K in keyof T]: T[K] } & {};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Global Sync Params
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// All possible sync names across all pages
+export type AllSyncNames = {
+  [P in SyncPagePath]: SyncName<P>
 }[SyncPagePath];
 
-// Get all sync names across all pages
-export type AllSyncNames = SyncCallUnion['name'];
+// Get clientInput type for a sync name (union if exists on multiple pages)
+type ClientInputForName<N extends AllSyncNames> = {
+  [P in SyncPagePath]: N extends SyncName<P> ? SyncClientInput<P, N> : never
+}[SyncPagePath];
 
-// Get clientInput for a given sync name (union if name exists on multiple pages)
-type ClientInputForName<N extends AllSyncNames> = Extract<SyncCallUnion, { name: N }>['clientInput'];
+// Get serverData type for a sync name (union if exists on multiple pages)
+type ServerDataForName<N extends AllSyncNames> = {
+  [P in SyncPagePath]: N extends SyncName<P> ? SyncServerData<P, N> : never
+}[SyncPagePath];
 
-// Get serverData for a given sync name (union if name exists on multiple pages)
-type ServerDataForName<N extends AllSyncNames> = Extract<SyncCallUnion, { name: N }>['serverData'];
+// Get clientOutput type for a sync name (union if exists on multiple pages)
+type ClientOutputForName<N extends AllSyncNames> = {
+  [P in SyncPagePath]: N extends SyncName<P> ? SyncClientOutput<P, N> : never
+}[SyncPagePath];
 
-// Get clientOutput for a given sync name (union if name exists on multiple pages)
-type ClientOutputForName<N extends AllSyncNames> = Extract<SyncCallUnion, { name: N }>['clientOutput'];
-
-// Check if clientInput has required fields (not just Record<string, any>)
-type IsClientInputRequired<T> = T extends Record<string, any>
-  ? keyof T extends never ? false
-  : string extends keyof T ? false
-  : true
-  : false;
-
-// Build sync params with conditionally required data
-type SyncParams<N extends AllSyncNames> = IsClientInputRequired<ClientInputForName<N>> extends true
-  ? { name: N; data: ClientInputForName<N>; receiver: string; ignoreSelf?: boolean }
-  : { name: N; data?: ClientInputForName<N>; receiver: string; ignoreSelf?: boolean };
+// Build params type for a specific sync name
+type SyncParamsForName<N extends AllSyncNames> =
+  DataRequired<ClientInputForName<N>> extends true
+  ? { name: N; data: Prettify<ClientInputForName<N>>; receiver: string; ignoreSelf?: boolean }
+  : { name: N; data?: Prettify<ClientInputForName<N>>; receiver: string; ignoreSelf?: boolean };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Sync Event Callbacks Registry
@@ -58,23 +59,33 @@ type SyncParams<N extends AllSyncNames> = IsClientInputRequired<ClientInputForNa
 const syncEvents: Record<string, ((params: { clientOutput: any; serverData: any; aditionalData: any }) => void)> = {};
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Page-Specific Params (for exact types when duplicate names exist)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Build params type for a specific page and sync name
+type PageSyncParamsForName<P extends SyncPagePath, N extends SyncName<P>> =
+  DataRequired<SyncClientInput<P, N>> extends true
+  ? { name: N; data: SyncClientInput<P, N>; receiver: string; ignoreSelf?: boolean }
+  : { name: N; data?: SyncClientInput<P, N>; receiver: string; ignoreSelf?: boolean };
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // syncRequest Function Overloads
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Overload 1: Page-specific - when user provides page path, get exact types
-export function syncRequest<P extends SyncPagePath, N extends SyncName<P>>(
-  params: { name: N; data?: SyncClientInput<P, N>; receiver: string; ignoreSelf?: boolean }
+// Overload 1: Name-based inference - PRIMARY usage
+// TypeScript infers N from the literal name value
+export function syncRequest<N extends AllSyncNames>(
+  params: SyncParamsForName<N>
 ): Promise<boolean>;
 
-// Overload 2: Global sync name - union types if name exists on multiple pages
-export function syncRequest<N extends AllSyncNames>(
-  params: SyncParams<N>
+// Overload 2: Explicit page + name - for duplicate sync names across pages
+// Both type params REQUIRED when specifying page
+export function syncRequest<P extends SyncPagePath, N extends SyncName<P>>(
+  params: PageSyncParamsForName<P, N>
 ): Promise<boolean>;
 
 // Implementation
-export function syncRequest(
-  params: { name: string; data?: any; receiver: string; ignoreSelf?: boolean }
-): Promise<boolean> {
+export function syncRequest(params: any): Promise<boolean> {
   let { name, data, receiver, ignoreSelf } = params;
 
   return new Promise(async (resolve) => {

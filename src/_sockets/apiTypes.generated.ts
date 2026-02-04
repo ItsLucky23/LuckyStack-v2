@@ -46,6 +46,10 @@ export interface ApiTypeMap {
     };
   };
   'settings': {
+    'publicApi': {
+      input: { email: string; };
+      output: { status: 'success'; result: { } };
+    };
     'updateUser': {
       input: Record<string, any>;
       output: { status: 'error' } | { status: 'success' };
@@ -53,12 +57,11 @@ export interface ApiTypeMap {
   };
 }
 
-// API Type helpers - fall back to permissive types when map is empty
-type _PagePath = keyof ApiTypeMap;
-export type PagePath = _PagePath extends never ? string : _PagePath;
-export type ApiName<P extends PagePath> = P extends _PagePath ? keyof ApiTypeMap[P] : string;
-export type ApiInput<P extends PagePath, N extends ApiName<P>> = P extends _PagePath ? (ApiTypeMap[P][N & keyof ApiTypeMap[P]] extends { input: infer I } ? I : any) : any;
-export type ApiOutput<P extends PagePath, N extends ApiName<P>> = P extends _PagePath ? (ApiTypeMap[P][N & keyof ApiTypeMap[P]] extends { output: infer O } ? O : any) : any;
+// API Type helpers
+export type PagePath = keyof ApiTypeMap;
+export type ApiName<P extends PagePath> = keyof ApiTypeMap[P];
+export type ApiInput<P extends PagePath, N extends ApiName<P>> = ApiTypeMap[P][N] extends { input: infer I } ? I : never;
+export type ApiOutput<P extends PagePath, N extends ApiName<P>> = ApiTypeMap[P][N] extends { output: infer O } ? O : never;
 
 // Full API path helper (can be used for debugging)
 export type FullApiPath<P extends PagePath, N extends ApiName<P>> = `api/${P}/${N & string}`;
@@ -82,20 +85,19 @@ export type SyncClientResponse<T = any> =
 export interface SyncTypeMap {
   'examples': {
     'updateCounter': {
-      clientInput: { };
+      clientInput: { increase: boolean; };
       serverData: { status: 'success'; increase: any };
       clientOutput: { status: 'success'; randomKey: boolean };
     };
   };
 }
 
-// Sync Type helpers - fall back to permissive types when map is empty
-type _SyncPagePath = keyof SyncTypeMap;
-export type SyncPagePath = _SyncPagePath extends never ? string : _SyncPagePath;
-export type SyncName<P extends SyncPagePath> = P extends _SyncPagePath ? keyof SyncTypeMap[P] : string;
-export type SyncClientInput<P extends SyncPagePath, N extends SyncName<P>> = P extends _SyncPagePath ? (SyncTypeMap[P][N & keyof SyncTypeMap[P]] extends { clientInput: infer C } ? C : any) : any;
-export type SyncServerData<P extends SyncPagePath, N extends SyncName<P>> = P extends _SyncPagePath ? (SyncTypeMap[P][N & keyof SyncTypeMap[P]] extends { serverData: infer S } ? S : any) : any;
-export type SyncClientOutput<P extends SyncPagePath, N extends SyncName<P>> = P extends _SyncPagePath ? (SyncTypeMap[P][N & keyof SyncTypeMap[P]] extends { clientOutput: infer O } ? O : any) : any;
+// Sync Type helpers
+export type SyncPagePath = keyof SyncTypeMap;
+export type SyncName<P extends SyncPagePath> = keyof SyncTypeMap[P];
+export type SyncClientInput<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { clientInput: infer C } ? C : never;
+export type SyncServerData<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { serverData: infer S } ? S : never;
+export type SyncClientOutput<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { clientOutput: infer O } ? O : never;
 
 // Full Sync path helper (can be used for debugging)
 export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>> = `sync/${P}/${N & string}`;

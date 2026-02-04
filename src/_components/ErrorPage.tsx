@@ -62,7 +62,7 @@ export default function ErrorPage() {
       <div className="flex gap-4">
         <button
           onClick={() => window.history.back()}
-          className="px-6 py-3 bg-container text-commen border border-container-border rounded-lg hover:bg-container-hover transition-colors font-medium"
+          className="px-6 py-3 bg-container text-common border border-container-border rounded-lg hover:bg-container-hover transition-colors font-medium"
         >
           ← Go Back
         </button>

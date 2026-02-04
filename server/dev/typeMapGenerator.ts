@@ -622,16 +622,19 @@ const getOutputTypeFromFile = (filePath: string): string => {
     const localVars = extractLocalVariables(content);
 
     // Scan for ALL return statements to build a union type
+    // Strip comments from entire content FIRST to avoid matching commented return statements
+    const strippedContent = stripComments(content);
+
     const returnRegex = /return\s*\{/g;
     let match;
     const returnTypes = new Set<string>();
 
-    while ((match = returnRegex.exec(content)) !== null) {
-      const returnStart = content.indexOf('{', match.index!);
-      const returnBodyRaw = extractBalancedBraces(content, returnStart);
+    while ((match = returnRegex.exec(strippedContent)) !== null) {
+      const returnStart = strippedContent.indexOf('{', match.index!);
+      const returnBodyRaw = extractBalancedBraces(strippedContent, returnStart);
 
       if (returnBodyRaw) {
-        const returnBody = stripComments(returnBodyRaw);
+        const returnBody = returnBodyRaw;
         if (returnBody && returnBody.includes('status:')) {
           const inferred = inferTypeFromObjectLiteralWithContext(returnBody, dataTypes, localVars, fullDataType);
           returnTypes.add(inferred);
@@ -664,14 +667,17 @@ const getSyncClientDataType = (filePath: string): string => {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
 
-    // Look for interface SyncParams with clientData property
+    // Look for interface SyncParams with clientInput/clientData property
     const syncParamsMatch = content.match(/interface\s+SyncParams\s*\{/);
     if (syncParamsMatch) {
       const paramsStart = syncParamsMatch.index!;
       const paramsBody = extractBalancedBraces(content, content.indexOf('{', paramsStart));
       if (paramsBody) {
-        // Look for clientData property
-        const clientDataMatch = paramsBody.match(/clientData\s*:\s*/);
+        // Look for clientInput property first (new naming), then clientData (backward compat)
+        let clientDataMatch = paramsBody.match(/clientInput\s*:\s*/);
+        if (!clientDataMatch) {
+          clientDataMatch = paramsBody.match(/clientData\s*:\s*/);
+        }
         if (clientDataMatch) {
           const dataStart = paramsBody.indexOf(':', clientDataMatch.index!) + 1;
           const afterColon = paramsBody.substring(dataStart).trim();
@@ -686,10 +692,17 @@ const getSyncClientDataType = (filePath: string): string => {
       }
     }
 
-    // Fallback: Look for clientData usage to infer type
-    // Pattern: clientData.increase, clientData.value, etc.
-    const clientDataUsages = content.matchAll(/clientData\.(\w+)/g);
+    // Fallback: Look for clientInput usage to infer type (also check clientData for backward compat)
+    // Pattern: clientInput.increase, clientInput.value, etc.
+    const clientInputUsages = content.matchAll(/clientInput\.(\\w+)/g);
     const properties: string[] = [];
+    for (const match of clientInputUsages) {
+      if (!properties.includes(match[1])) {
+        properties.push(`${match[1]}: any`);
+      }
+    }
+    // Also check clientData for backward compatibility
+    const clientDataUsages = content.matchAll(/clientData\.(\\w+)/g);
     for (const match of clientDataUsages) {
       if (!properties.includes(match[1])) {
         properties.push(`${match[1]}: any`);
@@ -719,17 +732,20 @@ const getSyncServerDataType = (filePath: string): string => {
     const { typeMap: dataTypes, fullType: fullDataType } = extractSyncDataTypeInfo(content);
     const localVars = extractLocalVariables(content);
 
+    // Strip comments from entire content FIRST to avoid matching commented return statements
+    const strippedContent = stripComments(content);
+
     // Scan for ALL return statements to build a union type
     const returnRegex = /return\s*\{/g;
     let match;
     const returnTypes = new Set<string>();
 
-    while ((match = returnRegex.exec(content)) !== null) {
-      const returnStart = content.indexOf('{', match.index!);
-      const returnBodyRaw = extractBalancedBraces(content, returnStart);
+    while ((match = returnRegex.exec(strippedContent)) !== null) {
+      const returnStart = strippedContent.indexOf('{', match.index!);
+      const returnBodyRaw = extractBalancedBraces(strippedContent, returnStart);
 
       if (returnBodyRaw) {
-        const returnBody = stripComments(returnBodyRaw);
+        const returnBody = returnBodyRaw;
         if (returnBody && returnBody.includes('status:')) {
           const inferred = inferTypeFromObjectLiteralWithContext(returnBody, dataTypes, localVars, fullDataType);
           returnTypes.add(inferred);
@@ -762,19 +778,24 @@ const getSyncClientOutputType = (filePath: string): string => {
     const { typeMap: dataTypes, fullType: fullDataType } = extractSyncDataTypeInfo(content);
     const localVars = extractLocalVariables(content);
 
+    // Strip comments from entire content FIRST to avoid matching commented return statements
+    const strippedContent = stripComments(content);
+
     // Scan for ALL return statements, but only include success ones
     const returnRegex = /return\s*\{/g;
     let match;
     const returnTypes = new Set<string>();
 
-    while ((match = returnRegex.exec(content)) !== null) {
-      const returnStart = content.indexOf('{', match.index!);
-      const returnBodyRaw = extractBalancedBraces(content, returnStart);
+    while ((match = returnRegex.exec(strippedContent)) !== null) {
+      const returnStart = strippedContent.indexOf('{', match.index!);
+      const returnBodyRaw = extractBalancedBraces(strippedContent, returnStart);
 
       if (returnBodyRaw) {
-        const returnBody = stripComments(returnBodyRaw);
+        const returnBody = returnBodyRaw;
         // Only include success returns (skip error returns as they don't reach clients)
-        if (returnBody && returnBody.includes("status:") && returnBody.includes("'success'")) {
+        // Handle both single and double quotes: 'success' or "success"
+        const isSuccess = returnBody.includes("'success'") || returnBody.includes('"success"');
+        if (returnBody && returnBody.includes("status:") && isSuccess) {
           const inferred = inferTypeFromObjectLiteralWithContext(returnBody, dataTypes, localVars, fullDataType);
           returnTypes.add(inferred);
         }
@@ -827,29 +848,61 @@ export const generateTypeMapFile = (): void => {
 
   console.log(`[TypeMapGenerator] Found ${syncServerFiles.length} Sync server files, ${syncClientFiles.length} Sync client files`);
 
-  // Build a map of sync name -> client file path for lookup
-  const clientFileMap = new Map<string, string>();
-  for (const clientFile of syncClientFiles) {
-    const syncName = extractSyncName(clientFile);
-    if (syncName) {
-      clientFileMap.set(syncName, clientFile);
-    }
-  }
+  // Build a unified map of all syncs (key: "pagePath/syncName")
+  const allSyncs = new Map<string, {
+    pagePath: string;
+    syncName: string;
+    serverFile?: string;
+    clientFile?: string;
+  }>();
 
-  for (const filePath of syncServerFiles) {
-    const pagePath = extractSyncPagePath(filePath);
-    const syncName = extractSyncName(filePath);
-
+  // Add all server files to the map
+  for (const serverFile of syncServerFiles) {
+    const pagePath = extractSyncPagePath(serverFile);
+    const syncName = extractSyncName(serverFile);
     if (!pagePath || !syncName) continue;
 
-    const clientInputType = getSyncClientDataType(filePath);  // From server file's SyncParams.clientData
-    const serverDataType = getSyncServerDataType(filePath);   // From server file's return
+    const key = `${pagePath}/${syncName}`;
+    const existing = allSyncs.get(key) || { pagePath, syncName };
+    existing.serverFile = serverFile;
+    allSyncs.set(key, existing);
+  }
 
-    // Get clientOutput from corresponding _client file if it exists
-    const clientFilePath = clientFileMap.get(syncName);
-    const clientOutputType = clientFilePath ? getSyncClientOutputType(clientFilePath) : '{ }';
+  // Add all client files to the map (may create new entries or add to existing)
+  for (const clientFile of syncClientFiles) {
+    const pagePath = extractSyncPagePath(clientFile);
+    const syncName = extractSyncName(clientFile);
+    if (!pagePath || !syncName) continue;
 
-    console.log(`[TypeMapGenerator] Sync: ${pagePath}/${syncName}`);
+    const key = `${pagePath}/${syncName}`;
+    const existing = allSyncs.get(key) || { pagePath, syncName };
+    existing.clientFile = clientFile;
+    allSyncs.set(key, existing);
+  }
+
+  // Process each sync with fallback logic
+  for (const [key, { pagePath, syncName, serverFile, clientFile }] of allSyncs) {
+    // clientInput: server file is primary, client file is fallback
+    let clientInputType = '{ }';
+    if (serverFile) {
+      clientInputType = getSyncClientDataType(serverFile);
+    } else if (clientFile) {
+      clientInputType = getSyncClientDataType(clientFile);
+    }
+
+    // serverData: from server file's return (or empty if no server file)
+    let serverDataType = '{ }';
+    if (serverFile) {
+      serverDataType = getSyncServerDataType(serverFile);
+    }
+
+    // clientOutput: from client file's return (or empty if no client file)
+    let clientOutputType = '{ }';
+    if (clientFile) {
+      clientOutputType = getSyncClientOutputType(clientFile);
+    }
+
+    console.log(`[TypeMapGenerator] Sync: ${pagePath}/${syncName} (server: ${!!serverFile}, client: ${!!clientFile})`);
 
     if (!syncTypesByPage.has(pagePath)) {
       syncTypesByPage.set(pagePath, new Map());
@@ -916,12 +969,11 @@ export interface ApiTypeMap {
 
   content += `}
 
-// API Type helpers - fall back to permissive types when map is empty
-type _PagePath = keyof ApiTypeMap;
-export type PagePath = _PagePath extends never ? string : _PagePath;
-export type ApiName<P extends PagePath> = P extends _PagePath ? keyof ApiTypeMap[P] : string;
-export type ApiInput<P extends PagePath, N extends ApiName<P>> = P extends _PagePath ? (ApiTypeMap[P][N & keyof ApiTypeMap[P]] extends { input: infer I } ? I : any) : any;
-export type ApiOutput<P extends PagePath, N extends ApiName<P>> = P extends _PagePath ? (ApiTypeMap[P][N & keyof ApiTypeMap[P]] extends { output: infer O } ? O : any) : any;
+// API Type helpers
+export type PagePath = keyof ApiTypeMap;
+export type ApiName<P extends PagePath> = keyof ApiTypeMap[P];
+export type ApiInput<P extends PagePath, N extends ApiName<P>> = ApiTypeMap[P][N] extends { input: infer I } ? I : never;
+export type ApiOutput<P extends PagePath, N extends ApiName<P>> = ApiTypeMap[P][N] extends { output: infer O } ? O : never;
 
 // Full API path helper (can be used for debugging)
 export type FullApiPath<P extends PagePath, N extends ApiName<P>> = \`api/\${P}/\${N & string}\`;
@@ -967,13 +1019,12 @@ export interface SyncTypeMap {
 
   content += `}
 
-// Sync Type helpers - fall back to permissive types when map is empty
-type _SyncPagePath = keyof SyncTypeMap;
-export type SyncPagePath = _SyncPagePath extends never ? string : _SyncPagePath;
-export type SyncName<P extends SyncPagePath> = P extends _SyncPagePath ? keyof SyncTypeMap[P] : string;
-export type SyncClientInput<P extends SyncPagePath, N extends SyncName<P>> = P extends _SyncPagePath ? (SyncTypeMap[P][N & keyof SyncTypeMap[P]] extends { clientInput: infer C } ? C : any) : any;
-export type SyncServerData<P extends SyncPagePath, N extends SyncName<P>> = P extends _SyncPagePath ? (SyncTypeMap[P][N & keyof SyncTypeMap[P]] extends { serverData: infer S } ? S : any) : any;
-export type SyncClientOutput<P extends SyncPagePath, N extends SyncName<P>> = P extends _SyncPagePath ? (SyncTypeMap[P][N & keyof SyncTypeMap[P]] extends { clientOutput: infer O } ? O : any) : any;
+// Sync Type helpers
+export type SyncPagePath = keyof SyncTypeMap;
+export type SyncName<P extends SyncPagePath> = keyof SyncTypeMap[P];
+export type SyncClientInput<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { clientInput: infer C } ? C : never;
+export type SyncServerData<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { serverData: infer S } ? S : never;
+export type SyncClientOutput<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { clientOutput: infer O } ? O : never;
 
 // Full Sync path helper (can be used for debugging)
 export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>> = \`sync/\${P}/\${N & string}\`;

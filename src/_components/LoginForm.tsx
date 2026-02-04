@@ -60,7 +60,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     const [error, response] = await tryCatch(fetchUser);
     if (error || !response?.reason) {
       // notify.error("Unexpected error occurred.");
-      notify.error({ key: 'commen/.404' })
+      notify.error({ key: 'common/.404' })
       console.error(error || "No JSON response");
       return setLoading(false);
     }
@@ -90,7 +90,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
       >
         <div className="flex flex-col gap-2">
           <h1 className="font-semibold text-lg">{title}</h1>
-          <p className="font-medium text-sm text-commen">
+          <p className="font-medium text-sm text-common">
             {subtitleText}
             <Link to={redirectURL} className="text-blue-500 cursor-pointer">
               {subtitleLink}

@@ -40,20 +40,20 @@ export default function DocsPage() {
                 placeholder="Search docs... (api, session, sync, zod)"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-10 px-4 pl-10 bg-container border border-container-border rounded-md text-commen focus:outline-blue-500"
+                className="w-full h-10 px-4 pl-10 bg-container border border-container-border rounded-md text-common focus:outline-blue-500"
               />
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted">🔍</span>
             </div>
             <div className="flex bg-container border border-container-border rounded-md overflow-hidden">
               <button
                 onClick={() => setViewMode('docs')}
-                className={`px-4 h-10 text-sm font-medium transition-colors cursor-pointer ${viewMode === 'docs' ? 'bg-blue-500 text-white' : 'text-commen hover:bg-container-hover'}`}
+                className={`px-4 h-10 text-sm font-medium transition-colors cursor-pointer ${viewMode === 'docs' ? 'bg-blue-500 text-white' : 'text-common hover:bg-container-hover'}`}
               >
                 📖 Docs
               </button>
               <button
                 onClick={() => setViewMode('files')}
-                className={`px-4 h-10 text-sm font-medium transition-colors cursor-pointer ${viewMode === 'files' ? 'bg-blue-500 text-white' : 'text-commen hover:bg-container-hover'}`}
+                className={`px-4 h-10 text-sm font-medium transition-colors cursor-pointer ${viewMode === 'files' ? 'bg-blue-500 text-white' : 'text-common hover:bg-container-hover'}`}
               >
                 📁 Files
               </button>
@@ -82,7 +82,7 @@ export default function DocsPage() {
               <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Topics</p>
               <button
                 onClick={() => setSelectedCategory(null)}
-                className={`text-left px-3 py-2 rounded-md text-sm cursor-pointer ${!selectedCategory ? 'bg-blue-500 text-white' : 'text-commen hover:bg-container-hover'}`}
+                className={`text-left px-3 py-2 rounded-md text-sm cursor-pointer ${!selectedCategory ? 'bg-blue-500 text-white' : 'text-common hover:bg-container-hover'}`}
               >
                 All Topics
               </button>
@@ -90,7 +90,7 @@ export default function DocsPage() {
                 <button
                   key={cat.id}
                   onClick={() => setSelectedCategory(cat.id)}
-                  className={`text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 cursor-pointer ${selectedCategory === cat.id ? 'bg-blue-500 text-white' : 'text-commen hover:bg-container-hover'}`}
+                  className={`text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 cursor-pointer ${selectedCategory === cat.id ? 'bg-blue-500 text-white' : 'text-common hover:bg-container-hover'}`}
                 >
                   <span>{cat.icon}</span>
                   <span className="truncate">{cat.title}</span>
@@ -158,7 +158,7 @@ function CodeBlock({ code, language, title }: { code: string; language?: string;
           {language && <span className="text-xs text-muted font-mono">{language}</span>}
         </div>
       )}
-      <pre className="p-4 overflow-x-auto text-sm font-mono text-commen leading-relaxed">
+      <pre className="p-4 overflow-x-auto text-sm font-mono text-common leading-relaxed">
         <code>{code}</code>
       </pre>
     </div>
@@ -196,7 +196,7 @@ function CategorySection({ category }: { category: DocCategory }) {
             </span>
             <h2 className="text-2xl font-bold text-title">{category.title}</h2>
           </div>
-          <p className="text-commen leading-relaxed">{category.intro}</p>
+          <p className="text-common leading-relaxed">{category.intro}</p>
           <div className="text-sm text-muted">
             {category.items.length} topics covered
           </div>
@@ -244,7 +244,7 @@ function DocItemCard({ item, categoryColor, categoryName }: {
       {/* Content */}
       {expanded && (
         <div className="p-4 pt-0 flex flex-col gap-4">
-          <p className="text-commen leading-relaxed">{item.description}</p>
+          <p className="text-common leading-relaxed">{item.description}</p>
 
           {item.file && (
             <span className="text-sm text-muted font-mono">📄 {item.file}</span>
@@ -274,7 +274,7 @@ function FileCard({ file }: { file: FrameworkFile }) {
           {file.side === 'server' ? 'Server' : 'Client'}
         </span>
       </div>
-      <p className="text-sm text-commen flex-1">{file.description}</p>
+      <p className="text-sm text-common flex-1">{file.description}</p>
       <span className="text-xs text-muted font-mono">{file.path}</span>
     </div>
   );

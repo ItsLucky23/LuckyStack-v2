@@ -16,71 +16,97 @@ export interface apiRequestResponse {
   messageParams?: Record<string, any>;
 }
 
-// Union of all API calls across all pages
-type ApiCallUnion = {
-  [P in PagePath]: {
-    [N in ApiName<P>]: {
-      name: N;
-      data: ApiInput<P, N>;
-      output: ApiOutput<P, N>;
-      page: P;
-    };
-  }[ApiName<P>];
+// ═══════════════════════════════════════════════════════════════════════════════
+// Type Helpers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Check if data input is required (i.e., T does NOT allow empty object)
+// Unions like {a:1} | {b:1} do NOT allow {}, so data will be required
+type DataRequired<T> = {} extends T ? false : true;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Global API Params - Union of ALL valid API calls with proper data enforcement
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// All possible API names across all pages
+type AllApiNames = {
+  [P in PagePath]: ApiName<P>
 }[PagePath];
 
-// All valid API names across all pages
-type AllApiNames = ApiCallUnion['name'];
+// Force expansion of types to clear aliases in tooltips
+type Prettify<T> = { [K in keyof T]: T[K] } & {};
 
-// Get data type for a name (union if name exists on multiple pages)
-type DataForName<N extends AllApiNames> = Extract<ApiCallUnion, { name: N }>['data'];
+// Get input type for an API name (union if exists on multiple pages)
+type InputForName<N extends AllApiNames> = {
+  [P in PagePath]: N extends ApiName<P> ? ApiInput<P, N> : never
+}[PagePath];
 
-// Get output type for a name (union if name exists on multiple pages)
-type OutputForName<N extends AllApiNames> = Extract<ApiCallUnion, { name: N }>['output'];
+// Get output type for an API name (union if exists on multiple pages)
+type OutputForName<N extends AllApiNames> = {
+  [P in PagePath]: N extends ApiName<P> ? ApiOutput<P, N> : never
+}[PagePath];
 
-// Check if data is required (not just Record<string, any>)
-type IsDataRequired<T> = T extends Record<string, any>
-  ? (keyof T extends never ? false : (string extends keyof T ? false : true))
-  : true;
+// Build params type for a specific API name
+type ApiParamsForName<N extends AllApiNames> =
+  DataRequired<InputForName<N>> extends true
+  ? { name: N; data: Prettify<InputForName<N>> }
+  : { name: N; data?: Prettify<InputForName<N>> };
 
-// Build the params type with data required or optional based on API definition
-type ApiParams<N extends AllApiNames> = IsDataRequired<DataForName<N>> extends true
-  ? { name: N; data: DataForName<N> }
-  : { name: N; data?: DataForName<N> };
+// ═══════════════════════════════════════════════════════════════════════════════
+// Page-Specific Params (for exact types when duplicate names exist)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Build params type for a specific page and API name
+type PageApiParamsForName<P extends PagePath, N extends ApiName<P>> =
+  DataRequired<ApiInput<P, N>> extends true
+  ? { name: N; data: ApiInput<P, N> }
+  : { name: N; data?: ApiInput<P, N> };
 
 /**
  * Type-safe API request function.
  * 
- * @example Without page path (union types for duplicates):
+ * @example
  * ```typescript
- * // If 'jow' exists on multiple pages, data/output are unions
- * const result = await apiRequest({ name: 'jow', data: { ... } });
- * ```
+ * // Normal usage - shows all APIs with data validation
+ * const result = await apiRequest({ name: 'publicApi', data: { message: 'hello' } });
+ * // result is typed correctly for publicApi
  * 
- * @example With page path (exact types):
- * ```typescript
- * // Specify page path to get exact types for that page's API
- * const result = await apiRequest<'examples/examples2'>({ 
- *   name: 'jow', 
- *   data: { name: 'john' } 
- * });
+ * // Page-specific for exact types when duplicates exist
+ * await apiRequest<'examples', 'publicApi'>({ name: 'publicApi', data: { message: 'hello' } });
  * ```
  */
 
-// Overload 1: With page path specified - exact types for that page's APIs
-export function apiRequest<P extends PagePath>(
-  params: { name: ApiName<P>; data?: ApiInput<P, ApiName<P>> }
-): Promise<ApiOutput<P, ApiName<P>>>;
-
-// Overload 2: Without page path - uses union types for API names
-// Data is required if the API expects specific input fields
+// Overload 1: Name-based inference - PRIMARY usage
+// TypeScript infers N from the literal name value
+// Use: apiRequest({ name: "publicApi", ... })
 export function apiRequest<N extends AllApiNames>(
-  params: ApiParams<N>
-): Promise<OutputForName<N>>;
+  params: ApiParamsForName<N>
+): Promise<Prettify<OutputForName<N>>>;
 
-// Overload 3: Special system APIs (logout, session)
+// Overload 2: Explicit page + name - for duplicate API names across pages
+// Both type params REQUIRED when specifying page
+// Use: apiRequest<"examples", "publicApi">({ name: "publicApi", ... })
+export function apiRequest<P extends PagePath, N extends ApiName<P>>(
+  params: PageApiParamsForName<P, N>
+): Promise<ApiOutput<P, N>>;
+
+// System APIs (logout, session)
 export function apiRequest(
   params: { name: 'logout' | 'session' }
 ): Promise<apiRequestResponse>;
+
+/**
+ * Helper to create a page-scoped API caller (alternative pattern)
+ * Use: const examplesApi = createPageApi("examples");
+ *      await examplesApi({ name: "publicApi", ... });
+ */
+export function createPageApi<P extends PagePath>(pagePath: P) {
+  return function <N extends ApiName<P>>(
+    params: PageApiParamsForName<P, N>
+  ): Promise<ApiOutput<P, N>> {
+    return apiRequest(params as any);
+  };
+}
 
 // Implementation (not exposed to TypeScript - only runtime)
 export function apiRequest(params: any): Promise<any> {

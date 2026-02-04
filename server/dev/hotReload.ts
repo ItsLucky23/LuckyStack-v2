@@ -1,6 +1,21 @@
 import chokidar from "chokidar";
+import fs from "fs";
 import { initializeApis, initializeFunctions, initializeSyncs } from "./loader";
-import { shouldInjectTemplate, injectTemplate } from "./templateInjector";
+import {
+  shouldInjectTemplate,
+  injectTemplate,
+  isSyncServerFile,
+  isSyncClientFile,
+  getPairedSyncFile,
+  extractClientInputFromFile,
+  extractClientInputFromGeneratedTypes,
+  extractSyncPagePath,
+  extractSyncName,
+  injectServerTemplateWithClientInput,
+  updateClientFileForPairedServer,
+  updateClientFileForDeletedServer,
+  isEmptyFile
+} from "./templateInjector";
 import { generateTypeMapFile } from "./typeMapGenerator";
 import { tryCatch } from "../functions/tryCatch";
 
@@ -18,6 +33,28 @@ export const setupWatchers = () => {
     // Check if this is a new empty file that needs a template
     if (shouldInjectTemplate(path)) {
       console.log(`[Watcher] New empty file detected: ${normalizedPath}`);
+
+      // Special handling for sync server files when client already exists
+      if (isSyncServerFile(normalizedPath)) {
+        const clientPath = getPairedSyncFile(normalizedPath);
+        if (clientPath && fs.existsSync(clientPath) && !isEmptyFile(clientPath)) {
+          // Extract clientInput types from existing client file
+          const clientInputTypes = extractClientInputFromFile(clientPath);
+          if (clientInputTypes) {
+            console.log(`[Watcher] Found existing client file, migrating types to server: ${clientPath}`);
+            // Inject server template with pre-filled clientInput from client
+            await injectServerTemplateWithClientInput(path, clientInputTypes);
+            // Regenerate types
+            await tryCatch(generateTypeMapFile);
+            // Update client file to use imported types + add serverData
+            await updateClientFileForPairedServer(clientPath);
+            initializeSyncs();
+            return;
+          }
+        }
+      }
+
+      // Default template injection
       const injected = await injectTemplate(path);
       if (injected) {
         // Don't continue processing - the template was just injected
@@ -56,7 +93,7 @@ export const setupWatchers = () => {
     initializeFunctions();
   };
 
-  const handleDelete = (path: string) => {
+  const handleDelete = async (path: string) => {
     const normalizedPath = path.replace(/\\/g, '/');
 
     if (normalizedPath.includes('_api/')) {
@@ -65,6 +102,27 @@ export const setupWatchers = () => {
       initializeApis();
     } else if (normalizedPath.includes('_sync/')) {
       console.log(`[Watcher] Sync file deleted: ${normalizedPath}`);
+
+      // Special handling for sync server file deletion when client exists
+      if (isSyncServerFile(normalizedPath)) {
+        const clientPath = getPairedSyncFile(normalizedPath);
+        if (clientPath && fs.existsSync(clientPath)) {
+          console.log(`[Watcher] Server file deleted, updating client to standalone: ${clientPath}`);
+
+          // Extract clientInput types from generated types file (server file is already deleted)
+          const pagePath = extractSyncPagePath(normalizedPath);
+          const syncName = extractSyncName(normalizedPath);
+          const clientInputTypes = extractClientInputFromGeneratedTypes(pagePath, syncName);
+
+          if (clientInputTypes) {
+            await updateClientFileForDeletedServer(clientPath, clientInputTypes);
+          } else {
+            // Fallback if types couldn't be extracted
+            await updateClientFileForDeletedServer(clientPath, '{\n    // Types were in _server.ts - please add them here\n  }');
+          }
+        }
+      }
+
       generateTypeMapFile();
       initializeSyncs();
     }

@@ -19,10 +19,8 @@
   --color-container4-border: #E2E8F0; /* gray-200 */
   --color-container4-hover: #E2E8F0; /* slightly darker */
 
-  --color-loadingScreen: #FAF9FF;
-
   --color-title: #000000; /* black */
-  --color-commen: #1E293B; /* slate-800 */
+  --color-common: #1E293B; /* slate-800 */
   --color-muted: #64748B; /* slate-500 */
 
   /* Correct / wrong */
@@ -31,14 +29,6 @@
 
   --color-wrong: #EF4444; /* red-500 */
   --color-wrong-hover: #DC2626; /* red-600 */
-
-  --color-loadingscreen: #BFDBFE;             /* blue-200, a bit darker */
-
-  --color-loadingscreen-container: #EFF6FF;   /* blue-50, subtle container */
-  --color-loadingscreen-container-selected: #DBEAFE; /* blue-100, stands out */
-  --color-loadingscreen-container-border: #93C5FD;   /* blue-300 border */
-  --color-loadingscreen-container-text: #1E3A8A;     /* blue-900, strong text */
-  
 }
 
 .dark {
@@ -60,10 +50,8 @@
   --color-container4-border: #374151; /* gray-700 */
   --color-container4-hover: #CBD5E1;
 
-  --color-loadingScreen: #192432;
-  
   --color-title: #FFFFFF;               /* white */
-  --color-commen: #E5E7EB;              /* gray-200 */
+  --color-common: #E5E7EB;              /* gray-200 */
   --color-muted: #9CA3AF;               /* gray-400 */
 
   /* Correct / wrong */
@@ -72,14 +60,6 @@
 
   --color-wrong: #EF4444; /* red-500 */
   --color-wrong-hover: #DC2626; /* red-600 */
-
-  --color-loadingscreen: #111827;             /* gray-900, a bit darker */
-
---color-loadingscreen-container: #1E293B;   /* slate-800, container base */
---color-loadingscreen-container-selected: #374151; /* gray-700, selected */
---color-loadingscreen-container-border: #4B5563;   /* gray-600 border */
---color-loadingscreen-container-text: #F1F5F9;     /* slate-100, readable text */
-
 }
 
 :root {
