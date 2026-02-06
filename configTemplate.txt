@@ -10,7 +10,11 @@ const config = {
   defaultLanguage: 'en', //* default language if the session data doesnt include it, this is used with the notify system with the json files in the localed folder
   defaultTheme: 'dark', //* the default theme the client uses when the user hasnt set a theme yet
   mobileConsole: false, //* if true then there is a extra console you can open on any device (including mobile)
+  sessionExpiryDays: 7, //* the number of days a session is valid
 
+  //? if true than we store the token in session (unsecure but nice for development)
+  //? when true you can open multiple windows and login into different user accounts so you can test certain features
+  allowMultipleSessions: false,
   
   //? if false syncing works to users in your room but they wont know who they are sycning to
   //? if true on the client we know the activity status of all users in the same room
