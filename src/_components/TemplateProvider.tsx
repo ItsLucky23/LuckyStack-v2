@@ -1,19 +1,23 @@
-import { useEffect, useState } from 'react';
-import Navbar from "src/_components/Navbar";
-import Middleware from 'src/_components/Middleware';
-import initializeRouter from './Router';
-import { useLocation } from 'react-router-dom';
-import Avatar from './Avatar';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGear, faHome } from '@fortawesome/free-solid-svg-icons';
-import { useSession } from '../_providers/SessionProvider';
-import { useMenuHandler } from './MenuHandler';
-import { ConfirmMenu } from './ConfirmMenu';
-import ThemeToggler from './ThemeToggler';
-import { dev } from '../../config';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+
+import config, { dev } from "config";
+import Middleware from 'src/_components/Middleware';
+import Navbar from "src/_components/Navbar";
 import { useSocketStatus } from 'src/_providers/socketStatusProvider';
 import { apiRequest } from 'src/_sockets/apiRequest';
-import config from "config";
+
+import { useSession } from '../_providers/SessionProvider';
+
+import Avatar from './Avatar';
+import { ConfirmMenu } from './ConfirmMenu';
+import { useMenuHandler } from './MenuHandler';
+import initializeRouter from './Router';
+import ThemeToggler from './ThemeToggler';
+
+
 
 const Templates = {
   dashboard: DashboardTemplate,

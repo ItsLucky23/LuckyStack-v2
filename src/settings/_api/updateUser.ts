@@ -1,42 +1,31 @@
-import { PrismaClient } from '@prisma/client';
-import { AuthProps, SessionLayout } from 'config';
+import { AuthProps, SessionLayout } from '../../../config';
+import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
+import sharp from 'sharp';
 import path from 'path';
-import { GameDataProps } from 'server/functions/game';
-import sharp from "sharp";
 
-interface Functions {
-  prisma: PrismaClient;
+// Set the request limit per minute. Set to false to use the default config value config.rateLimiting
+export const rateLimit: number | false = 20;
 
-  saveSession: (sessionId: string, data: any) => Promise<boolean>;
-  getSession: (sessionId: string) => Promise<any | null>;
-  deleteSession: (sessionId: string) => Promise<boolean>;
+// HTTP method for this API. If not set, inferred from name (get* = GET, delete* = DELETE, else POST)
+export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
 
-  saveGameData: (gameCode: string, data: GameDataProps) => Promise<boolean>;
-  getGameData: (gameCode: string) => Promise<GameDataProps | null>;
-  deleteGameData: (gameCode: string) => Promise<boolean>;
-  gameExists: (gameCode: string) => Promise<boolean>;
-
-  tryCatch: <T, P>(func: (values: P) => Promise<T> | T, params?: P) => Promise<[any, T | null]>;
-
-  [key: string]: any; // allows for other functions that are not defined as a type but do exist in the functions folder
+export const auth: AuthProps = {
+  login: true,
+  additional: []
 };
 
-interface ApiParams {
-  data: Record<string, any>;
-  functions: Functions;
+export interface ApiParams {
+  data: {
+    name?: string;
+    theme?: 'light' | 'dark';
+    language?: string;
+    avatar?: string;
+  };
   user: SessionLayout;
-};
-
-
-const auth: AuthProps = {
-  login: true, //? checks if the session data has an id. 
-  additional: [
-  ]
+  functions: Functions;
 }
 
-// const __filename = fileURLToPath(import.meta.url);
-// const __dirname = path.dirname(__filename);
-const main = async ({ data, functions, user }: ApiParams) => {
+export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
 
   const { avatar, name, theme, language } = data;
 
@@ -83,7 +72,5 @@ const main = async ({ data, functions, user }: ApiParams) => {
 
   await functions.saveSession(user.token, {...user, ...newData});
 
-  return { status: 'success' }
-}
-
-export { auth, main }
+  return { status: 'success', result: {} }
+};

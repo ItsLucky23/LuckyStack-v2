@@ -1,7 +1,9 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
+
 import config, { providers, SessionLayout } from "config";
 import tryCatch from "src/_functions/tryCatch";
+
 import notify from "../_functions/notify";
 const env = import.meta.env;
 
@@ -29,18 +31,18 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     setLoading(true);
 
     if (provider !== "credentials") {
-      window.location.href = `${config.backendUrl}/auth/api/${provider}`;
+      globalThis.location.href = `${config.backendUrl}/auth/api/${provider}`;
       return;
     }
 
     const form = (e.target as HTMLElement).closest("form");
     if (!form) {
       setLoading(false);
-      return console.error("Form not found");
+      console.error("Form not found"); return;
     }
 
     const getValue = (name: string) =>
-      (form.querySelector(`input[name="${name}"]`) as HTMLInputElement)?.value || "";
+      (form.querySelector(`input[name="${name}"]`)!).value || "";
 
     const name = getValue("name");
     const email = getValue("email");
@@ -62,22 +64,20 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
       // notify.error("Unexpected error occurred.");
       notify.error({ key: 'common/.404' })
       console.error(error || "No JSON response");
-      return setLoading(false);
+      setLoading(false); return;
     }
 
     if (!response.status) {
       notify.error({ key: response.reason });
-      return setLoading(false);
+      setLoading(false); return;
     }
 
     notify.success({ key: response.reason });
     setTimeout(() => {
-      if (response.newToken) {
-        if (env.VITE_SESSION_BASED_TOKEN == 'true') {
+      if (response.newToken && env.VITE_SESSION_BASED_TOKEN == 'true') {
           sessionStorage.setItem("token", response.newToken);
         }
-      }
-      window.location.href = response.newToken ? config.loginRedirectUrl : config.loginPageUrl;
+      globalThis.location.href = response.newToken ? config.loginRedirectUrl : config.loginPageUrl;
       // window.location.href = config.loginPageUrl;
     }, 1000);
   };

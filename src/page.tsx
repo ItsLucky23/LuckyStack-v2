@@ -1,6 +1,8 @@
-import config from "config";
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+
+import config from "config";
+
 import { useSession } from "./_providers/SessionProvider";
 const env = import.meta.env;
 
@@ -16,7 +18,7 @@ export default function App() {
     const token = params.get('token');
     if (token && env.VITE_SESSION_BASED_TOKEN == 'true') {
       sessionStorage.setItem('token', token);
-      window.location.href = window.location.pathname;
+      globalThis.location.href = globalThis.location.pathname;
       return;
     }
 
@@ -31,7 +33,7 @@ export default function App() {
   }, [navigate, location, session, sessionLoaded]);
 
   useEffect(() => {
-    let timeout = setTimeout(() => {
+    const timeout = setTimeout(() => {
       if (!sessionLoaded) {
         navigate(config.loginPageUrl)
       }

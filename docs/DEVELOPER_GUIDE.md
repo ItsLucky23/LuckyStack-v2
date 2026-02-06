@@ -23,22 +23,19 @@ cp envTemplate.txt .env
 ### 2. Start Development
 
 ```bash
-# Terminal 1: Start Redis
-redis-server redis.conf
-
-# Terminal 2: Start backend
+# Terminal 1: Start backend
 npm run server
 
-# Terminal 3: Start frontend (Vite)
-npm run dev
+# Terminal 2: Start frontend (Vite)
+npm run client
 ```
 
 ### 3. Create Your First API
 
 ```typescript
 // src/mypage/_api/hello.ts
-import { AuthProps, SessionLayout } from 'config';
-import { Functions, ApiResponse } from 'src/_sockets/apiTypes.generated';
+import { AuthProps, SessionLayout } from "config";
+import { Functions, ApiResponse } from "src/_sockets/apiTypes.generated";
 
 export const auth: AuthProps = { login: false, additional: [] };
 
@@ -50,8 +47,8 @@ export interface ApiParams {
 
 export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
   return {
-    status: 'success',
-    result: { message: `Hello, ${data.name}!` }
+    status: "success",
+    result: { message: `Hello, ${data.name}!` },
   };
 };
 ```
@@ -59,7 +56,7 @@ export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
 Types are auto-generated! Just save the file and use:
 
 ```typescript
-const result = await apiRequest({ name: 'hello', data: { name: 'World' } });
+const result = await apiRequest({ name: "hello", data: { name: "World" } });
 ```
 
 ---
@@ -69,12 +66,15 @@ const result = await apiRequest({ name: 'hello', data: { name: 'World' } });
 ```
 luckystack/
 ├── src/                    # Frontend (React)
+│   ├── _components/        # Shared UI components
+│   ├── _functions/         # Client utilities
 │   ├── _providers/         # React context providers
 │   ├── _sockets/           # Socket client utilities
 │   ├── _locales/           # i18n translations
+│   ├── admin/              # Admin pages
 │   └── {page}/             # Feature pages
 │       ├── page.tsx        # Main page component
-│       ├── components/     # Page-specific components
+│       ├── _components/    # Page-specific components
 │       ├── _api/           # API handlers for this page
 │       └── _sync/          # Sync handlers for this page
 │
@@ -86,7 +86,7 @@ luckystack/
 │   ├── dev/                # Hot reload & type generation
 │   └── server.ts           # Entry point
 │
-├── docs/                   # Documentation (you are here)
+├── docs/                   # Architecture documentation
 ├── config.ts               # App configuration
 └── .env                    # Environment variables
 ```
@@ -100,7 +100,7 @@ luckystack/
 ```
 src/game/
 ├── page.tsx                # Main game UI
-├── components/
+├── _components/
 │   ├── Board.tsx
 │   └── ScoreBoard.tsx
 ├── _api/
@@ -115,30 +115,31 @@ src/game/
 ### Using in Components
 
 ```tsx
-import { apiRequest } from 'src/_sockets/apiRequest';
-import { syncRequest, upsertSyncEventCallback } from 'src/_sockets/syncRequest';
+import { apiRequest } from "src/_sockets/apiRequest";
+import { syncRequest, upsertSyncEventCallback } from "src/_sockets/syncRequest";
 
 function GameBoard() {
   const [state, setState] = useState(null);
-  
+
   // Fetch initial state
   useEffect(() => {
-    apiRequest({ name: 'getGameState', data: { gameId } })
-      .then(result => setState(result));
+    apiRequest({ name: "getGameState", data: { gameId } }).then((result) =>
+      setState(result),
+    );
   }, [gameId]);
-  
+
   // Listen for moves
   useEffect(() => {
-    upsertSyncEventCallback('movePlayer', ({ serverOutput }) => {
-      setState(prev => ({ ...prev, ...serverOutput }));
+    upsertSyncEventCallback("movePlayer", ({ serverOutput }) => {
+      setState((prev) => ({ ...prev, ...serverOutput }));
     });
   }, []);
-  
+
   // Send a move
   const handleMove = (move) => {
-    syncRequest({ name: 'movePlayer', data: move });
+    syncRequest({ name: "movePlayer", data: move });
   };
-  
+
   return <Board onMove={handleMove} {...state} />;
 }
 ```
@@ -179,13 +180,13 @@ curl http://localhost/api/mypage/getGameState?gameId=123 \
 
 ```javascript
 // If socket is connected
-socket.emit('apiRequest', {
-  name: 'api/mypage/hello',
-  data: { name: 'Test' },
-  responseIndex: 999
+socket.emit("apiRequest", {
+  name: "api/mypage/hello",
+  data: { name: "Test" },
+  responseIndex: 999,
 });
 
-socket.on('apiResponse-999', console.log);
+socket.on("apiResponse-999", console.log);
 ```
 
 ---
@@ -195,6 +196,7 @@ socket.on('apiResponse-999', console.log);
 ### Server Logs
 
 Colorized console output:
+
 - 🔵 **Blue** - API calls
 - 🟢 **Green** - Success
 - 🔴 **Red** - Errors
@@ -220,7 +222,6 @@ Errors are automatically captured if `SENTRY_DSN` is set in `.env`.
 
 1. **Keep APIs small** - One responsibility per file
 2. **Use type inference** - Don't manually type API responses
-3. **Validate input** - Use Zod schemas for complex data
-4. **Handle errors** - Always return `{ status: 'error', message }` on failure
-5. **Clean up callbacks** - Remove sync callbacks when component unmounts
-6. **Use rooms** - Don't broadcast to everyone, use targeted rooms
+3. **Handle errors** - Always return `{ status: 'error', message }` on failure
+4. **Clean up callbacks** - Remove sync callbacks when component unmounts
+5. **Use rooms** - Don't broadcast to everyone, use targeted rooms

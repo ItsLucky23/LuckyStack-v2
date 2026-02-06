@@ -1,11 +1,16 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+
 import { SessionLayout } from "config";
+import { apiRequest } from "src/_sockets/apiRequest";
+
+import { useSession } from "../_providers/SessionProvider";
+
+import Avatar from "./Avatar";
 import Icon from "./Icon";
 import initializeRouter from "./Router";
-import Avatar from "./Avatar";
-import { useSession } from "../_providers/SessionProvider";
-import { apiRequest } from "src/_sockets/apiRequest";
+
+
 
 const navbarItems = [
   {
@@ -84,7 +89,7 @@ const displayPopup = ({ element, text }: { element: HTMLElement, text: string })
   popup.style.position = 'absolute';
   popup.style.top = `${(rect.top + window.scrollY - 10).toString()}px`;
   popup.style.left = `${(rect.left + window.scrollX + rect.width + 5).toString()}px`;
-  document.body.appendChild(popup);
+  document.body.append(popup);
 
   activePopups.push(popup);
   void popup.offsetHeight;
@@ -136,8 +141,8 @@ const NavbarItem = ({ item, state, setState, pathname, session, router }: Navbar
   return (
    <div className={`hover:bg-gray-200 hover:text-gray-600 w-full h-10 items-center rounded-sm transition-all duration-100 cursor-pointer gap-2 py-2
       ${state == 'expended' && item.hideOnExpended ? 'hidden' :
-        state == 'folded' && item.hideOnFolded ? 'hidden' : 
-        'flex'
+        (state == 'folded' && item.hideOnFolded ? 'hidden' : 
+        'flex')
       }
       ${state == 'folded' ? 'px-2' : 'px-2'}
       ${item.path == pathname ? 'bg-gray-200' : ''}
@@ -146,7 +151,7 @@ const NavbarItem = ({ item, state, setState, pathname, session, router }: Navbar
     onMouseEnter={(e) => {
       if (state == 'expended') { return }
       const target = e.currentTarget as HTMLElement;
-      const randomId = Math.floor(Math.random() * 1000000000000000);
+      const randomId = Math.floor(Math.random() * 1_000_000_000_000_000);
       toggleId.current = randomId;
       setTimeout(() => {
         requestAnimationFrame(() => {
@@ -165,7 +170,7 @@ const NavbarItem = ({ item, state, setState, pathname, session, router }: Navbar
       if (item.action) { item.action({ item, state, setState, pathname, session, router }) }
       else if (item.path) { 
         clearPopups();
-        void await router(item.path);
+        await router(item.path);
         setState('folded');
       }
     }}>
@@ -207,14 +212,14 @@ export default function Navbar() {
     if (!parent) return;
 
     const observer = new ResizeObserver((entries) => {
-      for (let entry of entries) {
+      for (const entry of entries) {
         setParentWidth(entry.contentRect.width);
       }
     });
 
     observer.observe(parent);
 
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); };
   }, []);
 
   if (!session) { return; }
@@ -292,7 +297,7 @@ export default function Navbar() {
           )}
 
       </div>
-      <div className={`@md:hidden flex absolute top-0 left-0 z-10 bg-black ${state != 'folded' ? 'opacity-80' : 'opacity-0 pointer-events-none'} transition-all duration-300 w-full h-full`}
+      <div className={`@md:hidden flex absolute top-0 left-0 z-10 bg-black ${state == 'folded' ? 'opacity-0 pointer-events-none' : 'opacity-80'} transition-all duration-300 w-full h-full`}
         onClick={() => { setState('folded') }}>
       </div>
     </div>

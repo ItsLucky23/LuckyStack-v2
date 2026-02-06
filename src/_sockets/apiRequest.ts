@@ -135,7 +135,7 @@ export function apiRequest(params: any): Promise<any> {
     const pathname = window.location.pathname;
     const pagePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
     const isGet = isGetMethod(pagePath, name as string);
-    const useAbortController = params.abortable === true || (params.abortable !== false && isGet);
+    const useAbortController = params.abortable === true || isGet;
     const fullname = (name as string) != 'session' && (name as string) != 'logout' ? `api${pathname}/${name}` : name;
     // example: api/games/boerZoektVrouw/getGameData
 

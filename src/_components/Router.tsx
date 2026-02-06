@@ -1,14 +1,16 @@
 import { useLocation, useNavigate } from "react-router-dom";
+
 import middlewareHandler from "src/_functions/middlewareHandler";
+
 import { useSession } from "../_providers/SessionProvider";
 
 const getParams = (locationSearch: string) => {
   const params = new URLSearchParams(locationSearch);
   const queryObject: Record<string, string> = {};
 
-  params.forEach((value, key) => {
+  for (const [key, value] of params.entries()) {
     queryObject[key] = value;
-  });
+  }
 
   return queryObject;
 }

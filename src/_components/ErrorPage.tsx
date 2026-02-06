@@ -61,7 +61,7 @@ export default function ErrorPage() {
       {/* Action Buttons */}
       <div className="flex gap-4">
         <button
-          onClick={() => window.history.back()}
+          onClick={() => { globalThis.history.back(); }}
           className="px-6 py-3 bg-container text-common border border-container-border rounded-lg hover:bg-container-hover transition-colors font-medium"
         >
           ← Go Back
@@ -93,21 +93,29 @@ export default function ErrorPage() {
 
 function getErrorMessage(status: number): string {
   switch (status) {
-    case 400:
+    case 400: {
       return 'The request was invalid or malformed.';
-    case 401:
+    }
+    case 401: {
       return 'You need to be logged in to access this page.';
-    case 403:
+    }
+    case 403: {
       return "You don't have permission to access this page.";
-    case 404:
+    }
+    case 404: {
       return "The page you're looking for doesn't exist or has been moved.";
-    case 500:
+    }
+    case 500: {
       return 'Our servers encountered an unexpected error.';
-    case 502:
+    }
+    case 502: {
       return 'Our servers are temporarily unavailable.';
-    case 503:
+    }
+    case 503: {
       return 'The service is temporarily unavailable. Please try again later.';
-    default:
+    }
+    default: {
       return 'An unexpected error occurred.';
+    }
   }
 }

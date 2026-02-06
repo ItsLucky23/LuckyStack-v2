@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "target": "ES2020",
     "useDefineForClassFields": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
@@ -19,23 +18,23 @@
     "jsx": "react-jsx",
     "baseUrl": "./",
     "paths": {
-      "src/*": ["src/*"]
+      "src/*": ["src/*"],
+      "config": ["./config.ts"]
     },
 
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
   "exclude": [ // this excludes files from being build
     "src/**/api",                    // exclude any api folder
     "src/**/sync/*_server.ts",       // only exclude server_*.ts files inside sync folders
-    "src/**/sync/*_server.tsx",      // (optional) if you use TSX files too
+    "src/**/sync/*_client.ts",       // only exclude server_*.ts files inside sync folders
     "src/**/sync/*_server.js",       // (optional) in case you have JS mixed in
-    "src/**/sync/*_server.jsx",       // (optional) same for JSX
+    "src/**/sync/*_client.js",       // (optional) in case you have JS mixed in
   ]
 
 }

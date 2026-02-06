@@ -8,10 +8,10 @@
 
 ```typescript
 // Client-side API call
-const result = await apiRequest({ 
-  name: 'getUserData', 
-  data: { userId: '123' },
-  abortable: true  // Optional: auto-cancels if called again before response
+const result = await apiRequest({
+  name: "getUserData",
+  data: { userId: "123" },
+  abortable: true, // Optional: auto-cancels if called again before response
 });
 
 // HTTP fallback (same API, no WebSocket needed)
@@ -39,10 +39,12 @@ src/
 
 ### 1. Create the file
 
+template is injected
+
 ```typescript
 // src/examples/_api/getUserData.ts
-import { AuthProps, SessionLayout } from 'config';
-import { Functions, ApiResponse } from 'src/_sockets/apiTypes.generated';
+import { AuthProps, SessionLayout } from "config";
+import { Functions, ApiResponse } from "src/_sockets/apiTypes.generated";
 
 // Rate limit: requests per minute (false = use global config)
 export const rateLimit: number | false = 60;
@@ -51,26 +53,30 @@ export const rateLimit: number | false = 60;
 // export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET';
 
 export const auth: AuthProps = {
-  login: true,        // Require authentication
-  additional: []      // Extra requirements: 'admin', etc.
+  login: true, // Require authentication
+  additional: [], // Extra requirements: 'admin', etc.
 };
 
 export interface ApiParams {
   data: {
-    userId: string;   // Input from client
+    userId: string; // Input from client
   };
   user: SessionLayout;
   functions: Functions;
 }
 
-export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
+export const main = async ({
+  data,
+  user,
+  functions,
+}: ApiParams): Promise<ApiResponse> => {
   const userData = await functions.prisma.user.findUnique({
-    where: { id: data.userId }
+    where: { id: data.userId },
   });
 
   return {
-    status: 'success',
-    result: userData
+    status: "success",
+    result: userData,
   };
 };
 ```
@@ -79,13 +85,13 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
 ```typescript
 // Types are auto-generated - full autocomplete!
-const result = await apiRequest({ 
-  name: 'getUserData', 
-  data: { userId: '123' } 
+const result = await apiRequest({
+  name: "getUserData",
+  data: { userId: "123" },
 });
 
-if (result.status === 'success') {
-  console.log(result.result);  // Typed correctly
+if (result.status === "success") {
+  console.log(result.result); // Typed correctly
 }
 ```
 
@@ -97,30 +103,28 @@ APIs are accessible via HTTP for testing, webhooks, or non-socket clients.
 
 ### RESTful Routes
 
-```
-{METHOD} /api/{path}
-```
-
 Examples:
+
 - `GET /api/examples/getUserData?userId=123`
-- `POST /api/examples/createUser` with JSON body
-- `PUT /api/settings/updateProfile` with JSON body
+- `POST /api/examples/createUser`
+- `PUT /api/settings/updateProfile`
 - `DELETE /api/examples/deleteUser`
 
 ### Method Inference
 
 If `httpMethod` is not exported, it's inferred from the API name:
 
-| Name Prefix | Inferred Method |
-|-------------|-----------------|
-| `get*`, `fetch*`, `list*` | GET |
-| `delete*`, `remove*` | DELETE |
-| `update*`, `edit*`, `patch*` | PUT |
-| Everything else | POST |
+| Name Prefix                  | Inferred Method |
+| ---------------------------- | --------------- |
+| `get*`, `fetch*`, `list*`    | GET             |
+| `delete*`, `remove*`         | DELETE          |
+| `update*`, `edit*`, `patch*` | PUT             |
+| Everything else              | POST            |
 
 ### Authentication
 
 Include token via:
+
 - **Cookie**: `token=your-token` (set automatically on login)
 - **Header**: `Authorization: Bearer your-token`
 
@@ -139,20 +143,6 @@ await apiRequest({ name: 'createUser', data: {...}, abortable: true });  // Forc
 await apiRequest({ name: 'getUser', data: {...}, abortable: false });    // Disable
 ```
 
----
-
-## Response Format
-
-```typescript
-interface ApiResponse {
-  status: 'success' | 'error';
-  result?: any;       // Your return data
-  message?: string;   // Error message
-}
-```
-
----
-
 ## Rate Limiting
 
 Configure globally in `config.ts`:
@@ -169,6 +159,6 @@ Or per-API:
 
 ```typescript
 // In any _api/*.ts file
-export const rateLimit = 30;      // Override global
-export const rateLimit = false;   // Disable for this API
+export const rateLimit = 30; // Override global
+export const rateLimit = false; // Disable for this API
 ```

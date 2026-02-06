@@ -163,13 +163,6 @@ export const frameworkFiles: FrameworkFile[] = [
     category: 'Server Utils'
   },
   {
-    name: 'zodValidation.ts',
-    path: 'server/utils/zodValidation.ts',
-    description: 'Zod schema validation for API requests.',
-    side: 'server',
-    category: 'Server Utils'
-  },
-  {
     name: 'extractToken.ts',
     path: 'server/utils/extractToken.ts',
     description: 'Extracts session token from socket handshake (cookie or header).',

@@ -1,11 +1,13 @@
 // src/_components/translationProvider.tsx
-import { createContext, Dispatch, ReactNode, SetStateAction, useContext, useEffect, useMemo, useState } from "react";
-import { useSession } from "../_providers/SessionProvider";
-import nlJson from "src/_locales/nl.json";
-import enJson from "src/_locales/en.json";
-import deJson from "src/_locales/de.json";
-import frJson from "src/_locales/fr.json";
+import { createContext, Dispatch, ReactNode, SetStateAction, use, useEffect, useMemo, useState } from "react";
+
 import config from "config";
+import deJson from "src/_locales/de.json";
+import enJson from "src/_locales/en.json";
+import frJson from "src/_locales/fr.json";
+import nlJson from "src/_locales/nl.json";
+
+import { useSession } from "../_providers/SessionProvider";
 
 const TranslationContext = createContext<{
   translations: Record<string, any>,
@@ -14,11 +16,16 @@ const TranslationContext = createContext<{
 
 const getLanguage = (language: string) => {
   switch (language) {
-    case "nl": return nlJson;
-    case "en": return enJson;
-    case "de": return deJson;
-    case "fr": return frJson;
-    default: return enJson;
+    case "nl": { return nlJson;
+    }
+    case "en": { return enJson;
+    }
+    case "de": { return deJson;
+    }
+    case "fr": { return frJson;
+    }
+    default: { return enJson;
+    }
   }
 };
 
@@ -32,17 +39,17 @@ export const TranslationProvider = ({ children }: { children: ReactNode }) => {
     if (session?.language) {
       setLanguage(session.language as 'nl' | 'en' | 'de' | 'fr');
     }
-  },  [window.location.pathname, session])
+  },  [globalThis.location.pathname, session])
 
   return (
-    <TranslationContext.Provider value={{ translations, setLanguage }}>
+    <TranslationContext value={{ translations, setLanguage }}>
       {children}
-    </TranslationContext.Provider>
+    </TranslationContext>
   );
 };
 
 export const useTranslation = () => {
-  const context = useContext(TranslationContext);
+  const context = use(TranslationContext);
   if (!context) {
     throw new Error("useTranslation must be used within a TranslationProvider");
   }
@@ -50,7 +57,7 @@ export const useTranslation = () => {
 };
 
 export const useUpdateLanguage = () => {
-  const context = useContext(TranslationContext);
+  const context = use(TranslationContext);
   if (!context) {
     throw new Error("setLanguage must be used within a TranslationProvider");
   }
@@ -69,7 +76,7 @@ export const translate = ({ translationList, key, params }: {
 
   for (const param of params) {
     if (!param.key) continue;
-    if (typeof param.value === "undefined") continue;
+    if (param.value === undefined) continue;
     const regex = new RegExp(`{{${param.key}}}`, "g");
     result = result.replace(regex, param.value.toString());
   }

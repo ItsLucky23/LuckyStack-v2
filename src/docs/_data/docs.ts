@@ -153,9 +153,6 @@ export default {
   // How long sessions last in Redis (days)
   sessionExpiryDays: 7,
   
-  // Auto-validate API requests with Zod schemas
-  enableZodValidation: true,
-  
   // Detect AFK users and broadcast to room
   socketActivityBroadcaster: true,
   
@@ -332,47 +329,6 @@ async function handleSubmit() {
     // User must be on pro plan
     { key: 'subscription', value: 'pro' }
   ]
-};`,
-            language: 'typescript'
-          }
-        ]
-      },
-      {
-        id: 'zod-validation',
-        title: 'Zod Validation',
-        description: 'Export a schema to auto-validate request data. Invalid requests are rejected before your code runs.',
-        file: 'server/utils/zodValidation.ts',
-        side: 'server',
-        toggleable: 'enableZodValidation',
-        examples: [
-          {
-            title: 'Add Schema to API',
-            code: `import { z } from 'zod';
-import { AuthProps } from '../../../config';
-
-// Define validation schema
-export const schema = z.object({
-  title: z.string().min(1).max(100),
-  content: z.string().min(1).max(10000),
-  tags: z.array(z.string()).optional(),
-  isPublic: z.boolean().default(false)
-});
-
-export const auth: AuthProps = { login: true };
-
-// data is now typed and validated!
-export const main = async ({ data, user, functions }) => {
-  // TypeScript knows: data.title is string, data.tags is string[] | undefined
-  const { prisma } = functions;
-  
-  const note = await prisma.note.create({
-    data: {
-      ...data,
-      userId: user.id
-    }
-  });
-  
-  return { status: 'success', result: note };
 };`,
             language: 'typescript'
           }

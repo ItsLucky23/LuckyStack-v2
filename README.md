@@ -6,6 +6,7 @@ A **socket-first full-stack framework** for building real-time web applications 
 [![React](https://img.shields.io/badge/React-19-61DAFB)](https://react.dev/)
 [![Socket.io](https://img.shields.io/badge/Socket.io-4.8-black)](https://socket.io/)
 [![Tailwind](https://img.shields.io/badge/Tailwind-4.0-38B2AC)](https://tailwindcss.com/)
+[![Prisma](https://img.shields.io/badge/Prisma-6.5-2D3748)](https://www.prisma.io/)
 
 ---
 
@@ -20,17 +21,17 @@ LuckyStack is a custom full-stack framework that takes a **socket-first approach
 
 ## Key Features
 
-| Feature | Description |
-|---------|-------------|
-| 🔌 **Socket-First** | All client-server communication via Socket.io |
-| 🔐 **Authentication** | Credentials + Google, GitHub, Discord, Facebook OAuth |
-| 🏠 **Room System** | Join rooms for targeted real-time sync |
-| 👁️ **Activity Awareness** | Track user AFK status and presence |
-| 📁 **File-Based Routing** | Next.js-style page and API routing |
-| 🎨 **Tailwind v4** | Modern CSS with custom theming |
-| 🗄️ **Redis Sessions** | Scalable session storage |
-| 📊 **Prisma + MongoDB** | Type-safe database access |
-| 🐛 **Sentry Integration** | Error monitoring for client and server |
+| Feature                | Description                                           |
+| ---------------------- | ----------------------------------------------------- |
+| **Socket-First**       | All client-server communication via Socket.io         |
+| **Authentication**     | Credentials + Google, GitHub, Discord, Facebook OAuth |
+| **Room System**        | Join rooms for targeted real-time sync                |
+| **Activity Awareness** | Track user AFK status and presence                    |
+| **File-Based Routing** | Next.js-style page and API routing                    |
+| **Tailwind v4**        | Modern CSS with custom theming                        |
+| **Redis Sessions**     | Scalable session storage                              |
+| **Prisma + MongoDB**   | Type-safe database access                             |
+| **Sentry Integration** | Error monitoring for client and server                |
 
 ---
 
@@ -70,6 +71,8 @@ npm run client   # Frontend (Terminal 2)
 
 ### Access the App
 
+You can change the ports in the `.env` file.
+
 - **Frontend:** http://localhost:5173
 - **Backend:** http://localhost:80
 
@@ -77,12 +80,15 @@ npm run client   # Frontend (Terminal 2)
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [📚 PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) | Architecture overview and terminology |
-| [🚀 HOSTING.md](./HOSTING.md) | Complete deployment guide |
-| [🔌 SOCKETS.md](./SOCKETS.md) | Socket system deep-dive |
-| [🤖 AI_DEVELOPMENT.md](./AI_DEVELOPMENT.md) | AI-assisted development & production checklist |
+| Document                                                   | Description                                |
+| ---------------------------------------------------------- | ------------------------------------------ |
+| [API architecture](./docs/ARCHITECTURE_API.md)             | API architecture overview                  |
+| [Authentication architecture](./docs/ARCHITECTURE_AUTH.md) | Authentication architecture overview       |
+| [Session architecture](./docs/ARCHITECTURE_SESSION.md)     | Session architecture overview              |
+| [Socket architecture](./docs/ARCHITECTURE_SOCKET.md)       | Socket architecture overview               |
+| [Sync architecture](./docs/ARCHITECTURE_SYNC.md)           | Sync architecture overview                 |
+| [Developer guide](./docs/DEVELOPER_GUIDE.md)               | Developer guide                            |
+| [AI Development](./AI_DEVELOPMENT.md)                      | AI-assisted development and security guide |
 
 ---
 
@@ -121,12 +127,14 @@ LuckyStack-v2/
 LuckyStack distinguishes between two types of server communication:
 
 ### API Requests
+
 Server-only operations (database queries, external APIs):
+
 ```typescript
 // Client
-const result = await apiRequest({ 
-  name: 'getUserData', 
-  data: { userId: '123' } 
+const result = await apiRequest({
+  name: "getUserData",
+  data: { userId: "123" },
 });
 
 // Server: src/settings/_api/getUserData.ts
@@ -137,14 +145,16 @@ export const main = async ({ data, user, functions }) => {
 ```
 
 ### Sync Requests
+
 Real-time events between clients:
+
 ```typescript
 // Client: Send to all users in room
 await syncRequest({
-  name: 'cursorMove',
+  name: "cursorMove",
   data: { x: 100, y: 200 },
-  receiver: 'room-abc123',
-  ignoreSelf: true
+  receiver: "room-abc123",
+  ignoreSelf: true,
 });
 
 // All other clients in the room receive the event
@@ -154,12 +164,12 @@ await syncRequest({
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
+| Command          | Description           |
+| ---------------- | --------------------- |
 | `npm run client` | Start Vite dev server |
-| `npm run server` | Start Node.js server |
-| `npm run build` | Build for production |
-| `npm run prod` | Run production server |
+| `npm run server` | Start Node.js server  |
+| `npm run build`  | Build for production  |
+| `npm run prod`   | Run production server |
 
 ---
 
@@ -171,7 +181,7 @@ See [`envTemplate.txt`](./envTemplate.txt) for all available options:
 
 - `NODE_ENV` - development or production
 - `DNS` - Public URL for OAuth redirects
-- `REDIS_HOST` / `REDIS_PORT` - Redis connection
+- `REDIS_HOST` / `REDIS_PASSWORD` / `REDIS_PORT` - Redis connection
 - `DATABASE_URL` - MongoDB connection string
 - `SENTRY_DSN` / `VITE_SENTRY_DSN` - Error monitoring
 
@@ -187,15 +197,16 @@ Supported: Google, GitHub, Discord, Facebook
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | React 19, React Router 7, TailwindCSS 4 |
-| **Backend** | Node.js (raw HTTP), Socket.io |
-| **Database** | MongoDB with Prisma ORM |
-| **Sessions** | Redis |
-| **Auth** | Custom OAuth + bcrypt |
-| **Monitoring** | Sentry |
-| **Build** | Vite, TypeScript, tsx |
+| Layer          | Technology                              |
+| -------------- | --------------------------------------- |
+| **Frontend**   | React 19, React Router 7, TailwindCSS 4 |
+| **Backend**    | Node.js (raw HTTP), Socket.io           |
+| **Database**   | MongoDB with Prisma 6.5 ORM             |
+| **Sessions**   | Redis                                   |
+| **Auth**       | Custom OAuth + bcrypt                   |
+| **Icons**      | Lucide React, Font Awesome              |
+| **Monitoring** | Sentry                                  |
+| **Build**      | Vite, TypeScript, tsx                   |
 
 ---
 

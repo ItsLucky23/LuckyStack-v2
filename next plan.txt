@@ -4,7 +4,7 @@ NPM package modularization - Split into @luckystack/*
 Session storage abstraction - Support PostgreSQL/JWT
 i18n error codes - Return error codes instead of messages
 Offline request queue - Queue failed requests for retry
-
+ServerFunctions interface - Fetch them automatically from server/functions folder and auto gen type
 
 
 ✅ Completed

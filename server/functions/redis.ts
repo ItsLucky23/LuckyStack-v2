@@ -7,6 +7,11 @@ dotenv.config();
 const redis = new Redis({
   host: process.env.REDIS_HOST as string,
   port: parseInt(process.env.REDIS_PORT as string),
+  ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
+  
+  retryStrategy(times) {
+    return Math.min(times * 50, 2000);
+  },
 });
 
 redis.on('connect', async () => {

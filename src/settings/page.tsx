@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import notify from "src/_functions/notify";
-import ThemeToggler from "src/_components/ThemeToggler";
-import { backendUrl } from "../../config";
-import { useUpdateLanguage } from "src/_components/TranslationProvider";
+
 import Avatar from "src/_components/Avatar";
+import ThemeToggler from "src/_components/ThemeToggler";
+import { useUpdateLanguage } from "src/_components/TranslationProvider";
+import notify from "src/_functions/notify";
 import { useTranslator } from "src/_functions/translator";
-import { apiRequest, apiRequestReponse } from "src/_sockets/apiRequest";
 import { useSession } from "src/_providers/SessionProvider";
+import { apiRequest, apiRequestReponse } from "src/_sockets/apiRequest";
+
+import { backendUrl } from "../../config";
 
 const incrementAvatarVersion = (url: string) => {
-  const match = url.match(/[?&]v=(\d+)/);
-  return match ? parseInt(match[1]) + 1 : 1;
+  const match = /[?&]v=(\d+)/.exec(url);
+  return match ? Number.parseInt(match[1]) + 1 : 1;
 }
 
 export const template = 'home';
@@ -26,23 +28,9 @@ export default function Home() {
   const [newName, setNewName] = useState<string>(session?.name || '');
   const [newTheme, setNewTheme] = useState<'light' | 'dark'>(session?.theme || 'dark');
 
-  if (!session) return null;
-
-  let url;
-
-  if (newAvatar.includes('base64')) {
-    url = new URL(newAvatar, window.location.origin);
-    url.search = ""; // remove query params
-  }
-
-  const displayUrl = newAvatar.includes('base64')
-    ? url?.toString()
-    : newAvatar.startsWith("http")
-      ? newAvatar
-      : `${backendUrl}/uploads/${session.avatar}`
-  console.log(displayUrl)
-
   const saveUser = useCallback(async () => {
+    if (!session) return;
+
     if (
       newLanguage == session.language
       && newAvatar == session.avatar
@@ -55,10 +43,10 @@ export default function Home() {
     const response = await apiRequest({
       name: "updateUser",
       data: {
-        language: newLanguage != session.language ? newLanguage : undefined,
-        avatar: newAvatar != session.avatar ? newAvatar : undefined,
-        name: newName != session.name ? newName : undefined,
-        theme: newTheme != session.theme ? newTheme : undefined,
+        language: newLanguage == session.language ? undefined : newLanguage,
+        avatar: newAvatar == session.avatar ? undefined : newAvatar,
+        name: newName == session.name ? undefined : newName,
+        theme: newTheme == session.theme ? undefined : newTheme,
       },
     }) as apiRequestReponse
     if (response.status === 'success') {
@@ -74,7 +62,23 @@ export default function Home() {
     if (!newAvatar) return;
 
     saveUser();
-  }, [newAvatar])
+  }, [newAvatar, saveUser])
+
+  if (!session) return null;
+
+  let url;
+
+  if (newAvatar.includes('base64')) {
+    url = new URL(newAvatar, globalThis.location.origin);
+    url.search = ""; // remove query params
+  }
+
+  const displayUrl = newAvatar.includes('base64')
+    ? url?.toString()
+    : (newAvatar.startsWith("http")
+      ? newAvatar
+      : `${backendUrl}/uploads/${session.avatar}`)
+  console.log(displayUrl)
 
   return (
     <div className='flex items-center justify-center w-full h-full bg-background'>
@@ -100,9 +104,9 @@ export default function Home() {
             <button
               className="w-full py-1 bg-container2 border-container2-border border-2 rounded-md text-title font-semibold text-lg"
               onClick={() => {
-                const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+                const input = document.querySelector('input[type="file"]')!;
                 input.click();
-                input.onchange = async () => {
+                input.addEventListener('change', async () => {
                   const file = input.files?.[0];
                   if (!file) return;
                   const maxSize = 4 * 1024 * 1024; // 4 MB
@@ -113,12 +117,12 @@ export default function Home() {
 
                   notify.info({ key: 'settings.loadingImg' })
                   const reader = new FileReader();
-                  reader.onload = async () => {
+                  reader.addEventListener('load', async () => {
                     setNewAvatar(prevUrl => `${reader.result}?v=${incrementAvatarVersion(prevUrl || "")}`)
                     notify.success({ key: 'settings.imgLoaded' })
-                  };
+                  });
                   reader.readAsDataURL(file);
-                }
+                })
               }}
             >
               {/* Change avatar */}

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, use, useState, ReactNode } from "react";
 
 type AvatarStatus = 'avatar' | 'fallback';
 
@@ -17,14 +17,14 @@ export const AvatarProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AvatarContext.Provider value={{ avatarStatuses, setAvatarStatus }}>
+    <AvatarContext value={{ avatarStatuses, setAvatarStatus }}>
       {children}
-    </AvatarContext.Provider>
+    </AvatarContext>
   );
 };
 
 export const useAvatarContext = () => {
-  const ctx = useContext(AvatarContext);
+  const ctx = use(AvatarContext);
   if (!ctx) throw new Error("useAvatarContext must be used within AvatarProvider");
   return ctx;
 };

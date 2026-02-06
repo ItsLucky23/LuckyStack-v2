@@ -47,22 +47,12 @@ export interface ApiTypeMap {
       output: { status: 'success'; result: { message: string; admin: any; previousStatus: any } };
       method: 'POST';
     };
-    'tt': {
-      input: { };
-      output: { status: 'success'; result: { } };
-      method: 'GET';
-    };
   };
   'settings': {
-    'publicApi': {
-      input: { email: string; };
-      output: { status: 'success'; result: { } };
-      method: 'POST';
-    };
     'updateUser': {
-      input: Record<string, any>;
-      output: { status: 'error' } | { status: 'success' };
-      method: 'PUT';
+      input: { name?: string; theme?: 'light' | 'dark'; language?: string; avatar?: string; };
+      output: { status: 'error' } | { status: 'success'; result: { } };
+      method: 'POST';
     };
   };
 }
@@ -89,11 +79,9 @@ export const apiMethodMap: Record<string, Record<string, HttpMethod>> = {
     'adminOnly': 'POST',
     'publicApi': 'POST',
     'toggleAdmin': 'POST',
-    'tt': 'GET',
   },
   'settings': {
-    'publicApi': 'POST',
-    'updateUser': 'PUT',
+    'updateUser': 'POST',
   },
 };
 

@@ -1,6 +1,8 @@
 import { ReactNode, useEffect, useState } from "react";
-import middlewareHandler from "src/_functions/middlewareHandler"
 import { useLocation, useNavigate } from "react-router-dom";
+
+import middlewareHandler from "src/_functions/middlewareHandler"
+
 import { useSession } from "../_providers/SessionProvider";
 
 export default function Middleware({ children }: { children: ReactNode }) {
@@ -20,9 +22,9 @@ export default function Middleware({ children }: { children: ReactNode }) {
       const params = new URLSearchParams(location.search);
       const queryObject: Record<string, string> = {};
 
-      params.forEach((value, key) => {
+      for (const [key, value] of params.entries()) {
         queryObject[key] = value;
-      });
+      }
 
       let count = 0;
       while (!sessionLoaded) { 

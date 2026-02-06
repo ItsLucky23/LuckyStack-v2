@@ -1,13 +1,15 @@
-import { dev, SessionLayout } from '../../config';
-import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { apiRequest } from 'src/_sockets/apiRequest';
-import { socketInstance, useSocket } from 'src/_sockets/socketInitializer';
+import { createContext, use, useState, ReactNode, useEffect } from 'react';
 
-type UserContextType = {
+import { apiRequest } from 'src/_sockets/apiRequest';
+import { socket, useSocket } from 'src/_sockets/socketInitializer';
+
+import { dev, SessionLayout } from '../../config';
+
+interface UserContextType {
   session: SessionLayout | null;
   // setSession: Dispatch<SetStateAction<SessionLayout | null>>;
   sessionLoaded: boolean;
-};
+}
 
 let latestSession: SessionLayout | null = null;
 
@@ -32,38 +34,38 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
   }, [])
 
   useEffect(() => {
-    if (!socketInstance) return;
+    if (!socket) return;
 
     const handler = (data: string) => {
       if (dev) { console.log('updateSession', JSON.parse(data)); }
       const parsed = JSON.parse(data) as SessionLayout;
       setSession(prev => ({
-        ...(prev as SessionLayout),
+        ...(prev!),
         ...parsed,
-        avatar: parsed?.avatar + '?v=' + Date.now()
+        avatar: parsed.avatar + '?v=' + Date.now()
       }));
     }
 
-    socketInstance.on('updateSession', handler)
+    socket.on('updateSession', handler)
 
     return () => {
-      if (!socketInstance) return;
-      socketInstance.off('updateSession', handler);
+      if (!socket) return;
+      socket.off('updateSession', handler);
     }
     
-  // }, [socketInstance])
+  // }, [socket])
   }, [])
 
   return (
-    <UserContext.Provider value={{ session, sessionLoaded }}>
+    <UserContext value={{ session, sessionLoaded }}>
       {children}
-    </UserContext.Provider>
+    </UserContext>
   );
 };
 
 // 5. Create a custom hook for easier usage
 export const useSession = () => {
-  const context = useContext(UserContext);
+  const context = use(UserContext);
   if (!context) {
     throw new Error('useSession must be used within a SessionProvider');
   }

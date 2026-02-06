@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+
 import { updateLocationRequest } from 'src/_sockets/socketInitializer';
 
 export default function LocationProvider({ children }: { children: React.ReactNode }) {

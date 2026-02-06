@@ -8,13 +8,13 @@
 
 ```typescript
 // Trigger OAuth login (redirects)
-window.location.href = '/auth/api/google';
+window.location.href = "/auth/api/google";
 
 // Credentials login
-const response = await fetch('/auth/api/credentials', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email, password, action: 'login' })
+const response = await fetch("/auth/api/credentials", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email, password }),
 });
 ```
 
@@ -22,13 +22,13 @@ const response = await fetch('/auth/api/credentials', {
 
 ## Supported Providers
 
-| Provider | Type | Config Required |
-|----------|------|-----------------|
-| Credentials | Email/Password | None (built-in) |
-| Google | OAuth 2.0 | Client ID, Secret |
-| GitHub | OAuth 2.0 | Client ID, Secret |
-| Discord | OAuth 2.0 | Client ID, Secret |
-| Facebook | OAuth 2.0 | Client ID, Secret |
+| Provider    | Type           | Config Required   |
+| ----------- | -------------- | ----------------- |
+| Credentials | Email/Password | None (built-in)   |
+| Google      | OAuth 2.0      | Client ID, Secret |
+| GitHub      | OAuth 2.0      | Client ID, Secret |
+| Discord     | OAuth 2.0      | Client ID, Secret |
+| Facebook    | OAuth 2.0      | Client ID, Secret |
 
 ---
 
@@ -57,13 +57,13 @@ FACEBOOK_CLIENT_SECRET=...
 ```typescript
 const oauthProviders = [
   {
-    name: 'google',
+    name: "google",
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    authorizationURL: 'https://accounts.google.com/o/oauth2/auth',
-    tokenURL: 'https://oauth2.googleapis.com/token',
+    authorizationURL: "https://accounts.google.com/o/oauth2/auth",
+    tokenURL: "https://oauth2.googleapis.com/token",
     callbackURL: `${process.env.DNS}/auth/callback/google`,
-    scope: ['email', 'profile'],
+    scope: ["email", "profile"],
   },
   // ... other providers
 ];
@@ -118,23 +118,23 @@ const oauthProviders = [
 
 ## Auth Endpoints
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/auth/api/{provider}` | GET | Initiate OAuth login |
-| `/auth/api/credentials` | POST | Credentials login/register |
-| `/auth/callback/{provider}` | GET | OAuth callback (from provider) |
+| Endpoint                    | Method | Purpose                        |
+| --------------------------- | ------ | ------------------------------ |
+| `/auth/api/{provider}`      | GET    | Initiate OAuth login           |
+| `/auth/api/credentials`     | POST   | Credentials login/register     |
+| `/auth/callback/{provider}` | GET    | OAuth callback (from provider) |
 
 ---
 
-## API Authorization
+## API And SYNC Authorization
 
 ### Basic login requirement
 
 ```typescript
 // In _api/*.ts
 export const auth: AuthProps = {
-  login: true,   // User must be logged in
-  additional: [] // No extra requirements
+  login: true, // User must be logged in
+  additional: [], // No extra requirements
 };
 ```
 
@@ -143,26 +143,12 @@ export const auth: AuthProps = {
 ```typescript
 export const auth: AuthProps = {
   login: true,
-  additional: ['admin']  // User must have 'admin' role
-};
-```
-
-### Custom validation
-
-```typescript
-// In server/utils/validateRequest.ts
-export const validateRequest = ({ auth, user }) => {
-  if (!user?.id && auth.login) {
-    return { status: 'error', message: 'Authentication required' };
-  }
-  
-  for (const role of auth.additional) {
-    if (!user.roles?.includes(role)) {
-      return { status: 'error', message: `Role required: ${role}` };
-    }
-  }
-  
-  return { status: 'success' };
+  additional: [
+    {
+      key: "admin",
+      value: true, // User must have 'admin' role
+    },
+  ],
 };
 ```
 
@@ -176,10 +162,10 @@ export const validateRequest = ({ auth, user }) => {
 function LoginPage() {
   return (
     <div>
-      <button onClick={() => window.location.href = '/auth/api/google'}>
+      <button onClick={() => (window.location.href = "/auth/api/google")}>
         Login with Google
       </button>
-      <button onClick={() => window.location.href = '/auth/api/github'}>
+      <button onClick={() => (window.location.href = "/auth/api/github")}>
         Login with GitHub
       </button>
     </div>
@@ -187,17 +173,28 @@ function LoginPage() {
 }
 ```
 
-### Session Check
+### Middleware
 
-```tsx
-import { useSession } from 'src/_providers/sessionProvider';
-import { Navigate } from 'react-router-dom';
+```ts
+switch (location) {
+  case "/test":
+    if (session?.email && session?.provider) {
+      return { success: true };
+    }
+    return { redirect: "/login" };
 
-function ProtectedRoute({ children }) {
-  const session = useSession();
-  
-  if (session === null) return <Navigate to="/login" />;
-  return children;
+  case "/admin":
+    if (session?.email && session?.provider && session?.admin === true) {
+      return { success: true };
+    } else if (!session?.email || !session?.provider) {
+      return { redirect: "/login" };
+    } else if (!session?.admin) {
+      notify.error({ key: "middleware.notAdmin" });
+    }
+    return;
+
+  default:
+    return { success: true };
 }
 ```
 

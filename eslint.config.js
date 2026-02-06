@@ -3,24 +3,25 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
-import reactX from 'eslint-plugin-react-x' // Import react-x plugin
-// No need to import react-dom here
+import reactX from 'eslint-plugin-react-x'
+import eslintPluginUnicorn from 'eslint-plugin-unicorn'
+import eslintPluginImportX from 'eslint-plugin-import-x'
+import jsxA11y from 'eslint-plugin-jsx-a11y'
 
 export default tseslint.config(
   { ignores: ['dist'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
-      // Replace ...tseslint.configs.recommended with this for strict type checking
       ...tseslint.configs.strictTypeChecked,
-      // Optionally add stylistic rules
       ...tseslint.configs.stylisticTypeChecked,
-
-      // From eslint-plugin-react-x
       js.configs.recommended,
       tseslint.configs.recommended,
-      reactX.configs.recommended, // Add react-x plugin's recommended configuration
-      // No need to add react-dom.configs.recommended again, it's redundant
+      reactX.configs.recommended,
+      eslintPluginUnicorn.configs['flat/recommended'],
+      eslintPluginImportX.flatConfigs.recommended,
+      eslintPluginImportX.flatConfigs.typescript,
+      jsxA11y.flatConfigs.recommended,
     ],
     languageOptions: {
       ecmaVersion: 2020,
@@ -30,11 +31,17 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    settings: {
+      'import-x/resolver': {
+        typescript: {
+          alwaysTryTypes: true,
+          project: ['./tsconfig.json', './tsconfig.app.json', './tsconfig.node.json', './tsconfig.server.json'],
+        },
+      },
+    },
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
-      // Removed react-x from plugins since it's already handled by extends
-      // Removed react-dom here since it's already handled by extends
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
@@ -42,7 +49,37 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
-      // You can add specific custom rules for react-x or react-dom here if necessary
+      'unicorn/filename-case': [
+        'error',
+        {
+          cases: {
+            camelCase: true,
+            pascalCase: true,
+          },
+        },
+      ],
+      'unicorn/prevent-abbreviations': 'off',
+      'unicorn/no-null': 'off',
+      'import-x/order': [
+        'error',
+        {
+          groups: [
+            'builtin',
+            'external',
+            'internal',
+            'parent',
+            'sibling',
+            'index',
+            'object',
+            'type',
+          ],
+          'newlines-between': 'always',
+          alphabetize: {
+            order: 'asc',
+            caseInsensitive: true,
+          },
+        },
+      ],
     },
   },
   {

@@ -24,7 +24,7 @@ import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 
 const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
 
-  const origin = req.headers.origin || req.headers.referer || req.headers.host || '';
+  const origin = req.headers.origin ?? req.headers.referer ?? req.headers.host ?? '';
 
   if (!allowedOrigin(origin)) {
     res.statusCode = 403;
@@ -81,7 +81,6 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   }
 
   //? we dont use zod cause it doesnt allow you to pass in a id in the url
-  // if (z.literal('/uploads/').safeParse(routePath).success) {
   if (routePath.startsWith('/uploads/')) {
     await serveAvatar({ routePath, res });
     return;

@@ -8,11 +8,11 @@
 
 ```typescript
 // Client: Get current session
-const session = await apiRequest({ name: 'session' });
+const session = await apiRequest({ name: "session" });
 // Returns: { id, email, name, provider, ... } or null
 
 // Client: Logout
-await apiRequest({ name: 'logout' });
+await apiRequest({ name: "logout" });
 ```
 
 ---
@@ -36,12 +36,21 @@ Define your session structure in `config.ts`:
 ```typescript
 export interface SessionLayout {
   id: string;
-  email: string;
   name: string;
-  profileUrl: string;
-  roles: string[];
+  email: string;
   provider: string;
-  roomCode?: string;
+  admin: boolean;
+  avatar: string;
+  avatarFallback: string;
+  language: string;
+  theme: "light" | "dark";
+  createdAt: Date;
+  updatedAt: Date;
+  token: string;
+  location?: {
+    pathName: string;
+    searchParams: { [key: string]: string };
+  };
 }
 ```
 
@@ -53,12 +62,12 @@ export interface SessionLayout {
 // config.ts
 const config = {
   // Session behavior
-  allowMultipleSessions: false,  // false = new login kicks other sessions
+  allowMultipleSessions: false, // false = new login kicks other sessions
   sessionExpiryDays: 7,
-  
+
   // Redirects
-  loginPageUrl: '/login',
-  loginRedirectUrl: '/examples',
+  loginPageUrl: "/login",
+  loginRedirectUrl: "/examples",
 };
 ```
 
@@ -88,10 +97,10 @@ const config = {
 
 Controlled by `VITE_SESSION_BASED_TOKEN` env variable:
 
-| Mode | Storage | Best For |
-|------|---------|----------|
+| Mode              | Storage         | Best For                   |
+| ----------------- | --------------- | -------------------------- |
 | `false` (default) | HttpOnly cookie | Web apps, security-focused |
-| `true` | sessionStorage | SPAs, cross-domain |
+| `true`            | sessionStorage  | Developing                 |
 
 ---
 
@@ -100,7 +109,11 @@ Controlled by `VITE_SESSION_BASED_TOKEN` env variable:
 ### Server-side
 
 ```typescript
-import { getSession, createSession, deleteSession } from 'server/functions/session';
+import {
+  getSession,
+  createSession,
+  deleteSession,
+} from "server/functions/session";
 
 // Get session from token
 const user = await getSession(token);
@@ -119,7 +132,7 @@ import { useSession } from 'src/_providers/sessionProvider';
 
 function UserProfile() {
   const session = useSession();
-  
+
   if (!session) return <LoginButton />;
   return <div>Welcome, {session.name}</div>;
 }
@@ -131,7 +144,7 @@ function UserProfile() {
 
 ```typescript
 // config.ts
-allowMultipleSessions: false  // Default
+allowMultipleSessions: false; // Default
 
 // When false:
 // - User logs in on device A → Session A created

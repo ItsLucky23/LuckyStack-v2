@@ -8,14 +8,15 @@
 
 ```typescript
 // Client A sends sync event
-await syncRequest({ 
-  name: 'updateCounter', 
-  data: { amount: 5 } 
+await syncRequest({
+  name: "updateCounter",
+  data: { amount: 5 },
+  roomCode: "game-room-123",
 });
 
 // Client B receives (via callback)
-upsertSyncEventCallback('updateCounter', ({ clientOutput, serverOutput }) => {
-  console.log('Counter updated:', serverOutput.newValue);
+upsertSyncEventCallback("updateCounter", ({ clientOutput, serverOutput }) => {
+  console.log("Counter updated:", serverOutput.newValue);
 });
 ```
 
@@ -26,8 +27,8 @@ upsertSyncEventCallback('updateCounter', ({ clientOutput, serverOutput }) => {
 ```
 src/
 ├── {page}/_sync/
-│   ├── {syncName}_client.ts    # Client-side handler (runs on sender)
-│   ├── {syncName}_server.ts    # Server-side handler (runs on server)
+│   ├── {syncName}_server.ts    # Runs on the server just once
+│   ├── {syncName}_client.ts    # Runs on the server for each client
 │   └── ...
 └── _sockets/
     ├── syncRequest.ts          # Client-side sync caller
@@ -38,29 +39,46 @@ src/
 
 ## Creating a Sync Event
 
-### 1. Server handler (required)
+### 1. Server handler (optional)
 
 ```typescript
 // src/examples/_sync/updateCounter_server.ts
-import { AuthProps, SessionLayout } from 'config';
-import { Functions } from 'src/_sockets/apiTypes.generated';
+import { AuthProps, SessionLayout } from "../../../config";
+import {
+  Functions,
+  SyncServerResponse,
+} from "../../../src/_sockets/apiTypes.generated";
 
 export const auth: AuthProps = {
   login: true,
-  additional: []
+  additional: [],
 };
 
-export const main = async ({ 
-  data, 
-  user 
-}: { 
-  data: { amount: number }; 
-  user: SessionLayout;
-}) => {
-  // Process and return data to broadcast
+export interface SyncParams {
+  clientInput: {
+    // Define the data shape sent from the client e.g.
+    amount: number;
+  };
+  user: SessionLayout; // session data of the user who called the sync event
+  functions: Functions; // functions object
+  roomCode: string; // room code
+}
+
+export const main = async ({
+  clientInput,
+  user,
+  functions,
+  roomCode,
+}: SyncParams): Promise<SyncServerResponse> => {
+  // THIS FILE RUNS JUST ONCE ON THE SERVER
+
+  // Please validate clientInput here and dont just send the data back to the other clients
+  // optional: database action or something else
+
   return {
-    newValue: data.amount,
-    updatedBy: user.id
+    status: "success",
+    newValue: clientInput.amount + 1,
+    // Add any data you want to broadcast to clients
   };
 };
 ```
@@ -68,111 +86,82 @@ export const main = async ({
 ### 2. Client handler (optional)
 
 ```typescript
-// src/examples/_sync/updateCounter_client.ts
-import { ServerSyncProps, ClientSyncProps } from 'config';
+import { SessionLayout } from "../../../config";
+import {
+  Functions,
+  SyncClientResponse,
+  SyncClientInput,
+  SyncServerOutput,
+} from "../../../src/_sockets/apiTypes.generated";
 
-// Server-side processing (runs before broadcast)
-export const main = ({ input, user }: ServerSyncProps) => {
+// Types are imported from the generated file based on the _server.ts definition
+type PagePath = "examples";
+type SyncName = "test1";
+export interface SyncParams {
+  clientInput: SyncClientInput<PagePath, SyncName>;
+
+  serverOutput: SyncServerOutput<PagePath, SyncName>;
+  // Note: No serverOutput in client-only syncs (no _server.ts file)
+  user: SessionLayout; // session data from any user that is in the room
+  functions: Functions; // contains all functions that are available on the server in the functions folder
+  roomCode: string; // room code
+}
+
+export const main = async ({
+  user,
+  clientInput,
+  serverOutput,
+  functions,
+  roomCode,
+}: SyncParams): Promise<SyncClientResponse> => {
+  // CLIENT-ONLY SYNC: No server processing, runs for each client in the room
+
+  // Example: Only allow users on set page to receive the event
+  // if (user?.location?.pathName === '/your-page') {
+  //   return { status: 'success' };
+  // }
+
   return {
-    processedAmount: input.amount * 2
+    status: "success",
+    // Add any additional data to pass to the client
   };
 };
-
-// Client-side processing (runs on receiving clients)
-export const clientMain = ({ clientOutput, serverOutput, user }: ClientSyncProps) => {
-  console.log('Received:', serverOutput);
-  return serverOutput;  // Final data passed to callback
-};
 ```
-
----
-
-## Sending Sync Events
-
-```typescript
-import { syncRequest } from 'src/_sockets/syncRequest';
-
-// Send to everyone in the same room
-await syncRequest({
-  name: 'updateCounter',
-  data: { amount: 5 }
-});
-
-// Send to specific room
-await syncRequest({
-  name: 'updateCounter',
-  data: { amount: 5 },
-  roomCode: 'game-room-123'
-});
-```
-
----
 
 ## Receiving Sync Events
 
 ```typescript
-import { upsertSyncEventCallback } from 'src/_sockets/syncRequest';
+import { upsertSyncEventCallback } from "src/_sockets/syncRequest";
 
 // Register a callback (upsert = updates if exists)
-upsertSyncEventCallback('updateCounter', ({ clientOutput, serverOutput }) => {
-  // clientOutput = result from _client.ts clientMain
-  // serverOutput = result from _server.ts main
+upsertSyncEventCallback("updateCounter", ({ clientOutput, serverOutput }) => {
+  // clientOutput = result from _client.ts
+  // serverOutput = result from _server.ts
   updateUI(serverOutput.newValue);
 });
-
-// Remove callback when done
-removeSyncEventCallback('updateCounter');
 ```
 
 ---
-
-## Room System
-
-Users are automatically assigned to rooms based on the page URL.
-
-```typescript
-// Automatically: /games/chess/room-123 → room code = "room-123"
-
-// Manual join:
-socket.emit('joinRoom', { roomCode: 'custom-room' });
-```
 
 ### Room-specific sync
 
 ```typescript
 // Only users in 'game-room-123' receive this
 await syncRequest({
-  name: 'moveChessPiece',
-  data: { from: 'e2', to: 'e4' },
-  roomCode: 'game-room-123'
+  name: "moveChessPiece",
+  data: { from: "e2", to: "e4" },
+  roomCode: "game-room-123",
 });
 ```
 
 ---
 
-## Data Flow
-
-```
-Client A                Server                  Client B
-   │                       │                       │
-   │──syncRequest()───────→│                       │
-   │                       │──run _server.ts──────→│
-   │                       │                       │
-   │                       │←─serverOutput─────────│
-   │                       │                       │
-   │←──broadcast to room───│───broadcast to room──→│
-   │                       │                       │
-   │──run _client.ts──────→│                       │
-   │                       │                       │
-   │──callback fired──────→│                       │
-```
-
 ---
 
 ## Type System
 
-| Property | Source | Description |
-|----------|--------|-------------|
-| `input` | `data` param in syncRequest | What client sends |
-| `serverOutput` | `_server.ts` return | Server processing result |
+| Property       | Source                         | Description              |
+| -------------- | ------------------------------ | ------------------------ |
+| `clientInput`  | `data` param in syncRequest    | What client sends        |
+| `serverOutput` | `_server.ts` return            | Server processing result |
 | `clientOutput` | `_client.ts` clientMain return | Client processing result |

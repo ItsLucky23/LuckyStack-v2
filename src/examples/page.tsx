@@ -1,10 +1,11 @@
-import { joinRoom } from "src/_sockets/socketInitializer";
 import { useEffect, useState } from 'react';
-import notify from "src/_functions/notify";
-import { syncRequest, useSyncEvents } from "src/_sockets/syncRequest";
-import { apiRequest } from "src/_sockets/apiRequest";
-import { useSession } from "src/_providers/SessionProvider";
 import { data, Link } from "react-router-dom";
+
+import notify from "src/_functions/notify";
+import { useSession } from "src/_providers/SessionProvider";
+import { apiRequest } from "src/_sockets/apiRequest";
+import { joinRoom } from "src/_sockets/socketInitializer";
+import { syncRequest, useSyncEvents } from "src/_sockets/syncRequest";
 
 export const template = 'home';
 
@@ -32,13 +33,6 @@ export default function ExamplesPage() {
     <div className="w-full h-full bg-background overflow-y-auto">
       <div className="max-w-6xl mx-auto p-6 flex flex-col gap-6">
 
-        {/* TEST */}
-        <div onClick={async () => {
-          syncRequest({ name: "pp", receiver: "123", data: { message: "hello", targetUserId: "123" } })
-        }}>
-
-        </div>
-
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-1">
@@ -62,7 +56,7 @@ export default function ExamplesPage() {
             {session?.id ? (
               <div className="flex flex-col gap-3 flex-1">
                 <div className="w-16 h-16 bg-container2 border border-container2-border rounded-full flex items-center justify-center text-title text-2xl font-bold">
-                  {session.name?.charAt(0).toUpperCase()}
+                  {session.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex flex-col gap-1">
                   <p className="text-title font-medium">{session.name}</p>
@@ -160,13 +154,13 @@ export default function ExamplesPage() {
             <p className="text-xs text-muted">Toast system with translation support (Sonner)</p>
             <div className="flex gap-2 mt-auto">
               <button
-                onClick={() => notify.success({ key: 'test', params: [{ key: 'name', value: session?.name || 'Guest' }] })}
+                onClick={() => { notify.success({ key: 'test', params: [{ key: 'name', value: session?.name || 'Guest' }] }); }}
                 className="flex-1 px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
               >
                 ✓ Success
               </button>
               <button
-                onClick={() => notify.error({ key: 'commen/.404' })}
+                onClick={() => { notify.error({ key: 'commen/.404' }); }}
                 className="flex-1 px-4 h-9 bg-wrong text-white rounded-md hover:bg-wrong-hover transition-colors text-sm cursor-pointer"
               >
                 ✗ Error

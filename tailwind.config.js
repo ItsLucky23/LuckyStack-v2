@@ -1,4 +1,3 @@
-// tailwind.config.js
 module.exports = {
   darkMode: "class",
   content: [
@@ -9,6 +8,5 @@ module.exports = {
     extend: {
       colors: {}
     },
-  },
-  plugins: [require("@tailwindcss/container-queries")],
+  }
 };

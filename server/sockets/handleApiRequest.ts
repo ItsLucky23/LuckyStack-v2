@@ -18,7 +18,7 @@ type handleApiRequestType = {
 
 export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
   //? This event gets triggered when the client uses the apiRequest function
-  //? We validate the message, check auth, optionally validate with Zod, then execute
+  //? We validate the message, check auth then execute
 
   if (typeof msg != 'object') {
     console.log('socket message was not a json object!!!!', 'red')

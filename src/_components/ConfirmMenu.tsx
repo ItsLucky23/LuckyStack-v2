@@ -1,4 +1,5 @@
 import { ReactNode, useState } from 'react';
+
 import { menuHandler } from 'src/_functions/menuHandler';
 
 interface ConfirmMenuProps {
@@ -46,7 +47,7 @@ export const ConfirmMenu = ({ title, content, input, resolve }: ConfirmMenuProps
             type="text"
             className="border rounded px-2 py-1 focus:border outline-none focus:ring-0"
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={(e) => { setInputValue(e.target.value); }}
           />
         </div>
       )}

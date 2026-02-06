@@ -1,4 +1,5 @@
 import { backendUrl, SessionLayout } from "config";
+
 import { useAvatarContext } from "./AvatarProvider";
 
 export default function Avatar({
@@ -11,15 +12,12 @@ export default function Avatar({
 }) {
   const { avatarStatuses, setAvatarStatus } = useAvatarContext();
 
-  // Unique key per avatar
-  if (!user) { return null; }
+  const key = user.avatar ?? user.avatarFallback ?? user.name;
+  const avatarStatus = avatarStatuses[key];
 
-  const key = user.avatar || user.avatarFallback || user.name;
-  const avatarStatus = key ? avatarStatuses[key] : null;
+  const formattedName = user.name[0].toUpperCase();
 
-  const formattedName = user?.name?.[0]?.toUpperCase() || "?";
-
-  return user?.avatar && (avatarStatus === 'avatar' || !avatarStatus) ? (
+  return user.avatar && (avatarStatus === 'avatar' ?? !avatarStatus) ? (
     <Img user={user} key={key} setAvatarStatus={setAvatarStatus} />
   ) : (
     <FallbackImg user={user} formattedName={formattedName} textSize={textSize} />
@@ -28,12 +26,12 @@ export default function Avatar({
 
 const Img = ({ user, setAvatarStatus }: any) => {
   if (!user?.avatar) {
-    const key = user.avatar || user.avatarFallback || user.name;
+    const key = user.avatar ?? user.avatarFallback ?? user.name;
     setAvatarStatus(key, 'fallback');
     return null;
   }
 
-  const key = user.avatar || user.avatarFallback || user.name;
+  const key = user.avatar ?? user.avatarFallback ?? user.name;
 
   return (
     <img

@@ -7,9 +7,7 @@ export const auth: AuthProps = {
 };
 
 export interface SyncParams {
-  clientInput: {
-    increase: boolean;
-  };
+  clientInput: { increase: boolean; };
   user: SessionLayout; // session data of the user who called the sync event
   functions: Functions; // functions object
   roomCode: string; // room code

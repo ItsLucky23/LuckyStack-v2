@@ -5,7 +5,6 @@ import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { RefObject, useEffect, useRef } from "react";
 import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
 
-export let socketInstance: Socket | null = null;
 export let socket: Socket | null = null;
 
 let responseIndex = 0;
@@ -19,7 +18,6 @@ export function useSocket(session: SessionLayout | null) {
   const sessionRef = useRef(session);
 
   useEffect(() => {
-    console.log('bamibamiba', session);
     sessionRef.current = session;
   }, [session])
 
@@ -41,27 +39,24 @@ export function useSocket(session: SessionLayout | null) {
       }
     }
 
-    socketInstance = io(backendUrl, socketOptions);
-
-    socket = socketInstance;
-
+    const socketConnection = io(backendUrl, socketOptions);
+    socket = socketConnection;
 
     const handleVisibility = async () => {
       if (!config.socketActivityBroadcaster) { return; }
 
       console.log(document.visibilityState)
-      if (!socket) { return; }
-
+      
       //? user switched tab or navigated away
       if (document.visibilityState === "hidden") {
-        socket.emit("intentionalDisconnect");
+        socketConnection.emit("intentionalDisconnect");
 
         //? user switched back to the tab
       } else if (document.visibilityState === "visible") {
         if (socketStatus.self.status !== "CONNECTED") {
-          socket.connect();
+          socketConnection.connect();
         }
-        socket?.emit("intentionalReconnect");
+        socketConnection.emit("intentionalReconnect");
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
@@ -73,28 +68,27 @@ export function useSocket(session: SessionLayout | null) {
         sessionRef: sessionRef as RefObject<SessionLayout>
       })
     } else {
-      socket.on("connect", () => {
+      socketConnection.on("connect", () => {
         console.log("Connected to server");
       });
 
-      socket.on("disconnect", () => {
+      socketConnection.on("disconnect", () => {
         console.log("Disconnected, trying to reconnect...");
       });
 
-      socket.on("reconnect_attempt", (attempt) => {
+      socketConnection.on("reconnect_attempt", (attempt) => {
         console.log(`Reconnecting attempt ${attempt}...`);
       });
 
-      socket.on("connect_error", (err) => {
+      socketConnection.on("connect_error", (err) => {
         if (dev) {
           console.error(`Connection error: ${err.message}`);
           toast.error(`Connection error: ${err.message}`);
         }
       });
-
     }
 
-    socket.on("logout", (status: "success" | "error") => {
+    socketConnection.on("logout", (status: "success" | "error") => {
       if (status === "success") {
         if (import.meta.env.VITE_SESSION_BASED_TOKEN === "true") {
           sessionStorage.clear();
@@ -106,7 +100,7 @@ export function useSocket(session: SessionLayout | null) {
       }
     });
 
-    socketInstance.on("sync", ({ cb, clientOutput, serverOutput, message, status }) => {
+    socketConnection.on("sync", ({ cb, clientOutput, serverOutput, message, status }) => {
       const path = window.location.pathname;
       if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverOutput, status, message });
 
@@ -123,9 +117,8 @@ export function useSocket(session: SessionLayout | null) {
 
 
     return () => {
-      if (socketInstance) {
-        socketInstance.disconnect();
-        socketInstance = null;
+      if (socket) {
+        socket.disconnect();
         socket = null;
         setSocketStatus(prev => ({
           ...prev,
@@ -142,7 +135,7 @@ export function useSocket(session: SessionLayout | null) {
 
   }, []);
 
-  return socketInstance;
+  return socket;
 }
 
 

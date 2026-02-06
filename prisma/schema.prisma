@@ -17,10 +17,10 @@ generator client {
 // ============================================
 
 // --- MYSQL (Default) ---
-datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
-}
+// datasource db {
+//   provider = "mysql"
+//   url      = env("DATABASE_URL")
+// }
 
 // --- POSTGRESQL ---
 // datasource db {
@@ -30,10 +30,10 @@ datasource db {
 
 // --- MONGODB ---
 // Note: MongoDB requires different schema syntax (see model comments below)
-// datasource db {
-//   provider = "mongodb"
-//   url      = env("DATABASE_URL")
-// }
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
 
 // --- SQLITE (Development only - no server needed) ---
 // datasource db {
@@ -62,22 +62,12 @@ datasource db {
 // ============================================
 
 model user {
-  // For MySQL/PostgreSQL (default):
-  id        String    @id @default(uuid())
-  
-  // For MongoDB, replace the above with:
-  // id        String    @id @default(auto()) @map("_id") @db.ObjectId
-  
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
   email     String
   name      String
   password  String?
   admin     Boolean   @default(false)
-  
-  // For MySQL/PostgreSQL:
-  avatar    String    @db.VarChar(512) @default("")
-  // For MongoDB/SQLite, use:
-  // avatar    String    @default("")
-  
+  avatar    String    @default("")
   language  String    @default("en")
   theme     THEME     @default(dark)
   provider  PROVIDERS

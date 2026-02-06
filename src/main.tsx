@@ -1,19 +1,24 @@
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { Toaster } from 'sonner'
+
 import 'src/index.css'
 import 'src/scrollbar-dark.css'
 import VConsole from 'vconsole';
+
 import { mobileConsole } from 'config'
 import LocationProvider from 'src/_components/LocationProvider'
+
+import { AvatarProvider } from './_components/AvatarProvider'
+import ErrorPage from './_components/ErrorPage';
 import { MenuHandlerProvider } from './_components/MenuHandler'
 import TemplateProvider from './_components/TemplateProvider'
-import type { Template } from './_components/TemplateProvider';
-import { AvatarProvider } from './_components/AvatarProvider'
-import { SessionProvider } from './_providers/SessionProvider'
 import { TranslationProvider } from './_components/TranslationProvider'
-import { SocketStatusProvider } from './_providers/socketStatusProvider'
 import { initializeSentry, SentryErrorBoundary } from './_functions/sentry'
+import { SessionProvider } from './_providers/SessionProvider'
+import { SocketStatusProvider } from './_providers/socketStatusProvider'
+
+import type { Template } from './_components/TemplateProvider';
 
 initializeSentry();
 
@@ -28,9 +33,9 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
     const routePath = path.replace('./', '').replace('.tsx', '').toLowerCase() || '/';
     const subPath = routePath.endsWith('/page')
       ? routePath.slice(0, -5)
-      : routePath.endsWith('page')
+      : (routePath.endsWith('page')
         ? '/'
-        : false;
+        : false);
     if (!subPath) continue;
 
     const template = module.template ?? 'plain';
@@ -51,13 +56,9 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
   return routes;
 };
 
-const pages = import.meta.glob('./**/*.tsx', { eager: true }) as Record<
-  string,
-  { default: React.ComponentType; template?: Template }
->;
+const pages = import.meta.glob('./**/*.tsx', { eager: true });
 
 // Import error page for router error handling
-import ErrorPage from './_components/ErrorPage';
 
 const router = createBrowserRouter([{
   path: '/',
@@ -73,7 +74,7 @@ const ErrorFallback = () => (
     <h1 className="text-2xl font-bold mb-4">Something went wrong</h1>
     <p className="text-muted-foreground mb-4">An unexpected error occurred. Please refresh the page.</p>
     <button
-      onClick={() => window.location.reload()}
+      onClick={() => { globalThis.location.reload(); }}
       className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:opacity-90"
     >
       Refresh Page
@@ -81,7 +82,7 @@ const ErrorFallback = () => (
   </div>
 );
 
-const root = document.getElementById("root");
+const root = document.querySelector("#root");
 if (root) {
   createRoot(root).render(
     <SentryErrorBoundary fallback={<ErrorFallback />}>

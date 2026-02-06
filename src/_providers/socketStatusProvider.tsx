@@ -1,6 +1,6 @@
 import {
   createContext,
-  useContext,
+  use,
   useState,
   ReactNode,
   Dispatch,
@@ -44,14 +44,14 @@ export const SocketStatusProvider = ({ children }: { children: ReactNode }) => {
   });
 
   return (
-    <SocketStatusContext.Provider value={{ socketStatus, setSocketStatus }}>
+    <SocketStatusContext value={{ socketStatus, setSocketStatus }}>
       {children}
-    </SocketStatusContext.Provider>
+    </SocketStatusContext>
   );
 };
 
 export const useSocketStatus = () => {
-  const context = useContext(SocketStatusContext);
+  const context = use(SocketStatusContext);
   if (!context) {
     throw new Error("useSocketStatus must be used within a SocketStatusProvider");
   }
