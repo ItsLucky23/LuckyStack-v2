@@ -279,12 +279,12 @@ export const updateClientFileForPairedServer = async (clientFilePath: string): P
     // Read the existing client file (preserve user's code)
     let content = fs.readFileSync(clientFilePath, 'utf-8');
 
-    // Update imports: add SyncClientInput, SyncServerData if not present
+    // Update imports: add SyncClientInput, SyncServerOutput if not present
     if (!content.includes('SyncClientInput')) {
       content = content.replace(
         /import \{([^}]+)\} from ['"]([^'"]*apiTypes\.generated)['"]/,
         (match, imports, path) => {
-          return `import {${imports}, SyncClientInput, SyncServerData } from '${path}'`;
+          return `import {${imports}, SyncClientInput, SyncServerOutput } from '${path}'`;
         }
       );
     }
@@ -306,19 +306,19 @@ export const updateClientFileForPairedServer = async (clientFilePath: string): P
       '$1clientInput: SyncClientInput<PagePath, SyncName>'
     );
 
-    // Add serverData if not present (after clientInput in SyncParams, with matching indentation)
-    if (!content.includes('serverData:')) {
+    // Add serverOutput if not present (after clientInput in SyncParams, with matching indentation)
+    if (!content.includes('serverOutput:')) {
       content = content.replace(
         /^(\s*)(clientInput:\s*SyncClientInput<PagePath, SyncName>);?\s*$/m,
-        '$1$2;\n$1serverData: SyncServerData<PagePath, SyncName>;'
+        '$1$2;\n$1serverOutput: SyncServerOutput<PagePath, SyncName>;'
       );
     }
 
-    // Add serverData to main function destructuring if not present
-    if (content.includes('main') && !content.match(/\{\s*[^}]*serverData[^}]*\}\s*:\s*SyncParams/)) {
+    // Add serverOutput to main function destructuring if not present
+    if (content.includes('main') && !content.match(/\{\s*[^}]*serverOutput[^}]*\}\s*:\s*SyncParams/)) {
       content = content.replace(
         /\{\s*([^}]*?clientInput)([^}]*)\}\s*:\s*SyncParams/,
-        '{ $1, serverData$2 }: SyncParams'
+        '{ $1, serverOutput$2 }: SyncParams'
       );
     }
 
@@ -335,7 +335,7 @@ export const updateClientFileForPairedServer = async (clientFilePath: string): P
  * Update a client file when the paired server file is deleted
  * Preserves user's main function code while:
  * - Inlining clientInput types
- * - Removing serverData from SyncParams and main function params
+ * - Removing serverOutput from SyncParams and main function params
  */
 export const updateClientFileForDeletedServer = async (
   clientFilePath: string,
@@ -357,25 +357,25 @@ export const updateClientFileForDeletedServer = async (
       `$1clientInput: ${clientInputTypes}`
     );
 
-    // STEP 2: Remove serverData line from SyncParams interface FIRST
-    // Pattern: serverData: SyncServerData<...>; or serverData: { ... };
+    // STEP 2: Remove serverOutput line from SyncParams interface FIRST
+    // Pattern: serverOutput: SyncServerOutput<...>; or serverOutput: { ... };
     // Remove entire line including its indentation
     content = content.replace(
-      /^[ \t]*serverData:\s*SyncServerData<[^>]+>;?\s*\r?\n?/m,
+      /^[ \t]*serverOutput:\s*SyncServerOutput<[^>]+>;?\s*\r?\n?/m,
       ''
     );
     content = content.replace(
-      /^[ \t]*serverData:\s*\{[^}]*\};?\s*\r?\n?/m,
+      /^[ \t]*serverOutput:\s*\{[^}]*\};?\s*\r?\n?/m,
       ''
     );
 
-    // STEP 3: Remove serverData from main function destructuring
-    content = content.replace(/,\s*serverData(?=\s*[,}])/g, '');
-    content = content.replace(/serverData\s*,\s*/g, '');
+    // STEP 3: Remove serverOutput from main function destructuring
+    content = content.replace(/,\s*serverOutput(?=\s*[,}])/g, '');
+    content = content.replace(/serverOutput\s*,\s*/g, '');
 
     // STEP 4: NOW clean up imports (after type declarations are replaced)
     content = content.replace(/,\s*SyncClientInput(?=\s*[,}])/g, '');
-    content = content.replace(/,\s*SyncServerData(?=\s*[,}])/g, '');
+    content = content.replace(/,\s*SyncServerOutput(?=\s*[,}])/g, '');
 
     // STEP 5: Remove type aliases if present
     content = content.replace(/\/\/\s*Types are imported.*\n?/g, '');

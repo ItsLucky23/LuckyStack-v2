@@ -2,12 +2,25 @@ import { dev } from "config";
 import { toast } from "sonner";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
 import type { PagePath, ApiName, ApiInput, ApiOutput } from './apiTypes.generated';
+import { getApiMethod } from './apiTypes.generated';
 
-const env = import.meta.env;
-
-//? if we use apiRequest function and the called api name starts with 1 of the names below we apply a abort controller
+//? Abort controller logic:
+//? - abortable: true → always use abort controller
+//? - abortable: false → never use abort controller
+//? - abortable: undefined → use abort controller for GET APIs (from generated types)
 const abortControllers = new Map<string, AbortController>();
-const abortControllerNames = ['get', 'fetch', 'load', 'is', 'has', 'list', 'all', 'search', 'view', 'retrieve'];
+
+/**
+ * Check if an API is a GET method using the generated type map.
+ * Falls back to name inference if API not found in map.
+ */
+const isGetMethod = (pagePath: string, apiName: string): boolean => {
+  const method = getApiMethod(pagePath, apiName);
+  if (method) return method === 'GET';
+
+  // Fallback: infer from name (only 'get' prefix)
+  return apiName.toLowerCase().startsWith('get');
+};
 
 export interface apiRequestResponse {
   status: 'success' | 'error';
@@ -49,8 +62,8 @@ type OutputForName<N extends AllApiNames> = {
 // Build params type for a specific API name
 type ApiParamsForName<N extends AllApiNames> =
   DataRequired<InputForName<N>> extends true
-  ? { name: N; data: Prettify<InputForName<N>> }
-  : { name: N; data?: Prettify<InputForName<N>> };
+  ? { name: N; data: Prettify<InputForName<N>>; abortable?: boolean }
+  : { name: N; data?: Prettify<InputForName<N>>; abortable?: boolean };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Page-Specific Params (for exact types when duplicate names exist)
@@ -59,8 +72,8 @@ type ApiParamsForName<N extends AllApiNames> =
 // Build params type for a specific page and API name
 type PageApiParamsForName<P extends PagePath, N extends ApiName<P>> =
   DataRequired<ApiInput<P, N>> extends true
-  ? { name: N; data: ApiInput<P, N> }
-  : { name: N; data?: ApiInput<P, N> };
+  ? { name: N; data: ApiInput<P, N>; abortable?: boolean }
+  : { name: N; data?: ApiInput<P, N>; abortable?: boolean };
 
 /**
  * Type-safe API request function.
@@ -95,19 +108,6 @@ export function apiRequest(
   params: { name: 'logout' | 'session' }
 ): Promise<apiRequestResponse>;
 
-/**
- * Helper to create a page-scoped API caller (alternative pattern)
- * Use: const examplesApi = createPageApi("examples");
- *      await examplesApi({ name: "publicApi", ... });
- */
-export function createPageApi<P extends PagePath>(pagePath: P) {
-  return function <N extends ApiName<P>>(
-    params: PageApiParamsForName<P, N>
-  ): Promise<ApiOutput<P, N>> {
-    return apiRequest(params as any);
-  };
-}
-
 // Implementation (not exposed to TypeScript - only runtime)
 export function apiRequest(params: any): Promise<any> {
   const { name } = params;
@@ -128,8 +128,14 @@ export function apiRequest(params: any): Promise<any> {
     if (!await waitForSocket()) { return resolve(null as any); }
     if (!socket) { return resolve(null as any); }
 
-    const useAbortController = abortControllerNames.some((tempName) => (name as string).startsWith(tempName)) && env.VITE_SESSION_BASED_TOKEN != 'true';
+    //? Abort controller logic:
+    //? - abortable: true → always use abort controller
+    //? - abortable: false → never use abort controller  
+    //? - abortable: undefined → smart default (GET APIs get abort controller)
     const pathname = window.location.pathname;
+    const pagePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+    const isGet = isGetMethod(pagePath, name as string);
+    const useAbortController = params.abortable === true || (params.abortable !== false && isGet);
     const fullname = (name as string) != 'session' && (name as string) != 'logout' ? `api${pathname}/${name}` : name;
     // example: api/games/boerZoektVrouw/getGameData
 

@@ -72,7 +72,7 @@ export interface ServerSyncProps {
 }
 
 export interface ClientSyncProps extends ServerSyncProps {
-  serverData: any;
+  serverOutput: any;
 }
 
 export const providers = ['credentials', 'google', 'github', 'facebook', 'discord'];

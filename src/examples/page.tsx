@@ -20,9 +20,9 @@ export default function ExamplesPage() {
 
   const { upsertSyncEventCallback } = useSyncEvents();
 
-  upsertSyncEventCallback('updateCounter', ({ serverData, clientOutput }) => {
+  upsertSyncEventCallback('updateCounter', ({ serverOutput, clientOutput }) => {
     console.log(clientOutput)
-    setCounter(prev => serverData.increase ? prev + 1 : prev - 1);
+    setCounter(prev => serverOutput.increase ? prev + 1 : prev - 1);
   });
 
   const logResult = (name: string, result: any) => {

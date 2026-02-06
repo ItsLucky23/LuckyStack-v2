@@ -6,7 +6,7 @@ export interface SyncParams {
   clientInput: {
     increase: boolean;
   };
-  serverData: {
+  serverOutput: {
     status: string;
     increase: boolean;
   };
@@ -15,7 +15,7 @@ export interface SyncParams {
   roomCode: string; // room code
 }
 
-export const main = async ({ user, clientInput, serverData, functions, roomCode }: SyncParams): Promise<SyncClientResponse> => {
+export const main = async ({ user, clientInput, serverOutput, functions, roomCode }: SyncParams): Promise<SyncClientResponse> => {
   console.log('Sync client check:', user?.location?.pathName);
 
   // Check if user is on the examples page

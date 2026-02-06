@@ -7,7 +7,7 @@ import type {
   SyncPagePath,
   SyncName,
   SyncClientInput,
-  SyncServerData,
+  SyncServerOutput,
   SyncClientOutput
 } from "./apiTypes.generated";
 
@@ -36,9 +36,9 @@ type ClientInputForName<N extends AllSyncNames> = {
   [P in SyncPagePath]: N extends SyncName<P> ? SyncClientInput<P, N> : never
 }[SyncPagePath];
 
-// Get serverData type for a sync name (union if exists on multiple pages)
-type ServerDataForName<N extends AllSyncNames> = {
-  [P in SyncPagePath]: N extends SyncName<P> ? SyncServerData<P, N> : never
+// Get serverOutput type for a sync name (union if exists on multiple pages)
+type ServerOutputForName<N extends AllSyncNames> = {
+  [P in SyncPagePath]: N extends SyncName<P> ? SyncServerOutput<P, N> : never
 }[SyncPagePath];
 
 // Get clientOutput type for a sync name (union if exists on multiple pages)
@@ -56,7 +56,7 @@ type SyncParamsForName<N extends AllSyncNames> =
 // Sync Event Callbacks Registry
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const syncEvents: Record<string, ((params: { clientOutput: any; serverData: any; aditionalData: any }) => void)> = {};
+const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: any; aditionalData: any }) => void)> = {};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Page-Specific Params (for exact types when duplicate names exist)
@@ -140,7 +140,7 @@ export function syncRequest(params: any): Promise<boolean> {
 // Type-safe callback for sync events
 export type SyncEventCallback<N extends AllSyncNames> = (params: {
   clientOutput: ClientOutputForName<N>;
-  serverData: ServerDataForName<N>;
+  serverOutput: ServerOutputForName<N>;
 }) => void;
 
 export const useSyncEvents = () => {
@@ -153,13 +153,13 @@ export const useSyncEvents = () => {
   // Legacy version: accepts any string (for backward compatibility)
   function upsertSyncEventCallback(
     name: string,
-    cb: (params: { clientOutput: any; serverData: any }) => void
+    cb: (params: { clientOutput: any; serverOutput: any }) => void
   ): void;
 
   // Implementation
   function upsertSyncEventCallback(
     name: string,
-    cb: (params: { clientOutput: any; serverData: any }) => void
+    cb: (params: { clientOutput: any; serverOutput: any }) => void
   ): void {
     const path = window.location.pathname;
     syncEvents[`sync${path}/${name}`] = cb;
@@ -170,7 +170,7 @@ export const useSyncEvents = () => {
 
 export const useSyncEventTrigger = () => {
 
-  const triggerSyncEvent = (name: string, clientOutput: any = {}, serverData: any = {}, aditionalData: any = {}) => {
+  const triggerSyncEvent = (name: string, clientOutput: any = {}, serverOutput: any = {}, aditionalData: any = {}) => {
     const cb = syncEvents[name];
     if (!cb) {
       if (dev) {
@@ -181,7 +181,7 @@ export const useSyncEventTrigger = () => {
       return;
     }
     if (typeof cb == 'function') {
-      cb({ clientOutput, serverData, aditionalData });
+      cb({ clientOutput, serverOutput, aditionalData });
     }
   }
 

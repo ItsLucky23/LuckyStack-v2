@@ -142,7 +142,7 @@ npm run build
 |-------|-------------|
 | OAuth callbacks | All providers have correct callback URLs |
 | Session expiry | `sessionExpiryDays` is appropriate |
-| Single session | `singleSessionPerUser` is set based on requirements |
+| Session config | `allowMultipleSessions` is set based on requirements |
 
 ---
 
@@ -213,7 +213,7 @@ However, always ensure:
 
 | Setting | Recommended |
 |---------|-------------|
-| `singleSessionPerUser` | `true` for sensitive apps |
+| `allowMultipleSessions` | `false` for sensitive apps |
 | `sessionExpiryDays` | 7 or less for high-security |
 | `SECURE` | `true` in production |
 | `VITE_SESSION_BASED_TOKEN` | `false` uses cookies instead of session |

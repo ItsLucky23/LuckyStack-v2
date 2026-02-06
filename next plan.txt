@@ -1,0 +1,22 @@
+Future Work (Not in This Plan)
+Auto-generated API docs page - Like FastAPI's /docs
+NPM package modularization - Split into @luckystack/*
+Session storage abstraction - Support PostgreSQL/JWT
+i18n error codes - Return error codes instead of messages
+Offline request queue - Queue failed requests for retry
+
+
+
+✅ Completed
+HTTP API Routing - RESTful /api/{name} routes with method validation
+HTTP Method Types - httpMethod in generated types + 
+getApiMethod()
+ runtime lookup
+Simplified httpApiUtils - User reverted to include more prefixes (get/fetch/list, delete/remove, update/edit/patch)
+Cleaned up server.ts - Removed legacy POST /api route, now uses 
+getParams
+ for parsing
+Updated Documentation - 
+docs/ARCHITECTURE_API.md
+ reflects new routes
+Fixed TypeScript errors - createPageApi removed, function overload order fixed

@@ -8,6 +8,7 @@ import { Socket } from 'socket.io';
 import { logout } from './utils/logout';
 import { validateRequest } from '../utils/validateRequest';
 import { captureException } from '../utils/sentry';
+import { checkRateLimit } from '../utils/rateLimiter';
 
 type handleApiRequestType = {
   msg: apiMessage,
@@ -79,6 +80,34 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   if (authResult.status === "error") {
     console.log(`ERROR: Auth failed for ${name}: ${authResult.message}`, 'red');
     return socket.emit(`apiResponse-${responseIndex}`, authResult);
+  }
+
+  //? Rate limiting check
+  const apiRateLimit = apisObject[name].rateLimit;
+  const effectiveLimit = apiRateLimit !== undefined
+    ? apiRateLimit
+    : config.rateLimiting.defaultApiLimit;
+
+  if (effectiveLimit !== false && effectiveLimit > 0) {
+    const rateLimitKey = user?.id
+      ? `user:${user.id}:api:${name}`
+      : `ip:${socket.handshake.address}:api:${name}`;
+
+    const { allowed, remaining, resetIn } = checkRateLimit({
+      key: rateLimitKey,
+      limit: effectiveLimit,
+      windowMs: config.rateLimiting.windowMs
+    });
+
+    if (!allowed) {
+      console.log(`Rate limit exceeded for ${name}`, 'yellow');
+      return socket.emit(`apiResponse-${responseIndex}`, {
+        status: 'error',
+        message: `Rate limit exceeded. Try again in ${resetIn} seconds.`,
+        rateLimitRemaining: remaining,
+        rateLimitResetIn: resetIn
+      });
+    }
   }
 
   //? Execute the API handler

@@ -195,7 +195,7 @@ const result = await apiRequest({ name: 'jow' }); // ❌ Property 'data' is miss
 - Sends real-time events to other clients in same room
 - `receiver` is the room code (e.g., "abc123")
 - `ignoreSelf` prevents the sender from receiving the event
-- **Fully type-safe** - sync names, clientData, and serverData are validated
+- **Fully type-safe** - sync names, clientData, and serverOutput are validated
 
 **Type System Features:**
 1. **Automatic type inference** - No manual type parameters needed 
@@ -224,10 +224,10 @@ await syncRequest<'examples'>({
 ```typescript
 const { upsertSyncEventCallback } = useSyncEvents();
 
-// Type-safe: clientOutput and serverData are inferred from sync definition
-upsertSyncEventCallback('updateCounter', ({ clientOutput, serverData }) => {
+// Type-safe: clientOutput and serverOutput are inferred from sync definition
+upsertSyncEventCallback('updateCounter', ({ clientOutput, serverOutput }) => {
   console.log(clientOutput.randomKey); // ← Type from _client file return (success only)
-  console.log(serverData.increase);    // ← Type from _server file return
+  console.log(serverOutput.increase);    // ← Type from _server file return
 });
 ```
 
@@ -237,7 +237,7 @@ The sync type system has three distinct data types that flow through the system:
 | Type | Source | Description |
 |------|--------|-------------|
 | `clientInput` | Sender's `data` param | Original data passed to `syncRequest({ data: ... })` |
-| `serverData` | `_server.ts` return | Data returned from server-side sync handler |
+| `serverOutput` | `_server.ts` return | Data returned from server-side sync handler |
 | `clientOutput` | `_client.ts` return | Data returned from client-side handler (success only) |
 
 **Type Generation:**
@@ -296,7 +296,7 @@ Pages export a `template` constant to specify their wrapper:
 - Call from client: `apiRequest({ name: '{name}' })`
 
 **Sync Routes** (real-time client-server events):
-- `src/{page}/_sync/{name}_server.ts` - Runs on server for validation, returns `serverData`
+- `src/{page}/_sync/{name}_server.ts` - Runs on server for validation, returns `serverOutput`
 - `src/{page}/_sync/{name}_client.ts` - Runs on receiving clients, returns `clientOutput`
 - Both files use `clientInput` in SyncParams for the original sender's data
 - Call from client: `syncRequest({ name: '{name}', data: clientInput, receiver: 'room-code' })`

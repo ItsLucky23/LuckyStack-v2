@@ -4,7 +4,7 @@
  * Features:
  * - Save/retrieve/delete sessions from Redis
  * - Configurable session expiry (config.sessionExpiryDays)
- * - Optional single-session-per-user enforcement (config.singleSessionPerUser)
+ * - Optional session enforcement (config.allowMultipleSessions)
  * - Real-time session updates to connected clients
  */
 
@@ -35,7 +35,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     if (!io) { return; }
 
     // Handle single-session enforcement on new login
-    if (newUser && config.singleSessionPerUser !== false) {
+    if (newUser && config.allowMultipleSessions === false) {
       const userId = data?.id;
       if (!userId) return;
 

@@ -9,7 +9,7 @@ export interface SyncParams {
     // Define the data shape sent from the client e.g.
     // message: string;
   };
-  // Note: No serverData in client-only syncs (no _server.ts file)
+  // Note: No serverOutput in client-only syncs (no _server.ts file)
   user: SessionLayout; // session data from any user that is in the room
   functions: Functions; // contains all functions that are available on the server in the functions folder
   roomCode: string; // room code

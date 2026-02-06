@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { inferHttpMethod } from '../utils/httpApiUtils';
 
 /**
  * Frontend Type Map Generator
@@ -100,6 +101,34 @@ const extractPagePath = (filePath: string): string => {
 
 const extractApiName = (filePath: string): string => {
   return path.basename(filePath, '.ts');
+};
+
+/**
+ * Extract httpMethod export from an API file.
+ * Returns the declared method or uses inferHttpMethod as fallback.
+ */
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
+const extractHttpMethod = (filePath: string, apiName: string): HttpMethod => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+
+    // Look for explicit export: export const httpMethod = 'GET';
+    // or: export const httpMethod: 'GET' | 'POST' = 'GET';
+    const methodMatch = content.match(/export\s+const\s+httpMethod\s*(?::[^=]+)?=\s*['"]([^'"]+)['"]/);
+    if (methodMatch) {
+      const method = methodMatch[1].toUpperCase() as HttpMethod;
+      if (['GET', 'POST', 'PUT', 'DELETE'].includes(method)) {
+        return method;
+      }
+    }
+
+    // Use inferHttpMethod as fallback for consistent behavior
+    return inferHttpMethod(apiName);
+  } catch (error) {
+    console.error(`[TypeMapGenerator] Error extracting httpMethod from ${filePath}:`, error);
+    return inferHttpMethod(apiName);
+  }
 };
 
 // Sync-specific extractors
@@ -720,9 +749,9 @@ const getSyncClientDataType = (filePath: string): string => {
 };
 
 /**
- * Extract serverData type from sync server file's return statement
+ * Extract serverOutput type from sync server file's return statement
  */
-const getSyncServerDataType = (filePath: string): string => {
+const getSyncServerOutputType = (filePath: string): string => {
   const DEFAULT_TYPE = '{ status: string }';
 
   try {
@@ -759,7 +788,7 @@ const getSyncServerDataType = (filePath: string): string => {
 
     return DEFAULT_TYPE;
   } catch (error) {
-    console.error(`[TypeMapGenerator] Error extracting sync serverData type from ${filePath}:`, error);
+    console.error(`[TypeMapGenerator] Error extracting sync serverOutput type from ${filePath}:`, error);
     return DEFAULT_TYPE;
   }
 };
@@ -818,7 +847,7 @@ export const generateTypeMapFile = (): void => {
   // Collect API Types
   // ═══════════════════════════════════════════════════════════════════════════
   const apiFiles = findAllApiFiles();
-  const typesByPage = new Map<string, Map<string, { input: string; output: string }>>();
+  const typesByPage = new Map<string, Map<string, { input: string; output: string; method: HttpMethod }>>();
 
   console.log(`[TypeMapGenerator] Found ${apiFiles.length} API files`);
 
@@ -830,13 +859,14 @@ export const generateTypeMapFile = (): void => {
 
     const inputType = getInputTypeFromFile(filePath);
     const outputType = getOutputTypeFromFile(filePath);
+    const httpMethod = extractHttpMethod(filePath, apiName);
 
-    console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}`);
+    console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName} (${httpMethod})`);
 
     if (!typesByPage.has(pagePath)) {
       typesByPage.set(pagePath, new Map());
     }
-    typesByPage.get(pagePath)!.set(apiName, { input: inputType, output: outputType });
+    typesByPage.get(pagePath)!.set(apiName, { input: inputType, output: outputType, method: httpMethod });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -844,7 +874,7 @@ export const generateTypeMapFile = (): void => {
   // ═══════════════════════════════════════════════════════════════════════════
   const syncServerFiles = findAllSyncFiles();
   const syncClientFiles = findAllSyncClientFiles();
-  const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverData: string; clientOutput: string }>>();
+  const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverOutput: string; clientOutput: string }>>();
 
   console.log(`[TypeMapGenerator] Found ${syncServerFiles.length} Sync server files, ${syncClientFiles.length} Sync client files`);
 
@@ -890,10 +920,10 @@ export const generateTypeMapFile = (): void => {
       clientInputType = getSyncClientDataType(clientFile);
     }
 
-    // serverData: from server file's return (or empty if no server file)
-    let serverDataType = '{ }';
+    // serverOutput: from server file's return (or empty if no server file)
+    let serverOutputType = '{ }';
     if (serverFile) {
-      serverDataType = getSyncServerDataType(serverFile);
+      serverOutputType = getSyncServerOutputType(serverFile);
     }
 
     // clientOutput: from client file's return (or empty if no client file)
@@ -907,7 +937,7 @@ export const generateTypeMapFile = (): void => {
     if (!syncTypesByPage.has(pagePath)) {
       syncTypesByPage.set(pagePath, new Map());
     }
-    syncTypesByPage.get(pagePath)!.set(syncName, { clientInput: clientInputType, serverData: serverDataType, clientOutput: clientOutputType });
+    syncTypesByPage.get(pagePath)!.set(syncName, { clientInput: clientInputType, serverOutput: serverOutputType, clientOutput: clientOutputType });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -957,10 +987,11 @@ export interface ApiTypeMap {
     content += `  '${pagePath}': {\n`;
 
     for (const apiName of sortedApis) {
-      const { input, output } = apis.get(apiName)!;
+      const { input, output, method } = apis.get(apiName)!;
       content += `    '${apiName}': {\n`;
       content += `      input: ${input};\n`;
       content += `      output: ${output};\n`;
+      content += `      method: '${method}';\n`;
       content += `    };\n`;
     }
 
@@ -969,16 +1000,49 @@ export interface ApiTypeMap {
 
   content += `}
 
+// HTTP Method type
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
 // API Type helpers
 export type PagePath = keyof ApiTypeMap;
 export type ApiName<P extends PagePath> = keyof ApiTypeMap[P];
 export type ApiInput<P extends PagePath, N extends ApiName<P>> = ApiTypeMap[P][N] extends { input: infer I } ? I : never;
 export type ApiOutput<P extends PagePath, N extends ApiName<P>> = ApiTypeMap[P][N] extends { output: infer O } ? O : never;
+export type ApiMethod<P extends PagePath, N extends ApiName<P>> = ApiTypeMap[P][N] extends { method: infer M } ? M : never;
 
 // Full API path helper (can be used for debugging)
 export type FullApiPath<P extends PagePath, N extends ApiName<P>> = \`api/\${P}/\${N & string}\`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Runtime API Method Map (for abort controller logic)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const apiMethodMap: Record<string, Record<string, HttpMethod>> = {
+`;
+
+  // Add runtime method map
+  for (const pagePath of sortedPages) {
+    const apis = typesByPage.get(pagePath)!;
+    const sortedApis = Array.from(apis.keys()).sort();
+
+    content += `  '${pagePath}': {\n`;
+    for (const apiName of sortedApis) {
+      const { method } = apis.get(apiName)!;
+      content += `    '${apiName}': '${method}',\n`;
+    }
+    content += `  },\n`;
+  }
+
+  content += `};
+
+/**
+ * Get the HTTP method for an API. Used by apiRequest for abort controller logic.
+ */
+export const getApiMethod = (pagePath: string, apiName: string): HttpMethod | undefined => {
+  return apiMethodMap[pagePath]?.[apiName];
+};
+
+
 // Sync Type Definitions
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1006,10 +1070,10 @@ export interface SyncTypeMap {
     content += `  '${pagePath}': {\n`;
 
     for (const syncName of sortedSyncs) {
-      const { clientInput, serverData, clientOutput } = syncs.get(syncName)!;
+      const { clientInput, serverOutput, clientOutput } = syncs.get(syncName)!;
       content += `    '${syncName}': {\n`;
       content += `      clientInput: ${clientInput};\n`;
-      content += `      serverData: ${serverData};\n`;
+      content += `      serverOutput: ${serverOutput};\n`;
       content += `      clientOutput: ${clientOutput};\n`;
       content += `    };\n`;
     }
@@ -1023,7 +1087,7 @@ export interface SyncTypeMap {
 export type SyncPagePath = keyof SyncTypeMap;
 export type SyncName<P extends SyncPagePath> = keyof SyncTypeMap[P];
 export type SyncClientInput<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { clientInput: infer C } ? C : never;
-export type SyncServerData<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { serverData: infer S } ? S : never;
+export type SyncServerOutput<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { serverOutput: infer S } ? S : never;
 export type SyncClientOutput<P extends SyncPagePath, N extends SyncName<P>> = SyncTypeMap[P][N] extends { clientOutput: infer O } ? O : never;
 
 // Full Sync path helper (can be used for debugging)

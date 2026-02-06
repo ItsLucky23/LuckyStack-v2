@@ -106,9 +106,9 @@ export function useSocket(session: SessionLayout | null) {
       }
     });
 
-    socketInstance.on("sync", ({ cb, clientOutput, serverData, message, status }) => {
+    socketInstance.on("sync", ({ cb, clientOutput, serverOutput, message, status }) => {
       const path = window.location.pathname;
-      if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverData, status, message });
+      if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverOutput, status, message });
 
       if (status === "error") {
         if (dev) {
@@ -118,7 +118,7 @@ export function useSocket(session: SessionLayout | null) {
         return;
       }
 
-      triggerSyncEvent(`sync${path}/${cb}`, clientOutput, serverData);
+      triggerSyncEvent(`sync${path}/${cb}`, clientOutput, serverOutput);
     });
 
 

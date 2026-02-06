@@ -46,7 +46,7 @@ export const setupWatchers = () => {
             await injectServerTemplateWithClientInput(path, clientInputTypes);
             // Regenerate types
             await tryCatch(generateTypeMapFile);
-            // Update client file to use imported types + add serverData
+            // Update client file to use imported types + add serverOutput
             await updateClientFileForPairedServer(clientPath);
             initializeSyncs();
             return;

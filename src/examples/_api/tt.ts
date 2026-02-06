@@ -1,13 +1,11 @@
-//@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { AuthProps, SessionLayout } from '{{REL_PATH}}config';
-//@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { Functions, ApiResponse } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
+import { AuthProps, SessionLayout } from '../../../config';
+import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
 // Set the request limit per minute. Set to false to use the default config value config.rateLimiting
 export const rateLimit: number | false = 20;
 
 // HTTP method for this API. If not set, inferred from name (get* = GET, delete* = DELETE, else POST)
-export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
+export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET';
 
 export const auth: AuthProps = {
   login: true,

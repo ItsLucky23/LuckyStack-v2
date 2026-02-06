@@ -191,7 +191,7 @@ import { syncRequest, useSyncEvents } from 'src/_sockets/syncRequest';
 const { upsertSyncEventCallback } = useSyncEvents();
 
 useEffect(() => {
-  upsertSyncEventCallback('cursorMove', ({ clientData, serverData }) => {
+  upsertSyncEventCallback('cursorMove', ({ clientData, serverOutput }) => {
     // Handle incoming sync from other clients
     console.log('User moved cursor:', clientData);
   });
@@ -253,7 +253,7 @@ import type { ClientSyncProps } from 'config';
 
 export const main = async ({ 
   clientData, 
-  serverData, 
+  serverOutput, 
   user 
 }: ClientSyncProps) => {
   // Filter who should receive this event
@@ -266,7 +266,7 @@ export const main = async ({
     status: 'success',
     // This data is passed to the callback
     strokes: clientData.strokes,
-    author: serverData.authorId
+    author: serverOutput.authorId
   };
 };
 ```
@@ -659,9 +659,9 @@ By default, LuckyStack enforces **one session per user**. When a user logs in on
 
 ```typescript
 const config = {
-  // true = new login kicks other sessions (default)
-  // false = allow multiple simultaneous sessions
-  singleSessionPerUser: true,
+  // false = new login kicks other sessions (default)
+  // true = allow multiple simultaneous sessions
+  allowMultipleSessions: false,
   
   // Session expiry in days
   sessionExpiryDays: 7,
@@ -950,7 +950,7 @@ export const main = async ({ data, user }) => {
 | Option | Default | Purpose |
 |--------|---------|---------|
 | `socketActivityBroadcaster` | `false` | Enable multiplayer awareness |
-| `singleSessionPerUser` | `true` | Kick other sessions on login |
+| `allowMultipleSessions` | `false` | Allow simultaneous sessions |
 | `sessionExpiryDays` | `7` | Session TTL in Redis |
 | `enableZodValidation` | `true` | Validate API data with Zod |
 

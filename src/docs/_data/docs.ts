@@ -147,8 +147,8 @@ VITE_SENTRY_DSN="https://...@sentry.io/..."`,
             title: 'Configuration Options',
             code: `// config.ts
 export default {
-  // Kick previous sessions when user logs in again
-  singleSessionPerUser: true,
+  // Allow multiple simultaneous sessions (false = kick previous sessions on login)
+  allowMultipleSessions: false,
   
   // How long sessions last in Redis (days)
   sessionExpiryDays: 7,
@@ -510,7 +510,7 @@ function handleMouseMove(e: MouseEvent) {
       {
         id: 'receive-sync',
         title: 'Receiving Sync Events',
-        description: 'Register callbacks to handle incoming events. The serverData contains the broadcasted data.',
+        description: 'Register callbacks to handle incoming events. The serverOutput contains the broadcasted data.',
         side: 'client',
         examples: [
           {
@@ -524,21 +524,21 @@ export default function CollaborativeCanvas() {
   
   useEffect(() => {
     // Register callback for cursor updates
-    upsertSyncEventCallback('cursorMove', ({ serverData, clientData }) => {
-      // serverData = data after server processing
+    upsertSyncEventCallback('cursorMove', ({ serverOutput, clientData }) => {
+      // serverOutput = data after server processing
       // clientData = original data sent
       setCursors(prev => ({
         ...prev,
-        [serverData.senderId]: { 
-          x: serverData.x, 
-          y: serverData.y 
+        [serverOutput.senderId]: { 
+          x: serverOutput.x, 
+          y: serverOutput.y 
         }
       }));
     });
     
     // Register callback for chat messages
-    upsertSyncEventCallback('chatMessage', ({ serverData }) => {
-      addMessageToChat(serverData);
+    upsertSyncEventCallback('chatMessage', ({ serverOutput }) => {
+      addMessageToChat(serverOutput);
     });
   }, []);
   
@@ -796,13 +796,13 @@ export const main = async ({ data, user, functions }) => {
         examples: [
           {
             title: 'Listen for AFK Events',
-            code: `upsertSyncEventCallback('userAfk', ({ serverData }) => {
-  console.log(serverData.userId, 'went AFK');
+            code: `upsertSyncEventCallback('userAfk', ({ serverOutput }) => {
+  console.log(serverOutput.userId, 'went AFK');
   // Gray out their cursor, show "away" badge, etc
 });
 
-upsertSyncEventCallback('userBack', ({ serverData }) => {
-  console.log(serverData.userId, 'is back');
+upsertSyncEventCallback('userBack', ({ serverOutput }) => {
+  console.log(serverOutput.userId, 'is back');
 });`,
             language: 'typescript'
           },

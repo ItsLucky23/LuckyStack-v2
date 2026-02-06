@@ -19,6 +19,8 @@ import { setupWatchers } from './dev/hotReload';
 import { initConsolelog } from './utils/console.log';
 import { initRepl } from './utils/repl';
 import { serveAvatar } from './utils/serveAvatars';
+import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
+import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 
 const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
 
@@ -159,6 +161,52 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       res.writeHead(302, { Location: location }); // Redirect without exposing token in URL
     }
     return res.end();
+
+    //? HTTP API route - allows calling APIs via HTTP instead of WebSocket
+    //? Supports: GET/POST/PUT/DELETE /api/{name}
+  } else if (routePath.startsWith('/api/')) {
+    try {
+      const httpToken = extractTokenFromRequest(req);
+
+      // Extract API name from path: /api/examples/getUserData → examples/getUserData
+      const apiName = routePath.slice(5); // Remove "/api/" prefix (5 chars)
+
+      if (!apiName) {
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(400);
+        return res.end(JSON.stringify({
+          status: 'error',
+          message: 'API name is required. Use /api/{name}'
+        }));
+      }
+
+      // Use getParams to parse request data (handles GET query params, POST/PUT/DELETE body)
+      const apiData = await getParams({
+        method: method || 'POST',
+        req,
+        res,
+        queryString
+      }) || {};
+
+      const result = await handleHttpApiRequest({
+        name: apiName,
+        data: apiData,
+        token: httpToken,
+        method: (method as 'GET' | 'POST' | 'PUT' | 'DELETE') || 'POST'
+      });
+
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(result.status === 'success' ? 200 : result.httpStatus || 400);
+      return res.end(JSON.stringify(result));
+    } catch (error) {
+      console.log('HTTP API error:', error, 'red');
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(400);
+      return res.end(JSON.stringify({
+        status: 'error',
+        message: 'Invalid request format'
+      }));
+    }
 
   } else if (routePath.includes("/assets/")) {
     const assetPath = routePath.slice(routePath.indexOf("/assets/"));

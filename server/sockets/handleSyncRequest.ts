@@ -11,7 +11,7 @@ import { extractTokenFromSocket } from "../utils/extractToken";
 const functionsObject = process.env.NODE_ENV == 'development' ? devFunctions : functions;
 
 
-// export default async function handleSyncRequest({ name, clientData, user, serverData, roomCode }: syncMessage) {
+// export default async function handleSyncRequest({ name, clientData, user, serverOutput, roomCode }: syncMessage) {
 export default async function handleSyncRequest({ msg, socket, token }: {
   msg: syncMessage,
   socket: Socket,
@@ -55,7 +55,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `you need ${name}_client or ${name}_server file to sync` });
   }
 
-  let serverData = {};
+  let serverOutput = {};
   if (syncObject[`${name}_server`]) {
     const { auth, main: serverMain } = syncObject[`${name}_server`];
 
@@ -86,7 +86,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       console.log('ERROR!!!, ', `sync ${name}_server function didnt return a status key with the value 'success' or 'error'`, 'red');
       return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `sync ${name}_server function didnt return a status key with the value 'success' or 'error'` });
     } else if (serverSyncResult?.status == 'success') {
-      serverData = serverSyncResult;
+      serverOutput = serverSyncResult;
     }
   }
 
@@ -131,7 +131,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
 
     if (syncObject[`${name}_client`]) {
-      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${name}_client`]({ clientInput: data, user, functions: functionsObject, serverData, roomCode: receiver }));
+      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${name}_client`]({ clientInput: data, user, functions: functionsObject, serverOutput, roomCode: receiver }));
       // if (clientSyncError) { socket.emit(`sync-${responseIndex}`, { status: "error", message: clientSyncError }); }
       if (clientSyncError) { tempSocket.emit(`sync`, { status: "error", message: clientSyncError }) }
       //? if we return error we dont want this client to get the event
@@ -139,7 +139,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       else if (clientSyncResult?.status == 'success') {
         const result = {
           cb,
-          serverData,
+          serverOutput,
           clientOutput: clientSyncResult,  // Return from _client file (success only)
           message: clientSyncResult.message || `${name} sync success`,
           status: 'success'
@@ -151,7 +151,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       //? if there is no client function we still want to send the server data to the clients
       const result = {
         cb,
-        serverData,
+        serverOutput,
         clientOutput: {},  // No client file, so empty output
         message: `${name} sync success`,
         status: 'success'
