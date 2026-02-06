@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
 import { ReactNode, useState } from 'react';
 
 import { menuHandler } from 'src/_functions/menuHandler';
@@ -5,18 +6,15 @@ import { menuHandler } from 'src/_functions/menuHandler';
 interface ConfirmMenuProps {
   title: string;
   content?: string | ReactNode;
-  // confirm: () => void;
   input?: string;
   resolve: (val: boolean) => void;
 }
 
-export const ConfirmMenu = ({ title, content, input, resolve }: ConfirmMenuProps) => {
-// export const ConfirmMenu = ({ title, content, confirm, input, resolve }: ConfirmMenuProps) => {
+export function ConfirmMenu({ title, content, input, resolve }: ConfirmMenuProps) {
   const [inputValue, setInputValue] = useState('');
 
   const handleConfirm = () => {
     if (input && input !== inputValue) return;
-    // confirm();
     resolve(true);
     menuHandler.close();
   };
@@ -73,19 +71,13 @@ export const ConfirmMenu = ({ title, content, input, resolve }: ConfirmMenuProps
       </div>
     </div>
   );
-};
+}
 
-// export const confirmDialog = async (props: Omit<ConfirmMenuProps, 'resolve'>): Promise<boolean> => {
-//   return await menuHandler.open(
-//     <ConfirmMenu {...props} resolve={(a) => {console.log(a)}} />,
-//     { dimBackground: true, background: 'bg-white', size: 'sm' }
-//   );
-// };
-export const confirmDialog = (props: Omit<ConfirmMenuProps, 'resolve'>): Promise<boolean> => {
+export function confirmDialog(props: Omit<ConfirmMenuProps, 'resolve'>): Promise<boolean> {
   return new Promise((resolve) => {
-    menuHandler.open(
+    void menuHandler.open(
       <ConfirmMenu {...props} resolve={resolve} />,
       { dimBackground: true, background: 'bg-white', size: 'sm' }
     );
   });
-};
+}

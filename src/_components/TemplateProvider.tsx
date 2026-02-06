@@ -1,6 +1,6 @@
 import { faGear, faHome } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import config, { dev } from "config";
@@ -14,7 +14,7 @@ import { useSession } from '../_providers/SessionProvider';
 import Avatar from './Avatar';
 import { ConfirmMenu } from './ConfirmMenu';
 import { useMenuHandler } from './MenuHandler';
-import initializeRouter from './Router';
+import useRouter from './Router';
 import ThemeToggler from './ThemeToggler';
 
 
@@ -43,10 +43,23 @@ function DashboardTemplate({ children }: { children: React.ReactNode }) {
 
 function HomeTemplate({ children }: { children: React.ReactNode }) {
 
-  const router = initializeRouter();
+  const router = useRouter();
   const location = useLocation();
   const { session } = useSession();
   const ref = useMenuHandler();
+
+  const handleNavigate = useCallback((path: string) => {
+    void router(path);
+  }, [router]);
+
+  const handleConfirmNavigate = useCallback(() => {
+    ref.close();
+    handleNavigate(location.pathname === '/settings' ? '/home' : '/settings');
+  }, [ref, handleNavigate, location.pathname]);
+
+  const handleLogout = useCallback(() => {
+    void apiRequest({ name: 'logout' });
+  }, []);
 
   return (
     <div className="w-full h-full overflow-hidden flex flex-col text-title text-sm md:text-lg">
@@ -64,30 +77,28 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
         <button 
           className='p-2 bg-container2 border border-container2-border rounded-md cursor-pointer'
           onClick={() => {
-            // console.log('clicked');
             if (location.pathname.startsWith('/games')) {
-              ref.open(
+              void ref.open(
                 <ConfirmMenu
                   title="Spel verlaten?"
                   content="Weet je zeker dat je het spel wilt verlaten?"
                   resolve={(status: boolean) => {
                     if (!status) { return; }
-                    ref.close();
-                    router(location.pathname == '/settings' ? '/home' : '/settings')
+                    handleConfirmNavigate();
                   }}
                 />
               )
             } else {
-              router(location.pathname == '/settings' ? '/home' : '/settings')
+              handleNavigate(location.pathname === '/settings' ? '/home' : '/settings');
             }
           }}
         >
-          <FontAwesomeIcon icon={location.pathname == '/settings' ? faHome : faGear} size='lg' />
+          <FontAwesomeIcon icon={location.pathname === '/settings' ? faHome : faGear} size='lg' />
         </button>
 
         <button 
           className='bg-container2 border border-container2-border rounded-md py-2 px-6 cursor-pointer font-semibold'
-          onClick={() => apiRequest({ name: 'logout' })}
+          onClick={handleLogout}
         >
           Uitloggen
         </button>
@@ -105,11 +116,12 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
 
 function PlainTemplate({ children }: { children: React.ReactNode }) {
   const { updateTheme } = ThemeToggler();
+  const reactLocation = useLocation();
 
   useEffect(() => {
     updateTheme(config.defaultTheme);
     document.documentElement.classList.toggle("dark", config.defaultTheme === "dark");
-  }, [location]);
+  }, [updateTheme, reactLocation]);
 
   return (
     <div className="w-full h-full">
@@ -127,10 +139,10 @@ export default function TemplateProvider({
 }) {
   const [template] = useState<Template>(initialTemplate);
 
-  const TemplateComponent = Templates[template] || PlainTemplate;
+  const TemplateComponent = Templates[template];
 
   const { session } = useSession();
-  const location = useLocation();
+  const reactLocation = useLocation();
   const { updateTheme } = ThemeToggler();
   const { socketStatus } = useSocketStatus();
 
@@ -139,14 +151,14 @@ export default function TemplateProvider({
       updateTheme(session.theme);
       document.documentElement.classList.toggle("dark", session.theme === "dark");
     }
-  }, [session, location]);
+  }, [session, updateTheme, reactLocation]);
 
   if (dev) {
     return (
       <div className='w-full h-full relative'>
         <div className='absolute top-2 right-2 z-50 bg-red-500 text-white px-2 py-1 rounded-md text-xs font-bold'>
           Socket status: {socketStatus.self.status}
-          {socketStatus.self.status === "RECONNECTING" && socketStatus.self.reconnectAttempt ? ` (attempt ${socketStatus.self.reconnectAttempt})` : ''}
+          {socketStatus.self.status === "RECONNECTING" && socketStatus.self.reconnectAttempt !== undefined ? ` (attempt ${String(socketStatus.self.reconnectAttempt)})` : ''}
         </div>
         <TemplateComponent>{children}</TemplateComponent>
       </div>

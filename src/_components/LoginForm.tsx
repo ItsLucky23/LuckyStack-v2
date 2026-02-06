@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import config, { providers, SessionLayout } from "config";
+import { backendUrl, loginRedirectUrl, loginPageUrl, providers, SessionLayout } from "config";
 import tryCatch from "src/_functions/tryCatch";
 
 import notify from "../_functions/notify";
@@ -31,7 +31,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     setLoading(true);
 
     if (provider !== "credentials") {
-      globalThis.location.href = `${config.backendUrl}/auth/api/${provider}`;
+      globalThis.location.href = `${backendUrl}/auth/api/${provider}`;
       return;
     }
 
@@ -41,8 +41,10 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
       console.error("Form not found"); return;
     }
 
-    const getValue = (name: string) =>
-      (form.querySelector(`input[name="${name}"]`)!).value || "";
+    const getValue = (name: string): string => {
+      const input = form.querySelector(`input[name="${name}"]`);
+      return (input as HTMLInputElement | null)?.value ?? "";
+    };
 
     const name = getValue("name");
     const email = getValue("email");
@@ -50,7 +52,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     const confirmPassword = getValue("confirmPassword");
 
     const fetchUser = async () => {
-      const res = await fetch(`${config.backendUrl}/auth/api/credentials`, {
+      const res = await fetch(`${backendUrl}/auth/api/credentials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, password, confirmPassword, provider }),
@@ -60,10 +62,9 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     };
 
     const [error, response] = await tryCatch(fetchUser);
-    if (error || !response?.reason) {
-      // notify.error("Unexpected error occurred.");
+    if (error || !response) {
       notify.error({ key: 'common/.404' })
-      console.error(error || "No JSON response");
+      console.error(error ?? "No JSON response");
       setLoading(false); return;
     }
 
@@ -77,14 +78,15 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
       if (response.newToken && env.VITE_SESSION_BASED_TOKEN == 'true') {
           sessionStorage.setItem("token", response.newToken);
         }
-      globalThis.location.href = response.newToken ? config.loginRedirectUrl : config.loginPageUrl;
-      // window.location.href = config.loginPageUrl;
+      globalThis.location.href = response.newToken ? loginRedirectUrl : loginPageUrl;
     }, 1000);
   };
 
   return (
     <div className="w-full overflow-y-auto flex items-center justify-center">
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- form container needs Enter key handling */}
       <form
+        tabIndex={-1}
         onKeyDown={handleKeyDown}
         className="p-8 bg-container rounded-md text-title flex flex-col gap-10 max-w-[400px] w-full"
       >
@@ -103,8 +105,9 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
             <div className="flex flex-col gap-4">
               {!isLogin && (
                 <div className="flex flex-col gap-2">
-                  <label className="font-medium text-sm">Name</label>
+                  <label htmlFor="name" className="font-medium text-sm">Name</label>
                   <input
+                    id="name"
                     name="name"
                     type="text"
                     placeholder="John Pork"
@@ -113,8 +116,9 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 </div>
               )}
               <div className="flex flex-col gap-2">
-                <label className="font-medium text-sm">Email address</label>
+                <label htmlFor="email" className="font-medium text-sm">Email address</label>
                 <input
+                  id="email"
                   name="email"
                   type="email"
                   placeholder="johnpork@gmail.com"
@@ -122,8 +126,9 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <label className="font-medium text-sm">Password</label>
+                <label htmlFor="password" className="font-medium text-sm">Password</label>
                 <input
+                  id="password"
                   name="password"
                   type="password"
                   placeholder="********"
@@ -132,8 +137,9 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
               </div>
               {!isLogin && (
                 <div className="flex flex-col gap-2">
-                  <label className="font-medium text-sm">Confirm password</label>
+                  <label htmlFor="confirmPassword" className="font-medium text-sm">Confirm password</label>
                   <input
+                    id="confirmPassword"
                     name="confirmPassword"
                     type="password"
                     placeholder="********"
@@ -144,13 +150,14 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
 
               <div className="flex items-center justify-center">
                 {isLogin && (
-                  <button className="px-8 h-10 cursor-pointer rounded-md text-blue-500 hover:scale-105 transition-all duration-300">
+                  <button type="button" className="px-8 h-10 cursor-pointer rounded-md text-blue-500 hover:scale-105 transition-all duration-300">
                     Forgot Password?
                   </button>
                 )}
               </div>
 
               <button
+                type="button"
                 ref={buttonRef}
                 className="px-8 h-10 rounded-md bg-blue-500 text-title hover:scale-105 transition-all duration-300 cursor-pointer"
                 onClick={(e) => void handleSubmit(e, "credentials")}
@@ -170,6 +177,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
             .filter((p) => p !== "credentials")
             .map((provider) => (
               <button
+                type="button"
                 key={provider}
                 onClick={(e) => void handleSubmit(e, provider)}
                 className="h-10 rounded-md cursor-pointer bg-container text-title border border-container-border flex gap-2 items-center justify-center hover:scale-105 transition-all duration-300"

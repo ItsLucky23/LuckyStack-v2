@@ -18,7 +18,7 @@ export default function ErrorPage() {
   if (isRouteErrorResponse(error)) {
     errorCode = error.status.toString();
     errorTitle = error.statusText || 'Error';
-    errorMessage = error.data?.message || getErrorMessage(error.status);
+    errorMessage = (error.data as { message?: string } | undefined)?.message ?? getErrorMessage(error.status);
   } else if (error instanceof Error) {
     errorMessage = error.message;
   }

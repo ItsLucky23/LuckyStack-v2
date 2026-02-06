@@ -11,9 +11,12 @@ export default function Icon({ name, size, weight, customClasses, onClick }: Pro
 
   return (
     <span
-      style={{ fontSize: size ? size : '20px', fontWeight: weight ? weight : 'lighter' }}
-      className={`material-icons select-none ${customClasses}`}
+      style={{ fontSize: size ?? '20px', fontWeight: weight ?? 'lighter' }}
+      className={`material-icons select-none ${customClasses ?? ''}`}
       onClick={onClick}
+      onKeyDown={(e) => { if (onClick && (e.key === 'Enter' || e.key === ' ')) onClick(); }}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
     >
       {name}
     </span>

@@ -6,7 +6,7 @@ import { useUpdateLanguage } from "src/_components/TranslationProvider";
 import notify from "src/_functions/notify";
 import { useTranslator } from "src/_functions/translator";
 import { useSession } from "src/_providers/SessionProvider";
-import { apiRequest, apiRequestReponse } from "src/_sockets/apiRequest";
+import { apiRequest } from "src/_sockets/apiRequest";
 
 import { backendUrl } from "../../config";
 
@@ -23,19 +23,19 @@ export default function Home() {
   const setLanguage = useUpdateLanguage();
   const translate = useTranslator();
 
-  const [newLanguage, setNewLanguage] = useState<'nl' | 'en' | 'de' | 'fr'>(session?.language as 'nl' | 'en' | 'de' | 'fr' || '');
-  const [newAvatar, setNewAvatar] = useState<string>(session?.avatar || '');
-  const [newName, setNewName] = useState<string>(session?.name || '');
-  const [newTheme, setNewTheme] = useState<'light' | 'dark'>(session?.theme || 'dark');
+  const [newLanguage, setNewLanguage] = useState<'nl' | 'en' | 'de' | 'fr'>((session?.language ?? '') as 'nl' | 'en' | 'de' | 'fr');
+  const [newAvatar, setNewAvatar] = useState<string>(session?.avatar ?? '');
+  const [newName, setNewName] = useState<string>(session?.name ?? '');
+  const [newTheme, setNewTheme] = useState<'light' | 'dark'>(session?.theme ?? 'dark');
 
   const saveUser = useCallback(async () => {
     if (!session) return;
 
     if (
-      newLanguage == session.language
-      && newAvatar == session.avatar
-      && newName == session.name
-      && newTheme == session.theme
+      newLanguage === session.language
+      && newAvatar === session.avatar
+      && newName === session.name
+      && newTheme === session.theme
     ) {
       notify.info({ key: 'settings.noChangesMade' })
       return;
@@ -43,12 +43,12 @@ export default function Home() {
     const response = await apiRequest({
       name: "updateUser",
       data: {
-        language: newLanguage == session.language ? undefined : newLanguage,
-        avatar: newAvatar == session.avatar ? undefined : newAvatar,
-        name: newName == session.name ? undefined : newName,
-        theme: newTheme == session.theme ? undefined : newTheme,
+        language: newLanguage === session.language ? undefined : newLanguage,
+        avatar: newAvatar === session.avatar ? undefined : newAvatar,
+        name: newName === session.name ? undefined : newName,
+        theme: newTheme === session.theme ? undefined : newTheme,
       },
-    }) as apiRequestReponse
+    })
     if (response.status === 'success') {
       notify.success({ key: 'settings.updatedUser' })
     } else {
@@ -61,7 +61,7 @@ export default function Home() {
   useEffect(() => {
     if (!newAvatar) return;
 
-    saveUser();
+    void saveUser();
   }, [newAvatar, saveUser])
 
   if (!session) return null;
@@ -87,6 +87,7 @@ export default function Home() {
         <div className="flex gap-4 items-center">
           {newAvatar || session.avatar ? (
             <img src={displayUrl}
+              alt="User avatar"
               className="rounded-xl min-w-28 max-w-28 object-cover aspect-square select-none"></img>
           ) : (
             <div className="rounded-xl min-w-28 max-w-28 object-cover aspect-square select-none">
@@ -104,10 +105,12 @@ export default function Home() {
             <button
               className="w-full py-1 bg-container2 border-container2-border border-2 rounded-md text-title font-semibold text-lg"
               onClick={() => {
-                const input = document.querySelector('input[type="file"]')!;
-                input.click();
-                input.addEventListener('change', async () => {
-                  const file = input.files?.[0];
+                const input = document.querySelector('input[type="file"]');
+                const inputElement = input as HTMLInputElement | null;
+                if (inputElement) {
+                  inputElement.click();
+                  inputElement.addEventListener('change', () => {
+                  const file = inputElement.files?.[0];
                   if (!file) return;
                   const maxSize = 4 * 1024 * 1024; // 4 MB
                   if (file.size > maxSize) {
@@ -117,12 +120,16 @@ export default function Home() {
 
                   notify.info({ key: 'settings.loadingImg' })
                   const reader = new FileReader();
-                  reader.addEventListener('load', async () => {
-                    setNewAvatar(prevUrl => `${reader.result}?v=${incrementAvatarVersion(prevUrl || "")}`)
+                  reader.addEventListener('load', () => {
+                    const result = reader.result;
+                    if (typeof result === 'string') {
+                      setNewAvatar(prevUrl => `${result}?v=${String(incrementAvatarVersion(prevUrl || ""))}`)
+                    }
                     notify.success({ key: 'settings.imgLoaded' })
                   });
                   reader.readAsDataURL(file);
-                })
+                  })
+                }
               }}
             >
               {/* Change avatar */}
@@ -172,7 +179,7 @@ export default function Home() {
                 setLanguage('nl');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newLanguage == 'nl' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
+                ${newLanguage === 'nl' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
                 hover:bg-container3 hover:border-container3-border transition-all duration-300
               `}
             >
@@ -185,7 +192,7 @@ export default function Home() {
                 setLanguage('en');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newLanguage == 'en' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
+                ${newLanguage === 'en' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
                 hover:bg-container3 hover:border-container3-border transition-all duration-300
               `}
             >
@@ -198,7 +205,7 @@ export default function Home() {
                 setLanguage('de');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newLanguage == 'de' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
+                ${newLanguage === 'de' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
                 hover:bg-container3 hover:border-container3-border transition-all duration-300
               `}
             >
@@ -211,7 +218,7 @@ export default function Home() {
                 setLanguage('fr');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newLanguage == 'fr' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
+                ${newLanguage === 'fr' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
                 hover:bg-container3 hover:border-container3-border transition-all duration-300
               `}
             >
@@ -233,7 +240,7 @@ export default function Home() {
                 updateTheme('light');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newTheme == 'light' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
+                ${newTheme === 'light' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
                 hover:bg-container3 hover:border-container3-border transition-all duration-300
               `}
             >
@@ -246,7 +253,7 @@ export default function Home() {
                 updateTheme('dark');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newTheme == 'dark' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
+                ${newTheme === 'dark' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
                 hover:bg-container3 hover:border-container3-border transition-all duration-300
               `}
             >
@@ -258,7 +265,7 @@ export default function Home() {
 
         <button
           className="w-full bg-blue-500 text-white py-2 rounded-lg"
-          onClick={saveUser}
+          onClick={() => void saveUser()}
         >
           {/* Save data */}
           {translate({ key: 'settings.saveChanges' })}

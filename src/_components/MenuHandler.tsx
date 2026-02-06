@@ -1,4 +1,5 @@
-import { createContext, use, useState, ReactNode, ReactElement, useEffect, useLayoutEffect } from 'react';
+/* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
+import { createContext, use, useState, ReactNode, ReactElement, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -9,7 +10,7 @@ interface MenuEntry {
   options: MenuOptions;
   isClosing?: boolean;
   soonIsTop?: boolean;
-  resolver?: (value: any) => void;
+  resolver?: (value: unknown) => void;
 }
 
 interface MenuOptions {
@@ -19,8 +20,8 @@ interface MenuOptions {
 }
 
 interface MenuHandlerContextType {
-  open: (element: ReactElement, options?: MenuOptions) => Promise<any>;
-  replace: (element: ReactElement, options?: MenuOptions) => Promise<any>;
+  open: (element: ReactElement, options?: MenuOptions) => Promise<unknown>;
+  replace: (element: ReactElement, options?: MenuOptions) => Promise<unknown>;
   close: () => void;
   closeAll: () => void;
   logStack: () => void;
@@ -49,7 +50,6 @@ const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: Slid
   }, []);
 
   useEffect(() => {
-
     // console.log("isClosing: ", isClosing, 'location: ', location, "top: ", isTop)
     if (!isTop && location === 'center') {
       setLocation('left'); // trigger the transition    
@@ -58,7 +58,7 @@ const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: Slid
     } else if (location === 'left' && soonIsTop) {
       setLocation('center'); // trigger the transition
     }
-  }, [isTop, isClosing, soonIsTop]);
+  }, [isTop, isClosing, soonIsTop, location]);
 
   const translate =
   location === 'center'
@@ -82,24 +82,24 @@ const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: Slid
 
 const MenuHandlerContext = createContext<MenuHandlerContextType | null>(null);
 
-export const useMenuHandler = () => {
+export function useMenuHandler() {
   const ctx = use(MenuHandlerContext);
   if (!ctx) throw new Error('useMenuHandler must be used within MenuHandlerProvider');
   return ctx;
-};
+}
 
-export const MenuHandlerProvider = ({ children }: { children: ReactNode }) => {
+export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   const [stack, setStack] = useState<MenuEntry[]>([]);
 
-  const open = (element: ReactElement, options: MenuOptions = {}) => {
-    return new Promise((resolve) => {
+  const open = useCallback((element: ReactElement, options: MenuOptions = {}) => {
+    return new Promise<unknown>((resolve) => {
       const id = uuidv4();
       setStack((prev) => [...prev, { id, element, options, resolver: resolve }]);
     });
-  };
+  }, []);
 
-  const replace = (element: ReactElement, options: MenuOptions = {}) => {
-    return new Promise((resolve) => {
+  const replace = useCallback((element: ReactElement, options: MenuOptions = {}) => {
+    return new Promise<unknown>((resolve) => {
       const id = uuidv4();
       setStack((prev) => {
         const newStack = [...prev];
@@ -108,22 +108,24 @@ export const MenuHandlerProvider = ({ children }: { children: ReactNode }) => {
         return newStack;
       });
     });
-  };
+  }, []);
 
-  const close = () => {
+  const close = useCallback(() => {
     setStack((prev) => {
       if (prev.length === 0) return prev;
-      const lastitem = prev.length == 1
+      const lastitem = prev.length === 1;
       const newStack = [...prev];
       const top = newStack.at(-1);
       const second = newStack.at(-2);
   
+      if (!top) return prev;
+      
       // Prevent double-close
-      if ((top as any).isClosing) return prev;
+      if (top.isClosing) return prev;
   
       // Mark top as closing
       if (lastitem) {
-        top.resolver?.(null); // Resolve the promise with nul
+        top.resolver?.(null); // Resolve the promise with null
         return [];
       } else {
         newStack[newStack.length - 1] = { ...top, isClosing: true };
@@ -133,37 +135,36 @@ export const MenuHandlerProvider = ({ children }: { children: ReactNode }) => {
       }
   
       // Delay removal for animation
-      if (!lastitem) {
-        setTimeout(() => {
-          setStack((current) => {
-            const last = current.at(-1);
-            const tempSecond = current.at(-2);
-            if (last.id === top.id && (last as any).isClosing) {
-              if (last.resolver) last.resolver(null);
-              if (tempSecond.id && tempSecond.id == second.id && (tempSecond as any).soonIsTop) {
-                current[current.length - 2] = {...tempSecond, soonIsTop: false };
-              }
-              return current.slice(0, -1);
+      setTimeout(() => {
+        setStack((current) => {
+          const last = current.at(-1);
+          const tempSecond = current.at(-2);
+          if (last && last.id === top.id && last.isClosing) {
+            if (last.resolver) last.resolver(null);
+            if (tempSecond && second && tempSecond.id === second.id && tempSecond.soonIsTop) {
+              current[current.length - 2] = {...tempSecond, soonIsTop: false };
             }
-            return current;
-          });
-        }, 200); // Match animation duration
-      }
+            return current.slice(0, -1);
+          }
+          return current;
+        });
+      }, 200); // Match animation duration
+
       return newStack;
     });
-  };
+  }, []);
   
 
-  const closeAll = () => {
+  const closeAll = useCallback(() => {
     setStack((prev) => {
       for (const entry of prev) entry.resolver?.(null);
       return [];
     });
-  };
+  }, []);
 
-  const logStack = () => {
+  const logStack = useCallback(() => {
     console.log('Menu stack:', stack.map(s => s.id));
-  };
+  }, [stack]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -171,17 +172,15 @@ export const MenuHandlerProvider = ({ children }: { children: ReactNode }) => {
     };
     globalThis.addEventListener('keydown', handleKeyDown);
     return () => { globalThis.removeEventListener('keydown', handleKeyDown); };
-  }, []);
+  }, [close]);
 
-  const stackTop = stack.at(-1) || {};
-  // const { size = 'md', background = 'bg-white' } = options;
-
-  const sizeClass = {
-    sm: '384px', // max-w-sm
-    md: '512px', // max-w-md
-    lg: '768px', // max-w-lg
-  }[stackTop.options.size || 'sm'];
+  const stackTop = stack.at(-1);
+  const sizeClass = stackTop?.options.size 
+    ? { sm: '384px', md: '512px', lg: '768px' }[stackTop.options.size] 
+    : '384px';
+    
   const [lastChildHeight, setLastChildHeight] = useState<number>(0);
+  
   useEffect(() => {
     const lastChild = document.querySelector('#test123')?.lastElementChild;
     if (lastChild) {
@@ -192,27 +191,34 @@ export const MenuHandlerProvider = ({ children }: { children: ReactNode }) => {
   }, [stack]);
 
   let attempToCloseAll = false;
+
+  const contextValue = useMemo(() => ({
+    open, replace, close, closeAll, logStack
+  }), [open, replace, close, closeAll, logStack]);
   
   return (
-    <MenuHandlerContext value={{ open, replace, close, closeAll, logStack }}>
+    <MenuHandlerContext value={contextValue}>
       {children}
       {createPortal(
         <div 
+          role="button"
+          tabIndex={0}
           className={`absolute top-0 left-0 w-full h-full flex items-center justify-center z-[1000] overflow-hidden ${stack.length === 0 ? 'pointer-events-none' : ''}`}
-          style={{ backgroundColor: stackTop.options && stackTop.options?.dimBackground != false ? 'rgba(0, 0, 0, 0.7)' : 'transparent'  }}
-          // onClick={closeAll}
-          onMouseDown={() => attempToCloseAll = true}
+          style={{ backgroundColor: stackTop?.options.dimBackground === false ? 'transparent' : 'rgba(0, 0, 0, 0.7)' }}
+          onMouseDown={() => { attempToCloseAll = true; }}
           onMouseUp={() => {
             if (!attempToCloseAll) { return }
             closeAll();
           }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') closeAll(); }}
         >
           <div 
+            role="presentation"
             id="test123"
             className={`rounded-md overflow-hidden relative h-auto 
               transition-[opacity,transform,height,width] duration-200 origin-bottom-right 
             `}
-            style={{ width: sizeClass, height: lastChildHeight+'px' }}
+            style={{ width: sizeClass, height: `${String(lastChildHeight)}px` }}
             onMouseDown={(e) => { e.stopPropagation(); }}
             onMouseUp={(e) => { e.stopPropagation(); }}
           >
@@ -222,7 +228,6 @@ export const MenuHandlerProvider = ({ children }: { children: ReactNode }) => {
                 isTop={index === stack.length - 1}
                 isClosing={entry.isClosing}
                 soonIsTop={entry.soonIsTop}
-                // onBackgroundClick={closeAll}
                 options={entry.options}
               >
                 {entry.element}
@@ -234,4 +239,4 @@ export const MenuHandlerProvider = ({ children }: { children: ReactNode }) => {
       )}
     </MenuHandlerContext>
   );
-};
+}

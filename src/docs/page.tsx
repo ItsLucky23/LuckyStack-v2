@@ -178,6 +178,7 @@ function CategorySection({ category }: { category: DocCategory }) {
             {category.videoPath ? (
               <video className="w-full h-full object-cover" controls>
                 <source src={category.videoPath} type="video/mp4" />
+                <track kind="captions" srcLang="en" label="English captions" />
               </video>
             ) : (
               <div className="flex flex-col items-center gap-3 text-muted">
@@ -226,11 +227,14 @@ function DocItemCard({ item, categoryColor, categoryName }: {
     <div className="bg-container border border-container-border rounded-lg overflow-hidden">
       {/* Header */}
       <div
+        role="button"
+        tabIndex={0}
         className="p-4 flex items-center justify-between cursor-pointer hover:bg-container-hover"
         onClick={() => { setExpanded(!expanded); }}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
       >
         <div className="flex items-center gap-3 flex-wrap">
-          {categoryName && (
+          {categoryName && categoryColor && (
             <span className={`text-xs text-white px-1.5 py-0.5 rounded ${categoryColor}`}>{categoryName}</span>
           )}
           <h3 className="font-semibold text-title text-lg">{item.title}</h3>
@@ -254,8 +258,8 @@ function DocItemCard({ item, categoryColor, categoryName }: {
           {/* Code Examples */}
           {item.examples && item.examples.length > 0 && (
             <div className="flex flex-col gap-4">
-              {item.examples.map((ex, i) => (
-                <CodeBlock key={i} code={ex.code} language={ex.language} title={ex.title} />
+              {item.examples.map((ex, idx) => (
+                <CodeBlock key={`${String(idx)}-${String(ex.title)}-${String(ex.language)}`} code={ex.code} language={ex.language} title={ex.title} />
               ))}
             </div>
           )}

@@ -15,15 +15,15 @@ const getParams = (locationSearch: string) => {
   return queryObject;
 }
 
-export default function initializeRouter() {
+// Custom hook for router initialization - renamed to use "use" prefix
+export default function useRouter() {
   const navigateHandler = useNavigate();
   const location = useLocation();
   const { session } = useSession();
 
   const navigate = async (path: string) => {
-    // const session = await apiRequest({ name: 'session' }) as SessionLayout;
     const queryObject = getParams(location.search);
-    const result = await middlewareHandler({ location: path, searchParams: queryObject, session }) as { success: boolean, redirect: string } | undefined;
+    const result = middlewareHandler({ location: path, searchParams: queryObject, session }) as { success: boolean, redirect: string } | undefined;
 
     if (result?.success) {
       return navigateHandler(path);

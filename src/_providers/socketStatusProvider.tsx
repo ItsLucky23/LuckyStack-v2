@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- hooks colocated with provider */
 import {
   createContext,
   use,
@@ -5,6 +6,7 @@ import {
   ReactNode,
   Dispatch,
   SetStateAction,
+  useMemo,
 } from "react";
 
 export type SOCKETSTATUS =
@@ -36,24 +38,28 @@ const SocketStatusContext = createContext<SocketStatusContextType | undefined>(
   undefined
 );
 
-export const SocketStatusProvider = ({ children }: { children: ReactNode }) => {
+export function SocketStatusProvider({ children }: { children: ReactNode }) {
   const [socketStatus, setSocketStatus] = useState({
     self: {
       status: "STARTUP" as SOCKETSTATUS,
     },
   });
 
+  const contextValue = useMemo(() => ({
+    socketStatus, setSocketStatus
+  }), [socketStatus]);
+
   return (
-    <SocketStatusContext value={{ socketStatus, setSocketStatus }}>
+    <SocketStatusContext value={contextValue}>
       {children}
     </SocketStatusContext>
   );
-};
+}
 
-export const useSocketStatus = () => {
+export function useSocketStatus() {
   const context = use(SocketStatusContext);
   if (!context) {
     throw new Error("useSocketStatus must be used within a SocketStatusProvider");
   }
   return context;
-};
+}

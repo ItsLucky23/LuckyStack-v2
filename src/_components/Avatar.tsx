@@ -1,14 +1,16 @@
 import { backendUrl, SessionLayout } from "config";
 
-import { useAvatarContext } from "./AvatarProvider";
+import { useAvatarContext, AvatarStatus } from "./AvatarProvider";
+
+type UserType = SessionLayout | { name: string; avatar?: string; avatarFallback?: string };
+type TextSize = "text-sm" | "text-base" | "text-lg" | "text-xl" | "text-2xl" | "text-3xl" | "text-4xl" | "text-5xl" | "text-6xl" | "text-7xl" | "text-8xl" | "text-9xl";
 
 export default function Avatar({
   user,
   textSize,
 }: {
-  user: SessionLayout 
-  | {name: string, avatar?: string, avatarFallback?: string},
-  textSize?: "text-sm" | "text-base" | "text-lg" | "text-xl" | "text-2xl" | "text-3xl" | "text-4xl" | "text-5xl" | "text-6xl" | "text-7xl" | "text-8xl" | "text-9xl"
+  user: UserType;
+  textSize?: TextSize;
 }) {
   const { avatarStatuses, setAvatarStatus } = useAvatarContext();
 
@@ -17,40 +19,51 @@ export default function Avatar({
 
   const formattedName = user.name[0].toUpperCase();
 
-  return user.avatar && (avatarStatus === 'avatar' ?? !avatarStatus) ? (
+  return user.avatar && avatarStatus !== 'fallback' ? (
     <Img user={user} key={key} setAvatarStatus={setAvatarStatus} />
   ) : (
     <FallbackImg user={user} formattedName={formattedName} textSize={textSize} />
   );
 }
 
-const Img = ({ user, setAvatarStatus }: any) => {
-  if (!user?.avatar) {
+interface ImgProps {
+  user: UserType;
+  setAvatarStatus: (key: string, status: AvatarStatus) => void;
+}
+
+const Img = ({ user, setAvatarStatus }: ImgProps) => {
+  if (!user.avatar) {
     const key = user.avatar ?? user.avatarFallback ?? user.name;
     setAvatarStatus(key, 'fallback');
     return null;
   }
 
-  const key = user.avatar ?? user.avatarFallback ?? user.name;
+  const key: string = user.avatar;
 
   return (
     <img
       className="rounded-full w-full h-full select-none object-cover aspect-square"
       src={user.avatar.startsWith('http') ? user.avatar : `${backendUrl}/uploads/${user.avatar}`}
       alt="Avatar"
-      onError={() => setAvatarStatus(key, 'fallback')}
-      onLoad={() => setAvatarStatus(key, 'avatar')}
+      onError={() => { setAvatarStatus(key, 'fallback'); }}
+      onLoad={() => { setAvatarStatus(key, 'avatar'); }}
     />
   );
 };
 
-const FallbackImg = ({ user, formattedName, textSize }: any) => {
+interface FallbackImgProps {
+  user: UserType;
+  formattedName: string;
+  textSize?: TextSize;
+}
+
+const FallbackImg = ({ user, formattedName, textSize }: FallbackImgProps) => {
   return (
     <div
-      className={`rounded-full bg-gray-300 text-white flex items-center justify-center w-full h-full select-none ${textSize || 'text-lg'}`}
-      style={{ backgroundColor: user?.avatarFallback }}
+      className={`rounded-full bg-gray-300 text-white flex items-center justify-center w-full h-full select-none ${textSize ?? 'text-lg'}`}
+      style={{ backgroundColor: user.avatarFallback }}
     >
-      {user?.name && user.name !== 'Wachten op speler' ? formattedName : null}
+      {user.name && user.name !== 'Wachten op speler' ? formattedName : null}
     </div>
   );
 };

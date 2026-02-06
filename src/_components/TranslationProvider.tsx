@@ -1,7 +1,8 @@
+/* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
 // src/_components/translationProvider.tsx
 import { createContext, Dispatch, ReactNode, SetStateAction, use, useEffect, useMemo, useState } from "react";
 
-import config from "config";
+import { defaultLanguage } from "config";
 import deJson from "src/_locales/de.json";
 import enJson from "src/_locales/en.json";
 import frJson from "src/_locales/fr.json";
@@ -9,54 +10,60 @@ import nlJson from "src/_locales/nl.json";
 
 import { useSession } from "../_providers/SessionProvider";
 
+type LanguageCode = 'nl' | 'en' | 'de' | 'fr';
+type TranslationRecord = Record<string, string | Record<string, unknown>>;
+
 const TranslationContext = createContext<{
-  translations: Record<string, any>,
-  setLanguage: Dispatch<SetStateAction<'nl' | 'en' | 'de' | 'fr'>>;
+  translations: TranslationRecord,
+  setLanguage: Dispatch<SetStateAction<LanguageCode>>;
 } | null>(null);
 
-const getLanguage = (language: string) => {
+const getLanguage = (language: string): TranslationRecord => {
   switch (language) {
-    case "nl": { return nlJson;
+    case "nl": { return nlJson as TranslationRecord;
     }
-    case "en": { return enJson;
+    case "en": { return enJson as TranslationRecord;
     }
-    case "de": { return deJson;
+    case "de": { return deJson as TranslationRecord;
     }
-    case "fr": { return frJson;
+    case "fr": { return frJson as TranslationRecord;
     }
-    default: { return enJson;
+    default: { return enJson as TranslationRecord;
     }
   }
 };
 
-export const TranslationProvider = ({ children }: { children: ReactNode }) => {
+export function TranslationProvider({ children }: { children: ReactNode }) {
   const { session } = useSession();
-  // const language = session?.language || config.defaultLanguage;
-  const [language, setLanguage] = useState<'nl' | 'en' | 'de' | 'fr'>((session?.language || config.defaultLanguage) as 'nl' | 'en' | 'de' | 'fr');
+  const [language, setLanguage] = useState<LanguageCode>((session?.language ?? defaultLanguage) as LanguageCode);
   const translations = useMemo(() => getLanguage(language), [language]);
 
   useEffect(() => {
     if (session?.language) {
-      setLanguage(session.language as 'nl' | 'en' | 'de' | 'fr');
+      setLanguage(session.language as LanguageCode);
     }
-  },  [globalThis.location.pathname, session])
+  }, [session]);
+
+  const contextValue = useMemo(() => ({
+    translations, setLanguage
+  }), [translations, setLanguage]);
 
   return (
-    <TranslationContext value={{ translations, setLanguage }}>
+    <TranslationContext value={contextValue}>
       {children}
     </TranslationContext>
   );
-};
+}
 
-export const useTranslation = () => {
+export function useTranslation() {
   const context = use(TranslationContext);
   if (!context) {
     throw new Error("useTranslation must be used within a TranslationProvider");
   }
   return context.translations;
-};
+}
 
-export const useUpdateLanguage = () => {
+export function useUpdateLanguage() {
   const context = use(TranslationContext);
   if (!context) {
     throw new Error("setLanguage must be used within a TranslationProvider");
@@ -65,20 +72,30 @@ export const useUpdateLanguage = () => {
 }
 
 // helper function for dynamic translation
-export const translate = ({ translationList, key, params }: {
-  translationList: Record<string, any>,
+export function translate({ translationList, key, params }: {
+  translationList: TranslationRecord,
   key: string,
   params?: { key: string, value: string | number | boolean }[]
-}) => {
-  let result = key.split(".").reduce((acc: any, part) => acc?.[part], translationList);
+}): string {
+  const parts = key.split(".");
+  let result: unknown = translationList;
+  
+  for (const part of parts) {
+    if (result && typeof result === 'object' && part in result) {
+      result = (result as Record<string, unknown>)[part];
+    } else {
+      return key;
+    }
+  }
+  
   if (typeof result !== "string") return key;
   if (!params) return result;
 
+  let finalResult = result;
   for (const param of params) {
     if (!param.key) continue;
-    if (param.value === undefined) continue;
     const regex = new RegExp(`{{${param.key}}}`, "g");
-    result = result.replace(regex, param.value.toString());
+    finalResult = finalResult.replace(regex, String(param.value));
   }
-  return result;
-};
+  return finalResult;
+}

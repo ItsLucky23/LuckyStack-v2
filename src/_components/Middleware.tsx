@@ -33,9 +33,9 @@ export default function Middleware({ children }: { children: ReactNode }) {
         if (count > 500) break; // after 5 seconds we stop waiting for the session
       }
 
-      // const session = await apiRequest({ name: 'session' }) as SessionLayout;
-      const result = await middlewareHandler({ location: location.pathname, searchParams: queryObject, session }) as { success: boolean, redirect: string } | undefined;
+      const result = middlewareHandler({ location: location.pathname, searchParams: queryObject, session }) as { success: boolean, redirect: string } | undefined;
 
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional check prevents navigation race conditions
       if (!isMounted) return;
       if (result?.success) {
         setAllowed(true);
@@ -46,11 +46,6 @@ export default function Middleware({ children }: { children: ReactNode }) {
       }
 
       setChecking(false);
-
-      return () => {
-        isMounted = false;
-      }
-
     })();
 
     //! dont remove isMounted, read below
@@ -61,7 +56,7 @@ export default function Middleware({ children }: { children: ReactNode }) {
     return () => {
       isMounted = false;
     };
-  }, [location.pathname, sessionLoaded]); // important: rerun on path change
+  }, [location.pathname, location.search, navigate, session, sessionLoaded]); // important: rerun on path change
 
   if (checking || !allowed) return null;
   return <div className="w-full h-full">{children}</div>;

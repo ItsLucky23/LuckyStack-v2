@@ -1,7 +1,7 @@
+/* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { Toaster } from 'sonner'
-
 import 'src/index.css'
 import 'src/scrollbar-dark.css'
 import VConsole from 'vconsole';
@@ -56,7 +56,7 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
   return routes;
 };
 
-const pages = import.meta.glob('./**/*.tsx', { eager: true });
+const pages: Record<string, { default: PageWithTemplate; template?: Template }> = import.meta.glob('./**/*.tsx', { eager: true });
 
 // Import error page for router error handling
 

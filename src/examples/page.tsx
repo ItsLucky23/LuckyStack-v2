@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { data, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import notify from "src/_functions/notify";
 import { useSession } from "src/_providers/SessionProvider";
@@ -12,10 +12,10 @@ export const template = 'home';
 export default function ExamplesPage() {
   const { session } = useSession();
   const [counter, setCounter] = useState(0);
-  const [apiResults, setApiResults] = useState<any[]>([]);
+  const [apiResults, setApiResults] = useState<{ name: string; result: unknown; ts: string }[]>([]);
 
   useEffect(() => {
-    joinRoom('examples-room');
+    void joinRoom('examples-room');
   }, []);
 
   const { upsertSyncEventCallback } = useSyncEvents();
@@ -25,7 +25,7 @@ export default function ExamplesPage() {
     setCounter(prev => serverOutput.increase ? prev + 1 : prev - 1);
   });
 
-  const logResult = (name: string, result: any) => {
+  const logResult = (name: string, result: unknown) => {
     setApiResults(prev => [{ name, result, ts: new Date().toLocaleTimeString() }, ...prev.slice(0, 4)]);
   };
 
@@ -66,9 +66,11 @@ export default function ExamplesPage() {
                   </p>
                 </div>
                 <button
-                  onClick={async () => {
-                    const result = await apiRequest({ name: 'logout' })
-                    logResult('logout', result)
+                  onClick={() => {
+                    void (async () => {
+                      const result = await apiRequest({ name: 'logout' })
+                      logResult('logout', result)
+                    })();
                   }}
                   className="mt-auto px-4 h-9 bg-container2 border border-container2-border text-commen rounded-md hover:bg-container2-hover transition-colors text-sm"
                 >
@@ -96,14 +98,14 @@ export default function ExamplesPage() {
             </div>
             <div className="flex items-center gap-6 justify-center py-4">
               <button
-                onClick={() => syncRequest({ name: 'updateCounter', data: { increase: false }, receiver: 'examples-room' })}
+                onClick={() => { void syncRequest({ name: 'updateCounter', data: { increase: false }, receiver: 'examples-room' }); }}
                 className="w-14 h-14 bg-wrong text-white rounded-full text-3xl font-bold hover:scale-110 transition-transform cursor-pointer"
               >−</button>
               <div className="w-28 h-20 bg-container2 border border-container2-border rounded-lg flex items-center justify-center">
                 <span className="text-4xl font-bold text-title">{counter}</span>
               </div>
               <button
-                onClick={() => syncRequest({ name: 'updateCounter', data: { increase: true }, receiver: 'examples-room' })}
+                onClick={() => { void syncRequest({ name: 'updateCounter', data: { increase: true }, receiver: 'examples-room' }); }}
                 className="w-14 h-14 bg-correct text-white rounded-full text-3xl font-bold hover:scale-110 transition-transform cursor-pointer"
               >+</button>
             </div>
@@ -114,7 +116,7 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🌐 Public API</h3>
             <p className="text-xs text-muted">No login needed</p>
             <button
-              onClick={async () => { const result = await apiRequest<"examples", "publicApi">({ name: "publicApi", data: { message: "" } }) }}
+              onClick={() => void apiRequest<"examples", "publicApi">({ name: "publicApi", data: { message: "" } })}
               className="mt-auto px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
             >
               Call API
@@ -126,7 +128,7 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🔄 Toggle Admin</h3>
             <p className="text-xs text-muted">Requires login</p>
             <button
-              onClick={async () => { const result = await apiRequest({ name: "publicApi", data: { message: "" } }) }}
+              onClick={() => void apiRequest({ name: "publicApi", data: { message: "" } })}
               className="mt-auto px-4 h-9 bg-orange-500 text-white rounded-md hover:bg-orange-600 transition-colors text-sm cursor-pointer"
             >
               Toggle
@@ -138,9 +140,11 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🔐 Admin Only</h3>
             <p className="text-xs text-muted">admin: true required</p>
             <button
-              onClick={async () => {
-                const result = await apiRequest({ name: 'adminOnly' })
-                logResult('adminOnly', result)
+              onClick={() => {
+                void (async () => {
+                  const result = await apiRequest({ name: 'adminOnly' })
+                  logResult('adminOnly', result)
+                })();
               }}
               className="mt-auto px-4 h-9 bg-wrong text-white rounded-md hover:bg-wrong-hover transition-colors text-sm cursor-pointer"
             >
@@ -154,7 +158,7 @@ export default function ExamplesPage() {
             <p className="text-xs text-muted">Toast system with translation support (Sonner)</p>
             <div className="flex gap-2 mt-auto">
               <button
-                onClick={() => { notify.success({ key: 'test', params: [{ key: 'name', value: session?.name || 'Guest' }] }); }}
+                onClick={() => { notify.success({ key: 'test', params: [{ key: 'name', value: session?.name ?? 'Guest' }] }); }}
                 className="flex-1 px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
               >
                 ✓ Success
@@ -175,8 +179,8 @@ export default function ExamplesPage() {
               <p className="text-xs text-muted">Click an API button to see results here</p>
             ) : (
               <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-                {apiResults.map((item, i) => (
-                  <div key={i} className="flex gap-3 text-xs p-2 bg-container2 border border-container2-border rounded">
+                {apiResults.map((item) => (
+                  <div key={`${item.name}-${item.ts}`} className="flex gap-3 text-xs p-2 bg-container2 border border-container2-border rounded">
                     <span className="font-mono text-blue-500 w-32 flex-shrink-0">{item.name}</span>
                     <span className="text-muted">{item.ts}</span>
                     <pre className="text-commen flex-1 overflow-x-auto">{JSON.stringify(item.result, null, 0)}</pre>
