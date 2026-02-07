@@ -61,11 +61,11 @@ const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: Slid
   }, [isTop, isClosing, soonIsTop, location]);
 
   const translate =
-  location === 'center'
+    location === 'center'
       ? '0 0'
       : (location === 'left'
-      ? '-100% 0'
-      : '100% 0'); // initial
+        ? '-100% 0'
+        : '100% 0'); // initial
 
   return (
     <div
@@ -117,12 +117,12 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
       const newStack = [...prev];
       const top = newStack.at(-1);
       const second = newStack.at(-2);
-  
+
       if (!top) return prev;
-      
+
       // Prevent double-close
       if (top.isClosing) return prev;
-  
+
       // Mark top as closing
       if (lastitem) {
         top.resolver?.(null); // Resolve the promise with null
@@ -133,7 +133,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
           newStack[newStack.length - 2] = { ...second, soonIsTop: true };
         }
       }
-  
+
       // Delay removal for animation
       setTimeout(() => {
         setStack((current) => {
@@ -142,7 +142,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
           if (last && last.id === top.id && last.isClosing) {
             if (last.resolver) last.resolver(null);
             if (tempSecond && second && tempSecond.id === second.id && tempSecond.soonIsTop) {
-              current[current.length - 2] = {...tempSecond, soonIsTop: false };
+              current[current.length - 2] = { ...tempSecond, soonIsTop: false };
             }
             return current.slice(0, -1);
           }
@@ -153,7 +153,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
       return newStack;
     });
   }, []);
-  
+
 
   const closeAll = useCallback(() => {
     setStack((prev) => {
@@ -175,12 +175,12 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   }, [close]);
 
   const stackTop = stack.at(-1);
-  const sizeClass = stackTop?.options.size 
-    ? { sm: '384px', md: '512px', lg: '768px' }[stackTop.options.size] 
+  const sizeClass = stackTop?.options.size
+    ? { sm: '384px', md: '512px', lg: '768px' }[stackTop.options.size]
     : '384px';
-    
+
   const [lastChildHeight, setLastChildHeight] = useState<number>(0);
-  
+
   useEffect(() => {
     const lastChild = document.querySelector('#test123')?.lastElementChild;
     if (lastChild) {
@@ -195,16 +195,16 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   const contextValue = useMemo(() => ({
     open, replace, close, closeAll, logStack
   }), [open, replace, close, closeAll, logStack]);
-  
+
   return (
     <MenuHandlerContext value={contextValue}>
       {children}
       {createPortal(
-        <div 
+        <div
           role="button"
           tabIndex={0}
           className={`absolute top-0 left-0 w-full h-full flex items-center justify-center z-[1000] overflow-hidden ${stack.length === 0 ? 'pointer-events-none' : ''}`}
-          style={{ backgroundColor: stackTop?.options.dimBackground === false ? 'transparent' : 'rgba(0, 0, 0, 0.7)' }}
+          style={{ backgroundColor: stackTop?.options.dimBackground === true ? 'rgba(0, 0, 0, 0.7)' : 'transparent' }}
           onMouseDown={() => { attempToCloseAll = true; }}
           onMouseUp={() => {
             if (!attempToCloseAll) { return }
@@ -212,7 +212,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
           }}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') closeAll(); }}
         >
-          <div 
+          <div
             role="presentation"
             id="test123"
             className={`rounded-md overflow-hidden relative h-auto 

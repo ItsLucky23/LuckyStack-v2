@@ -30,4 +30,4 @@ config
 uploads/**
 
 # Auto-generated types (regenerated on dev server start)
-src/_sockets/apiTypes.generated.ts
+apiTypes.generated.ts

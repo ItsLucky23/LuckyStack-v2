@@ -116,7 +116,7 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🌐 Public API</h3>
             <p className="text-xs text-muted">No login needed</p>
             <button
-              onClick={() => void apiRequest<"examples", "publicApi">({ name: "publicApi", data: { message: "" } })}
+              onClick={() => void apiRequest<"examples", "publicApi">({ name: "publicApi", data: { message: "Message sent from the client!" } })}
               className="mt-auto px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
             >
               Call API
@@ -128,7 +128,7 @@ export default function ExamplesPage() {
             <h3 className="font-semibold text-title text-sm">🔄 Toggle Admin</h3>
             <p className="text-xs text-muted">Requires login</p>
             <button
-              onClick={() => void apiRequest({ name: "publicApi", data: { message: "" } })}
+              onClick={() => void apiRequest({ name: "toggleAdmin" })}
               className="mt-auto px-4 h-9 bg-orange-500 text-white rounded-md hover:bg-orange-600 transition-colors text-sm cursor-pointer"
             >
               Toggle
