@@ -3,19 +3,18 @@
 
 You have access to valid project context in the following files. You should prioritize reading these files to understand the project structure, configuration, and current state before proposing changes or answering complex questions:
 
-1. **`repomix-output.xml`**: Contains a comprehensive dump or summary of the codebase. Check this for overall code patterns and existing implementation.
-2. **`PROJECT_CONTEXT.md`**: Contains high-level architecture documentation, terminology, and design decisions. useful for "big picture" understanding.
-3. **`config.ts`**: Contains the main application configuration constants and types.
-4. **`.env`**: Contains environment variables and active configuration settings.
+1. **`.claude/CLAUDE.md`**: Contains AI development rules, coding conventions, and project overview. Read this first.
+2. **`PROJECT_CONTEXT.md`**: Contains detailed architecture documentation, terminology, and design decisions.
+3. **`docs/`**: Contains architecture documentation for Routing, API, Auth, Session, Socket, and Sync systems.
+4. **`config.ts`**: Contains the main application configuration constants and types.
+5. **`.env`**: Contains environment variables and active configuration settings.
 
 ## Behavior
-- When starting a significant task, always check `PROJECT_CONTEXT.md` first.
-- If you need to understand the broader codebase without searching every file, `repomix-output.xml` is a good source.
+- When starting a significant task, always check `.claude/CLAUDE.md` and `PROJECT_CONTEXT.md` first.
 - Verify configuration values in `config.ts` and `.env` when debugging or adding features.
+- Follow all rules defined in `.claude/CLAUDE.md` (styling, error handling, comments, SOLID, etc.).
 
 ## Context Update Rule (IMPORTANT)
-**After every code change, you MUST:**
-1. **Update `PROJECT_CONTEXT.md`** - Document any new files, functions, patterns, or behavior changes you've made. Keep the documentation in sync with the codebase.
-2. **Regenerate `repomix-output.xml`** - Run `npx repomix` to regenerate the codebase summary with your changes.
-
-This ensures future AI sessions have accurate context about the current state of the codebase.
+**After every significant code change, you MUST:**
+1. **Update `PROJECT_CONTEXT.md`** - Document any new files, functions, patterns, or behavior changes. Keep the documentation in sync with the codebase.
+2. **Tell the user to run `npx repomix`** - To regenerate the codebase summary with your changes.

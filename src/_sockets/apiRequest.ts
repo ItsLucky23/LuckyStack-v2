@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
 import type { PagePath, ApiName, ApiInput, ApiOutput } from './apiTypes.generated';
 import { getApiMethod } from './apiTypes.generated';
+import notify from "src/_functions/notify";
 
 //? Abort controller logic:
 //? - abortable: true → always use abort controller
@@ -25,8 +26,12 @@ const isGetMethod = (pagePath: string, apiName: string): boolean => {
 export interface apiRequestResponse {
   status: 'success' | 'error';
   result?: Record<string, any>;
+  errorCode?: string;
+  errorParams?: {
+    key: string;
+    value: string | number | boolean;
+  }[];
   message?: string;
-  messageParams?: Record<string, any>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -62,8 +67,8 @@ type OutputForName<N extends AllApiNames> = {
 // Build params type for a specific API name
 type ApiParamsForName<N extends AllApiNames> =
   DataRequired<InputForName<N>> extends true
-  ? { name: N; data: Prettify<InputForName<N>>; abortable?: boolean }
-  : { name: N; data?: Prettify<InputForName<N>>; abortable?: boolean };
+  ? { name: N; data: Prettify<InputForName<N>>; abortable?: boolean; disableErrorMessage?: boolean; }
+  : { name: N; data?: Prettify<InputForName<N>>; abortable?: boolean; disableErrorMessage?: boolean; };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Page-Specific Params (for exact types when duplicate names exist)
@@ -72,8 +77,8 @@ type ApiParamsForName<N extends AllApiNames> =
 // Build params type for a specific page and API name
 type PageApiParamsForName<P extends PagePath, N extends ApiName<P>> =
   DataRequired<ApiInput<P, N>> extends true
-  ? { name: N; data: ApiInput<P, N>; abortable?: boolean }
-  : { name: N; data?: ApiInput<P, N>; abortable?: boolean };
+  ? { name: N; data: ApiInput<P, N>; abortable?: boolean; disableErrorMessage?: boolean; }
+  : { name: N; data?: ApiInput<P, N>; abortable?: boolean; disableErrorMessage?: boolean; };
 
 /**
  * Type-safe API request function.
@@ -110,7 +115,7 @@ export function apiRequest(
 
 // Implementation (not exposed to TypeScript - only runtime)
 export function apiRequest(params: any): Promise<any> {
-  const { name } = params;
+  const { name, disableErrorMessage = false } = params;
   let { data } = params;
   return new Promise(async (resolve, reject) => {
     if (!name || typeof name !== "string") {
@@ -164,21 +169,32 @@ export function apiRequest(params: any): Promise<any> {
     socket.emit('apiRequest', { name: fullname, data, responseIndex: tempIndex });
 
     if (dev && (name as string) != 'session' && (name as string) != 'logout') { console.log(`Client API Request(${tempIndex}): `, { name, data }) }
-    socket.once(`apiResponse-${tempIndex}`, ({ result, message, status }: {
+    socket.once(`apiResponse-${tempIndex}`, ({ result, message, status, errorCode, errorParams }: {
       result: any;
       message: string;
       status: "success" | "error";
+      errorCode?: string;
+      errorParams?: {
+        key: string;
+        value: string | number | boolean;
+      }[];
     }) => {
       if (signal && signal.aborted) { return; }
 
       if (status === "error") {
-        if (dev) {
-          console.error('message:', message);
-          toast.error(message);
+        if (!disableErrorMessage) {
+          // toast.error(message)
+          if (errorCode) {
+            notify.error({ key: errorCode, params: errorParams })
+          } else {
+            notify.error({ key: message })
+          }
         }
         return resolve({
           status,
-          message
+          message,
+          errorCode,
+          errorParams
         } as any)
       }
 

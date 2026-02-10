@@ -22,12 +22,31 @@ This guide covers everything you need to deploy LuckyStack from development to p
 
 Before deploying LuckyStack, ensure you have:
 
-| Requirement | Version | Notes |
-|-------------|---------|-------|
-| **Node.js** | 18+ | LTS recommended |
-| **Redis** | 6+ | Used for session storage |
-| **MongoDB** | 6+ | Primary database (via Prisma) |
-| **npm** | 9+ | Comes with Node.js |
+| Requirement  | Version | Notes                                            |
+| ------------ | ------- | ------------------------------------------------ |
+| **Node.js**  | 18+     | LTS recommended                                  |
+| **Redis**    | 6+      | Used for session storage                         |
+| **Database** | -       | Your choice (see database section below)         |
+| **npm**      | 9+      | Comes with Node.js                               |
+
+### Database
+
+LuckyStack uses **Prisma** as its ORM, which supports multiple database providers. Choose whichever fits your project:
+
+| Provider       | Config Value   | Notes                                              |
+| -------------- | -------------- | -------------------------------------------------- |
+| **MongoDB**    | `mongodb`      | Currently active in `prisma/schema.prisma`         |
+| **MySQL**      | `mysql`        | Uncomment in schema, update `DATABASE_URL`         |
+| **PostgreSQL** | `postgresql`   | Uncomment in schema, update `DATABASE_URL`         |
+| **SQLite**     | `sqlite`       | Uncomment in schema, no server needed (dev only)   |
+
+To switch databases:
+1. Open `prisma/schema.prisma`
+2. Comment out the current `datasource db` block
+3. Uncomment the one for your chosen provider
+4. Adjust the `id` field syntax if switching between MongoDB and SQL (see comments in schema)
+5. Update `DATABASE_URL` in `.env`
+6. Run `npx prisma generate && npx prisma db push`
 
 ### Installing Redis
 
@@ -53,36 +72,45 @@ sudo systemctl enable redis-server
 sudo systemctl start redis-server
 ```
 
-### Installing MongoDB
+### Installing a Database
 
-Use [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) (free tier supports transactions) or install locally.
-**Note:** Local installations must be configured as a **Replica Set** to support transactions.
+**MongoDB (if using MongoDB provider):**
 
-**Docker (Windows/Linux/Mac):**
+Use [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) (free tier available) or install locally.
+
+> Local MongoDB installations must be configured as a **Replica Set** to support transactions.
+
+Docker:
 ```bash
-# Start with replica set enabled
 docker run -d --name mongodb -p 27017:27017 mongo:latest --replSet rs0
-# Initialize the replica set
 docker exec -it mongodb mongosh --eval "rs.initiate()"
 ```
 
-**macOS (Homebrew):**
+**MySQL (if using MySQL provider):**
 ```bash
-brew tap mongodb/brew
-brew install mongodb-community
-brew services start mongodb-community
-# You must manually enable replication in mongod.conf and run rs.initiate()
+# Docker
+docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=password mysql:latest
+
+# Then set DATABASE_URL="mysql://root:password@localhost:3306/PROJECT_NAME"
 ```
 
-**Windows (Native):**
-1. Download from [MongoDB Download Center](https://www.mongodb.com/try/download/community).
-2. Install and run as a service.
-3. Edit `mongod.cfg` to add `replication: replSetName: rs0`.
-4. Restart service and run `rs.initiate()` in mongosh.
+**PostgreSQL (if using PostgreSQL provider):**
+```bash
+# Docker
+docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest
 
-**Linux:**
-Install via your package manager (apt/yum/dnf) following [official docs](https://www.mongodb.com/docs/manual/administration/install-on-linux/).
-Edit `/etc/mongod.conf` to enable replication (`replSetName: rs0`) and restart.
+# Then set DATABASE_URL="postgresql://postgres:password@localhost:5432/PROJECT_NAME"
+```
+
+**SQLite (development only):**
+
+No installation needed. Set the datasource in `prisma/schema.prisma` to:
+```prisma
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+```
 
 ---
 
@@ -121,6 +149,8 @@ REDIS_PORT=6379
 
 DATABASE_URL="mongodb://localhost:27017/PROJECT_NAME"
 ```
+
+> Adjust `DATABASE_URL` to match your chosen database provider.
 
 ### 3. Configure Application
 
@@ -212,6 +242,8 @@ sudo systemctl enable redis-server
 # Install PM2 for process management
 sudo npm install -g pm2
 ```
+
+> Install your chosen database separately (see database section above).
 
 #### 2. Deploy Application
 
@@ -384,6 +416,8 @@ CMD ["node", "dist/server.js"]
 
 #### 2. Create docker-compose.yml
 
+The example below uses MongoDB. Replace the `mongo` service with your chosen database.
+
 ```yaml
 version: '3.8'
 
@@ -408,6 +442,7 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  # Replace with your chosen database
   mongo:
     image: mongo:latest
     volumes:
@@ -429,27 +464,27 @@ docker-compose up -d --build
 
 ## Environment Variables Reference
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `NODE_ENV` | Yes | `development` | `development` or `production` |
-| `PROJECT_NAME` | Yes | - | Unique name for Redis key prefixing |
-| `SERVER_IP` | Yes | `localhost` | Server bind address |
-| `SERVER_PORT` | Yes | `80` | Server port |
-| `DNS` | Yes | - | Public URL for OAuth redirects |
-| `SECURE` | Yes | `false` | Enable HTTPS cookies |
-| `VITE_SESSION_BASED_TOKEN` | Yes | `true` | Token storage method |
-| `REDIS_HOST` | Yes | `127.0.0.1` | Redis server host |
-| `REDIS_PORT` | Yes | `6379` | Redis server port |
-| `DATABASE_URL` | Yes | - | MongoDB connection string |
-| `SENTRY_DSN` | No | - | Sentry error tracking DSN |
-| `GOOGLE_CLIENT_ID` | No | - | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | No | - | Google OAuth client secret |
-| `GITHUB_CLIENT_ID` | No | - | GitHub OAuth client ID |
-| `GITHUB_CLIENT_SECRET` | No | - | GitHub OAuth client secret |
-| `DISCORD_CLIENT_ID` | No | - | Discord OAuth client ID |
-| `DISCORD_CLIENT_SECRET` | No | - | Discord OAuth client secret |
-| `FACEBOOK_CLIENT_ID` | No | - | Facebook OAuth client ID |
-| `FACEBOOK_CLIENT_SECRET` | No | - | Facebook OAuth client secret |
+| Variable                   | Required | Default       | Description                              |
+| -------------------------- | -------- | ------------- | ---------------------------------------- |
+| `NODE_ENV`                 | Yes      | `development` | `development` or `production`            |
+| `PROJECT_NAME`             | Yes      | -             | Unique name for Redis key prefixing      |
+| `SERVER_IP`                | Yes      | `localhost`   | Server bind address                      |
+| `SERVER_PORT`              | Yes      | `80`          | Server port                              |
+| `DNS`                      | Yes      | -             | Public URL for OAuth redirects           |
+| `SECURE`                   | Yes      | `false`       | Enable HTTPS cookies                     |
+| `VITE_SESSION_BASED_TOKEN` | Yes      | `true`        | Token storage method                     |
+| `REDIS_HOST`               | Yes      | `127.0.0.1`   | Redis server host                        |
+| `REDIS_PORT`               | Yes      | `6379`        | Redis server port                        |
+| `DATABASE_URL`             | Yes      | -             | Database connection string (any Prisma-supported DB) |
+| `SENTRY_DSN`               | No       | -             | Sentry error tracking DSN               |
+| `GOOGLE_CLIENT_ID`         | No       | -             | Google OAuth client ID                   |
+| `GOOGLE_CLIENT_SECRET`     | No       | -             | Google OAuth client secret               |
+| `GITHUB_CLIENT_ID`         | No       | -             | GitHub OAuth client ID                   |
+| `GITHUB_CLIENT_SECRET`     | No       | -             | GitHub OAuth client secret               |
+| `DISCORD_CLIENT_ID`        | No       | -             | Discord OAuth client ID                  |
+| `DISCORD_CLIENT_SECRET`    | No       | -             | Discord OAuth client secret              |
+| `FACEBOOK_CLIENT_ID`       | No       | -             | Facebook OAuth client ID                 |
+| `FACEBOOK_CLIENT_SECRET`   | No       | -             | Facebook OAuth client secret             |
 
 ---
 
@@ -502,6 +537,16 @@ docker-compose up -d --build
 1. Ensure `config.ts` exists (copy from `configTemplate.txt`)
 2. Run `npx prisma generate` before building
 3. Check all dependencies installed: `rm -rf node_modules && npm install`
+
+### Database Connection Issues
+
+**Symptom:** Prisma errors on startup or API calls.
+
+**Solutions:**
+1. Verify `DATABASE_URL` in `.env` matches your database provider
+2. Ensure only ONE `datasource db` block is uncommented in `prisma/schema.prisma`
+3. Run `npx prisma generate` after changing providers
+4. For MongoDB: ensure replica set is configured if using transactions
 
 ---
 

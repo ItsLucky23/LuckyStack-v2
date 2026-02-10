@@ -4,10 +4,10 @@
   2. v
 -->
 
-# UI-Builder Project Context
+# LuckyStack Project Context
 
-> **Human-readable documentation for AI assistants to understand this project.**  
-> Last updated: 2026-02-06
+> **Human-readable documentation for AI assistants and developers to understand this project.**
+> Last updated: 2026-02-10
 
 ---
 
@@ -270,7 +270,7 @@ The sync type system has three distinct data types that flow through the system:
 
 | Component                 | Purpose                                              |
 | ------------------------- | ---------------------------------------------------- |
-| `TemplateProvider.tsx`    | Wraps pages in templates: `plain`, `main`, `sandbox` |
+| `TemplateProvider.tsx`    | Wraps pages in templates: `plain`, `home`, `dashboard` |
 | `SessionProvider.tsx`     | Provides session context and socket initialization   |
 | `Middleware.tsx`          | Route authentication guards                          |
 | `LoginForm.tsx`           | OAuth login buttons                                  |
@@ -285,25 +285,21 @@ The sync type system has three distinct data types that flow through the system:
 
 Pages export a `template` constant to specify their wrapper:
 
-1. **`plain`** - Minimal wrapper, no UI chrome
-2. **`main`** - Navbar with user info and navigation
-3. **`sandbox`** - Full sandbox with all feature providers:
-   ```
-   GridProvider → BlueprintsProvider → BuilderPanelProvider →
-   MenusProvider → CodeProvider → DrawingProvider → NotesProvider → MainTemplate
-   ```
+1. **`plain`** - Minimal wrapper, no UI chrome. Sets theme to `config.defaultTheme`.
+2. **`home`** - Top bar with user avatar, name, settings/home toggle, and logout button. Includes `Middleware` for route guards.
+3. **`dashboard`** - Side navigation bar (`Navbar`) with main content area. Includes `Middleware` for route guards.
 
 ### Page Routes
 
-| Route       | Template | Purpose                                              |
-| ----------- | -------- | ---------------------------------------------------- |
-| `/`         | plain    | Root redirect based on session                       |
-| `/login`    | plain    | OAuth login page                                     |
-| `/register` | plain    | Registration (uses LoginForm)                        |
-| `/home`     | main     | Sandbox selection (in progress)                      |
-| `/settings` | main     | User settings with `_api` folder                     |
-| `/test`     | main     | Development testing with `_api` and `_sync` examples |
-| `/sandbox`  | sandbox  | Main application canvas                              |
+| Route       | Template | Purpose                                          |
+| ----------- | -------- | ------------------------------------------------ |
+| `/`         | plain    | Root redirect based on session                   |
+| `/login`    | plain    | OAuth login page                                 |
+| `/register` | plain    | Registration (uses LoginForm)                    |
+| `/docs`     | plain    | Documentation pages                              |
+| `/settings` | home     | User settings with `_api` folder                 |
+| `/examples` | home     | Framework demo page with `_api` and `_sync` examples |
+| `/admin`    | (none)   | Admin pages                                      |
 
 ### API/Sync Convention
 
@@ -326,10 +322,9 @@ Pages export a `template` constant to specify their wrapper:
 
 - **TailwindCSS v4** with custom colors in `src/index.css`
 - Theme support: light (default) and dark mode via CSS classes
-- Custom CSS variables for colors (`--color-background`, `--color-primary`, etc.)
-- `src/NoteEditor.css` - ProseMirror/TipTap styles for notes
-- `src/scrollbar-*.css` - Theme-specific scrollbar styles (not yet dynamically loaded)
-
----
-
-# Part 2: Application Summary
+- Custom CSS variables for theme colors defined in `@theme` block:
+  - Layout: `background`, `container` (1-4 with `-border` and `-hover` variants)
+  - Text: `title`, `common`, `muted`
+  - Status: `correct`, `correct-hover`, `wrong`, `wrong-hover`
+- Dark mode via `.dark` CSS class on `<html>` element
+- `src/scrollbar-dark.css` - Dark scrollbar styles

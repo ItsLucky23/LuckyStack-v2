@@ -82,13 +82,14 @@ You can change the ports in the `.env` file.
 
 | Document                                                   | Description                                |
 | ---------------------------------------------------------- | ------------------------------------------ |
+| [Routing architecture](./docs/ARCHITECTURE_ROUTING.md)     | File-based routing (pages, APIs, syncs)    |
 | [API architecture](./docs/ARCHITECTURE_API.md)             | API architecture overview                  |
 | [Authentication architecture](./docs/ARCHITECTURE_AUTH.md) | Authentication architecture overview       |
 | [Session architecture](./docs/ARCHITECTURE_SESSION.md)     | Session architecture overview              |
 | [Socket architecture](./docs/ARCHITECTURE_SOCKET.md)       | Socket architecture overview               |
 | [Sync architecture](./docs/ARCHITECTURE_SYNC.md)           | Sync architecture overview                 |
 | [Developer guide](./docs/DEVELOPER_GUIDE.md)               | Developer guide                            |
-| [AI Development](./AI_DEVELOPMENT.md)                      | AI-assisted development and security guide |
+| [Hosting guide](./docs/HOSTING.md)                         | Deployment and hosting guide               |
 
 ---
 

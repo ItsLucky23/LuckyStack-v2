@@ -969,7 +969,8 @@ export interface Functions {
 
 export type ApiResponse<T = any> =
   | { status: 'success'; result: T }
-  | { status: 'error'; message?: string; errors?: any };
+  | { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[] }
+  | { status: 'error'; message?: string; };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // API Type Map
