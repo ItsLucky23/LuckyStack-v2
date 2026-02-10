@@ -1,286 +1,354 @@
-import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { apiRequest } from 'src/_sockets/apiRequest'; // We keep using this for the initial fetch as it's within the 'docs' page context
+import { socket } from 'src/_sockets/socketInitializer';
+import tryCatch from 'src/_functions/tryCatch';
+import notify from 'src/_functions/notify';
 
-import { docsCategories, searchDocs, DocItem, DocCategory, Side } from './_data/docs';
-import { getFilesByCategory, FrameworkFile } from './_data/files';
+// Define types for the docs structure (matching server response)
+interface ApiDoc {
+  page: string;
+  name: string;
+  method: string;
+  description?: string;
+  input: string;
+  output: string;
+  auth: any;
+  rateLimit: number | false | undefined;
+  path: string;
+}
 
-export const template = 'plain';
+interface SyncDoc {
+  page: string;
+  name: string;
+  clientInput: string;
+  serverOutput: string;
+  clientOutput: string;
+  path: string;
+}
 
-type ViewMode = 'docs' | 'files';
+interface DocsResult {
+  apis: Record<string, ApiDoc[]>;
+  syncs: Record<string, SyncDoc[]>;
+}
+
+export const template = 'dashboard'; // Use dashboard template for sidebar layout
 
 export default function DocsPage() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<ViewMode>('docs');
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [docs, setDocs] = useState<DocsResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedApi, setSelectedApi] = useState<ApiDoc | null>(null);
+  const [selectedSync, setSelectedSync] = useState<SyncDoc | null>(null);
+  const [inputData, setInputData] = useState('{}');
+  const [apiResult, setApiResult] = useState<any>(null);
+  const [apiStatus, setApiStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
-  const searchResults = useMemo(() => searchDocs(searchQuery), [searchQuery]);
-  const filesByCategory = useMemo(() => getFilesByCategory(), []);
-  const isSearching = searchQuery.trim().length > 0;
+  useEffect(() => {
+    const fetchDocs = async () => {
+      // We can use the generic apiRequest here because we are ON the 'docs' page, 
+      // so 'getDocs' resolves to 'api/docs/getDocs' which is correct.
+      const [err, res] = await tryCatch(async () => 
+        // @ts-ignore - Dynamic API not in generated types yet during dev
+        await apiRequest({ name: 'getDocs', data: {} })
+      );
+
+      if (err) {
+        notify.error({ key: 'Failed to load documentation' });
+        console.error(err);
+      } else if (res?.status === 'success') {
+        setDocs(res.result);
+      }
+      setLoading(false);
+    };
+
+    fetchDocs();
+  }, []);
+
+  const handleApiRun = (api: ApiDoc) => {
+    if (!socket) {
+      notify.error({ key: 'Socket not connected' });
+      return;
+    }
+
+    setApiStatus('loading');
+    setApiResult(null);
+
+    let parsedData = {};
+    try {
+      parsedData = JSON.parse(inputData);
+    } catch (e) {
+      notify.error({ key: 'Invalid JSON input' });
+      setApiStatus('error');
+      return;
+    }
+
+    const responseIndex = Date.now(); // Simple index for this manual run
+    const eventName = `apiResponse-${responseIndex}`;
+    
+    // We use raw socket emit to bypass apiRequest's page-scoped logic
+    // This allows us to call ANY api from this docs page
+    socket.emit('apiRequest', {
+      name: api.path, // e.g., 'api/examples/test123'
+      data: parsedData,
+      responseIndex
+    });
+
+    socket.once(eventName, (response: any) => {
+      setApiResult(response);
+      setApiStatus(response.status === 'success' ? 'success' : 'error');
+    });
+
+    // Cleanup listener after timeout
+    setTimeout(() => {
+      if (socket?.hasListeners(eventName)) {
+        socket.off(eventName);
+        if (apiStatus === 'loading') {
+          setApiStatus('error');
+          setApiResult({ message: 'Request timed out' });
+        }
+      }
+    }, 5000);
+  };
+
+  if (loading) return <div className="p-8 text-common/60">Loading documentation...</div>;
+  if (!docs) return <div className="p-8 text-wrong">Failed to load documentation.</div>;
 
   return (
-    <div className="w-full h-full bg-background overflow-y-auto">
-      <div className="max-w-6xl mx-auto p-6 flex flex-col gap-6">
-
-        {/* Header */}
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <h1 className="text-3xl font-bold text-title">LuckyStack Documentation</h1>
-              <p className="text-muted text-sm">Everything you need to build with LuckyStack</p>
+    <div className="flex h-full min-h-screen bg-background text-common overflow-hidden">
+      {/* Sidebar */}
+      <div className="w-64 flex-shrink-0 border-r border-container-border overflow-y-auto p-4 bg-container/50">
+        <h2 className="text-xl font-bold mb-6 text-title">Documentation</h2>
+        
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-common/50 mb-3">APIs</h3>
+          {Object.entries(docs.apis).map(([page, apis]) => (
+            <div key={page} className="mb-4">
+              <div className="text-xs font-medium text-container-border mb-2 px-2 uppercase">{page}</div>
+              <div className="space-y-1">
+                {apis.map(api => (
+                  <button
+                    key={api.name}
+                    onClick={() => { setSelectedApi(api); setSelectedSync(null); setInputData('{}'); setApiResult(null); setApiStatus('idle'); }}
+                    className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                      selectedApi?.path === api.path 
+                        ? 'bg-container3 text-title shadow-sm' 
+                        : 'hover:bg-container2 text-common/80'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="truncate">{api.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        api.method === 'GET' ? 'bg-blue-500/10 text-blue-500' : 'bg-green-500/10 text-green-500'
+                      }`}>{api.method}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
-            <Link to="/examples" className="px-4 h-9 bg-blue-500 text-white rounded-md flex items-center justify-center hover:scale-105 transition-all duration-300 text-sm">
-              Live Examples →
-            </Link>
-          </div>
-
-          {/* Search + Mode */}
-          <div className="flex gap-3">
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                placeholder="Search docs... (api, session, sync)"
-                value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); }}
-                className="w-full h-10 px-4 pl-10 bg-container border border-container-border rounded-md text-common focus:outline-blue-500"
-              />
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted">🔍</span>
-            </div>
-            <div className="flex bg-container border border-container-border rounded-md overflow-hidden">
-              <button
-                onClick={() => { setViewMode('docs'); }}
-                className={`px-4 h-10 text-sm font-medium transition-colors cursor-pointer ${viewMode === 'docs' ? 'bg-blue-500 text-white' : 'text-common hover:bg-container-hover'}`}
-              >
-                📖 Docs
-              </button>
-              <button
-                onClick={() => { setViewMode('files'); }}
-                className={`px-4 h-10 text-sm font-medium transition-colors cursor-pointer ${viewMode === 'files' ? 'bg-blue-500 text-white' : 'text-common hover:bg-container-hover'}`}
-              >
-                📁 Files
-              </button>
-            </div>
-          </div>
+          ))}
         </div>
 
-        {/* Search Results */}
-        {isSearching && (
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-muted">{searchResults.length} results for "{searchQuery}"</p>
-            {searchResults.map(item => (
-              <DocItemCard key={item.id} item={item} categoryColor={item.categoryColor} categoryName={item.category} />
-            ))}
-            {searchResults.length === 0 && (
-              <p className="text-muted py-8 text-center">No results found</p>
-            )}
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-common/50 mb-3">Syncs</h3>
+          {Object.entries(docs.syncs).map(([page, syncs]) => (
+            <div key={page} className="mb-4">
+              <div className="text-xs font-medium text-container-border mb-2 px-2 uppercase">{page}</div>
+              <div className="space-y-1">
+                {syncs.map(sync => (
+                  <button
+                    key={sync.name}
+                    onClick={() => { setSelectedSync(sync); setSelectedApi(null); }}
+                    className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                      selectedSync?.path === sync.path 
+                        ? 'bg-container3 text-title shadow-sm' 
+                        : 'hover:bg-container2 text-common/80'
+                    }`}
+                  >
+                    <span className="truncate">{sync.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 overflow-y-auto p-8">
+        {!selectedApi && !selectedSync && (
+          <div className="flex flex-col items-center justify-center h-full text-common/40">
+            <div className="text-6xl mb-4">📚</div>
+            <p>Select an API or Sync event to view documentation</p>
           </div>
         )}
 
-        {/* Main Content */}
-        {!isSearching && viewMode === 'docs' && (
-          <div className="flex gap-6">
-            {/* Sidebar */}
-            <div className="w-48 flex-shrink-0 hidden lg:flex flex-col gap-1 sticky top-6 self-start">
-              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Topics</p>
-              <button
-                onClick={() => { setSelectedCategory(null); }}
-                className={`text-left px-3 py-2 rounded-md text-sm cursor-pointer ${selectedCategory ? 'text-common hover:bg-container-hover' : 'bg-blue-500 text-white'}`}
-              >
-                All Topics
-              </button>
-              {docsCategories.map(cat => (
-                <button
-                  key={cat.id}
-                  onClick={() => { setSelectedCategory(cat.id); }}
-                  className={`text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 cursor-pointer ${selectedCategory === cat.id ? 'bg-blue-500 text-white' : 'text-common hover:bg-container-hover'}`}
-                >
-                  <span>{cat.icon}</span>
-                  <span className="truncate">{cat.title}</span>
-                </button>
-              ))}
+        {/* API Details */}
+        {selectedApi && (
+          <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
+            {/* Header */}
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <span className={`text-sm font-bold px-2 py-1 rounded ${
+                  selectedApi.method === 'GET' ? 'bg-blue-500 text-white' : 'bg-green-600 text-white'
+                }`}>
+                  {selectedApi.method}
+                </span>
+                <h1 className="text-2xl font-bold text-title tracking-tight">{selectedApi.name}</h1>
+              </div>
+              <div className="font-mono text-sm text-common/60 bg-container px-3 py-1.5 rounded w-fit border border-container-border">
+                {selectedApi.path}
+              </div>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 flex flex-col gap-6">
-              {docsCategories
-                .filter(cat => !selectedCategory || cat.id === selectedCategory)
-                .map((cat, index, arr) => (
-                  <div key={cat.id}>
-                    <CategorySection category={cat} />
-                    {index < arr.length - 1 && (
-                      <div className="border-t border-container-border mt-10" />
-                    )}
+            {/* Info Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-container p-4 rounded-xl border border-container-border">
+                <h3 className="text-sm font-semibold text-common/70 mb-3 uppercase tracking-wider">Authentication</h3>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Login Required:</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      selectedApi.auth?.login 
+                        ? 'bg-wrong/10 text-wrong border border-wrong/20' 
+                        : 'bg-correct/10 text-correct border border-correct/20'
+                    }`}>
+                      {selectedApi.auth?.login ? 'YES' : 'NO'}
+                    </span>
                   </div>
-                ))
-              }
-            </div>
-          </div>
-        )}
-
-        {/* Files Mode */}
-        {!isSearching && viewMode === 'files' && (
-          <div className="flex flex-col gap-8">
-            {Object.entries(filesByCategory).map(([category, files]) => (
-              <div key={category} className="flex flex-col gap-3">
-                <h2 className="text-lg font-semibold text-title">{category}</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {files.map(file => (
-                    <FileCard key={file.path} file={file} />
-                  ))}
+                  {/* Additional auth rules could be parsed and listed here */}
                 </div>
               </div>
-            ))}
+
+              <div className="bg-container p-4 rounded-xl border border-container-border">
+                <h3 className="text-sm font-semibold text-common/70 mb-3 uppercase tracking-wider">Rate Limit</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-bold text-title">
+                    {selectedApi.rateLimit === false ? 'None' : selectedApi.rateLimit ?? '60'}
+                  </span>
+                  <span className="text-xs text-common/50">requests / min</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Type Defs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Input Schema</h3>
+                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed shadow-inner">
+                  {selectedApi.input}
+                </pre>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Output Schema</h3>
+                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed shadow-inner">
+                  {selectedApi.output}
+                </pre>
+              </div>
+            </div>
+
+            {/* Try It Playground */}
+            <div className="bg-container p-6 rounded-xl border border-container-border shadow-lg">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-title">⚡ Try it out</h3>
+                {apiStatus === 'success' && <span className="text-xs text-correct font-bold">Request Successful</span>}
+                {apiStatus === 'error' && <span className="text-xs text-wrong font-bold">Request Failed</span>}
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-common/60 mb-1.5 uppercase">Request Body (JSON)</label>
+                  <textarea
+                    value={inputData}
+                    onChange={(e) => setInputData(e.target.value)}
+                    className="w-full h-32 bg-background border border-container-border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all resize-y"
+                    placeholder="{}"
+                  />
+                </div>
+
+                <button
+                  onClick={() => handleApiRun(selectedApi)}
+                  disabled={apiStatus === 'loading'}
+                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-medium rounded-lg shadow-lg hover:shadow-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                >
+                  {apiStatus === 'loading' ? 'Running...' : 'Run Request'}
+                </button>
+
+                {apiResult && (
+                  <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+                    <label className="block text-xs font-medium text-common/60 mb-1.5 uppercase">Response</label>
+                    <pre className={`w-full bg-background border rounded-lg p-3 font-mono text-sm overflow-x-auto ${
+                      apiResult.status === 'error' ? 'border-wrong/30 text-wrong' : 'border-correct/30 text-correct'
+                    }`}>
+                      {JSON.stringify(apiResult, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Socket Usage */}
+            <div>
+              <h3 className="text-lg font-bold text-title mb-4">Socket Usage</h3>
+              <div className="bg-[#1e1e1e] text-gray-300 p-4 rounded-xl overflow-x-auto border border-white/10 shadow-inner">
+                <code className="font-mono text-xs leading-relaxed">
+                  <span className="text-purple-400">socket</span>.<span className="text-blue-400">emit</span>(<span className="text-green-400">'apiRequest'</span>, {'{'}<br/>
+                  &nbsp;&nbsp;<span className="text-sky-300">name</span>: <span className="text-green-400">'{selectedApi.path}'</span>,<br/>
+                  &nbsp;&nbsp;<span className="text-sky-300">data</span>: {inputData !== '{}' ? inputData : '{ ... }'},<br/>
+                  &nbsp;&nbsp;<span className="text-sky-300">responseIndex</span>: <span className="text-yellow-400">123</span><br/>
+                  {'}'});<br/>
+                  <br/>
+                  <span className="text-gray-500">// Listen for response</span><br/>
+                  <span className="text-purple-400">socket</span>.<span className="text-blue-400">on</span>(<span className="text-green-400">'apiResponse-123'</span>, (<span className="text-orange-300">response</span>) {'=>'} {'{'}<br/>
+                  &nbsp;&nbsp;<span className="text-purple-400">console</span>.<span className="text-yellow-300">log</span>(response);<br/>
+                  {'}'});
+                </code>
+              </div>
+            </div>
           </div>
         )}
 
-      </div>
-    </div>
-  );
-}
-
-// Side Badge
-function SideBadge({ side }: { side?: Side }) {
-  if (!side) return null;
-  const config = {
-    client: { bg: 'bg-blue-500', text: 'Client' },
-    server: { bg: 'bg-green-600', text: 'Server' },
-    shared: { bg: 'bg-purple-500', text: 'Shared' }
-  };
-  const c = config[side];
-  return <span className={`text-xs text-white px-1.5 py-0.5 rounded ${c.bg}`}>{c.text}</span>;
-}
-
-// Code Block with syntax highlighting styling
-function CodeBlock({ code, language, title }: { code: string; language?: string; title?: string }) {
-  return (
-    <div className="bg-container2 border border-container2-border rounded-lg overflow-hidden">
-      {title && (
-        <div className="px-4 py-2 border-b border-container2-border bg-container3 flex items-center justify-between">
-          <span className="text-xs font-medium text-muted">{title}</span>
-          {language && <span className="text-xs text-muted font-mono">{language}</span>}
-        </div>
-      )}
-      <pre className="p-4 overflow-x-auto text-sm font-mono text-common leading-relaxed">
-        <code>{code}</code>
-      </pre>
-    </div>
-  );
-}
-
-// Category Section
-function CategorySection({ category }: { category: DocCategory }) {
-  return (
-    <div className="flex flex-col gap-6" id={category.id}>
-      {/* Header with video */}
-      <div className="flex flex-col lg:flex-row gap-6">
-        {/* Video */}
-        <div className="lg:w-1/2 bg-container border border-container-border rounded-lg overflow-hidden">
-          <div className="aspect-video bg-container3 flex items-center justify-center">
-            {category.videoPath ? (
-              <video className="w-full h-full object-cover" controls>
-                <source src={category.videoPath} type="video/mp4" />
-                <track kind="captions" srcLang="en" label="English captions" />
-              </video>
-            ) : (
-              <div className="flex flex-col items-center gap-3 text-muted">
-                <span className="text-5xl">{category.icon}</span>
-                <span className="text-lg font-medium">{category.title}</span>
-                <span className="text-sm">Video tutorial coming soon</span>
+        {/* Sync Details */}
+        {selectedSync && (
+          <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-sm font-bold px-2 py-1 rounded bg-purple-600 text-white">SYNC</span>
+                <h1 className="text-2xl font-bold text-title tracking-tight">{selectedSync.name}</h1>
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Intro */}
-        <div className="lg:w-1/2 flex flex-col gap-4">
-          <div className="flex items-center gap-3">
-            <span className={`w-10 h-10 rounded-lg ${category.color} flex items-center justify-center text-white text-xl`}>
-              {category.icon}
-            </span>
-            <h2 className="text-2xl font-bold text-title">{category.title}</h2>
-          </div>
-          <p className="text-common leading-relaxed">{category.intro}</p>
-          <div className="text-sm text-muted">
-            {category.items.length} topics covered
-          </div>
-        </div>
-      </div>
-
-      {/* Doc Items */}
-      <div className="flex flex-col gap-6">
-        {category.items.map(item => (
-          <DocItemCard key={item.id} item={item} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Doc Item Card
-function DocItemCard({ item, categoryColor, categoryName }: {
-  item: DocItem;
-  categoryColor?: string;
-  categoryName?: string;
-}) {
-  const [expanded, setExpanded] = useState(true);
-
-  return (
-    <div className="bg-container border border-container-border rounded-lg overflow-hidden">
-      {/* Header */}
-      <div
-        role="button"
-        tabIndex={0}
-        className="p-4 flex items-center justify-between cursor-pointer hover:bg-container-hover"
-        onClick={() => { setExpanded(!expanded); }}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
-      >
-        <div className="flex items-center gap-3 flex-wrap">
-          {categoryName && categoryColor && (
-            <span className={`text-xs text-white px-1.5 py-0.5 rounded ${categoryColor}`}>{categoryName}</span>
-          )}
-          <h3 className="font-semibold text-title text-lg">{item.title}</h3>
-          <SideBadge side={item.side} />
-          {item.toggleable && (
-            <span className="text-xs bg-orange-500 text-white px-1.5 py-0.5 rounded">⚙️ {item.toggleable}</span>
-          )}
-        </div>
-        <span className="text-muted text-sm">{expanded ? '▲' : '▼'}</span>
-      </div>
-
-      {/* Content */}
-      {expanded && (
-        <div className="p-4 pt-0 flex flex-col gap-4">
-          <p className="text-common leading-relaxed">{item.description}</p>
-
-          {item.file && (
-            <span className="text-sm text-muted font-mono">📄 {item.file}</span>
-          )}
-
-          {/* Code Examples */}
-          {item.examples && item.examples.length > 0 && (
-            <div className="flex flex-col gap-4">
-              {item.examples.map((ex, idx) => (
-                <CodeBlock key={`${String(idx)}-${String(ex.title)}-${String(ex.language)}`} code={ex.code} language={ex.language} title={ex.title} />
-              ))}
+              <div className="font-mono text-sm text-common/60 bg-container px-3 py-1.5 rounded w-fit border border-container-border">
+                {selectedSync.path}
+              </div>
             </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
-// File Card with side indicator
-function FileCard({ file }: { file: FrameworkFile }) {
-  return (
-    <div className="bg-container border border-container-border rounded-lg p-4 flex flex-col gap-2 hover:border-blue-400">
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-sm text-title">{file.name}</span>
-        <span className={`text-xs text-white px-1.5 py-0.5 rounded ${file.side === 'server' ? 'bg-green-600' : 'bg-blue-500'}`}>
-          {file.side === 'server' ? 'Server' : 'Client'}
-        </span>
+            <div className="bg-container p-6 rounded-xl border border-container-border">
+               <p className="text-common/80 leading-relaxed">
+                Sync events provide real-time updates to all clients in a room. 
+                When a client triggers a sync request, the server validates it and broadcasts the result to everyone.
+               </p>
+            </div>
+
+             <div className="grid grid-cols-1 gap-6">
+              <div>
+                <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Client Input (Trigger)</h3>
+                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed">
+                  {selectedSync.clientInput}
+                </pre>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Server Output (Broadcast)</h3>
+                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed">
+                  {selectedSync.serverOutput}
+                </pre>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Client Output (Local)</h3>
+                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed">
+                  {selectedSync.clientOutput}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      <p className="text-sm text-common flex-1">{file.description}</p>
-      <span className="text-xs text-muted font-mono">{file.path}</span>
     </div>
   );
 }
