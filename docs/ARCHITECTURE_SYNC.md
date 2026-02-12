@@ -141,6 +141,10 @@ upsertSyncEventCallback("updateCounter", ({ clientOutput, serverOutput }) => {
 });
 ```
 
+## Offline Request Queue
+
+When the socket is disconnected or the browser is offline, `syncRequest` queues requests in memory and flushes on reconnect or when the browser comes back online.
+
 ---
 
 ### Room-specific sync

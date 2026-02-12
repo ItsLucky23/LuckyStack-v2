@@ -143,6 +143,10 @@ await apiRequest({ name: 'createUser', data: {...}, abortable: true });  // Forc
 await apiRequest({ name: 'getUser', data: {...}, abortable: false });    // Disable
 ```
 
+## Offline Request Queue
+
+When the socket is disconnected or the browser is offline, `apiRequest` automatically queues requests in memory. The queue flushes on reconnect or when the browser comes back online. Aborted requests are removed from the queue.
+
 ## Rate Limiting
 
 Configure globally in `config.ts`:

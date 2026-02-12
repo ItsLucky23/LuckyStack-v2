@@ -24,10 +24,10 @@
 - Available color tokens: `background`, `container`, `container2`, `container3`, `container4` (each with `-border` and `-hover` variants), `title`, `common`, `muted`, `correct`, `correct-hover`, `wrong`, `wrong-hover`.
 - Prefer `flex` and `gap` for layout. Avoid using `margin` unless absolutely necessary.
 - Dark mode is handled via CSS class `.dark` on `<html>`. Colors auto-switch via CSS variables.
-
+- Use existing Components like our Dropdown, MenuHandler, Avatar, ConfirmMenu, Icon, etc.
 ### 2. No Emojis
 
-- Never add emojis in code, comments, UI text, or debug output.
+- Never add emojis in code, comments, UI text, debug output, documentation, or html (use fontawesome icons instead).
 
 ### 3. SOLID Principles
 
@@ -48,7 +48,7 @@
 
 - Always use the custom `tryCatch` function for error handling:
   - **Client:** `import tryCatch from 'src/_functions/tryCatch'` - returns `[error, result]` tuple.
-  - **Server:** `import { tryCatch } from 'server/functions/tryCatch'` - returns `[error, result]` tuple with automatic Sentry capture.
+  - **Server:** `import { tryCatch } from 'server/functions/tryCatch'` - returns `[error, result]` tuple with automatic Sentry capture (in api and sync calls we get tryCatch in the function parameter ).
 - Check the first value: if truthy, there's an error. If null, access the second value for the result.
 - Never use raw `try/catch` blocks. Always wrap async operations in `tryCatch`.
 
@@ -94,6 +94,9 @@
 - After making significant code changes, update the relevant documentation files (`PROJECT_CONTEXT.md`, `docs/ARCHITECTURE_*.md`, etc.) to stay in sync with the codebase.
 - After updating docs, tell the user to run `npx repomix` to regenerate the codebase summary.
 
+### 14. Keep Design Updated
+
+- when updating files that are listed in the .gitignore check if there is a template file for it and update that too. (e.g. .env -> envTemplate.txt or config.ts -> configTemplate.txt)
 ---
 
 ## Project Structure
@@ -157,8 +160,13 @@ LuckyStack/
 
 ```typescript
 // src/{page}/_api/{name}.ts
-export const auth: AuthProps = { login: true, additional: [] };
 export const rateLimit: number | false = 60;
+export const method: "GET" | "POST" | "PUT" | "DELETE" = "POST";
+
+export const auth: AuthProps = { 
+  login: true, 
+  additional: [] 
+};
 
 export interface ApiParams {
   data: { /* typed input */ };
@@ -175,7 +183,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
 - `_server.ts` runs once on server for validation
 - `_client.ts` runs on server for each client in the room
-- Client sends: `syncRequest({ name, data, receiver: roomCode })`
+- Client sends: `syncRequest({ name, data, receiver: roomCode, ignoreSelf?: boolean })`
 - Client receives: `upsertSyncEventCallback(name, ({ clientOutput, serverOutput }) => {})`
 
 ### Provider Hierarchy
@@ -186,11 +194,10 @@ SocketStatusProvider > SessionProvider > TranslationProvider > AvatarProvider > 
 
 ### Templates
 
-Pages export `template` as `'plain'`, `'home'`, or `'dashboard'` to control their layout wrapper.
+Pages export `template` as `'plain'`, `'home'`, or a new template that you can create yourself. 
 
 - `plain` - No UI chrome (login, register, docs)
 - `home` - Top bar with avatar, settings toggle, logout
-- `dashboard` - Side navbar with main content area
 
 ---
 
@@ -206,3 +213,17 @@ For detailed architecture docs, read the files in `docs/`:
 - Getting started: `docs/DEVELOPER_GUIDE.md`
 - Deployment: `docs/HOSTING.md`
 - Full context: `PROJECT_CONTEXT.md`
+
+
+## JSX
+
+- Always use self-closing tags for components that don't have children: `<MyComponent />` instead of `<MyComponent></MyComponent>`.
+- Use div tags for basicly everything besides obvious cases like buttons or inputs, e.g. don't use header or footer tags.
+- With text use our i18n implementation.
+```tsx
+import { useTranslator } from "src/_functions/translator";
+
+const translate = useTranslator();
+{translate({ key: 'settings.theme.light' })}
+```
+- always use `` in a className tag instead of '' or "".

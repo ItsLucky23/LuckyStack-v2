@@ -4,6 +4,7 @@ import config, { dev, backendUrl, SessionLayout } from "config";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { RefObject, useEffect, useRef } from "react";
 import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
+import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
 
 export let socket: Socket | null = null;
 
@@ -41,6 +42,8 @@ export function useSocket(session: SessionLayout | null) {
 
     const socketConnection = io(backendUrl, socketOptions);
     socket = socketConnection;
+
+    const canFlushQueue = () => socketConnection.connected && isOnline();
 
     const handleVisibility = async () => {
       if (!config.socketActivityBroadcaster) { return; }
@@ -88,6 +91,11 @@ export function useSocket(session: SessionLayout | null) {
       });
     }
 
+    socketConnection.on("connect", () => {
+      flushApiQueue(canFlushQueue);
+      flushSyncQueue(canFlushQueue);
+    });
+
     socketConnection.on("logout", (status: "success" | "error") => {
       if (status === "success") {
         if (import.meta.env.VITE_SESSION_BASED_TOKEN === "true") {
@@ -116,6 +124,17 @@ export function useSocket(session: SessionLayout | null) {
     });
 
 
+    const handleOnline = () => {
+      if (socketConnection.connected) {
+        flushApiQueue(canFlushQueue);
+        flushSyncQueue(canFlushQueue);
+        return;
+      }
+      socketConnection.connect();
+    };
+
+    window.addEventListener("online", handleOnline);
+
     return () => {
       if (socket) {
         socket.disconnect();
@@ -131,6 +150,7 @@ export function useSocket(session: SessionLayout | null) {
       }
 
       document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("online", handleOnline)
     };
 
   }, []);

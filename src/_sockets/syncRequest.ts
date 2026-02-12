@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
 import { statusContent } from "src/_providers/socketStatusProvider";
 import { Dispatch, RefObject, SetStateAction } from "react";
+import { enqueueSyncRequest, isOnline } from "./offlineQueue";
 import type {
   SyncPagePath,
   SyncName,
@@ -112,24 +113,49 @@ export function syncRequest(params: any): Promise<boolean> {
     if (!await waitForSocket()) { return resolve(false); }
     if (!socket) { return resolve(false); }
 
-    const tempIndex = incrementResponseIndex();
     const pathname = window.location.pathname;
     const fullName = `sync${pathname}/${name}`;
+    let queueId: string | null = null;
 
-    if (dev) { console.log(`Client Sync Request: `, { name, data, receiver, ignoreSelf }) }
+    const canSendNow = () => {
+      if (!socket) return false;
+      if (!socket.connected) return false;
+      return isOnline();
+    };
 
-    socket.emit('sync', { name: fullName, data, cb: name, receiver, responseIndex: tempIndex, ignoreSelf });
-
-    socket.once(`sync-${tempIndex}`, (data: { status: "success" | "error", message: string }) => {
-      if (data.status === "error") {
-        if (dev) {
-          console.error(`Sync ${name} failed: ${data.message}`);
-          toast.error(`Sync ${name} failed: ${data.message}`);
+    const runRequest = () => {
+      if (!canSendNow()) {
+        if (!queueId) {
+          queueId = `${Date.now()}-${Math.random()}`;
         }
-        return resolve(false);
+        enqueueSyncRequest({
+          id: queueId,
+          key: fullName,
+          run: runRequest,
+          createdAt: Date.now(),
+        });
+        return;
       }
-      resolve(data.status == "success");
-    });
+
+      const tempIndex = incrementResponseIndex();
+
+      if (dev) { console.log(`Client Sync Request: `, { name, data, receiver, ignoreSelf }) }
+
+      socket.emit('sync', { name: fullName, data, cb: name, receiver, responseIndex: tempIndex, ignoreSelf });
+
+      socket.once(`sync-${tempIndex}`, (data: { status: "success" | "error", message: string }) => {
+        if (data.status === "error") {
+          if (dev) {
+            console.error(`Sync ${name} failed: ${data.message}`);
+            toast.error(`Sync ${name} failed: ${data.message}`);
+          }
+          return resolve(false);
+        }
+        resolve(data.status == "success");
+      });
+    };
+
+    runRequest();
   })
 }
 

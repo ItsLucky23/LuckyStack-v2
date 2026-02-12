@@ -4,6 +4,7 @@ import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializ
 import type { PagePath, ApiName, ApiInput, ApiOutput } from './apiTypes.generated';
 import { getApiMethod } from './apiTypes.generated';
 import notify from "src/_functions/notify";
+import { enqueueApiRequest, isOnline, removeApiQueueItem } from "./offlineQueue";
 
 //? Abort controller logic:
 //? - abortable: true → always use abort controller
@@ -146,6 +147,7 @@ export function apiRequest(params: any): Promise<any> {
 
     let signal: AbortSignal | null = null;
     let abortFunc = () => { };
+    let queueId: string | null = null;
 
     if (useAbortController) {
       if (abortControllers.has(fullname as string)) {
@@ -158,6 +160,7 @@ export function apiRequest(params: any): Promise<any> {
       abortControllers.set(fullname as string, abortController);
       abortFunc = () => {
         if (signal) { signal.removeEventListener("abort", abortFunc); }
+        if (queueId) { removeApiQueueItem(queueId); }
         reject(`Request ${fullname} aborted`)
       };
       //? here we bind the abortFunc to the abort event so it will be called when the abort controller is aborted
@@ -165,49 +168,74 @@ export function apiRequest(params: any): Promise<any> {
       signal.addEventListener("abort", abortFunc);
     }
 
-    const tempIndex = incrementResponseIndex();
-    socket.emit('apiRequest', { name: fullname, data, responseIndex: tempIndex });
+    const canSendNow = () => {
+      if (!socket) return false;
+      if (!socket.connected) return false;
+      return isOnline();
+    };
 
-    if (dev && (name as string) != 'session' && (name as string) != 'logout') { console.log(`Client API Request(${tempIndex}): `, { name, data }) }
-    socket.once(`apiResponse-${tempIndex}`, ({ result, message, status, errorCode, errorParams }: {
-      result: any;
-      message: string;
-      status: "success" | "error";
-      errorCode?: string;
-      errorParams?: {
-        key: string;
-        value: string | number | boolean;
-      }[];
-    }) => {
+    const runRequest = (socketInstance) => {
+      if (!canSendNow()) {
+        if (!queueId) {
+          queueId = `${Date.now()}-${Math.random()}`;
+        }
+        enqueueApiRequest({
+          id: queueId,
+          key: fullname,
+          run: runRequest,
+          createdAt: Date.now(),
+        });
+        return;
+      }
+
       if (signal && signal.aborted) { return; }
 
-      if (status === "error") {
-        if (!disableErrorMessage) {
-          // toast.error(message)
-          if (errorCode) {
-            notify.error({ key: errorCode, params: errorParams })
-          } else {
-            notify.error({ key: message })
+      const tempIndex = incrementResponseIndex();
+      socketInstance.emit('apiRequest', { name: fullname, data, responseIndex: tempIndex });
+
+      if (dev && (name as string) != 'session' && (name as string) != 'logout') { console.log(`Client API Request(${tempIndex}): `, { name, data }) }
+      socketInstance.once(`apiResponse-${tempIndex}`, ({ result, message, status, errorCode, errorParams }: {
+        result: any;
+        message: string;
+        status: "success" | "error";
+        errorCode?: string;
+        errorParams?: {
+          key: string;
+          value: string | number | boolean;
+        }[];
+      }) => {
+        if (signal && signal.aborted) { return; }
+
+        if (status === "error") {
+          if (!disableErrorMessage) {
+            // toast.error(message)
+            if (errorCode) {
+              notify.error({ key: errorCode, params: errorParams })
+            } else {
+              notify.error({ key: message })
+            }
           }
+          return resolve({
+            status,
+            message,
+            errorCode,
+            errorParams
+          } as any)
         }
-        return resolve({
-          status,
-          message,
-          errorCode,
-          errorParams
-        } as any)
-      }
 
-      if (dev && (name as string) != 'session' && (name as string) != 'logout') { console.log(`Server API Response(${tempIndex}): `, { name, ...result }) }
-      if (dev && (name as string) == 'session') { console.log(`Session result(${tempIndex}): `, result) }
-      if (dev && (name as string) == 'logout') { console.log(`Logout result(${tempIndex}): `, result) }
+        if (dev && (name as string) != 'session' && (name as string) != 'logout') { console.log(`Server API Response(${tempIndex}): `, { name, ...result }) }
+        if (dev && (name as string) == 'session') { console.log(`Session result(${tempIndex}): `, result) }
+        if (dev && (name as string) == 'logout') { console.log(`Logout result(${tempIndex}): `, result) }
 
-      if (signal) {
-        signal.removeEventListener("abort", abortFunc);
-        abortControllers.delete(fullname as string);
-      }
+        if (signal) {
+          signal.removeEventListener("abort", abortFunc);
+          abortControllers.delete(fullname as string);
+        }
 
-      resolve(result)
-    });
+        resolve(result)
+      });
+    };
+
+    runRequest(socket);
   })
 }

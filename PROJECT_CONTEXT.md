@@ -162,6 +162,7 @@ These are the core functions for communicating with the backend:
 - **Fully type-safe API calls** - TypeScript validates API names, input data, and output types
 - Auto-prefixes with current path: `api/{path}/{name}`
 - Has abort controllers for duplicate GET-like requests
+- Queues requests in memory when offline or socket-disconnected, then flushes on reconnect
 
 **Type System Features:**
 
@@ -208,6 +209,7 @@ const result = await apiRequest({ name: "jow" }); // ❌ Property 'data' is miss
 - `receiver` is the room code (e.g., "abc123")
 - `ignoreSelf` prevents the sender from receiving the event
 - **Fully type-safe** - sync names, clientData, and serverOutput are validated
+- Queues requests in memory when offline or socket-disconnected, then flushes on reconnect
 
 **Type System Features:**
 
