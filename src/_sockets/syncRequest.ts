@@ -115,24 +115,26 @@ export function syncRequest(params: any): Promise<boolean> {
     if (!socket) { return resolve(false); }
 
     const pathname = window.location.pathname;
-    const fullName = `sync${pathname}/${name}`;
+    const pagePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+    const cleanPagePath = pagePath.endsWith('/') ? pagePath.slice(0, -1) : pagePath;
+    // Build full sync route key: "sync/examples/updateCounter" or "sync/updateCounter" (root-level)
+    const fullName = cleanPagePath ? `sync/${cleanPagePath}/${name}` : `sync/${name}`;
     let queueId: string | null = null;
 
-    const canSendNow = () => {
-      if (!socket) return false;
-      if (!socket.connected) return false;
+    const canSendNow = (s: Socket) => {
+      if (!s.connected) return false;
       return isOnline();
     };
 
     const runRequest = (socketInstance: Socket) => {
-      if (!canSendNow()) {
+      if (!canSendNow(socketInstance)) {
         if (!queueId) {
           queueId = `${Date.now()}-${Math.random()}`;
         }
         enqueueSyncRequest({
           id: queueId,
           key: fullName,
-          run: () => runRequest(socketInstance),
+          run: (s) => runRequest(s),
           createdAt: Date.now(),
         });
         return;
@@ -188,8 +190,11 @@ export const useSyncEvents = () => {
     name: string,
     cb: (params: { clientOutput: any; serverOutput: any }) => void
   ): void {
-    const path = window.location.pathname;
-    syncEvents[`sync${path}/${name}`] = cb;
+    const pathname = window.location.pathname;
+    const pagePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+    const cleanPagePath = pagePath.endsWith('/') ? pagePath.slice(0, -1) : pagePath;
+    const fullName = cleanPagePath ? `sync/${cleanPagePath}/${name}` : `sync/${name}`;
+    syncEvents[fullName] = cb;
   }
 
   return { upsertSyncEventCallback };

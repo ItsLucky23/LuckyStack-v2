@@ -21,13 +21,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useSocket(session); //? starts the socket connection
 
   useEffect(() => {
-    console.log('jowjowjowj');
     latestSession = session;
   }, [session])
 
   useEffect(() => {
     void (async () => {
-      const response = await apiRequest({ name: 'session' });
+      const response = await apiRequest<"root", "session">({ name: 'session' });
       setSession(response as unknown as SessionLayout | null);
       setSessionLoaded(true);
     })()

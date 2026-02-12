@@ -7,12 +7,15 @@
 ## Quick Reference
 
 ```typescript
-// Client-side API call
+// Page-relative API call
 const result = await apiRequest({
   name: "getUserData",
   data: { userId: "123" },
   abortable: true, // Optional: auto-cancels if called again before response
 });
+
+// Root-level API call (works from any page — server resolves automatically)
+const session = await apiRequest({ name: "session" });
 
 // HTTP fallback (same API, no WebSocket needed)
 // GET /api/examples/getUserData?userId=123
@@ -25,12 +28,16 @@ const result = await apiRequest({
 
 ```
 src/
+├── _api/                       # Root-level APIs (callable from any page)
+│   ├── session.ts              # → api/session (use '/session' on client)
+│   └── logout.ts               # → api/logout  (use '/logout' on client)
 ├── {page}/_api/
-│   ├── {apiName}.ts          # Your API handler
-│   └── ...
+│   ├── {apiName}.ts            # → api/{page}/{apiName}
+│   └── {subfolder}/            # Nested: api/{page}/{subfolder}/{apiName}
+│       └── {apiName}.ts
 └── _sockets/
-    ├── apiRequest.ts         # Client-side API caller
-    └── apiTypes.generated.ts # Auto-generated types
+    ├── apiRequest.ts           # Client-side API caller
+    └── apiTypes.generated.ts   # Auto-generated types
 ```
 
 ---

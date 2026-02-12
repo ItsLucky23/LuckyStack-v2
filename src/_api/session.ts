@@ -12,6 +12,7 @@ export interface ApiParams {
 }
 
 export const main = async ({ user }: ApiParams): Promise<ApiResponse> => {
+  console.log(user)
   return {
     status: 'success',
     result: user

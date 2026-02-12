@@ -115,7 +115,7 @@ export default function DocsPage() {
   return (
     <div className="flex h-full min-h-screen bg-background text-common overflow-hidden">
       {/* Sidebar */}
-      <div className="w-64 flex-shrink-0 border-r border-container-border overflow-y-auto p-4 bg-container/50">
+      <div className="w-64 flex-shrink-0 border-r border-container1-border overflow-y-auto p-4 bg-container1/50">
         <h2 className="text-xl font-bold mb-6 text-title">Documentation</h2>
         
         <div className="mb-6">
@@ -130,14 +130,14 @@ export default function DocsPage() {
                     onClick={() => { setSelectedApi(api); setSelectedSync(null); setInputData('{}'); setApiResult(null); setApiStatus('idle'); }}
                     className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
                       selectedApi?.path === api.path 
-                        ? 'bg-container3 text-title shadow-sm' 
+                        ? 'bg-primary/10 text-title shadow-sm' 
                         : 'hover:bg-container2 text-common/80'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="truncate">{api.name}</span>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                        api.method === 'GET' ? 'bg-blue-500/10 text-blue-500' : 'bg-green-500/10 text-green-500'
+                        api.method === 'GET' ? 'bg-primary/10 text-primary' : 'bg-green-500/10 text-green-500'
                       }`}>{api.method}</span>
                     </div>
                   </button>
@@ -159,7 +159,7 @@ export default function DocsPage() {
                     onClick={() => { setSelectedSync(sync); setSelectedApi(null); }}
                     className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
                       selectedSync?.path === sync.path 
-                        ? 'bg-container3 text-title shadow-sm' 
+                        ? 'bg-primary/10 text-title shadow-sm' 
                         : 'hover:bg-container2 text-common/80'
                     }`}
                   >
@@ -188,20 +188,20 @@ export default function DocsPage() {
             <div>
               <div className="flex items-center gap-3 mb-2">
                 <span className={`text-sm font-bold px-2 py-1 rounded ${
-                  selectedApi.method === 'GET' ? 'bg-blue-500 text-white' : 'bg-green-600 text-white'
+                  selectedApi.method === 'GET' ? 'bg-primary text-white' : 'bg-green-600 text-white'
                 }`}>
                   {selectedApi.method}
                 </span>
                 <h1 className="text-2xl font-bold text-title tracking-tight">{selectedApi.name}</h1>
               </div>
-              <div className="font-mono text-sm text-common/60 bg-container px-3 py-1.5 rounded w-fit border border-container-border">
+              <div className="font-mono text-sm text-common/60 bg-container1 px-3 py-1.5 rounded w-fit border border-container1-border">
                 {selectedApi.path}
               </div>
             </div>
 
             {/* Info Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-container p-4 rounded-xl border border-container-border">
+              <div className="bg-container1 p-4 rounded-xl border border-container1-border">
                 <h3 className="text-sm font-semibold text-common/70 mb-3 uppercase tracking-wider">Authentication</h3>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -218,7 +218,7 @@ export default function DocsPage() {
                 </div>
               </div>
 
-              <div className="bg-container p-4 rounded-xl border border-container-border">
+              <div className="bg-container1 p-4 rounded-xl border border-container1-border">
                 <h3 className="text-sm font-semibold text-common/70 mb-3 uppercase tracking-wider">Rate Limit</h3>
                 <div className="flex items-center gap-2">
                   <span className="text-2xl font-bold text-title">
@@ -233,20 +233,20 @@ export default function DocsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Input Schema</h3>
-                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed shadow-inner">
+                <pre className="bg-container2 p-4 rounded-lg border border-container1-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed shadow-inner">
                   {selectedApi.input}
                 </pre>
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Output Schema</h3>
-                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed shadow-inner">
+                <pre className="bg-container2 p-4 rounded-lg border border-container1-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed shadow-inner">
                   {selectedApi.output}
                 </pre>
               </div>
             </div>
 
             {/* Try It Playground */}
-            <div className="bg-container p-6 rounded-xl border border-container-border shadow-lg">
+            <div className="bg-container1 p-6 rounded-xl border border-container1-border shadow-lg">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-title">⚡ Try it out</h3>
                 {apiStatus === 'success' && <span className="text-xs text-correct font-bold">Request Successful</span>}
@@ -259,7 +259,7 @@ export default function DocsPage() {
                   <textarea
                     value={inputData}
                     onChange={(e) => setInputData(e.target.value)}
-                    className="w-full h-32 bg-background border border-container-border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all resize-y"
+                    className="w-full h-32 bg-background border border-container1-border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all resize-y"
                     placeholder="{}"
                   />
                 </div>
@@ -267,7 +267,7 @@ export default function DocsPage() {
                 <button
                   onClick={() => handleApiRun(selectedApi)}
                   disabled={apiStatus === 'loading'}
-                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-medium rounded-lg shadow-lg hover:shadow-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  className="px-6 py-2 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                 >
                   {apiStatus === 'loading' ? 'Running...' : 'Run Request'}
                 </button>
@@ -290,14 +290,14 @@ export default function DocsPage() {
               <h3 className="text-lg font-bold text-title mb-4">Socket Usage</h3>
               <div className="bg-[#1e1e1e] text-gray-300 p-4 rounded-xl overflow-x-auto border border-white/10 shadow-inner">
                 <code className="font-mono text-xs leading-relaxed">
-                  <span className="text-purple-400">socket</span>.<span className="text-blue-400">emit</span>(<span className="text-green-400">'apiRequest'</span>, {'{'}<br/>
+                  <span className="text-purple-400">socket</span>.<span className="text-primary">emit</span>(<span className="text-green-400">'apiRequest'</span>, {'{'}<br/>
                   &nbsp;&nbsp;<span className="text-sky-300">name</span>: <span className="text-green-400">'{selectedApi.path}'</span>,<br/>
                   &nbsp;&nbsp;<span className="text-sky-300">data</span>: {inputData !== '{}' ? inputData : '{ ... }'},<br/>
                   &nbsp;&nbsp;<span className="text-sky-300">responseIndex</span>: <span className="text-yellow-400">123</span><br/>
                   {'}'});<br/>
                   <br/>
                   <span className="text-gray-500">// Listen for response</span><br/>
-                  <span className="text-purple-400">socket</span>.<span className="text-blue-400">on</span>(<span className="text-green-400">'apiResponse-123'</span>, (<span className="text-orange-300">response</span>) {'=>'} {'{'}<br/>
+                  <span className="text-purple-400">socket</span>.<span className="text-primary">on</span>(<span className="text-green-400">'apiResponse-123'</span>, (<span className="text-orange-300">response</span>) {'=>'} {'{'}<br/>
                   &nbsp;&nbsp;<span className="text-purple-400">console</span>.<span className="text-yellow-300">log</span>(response);<br/>
                   {'}'});
                 </code>
@@ -314,12 +314,12 @@ export default function DocsPage() {
                 <span className="text-sm font-bold px-2 py-1 rounded bg-purple-600 text-white">SYNC</span>
                 <h1 className="text-2xl font-bold text-title tracking-tight">{selectedSync.name}</h1>
               </div>
-              <div className="font-mono text-sm text-common/60 bg-container px-3 py-1.5 rounded w-fit border border-container-border">
+              <div className="font-mono text-sm text-common/60 bg-container1 px-3 py-1.5 rounded w-fit border border-container1-border">
                 {selectedSync.path}
               </div>
             </div>
 
-            <div className="bg-container p-6 rounded-xl border border-container-border">
+            <div className="bg-container1 p-6 rounded-xl border border-container1-border">
                <p className="text-common/80 leading-relaxed">
                 Sync events provide real-time updates to all clients in a room. 
                 When a client triggers a sync request, the server validates it and broadcasts the result to everyone.
@@ -329,19 +329,19 @@ export default function DocsPage() {
              <div className="grid grid-cols-1 gap-6">
               <div>
                 <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Client Input (Trigger)</h3>
-                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed">
+                <pre className="bg-container2 p-4 rounded-lg border border-container1-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed">
                   {selectedSync.clientInput}
                 </pre>
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Server Output (Broadcast)</h3>
-                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed">
+                <pre className="bg-container2 p-4 rounded-lg border border-container1-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed">
                   {selectedSync.serverOutput}
                 </pre>
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-common/70 mb-2 pl-1">Client Output (Local)</h3>
-                <pre className="bg-container3 p-4 rounded-lg border border-container-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed">
+                <pre className="bg-container2 p-4 rounded-lg border border-container1-border text-xs font-mono overflow-x-auto text-common/90 leading-relaxed">
                   {selectedSync.clientOutput}
                 </pre>
               </div>

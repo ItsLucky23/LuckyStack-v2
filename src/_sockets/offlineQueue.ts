@@ -26,16 +26,10 @@ export const isOnline = () => {
 
 export const enqueueApiRequest = (item: ApiQueueItem) => {
   apiQueue.push(item);
-  if (dev) {
-    console.log("API request queued", { key: item.key, queueSize: apiQueue.length });
-  }
 };
 
 export const enqueueSyncRequest = (item: SyncQueueItem) => {
   syncQueue.push(item);
-  if (dev) {
-    console.log("Sync request queued", { key: item.key, queueSize: syncQueue.length });
-  }
 };
 
 export const removeApiQueueItem = (id: string) => {

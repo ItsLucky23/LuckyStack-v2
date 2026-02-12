@@ -48,16 +48,26 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   const user = await getSession(token);
   const syncObject = process.env.NODE_ENV == 'development' ? devSyncs : syncs;
 
-  console.log(syncObject)
+  //? Resolve sync: try exact match first, then fall back to root-level
+  //? e.g. client sends "sync/examples/updateCounter" → not found → try "sync/updateCounter"
+  let resolvedName = name;
+  const syncBaseName = name.split('/').pop(); // e.g. "sync/examples/updateCounter" → "updateCounter"
+  if (!syncObject[`${name}_client`] && !syncObject[`${name}_server`] && syncBaseName) {
+    const rootKey = `sync/${syncBaseName}`;
+    if (syncObject[`${rootKey}_client`] || syncObject[`${rootKey}_server`]) {
+      resolvedName = rootKey;
+    }
+  }
+
   //? we check if there is a client file or/and a server file, if they both dont exist we abort
-  if (!syncObject[`${name}_client`] && !syncObject[`${name}_server`]) {
+  if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
     console.log("ERROR!!!, ", `you need ${name}_client or ${name}_server file to sync`, 'red');
     return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `you need ${name}_client or ${name}_server file to sync` });
   }
 
   let serverOutput = {};
-  if (syncObject[`${name}_server`]) {
-    const { auth, main: serverMain } = syncObject[`${name}_server`];
+  if (syncObject[`${resolvedName}_server`]) {
+    const { auth, main: serverMain } = syncObject[`${resolvedName}_server`];
 
     //? if the login key is true we check if the user has an id in the session object
     if (auth.login) {
@@ -83,8 +93,8 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: serverSyncResult.message });
     } else if (serverSyncResult?.status !== 'success') {
       //? badReturn means it doesnt include a status key with the value 'success' || 'error'
-      console.log('ERROR!!!, ', `sync ${name}_server function didnt return a status key with the value 'success' or 'error'`, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `sync ${name}_server function didnt return a status key with the value 'success' or 'error'` });
+      console.log('ERROR!!!, ', `sync ${resolvedName}_server function didnt return a status key with the value 'success' or 'error'`, 'red');
+      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `sync ${resolvedName}_server function didnt return a status key with the value 'success' or 'error'` });
     } else if (serverSyncResult?.status == 'success') {
       serverOutput = serverSyncResult;
     }
@@ -130,8 +140,8 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       }
     }
 
-    if (syncObject[`${name}_client`]) {
-      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${name}_client`]({ clientInput: data, user, functions: functionsObject, serverOutput, roomCode: receiver }));
+    if (syncObject[`${resolvedName}_client`]) {
+      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, user, functions: functionsObject, serverOutput, roomCode: receiver }));
       // if (clientSyncError) { socket.emit(`sync-${responseIndex}`, { status: "error", message: clientSyncError }); }
       if (clientSyncError) { tempSocket.emit(`sync`, { status: "error", message: clientSyncError }) }
       //? if we return error we dont want this client to get the event

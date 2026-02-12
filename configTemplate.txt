@@ -14,13 +14,20 @@ const config = {
 
   //? if true than we store the token in session (unsecure but nice for development)
   //? when true you can open multiple windows and login into different user accounts so you can test certain features
-  allowMultipleSessions: false,
+  singleSessionPerUser: false,
   
   //? if false syncing works to users in your room but they wont know who they are sycning to
   //? if true on the client we know the activity status of all users in the same room
   //? this is usefull for multiplayer games to e.g. pause the game when a user is afk
   //? this data is stored in socketStatus (context provider)
-  socketActivityBroadcaster: false
+  socketActivityBroadcaster: false,
+
+  //? Rate limiting configuration for API requests
+  rateLimiting: {
+    defaultApiLimit: 60,   //* requests per minute per user
+    defaultIpLimit: 100,   //* requests per minute per IP (unauthenticated)
+    windowMs: 60000,       //* sliding window duration in ms (1 minute)
+  }
 }
 //* these values are optional to have in the session object, used for type declartion after an apiRequest on the client
 export interface SessionLayout {

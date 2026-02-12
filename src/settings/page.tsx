@@ -15,6 +15,9 @@ const incrementAvatarVersion = (url: string) => {
   return match ? Number.parseInt(match[1]) + 1 : 1;
 }
 
+//? Strip ?v= cache buster so avatar comparisons aren't affected by version changes
+const stripAvatarVersion = (url: string) => url.replace(/[?&]v=\d+/, '');
+
 export const template = 'home';
 export default function Home() {
 
@@ -33,18 +36,25 @@ export default function Home() {
 
     if (
       newLanguage === session.language
-      && newAvatar === session.avatar
+      && stripAvatarVersion(newAvatar) === stripAvatarVersion(session.avatar)
       && newName === session.name
       && newTheme === session.theme
     ) {
       notify.info({ key: 'settings.noChangesMade' })
       return;
     }
+    console.log(session.avatar)
+    console.log({
+      language: newLanguage === session.language ? undefined : newLanguage,
+      avatar: stripAvatarVersion(newAvatar) === stripAvatarVersion(session.avatar) ? undefined : newAvatar,
+      name: newName === session.name ? undefined : newName,
+      theme: newTheme === session.theme ? undefined : newTheme,
+    })
     const response = await apiRequest({
       name: "updateUser",
       data: {
         language: newLanguage === session.language ? undefined : newLanguage,
-        avatar: newAvatar === session.avatar ? undefined : newAvatar,
+        avatar: stripAvatarVersion(newAvatar) === stripAvatarVersion(session.avatar) ? undefined : newAvatar,
         name: newName === session.name ? undefined : newName,
         theme: newTheme === session.theme ? undefined : newTheme,
       },
@@ -60,6 +70,9 @@ export default function Home() {
   //? we trigger saveUser when the newAvatar changes so that the avatar is saved immidiatly, we dont call the saveUser in the onchange callback cause than it causes a race codition between the function calling and newAvatar having the new value
   useEffect(() => {
     if (!newAvatar) return;
+    if (!session) return;
+    
+    if (stripAvatarVersion(newAvatar) === stripAvatarVersion(session.avatar)) return;
 
     void saveUser();
   }, [newAvatar, saveUser])
@@ -82,7 +95,7 @@ export default function Home() {
 
   return (
     <div className='flex items-center justify-center w-full h-full bg-background'>
-      <div className="bg-container border-2 border-container-border flex flex-col p-8 gap-4 rounded-2xl max-w-[360px] w-[90%]">
+      <div className="bg-container1 border-2 border-container1-border flex flex-col p-8 gap-4 rounded-2xl max-w-[360px] w-[90%]">
 
         <div className="flex gap-4 items-center">
           {newAvatar || session.avatar ? (
@@ -161,7 +174,7 @@ export default function Home() {
         <div className="space-y-2 w-full">
           <div className="text-lg font-semibold">Name</div>
           <input
-            className={`w-full bg-container2 border-container2-border border-2 focus:outline-0 focus:border-container3-border transition-all duration-150 p-2 rounded-md`}
+            className={`w-full bg-container2 border-container2-border border-2 focus:outline-0 focus:border-secondary transition-all duration-150 p-2 rounded-md`}
             value={newName}
             onChange={(e) => { setNewName(e.target.value) }}
           ></input>
@@ -179,8 +192,8 @@ export default function Home() {
                 setLanguage('nl');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newLanguage === 'nl' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
-                hover:bg-container3 hover:border-container3-border transition-all duration-300
+                ${newLanguage === 'nl' ? 'bg-primary border-primary text-white' : 'bg-container2 border-container2-border'}
+                hover:bg-primary hover:border-primary hover:text-white transition-all duration-300
               `}
             >
               {/* NL */}
@@ -192,8 +205,8 @@ export default function Home() {
                 setLanguage('en');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newLanguage === 'en' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
-                hover:bg-container3 hover:border-container3-border transition-all duration-300
+                ${newLanguage === 'en' ? 'bg-primary border-primary text-white' : 'bg-container2 border-container2-border'}
+                hover:bg-primary hover:border-primary hover:text-white transition-all duration-300
               `}
             >
               {/* EN */}
@@ -205,8 +218,8 @@ export default function Home() {
                 setLanguage('de');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newLanguage === 'de' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
-                hover:bg-container3 hover:border-container3-border transition-all duration-300
+                ${newLanguage === 'de' ? 'bg-primary border-primary text-white' : 'bg-container2 border-container2-border'}
+                hover:bg-primary hover:border-primary hover:text-white transition-all duration-300
               `}
             >
               {/* DE */}
@@ -218,8 +231,8 @@ export default function Home() {
                 setLanguage('fr');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newLanguage === 'fr' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
-                hover:bg-container3 hover:border-container3-border transition-all duration-300
+                ${newLanguage === 'fr' ? 'bg-primary border-primary text-white' : 'bg-container2 border-container2-border'}
+                hover:bg-primary hover:border-primary hover:text-white transition-all duration-300
               `}
             >
               {/* FR */}
@@ -240,8 +253,8 @@ export default function Home() {
                 updateTheme('light');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newTheme === 'light' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
-                hover:bg-container3 hover:border-container3-border transition-all duration-300
+                ${newTheme === 'light' ? 'bg-primary border-primary text-white' : 'bg-container2 border-container2-border'}
+                hover:bg-primary hover:border-primary hover:text-white transition-all duration-300
               `}
             >
               {/* Light mode */}
@@ -253,8 +266,8 @@ export default function Home() {
                 updateTheme('dark');
               }}
               className={`w-full border-2 p-2 rounded-md
-                ${newTheme === 'dark' ? 'bg-container3 border-container3-border' : 'bg-container2 border-container2-border'}
-                hover:bg-container3 hover:border-container3-border transition-all duration-300
+                ${newTheme === 'dark' ? 'bg-primary border-primary text-white' : 'bg-container2 border-container2-border'}
+                hover:bg-primary hover:border-primary hover:text-white transition-all duration-300
               `}
             >
               {/* Dark mode */}
@@ -264,7 +277,7 @@ export default function Home() {
         </div>
 
         <button
-          className="w-full bg-blue-500 text-white py-2 rounded-lg"
+          className="w-full bg-primary text-white py-2 rounded-lg"
           onClick={() => void saveUser()}
         >
           {/* Save data */}

@@ -18,7 +18,11 @@ const abortControllers = new Map<string, AbortController>();
  * Falls back to name inference if API not found in map.
  */
 const isGetMethod = (pagePath: string, apiName: string): boolean => {
-  const method = getApiMethod(pagePath, apiName);
+  let method = getApiMethod(pagePath, apiName);
+  // Fallback to root-level API if not found under current page
+  if (!method && pagePath !== 'root') {
+    method = getApiMethod('root', apiName);
+  }
   if (method) return method === 'GET';
 
   // Fallback: infer from name (only 'get' prefix)
@@ -47,8 +51,7 @@ type DataRequired<T> = {} extends T ? false : true;
 // ═══════════════════════════════════════════════════════════════════════════════
 // Global API Params - Union of ALL valid API calls with proper data enforcement
 // ═══════════════════════════════════════════════════════════════════════════════
-
-// All possible API names across all pages
+// All possible API names across all pages (includes root-level APIs under 'root')
 type AllApiNames = {
   [P in PagePath]: ApiName<P>
 }[PagePath];
@@ -136,10 +139,14 @@ export function apiRequest(params: any): Promise<any> {
     //? - abortable: undefined → smart default (GET APIs get abort controller)
     const pathname = window.location.pathname;
     const pagePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
-    const isGet = isGetMethod(pagePath, name as string);
+    // Remove trailing slash for clean paths
+    const cleanPagePath = pagePath.endsWith('/') ? pagePath.slice(0, -1) : pagePath;
+
+    const isGet = isGetMethod(cleanPagePath, name as string);
     const useAbortController = params.abortable === true || isGet;
-    const fullname = (name as string) != 'session' && (name as string) != 'logout' ? `api${pathname}/${name}` : name;
-    // example: api/games/boerZoektVrouw/getGameData
+    // Build full API route key: "api/examples/getUserData" or "api/session" (when at root /)
+    // Server handles root-level fallback: if api/examples/session doesn't exist, it tries api/session
+    const fullname = cleanPagePath ? `api/${cleanPagePath}/${name}` : `api/${name}`;
 
     let signal: AbortSignal | null = null;
     let abortFunc = () => { };
@@ -164,21 +171,20 @@ export function apiRequest(params: any): Promise<any> {
       signal.addEventListener("abort", abortFunc);
     }
 
-    const canSendNow = () => {
-      if (!socket) return false;
-      if (!socket.connected) return false;
+    const canSendNow = (s: Socket) => {
+      if (!s.connected) return false;
       return isOnline();
     };
 
     const runRequest = (socketInstance: Socket) => {
-      if (!canSendNow()) {
+      if (!canSendNow(socketInstance)) {
         if (!queueId) {
           queueId = `${Date.now()}-${Math.random()}`;
         }
         enqueueApiRequest({
           id: queueId,
           key: fullname,
-          run: () => runRequest(socketInstance),
+          run: (s) => runRequest(s),
           createdAt: Date.now(),
         });
         return;
@@ -189,7 +195,7 @@ export function apiRequest(params: any): Promise<any> {
       const tempIndex = incrementResponseIndex();
       socketInstance.emit('apiRequest', { name: fullname, data, responseIndex: tempIndex });
 
-      if (dev && (name as string) != 'session' && (name as string) != 'logout') { console.log(`Client API Request(${tempIndex}): `, { name, data }) }
+      if (dev) { console.log(`Client API Request(${tempIndex}): `, { name, data }) }
       socketInstance.once(`apiResponse-${tempIndex}`, ({ result, message, status, errorCode, errorParams }: {
         result: any;
         message: string;
@@ -219,9 +225,7 @@ export function apiRequest(params: any): Promise<any> {
           } as any)
         }
 
-        if (dev && (name as string) != 'session' && (name as string) != 'logout') { console.log(`Server API Response(${tempIndex}): `, { name, ...result }) }
-        if (dev && (name as string) == 'session') { console.log(`Session result(${tempIndex}): `, result) }
-        if (dev && (name as string) == 'logout') { console.log(`Logout result(${tempIndex}): `, result) }
+        if (dev) { console.log(`Server API Response(${tempIndex}): `, { name, ...result }) }
 
         if (signal) {
           signal.removeEventListener("abort", abortFunc);

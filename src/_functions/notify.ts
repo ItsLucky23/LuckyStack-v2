@@ -5,13 +5,14 @@ import enJson from "src/_locales/en.json";
 import deJson from "src/_locales/de.json";
 import frJson from "src/_locales/fr.json";
 import { getCurrentSession } from "src/_providers/SessionProvider";
+import { defaultLanguage } from "config";
 // import Translator from "./translator";
 
 const Translator = () => {
   const session = getCurrentSession();
-  if (!session) { return }
+  const language = session?.language ?? defaultLanguage;
 
-  switch (session.language) {
+  switch (language) {
     case "nl": return nlJson;
     case "en": return enJson;
     case "de": return deJson;

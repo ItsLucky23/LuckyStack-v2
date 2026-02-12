@@ -39,7 +39,7 @@ export default function ExamplesPage() {
             <h1 className="text-3xl font-bold text-title">LuckyStack Examples</h1>
             <p className="text-muted text-sm">Interactive demo of all framework features</p>
           </div>
-          <Link to="/docs" className="px-4 h-9 bg-container border border-container-border text-commen rounded-md flex items-center justify-center hover:scale-105 transition-all duration-300">
+          <Link to="/docs" className="px-4 h-9 bg-container1 border border-container1-border text-commen rounded-md flex items-center justify-center hover:scale-105 transition-all duration-300">
             📖 Docs
           </Link>
         </div>
@@ -48,20 +48,20 @@ export default function ExamplesPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 auto-rows-auto">
 
           {/* User Info - Tall */}
-          <div className="md:row-span-2 bg-container border border-container-border rounded-lg p-5 flex flex-col gap-4">
+          <div className="md:row-span-2 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-4">
             <h2 className="font-semibold text-title flex items-center gap-2">
-              <span className="w-6 h-6 bg-blue-500 rounded flex items-center justify-center text-white text-xs">👤</span>
+              <span className="w-6 h-6 bg-primary rounded flex items-center justify-center text-white text-xs">👤</span>
               User Info
             </h2>
             {session?.id ? (
               <div className="flex flex-col gap-3 flex-1">
-                <div className="w-16 h-16 bg-container2 border border-container2-border rounded-full flex items-center justify-center text-title text-2xl font-bold">
+                <div className="w-16 h-16 bg-container12 border border-container2-border rounded-full flex items-center justify-center text-title text-2xl font-bold">
                   {session.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex flex-col gap-1">
                   <p className="text-title font-medium">{session.name}</p>
                   <p className="text-xs text-muted">{session.email}</p>
-                  <p className={`text-xs mt-2 px-2 py-1 rounded inline-block w-fit ${session.admin ? 'bg-correct text-white' : 'bg-container2 text-muted'}`}>
+                  <p className={`text-xs mt-2 px-2 py-1 rounded inline-block w-fit ${session.admin ? 'bg-correct text-white' : 'bg-container12 text-muted'}`}>
                     {session.admin ? '✓ Admin' : 'Not Admin'}
                   </p>
                 </div>
@@ -69,10 +69,11 @@ export default function ExamplesPage() {
                   onClick={() => {
                     void (async () => {
                       const result = await apiRequest({ name: 'logout' })
+                      const result2 = await apiRequest({ name: 'kkl' })
                       logResult('logout', result)
                     })();
                   }}
-                  className="mt-auto px-4 h-9 bg-container2 border border-container2-border text-commen rounded-md hover:bg-container2-hover transition-colors text-sm"
+                  className="mt-auto px-4 h-9 bg-container12 border border-container2-border text-commen rounded-md hover:bg-container12-hover transition-colors text-sm"
                 >
                   Logout
                 </button>
@@ -80,7 +81,7 @@ export default function ExamplesPage() {
             ) : (
               <div className="flex flex-col gap-3 flex-1 items-center justify-center">
                 <p className="text-muted text-sm">Not logged in</p>
-                <Link to="/login" className="px-4 h-9 bg-blue-500 text-white rounded-md flex items-center justify-center hover:scale-105 transition-all duration-300 text-sm">
+                <Link to="/login" className="px-4 h-9 bg-primary text-white rounded-md flex items-center justify-center hover:scale-105 transition-all duration-300 text-sm">
                   Go to Login
                 </Link>
               </div>
@@ -88,7 +89,7 @@ export default function ExamplesPage() {
           </div>
 
           {/* Real-time Sync - Wide */}
-          <div className="md:col-span-2 lg:col-span-3 bg-container border border-container-border rounded-lg p-5 flex flex-col gap-4">
+          <div className="md:col-span-2 lg:col-span-3 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-title flex items-center gap-2">
                 <span className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center text-white text-xs">⚡</span>
@@ -101,7 +102,7 @@ export default function ExamplesPage() {
                 onClick={() => { void syncRequest({ name: 'updateCounter', data: { increase: false }, receiver: 'examples-room' }); }}
                 className="w-14 h-14 bg-wrong text-white rounded-full text-3xl font-bold hover:scale-110 transition-transform cursor-pointer"
               >−</button>
-              <div className="w-28 h-20 bg-container2 border border-container2-border rounded-lg flex items-center justify-center">
+              <div className="w-28 h-20 bg-container12 border border-container2-border rounded-lg flex items-center justify-center">
                 <span className="text-4xl font-bold text-title">{counter}</span>
               </div>
               <button
@@ -112,7 +113,7 @@ export default function ExamplesPage() {
           </div>
 
           {/* Public API */}
-          <div className="bg-container border border-container-border rounded-lg p-5 flex flex-col gap-3">
+          <div className="bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
             <h3 className="font-semibold text-title text-sm">🌐 Public API</h3>
             <p className="text-xs text-muted">No login needed</p>
             <button
@@ -124,7 +125,7 @@ export default function ExamplesPage() {
           </div>
 
           {/* Toggle Admin */}
-          <div className="bg-container border border-container-border rounded-lg p-5 flex flex-col gap-3">
+          <div className="bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
             <h3 className="font-semibold text-title text-sm">🔄 Toggle Admin</h3>
             <p className="text-xs text-muted">Requires login</p>
             <button
@@ -136,7 +137,7 @@ export default function ExamplesPage() {
           </div>
 
           {/* Admin Only */}
-          <div className="bg-container border border-container-border rounded-lg p-5 flex flex-col gap-3">
+          <div className="bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
             <h3 className="font-semibold text-title text-sm">🔐 Admin Only</h3>
             <p className="text-xs text-muted">admin: true required</p>
             <button
@@ -153,7 +154,7 @@ export default function ExamplesPage() {
           </div>
 
           {/* Notification - Wide */}
-          <div className="md:col-span-2 bg-container border border-container-border rounded-lg p-5 flex flex-col gap-3">
+          <div className="md:col-span-2 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
             <h3 className="font-semibold text-title text-sm">🔔 Notifications</h3>
             <p className="text-xs text-muted">Toast system with translation support (Sonner)</p>
             <div className="flex gap-2 mt-auto">
@@ -173,15 +174,15 @@ export default function ExamplesPage() {
           </div>
 
           {/* API Results - Full Width */}
-          <div className="md:col-span-3 lg:col-span-4 bg-container border border-container-border rounded-lg p-5 flex flex-col gap-3">
+          <div className="md:col-span-3 lg:col-span-4 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
             <h3 className="font-semibold text-title text-sm">📋 API Results</h3>
             {apiResults.length === 0 ? (
               <p className="text-xs text-muted">Click an API button to see results here</p>
             ) : (
               <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
                 {apiResults.map((item) => (
-                  <div key={`${item.name}-${item.ts}`} className="flex gap-3 text-xs p-2 bg-container2 border border-container2-border rounded">
-                    <span className="font-mono text-blue-500 w-32 flex-shrink-0">{item.name}</span>
+                  <div key={`${item.name}-${item.ts}`} className="flex gap-3 text-xs p-2 bg-container12 border border-container2-border rounded">
+                    <span className="font-mono text-primary w-32 flex-shrink-0">{item.name}</span>
                     <span className="text-muted">{item.ts}</span>
                     <pre className="text-commen flex-1 overflow-x-auto">{JSON.stringify(item.result, null, 0)}</pre>
                   </div>

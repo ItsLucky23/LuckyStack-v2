@@ -26,13 +26,14 @@ interface FullProvider {
   getAvatar?: ({userData, avatarId}: {userData: Record<string, any>, avatarId: string}) => any
 }
 
-type oauthProvidersProps = | BasicProvider | (Required<FullProvider>); 
+type oauthProvidersProps = BasicProvider | FullProvider; 
 
 // const backendUrl = `http${process.env.SECURE == 'true' ? 's' : ''}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
 const prod = process.env.NODE_ENV !== 'development';
-const backendUrl = process.env.NODE_ENV == 'development' 
-  ? `http${process.env.SECURE == 'true' ? 's' : ''}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`
-  : process.env.DNS
+const protocol = process.env.SECURE == 'true' ? 'https' : 'http';
+const backendUrl = prod
+  ? (process.env.DNS || "")
+  : `${protocol}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`
   
 const oauthProviders: oauthProvidersProps[] = [
   {
@@ -53,7 +54,8 @@ const oauthProviders: oauthProvidersProps[] = [
     ],
     nameKey: 'name',
     emailKey: 'email',
-    avatarKey: 'picture'
+    avatarKey: 'picture',
+    avatarCodeKey: ''
   },
   {
     name: 'github',
@@ -79,7 +81,11 @@ const oauthProviders: oauthProvidersProps[] = [
             'Authorization': `Bearer ${access_token}`
           },
         })
-        return await response.json(); 
+        if (!response.ok) { return false; }
+        const emails = await response.json(); 
+        // return data;
+        if (!Array.isArray(emails)) { return false; }
+        return emails;
       }
   
       const [getEmailError, getEmailResponse] = await tryCatch(getEmail);
@@ -87,6 +93,8 @@ const oauthProviders: oauthProvidersProps[] = [
         console.log(getEmailError);
         return false;
       }
+
+      if (!getEmailResponse) { return false; }
   
       //? if we found the email we set it to the user object
       let mainEmail: string | undefined;
@@ -137,10 +145,63 @@ const oauthProviders: oauthProvidersProps[] = [
     scope: ['public_profile', 'email'],
     nameKey: 'name',
     emailKey: 'email',
+    avatarCodeKey: '',
     getAvatar: ({userData}: {userData: Record<string, any>}) => {
       return userData?.picture?.data?.url || undefined;
     }
   },
+  {
+    name: 'microsoft',
+    clientID: prod ? process.env.MICROSOFT_CLIENT_ID! : process.env.DEV_MICROSOFT_CLIENT_ID!,
+    clientSecret: prod ? process.env.MICROSOFT_CLIENT_SECRET! : process.env.DEV_MICROSOFT_CLIENT_SECRET!,
+    callbackURL: `${backendUrl}/auth/callback/microsoft`,
+    // 'common' allows both personal and work accounts
+    authorizationURL: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
+    tokenExchangeURL: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    tokenExchangeMethod: 'form',
+    userInfoURL: 'https://graph.microsoft.com/v1.0/me',
+    scope: ['openid', 'profile', 'email', 'User.Read'],
+    nameKey: 'displayName',
+    emailKey: 'mail', // Note: some personal accounts use 'userPrincipalName' if 'mail' is null
+    avatarCodeKey: 'id', 
+    getAvatar: async ({ userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => {
+      // Microsoft doesn't give a URL, it gives a binary blob via a separate endpoint.
+      // You typically need the access_token here to fetch it. 
+      // If your architecture doesn't pass the token to getAvatar, 
+      // you can return this Graph URL for your frontend to fetch (with a token):
+      return `https://graph.microsoft.com/v1.0/users/${avatarId}/photo/$value`;
+    },
+    getEmail: async (access_token: string) => {
+      const getEmail = async () => {
+        const response = await fetch('https://graph.microsoft.com/v1.0/me', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${access_token}`,
+            'Content-Type': 'application/json'
+          },
+        });
+        if (!response.ok) { return false; }
+        const data = await response.json();
+        if (!data) { return false; }
+        return data;
+      };
+
+      const [getEmailError, getEmailResponse] = await tryCatch(getEmail);
+      if (getEmailError) {
+        console.log(getEmailError);
+        return false;
+      }
+
+      if (!getEmailResponse) { return false; }
+
+      const tempEmailReponse: any = getEmailResponse;
+
+      // 1. 'mail' is the standard property for work/school accounts
+      // 2. 'userPrincipalName' is used for personal accounts or as a fallback
+      const mainEmail = tempEmailReponse.mail || tempEmailReponse.userPrincipalName;
+      return mainEmail || false;
+    }
+  }
 ];
 
 export default oauthProviders;

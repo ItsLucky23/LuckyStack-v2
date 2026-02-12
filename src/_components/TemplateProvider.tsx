@@ -58,13 +58,13 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
   }, [ref, handleNavigate, location.pathname]);
 
   const handleLogout = useCallback(() => {
-    void apiRequest<"", "logout">({ name: 'logout' });
+    void apiRequest({ name: 'logout' });
   }, []);
 
   return (
     <div className="w-full h-full overflow-hidden flex flex-col text-title text-sm md:text-lg">
 
-      <div className='w-full flex items-center p-2 bg-container gap-4'>
+      <div className='w-full flex items-center p-2 bg-container1 gap-4'>
         <div className='h-full flex-1 flex gap-2 items-center'>
           <div className='min-w-8 max-w-8 h-8'>
             {session && (

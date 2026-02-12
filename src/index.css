@@ -1,33 +1,33 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #FFFFFF;
+  --color-background: #F5F5F5;
 
-  --color-container1: #F5F5F5;
-  --color-container1-hover: #EEEEEE;
-  --color-container1-border: #E0E0E0;
+  --color-container1: #FFFFFF;
+  --color-container1-hover: #F9F9F9;
+  --color-container1-border: #E5E5E5;
 
-  --color-container2: #929292;
-  --color-container2-hover: #858585;
-  --color-container2-border: #7A7A7A;
+  --color-container2: #EFEFEF;
+  --color-container2-hover: #E5E5E5;
+  --color-container2-border: #Dcdcdc;
 
   --color-title: #1E1F21;
   --color-common: #454648;
 
   /* color to layer over the primary color */
-  --color-title-primary: #FDFFA9;
-  --color-common-primary: #FDFD8D;
+  --color-title-primary: #FFFFFF;
+  --color-common-primary: #FFFFFF;
 
-  --color-title-secondary: #FDFFA9;
-  --color-common-secondary: #FDFD8D;
+  --color-title-secondary: #FFFFFF;
+  --color-common-secondary: #FFFFFF;
 
-  --color-primary: #DE6E2B;
-  --color-primary-hover: #C45A1B;
-  --color-primary-border: #BC5A1E;
+  --color-primary: #3B82F6;
+  --color-primary-hover: #2563EB;
+  --color-primary-border: #1D4ED8;
 
-  --color-secondary: #DE6E2B;
-  --color-secondary-hover: #C45A1B;
-  --color-secondary-border: #BC5A1E;
+  --color-secondary: #3B82F6;
+  --color-secondary-hover: #2563EB;
+  --color-secondary-border: #1D4ED8;
 
   --color-correct: oklch(72.3% 0.219 149.579);
   --color-correct-hover: oklch(62.7% 0.194 149.214);

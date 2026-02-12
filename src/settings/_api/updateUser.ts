@@ -29,6 +29,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   const { avatar, name, theme, language } = data;
 
+  console.log(data)
   if (avatar) {
     console.log(avatar)
     const matches = avatar.match(/^data:(.+);base64,(.+)$/);
@@ -50,7 +51,10 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
         console.error("Error saving avatar:", err);
         return { status: "error" };
       }
-    } else { console.log("failed to upload new avatar") }
+    } else { 
+      console.log("failed to upload new avatar")
+      return { status: "error" };
+    }
   }
 
   let newData = {};

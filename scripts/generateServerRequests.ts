@@ -61,21 +61,24 @@ rawSrcFiles.forEach((normalized) => {
     const varName = `api${apiCount++}`;
     apiImports.push(`import * as ${varName} from '${importPath}';`);
 
-    // capture "games/boerZoektVrouw" and "getGameData"
-    const match = normalized.match(/src\/(.+?)\/_api\/(.+)\.ts$/i);
+    // capture optional page path and API name (supports root-level and nested _api)
+    // Root: src/_api/session.ts → pagePath=undefined, apiName="session"
+    // Nested: src/examples/_api/user/changeName.ts → pagePath="examples", apiName="user/changeName"
+    const match = normalized.match(/src\/(?:(.+?)\/)_api\/(.+)\.ts$/i);
     if (!match) return;
     const [_, pagePath, apiName] = match;
-    const routeKey = `api/${pagePath}/${apiName}`; // clean route-like key
+    const routeKey = pagePath ? `api/${pagePath}/${apiName}` : `api/${apiName}`;
 
     apiMap += `  "${routeKey}": {\n    auth: "auth" in ${varName} ? ${varName}.auth : {},\n    main: ${varName}.main,\n  },\n`;
   }
 
   // Sync
   if (normalized.includes("_sync/")) {
-    const match = normalized.match(/src\/(.+?)\/_sync\/(.+)\.ts$/i);
+    // Make page path optional for root-level _sync
+    const match = normalized.match(/src\/(?:(.+?)\/)_sync\/(.+)\.ts$/i);
     if (!match) return;
     const [_, pagePath, syncName] = match;
-    const routeKey = `sync/${pagePath}/${syncName}`;
+    const routeKey = pagePath ? `sync/${pagePath}/${syncName}` : `sync/${syncName}`;
   
     console.log(syncName)
     if (syncName.endsWith("_client")) {

@@ -77,6 +77,8 @@ export function translate({ translationList, key, params }: {
   key: string,
   params?: { key: string, value: string | number | boolean }[]
 }): string {
+  if (!key) return "";
+  
   const parts = key.split(".");
   let result: unknown = translationList;
   

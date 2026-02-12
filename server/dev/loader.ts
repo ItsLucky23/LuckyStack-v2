@@ -30,6 +30,25 @@ const importFile = async (absolutePath: string) => {
 };
 
 // ----------------------------
+// Helper: recursively collect all .ts files from a directory
+// Returns paths relative to the base dir (e.g. "changeName.ts" or "user/changeName.ts")
+// ----------------------------
+const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
+  const results: string[] = [];
+  const entries = fs.readdirSync(dir);
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry);
+    const relPath = relativeTo ? `${relativeTo}/${entry}` : entry;
+    if (fs.statSync(entryPath).isDirectory()) {
+      results.push(...collectTsFiles(entryPath, relPath));
+    } else if (entry.endsWith(".ts")) {
+      results.push(relPath);
+    }
+  }
+  return results;
+};
+
+// ----------------------------
 // API Loader
 // ----------------------------
 export const initializeApis = async () => {
@@ -46,35 +65,36 @@ const scanApiFolder = async (file: string, basePath = "") => {
   if (!fs.statSync(fullPath).isDirectory()) return;
 
   if (file.toLowerCase().endsWith("api")) {
-    const files = fs.readdirSync(fullPath);
-    for (const f of files) {
-      if (!f.endsWith(".ts")) continue;
+    // basePath is the path segments between src/ and the _api folder
+    // Root _api:     basePath="" → pageLocation=""
+    // examples/_api: basePath="examples" → pageLocation="examples"
+    const pageLocation = basePath.replace(/\\/g, '/');
 
-      const modulePath = path.join(fullPath, f);
+    // Collect all .ts files recursively (supports nested folders like _api/user/changeName.ts)
+    const tsFiles = collectTsFiles(fullPath);
+
+    for (const relFile of tsFiles) {
+      const modulePath = path.resolve(path.join(fullPath, relFile));
       const [err, module] = await tryCatch(async () => importFile(modulePath));
       if (err) continue;
 
-      const { auth = {}, main } = module;
+      const { auth = {}, main, rateLimit, httpMethod, schema } = module;
       if (!main || typeof main !== "function") continue;
 
-      // const pageLocation = modulePath.split(`/${file}/`)[0].replace(/^src[\/\\]/, "");
-      let pageLocation = path
-        .join(basePath, file)
-        .replace(/^src[\/\\]/, '')
-        .replace(/\\/g, '/')
-        .split("/api")[0];
+      // Remove .ts extension and normalize slashes for the API name
+      const apiName = relFile.replace(/\.ts$/, "").replace(/\\/g, '/');
+      // Build route key: "api/examples/getUserData" or "api/session" (root-level)
+      const routeKey = pageLocation ? `api/${pageLocation}/${apiName}` : `api/${apiName}`;
 
-      const lastSlash = pageLocation.lastIndexOf('/');
-      if (lastSlash !== -1) {
-        pageLocation = pageLocation.substring(0, lastSlash);
-      }
-
-      devApis[`api/${pageLocation}/${f.replace(".ts", "")}`] = {
+      devApis[routeKey] = {
         main,
         auth: {
           login: auth.login || false,
           additional: auth.additional || [],
         },
+        rateLimit,
+        httpMethod,
+        schema,
       };
     }
   } else {
@@ -102,6 +122,9 @@ const scanSyncFolder = async (file: string, basePath = "") => {
   if (!fs.statSync(fullPath).isDirectory()) return;
 
   if (file.toLowerCase().endsWith("sync")) {
+    // basePath is the path segments between src/ and the _sync folder
+    const pageLocation = basePath.replace(/\\/g, '/');
+
     const files = fs.readdirSync(fullPath);
     for (const f of files) {
       if (!f.endsWith("_client.ts") && !f.endsWith("_server.ts")) { continue; }
@@ -111,41 +134,18 @@ const scanSyncFolder = async (file: string, basePath = "") => {
 
       if (fileError) { continue; }
 
-      // build the route key similar to API routes
-      let pageLocation = path
-        .join(basePath, file)
-        .replace(/^src[\/\\]/, '')
-        .replace(/\\/g, '/')
-        .split('/sync')[0];
-
-      // remove last segment
-      const lastSlash = pageLocation.lastIndexOf('/');
-      if (lastSlash !== -1) {
-        pageLocation = pageLocation.substring(0, lastSlash);
-      }
+      const syncFileName = f.replace(".ts", "");
+      // Build route key: "sync/examples/test_server" or "sync/test_server" (root-level)
+      const routeKey = pageLocation ? `sync/${pageLocation}/${syncFileName}` : `sync/${syncFileName}`;
 
       if (f.endsWith("_server.ts")) {
-        devSyncs[`sync/${pageLocation}/${f.replace(".ts", "")}`] = { 
+        devSyncs[routeKey] = { 
           main: fileResult.main, 
           auth: fileResult.auth || {} 
         };
       } else {
-        devSyncs[`sync/${pageLocation}/${f.replace(".ts", "")}`] = fileResult.main;
+        devSyncs[routeKey] = fileResult.main;
       }
-
-      // // optional _server.ts
-      // const serverFile = f.replace("_client.ts", "_server.ts");
-      // const serverPath = path.join(fullPath, serverFile);
-
-      // if (fs.existsSync(serverPath)) {
-      //   const [errServer, serverModule] = await tryCatch(async () => importFile(serverPath));
-      //   if (!errServer && typeof serverModule.main === "function") {
-      //     // final key style: sync/games/boerZoektVrouw/getCards
-      //     devSyncs[`sync/${pageLocation}/${f.replace("_client.ts", "_server")}`] = { main: serverModule.main, auth: serverModule.auth || {} };
-      //   }
-      // }
-
-
     }
   } else {
     const subFolders = fs.readdirSync(fullPath);

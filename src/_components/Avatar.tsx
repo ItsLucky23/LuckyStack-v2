@@ -16,7 +16,7 @@ export default function Avatar({
 
   const key = user.avatar ?? user.avatarFallback ?? user.name;
   const avatarStatus = avatarStatuses[key];
-
+  
   const formattedName = user.name[0].toUpperCase();
 
   return user.avatar && avatarStatus !== 'fallback' ? (

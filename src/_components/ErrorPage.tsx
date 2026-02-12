@@ -27,7 +27,7 @@ export default function ErrorPage() {
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
       {/* Error Icon */}
       <div className="mb-8 relative">
-        <div className="w-32 h-32 rounded-full bg-container border border-container-border flex items-center justify-center">
+        <div className="w-32 h-32 rounded-full bg-container1 border border-container1-border flex items-center justify-center">
           <svg
             className="w-16 h-16 text-wrong"
             fill="none"
@@ -62,13 +62,13 @@ export default function ErrorPage() {
       <div className="flex gap-4">
         <button
           onClick={() => { globalThis.history.back(); }}
-          className="px-6 py-3 bg-container text-common border border-container-border rounded-lg hover:bg-container-hover transition-colors font-medium"
+          className="px-6 py-3 bg-container1 text-common border border-container1-border rounded-lg hover:bg-container1-hover transition-colors font-medium"
         >
           ← Go Back
         </button>
         <Link
           to="/"
-          className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+          className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors font-medium"
         >
           Home
         </Link>
@@ -77,7 +77,7 @@ export default function ErrorPage() {
       {/* Dev info (only in development) */}
       {import.meta.env.DEV && error instanceof Error && (
         <div className="mt-12 max-w-2xl w-full">
-          <details className="bg-container rounded-lg p-4 border border-container-border">
+          <details className="bg-container1 rounded-lg p-4 border border-container1-border">
             <summary className="cursor-pointer text-sm text-muted font-medium">
               Developer Details
             </summary>

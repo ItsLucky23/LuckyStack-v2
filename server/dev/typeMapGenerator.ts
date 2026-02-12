@@ -95,12 +95,23 @@ const findAllSyncClientFiles = (dir: string = SRC_DIR, results: string[] = []): 
 
 const extractPagePath = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/');
-  const match = normalized.match(/src\/(.+?)\/_api\//);
-  return match ? match[1] : '';
+  // Match both src/examples/_api/ (nested) and src/_api/ (root-level)
+  const match = normalized.match(/src\/(?:(.+?)\/)_api\//);
+  if (match) {
+    return match[1] || 'root';
+  }
+  // Check for root-level _api directly under src/
+  if (normalized.includes('/src/_api/')) {
+    return 'root';
+  }
+  return '';
 };
 
 const extractApiName = (filePath: string): string => {
-  return path.basename(filePath, '.ts');
+  // For nested APIs like _api/user/changeName.ts, extract the full sub-path
+  const normalized = filePath.replace(/\\/g, '/');
+  const match = normalized.match(/_api\/(.+)\.ts$/);
+  return match ? match[1] : path.basename(filePath, '.ts');
 };
 
 /**
@@ -131,11 +142,45 @@ const extractHttpMethod = (filePath: string, apiName: string): HttpMethod => {
   }
 };
 
+/**
+ * Extract rateLimit export from an API file.
+ * Returns the declared limit value, false if explicitly disabled, or undefined if not set.
+ */
+const extractRateLimit = (filePath: string): number | false | undefined => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+
+    // Look for: export const rateLimit: number | false = 20;
+    // or: export const rateLimit = 20;
+    // or: export const rateLimit = false;
+    const rateLimitMatch = content.match(/export\s+const\s+rateLimit\s*(?::[^=]+)?=\s*([^;]+);/);
+    if (rateLimitMatch) {
+      const value = rateLimitMatch[1].trim();
+      if (value === 'false') return false;
+      const num = parseInt(value, 10);
+      if (!isNaN(num)) return num;
+    }
+
+    return undefined;
+  } catch (error) {
+    console.error(`[TypeMapGenerator] Error extracting rateLimit from ${filePath}:`, error);
+    return undefined;
+  }
+};
+
 // Sync-specific extractors
 const extractSyncPagePath = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/');
-  const match = normalized.match(/src\/(.+?)\/_sync\//);
-  return match ? match[1] : '';
+  // Match both src/examples/_sync/ (nested) and src/_sync/ (root-level)
+  const match = normalized.match(/src\/(?:(.+?)\/)_sync\//);
+  if (match) {
+    return match[1] || 'root';
+  }
+  // Check for root-level _sync directly under src/
+  if (normalized.includes('/src/_sync/')) {
+    return 'root';
+  }
+  return '';
 };
 
 const extractSyncName = (filePath: string): string => {
@@ -847,7 +892,7 @@ export const generateTypeMapFile = (): void => {
   // Collect API Types
   // ═══════════════════════════════════════════════════════════════════════════
   const apiFiles = findAllApiFiles();
-  const typesByPage = new Map<string, Map<string, { input: string; output: string; method: HttpMethod }>>();
+  const typesByPage = new Map<string, Map<string, { input: string; output: string; method: HttpMethod; rateLimit: number | false | undefined }>>();
 
   console.log(`[TypeMapGenerator] Found ${apiFiles.length} API files`);
 
@@ -860,13 +905,14 @@ export const generateTypeMapFile = (): void => {
     const inputType = getInputTypeFromFile(filePath);
     const outputType = getOutputTypeFromFile(filePath);
     const httpMethod = extractHttpMethod(filePath, apiName);
+    const rateLimit = extractRateLimit(filePath);
 
-    console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName} (${httpMethod})`);
+    console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName} (${httpMethod}${rateLimit !== undefined ? `, rateLimit: ${rateLimit}` : ''})`);
 
     if (!typesByPage.has(pagePath)) {
       typesByPage.set(pagePath, new Map());
     }
-    typesByPage.get(pagePath)!.set(apiName, { input: inputType, output: outputType, method: httpMethod });
+    typesByPage.get(pagePath)!.set(apiName, { input: inputType, output: outputType, method: httpMethod, rateLimit });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -988,11 +1034,14 @@ export interface ApiTypeMap {
     content += `  '${pagePath}': {\n`;
 
     for (const apiName of sortedApis) {
-      const { input, output, method } = apis.get(apiName)!;
+      const { input, output, method, rateLimit } = apis.get(apiName)!;
       content += `    '${apiName}': {\n`;
       content += `      input: ${input};\n`;
       content += `      output: ${output};\n`;
       content += `      method: '${method}';\n`;
+      if (rateLimit !== undefined) {
+        content += `      rateLimit: ${rateLimit};\n`;
+      }
       content += `    };\n`;
     }
 

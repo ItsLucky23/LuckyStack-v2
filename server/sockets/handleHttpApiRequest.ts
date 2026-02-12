@@ -81,8 +81,19 @@ export async function handleHttpApiRequest({
 
   const apisObject = process.env.NODE_ENV === 'development' ? devApis : apis;
 
+  //? Resolve API: try exact match first, then fall back to root-level
+  //? e.g. "api/examples/session" → not found → try "api/session"
+  const apiBaseName = name.split('/').pop();
+  let resolvedName = name;
+  if (!apisObject[name] && apiBaseName) {
+    const rootKey = `api/${apiBaseName}`;
+    if (apisObject[rootKey]) {
+      resolvedName = rootKey;
+    }
+  }
+
   // Check if API exists
-  if (!apisObject[name]) {
+  if (!apisObject[resolvedName]) {
     return {
       status: 'error',
       message: `API not found: ${name}`,
@@ -90,7 +101,7 @@ export async function handleHttpApiRequest({
     };
   }
 
-  const { auth, main, httpMethod: declaredMethod } = apisObject[name];
+  const { auth, main, httpMethod: declaredMethod } = apisObject[resolvedName];
 
   // HTTP method validation
   const expectedMethod = declaredMethod ?? inferHttpMethod(name);

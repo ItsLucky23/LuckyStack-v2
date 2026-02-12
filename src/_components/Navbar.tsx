@@ -107,7 +107,7 @@ const clearPopups = () => {
 const displayPopup = ({ element, text }: { element: HTMLElement, text: string }) => {
   const popup = document.createElement('div');
   popup.className = `
-    bg-gray-200 text-gray-700 rounded-md p-2 absolute z-50 shadow-lg whitespace-nowrap pointer-events-none
+    bg-container2 text-title border border-container2-border rounded-md p-2 absolute z-50 shadow-lg whitespace-nowrap pointer-events-none
     transform scale-90 opacity-0 transition-all duration-200
   `;
 
@@ -140,13 +140,13 @@ const NavbarItem = ({ item, state, setState, pathname, session, router }: Navbar
    <div
      role="button"
      tabIndex={0}
-     className={`hover:bg-gray-200 hover:text-gray-600 w-full h-10 items-center rounded-sm transition-all duration-100 cursor-pointer gap-2 py-2
+     className={`hover:bg-container1-hover hover:text-title w-full h-10 items-center rounded-sm transition-all duration-100 cursor-pointer gap-2 py-2
       ${state === 'expended' && item.hideOnExpended ? 'hidden' :
         (state === 'folded' && item.hideOnFolded ? 'hidden' : 
         'flex')
       }
       ${state === 'folded' ? 'px-2' : 'px-2'}
-      ${item.path === pathname ? 'bg-gray-200' : ''}
+      ${item.path === pathname ? 'bg-container2 text-title' : 'text-common'}
       ${item.bottom ? 'mt-auto' : ''}
     `}
     onMouseEnter={(e) => {
@@ -240,7 +240,7 @@ export default function Navbar() {
     <div ref={ref}>
       {parentWidth < 768 &&
         <>
-          <div className="w-full py-2 px-4 bg-white text-black flex justify-between items-center">
+          <div className="w-full py-2 px-4 bg-container1 text-title flex justify-between items-center">
             <div className="w-8 h-8">
               <Avatar 
                 user={session}
@@ -260,7 +260,7 @@ export default function Navbar() {
           </div>
         </>
       }
-      <div className={`h-full bg-white text-gray-500 flex flex-col items-center @md:py-4 transition-all duration-200 @md:px-2 absolute z-20 @md:z-0 @md:relative
+      <div className={`h-full bg-container1 text-common flex flex-col items-center @md:py-4 transition-all duration-200 @md:px-2 absolute z-20 @md:z-0 @md:relative
         ${state === 'folded' ? 
           '@md:w-14 w-0 gap-3' : 
           'w-64 gap-1 px-2'

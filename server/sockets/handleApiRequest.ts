@@ -34,7 +34,9 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? 'logout' needs special handling since it requires socket access
-  if (name == 'logout') {
+  // Extract the API name (last segment) to check for logout regardless of page path
+  const apiBaseName = name.split('/').pop();
+  if (apiBaseName == 'logout') {
     await logout({ token, socket, userId: user?.id || null });
     return socket.emit(`apiResponse-${responseIndex}`, { result: true });
   }
@@ -52,15 +54,25 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   const apisObject = process.env.NODE_ENV == 'development' ? devApis : apis;
 
+  //? Resolve API: try exact match first, then fall back to root-level
+  //? e.g. client sends "api/examples/session" → not found → try "api/session"
+  let resolvedName = name;
+  if (!apisObject[name] && apiBaseName) {
+    const rootKey = `api/${apiBaseName}`;
+    if (apisObject[rootKey]) {
+      resolvedName = rootKey;
+    }
+  }
+
   //? Check if API exists
-  if (!apisObject[name]) {
+  if (!apisObject[resolvedName]) {
     return socket.emit(`apiResponse-${responseIndex}`, {
       status: "error",
       message: `API not found: ${name}`
     });
   }
 
-  const { auth, main, schema } = apisObject[name];
+  const { auth, main, schema } = apisObject[resolvedName];
 
   //? Auth validation: check login requirement
   if (auth.login) {
@@ -81,7 +93,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Rate limiting check
-  const apiRateLimit = apisObject[name].rateLimit;
+  const apiRateLimit = apisObject[resolvedName].rateLimit;
   const effectiveLimit = apiRateLimit !== undefined
     ? apiRateLimit
     : config.rateLimiting.defaultApiLimit;
