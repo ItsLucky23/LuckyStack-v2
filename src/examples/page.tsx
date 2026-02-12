@@ -40,7 +40,7 @@ export default function ExamplesPage() {
             <p className="text-muted text-sm">Interactive demo of all framework features</p>
           </div>
           <Link to="/docs" className="px-4 h-9 bg-container1 border border-container1-border text-commen rounded-md flex items-center justify-center hover:scale-105 transition-all duration-300">
-            📖 Docs
+            Docs
           </Link>
         </div>
 
@@ -50,7 +50,7 @@ export default function ExamplesPage() {
           {/* User Info - Tall */}
           <div className="md:row-span-2 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-4">
             <h2 className="font-semibold text-title flex items-center gap-2">
-              <span className="w-6 h-6 bg-primary rounded flex items-center justify-center text-white text-xs">👤</span>
+              <span className="w-6 h-6 bg-primary rounded flex items-center justify-center text-white text-xs"></span>
               User Info
             </h2>
             {session?.id ? (
@@ -69,7 +69,6 @@ export default function ExamplesPage() {
                   onClick={() => {
                     void (async () => {
                       const result = await apiRequest({ name: 'logout' })
-                      const result2 = await apiRequest({ name: 'kkl' })
                       logResult('logout', result)
                     })();
                   }}
@@ -92,7 +91,7 @@ export default function ExamplesPage() {
           <div className="md:col-span-2 lg:col-span-3 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-title flex items-center gap-2">
-                <span className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center text-white text-xs">⚡</span>
+                <span className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center text-white text-xs"></span>
                 Real-time Sync
               </h2>
               <span className="text-xs text-muted">Open in 2 tabs to test</span>
@@ -114,7 +113,7 @@ export default function ExamplesPage() {
 
           {/* Public API */}
           <div className="bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">🌐 Public API</h3>
+            <h3 className="font-semibold text-title text-sm">Public API</h3>
             <p className="text-xs text-muted">No login needed</p>
             <button
               onClick={() => void apiRequest<"examples", "publicApi">({ name: "publicApi", data: { message: "Message sent from the client!" } })}
@@ -126,7 +125,7 @@ export default function ExamplesPage() {
 
           {/* Toggle Admin */}
           <div className="bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">🔄 Toggle Admin</h3>
+            <h3 className="font-semibold text-title text-sm">Toggle Admin</h3>
             <p className="text-xs text-muted">Requires login</p>
             <button
               onClick={() => void apiRequest({ name: "toggleAdmin" })}
@@ -138,7 +137,7 @@ export default function ExamplesPage() {
 
           {/* Admin Only */}
           <div className="bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">🔐 Admin Only</h3>
+            <h3 className="font-semibold text-title text-sm">Admin Only</h3>
             <p className="text-xs text-muted">admin: true required</p>
             <button
               onClick={() => {
@@ -155,27 +154,27 @@ export default function ExamplesPage() {
 
           {/* Notification - Wide */}
           <div className="md:col-span-2 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">🔔 Notifications</h3>
+            <h3 className="font-semibold text-title text-sm">Notifications</h3>
             <p className="text-xs text-muted">Toast system with translation support (Sonner)</p>
             <div className="flex gap-2 mt-auto">
               <button
                 onClick={() => { notify.success({ key: 'test', params: [{ key: 'name', value: session?.name ?? 'Guest' }] }); }}
                 className="flex-1 px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
               >
-                ✓ Success
+                Success
               </button>
               <button
                 onClick={() => { notify.error({ key: 'commen/.404' }); }}
                 className="flex-1 px-4 h-9 bg-wrong text-white rounded-md hover:bg-wrong-hover transition-colors text-sm cursor-pointer"
               >
-                ✗ Error
+                Error
               </button>
             </div>
           </div>
 
           {/* API Results - Full Width */}
           <div className="md:col-span-3 lg:col-span-4 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">📋 API Results</h3>
+            <h3 className="font-semibold text-title text-sm">API Results</h3>
             {apiResults.length === 0 ? (
               <p className="text-xs text-muted">Click an API button to see results here</p>
             ) : (

@@ -887,12 +887,329 @@ const getSyncClientOutputType = (filePath: string): string => {
   }
 };
 
+// Helper to extract balanced parentheses (for function args)
+const extractBalancedParentheses = (content: string, startIndex: number): string | null => {
+  let depth = 0;
+  for (let i = startIndex; i < content.length; i++) {
+    if (content[i] === '(') {
+        depth++;
+    } else if (content[i] === ')') {
+      depth--;
+      if (depth === 0) return content.substring(startIndex, i + 1);
+    }
+  }
+  return null;
+}
+
+const cleanArgs = (args: string): string => {
+  // Remove default values: 'arg: string = "value"' -> 'arg: string'
+  // Strategy: match = followed by value until comma or end bracket
+  // CRITICAL: Do NOT match '=>' arrow function return type indicator!
+  // Regex: 
+  // \s* matches optional whitespace before =
+  // =(?!>) matches = ONLY if NOT followed by >
+  // [^,{})]+ matches the value (anything except comma or closing brackets)
+  
+  let cleaned = args.replace(/\n/g, ' ');
+  
+  // Remove string literals first to avoid matching = inside strings
+  const strings: string[] = [];
+  cleaned = cleaned.replace(/(['"])(?:(?=(\\?))\2.)*?\1/g, (m) => {
+      strings.push(m);
+      return `__STR_${strings.length-1}__`;
+  });
+
+  // Remove suspicious env var usage defaults entirely
+  if (cleaned.includes('process.env')) {
+      return '...args: any[]';
+  }
+  
+  // Remove default assignment, but preserve =>
+  cleaned = cleaned.replace(/\s*=(?![>])[^,{})]+/g, '');
+
+  return cleaned;
+}
+
+// Global set to collect required imports across all files
+const namedImports = new Map<string, Set<string>>();
+const defaultImports = new Map<string, string>();
+
+interface FileImport {
+    source: string;
+    isDefault: boolean;
+    originalName?: string;
+}
+
+const sanitizeTypAndCollectImports = (type: string, filePath: string, availableExports: Set<string>, fileImports: Map<string, FileImport>, knownGenerics: Set<string> = new Set()): string => {
+   // Detect potential types: Words starting with Uppercase
+   return type.replace(/\b([A-Z][a-zA-Z0-9_]*)(<[^>]+>)?(\[\])?\b/g, (match, typeName, generics, isArray) => {
+       const builtins = ['Promise', 'Date', 'Function', 'Array', 'Record', 'Partial', 'Pick', 'Omit', 'Error', 'Map', 'Set', 'Buffer', 'Uint8Array', 'Object'];
+       const existingImports = ['PrismaClient', 'SessionLayout']; // Already imported in header
+       
+       if (builtins.includes(typeName) || existingImports.includes(typeName) || knownGenerics.has(typeName)) return match;
+       
+       // Priority 1: Check if it's imported in the source file
+       if (fileImports.has(typeName)) {
+           const imp = fileImports.get(typeName)!;
+           if (imp.isDefault) {
+               // Default import (e.g. Redis from 'ioredis')
+               // Check if we already have a default import for this source
+               if (defaultImports.has(imp.source) && defaultImports.get(imp.source) !== typeName) {
+                   // Conflict! Two default imports from same source with different names? Rare.
+                   // Ignore for now.
+               } else {
+                   defaultImports.set(imp.source, typeName);
+                   return match;
+               }
+           } else {
+               // Named import
+               if (!namedImports.has(imp.source)) namedImports.set(imp.source, new Set());
+               namedImports.get(imp.source)!.add(imp.originalName || typeName);
+               return match;
+           }
+       }
+
+       // Priority 2: Check if this type is exported in the current file (Relative import)
+       if (availableExports.has(typeName)) {
+           const outputDir = path.join(process.cwd(), 'src', '_sockets');
+           let relPath = path.relative(outputDir, filePath).replace(/\\/g, '/').replace('.ts', '');
+           if (!relPath.startsWith('.')) relPath = './' + relPath;
+           
+           if (!namedImports.has(relPath)) namedImports.set(relPath, new Set());
+           namedImports.get(relPath)!.add(typeName);
+           return match;
+       }
+       
+       return `any${isArray || ''}`; 
+   });
+}
+
+const findDefinitionSignature = (name: string, content: string, filePath: string, availableExports: Set<string>, fileImports: Map<string, FileImport>): string => {
+  const varRegex = new RegExp(`const\\s+${name}\\s*=\\s*(?:async\\s*)?`);
+  const funcRegex = new RegExp(`function\\s+${name}\\s*`);
+  
+  let match = content.match(varRegex);
+  let isAsync = false;
+  let defStart = -1;
+  let genericsStr = '';
+  let knownGenerics = new Set<string>();
+
+  if (match) {
+    defStart = match.index! + match[0].length;
+    isAsync = match[0].includes('async');
+    const lookAhead = content.substring(defStart, defStart + 50);
+    const genMatch = lookAhead.match(/^\s*(<[^>]+>)/);
+    if (genMatch) {
+        genericsStr = genMatch[1];
+        defStart += genMatch[0].length;
+    }
+  } else {
+    match = content.match(funcRegex);
+    if (match) {
+        defStart = match.index! + match[0].length;
+        const prefix = content.substring(Math.max(0, match.index! - 6), match.index!);
+        if (prefix.includes('async')) isAsync = true;
+        const lookAhead = content.substring(match.index! + match[0].length, match.index! + match[0].length + 50);
+         const genMatch = lookAhead.match(/^\s*(<[^>]+>)/);
+         if (genMatch) {
+             genericsStr = genMatch[1];
+             defStart += genMatch[0].length;
+         }
+    }
+  }
+  
+  if (genericsStr) {
+      const inner = genericsStr.slice(1, -1);
+      inner.split(',').forEach(g => {
+          const part = g.trim().split(/\s*=/)[0].trim().split(/\s+/)[0]; 
+          if (part) knownGenerics.add(part);
+      });
+  }
+
+  if (defStart !== -1) {
+    const openParen = content.indexOf('(', defStart - 5); 
+    if (openParen !== -1 && openParen < defStart + 50) { 
+       const between = content.substring(defStart, openParen);
+       const newMatch = between.match(/new\s+([a-zA-Z0-9_]+)/);
+       if (newMatch) {
+           const className = newMatch[1];
+           // Try to find import for this class
+           const sanitized = sanitizeTypAndCollectImports(className, filePath, availableExports, fileImports);
+           if (sanitized !== 'any') return sanitized;
+           return 'any';
+       }
+
+       if (!/^\s*$/.test(between)) return 'any';
+
+       const rawArgs = extractBalancedParentheses(content, openParen);
+       if (rawArgs) {
+         let returnType = isAsync ? 'Promise<any>' : 'any';
+         const afterArgs = content.substring(openParen + rawArgs.length);
+         const returnMatch = afterArgs.match(/^\s*:\s*([^{=]+)(?:=>|\{)/);
+         if (returnMatch) {
+             let rawType = returnMatch[1].trim();
+             if (rawType.endsWith('=>')) rawType = rawType.slice(0, -2).trim();
+             returnType = sanitizeTypAndCollectImports(rawType, filePath, availableExports, fileImports, knownGenerics);
+             if (isAsync && !returnType.startsWith('Promise')) returnType = `Promise<${returnType}>`;
+         }
+
+         const cleanedArgs = cleanArgs(rawArgs);
+         const sanitizedArgs = sanitizeTypAndCollectImports(cleanedArgs, filePath, availableExports, fileImports, knownGenerics);
+         return `${genericsStr}${sanitizedArgs} => ${returnType}`;
+       }
+    }
+  }
+  
+  return 'any'; 
+}
+
+const generateFunctionsForDir = (dir: string, indent: string = '  '): string => {
+  if (!fs.existsSync(dir)) return '';
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  let output = '';
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+
+    if (entry.isDirectory()) {
+      const subOutput = generateFunctionsForDir(fullPath, indent + '  ');
+      if (subOutput.trim()) {
+        output += `${indent}${entry.name}: {\n${subOutput}${indent}};\n`;
+      }
+    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
+      const fileName = entry.name.replace('.ts', '');
+      let fileOutput = '';
+      
+      try {
+        const rawContent = fs.readFileSync(fullPath, 'utf-8');
+        const content = stripComments(rawContent);
+        const exports = new Map<string, string>(); 
+        
+        const availableExports = new Set<string>();
+        const typeExportRegex = /export\s+(?:interface|type|class|enum)\s+(\w+)/g;
+        let tMatch;
+        while ((tMatch = typeExportRegex.exec(content)) !== null) availableExports.add(tMatch[1]);
+        
+        // Parse Imports
+        const fileImports = new Map<string, FileImport>();
+        // import ... from '...'
+        const importRegex = /import\s+(?:(\w+)|(?:\*\s+as\s+(\w+))|\{([^}]+)\})\s+from\s+['"]([^'"]+)['"]/g;
+        let iMatch;
+        while ((iMatch = importRegex.exec(content)) !== null) {
+            const source = iMatch[4];
+            const defaultImp = iMatch[1]; // import Default from '...'
+            const namespaceImp = iMatch[2]; // import * as Namespace from '...'
+            const namedImpBlock = iMatch[3]; // import { Named } from '...'
+            
+            if (defaultImp) {
+                fileImports.set(defaultImp, { source, isDefault: true });
+            } else if (namespaceImp) {
+                // Namespace imports are treated as default for now, though less common for types
+                fileImports.set(namespaceImp, { source, isDefault: true });
+            }
+            if (namedImpBlock) {
+                namedImpBlock.split(',').forEach(part => {
+                    const [orig, alias] = part.split(/\s+as\s+/).map(s => s.trim());
+                    if (orig) {
+                        fileImports.set(alias || orig, { source, isDefault: false, originalName: orig });
+                    }
+                });
+            }
+        }
+
+
+        // 1. export const/function name ...
+        const simpleExportRegex = /export\s+(?:const|function|async\s+function)\s+(\w+)/g;
+        let match;
+        while ((match = simpleExportRegex.exec(content)) !== null) {
+            exports.set(match[1], findDefinitionSignature(match[1], content, fullPath, availableExports, fileImports));
+        }
+
+        // 2. export default ...
+        const exportDefaultMatch = content.match(/export\s+default\s+(.*)/);
+        if (exportDefaultMatch) {
+            const decl = exportDefaultMatch[1].trim();
+            // Check for 'as Type'
+            const asMatch = decl.match(/(.*)\s+as\s+([a-zA-Z0-9_]+);?$/);
+            if (asMatch) {
+                 // export default x as Type
+                 const typeName = asMatch[2];
+                 // Sanitize and import expectation
+                 const sanitizedType = sanitizeTypAndCollectImports(typeName, fullPath, availableExports, fileImports);
+                 exports.set('default', sanitizedType !== 'any' ? sanitizedType : 'any');
+            } else {
+                 const defFunc = decl.match(/(?:async\s+)?function\s+(\w+)/);
+                 if (defFunc) {
+                     exports.set('default', findDefinitionSignature(defFunc[1], content, fullPath, availableExports, fileImports));
+                 } else {
+                      const defVal = decl.match(/^(\w+)/);
+                      if (defVal && !decl.startsWith('class')) {
+                          exports.set('default', findDefinitionSignature(defVal[1], content, fullPath, availableExports, fileImports));
+                      } else {
+                          const isAsync = decl.includes('async');
+                          exports.set('default', `(...args: any[]) => ${isAsync ? 'Promise<any>' : 'any'}`);
+                      }
+                 }
+            }
+        }
+
+        // 3. export { ... }
+        const exportBlockRegex = /export\s*\{([^}]+)\}/g;
+        while ((match = exportBlockRegex.exec(content)) !== null) {
+            match[1].split(',').forEach(part => {
+                const parts = part.trim().split(/\s+as\s+/);
+                const name = parts[0];
+                const alias = parts[1] || name;
+                if (name) exports.set(alias, findDefinitionSignature(name, content, fullPath, availableExports, fileImports));
+            });
+        }
+
+        // Output all found exports
+        for (const [name, sig] of exports) {
+             fileOutput += `${indent}  ${name}: ${sig};\n`;
+        }
+        
+        if (fileOutput) {
+            output += `${indent}${fileName}: {\n${fileOutput}${indent}};\n`;
+        }
+      } catch (err) {
+        console.error(`[TypeMapGenerator] Error parsing functions file ${fullPath}:`, err);
+      }
+    }
+  }
+  return output;
+};
+
+const generateServerFunctions = (): string => {
+  namedImports.clear(); 
+  defaultImports.clear();
+  const functionsDir = path.join(process.cwd(), 'server', 'functions');
+  return generateFunctionsForDir(functionsDir, '  ');
+};
+
+
+// Helper to extract auth config
+const extractAuth = (filePath: string): any => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const authMatch = content.match(/export\s+const\s+auth\s*:\s*AuthProps\s*=\s*(\{[\s\S]*?\});/);
+    if (authMatch) {
+      // Very basic parsing for login: true/false
+      const loginMatch = authMatch[1].match(/login\s*:\s*(true|false)/);
+      return {
+        login: loginMatch ? loginMatch[1] === 'true' : true // Default to true if not specified? Or false? Config usually defaults to true.
+      };
+    }
+  } catch (e) {}
+  return { login: true }; // Default safe
+};
+
 export const generateTypeMapFile = (): void => {
   // ═══════════════════════════════════════════════════════════════════════════
   // Collect API Types
   // ═══════════════════════════════════════════════════════════════════════════
   const apiFiles = findAllApiFiles();
-  const typesByPage = new Map<string, Map<string, { input: string; output: string; method: HttpMethod; rateLimit: number | false | undefined }>>();
+  const typesByPage = new Map<string, Map<string, { input: string; output: string; method: HttpMethod; rateLimit: number | false | undefined; auth: any; description?: string }>>();
 
   console.log(`[TypeMapGenerator] Found ${apiFiles.length} API files`);
 
@@ -906,13 +1223,14 @@ export const generateTypeMapFile = (): void => {
     const outputType = getOutputTypeFromFile(filePath);
     const httpMethod = extractHttpMethod(filePath, apiName);
     const rateLimit = extractRateLimit(filePath);
+    const auth = extractAuth(filePath);
 
     console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName} (${httpMethod}${rateLimit !== undefined ? `, rateLimit: ${rateLimit}` : ''})`);
 
     if (!typesByPage.has(pagePath)) {
       typesByPage.set(pagePath, new Map());
     }
-    typesByPage.get(pagePath)!.set(apiName, { input: inputType, output: outputType, method: httpMethod, rateLimit });
+    typesByPage.get(pagePath)!.set(apiName, { input: inputType, output: outputType, method: httpMethod, rateLimit, auth });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -924,7 +1242,6 @@ export const generateTypeMapFile = (): void => {
 
   console.log(`[TypeMapGenerator] Found ${syncServerFiles.length} Sync server files, ${syncClientFiles.length} Sync client files`);
 
-  // Build a unified map of all syncs (key: "pagePath/syncName")
   const allSyncs = new Map<string, {
     pagePath: string;
     syncName: string;
@@ -932,7 +1249,6 @@ export const generateTypeMapFile = (): void => {
     clientFile?: string;
   }>();
 
-  // Add all server files to the map
   for (const serverFile of syncServerFiles) {
     const pagePath = extractSyncPagePath(serverFile);
     const syncName = extractSyncName(serverFile);
@@ -944,7 +1260,6 @@ export const generateTypeMapFile = (): void => {
     allSyncs.set(key, existing);
   }
 
-  // Add all client files to the map (may create new entries or add to existing)
   for (const clientFile of syncClientFiles) {
     const pagePath = extractSyncPagePath(clientFile);
     const syncName = extractSyncName(clientFile);
@@ -956,9 +1271,7 @@ export const generateTypeMapFile = (): void => {
     allSyncs.set(key, existing);
   }
 
-  // Process each sync with fallback logic
   for (const [key, { pagePath, syncName, serverFile, clientFile }] of allSyncs) {
-    // clientInput: server file is primary, client file is fallback
     let clientInputType = '{ }';
     if (serverFile) {
       clientInputType = getSyncClientDataType(serverFile);
@@ -966,13 +1279,11 @@ export const generateTypeMapFile = (): void => {
       clientInputType = getSyncClientDataType(clientFile);
     }
 
-    // serverOutput: from server file's return (or empty if no server file)
     let serverOutputType = '{ }';
     if (serverFile) {
       serverOutputType = getSyncServerOutputType(serverFile);
     }
 
-    // clientOutput: from client file's return (or empty if no client file)
     let clientOutputType = '{ }';
     if (clientFile) {
       clientOutputType = getSyncClientOutputType(clientFile);
@@ -989,6 +1300,20 @@ export const generateTypeMapFile = (): void => {
   // ═══════════════════════════════════════════════════════════════════════════
   // Generate Output File
   // ═══════════════════════════════════════════════════════════════════════════
+  
+  // Generate functions first to populate requiredImports
+  const functionsInterface = generateServerFunctions();
+  
+  let importStatements = '';
+  // Named imports
+  for (const [path, types] of namedImports) {
+      importStatements += `import { ${Array.from(types).join(', ')} } from "${path}";\n`;
+  }
+  // Default imports
+  for (const [path, defaultName] of defaultImports) {
+      importStatements += `import ${defaultName} from "${path}";\n`;
+  }
+
   let content = `/**
  * Auto-generated type map for all API and Sync endpoints.
  * Enables type-safe apiRequest and syncRequest calls.
@@ -996,16 +1321,11 @@ export const generateTypeMapFile = (): void => {
 
 import { PrismaClient } from "@prisma/client";
 import { SessionLayout } from "config";
-
+${importStatements}
 export interface Functions {
   prisma: PrismaClient;
 
-  saveSession: (sessionId: string, data: SessionLayout) => Promise<boolean>;
-  getSession: (sessionId: string) => Promise<SessionLayout | null>;
-  deleteSession: (sessionId: string) => Promise<boolean>;
-
-  tryCatch: <T, P>(func: (values: P) => Promise<T> | T, params?: P) => Promise<[any, T | null]>;
-
+${functionsInterface}
   [key: string]: any; // allows for other functions that are not defined as a type but do exist in the functions folder
 };
 
@@ -1026,15 +1346,33 @@ export interface ApiTypeMap {
 `;
 
   const sortedPages = Array.from(typesByPage.keys()).sort();
+  const sortedSyncPages = Array.from(syncTypesByPage.keys()).sort();
+
+  // Prepare JSON Data for Docs
+  const docsData: any = { apis: {}, syncs: {} };
 
   for (const pagePath of sortedPages) {
     const apis = typesByPage.get(pagePath)!;
     const sortedApis = Array.from(apis.keys()).sort();
 
-    content += `  '${pagePath}': {\n`;
+    docsData.apis[pagePath] = [];
 
+    content += `  '${pagePath}': {\n`;
     for (const apiName of sortedApis) {
-      const { input, output, method, rateLimit } = apis.get(apiName)!;
+      const { input, output, method, rateLimit, auth } = apis.get(apiName)!;
+      
+      // Add to docs json
+      docsData.apis[pagePath].push({
+          page: pagePath,
+          name: apiName,
+          method,
+          input,
+          output,
+          rateLimit,
+          auth,
+          path: `api/${pagePath}/${apiName}`
+      });
+
       content += `    '${apiName}': {\n`;
       content += `      input: ${input};\n`;
       content += `      output: ${output};\n`;
@@ -1044,7 +1382,6 @@ export interface ApiTypeMap {
       }
       content += `    };\n`;
     }
-
     content += `  };\n`;
   }
 
@@ -1111,16 +1448,26 @@ export type SyncClientResponse<T = any> =
 export interface SyncTypeMap {
 `;
 
-  const sortedSyncPages = Array.from(syncTypesByPage.keys()).sort();
-
   for (const pagePath of sortedSyncPages) {
     const syncs = syncTypesByPage.get(pagePath)!;
     const sortedSyncs = Array.from(syncs.keys()).sort();
+
+    docsData.syncs[pagePath] = [];
 
     content += `  '${pagePath}': {\n`;
 
     for (const syncName of sortedSyncs) {
       const { clientInput, serverOutput, clientOutput } = syncs.get(syncName)!;
+      
+      docsData.syncs[pagePath].push({
+          page: pagePath,
+          name: syncName,
+          clientInput,
+          serverOutput,
+          clientOutput,
+          path: `sync/${pagePath}/${syncName}`
+      });
+
       content += `    '${syncName}': {\n`;
       content += `      clientInput: ${clientInput};\n`;
       content += `      serverOutput: ${serverOutput};\n`;
@@ -1145,9 +1492,20 @@ export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>> = \`sync
 `;
 
   try {
-    fs.writeFileSync(OUTPUT_FILE, content, 'utf-8');
-    console.log(`[TypeMapGenerator] Generated: ${OUTPUT_FILE}`);
+    const outputPath = path.join(process.cwd(), 'src', '_sockets', 'apiTypes.generated.ts');
+    fs.writeFileSync(outputPath, content, 'utf-8');
+    console.log('[TypeMapGenerator] Generated apiTypes.generated.ts');
+    
+    // Write Documentation JSON
+    const docsPath = path.join(process.cwd(), 'src', 'docs', '_api', 'apiDocs.generated.json');
+    // Ensure directory exists
+    const docsDir = path.dirname(docsPath);
+    if (!fs.existsSync(docsDir)) {
+        fs.mkdirSync(docsDir, { recursive: true });
+    }
+    fs.writeFileSync(docsPath, JSON.stringify(docsData, null, 2), 'utf-8');
+    console.log('[TypeMapGenerator] Generated apiDocs.generated.json');
   } catch (error) {
-    console.error(`[TypeMapGenerator] Error writing type map:`, error);
+    console.error('[TypeMapGenerator] Error writing type map or docs:', error);
   }
 };

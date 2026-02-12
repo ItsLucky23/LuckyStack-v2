@@ -44,11 +44,9 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
     routes.push({
       path: subPath,
       element: (
-        <LocationProvider>
-          <TemplateProvider key={`${template}-${subPath}`} initialTemplate={template}>
-            <Page />
-          </TemplateProvider>
-        </LocationProvider>
+        <TemplateProvider key={`${template}-${subPath}`} initialTemplate={template}>
+          <Page />
+        </TemplateProvider>
       ),
     });
   }
@@ -62,6 +60,7 @@ const pages: Record<string, { default: PageWithTemplate; template?: Template }> 
 
 const router = createBrowserRouter([{
   path: '/',
+  element: <LocationProvider />,
   errorElement: <ErrorPage />,
   children: getRoutes(pages)
 }])

@@ -10,6 +10,18 @@ import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketL
 import config, { SessionLayout } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
 
+//? Per-token lock to serialize session mutations (prevents read-modify-write races)
+const sessionLocks = new Map<string, Promise<void>>();
+const withSessionLock = async (token: string, fn: () => Promise<void>) => {
+  const prev = sessionLocks.get(token) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  sessionLocks.set(token, next);
+  try { await next; } finally {
+    //? Clean up if no more pending operations
+    if (sessionLocks.get(token) === next) sessionLocks.delete(token);
+  }
+};
+
 export type apiMessage = {
   name: string;
   data: object;
@@ -69,15 +81,17 @@ export default function loadSocket(httpServer: any) {
         socket.emit(`joinRoom-${responseIndex}`, { error: 'Not authenticated' });
         return;
       }
-      const session = await getSession(token);
-      if (!session) {
-        socket.emit(`joinRoom-${responseIndex}`, { error: 'Session not found' });
-        return;
-      }
-      await socket.join(group);
-      await saveSession(token, { ...session, code: group });
-      socket.emit(`joinRoom-${responseIndex}`);
-      console.log(`Socket ${socket.id} joined group ${group}`, 'cyan');
+      await withSessionLock(token, async () => {
+        const session = await getSession(token);
+        if (!session) {
+          socket.emit(`joinRoom-${responseIndex}`, { error: 'Session not found' });
+          return;
+        }
+        await socket.join(group);
+        await saveSession(token, { ...session, code: group });
+        socket.emit(`joinRoom-${responseIndex}`);
+        console.log(`Socket ${socket.id} joined group ${group}`, 'cyan');
+      });
     });
 
     socket.on('disconnect', async (reason) => {
@@ -93,17 +107,19 @@ export default function loadSocket(httpServer: any) {
       if (!token) { return; }
       console.log('updating location to: ', newLocation.pathName, 'yellow')
 
-      let returnedUser: SessionLayout | null = null;
-      if (config.socketActivityBroadcaster) {
-        returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
-      }
+      await withSessionLock(token, async () => {
+        let returnedUser: SessionLayout | null = null;
+        if (config.socketActivityBroadcaster) {
+          returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
+        }
 
-      if (!newLocation) { return; }
-      const user = returnedUser || await getSession(token);
-      if (!user) { return; }
+        if (!newLocation) { return; }
+        const user = returnedUser || await getSession(token);
+        if (!user) { return; }
 
-      user.location = newLocation;
-      return await saveSession(token, user);
+        user.location = newLocation;
+        await saveSession(token, user);
+      });
     });
 
     if (config.socketActivityBroadcaster && token) {

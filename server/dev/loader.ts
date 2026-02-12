@@ -160,16 +160,38 @@ const scanSyncFolder = async (file: string, basePath = "") => {
 // ----------------------------
 export const initializeFunctions = async () => {
   Object.keys(devFunctions).forEach(k => delete devFunctions[k]);
-  const functionsFolder = fs.readdirSync(path.resolve("./server/functions"));
+  
+  const rootDir = path.resolve("./server/functions");
+  if (!fs.existsSync(rootDir)) return;
 
-  for (const file of functionsFolder) {
-    const filePath = path.join("./server/functions", file);
-    if (!fs.statSync(filePath).isFile() || !file.endsWith(".ts")) continue;
+  await scanFunctionsFolder(rootDir);
+};
 
-    const [err, module] = await tryCatch(async () => importFile(filePath));
-    if (err) continue;
+const scanFunctionsFolder = async (dir: string, basePath: string[] = []) => {
+  const entries = fs.readdirSync(dir);
 
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry);
+    const stat = fs.statSync(fullPath);
 
-    Object.assign(devFunctions, module);
+    if (stat.isDirectory()) {
+      await scanFunctionsFolder(fullPath, [...basePath, entry]);
+    } else if (entry.endsWith(".ts")) {
+      const [err, module] = await tryCatch(async () => importFile(fullPath));
+      if (err) continue;
+      
+      const fileName = entry.replace(".ts", "");
+      
+      // Navigate to the correct nesting level
+      let target = devFunctions;
+      for (const part of basePath) {
+        if (!target[part]) target[part] = {};
+        target = target[part];
+      }
+      
+      // Merge module exports into the target key (handles case where file and folder share name)
+      if (!target[fileName]) target[fileName] = {};
+      Object.assign(target[fileName], module);
+    }
   }
 };

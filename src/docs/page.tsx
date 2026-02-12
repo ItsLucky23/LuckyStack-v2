@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { apiRequest } from 'src/_sockets/apiRequest'; // We keep using this for the initial fetch as it's within the 'docs' page context
+import React, { useState } from 'react';
 import { socket } from 'src/_sockets/socketInitializer';
-import tryCatch from 'src/_functions/tryCatch';
 import notify from 'src/_functions/notify';
+import apiDocs from './_api/apiDocs.generated.json';
 
 // Define types for the docs structure (matching server response)
 interface ApiDoc {
@@ -31,37 +30,17 @@ interface DocsResult {
   syncs: Record<string, SyncDoc[]>;
 }
 
-export const template = 'dashboard'; // Use dashboard template for sidebar layout
-
 export default function DocsPage() {
-  const [docs, setDocs] = useState<DocsResult | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [docs, setDocs] = useState<DocsResult | null>(apiDocs as unknown as DocsResult);
+  const [loading, setLoading] = useState(false);
   const [selectedApi, setSelectedApi] = useState<ApiDoc | null>(null);
   const [selectedSync, setSelectedSync] = useState<SyncDoc | null>(null);
   const [inputData, setInputData] = useState('{}');
   const [apiResult, setApiResult] = useState<any>(null);
   const [apiStatus, setApiStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
-  useEffect(() => {
-    const fetchDocs = async () => {
-      // We can use the generic apiRequest here because we are ON the 'docs' page, 
-      // so 'getDocs' resolves to 'api/docs/getDocs' which is correct.
-      const [err, res] = await tryCatch(async () => 
-        // @ts-ignore - Dynamic API not in generated types yet during dev
-        await apiRequest({ name: 'getDocs', data: {} })
-      );
+  // No useEffect needed, docs are loaded statically via import
 
-      if (err) {
-        notify.error({ key: 'Failed to load documentation' });
-        console.error(err);
-      } else if (res?.status === 'success') {
-        setDocs(res.result);
-      }
-      setLoading(false);
-    };
-
-    fetchDocs();
-  }, []);
 
   const handleApiRun = (api: ApiDoc) => {
     if (!socket) {
@@ -176,7 +155,6 @@ export default function DocsPage() {
       <div className="flex-1 overflow-y-auto p-8">
         {!selectedApi && !selectedSync && (
           <div className="flex flex-col items-center justify-center h-full text-common/40">
-            <div className="text-6xl mb-4">📚</div>
             <p>Select an API or Sync event to view documentation</p>
           </div>
         )}

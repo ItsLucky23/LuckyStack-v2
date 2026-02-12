@@ -40,4 +40,4 @@ async function clearKeysWithPrefix(prefix: string) {
   } while (cursor !== '0');
 }
 
-export default redis;
+export default redis as Redis;

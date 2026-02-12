@@ -1,0 +1,2 @@
+1. what happends when user changes pages after page 1 joined a room, do we stay in this room or what happends
+2. 
