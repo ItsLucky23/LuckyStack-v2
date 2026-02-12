@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import 'src/index.css'
-import 'src/scrollbar-dark.css'
+import 'src/scrollbar.css'
 import VConsole from 'vconsole';
 
 import { mobileConsole } from 'config'

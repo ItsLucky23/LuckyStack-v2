@@ -5,8 +5,8 @@ NPM package modularization - Split into @luckystack/*
 Session storage abstraction - Support PostgreSQL/JWT
 ✅ ServerFunctions interface - Fetch them automatically from server/functions folder and auto gen type
 Location Provider - Optional feature just like socket broadcaster
-Theme - Built-in function to toggle theme
-based on dark or light theme in session use scrollbar-light.css or scrollbar-black.css
+✅ Theme - Built-in function to toggle theme
+✅ based on dark or light theme in session use scrollbar-light.css or scrollbar-black.css
 
 ✅Routing - check if we support slugs/ids in routes for pages and if we support nested routes for (we dont want slugs in api or syncs calls since we use sockets)
 1. pages

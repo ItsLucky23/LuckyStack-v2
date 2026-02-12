@@ -1,8 +1,9 @@
 import { useState } from "react";
+import config from "config";
 
 export default function ThemeToggler() {
 
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [theme, setTheme] = useState<"light" | "dark">(config.defaultTheme);
 
   //? on default we set the theme to the session of the user but we allow to change it using a useState hook
   //? reason for this is that the settings page can display how it looks in the differnt theme without needing to call the server to update the sesion if the user hasnt clicked save yet
