@@ -77,19 +77,6 @@ export async function handleHttpApiRequest({
   // Get user session
   const user = await getSession(token);
 
-  // Built-in API handlers
-  if (name === 'session') {
-    return { status: 'success', result: user };
-  }
-
-  // Note: 'logout' doesn't make sense for stateless HTTP - skip it
-  if (name === 'logout') {
-    return {
-      status: 'error',
-      message: 'Use cookie-based logout or DELETE request instead'
-    };
-  }
-
   console.log(`http api: ${name} called`, 'cyan');
 
   const apisObject = process.env.NODE_ENV === 'development' ? devApis : apis;
