@@ -22,3 +22,41 @@ Location Provider - Optional feature just like socket broadcaster
 ✅ Cleaned up server.ts - Removed legacy POST /api route, now uses getParams for parsing
 ✅ Updated Documentation - docs/ARCHITECTURE_API.md reflects new routes
 ✅ Fixed TypeScript errors - createPageApi removed, function overload order fixed
+
+
+
+
+
+
+
+
+
+api reload recent update:
+
+
+
+
+
+I’ll quickly list the exact AFAS-related framework-impacting edits in apiRequest and hot-reload/loader so you can port only those changes.
+
+AFAS-impacting framework changes
+
+API route resolution fix in src/_sockets/apiRequest.ts: added resolveApiRoutePath() so nested pages (like AFAS detail routes) resolve to the nearest page that actually has the API, instead of always using full pathname.
+In the same file, isGetMethod() and built fullname now use the resolved page path, and pathname source was hardened to globalThis.location.pathname.
+Hot reload changes you’ll want in framework
+
+In server/dev/hotReload.ts: changed dev detection to NODE_ENV !== 'production' (instead of strict "development"), so staging/dev-like envs still hot-reload.
+Added debounced reload scheduler per domain (api/sync/functions) to prevent reload storms.
+Added clearSrcCache() that clears Node require cache for src modules before API/sync reloads.
+Added dependency-aware API reload: changes/deletes in _functions/server/ now also trigger API reload.
+Added generated-file guard (apiTypes.generated.ts, docs output) to avoid watch loops.
+Added awaitWriteFinish to chokidar watcher for more stable reload on rapid file writes.
+Loader/framework compatibility updates
+
+In server/dev/loader.ts: switched dynamic loading to createRequire + cache eviction, and normalized default export merging for API/sync/functions modules.
+Removed debug noise from loader/watcher logs (kept behavior, cleaner console output).
+Related mode consistency updates
+
+server/server.ts, server/sockets/handleApiRequest.ts, server/sockets/handleHttpApiRequest.ts: unified dev/prod checks to NODE_ENV !== 'production' for selecting devApis/devFunctions.
+Want me to generate a compact “framework patch checklist” file you can paste into the core framework repo?
+
