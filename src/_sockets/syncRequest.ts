@@ -11,6 +11,7 @@ import type {
   SyncServerOutput,
   SyncClientOutput
 } from "./apiTypes.generated";
+import { Socket } from "socket.io-client";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Type Helpers for Sync Requests
@@ -123,7 +124,7 @@ export function syncRequest(params: any): Promise<boolean> {
       return isOnline();
     };
 
-    const runRequest = () => {
+    const runRequest = (socketInstance: Socket) => {
       if (!canSendNow()) {
         if (!queueId) {
           queueId = `${Date.now()}-${Math.random()}`;
@@ -131,7 +132,7 @@ export function syncRequest(params: any): Promise<boolean> {
         enqueueSyncRequest({
           id: queueId,
           key: fullName,
-          run: runRequest,
+          run: () => runRequest(socketInstance),
           createdAt: Date.now(),
         });
         return;
@@ -141,9 +142,9 @@ export function syncRequest(params: any): Promise<boolean> {
 
       if (dev) { console.log(`Client Sync Request: `, { name, data, receiver, ignoreSelf }) }
 
-      socket.emit('sync', { name: fullName, data, cb: name, receiver, responseIndex: tempIndex, ignoreSelf });
+      socketInstance.emit('sync', { name: fullName, data, cb: name, receiver, responseIndex: tempIndex, ignoreSelf });
 
-      socket.once(`sync-${tempIndex}`, (data: { status: "success" | "error", message: string }) => {
+      socketInstance.once(`sync-${tempIndex}`, (data: { status: "success" | "error", message: string }) => {
         if (data.status === "error") {
           if (dev) {
             console.error(`Sync ${name} failed: ${data.message}`);
@@ -155,7 +156,7 @@ export function syncRequest(params: any): Promise<boolean> {
       });
     };
 
-    runRequest();
+    runRequest(socket);
   })
 }
 

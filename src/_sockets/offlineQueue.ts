@@ -1,16 +1,17 @@
 import { dev } from "config";
+import { Socket } from "socket.io-client";
 
 type ApiQueueItem = {
   id: string;
   key: string;
-  run: () => void;
+  run: (socketInstance: Socket) => void;
   createdAt: number;
 };
 
 type SyncQueueItem = {
   id: string;
   key: string;
-  run: () => void;
+  run: (socketInstance: Socket) => void;
   createdAt: number;
 };
 
@@ -59,7 +60,7 @@ export const removeApiQueueItemsByKey = (key: string) => {
   }
 };
 
-export const flushApiQueue = (canRun: () => boolean) => {
+export const flushApiQueue = (canRun: () => boolean, socketInstance: Socket) => {
   if (isFlushing) return;
   if (apiQueue.length === 0) return;
   if (!canRun()) return;
@@ -68,12 +69,12 @@ export const flushApiQueue = (canRun: () => boolean) => {
   while (apiQueue.length > 0) {
     if (!canRun()) break;
     const item = apiQueue.shift();
-    item?.run();
+    item?.run(socketInstance);
   }
   isFlushing = false;
 };
 
-export const flushSyncQueue = (canRun: () => boolean) => {
+export const flushSyncQueue = (canRun: () => boolean, socketInstance: Socket) => {
   if (isFlushing) return;
   if (syncQueue.length === 0) return;
   if (!canRun()) return;
@@ -82,7 +83,7 @@ export const flushSyncQueue = (canRun: () => boolean) => {
   while (syncQueue.length > 0) {
     if (!canRun()) break;
     const item = syncQueue.shift();
-    item?.run();
+    item?.run(socketInstance);
   }
   isFlushing = false;
 };

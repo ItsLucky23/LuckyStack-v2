@@ -92,8 +92,8 @@ export function useSocket(session: SessionLayout | null) {
     }
 
     socketConnection.on("connect", () => {
-      flushApiQueue(canFlushQueue);
-      flushSyncQueue(canFlushQueue);
+      flushApiQueue(canFlushQueue, socketConnection);
+      flushSyncQueue(canFlushQueue, socketConnection);
     });
 
     socketConnection.on("logout", (status: "success" | "error") => {
@@ -126,8 +126,8 @@ export function useSocket(session: SessionLayout | null) {
 
     const handleOnline = () => {
       if (socketConnection.connected) {
-        flushApiQueue(canFlushQueue);
-        flushSyncQueue(canFlushQueue);
+        flushApiQueue(canFlushQueue, socketConnection);
+        flushSyncQueue(canFlushQueue, socketConnection);
         return;
       }
       socketConnection.connect();

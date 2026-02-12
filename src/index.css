@@ -1,6 +1,84 @@
 @import "tailwindcss";
 
 @theme {
+  --color-background: #FFFFFF;
+
+  --color-container1: #F5F5F5;
+  --color-container1-hover: #EEEEEE;
+  --color-container1-border: #E0E0E0;
+
+  --color-container2: #929292;
+  --color-container2-hover: #858585;
+  --color-container2-border: #7A7A7A;
+
+  --color-title: #1E1F21;
+  --color-common: #454648;
+
+  /* color to layer over the primary color */
+  --color-title-primary: #FDFFA9;
+  --color-common-primary: #FDFD8D;
+
+  --color-title-secondary: #FDFFA9;
+  --color-common-secondary: #FDFD8D;
+
+  --color-primary: #DE6E2B;
+  --color-primary-hover: #C45A1B;
+  --color-primary-border: #BC5A1E;
+
+  --color-secondary: #DE6E2B;
+  --color-secondary-hover: #C45A1B;
+  --color-secondary-border: #BC5A1E;
+
+  --color-correct: oklch(72.3% 0.219 149.579);
+  --color-correct-hover: oklch(62.7% 0.194 149.214);
+
+  --color-warning: oklch(79.5% 0.184 86.047);
+  --color-warning-hover: oklch(68.1% 0.162 75.834);
+
+  --color-wrong: oklch(63.7% 0.237 25.331);
+  --color-wrong-hover: oklch(57.7% 0.245 27.325);
+}
+
+.dark {
+  --color-background: #231934;
+
+  --color-container1: #322844;
+  --color-container1-hover: #3D3251;
+  --color-container1-border: #443958;
+
+  --color-container2: #373737;
+  --color-container2-hover: #454545;
+  --color-container2-border: #4A4A4A;
+
+  --color-title: #FFFFFF;
+  --color-common: #E0E0E0;
+
+  --color-title-secondary: #FFFFFF;
+  --color-common-secondary: #E0E0E0;
+
+  /* color to layer over the primary color */
+  --color-title-primary: #F1C4FD;
+  --color-common-primary: #FDFD8D;
+
+  --color-primary: #6800D8;
+  --color-primary-hover: #7A00FF;
+  --color-primary-border: #8B3DFF;
+
+  --color-secondary: #6800D8;
+  --color-secondary-hover: #7A00FF;
+  --color-secondary-border: #8B3DFF;
+
+  --color-correct: oklch(72.3% 0.219 149.579);
+  --color-correct-hover: oklch(62.7% 0.194 149.214);
+
+  --color-warning: oklch(79.5% 0.184 86.047);
+  --color-warning-hover: oklch(68.1% 0.162 75.834);
+
+  --color-wrong: oklch(63.7% 0.237 25.331);
+  --color-wrong-hover: oklch(57.7% 0.245 27.325);
+}
+
+/* @theme {
   --color-background: #EFF6FF;
 
   --color-container: #FFFFFF;
@@ -58,7 +136,7 @@
 
   --color-wrong: #EF4444;
   --color-wrong-hover: #DC2626;
-}
+} */
 
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;

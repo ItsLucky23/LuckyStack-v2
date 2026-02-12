@@ -5,6 +5,7 @@ import type { PagePath, ApiName, ApiInput, ApiOutput } from './apiTypes.generate
 import { getApiMethod } from './apiTypes.generated';
 import notify from "src/_functions/notify";
 import { enqueueApiRequest, isOnline, removeApiQueueItem } from "./offlineQueue";
+import { Socket } from "socket.io-client";
 
 //? Abort controller logic:
 //? - abortable: true → always use abort controller
@@ -169,7 +170,7 @@ export function apiRequest(params: any): Promise<any> {
       return isOnline();
     };
 
-    const runRequest = (socketInstance) => {
+    const runRequest = (socketInstance: Socket) => {
       if (!canSendNow()) {
         if (!queueId) {
           queueId = `${Date.now()}-${Math.random()}`;
@@ -177,7 +178,7 @@ export function apiRequest(params: any): Promise<any> {
         enqueueApiRequest({
           id: queueId,
           key: fullname,
-          run: runRequest,
+          run: () => runRequest(socketInstance),
           createdAt: Date.now(),
         });
         return;
