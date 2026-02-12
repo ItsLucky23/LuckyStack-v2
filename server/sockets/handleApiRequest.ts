@@ -52,7 +52,8 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   console.log(`api: ${name} called`, 'blue');
 
-  const apisObject = process.env.NODE_ENV == 'development' ? devApis : apis;
+  const isDevMode = process.env.NODE_ENV !== 'production';
+  const apisObject = isDevMode ? devApis : apis;
 
   //? Resolve API: try exact match first, then fall back to root-level
   //? e.g. client sends "api/examples/session" → not found → try "api/session"
@@ -121,7 +122,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Execute the API handler
-  const functionsObject = process.env.NODE_ENV == 'development' ? devFunctions : functions;
+  const functionsObject = isDevMode ? devFunctions : functions;
   const [error, result] = await tryCatch(
     async () => await main({ data, user, functions: functionsObject })
   );

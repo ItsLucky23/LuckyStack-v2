@@ -1,5 +1,7 @@
 import chokidar from "chokidar";
 import fs from "fs";
+import path from 'path';
+import { createRequire } from 'module';
 import { initializeApis, initializeFunctions, initializeSyncs } from "./loader";
 import {
   shouldInjectTemplate,
@@ -24,16 +26,61 @@ import { tryCatch } from "../functions/tryCatch";
 // ----------------------------
 
 export const setupWatchers = () => {
-  if (process.env.NODE_ENV !== "development") return;
+  const isDevMode = process.env.NODE_ENV !== 'production';
+  if (!isDevMode) return;
+  const nodeRequire = createRequire(import.meta.url);
+  const reloadTimers = new Map<'api' | 'sync' | 'functions', NodeJS.Timeout>();
+
+  const clearModuleCache = (paths: string[]) => {
+    const normalizedNeedles = paths.map((value) => value.replace(/\\/g, '/'));
+    for (const cacheKey of Object.keys(nodeRequire.cache)) {
+      const normalizedCacheKey = cacheKey.replace(/\\/g, '/');
+      if (normalizedNeedles.some((needle) => normalizedCacheKey.includes(needle))) {
+        delete nodeRequire.cache[cacheKey];
+      }
+    }
+  };
+
+  const clearSrcCache = () => {
+    const srcNeedle = `${path.sep}src${path.sep}`.replace(/\\/g, '/');
+    clearModuleCache([srcNeedle]);
+  };
+
+  const isApiDependencyFile = (normalizedPath: string): boolean => {
+    return normalizedPath.includes('_functions/server/');
+  };
+
+  const isGeneratedPath = (normalizedPath: string): boolean => {
+    return (
+      normalizedPath.includes('apiTypes.generated.ts')
+      || normalizedPath.includes('apiDocs.generated.json')
+      || normalizedPath.includes('/src/docs/_api/')
+    );
+  };
+
+  const scheduleReload = (
+    key: 'api' | 'sync' | 'functions',
+    task: () => Promise<void> | void,
+    delay = 120
+  ) => {
+    const activeTimer = reloadTimers.get(key);
+    if (activeTimer) {
+      clearTimeout(activeTimer);
+    }
+
+    const timer = setTimeout(() => {
+      reloadTimers.delete(key);
+      void task();
+    }, delay);
+
+    reloadTimers.set(key, timer);
+  };
 
   const handleAdd = async (path: string) => {
-    console.log(path)
     const normalizedPath = path.replace(/\\/g, '/');
 
     // Check if this is a new empty file that needs a template
     if (shouldInjectTemplate(path)) {
-      console.log(`[Watcher] New empty file detected: ${normalizedPath}`);
-
       // Special handling for sync server files when client already exists
       if (isSyncServerFile(normalizedPath)) {
         const clientPath = getPairedSyncFile(normalizedPath);
@@ -41,7 +88,6 @@ export const setupWatchers = () => {
           // Extract clientInput types from existing client file
           const clientInputTypes = extractClientInputFromFile(clientPath);
           if (clientInputTypes) {
-            console.log(`[Watcher] Found existing client file, migrating types to server: ${clientPath}`);
             // Inject server template with pre-filled clientInput from client
             await injectServerTemplateWithClientInput(path, clientInputTypes);
             // Regenerate types
@@ -68,68 +114,93 @@ export const setupWatchers = () => {
   };
 
   const handleChange = async (path: string) => {
-    console.log(path)
     const normalizedPath = path.replace(/\\/g, '/');
 
-    // Skip if this is the generated type map file
-    if (normalizedPath.includes('apiTypes.generated.ts')) {
+    if (isGeneratedPath(normalizedPath)) {
       return;
     }
 
     if (normalizedPath.includes('_api/')) {
-      // Reload the API handlers
-      console.log(`[Watcher] Reloading API due to change in: ${normalizedPath}`);
-      tryCatch(generateTypeMapFile);
-      initializeApis();
+      scheduleReload('api', async () => {
+        clearSrcCache();
+        await tryCatch(generateTypeMapFile);
+        await initializeApis();
+      });
+    } else if (isApiDependencyFile(normalizedPath)) {
+      scheduleReload('api', async () => {
+        clearSrcCache();
+        await initializeApis();
+      });
     } else if (normalizedPath.includes('_sync/')) {
-      console.log(`[Watcher] Reloading Sync due to change in: ${normalizedPath}`);
-      tryCatch(generateTypeMapFile);
-      initializeSyncs();
+      scheduleReload('sync', async () => {
+        clearSrcCache();
+        await tryCatch(generateTypeMapFile);
+        await initializeSyncs();
+      });
     }
   };
 
   const handleFunctionChange = (path: string) => {
-    console.log(`[Watcher] Reloading Function due to change in: ${path.replace(/\\/g, '/')}`);
-    initializeFunctions();
+    const normalizedPath = path.replace(/\\/g, '/');
+    scheduleReload('functions', async () => {
+      await initializeFunctions();
+    });
   };
 
   const handleDelete = async (path: string) => {
     const normalizedPath = path.replace(/\\/g, '/');
 
+    if (isGeneratedPath(normalizedPath)) {
+      return;
+    }
+
     if (normalizedPath.includes('_api/')) {
-      console.log(`[Watcher] API file deleted: ${normalizedPath}`);
-      generateTypeMapFile();
-      initializeApis();
+      scheduleReload('api', async () => {
+        clearSrcCache();
+        await generateTypeMapFile();
+        await initializeApis();
+      });
+    } else if (isApiDependencyFile(normalizedPath)) {
+      scheduleReload('api', async () => {
+        clearSrcCache();
+        await initializeApis();
+      });
     } else if (normalizedPath.includes('_sync/')) {
-      console.log(`[Watcher] Sync file deleted: ${normalizedPath}`);
+      scheduleReload('sync', async () => {
+        clearSrcCache();
 
-      // Special handling for sync server file deletion when client exists
-      if (isSyncServerFile(normalizedPath)) {
-        const clientPath = getPairedSyncFile(normalizedPath);
-        if (clientPath && fs.existsSync(clientPath)) {
-          console.log(`[Watcher] Server file deleted, updating client to standalone: ${clientPath}`);
+        // Special handling for sync server file deletion when client exists
+        if (isSyncServerFile(normalizedPath)) {
+          const clientPath = getPairedSyncFile(normalizedPath);
+          if (clientPath && fs.existsSync(clientPath)) {
+            // Extract clientInput types from generated types file (server file is already deleted)
+            const pagePath = extractSyncPagePath(normalizedPath);
+            const syncName = extractSyncName(normalizedPath);
+            const clientInputTypes = extractClientInputFromGeneratedTypes(pagePath, syncName);
 
-          // Extract clientInput types from generated types file (server file is already deleted)
-          const pagePath = extractSyncPagePath(normalizedPath);
-          const syncName = extractSyncName(normalizedPath);
-          const clientInputTypes = extractClientInputFromGeneratedTypes(pagePath, syncName);
-
-          if (clientInputTypes) {
-            await updateClientFileForDeletedServer(clientPath, clientInputTypes);
-          } else {
-            // Fallback if types couldn't be extracted
-            await updateClientFileForDeletedServer(clientPath, '{\n    // Types were in _server.ts - please add them here\n  }');
+            if (clientInputTypes) {
+              await updateClientFileForDeletedServer(clientPath, clientInputTypes);
+            } else {
+              // Fallback if types couldn't be extracted
+              await updateClientFileForDeletedServer(clientPath, '{\n    // Types were in _server.ts - please add them here\n  }');
+            }
           }
         }
-      }
 
-      generateTypeMapFile();
-      initializeSyncs();
+        await generateTypeMapFile();
+        await initializeSyncs();
+      });
     }
   };
 
   // Watch the main source folders
-  chokidar.watch('src', { ignoreInitial: true })
+  chokidar.watch('src', {
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 120,
+      pollInterval: 20,
+    },
+  })
     .on('add', handleAdd)
     .on('change', handleChange)
     .on('unlink', handleDelete);
@@ -140,6 +211,5 @@ export const setupWatchers = () => {
     .on('change', handleFunctionChange);
 
   // Generate initial type map on startup
-  console.log('[Watcher] Generating initial frontend type map...');
   generateTypeMapFile();
 };

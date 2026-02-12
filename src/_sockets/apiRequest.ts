@@ -29,6 +29,22 @@ const isGetMethod = (pagePath: string, apiName: string): boolean => {
   return apiName.toLowerCase().startsWith('get');
 };
 
+const resolveApiRoutePath = (pagePath: string, apiName: string): string => {
+  if (!pagePath) {
+    return '';
+  }
+
+  const segments = pagePath.split('/').filter((segment) => segment.length > 0);
+  for (let index = segments.length; index > 0; index -= 1) {
+    const candidate = segments.slice(0, index).join('/');
+    if (getApiMethod(candidate, apiName)) {
+      return candidate;
+    }
+  }
+
+  return pagePath;
+};
+
 export interface apiRequestResponse {
   status: 'success' | 'error';
   result?: Record<string, any>;
@@ -137,16 +153,17 @@ export function apiRequest(params: any): Promise<any> {
     //? - abortable: true → always use abort controller
     //? - abortable: false → never use abort controller  
     //? - abortable: undefined → smart default (GET APIs get abort controller)
-    const pathname = window.location.pathname;
+    const pathname = globalThis.location.pathname;
     const pagePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
     // Remove trailing slash for clean paths
     const cleanPagePath = pagePath.endsWith('/') ? pagePath.slice(0, -1) : pagePath;
+    const resolvedPagePath = resolveApiRoutePath(cleanPagePath, name as string);
 
-    const isGet = isGetMethod(cleanPagePath, name as string);
+    const isGet = isGetMethod(resolvedPagePath, name as string);
     const useAbortController = params.abortable === true || isGet;
     // Build full API route key: "api/examples/getUserData" or "api/session" (when at root /)
     // Server handles root-level fallback: if api/examples/session doesn't exist, it tries api/session
-    const fullname = cleanPagePath ? `api/${cleanPagePath}/${name}` : `api/${name}`;
+    const fullname = resolvedPagePath ? `api/${resolvedPagePath}/${name}` : `api/${name}`;
 
     let signal: AbortSignal | null = null;
     let abortFunc = () => { };

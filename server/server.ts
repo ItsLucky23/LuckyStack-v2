@@ -229,7 +229,8 @@ const ip: string = process.env.SERVER_IP || '127.0.0.1';
 const port: string = process.env.SERVER_PORT || '80';
 
 (async () => {
-  if (process.env.NODE_ENV == 'development') {
+  const isDevMode = process.env.NODE_ENV !== 'production';
+  if (isDevMode) {
     initConsolelog();
     await initializeAll();
     setupWatchers();

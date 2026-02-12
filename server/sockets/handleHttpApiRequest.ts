@@ -79,7 +79,8 @@ export async function handleHttpApiRequest({
 
   console.log(`http api: ${name} called`, 'cyan');
 
-  const apisObject = process.env.NODE_ENV === 'development' ? devApis : apis;
+  const isDevMode = process.env.NODE_ENV !== 'production';
+  const apisObject = isDevMode ? devApis : apis;
 
   //? Resolve API: try exact match first, then fall back to root-level
   //? e.g. "api/examples/session" → not found → try "api/session"
@@ -160,7 +161,7 @@ export async function handleHttpApiRequest({
   }
 
   // Execute the API handler
-  const functionsObject = process.env.NODE_ENV === 'development' ? devFunctions : functions;
+  const functionsObject = isDevMode ? devFunctions : functions;
   const [error, result] = await tryCatch(
     async () => await main({ data: requestData, user, functions: functionsObject })
   );

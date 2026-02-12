@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
-import { pathToFileURL } from "url";
+import { createRequire } from 'module';
 import { tryCatch } from "../functions/tryCatch";
+
+const nodeRequire = createRequire(import.meta.url);
 
 // ----------------------------
 // Storage for loaded modules
@@ -15,18 +17,22 @@ export const devFunctions: Record<string, any> = {};
 // ----------------------------
 export const initializeAll = async () => {
   await Promise.all([initializeApis(), initializeSyncs(), initializeFunctions()]);
-  console.log(devApis)
-  console.log(devSyncs)
-  console.log("DEV modules initialized.");
-  // console.log(devFunctions)
 };
 
 // ----------------------------
 // Helper: convert absolute path to proper file URL for import
 // ----------------------------
 const importFile = async (absolutePath: string) => {
-  const url = pathToFileURL(absolutePath).href;
-  return import(`${url}?update=${Date.now()}`);
+  const normalizedPath = absolutePath.replace(/\\/g, '/');
+
+  for (const cacheKey of Object.keys(nodeRequire.cache)) {
+    const normalizedCacheKey = cacheKey.replace(/\\/g, '/');
+    if (normalizedCacheKey.startsWith(normalizedPath)) {
+      delete nodeRequire.cache[cacheKey];
+    }
+  }
+
+  return nodeRequire(absolutePath);
 };
 
 // ----------------------------
@@ -78,7 +84,8 @@ const scanApiFolder = async (file: string, basePath = "") => {
       const [err, module] = await tryCatch(async () => importFile(modulePath));
       if (err) continue;
 
-      const { auth = {}, main, rateLimit, httpMethod, schema } = module;
+      const resolvedModule = module?.default ? { ...module.default, ...module } : module;
+      const { auth = {}, main, rateLimit, httpMethod, schema } = resolvedModule;
       if (!main || typeof main !== "function") continue;
 
       // Remove .ts extension and normalize slashes for the API name
@@ -134,17 +141,21 @@ const scanSyncFolder = async (file: string, basePath = "") => {
 
       if (fileError) { continue; }
 
+      const resolvedSyncModule = fileResult?.default
+        ? { ...fileResult.default, ...fileResult }
+        : fileResult;
+
       const syncFileName = f.replace(".ts", "");
       // Build route key: "sync/examples/test_server" or "sync/test_server" (root-level)
       const routeKey = pageLocation ? `sync/${pageLocation}/${syncFileName}` : `sync/${syncFileName}`;
 
       if (f.endsWith("_server.ts")) {
         devSyncs[routeKey] = { 
-          main: fileResult.main, 
-          auth: fileResult.auth || {} 
+          main: resolvedSyncModule.main,
+          auth: resolvedSyncModule.auth || {}
         };
       } else {
-        devSyncs[routeKey] = fileResult.main;
+        devSyncs[routeKey] = resolvedSyncModule.main;
       }
     }
   } else {
@@ -179,6 +190,8 @@ const scanFunctionsFolder = async (dir: string, basePath: string[] = []) => {
     } else if (entry.endsWith(".ts")) {
       const [err, module] = await tryCatch(async () => importFile(fullPath));
       if (err) continue;
+
+      const resolvedFunctionModule = module?.default ? { ...module.default, ...module } : module;
       
       const fileName = entry.replace(".ts", "");
       
@@ -191,7 +204,7 @@ const scanFunctionsFolder = async (dir: string, basePath: string[] = []) => {
       
       // Merge module exports into the target key (handles case where file and folder share name)
       if (!target[fileName]) target[fileName] = {};
-      Object.assign(target[fileName], module);
+      Object.assign(target[fileName], resolvedFunctionModule);
     }
   }
 };
