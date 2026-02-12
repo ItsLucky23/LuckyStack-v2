@@ -31,3 +31,6 @@ uploads/**
 
 # Auto-generated types (regenerated on dev server start)
 apiTypes.generated.ts
+
+# Repomix
+repomix-output.xml

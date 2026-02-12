@@ -1,35 +1,117 @@
 import { PrismaClient } from "@prisma/client";
-
+ 
+// ============================================
+// LUCKYSTACK CONFIGURATION
+// ============================================
+// This file contains all configurable options for the framework.
+// Copy this to 'config.ts' and adjust values for your project.
+// ============================================
+ 
 const config = {
-  // backendUrl: 'https://your.domain.com', //* the url of the backend server
-  backendUrl: 'http://localhost:80', //* the url of the backend server
-
-  dev: true, //* if true then we get extra console logs
-  loginPageUrl: '/login', //* url the client is redirected to when the user is not authenticate
-  loginRedirectUrl: '/test', //* url the client is redirected to after logging in
-  defaultLanguage: 'en', //* default language if the session data doesnt include it, this is used with the notify system with the json files in the localed folder
-  defaultTheme: 'dark', //* the default theme the client uses when the user hasnt set a theme yet
-  mobileConsole: false, //* if true then there is a extra console you can open on any device (including mobile)
-  sessionExpiryDays: 7, //* the number of days a session is valid
-
-  //? if true than we store the token in session (unsecure but nice for development)
-  //? when true you can open multiple windows and login into different user accounts so you can test certain features
-  singleSessionPerUser: false,
-  
-  //? if false syncing works to users in your room but they wont know who they are sycning to
-  //? if true on the client we know the activity status of all users in the same room
-  //? this is usefull for multiplayer games to e.g. pause the game when a user is afk
-  //? this data is stored in socketStatus (context provider)
+  // ============================================
+  // SERVER URLS
+  // ============================================
+ 
+  /** The URL of the backend server. Update for production. */
+  backendUrl: 'http://localhost:80',
+ 
+  // ============================================
+  // DEVELOPMENT OPTIONS
+  // ============================================
+ 
+  /** Enable extra console logs for debugging */
+  dev: true,
+ 
+  /** Enable mobile-friendly console overlay (useful for debugging on phones) */
+  mobileConsole: false,
+ 
+  // ============================================
+  // AUTHENTICATION & REDIRECTS
+  // ============================================
+ 
+  /** URL to redirect unauthenticated users */
+  loginPageUrl: '/login',
+ 
+  /** URL to redirect after successful login */
+  loginRedirectUrl: '/examples',
+ 
+  // ============================================
+  // SESSION MANAGEMENT
+  // ============================================
+ 
+  /**
+   * If false, logging in on a new device will automatically sign out all other sessions.
+   * Useful for security-sensitive apps. Set to true to allow multiple simultaneous sessions.
+   */
+  allowMultipleSessions: false,
+ 
+  /**
+   * Number of days before a session expires in Redis.
+   * After this time, users will need to log in again.
+   */
+  sessionExpiryDays: 7,
+ 
+  // ============================================
+  // SOCKET & MULTIPLAYER FEATURES
+  // ============================================
+ 
+  /**
+   * Enable multiplayer awareness broadcasting.
+   *
+   * When FALSE:
+   * - Sync events work normally between users in the same room
+   * - Users don't know each other's connection status
+   *
+   * When TRUE:
+   * - Users in the same room can see each other's status (online/AFK/reconnecting)
+   * - Status is available via useSocketStatus() hook from SocketStatusProvider
+   * - Useful for: multiplayer games, collaborative editors, presence indicators
+   *
+   * @example
+   * ```tsx
+   * import { useSocketStatus } from 'src/_providers/socketStatusProvider';
+   *
+   * function UserList() {
+   *   const { socketStatus } = useSocketStatus();
+   *   // socketStatus['user-id'] = { status: 'CONNECTED' | 'DISCONNECTED' | 'RECONNECTING' }
+   * }
+   * ```
+   */
   socketActivityBroadcaster: false,
+ 
+  // ============================================
+  // LOCALIZATION
+  // ============================================
+ 
+  /** Default language for notifications and UI (matches files in src/_locales/) */
+  defaultLanguage: 'en',
+ 
+  /** Default theme when user hasn't set a preference */
+  defaultTheme: 'dark' as 'light' | 'dark',
 
-  //? Rate limiting configuration for API requests
+  // ============================================
+  // RATE LIMITING
+  // ============================================
+
+  /** Rate limiting configuration for API requests */
   rateLimiting: {
-    defaultApiLimit: 60,   //* requests per minute per user
-    defaultIpLimit: 100,   //* requests per minute per IP (unauthenticated)
-    windowMs: 60000,       //* sliding window duration in ms (1 minute)
-  }
-}
-//* these values are optional to have in the session object, used for type declartion after an apiRequest on the client
+    /** Requests per minute per authenticated user */
+    defaultApiLimit: 60,
+    /** Requests per minute per IP (unauthenticated) */
+    defaultIpLimit: 100,
+    /** Sliding window duration in ms */
+    windowMs: 60000,
+  },
+};
+ 
+// ============================================
+// TYPE DEFINITIONS
+// ============================================
+ 
+/**
+ * Session data structure stored in Redis.
+ * Extend this interface to add custom fields to user sessions.
+ */
 export interface SessionLayout {
   id: string;
   name: string;
@@ -43,6 +125,7 @@ export interface SessionLayout {
   createdAt: Date;
   updatedAt: Date;
   token: string;
+  code?: string; // Room code the user has joined
   location?: {
     pathName: string;
     searchParams: {
@@ -50,43 +133,61 @@ export interface SessionLayout {
     };
   };
 };
-
+ 
+/**
+ * Authentication configuration for API and Sync handlers.
+ *
+ * @example
+ * ```typescript
+ * // Require login only
+ * export const auth: AuthProps = { login: true };
+ *
+ * // Require admin user
+ * export const auth: AuthProps = {
+ *   login: true,
+ *   additional: [{ key: 'admin', value: true }]
+ * };
+ * ```
+ */
 export interface AuthProps {
-  login: boolean; //* if true then the user needs to have an id in the session object
-  additional?: { //* if true then the user needs to have the additional keys in the session object with the condition
-    key: keyof SessionLayout; //* the key of the session object
-    value?: any //* the exact value the key needs to have. this is a strict comparison
-    type?: 'string' | 'number' | 'boolean'; //* the type of the key. this is a strict comparison
-    nullish?: boolean; //* if true then the key needs to be null or undefined, if false then the key needs to be not null and not undefined
-    mustBeFalsy?: boolean; //* if true than the passes key needs to be a false value such as false, 0, -0, 0n, "", null, undefined or NaN, if false then the key needs to be a true value such as true, 1, 'a' or any other value
+  /** If true, user must have a valid session with an ID */
+  login: boolean;
+ 
+  /** Additional validation rules for session properties */
+  additional?: {
+    /** The session property to check (e.g., 'admin', 'email') */
+    key: keyof SessionLayout;
+ 
+    /** Exact value the property must equal (strict comparison) */
+    value?: any;
+ 
+    /** Type the property must be */
+    type?: 'string' | 'number' | 'boolean';
+ 
+    /** If true, property must be null/undefined. If false, must NOT be null/undefined */
+    nullish?: boolean;
+ 
+    /** If true, property must be falsy. If false, must be truthy */
+    mustBeFalsy?: boolean;
   }[]
 }
-
-interface ServerFunctions {
-  prisma: PrismaClient;
-
-  saveSession: (token: string, data: any) => Promise<boolean>;
-  getSession: (token: string) => Promise<any | null>;
-  deleteSession: (token: string) => Promise<boolean>;
-
-  tryCatch: <T, P>(func: (values: P) => Promise<T> | T, params?: P) => Promise<[any, T | null]>;
-  sleep: (ms: number) => Promise<void>;
-
-  [key: string]: any; // allows you to call functions you made yourself, autocomplete wont work for your own functions if you dont add them here
-};
-
-
-export interface ServerSyncProps {
-  clientData: any;
-  functions: ServerFunctions;
-  user: SessionLayout;
-}
-
-export interface ClientSyncProps extends ServerSyncProps {
-  serverOutput: any;
-}
-
+ 
+// ============================================
+// EXPORTS
+// ============================================
+ 
+/** Supported OAuth providers */
 export const providers = ['credentials', 'google', 'github', 'facebook', 'discord'];
-
+ 
 export default config;
-export const { backendUrl, dev, loginPageUrl, loginRedirectUrl, defaultLanguage, mobileConsole } = config;
+export const {
+  backendUrl,
+  dev,
+  loginPageUrl,
+  loginRedirectUrl,
+  defaultLanguage,
+  mobileConsole,
+  allowMultipleSessions,
+  sessionExpiryDays,
+  socketActivityBroadcaster,
+} = config;
