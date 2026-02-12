@@ -115,6 +115,8 @@ server/utils/repl.ts
 server/utils/sentry.ts
 server/utils/serveAvatars.ts
 server/utils/validateRequest.ts
+src/_api/logout.ts
+src/_api/session.ts
 src/_components/Avatar.tsx
 src/_components/AvatarProvider.tsx
 src/_components/ConfirmMenu.tsx
@@ -178,330 +180,53 @@ vite.config.ts
 <files>
 This section contains the contents of the repository's files.
 
-<file path="src/_sockets/offlineQueue.ts">
-import { dev } from "config";
+<file path="src/_api/logout.ts">
+import { AuthProps, SessionLayout } from '../../config';
+import { Functions, ApiResponse } from '../_sockets/apiTypes.generated';
 
-type ApiQueueItem = {
-  id: string;
-  key: string;
-  run: () => void;
-  createdAt: number;
+export const auth: AuthProps = {
+  login: false,
 };
 
-type SyncQueueItem = {
-  id: string;
-  key: string;
-  run: () => void;
-  createdAt: number;
-};
-
-const apiQueue: ApiQueueItem[] = [];
-const syncQueue: SyncQueueItem[] = [];
-let isFlushing = false;
-
-export const isOnline = () => {
-  if (typeof navigator === "undefined") return true;
-  return navigator.onLine !== false;
-};
-
-export const enqueueApiRequest = (item: ApiQueueItem) => {
-  apiQueue.push(item);
-  if (dev) {
-    console.log("API request queued", { key: item.key, queueSize: apiQueue.length });
-  }
-};
-
-export const enqueueSyncRequest = (item: SyncQueueItem) => {
-  syncQueue.push(item);
-  if (dev) {
-    console.log("Sync request queued", { key: item.key, queueSize: syncQueue.length });
-  }
-};
-
-export const removeApiQueueItem = (id: string) => {
-  const index = apiQueue.findIndex((item) => item.id === id);
-  if (index >= 0) {
-    apiQueue.splice(index, 1);
-  }
-};
-
-export const removeSyncQueueItem = (id: string) => {
-  const index = syncQueue.findIndex((item) => item.id === id);
-  if (index >= 0) {
-    syncQueue.splice(index, 1);
-  }
-};
-
-export const removeApiQueueItemsByKey = (key: string) => {
-  for (let i = apiQueue.length - 1; i >= 0; i -= 1) {
-    if (apiQueue[i].key === key) {
-      apiQueue.splice(i, 1);
-    }
-  }
-};
-
-export const flushApiQueue = (canRun: () => boolean) => {
-  if (isFlushing) return;
-  if (apiQueue.length === 0) return;
-  if (!canRun()) return;
-
-  isFlushing = true;
-  while (apiQueue.length > 0) {
-    if (!canRun()) break;
-    const item = apiQueue.shift();
-    item?.run();
-  }
-  isFlushing = false;
-};
-
-export const flushSyncQueue = (canRun: () => boolean) => {
-  if (isFlushing) return;
-  if (syncQueue.length === 0) return;
-  if (!canRun()) return;
-
-  isFlushing = true;
-  while (syncQueue.length > 0) {
-    if (!canRun()) break;
-    const item = syncQueue.shift();
-    item?.run();
-  }
-  isFlushing = false;
-};
-
-export const getApiQueueSize = () => apiQueue.length;
-export const getSyncQueueSize = () => syncQueue.length;
-</file>
-
-<file path=".claude/CLAUDE.md">
-# LuckyStack - AI Development Rules
-
-> These rules are automatically loaded by Claude Code on every prompt.
-> Last updated: 2026-02-10
-
----
-
-## Project Overview
-
-**LuckyStack** is a socket-first fullstack framework built with React 19 + raw Node.js (no Express). All client-server communication happens via Socket.io WebSockets, with HTTP fallback. The project uses file-based routing for pages, APIs, and real-time sync events.
-
-**Tech stack:** React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5, TypeScript 5.7, Vite, Redis
-
-**Database:** Configurable via Prisma - supports MongoDB, MySQL, PostgreSQL, and SQLite. Check `prisma/schema.prisma` for the currently active provider.
-
----
-
-## Rules
-
-### 1. Styling
-
-- Use **TailwindCSS** exclusively for styling.
-- Only use colors defined in `src/index.css` (the `@theme` block and `.dark` overrides). Never use arbitrary color values.
-- Available color tokens: `background`, `container`, `container2`, `container3`, `container4` (each with `-border` and `-hover` variants), `title`, `common`, `muted`, `correct`, `correct-hover`, `wrong`, `wrong-hover`.
-- Prefer `flex` and `gap` for layout. Avoid using `margin` unless absolutely necessary.
-- Dark mode is handled via CSS class `.dark` on `<html>`. Colors auto-switch via CSS variables.
-- Use existing Components like our Dropdown, MenuHandler, Avatar, ConfirmMenu, Icon, etc.
-### 2. No Emojis
-
-- Never add emojis in code, comments, UI text, debug output, documentation, or html (use fontawesome icons instead).
-
-### 3. SOLID Principles
-
-- Follow SOLID principles in all code:
-  - **S**ingle Responsibility: each file/function does one thing.
-  - **O**pen/Closed: extend behavior without modifying existing code.
-  - **L**iskov Substitution: subtypes must be substitutable for their base types.
-  - **I**nterface Segregation: prefer small, focused interfaces.
-  - **D**ependency Inversion: depend on abstractions, not concretions.
-
-### 4. Comments
-
-- Write simple comments explaining **why** something is done, not what.
-- Do not add long JSDoc blocks or examples at the start of functions if the function name is self-explanatory.
-- No redundant comments on obvious code.
-
-### 5. Error Handling
-
-- Always use the custom `tryCatch` function for error handling:
-  - **Client:** `import tryCatch from 'src/_functions/tryCatch'` - returns `[error, result]` tuple.
-  - **Server:** `import { tryCatch } from 'server/functions/tryCatch'` - returns `[error, result]` tuple with automatic Sentry capture (in api and sync calls we get tryCatch in the function parameter ).
-- Check the first value: if truthy, there's an error. If null, access the second value for the result.
-- Never use raw `try/catch` blocks. Always wrap async operations in `tryCatch`.
-
-### 6. Terminal Commands
-
-- Do not run terminal commands automatically. Instead, tell the user what to run and explain why.
-- Exception: reading files, searching code, and git operations are fine.
-
-### 7. No Test Files
-
-- Do not create test files to verify backend functionality.
-- Instead, explain to the user how to test the feature (e.g., via browser console, curl, or the examples page) and why that approach works.
-
-### 8. Use Existing Code and Patterns
-
-- Always look at existing code before implementing something new.
-- Match the coding style, patterns, and conventions already in the codebase.
-- Reuse existing utilities (`tryCatch`, `notify`, `apiRequest`, `syncRequest`, etc.).
-- Follow the established file-based routing pattern for new APIs and sync events.
-
-### 9. Ask When Unsure
-
-- If requirements are unclear or you're unsure about an approach, always ask the user before guessing.
-- This applies to architecture decisions, feature scope, UI behavior, and anything ambiguous.
-
-### 10. Suggest Next Steps
-
-- After completing code, suggest what the user should do next (e.g., code review, testing approach, related changes).
-
-### 11. Report Issues Without Auto-Fixing
-
-- When analyzing code and you notice potential mistakes, unhandled errors, or improvement opportunities, report them to the user.
-- Do not fix them automatically. Let the user decide.
-
-### 12. Verify Code Flow Against Docs
-
-- Before writing code, verify that the code flow you've analyzed matches what the docs describe.
-- If the flow matches the docs, proceed with implementation.
-- If the flow doesn't match the docs, re-analyze the code. If you're still confident the docs are wrong after a second look, tell the user so the docs can be updated. Otherwise, follow the docs.
-
-### 13. Keep Documentation Updated
-
-- After making significant code changes, update the relevant documentation files (`PROJECT_CONTEXT.md`, `docs/ARCHITECTURE_*.md`, etc.) to stay in sync with the codebase.
-- After updating docs, tell the user to run `npx repomix` to regenerate the codebase summary.
-
-### 14. Keep Design Updated
-
-- when updating files that are listed in the .gitignore check if there is a template file for it and update that too. (e.g. .env -> envTemplate.txt or config.ts -> configTemplate.txt)
----
-
-## Project Structure
-
-```
-LuckyStack/
-├── server/                    # Backend (raw Node.js + Socket.io)
-│   ├── server.ts              # HTTP server entry point
-│   ├── auth/                  # OAuth + credentials authentication
-│   ├── sockets/               # Socket.io event handlers
-│   │   ├── socket.ts          # Socket server setup
-│   │   ├── handleApiRequest.ts
-│   │   ├── handleHttpApiRequest.ts
-│   │   └── handleSyncRequest.ts
-│   ├── functions/             # Server utilities (session, db, redis, tryCatch)
-│   ├── utils/                 # Helpers (rateLimiter, validateRequest, sentry)
-│   └── dev/                   # Hot-reload & type generation
-│
-├── src/                       # Frontend (React 19)
-│   ├── main.tsx               # Entry point + file-based router
-│   ├── index.css              # Tailwind theme colors (ONLY color source)
-│   ├── _sockets/              # apiRequest, syncRequest, socketInitializer
-│   ├── _providers/            # SessionProvider, SocketStatusProvider
-│   ├── _components/           # Shared UI (Navbar, Middleware, MenuHandler, etc.)
-│   ├── _functions/            # Client utilities (tryCatch, notify, translator)
-│   ├── _locales/              # i18n translations (nl, en, de, fr)
-│   └── {page}/                # Feature pages
-│       ├── page.tsx           # Page component (exports template)
-│       ├── _components/       # Page-specific components
-│       ├── _api/              # API endpoints for this page
-│       └── _sync/             # Sync handlers for this page
-│
-├── docs/                      # Architecture documentation
-│   ├── ARCHITECTURE_API.md    # API request system
-│   ├── ARCHITECTURE_AUTH.md   # Authentication flows
-│   ├── ARCHITECTURE_ROUTING.md # File-based routing (pages, APIs, syncs)
-│   ├── ARCHITECTURE_SESSION.md # Session management
-│   ├── ARCHITECTURE_SOCKET.md # Socket.io setup
-│   ├── ARCHITECTURE_SYNC.md   # Real-time sync system
-│   ├── DEVELOPER_GUIDE.md     # Getting started
-│   └── HOSTING.md             # Deployment guide
-│
-├── prisma/schema.prisma       # Database schema (supports MongoDB, MySQL, PostgreSQL, SQLite)
-├── config.ts                  # App config (gitignored, use configTemplate.txt)
-├── .env                       # Environment vars (gitignored, use envTemplate.txt)
-├── README.md                  # Framework overview
-└── PROJECT_CONTEXT.md         # Detailed architecture reference
-```
-
-## Key Patterns
-
-### File-Based Routing
-
-- `src/{page}/page.tsx` renders at route `/{page}`
-- `src/{page}/_api/{name}.ts` creates an API endpoint accessible as `api/{page}/{name}`
-- `src/{page}/_sync/{name}_server.ts` + `{name}_client.ts` creates a sync event as `sync/{page}/{name}`
-- Folders prefixed with `_` are private (not routes)
-- For full routing details see `docs/ARCHITECTURE_ROUTING.md`
-
-### API Pattern
-
-```typescript
-// src/{page}/_api/{name}.ts
-export const rateLimit: number | false = 60;
-export const method: "GET" | "POST" | "PUT" | "DELETE" = "POST";
-
-export const auth: AuthProps = { 
-  login: true, 
-  additional: [] 
-};
+// Mark as DELETE method for HTTP requests
+export const httpMethod = 'DELETE' as const;
 
 export interface ApiParams {
-  data: { /* typed input */ };
-  user: SessionLayout;
+  data: {};
+  user: SessionLayout | null;
   functions: Functions;
 }
 
-export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
-  return { status: 'success', result: { /* data */ } };
+export const main = async (_params: ApiParams): Promise<ApiResponse> => {
+  // We dont actually do anything here, logout is handled in handleApiRequest
+  // We still define the api route so our type system knows about it
+  return {
+    status: 'success',
+    result: true
+  };
 };
-```
+</file>
 
-### Sync Pattern
+<file path="src/_api/session.ts">
+import { AuthProps, SessionLayout } from '../../config';
+import { Functions, ApiResponse } from '../_sockets/apiTypes.generated';
 
-- `_server.ts` runs once on server for validation
-- `_client.ts` runs on server for each client in the room
-- Client sends: `syncRequest({ name, data, receiver: roomCode, ignoreSelf?: boolean })`
-- Client receives: `upsertSyncEventCallback(name, ({ clientOutput, serverOutput }) => {})`
+export const auth: AuthProps = {
+  login: false
+};
 
-### Provider Hierarchy
+export interface ApiParams {
+  data: {};
+  user: SessionLayout | null;
+  functions: Functions;
+}
 
-```
-SocketStatusProvider > SessionProvider > TranslationProvider > AvatarProvider > MenuHandlerProvider > Router
-```
-
-### Templates
-
-Pages export `template` as `'plain'`, `'home'`, or a new template that you can create yourself. 
-
-- `plain` - No UI chrome (login, register, docs)
-- `home` - Top bar with avatar, settings toggle, logout
-
----
-
-## Documentation Reference
-
-For detailed architecture docs, read the files in `docs/`:
-- Routing: `docs/ARCHITECTURE_ROUTING.md`
-- API system: `docs/ARCHITECTURE_API.md`
-- Auth flows: `docs/ARCHITECTURE_AUTH.md`
-- Sessions: `docs/ARCHITECTURE_SESSION.md`
-- Socket setup: `docs/ARCHITECTURE_SOCKET.md`
-- Sync events: `docs/ARCHITECTURE_SYNC.md`
-- Getting started: `docs/DEVELOPER_GUIDE.md`
-- Deployment: `docs/HOSTING.md`
-- Full context: `PROJECT_CONTEXT.md`
-
-
-## JSX
-
-- Always use self-closing tags for components that don't have children: `<MyComponent />` instead of `<MyComponent></MyComponent>`.
-- Use div tags for basicly everything besides obvious cases like buttons or inputs, e.g. don't use header or footer tags.
-- With text use our i18n implementation.
-```tsx
-import { useTranslator } from "src/_functions/translator";
-
-const translate = useTranslator();
-{translate({ key: 'settings.theme.light' })}
-```
-- always use `` in a className tag instead of '' or "".
+export const main = async ({ user }: ApiParams): Promise<ApiResponse> => {
+  return {
+    status: 'success',
+    result: user
+  };
+};
 </file>
 
 <file path=".claude/settings.json">
@@ -2659,19 +2384,6 @@ export async function handleHttpApiRequest({
   // Get user session
   const user = await getSession(token);
 
-  // Built-in API handlers
-  if (name === 'session') {
-    return { status: 'success', result: user };
-  }
-
-  // Note: 'logout' doesn't make sense for stateless HTTP - skip it
-  if (name === 'logout') {
-    return {
-      status: 'error',
-      message: 'Use cookie-based logout or DELETE request instead'
-    };
-  }
-
   console.log(`http api: ${name} called`, 'cyan');
 
   const apisObject = process.env.NODE_ENV === 'development' ? devApis : apis;
@@ -4160,6 +3872,100 @@ export default async function <T, P>(
 }
 </file>
 
+<file path="src/_sockets/offlineQueue.ts">
+import { dev } from "config";
+
+type ApiQueueItem = {
+  id: string;
+  key: string;
+  run: () => void;
+  createdAt: number;
+};
+
+type SyncQueueItem = {
+  id: string;
+  key: string;
+  run: () => void;
+  createdAt: number;
+};
+
+const apiQueue: ApiQueueItem[] = [];
+const syncQueue: SyncQueueItem[] = [];
+let isFlushing = false;
+
+export const isOnline = () => {
+  if (typeof navigator === "undefined") return true;
+  return navigator.onLine !== false;
+};
+
+export const enqueueApiRequest = (item: ApiQueueItem) => {
+  apiQueue.push(item);
+  if (dev) {
+    console.log("API request queued", { key: item.key, queueSize: apiQueue.length });
+  }
+};
+
+export const enqueueSyncRequest = (item: SyncQueueItem) => {
+  syncQueue.push(item);
+  if (dev) {
+    console.log("Sync request queued", { key: item.key, queueSize: syncQueue.length });
+  }
+};
+
+export const removeApiQueueItem = (id: string) => {
+  const index = apiQueue.findIndex((item) => item.id === id);
+  if (index >= 0) {
+    apiQueue.splice(index, 1);
+  }
+};
+
+export const removeSyncQueueItem = (id: string) => {
+  const index = syncQueue.findIndex((item) => item.id === id);
+  if (index >= 0) {
+    syncQueue.splice(index, 1);
+  }
+};
+
+export const removeApiQueueItemsByKey = (key: string) => {
+  for (let i = apiQueue.length - 1; i >= 0; i -= 1) {
+    if (apiQueue[i].key === key) {
+      apiQueue.splice(i, 1);
+    }
+  }
+};
+
+export const flushApiQueue = (canRun: () => boolean) => {
+  if (isFlushing) return;
+  if (apiQueue.length === 0) return;
+  if (!canRun()) return;
+
+  isFlushing = true;
+  while (apiQueue.length > 0) {
+    if (!canRun()) break;
+    const item = apiQueue.shift();
+    item?.run();
+  }
+  isFlushing = false;
+};
+
+export const flushSyncQueue = (canRun: () => boolean) => {
+  if (isFlushing) return;
+  if (syncQueue.length === 0) return;
+  if (!canRun()) return;
+
+  isFlushing = true;
+  while (syncQueue.length > 0) {
+    if (!canRun()) break;
+    const item = syncQueue.shift();
+    item?.run();
+  }
+  isFlushing = false;
+};
+
+export const getApiQueueSize = () => apiQueue.length;
+export const getSyncQueueSize = () => syncQueue.length;
+</file>
+
 <file path="src/admin/page.tsx">
 export default function Home() {
   return (
@@ -4432,6 +4238,238 @@ export default function App() {
 /// <reference types="vite/client" />
 </file>
 
+<file path=".claude/CLAUDE.md">
+# LuckyStack - AI Development Rules
+
+> These rules are automatically loaded by Claude Code on every prompt.
+> Last updated: 2026-02-10
+
+---
+
+## Project Overview
+
+**LuckyStack** is a socket-first fullstack framework built with React 19 + raw Node.js (no Express). All client-server communication happens via Socket.io WebSockets, with HTTP fallback. The project uses file-based routing for pages, APIs, and real-time sync events.
+
+**Tech stack:** React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5, TypeScript 5.7, Vite, Redis
+
+**Database:** Configurable via Prisma - supports MongoDB, MySQL, PostgreSQL, and SQLite. Check `prisma/schema.prisma` for the currently active provider.
+
+---
+
+## Rules
+
+### 1. Styling
+
+- Use **TailwindCSS** exclusively for styling.
+- Only use colors defined in `src/index.css` (the `@theme` block and `.dark` overrides). Never use arbitrary color values.
+- Available color tokens: `background`, `container`, `container2`, `container3`, `container4` (each with `-border` and `-hover` variants), `title`, `common`, `muted`, `correct`, `correct-hover`, `wrong`, `wrong-hover`.
+- Prefer `flex` and `gap` for layout. Avoid using `margin` unless absolutely necessary.
+- Dark mode is handled via CSS class `.dark` on `<html>`. Colors auto-switch via CSS variables.
+- Use existing Components like our Dropdown, MenuHandler, Avatar, ConfirmMenu, Icon, etc.
+### 2. No Emojis
+
+- Never add emojis in code, comments, UI text, debug output, documentation, or html (use fontawesome icons instead).
+
+### 3. SOLID Principles
+
+- Follow SOLID principles in all code:
+  - **S**ingle Responsibility: each file/function does one thing.
+  - **O**pen/Closed: extend behavior without modifying existing code.
+  - **L**iskov Substitution: subtypes must be substitutable for their base types.
+  - **I**nterface Segregation: prefer small, focused interfaces.
+  - **D**ependency Inversion: depend on abstractions, not concretions.
+
+### 4. Comments
+
+- Write simple comments explaining **why** something is done, not what.
+- Do not add long JSDoc blocks or examples at the start of functions if the function name is self-explanatory.
+- No redundant comments on obvious code.
+
+### 5. Error Handling
+
+- Always use the custom `tryCatch` function for error handling:
+  - **Client:** `import tryCatch from 'src/_functions/tryCatch'` - returns `[error, result]` tuple.
+  - **Server:** `import { tryCatch } from 'server/functions/tryCatch'` - returns `[error, result]` tuple with automatic Sentry capture (in api and sync calls we get tryCatch in the function parameter ).
+- Check the first value: if truthy, there's an error. If null, access the second value for the result.
+- Never use raw `try/catch` blocks. Always wrap async operations in `tryCatch`.
+
+### 6. Terminal Commands
+
+- Do not run terminal commands automatically. Instead, tell the user what to run and explain why.
+- Exception: reading files, searching code, and git operations are fine.
+
+### 7. No Test Files
+
+- Do not create test files to verify backend functionality.
+- Instead, explain to the user how to test the feature (e.g., via browser console, curl, or the examples page) and why that approach works.
+
+### 8. Use Existing Code and Patterns
+
+- Always look at existing code before implementing something new.
+- Match the coding style, patterns, and conventions already in the codebase.
+- Reuse existing utilities (`tryCatch`, `notify`, `apiRequest`, `syncRequest`, etc.).
+- Follow the established file-based routing pattern for new APIs and sync events.
+
+### 9. Ask When Unsure
+
+- If requirements are unclear or you're unsure about an approach, always ask the user before guessing.
+- This applies to architecture decisions, feature scope, UI behavior, and anything ambiguous.
+
+### 10. Suggest Next Steps
+
+- After completing code, suggest what the user should do next (e.g., code review, testing approach, related changes).
+
+### 11. Report Issues Without Auto-Fixing
+
+- When analyzing code and you notice potential mistakes, unhandled errors, or improvement opportunities, report them to the user.
+- Do not fix them automatically. Let the user decide.
+
+### 12. Verify Code Flow Against Docs
+
+- Before writing code, verify that the code flow you've analyzed matches what the docs describe.
+- If the flow matches the docs, proceed with implementation.
+- If the flow doesn't match the docs, re-analyze the code. If you're still confident the docs are wrong after a second look, tell the user so the docs can be updated. Otherwise, follow the docs.
+
+### 13. Keep Documentation Updated
+
+- After making significant code changes, update the relevant documentation files (`PROJECT_CONTEXT.md`, `docs/ARCHITECTURE_*.md`, etc.) to stay in sync with the codebase.
+- After updating docs, tell the user to run `npx repomix` to regenerate the codebase summary.
+
+### 14. Keep Design Updated
+
+- when updating files that are listed in the .gitignore check if there is a template file for it and update that too. (e.g. .env -> envTemplate.txt or config.ts -> configTemplate.txt)
+---
+
+## Project Structure
+
+```
+LuckyStack/
+├── server/                    # Backend (raw Node.js + Socket.io)
+│   ├── server.ts              # HTTP server entry point
+│   ├── auth/                  # OAuth + credentials authentication
+│   ├── sockets/               # Socket.io event handlers
+│   │   ├── socket.ts          # Socket server setup
+│   │   ├── handleApiRequest.ts
+│   │   ├── handleHttpApiRequest.ts
+│   │   └── handleSyncRequest.ts
+│   ├── functions/             # Server utilities (session, db, redis, tryCatch)
+│   ├── utils/                 # Helpers (rateLimiter, validateRequest, sentry)
+│   └── dev/                   # Hot-reload & type generation
+│
+├── src/                       # Frontend (React 19)
+│   ├── main.tsx               # Entry point + file-based router
+│   ├── index.css              # Tailwind theme colors (ONLY color source)
+│   ├── _sockets/              # apiRequest, syncRequest, socketInitializer
+│   ├── _providers/            # SessionProvider, SocketStatusProvider
+│   ├── _components/           # Shared UI (Navbar, Middleware, MenuHandler, etc.)
+│   ├── _functions/            # Client utilities (tryCatch, notify, translator)
+│   ├── _locales/              # i18n translations (nl, en, de, fr)
+│   └── {page}/                # Feature pages
+│       ├── page.tsx           # Page component (exports template)
+│       ├── _components/       # Page-specific components
+│       ├── _api/              # API endpoints for this page
+│       └── _sync/             # Sync handlers for this page
+│
+├── docs/                      # Architecture documentation
+│   ├── ARCHITECTURE_API.md    # API request system
+│   ├── ARCHITECTURE_AUTH.md   # Authentication flows
+│   ├── ARCHITECTURE_ROUTING.md # File-based routing (pages, APIs, syncs)
+│   ├── ARCHITECTURE_SESSION.md # Session management
+│   ├── ARCHITECTURE_SOCKET.md # Socket.io setup
+│   ├── ARCHITECTURE_SYNC.md   # Real-time sync system
+│   ├── DEVELOPER_GUIDE.md     # Getting started
+│   └── HOSTING.md             # Deployment guide
+│
+├── prisma/schema.prisma       # Database schema (supports MongoDB, MySQL, PostgreSQL, SQLite)
+├── config.ts                  # App config (gitignored, use configTemplate.txt)
+├── .env                       # Environment vars (gitignored, use envTemplate.txt)
+├── README.md                  # Framework overview
+└── PROJECT_CONTEXT.md         # Detailed architecture reference
+```
+
+## Key Patterns
+
+### File-Based Routing
+
+- `src/{page}/page.tsx` renders at route `/{page}`
+- `src/{page}/_api/{name}.ts` creates an API endpoint accessible as `api/{page}/{name}`
+- `src/{page}/_sync/{name}_server.ts` + `{name}_client.ts` creates a sync event as `sync/{page}/{name}`
+- Folders prefixed with `_` are private (not routes)
+- For full routing details see `docs/ARCHITECTURE_ROUTING.md`
+
+### API Pattern
+
+```typescript
+// src/{page}/_api/{name}.ts
+export const rateLimit: number | false = 60;
+export const method: "GET" | "POST" | "PUT" | "DELETE" = "POST";
+
+export const auth: AuthProps = { 
+  login: true, 
+  additional: [] 
+};
+
+export interface ApiParams {
+  data: { /* typed input */ };
+  user: SessionLayout;
+  functions: Functions;
+}
+
+export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
+  return { status: 'success', result: { /* data */ } };
+};
+```
+
+### Sync Pattern
+
+- `_server.ts` runs once on server for validation
+- `_client.ts` runs on server for each client in the room
+- Client sends: `syncRequest({ name, data, receiver: roomCode, ignoreSelf?: boolean })`
+- Client receives: `upsertSyncEventCallback(name, ({ clientOutput, serverOutput }) => {})`
+
+### Provider Hierarchy
+
+```
+SocketStatusProvider > SessionProvider > TranslationProvider > AvatarProvider > MenuHandlerProvider > Router
+```
+
+### Templates
+
+Pages export `template` as `'plain'`, `'home'`, or a new template that you can create yourself. 
+
+- `plain` - No UI chrome (login, register, docs)
+- `home` - Top bar with avatar, settings toggle, logout
+
+---
+
+## Documentation Reference
+
+For detailed architecture docs, read the files in `docs/`:
+- Routing: `docs/ARCHITECTURE_ROUTING.md`
+- API system: `docs/ARCHITECTURE_API.md`
+- Auth flows: `docs/ARCHITECTURE_AUTH.md`
+- Sessions: `docs/ARCHITECTURE_SESSION.md`
+- Socket setup: `docs/ARCHITECTURE_SOCKET.md`
+- Sync events: `docs/ARCHITECTURE_SYNC.md`
+- Getting started: `docs/DEVELOPER_GUIDE.md`
+- Deployment: `docs/HOSTING.md`
+- Full context: `PROJECT_CONTEXT.md`
+
+
+## JSX
+
+- Always use self-closing tags for components that don't have children: `<MyComponent />` instead of `<MyComponent></MyComponent>`.
+- Use div tags for basicly everything besides obvious cases like buttons or inputs, e.g. don't use header or footer tags.
+- With text use our i18n implementation.
+```tsx
+import { useTranslator } from "src/_functions/translator";
+
+const translate = useTranslator();
+{translate({ key: 'settings.theme.light' })}
+```
+- always use `` in a className tag instead of '' or "".
+</file>
+
 <file path=".cursorrules">
 # Cursor AI Project Rules
 
@@ -4449,180 +4487,23 @@ You have access to valid project context in the following files. You should prio
 - Follow all rules defined in `.claude/CLAUDE.md` (styling, error handling, comments, SOLID, etc.).
 
 ## Context Update Rule (IMPORTANT)
-**After every significant code change, you MUST:**
-1. **Update `PROJECT_CONTEXT.md`** - Document any new files, functions, patterns, or behavior changes. Keep the documentation in sync with the codebase.
-2. **Tell the user to run `npx repomix`** - To regenerate the codebase summary with your changes.
-</file>
+**After every code change, you MUST:**
+1. **Update `PROJECT_CONTEXT.md`** - Document any new files, functions, patterns, or behavior changes you've made. Keep the documentation in sync with the codebase.
+2. **Regenerate `repomix-output.xml`** - Run `npx repomix` to regenerate the codebase summary with your changes.
 
-<file path="docs/ARCHITECTURE_API.md">
-# API Architecture
+This ensures future AI sessions have accurate context about the current state of the codebase.
 
-> Type-safe API request system with WebSocket-first architecture and HTTP fallback.
 
----
+## Files for extra context
+**These files are meant for the user but can be usefull for the AI to understand the project**
+1. `docs/ARCHITECTURE_API.md`
+2. `docs/ARCHITECTURE_AUTH.md`
+3. `docs/ARCHITECTURE_SESSION.md`
+4. `docs/ARCHITECTURE_SOCKET.md`
+5. `docs/ARCHITECTURE_SYNC.md`
+6. `docs/DEVELOPER_GUIDE.md`
 
-## Quick Reference
-
-```typescript
-// Client-side API call
-const result = await apiRequest({
-  name: "getUserData",
-  data: { userId: "123" },
-  abortable: true, // Optional: auto-cancels if called again before response
-});
-
-// HTTP fallback (same API, no WebSocket needed)
-// GET /api/examples/getUserData?userId=123
-// POST /api  with { name: 'api/examples/getUserData', data: { userId: '123' } }
-```
-
----
-
-## File Structure
-
-```
-src/
-├── {page}/_api/
-│   ├── {apiName}.ts          # Your API handler
-│   └── ...
-└── _sockets/
-    ├── apiRequest.ts         # Client-side API caller
-    └── apiTypes.generated.ts # Auto-generated types
-```
-
----
-
-## Creating an API
-
-### 1. Create the file
-
-template is injected
-
-```typescript
-// src/examples/_api/getUserData.ts
-import { AuthProps, SessionLayout } from "config";
-import { Functions, ApiResponse } from "src/_sockets/apiTypes.generated";
-
-// Rate limit: requests per minute (false = use global config)
-export const rateLimit: number | false = 60;
-
-// HTTP method (optional - inferred from name if not set)
-// export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET';
-
-export const auth: AuthProps = {
-  login: true, // Require authentication
-  additional: [], // Extra requirements: 'admin', etc.
-};
-
-export interface ApiParams {
-  data: {
-    userId: string; // Input from client
-  };
-  user: SessionLayout;
-  functions: Functions;
-}
-
-export const main = async ({
-  data,
-  user,
-  functions,
-}: ApiParams): Promise<ApiResponse> => {
-  const userData = await functions.prisma.user.findUnique({
-    where: { id: data.userId },
-  });
-
-  return {
-    status: "success",
-    result: userData,
-  };
-};
-```
-
-### 2. Use from client
-
-```typescript
-// Types are auto-generated - full autocomplete!
-const result = await apiRequest({
-  name: "getUserData",
-  data: { userId: "123" },
-});
-
-if (result.status === "success") {
-  console.log(result.result); // Typed correctly
-}
-```
-
----
-
-## HTTP API Access
-
-APIs are accessible via HTTP for testing, webhooks, or non-socket clients.
-
-### RESTful Routes
-
-Examples:
-
-- `GET /api/examples/getUserData?userId=123`
-- `POST /api/examples/createUser`
-- `PUT /api/settings/updateProfile`
-- `DELETE /api/examples/deleteUser`
-
-### Method Inference
-
-If `httpMethod` is not exported, it's inferred from the API name:
-
-| Name Prefix                  | Inferred Method |
-| ---------------------------- | --------------- |
-| `get*`, `fetch*`, `list*`    | GET             |
-| `delete*`, `remove*`         | DELETE          |
-| `update*`, `edit*`, `patch*` | PUT             |
-| Everything else              | POST            |
-
-### Authentication
-
-Include token via:
-
-- **Cookie**: `token=your-token` (set automatically on login)
-- **Header**: `Authorization: Bearer your-token`
-
----
-
-## Abort Controller
-
-GET-style APIs automatically use abort controllers to cancel in-flight requests.
-
-```typescript
-// These automatically cancel previous calls if called again:
-await apiRequest({ name: 'getUserData', data: {...} });
-
-// Explicit control:
-await apiRequest({ name: 'createUser', data: {...}, abortable: true });  // Force
-await apiRequest({ name: 'getUser', data: {...}, abortable: false });    // Disable
-```
-
-## Offline Request Queue
-
-When the socket is disconnected or the browser is offline, `apiRequest` automatically queues requests in memory. The queue flushes on reconnect or when the browser comes back online. Aborted requests are removed from the queue.
-
-## Rate Limiting
-
-Configure globally in `config.ts`:
-
-```typescript
-rateLimiting: {
-  defaultApiLimit: 60,   // Requests per minute per user
-  defaultIpLimit: 100,   // Per-IP limit (unauthenticated)
-  windowMs: 60000,       // 1 minute window
-}
-```
-
-Or per-API:
-
-```typescript
-// In any _api/*.ts file
-export const rateLimit = 30; // Override global
-export const rateLimit = false; // Disable for this API
-```
+After changes are made all files can be updated if they are related to the changes.
 </file>
 
 <file path="docs/ARCHITECTURE_AUTH.md">
@@ -5116,180 +4997,6 @@ socket.on("disconnect", (reason) => {
   }
 });
 ```
-</file>
-
-<file path="docs/ARCHITECTURE_SYNC.md">
-# Sync Architecture
-
-> Real-time event broadcasting between clients using rooms.
-
----
-
-## Quick Reference
-
-```typescript
-// Client A sends sync event
-await syncRequest({
-  name: "updateCounter",
-  data: { amount: 5 },
-  roomCode: "game-room-123",
-});
-
-// Client B receives (via callback)
-upsertSyncEventCallback("updateCounter", ({ clientOutput, serverOutput }) => {
-  console.log("Counter updated:", serverOutput.newValue);
-});
-```
-
----
-
-## File Structure
-
-```
-src/
-├── {page}/_sync/
-│   ├── {syncName}_server.ts    # Runs on the server just once
-│   ├── {syncName}_client.ts    # Runs on the server for each client
-│   └── ...
-└── _sockets/
-    ├── syncRequest.ts          # Client-side sync caller
-    └── apiTypes.generated.ts   # Auto-generated types
-```
-
----
-
-## Creating a Sync Event
-
-### 1. Server handler (optional)
-
-```typescript
-// src/examples/_sync/updateCounter_server.ts
-import { AuthProps, SessionLayout } from "../../../config";
-import {
-  Functions,
-  SyncServerResponse,
-} from "../../../src/_sockets/apiTypes.generated";
-
-export const auth: AuthProps = {
-  login: true,
-  additional: [],
-};
-
-export interface SyncParams {
-  clientInput: {
-    // Define the data shape sent from the client e.g.
-    amount: number;
-  };
-  user: SessionLayout; // session data of the user who called the sync event
-  functions: Functions; // functions object
-  roomCode: string; // room code
-}
-
-export const main = async ({
-  clientInput,
-  user,
-  functions,
-  roomCode,
-}: SyncParams): Promise<SyncServerResponse> => {
-  // THIS FILE RUNS JUST ONCE ON THE SERVER
-
-  // Please validate clientInput here and dont just send the data back to the other clients
-  // optional: database action or something else
-
-  return {
-    status: "success",
-    newValue: clientInput.amount + 1,
-    // Add any data you want to broadcast to clients
-  };
-};
-```
-
-### 2. Client handler (optional)
-
-```typescript
-import { SessionLayout } from "../../../config";
-import {
-  Functions,
-  SyncClientResponse,
-  SyncClientInput,
-  SyncServerOutput,
-} from "../../../src/_sockets/apiTypes.generated";
-
-// Types are imported from the generated file based on the _server.ts definition
-type PagePath = "examples";
-type SyncName = "test1";
-export interface SyncParams {
-  clientInput: SyncClientInput<PagePath, SyncName>;
-
-  serverOutput: SyncServerOutput<PagePath, SyncName>;
-  // Note: No serverOutput in client-only syncs (no _server.ts file)
-  user: SessionLayout; // session data from any user that is in the room
-  functions: Functions; // contains all functions that are available on the server in the functions folder
-  roomCode: string; // room code
-}
-
-export const main = async ({
-  user,
-  clientInput,
-  serverOutput,
-  functions,
-  roomCode,
-}: SyncParams): Promise<SyncClientResponse> => {
-  // CLIENT-ONLY SYNC: No server processing, runs for each client in the room
-
-  // Example: Only allow users on set page to receive the event
-  // if (user?.location?.pathName === '/your-page') {
-  //   return { status: 'success' };
-  // }
-
-  return {
-    status: "success",
-    // Add any additional data to pass to the client
-  };
-};
-```
-
-## Receiving Sync Events
-
-```typescript
-import { upsertSyncEventCallback } from "src/_sockets/syncRequest";
-
-// Register a callback (upsert = updates if exists)
-upsertSyncEventCallback("updateCounter", ({ clientOutput, serverOutput }) => {
-  // clientOutput = result from _client.ts
-  // serverOutput = result from _server.ts
-  updateUI(serverOutput.newValue);
-});
-```
-
-## Offline Request Queue
-
-When the socket is disconnected or the browser is offline, `syncRequest` queues requests in memory and flushes on reconnect or when the browser comes back online.
-
----
-
-### Room-specific sync
-
-```typescript
-// Only users in 'game-room-123' receive this
-await syncRequest({
-  name: "moveChessPiece",
-  data: { from: "e2", to: "e4" },
-  roomCode: "game-room-123",
-});
-```
-
----
-
----
-
-## Type System
-
-| Property       | Source                         | Description              |
-| -------------- | ------------------------------ | ------------------------ |
-| `clientInput`  | `data` param in syncRequest    | What client sends        |
-| `serverOutput` | `_server.ts` return            | Server processing result |
-| `clientOutput` | `_client.ts` clientMain return | Client processing result |
 </file>
 
 <file path="docs/DEVELOPER_GUIDE.md">
@@ -6918,6 +6625,351 @@ export default config;
 export const { backendUrl, dev, loginPageUrl, loginRedirectUrl, defaultLanguage, mobileConsole } = config;
 </file>
 
+<file path="docs/ARCHITECTURE_API.md">
+# API Architecture
+
+> Type-safe API request system with WebSocket-first architecture and HTTP fallback.
+
+---
+
+## Quick Reference
+
+```typescript
+// Client-side API call
+const result = await apiRequest({
+  name: "getUserData",
+  data: { userId: "123" },
+  abortable: true, // Optional: auto-cancels if called again before response
+});
+
+// HTTP fallback (same API, no WebSocket needed)
+// GET /api/examples/getUserData?userId=123
+// POST /api  with { name: 'api/examples/getUserData', data: { userId: '123' } }
+```
+
+---
+
+## File Structure
+
+```
+src/
+├── {page}/_api/
+│   ├── {apiName}.ts          # Your API handler
+│   └── ...
+└── _sockets/
+    ├── apiRequest.ts         # Client-side API caller
+    └── apiTypes.generated.ts # Auto-generated types
+```
+
+---
+
+## Creating an API
+
+### 1. Create the file
+
+template is injected
+
+```typescript
+// src/examples/_api/getUserData.ts
+import { AuthProps, SessionLayout } from "config";
+import { Functions, ApiResponse } from "src/_sockets/apiTypes.generated";
+
+// Rate limit: requests per minute (false = use global config)
+export const rateLimit: number | false = 60;
+
+// HTTP method (optional - inferred from name if not set)
+// export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET';
+
+export const auth: AuthProps = {
+  login: true, // Require authentication
+  additional: [], // Extra requirements: 'admin', etc.
+};
+
+export interface ApiParams {
+  data: {
+    userId: string; // Input from client
+  };
+  user: SessionLayout;
+  functions: Functions;
+}
+
+export const main = async ({
+  data,
+  user,
+  functions,
+}: ApiParams): Promise<ApiResponse> => {
+  const userData = await functions.prisma.user.findUnique({
+    where: { id: data.userId },
+  });
+
+  return {
+    status: "success",
+    result: userData,
+  };
+};
+```
+
+### 2. Use from client
+
+```typescript
+// Types are auto-generated - full autocomplete!
+const result = await apiRequest({
+  name: "getUserData",
+  data: { userId: "123" },
+});
+
+if (result.status === "success") {
+  console.log(result.result); // Typed correctly
+}
+```
+
+---
+
+## HTTP API Access
+
+APIs are accessible via HTTP for testing, webhooks, or non-socket clients.
+
+### RESTful Routes
+
+Examples:
+
+- `GET /api/examples/getUserData?userId=123`
+- `POST /api/examples/createUser`
+- `PUT /api/settings/updateProfile`
+- `DELETE /api/examples/deleteUser`
+
+### Method Inference
+
+If `httpMethod` is not exported, it's inferred from the API name:
+
+| Name Prefix                  | Inferred Method |
+| ---------------------------- | --------------- |
+| `get*`, `fetch*`, `list*`    | GET             |
+| `delete*`, `remove*`         | DELETE          |
+| `update*`, `edit*`, `patch*` | PUT             |
+| Everything else              | POST            |
+
+### Authentication
+
+Include token via:
+
+- **Cookie**: `token=your-token` (set automatically on login)
+- **Header**: `Authorization: Bearer your-token`
+
+---
+
+## Abort Controller
+
+GET-style APIs automatically use abort controllers to cancel in-flight requests.
+
+```typescript
+// These automatically cancel previous calls if called again:
+await apiRequest({ name: 'getUserData', data: {...} });
+
+// Explicit control:
+await apiRequest({ name: 'createUser', data: {...}, abortable: true });  // Force
+await apiRequest({ name: 'getUser', data: {...}, abortable: false });    // Disable
+```
+
+## Offline Request Queue
+
+When the socket is disconnected or the browser is offline, `apiRequest` automatically queues requests in memory. The queue flushes on reconnect or when the browser comes back online. Aborted requests are removed from the queue.
+
+## Rate Limiting
+
+Configure globally in `config.ts`:
+
+```typescript
+rateLimiting: {
+  defaultApiLimit: 60,   // Requests per minute per user
+  defaultIpLimit: 100,   // Per-IP limit (unauthenticated)
+  windowMs: 60000,       // 1 minute window
+}
+```
+
+Or per-API:
+
+```typescript
+// In any _api/*.ts file
+export const rateLimit = 30; // Override global
+export const rateLimit = false; // Disable for this API
+```
+</file>
+
+<file path="docs/ARCHITECTURE_SYNC.md">
+# Sync Architecture
+
+> Real-time event broadcasting between clients using rooms.
+
+---
+
+## Quick Reference
+
+```typescript
+// Client A sends sync event
+await syncRequest({
+  name: "updateCounter",
+  data: { amount: 5 },
+  roomCode: "game-room-123",
+});
+
+// Client B receives (via callback)
+upsertSyncEventCallback("updateCounter", ({ clientOutput, serverOutput }) => {
+  console.log("Counter updated:", serverOutput.newValue);
+});
+```
+
+---
+
+## File Structure
+
+```
+src/
+├── {page}/_sync/
+│   ├── {syncName}_server.ts    # Runs on the server just once
+│   ├── {syncName}_client.ts    # Runs on the server for each client
+│   └── ...
+└── _sockets/
+    ├── syncRequest.ts          # Client-side sync caller
+    └── apiTypes.generated.ts   # Auto-generated types
+```
+
+---
+
+## Creating a Sync Event
+
+### 1. Server handler (optional)
+
+```typescript
+// src/examples/_sync/updateCounter_server.ts
+import { AuthProps, SessionLayout } from "../../../config";
+import {
+  Functions,
+  SyncServerResponse,
+} from "../../../src/_sockets/apiTypes.generated";
+
+export const auth: AuthProps = {
+  login: true,
+  additional: [],
+};
+
+export interface SyncParams {
+  clientInput: {
+    // Define the data shape sent from the client e.g.
+    amount: number;
+  };
+  user: SessionLayout; // session data of the user who called the sync event
+  functions: Functions; // functions object
+  roomCode: string; // room code
+}
+
+export const main = async ({
+  clientInput,
+  user,
+  functions,
+  roomCode,
+}: SyncParams): Promise<SyncServerResponse> => {
+  // THIS FILE RUNS JUST ONCE ON THE SERVER
+
+  // Please validate clientInput here and dont just send the data back to the other clients
+  // optional: database action or something else
+
+  return {
+    status: "success",
+    newValue: clientInput.amount + 1,
+    // Add any data you want to broadcast to clients
+  };
+};
+```
+
+### 2. Client handler (optional)
+
+```typescript
+import { SessionLayout } from "../../../config";
+import {
+  Functions,
+  SyncClientResponse,
+  SyncClientInput,
+  SyncServerOutput,
+} from "../../../src/_sockets/apiTypes.generated";
+
+// Types are imported from the generated file based on the _server.ts definition
+type PagePath = "examples";
+type SyncName = "test1";
+export interface SyncParams {
+  clientInput: SyncClientInput<PagePath, SyncName>;
+
+  serverOutput: SyncServerOutput<PagePath, SyncName>;
+  // Note: No serverOutput in client-only syncs (no _server.ts file)
+  user: SessionLayout; // session data from any user that is in the room
+  functions: Functions; // contains all functions that are available on the server in the functions folder
+  roomCode: string; // room code
+}
+
+export const main = async ({
+  user,
+  clientInput,
+  serverOutput,
+  functions,
+  roomCode,
+}: SyncParams): Promise<SyncClientResponse> => {
+  // CLIENT-ONLY SYNC: No server processing, runs for each client in the room
+
+  // Example: Only allow users on set page to receive the event
+  // if (user?.location?.pathName === '/your-page') {
+  //   return { status: 'success' };
+  // }
+
+  return {
+    status: "success",
+    // Add any additional data to pass to the client
+  };
+};
+```
+
+## Receiving Sync Events
+
+```typescript
+import { upsertSyncEventCallback } from "src/_sockets/syncRequest";
+
+// Register a callback (upsert = updates if exists)
+upsertSyncEventCallback("updateCounter", ({ clientOutput, serverOutput }) => {
+  // clientOutput = result from _client.ts
+  // serverOutput = result from _server.ts
+  updateUI(serverOutput.newValue);
+});
+```
+
+## Offline Request Queue
+
+When the socket is disconnected or the browser is offline, `syncRequest` queues requests in memory and flushes on reconnect or when the browser comes back online.
+
+---
+
+### Room-specific sync
+
+```typescript
+// Only users in 'game-room-123' receive this
+await syncRequest({
+  name: "moveChessPiece",
+  data: { from: "e2", to: "e4" },
+  roomCode: "game-room-123",
+});
+```
+
+---
+
+---
+
+## Type System
+
+| Property       | Source                         | Description              |
+| -------------- | ------------------------------ | ------------------------ |
+| `clientInput`  | `data` param in syncRequest    | What client sends        |
+| `serverOutput` | `_server.ts` return            | Server processing result |
+| `clientOutput` | `_client.ts` clientMain return | Client processing result |
+</file>
+
 <file path="envTemplate.txt">
 # NODE_ENV=production # development | production
 NODE_ENV=development # development | production
@@ -7066,35 +7118,6 @@ SENTRY_ENABLED=false
 VITE_SENTRY_DSN=
 # Set to 'true' to enable Sentry in development
 VITE_SENTRY_ENABLED=false
-</file>
-
-<file path="next plan.txt">
-Future Work (Not in This Plan)
-Auto-generated API docs page - Like FastAPI's /docs
-NPM package modularization - Split into @luckystack/*
-Session storage abstraction - Support PostgreSQL/JWT
-Offline request queue - Queue failed requests for retry
-ServerFunctions interface - Fetch them automatically from server/functions folder and auto gen type
-Routing - check if we support slugs/ids in routes for pages and nested routes for
-1. pages
-2. api, syncs
-3. server functions
-
-
-✅ Completed
-i18n error codes - Return error codes instead of messages
-HTTP API Routing - RESTful /api/{name} routes with method validation
-HTTP Method Types - httpMethod in generated types + 
-getApiMethod()
- runtime lookup
-Simplified httpApiUtils - User reverted to include more prefixes (get/fetch/list, delete/remove, update/edit/patch)
-Cleaned up server.ts - Removed legacy POST /api route, now uses 
-getParams
- for parsing
-Updated Documentation - 
-docs/ARCHITECTURE_API.md
- reflects new routes
-Fixed TypeScript errors - createPageApi removed, function overload order fixed
 </file>
 
 <file path="package.json">
@@ -8608,13 +8631,13 @@ const Templates = {
   home: HomeTemplate,
   plain: PlainTemplate,
 }
-export  type Template = 'dashboard' | 'plain' | 'home';
+export type Template = 'dashboard' | 'plain' | 'home';
 
 function DashboardTemplate({ children }: { children: React.ReactNode }) {
   return (
     <div className="w-full h-full flex flex-row bg-white">
       <div className="w-full h-full flex flex-col md:flex-row">
-        <Navbar/>
+        <Navbar />
         <div className="md:flex-grow h-full text-black bg-blue-50">
           <Middleware>
             {children}
@@ -8642,7 +8665,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
   }, [ref, handleNavigate, location.pathname]);
 
   const handleLogout = useCallback(() => {
-    void apiRequest({ name: 'logout' });
+    void apiRequest<"", "logout">({ name: 'logout' });
   }, []);
 
   return (
@@ -8658,7 +8681,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
           <h1 className='font-semibold text-base line-clamp-1'>{session?.name}</h1>
         </div>
 
-        <button 
+        <button
           className='p-2 bg-container2 border border-container2-border rounded-md cursor-pointer'
           onClick={() => {
             if (location.pathname.startsWith('/games')) {
@@ -8680,7 +8703,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
           <FontAwesomeIcon icon={location.pathname === '/settings' ? faHome : faGear} size='lg' />
         </button>
 
-        <button 
+        <button
           className='bg-container2 border border-container2-border rounded-md py-2 px-6 cursor-pointer font-semibold'
           onClick={handleLogout}
         >
@@ -8746,7 +8769,7 @@ export default function TemplateProvider({
         </div>
         <TemplateComponent>{children}</TemplateComponent>
       </div>
-    );  
+    );
   }
 
   return (
@@ -9180,6 +9203,35 @@ export default function App() {
 
   return null;
 }
+</file>
+
+<file path="next plan.txt">
+Future Work (Not in This Plan)
+Auto-generated API docs page - Like FastAPI's /docs
+NPM package modularization - Split into @luckystack/*
+Session storage abstraction - Support PostgreSQL/JWT
+Offline request queue - Queue failed requests for retry
+ServerFunctions interface - Fetch them automatically from server/functions folder and auto gen type
+Routing - check if we support slugs/ids in routes for pages and nested routes for
+1. pages
+2. api, syncs
+3. server functions
+
+
+✅ Completed
+i18n error codes - Return error codes instead of messages
+HTTP API Routing - RESTful /api/{name} routes with method validation
+HTTP Method Types - httpMethod in generated types + 
+getApiMethod()
+ runtime lookup
+Simplified httpApiUtils - User reverted to include more prefixes (get/fetch/list, delete/remove, update/edit/patch)
+Cleaned up server.ts - Removed legacy POST /api route, now uses 
+getParams
+ for parsing
+Updated Documentation - 
+docs/ARCHITECTURE_API.md
+ reflects new routes
+Fixed TypeScript errors - createPageApi removed, function overload order fixed
 </file>
 
 <file path="README.md">
@@ -10387,224 +10439,6 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
       )}
     </MenuHandlerContext>
   );
-}
-</file>
-
-<file path="src/_sockets/socketInitializer.ts">
-import { toast } from "sonner";
-import { io, Socket } from 'socket.io-client';
-import config, { dev, backendUrl, SessionLayout } from "config";
-import { useSocketStatus } from "../_providers/socketStatusProvider";
-import { RefObject, useEffect, useRef } from "react";
-import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
-import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
-
-export let socket: Socket | null = null;
-
-let responseIndex = 0;
-export const incrementResponseIndex = () => {
-  return responseIndex = responseIndex + 1;
-}
-
-export function useSocket(session: SessionLayout | null) {
-  const { socketStatus, setSocketStatus } = useSocketStatus();
-  const { triggerSyncEvent } = useSyncEventTrigger();
-  const sessionRef = useRef(session);
-
-  useEffect(() => {
-    sessionRef.current = session;
-  }, [session])
-
-  useEffect(() => {
-    const socketOptions: any = {
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: Infinity,
-      autoConnect: true,
-      withCredentials: true,
-      auth: {}
-    };
-
-    if (import.meta.env.VITE_SESSION_BASED_TOKEN === "true") {
-      const token = sessionStorage.getItem("token");
-      if (token) {
-        socketOptions.auth = { token };
-      }
-    }
-
-    const socketConnection = io(backendUrl, socketOptions);
-    socket = socketConnection;
-
-    const canFlushQueue = () => socketConnection.connected && isOnline();
-
-    const handleVisibility = async () => {
-      if (!config.socketActivityBroadcaster) { return; }
-
-      console.log(document.visibilityState)
-      
-      //? user switched tab or navigated away
-      if (document.visibilityState === "hidden") {
-        socketConnection.emit("intentionalDisconnect");
-
-        //? user switched back to the tab
-      } else if (document.visibilityState === "visible") {
-        if (socketStatus.self.status !== "CONNECTED") {
-          socketConnection.connect();
-        }
-        socketConnection.emit("intentionalReconnect");
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-
-    if (config.socketActivityBroadcaster) {
-      initSyncRequest({
-        socketStatus,
-        setSocketStatus,
-        sessionRef: sessionRef as RefObject<SessionLayout>
-      })
-    } else {
-      socketConnection.on("connect", () => {
-        console.log("Connected to server");
-      });
-
-      socketConnection.on("disconnect", () => {
-        console.log("Disconnected, trying to reconnect...");
-      });
-
-      socketConnection.on("reconnect_attempt", (attempt) => {
-        console.log(`Reconnecting attempt ${attempt}...`);
-      });
-
-      socketConnection.on("connect_error", (err) => {
-        if (dev) {
-          console.error(`Connection error: ${err.message}`);
-          toast.error(`Connection error: ${err.message}`);
-        }
-      });
-    }
-
-    socketConnection.on("connect", () => {
-      flushApiQueue(canFlushQueue);
-      flushSyncQueue(canFlushQueue);
-    });
-
-    socketConnection.on("logout", (status: "success" | "error") => {
-      if (status === "success") {
-        if (import.meta.env.VITE_SESSION_BASED_TOKEN === "true") {
-          sessionStorage.clear();
-        }
-        window.location.href = config.loginPageUrl;
-      } else {
-        console.error("Logout failed");
-        toast.error("Logout failed");
-      }
-    });
-
-    socketConnection.on("sync", ({ cb, clientOutput, serverOutput, message, status }) => {
-      const path = window.location.pathname;
-      if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverOutput, status, message });
-
-      if (status === "error") {
-        if (dev) {
-          console.log(message);
-          toast.error(message);
-        }
-        return;
-      }
-
-      triggerSyncEvent(`sync${path}/${cb}`, clientOutput, serverOutput);
-    });
-
-
-    const handleOnline = () => {
-      if (socketConnection.connected) {
-        flushApiQueue(canFlushQueue);
-        flushSyncQueue(canFlushQueue);
-        return;
-      }
-      socketConnection.connect();
-    };
-
-    window.addEventListener("online", handleOnline);
-
-    return () => {
-      if (socket) {
-        socket.disconnect();
-        socket = null;
-        setSocketStatus(prev => ({
-          ...prev,
-          self: {
-            status: "DISCONNECTED",
-            reconnectAttempt: undefined,
-            endTime: undefined,
-          }
-        }));
-      }
-
-      document.removeEventListener("visibilitychange", handleVisibility)
-      window.removeEventListener("online", handleOnline)
-    };
-
-  }, []);
-
-  return socket;
-}
-
-
-export const waitForSocket = async () => {
-
-  let i = 0;
-  while (!socket) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    i++
-    if (i > 500) {
-      if (dev) {
-        console.error("Socket is not initialized, giving up");
-        toast.error("Socket is not initialized, giving up");
-      }
-      return false
-    } //? we give it 500 * 10 so 5000ms or 5s to load the socket connection
-  }
-
-  return true
-}
-
-export const joinRoom = async (group: string) => {
-  return new Promise(async (resolve) => {
-    if (!group || typeof group !== "string") {
-      if (dev) {
-        console.error("Invalid group");
-        toast.error("Invalid group");
-      }
-      return resolve(null);
-    }
-
-    if (!await waitForSocket()) { return resolve(null); }
-    if (!socket) { return resolve(null); }
-
-    const tempIndex = incrementResponseIndex();
-    socket.emit('joinRoom', { group, responseIndex: tempIndex });
-
-    socket.once(`joinRoom-${tempIndex}`, () => {
-      return resolve(true);
-    });
-  })
-}
-
-export const updateLocationRequest = async ({ location }: { location: { pathName: string, searchParams: Record<string, string> } }) => {
-  if (!location.pathName || !location.searchParams) {
-    if (dev) {
-      console.error("Invalid location");
-      toast.error("Invalid location");
-    }
-    return null;
-  }
-
-  if (!await waitForSocket()) { return }
-  if (!socket) { return null; }
-
-  socket.emit('updateLocation', location);
 }
 </file>
 
@@ -12321,15 +12155,13 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     return;
   }
 
-  //? Built-in API handlers
-  if (name == 'session') {
-    return socket.emit(`apiResponse-${responseIndex}`, { result: user });
-  }
-
+  //? 'logout' needs special handling since it requires socket access
   if (name == 'logout') {
     await logout({ token, socket, userId: user?.id || null });
     return socket.emit(`apiResponse-${responseIndex}`, { result: true });
   }
+
+  //? Built-in API handlers
 
   if (!name || !data || typeof name != 'string' || typeof data != 'object') {
     return socket.emit(`apiResponse-${responseIndex}`, {
@@ -12432,333 +12264,221 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 }
 </file>
 
-<file path="src/_sockets/syncRequest.ts">
-import { dev, SessionLayout } from "config";
+<file path="src/_sockets/socketInitializer.ts">
 import { toast } from "sonner";
-import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
-import { statusContent } from "src/_providers/socketStatusProvider";
-import { Dispatch, RefObject, SetStateAction } from "react";
-import { enqueueSyncRequest, isOnline } from "./offlineQueue";
-import type {
-  SyncPagePath,
-  SyncName,
-  SyncClientInput,
-  SyncServerOutput,
-  SyncClientOutput
-} from "./apiTypes.generated";
+import { io, Socket } from 'socket.io-client';
+import config, { dev, backendUrl, SessionLayout } from "config";
+import { useSocketStatus } from "../_providers/socketStatusProvider";
+import { RefObject, useEffect, useRef } from "react";
+import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
+import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Type Helpers for Sync Requests
-// ═══════════════════════════════════════════════════════════════════════════════
+export let socket: Socket | null = null;
 
-// Check if data input is required (i.e., T does NOT allow empty object)
-// Unions like {a:1} | {b:1} do NOT allow {}, so data will be required
-type DataRequired<T> = {} extends T ? false : true;
+let responseIndex = 0;
+export const incrementResponseIndex = () => {
+  return responseIndex = responseIndex + 1;
+}
 
-// Force expansion of types to clear aliases in tooltips
-type Prettify<T> = { [K in keyof T]: T[K] } & {};
+export function useSocket(session: SessionLayout | null) {
+  const { socketStatus, setSocketStatus } = useSocketStatus();
+  const { triggerSyncEvent } = useSyncEventTrigger();
+  const sessionRef = useRef(session);
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Global Sync Params
-// ═══════════════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session])
 
-// All possible sync names across all pages
-export type AllSyncNames = {
-  [P in SyncPagePath]: SyncName<P>
-}[SyncPagePath];
-
-// Get clientInput type for a sync name (union if exists on multiple pages)
-type ClientInputForName<N extends AllSyncNames> = {
-  [P in SyncPagePath]: N extends SyncName<P> ? SyncClientInput<P, N> : never
-}[SyncPagePath];
-
-// Get serverOutput type for a sync name (union if exists on multiple pages)
-type ServerOutputForName<N extends AllSyncNames> = {
-  [P in SyncPagePath]: N extends SyncName<P> ? SyncServerOutput<P, N> : never
-}[SyncPagePath];
-
-// Get clientOutput type for a sync name (union if exists on multiple pages)
-type ClientOutputForName<N extends AllSyncNames> = {
-  [P in SyncPagePath]: N extends SyncName<P> ? SyncClientOutput<P, N> : never
-}[SyncPagePath];
-
-// Build params type for a specific sync name
-type SyncParamsForName<N extends AllSyncNames> =
-  DataRequired<ClientInputForName<N>> extends true
-  ? { name: N; data: Prettify<ClientInputForName<N>>; receiver: string; ignoreSelf?: boolean }
-  : { name: N; data?: Prettify<ClientInputForName<N>>; receiver: string; ignoreSelf?: boolean };
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Sync Event Callbacks Registry
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: any; aditionalData: any }) => void)> = {};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Page-Specific Params (for exact types when duplicate names exist)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// Build params type for a specific page and sync name
-type PageSyncParamsForName<P extends SyncPagePath, N extends SyncName<P>> =
-  DataRequired<SyncClientInput<P, N>> extends true
-  ? { name: N; data: SyncClientInput<P, N>; receiver: string; ignoreSelf?: boolean }
-  : { name: N; data?: SyncClientInput<P, N>; receiver: string; ignoreSelf?: boolean };
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// syncRequest Function Overloads
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// Overload 1: Name-based inference - PRIMARY usage
-// TypeScript infers N from the literal name value
-export function syncRequest<N extends AllSyncNames>(
-  params: SyncParamsForName<N>
-): Promise<boolean>;
-
-// Overload 2: Explicit page + name - for duplicate sync names across pages
-// Both type params REQUIRED when specifying page
-export function syncRequest<P extends SyncPagePath, N extends SyncName<P>>(
-  params: PageSyncParamsForName<P, N>
-): Promise<boolean>;
-
-// Implementation
-export function syncRequest(params: any): Promise<boolean> {
-  let { name, data, receiver, ignoreSelf } = params;
-
-  return new Promise(async (resolve) => {
-    if (!name || typeof name !== "string") {
-      if (dev) {
-        console.error("Invalid name for syncRequest");
-        toast.error("Invalid name for syncRequest");
-      }
-      return resolve(false);
-    }
-
-    if (!data || typeof data !== "object") {
-      data = {};
-    }
-
-    if (!receiver) {
-      if (dev) {
-        console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets wich we dont recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
-        toast.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets wich we dont recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
-      }
-      return resolve(false);
-    }
-
-    if (!await waitForSocket()) { return resolve(false); }
-    if (!socket) { return resolve(false); }
-
-    const pathname = window.location.pathname;
-    const fullName = `sync${pathname}/${name}`;
-    let queueId: string | null = null;
-
-    const canSendNow = () => {
-      if (!socket) return false;
-      if (!socket.connected) return false;
-      return isOnline();
+  useEffect(() => {
+    const socketOptions: any = {
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: Infinity,
+      autoConnect: true,
+      withCredentials: true,
+      auth: {}
     };
 
-    const runRequest = () => {
-      if (!canSendNow()) {
-        if (!queueId) {
-          queueId = `${Date.now()}-${Math.random()}`;
+    if (import.meta.env.VITE_SESSION_BASED_TOKEN === "true") {
+      const token = sessionStorage.getItem("token");
+      if (token) {
+        socketOptions.auth = { token };
+      }
+    }
+
+    const socketConnection = io(backendUrl, socketOptions);
+    socket = socketConnection;
+
+    const canFlushQueue = () => socketConnection.connected && isOnline();
+
+    const handleVisibility = async () => {
+      if (!config.socketActivityBroadcaster) { return; }
+
+      console.log(document.visibilityState)
+      
+      //? user switched tab or navigated away
+      if (document.visibilityState === "hidden") {
+        socketConnection.emit("intentionalDisconnect");
+
+        //? user switched back to the tab
+      } else if (document.visibilityState === "visible") {
+        if (socketStatus.self.status !== "CONNECTED") {
+          socketConnection.connect();
         }
-        enqueueSyncRequest({
-          id: queueId,
-          key: fullName,
-          run: runRequest,
-          createdAt: Date.now(),
-        });
+        socketConnection.emit("intentionalReconnect");
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    if (config.socketActivityBroadcaster) {
+      initSyncRequest({
+        socketStatus,
+        setSocketStatus,
+        sessionRef: sessionRef as RefObject<SessionLayout>
+      })
+    } else {
+      socketConnection.on("connect", () => {
+        console.log("Connected to server");
+      });
+
+      socketConnection.on("disconnect", () => {
+        console.log("Disconnected, trying to reconnect...");
+      });
+
+      socketConnection.on("reconnect_attempt", (attempt) => {
+        console.log(`Reconnecting attempt ${attempt}...`);
+      });
+
+      socketConnection.on("connect_error", (err) => {
+        if (dev) {
+          console.error(`Connection error: ${err.message}`);
+          toast.error(`Connection error: ${err.message}`);
+        }
+      });
+    }
+
+    socketConnection.on("connect", () => {
+      flushApiQueue(canFlushQueue);
+      flushSyncQueue(canFlushQueue);
+    });
+
+    socketConnection.on("logout", (status: "success" | "error") => {
+      if (status === "success") {
+        if (import.meta.env.VITE_SESSION_BASED_TOKEN === "true") {
+          sessionStorage.clear();
+        }
+        window.location.href = config.loginPageUrl;
+      } else {
+        console.error("Logout failed");
+        toast.error("Logout failed");
+      }
+    });
+
+    socketConnection.on("sync", ({ cb, clientOutput, serverOutput, message, status }) => {
+      const path = window.location.pathname;
+      if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverOutput, status, message });
+
+      if (status === "error") {
+        if (dev) {
+          console.log(message);
+          toast.error(message);
+        }
         return;
       }
 
-      const tempIndex = incrementResponseIndex();
+      triggerSyncEvent(`sync${path}/${cb}`, clientOutput, serverOutput);
+    });
 
-      if (dev) { console.log(`Client Sync Request: `, { name, data, receiver, ignoreSelf }) }
 
-      socket.emit('sync', { name: fullName, data, cb: name, receiver, responseIndex: tempIndex, ignoreSelf });
-
-      socket.once(`sync-${tempIndex}`, (data: { status: "success" | "error", message: string }) => {
-        if (data.status === "error") {
-          if (dev) {
-            console.error(`Sync ${name} failed: ${data.message}`);
-            toast.error(`Sync ${name} failed: ${data.message}`);
-          }
-          return resolve(false);
-        }
-        resolve(data.status == "success");
-      });
+    const handleOnline = () => {
+      if (socketConnection.connected) {
+        flushApiQueue(canFlushQueue);
+        flushSyncQueue(canFlushQueue);
+        return;
+      }
+      socketConnection.connect();
     };
 
-    runRequest();
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      if (socket) {
+        socket.disconnect();
+        socket = null;
+        setSocketStatus(prev => ({
+          ...prev,
+          self: {
+            status: "DISCONNECTED",
+            reconnectAttempt: undefined,
+            endTime: undefined,
+          }
+        }));
+      }
+
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("online", handleOnline)
+    };
+
+  }, []);
+
+  return socket;
+}
+
+
+export const waitForSocket = async () => {
+
+  let i = 0;
+  while (!socket) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    i++
+    if (i > 500) {
+      if (dev) {
+        console.error("Socket is not initialized, giving up");
+        toast.error("Socket is not initialized, giving up");
+      }
+      return false
+    } //? we give it 500 * 10 so 5000ms or 5s to load the socket connection
+  }
+
+  return true
+}
+
+export const joinRoom = async (group: string) => {
+  return new Promise(async (resolve) => {
+    if (!group || typeof group !== "string") {
+      if (dev) {
+        console.error("Invalid group");
+        toast.error("Invalid group");
+      }
+      return resolve(null);
+    }
+
+    if (!await waitForSocket()) { return resolve(null); }
+    if (!socket) { return resolve(null); }
+
+    const tempIndex = incrementResponseIndex();
+    socket.emit('joinRoom', { group, responseIndex: tempIndex });
+
+    socket.once(`joinRoom-${tempIndex}`, () => {
+      return resolve(true);
+    });
   })
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// useSyncEvents Hook - Type-Safe Event Registration
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// Type-safe callback for sync events
-export type SyncEventCallback<N extends AllSyncNames> = (params: {
-  clientOutput: ClientOutputForName<N>;
-  serverOutput: ServerOutputForName<N>;
-}) => void;
-
-export const useSyncEvents = () => {
-  // Type-safe version: use with specific sync name
-  function upsertSyncEventCallback<N extends AllSyncNames>(
-    name: N,
-    cb: SyncEventCallback<N>
-  ): void;
-
-  // Legacy version: accepts any string (for backward compatibility)
-  function upsertSyncEventCallback(
-    name: string,
-    cb: (params: { clientOutput: any; serverOutput: any }) => void
-  ): void;
-
-  // Implementation
-  function upsertSyncEventCallback(
-    name: string,
-    cb: (params: { clientOutput: any; serverOutput: any }) => void
-  ): void {
-    const path = window.location.pathname;
-    syncEvents[`sync${path}/${name}`] = cb;
-  }
-
-  return { upsertSyncEventCallback };
-}
-
-export const useSyncEventTrigger = () => {
-
-  const triggerSyncEvent = (name: string, clientOutput: any = {}, serverOutput: any = {}, aditionalData: any = {}) => {
-    const cb = syncEvents[name];
-    if (!cb) {
-      if (dev) {
-        console.log(syncEvents)
-        console.error(`Sync event ${name} not found`);
-        toast.error(`Sync event ${name} not found`);
-      }
-      return;
-    }
-    if (typeof cb == 'function') {
-      cb({ clientOutput, serverOutput, aditionalData });
-    }
-  }
-
-  return { triggerSyncEvent }
-}
-
-export const initSyncRequest = async ({
-  socketStatus,
-  setSocketStatus,
-  sessionRef
-}: {
-  socketStatus: {
-    self: statusContent;
-    [userId: string]: statusContent;
-  };
-  setSocketStatus: Dispatch<
-    SetStateAction<{
-      self: statusContent;
-      [userId: string]: statusContent;
-    }>
-  >;
-  sessionRef: RefObject<SessionLayout> | null;
-}) => {
-
-  if (!await waitForSocket()) { return; }
-  if (!socket) { return; }
-  if (!sessionRef) { return; }
-
-  socket.on("connect", () => {
-    console.log(socketStatus)
-    console.log("Connected to server");
-    setSocketStatus(prev => ({
-      ...prev,
-      self: {
-        ...prev.self,
-        status: "CONNECTED",
-        // reconnectAttempt: undefined,
-      }
-    }));
-  });
-
-  socket.on("disconnect", () => {
-    setSocketStatus(prev => ({
-      ...prev,
-      self: {
-        ...prev.self,
-        status: "DISCONNECTED",
-      }
-    }));
-    console.log("Disconnected, trying to reconnect...");
-  });
-
-  socket.on("reconnect_attempt", (attempt) => {
-    setSocketStatus(prev => ({
-      ...prev,
-      self: {
-        ...prev.self,
-        status: "RECONNECTING",
-        reconnectAttempt: attempt,
-      }
-    }));
-    console.log(`Reconnecting attempt ${attempt}...`);
-  });
-
-  //? will not trigger when you call this event
-  socket.on("userAfk", ({ userId, endTime }) => {
-    if (userId == sessionRef.current?.id) {
-      setSocketStatus(prev => ({
-        ...prev,
-        self: {
-          status: "DISCONNECTED",
-          reconnectAttempt: undefined,
-          endTime
-        }
-      }));
-    } else {
-      setSocketStatus(prev => ({
-        ...prev,
-        [userId]: {
-          status: "DISCONNECTED",
-          endTime
-        }
-      }));
-    }
-  });
-
-  //? will not trigger when you call this event
-  socket.on("userBack", ({ userId }) => {
-    console.log("userBack", { userId });
-
-    setSocketStatus(prev => {
-      const newStatus = { ...prev };
-      newStatus[userId] = {
-        status: "CONNECTED",
-        endTime: undefined,
-      };
-      return newStatus;
-    });
-  });
-
-  socket.on("connect_error", (err) => {
-    console.log("connect_error", { err });
-    setSocketStatus(prev => ({
-      ...prev,
-      self: {
-        ...prev.self,
-        status: "DISCONNECTED",
-        reconnectAttempt: undefined,
-      }
-    }));
+export const updateLocationRequest = async ({ location }: { location: { pathName: string, searchParams: Record<string, string> } }) => {
+  if (!location.pathName || !location.searchParams) {
     if (dev) {
-      console.error(`Connection error: ${err.message}`);
-      toast.error(`Connection error: ${err.message}`);
+      console.error("Invalid location");
+      toast.error("Invalid location");
     }
-  });
+    return null;
+  }
 
+  if (!await waitForSocket()) { return }
+  if (!socket) { return null; }
+
+  socket.emit('updateLocation', location);
 }
 </file>
 
@@ -13116,6 +12836,336 @@ export default function DocsPage() {
       </div>
     </div>
   );
+}
+</file>
+
+<file path="src/_sockets/syncRequest.ts">
+import { dev, SessionLayout } from "config";
+import { toast } from "sonner";
+import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
+import { statusContent } from "src/_providers/socketStatusProvider";
+import { Dispatch, RefObject, SetStateAction } from "react";
+import { enqueueSyncRequest, isOnline } from "./offlineQueue";
+import type {
+  SyncPagePath,
+  SyncName,
+  SyncClientInput,
+  SyncServerOutput,
+  SyncClientOutput
+} from "./apiTypes.generated";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Type Helpers for Sync Requests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Check if data input is required (i.e., T does NOT allow empty object)
+// Unions like {a:1} | {b:1} do NOT allow {}, so data will be required
+type DataRequired<T> = {} extends T ? false : true;
+
+// Force expansion of types to clear aliases in tooltips
+type Prettify<T> = { [K in keyof T]: T[K] } & {};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Global Sync Params
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// All possible sync names across all pages
+export type AllSyncNames = {
+  [P in SyncPagePath]: SyncName<P>
+}[SyncPagePath];
+
+// Get clientInput type for a sync name (union if exists on multiple pages)
+type ClientInputForName<N extends AllSyncNames> = {
+  [P in SyncPagePath]: N extends SyncName<P> ? SyncClientInput<P, N> : never
+}[SyncPagePath];
+
+// Get serverOutput type for a sync name (union if exists on multiple pages)
+type ServerOutputForName<N extends AllSyncNames> = {
+  [P in SyncPagePath]: N extends SyncName<P> ? SyncServerOutput<P, N> : never
+}[SyncPagePath];
+
+// Get clientOutput type for a sync name (union if exists on multiple pages)
+type ClientOutputForName<N extends AllSyncNames> = {
+  [P in SyncPagePath]: N extends SyncName<P> ? SyncClientOutput<P, N> : never
+}[SyncPagePath];
+
+// Build params type for a specific sync name
+type SyncParamsForName<N extends AllSyncNames> =
+  DataRequired<ClientInputForName<N>> extends true
+  ? { name: N; data: Prettify<ClientInputForName<N>>; receiver: string; ignoreSelf?: boolean }
+  : { name: N; data?: Prettify<ClientInputForName<N>>; receiver: string; ignoreSelf?: boolean };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sync Event Callbacks Registry
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: any; aditionalData: any }) => void)> = {};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Page-Specific Params (for exact types when duplicate names exist)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Build params type for a specific page and sync name
+type PageSyncParamsForName<P extends SyncPagePath, N extends SyncName<P>> =
+  DataRequired<SyncClientInput<P, N>> extends true
+  ? { name: N; data: SyncClientInput<P, N>; receiver: string; ignoreSelf?: boolean }
+  : { name: N; data?: SyncClientInput<P, N>; receiver: string; ignoreSelf?: boolean };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// syncRequest Function Overloads
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Overload 1: Name-based inference - PRIMARY usage
+// TypeScript infers N from the literal name value
+export function syncRequest<N extends AllSyncNames>(
+  params: SyncParamsForName<N>
+): Promise<boolean>;
+
+// Overload 2: Explicit page + name - for duplicate sync names across pages
+// Both type params REQUIRED when specifying page
+export function syncRequest<P extends SyncPagePath, N extends SyncName<P>>(
+  params: PageSyncParamsForName<P, N>
+): Promise<boolean>;
+
+// Implementation
+export function syncRequest(params: any): Promise<boolean> {
+  let { name, data, receiver, ignoreSelf } = params;
+
+  return new Promise(async (resolve) => {
+    if (!name || typeof name !== "string") {
+      if (dev) {
+        console.error("Invalid name for syncRequest");
+        toast.error("Invalid name for syncRequest");
+      }
+      return resolve(false);
+    }
+
+    if (!data || typeof data !== "object") {
+      data = {};
+    }
+
+    if (!receiver) {
+      if (dev) {
+        console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets wich we dont recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
+        toast.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets wich we dont recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
+      }
+      return resolve(false);
+    }
+
+    if (!await waitForSocket()) { return resolve(false); }
+    if (!socket) { return resolve(false); }
+
+    const pathname = window.location.pathname;
+    const fullName = `sync${pathname}/${name}`;
+    let queueId: string | null = null;
+
+    const canSendNow = () => {
+      if (!socket) return false;
+      if (!socket.connected) return false;
+      return isOnline();
+    };
+
+    const runRequest = () => {
+      if (!canSendNow()) {
+        if (!queueId) {
+          queueId = `${Date.now()}-${Math.random()}`;
+        }
+        enqueueSyncRequest({
+          id: queueId,
+          key: fullName,
+          run: runRequest,
+          createdAt: Date.now(),
+        });
+        return;
+      }
+
+      const tempIndex = incrementResponseIndex();
+
+      if (dev) { console.log(`Client Sync Request: `, { name, data, receiver, ignoreSelf }) }
+
+      socket.emit('sync', { name: fullName, data, cb: name, receiver, responseIndex: tempIndex, ignoreSelf });
+
+      socket.once(`sync-${tempIndex}`, (data: { status: "success" | "error", message: string }) => {
+        if (data.status === "error") {
+          if (dev) {
+            console.error(`Sync ${name} failed: ${data.message}`);
+            toast.error(`Sync ${name} failed: ${data.message}`);
+          }
+          return resolve(false);
+        }
+        resolve(data.status == "success");
+      });
+    };
+
+    runRequest();
+  })
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// useSyncEvents Hook - Type-Safe Event Registration
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Type-safe callback for sync events
+export type SyncEventCallback<N extends AllSyncNames> = (params: {
+  clientOutput: ClientOutputForName<N>;
+  serverOutput: ServerOutputForName<N>;
+}) => void;
+
+export const useSyncEvents = () => {
+  // Type-safe version: use with specific sync name
+  function upsertSyncEventCallback<N extends AllSyncNames>(
+    name: N,
+    cb: SyncEventCallback<N>
+  ): void;
+
+  // Legacy version: accepts any string (for backward compatibility)
+  function upsertSyncEventCallback(
+    name: string,
+    cb: (params: { clientOutput: any; serverOutput: any }) => void
+  ): void;
+
+  // Implementation
+  function upsertSyncEventCallback(
+    name: string,
+    cb: (params: { clientOutput: any; serverOutput: any }) => void
+  ): void {
+    const path = window.location.pathname;
+    syncEvents[`sync${path}/${name}`] = cb;
+  }
+
+  return { upsertSyncEventCallback };
+}
+
+export const useSyncEventTrigger = () => {
+
+  const triggerSyncEvent = (name: string, clientOutput: any = {}, serverOutput: any = {}, aditionalData: any = {}) => {
+    const cb = syncEvents[name];
+    if (!cb) {
+      if (dev) {
+        console.log(syncEvents)
+        console.error(`Sync event ${name} not found`);
+        toast.error(`Sync event ${name} not found`);
+      }
+      return;
+    }
+    if (typeof cb == 'function') {
+      cb({ clientOutput, serverOutput, aditionalData });
+    }
+  }
+
+  return { triggerSyncEvent }
+}
+
+export const initSyncRequest = async ({
+  socketStatus,
+  setSocketStatus,
+  sessionRef
+}: {
+  socketStatus: {
+    self: statusContent;
+    [userId: string]: statusContent;
+  };
+  setSocketStatus: Dispatch<
+    SetStateAction<{
+      self: statusContent;
+      [userId: string]: statusContent;
+    }>
+  >;
+  sessionRef: RefObject<SessionLayout> | null;
+}) => {
+
+  if (!await waitForSocket()) { return; }
+  if (!socket) { return; }
+  if (!sessionRef) { return; }
+
+  socket.on("connect", () => {
+    console.log(socketStatus)
+    console.log("Connected to server");
+    setSocketStatus(prev => ({
+      ...prev,
+      self: {
+        ...prev.self,
+        status: "CONNECTED",
+        // reconnectAttempt: undefined,
+      }
+    }));
+  });
+
+  socket.on("disconnect", () => {
+    setSocketStatus(prev => ({
+      ...prev,
+      self: {
+        ...prev.self,
+        status: "DISCONNECTED",
+      }
+    }));
+    console.log("Disconnected, trying to reconnect...");
+  });
+
+  socket.on("reconnect_attempt", (attempt) => {
+    setSocketStatus(prev => ({
+      ...prev,
+      self: {
+        ...prev.self,
+        status: "RECONNECTING",
+        reconnectAttempt: attempt,
+      }
+    }));
+    console.log(`Reconnecting attempt ${attempt}...`);
+  });
+
+  //? will not trigger when you call this event
+  socket.on("userAfk", ({ userId, endTime }) => {
+    if (userId == sessionRef.current?.id) {
+      setSocketStatus(prev => ({
+        ...prev,
+        self: {
+          status: "DISCONNECTED",
+          reconnectAttempt: undefined,
+          endTime
+        }
+      }));
+    } else {
+      setSocketStatus(prev => ({
+        ...prev,
+        [userId]: {
+          status: "DISCONNECTED",
+          endTime
+        }
+      }));
+    }
+  });
+
+  //? will not trigger when you call this event
+  socket.on("userBack", ({ userId }) => {
+    console.log("userBack", { userId });
+
+    setSocketStatus(prev => {
+      const newStatus = { ...prev };
+      newStatus[userId] = {
+        status: "CONNECTED",
+        endTime: undefined,
+      };
+      return newStatus;
+    });
+  });
+
+  socket.on("connect_error", (err) => {
+    console.log("connect_error", { err });
+    setSocketStatus(prev => ({
+      ...prev,
+      self: {
+        ...prev.self,
+        status: "DISCONNECTED",
+        reconnectAttempt: undefined,
+      }
+    }));
+    if (dev) {
+      console.error(`Connection error: ${err.message}`);
+      toast.error(`Connection error: ${err.message}`);
+    }
+  });
+
 }
 </file>
 
@@ -13566,11 +13616,6 @@ export function apiRequest<P extends PagePath, N extends ApiName<P>>(
   params: PageApiParamsForName<P, N>
 ): Promise<ApiOutput<P, N>>;
 
-// System APIs (logout, session)
-export function apiRequest(
-  params: { name: 'logout' | 'session' }
-): Promise<apiRequestResponse>;
-
 // Implementation (not exposed to TypeScript - only runtime)
 export function apiRequest(params: any): Promise<any> {
   const { name, disableErrorMessage = false } = params;
@@ -13631,7 +13676,7 @@ export function apiRequest(params: any): Promise<any> {
       return isOnline();
     };
 
-    const runRequest = () => {
+    const runRequest = (socketInstance) => {
       if (!canSendNow()) {
         if (!queueId) {
           queueId = `${Date.now()}-${Math.random()}`;
@@ -13648,10 +13693,10 @@ export function apiRequest(params: any): Promise<any> {
       if (signal && signal.aborted) { return; }
 
       const tempIndex = incrementResponseIndex();
-      socket.emit('apiRequest', { name: fullname, data, responseIndex: tempIndex });
+      socketInstance.emit('apiRequest', { name: fullname, data, responseIndex: tempIndex });
 
       if (dev && (name as string) != 'session' && (name as string) != 'logout') { console.log(`Client API Request(${tempIndex}): `, { name, data }) }
-      socket.once(`apiResponse-${tempIndex}`, ({ result, message, status, errorCode, errorParams }: {
+      socketInstance.once(`apiResponse-${tempIndex}`, ({ result, message, status, errorCode, errorParams }: {
         result: any;
         message: string;
         status: "success" | "error";
@@ -13693,7 +13738,7 @@ export function apiRequest(params: any): Promise<any> {
       });
     };
 
-    runRequest();
+    runRequest(socket);
   })
 }
 </file>

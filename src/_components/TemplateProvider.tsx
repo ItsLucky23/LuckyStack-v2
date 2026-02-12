@@ -24,13 +24,13 @@ const Templates = {
   home: HomeTemplate,
   plain: PlainTemplate,
 }
-export  type Template = 'dashboard' | 'plain' | 'home';
+export type Template = 'dashboard' | 'plain' | 'home';
 
 function DashboardTemplate({ children }: { children: React.ReactNode }) {
   return (
     <div className="w-full h-full flex flex-row bg-white">
       <div className="w-full h-full flex flex-col md:flex-row">
-        <Navbar/>
+        <Navbar />
         <div className="md:flex-grow h-full text-black bg-blue-50">
           <Middleware>
             {children}
@@ -58,7 +58,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
   }, [ref, handleNavigate, location.pathname]);
 
   const handleLogout = useCallback(() => {
-    void apiRequest({ name: 'logout' });
+    void apiRequest<"", "logout">({ name: 'logout' });
   }, []);
 
   return (
@@ -74,7 +74,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
           <h1 className='font-semibold text-base line-clamp-1'>{session?.name}</h1>
         </div>
 
-        <button 
+        <button
           className='p-2 bg-container2 border border-container2-border rounded-md cursor-pointer'
           onClick={() => {
             if (location.pathname.startsWith('/games')) {
@@ -96,7 +96,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
           <FontAwesomeIcon icon={location.pathname === '/settings' ? faHome : faGear} size='lg' />
         </button>
 
-        <button 
+        <button
           className='bg-container2 border border-container2-border rounded-md py-2 px-6 cursor-pointer font-semibold'
           onClick={handleLogout}
         >
@@ -162,7 +162,7 @@ export default function TemplateProvider({
         </div>
         <TemplateComponent>{children}</TemplateComponent>
       </div>
-    );  
+    );
   }
 
   return (

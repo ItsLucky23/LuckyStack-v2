@@ -15,6 +15,20 @@ You have access to valid project context in the following files. You should prio
 - Follow all rules defined in `.claude/CLAUDE.md` (styling, error handling, comments, SOLID, etc.).
 
 ## Context Update Rule (IMPORTANT)
-**After every significant code change, you MUST:**
-1. **Update `PROJECT_CONTEXT.md`** - Document any new files, functions, patterns, or behavior changes. Keep the documentation in sync with the codebase.
-2. **Tell the user to run `npx repomix`** - To regenerate the codebase summary with your changes.
+**After every code change, you MUST:**
+1. **Update `PROJECT_CONTEXT.md`** - Document any new files, functions, patterns, or behavior changes you've made. Keep the documentation in sync with the codebase.
+2. **Regenerate `repomix-output.xml`** - Run `npx repomix` to regenerate the codebase summary with your changes.
+
+This ensures future AI sessions have accurate context about the current state of the codebase.
+
+
+## Files for extra context
+**These files are meant for the user but can be usefull for the AI to understand the project**
+1. `docs/ARCHITECTURE_API.md`
+2. `docs/ARCHITECTURE_AUTH.md`
+3. `docs/ARCHITECTURE_SESSION.md`
+4. `docs/ARCHITECTURE_SOCKET.md`
+5. `docs/ARCHITECTURE_SYNC.md`
+6. `docs/DEVELOPER_GUIDE.md`
+
+After changes are made all files can be updated if they are related to the changes.

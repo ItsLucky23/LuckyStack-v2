@@ -33,15 +33,13 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     return;
   }
 
-  //? Built-in API handlers
-  if (name == 'session') {
-    return socket.emit(`apiResponse-${responseIndex}`, { result: user });
-  }
-
+  //? 'logout' needs special handling since it requires socket access
   if (name == 'logout') {
     await logout({ token, socket, userId: user?.id || null });
     return socket.emit(`apiResponse-${responseIndex}`, { result: true });
   }
+
+  //? Built-in API handlers
 
   if (!name || !data || typeof name != 'string' || typeof data != 'object') {
     return socket.emit(`apiResponse-${responseIndex}`, {

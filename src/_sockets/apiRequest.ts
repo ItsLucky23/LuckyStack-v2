@@ -109,11 +109,6 @@ export function apiRequest<P extends PagePath, N extends ApiName<P>>(
   params: PageApiParamsForName<P, N>
 ): Promise<ApiOutput<P, N>>;
 
-// System APIs (logout, session)
-export function apiRequest(
-  params: { name: 'logout' | 'session' }
-): Promise<apiRequestResponse>;
-
 // Implementation (not exposed to TypeScript - only runtime)
 export function apiRequest(params: any): Promise<any> {
   const { name, disableErrorMessage = false } = params;
