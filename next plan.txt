@@ -6,11 +6,12 @@ Session storage abstraction - Support PostgreSQL/JWT
 ✅ ServerFunctions interface - Fetch them automatically from server/functions folder and auto gen type
 Location Provider - Optional feature just like socket broadcaster
 Theme - Built-in function to toggle theme
+based on dark or light theme in session use scrollbar-light.css or scrollbar-black.css
 
-Routing - check if we support slugs/ids in routes for pages and nested routes for
-✅ 1. pages
-✅ 2. api, syncs
-✅ 3. server functions
+✅Routing - check if we support slugs/ids in routes for pages and if we support nested routes for (we dont want slugs in api or syncs calls since we use sockets)
+1. pages
+2. api, syncs
+3. server functions
 
 ✅ Offline request queue - Queue failed requests for retry
 ✅ Completed

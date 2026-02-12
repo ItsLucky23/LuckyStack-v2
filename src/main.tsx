@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
 import { createRoot } from 'react-dom/client'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import 'src/index.css'
 import 'src/scrollbar-dark.css'
@@ -22,6 +22,15 @@ import type { Template } from './_components/TemplateProvider';
 
 initializeSentry();
 
+// Wrapper to inject Next.js-style params and searchParams as props
+const PageWrapper = ({ Page }: { Page: React.ComponentType<any> }) => {
+  const params = useParams();
+  const [searchParams] = useSearchParams();
+  const searchParamsObj = Object.fromEntries(searchParams);
+
+  return <Page params={params} searchParams={searchParamsObj} />;
+};
+
 type PageWithTemplate = React.ComponentType & { template?: Template };
 const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?: Template }>) => {
   const routes = [];
@@ -38,14 +47,17 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
         : false);
     if (!subPath) continue;
 
+    // Convert [param] to :param for React Router v6+
+    const finalPath = subPath.replace(/\[([^\]]+)\]/g, ':$1');
+
     const template = module.template ?? 'plain';
     const Page = module.default;
 
     routes.push({
-      path: subPath,
+      path: finalPath,
       element: (
         <TemplateProvider key={`${template}-${subPath}`} initialTemplate={template}>
-          <Page />
+          <PageWrapper Page={Page} />
         </TemplateProvider>
       ),
     });
