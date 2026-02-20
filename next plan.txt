@@ -5,6 +5,12 @@ add a logging tool
 add a metrics tool
 add a tracing tool
 NPM package modularization - Split into @luckystack/*
+  @luckystack/core          # Socket client, base types, config loader
+  @luckystack/api           # apiRequest, API handler system
+  @luckystack/sync          # syncRequest, sync handler system, rooms
+  @luckystack/session       # Redis sessions, OAuth providers, auth middleware
+  @luckystack/react         # SessionProvider, SocketStatusProvider, hooks
+  @luckystack/cli           # Dev server, type generation, hot reload
 Session storage abstraction - Support PostgreSQL/JWT
 Location Provider - Optional feature just like socket broadcaster
 
