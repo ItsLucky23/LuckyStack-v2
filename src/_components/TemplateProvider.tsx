@@ -58,7 +58,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
   }, [ref, handleNavigate, location.pathname]);
 
   const handleLogout = useCallback(() => {
-    void apiRequest({ name: 'logout' });
+    void apiRequest({ name: 'logout', version: 'v1' });
   }, []);
 
   return (

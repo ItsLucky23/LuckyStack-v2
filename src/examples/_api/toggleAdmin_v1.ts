@@ -11,21 +11,18 @@ export interface ApiParams {
   functions: Functions;
 }
 
-export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
-  const { prisma, saveSession } = functions;
+export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse> => {
+  const { db: { prisma }, session: { saveSession } } = functions;
 
-  // Toggle admin status
   const newAdminStatus = !user.admin;
 
-  // Update in database
   await prisma.user.update({
     where: { id: user.id },
     data: { admin: newAdminStatus }
   });
 
-  // Update session
   const updatedUser = { ...user, admin: newAdminStatus };
-  await saveSession(user.token, updatedUser);
+  saveSession(user.token, updatedUser);
 
   return {
     status: 'success',

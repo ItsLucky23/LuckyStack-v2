@@ -1,62 +1,48 @@
 Future Work (Not in This Plan)
 
-✅ Auto-generated API docs page - Like FastAPI's /docs
+split the framework up into different npm packages, this requires us to analyze the complete codebase and replace any hardcoded value with configurable values and make more things optional / split them from existing code so that the user never has to change anything in the npm packages and can change them in other files we tell the user to add into there primary folder.
+add a logging tool
+add a metrics tool
+add a tracing tool
 NPM package modularization - Split into @luckystack/*
 Session storage abstraction - Support PostgreSQL/JWT
-✅ ServerFunctions interface - Fetch them automatically from server/functions folder and auto gen type
 Location Provider - Optional feature just like socket broadcaster
-✅ Theme - Built-in function to toggle theme
-✅ based on dark or light theme in session use scrollbar-light.css or scrollbar-black.css
-
-✅Routing - check if we support slugs/ids in routes for pages and if we support nested routes for (we dont want slugs in api or syncs calls since we use sockets)
-1. pages
-2. api, syncs
-3. server functions
-
-✅ Offline request queue - Queue failed requests for retry
-✅ Completed
-✅ i18n error codes - Return error codes instead of messages
-✅ HTTP API Routing - RESTful /api/{name} routes with method validation
-✅ HTTP Method Types - httpMethod in generated types + getApiMethod() runtime lookup
-✅ Simplified httpApiUtils - User reverted to include more prefixes (get/fetch/list, delete/remove, update/edit/patch)
-✅ Cleaned up server.ts - Removed legacy POST /api route, now uses getParams for parsing
-✅ Updated Documentation - docs/ARCHITECTURE_API.md reflects new routes
-✅ Fixed TypeScript errors - createPageApi removed, function overload order fixed
 
 
 
 
+Places to replace with TS API isntead of the regex bullshit
 
+High priority:
+extractors.ts
+Replace regex-based parsing of ApiParams, SyncParams, return types, unions/generics.
+typeContext.ts
+Replace regex import/export parsing with AST import/export nodes.
+functionsMeta.ts
+Replace signature inference regex with function/type nodes.
+Medium priority:
+apiMeta.ts
+auth, httpMethod, rateLimit extraction via AST constants.
+templateInjector.ts
+Safer “find/replace” using AST + printer for typed sections.
+Low priority / keep as-is:
+discovery.ts (filesystem scanning is fine)
+hotReload.ts (watch logic itself is fine)
+Complexity impact
 
+Code complexity: higher at first (AST traversal + node kind handling).
+Maintenance complexity: lower long-term (far fewer parser edge-case bugs).
+Reliability: much higher for nested types, aliases, conditional/mapped/generic types.
+Speed impact
 
+If you use only ts.createSourceFile (no type checker): usually small overhead, still fast.
+If you use full Program + TypeChecker: slower cold start, but much better correctness.
+With caching/incremental strategy, runtime stays practical:
+Parse changed files only.
+Rebuild/check only affected dependency graph.
+Keep a long-lived Program in dev mode when possible.
+Practical recommendation
 
-
-api reload recent update:
-
-
-
-
-
-I’ll quickly list the exact AFAS-related framework-impacting edits in apiRequest and hot-reload/loader so you can port only those changes.
-
-AFAS-impacting framework changes
-
-API route resolution fix in src/_sockets/apiRequest.ts: added resolveApiRoutePath() so nested pages (like AFAS detail routes) resolve to the nearest page that actually has the API, instead of always using full pathname.
-In the same file, isGetMethod() and built fullname now use the resolved page path, and pathname source was hardened to globalThis.location.pathname.
-Hot reload changes you’ll want in framework
-
-In server/dev/hotReload.ts: changed dev detection to NODE_ENV !== 'production' (instead of strict "development"), so staging/dev-like envs still hot-reload.
-Added debounced reload scheduler per domain (api/sync/functions) to prevent reload storms.
-Added clearSrcCache() that clears Node require cache for src modules before API/sync reloads.
-Added dependency-aware API reload: changes/deletes in _functions/server/ now also trigger API reload.
-Added generated-file guard (apiTypes.generated.ts, docs output) to avoid watch loops.
-Added awaitWriteFinish to chokidar watcher for more stable reload on rapid file writes.
-Loader/framework compatibility updates
-
-In server/dev/loader.ts: switched dynamic loading to createRequire + cache eviction, and normalized default export merging for API/sync/functions modules.
-Removed debug noise from loader/watcher logs (kept behavior, cleaner console output).
-Related mode consistency updates
-
-server/server.ts, server/sockets/handleApiRequest.ts, server/sockets/handleHttpApiRequest.ts: unified dev/prod checks to NODE_ENV !== 'production' for selecting devApis/devFunctions.
-Want me to generate a compact “framework patch checklist” file you can paste into the core framework repo?
-
+Phase 1: AST-only parser (no checker) for imports/params/returns.
+Phase 2: add TypeChecker only for unresolved aliases/cross-file complex types.
+Phase 3: remove regex fallbacks once coverage is stable.

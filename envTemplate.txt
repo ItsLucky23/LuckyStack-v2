@@ -16,6 +16,7 @@ SERVER_PORT=80 # 80 for localhost and for production any port you like e.g 3000
 # and when NODE_ENV is set to production it should be someting like https://random.dns.com
 # DNS=https://random.dns.com
 DNS=http://localhost:5173
+# DNS=http://localhost
 
 REDIS_HOST=127.0.0.1
 REDIS_PASSWORD=
@@ -121,11 +122,11 @@ DEV_DISCORD_CLIENT_SECRET=xxxxxxx
 DATABASE_URL="mysql://root:password@localhost:3306/luckystack"
 
 # --- POSTGRESQL ---
-# DATABASE_URL="postgresql://postgres:password@localhost:5432/luckystack"
+# DATABASE_URL="postgresql://root:password@localhost:5432/luckystack"
 
 # --- MONGODB ---
-# DATABASE_URL="mongodb://localhost:27017/luckystack"
-# With some query parameters DATABASE_URL="mongodb://localhost:27017/luckystack?authSource=admin&replicaSet=rs0"
+# DATABASE_URL="mongodb://root:password@localhost:3306/test"
+# With some query parameters DATABASE_URL="mongodb://root:password@localhost:3306/test?authSource=admin&replicaSet=rs0"
 
 # --- SQLITE (No server needed - great for development) ---
 # DATABASE_URL="file:./dev.db"

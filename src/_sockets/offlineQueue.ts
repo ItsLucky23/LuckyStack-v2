@@ -1,4 +1,3 @@
-import { dev } from "config";
 import { Socket } from "socket.io-client";
 
 type ApiQueueItem = {

@@ -1,4 +1,3 @@
-import { tryCatch } from "../functions/tryCatch";
 import { devSyncs, devFunctions } from "../dev/loader"
 import { syncs, functions } from '../prod/generatedApis'
 import { ioInstance, syncMessage } from "./socket";
@@ -7,6 +6,9 @@ import { getSession } from "../functions/session";
 import { SessionLayout } from "../../config";
 import { validateRequest } from "../utils/validateRequest";
 import { extractTokenFromSocket } from "../utils/extractToken";
+import tryCatch from "../../shared/tryCatch";
+import { extractLanguageFromHeader, normalizeErrorResponse } from "../utils/responseNormalizer";
+import { validateInputByType } from "../utils/runtimeTypeValidation";
 
 const functionsObject = process.env.NODE_ENV == 'development' ? devFunctions : functions;
 
@@ -23,22 +25,81 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   //? first we validate the data
   if (typeof msg != 'object') {
     console.log('message', 'socket message was not a json object', 'red')
-    return socket.emit('sync', 'socket message was not a json object');
+    const normalized = normalizeErrorResponse({
+      response: { status: 'error', errorCode: 'sync.invalidRequest' },
+      preferredLocale:
+        extractLanguageFromHeader(socket.handshake.headers['x-language'])
+        || extractLanguageFromHeader(socket.handshake.headers['accept-language']),
+    });
+    return socket.emit('sync', {
+      status: normalized.status,
+      message: normalized.message,
+      errorCode: normalized.errorCode,
+      errorParams: normalized.errorParams,
+      httpStatus: normalized.httpStatus,
+    });
   }
 
   const { name, data, cb, receiver, responseIndex, ignoreSelf } = msg;
+  const preferredLocale =
+    extractLanguageFromHeader(socket.handshake.headers['x-language'])
+    || extractLanguageFromHeader(socket.handshake.headers['accept-language']);
+
+  const buildSyncError = ({
+    response,
+    preferred,
+    userLanguage,
+  }: {
+    response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[]; httpStatus?: number };
+    preferred?: string | null;
+    userLanguage?: string | null;
+  }) => {
+    const normalized = normalizeErrorResponse({
+      response,
+      preferredLocale: preferred,
+      userLanguage,
+    });
+
+    return {
+      status: normalized.status,
+      message: normalized.message,
+      errorCode: normalized.errorCode,
+      errorParams: normalized.errorParams,
+      httpStatus: normalized.httpStatus,
+    };
+  };
+
+  const ensureSyncErrorShape = (response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[]; httpStatus?: number }) => {
+    if (typeof response.errorCode === 'string' && response.errorCode.trim().length > 0) {
+      return response;
+    }
+
+    return {
+      ...response,
+      errorCode: 'sync.clientRejected',
+    };
+  };
 
   if (!name || !data || typeof name != 'string' || typeof data != 'object') {
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `socket message was incomplete, syncName: ${name}, syncData: ${JSON.stringify(data)}` })
+    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      response: { status: 'error', errorCode: 'sync.invalidRequest' },
+      preferred: preferredLocale,
+    }))
   }
 
   if (!cb || typeof cb != 'string') {
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `socket message was incomplete, cb: ${cb}` });
+    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      response: { status: 'error', errorCode: 'sync.invalidCallback' },
+      preferred: preferredLocale,
+    }));
   }
 
   if (!receiver) {
     console.log('receiver / roomCode: ', receiver, 'red')
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `socket message was incomplete, needs a receiver / roomCode: ${receiver}` });
+    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      response: { status: 'error', errorCode: 'sync.missingReceiver' },
+      preferred: preferredLocale,
+    }));
   }
 
   console.log(' ', 'blue')
@@ -47,13 +108,15 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
   const user = await getSession(token);
   const syncObject = process.env.NODE_ENV == 'development' ? devSyncs : syncs;
+  const nameSegments = name.split('/').filter(Boolean);
+  const syncBaseName = nameSegments[nameSegments.length - 2];
+  const requestedVersion = nameSegments[nameSegments.length - 1];
 
   //? Resolve sync: try exact match first, then fall back to root-level
-  //? e.g. client sends "sync/examples/updateCounter" → not found → try "sync/updateCounter"
+  //? e.g. client sends "sync/examples/updateCounter/v1" → not found → try "sync/updateCounter/v1"
   let resolvedName = name;
-  const syncBaseName = name.split('/').pop(); // e.g. "sync/examples/updateCounter" → "updateCounter"
-  if (!syncObject[`${name}_client`] && !syncObject[`${name}_server`] && syncBaseName) {
-    const rootKey = `sync/${syncBaseName}`;
+  if (!syncObject[`${name}_client`] && !syncObject[`${name}_server`] && syncBaseName && requestedVersion) {
+    const rootKey = `sync/${syncBaseName}/${requestedVersion}`;
     if (syncObject[`${rootKey}_client`] || syncObject[`${rootKey}_server`]) {
       resolvedName = rootKey;
     }
@@ -62,39 +125,85 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   //? we check if there is a client file or/and a server file, if they both dont exist we abort
   if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
     console.log("ERROR!!!, ", `you need ${name}_client or ${name}_server file to sync`, 'red');
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `you need ${name}_client or ${name}_server file to sync` });
+    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      response: { status: 'error', errorCode: 'sync.notFound' },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    }));
   }
 
   let serverOutput = {};
   if (syncObject[`${resolvedName}_server`]) {
-    const { auth, main: serverMain } = syncObject[`${resolvedName}_server`];
+    const { auth, main: serverMain, inputType } = syncObject[`${resolvedName}_server`];
+
+    const inputValidation = validateInputByType({
+      typeText: inputType,
+      value: data,
+      rootKey: 'clientInput',
+    });
+    if (inputValidation.status === 'error') {
+      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.invalidInputType',
+          errorParams: [{ key: 'message', value: inputValidation.message }],
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    }
 
     //? if the login key is true we check if the user has an id in the session object
     if (auth.login) {
       if (!user?.id) {
         console.log(`ERROR!!!, not logged in but sync requires login`, 'red');
-        return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: 'not logged in but sync requires login' });
+        return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+          response: { status: 'error', errorCode: 'auth.required' },
+          preferred: preferredLocale,
+        }));
       }
     }
 
     const validationResult = validateRequest({ auth, user: user as SessionLayout });
     if (validationResult.status === 'error') {
-      console.log('ERROR!!!, ', validationResult.message, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, validationResult);
+      console.log('ERROR!!!, ', validationResult.errorCode, 'red');
+      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: validationResult.errorCode || 'auth.forbidden',
+          errorParams: validationResult.errorParams,
+          httpStatus: validationResult.httpStatus,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
     }
 
     //? if the user has passed all the checks we call the preload sync function and return the result
     const [serverSyncError, serverSyncResult] = await tryCatch(async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }));
     if (serverSyncError) {
       console.log('ERROR!!!, ', serverSyncError.message, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: serverSyncError.message });
+      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+        response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
     } else if (serverSyncResult?.status == 'error') {
-      console.log('ERROR!!!, ', serverSyncResult.message, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: serverSyncResult.message });
+      const normalizedServerError = buildSyncError({
+        response: serverSyncResult,
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      });
+      console.log('ERROR!!!, ', normalizedServerError.message, 'red');
+      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, normalizedServerError);
     } else if (serverSyncResult?.status !== 'success') {
       //? badReturn means it doesnt include a status key with the value 'success' || 'error'
       console.log('ERROR!!!, ', `sync ${resolvedName}_server function didnt return a status key with the value 'success' or 'error'`, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `sync ${resolvedName}_server function didnt return a status key with the value 'success' or 'error'` });
+      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+        response: { status: 'error', errorCode: 'sync.invalidServerResponse' },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
     } else if (serverSyncResult?.status == 'success') {
       serverOutput = serverSyncResult;
     }
@@ -112,7 +221,11 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     console.log('data: ', msg, 'red');
     console.log('receiver: ', receiver, 'red');
     console.log('no sockets found', 'red');
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: "error", message: `no sockets found for receiver / roomCode: ${receiver}` });
+    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      response: { status: 'error', errorCode: 'sync.noReceiversFound' },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    }));
   }
 
   //? here we loop over all the connected clients
@@ -142,13 +255,52 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
     if (syncObject[`${resolvedName}_client`]) {
       const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, user, functions: functionsObject, serverOutput, roomCode: receiver }));
-      // if (clientSyncError) { socket.emit(`sync-${responseIndex}`, { status: "error", message: clientSyncError }); }
-      if (clientSyncError) { tempSocket.emit(`sync`, { status: "error", message: clientSyncError }) }
-      //? if we return error we dont want this client to get the event
-      else if (clientSyncResult?.status == 'error') { continue; }
+      if (clientSyncError) {
+        tempSocket.emit(`sync`, {
+          cb,
+          fullName: resolvedName,
+          ...buildSyncError({
+            response: { status: 'error', errorCode: 'sync.clientExecutionFailed' },
+            preferred:
+              extractLanguageFromHeader(tempSocket.handshake.headers['x-language'])
+              || extractLanguageFromHeader(tempSocket.handshake.headers['accept-language']),
+            userLanguage: user?.language,
+          }),
+        });
+        continue;
+      }
+      if (clientSyncResult?.status == 'error') {
+        tempSocket.emit(`sync`, {
+          cb,
+          fullName: resolvedName,
+          ...buildSyncError({
+            response: ensureSyncErrorShape(clientSyncResult),
+            preferred:
+              extractLanguageFromHeader(tempSocket.handshake.headers['x-language'])
+              || extractLanguageFromHeader(tempSocket.handshake.headers['accept-language']),
+            userLanguage: user?.language,
+          }),
+        });
+        continue;
+      }
+      if (clientSyncResult?.status !== 'success') {
+        tempSocket.emit(`sync`, {
+          cb,
+          fullName: resolvedName,
+          ...buildSyncError({
+            response: { status: 'error', errorCode: 'sync.invalidClientResponse' },
+            preferred:
+              extractLanguageFromHeader(tempSocket.handshake.headers['x-language'])
+              || extractLanguageFromHeader(tempSocket.handshake.headers['accept-language']),
+            userLanguage: user?.language,
+          }),
+        });
+        continue;
+      }
       else if (clientSyncResult?.status == 'success') {
         const result = {
           cb,
+          fullName: resolvedName,
           serverOutput,
           clientOutput: clientSyncResult,  // Return from _client file (success only)
           message: clientSyncResult.message || `${name} sync success`,
@@ -161,6 +313,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       //? if there is no client function we still want to send the server data to the clients
       const result = {
         cb,
+        fullName: resolvedName,
         serverOutput,
         clientOutput: {},  // No client file, so empty output
         message: `${name} sync success`,

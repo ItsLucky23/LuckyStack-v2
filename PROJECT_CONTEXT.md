@@ -64,7 +64,9 @@ Handles all real-time communication:
 
 - **`apiRequest`** - RPC-style API calls from client (routed via `handleApiRequest.ts`)
 - **`sync`** - Room-based sync events between clients (routed via `handleSyncRequest.ts`)
-- **`joinRoom`** - Adds socket to a room (room code stored in session)
+- **`joinRoom`** - Adds socket to a room (room code appended to session `roomCodes[]`)
+- **`leaveRoom`** - Removes socket from a room (room code removed from session `roomCodes[]`)
+- **`getJoinedRooms`** - Returns current room membership for the socket
 - **`updateLocation`** - Tracks user's current page path
 - **`disconnect`** - Handles socket disconnection with optional activity broadcasting
 
@@ -96,10 +98,19 @@ Handles all real-time communication:
 | `session.ts`     | Session CRUD in Redis + **auto-kicks previous sessions on login** |
 | `redis.ts`       | Redis client wrapper (ioredis)                                    |
 | `db.ts`          | Prisma client export for MongoDB                                  |
-| `tryCatch.ts`    | Error-safe async function wrapper                                 |
+| `helper.ts`    | Error-safe async function wrapper                                 |
 | `sleep.ts`       | Promise-based delay                                               |
 | `broadcaster.ts` | Utility for broadcasting to socket rooms                          |
 | `game.ts`        | Game-related utilities (for multiplayer games)                    |
+
+### `shared/` - Isomorphic Utilities
+
+| File             | Purpose                                                           |
+| ---------------- | ----------------------------------------------------------------- |
+| `tryCatch.ts`    | Shared tuple-based error handler used by client and server        |
+| `sleep.ts`       | Shared Promise-based delay utility                                |
+| `sentry.ts`      | Shared Sentry wrapper for browser/server contexts                 |
+| `responseNormalizer.ts` | Shared response/error normalization for API + sync flows      |
 
 ### Session Kicking Feature (`session.ts`)
 
@@ -201,6 +212,7 @@ const result = await apiRequest({ name: "jow" }); // ❌ Property 'data' is miss
 
 - Types are auto-generated in `src/_sockets/apiTypes.generated.ts` by `server/dev/typeMapGenerator.ts`
 - Watches `_api` folders and extracts input/output types from `ApiParams` interface and `main` function return type
+- Watches `server/functions` and `shared` so `Functions` interface stays in sync
 - Regenerates on file changes via `server/dev/hotReload.ts`
 
 #### `syncRequest({ name, data, receiver, ignoreSelf })` → Promise (Type-Safe)
@@ -261,12 +273,13 @@ The sync type system has three distinct data types that flow through the system:
 
 - Types auto-generated in `src/_sockets/apiTypes.generated.ts`
 - Watches `_sync/*_server.ts` and `_sync/*_client.ts` files
+- Also regenerates when `server/functions` or `shared` files change
 - `clientOutput` only includes successful returns (error returns are filtered out)
 
-#### `joinRoom(code)` → Promise
+#### `joinRoom(roomCode)` → Promise
 
 - Joins a socket room for sync events
-- Room code stored in user session
+- Room code is appended to user session `roomCodes[]`
 
 ### `src/_components/` - Reusable UI Components
 

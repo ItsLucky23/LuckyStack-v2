@@ -18,8 +18,11 @@ export interface SyncParams {
   roomCode: string; // room code
 }
 
-export const main = async ({ user, clientInput, serverOutput, functions, roomCode }: SyncParams): Promise<SyncClientResponse> => {
+export const main = async ({  }: SyncParams): Promise<SyncClientResponse> => {
   // THIS FILE RUNS ON THE SERVER AND IT EXECUTES FOR EVERY CLIENT THAT IS IN THE GIVEN ROOM
+
+  // Return { status: 'error', message: '...' } OR { status: 'error', errorCode: '...' }
+  // Returning error here only affects the current target client and does not stop other clients.
 
   // Example: Only allow users on set page to receive the event
   // if (user?.location?.pathName === '/your-page') {

@@ -16,13 +16,12 @@ export interface ApiParams {
   functions: Functions;
 }
 
-export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
+export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
   console.log("received message: " + data.message);
   return {
     status: 'success',
-    result: {
-      message: 'This API can be called without logging in!',
-      serverTime: Date.now()
-    }
+    message: 'This API can be called without logging in!',
+    serverTime: Date.now(),
+    httpStatus: 200,
   };
 };

@@ -6,7 +6,6 @@ import deJson from "src/_locales/de.json";
 import frJson from "src/_locales/fr.json";
 import { getCurrentSession } from "src/_providers/SessionProvider";
 import { defaultLanguage } from "config";
-// import Translator from "./translator";
 
 const Translator = () => {
   const session = getCurrentSession();

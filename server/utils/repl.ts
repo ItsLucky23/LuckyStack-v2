@@ -1,6 +1,41 @@
 import { getAllGameDatas, getGameData, saveGameData } from "../functions/game"
 import { deleteSession, getAllSessions, getSession } from "../functions/session"
 import repl from 'repl';
+import { devApis, devSyncs } from "../dev/loader";
+import { apis, syncs } from "../prod/generatedApis";
+
+const getActiveApiMap = (): Record<string, unknown> => {
+  if (Object.keys(devApis).length > 0) {
+    return devApis;
+  }
+  return apis;
+};
+
+const getActiveSyncMap = (): Record<string, unknown> => {
+  if (Object.keys(devSyncs).length > 0) {
+    return devSyncs;
+  }
+  return syncs as Record<string, unknown>;
+};
+
+const normalizeApiUrls = (): string[] => {
+  const routeKeys = Object.keys(getActiveApiMap())
+    .filter((key) => key.startsWith('api/'))
+    .map((key) => `/${key}`)
+    .sort((a, b) => a.localeCompare(b));
+
+  return Array.from(new Set(routeKeys));
+};
+
+const normalizeSyncUrls = (): string[] => {
+  const routeKeys = Object.keys(getActiveSyncMap())
+    .filter((key) => key.startsWith('sync/'))
+    .map((key) => key.replace(/_(client|server)$/, ''))
+    .map((key) => `/${key}`)
+    .sort((a, b) => a.localeCompare(b));
+
+  return Array.from(new Set(routeKeys));
+};
 
 export const initRepl = () => {
   const replInstance = repl.start({
@@ -99,5 +134,35 @@ export const initRepl = () => {
     console.log('getSession(token) -- if no token provided then it will return all sessions')
     console.log('deleteSession(token) -- if no token provided then it will delete all sessions')
     console.log('getGame(code) -- if no code provided then it will return all sessions')
+    console.log('listApiUrls() -- prints all discovered API urls')
+    console.log('listSyncUrls() -- prints all discovered sync urls')
+  }
+
+  replInstance.context.listApiUrls = () => {
+    const urls = normalizeApiUrls();
+    if (urls.length === 0) {
+      console.log('No API urls found.');
+      return urls;
+    }
+
+    console.log('API urls:');
+    for (const url of urls) {
+      console.log(url);
+    }
+    return urls;
+  }
+
+  replInstance.context.listSyncUrls = () => {
+    const urls = normalizeSyncUrls();
+    if (urls.length === 0) {
+      console.log('No sync urls found.');
+      return urls;
+    }
+
+    console.log('Sync urls:');
+    for (const url of urls) {
+      console.log(url);
+    }
+    return urls;
   }
 }

@@ -7,7 +7,6 @@ import {
   shouldInjectTemplate,
   injectTemplate,
   isSyncServerFile,
-  isSyncClientFile,
   getPairedSyncFile,
   extractClientInputFromFile,
   extractClientInputFromGeneratedTypes,
@@ -18,8 +17,9 @@ import {
   updateClientFileForDeletedServer,
   isEmptyFile
 } from "./templateInjector";
-import { generateTypeMapFile } from "./typeMapGenerator";
-import { tryCatch } from "../functions/tryCatch";
+import { generateTypeMapFile } from "./typeMapGenerator.js";
+import tryCatch from "../functions/tryCatch";
+import { reloadLocaleTranslations } from "../utils/responseNormalizer";
 
 // ----------------------------
 // Watcher for Hot Reload + Type Generation
@@ -29,7 +29,7 @@ export const setupWatchers = () => {
   const isDevMode = process.env.NODE_ENV !== 'production';
   if (!isDevMode) return;
   const nodeRequire = createRequire(import.meta.url);
-  const reloadTimers = new Map<'api' | 'sync' | 'functions', NodeJS.Timeout>();
+  const reloadTimers = new Map<'api' | 'sync' | 'functions' | 'typemap' | 'locales', NodeJS.Timeout>();
 
   const clearModuleCache = (paths: string[]) => {
     const normalizedNeedles = paths.map((value) => value.replace(/\\/g, '/'));
@@ -46,20 +46,50 @@ export const setupWatchers = () => {
     clearModuleCache([srcNeedle]);
   };
 
-  const isApiDependencyFile = (normalizedPath: string): boolean => {
-    return normalizedPath.includes('_functions/server/');
+  const isRouteDependencyFile = (normalizedPath: string): boolean => {
+    if (!normalizedPath.endsWith('.ts') && !normalizedPath.endsWith('.tsx')) {
+      return false;
+    }
+
+    if (!normalizedPath.includes('/src/')) {
+      return false;
+    }
+
+    if (normalizedPath.includes('/_api/') || normalizedPath.includes('/_sync/')) {
+      return false;
+    }
+
+    if (isGeneratedPath(normalizedPath)) {
+      return false;
+    }
+
+    return true;
   };
 
   const isGeneratedPath = (normalizedPath: string): boolean => {
     return (
       normalizedPath.includes('apiTypes.generated.ts')
       || normalizedPath.includes('apiDocs.generated.json')
-      || normalizedPath.includes('/src/docs/_api/')
     );
   };
 
+  const isTypeMapRelevantFile = (normalizedPath: string): boolean => {
+    if (isGeneratedPath(normalizedPath)) return false;
+    if (!(normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'))) return false;
+
+    return (
+      normalizedPath.includes('/src/')
+      || normalizedPath.endsWith('/config.ts')
+      || normalizedPath.includes('/shared/')
+    );
+  };
+
+  const isLocaleFile = (normalizedPath: string): boolean => {
+    return normalizedPath.includes('/src/_locales/') && normalizedPath.endsWith('.json');
+  };
+
   const scheduleReload = (
-    key: 'api' | 'sync' | 'functions',
+    key: 'api' | 'sync' | 'functions' | 'typemap' | 'locales',
     task: () => Promise<void> | void,
     delay = 120
   ) => {
@@ -120,16 +150,36 @@ export const setupWatchers = () => {
       return;
     }
 
+    if (isLocaleFile(normalizedPath)) {
+      scheduleReload('locales', () => {
+        reloadLocaleTranslations();
+      });
+      return;
+    }
+
+    if (isTypeMapRelevantFile(normalizedPath)) {
+      scheduleReload('typemap', async () => {
+        await tryCatch(generateTypeMapFile);
+      });
+    }
+
     if (normalizedPath.includes('_api/')) {
       scheduleReload('api', async () => {
         clearSrcCache();
         await tryCatch(generateTypeMapFile);
         await initializeApis();
       });
-    } else if (isApiDependencyFile(normalizedPath)) {
+    } else if (isRouteDependencyFile(normalizedPath)) {
       scheduleReload('api', async () => {
         clearSrcCache();
+        await tryCatch(generateTypeMapFile);
         await initializeApis();
+      });
+
+      scheduleReload('sync', async () => {
+        clearSrcCache();
+        await tryCatch(generateTypeMapFile);
+        await initializeSyncs();
       });
     } else if (normalizedPath.includes('_sync/')) {
       scheduleReload('sync', async () => {
@@ -140,9 +190,9 @@ export const setupWatchers = () => {
     }
   };
 
-  const handleFunctionChange = (path: string) => {
-    const normalizedPath = path.replace(/\\/g, '/');
+  const handleFunctionChange = (_path: string) => {
     scheduleReload('functions', async () => {
+      await tryCatch(generateTypeMapFile);
       await initializeFunctions();
     });
   };
@@ -154,16 +204,36 @@ export const setupWatchers = () => {
       return;
     }
 
+    if (isLocaleFile(normalizedPath)) {
+      scheduleReload('locales', () => {
+        reloadLocaleTranslations();
+      });
+      return;
+    }
+
+    if (isTypeMapRelevantFile(normalizedPath)) {
+      scheduleReload('typemap', async () => {
+        await generateTypeMapFile();
+      });
+    }
+
     if (normalizedPath.includes('_api/')) {
       scheduleReload('api', async () => {
         clearSrcCache();
         await generateTypeMapFile();
         await initializeApis();
       });
-    } else if (isApiDependencyFile(normalizedPath)) {
+    } else if (isRouteDependencyFile(normalizedPath)) {
       scheduleReload('api', async () => {
         clearSrcCache();
+        await generateTypeMapFile();
         await initializeApis();
+      });
+
+      scheduleReload('sync', async () => {
+        clearSrcCache();
+        await generateTypeMapFile();
+        await initializeSyncs();
       });
     } else if (normalizedPath.includes('_sync/')) {
       scheduleReload('sync', async () => {
@@ -208,7 +278,14 @@ export const setupWatchers = () => {
   // Watch functions separately
   chokidar.watch('server/functions', { ignoreInitial: true })
     .on('add', handleFunctionChange)
-    .on('change', handleFunctionChange);
+    .on('change', handleFunctionChange)
+    .on('unlink', handleFunctionChange);
+
+  // Watch shared functions separately
+  chokidar.watch('shared', { ignoreInitial: true })
+    .on('add', handleFunctionChange)
+    .on('change', handleFunctionChange)
+    .on('unlink', handleFunctionChange);
 
   // Generate initial type map on startup
   generateTypeMapFile();

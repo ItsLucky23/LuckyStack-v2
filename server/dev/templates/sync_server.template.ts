@@ -19,8 +19,11 @@ export interface SyncParams {
   roomCode: string; // room code
 }
 
-export const main = async ({ clientInput, user, functions, roomCode }: SyncParams): Promise<SyncServerResponse> => {
+export const main = async ({  }: SyncParams): Promise<SyncServerResponse> => {
   // THIS FILE RUNS JUST ONCE ON THE SERVER
+
+  // Return { status: 'error', message: '...' } OR { status: 'error', errorCode: '...' }
+  // Returning error here aborts the full sync flow.
 
   // Please validate clientInput here and dont just send the data back to the other clients
   // optional: database action or something else

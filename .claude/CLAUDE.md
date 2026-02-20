@@ -47,8 +47,8 @@
 ### 5. Error Handling
 
 - Always use the custom `tryCatch` function for error handling:
-  - **Client:** `import tryCatch from 'src/_functions/tryCatch'` - returns `[error, result]` tuple.
-  - **Server:** `import { tryCatch } from 'server/functions/tryCatch'` - returns `[error, result]` tuple with automatic Sentry capture (in api and sync calls we get tryCatch in the function parameter ).
+  - **Client:** `import tryCatch from 'src/_functions/helper'` - returns `[error, result]` tuple.
+  - **Server:** `import { tryCatch } from 'server/functions/helper'` - returns `[error, result]` tuple with automatic Sentry capture (in api and sync calls we get tryCatch in the function parameter ).
 - Check the first value: if truthy, there's an error. If null, access the second value for the result.
 - Never use raw `try/catch` blocks. Always wrap async operations in `tryCatch`.
 

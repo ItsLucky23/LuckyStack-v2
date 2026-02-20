@@ -35,3 +35,6 @@ apiDocs.generated.json
 
 # Repomix
 repomix-output.xml
+
+# TypeScript Build Artifacts
+*.tsbuildinfo

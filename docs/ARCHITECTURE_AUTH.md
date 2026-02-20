@@ -29,6 +29,7 @@ const response = await fetch("/auth/api/credentials", {
 | GitHub      | OAuth 2.0      | Client ID, Secret |
 | Discord     | OAuth 2.0      | Client ID, Secret |
 | Facebook    | OAuth 2.0      | Client ID, Secret |
+| Microsoft   | OAuth 2.0      | Client ID, Secret |
 
 ---
 
@@ -137,6 +138,18 @@ export const auth: AuthProps = {
   additional: [], // No extra requirements
 };
 ```
+
+---
+
+## Runtime Function Reference
+
+| File | Function | Purpose |
+| ---- | -------- | ------- |
+| `server/auth/login.ts` | `loginWithCredentials` | Handles credentials login/register, password checks, session creation. |
+| `server/auth/login.ts` | `loginCallback` | Handles OAuth callback flow and provider profile mapping. |
+| `server/auth/loginConfig.ts` | provider config | Defines OAuth provider metadata and endpoints. |
+| `server/auth/checkOrigin.ts` | `default export` | Validates allowed origins for HTTP/socket requests. |
+| `server/utils/validateRequest.ts` | `validateRequest` | Enforces `auth.additional` checks for APIs and sync handlers. |
 
 ### Role-based access
 

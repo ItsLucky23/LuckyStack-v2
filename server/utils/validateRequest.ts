@@ -22,7 +22,9 @@ export const isFalsy = (value: unknown): boolean => {
 
 export interface ValidationResult {
   status: 'success' | 'error';
-  message?: string;
+  errorCode?: string;
+  errorParams?: { key: string; value: string | number | boolean; }[];
+  httpStatus?: number;
 }
 
 /**
@@ -64,7 +66,8 @@ export const validateRequest = ({
     if (!condition.key) {
       return {
         status: 'error',
-        message: 'Missing key in auth.additional condition',
+        errorCode: 'auth.invalidCondition',
+        httpStatus: 500,
       };
     }
 
@@ -72,7 +75,9 @@ export const validateRequest = ({
     if (!(condition.key in user)) {
       return {
         status: 'error',
-        message: `Key ${condition.key} not found in user session`
+        errorCode: 'auth.invalidCondition',
+        errorParams: [{ key: 'key', value: String(condition.key) }],
+        httpStatus: 500,
       };
     }
 
@@ -84,13 +89,17 @@ export const validateRequest = ({
       if (condition.nullish && !isNullish) {
         return {
           status: 'error',
-          message: `Expected ${condition.key} to be null or undefined`,
+          errorCode: 'auth.forbidden',
+          errorParams: [{ key: 'key', value: String(condition.key) }],
+          httpStatus: 403,
         };
       }
       if (!condition.nullish && isNullish) {
         return {
           status: 'error',
-          message: `Expected ${condition.key} to be not null and not undefined`,
+          errorCode: 'auth.forbidden',
+          errorParams: [{ key: 'key', value: String(condition.key) }],
+          httpStatus: 403,
         };
       }
     }
@@ -100,7 +109,9 @@ export const validateRequest = ({
       if (typeof val !== condition.type) {
         return {
           status: 'error',
-          message: `Expected ${condition.key} to be of type ${condition.type}`,
+          errorCode: 'auth.forbidden',
+          errorParams: [{ key: 'key', value: String(condition.key) }],
+          httpStatus: 403,
         };
       }
     }
@@ -110,7 +121,9 @@ export const validateRequest = ({
       if (val !== condition.value) {
         return {
           status: 'error',
-          message: `Expected ${condition.key} to equal ${JSON.stringify(condition.value)}`,
+          errorCode: 'auth.forbidden',
+          errorParams: [{ key: 'key', value: String(condition.key) }],
+          httpStatus: 403,
         };
       }
     }
@@ -120,13 +133,17 @@ export const validateRequest = ({
       if (condition.mustBeFalsy && !isFalsy(val)) {
         return {
           status: 'error',
-          message: `Expected ${condition.key} to be falsy`,
+          errorCode: 'auth.forbidden',
+          errorParams: [{ key: 'key', value: String(condition.key) }],
+          httpStatus: 403,
         };
       }
       if (!condition.mustBeFalsy && isFalsy(val)) {
         return {
           status: 'error',
-          message: `Expected ${condition.key} to be truthy`,
+          errorCode: 'auth.forbidden',
+          errorParams: [{ key: 'key', value: String(condition.key) }],
+          httpStatus: 403,
         };
       }
     }

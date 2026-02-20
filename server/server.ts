@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
-import { initializeSentry, captureException } from './utils/sentry';
+import { initializeSentry } from './functions/sentry';
+import path from 'path';
 
 dotenv.config();
 initializeSentry();
@@ -14,13 +15,11 @@ import oauthProviders from "./auth/loginConfig";
 import { deleteSession } from './functions/session';
 import allowedOrigin from './auth/checkOrigin';
 import { SessionLayout } from '../config';
-import { initializeAll } from './dev/loader';
-import { setupWatchers } from './dev/hotReload';
-import { initConsolelog } from './utils/console.log';
-import { initRepl } from './utils/repl';
+
 import { serveAvatar } from './utils/serveAvatars';
 import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
 import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
+import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
 
 const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
 
@@ -119,9 +118,6 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       if (token) { await deleteSession(token); }
 
       console.log('setting cookie with newToken: ', newToken, 'green');
-      // const cookieOptions = process.env.NODE_ENV == "development" ? 
-      //   "HttpOnly; SameSite=Strict; Path=/; Max-Age=604800;": 
-      //   "HttpOnly; SameSite=Strict; Path=/; Max-Age=604800; Secure;";
       const cookieOptions = `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800; ${process.env.SECURE == 'true' ? "Secure;" : ""}`
 
       res.setHeader("Set-Cookie", `token=${newToken}; ${cookieOptions}`);
@@ -175,35 +171,88 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         res.writeHead(400);
         return res.end(JSON.stringify({
           status: 'error',
-          message: 'API name is required. Use /api/{name}'
+          httpStatus: 400,
+          message: 'api.invalidName',
+          errorCode: 'api.invalidName',
         }));
       }
 
       // Use getParams to parse request data (handles GET query params, POST/PUT/DELETE body)
-      const apiData = await getParams({
-        method: method || 'POST',
-        req,
-        res,
-        queryString
-      }) || {};
+      const apiData = params || {};
 
       const result = await handleHttpApiRequest({
         name: apiName,
         data: apiData,
         token: httpToken,
+        xLanguageHeader: req.headers['x-language'],
+        acceptLanguageHeader: req.headers['accept-language'],
         method: (method as 'GET' | 'POST' | 'PUT' | 'DELETE') || 'POST'
       });
 
       res.setHeader('Content-Type', 'application/json');
-      res.writeHead(result.status === 'success' ? 200 : result.httpStatus || 400);
+      res.writeHead(result.httpStatus);
       return res.end(JSON.stringify(result));
     } catch (error) {
       console.log('HTTP API error:', error, 'red');
       res.setHeader('Content-Type', 'application/json');
-      res.writeHead(400);
+      res.writeHead(500);
       return res.end(JSON.stringify({
         status: 'error',
-        message: 'Invalid request format'
+        httpStatus: 500,
+        message: 'api.invalidRequestFormat',
+        errorCode: 'api.invalidRequestFormat',
+      }));
+    }
+
+  } else if (routePath.startsWith('/sync/')) {
+    try {
+      if (method !== 'POST') {
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(405);
+        return res.end(JSON.stringify({
+          status: 'error',
+          message: 'sync.methodNotAllowed',
+          errorCode: 'sync.methodNotAllowed',
+        }));
+      }
+
+      const httpToken = extractTokenFromRequest(req);
+      const syncName = routePath.slice(6);
+
+      if (!syncName) {
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(400);
+        return res.end(JSON.stringify({
+          status: 'error',
+          message: 'sync.invalidName',
+          errorCode: 'sync.invalidName',
+        }));
+      }
+
+      const syncParams = params || {};
+
+      const result = await handleHttpSyncRequest({
+        name: `sync/${syncName}`,
+        cb: typeof (syncParams as any).cb === 'string' ? (syncParams as any).cb : undefined,
+        data: (syncParams as any).data || {},
+        receiver: (syncParams as any).receiver,
+        ignoreSelf: (syncParams as any).ignoreSelf,
+        token: httpToken,
+        xLanguageHeader: req.headers['x-language'],
+        acceptLanguageHeader: req.headers['accept-language'],
+      });
+
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(result.status === 'success' ? 200 : 400);
+      return res.end(JSON.stringify(result));
+    } catch (error) {
+      console.log('HTTP SYNC error:', error, 'red');
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(500);
+      return res.end(JSON.stringify({
+        status: 'error',
+        message: 'sync.invalidRequestFormat',
+        errorCode: 'sync.invalidRequestFormat',
       }));
     }
 
@@ -219,6 +268,10 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     //? png|jpg|jpeg|gif|svg|html|css|js
     return serveFile(req, res);
 
+  } else if (path.extname(routePath)) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    return res.end("Not Found");
+
   } else { // for the index.html
     //? if the request doesnt fit any of the above then we serve the index.html file
     return serveFile({ url: '/' }, res);
@@ -231,9 +284,13 @@ const port: string = process.env.SERVER_PORT || '80';
 (async () => {
   const isDevMode = process.env.NODE_ENV !== 'production';
   if (isDevMode) {
+    const { initConsolelog } = await import('./utils/console.log');
     initConsolelog();
+    const { initializeAll } = await import('./dev/loader');
     await initializeAll();
+    const { setupWatchers } = await import('./dev/hotReload');
     setupWatchers();
+    const { initRepl } = await import('./utils/repl');
     initRepl();
   }
 

@@ -8,6 +8,7 @@
  */
 
 import * as Sentry from '@sentry/react';
+import { initSharedSentry } from '../../shared/sentrySetup';
 
 const env = import.meta.env;
 
@@ -78,96 +79,23 @@ export const initializeSentry = () => {
     },
   });
 
+  // Initialize shared Sentry instance
+  initSharedSentry(Sentry);
+
   console.log('✅ Sentry initialized for error monitoring');
 };
 
-/**
- * Capture an exception and send it to Sentry.
- * 
- * @param error - The error to capture
- * @param context - Additional context to attach to the error
- * 
- * @example
- * ```typescript
- * try {
- *   await riskyOperation();
- * } catch (error) {
- *   captureException(error, { userId: session?.id, action: 'riskyOperation' });
- * }
- * ```
- */
-export const captureException = (
-  error: unknown,
-  context?: Record<string, unknown>
-) => {
-  if (context) {
-    Sentry.setContext('additional', context);
-  }
-  Sentry.captureException(error);
-};
-
-/**
- * Capture a message (non-error event) and send it to Sentry.
- * 
- * @param message - The message to capture
- * @param level - Severity level
- * @param context - Additional context to attach
- */
-export const captureMessage = (
-  message: string,
-  level: 'info' | 'warning' | 'error' | 'fatal' = 'info',
-  context?: Record<string, unknown>
-) => {
-  if (context) {
-    Sentry.setContext('additional', context);
-  }
-  Sentry.captureMessage(message, level);
-};
-
-/**
- * Set user context for error tracking.
- * Call this after user authentication.
- * 
- * @param user - User information to attach to errors
- * 
- * @example
- * ```typescript
- * // In SessionProvider after session loads
- * if (session?.id) {
- *   setSentryUser({ id: session.id, email: session.email });
- * }
- * ```
- */
-export const setSentryUser = (user: {
-  id?: string;
-  email?: string;
-  username?: string;
-} | null) => {
-  Sentry.setUser(user);
-};
+// Re-export shared capture functions
+export * from '../../shared/sentrySetup';
 
 /**
  * Error Boundary component for React.
  * Wrap your app or components to catch and report errors.
- * 
- * @example
- * ```tsx
- * import { SentryErrorBoundary } from './utils/sentry';
- * 
- * <SentryErrorBoundary fallback={<ErrorFallback />}>
- *   <App />
- * </SentryErrorBoundary>
- * ```
  */
 export const SentryErrorBoundary = Sentry.ErrorBoundary;
 
 /**
  * HOC to wrap components with Sentry profiling.
- * 
- * @example
- * ```typescript
- * export default withSentryProfiler(MyComponent);
- * ```
  */
 export const withSentryProfiler = Sentry.withProfiler;
 

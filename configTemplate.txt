@@ -1,5 +1,3 @@
-import { PrismaClient } from "@prisma/client";
- 
 // ============================================
 // LUCKYSTACK CONFIGURATION
 // ============================================
@@ -93,12 +91,22 @@ const config = {
   // RATE LIMITING
   // ============================================
 
-  /** Rate limiting configuration for API requests */
+  /**
+   * Rate limiting configuration for API requests.
+   * Uses in-memory storage (suitable for single-server deployments).
+   * 
+   * @example Per-API override:
+   * ```typescript
+   * // In any _api/*.ts file
+   * export const rateLimit = 60;    // 60 requests/minute
+   * export const rateLimit = false; // Disable for this API
+   * ```
+   */
   rateLimiting: {
     /** Requests per minute per authenticated user */
-    defaultApiLimit: 60,
+    defaultApiLimit: 60 as number | false,
     /** Requests per minute per IP (unauthenticated) */
-    defaultIpLimit: 100,
+    defaultIpLimit: 100 as number | false,
     /** Sliding window duration in ms */
     windowMs: 60000,
   },
@@ -125,7 +133,7 @@ export interface SessionLayout {
   createdAt: Date;
   updatedAt: Date;
   token: string;
-  code?: string; // Room code the user has joined
+  roomCodes?: string[]; // Room codes the user has joined
   location?: {
     pathName: string;
     searchParams: {
@@ -171,10 +179,6 @@ export interface AuthProps {
     mustBeFalsy?: boolean;
   }[]
 }
- 
-// ============================================
-// EXPORTS
-// ============================================
  
 /** Supported OAuth providers */
 export const providers = ['credentials', 'google', 'github', 'facebook', 'discord'];

@@ -5,7 +5,7 @@ import { updateLocationRequest } from 'src/_sockets/socketInitializer';
 
 const sendLocationUpdate = (pathname: string) => {
   const searchParams: Record<string, string> = {};
-  for (const [key, value] of new URLSearchParams(window.location.search)) {
+  for (const [key, value] of new URLSearchParams(globalThis.location.search)) {
     searchParams[key] = value;
   }
   void updateLocationRequest({ location: { pathName: pathname, searchParams } });

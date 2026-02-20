@@ -5,9 +5,7 @@ export default function Overview({
   params: { 
     id: string 
   },
-  searchParams: { 
-    [key: string]: string | string[] | undefined 
-  } 
+  searchParams: Record<string, string | string[] | undefined>
 }) {
   console.log(searchParams)
   return (

@@ -39,6 +39,26 @@ export type syncMessage = {
 
 export let ioInstance: SocketIOServer | null = null;
 
+const getVisibleSocketRooms = (socket: any, token: string | null): string[] => {
+  return Array.from(socket.rooms)
+    .filter((room): room is string => typeof room === 'string')
+    .filter((room) => room !== socket.id)
+    .filter((room) => !token || room !== token);
+};
+
+const getSessionRoomCodes = (session: SessionLayout): string[] => {
+  const roomCodes = Array.isArray(session.roomCodes)
+    ? session.roomCodes.filter((roomCode): roomCode is string => typeof roomCode === 'string' && roomCode.length > 0)
+    : [];
+
+  return Array.from(new Set(roomCodes));
+};
+
+const sanitizeSessionRoomKeys = (session: SessionLayout): SessionLayout => {
+  const { code: _legacyCode, codes: _legacyCodes, ...sanitizedSession } = session as SessionLayout & { code?: string; codes?: string[] };
+  return sanitizedSession;
+};
+
 export default function loadSocket(httpServer: any) {
 
   //? here we create the SocketIOServer instance
@@ -76,9 +96,17 @@ export default function loadSocket(httpServer: any) {
       handleSyncRequest({ msg, socket, token });
     });
     socket.on('joinRoom', async (data) => {
-      const { group, responseIndex } = data;
+      const group = typeof data?.group === 'string' ? data.group.trim() : '';
+      const responseIndex = data?.responseIndex;
+      if (typeof responseIndex !== 'number') {
+        return;
+      }
       if (!token) {
         socket.emit(`joinRoom-${responseIndex}`, { error: 'Not authenticated' });
+        return;
+      }
+      if (!group) {
+        socket.emit(`joinRoom-${responseIndex}`, { error: 'Invalid room' });
         return;
       }
       await withSessionLock(token, async () => {
@@ -87,11 +115,67 @@ export default function loadSocket(httpServer: any) {
           socket.emit(`joinRoom-${responseIndex}`, { error: 'Session not found' });
           return;
         }
+
+        const existingRoomCodes = getSessionRoomCodes(session);
+        const nextRoomCodes = Array.from(new Set([...existingRoomCodes, group]));
+
         await socket.join(group);
-        await saveSession(token, { ...session, code: group });
-        socket.emit(`joinRoom-${responseIndex}`);
+        const sanitizedSession = sanitizeSessionRoomKeys(session);
+        await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
+        socket.emit(`joinRoom-${responseIndex}`, { rooms: getVisibleSocketRooms(socket, token) });
         console.log(`Socket ${socket.id} joined group ${group}`, 'cyan');
       });
+    });
+
+    socket.on('leaveRoom', async (data) => {
+      const group = typeof data?.group === 'string' ? data.group.trim() : '';
+      const responseIndex = data?.responseIndex;
+      if (typeof responseIndex !== 'number') {
+        return;
+      }
+
+      if (!token) {
+        socket.emit(`leaveRoom-${responseIndex}`, { error: 'Not authenticated' });
+        return;
+      }
+
+      if (!group) {
+        socket.emit(`leaveRoom-${responseIndex}`, { error: 'Invalid room' });
+        return;
+      }
+
+      await withSessionLock(token, async () => {
+        const session = await getSession(token);
+        if (!session) {
+          socket.emit(`leaveRoom-${responseIndex}`, { error: 'Session not found' });
+          return;
+        }
+
+        const existingRoomCodes = getSessionRoomCodes(session);
+        const nextRoomCodes = existingRoomCodes.filter((roomCode) => roomCode !== group);
+
+        await socket.leave(group);
+
+        const sanitizedSession = sanitizeSessionRoomKeys(session);
+        await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
+
+        socket.emit(`leaveRoom-${responseIndex}`, { rooms: getVisibleSocketRooms(socket, token) });
+        console.log(`Socket ${socket.id} left group ${group}`, 'cyan');
+      });
+    });
+
+    socket.on('getJoinedRooms', (data) => {
+      const responseIndex = data?.responseIndex;
+      if (typeof responseIndex !== 'number') {
+        return;
+      }
+
+      if (!token) {
+        socket.emit(`getJoinedRooms-${responseIndex}`, { error: 'Not authenticated', rooms: [] });
+        return;
+      }
+
+      socket.emit(`getJoinedRooms-${responseIndex}`, { rooms: getVisibleSocketRooms(socket, token) });
     });
 
     socket.on('disconnect', async (reason) => {

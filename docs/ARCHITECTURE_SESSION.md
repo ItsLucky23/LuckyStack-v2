@@ -8,11 +8,11 @@
 
 ```typescript
 // Client: Get current session
-const session = await apiRequest({ name: "session" });
+const session = await apiRequest({ name: "session", version: "v1" });
 // Returns: { id, email, name, provider, ... } or null
 
 // Client: Logout
-await apiRequest({ name: "logout" });
+await apiRequest({ name: "logout", version: "v1" });
 ```
 
 ---
@@ -111,15 +111,15 @@ Controlled by `VITE_SESSION_BASED_TOKEN` env variable:
 ```typescript
 import {
   getSession,
-  createSession,
+  saveSession,
   deleteSession,
 } from "server/functions/session";
 
 // Get session from token
 const user = await getSession(token);
 
-// Create new session
-const token = await createSession(userId, sessionData);
+// Create/update session
+await saveSession(token, sessionData, true);
 
 // Delete session (logout)
 await deleteSession(token);
@@ -128,10 +128,10 @@ await deleteSession(token);
 ### Client-side
 
 ```typescript
-import { useSession } from 'src/_providers/sessionProvider';
+import { useSession } from 'src/_providers/SessionProvider';
 
 function UserProfile() {
-  const session = useSession();
+  const { session } = useSession();
 
   if (!session) return <LoginButton />;
   return <div>Welcome, {session.name}</div>;
@@ -164,3 +164,15 @@ allowMultipleSessions: false; // Default
 2. **HttpOnly cookies** - Not accessible via JavaScript
 3. **Session validation** - Every API/sync request validates token
 4. **Automatic cleanup** - Redis TTL handles expiry
+
+---
+
+## Runtime Function Reference
+
+| File | Function | Purpose |
+| ---- | -------- | ------- |
+| `server/functions/session.ts` | `saveSession` | Persists session, enforces single-session mode, pushes updates to connected clients. |
+| `server/functions/session.ts` | `getSession` | Resolves session by token for API/sync/auth flows. |
+| `server/functions/session.ts` | `deleteSession` | Removes session and emits forced logout event channel. |
+| `server/functions/session.ts` | `getAllSessions` | Admin/debug helper to inspect active sessions. |
+| `src/_providers/SessionProvider.tsx` | `useSession` | React hook to access `session` and `sessionLoaded` state. |

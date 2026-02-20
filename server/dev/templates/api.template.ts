@@ -24,11 +24,15 @@ export interface ApiParams {
   functions: Functions;
 }
 
-export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
+export const main = async ({  }: ApiParams): Promise<ApiResponse> => {
+  // Error responses must include errorCode
+  // return { status: 'error', errorCode: 'api.someError', errorParams: [{ key: 'id', value: 1 }] };
+
+  // Optional: set custom HTTP status on this response
+  // return { status: 'success', httpStatus: 201 };
+
   return {
     status: 'success',
-    result: {
-      // Your response data here
-    }
+    // Your response data here
   };
 };

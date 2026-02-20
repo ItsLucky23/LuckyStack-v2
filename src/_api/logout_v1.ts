@@ -5,7 +5,6 @@ export const auth: AuthProps = {
   login: false,
 };
 
-// Mark as DELETE method for HTTP requests
 export const httpMethod = 'DELETE' as const;
 
 export interface ApiParams {
@@ -15,8 +14,6 @@ export interface ApiParams {
 }
 
 export const main = async (_params: ApiParams): Promise<ApiResponse> => {
-  // We dont actually do anything here, logout is handled in handleApiRequest
-  // We still define the api route so our type system knows about it
   return {
     status: 'success',
     result: true

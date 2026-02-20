@@ -1,11 +1,11 @@
 import { dev } from "config";
 import { toast } from "sonner";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
-import type { PagePath, ApiName, ApiInput, ApiOutput } from './apiTypes.generated';
-import { getApiMethod } from './apiTypes.generated';
+import type { ApiTypeMap } from './apiTypes.generated';
 import notify from "src/_functions/notify";
 import { enqueueApiRequest, isOnline, removeApiQueueItem } from "./offlineQueue";
 import { Socket } from "socket.io-client";
+import { normalizeErrorResponseCore } from "../../shared/responseNormalizer";
 
 //? Abort controller logic:
 //? - abortable: true → always use abort controller
@@ -17,44 +17,11 @@ const abortControllers = new Map<string, AbortController>();
  * Check if an API is a GET method using the generated type map.
  * Falls back to name inference if API not found in map.
  */
-const isGetMethod = (pagePath: string, apiName: string): boolean => {
-  let method = getApiMethod(pagePath, apiName);
-  // Fallback to root-level API if not found under current page
-  if (!method && pagePath !== 'root') {
-    method = getApiMethod('root', apiName);
-  }
-  if (method) return method === 'GET';
-
-  // Fallback: infer from name (only 'get' prefix)
-  return apiName.toLowerCase().startsWith('get');
+const isGetMethod = (apiName: string): boolean => {
+  const lower = apiName.toLowerCase();
+  return lower.startsWith('get') || lower.startsWith('fetch') || lower.startsWith('list');
 };
 
-const resolveApiRoutePath = (pagePath: string, apiName: string): string => {
-  if (!pagePath) {
-    return '';
-  }
-
-  const segments = pagePath.split('/').filter((segment) => segment.length > 0);
-  for (let index = segments.length; index > 0; index -= 1) {
-    const candidate = segments.slice(0, index).join('/');
-    if (getApiMethod(candidate, apiName)) {
-      return candidate;
-    }
-  }
-
-  return pagePath;
-};
-
-export interface apiRequestResponse {
-  status: 'success' | 'error';
-  result?: Record<string, any>;
-  errorCode?: string;
-  errorParams?: {
-    key: string;
-    value: string | number | boolean;
-  }[];
-  message?: string;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Type Helpers
@@ -64,80 +31,79 @@ export interface apiRequestResponse {
 // Unions like {a:1} | {b:1} do NOT allow {}, so data will be required
 type DataRequired<T> = {} extends T ? false : true;
 
+type UnionToIntersection<U> =
+  (U extends any ? (arg: U) => void : never) extends ((arg: infer I) => void)
+    ? I
+    : never;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Global API Params - Union of ALL valid API calls with proper data enforcement
 // ═══════════════════════════════════════════════════════════════════════════════
-// All possible API names across all pages (includes root-level APIs under 'root')
-type AllApiNames = {
-  [P in PagePath]: ApiName<P>
-}[PagePath];
+type ApiRouteRecord = UnionToIntersection<{
+  [P in keyof ApiTypeMap]: {
+    [N in keyof ApiTypeMap[P] as P extends 'root' ? `${N & string}` : `${P & string}/${N & string}`]: ApiTypeMap[P][N]
+  }
+}[keyof ApiTypeMap]>;
+
+type ApiFullName = keyof ApiRouteRecord & string;
+type VersionsForFullName<F extends ApiFullName> = keyof ApiRouteRecord[F] & string;
 
 // Force expansion of types to clear aliases in tooltips
 type Prettify<T> = { [K in keyof T]: T[K] } & {};
 
 // Get input type for an API name (union if exists on multiple pages)
-type InputForName<N extends AllApiNames> = {
-  [P in PagePath]: N extends ApiName<P> ? ApiInput<P, N> : never
-}[PagePath];
+type InputForFullName<F extends ApiFullName, V extends VersionsForFullName<F>> = ApiRouteRecord[F][V] extends { input: infer I }
+  ? I
+  : never;
 
 // Get output type for an API name (union if exists on multiple pages)
-type OutputForName<N extends AllApiNames> = {
-  [P in PagePath]: N extends ApiName<P> ? ApiOutput<P, N> : never
-}[PagePath];
+type OutputForFullName<F extends ApiFullName, V extends VersionsForFullName<F>> = ApiRouteRecord[F][V] extends { output: infer O }
+  ? O
+  : never;
 
 // Build params type for a specific API name
-type ApiParamsForName<N extends AllApiNames> =
-  DataRequired<InputForName<N>> extends true
-  ? { name: N; data: Prettify<InputForName<N>>; abortable?: boolean; disableErrorMessage?: boolean; }
-  : { name: N; data?: Prettify<InputForName<N>>; abortable?: boolean; disableErrorMessage?: boolean; };
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Page-Specific Params (for exact types when duplicate names exist)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// Build params type for a specific page and API name
-type PageApiParamsForName<P extends PagePath, N extends ApiName<P>> =
-  DataRequired<ApiInput<P, N>> extends true
-  ? { name: N; data: ApiInput<P, N>; abortable?: boolean; disableErrorMessage?: boolean; }
-  : { name: N; data?: ApiInput<P, N>; abortable?: boolean; disableErrorMessage?: boolean; };
+type ApiParamsForFullName<
+  F extends ApiFullName,
+  V extends VersionsForFullName<F>
+> = DataRequired<InputForFullName<F, V>> extends true
+  ? { name: F; version: V; data: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; }
+  : { name: F; version: V; data?: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; };
 
 /**
  * Type-safe API request function.
  * 
  * @example
  * ```typescript
- * // Normal usage - shows all APIs with data validation
- * const result = await apiRequest({ name: 'publicApi', data: { message: 'hello' } });
+ * // Full name usage - includes page in the name
+ * const result = await apiRequest({ name: 'examples/publicApi', version: 'v1', data: { message: 'hello' } });
  * // result is typed correctly for publicApi
  * 
- * // Page-specific for exact types when duplicates exist
- * await apiRequest<'examples', 'publicApi'>({ name: 'publicApi', data: { message: 'hello' } });
+ * // Root APIs do not include a page prefix
+ * await apiRequest({ name: 'session', version: 'v1' });
  * ```
  */
 
-// Overload 1: Name-based inference - PRIMARY usage
-// TypeScript infers N from the literal name value
-// Use: apiRequest({ name: "publicApi", ... })
-export function apiRequest<N extends AllApiNames>(
-  params: ApiParamsForName<N>
-): Promise<Prettify<OutputForName<N>>>;
-
-// Overload 2: Explicit page + name - for duplicate API names across pages
-// Both type params REQUIRED when specifying page
-// Use: apiRequest<"examples", "publicApi">({ name: "publicApi", ... })
-export function apiRequest<P extends PagePath, N extends ApiName<P>>(
-  params: PageApiParamsForName<P, N>
-): Promise<ApiOutput<P, N>>;
+export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<F>>(
+  params: ApiParamsForFullName<F, V>
+): Promise<Prettify<OutputForFullName<F, V>>>;
 
 // Implementation (not exposed to TypeScript - only runtime)
 export function apiRequest(params: any): Promise<any> {
-  const { name, disableErrorMessage = false } = params;
+  let { name, version, disableErrorMessage = false } = params;
   let { data } = params;
   return new Promise(async (resolve, reject) => {
     if (!name || typeof name !== "string") {
       if (dev) {
         console.error("Invalid name");
         toast.error("Invalid name");
+      }
+      return resolve(null as any);
+    }
+
+    if (!version || typeof version !== 'string') {
+      if (dev) {
+        console.error("Invalid version");
+        toast.error("Invalid version");
       }
       return resolve(null as any);
     }
@@ -149,21 +115,16 @@ export function apiRequest(params: any): Promise<any> {
     if (!await waitForSocket()) { return resolve(null as any); }
     if (!socket) { return resolve(null as any); }
 
+    name = name.replace(/^\/+|\/+$/g, '');
+
     //? Abort controller logic:
     //? - abortable: true → always use abort controller
     //? - abortable: false → never use abort controller  
-    //? - abortable: undefined → smart default (GET APIs get abort controller)
-    const pathname = globalThis.location.pathname;
-    const pagePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
-    // Remove trailing slash for clean paths
-    const cleanPagePath = pagePath.endsWith('/') ? pagePath.slice(0, -1) : pagePath;
-    const resolvedPagePath = resolveApiRoutePath(cleanPagePath, name as string);
-
-    const isGet = isGetMethod(resolvedPagePath, name as string);
+    //? - abortable: undefined → smart default (GET-like APIs get abort controller)
+    const terminalName = name.split('/').at(-1) ?? name;
+    const isGet = isGetMethod(terminalName as string);
     const useAbortController = params.abortable === true || isGet;
-    // Build full API route key: "api/examples/getUserData" or "api/session" (when at root /)
-    // Server handles root-level fallback: if api/examples/session doesn't exist, it tries api/session
-    const fullname = resolvedPagePath ? `api/${resolvedPagePath}/${name}` : `api/${name}`;
+    const fullname = `api/${name}/${version}`;
 
     let signal: AbortSignal | null = null;
     let abortFunc = () => { };
@@ -212,44 +173,38 @@ export function apiRequest(params: any): Promise<any> {
       const tempIndex = incrementResponseIndex();
       socketInstance.emit('apiRequest', { name: fullname, data, responseIndex: tempIndex });
 
-      if (dev) { console.log(`Client API Request(${tempIndex}): `, { name, data }) }
-      socketInstance.once(`apiResponse-${tempIndex}`, ({ result, message, status, errorCode, errorParams }: {
-        result: any;
-        message: string;
-        status: "success" | "error";
-        errorCode?: string;
-        errorParams?: {
-          key: string;
-          value: string | number | boolean;
-        }[];
-      }) => {
+      type ApiResponse =
+        | ({ status: "success"; httpStatus: number } & any)
+        | { status: "error"; httpStatus: number; message: string; errorCode: string; errorParams?: { key: string; value: string | number | boolean; }[] };
+
+      if (dev) { console.log(`Client API Request(${tempIndex}): `, { APINAME: name, data }) }
+      socketInstance.once(`apiResponse-${tempIndex}`, (response: ApiResponse) => {
         if (signal && signal.aborted) { return; }
 
+        const { status } = response;
+
+        if (dev) { console.log(`Server API Response(${tempIndex}): `, { ...response, APINAME: name }) }
+
         if (status === "error") {
+          const normalizedError = normalizeErrorResponseCore({ response });
+
           if (!disableErrorMessage) {
             // toast.error(message)
-            if (errorCode) {
-              notify.error({ key: errorCode, params: errorParams })
+            if (normalizedError.errorCode) {
+              notify.error({ key: normalizedError.errorCode, params: normalizedError.errorParams })
             } else {
-              notify.error({ key: message })
+              notify.error({ key: normalizedError.message })
             }
           }
-          return resolve({
-            status,
-            message,
-            errorCode,
-            errorParams
-          } as any)
+          return resolve(normalizedError as any)
         }
-
-        if (dev) { console.log(`Server API Response(${tempIndex}): `, { name, ...result }) }
 
         if (signal) {
           signal.removeEventListener("abort", abortFunc);
           abortControllers.delete(fullname as string);
         }
 
-        resolve(result)
+        resolve(response as any)
       });
     };
 

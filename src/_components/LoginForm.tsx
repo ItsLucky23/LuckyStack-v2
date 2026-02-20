@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { backendUrl, loginRedirectUrl, loginPageUrl, providers, SessionLayout } from "config";
-import tryCatch from "src/_functions/tryCatch";
+import tryCatch from "shared/tryCatch";
 
 import notify from "../_functions/notify";
 const env = import.meta.env;
@@ -62,7 +62,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     };
 
     const [error, response] = await tryCatch(fetchUser);
-    
+
     if (error || !response) {
       notify.error({ key: 'common/.404' })
       console.error(error ?? "No JSON response");
@@ -71,15 +71,15 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
 
     if (!response.status) {
       notify.error({ key: response.reason });
-      setLoading(false); 
+      setLoading(false);
       return;
     }
 
     notify.success({ key: response.reason });
     setTimeout(() => {
       if (response.newToken && env.VITE_SESSION_BASED_TOKEN == 'true') {
-          sessionStorage.setItem("token", response.newToken);
-        }
+        sessionStorage.setItem("token", response.newToken);
+      }
       globalThis.location.href = response.newToken ? loginRedirectUrl : loginPageUrl;
     }, 1000);
   };

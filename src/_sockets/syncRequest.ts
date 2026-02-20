@@ -5,11 +5,7 @@ import { statusContent } from "src/_providers/socketStatusProvider";
 import { Dispatch, RefObject, SetStateAction } from "react";
 import { enqueueSyncRequest, isOnline } from "./offlineQueue";
 import type {
-  SyncPagePath,
-  SyncName,
-  SyncClientInput,
-  SyncServerOutput,
-  SyncClientOutput
+  SyncTypeMap
 } from "./apiTypes.generated";
 import { Socket } from "socket.io-client";
 
@@ -21,38 +17,55 @@ import { Socket } from "socket.io-client";
 // Unions like {a:1} | {b:1} do NOT allow {}, so data will be required
 type DataRequired<T> = {} extends T ? false : true;
 
-// Force expansion of types to clear aliases in tooltips
-type Prettify<T> = { [K in keyof T]: T[K] } & {};
+type UnionToIntersection<U> =
+  (U extends any ? (arg: U) => void : never) extends ((arg: infer I) => void)
+    ? I
+    : never;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Global Sync Params
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // All possible sync names across all pages
-export type AllSyncNames = {
-  [P in SyncPagePath]: SyncName<P>
-}[SyncPagePath];
+type SyncRouteRecord = UnionToIntersection<{
+  [P in keyof SyncTypeMap]: {
+    [N in keyof SyncTypeMap[P] as `${P & string}/${N & string}`]: SyncTypeMap[P][N]
+  }
+}[keyof SyncTypeMap]>;
 
-// Get clientInput type for a sync name (union if exists on multiple pages)
-type ClientInputForName<N extends AllSyncNames> = {
-  [P in SyncPagePath]: N extends SyncName<P> ? SyncClientInput<P, N> : never
-}[SyncPagePath];
+type SyncFullName = keyof SyncRouteRecord & string;
+type VersionsForFullName<F extends SyncFullName> = keyof SyncRouteRecord[F] & string;
 
-// Get serverOutput type for a sync name (union if exists on multiple pages)
-type ServerOutputForName<N extends AllSyncNames> = {
-  [P in SyncPagePath]: N extends SyncName<P> ? SyncServerOutput<P, N> : never
-}[SyncPagePath];
+type ClientInputForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> = SyncRouteRecord[F][V] extends { clientInput: infer I }
+  ? I
+  : never;
 
-// Get clientOutput type for a sync name (union if exists on multiple pages)
-type ClientOutputForName<N extends AllSyncNames> = {
-  [P in SyncPagePath]: N extends SyncName<P> ? SyncClientOutput<P, N> : never
-}[SyncPagePath];
+type ServerOutputForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> = SyncRouteRecord[F][V] extends { serverOutput: infer O }
+  ? O
+  : never;
 
-// Build params type for a specific sync name
-type SyncParamsForName<N extends AllSyncNames> =
-  DataRequired<ClientInputForName<N>> extends true
-  ? { name: N; data: Prettify<ClientInputForName<N>>; receiver: string; ignoreSelf?: boolean }
-  : { name: N; data?: Prettify<ClientInputForName<N>>; receiver: string; ignoreSelf?: boolean };
+type ClientOutputForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> = SyncRouteRecord[F][V] extends { clientOutput: infer O }
+  ? O
+  : never;
+
+type SyncParamsForFullName<
+  F extends SyncFullName,
+  V extends VersionsForFullName<F>
+> = DataRequired<ClientInputForFullName<F, V>> extends true
+  ? {
+    name: F;
+    version: V;
+    data: ClientInputForFullName<F, V>;
+    receiver: string;
+    ignoreSelf?: boolean;
+  }
+  : {
+    name: F;
+    version: V;
+    data?: ClientInputForFullName<F, V>;
+    receiver: string;
+    ignoreSelf?: boolean;
+  };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Sync Event Callbacks Registry
@@ -61,34 +74,16 @@ type SyncParamsForName<N extends AllSyncNames> =
 const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: any; aditionalData: any }) => void)> = {};
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Page-Specific Params (for exact types when duplicate names exist)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// Build params type for a specific page and sync name
-type PageSyncParamsForName<P extends SyncPagePath, N extends SyncName<P>> =
-  DataRequired<SyncClientInput<P, N>> extends true
-  ? { name: N; data: SyncClientInput<P, N>; receiver: string; ignoreSelf?: boolean }
-  : { name: N; data?: SyncClientInput<P, N>; receiver: string; ignoreSelf?: boolean };
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // syncRequest Function Overloads
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Overload 1: Name-based inference - PRIMARY usage
-// TypeScript infers N from the literal name value
-export function syncRequest<N extends AllSyncNames>(
-  params: SyncParamsForName<N>
-): Promise<boolean>;
-
-// Overload 2: Explicit page + name - for duplicate sync names across pages
-// Both type params REQUIRED when specifying page
-export function syncRequest<P extends SyncPagePath, N extends SyncName<P>>(
-  params: PageSyncParamsForName<P, N>
+export function syncRequest<F extends SyncFullName, V extends VersionsForFullName<F>>(
+  params: SyncParamsForFullName<F, V>
 ): Promise<boolean>;
 
 // Implementation
 export function syncRequest(params: any): Promise<boolean> {
-  let { name, data, receiver, ignoreSelf } = params;
+  let { name, version, data, receiver, ignoreSelf } = params;
 
   return new Promise(async (resolve) => {
     if (!name || typeof name !== "string") {
@@ -103,6 +98,14 @@ export function syncRequest(params: any): Promise<boolean> {
       data = {};
     }
 
+    if (!version || typeof version !== 'string') {
+      if (dev) {
+        console.error("Invalid version for syncRequest");
+        toast.error("Invalid version for syncRequest");
+      }
+      return resolve(false);
+    }
+
     if (!receiver) {
       if (dev) {
         console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets wich we dont recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
@@ -114,11 +117,8 @@ export function syncRequest(params: any): Promise<boolean> {
     if (!await waitForSocket()) { return resolve(false); }
     if (!socket) { return resolve(false); }
 
-    const pathname = window.location.pathname;
-    const pagePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
-    const cleanPagePath = pagePath.endsWith('/') ? pagePath.slice(0, -1) : pagePath;
-    // Build full sync route key: "sync/examples/updateCounter" or "sync/updateCounter" (root-level)
-    const fullName = cleanPagePath ? `sync/${cleanPagePath}/${name}` : `sync/${name}`;
+    name = name.replace(/^\/+|\/+$/g, '');
+    const fullName = `sync/${name}/${version}`;
     let queueId: string | null = null;
 
     const canSendNow = (s: Socket) => {
@@ -144,7 +144,7 @@ export function syncRequest(params: any): Promise<boolean> {
 
       if (dev) { console.log(`Client Sync Request: `, { name, data, receiver, ignoreSelf }) }
 
-      socketInstance.emit('sync', { name: fullName, data, cb: name, receiver, responseIndex: tempIndex, ignoreSelf });
+      socketInstance.emit('sync', { name: fullName, data, cb: `${name}/${version}`, receiver, responseIndex: tempIndex, ignoreSelf });
 
       socketInstance.once(`sync-${tempIndex}`, (data: { status: "success" | "error", message: string }) => {
         if (data.status === "error") {
@@ -166,35 +166,49 @@ export function syncRequest(params: any): Promise<boolean> {
 // useSyncEvents Hook - Type-Safe Event Registration
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Type-safe callback for sync events
-export type SyncEventCallback<N extends AllSyncNames> = (params: {
-  clientOutput: ClientOutputForName<N>;
-  serverOutput: ServerOutputForName<N>;
-}) => void;
-
 export const useSyncEvents = () => {
-  // Type-safe version: use with specific sync name
-  function upsertSyncEventCallback<N extends AllSyncNames>(
-    name: N,
-    cb: SyncEventCallback<N>
-  ): void;
+  type TypedCallbackParams<F extends SyncFullName, V extends VersionsForFullName<F>> = {
+    clientOutput: ClientOutputForFullName<F, V>;
+    serverOutput: ServerOutputForFullName<F, V>;
+  };
 
-  // Legacy version: accepts any string (for backward compatibility)
-  function upsertSyncEventCallback(
-    name: string,
-    cb: (params: { clientOutput: any; serverOutput: any }) => void
-  ): void;
+  type UpsertParams<F extends SyncFullName, V extends VersionsForFullName<F>> = {
+    name: F;
+    version: V;
+    callback: (params: TypedCallbackParams<F, V>) => void;
+  };
 
-  // Implementation
-  function upsertSyncEventCallback(
-    name: string,
-    cb: (params: { clientOutput: any; serverOutput: any }) => void
+  function upsertSyncEventCallback<F extends SyncFullName, V extends VersionsForFullName<F>>(
+    params: UpsertParams<F, V>
   ): void {
-    const pathname = window.location.pathname;
-    const pagePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
-    const cleanPagePath = pagePath.endsWith('/') ? pagePath.slice(0, -1) : pagePath;
-    const fullName = cleanPagePath ? `sync/${cleanPagePath}/${name}` : `sync/${name}`;
-    syncEvents[fullName] = cb;
+
+    if (!params.name || typeof params.name !== 'string') {
+      if (dev) {
+        console.error("Invalid name for upsertSyncEventCallback");
+        toast.error("Invalid name for upsertSyncEventCallback");
+      }
+      return;
+    }
+
+    if (!params.version || typeof params.version !== 'string') {
+      if (dev) {
+        console.error("Invalid version for upsertSyncEventCallback");
+        toast.error("Invalid version for upsertSyncEventCallback");
+      }
+      return;
+    }
+
+    if (typeof params.callback !== 'function') {
+      if (dev) {
+        console.error("Invalid callback for upsertSyncEventCallback");
+        toast.error("Invalid callback for upsertSyncEventCallback");
+      }
+      return;
+    }
+
+    const sanitizedName = params.name.replace(/^\/+|\/+$/g, '');
+    const fullName = `sync/${sanitizedName}/${params.version}`;
+    syncEvents[fullName] = params.callback;
   }
 
   return { upsertSyncEventCallback };

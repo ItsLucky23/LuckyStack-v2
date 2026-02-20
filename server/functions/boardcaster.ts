@@ -1,7 +1,7 @@
 import { ioInstance } from "../../server/sockets/socket"
 import { getSession } from "./session";
 
-export default async function boardcaster({
+export const boardcaster = async ({
   code,
   event,
   session,
@@ -13,12 +13,14 @@ export default async function boardcaster({
   session?: boolean,
   data?: any,
   ignoreSelf?: string
-}) {
+}): Promise<number> => {
   const io = ioInstance;
-  if (!io) { return; }
+  if (!io) { return 0; }
 
   const sockets = io.sockets.adapter.rooms.get(code);
-  if (!sockets) { return; }
+  if (!sockets) { return 0; }
+
+  let emittedCount = 0;
 
 
   for (const socketId of sockets || []) {
@@ -43,10 +45,15 @@ export default async function boardcaster({
       const sessionData = await getSession(tempToken);
 
       tempSocket.emit(event, { ...data, session: sessionData });
+      emittedCount++;
 
     } else {
       tempSocket.emit(event, { ...data });
+      emittedCount++;
     }
   }
 
+  return emittedCount;
 }
+
+export default boardcaster;

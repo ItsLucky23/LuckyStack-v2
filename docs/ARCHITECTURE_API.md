@@ -7,19 +7,26 @@
 ## Quick Reference
 
 ```typescript
-// Page-relative API call
+// Full route-name API call
 const result = await apiRequest({
-  name: "getUserData",
+  name: "examples/getUserData",
+  version: "v1",
   data: { userId: "123" },
   abortable: true, // Optional: auto-cancels if called again before response
 });
 
-// Root-level API call (works from any page — server resolves automatically)
-const session = await apiRequest({ name: "session" });
+// Nested page API call
+const nestedResult = await apiRequest({
+  name: "test/nestedTest/info",
+  version: "v1",
+});
+
+// Root-level API call (no prefix)
+const session = await apiRequest({ name: "session", version: "v1" });
 
 // HTTP fallback (same API, no WebSocket needed)
-// GET /api/examples/getUserData?userId=123
-// POST /api  with { name: 'api/examples/getUserData', data: { userId: '123' } }
+// GET /api/examples/getUserData/v1?userId=123
+// POST /api/examples/getUserData/v1 with JSON body
 ```
 
 ---
@@ -29,12 +36,12 @@ const session = await apiRequest({ name: "session" });
 ```
 src/
 ├── _api/                       # Root-level APIs (callable from any page)
-│   ├── session.ts              # → api/session (use '/session' on client)
-│   └── logout.ts               # → api/logout  (use '/logout' on client)
+│   ├── session_v1.ts           # → api/session/v1
+│   └── logout_v1.ts            # → api/logout/v1
 ├── {page}/_api/
-│   ├── {apiName}.ts            # → api/{page}/{apiName}
-│   └── {subfolder}/            # Nested: api/{page}/{subfolder}/{apiName}
-│       └── {apiName}.ts
+│   ├── {apiName}_v1.ts         # → api/{page}/{apiName}/v1
+│   └── {subfolder}/            # Nested: api/{page}/{subfolder}/{apiName}/v1
+│       └── {apiName}_v1.ts
 └── _sockets/
     ├── apiRequest.ts           # Client-side API caller
     └── apiTypes.generated.ts   # Auto-generated types
@@ -46,10 +53,10 @@ src/
 
 ### 1. Create the file
 
-template is injected
+Template is injected automatically for empty files.
 
 ```typescript
-// src/examples/_api/getUserData.ts
+// src/examples/_api/getUserData_v1.ts
 import { AuthProps, SessionLayout } from "config";
 import { Functions, ApiResponse } from "src/_sockets/apiTypes.generated";
 
@@ -77,15 +84,24 @@ export const main = async ({
   user,
   functions,
 }: ApiParams): Promise<ApiResponse> => {
-  const userData = await functions.prisma.user.findUnique({
+  const userData = await functions.db.prisma.user.findUnique({
     where: { id: data.userId },
   });
 
   return {
     status: "success",
-    result: userData,
+    // Optional per-response HTTP status (for network response)
+    // httpStatus: 201,
+    userData,
   };
 };
+
+// Error shape is strict:
+// { status: 'error', errorCode: string, errorParams?: { key: string; value: string | number | boolean }[], httpStatus?: number }
+// Message is resolved server-side from errorCode + errorParams using i18n.
+
+// Success shape is strict too:
+// Must include status: 'success' and may include any additional payload keys.
 ```
 
 ### 2. Use from client
@@ -93,12 +109,13 @@ export const main = async ({
 ```typescript
 // Types are auto-generated - full autocomplete!
 const result = await apiRequest({
-  name: "getUserData",
+  name: "examples/getUserData",
+  version: "v1",
   data: { userId: "123" },
 });
 
 if (result.status === "success") {
-  console.log(result.result); // Typed correctly
+  console.log(result.userData); // Typed correctly
 }
 ```
 
@@ -112,10 +129,16 @@ APIs are accessible via HTTP for testing, webhooks, or non-socket clients.
 
 Examples:
 
-- `GET /api/examples/getUserData?userId=123`
-- `POST /api/examples/createUser`
-- `PUT /api/settings/updateProfile`
-- `DELETE /api/examples/deleteUser`
+- `GET /api/examples/getUserData/v1?userId=123`
+- `POST /api/examples/createUser/v1`
+- `PUT /api/settings/updateProfile/v1`
+- `DELETE /api/examples/deleteUser/v1`
+
+### Versioning Rules
+
+- API filenames are required to end with `_v{number}.ts`.
+- URLs are required to end with `/{version}`.
+- Invalid unversioned API filenames do not get route templates injected.
 
 ### Method Inference
 
@@ -135,6 +158,18 @@ Include token via:
 - **Cookie**: `token=your-token` (set automatically on login)
 - **Header**: `Authorization: Bearer your-token`
 
+For translated error responses over HTTP, send one of:
+
+- `Accept-Language: en`
+- `X-Language: en`
+
+### Response Contract
+
+- API handlers must return exactly one of:
+  - success: `{ status: 'success', ...payload }`
+  - error: `{ status: 'error', errorCode: string, errorParams?: [...], httpStatus?: number }`
+- HTTP responses normalize errors to include localized `message` and final `httpStatus`.
+
 ---
 
 ## Abort Controller
@@ -143,11 +178,11 @@ GET-style APIs automatically use abort controllers to cancel in-flight requests.
 
 ```typescript
 // These automatically cancel previous calls if called again:
-await apiRequest({ name: 'getUserData', data: {...} });
+await apiRequest({ name: 'examples/getUserData', version: 'v1', data: {...} });
 
 // Explicit control:
-await apiRequest({ name: 'createUser', data: {...}, abortable: true });  // Force
-await apiRequest({ name: 'getUser', data: {...}, abortable: false });    // Disable
+await apiRequest({ name: 'examples/createUser', version: 'v1', data: {...}, abortable: true });  // Force
+await apiRequest({ name: 'examples/getUser', version: 'v1', data: {...}, abortable: false });    // Disable
 ```
 
 ## Offline Request Queue
@@ -173,3 +208,15 @@ Or per-API:
 export const rateLimit = 30; // Override global
 export const rateLimit = false; // Disable for this API
 ```
+
+---
+
+## Runtime Function Reference
+
+| File | Function | Purpose |
+| ---- | -------- | ------- |
+| `server/sockets/handleApiRequest.ts` | `default export` | Handles websocket API requests (`apiRequest`), validates auth/rate-limit, executes API module, emits response. |
+| `server/sockets/handleHttpApiRequest.ts` | `handleHttpApiRequest` | Handles HTTP API calls (`/api/...`) with shared auth/validation/error-normalization behavior. |
+| `server/utils/responseNormalizer.ts` | `normalizeErrorResponse` | Normalizes `errorCode/errorParams` into localized error responses. |
+| `server/utils/rateLimiter.ts` | `checkRateLimit` | Applies configured rate-limit windows and limits. |
+| `src/_sockets/apiRequest.ts` | `apiRequest` | Typed client request API with queueing and abort-controller support. |

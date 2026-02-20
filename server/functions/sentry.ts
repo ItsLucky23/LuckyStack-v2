@@ -8,6 +8,13 @@
  */
 
 import * as Sentry from '@sentry/node';
+import {
+  initSharedSentry,
+  captureException as sharedCaptureException,
+  captureMessage as sharedCaptureMessage,
+  setSentryUser as sharedSetSentryUser,
+  startSpan as sharedStartSpan,
+} from '../../shared/sentrySetup';
 
 /**
  * Initialize Sentry error monitoring.
@@ -63,96 +70,37 @@ export const initializeSentry = () => {
     },
   });
 
+  // Initialize shared Sentry instance for shared utilities
+  initSharedSentry(Sentry);
+
   console.log('✅ Sentry initialized for error monitoring', 'green');
 };
 
-/**
- * Capture an exception and send it to Sentry.
- * 
- * @param error - The error to capture
- * @param context - Additional context to attach to the error
- * 
- * @example
- * ```typescript
- * try {
- *   await riskyOperation();
- * } catch (error) {
- *   captureException(error, { userId: user.id, action: 'riskyOperation' });
- * }
- * ```
- */
 export const captureException = (
   error: unknown,
   context?: Record<string, unknown>
-) => {
-  if (context) {
-    Sentry.setContext('additional', context);
-  }
-  Sentry.captureException(error);
+): void => {
+  return sharedCaptureException(error, context);
 };
 
-/**
- * Capture a message (non-error event) and send it to Sentry.
- * 
- * @param message - The message to capture
- * @param level - Severity level (info, warning, error, fatal)
- * @param context - Additional context to attach
- * 
- * @example
- * ```typescript
- * captureMessage('User exceeded rate limit', 'warning', { userId: user.id });
- * ```
- */
 export const captureMessage = (
   message: string,
   level: 'info' | 'warning' | 'error' | 'fatal' = 'info',
   context?: Record<string, unknown>
-) => {
-  if (context) {
-    Sentry.setContext('additional', context);
-  }
-  Sentry.captureMessage(message, level);
+): void => {
+  return sharedCaptureMessage(message, level, context);
 };
 
-/**
- * Set user context for error tracking.
- * Call this after user authentication.
- * 
- * @param user - User information to attach to errors
- * 
- * @example
- * ```typescript
- * setSentryUser({ id: user.id, email: user.email });
- * ```
- */
 export const setSentryUser = (user: {
   id?: string;
   email?: string;
   username?: string;
-} | null) => {
-  Sentry.setUser(user);
+} | null): void => {
+  return sharedSetSentryUser(user);
 };
 
-/**
- * Create a performance transaction span.
- * Useful for tracking custom operations.
- * 
- * @param name - Name of the operation
- * @param op - Operation type (e.g., 'http', 'db', 'function')
- * @returns A span object with a finish method
- * 
- * @example
- * ```typescript
- * const span = startSpan('processPayment', 'payment');
- * try {
- *   await processPayment();
- * } finally {
- *   span.end();
- * }
- * ```
- */
-export const startSpan = (name: string, op: string) => {
-  return Sentry.startInactiveSpan({ name, op });
+export const startSpan = (name: string, op: string): unknown => {
+  return sharedStartSpan(name, op);
 };
 
 export default Sentry;

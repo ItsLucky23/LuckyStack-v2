@@ -1,3 +1,7 @@
-export default function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
+import sharedSleep from "../../shared/sleep";
+
+export const sleep = (ms: number): Promise<void> => {
+	return sharedSleep(ms);
+};
+
+export default sleep;

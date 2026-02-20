@@ -31,27 +31,22 @@ export default function Home() {
   const [newName, setNewName] = useState<string>(session?.name ?? '');
   const [newTheme, setNewTheme] = useState<'light' | 'dark'>(session?.theme ?? 'dark');
 
-  const saveUser = useCallback(async () => {
+  const saveUser = useCallback(async (isAvatarChange?: boolean) => {
     if (!session) return;
 
     if (
       newLanguage === session.language
-      && stripAvatarVersion(newAvatar) === stripAvatarVersion(session.avatar)
       && newName === session.name
       && newTheme === session.theme
+      && !isAvatarChange
     ) {
       notify.info({ key: 'settings.noChangesMade' })
       return;
     }
-    console.log(session.avatar)
-    console.log({
-      language: newLanguage === session.language ? undefined : newLanguage,
-      avatar: stripAvatarVersion(newAvatar) === stripAvatarVersion(session.avatar) ? undefined : newAvatar,
-      name: newName === session.name ? undefined : newName,
-      theme: newTheme === session.theme ? undefined : newTheme,
-    })
+
     const response = await apiRequest({
-      name: "updateUser",
+      name: "settings/updateUser",
+      version: 'v1',
       data: {
         language: newLanguage === session.language ? undefined : newLanguage,
         avatar: stripAvatarVersion(newAvatar) === stripAvatarVersion(session.avatar) ? undefined : newAvatar,
@@ -66,53 +61,32 @@ export default function Home() {
     }
   }, [newLanguage, newAvatar, newName, newTheme, session]);
 
-
-  //? we trigger saveUser when the newAvatar changes so that the avatar is saved immidiatly, we dont call the saveUser in the onchange callback cause than it causes a race codition between the function calling and newAvatar having the new value
   useEffect(() => {
-    if (!newAvatar) return;
     if (!session) return;
-    
-    if (stripAvatarVersion(newAvatar) === stripAvatarVersion(session.avatar)) return;
+    void saveUser(true);
+  }, [newAvatar, saveUser, session])
 
-    void saveUser();
-  }, [newAvatar, saveUser])
+  const displayUrl = session
+    ? (session.avatar.startsWith('http') ? session.avatar : `${backendUrl}/uploads/${session.avatar}`)
+    : '';
 
   if (!session) return null;
-
-  let url;
-
-  if (newAvatar.includes('base64')) {
-    url = new URL(newAvatar, globalThis.location.origin);
-    url.search = ""; // remove query params
-  }
-
-  const displayUrl = newAvatar.includes('base64')
-    ? url?.toString()
-    : (newAvatar.startsWith("http")
-      ? newAvatar
-      : `${backendUrl}/uploads/${session.avatar}`)
-  console.log(displayUrl)
 
   return (
     <div className='flex items-center justify-center w-full h-full bg-background'>
       <div className="bg-container1 border-2 border-container1-border flex flex-col p-8 gap-4 rounded-2xl max-w-[360px] w-[90%]">
 
         <div className="flex gap-4 items-center">
-          {newAvatar || session.avatar ? (
-            <img src={displayUrl}
-              alt="User avatar"
-              className="rounded-xl min-w-28 max-w-28 object-cover aspect-square select-none"></img>
-          ) : (
-            <div className="rounded-xl min-w-28 max-w-28 object-cover aspect-square select-none">
-              <Avatar
-                user={{
-                  name: session.name,
-                  avatarFallback: session.avatarFallback
-                }}
-                textSize="text-4xl"
-              />
-            </div>
-          )}
+          <div className="rounded-xl min-w-28 max-w-28 object-cover aspect-square select-none">
+            <Avatar
+              user={{
+                name: session.name,
+                avatar: displayUrl,
+                avatarFallback: session.avatarFallback
+              }}
+              textSize="text-4xl"
+            />
+          </div>
           <div className="space-y-2">
             <input type="file" className="hidden"></input>
             <button
@@ -145,27 +119,9 @@ export default function Home() {
                 }
               }}
             >
-              {/* Change avatar */}
               {translate({ key: 'settings.changeAvatar' })}
             </button>
-            {/* <button 
-              className="w-full py-1 bg-wrong/50 border-wrong border-2 rounded-md text-title font-semibold text-lg"
-              onClick={() => {
-                ref.open(
-                  <ConfirmMenu
-                    title={(translate({ key: 'settings.changeAvatar' }))}
-                    content={'asd'}
-                    resolve={(success) => {
-                      console.log(success)
-                    }}
-                  />
-                )
-              }}
-            >
-              {translate({ key: 'settings.deleteAvatar' })}
-            </button> */}
             <div className="text-muted text-sm">
-              {/* JPG, GIV or PNG. 1MB max. */}
               {translate({ key: 'settings.changeAvatarDescription' })}
             </div>
           </div>

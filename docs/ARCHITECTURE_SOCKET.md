@@ -23,10 +23,12 @@ socket.emit("event", data);
 | `apiRequest`          | Client → Server  | RPC-style API calls          |
 | `apiResponse-{index}` | Server → Client  | API response by index        |
 | `sync`                | Client → Server  | Sync event to broadcast      |
-| `syncEvent-{name}`    | Server → Clients | Broadcasted sync data        |
+| `sync`                | Server → Clients | Broadcasted sync payloads    |
 | `joinRoom`            | Client → Server  | Join a specific room         |
+| `leaveRoom`           | Client → Server  | Leave a specific room        |
+| `getJoinedRooms`      | Client → Server  | Get current room membership  |
 | `updateLocation`      | Client → Server  | Track user's current page    |
-| `logout`              | Server → Client  | Force logout (other session) |
+| `forceLogout`         | Server → Client  | Force logout (other session) |
 
 ---
 
@@ -37,7 +39,7 @@ socket.emit("event", data);
 socket.join(roomCode);
 
 // Server-side: broadcast to room
-io.to(roomCode).emit("syncEvent-updateCounter", data);
+io.to(roomCode).emit("sync", data);
 
 // Client triggers room join
 socket.emit("joinRoom", { roomCode: "game-123" });
@@ -107,3 +109,15 @@ socket.on("disconnect", (reason) => {
   }
 });
 ```
+
+---
+
+## Runtime Function Reference
+
+| File | Function | Purpose |
+| ---- | -------- | ------- |
+| `server/sockets/socket.ts` | `loadSocket` | Initializes Socket.io server, registers all socket event handlers. |
+| `src/_sockets/socketInitializer.ts` | `useSocket` | Initializes client socket, listeners, queue flushing, visibility reconnection behavior. |
+| `src/_sockets/socketInitializer.ts` | `joinRoom` / `leaveRoom` / `getJoinedRooms` | Client room management helpers. |
+| `server/sockets/handleApiRequest.ts` | `default export` | Handles incoming `apiRequest` socket messages. |
+| `server/sockets/handleSyncRequest.ts` | `default export` | Handles incoming `sync` socket messages and room fanout. |

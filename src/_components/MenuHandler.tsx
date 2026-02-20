@@ -139,9 +139,9 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
         setStack((current) => {
           const last = current.at(-1);
           const tempSecond = current.at(-2);
-          if (last && last.id === top.id && last.isClosing) {
-            if (last.resolver) last.resolver(null);
-            if (tempSecond && second && tempSecond.id === second.id && tempSecond.soonIsTop) {
+          if (last?.id === top.id && last.isClosing) {
+            last.resolver?.(null);
+            if (tempSecond?.soonIsTop && tempSecond.id === second?.id) {
               current[current.length - 2] = { ...tempSecond, soonIsTop: false };
             }
             return current.slice(0, -1);

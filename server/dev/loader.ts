@@ -1,27 +1,22 @@
 import fs from "fs";
 import path from "path";
 import { createRequire } from 'module';
-import { tryCatch } from "../functions/tryCatch";
+import tryCatch from "../functions/tryCatch";
+import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
 
 const nodeRequire = createRequire(import.meta.url);
 
-// ----------------------------
-// Storage for loaded modules
-// ----------------------------
 export const devApis: Record<string, any> = {};
 export const devSyncs: Record<string, any> = {};
 export const devFunctions: Record<string, any> = {};
 
-// ----------------------------
-// Unified Initialization
-// ----------------------------
+const API_VERSION_REGEX = /_v(\d+)$/;
+const SYNC_VERSION_REGEX = /_(server|client)_v(\d+)$/;
+
 export const initializeAll = async () => {
   await Promise.all([initializeApis(), initializeSyncs(), initializeFunctions()]);
 };
 
-// ----------------------------
-// Helper: convert absolute path to proper file URL for import
-// ----------------------------
 const importFile = async (absolutePath: string) => {
   const normalizedPath = absolutePath.replace(/\\/g, '/');
 
@@ -35,10 +30,6 @@ const importFile = async (absolutePath: string) => {
   return nodeRequire(absolutePath);
 };
 
-// ----------------------------
-// Helper: recursively collect all .ts files from a directory
-// Returns paths relative to the base dir (e.g. "changeName.ts" or "user/changeName.ts")
-// ----------------------------
 const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
   const results: string[] = [];
   const entries = fs.readdirSync(dir);
@@ -54,11 +45,34 @@ const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
   return results;
 };
 
-// ----------------------------
-// API Loader
-// ----------------------------
+const isMergeable = (value: unknown): value is Record<string, unknown> | ((...args: any[]) => any) => {
+  return (typeof value === 'object' && value !== null) || typeof value === 'function';
+};
+
+const resolveFunctionModule = (loadedModule: any, fileName: string) => {
+  if (!loadedModule || typeof loadedModule !== 'object' || !("default" in loadedModule)) {
+    return isMergeable(loadedModule) ? loadedModule : {};
+  }
+
+  const moduleRecord = loadedModule as Record<string, any>;
+  const { default: defaultExport, ...namedExports } = moduleRecord;
+  const filteredNamedExports = Object.fromEntries(
+    Object.entries(namedExports).filter(([key]) => key !== '__esModule')
+  );
+
+  if (Object.keys(filteredNamedExports).length > 0) {
+    return filteredNamedExports;
+  }
+
+  if (defaultExport !== undefined) {
+    return { [fileName]: defaultExport };
+  }
+
+  return {};
+};
+
 export const initializeApis = async () => {
-  Object.keys(devApis).forEach(k => delete devApis[k]);
+  Object.keys(devApis).forEach((key) => delete devApis[key]);
   const srcFolder = fs.readdirSync(path.resolve("./src"));
 
   for (const file of srcFolder) {
@@ -70,53 +84,55 @@ const scanApiFolder = async (file: string, basePath = "") => {
   const fullPath = path.join("./src", basePath, file);
   if (!fs.statSync(fullPath).isDirectory()) return;
 
-  if (file.toLowerCase().endsWith("api")) {
-    // basePath is the path segments between src/ and the _api folder
-    // Root _api:     basePath="" → pageLocation=""
-    // examples/_api: basePath="examples" → pageLocation="examples"
-    const pageLocation = basePath.replace(/\\/g, '/');
-
-    // Collect all .ts files recursively (supports nested folders like _api/user/changeName.ts)
-    const tsFiles = collectTsFiles(fullPath);
-
-    for (const relFile of tsFiles) {
-      const modulePath = path.resolve(path.join(fullPath, relFile));
-      const [err, module] = await tryCatch(async () => importFile(modulePath));
-      if (err) continue;
-
-      const resolvedModule = module?.default ? { ...module.default, ...module } : module;
-      const { auth = {}, main, rateLimit, httpMethod, schema } = resolvedModule;
-      if (!main || typeof main !== "function") continue;
-
-      // Remove .ts extension and normalize slashes for the API name
-      const apiName = relFile.replace(/\.ts$/, "").replace(/\\/g, '/');
-      // Build route key: "api/examples/getUserData" or "api/session" (root-level)
-      const routeKey = pageLocation ? `api/${pageLocation}/${apiName}` : `api/${apiName}`;
-
-      devApis[routeKey] = {
-        main,
-        auth: {
-          login: auth.login || false,
-          additional: auth.additional || [],
-        },
-        rateLimit,
-        httpMethod,
-        schema,
-      };
-    }
-  } else {
+  if (!file.toLowerCase().endsWith("api")) {
     const subFolders = fs.readdirSync(fullPath);
     for (const sub of subFolders) {
       await scanApiFolder(sub, path.join(basePath, file));
     }
+    return;
+  }
+
+  const pageLocation = basePath.replace(/\\/g, '/');
+  const tsFiles = collectTsFiles(fullPath);
+
+  for (const relFile of tsFiles) {
+    const rawApiName = relFile.replace(/\.ts$/, "").replace(/\\/g, '/');
+    const versionMatch = rawApiName.match(API_VERSION_REGEX);
+    if (!versionMatch) {
+      continue;
+    }
+
+    const version = `v${versionMatch[1]}`;
+    const apiName = rawApiName.replace(API_VERSION_REGEX, '');
+    const routeKey = pageLocation
+      ? `api/${pageLocation}/${apiName}/${version}`
+      : `api/${apiName}/${version}`;
+
+    const modulePath = path.resolve(path.join(fullPath, relFile));
+    const [err, module] = await tryCatch(async () => importFile(modulePath));
+    if (err) continue;
+
+    const resolvedModule = module?.default ? { ...module.default, ...module } : module;
+    const { auth = {}, main, rateLimit, httpMethod, schema } = resolvedModule;
+    if (!main || typeof main !== "function") continue;
+    const inputType = getInputTypeFromFile(modulePath);
+
+    devApis[routeKey] = {
+      main,
+      auth: {
+        login: auth.login || false,
+        additional: auth.additional || [],
+      },
+      rateLimit,
+      httpMethod,
+      schema,
+      inputType,
+    };
   }
 };
 
-// ----------------------------
-// Sync Loader
-// ----------------------------
 export const initializeSyncs = async () => {
-  Object.keys(devSyncs).forEach(k => delete devSyncs[k]);
+  Object.keys(devSyncs).forEach((key) => delete devSyncs[key]);
   const srcFolder = fs.readdirSync(path.resolve("./src"));
 
   for (const file of srcFolder) {
@@ -128,54 +144,59 @@ const scanSyncFolder = async (file: string, basePath = "") => {
   const fullPath = path.join("./src", basePath, file);
   if (!fs.statSync(fullPath).isDirectory()) return;
 
-  if (file.toLowerCase().endsWith("sync")) {
-    // basePath is the path segments between src/ and the _sync folder
-    const pageLocation = basePath.replace(/\\/g, '/');
-
-    const files = fs.readdirSync(fullPath);
-    for (const f of files) {
-      if (!f.endsWith("_client.ts") && !f.endsWith("_server.ts")) { continue; }
-
-      const filePath = path.join(fullPath, f);
-      const [fileError, fileResult] = await tryCatch(async () => importFile(filePath));
-
-      if (fileError) { continue; }
-
-      const resolvedSyncModule = fileResult?.default
-        ? { ...fileResult.default, ...fileResult }
-        : fileResult;
-
-      const syncFileName = f.replace(".ts", "");
-      // Build route key: "sync/examples/test_server" or "sync/test_server" (root-level)
-      const routeKey = pageLocation ? `sync/${pageLocation}/${syncFileName}` : `sync/${syncFileName}`;
-
-      if (f.endsWith("_server.ts")) {
-        devSyncs[routeKey] = { 
-          main: resolvedSyncModule.main,
-          auth: resolvedSyncModule.auth || {}
-        };
-      } else {
-        devSyncs[routeKey] = resolvedSyncModule.main;
-      }
-    }
-  } else {
+  if (!file.toLowerCase().endsWith("sync")) {
     const subFolders = fs.readdirSync(fullPath);
     for (const sub of subFolders) {
       await scanSyncFolder(sub, path.join(basePath, file));
     }
+    return;
+  }
+
+  const pageLocation = basePath.replace(/\\/g, '/');
+  const tsFiles = collectTsFiles(fullPath);
+
+  for (const relFile of tsFiles) {
+    const rawSyncFileName = relFile.replace(/\.ts$/, "").replace(/\\/g, '/');
+    const syncMatch = rawSyncFileName.match(SYNC_VERSION_REGEX);
+    if (!syncMatch) {
+      continue;
+    }
+
+    const kind = syncMatch[1];
+    const version = `v${syncMatch[2]}`;
+    const syncName = rawSyncFileName.replace(SYNC_VERSION_REGEX, '');
+    const routeBaseKey = pageLocation
+      ? `sync/${pageLocation}/${syncName}/${version}`
+      : `sync/${syncName}/${version}`;
+
+    const filePath = path.resolve(path.join(fullPath, relFile));
+    const [fileError, fileResult] = await tryCatch(async () => importFile(filePath));
+    if (fileError) continue;
+
+    const resolvedSyncModule = fileResult?.default
+      ? { ...fileResult.default, ...fileResult }
+      : fileResult;
+    const inputType = getSyncClientDataType(filePath);
+
+    if (kind === 'server') {
+      devSyncs[`${routeBaseKey}_server`] = {
+        main: resolvedSyncModule.main,
+        auth: resolvedSyncModule.auth || {},
+        inputType,
+      };
+    } else {
+      devSyncs[`${routeBaseKey}_client`] = resolvedSyncModule.main;
+    }
   }
 };
 
-// ----------------------------
-// Functions Loader
-// ----------------------------
 export const initializeFunctions = async () => {
-  Object.keys(devFunctions).forEach(k => delete devFunctions[k]);
-  
-  const rootDir = path.resolve("./server/functions");
-  if (!fs.existsSync(rootDir)) return;
+  Object.keys(devFunctions).forEach((key) => delete devFunctions[key]);
 
-  await scanFunctionsFolder(rootDir);
+  const serverFunctionsDir = path.resolve("./server/functions");
+  if (fs.existsSync(serverFunctionsDir)) {
+    await scanFunctionsFolder(serverFunctionsDir);
+  }
 };
 
 const scanFunctionsFolder = async (dir: string, basePath: string[] = []) => {
@@ -187,24 +208,30 @@ const scanFunctionsFolder = async (dir: string, basePath: string[] = []) => {
 
     if (stat.isDirectory()) {
       await scanFunctionsFolder(fullPath, [...basePath, entry]);
-    } else if (entry.endsWith(".ts")) {
-      const [err, module] = await tryCatch(async () => importFile(fullPath));
-      if (err) continue;
-
-      const resolvedFunctionModule = module?.default ? { ...module.default, ...module } : module;
-      
-      const fileName = entry.replace(".ts", "");
-      
-      // Navigate to the correct nesting level
-      let target = devFunctions;
-      for (const part of basePath) {
-        if (!target[part]) target[part] = {};
-        target = target[part];
-      }
-      
-      // Merge module exports into the target key (handles case where file and folder share name)
-      if (!target[fileName]) target[fileName] = {};
-      Object.assign(target[fileName], resolvedFunctionModule);
+      continue;
     }
+
+    if (!entry.endsWith(".ts")) {
+      continue;
+    }
+
+    const [err, module] = await tryCatch(async () => importFile(fullPath));
+    if (err) continue;
+
+    const fileName = entry.replace(".ts", "");
+    const resolvedFunctionModule = resolveFunctionModule(module, fileName);
+    if (!isMergeable(resolvedFunctionModule)) continue;
+
+    let target = devFunctions;
+    for (const part of basePath) {
+      if (!target[part]) target[part] = {};
+      target = target[part];
+    }
+
+    if (target[fileName] && isMergeable(resolvedFunctionModule) && isMergeable(target[fileName])) {
+      Object.assign(resolvedFunctionModule, target[fileName]);
+    }
+
+    target[fileName] = resolvedFunctionModule;
   }
 };

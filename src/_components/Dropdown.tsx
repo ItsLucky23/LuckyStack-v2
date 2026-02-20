@@ -2,19 +2,21 @@ import { faCaretDown, faCheck } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useState, useRef, useEffect } from "react";
 
+type DropdownItem = string | number;
+
 interface DropdownProps {
-  items: any[];
+  items: DropdownItem[];
   itemsPlaceholder?: string[]; // The nice text (e.g., "Open")
-  onChange?: (value: any) => void;
+  onChange?: (value: DropdownItem) => void;
   placeholder?: string; // The text to show when nothing is selected
-  value?: any;    // The actual code value (e.g., "OPEN")
+  value?: DropdownItem;    // The actual code value (e.g., "OPEN")
   className?: string; // Allow custom classes from parent
 }
 
 export default function Dropdown({
   items,
   itemsPlaceholder,
-  onChange = () => {},
+  onChange,
   placeholder,
   value,
   className = "",
@@ -29,20 +31,22 @@ export default function Dropdown({
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, [dropdownRef]);
 
-  if (!items || items.length === 0) return null;
+  if (items.length === 0) return null;
 
-  const getDisplayLabel = (val: any) => {
+  const getDisplayLabel = (val: DropdownItem): string => {
     const index = items.indexOf(val);
-    if (index !== -1 && itemsPlaceholder && itemsPlaceholder[index]) {
+    if (index !== -1 && itemsPlaceholder?.[index]) {
       return itemsPlaceholder[index];
     }
-    return val;
+    return String(val);
   };
 
-  const isValueSelected = value !== undefined && value !== null && items.includes(value);
+  const isValueSelected = value !== undefined && items.includes(value);
   const currentLabel = isValueSelected ? getDisplayLabel(value) : placeholder;
 
   return (
@@ -55,19 +59,26 @@ export default function Dropdown({
         bg-container1 border border-container1-border transition-colors hover:bg-container1-hover
         ${className}
       `}
-      onClick={() => setIsOpen((prev) => !prev)}
     >
       {/* Current Selection / Title */}
-      <span className={`text-sm ${!isValueSelected ? "text-common" : "text-title font-medium"}`}>
-        {currentLabel}
-      </span>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3"
+        onClick={() => {
+          setIsOpen((prev) => !prev);
+        }}
+      >
+        <span className={`text-sm ${isValueSelected ? "text-title font-medium" : "text-common"}`}>
+          {currentLabel}
+        </span>
 
-      <FontAwesomeIcon
-        icon={faCaretDown}
-        className={`text-xs text-common transition-transform duration-300 ${
-          isOpen ? "rotate-180" : ""
-        }`}
-      />
+        <FontAwesomeIcon
+          icon={faCaretDown}
+          className={`text-xs text-common transition-transform duration-300 ${
+            isOpen ? "rotate-180" : ""
+          }`}
+        />
+      </button>
 
       {/* Dropdown Menu */}
       <div
@@ -81,11 +92,12 @@ export default function Dropdown({
         <div className="flex flex-col p-1 max-h-60 overflow-y-auto">
           {items.map((item, index) => {
             const isSelected = item === value;
-            const label = itemsPlaceholder ? itemsPlaceholder[index] : item;
+            const label = itemsPlaceholder?.[index] ?? String(item);
 
             return (
-              <div
-                key={index}
+              <button
+                key={String(item)}
+                type="button"
                 className={`
                   dropdown
                   flex items-center justify-between rounded-sm px-2 py-1.5 text-sm transition-colors
@@ -94,14 +106,14 @@ export default function Dropdown({
                 `}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onChange(item);
+                  onChange?.(item);
                   setIsOpen(false);
                 }}
               >
                 <span>{label}</span>
                 {/* Optional: Add a checkmark for the selected item */}
                 {isSelected && <FontAwesomeIcon icon={faCheck} className="text-xs ml-2" />}
-              </div>
+              </button>
             );
           })}
         </div>

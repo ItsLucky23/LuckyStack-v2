@@ -1,9 +1,8 @@
 import { Socket } from "socket.io";
 import redis from "../../functions/redis";
-import { tryCatch } from "../../functions/tryCatch";
 import { disconnectTimers, tempDisconnectedSockets } from "./activityBroadcaster";
 import { deleteSession } from "../../functions/session";
-import { socketLeaveRoom } from "./activityBroadcaster";
+import tryCatch from "../../../shared/tryCatch";
 
 export const logout = async ({ token, socket, userId }: {
   token: string | null,
@@ -11,15 +10,15 @@ export const logout = async ({ token, socket, userId }: {
   userId: string | null,
 }) => {
   const [error, result] = await tryCatch(async () => {
-    if (!socket) { 
+    if (!socket) {
       console.log('Trying to logout but invalid socket', 'red');
       return;
     }
-    if (!token) { 
+    if (!token) {
       console.log('Trying to logout without a token', 'red');
       return;
     }
-    
+
     if (tempDisconnectedSockets.has(token)) {
       tempDisconnectedSockets.delete(token);
     }
@@ -29,12 +28,11 @@ export const logout = async ({ token, socket, userId }: {
       if (timer) {
         clearTimeout(timer);
         disconnectTimers.delete(token);
-      } 
+      }
     }
 
     console.log(`Logging out user with token: ${token}`, 'cyan');
-    
-    await socketLeaveRoom({ token, socket, newPath: null });
+
     await deleteSession(token);
     const tokensOfActiveUsers = `${process.env.PROJECT_NAME}-activeUsers:${userId}`
     await redis.srem(tokensOfActiveUsers, token);

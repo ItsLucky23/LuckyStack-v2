@@ -15,10 +15,11 @@ export interface SyncParams {
   roomCode: string; // room code
 }
 
-export const main = async ({ user, clientInput, serverOutput, functions, roomCode }: SyncParams): Promise<SyncClientResponse> => {
+export const main = async ({  }: SyncParams): Promise<SyncClientResponse> => {
   // PAIRED SYNC: Types are shared with the _server.ts file
   // clientInput type comes from _server.ts SyncParams
   // serverOutput type is inferred from _server.ts return value
+  // Returning error here only affects the current target client and does not stop other clients.
 
   // Example: Only allow users on set page to receive the event
   // if (user?.location?.pathName === '/your-page') {

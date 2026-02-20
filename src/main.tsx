@@ -4,7 +4,7 @@ import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 
 import { Toaster } from 'sonner'
 import 'src/index.css'
 import 'src/scrollbar.css'
-import VConsole from 'vconsole';
+import VConsole from 'vconsole'
 
 import { mobileConsole } from 'config'
 import LocationProvider from 'src/_components/LocationProvider'
@@ -18,12 +18,22 @@ import { initializeSentry, SentryErrorBoundary } from './_functions/sentry'
 import { SessionProvider } from './_providers/SessionProvider'
 import { SocketStatusProvider } from './_providers/socketStatusProvider'
 
-import type { Template } from './_components/TemplateProvider';
+import type { Template } from './_components/TemplateProvider'
 
 initializeSentry();
 
+interface PageProps {
+  params: Record<string, string | undefined>;
+  searchParams: Record<string, string>;
+}
+
+interface PageModule {
+  default: React.ComponentType<PageProps>;
+  template?: Template;
+}
+
 // Wrapper to inject Next.js-style params and searchParams as props
-const PageWrapper = ({ Page }: { Page: React.ComponentType<any> }) => {
+const PageWrapper = ({ Page }: { Page: React.ComponentType<PageProps> }) => {
   const params = useParams();
   const [searchParams] = useSearchParams();
   const searchParamsObj = Object.fromEntries(searchParams);
@@ -31,15 +41,16 @@ const PageWrapper = ({ Page }: { Page: React.ComponentType<any> }) => {
   return <Page params={params} searchParams={searchParamsObj} />;
 };
 
-type PageWithTemplate = React.ComponentType & { template?: Template };
-const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?: Template }>) => {
+const getRoutes = (pages: Record<string, PageModule>) => {
   const routes = [];
+  for (const path in pages) {
+    const module = pages[path];
 
-  for (const [path, module] of Object.entries(pages)) {
     const pathSegments = path.split('/');
     if (pathSegments.some(segment => segment.startsWith('_'))) continue;
 
-    const routePath = path.replace('./', '').replace('.tsx', '').toLowerCase() || '/';
+    const normalizedPath = path.replace(/^\.\//, '').replace(/\.tsx$/, '').toLowerCase();
+    const routePath = normalizedPath === '' ? '/' : normalizedPath;
     const subPath = routePath.endsWith('/page')
       ? routePath.slice(0, -5)
       : (routePath.endsWith('page')
@@ -48,6 +59,7 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
     if (!subPath) continue;
 
     // Convert [param] to :param for React Router v6+
+    // eslint-disable-next-line unicorn/prefer-string-replace-all
     const finalPath = subPath.replace(/\[([^\]]+)\]/g, ':$1');
 
     const template = module.template ?? 'plain';
@@ -66,9 +78,28 @@ const getRoutes = (pages: Record<string, { default: PageWithTemplate, template?:
   return routes;
 };
 
-const pages: Record<string, { default: PageWithTemplate; template?: Template }> = import.meta.glob('./**/*.tsx', { eager: true });
+const prodPages = import.meta.glob([
+  './**/*.tsx',
+  './**/*.jsx',
+  '!./docs/**',
+  '!./**/docs/page.tsx',
+  '!./**/_api/**',
+  '!./**/_sync/**',
+  '!./**/server/**',
+  '!./**/_server/**',
+  '!./**/docs/**',
+  '!./**/*_server.tsx',
+  '!./**/*_server.jsx'
+], { eager: true });
 
-// Import error page for router error handling
+const devPages = import.meta.glob([
+  './**/*.tsx',
+  './**/*.jsx'
+], { eager: true });
+
+const pagesUnknown = import.meta.env.PROD ? prodPages : devPages;
+
+const pages: Record<string, PageModule> = pagesUnknown as Record<string, PageModule>;
 
 const router = createBrowserRouter([{
   path: '/',

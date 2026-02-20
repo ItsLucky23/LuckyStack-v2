@@ -3,7 +3,7 @@ import { access } from 'fs/promises';
 import fs from "fs";
 import { ServerResponse } from "http";
 
-export const serveAvatar = async ({ 
+export const serveAvatar = async ({
   routePath,
   res,
 }: {
@@ -11,12 +11,13 @@ export const serveAvatar = async ({
   res: ServerResponse;
 }) => {
   const uploadsFolder = path.join(process.cwd(), "uploads");
-      
+
   // Always append .webp since that's the stored format
   const fileId = path.basename(routePath, path.extname(routePath)); // remove any extension if present
   const fileName = `${fileId}.webp`;
   const filePath = path.join(uploadsFolder, fileName);
 
+  console.log(`Serving avatar for file ID: ${fileId} at path: ${filePath}`);
   if (!fileId) return;
 
   try {

@@ -1,40 +1,47 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2020",
-    "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "skipLibCheck": true,
-
-    "allowJs": true,
-    "checkJs": false,
-    
+    "target": "ES2020", /* Override base target for broader browser support */
+    "useDefineForClassFields": true, /* Emit class fields with Define semantics. */
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ], /* Include DOM libraries for frontend code */
     /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "isolatedModules": true,
-    "moduleDetection": "force",
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "baseUrl": "./",
+    "moduleResolution": "bundler", /* optimal for bundlers like Vite */
+    "allowImportingTsExtensions": true, /* Allow imports to include TypeScript file extensions. */
+    "isolatedModules": true, /* Ensure that each file can be safely transpiled without relying on other imports. */
+    "moduleDetection": "force", /* Force module detection for non-module files. */
+    "noEmit": true, /* Do not emit outputs (Vite handles this). */
+    "jsx": "react-jsx", /* Specify what JSX code is generated. */
+    "allowJs": true, /* Allow JavaScript files to be a part of your program. */
+    "checkJs": false, /* Enable error reporting in type-checked JavaScript files. */
+    "baseUrl": "./", /* Base directory to resolve non-absolute module names. */
     "paths": {
-      "src/*": ["src/*"],
-      "config": ["./config.ts"]
-    },
-
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+      "src/*": [
+        "src/*"
+      ],
+      "config": [
+        "./config.ts"
+      ],
+      "shared/*": [
+        "./shared/*"
+      ]
+    }
   },
-  "include": ["src"],
-  "exclude": [ // this excludes files from being build
-    "src/**/api",                    // exclude any api folder
-    "src/**/sync/*_server.ts",       // only exclude server_*.ts files inside sync folders
-    "src/**/sync/*_client.ts",       // only exclude server_*.ts files inside sync folders
-    "src/**/sync/*_server.js",       // (optional) in case you have JS mixed in
-    "src/**/sync/*_client.js",       // (optional) in case you have JS mixed in
+  "include": [
+    "src",
+    "shared"
+  ],
+  "exclude": [
+    "src/**/_api/**",
+    "src/**/_sync/**",
+    "src/**/server/**",
+    "src/**/_server/**",
+    "src/**/*_server.ts",
+    "src/**/*_server.tsx",
+    "src/**/*_server.js",
+    "src/**/*_server.jsx"
   ]
-
 }

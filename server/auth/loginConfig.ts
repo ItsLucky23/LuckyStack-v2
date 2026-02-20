@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { tryCatch } from '../functions/tryCatch';
+import tryCatch from '../../shared/tryCatch';
 
 dotenv.config(); // Load environment variables from .env file
 
@@ -19,30 +19,31 @@ interface FullProvider {
   scope: string[],
   getEmail?: (access_token: string) => Promise<string | false | undefined>,
   nameKey: string,
-  emailKey: string, 
+  emailKey: string,
 
   avatarKey?: string, //? the avatarKey represent the url to the img
   avatarCodeKey: string, //? the avatarCodeKey should be the key representing the avatar id if the provider doesnt give the avatar url directly, we use the getAvatar function with this value together
-  getAvatar?: ({userData, avatarId}: {userData: Record<string, any>, avatarId: string}) => any
+  getAvatar?: ({ userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => any
 }
 
-type oauthProvidersProps = BasicProvider | FullProvider; 
+type oauthProvidersProps = BasicProvider | FullProvider;
 
 // const backendUrl = `http${process.env.SECURE == 'true' ? 's' : ''}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
 const prod = process.env.NODE_ENV !== 'development';
-const protocol = process.env.SECURE == 'true' ? 'https' : 'http';
+const secure = process.env.SECURE == 'true';
+const protocol = secure ? 'https' : 'http';
 const backendUrl = prod
   ? (process.env.DNS || "")
   : `${protocol}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`
-  
+
 const oauthProviders: oauthProvidersProps[] = [
   {
     name: 'credentials',
   },
   {
     name: 'google',
-    clientID: prod ?  process.env.GOOGLE_CLIENT_ID : process.env.DEV_GOOGLE_CLIENT_ID,
-    clientSecret: prod ?  process.env.GOOGLE_CLIENT_SECRET : process.env.DEV_GOOGLE_CLIENT_SECRET,
+    clientID: prod && secure ? process.env.GOOGLE_CLIENT_ID : process.env.DEV_GOOGLE_CLIENT_ID,
+    clientSecret: prod && secure ? process.env.GOOGLE_CLIENT_SECRET : process.env.DEV_GOOGLE_CLIENT_SECRET,
     callbackURL: `${backendUrl}/auth/callback/google`,
     authorizationURL: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenExchangeURL: 'https://oauth2.googleapis.com/token',
@@ -59,8 +60,8 @@ const oauthProviders: oauthProvidersProps[] = [
   },
   {
     name: 'github',
-    clientID: prod ?  process.env.GITHUB_CLIENT_ID : process.env.DEV_GITHUB_CLIENT_ID,
-    clientSecret: prod ?  process.env.GITHUB_CLIENT_SECRET : process.env.DEV_GITHUB_CLIENT_SECRET,
+    clientID: prod && secure ? process.env.GITHUB_CLIENT_ID : process.env.DEV_GITHUB_CLIENT_ID,
+    clientSecret: prod && secure ? process.env.GITHUB_CLIENT_SECRET : process.env.DEV_GITHUB_CLIENT_SECRET,
     callbackURL: `${backendUrl}/auth/callback/github`,
     authorizationURL: 'https://github.com/login/oauth/authorize',
     tokenExchangeURL: 'https://github.com/login/oauth/access_token',
@@ -82,12 +83,12 @@ const oauthProviders: oauthProvidersProps[] = [
           },
         })
         if (!response.ok) { return false; }
-        const emails = await response.json(); 
+        const emails = await response.json();
         // return data;
         if (!Array.isArray(emails)) { return false; }
         return emails;
       }
-  
+
       const [getEmailError, getEmailResponse] = await tryCatch(getEmail);
       if (getEmailError) {
         console.log(getEmailError);
@@ -95,7 +96,7 @@ const oauthProviders: oauthProvidersProps[] = [
       }
 
       if (!getEmailResponse) { return false; }
-  
+
       //? if we found the email we set it to the user object
       let mainEmail: string | undefined;
       for (const email of getEmailResponse) {
@@ -107,8 +108,8 @@ const oauthProviders: oauthProvidersProps[] = [
   },
   {
     name: 'discord',
-    clientID: prod ?  process.env.DISCORD_CLIENT_ID : process.env.DEV_DISCORD_CLIENT_ID,
-    clientSecret: prod ?  process.env.DISCORD_CLIENT_SECRET : process.env.DEV_DISCORD_CLIENT_SECRET,
+    clientID: prod && secure ? process.env.DISCORD_CLIENT_ID : process.env.DEV_DISCORD_CLIENT_ID,
+    clientSecret: prod && secure ? process.env.DISCORD_CLIENT_SECRET : process.env.DEV_DISCORD_CLIENT_SECRET,
     callbackURL: `${backendUrl}/auth/callback/discord`,
     authorizationURL: 'https://discord.com/oauth2/authorize',
     tokenExchangeURL: 'https://discord.com/api/oauth2/token',
@@ -121,7 +122,7 @@ const oauthProviders: oauthProvidersProps[] = [
     nameKey: 'username',
     emailKey: 'email',
     avatarCodeKey: 'avatar',
-    getAvatar: ({userData, avatarId}: {userData: Record<string, any>, avatarId: string}) => {
+    getAvatar: ({ userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => {
       if (!avatarId) {
         // Default avatar (based on discriminator % 5)
         // const defaultAvatarIndex = userId % 5;
@@ -135,8 +136,8 @@ const oauthProviders: oauthProvidersProps[] = [
   },
   {
     name: 'facebook',
-    clientID: prod ?  process.env.FACEBOOK_CLIENT_ID : process.env.DEV_FACEBOOK_CLIENT_ID,
-    clientSecret: prod ?  process.env.FACEBOOK_CLIENT_SECRET : process.env.DEV_FACEBOOK_CLIENT_SECRET,
+    clientID: prod && secure ? process.env.FACEBOOK_CLIENT_ID : process.env.DEV_FACEBOOK_CLIENT_ID,
+    clientSecret: prod && secure ? process.env.FACEBOOK_CLIENT_SECRET : process.env.DEV_FACEBOOK_CLIENT_SECRET,
     callbackURL: `${backendUrl}/auth/callback/facebook`,
     authorizationURL: 'https://www.facebook.com/v10.0/dialog/oauth',
     tokenExchangeURL: 'https://graph.facebook.com/v10.0/oauth/access_token',
@@ -146,14 +147,14 @@ const oauthProviders: oauthProvidersProps[] = [
     nameKey: 'name',
     emailKey: 'email',
     avatarCodeKey: '',
-    getAvatar: ({userData}: {userData: Record<string, any>}) => {
+    getAvatar: ({ userData }: { userData: Record<string, any> }) => {
       return userData?.picture?.data?.url || undefined;
     }
   },
   {
     name: 'microsoft',
-    clientID: prod ? process.env.MICROSOFT_CLIENT_ID! : process.env.DEV_MICROSOFT_CLIENT_ID!,
-    clientSecret: prod ? process.env.MICROSOFT_CLIENT_SECRET! : process.env.DEV_MICROSOFT_CLIENT_SECRET!,
+    clientID: prod && secure ? process.env.MICROSOFT_CLIENT_ID! : process.env.DEV_MICROSOFT_CLIENT_ID!,
+    clientSecret: prod && secure ? process.env.MICROSOFT_CLIENT_SECRET! : process.env.DEV_MICROSOFT_CLIENT_SECRET!,
     callbackURL: `${backendUrl}/auth/callback/microsoft`,
     // 'common' allows both personal and work accounts
     authorizationURL: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
@@ -163,8 +164,8 @@ const oauthProviders: oauthProvidersProps[] = [
     scope: ['openid', 'profile', 'email', 'User.Read'],
     nameKey: 'displayName',
     emailKey: 'mail', // Note: some personal accounts use 'userPrincipalName' if 'mail' is null
-    avatarCodeKey: 'id', 
-    getAvatar: async ({ userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => {
+    avatarCodeKey: 'id',
+    getAvatar: async ({ userData: _userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => {
       // Microsoft doesn't give a URL, it gives a binary blob via a separate endpoint.
       // You typically need the access_token here to fetch it. 
       // If your architecture doesn't pass the token to getAvatar, 

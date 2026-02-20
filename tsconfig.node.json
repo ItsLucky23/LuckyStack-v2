@@ -1,25 +1,19 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2023"],
-    "module": "ESNext",
-    "skipLibCheck": true,
-
-    "allowJs": true,
-    "checkJs": false,
-
+    "lib": [
+      "ES2023"
+    ], /* Specific library for Node environment tools */
+    "allowJs": true, /* Allow JavaScript files. */
+    "checkJs": false, /* Disable check JS. */
     /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "isolatedModules": true,
-    "moduleDetection": "force",
-    "noEmit": true,
-
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "moduleResolution": "bundler", /* optimal for bundlers like Vite */
+    "allowImportingTsExtensions": true, /* Allow imports to include TypeScript file extensions. */
+    "isolatedModules": true, /* Ensure that each file can be safely transpiled without relying on other imports. */
+    "moduleDetection": "force", /* Force module detection for non-module files. */
+    "noEmit": true /* Do not emit outputs. */
   },
-  "include": ["vite.config.ts"]
+  "include": [
+    "vite.config.ts"
+  ]
 }

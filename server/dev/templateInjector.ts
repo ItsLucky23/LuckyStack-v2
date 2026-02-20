@@ -35,11 +35,31 @@ export const isInSyncFolder = (filePath: string): boolean => {
 };
 
 export const isSyncServerFile = (filePath: string): boolean => {
-  return filePath.endsWith('_server.ts');
+  return /_server_v\d+\.ts$/.test(filePath);
 };
 
 export const isSyncClientFile = (filePath: string): boolean => {
-  return filePath.endsWith('_client.ts');
+  return /_client_v\d+\.ts$/.test(filePath);
+};
+
+const isVersionedApiFile = (filePath: string): boolean => {
+  return /_v\d+\.ts$/.test(filePath);
+};
+
+const isVersionedSyncFile = (filePath: string): boolean => {
+  return /_(?:server|client)_v\d+\.ts$/.test(filePath);
+};
+
+const getInvalidVersionMessage = (filePath: string): string => {
+  if (isInApiFolder(filePath)) {
+    return `// Invalid API filename.\n// API files must end with _v<number>.ts\n// Example: updateUser_v1.ts\n`;
+  }
+
+  if (isInSyncFolder(filePath)) {
+    return `// Invalid sync filename.\n// Sync files must end with _server_v<number>.ts or _client_v<number>.ts\n// Example: updateCounter_server_v1.ts\n`;
+  }
+
+  return `// Invalid route filename.`;
 };
 
 /**
@@ -48,10 +68,10 @@ export const isSyncClientFile = (filePath: string): boolean => {
 export const getPairedSyncFile = (filePath: string): string | null => {
   const normalized = filePath.replace(/\\/g, '/');
   if (isSyncServerFile(normalized)) {
-    return normalized.replace('_server.ts', '_client.ts');
+    return normalized.replace(/_server_v(\d+)\.ts$/, '_client_v$1.ts');
   }
   if (isSyncClientFile(normalized)) {
-    return normalized.replace('_client.ts', '_server.ts');
+    return normalized.replace(/_client_v(\d+)\.ts$/, '_server_v$1.ts');
   }
   return null;
 };
@@ -78,8 +98,14 @@ export const extractSyncPagePath = (filePath: string): string => {
  * Extract sync name from a sync file path (e.g., "test" from "src/examples/_sync/test_server.ts")
  */
 export const extractSyncName = (filePath: string): string => {
-  const basename = path.basename(filePath, '.ts');
-  return basename.replace(/_server$/, '').replace(/_client$/, '');
+  const normalized = filePath.replace(/\\/g, '/');
+  const match = normalized.match(/_sync\/(.+)\.ts$/);
+  if (!match) {
+    const basename = path.basename(filePath, '.ts');
+    return basename.replace(/_server_v\d+$/, '').replace(/_client_v\d+$/, '');
+  }
+
+  return match[1].replace(/_server_v\d+$/, '').replace(/_client_v\d+$/, '');
 };
 
 /**
@@ -129,17 +155,32 @@ export const extractClientInputFromGeneratedTypes = (pagePath: string, syncName:
     const generatedTypesPath = path.join(process.cwd(), 'src', '_sockets', 'apiTypes.generated.ts');
     const content = fs.readFileSync(generatedTypesPath, 'utf-8');
 
-    // Find the sync entry pattern: 'syncName': { clientInput: ...
-    const syncEntryPattern = new RegExp(`'${syncName}':\\s*\\{\\s*clientInput:\\s*`);
-    const match = content.match(syncEntryPattern);
+    const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedPagePath = escapeRegex(pagePath);
+    const escapedSyncName = escapeRegex(syncName);
 
-    if (!match || match.index === undefined) {
+    const pageBlockRegex = new RegExp(`'${escapedPagePath}'\\s*:\\s*\\{([\\s\\S]*?)\\n\\s{2}\\};`, 'm');
+    const pageBlockMatch = content.match(pageBlockRegex);
+    if (!pageBlockMatch || !pageBlockMatch[1]) {
+      console.log(`[TemplateInjector] Could not find page block for ${pagePath}`);
+      return null;
+    }
+
+    const pageBlock = pageBlockMatch[1];
+
+    const syncEntryPattern = new RegExp(`'${escapedSyncName}':\\s*\\{\\s*clientInput:\\s*`);
+    const match = pageBlock.match(syncEntryPattern);
+
+    if (!match || typeof match.index !== 'number') {
       console.log(`[TemplateInjector] Could not find sync entry for ${pagePath}/${syncName}`);
       return null;
     }
 
+    const pageStart = content.indexOf(pageBlock);
+    const globalMatchIndex = pageStart + match.index;
+
     // Find the start of clientInput value (the opening brace)
-    const searchStart = match.index + match[0].length;
+    const searchStart = globalMatchIndex + match[0].length;
     const braceStart = content.indexOf('{', searchStart - 1);
 
     if (braceStart === -1) return null;
@@ -246,6 +287,18 @@ const getTemplate = (filePath: string): string | null => {
 };
 
 export const injectTemplate = async (filePath: string): Promise<boolean> => {
+  if (isInApiFolder(filePath) && !isVersionedApiFile(filePath)) {
+    fs.writeFileSync(filePath, getInvalidVersionMessage(filePath), 'utf-8');
+    console.log(`[TemplateInjector] Invalid API filename, injected guidance: ${filePath}`);
+    return true;
+  }
+
+  if (isInSyncFolder(filePath) && !isVersionedSyncFile(filePath)) {
+    fs.writeFileSync(filePath, getInvalidVersionMessage(filePath), 'utf-8');
+    console.log(`[TemplateInjector] Invalid sync filename, injected guidance: ${filePath}`);
+    return true;
+  }
+
   const template = getTemplate(filePath);
 
   if (!template) {
@@ -283,7 +336,7 @@ export const updateClientFileForPairedServer = async (clientFilePath: string): P
     if (!content.includes('SyncClientInput')) {
       content = content.replace(
         /import \{([^}]+)\} from ['"]([^'"]*apiTypes\.generated)['"]/,
-        (match, imports, path) => {
+        (_match, imports, path) => {
           return `import {${imports}, SyncClientInput, SyncServerOutput } from '${path}'`;
         }
       );

@@ -3,11 +3,10 @@
 
 import fs from "fs";
 
-let apiMap = "export const apis: Record<string, { auth: any, main: any }> = { };\n";
+let apiMap = "export const apis: Record<string, { auth: any, main: any, rateLimit?: number | false, httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE' }> = { };\n";
 let syncMap = "export const syncs: Record<string, { main: any, auth: Record<string, any> }> | any = { };\n";
 let functionsMap = "export const functions: Record<string, any> = { };";
 
 const output = `${apiMap}\n${syncMap}\n${functionsMap}`;
 
 fs.writeFileSync("./server/prod/generatedApis.ts", output);
-// console.log("✅ server/prod/generatedApis.ts Cleared");

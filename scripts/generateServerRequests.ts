@@ -1,7 +1,10 @@
 import fs from "fs";
 import path from "path";
+import { getInputTypeFromFile, getSyncClientDataType } from '../server/dev/typeMap/extractors';
 
 const normalizePath = (p: string) => p.split(path.sep).join("/");
+const API_VERSION_REGEX = /_v(\d+)$/;
+const SYNC_VERSION_REGEX = /_(server|client)_v(\d+)$/;
 
 // Recursively walk dirs to collect _api and _sync files
 const walkSrcFiles = (dir: string, results: string[] = []) => {
@@ -20,13 +23,23 @@ const walkSrcFiles = (dir: string, results: string[] = []) => {
   return results;
 };
 
-// Collect server function files
-const walkFunctionFiles = (dir: string) => {
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((file) => file.endsWith(".ts"))
-    .map((file) => normalizePath(path.join(dir, file)));
+// Collect function files recursively
+const walkFunctionFiles = (dir: string, results: string[] = []) => {
+  if (!fs.existsSync(dir)) return results;
+
+  const entries = fs.readdirSync(dir);
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry);
+    const stat = fs.statSync(fullPath);
+
+    if (stat.isDirectory()) {
+      walkFunctionFiles(fullPath, results);
+    } else if (entry.endsWith(".ts")) {
+      results.push(normalizePath(fullPath));
+    }
+  }
+
+  return results;
 };
 
 // --------------------
@@ -42,8 +55,8 @@ const apiImports: string[] = [];
 const syncImports: string[] = [];
 const functionImports: string[] = [];
 
-let apiMap = "export const apis: Record<string, { auth: any, main: any }> = {\n";
-let syncMap = "export const syncs: Record<string, { main: any, auth: Record<string, any> }> | any = {\n";
+let apiMap = "export const apis: Record<string, { auth: any, main: any, rateLimit?: number | false, httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE', inputType?: string }> = {\n";
+let syncMap = "export const syncs: Record<string, { main: any, auth: Record<string, any>, inputType?: string }> | any = {\n";
 let functionsMap = "export const functions: Record<string, any> = {\n";
 
 let apiCount = 0;
@@ -64,33 +77,45 @@ rawSrcFiles.forEach((normalized) => {
     // capture optional page path and API name (supports root-level and nested _api)
     // Root: src/_api/session.ts → pagePath=undefined, apiName="session"
     // Nested: src/examples/_api/user/changeName.ts → pagePath="examples", apiName="user/changeName"
-    const match = normalized.match(/src\/(?:(.+?)\/)_api\/(.+)\.ts$/i);
+    const match = normalized.match(/src\/(?:(.+?)\/)?_api\/(.+)\.ts$/i);
     if (!match) return;
-    const [_, pagePath, apiName] = match;
-    const routeKey = pagePath ? `api/${pagePath}/${apiName}` : `api/${apiName}`;
+    const [_, pagePath, apiNameWithVersion] = match;
+    const versionMatch = apiNameWithVersion.match(API_VERSION_REGEX);
+    if (!versionMatch) return;
 
-    apiMap += `  "${routeKey}": {\n    auth: "auth" in ${varName} ? ${varName}.auth : {},\n    main: ${varName}.main,\n  },\n`;
+    const version = `v${versionMatch[1]}`;
+    const apiName = apiNameWithVersion.replace(API_VERSION_REGEX, '');
+    const routeKey = pagePath ? `api/${pagePath}/${apiName}/${version}` : `api/${apiName}/${version}`;
+
+    apiMap += `  "${routeKey}": {\n    auth: "auth" in ${varName} ? ${varName}.auth : {},\n    main: ${varName}.main,\n    rateLimit: "rateLimit" in ${varName} ? (${varName}.rateLimit as number | false | undefined) : undefined,\n    httpMethod: "httpMethod" in ${varName} ? (${varName}.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined) : undefined,\n    inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n  },\n`;
   }
 
   // Sync
   if (normalized.includes("_sync/")) {
     // Make page path optional for root-level _sync
-    const match = normalized.match(/src\/(?:(.+?)\/)_sync\/(.+)\.ts$/i);
+    const match = normalized.match(/src\/(?:(.+?)\/)?_sync\/(.+)\.ts$/i);
     if (!match) return;
-    const [_, pagePath, syncName] = match;
-    const routeKey = pagePath ? `sync/${pagePath}/${syncName}` : `sync/${syncName}`;
-  
+    const [_, pagePath, syncNameWithVersion] = match;
+    const syncMatch = syncNameWithVersion.match(SYNC_VERSION_REGEX);
+    if (!syncMatch) return;
+
+    const kind = syncMatch[1];
+    const version = `v${syncMatch[2]}`;
+    const syncName = syncNameWithVersion.replace(SYNC_VERSION_REGEX, '');
+    const routeKey = pagePath ? `sync/${pagePath}/${syncName}/${version}` : `sync/${syncName}/${version}`;
+
     console.log(syncName)
-    if (syncName.endsWith("_client")) {
+    if (kind === 'client') {
       const varName = `syncClient${syncCount++}`;
       syncImports.push(`import * as ${varName} from '${importPath}';`);
-      syncMap += `  "${routeKey}": ${varName}.main,\n`;
+      syncMap += `  "${routeKey}_client": ${varName}.main,\n`;
     }
-  
-    if (syncName.endsWith("_server")) {
+
+    if (kind === 'server') {
       const varName = `syncServer${syncCount++}`;
       syncImports.push(`import * as ${varName} from '${importPath}';`);
-      syncMap += `  "${routeKey}": { auth: "auth" in ${varName} ? ${varName}.auth : {}, main: ${varName}.main },\n`;
+      const inputType = getSyncClientDataType(normalized);
+      syncMap += `  "${routeKey}_server": { auth: "auth" in ${varName} ? ${varName}.auth : {}, main: ${varName}.main, inputType: ${JSON.stringify(inputType)} },\n`;
     }
   }
 });
@@ -101,8 +126,14 @@ rawSrcFiles.forEach((normalized) => {
 functionFiles.forEach((filePath) => {
   const importPath = "../../" + filePath.replace(/\.ts$/, "");
   const varName = `fn${fnCount++}`;
+  const fileName = path.basename(filePath, ".ts");
   functionImports.push(`import * as ${varName} from '${importPath}';`);
-  functionsMap += `  ...${varName},\n`;
+  functionsMap += `  ${JSON.stringify(fileName)}: (() => {\n`;
+  functionsMap += `    const { default: _default, ...named } = ${varName} as Record<string, any>;\n`;
+  functionsMap += `    const cleaned = Object.fromEntries(Object.entries(named).filter(([key]) => key !== '__esModule'));\n`;
+  functionsMap += `    if (Object.keys(cleaned).length > 0) return cleaned;\n`;
+  functionsMap += `    return _default !== undefined ? { ${JSON.stringify(fileName)}: _default } : {};\n`;
+  functionsMap += `  })(),\n`;
 });
 
 // --------------------

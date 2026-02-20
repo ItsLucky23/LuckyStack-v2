@@ -12,7 +12,7 @@
 
 import config, { SessionLayout } from "../../config";
 import redis from "./redis";
-import { captureException } from "../utils/sentry";
+import { captureException } from "./sentry";
 
 /** Convert days to seconds for Redis TTL */
 const SESSION_TTL = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
@@ -24,7 +24,7 @@ const SESSION_TTL = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
  * @param data - The session data to store
  * @param newUser - If true, this is a new login (triggers single-session enforcement)
  */
-const saveSession = async (token: string, data: SessionLayout, newUser?: boolean) => {
+const saveSession = async (token: string, data: SessionLayout, newUser?: boolean): Promise<void> => {
   try {
     const sessionKey = `${process.env.PROJECT_NAME}-session:${token}`;
     await redis.set(sessionKey, JSON.stringify(data));

@@ -49,7 +49,7 @@ export function useSocket(session: SessionLayout | null) {
       if (!config.socketActivityBroadcaster) { return; }
 
       console.log(document.visibilityState)
-      
+
       //? user switched tab or navigated away
       if (document.visibilityState === "hidden") {
         socketConnection.emit("intentionalDisconnect");
@@ -108,19 +108,26 @@ export function useSocket(session: SessionLayout | null) {
       }
     });
 
-    socketConnection.on("sync", ({ cb, clientOutput, serverOutput, message, status }) => {
-      const path = window.location.pathname;
-      if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverOutput, status, message });
+    socketConnection.on("sync", ({ cb, clientOutput, serverOutput, message, status, fullName, errorCode, errorParams, httpStatus }) => {
+      if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverOutput, status, message, fullName, errorCode, errorParams, httpStatus });
 
       if (status === "error") {
         if (dev) {
-          console.log(message);
           toast.error(message);
         }
         return;
       }
 
-      triggerSyncEvent(`sync${path}/${cb}`, clientOutput, serverOutput);
+      if (typeof fullName !== 'string' || fullName.length === 0) {
+        const errorMessage = `Sync response is missing fullName for cb '${cb}'.`;
+        if (dev) {
+          console.error(errorMessage);
+          toast.error(errorMessage);
+        }
+        throw new Error(errorMessage);
+      }
+
+      triggerSyncEvent(fullName, clientOutput, serverOutput);
     });
 
 
@@ -178,7 +185,7 @@ export const waitForSocket = async () => {
 }
 
 export const joinRoom = async (group: string) => {
-  return new Promise(async (resolve) => {
+  return new Promise<{ success: true; rooms: string[] } | null>(async (resolve) => {
     if (!group || typeof group !== "string") {
       if (dev) {
         console.error("Invalid group");
@@ -193,8 +200,80 @@ export const joinRoom = async (group: string) => {
     const tempIndex = incrementResponseIndex();
     socket.emit('joinRoom', { group, responseIndex: tempIndex });
 
-    socket.once(`joinRoom-${tempIndex}`, () => {
-      return resolve(true);
+    socket.once(`joinRoom-${tempIndex}`, (response?: { error?: string; rooms?: unknown }) => {
+      if (response?.error) {
+        if (dev) {
+          console.error(response.error);
+          toast.error(response.error);
+        }
+        return resolve(null);
+      }
+
+      const rooms = Array.isArray(response?.rooms)
+        ? response.rooms.filter((room): room is string => typeof room === 'string')
+        : [];
+
+      return resolve({ success: true, rooms });
+    });
+  })
+}
+
+export const leaveRoom = async (group: string) => {
+  return new Promise<{ success: true; rooms: string[] } | null>(async (resolve) => {
+    if (!group || typeof group !== "string") {
+      if (dev) {
+        console.error("Invalid group");
+        toast.error("Invalid group");
+      }
+      return resolve(null);
+    }
+
+    if (!await waitForSocket()) { return resolve(null); }
+    if (!socket) { return resolve(null); }
+
+    const tempIndex = incrementResponseIndex();
+    socket.emit('leaveRoom', { group, responseIndex: tempIndex });
+
+    socket.once(`leaveRoom-${tempIndex}`, (response?: { error?: string; rooms?: unknown }) => {
+      if (response?.error) {
+        if (dev) {
+          console.error(response.error);
+          toast.error(response.error);
+        }
+        return resolve(null);
+      }
+
+      const rooms = Array.isArray(response?.rooms)
+        ? response.rooms.filter((room): room is string => typeof room === 'string')
+        : [];
+
+      return resolve({ success: true, rooms });
+    });
+  })
+}
+
+export const getJoinedRooms = async () => {
+  return new Promise<string[] | null>(async (resolve) => {
+    if (!await waitForSocket()) { return resolve(null); }
+    if (!socket) { return resolve(null); }
+
+    const tempIndex = incrementResponseIndex();
+    socket.emit('getJoinedRooms', { responseIndex: tempIndex });
+
+    socket.once(`getJoinedRooms-${tempIndex}`, (response?: { error?: string; rooms?: unknown }) => {
+      if (response?.error) {
+        if (dev) {
+          console.error(response.error);
+          toast.error(response.error);
+        }
+        return resolve(null);
+      }
+
+      const rooms = Array.isArray(response?.rooms)
+        ? response.rooms.filter((room): room is string => typeof room === 'string')
+        : [];
+
+      return resolve(rooms);
     });
   })
 }

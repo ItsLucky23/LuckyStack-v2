@@ -31,7 +31,7 @@ export interface GameDataProps {
 }
 
 
-const saveGameData = async (gameCode: string, data: GameDataProps) => {
+const saveGameData = async (gameCode: string, data: GameDataProps): Promise<boolean> => {
   // console.log(gameCode)
   // console.log(data)
   await redis.set(`${process.env.PROJECT_NAME}-games:${gameCode}`, JSON.stringify(data));
@@ -39,19 +39,19 @@ const saveGameData = async (gameCode: string, data: GameDataProps) => {
   return true;
 };
 
-const getGameData = async (gameCode: string) => {
+const getGameData = async (gameCode: string): Promise<GameDataProps | null> => {
   const data = await redis.get(`${process.env.PROJECT_NAME}-games:${gameCode}`);
   return data ? JSON.parse(data) as GameDataProps : null;
 };
 
-const getAllGameDatas = async () => {
+const getAllGameDatas = async (): Promise<GameDataProps[]> => {
   const allGameDatas = await redis.keys("*");
   const GameDatas = await Promise.all(allGameDatas.map((gameData) => redis.get(gameData)));
   return GameDatas.map((gameData) => JSON.parse(gameData || "{}")); 
 }
 
 
-const deleteGameData = async (gameCode: string) => {
+const deleteGameData = async (gameCode: string): Promise<boolean> => {
   await redis.del(`${process.env.PROJECT_NAME}-games:${gameCode}`);
   return true;
 };
