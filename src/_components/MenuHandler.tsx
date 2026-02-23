@@ -69,7 +69,8 @@ const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: Slid
 
   return (
     <div
-      className={`w-full overflow-hidden absolute flex flex-col text-black transform transition-transform duration-300 
+      className={`w-full overflow-hidden absolute flex flex-col text-black transition-all duration-200 origin-center
+        ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none'}
         ${options.background ?? ''}
       `}
       style={{ translate }}
@@ -182,9 +183,11 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   const [lastChildHeight, setLastChildHeight] = useState<number>(0);
 
   useEffect(() => {
-    const lastChild = document.querySelector('#test123')?.lastElementChild;
+    const lastChild = document.querySelector('#MENUHANDLER')?.lastElementChild;
     if (lastChild) {
-      setLastChildHeight(lastChild.getBoundingClientRect().height);
+      const maxHeight = window.innerHeight * 0.9;
+      const height = lastChild.clientHeight > maxHeight ? maxHeight : lastChild.clientHeight;
+      setLastChildHeight(height);
     } else {
       setLastChildHeight(0);
     }
@@ -214,10 +217,8 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
         >
           <div
             role="presentation"
-            id="test123"
-            className={`rounded-md overflow-hidden relative h-auto 
-              transition-[opacity,transform,height,width] duration-200 origin-bottom-right 
-            `}
+            id="MENUHANDLER"
+            className={`rounded-md overflow-hidden relative h-auto`}
             style={{ width: sizeClass, height: `${String(lastChildHeight)}px` }}
             onMouseDown={(e) => { e.stopPropagation(); }}
             onMouseUp={(e) => { e.stopPropagation(); }}
