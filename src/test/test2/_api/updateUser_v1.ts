@@ -15,7 +15,7 @@ export const auth: AuthProps = {
 export interface ApiParams {
   data: Admin;
   user: SessionLayout;
-  functions: Functions;
+  functions: Functions; 
 }
 
 export const main = async ({  }: ApiParams): Promise<ApiResponse> => {

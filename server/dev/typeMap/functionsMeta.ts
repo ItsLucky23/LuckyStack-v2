@@ -140,6 +140,15 @@ const generateFunctionsForDir = (dir: string, collectors: ImportCollectors, inde
           exports.set(statement.name.text, findSignatureForExport(statement.name.text, sourceFile, rawContent, fullPath, availableExports, fileImports, collectors));
         }
 
+        // export { a, b as c }
+        if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+          for (const specifier of statement.exportClause.elements) {
+            const exportName = specifier.name.text;
+            const originalName = specifier.propertyName ? specifier.propertyName.text : exportName;
+            exports.set(exportName, findSignatureForExport(originalName, sourceFile, rawContent, fullPath, availableExports, fileImports, collectors));
+          }
+        }
+
         // export default someIdentifier
         if (ts.isExportAssignment(statement) && !statement.isExportEquals && ts.isIdentifier(statement.expression)) {
           defaultExportName = statement.expression.text;

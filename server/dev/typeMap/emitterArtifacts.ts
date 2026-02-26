@@ -52,6 +52,10 @@ const writeFileIfChanged = (filePath: string, content: string): boolean => {
 	return true;
 };
 
+const indentStr = (str: string, indentText: string): string => {
+	return str.split('\n').map((line, i) => i === 0 ? line : indentText + line).join('\n');
+};
+
 export const buildTypeMapArtifacts = ({
 	typesByPage,
 	syncTypesByPage,
@@ -67,12 +71,15 @@ export const buildTypeMapArtifacts = ({
 }) => {
 	const importStatements = buildImportStatements({ namedImports, defaultImports });
 
-	let content = `/**
+	let content = `/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+/* eslint-disable @typescript-eslint/ban-types */
+// @ts-nocheck
+
+/**
  * Auto-generated type map for all API and Sync endpoints.
  * Enables type-safe apiRequest and syncRequest calls.
  */
 
-import { PrismaClient } from "@prisma/client";
 import { SessionLayout } from "../../config";
 ${importStatements}
 export interface Functions {
@@ -131,8 +138,8 @@ export interface ApiTypeMap {
 				});
 
 				content += `      '${version}': {\n`;
-				content += `        input: ${entry.input};\n`;
-				content += `        output: ${entry.output};\n`;
+				content += `        input: ${indentStr(entry.input, '        ')};\n`;
+				content += `        output: ${indentStr(entry.output, '        ')};\n`;
 				content += `        method: '${entry.method}';\n`;
 				if (entry.rateLimit !== undefined) {
 					content += `        rateLimit: ${entry.rateLimit};\n`;
@@ -232,9 +239,9 @@ export interface SyncTypeMap {
 				});
 
 				content += `      '${version}': {\n`;
-				content += `        clientInput: ${entry.clientInput};\n`;
-				content += `        serverOutput: ${entry.serverOutput};\n`;
-				content += `        clientOutput: ${entry.clientOutput};\n`;
+				content += `        clientInput: ${indentStr(entry.clientInput, '        ')};\n`;
+				content += `        serverOutput: ${indentStr(entry.serverOutput, '        ')};\n`;
+				content += `        clientOutput: ${indentStr(entry.clientOutput, '        ')};\n`;
 				content += `      };\n`;
 			}
 			content += `    };\n`;

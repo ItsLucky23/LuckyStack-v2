@@ -97,8 +97,17 @@ export const expandType = (type: ts.Type, checker: ts.TypeChecker, depth = 0): s
 
       // Known opaque containers — return as-is without expanding internals
       if (SKIP_EXPANSION.has(targetName)) {
+        // Special-case: always serialize Date as string
+        if (targetName === 'Date') return 'string';
         return checker.typeToString(type);
       }
+    }
+
+    // Known non-generic opaque containers (Date, Error, Buffer, etc.)
+    const symbolName = type.symbol?.name || type.aliasSymbol?.name || '';
+    if (SKIP_EXPANSION.has(symbolName)) {
+      if (symbolName === 'Date') return 'string';
+      return checker.typeToString(type);
     }
 
     const props = checker.getPropertiesOfType(type);
@@ -119,7 +128,9 @@ export const expandType = (type: ts.Type, checker: ts.TypeChecker, depth = 0): s
         fields.push(`[key: ${keyType}]: ${valueType}`);
       }
 
-      return `{ ${fields.join('; ')} }`;
+      const indent = '  '.repeat(depth + 1);
+      const outerIndent = '  '.repeat(depth);
+      return `{\n${indent}${fields.join(`;\n${indent}`)}\n${outerIndent}}`;
     }
 
     return '{ }';

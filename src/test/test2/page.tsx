@@ -5,7 +5,7 @@ export default function Home() {
 
   useEffect(() => {
     (async () => {
-      const response = await apiRequest({ name: 'examples/adminOnly', version: "v1" })
+      const response = await apiRequest({ name: "test/updateAdmin", version: "v1" })
     })()
   }, [])
 

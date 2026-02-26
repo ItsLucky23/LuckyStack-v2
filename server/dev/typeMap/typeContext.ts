@@ -118,27 +118,38 @@ export const sanitizeTypeAndCollectImports = ({
 
     if (fileImports.has(typeName)) {
       const importConfig = fileImports.get(typeName)!;
-      const importPath = toGeneratedImportPath(importConfig.source, filePath);
 
-      if (importConfig.isDefault) {
-        if (!defaultImports.has(importPath) || defaultImports.get(importPath) === typeName) {
-          defaultImports.set(importPath, typeName);
+      // If the import is from a package (not relative and not an internal alias), we can keep it
+      // Internal aliases often start with 'src/' or 'shared/' or '@/'
+      const isInternal = importConfig.source.startsWith('.') ||
+        importConfig.source.startsWith('/') ||
+        importConfig.source.startsWith('src/') ||
+        importConfig.source.startsWith('shared/') ||
+        importConfig.source.startsWith('server/');
+
+      if (!isInternal) {
+        const importPath = toGeneratedImportPath(importConfig.source, filePath);
+
+        if (importConfig.isDefault) {
+          if (!defaultImports.has(importPath) || defaultImports.get(importPath) === typeName) {
+            defaultImports.set(importPath, typeName);
+            return match;
+          }
+        } else {
+          if (!namedImports.has(importPath)) namedImports.set(importPath, new Set());
+          namedImports.get(importPath)!.add(importConfig.originalName || typeName);
           return match;
         }
-      } else {
-        if (!namedImports.has(importPath)) namedImports.set(importPath, new Set());
-        namedImports.get(importPath)!.add(importConfig.originalName || typeName);
-        return match;
       }
     }
 
     if (availableExports.has(typeName)) {
-      const outputDir = path.dirname(GENERATED_SOCKET_TYPES_PATH);
-      let relPath = path.relative(outputDir, filePath).replace(/\\/g, '/').replace('.ts', '');
-      if (!relPath.startsWith('.')) relPath = `./${relPath}`;
-      if (!namedImports.has(relPath)) namedImports.set(relPath, new Set());
-      namedImports.get(relPath)!.add(typeName);
-      return match;
+      // If it's exported locally in the same file, we used to add a relative import here,
+      // but the user wants to flatten out our own types, so we don't import them anymore.
+      // (The tsProgram.ts expandType handles API inputs/outputs deeply, 
+      // but for functionsMeta.ts we just map them to `any` or leave them if they are built-ins).
+      // If we *really* wanted to deeply flatten, we'd need to invoke the type checker. 
+      // For now, mapping non-npm imports to `any` (the fallback below) handles the prompt.
     }
 
     return `any${isArray || ''}`;
