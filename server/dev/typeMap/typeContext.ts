@@ -110,7 +110,7 @@ export const sanitizeTypeAndCollectImports = ({
 
   return type.replace(/\b([A-Z][a-zA-Z0-9_]*)(<[^>]+>)?(\[\])?\b/g, (match, typeName, _generics, isArray) => {
     const builtins = ['Promise', 'Date', 'Function', 'Array', 'Record', 'Partial', 'Pick', 'Omit', 'Error', 'Map', 'Set', 'Buffer', 'Uint8Array', 'Object'];
-    const existingImports = ['PrismaClient', 'SessionLayout'];
+    const existingImports = ['SessionLayout'];
 
     if (builtins.includes(typeName) || existingImports.includes(typeName) || knownGenerics.has(typeName)) {
       return match;
