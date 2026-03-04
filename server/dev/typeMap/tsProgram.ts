@@ -53,6 +53,82 @@ const isJsonLikeType = (type: ts.Type, checker: ts.TypeChecker): boolean => {
   return /(\bPrisma\.)?(Input)?Json(Value|Object|Array)\b/.test(rendered);
 };
 
+const getLiteralTypeFromExpression = (
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  depth: number,
+): string | null => {
+  if (ts.isParenthesizedExpression(expression)) {
+    return getLiteralTypeFromExpression(expression.expression, checker, depth);
+  }
+
+  if (ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) {
+    return getLiteralTypeFromExpression(expression.expression, checker, depth);
+  }
+
+  if (expression.kind === ts.SyntaxKind.TrueKeyword) return 'true';
+  if (expression.kind === ts.SyntaxKind.FalseKeyword) return 'false';
+  if (expression.kind === ts.SyntaxKind.NullKeyword) return 'null';
+
+  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+    return `'${expression.text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+  }
+
+  if (ts.isNumericLiteral(expression)) {
+    return expression.text;
+  }
+
+  if (
+    ts.isPrefixUnaryExpression(expression)
+    && expression.operator === ts.SyntaxKind.MinusToken
+    && ts.isNumericLiteral(expression.operand)
+  ) {
+    return `-${expression.operand.text}`;
+  }
+
+  if (ts.isIdentifier(expression)) {
+    const identifierType = checker.getTypeAtLocation(expression);
+    const isLiteralType = (identifierType.flags & (
+      ts.TypeFlags.StringLiteral
+      | ts.TypeFlags.NumberLiteral
+      | ts.TypeFlags.BooleanLiteral
+      | ts.TypeFlags.Null
+      | ts.TypeFlags.Undefined
+    )) !== 0;
+
+    if (isLiteralType || identifierType.isUnion()) {
+      const expanded = expandType(identifierType, checker, depth);
+      if (expanded.includes("'") || /\btrue\b|\bfalse\b|\bnull\b|\bundefined\b/.test(expanded)) {
+        return expanded;
+      }
+    }
+  }
+
+  return null;
+};
+
+const getLiteralTypeFromPropertySymbol = (
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+  depth: number,
+): string | null => {
+  const declarations = symbol.declarations ?? [];
+
+  for (const declaration of declarations) {
+    if (ts.isPropertyAssignment(declaration)) {
+      const literal = getLiteralTypeFromExpression(declaration.initializer, checker, depth);
+      if (literal) return literal;
+    }
+
+    if (ts.isShorthandPropertyAssignment(declaration)) {
+      const literal = getLiteralTypeFromExpression(declaration.name, checker, depth);
+      if (literal) return literal;
+    }
+  }
+
+  return null;
+};
+
 // Recursively expand a TypeScript type to an inline type string with no named references.
 // The result is self-contained and requires no imports.
 export const expandType = (type: ts.Type, checker: ts.TypeChecker, depth = 0): string => {
@@ -137,8 +213,9 @@ export const expandType = (type: ts.Type, checker: ts.TypeChecker, depth = 0): s
 
       for (const prop of props) {
         const propType = checker.getTypeOfSymbol(prop);
+        const literalType = getLiteralTypeFromPropertySymbol(prop, checker, depth + 1);
         const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;
-        fields.push(`${prop.name}${isOptional ? '?' : ''}: ${expandType(propType, checker, depth + 1)}`);
+        fields.push(`${prop.name}${isOptional ? '?' : ''}: ${literalType ?? expandType(propType, checker, depth + 1)}`);
       }
 
       for (const indexInfo of indexInfos) {

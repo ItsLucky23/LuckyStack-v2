@@ -169,6 +169,7 @@ For translated error responses over HTTP, send one of:
   - success: `{ status: 'success', ...payload }`
   - error: `{ status: 'error', errorCode: string, errorParams?: [...], httpStatus?: number }`
 - HTTP responses normalize errors to include localized `message` and final `httpStatus`.
+- Generated output typing preserves direct literal return values in object properties (for example `submitted: true` and `submitted: false`) so branch-specific unions stay discriminated in TypeScript.
 
 ---
 

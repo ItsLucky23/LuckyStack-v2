@@ -222,6 +222,8 @@ Note: HTTP is only the trigger. Actual delivery still happens via Socket.io to u
 | `serverOutput` | `_server.ts` return            | Server processing result |
 | `clientOutput` | `_client.ts` clientMain return | Client processing result |
 
+Generated sync output typing preserves direct literal return values in object properties (for example `allowed: true` vs `allowed: false`) so TypeScript can narrow branch-specific shapes safely.
+
 ### Error Contract
 
 - Sync errors should return `status: 'error'` with an `errorCode` (and optional `errorParams` / `httpStatus`).
