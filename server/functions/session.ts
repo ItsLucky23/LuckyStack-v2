@@ -48,7 +48,10 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
       if (!userId) return;
 
       const activeUsersKey = `${process.env.PROJECT_NAME}-activeUsers:${userId}`;
-      const previousTokens = await redis.smembers(activeUsersKey);
+      // const previousTokens = await redis.smembers(activeUsersKey);
+      const allTokens = await redis.smembers(activeUsersKey);
+      // Exclude the current token — it was just added and has no socket room yet
+      const previousTokens = allTokens.filter(t => t !== token);
 
       if (previousTokens.length > 0) {
         const { logout } = await import('../sockets/utils/logout');
