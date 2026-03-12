@@ -1,7 +1,86 @@
 import ts from 'typescript';
-import { getServerProgram, expandType, expandTypeDetailed, ExpandedTypeResult } from './tsProgram';
+import path from 'path';
+import { getServerProgram, expandTypeDetailed, ExpandedTypeResult, UnresolvedTypeSymbol } from './tsProgram';
+import { ROOT_DIR } from '../../utils/paths';
 
 export interface TypeExtractionResult extends ExpandedTypeResult {}
+
+const TYPE_NAME_PATTERN = /\b[A-Z][A-Za-z0-9_]*\b/g;
+
+const KNOWN_GLOBAL_TYPE_NAMES = new Set([
+  'String', 'Number', 'Boolean', 'Object', 'Array', 'ReadonlyArray', 'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet',
+  'Date', 'RegExp', 'Error', 'Record', 'Partial', 'Required', 'Pick', 'Omit', 'Readonly', 'Exclude', 'Extract',
+  'NonNullable', 'ReturnType', 'Awaited', 'JsonValue', 'JsonObject', 'JsonArray', 'JsonPrimitive',
+]);
+
+const normalizeImportPath = (targetFilePath: string): string => {
+  const fromDir = path.join(ROOT_DIR, 'src', '_sockets');
+  const from = fromDir.replace(/\\/g, '/');
+  const to = targetFilePath.replace(/\\/g, '/');
+  const normalized = path.posix.relative(from, to).replace(/\\/g, '/');
+  const withoutExtension = normalized.replace(/(\.d)?\.(ts|tsx|js|jsx)$/i, '');
+  if (withoutExtension.startsWith('.')) return withoutExtension;
+  return `./${withoutExtension}`;
+};
+
+const mergeUnresolvedSymbols = (
+  left: UnresolvedTypeSymbol[],
+  right: UnresolvedTypeSymbol[],
+): UnresolvedTypeSymbol[] => {
+  const merged = [...left];
+  const seen = new Set(merged.map((symbol) => `${symbol.name}|${symbol.importPath ?? ''}|${symbol.sourceFile ?? ''}`));
+
+  for (const symbol of right) {
+    const key = `${symbol.name}|${symbol.importPath ?? ''}|${symbol.sourceFile ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(symbol);
+  }
+
+  return merged;
+};
+
+const collectFallbackSymbolsFromTypeText = (
+  typeText: string,
+  scopeNode: ts.Node,
+  checker: ts.TypeChecker,
+): UnresolvedTypeSymbol[] => {
+  const names = new Set((typeText.match(TYPE_NAME_PATTERN) ?? []).filter((name) => !KNOWN_GLOBAL_TYPE_NAMES.has(name)));
+  const symbolsInScope = checker.getSymbolsInScope(
+    scopeNode,
+    ts.SymbolFlags.TypeAlias | ts.SymbolFlags.Interface | ts.SymbolFlags.Class | ts.SymbolFlags.Enum | ts.SymbolFlags.Alias,
+  );
+
+  const unresolvedSymbols: UnresolvedTypeSymbol[] = [];
+
+  for (const name of names) {
+    const localSymbol = symbolsInScope.find((symbol) => symbol.name === name);
+    if (!localSymbol) continue;
+
+    const targetSymbol = (localSymbol.flags & ts.SymbolFlags.Alias) !== 0
+      ? checker.getAliasedSymbol(localSymbol)
+      : localSymbol;
+    const declaration = targetSymbol.declarations?.[0];
+
+    if (!declaration) {
+      unresolvedSymbols.push({ name });
+      continue;
+    }
+
+    const sourceFile = declaration.getSourceFile().fileName;
+    if (!sourceFile || sourceFile.includes('/node_modules/') || sourceFile.includes('\\node_modules\\')) {
+      continue;
+    }
+
+    unresolvedSymbols.push({
+      name,
+      sourceFile,
+      importPath: normalizeImportPath(sourceFile),
+    });
+  }
+
+  return unresolvedSymbols;
+};
 
 // Kept for backwards compatibility — callers outside this module may still import it.
 export const stripComments = (str: string): string => {
@@ -63,16 +142,23 @@ const findMainFunction = (sourceFile: ts.SourceFile): ts.FunctionLikeDeclaration
 
 // Collects the expanded type strings of all object-literal return statements
 // in a function body, without descending into nested function definitions.
-const collectReturnObjectTypes = (
+const collectReturnObjectTypeDetails = (
   funcNode: ts.FunctionLikeDeclaration,
   checker: ts.TypeChecker,
-): string[] => {
+): TypeExtractionResult => {
   const types: string[] = [];
+  let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
 
   const visit = (node: ts.Node) => {
     if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression)) {
       const type = checker.getTypeAtLocation(node.expression);
-      types.push(expandType(type, checker));
+      const expanded = expandTypeDetailed(type, checker);
+      types.push(expanded.text);
+      unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
+      unresolvedSymbols = mergeUnresolvedSymbols(
+        unresolvedSymbols,
+        collectFallbackSymbolsFromTypeText(expanded.text, node.expression, checker),
+      );
     }
 
     // Recurse into control flow but not into nested function bodies
@@ -86,7 +172,7 @@ const collectReturnObjectTypes = (
   };
 
   ts.forEachChild(funcNode, visit);
-  return types;
+  return { text: unionTypes(types), unresolvedSymbols };
 };
 
 // Returns the deduplicated union of an array of type strings.
@@ -140,8 +226,8 @@ export const getOutputTypeDetailsFromFile = (filePath: string): TypeExtractionRe
     const mainFn = findMainFunction(sourceFile);
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const types = collectReturnObjectTypes(mainFn, checker);
-    return { text: unionTypes(types) || DEFAULT, unresolvedSymbols: [] };
+    const details = collectReturnObjectTypeDetails(mainFn, checker);
+    return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting output type from ${filePath}:`, error);
     return { text: DEFAULT, unresolvedSymbols: [] };
@@ -194,8 +280,8 @@ export const getSyncServerOutputTypeDetailsFromFile = (filePath: string): TypeEx
     const mainFn = findMainFunction(sourceFile);
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const types = collectReturnObjectTypes(mainFn, checker);
-    return { text: unionTypes(types) || DEFAULT, unresolvedSymbols: [] };
+    const details = collectReturnObjectTypeDetails(mainFn, checker);
+    return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting sync serverOutput type from ${filePath}:`, error);
     return { text: DEFAULT, unresolvedSymbols: [] };
@@ -218,8 +304,8 @@ export const getSyncClientOutputTypeDetailsFromFile = (filePath: string): TypeEx
     const mainFn = findMainFunction(sourceFile);
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const types = collectReturnObjectTypes(mainFn, checker);
-    return { text: unionTypes(types) || DEFAULT, unresolvedSymbols: [] };
+    const details = collectReturnObjectTypeDetails(mainFn, checker);
+    return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting sync clientOutput type from ${filePath}:`, error);
     return { text: DEFAULT, unresolvedSymbols: [] };
