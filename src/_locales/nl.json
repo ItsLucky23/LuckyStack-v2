@@ -17,6 +17,8 @@
     "invalidRequest": "Ongeldige API-request.",
     "invalidName": "Ongeldige API-naam.",
     "invalidDataObject": "Ongeldige API-payload.",
+    "invalidRequestFormat": "Ongeldig requestformaat.",
+    "payloadTooLarge": "Request payload is te groot.",
     "notFound": "API '{{name}}' bestaat niet.",
     "invalidInputType": "Ongeldige API-input: {{message}}",
     "rateLimitExceeded": "Te veel requests. Probeer opnieuw over {{seconds}} seconden.",
@@ -28,8 +30,12 @@
   "sync": {
     "invalidRequest": "Ongeldige sync-request.",
     "invalidCallback": "Ongeldige sync-callback.",
+    "methodNotAllowed": "Sync-methode niet toegestaan.",
+    "invalidName": "Ongeldige sync-naam.",
+    "invalidRequestFormat": "Ongeldig sync-requestformaat.",
     "missingReceiver": "Sync receiver is verplicht.",
     "notFound": "Sync-event niet gevonden.",
+    "rateLimitExceeded": "Te veel sync-requests. Probeer opnieuw over {{seconds}} seconden.",
     "invalidInputType": "Ongeldige sync-input: {{message}}",
     "serverExecutionFailed": "Sync server-handler is mislukt.",
     "invalidServerResponse": "Sync server retourneerde een ongeldige respons.",
@@ -58,6 +64,7 @@
     "wrongPassword": "Wachtwoord komt niet overeen.",
     "loggedIn": "Gebruiker ingelogd.",
     "providerNotFound": "Provider niet gevonden.",
+    "oauthStateInitFailed": "Initialiseren van OAuth-beveiligingsstatus is mislukt.",
     "noReason": "Geen reden opgegeven.",
     "name": "Naam",
     "emailAddress": "E-mailadres",
@@ -89,6 +96,13 @@
     "loadingImg": "Foto word geladen",
     "imgLoaded": "Foto is geladen",
     "name": "Naam"
+  },
+  "avatar": {
+    "uploadFailed": "Uploaden van avatar is mislukt.",
+    "invalidFormat": "Ongeldig avatarformaat."
+  },
+  "session": {
+    "invalid": "Sessie is ongeldig."
   },
   "docs": {
     "documentation": "Documentatie",

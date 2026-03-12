@@ -4,7 +4,7 @@ import config from '../../config';
 /**
  * Extract the authentication token from a Socket.io connection.
  * 
- * Checks `config.sessionBasedToken`. to determine where to look:
+ * Checks `config.sessionBasedToken` to determine where to look:
  * - `true`: Token is in `socket.handshake.auth.token` (sessionStorage on client)
  * - `false`: Token is in cookies via `socket.handshake.headers.cookie`
  * 
@@ -33,15 +33,13 @@ export const extractTokenFromSocket = (socket: Socket): string | null => {
   }
 
   // Cookie-based token
-  if (!config.sessionBasedToken && cookie) {
-    // Parse the token from cookie string "token=abc123; other=value"
-    const tokenCookie = cookie
-      .split('; ')
-      .find(row => row.startsWith('token='));
-
-    return tokenCookie?.split('=')[1] ?? null;
+  if (!cookie) {
+    return null;
   }
 
-  // Fallback: try both methods
-  return sessionToken ?? (cookie?.split('=')[1]) ?? null;
+  const tokenCookie = cookie
+    .split('; ')
+    .find(row => row.startsWith('token='));
+
+  return tokenCookie?.split('=')[1] ?? null;
 };

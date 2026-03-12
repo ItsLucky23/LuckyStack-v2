@@ -17,6 +17,8 @@
     "invalidRequest": "Ungültige API-Anfrage.",
     "invalidName": "Ungültiger API-Name.",
     "invalidDataObject": "Ungültige API-Payload.",
+    "invalidRequestFormat": "Ungültiges Anfrageformat.",
+    "payloadTooLarge": "Die Request-Payload ist zu groß.",
     "notFound": "API '{{name}}' wurde nicht gefunden.",
     "invalidInputType": "Ungültige API-Eingabe: {{message}}",
     "rateLimitExceeded": "Zu viele Anfragen. Versuche es in {{seconds}} Sekunden erneut.",
@@ -28,8 +30,12 @@
   "sync": {
     "invalidRequest": "Ungültige Sync-Anfrage.",
     "invalidCallback": "Ungültiger Sync-Callback.",
+    "methodNotAllowed": "Sync-Methode nicht erlaubt.",
+    "invalidName": "Ungültiger Sync-Name.",
+    "invalidRequestFormat": "Ungültiges Sync-Anfrageformat.",
     "missingReceiver": "Ein Sync-Empfänger ist erforderlich.",
     "notFound": "Sync-Event wurde nicht gefunden.",
+    "rateLimitExceeded": "Zu viele Sync-Anfragen. Versuche es in {{seconds}} Sekunden erneut.",
     "invalidInputType": "Ungültige Sync-Eingabe: {{message}}",
     "serverExecutionFailed": "Sync-Server-Handler ist fehlgeschlagen.",
     "invalidServerResponse": "Sync-Server hat eine ungültige Antwort zurückgegeben.",
@@ -58,6 +64,7 @@
     "wrongPassword": "Passwort stimmt nicht überein.",
     "loggedIn": "Benutzer eingeloggt.",
     "providerNotFound": "Provider nicht gefunden.",
+    "oauthStateInitFailed": "OAuth-Sicherheitsstatus konnte nicht initialisiert werden.",
     "noReason": "Kein Grund angegeben.",
     "name": "Name",
     "emailAddress": "E-Mail-Adresse",
@@ -89,6 +96,13 @@
     "loadingImg": "Foto wird geladen",
     "imgLoaded": "Foto wurde geladen",
     "name": "Name"
+  },
+  "avatar": {
+    "uploadFailed": "Avatar konnte nicht hochgeladen werden.",
+    "invalidFormat": "Ungültiges Avatar-Format."
+  },
+  "session": {
+    "invalid": "Sitzung ist ungültig."
   },
   "docs": {
     "documentation": "Dokumentation",

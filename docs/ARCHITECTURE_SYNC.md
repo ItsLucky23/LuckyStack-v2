@@ -210,6 +210,18 @@ Body:
 
 Note: HTTP is only the trigger. Actual delivery still happens via Socket.io to users in the target room.
 
+HTTP sync requests are rate-limited using global `config.rateLimiting` settings:
+
+```typescript
+rateLimiting: {
+  defaultApiLimit: 60, // fallback per-sync-route limit
+  defaultIpLimit: 100, // global per-IP cap across all sync routes
+  windowMs: 60000,
+}
+```
+
+When exceeded, handlers return `sync.rateLimitExceeded` with `seconds` in `errorParams`.
+
 ---
 
 ---

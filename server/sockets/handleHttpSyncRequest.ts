@@ -2,12 +2,13 @@ import { devSyncs, devFunctions } from "../dev/loader";
 import { syncs, functions } from '../prod/generatedApis';
 import { ioInstance } from "./socket";
 import { getSession } from "../functions/session";
-import { SessionLayout } from "../../config";
+import config, { SessionLayout } from "../../config";
 import { validateRequest } from "../utils/validateRequest";
 import { extractTokenFromSocket } from "../utils/extractToken";
 import tryCatch from "../../shared/tryCatch";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "../utils/responseNormalizer";
 import { validateInputByType } from '../utils/runtimeTypeValidation';
+import { checkRateLimit } from '../utils/rateLimiter';
 
 interface HttpSyncRequestParams {
   name: string;
@@ -16,6 +17,7 @@ interface HttpSyncRequestParams {
   receiver: string;
   ignoreSelf?: boolean;
   token: string | null;
+  requesterIp?: string;
   xLanguageHeader?: string | string[];
   acceptLanguageHeader?: string | string[];
 }
@@ -37,6 +39,7 @@ export default async function handleHttpSyncRequest({
   receiver,
   ignoreSelf,
   token,
+  requesterIp,
   xLanguageHeader,
   acceptLanguageHeader,
 }: HttpSyncRequestParams): Promise<HttpSyncResponse> {
@@ -126,6 +129,54 @@ export default async function handleHttpSyncRequest({
       preferred: preferredLocale,
       userLanguage: user?.language,
     });
+  }
+
+  // Rate limiting for HTTP sync requests
+  const effectiveSyncLimit = config.rateLimiting.defaultApiLimit;
+  if (effectiveSyncLimit !== false && effectiveSyncLimit > 0) {
+    const requesterIdentity = token ?? requesterIp ?? 'anonymous';
+    const keyPrefix = token ? 'token' : 'ip';
+
+    const { allowed, resetIn } = checkRateLimit({
+      key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
+      limit: effectiveSyncLimit,
+      windowMs: config.rateLimiting.windowMs,
+    });
+
+    if (!allowed) {
+      return buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+          httpStatus: 429,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      });
+    }
+  }
+
+  if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
+    const ipBucket = requesterIp ?? 'unknown';
+    const { allowed, resetIn } = checkRateLimit({
+      key: `ip:${ipBucket}:sync:all`,
+      limit: config.rateLimiting.defaultIpLimit,
+      windowMs: config.rateLimiting.windowMs,
+    });
+
+    if (!allowed) {
+      return buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+          httpStatus: 429,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      });
+    }
   }
 
   let serverOutput = {};

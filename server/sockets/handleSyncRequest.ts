@@ -3,12 +3,13 @@ import { syncs, functions } from '../prod/generatedApis'
 import { ioInstance, syncMessage } from "./socket";
 import { Socket } from "socket.io";
 import { getSession } from "../functions/session";
-import { SessionLayout } from "../../config";
+import config, { SessionLayout } from "../../config";
 import { validateRequest } from "../utils/validateRequest";
 import { extractTokenFromSocket } from "../utils/extractToken";
 import tryCatch from "../../shared/tryCatch";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "../utils/responseNormalizer";
 import { validateInputByType } from "../utils/runtimeTypeValidation";
+import { checkRateLimit } from "../utils/rateLimiter";
 
 const functionsObject = process.env.NODE_ENV == 'development' ? devFunctions : functions;
 
@@ -130,6 +131,53 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       preferred: preferredLocale,
       userLanguage: user?.language,
     }));
+  }
+
+  //? Rate limit check: per-sync bucket fallback + global per-IP cap
+  if (config.rateLimiting.defaultApiLimit !== false && config.rateLimiting.defaultApiLimit > 0) {
+    const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
+    const keyPrefix = token ? 'token' : 'ip';
+
+    const { allowed, resetIn } = checkRateLimit({
+      key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
+      limit: config.rateLimiting.defaultApiLimit,
+      windowMs: config.rateLimiting.windowMs,
+    });
+
+    if (!allowed) {
+      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+          httpStatus: 429,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    }
+  }
+
+  if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
+    const requesterIp = socket.handshake.address ?? 'unknown';
+    const { allowed, resetIn } = checkRateLimit({
+      key: `ip:${requesterIp}:sync:all`,
+      limit: config.rateLimiting.defaultIpLimit,
+      windowMs: config.rateLimiting.windowMs,
+    });
+
+    if (!allowed) {
+      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+          httpStatus: 429,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    }
   }
 
   let serverOutput = {};

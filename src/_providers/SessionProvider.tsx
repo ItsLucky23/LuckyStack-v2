@@ -4,7 +4,7 @@ import { createContext, use, useState, ReactNode, useEffect, useMemo } from 'rea
 import { apiRequest } from 'src/_sockets/apiRequest';
 import { socket, useSocket } from 'src/_sockets/socketInitializer';
 
-import { dev, SessionLayout } from '../../config';
+import { dev, pageTitle, SessionLayout } from '../../config';
 
 interface UserContextType {
   session: SessionLayout | null;
@@ -23,6 +23,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     latestSession = session;
   }, [session])
+
+  useEffect(() => {
+    document.title = dev && session?.email 
+      ? `[DEV] ${session?.email} - ${pageTitle}` 
+      : dev
+      ? `[DEV] ${pageTitle}`
+      : pageTitle;
+  }, [session?.email]);
 
   useEffect(() => {
     void (async () => {

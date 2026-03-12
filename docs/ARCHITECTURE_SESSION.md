@@ -102,6 +102,11 @@ Controlled by `sessionBasedToken` in `config.ts`:
 | `false` (default) | HttpOnly cookie | Web apps, security-focused |
 | `true`            | sessionStorage  | Developing                 |
 
+Notes:
+- Token extraction is strict by mode (no fallback between cookie and sessionStorage sources).
+- OAuth callback token-in-URL redirect is only used in development when `sessionBasedToken` is `true`.
+- In non-development environments, OAuth callback uses HttpOnly cookie delivery.
+
 ---
 
 ## Session Functions

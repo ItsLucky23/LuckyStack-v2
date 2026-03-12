@@ -108,7 +108,7 @@ const loginWithCredentials = async (params: paramsType) => {
       console.log(checkEmailError);
       return { status: false, reason: checkEmailError };
     }
-    if (checkEmailResponse) { return { status: false, reason: 'login.emailExist' }; }
+    if (checkEmailResponse) { return { status: false, reason: 'login.emailExists' }; }
 
     //? email is not in use so we define the function to create the new user
     const createNewUser = async () => {

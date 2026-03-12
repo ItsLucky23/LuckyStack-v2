@@ -48,6 +48,9 @@ const config = {
  
   /** Enable mobile-friendly console overlay (useful for debugging on phones) */
   mobileConsole: false,
+
+  /** The title of the page */
+  pageTitle: "LuckyStack",
  
   /** URL to redirect unauthenticated users */
   loginPageUrl: '/login',
@@ -194,5 +197,6 @@ export const {
   sessionBasedToken,
   sessionExpiryDays,
   socketActivityBroadcaster,
-  rateLimiting
+  rateLimiting,
+  pageTitle
 } = config;

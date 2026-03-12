@@ -17,6 +17,8 @@
     "invalidRequest": "Invalid API request.",
     "invalidName": "Invalid API name.",
     "invalidDataObject": "Invalid API payload.",
+    "invalidRequestFormat": "Invalid request format.",
+    "payloadTooLarge": "Request payload is too large.",
     "notFound": "API '{{name}}' was not found.",
     "invalidInputType": "Invalid API input: {{message}}",
     "rateLimitExceeded": "Too many requests. Try again in {{seconds}} seconds.",
@@ -28,8 +30,12 @@
   "sync": {
     "invalidRequest": "Invalid sync request.",
     "invalidCallback": "Invalid sync callback.",
+    "methodNotAllowed": "Sync method not allowed.",
+    "invalidName": "Invalid sync name.",
+    "invalidRequestFormat": "Invalid sync request format.",
     "missingReceiver": "Sync receiver is required.",
     "notFound": "Sync event was not found.",
+    "rateLimitExceeded": "Too many sync requests. Try again in {{seconds}} seconds.",
     "invalidInputType": "Invalid sync input: {{message}}",
     "serverExecutionFailed": "Sync server handler failed.",
     "invalidServerResponse": "Sync server returned an invalid response.",
@@ -58,6 +64,7 @@
     "wrongPassword": "Password does not match.",
     "loggedIn": "User logged in.",
     "providerNotFound": "Provider not found.",
+    "oauthStateInitFailed": "Failed to initialize OAuth security state.",
     "noReason": "No reason provided.",
     "name": "Name",
     "emailAddress": "Email address",
@@ -90,6 +97,13 @@
     "loadingImg": "Photo is loading",
     "imgLoaded": "Photo has loaded",
     "name": "Name"
+  },
+  "avatar": {
+    "uploadFailed": "Failed to upload avatar.",
+    "invalidFormat": "Invalid avatar format."
+  },
+  "session": {
+    "invalid": "Session is invalid."
   },
   "docs": {
     "documentation": "Documentation",

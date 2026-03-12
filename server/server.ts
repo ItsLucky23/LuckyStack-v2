@@ -98,6 +98,10 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   let params: object | null;
   params = await getParams({ method, req, res, queryString });
 
+  if (res.writableEnded) {
+    return;
+  }
+
   //? we log the request and if there are any params we log them with the request
   if (params && typeof params == 'object' && Object.keys(params).length !== 0) {
     const safeParams = sanitizeForLog(params);
@@ -123,8 +127,11 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     if (provider?.name != 'credentials' && 'scope' in provider) {
       const oauthState = await createOAuthState(provider.name);
       if (!oauthState) {
-        res.writeHead(500, { "Content-Type": "text/plain" });
-        return res.end('OAuth state initialization failed');
+        res.writeHead(500, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({
+          status: false,
+          reason: 'login.oauthStateInitFailed',
+        }));
       }
 
       const clientId = encodeURIComponent(provider.clientID);
@@ -190,7 +197,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
     const location = process.env.DNS
 
-    if (config.sessionBasedToken) {
+    if (config.sessionBasedToken && config.dev) {
       res.writeHead(302, {
         Location: `${process.env.DNS}?token=${newToken}`,
       });
@@ -282,6 +289,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         receiver: (syncParams as any).receiver,
         ignoreSelf: (syncParams as any).ignoreSelf,
         token: httpToken,
+        requesterIp: req.socket.remoteAddress ?? undefined,
         xLanguageHeader: req.headers['x-language'],
         acceptLanguageHeader: req.headers['accept-language'],
       });

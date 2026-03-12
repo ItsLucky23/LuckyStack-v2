@@ -17,6 +17,8 @@
     "invalidRequest": "Requête API invalide.",
     "invalidName": "Nom d'API invalide.",
     "invalidDataObject": "Payload API invalide.",
+    "invalidRequestFormat": "Format de requête invalide.",
+    "payloadTooLarge": "Le payload de la requête est trop volumineux.",
     "notFound": "API '{{name}}' introuvable.",
     "invalidInputType": "Entrée API invalide : {{message}}",
     "rateLimitExceeded": "Trop de requêtes. Réessayez dans {{seconds}} secondes.",
@@ -28,8 +30,12 @@
   "sync": {
     "invalidRequest": "Requête sync invalide.",
     "invalidCallback": "Callback sync invalide.",
+    "methodNotAllowed": "Méthode sync non autorisée.",
+    "invalidName": "Nom de sync invalide.",
+    "invalidRequestFormat": "Format de requête sync invalide.",
     "missingReceiver": "Le receiver sync est requis.",
     "notFound": "Événement sync introuvable.",
+    "rateLimitExceeded": "Trop de requêtes sync. Réessayez dans {{seconds}} secondes.",
     "invalidInputType": "Entrée sync invalide : {{message}}",
     "serverExecutionFailed": "Le handler serveur sync a échoué.",
     "invalidServerResponse": "Le serveur sync a renvoyé une réponse invalide.",
@@ -58,6 +64,7 @@
     "wrongPassword": "Le mot de passe est incorrect.",
     "loggedIn": "Utilisateur connecté.",
     "providerNotFound": "Fournisseur introuvable.",
+    "oauthStateInitFailed": "Échec de l'initialisation de l'état de sécurité OAuth.",
     "noReason": "Aucune raison fournie.",
     "name": "Nom",
     "emailAddress": "Adresse e-mail",
@@ -89,6 +96,13 @@
     "loadingImg": "La photo est en cours de chargement",
     "imgLoaded": "La photo a été chargée",
     "name": "Nom"
+  },
+  "avatar": {
+    "uploadFailed": "Échec de l'envoi de l'avatar.",
+    "invalidFormat": "Format d'avatar invalide."
+  },
+  "session": {
+    "invalid": "Session invalide."
   },
   "docs": {
     "documentation": "Documentation",
