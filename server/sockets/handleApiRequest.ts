@@ -153,25 +153,48 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     });
   }
 
-  //? Rate limiting check
+  //? Rate limiting check: per-API bucket (custom rateLimit or defaultApiLimit fallback)
   const apiRateLimit = apisObject[resolvedName].rateLimit;
-  const effectiveLimit = apiRateLimit !== undefined
+  const effectiveApiLimit = apiRateLimit !== undefined
     ? apiRateLimit
     : config.rateLimiting.defaultApiLimit;
 
-  if (effectiveLimit !== false && effectiveLimit > 0) {
-    const rateLimitKey = user?.id
-      ? `user:${user.id}:api:${name}`
-      : `ip:${socket.handshake.address}:api:${name}`;
+  if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
+    const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
+    const keyPrefix = token ? 'token' : 'ip';
+    const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${name}`;
 
     const { allowed, resetIn } = checkRateLimit({
       key: rateLimitKey,
-      limit: effectiveLimit,
+      limit: effectiveApiLimit,
       windowMs: config.rateLimiting.windowMs
     });
 
     if (!allowed) {
       console.log(`Rate limit exceeded for ${name}`, 'yellow');
+      return emitApiError({
+        response: {
+          status: 'error',
+          errorCode: 'api.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+        },
+        fallbackHttpStatus: 429,
+      });
+    }
+  }
+
+  //? Global per-IP bucket across all APIs
+  if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
+    const requesterIp = socket.handshake.address ?? 'unknown';
+
+    const { allowed, resetIn } = checkRateLimit({
+      key: `ip:${requesterIp}:api:all`,
+      limit: config.rateLimiting.defaultIpLimit,
+      windowMs: config.rateLimiting.windowMs
+    });
+
+    if (!allowed) {
+      console.log(`Global IP rate limit exceeded for ${requesterIp}`, 'yellow');
       return emitApiError({
         response: {
           status: 'error',

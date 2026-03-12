@@ -1,10 +1,9 @@
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 
-import { loginRedirectUrl, loginPageUrl } from "config";
+import { loginRedirectUrl, loginPageUrl, sessionBasedToken } from "config";
 
 import { useSession } from "./_providers/SessionProvider";
-const env = import.meta.env;
 
 export const template = 'plain'
 export default function App() {
@@ -16,7 +15,7 @@ export default function App() {
  
     const params = new URLSearchParams(location.search);
     const token = params.get('token');
-    if (token && env.VITE_SESSION_BASED_TOKEN === 'true') {
+    if (token && sessionBasedToken) {
       sessionStorage.setItem('token', token);
       globalThis.location.href = globalThis.location.pathname;
       return;

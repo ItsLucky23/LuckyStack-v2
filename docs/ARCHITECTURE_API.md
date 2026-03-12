@@ -196,9 +196,9 @@ Configure globally in `config.ts`:
 
 ```typescript
 rateLimiting: {
-  defaultApiLimit: 60,   // Requests per minute per user
-  defaultIpLimit: 100,   // Per-IP limit (unauthenticated)
-  windowMs: 60000,       // 1 minute window
+  defaultApiLimit: 60,   // Fallback requests/min per API when no per-API rateLimit is exported
+  defaultIpLimit: 100,   // Global requests/min cap per IP across all APIs combined
+  windowMs: 60000,       // Request window size in milliseconds
 }
 ```
 

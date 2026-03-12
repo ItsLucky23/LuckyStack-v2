@@ -49,7 +49,7 @@ export const initializeSentry = () => {
     // profilesSampleRate: 0.1,
 
     // Additional options
-    serverName: process.env.PROJECT_NAME || 'luckystack-server',
+    serverName: process.env.PROJECT_NAME || "",
 
     // Only send errors in production by default
     enabled: process.env.NODE_ENV === 'production' || process.env.SENTRY_ENABLED === 'true',

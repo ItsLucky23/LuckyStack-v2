@@ -135,7 +135,6 @@ Edit `.env` with your settings. **Minimum required for development:**
 
 ```env
 NODE_ENV=development
-VITE_SESSION_BASED_TOKEN=true
 SECURE=false
 PROJECT_NAME=my_project
 
@@ -472,7 +471,6 @@ docker-compose up -d --build
 | `SERVER_PORT`              | Yes      | `80`          | Server port                              |
 | `DNS`                      | Yes      | -             | Public URL for OAuth redirects           |
 | `SECURE`                   | Yes      | `false`       | Enable HTTPS cookies                     |
-| `VITE_SESSION_BASED_TOKEN` | Yes      | `true`        | Token storage method                     |
 | `REDIS_HOST`               | Yes      | `127.0.0.1`   | Redis server host                        |
 | `REDIS_PORT`               | Yes      | `6379`        | Redis server port                        |
 | `DATABASE_URL`             | Yes      | -             | Database connection string (any Prisma-supported DB) |
@@ -526,7 +524,7 @@ docker-compose up -d --build
 
 **Solutions:**
 1. Check `SECURE=true` only if using HTTPS
-2. Verify `VITE_SESSION_BASED_TOKEN` matches between client and server
+2. Verify `sessionBasedToken` in `config.ts` matches your intended token mode
 3. Check Redis is properly storing data: `redis-cli keys "*"`
 
 ### Build Fails

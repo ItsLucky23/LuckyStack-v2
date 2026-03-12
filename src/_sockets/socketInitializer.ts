@@ -33,7 +33,7 @@ export function useSocket(session: SessionLayout | null) {
       auth: {}
     };
 
-    if (import.meta.env.VITE_SESSION_BASED_TOKEN === "true") {
+    if (config.sessionBasedToken) {
       const token = sessionStorage.getItem("token");
       if (token) {
         socketOptions.auth = { token };
@@ -98,7 +98,7 @@ export function useSocket(session: SessionLayout | null) {
 
     socketConnection.on("logout", (status: "success" | "error") => {
       if (status === "success") {
-        if (import.meta.env.VITE_SESSION_BASED_TOKEN === "true") {
+        if (config.sessionBasedToken) {
           sessionStorage.clear();
         }
         window.location.href = config.loginPageUrl;

@@ -9,7 +9,7 @@ interface MenuOptions {
 
 type MenuHandlerRef = ReturnType<typeof useMenuHandler> | null;
 
-const MENU_HANDLER_KEY = '__MATCHRIX_MENU_HANDLER__';
+const MENU_HANDLER_KEY = 'MENU_HANDLER';
 const globalStore = globalThis as typeof globalThis & { [MENU_HANDLER_KEY]?: MenuHandlerRef };
 
 if (globalStore[MENU_HANDLER_KEY] === undefined) {

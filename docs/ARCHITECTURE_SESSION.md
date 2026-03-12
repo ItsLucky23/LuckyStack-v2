@@ -95,7 +95,7 @@ const config = {
 
 ## Token Modes
 
-Controlled by `VITE_SESSION_BASED_TOKEN` env variable:
+Controlled by `sessionBasedToken` in `config.ts`:
 
 | Mode              | Storage         | Best For                   |
 | ----------------- | --------------- | -------------------------- |

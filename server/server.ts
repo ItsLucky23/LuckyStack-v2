@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { initializeSentry } from './functions/sentry';
 import path from 'path';
 
-dotenv.config();
+dotenv.config({ path: [".env.local", ".env"] });
 initializeSentry();
 
 import http from 'http';
@@ -14,7 +14,7 @@ import z from 'zod';
 import oauthProviders from "./auth/loginConfig";
 import { deleteSession } from './functions/session';
 import allowedOrigin from './auth/checkOrigin';
-import { SessionLayout } from '../config';
+import config, { SessionLayout } from '../config';
 
 import { serveAvatar } from './utils/serveAvatars';
 import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
@@ -147,7 +147,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
     const location = process.env.DNS
 
-    if (process.env.VITE_SESSION_BASED_TOKEN == 'true') {
+    if (config.sessionBasedToken) {
       res.writeHead(302, {
         Location: `${process.env.DNS}?token=${newToken}`,
       });
@@ -184,6 +184,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         name: apiName,
         data: apiData,
         token: httpToken,
+        requesterIp: req.socket.remoteAddress ?? undefined,
         xLanguageHeader: req.headers['x-language'],
         acceptLanguageHeader: req.headers['accept-language'],
         method: (method as 'GET' | 'POST' | 'PUT' | 'DELETE') || 'POST'

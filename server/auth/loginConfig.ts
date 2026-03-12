@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import tryCatch from '../../shared/tryCatch';
 
-dotenv.config(); // Load environment variables from .env file
+dotenv.config({ path: ['.env.local', '.env'] });
 
 interface BasicProvider {
   name: string;

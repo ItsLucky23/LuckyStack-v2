@@ -1,12 +1,11 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { backendUrl, loginRedirectUrl, loginPageUrl, providers, SessionLayout } from "config";
+import { backendUrl, loginRedirectUrl, loginPageUrl, providers, SessionLayout, sessionBasedToken } from "config";
 import tryCatch from "shared/tryCatch";
 
 import notify from "../_functions/notify";
 import { useTranslator } from "../_functions/translator";
-const env = import.meta.env;
 
 export default function LoginForm({ formType }: { formType: "login" | "register" }) {
   const translate = useTranslator();
@@ -79,7 +78,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
 
     notify.success({ key: response.reason });
     setTimeout(() => {
-      if (response.newToken && env.VITE_SESSION_BASED_TOKEN == 'true') {
+      if (response.newToken && sessionBasedToken) {
         sessionStorage.setItem("token", response.newToken);
       }
       globalThis.location.href = response.newToken ? loginRedirectUrl : loginPageUrl;

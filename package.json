@@ -6,14 +6,22 @@
   "scripts": {
     "client": "tsx scripts/clearServerRequests.ts && vite --host",
     "server": "npx tsx server/server.ts",
-    "liveServer": "npx tsx --watch server/server.ts",
     "lint": "eslint src/**/*.tsx",
     "generateArtifacts": "tsx scripts/generateTypeMaps.ts && tsx scripts/generateServerRequests.ts",
     "buildClient": "tsx scripts/generateTypeMaps.ts && tsc -b && vite build",
     "buildServer": "npm run generateArtifacts && tsx scripts/bundleServer.ts",
     "build": "npm run generateArtifacts && tsc -b && vite build && tsx scripts/bundleServer.ts",
     "prod": "node dist/server.js",
-    "production": "node dist/server.js"
+    "production": "node dist/server.js",
+    
+    "prisma:format": "prisma format",
+    "prisma:validate": "dotenv -e .env.local -- prisma validate",
+    "prisma:generate": "dotenv -e .env.local -- prisma generate",
+    "prisma:db:pull": "dotenv -e .env.local -- prisma db pull",
+    "prisma:db:push": "dotenv -e .env.local -- prisma db push",
+    "prisma:migrate:dev": "dotenv -e .env.local -- prisma migrate dev",
+    "prisma:migrate:reset": "dotenv -e .env.local -- prisma migrate reset",
+    "prisma:studio": "dotenv -e .env.local -- prisma studio"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.0.1",
@@ -57,6 +65,7 @@
     "@vitejs/plugin-react-swc": "^3.8.0",
     "autoprefixer": "^10.4.21",
     "chokidar": "^4.0.3",
+    "dotenv-cli": "^11.0.0",
     "eslint": "^9.21.0",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import-x": "^4.16.1",

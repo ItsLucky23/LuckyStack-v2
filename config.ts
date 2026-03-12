@@ -1,33 +1,53 @@
-import { user } from '@prisma/client';
+import { LANGUAGE, THEME, User } from "@prisma/client";
 
-// ============================================
-// LUCKYSTACK CONFIGURATION
-// ============================================
-// This file contains all configurable options for the framework.
-// Copy this to 'config.ts' and adjust values for your project.
-// ============================================
- 
+type AppEnvironmentConfig = {
+  backendUrl: string;
+  dev: boolean;
+  sessionBasedToken?: boolean;
+  allowMultipleSessions?: boolean;
+};
+
+const normalizeDns = (dns: string): string => dns.replace(/\/+$/, "");
+
+const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
+  "http://localhost:5173": {
+    backendUrl: "http://localhost:80",
+    dev: true,
+    sessionBasedToken: true,
+    allowMultipleSessions: true
+  },
+  "https://staging.server.com": {
+    backendUrl: "https://staging.server.com",
+    dev: false,
+    sessionBasedToken: false,
+    allowMultipleSessions: false
+  },
+  "https://app.server.com": {
+    backendUrl: "https://app.server.com",
+    dev: false,
+    sessionBasedToken: false,
+    allowMultipleSessions: false
+  },
+};
+
+const detectedDns = normalizeDns(
+  typeof window !== "undefined"
+    ? window.location.origin
+    : (process.env.DNS ?? "http://localhost:5173"),
+);
+
+const resolvedEnvironment =
+  dnsEnvironmentMap[detectedDns] ?? dnsEnvironmentMap["http://localhost:5173"];
+
 const config = {
-  // ============================================
-  // SERVER URLS
-  // ============================================
- 
   /** The URL of the backend server. Update for production. */
-  backendUrl: 'http://localhost:80',
- 
-  // ============================================
-  // DEVELOPMENT OPTIONS
-  // ============================================
+  backendUrl: resolvedEnvironment.backendUrl,
  
   /** Enable extra console logs for debugging */
-  dev: true,
+  dev: resolvedEnvironment.dev,
  
   /** Enable mobile-friendly console overlay (useful for debugging on phones) */
   mobileConsole: false,
- 
-  // ============================================
-  // AUTHENTICATION & REDIRECTS
-  // ============================================
  
   /** URL to redirect unauthenticated users */
   loginPageUrl: '/login',
@@ -35,25 +55,24 @@ const config = {
   /** URL to redirect after successful login */
   loginRedirectUrl: '/examples',
  
-  // ============================================
-  // SESSION MANAGEMENT
-  // ============================================
- 
   /**
    * If false, logging in on a new device will automatically sign out all other sessions.
    * Useful for security-sensitive apps. Set to true to allow multiple simultaneous sessions.
    */
-  allowMultipleSessions: false,
+  allowMultipleSessions: resolvedEnvironment.allowMultipleSessions ?? false,
  
+  /** 
+    * Controls where auth tokens are read/written.
+    * false: token is kept in HttpOnly cookies (shared across tabs, more secure).
+    * true: token is kept in sessionStorage (tab-scoped sessions, useful for multi-account testing).
+  */
+  sessionBasedToken: resolvedEnvironment.sessionBasedToken ?? false,
+
   /**
    * Number of days before a session expires in Redis.
    * After this time, users will need to log in again.
    */
   sessionExpiryDays: 7,
- 
-  // ============================================
-  // SOCKET & MULTIPLAYER FEATURES
-  // ============================================
  
   /**
    * Enable multiplayer awareness broadcasting.
@@ -79,19 +98,11 @@ const config = {
    */
   socketActivityBroadcaster: false,
  
-  // ============================================
-  // LOCALIZATION
-  // ============================================
- 
   /** Default language for notifications and UI (matches files in src/_locales/) */
-  defaultLanguage: 'en',
+  defaultLanguage: 'en' as LANGUAGE,
  
   /** Default theme when user hasn't set a preference */
-  defaultTheme: 'dark' as 'light' | 'dark',
-
-  // ============================================
-  // RATE LIMITING
-  // ============================================
+  defaultTheme: 'light' as THEME,
 
   /**
    * Rate limiting configuration for API requests.
@@ -105,11 +116,11 @@ const config = {
    * ```
    */
   rateLimiting: {
-    /** Requests per minute per authenticated user */
+    /** Fallback requests per minute for any API that does not export its own rateLimit. */
     defaultApiLimit: 60 as number | false,
-    /** Requests per minute per IP (unauthenticated) */
+    /** Global requests per minute per IP across all API routes combined. */
     defaultIpLimit: 100 as number | false,
-    /** Sliding window duration in ms */
+    /** Request window duration in milliseconds used by both limits. */
     windowMs: 60000,
   },
 };
@@ -118,20 +129,17 @@ const config = {
 // TYPE DEFINITIONS
 // ============================================
  
-/**
- * Session data structure stored in Redis.
- * Extend this interface to add custom fields to user sessions.
- */
-export interface SessionLayout extends user {
+export interface SessionLayout extends User {
+  avatarFallback: string;
   token: string;
-  roomCodes?: string[]; // Room codes the user has joined
+  roomCodes?: string[];
   location?: {
     pathName: string;
     searchParams: {
       [key: string]: string;
     };
   };
-};
+} 
  
 /**
  * Authentication configuration for API and Sync handlers.
@@ -183,6 +191,7 @@ export const {
   defaultLanguage,
   mobileConsole,
   allowMultipleSessions,
+  sessionBasedToken,
   sessionExpiryDays,
   socketActivityBroadcaster,
   rateLimiting

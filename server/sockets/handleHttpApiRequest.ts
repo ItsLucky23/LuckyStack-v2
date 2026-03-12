@@ -40,6 +40,7 @@ interface HttpApiRequestParams {
   name: string;
   data: Record<string, any>;
   token: string | null;
+  requesterIp?: string;
   xLanguageHeader?: string | string[];
   acceptLanguageHeader?: string | string[];
   /** HTTP method from the request */
@@ -63,6 +64,7 @@ export async function handleHttpApiRequest({
   name,
   data,
   token,
+  requesterIp,
   xLanguageHeader,
   acceptLanguageHeader,
   method = 'POST'
@@ -198,26 +200,47 @@ export async function handleHttpApiRequest({
     });
   }
 
-  // Rate limiting check
+  // Rate limiting check: per-API bucket (custom rateLimit or defaultApiLimit fallback)
   const apiRateLimit = apisObject[resolvedName].rateLimit;
-  const effectiveLimit = apiRateLimit !== undefined
+  const effectiveApiLimit = apiRateLimit !== undefined
     ? apiRateLimit
     : config.rateLimiting.defaultApiLimit;
 
-  if (effectiveLimit !== false && effectiveLimit > 0) {
-    // For HTTP, we use token-based key or fall back to a generic "http" key
-    const rateLimitKey = user?.id
-      ? `user:${user.id}:api:${name}`
-      : `http:api:${normalizedName}`;
+  if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
+    const requesterIdentity = token ?? requesterIp ?? 'anonymous';
+    const keyPrefix = token ? 'token' : 'ip';
+    const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${normalizedName}`;
 
     const { allowed, resetIn } = checkRateLimit({
       key: rateLimitKey,
-      limit: effectiveLimit,
+      limit: effectiveApiLimit,
       windowMs: config.rateLimiting.windowMs
     });
 
     if (!allowed) {
       console.log(`Rate limit exceeded for HTTP API ${normalizedName}`, 'yellow');
+      return buildNetworkError({
+        response: {
+          status: 'error',
+          errorCode: 'api.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+        },
+        fallbackHttpStatus: 429,
+      });
+    }
+  }
+
+  // Global per-IP bucket across all APIs
+  if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
+    const ipBucket = requesterIp ?? 'unknown';
+    const { allowed, resetIn } = checkRateLimit({
+      key: `ip:${ipBucket}:api:all`,
+      limit: config.rateLimiting.defaultIpLimit,
+      windowMs: config.rateLimiting.windowMs
+    });
+
+    if (!allowed) {
+      console.log(`Global IP rate limit exceeded for ${ipBucket}`, 'yellow');
       return buildNetworkError({
         response: {
           status: 'error',
