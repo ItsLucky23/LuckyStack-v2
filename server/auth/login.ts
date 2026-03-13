@@ -76,6 +76,21 @@ const sanitizeUserForSession = <T extends { password?: unknown }>(user: T): Omit
   return safeUser;
 };
 
+const toReasonKey = (error: unknown, fallback = 'api.internalServerError'): string => {
+  if (typeof error === 'string' && error.length > 0) {
+    return error;
+  }
+
+  if (error instanceof Error && error.message) {
+    const message = error.message.toLowerCase();
+    if (message.includes('authentication failed') || message.includes('scram failure')) {
+      return 'api.internalServerError';
+    }
+  }
+
+  return fallback;
+};
+
 // Route that starts the OAuth flow for the specified provider and redirects to the callback endpoint
 const loginWithCredentials = async (params: paramsType) => {
 
@@ -111,7 +126,7 @@ const loginWithCredentials = async (params: paramsType) => {
     const [checkEmailError, checkEmailResponse] = await tryCatch(checkEmail);
     if (checkEmailError) {
       console.log(checkEmailError);
-      return { status: false, reason: checkEmailError };
+      return { status: false, reason: toReasonKey(checkEmailError) };
     }
     if (checkEmailResponse) { return { status: false, reason: 'login.emailExists' }; }
 
@@ -135,7 +150,7 @@ const loginWithCredentials = async (params: paramsType) => {
 
     //? here we create the new user
     const [createNewUserError, createNewUserResponse] = await tryCatch(createNewUser);
-    if (createNewUserError) { return { status: false, reason: createNewUserError }; }
+    if (createNewUserError) { return { status: false, reason: toReasonKey(createNewUserError) }; }
     if (createNewUserResponse) {
       return {
         status: true,
@@ -160,7 +175,7 @@ const loginWithCredentials = async (params: paramsType) => {
     const [findUserError, findUserResponse] = await tryCatch(findUser);
     if (findUserError) {
       console.log(findUserError, ' findUserError');
-      return { status: false, reason: findUserError };
+      return { status: false, reason: toReasonKey(findUserError) };
     }
     if (!findUserResponse) { return { status: false, reason: 'login.userNotFound' }; }
 

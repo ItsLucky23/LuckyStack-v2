@@ -82,7 +82,10 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     }
 
     if (!response.status) {
-      notify.error({ key: response.reason });
+      const reasonKey = typeof response.reason === 'string' && response.reason.length > 0
+        ? response.reason
+        : 'api.internalServerError';
+      notify.error({ key: reasonKey });
       setLoading(false);
       return;
     }

@@ -174,8 +174,11 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
     //? if it failed to either login or creating an account then we return
     if (!status) {
+      const reasonKey = typeof reason === 'string' && reason.length > 0
+        ? reason
+        : 'api.internalServerError';
       res.setHeader("content-type", "application/json; charset=utf-8");
-      return res.end(JSON.stringify({ status, reason: reason || 'internal server error' }));
+      return res.end(JSON.stringify({ status, reason: reasonKey }));
     }
 
     //? if it was successful then we apply the cookie and return the user id and reason for the login or account creation
