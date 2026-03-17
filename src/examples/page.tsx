@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from "react-router-dom";
 
 import { useSession } from "src/_providers/SessionProvider";
+import Dropdown from "src/_components/Dropdown";
 import { apiRequest } from "src/_sockets/apiRequest";
 import { joinRoom } from "src/_sockets/socketInitializer";
 import { syncRequest, useSyncEvents } from "src/_sockets/syncRequest";
@@ -16,6 +17,40 @@ export default function ExamplesPage() {
   const btnPlus = "+";
   const [counter, setCounter] = useState(0);
   const [apiResults, setApiResults] = useState<{ APINAME: string; result: unknown; ts: string }[]>([]);
+  const [selectedDropdownValue, setSelectedDropdownValue] = useState<string | number>("jow");
+  const dropdownSizes = ["sm", "md", "lg", "xl"] as const;
+  const [selectedDropdownSize, setSelectedDropdownSize] = useState<(typeof dropdownSizes)[number]>("lg");
+  const [showDropdownSearch, setShowDropdownSearch] = useState(true);
+
+  const dropdownItems = [
+    "jow",
+    "hiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+    {
+      value: "custom-card",
+      placeholder: "JOWWW",
+      item: <div className="rounded bg-primary px-2 py-1 text-title-primary">JOWWW</div>,
+      selectedItem: <div className="truncate">JOWWW</div>,
+      searchText: "jow custom",
+    },
+    {
+      value: "custom-button",
+      placeholder: "Button item",
+      item: (
+        <button
+          type="button"
+          className="rounded border border-container2-border bg-container2 px-2 py-1 text-title"
+          onClick={(event) => {
+            event.stopPropagation();
+            console.log(123);
+          }}
+        >
+          Clickable custom button
+        </button>
+      ),
+      searchText: "button custom",
+    },
+    'asdasd'
+  ];
 
   useEffect(() => {
     void joinRoom('examples-room');
@@ -164,6 +199,63 @@ export default function ExamplesPage() {
             >
               {translate({ key: 'examples.callApi' })}
             </button>
+          </div>
+
+          <div className="md:col-span-2 lg:col-span-2 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
+            <h3 className="font-semibold text-title text-sm">Dropdown component</h3>
+            <p className="text-xs text-common">Choose dropdown size and toggle the search input field.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {dropdownSizes.map((sizeOption) => {
+                const isActive = selectedDropdownSize === sizeOption;
+                return (
+                  <button
+                    key={sizeOption}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDropdownSize(sizeOption);
+                    }}
+                    className={`
+                      h-8 px-3 rounded-md border text-xs font-medium transition-colors
+                      ${isActive
+                        ? "bg-primary border-primary-border text-title-primary"
+                        : "bg-container2 border-container2-border text-title hover:bg-container2-hover"
+                      }
+                    `}
+                  >
+                    {sizeOption.toUpperCase()}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDropdownSearch((prev) => !prev);
+                }}
+                className={`
+                  h-8 px-3 rounded-md border text-xs font-medium transition-colors
+                  ${showDropdownSearch
+                    ? "bg-correct border-correct text-title-primary hover:bg-correct-hover"
+                    : "bg-container2 border-container2-border text-title hover:bg-container2-hover"
+                  }
+                `}
+              >
+                Search input: {showDropdownSearch ? "On" : "Off"}
+              </button>
+            </div>
+            <Dropdown
+              items={dropdownItems}
+              value={selectedDropdownValue}
+              onChange={(nextValue) => {
+                setSelectedDropdownValue(nextValue);
+              }}
+              placeholder="Select dropdown item"
+              size={selectedDropdownSize}
+              showSearch={showDropdownSearch}
+              searchPlaceholder="Search dropdown items"
+            />
+            <div className="rounded border border-container2-border bg-container2 px-3 py-2 text-xs text-title">
+              Selected value: {String(selectedDropdownValue)}
+            </div>
           </div>
 
           {/* API Results - Full Width */}

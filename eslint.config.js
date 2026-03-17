@@ -105,7 +105,14 @@ export default tseslint.config(
       }],
       'jsx-a11y/click-events-have-key-events': 'off',
       'jsx-a11y/no-static-element-interactions': 'off',
-      'no-restricted-syntax': 'off',
+      // 'no-restricted-syntax': 'off',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "TSAsExpression > TSAsExpression > Identifier[name=/^(serverOutput|clientOutput|response|result|output|res)$/]",
+          message: 'Do not use double-casts on backend payloads. Use generated types from src/_sockets/apiTypes.generated.ts and discriminated unions instead.',
+        },
+      ],
     },
   },
   {
@@ -116,7 +123,8 @@ export default tseslint.config(
       'src/**/*Sync/**/*.ts'
     ],
     rules: {
-      '@typescript-eslint/no-unused-vars': 'off',
+      // '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': 'on',
     },
   }
 )

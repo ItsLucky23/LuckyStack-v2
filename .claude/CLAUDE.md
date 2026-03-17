@@ -137,6 +137,19 @@ upsertSyncEventCallback({
 });
 ```
 
+### 16. Generated Types Are Mandatory (No Unknown Casts): NEVER cast typed API/sync payloads to `unknown`, `any`, or custom `unsafe*` wrappers when calling `apiRequest`, `syncRequest`, or `upsertSyncEventCallback`.
+  - Treat `src/_sockets/apiTypes.generated.ts` as the source of truth for request/response typing.
+  - Use route/version string literals so inference works (example: `name: 'organization-settings/sendInvite', version: 'v1'`).
+  - In sync callbacks, use discriminated unions directly:
+    ```typescript
+    callback: ({ serverOutput }) => {
+      if (serverOutput.status !== 'success') return;
+      // serverOutput is now typed success output from generated map
+      console.log(serverOutput.organizationId);
+    }
+    ```
+  - If inference fails, fix the typing source or regenerate maps instead of adding casts/wrappers.
+
 AI self-check before finalizing changes:
 
 - Did I rely on generated route/version types?
