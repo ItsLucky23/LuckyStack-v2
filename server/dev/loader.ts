@@ -16,6 +16,83 @@ export const devFunctions: Record<string, any> = {};
 const API_VERSION_REGEX = /_v(\d+)$/;
 const SYNC_VERSION_REGEX = /_(server|client)_v(\d+)$/;
 
+const normalizePath = (value: string): string => value.replace(/\\/g, '/');
+
+const resolveApiRouteMetaFromPath = (filePath: string): { routeKey: string; absolutePath: string } | null => {
+  const absolutePath = path.resolve(filePath);
+  const normalizedAbsolutePath = normalizePath(absolutePath);
+  const normalizedSrcDir = normalizePath(SRC_DIR);
+
+  if (!normalizedAbsolutePath.startsWith(normalizedSrcDir) || !normalizedAbsolutePath.endsWith('.ts')) {
+    return null;
+  }
+
+  const relativePath = normalizePath(path.relative(SRC_DIR, absolutePath));
+  const segments = relativePath.split('/');
+  const apiIndex = segments.indexOf('_api');
+  if (apiIndex === -1 || apiIndex === segments.length - 1) {
+    return null;
+  }
+
+  const pageLocation = segments.slice(0, apiIndex).join('/');
+  const apiFilePath = segments.slice(apiIndex + 1).join('/');
+  const rawApiName = apiFilePath.replace(/\.ts$/, '');
+  const versionMatch = rawApiName.match(API_VERSION_REGEX);
+
+  if (!versionMatch) {
+    return null;
+  }
+
+  const version = `v${versionMatch[1]}`;
+  const apiName = rawApiName.replace(API_VERSION_REGEX, '');
+  const routeKey = pageLocation
+    ? `api/${pageLocation}/${apiName}/${version}`
+    : `api/${apiName}/${version}`;
+
+  return { routeKey, absolutePath };
+};
+
+const resolveSyncRouteMetaFromPath = (
+  filePath: string,
+): { routeKey: string; kind: 'server' | 'client'; absolutePath: string } | null => {
+  const absolutePath = path.resolve(filePath);
+  const normalizedAbsolutePath = normalizePath(absolutePath);
+  const normalizedSrcDir = normalizePath(SRC_DIR);
+
+  if (!normalizedAbsolutePath.startsWith(normalizedSrcDir) || !normalizedAbsolutePath.endsWith('.ts')) {
+    return null;
+  }
+
+  const relativePath = normalizePath(path.relative(SRC_DIR, absolutePath));
+  const segments = relativePath.split('/');
+  const syncIndex = segments.indexOf('_sync');
+  if (syncIndex === -1 || syncIndex === segments.length - 1) {
+    return null;
+  }
+
+  const pageLocation = segments.slice(0, syncIndex).join('/');
+  const syncFilePath = segments.slice(syncIndex + 1).join('/');
+  const rawSyncName = syncFilePath.replace(/\.ts$/, '');
+  const match = rawSyncName.match(SYNC_VERSION_REGEX);
+
+  if (!match) {
+    return null;
+  }
+
+  const kind = match[1] as 'server' | 'client';
+  const version = `v${match[2]}`;
+  const syncName = rawSyncName.replace(SYNC_VERSION_REGEX, '');
+  const routeBaseKey = pageLocation
+    ? `sync/${pageLocation}/${syncName}/${version}`
+    : `sync/${syncName}/${version}`;
+
+  return {
+    routeKey: `${routeBaseKey}_${kind}`,
+    kind,
+    absolutePath,
+  };
+};
+
 export const initializeAll = async () => {
   await Promise.all([initializeApis(), initializeSyncs(), initializeFunctions()]);
 };
@@ -85,6 +162,56 @@ export const initializeApis = async () => {
   }
 };
 
+export const upsertApiFromFile = async (filePath: string): Promise<void> => {
+  const routeMeta = resolveApiRouteMetaFromPath(filePath);
+  if (!routeMeta) {
+    return;
+  }
+
+  invalidateProgramCache();
+  clearRuntimeTypeResolverCache();
+
+  const [err, module] = await tryCatch(async () => importFile(routeMeta.absolutePath));
+  if (err) {
+    console.log(`[loader][api] failed to import ${routeMeta.routeKey} from ${routeMeta.absolutePath}:`, err, 'red');
+    return;
+  }
+
+  const resolvedModule = module?.default ? { ...module.default, ...module } : module;
+  const { auth = {}, main, rateLimit, httpMethod, schema } = resolvedModule;
+
+  if (!main || typeof main !== 'function') {
+    delete devApis[routeMeta.routeKey];
+    return;
+  }
+
+  const inputType = getInputTypeFromFile(routeMeta.absolutePath);
+
+  devApis[routeMeta.routeKey] = {
+    main,
+    auth: {
+      login: auth.login || false,
+      additional: auth.additional || [],
+    },
+    rateLimit,
+    httpMethod,
+    schema,
+    inputType,
+    inputTypeFilePath: routeMeta.absolutePath,
+  };
+};
+
+export const removeApiFromFile = (filePath: string): void => {
+  const routeMeta = resolveApiRouteMetaFromPath(filePath);
+  if (!routeMeta) {
+    return;
+  }
+
+  invalidateProgramCache();
+  clearRuntimeTypeResolverCache();
+  delete devApis[routeMeta.routeKey];
+};
+
 const scanApiFolder = async (file: string, basePath = "") => {
   const fullPath = path.join(SRC_DIR, basePath, file);
   if (!fs.statSync(fullPath).isDirectory()) return;
@@ -149,6 +276,62 @@ export const initializeSyncs = async () => {
   for (const file of srcFolder) {
     await scanSyncFolder(file);
   }
+};
+
+export const upsertSyncFromFile = async (filePath: string): Promise<void> => {
+  const routeMeta = resolveSyncRouteMetaFromPath(filePath);
+  if (!routeMeta) {
+    return;
+  }
+
+  invalidateProgramCache();
+  clearRuntimeTypeResolverCache();
+
+  const [err, module] = await tryCatch(async () => importFile(routeMeta.absolutePath));
+  if (err) {
+    console.log(`[loader][sync] failed to import ${routeMeta.absolutePath}:`, err, 'red');
+    return;
+  }
+
+  const resolvedSyncModule = module?.default
+    ? { ...module.default, ...module }
+    : module;
+
+  if (routeMeta.kind === 'server') {
+    if (!resolvedSyncModule.main || typeof resolvedSyncModule.main !== 'function') {
+      delete devSyncs[routeMeta.routeKey];
+      return;
+    }
+
+    const inputType = getSyncClientDataType(routeMeta.absolutePath);
+
+    devSyncs[routeMeta.routeKey] = {
+      main: resolvedSyncModule.main,
+      auth: resolvedSyncModule.auth || {},
+      inputType,
+      inputTypeFilePath: routeMeta.absolutePath,
+    };
+
+    return;
+  }
+
+  if (!resolvedSyncModule.main || typeof resolvedSyncModule.main !== 'function') {
+    delete devSyncs[routeMeta.routeKey];
+    return;
+  }
+
+  devSyncs[routeMeta.routeKey] = resolvedSyncModule.main;
+};
+
+export const removeSyncFromFile = (filePath: string): void => {
+  const routeMeta = resolveSyncRouteMetaFromPath(filePath);
+  if (!routeMeta) {
+    return;
+  }
+
+  invalidateProgramCache();
+  clearRuntimeTypeResolverCache();
+  delete devSyncs[routeMeta.routeKey];
 };
 
 const scanSyncFolder = async (file: string, basePath = "") => {

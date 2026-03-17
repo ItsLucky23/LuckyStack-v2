@@ -166,10 +166,15 @@ function GameBoard() {
 
 The dev server watches for file changes and automatically:
 
-1. **API files** (`_api/*.ts`) - Regenerates types in `apiTypes.generated.ts`
-2. **Sync files** (`_sync/*.ts`) - Injects templates and updates types
+1. **API files** (`_api/*.ts`) - Regenerates types and incrementally reloads only changed API handlers in memory
+2. **Sync files** (`_sync/*.ts`) - Injects templates, regenerates types, and incrementally reloads only changed sync handlers in memory
 3. **Function files** (`server/functions/*.ts`, `shared/*.ts`) - Reloads functions and regenerates `apiTypes.generated.ts`
 4. **Components** - Vite HMR handles the rest
+
+For direct `_api` and `_sync` edits, the watcher reloads only the changed route module in memory.
+Type-map regeneration for route files runs on add/delete events, not on every save.
+
+For non-route dependencies in `src/` (files outside `_api`/`_sync`), the watcher still does a full API/sync reload so imports remain consistent.
 
 Type regeneration is asynchronous and can lag briefly (usually hundreds of milliseconds).
 

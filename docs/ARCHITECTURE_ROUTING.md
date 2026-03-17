@@ -81,6 +81,7 @@ src/{page}/_api/{name}_v1.ts  -->  accessible as api/{page}/{name}/v1
 ### How It Works
 
 **Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_api/` as API handlers.
+After initial load, the dev watcher performs incremental in-memory updates for changed `_api` files instead of rebuilding the entire API map on every save.
 
 **Production:** The `scripts/generateServerRequests.ts` build script statically generates a route map that's bundled into `server/prod/generatedApis.ts`.
 
@@ -225,6 +226,9 @@ At least one of the two files must exist. Both are optional individually.
 ### How It Works
 
 **Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_sync/` that end with `_server.ts` or `_client.ts`.
+After initial load, the dev watcher performs incremental in-memory updates for changed `_sync` files instead of rebuilding the entire sync map on every save.
+
+For non-route dependency changes (for example shared modules under `src/` outside `_api` and `_sync`), the watcher still performs a full API/sync reload because multiple handlers can depend on that module.
 
 **Production:** Same build script generates static route maps.
 

@@ -126,8 +126,8 @@ When a user logs in, the system automatically kicks all previous sessions for th
 
 | File           | Purpose                                                     |
 | -------------- | ----------------------------------------------------------- |
-| `loader.ts`    | Hot-reloads `_api` and `_sync` files without server restart |
-| `hotReload.ts` | File watcher that triggers reloads on changes               |
+| `loader.ts`    | Hot-reloads `_api` and `_sync` files without server restart, with per-file incremental updates after initial scan |
+| `hotReload.ts` | File watcher that triggers incremental route reloads for direct `_api`/`_sync` edits and full reloads for shared route dependencies |
 
 ### `server/sockets/utils/` - Socket Utilities
 
