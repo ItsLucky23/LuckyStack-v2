@@ -38,28 +38,36 @@ interface SlideInWrapperProps {
 
 const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: SlideInWrapperProps) => {
   const [location, setLocation] = useState<'left' | 'center' | 'right'>('right');
+  const hasMountedRef = useRef(false);
 
   useLayoutEffect(() => {
     // Start with off-screen to the right
     setLocation('right');
 
     const timer = requestAnimationFrame(() => {
+      hasMountedRef.current = true;
       setLocation('center'); // trigger the transition
     });
 
     return () => { cancelAnimationFrame(timer); };
   }, []);
 
+  const targetLocation: 'left' | 'center' | 'right' = isClosing
+    ? 'right'
+    : (isTop || soonIsTop)
+      ? 'center'
+      : 'left';
+
   useEffect(() => {
-    // console.log("isClosing: ", isClosing, 'location: ', location, "top: ", isTop)
-    if (!isTop && location === 'center') {
-      setLocation('left'); // trigger the transition    
-    } else if (isClosing && location === 'center') {
-      setLocation('right'); // trigger the transition
-    } else if (location === 'left' && soonIsTop) {
-      setLocation('center'); // trigger the transition
+    // Keep the first-frame mount animation, then sync to the derived target state.
+    if (!hasMountedRef.current) {
+      return;
     }
-  }, [isTop, isClosing, soonIsTop, location]);
+
+    if (location !== targetLocation) {
+      setLocation(targetLocation);
+    }
+  }, [location, targetLocation]);
 
   const isVisible = !isClosing;
 
