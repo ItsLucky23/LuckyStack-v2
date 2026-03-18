@@ -59,7 +59,7 @@ export default function ExamplesPage() {
       ),
       searchText: "button custom",
     },
-    'asdasd'
+    'asdasd',
   ];
 
   useEffect(() => {

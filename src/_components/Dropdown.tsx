@@ -80,15 +80,19 @@ export default function Dropdown({
   noResultsText = "No results",
 }: DropdownProps) {
   const animationDuration = 200;
+  const listMaxHeight = 320;
+  const searchSectionHeight = 56;
+  const menuVerticalPadding = 8;
   const [isOpen, setIsOpen] = useState(false);
   const [isMenuMounted, setIsMenuMounted] = useState(false);
   const [isMenuPositionReady, setIsMenuPositionReady] = useState(false);
   const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const [menuDirection, setMenuDirection] = useState<DropdownDirection>("down");
-  const [menuMaxHeight, setMenuMaxHeight] = useState(240);
+  const [listViewportMaxHeight, setListViewportMaxHeight] = useState(listMaxHeight);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const openAnimationFrameRef = useRef<number | null>(null);
@@ -156,34 +160,47 @@ export default function Dropdown({
     const viewportPadding = 8;
     const triggerGap = 4;
     const viewportHeight = globalThis.innerHeight;
-    const searchHeight = showSearch ? 56 : 0;
-    const estimatedOptionHeight = 38;
-    const preferredMenuHeight = Math.min(320, searchHeight + normalizedOptions.length * estimatedOptionHeight + 12);
-    const measuredMenuHeight = menuRef.current?.offsetHeight ?? 0;
-    const estimatedMenuHeight = Math.max(preferredMenuHeight, measuredMenuHeight);
-
+    const searchHeight = showSearch ? searchSectionHeight : 0;
+    const listContentHeight = listRef.current?.scrollHeight ?? listMaxHeight;
+    const desiredListHeight = Math.min(listMaxHeight, listContentHeight);
+    const desiredDropdownHeight = searchHeight + desiredListHeight + menuVerticalPadding;
     const spaceBelow = viewportHeight - rect.bottom - viewportPadding;
     const spaceAbove = rect.top - viewportPadding;
-    const menuBottomIfDown = rect.bottom + triggerGap + estimatedMenuHeight;
-    const shouldOpenUp = menuBottomIfDown > viewportHeight - viewportPadding;
+    const canFitDesiredDown = spaceBelow >= desiredDropdownHeight;
+    const canFitDesiredUp = spaceAbove >= desiredDropdownHeight;
 
-    const availableSpace = shouldOpenUp ? spaceAbove : spaceBelow;
-    const computedMaxHeight = Math.max(140, availableSpace - triggerGap);
-    const renderedMenuHeight = Math.min(estimatedMenuHeight, computedMaxHeight);
+    let nextDirection: DropdownDirection;
+    if (canFitDesiredDown) {
+      nextDirection = "down";
+    } else if (canFitDesiredUp) {
+      nextDirection = "up";
+    } else {
+      nextDirection = "down";
+    }
 
-    const top = shouldOpenUp
+    const availableSpace = nextDirection === "up" ? spaceAbove : spaceBelow;
+    const availableListHeight = Math.max(1, availableSpace - triggerGap - searchHeight - menuVerticalPadding);
+    const nextListMaxHeight = Math.min(listMaxHeight, availableListHeight);
+    const maxRenderedMenuHeight = searchHeight + menuVerticalPadding + nextListMaxHeight;
+    const measuredMenuHeight = menuRef.current?.offsetHeight;
+    const renderedMenuHeight = measuredMenuHeight
+      ? Math.min(measuredMenuHeight, maxRenderedMenuHeight)
+      : maxRenderedMenuHeight;
+    const maxTop = viewportHeight - viewportPadding - renderedMenuHeight;
+
+    const top = nextDirection === "up"
       ? Math.max(viewportPadding, rect.top - triggerGap - renderedMenuHeight)
-      : rect.bottom + triggerGap;
+      : Math.min(rect.bottom + triggerGap, Math.max(viewportPadding, maxTop));
 
-    setMenuDirection(shouldOpenUp ? "up" : "down");
-    setMenuMaxHeight(computedMaxHeight);
+    setMenuDirection(nextDirection);
+    setListViewportMaxHeight(nextListMaxHeight);
 
     setMenuPosition({
       top,
       left: rect.left,
       width: rect.width,
     });
-  }, [normalizedOptions.length, showSearch]);
+  }, [listMaxHeight, menuVerticalPadding, searchSectionHeight, showSearch]);
 
   const openDropdown = () => {
     if (closeTimeoutRef.current) {
@@ -333,7 +350,6 @@ export default function Dropdown({
   });
 
   const currentLabel = selectedOption?.selectedItem ?? placeholder;
-  const optionsMaxHeight = Math.max(96, menuMaxHeight - (showSearch ? 56 : 0));
   const hiddenMenuStateClass = getHiddenMenuStateClass(menuDirection);
   const menuStateClass = isMenuPositionReady
     ? (isMenuVisible ? "opacity-100 scale-100 translate-y-0 pointer-events-auto" : hiddenMenuStateClass)
@@ -357,9 +373,9 @@ export default function Dropdown({
           }
         }}
         className={`
-          flex w-full min-w-0 items-center justify-between gap-3 rounded-md border border-container1-border
+          flex min-w-0 items-center justify-between gap-3 rounded-md border border-container1-border
           bg-container1 transition-colors hover:bg-container1-hover cursor-pointer select-none
-          px-2.5 py-2 text-sm ${triggerWidthClass}
+          px-2.5 py-2 text-sm ${size ? triggerWidthClass : "w-full"}
         `}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
@@ -383,7 +399,7 @@ export default function Dropdown({
           style={{
             top: menuPosition.top,
             left: menuPosition.left,
-            width: selectedSizeConfig ? Math.max(menuPosition.width, selectedSizeConfig.minWidthPx) : menuPosition.width,
+            width: selectedSizeConfig?.minWidthPx ?? menuPosition.width,
           }}
           className={`
             fixed z-[9999] rounded-md
@@ -409,7 +425,12 @@ export default function Dropdown({
             </div>
           )}
 
-          <div className="flex flex-col overflow-y-auto p-1" style={{ maxHeight: optionsMaxHeight }} role="listbox">
+          <div
+            ref={listRef}
+            className="flex flex-col overflow-y-auto p-1"
+            style={{ maxHeight: listViewportMaxHeight }}
+            role="listbox"
+          >
             {filteredOptions.map((option) => {
               const isSelected = option.value === value;
 
