@@ -277,16 +277,28 @@ export const useSyncEvents = () => {
     }
 
     const nextCallbacks = getCallbacksForRoute(fullName);
+    // Multiple components can intentionally subscribe to the same sync event.
+    // Only warn when the exact same callback is registered twice.
+    if (nextCallbacks.includes(callback)) {
+      if (dev) {
+        console.warn(`[SyncEvents] Duplicate callback registration for ${fullName} was ignored.`);
+      }
+
+      localRegistryRef.current.set(fullName, callback);
+
+      return () => {
+        const current = getCallbacksForRoute(fullName);
+        syncEvents[fullName] = current.filter((cb) => cb !== callback);
+
+        if (localRegistryRef.current.get(fullName) === callback) {
+          localRegistryRef.current.delete(fullName);
+        }
+      };
+    }
+
     nextCallbacks.push(callback);
     syncEvents[fullName] = nextCallbacks;
     localRegistryRef.current.set(fullName, callback);
-
-    if (dev && nextCallbacks.length > 1) {
-      console.warn(
-        `[SyncEvents] Multiple callbacks registered for ${fullName} (${nextCallbacks.length}). ` +
-        `If this is unintentional, register callbacks in useEffect and return cleanup.`
-      );
-    }
 
     return () => {
       const current = getCallbacksForRoute(fullName);

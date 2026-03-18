@@ -1,5 +1,12 @@
 import { io, ManagerOptions, Socket, SocketOptions } from 'socket.io-client';
-import config, { dev, backendUrl, SessionLayout } from "config";
+import {
+  dev,
+  backendUrl,
+  SessionLayout,
+  sessionBasedToken,
+  socketActivityBroadcaster,
+  loginPageUrl,
+} from "config";
 import notify from "src/_functions/notify";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { useEffect, useRef } from "react";
@@ -61,7 +68,7 @@ export function useSocket(session: SessionLayout | null) {
       auth: {}
     };
 
-    if (config.sessionBasedToken) {
+    if (sessionBasedToken) {
       const token = sessionStorage.getItem("token");
       if (token) {
         socketOptions.auth = { token };
@@ -74,7 +81,7 @@ export function useSocket(session: SessionLayout | null) {
     const canFlushQueue = () => socketConnection.connected && isOnline();
 
     const handleVisibility = () => {
-      if (!config.socketActivityBroadcaster) { return; }
+      if (!socketActivityBroadcaster) { return; }
 
       console.log(document.visibilityState)
 
@@ -92,7 +99,7 @@ export function useSocket(session: SessionLayout | null) {
     };
     document.addEventListener("visibilitychange", handleVisibility);
 
-    if (config.socketActivityBroadcaster) {
+    if (socketActivityBroadcaster) {
       initSyncRequest({
         setSocketStatus,
         sessionRef,
@@ -125,10 +132,10 @@ export function useSocket(session: SessionLayout | null) {
 
     socketConnection.on("logout", (status: "success" | "error") => {
       if (status === "success") {
-        if (config.sessionBasedToken) {
+        if (sessionBasedToken) {
           sessionStorage.clear();
         }
-        globalThis.location.href = config.loginPageUrl;
+        globalThis.location.href = loginPageUrl;
       } else {
         console.error("Logout failed");
         notify.error({ key: 'common.logoutFailed' });
