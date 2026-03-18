@@ -52,11 +52,12 @@ const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: Slid
     return () => { cancelAnimationFrame(timer); };
   }, []);
 
-  const targetLocation: 'left' | 'center' | 'right' = isClosing
-    ? 'right'
-    : (isTop || soonIsTop)
-      ? 'center'
-      : 'left';
+  let targetLocation: 'left' | 'center' | 'right' = 'left';
+  if (isClosing) {
+    targetLocation = 'right';
+  } else if (isTop || soonIsTop) {
+    targetLocation = 'center';
+  }
 
   useEffect(() => {
     // Keep the first-frame mount animation, then sync to the derived target state.

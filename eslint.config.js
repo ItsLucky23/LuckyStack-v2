@@ -29,7 +29,9 @@ export default tseslint.config(
       ecmaVersion: 2020,
       globals: globals.browser,
       parserOptions: {
-        projectService: true,
+        projectService: {
+          noWarnOnMultipleProjects: true,
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -37,6 +39,7 @@ export default tseslint.config(
       'import-x/resolver': {
         typescript: {
           alwaysTryTypes: true,
+          noWarnOnMultipleProjects: true,
           project: ['./tsconfig.json', './tsconfig.client.json', './tsconfig.server.json'],
         },
       },
@@ -124,7 +127,6 @@ export default tseslint.config(
     ],
     rules: {
       // '@typescript-eslint/no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': 'on',
     },
   }
 )

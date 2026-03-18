@@ -1,6 +1,6 @@
 import { faCaretDown, faCheck } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { ReactNode, useState, useRef, useEffect, useLayoutEffect } from "react";
+import { ReactNode, useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 
 type PrimitiveDropdownItem = string | number;
@@ -52,6 +52,20 @@ interface DropdownProps {
   noResultsText?: string;
 }
 
+const isPrimitiveItem = (item: unknown): item is PrimitiveDropdownItem =>
+  typeof item === "string" || typeof item === "number";
+
+const isDropdownObjectItem = (item: unknown): item is DropdownItem =>
+  typeof item === "object" && item !== null && "item" in item;
+
+const getHiddenMenuStateClass = (direction: DropdownDirection) => {
+  if (direction === "up") {
+    return "opacity-0 scale-90 translate-y-2 pointer-events-none";
+  }
+
+  return "opacity-0 scale-90 -translate-y-2 pointer-events-none";
+};
+
 export default function Dropdown({
   items,
   onChange,
@@ -87,20 +101,14 @@ export default function Dropdown({
     xl: { minWidthPx: 420, triggerWidth: "w-[420px]", option: "px-2.5 py-1.5 text-sm", icon: "text-xs" },
   };
 
-  const isPrimitiveItem = (item: unknown): item is PrimitiveDropdownItem =>
-    typeof item === "string" || typeof item === "number";
-
-  const isDropdownObjectItem = (item: DropdownInputItem): item is DropdownItem =>
-    typeof item === "object" && item !== null && "item" in item;
-
   const normalizedOptions: NormalizedOption[] = items.map((item, index) => {
     if (isDropdownObjectItem(item)) {
-      const rawItem = item.item ?? item.placeholder ?? `Item ${index + 1}`;
-      const label = item.placeholder ?? (isPrimitiveItem(rawItem) ? String(rawItem) : `Item ${index + 1}`);
+      const rawItem = item.item ?? item.placeholder ?? `Item ${String(index + 1)}`;
+      const label = item.placeholder ?? (isPrimitiveItem(rawItem) ? String(rawItem) : `Item ${String(index + 1)}`);
 
       return {
-        key: item.key ?? `${String(item.value ?? label)}-${index}`,
-        value: item.value ?? (isPrimitiveItem(rawItem) ? rawItem : `jsx-item-${index}`),
+        key: item.key ?? `${String(item.value ?? label)}-${String(index)}`,
+        value: item.value ?? (isPrimitiveItem(rawItem) ? rawItem : `jsx-item-${String(index)}`),
         label,
         item: rawItem,
         selectedItem: item.selectedItem ?? (isPrimitiveItem(rawItem) ? rawItem : label),
@@ -112,7 +120,7 @@ export default function Dropdown({
 
     if (isPrimitiveItem(item)) {
       return {
-        key: `${String(item)}-${index}`,
+        key: `${String(item)}-${String(index)}`,
         value: item,
         label: String(item),
         item,
@@ -124,18 +132,18 @@ export default function Dropdown({
     }
 
     return {
-      key: `jsx-item-${index}`,
-      value: `jsx-item-${index}`,
-      label: `Item ${index + 1}`,
+      key: `jsx-item-${String(index)}`,
+      value: `jsx-item-${String(index)}`,
+      label: `Item ${String(index + 1)}`,
       item,
       selectedItem: item,
-      searchText: `Item ${index + 1}`,
+      searchText: `Item ${String(index + 1)}`,
       disabled: false,
       index,
     };
   });
 
-  const updateMenuPosition = () => {
+  const updateMenuPosition = useCallback(() => {
     if (!dropdownRef.current) return;
 
     const rect = dropdownRef.current.getBoundingClientRect();
@@ -169,7 +177,7 @@ export default function Dropdown({
       left: rect.left,
       width: rect.width,
     });
-  };
+  }, [normalizedOptions.length, showSearch]);
 
   const openDropdown = () => {
     if (closeTimeoutRef.current) {
@@ -251,14 +259,14 @@ export default function Dropdown({
       globalThis.removeEventListener("resize", handleReposition);
       globalThis.removeEventListener("scroll", handleReposition, true);
     };
-  }, [isMenuMounted, normalizedOptions.length, showSearch, size]);
+  }, [isMenuMounted, updateMenuPosition]);
 
   useLayoutEffect(() => {
     if (!isMenuMounted || !isOpen || isMenuPositionReady) return;
 
     updateMenuPosition();
     setIsMenuPositionReady(true);
-  }, [isMenuMounted, isOpen, isMenuPositionReady, normalizedOptions.length, showSearch, size]);
+  }, [isMenuMounted, isOpen, isMenuPositionReady, updateMenuPosition]);
 
   useEffect(() => {
     if (!isMenuMounted || !isOpen || !isMenuPositionReady || isMenuVisible) return;
@@ -287,7 +295,7 @@ export default function Dropdown({
   useEffect(() => {
     if (!isMenuMounted) return;
     updateMenuPosition();
-  }, [searchValue]);
+  }, [isMenuMounted, searchValue, updateMenuPosition]);
 
   useEffect(() => {
     return () => {
@@ -303,19 +311,27 @@ export default function Dropdown({
 
   if (normalizedOptions.length === 0) return null;
 
-  const selectedOption = value !== undefined
-    ? normalizedOptions.find((option) => option.value === value)
-    : undefined;
+  const selectedOption = value === undefined
+    ? undefined
+    : normalizedOptions.find((option) => option.value === value);
+
+  const query = searchValue.trim().toLowerCase();
+  const shouldFilterOptions = showSearch && query.length > 0;
 
   const filteredOptions = normalizedOptions.filter((option) => {
-    if (!showSearch || !searchValue.trim()) return true;
+    if (shouldFilterOptions) {
+      return `${option.label} ${option.searchText} ${String(option.value)}`.toLowerCase().includes(query);
+    }
 
-    const query = searchValue.trim().toLowerCase();
-    return `${option.label} ${option.searchText} ${String(option.value)}`.toLowerCase().includes(query);
+    return true;
   });
 
   const currentLabel = selectedOption?.selectedItem ?? placeholder;
   const optionsMaxHeight = Math.max(96, menuMaxHeight - (showSearch ? 56 : 0));
+  const hiddenMenuStateClass = getHiddenMenuStateClass(menuDirection);
+  const menuStateClass = isMenuPositionReady
+    ? (isMenuVisible ? "opacity-100 scale-100 translate-y-0 pointer-events-auto" : hiddenMenuStateClass)
+    : hiddenMenuStateClass;
 
   return (
     <div
@@ -369,16 +385,7 @@ export default function Dropdown({
             ${isMenuPositionReady ? "transition duration-200 ease-out" : ""}
             ${menuDirection === "up" ? "origin-bottom" : "origin-top"}
             ${menuClassName}
-            ${!isMenuPositionReady
-              ? menuDirection === "up"
-                ? "opacity-0 scale-90 translate-y-2 pointer-events-none"
-                : "opacity-0 scale-90 -translate-y-2 pointer-events-none"
-              : isMenuVisible
-              ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
-              : menuDirection === "up"
-                ? "opacity-0 scale-90 translate-y-2 pointer-events-none"
-                : "opacity-0 scale-90 -translate-y-2 pointer-events-none"
-            }
+            ${menuStateClass}
           `}
         >
           {showSearch && (

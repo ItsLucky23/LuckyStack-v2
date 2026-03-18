@@ -21,15 +21,25 @@ export default function ExamplesPage() {
   const dropdownSizes = ["sm", "md", "lg", "xl"] as const;
   const [selectedDropdownSize, setSelectedDropdownSize] = useState<(typeof dropdownSizes)[number]>("lg");
   const [showDropdownSearch, setShowDropdownSearch] = useState(true);
+  const jowText = "JOWWW";
+  const clickableButtonText = "Clickable custom button";
+  const dropdownTitleText = "Dropdown component";
+  const dropdownDescriptionText = "Choose dropdown size and toggle the search input field.";
+  const searchInputLabel = "Search input:";
+  const searchEnabledText = "On";
+  const searchDisabledText = "Off";
+  const selectDropdownItemPlaceholder = "Select dropdown item";
+  const searchDropdownItemsPlaceholder = "Search dropdown items";
+  const selectedValueLabel = "Selected value:";
 
   const dropdownItems = [
     "jow",
     "hiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
     {
       value: "custom-card",
-      placeholder: "JOWWW",
-      item: <div className="rounded bg-primary px-2 py-1 text-title-primary">JOWWW</div>,
-      selectedItem: <div className="truncate">JOWWW</div>,
+      placeholder: jowText,
+      item: <div className="rounded bg-primary px-2 py-1 text-title-primary">{jowText}</div>,
+      selectedItem: <div className="truncate">{jowText}</div>,
       searchText: "jow custom",
     },
     {
@@ -44,7 +54,7 @@ export default function ExamplesPage() {
             console.log(123);
           }}
         >
-          Clickable custom button
+          {clickableButtonText}
         </button>
       ),
       searchText: "button custom",
@@ -202,8 +212,8 @@ export default function ExamplesPage() {
           </div>
 
           <div className="md:col-span-2 lg:col-span-2 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">Dropdown component</h3>
-            <p className="text-xs text-common">Choose dropdown size and toggle the search input field.</p>
+            <h3 className="font-semibold text-title text-sm">{dropdownTitleText}</h3>
+            <p className="text-xs text-common">{dropdownDescriptionText}</p>
             <div className="flex flex-wrap items-center gap-2">
               {dropdownSizes.map((sizeOption) => {
                 const isActive = selectedDropdownSize === sizeOption;
@@ -239,7 +249,7 @@ export default function ExamplesPage() {
                   }
                 `}
               >
-                Search input: {showDropdownSearch ? "On" : "Off"}
+                {searchInputLabel} {showDropdownSearch ? searchEnabledText : searchDisabledText}
               </button>
             </div>
             <Dropdown
@@ -248,13 +258,13 @@ export default function ExamplesPage() {
               onChange={(nextValue) => {
                 setSelectedDropdownValue(nextValue);
               }}
-              placeholder="Select dropdown item"
+              placeholder={selectDropdownItemPlaceholder}
               size={selectedDropdownSize}
               showSearch={showDropdownSearch}
-              searchPlaceholder="Search dropdown items"
+              searchPlaceholder={searchDropdownItemsPlaceholder}
             />
             <div className="rounded border border-container2-border bg-container2 px-3 py-2 text-xs text-title">
-              Selected value: {String(selectedDropdownValue)}
+              {selectedValueLabel} {String(selectedDropdownValue)}
             </div>
           </div>
 
