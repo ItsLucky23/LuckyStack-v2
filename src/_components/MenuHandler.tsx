@@ -74,7 +74,7 @@ const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: Slid
 
   return (
     <div
-      className={`${isTop ? 'relative' : 'absolute inset-0'} flex min-h-0 w-full flex-col overflow-y-auto text-text-primary transition-all duration-200 origin-center
+      className={`${isTop ? 'relative' : 'absolute inset-0'} flex h-full min-h-0 w-full flex-col text-text-primary transition-all duration-200 origin-center
         ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none'}
         ${options.background ?? ''}
       `}
@@ -255,7 +255,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
         <div
           role="button"
           tabIndex={0}
-          className={`absolute top-0 left-0 w-full h-full flex items-center justify-center z-[1000] overflow-hidden transition-colors duration-200 ${stack.length === 0 ? 'pointer-events-none' : ''}`}
+          className={`fixed inset-0 z-[1000] flex items-center justify-center overflow-y-auto p-3 sm:p-4 transition-colors duration-200 ${stack.length === 0 ? 'pointer-events-none' : ''}`}
           style={{ backgroundColor: !stackTop?.isClosing && stackTop?.options.dimBackground === true ? 'rgba(0, 0, 0, 0.7)' : 'transparent' }}
           onMouseDown={() => { attemptToCloseAllRef.current = true; }}
           onMouseUp={() => {
@@ -267,7 +267,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
           <div
             role="presentation"
             id="MENUHANDLER"
-            className={`relative flex min-h-0 flex-col overflow-hidden rounded-md transition-all duration-200 max-h-[90vh] ${stackTop && !stackTop.isClosing ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`}
+            className={`relative flex min-h-0 flex-col overflow-hidden rounded-md transition-all duration-200 max-h-[calc(100dvh-2rem)] ${stackTop && !stackTop.isClosing ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`}
             style={{ width: sizeClass }}
             onMouseDown={(e) => { e.stopPropagation(); }}
             onMouseUp={(e) => { e.stopPropagation(); }}
