@@ -12,11 +12,13 @@ const sendLocationUpdate = (pathname: string) => {
   void updateLocationRequest({ location: { pathName: pathname, searchParams } });
 };
 
+const isLocationProviderEnabled = (): boolean => locationProviderEnabled;
+
 export default function LocationProvider() {
   const location = useLocation();
 
   useEffect(() => {
-    if (!locationProviderEnabled) { return; }
+    if (!isLocationProviderEnabled()) { return; }
     sendLocationUpdate(location.pathname);
   }, [location.pathname]);
 
