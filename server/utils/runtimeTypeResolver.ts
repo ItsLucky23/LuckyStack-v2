@@ -11,6 +11,12 @@ interface ObjectField {
   type: string;
 }
 
+interface ObjectIndexSignature {
+  keyName: string;
+  keyType: string;
+  type: string;
+}
+
 interface ResolveState {
   stack: Set<string>;
 }
@@ -77,12 +83,15 @@ const splitTopLevel = (value: string, splitter: '|' | '&' | ','): string[] => {
   return items;
 };
 
-const parseObjectFields = (typeText: string): ObjectField[] => {
+const parseObjectFields = (typeText: string): { fields: ObjectField[]; indexSignatures: ObjectIndexSignature[] } => {
   const clean = typeText.trim();
-  if (!clean.startsWith('{') || !clean.endsWith('}')) return [];
+  if (!clean.startsWith('{') || !clean.endsWith('}')) {
+    return { fields: [], indexSignatures: [] };
+  }
 
   const inner = clean.slice(1, -1);
   const fields: ObjectField[] = [];
+  const indexSignatures: ObjectIndexSignature[] = [];
   let part = '';
   let depth = 0;
 
@@ -93,13 +102,22 @@ const parseObjectFields = (typeText: string): ObjectField[] => {
     if (char === ';' && depth === 0) {
       const trimmed = part.trim();
       if (trimmed) {
-        const match = trimmed.match(/^(["']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/);
-        if (match) {
+        const fieldMatch = trimmed.match(/^("']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/);
+        if (fieldMatch) {
           fields.push({
-            key: match[1].replace(/^['"]|['"]$/g, ''),
-            optional: Boolean(match[2]),
-            type: match[3].trim(),
+            key: fieldMatch[1].replace(/^['"]|['"]$/g, ''),
+            optional: Boolean(fieldMatch[2]),
+            type: fieldMatch[3].trim(),
           });
+        } else {
+          const indexMatch = trimmed.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/);
+          if (indexMatch) {
+            indexSignatures.push({
+              keyName: indexMatch[1].trim(),
+              keyType: indexMatch[2].trim(),
+              type: indexMatch[3].trim(),
+            });
+          }
         }
       }
       part = '';
@@ -111,22 +129,47 @@ const parseObjectFields = (typeText: string): ObjectField[] => {
 
   const final = part.trim();
   if (final) {
-    const match = final.match(/^(["']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/);
-    if (match) {
+    const fieldMatch = final.match(/^("']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/);
+    if (fieldMatch) {
       fields.push({
-        key: match[1].replace(/^['"]|['"]$/g, ''),
-        optional: Boolean(match[2]),
-        type: match[3].trim(),
+        key: fieldMatch[1].replace(/^['"]|['"]$/g, ''),
+        optional: Boolean(fieldMatch[2]),
+        type: fieldMatch[3].trim(),
       });
+    } else {
+      const indexMatch = final.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/);
+      if (indexMatch) {
+        indexSignatures.push({
+          keyName: indexMatch[1].trim(),
+          keyType: indexMatch[2].trim(),
+          type: indexMatch[3].trim(),
+        });
+      }
     }
   }
 
-  return fields;
+  return { fields, indexSignatures };
 };
 
-const serializeObjectFields = (fields: ObjectField[]): string => {
-  if (!fields.length) return '{ }';
-  return `{ ${fields.map((f) => `${f.key}${f.optional ? '?' : ''}: ${f.type}`).join('; ')} }`;
+const serializeObjectFields = ({
+  fields,
+  indexSignatures,
+}: {
+  fields: ObjectField[];
+  indexSignatures: ObjectIndexSignature[];
+}): string => {
+  const segments: string[] = [];
+
+  for (const field of fields) {
+    segments.push(`${field.key}${field.optional ? '?' : ''}: ${field.type}`);
+  }
+
+  for (const indexSignature of indexSignatures) {
+    segments.push(`[${indexSignature.keyName}: ${indexSignature.keyType}]: ${indexSignature.type}`);
+  }
+
+  if (!segments.length) return '{ }';
+  return `{ ${segments.join('; ')} }`;
 };
 
 const parseLiteralUnionKeys = (value: string): string[] | null => {
@@ -225,9 +268,13 @@ const applyUtilityType = ({
     if (utilityArgs.length !== 1) return toUnresolved(`unresolved utility ${utilityName}<...>`);
     const target = resolveExpression(utilityArgs[0], filePath, depth + 1, state);
     if (isUnresolvedTypeMarker(target)) return target;
-    const fields = parseObjectFields(target);
+    const parsed = parseObjectFields(target);
+    const fields = parsed.fields;
     if (!fields.length) return toUnresolved(`unresolved utility ${utilityName}<${utilityArgs[0]}>`);
-    return serializeObjectFields(fields.map((f) => ({ ...f, optional: utilityName === 'Partial' })));
+    return serializeObjectFields({
+      fields: fields.map((f) => ({ ...f, optional: utilityName === 'Partial' })),
+      indexSignatures: parsed.indexSignatures,
+    });
   }
 
   if (utilityName === 'Pick' || utilityName === 'Omit') {
@@ -236,11 +283,12 @@ const applyUtilityType = ({
     if (isUnresolvedTypeMarker(target)) return target;
     const keys = parseLiteralUnionKeys(utilityArgs[1]);
     if (!keys) return toUnresolved(`unresolved utility ${utilityName}<${utilityArgs.join(', ')}>`);
-    const fields = parseObjectFields(target);
+    const parsed = parseObjectFields(target);
+    const fields = parsed.fields;
     if (!fields.length) return toUnresolved(`unresolved utility ${utilityName}<${utilityArgs.join(', ')}>`);
     const keySet = new Set(keys);
     const filtered = fields.filter((f) => (utilityName === 'Pick' ? keySet.has(f.key) : !keySet.has(f.key)));
-    return serializeObjectFields(filtered);
+    return serializeObjectFields({ fields: filtered, indexSignatures: parsed.indexSignatures });
   }
 
   if (utilityName === 'Record') {
@@ -251,7 +299,10 @@ const applyUtilityType = ({
     if (isUnresolvedTypeMarker(resolvedValue)) return resolvedValue;
     const keys = parseLiteralUnionKeys(resolvedKey);
     if (!keys) return `Record<${resolvedKey}, ${resolvedValue}>`;
-    return serializeObjectFields(keys.map((key) => ({ key, optional: false, type: resolvedValue })));
+    return serializeObjectFields({
+      fields: keys.map((key) => ({ key, optional: false, type: resolvedValue })),
+      indexSignatures: [],
+    });
   }
 
   return toUnresolved(`unresolved utility ${utilityName}<${utilityArgs.join(', ')}>`);
@@ -292,9 +343,18 @@ const resolveExpression = (typeText: string, filePath: string, depth: number, st
         const inner = resolveExpression(type.slice(0, -2), filePath, depth + 1, state);
         result = isUnresolvedTypeMarker(inner) ? inner : `${inner}[]`;
       } else if (type.startsWith('{') && type.endsWith('}')) {
-        const fields = parseObjectFields(type);
+        const parsed = parseObjectFields(type);
+        const fields = parsed.fields;
+        const indexSignatures = parsed.indexSignatures;
         const resolvedFields: ObjectField[] = [];
+        const resolvedIndexSignatures: ObjectIndexSignature[] = [];
         let hadError: string | undefined;
+
+        if (fields.length === 0 && indexSignatures.length === 0) {
+          result = type;
+          state.stack.delete(visitKey);
+          return result;
+        }
 
         for (const field of fields) {
           const resolvedType = resolveExpression(field.type, filePath, depth + 1, state);
@@ -302,7 +362,24 @@ const resolveExpression = (typeText: string, filePath: string, depth: number, st
           resolvedFields.push({ ...field, type: resolvedType });
         }
 
-        result = hadError ?? serializeObjectFields(resolvedFields);
+        for (const indexSignature of indexSignatures) {
+          const resolvedKeyType = resolveExpression(indexSignature.keyType, filePath, depth + 1, state);
+          if (isUnresolvedTypeMarker(resolvedKeyType)) { hadError = resolvedKeyType; break; }
+
+          const resolvedValueType = resolveExpression(indexSignature.type, filePath, depth + 1, state);
+          if (isUnresolvedTypeMarker(resolvedValueType)) { hadError = resolvedValueType; break; }
+
+          resolvedIndexSignatures.push({
+            ...indexSignature,
+            keyType: resolvedKeyType,
+            type: resolvedValueType,
+          });
+        }
+
+        result = hadError ?? serializeObjectFields({
+          fields: resolvedFields,
+          indexSignatures: resolvedIndexSignatures,
+        });
       } else {
         const genericMatch = type.match(/^([A-Za-z_][A-Za-z0-9_]*)<(.+)>$/);
         if (genericMatch) {

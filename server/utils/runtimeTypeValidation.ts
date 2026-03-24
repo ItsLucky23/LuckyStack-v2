@@ -2,6 +2,18 @@ type ValidationResult =
   | { status: 'success' }
   | { status: 'error'; message: string };
 
+  type ParsedObjectField = {
+  key: string;
+  optional: boolean;
+  type: string;
+};
+
+type ParsedObjectIndexSignature = {
+  keyName: string;
+  keyType: string;
+  type: string;
+};
+
 const splitTopLevel = (value: string, splitter: '|' | '&'): string[] => {
   const items: string[] = [];
   let depthParen = 0;
@@ -30,25 +42,44 @@ const splitTopLevel = (value: string, splitter: '|' | '&'): string[] => {
   return items;
 };
 
-const parseObjectFields = (typeText: string): Array<{ key: string; optional: boolean; type: string }> => {
+const parseObjectFields = (typeText: string): {
+  fields: ParsedObjectField[];
+  indexSignatures: ParsedObjectIndexSignature[];
+} => {
   const clean = typeText.trim();
-  if (!clean.startsWith('{') || !clean.endsWith('}')) return [];
+  if (!clean.startsWith('{') || !clean.endsWith('}')) {
+    return { fields: [], indexSignatures: [] };
+  }
 
   const inner = clean.slice(1, -1);
-  const fields: Array<{ key: string; optional: boolean; type: string }> = [];
+  const fields: ParsedObjectField[] = [];
+  const indexSignatures: ParsedObjectIndexSignature[] = [];
 
   let part = '';
   let depth = 0;
   for (const char of inner) {
-    if (char === '{' || char === '[' || char === '(') depth += 1;
-    if (char === '}' || char === ']' || char === ')') depth -= 1;
+    if (char === '{' || char === '[' || char === '(' || char === '<') depth += 1;
+    if (char === '}' || char === ']' || char === ')' || char === '>') depth -= 1;
 
     if (char === ';' && depth === 0) {
       const trimmed = part.trim();
       if (trimmed) {
-        const match = trimmed.match(/^(\w+)(\?)?\s*:\s*([\s\S]+)$/);
-        if (match) {
-          fields.push({ key: match[1], optional: Boolean(match[2]), type: match[3].trim() });
+        const fieldMatch = trimmed.match(/^(["']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/);
+        if (fieldMatch) {
+          fields.push({
+            key: fieldMatch[1].replace(/^['"]|['"]$/g, ''),
+            optional: Boolean(fieldMatch[2]),
+            type: fieldMatch[3].trim(),
+          });
+        } else {
+          const indexMatch = trimmed.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/);
+          if (indexMatch) {
+            indexSignatures.push({
+              keyName: indexMatch[1].trim(),
+              keyType: indexMatch[2].trim(),
+              type: indexMatch[3].trim(),
+            });
+          }
         }
       }
       part = '';
@@ -61,12 +92,40 @@ const parseObjectFields = (typeText: string): Array<{ key: string; optional: boo
   const final = part.trim();
   if (final) {
     const match = final.match(/^(\w+)(\?)?\s*:\s*([\s\S]+)$/);
-    if (match) {
-      fields.push({ key: match[1], optional: Boolean(match[2]), type: match[3].trim() });
+    const fieldMatch = final.match(/^(["']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/);
+    if (fieldMatch) {
+      fields.push({
+        key: fieldMatch[1].replace(/^['"]|['"]$/g, ''),
+        optional: Boolean(fieldMatch[2]),
+        type: fieldMatch[3].trim(),
+      });
+    } else {
+      const indexMatch = final.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/);
+      if (indexMatch) {
+        indexSignatures.push({
+          keyName: indexMatch[1].trim(),
+          keyType: indexMatch[2].trim(),
+          type: indexMatch[3].trim(),
+        });
+      }
     }
   }
 
-  return fields;
+  return { fields, indexSignatures };
+};
+
+const matchesIndexKeyType = ({ keyType, key }: { keyType: string; key: string }): boolean => {
+  const normalized = keyType.trim();
+  if (normalized === 'string') return true;
+  if (normalized === 'number') return /^-?\d+(\.\d+)?$/.test(key);
+  if (normalized.includes('|')) {
+    const parts = splitTopLevel(normalized, '|').map((part) => part.trim());
+    return parts.some((part) => matchesIndexKeyType({ keyType: part, key }));
+  }
+  if ((normalized.startsWith("'") && normalized.endsWith("'")) || (normalized.startsWith('"') && normalized.endsWith('"'))) {
+    return key === normalized.slice(1, -1);
+  }
+  return false;
 };
 
 const isPrimitiveMatch = (type: string, value: unknown): boolean => {
@@ -166,7 +225,7 @@ const validateType = (typeText: string, value: unknown, path: string): Validatio
       return { status: 'error', message: `${path} should be an object` };
     }
 
-    const fields = parseObjectFields(type);
+    const { fields, indexSignatures } = parseObjectFields(type);
     const input = value as Record<string, unknown>;
 
     for (const field of fields) {
@@ -182,7 +241,29 @@ const validateType = (typeText: string, value: unknown, path: string): Validatio
 
     const allowedKeys = new Set(fields.map((field) => field.key));
     for (const key of Object.keys(input)) {
-      if (!allowedKeys.has(key)) {
+      if (allowedKeys.has(key)) {
+        continue;
+      }
+
+      if (indexSignatures.length === 0) {
+        return { status: 'error', message: `${path}.${key} is not allowed` };
+      }
+
+      const indexValue = input[key];
+      let matched = false;
+      for (const indexSignature of indexSignatures) {
+        if (!matchesIndexKeyType({ keyType: indexSignature.keyType, key })) {
+          continue;
+        }
+
+        const indexResult = validateType(indexSignature.type, indexValue, `${path}.${key}`);
+        if (indexResult.status === 'success') {
+          matched = true;
+          break;
+        }
+      }
+
+      if (!matched) {
         return { status: 'error', message: `${path}.${key} is not allowed` };
       }
     }
