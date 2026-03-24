@@ -435,6 +435,12 @@ export default function MultiSelectDropdown({
             ${menuClassName}
             ${menuStateClass}
           `}
+          onMouseDown={(event) => {
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
         >
           {showSearch && (
             <div className="p-2 border-b border-container1-border">
