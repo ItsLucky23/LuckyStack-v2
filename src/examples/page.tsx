@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { Link } from "react-router-dom";
 
 import { useSession } from "src/_providers/SessionProvider";
 import Dropdown from "src/_components/Dropdown";
+import MultiSelectDropdown from "src/_components/MultiSelectDropdown";
 import { apiRequest } from "src/_sockets/apiRequest";
 import { joinRoom } from "src/_sockets/socketInitializer";
 import { syncRequest, useSyncEvents } from "src/_sockets/syncRequest";
@@ -10,15 +11,31 @@ import { useTranslator } from "src/_functions/translator";
 
 export const template = 'home';
 
+interface ExampleDropdownItem {
+  id: string | number;
+  value: string | number;
+  item?: ReactNode;
+  placeholder?: string;
+  selectedItem?: ReactNode;
+  searchText?: string;
+  disabled?: boolean;
+}
+
 export default function ExamplesPage() {
   const { session } = useSession();
   const translate = useTranslator();
   const btnMinus = "−";
   const btnPlus = "+";
+  const defaultDropdownItem: ExampleDropdownItem = {
+    id: "jow-base",
+    value: "jow",
+    item: "jow",
+  };
   const [counter, setCounter] = useState(0);
   const [apiResults, setApiResults] = useState<{ APINAME: string; result: unknown; ts: string }[]>([]);
-  const [selectedDropdownValue, setSelectedDropdownValue] = useState<string | number>("jow");
-  const dropdownSizes = ["sm", "md", "lg", "xl"] as const;
+  const [selectedDropdownItem, setSelectedDropdownItem] = useState<ExampleDropdownItem>(defaultDropdownItem);
+  const [selectedMultiDropdownItems, setSelectedMultiDropdownItems] = useState<ExampleDropdownItem[]>([defaultDropdownItem]);
+  const dropdownSizes = ["sm", "md", "lg", "xl", "none"] as const;
   const [selectedDropdownSize, setSelectedDropdownSize] = useState<(typeof dropdownSizes)[number]>("lg");
   const [showDropdownSearch, setShowDropdownSearch] = useState(true);
   const jowText = "JOWWW";
@@ -29,13 +46,39 @@ export default function ExamplesPage() {
   const searchEnabledText = "On";
   const searchDisabledText = "Off";
   const selectDropdownItemPlaceholder = "Select dropdown item";
+  const selectMultiDropdownItemPlaceholder = "Select multiple items";
   const searchDropdownItemsPlaceholder = "Search dropdown items";
   const selectedValueLabel = "Selected value:";
+  const selectedValuesLabel = "Selected values:";
+  const idPrefixLabel = "(id:";
+  const idsPrefixLabel = "(ids:";
+  const labelSuffixParen = ")";
+  const multiSelectTitleText = "MultiSelectDropdown component";
+  const multiSelectDescriptionText = "Same dropdown behavior, but with checkboxes so you can toggle multiple items.";
 
-  const dropdownItems = [
-    "jow",
-    "hiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+  const dropdownItems: ExampleDropdownItem[] = [
     {
+      id: "jow-base",
+      value: "jow",
+      item: "jow",
+    },
+    {
+      id: "long-text",
+      value: "hiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+      item: "hiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+    },
+    {
+      id: "alpha",
+      value: "alpha",
+      item: "alpha",
+    },
+    {
+      id: "beta",
+      value: "beta",
+      item: "beta",
+    },
+    {
+      id: "custom-card",
       value: "custom-card",
       placeholder: jowText,
       item: <div className="rounded bg-primary px-2 py-1 text-title-primary">{jowText}</div>,
@@ -43,6 +86,7 @@ export default function ExamplesPage() {
       searchText: "jow custom",
     },
     {
+      id: "custom-button",
       value: "custom-button",
       placeholder: "Button item",
       item: (
@@ -59,7 +103,31 @@ export default function ExamplesPage() {
       ),
       searchText: "button custom",
     },
-    'asdasd',
+    {
+      id: "asdasd1",
+      value: "asdasd",
+      item: "asdasd",
+    },
+    {
+      id: "asdasd2",
+      value: "asdasd",
+      item: "asdasd",
+    },
+    {
+      id: "asdasd3",
+      value: "asdasd",
+      item: "asdasd",
+    },
+    {
+      id: "asdasd4",
+      value: "asdasd",
+      item: "asdasd",
+    },
+    {
+      id: "asdasd5",
+      value: "asdasd",
+      item: "asdasd",
+    },
   ];
 
   useEffect(() => {
@@ -254,17 +322,79 @@ export default function ExamplesPage() {
             </div>
             <Dropdown
               items={dropdownItems}
-              value={selectedDropdownValue}
-              onChange={(nextValue) => {
-                setSelectedDropdownValue(nextValue);
+              value={selectedDropdownItem}
+              onChange={(nextItem) => {
+                setSelectedDropdownItem(nextItem);
               }}
               placeholder={selectDropdownItemPlaceholder}
-              size={selectedDropdownSize}
+              size={selectedDropdownSize == "none" ? undefined : selectedDropdownSize}
               showSearch={showDropdownSearch}
               searchPlaceholder={searchDropdownItemsPlaceholder}
             />
             <div className="rounded border border-container2-border bg-container2 px-3 py-2 text-xs text-title">
-              {selectedValueLabel} {String(selectedDropdownValue)}
+              {selectedValueLabel} {String(selectedDropdownItem.value)} {idPrefixLabel} {selectedDropdownItem.id}{labelSuffixParen}
+            </div>
+          </div>
+
+          <div className='md:col-span-2 lg:col-span-2 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3'>
+            <h3 className="font-semibold text-title text-sm">{multiSelectTitleText}</h3>
+            <p className="text-xs text-common">{multiSelectDescriptionText}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {dropdownSizes.map((sizeOption) => {
+                const isActive = selectedDropdownSize === sizeOption;
+                return (
+                  <button
+                    key={sizeOption}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDropdownSize(sizeOption);
+                    }}
+                    className={`
+                      h-8 px-3 rounded-md border text-xs font-medium transition-colors
+                      ${isActive
+                        ? "bg-primary border-primary-border text-title-primary"
+                        : "bg-container2 border-container2-border text-title hover:bg-container2-hover"
+                      }
+                    `}
+                  >
+                    {sizeOption.toUpperCase()}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDropdownSearch((prev) => !prev);
+                }}
+                className={`
+                  h-8 px-3 rounded-md border text-xs font-medium transition-colors
+                  ${showDropdownSearch
+                    ? "bg-correct border-correct text-title-primary hover:bg-correct-hover"
+                    : "bg-container2 border-container2-border text-title hover:bg-container2-hover"
+                  }
+                `}
+              >
+                {searchInputLabel} {showDropdownSearch ? searchEnabledText : searchDisabledText}
+              </button>
+            </div>
+            <MultiSelectDropdown
+              items={dropdownItems}
+              value={selectedMultiDropdownItems}
+              onChange={(nextItems) => {
+                setSelectedMultiDropdownItems(nextItems);
+              }}
+              placeholder={selectMultiDropdownItemPlaceholder}
+              size={selectedDropdownSize == "none" ? undefined : selectedDropdownSize}
+              showSearch={showDropdownSearch}
+              searchPlaceholder={searchDropdownItemsPlaceholder}
+            />
+            <div className="rounded border border-container2-border bg-container2 px-3 py-2 text-xs text-title">
+              {selectedValuesLabel} {selectedMultiDropdownItems.length > 0
+                ? selectedMultiDropdownItems.map((item) => String(item.value)).join(", ")
+                : "-"}
+              {" "}{idsPrefixLabel} {selectedMultiDropdownItems.length > 0
+                ? selectedMultiDropdownItems.map((item) => String(item.id)).join(", ")
+                : "-"}{labelSuffixParen}
             </div>
           </div>
 

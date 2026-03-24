@@ -1,6 +1,6 @@
 import { faCaretDown, faCheck } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { ReactNode, useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { ReactNode, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 
 type DropdownValue = string | number;
@@ -17,10 +17,14 @@ interface DropdownItem {
   disabled?: boolean;
 }
 
-interface DropdownSelectMeta {
+interface MultiSelectDropdownToggleMeta {
   value: DropdownValue;
   index: number;
   label: string;
+  item: DropdownItem;
+  selected: boolean;
+  selectedValues: DropdownValue[];
+  selectedItems: DropdownItem[];
 }
 
 interface NormalizedOption {
@@ -35,19 +39,21 @@ interface NormalizedOption {
   sourceItem: DropdownItem;
 }
 
-interface DropdownProps {
+interface MultiSelectDropdownProps {
   items: DropdownItem[];
-  onChange?: (item: DropdownItem) => void;
-  onSelect?: (meta: DropdownSelectMeta) => void;
+  onChange?: (items: DropdownItem[]) => void;
+  onToggle?: (meta: MultiSelectDropdownToggleMeta) => void;
   placeholder?: ReactNode;
-  value?: DropdownItem;
-  defaultValue?: DropdownItem;
+  value?: DropdownItem[];
+  defaultValue?: DropdownItem[];
   className?: string;
   menuClassName?: string;
   size?: DropdownSize;
   showSearch?: boolean;
   searchPlaceholder?: string;
   noResultsText?: string;
+  selectedCountText?: (count: number) => ReactNode;
+  closeOnSelect?: boolean;
 }
 
 const isPrimitiveItem = (item: unknown): item is string | number =>
@@ -61,10 +67,10 @@ const getHiddenMenuStateClass = (direction: DropdownDirection) => {
   return "opacity-0 scale-90 -translate-y-2 pointer-events-none";
 };
 
-export default function Dropdown({
+export default function MultiSelectDropdown({
   items,
   onChange,
-  onSelect,
+  onToggle,
   placeholder,
   value,
   defaultValue,
@@ -74,7 +80,9 @@ export default function Dropdown({
   showSearch = false,
   searchPlaceholder = "Search...",
   noResultsText = "No results",
-}: DropdownProps) {
+  selectedCountText,
+  closeOnSelect = false,
+}: MultiSelectDropdownProps) {
   const animationDuration = 200;
   const listMaxHeight = 320;
   const searchSectionHeight = 56;
@@ -86,7 +94,6 @@ export default function Dropdown({
   const [searchValue, setSearchValue] = useState("");
   const [menuDirection, setMenuDirection] = useState<DropdownDirection>("down");
   const [listViewportMaxHeight, setListViewportMaxHeight] = useState(listMaxHeight);
-  const [internalSelectedItem, setInternalSelectedItem] = useState<DropdownItem | undefined>(defaultValue);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -94,6 +101,10 @@ export default function Dropdown({
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const openAnimationFrameRef = useRef<number | null>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, width: 0 });
+  const [internalSelectedItems, setInternalSelectedItems] = useState<DropdownItem[]>(defaultValue ?? []);
+
+  const isControlled = value !== undefined;
+  const selectedItems = isControlled ? value : internalSelectedItems;
 
   const sizeConfig: Record<DropdownSize, { minWidthPx: number; triggerWidth: string; option: string; icon: string }> = {
     sm: { minWidthPx: 160, triggerWidth: "w-40", option: "px-2.5 py-1.5 text-sm", icon: "text-xs" },
@@ -125,9 +136,7 @@ export default function Dropdown({
     };
   });
 
-  const isControlled = value !== undefined;
-  const selectedItem = isControlled ? value : internalSelectedItem;
-  const selectedItemId = selectedItem?.id;
+  const selectedIdSet = useMemo(() => new Set(selectedItems.map((item) => item.id)), [selectedItems]);
 
   const updateMenuPosition = useCallback(() => {
     if (!dropdownRef.current) return;
@@ -225,6 +234,40 @@ export default function Dropdown({
     openDropdown();
   };
 
+  const applySelection = useCallback((nextSelectedItems: DropdownItem[]) => {
+    if (!isControlled) {
+      setInternalSelectedItems(nextSelectedItems);
+    }
+
+    onChange?.(nextSelectedItems);
+  }, [isControlled, onChange]);
+
+  const toggleOption = useCallback((option: NormalizedOption) => {
+    if (option.disabled) return;
+
+    const alreadySelected = selectedIdSet.has(option.sourceItem.id);
+    const nextSelectedItems = alreadySelected
+      ? selectedItems.filter((selectedItem) => selectedItem.id !== option.sourceItem.id)
+      : [...selectedItems, option.sourceItem];
+
+    const nextSelectedValues = nextSelectedItems.map((selectedItem) => selectedItem.value);
+
+    applySelection(nextSelectedItems);
+    onToggle?.({
+      value: option.value,
+      index: option.index,
+      label: option.label,
+      item: option.sourceItem,
+      selected: !alreadySelected,
+      selectedValues: nextSelectedValues,
+      selectedItems: nextSelectedItems,
+    });
+
+    if (closeOnSelect) {
+      closeDropdown();
+    }
+  }, [applySelection, closeOnSelect, onToggle, selectedIdSet, selectedItems]);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as Node;
@@ -310,9 +353,7 @@ export default function Dropdown({
 
   if (normalizedOptions.length === 0) return null;
 
-  const selectedOption = selectedItemId === undefined
-    ? undefined
-    : normalizedOptions.find((option) => option.sourceItem.id === selectedItemId);
+  const selectedOptions = normalizedOptions.filter((option) => selectedIdSet.has(option.sourceItem.id));
 
   const query = searchValue.trim().toLowerCase();
   const shouldFilterOptions = showSearch && query.length > 0;
@@ -325,7 +366,16 @@ export default function Dropdown({
     return true;
   });
 
-  const currentLabel = selectedOption?.selectedItem ?? placeholder;
+  const defaultSelectedCountLabel = selectedOptions.length > 0
+    ? `${String(selectedOptions.length)} selected`
+    : placeholder;
+  let currentLabel = placeholder;
+
+  if (selectedOptions.length === 1) {
+    currentLabel = selectedOptions[0].selectedItem;
+  } else if (selectedOptions.length > 1) {
+    currentLabel = selectedCountText?.(selectedOptions.length) ?? defaultSelectedCountLabel;
+  }
   const hiddenMenuStateClass = getHiddenMenuStateClass(menuDirection);
   const menuStateClass = isMenuPositionReady
     ? (isMenuVisible ? "opacity-100 scale-100 translate-y-0 pointer-events-auto" : hiddenMenuStateClass)
@@ -357,7 +407,7 @@ export default function Dropdown({
         aria-haspopup="listbox"
         onClick={toggleDropdown}
       >
-        <div className={`min-w-0 truncate ${selectedOption ? "text-title font-medium" : "text-common"}`}>
+        <div className={`min-w-0 truncate ${selectedOptions.length > 0 ? "text-title font-medium" : "text-common"}`}>
           {currentLabel}
         </div>
 
@@ -406,9 +456,10 @@ export default function Dropdown({
             className="flex flex-col overflow-y-auto p-1"
             style={{ maxHeight: listViewportMaxHeight }}
             role="listbox"
+            aria-multiselectable
           >
             {filteredOptions.map((option) => {
-              const isSelected = selectedItemId !== undefined && option.sourceItem.id === selectedItemId;
+              const isSelected = selectedIdSet.has(option.sourceItem.id);
 
               return (
                 <div
@@ -418,40 +469,38 @@ export default function Dropdown({
                   aria-disabled={option.disabled}
                   tabIndex={option.disabled ? -1 : 0}
                   className={`
-                    flex w-full items-center justify-between gap-2 rounded-sm text-left transition-colors
+                    flex w-full items-center gap-2 rounded-sm text-left transition-colors
                     border border-transparent
                     ${optionClass}
                     ${option.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
                     ${isSelected ? "bg-container2 border-container2-border text-title font-medium" : "hover:bg-container1-hover text-title"}
                   `}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (option.disabled) return;
-
-                    if (!isControlled) {
-                      setInternalSelectedItem(option.sourceItem);
-                    }
-
-                    onChange?.(option.sourceItem);
-                    onSelect?.({ value: option.value, index: option.index, label: option.label });
-                    closeDropdown();
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleOption(option);
                   }}
                   onKeyDown={(event) => {
                     if (option.disabled) return;
                     if (event.key !== "Enter" && event.key !== " ") return;
 
                     event.preventDefault();
-                    if (!isControlled) {
-                      setInternalSelectedItem(option.sourceItem);
-                    }
-
-                    onChange?.(option.sourceItem);
-                    onSelect?.({ value: option.value, index: option.index, label: option.label });
-                    closeDropdown();
+                    toggleOption(option);
                   }}
                 >
+                  <span
+                    aria-hidden
+                    className={`
+                      flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border text-[10px]
+                      transition-colors duration-150
+                      ${isSelected
+                        ? "border-primary-border bg-primary text-title-primary"
+                        : "border-container2-border bg-container2 text-transparent"
+                      }
+                    `}
+                  >
+                    <FontAwesomeIcon icon={faCheck} />
+                  </span>
                   <span className="flex-1 min-w-0">{option.item}</span>
-                  {isSelected && <FontAwesomeIcon icon={faCheck} className="ml-2 text-xs" />}
                 </div>
               );
             })}

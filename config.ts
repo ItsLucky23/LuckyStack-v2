@@ -11,7 +11,7 @@ const normalizeDns = (dns: string): string => dns.replace(/\/+$/, "");
 
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
   "http://localhost:5173": {
-    backendUrl: "http://localhost:80",
+    backendUrl: "http://localhost:81",
     dev: true,
     sessionBasedToken: true,
     allowMultipleSessions: true
