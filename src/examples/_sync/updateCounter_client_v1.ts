@@ -11,16 +11,21 @@ export interface SyncParams {
   roomCode: string;
 }
 
-export const main = async ({ token, functions }: SyncParams): Promise<SyncClientResponse> => {
-  const user = token ? await functions.session.getSession(token) : null;
-  console.log('Sync client check:', user?.location?.pathName);
+export const main = async (): Promise<SyncClientResponse> => {
+// export const main = async ({ token, functions }: SyncParams): Promise<SyncClientResponse> => {
+  // const user = token ? await functions.session.getSession(token) : null;
+  // console.log('Sync client check:', user?.location?.pathName);
 
-  if (user?.location?.pathName === '/examples' || user?.location?.pathName === '/docs') {
-    return {
-      status: 'success',
-      randomKey: true,
-    };
+  // if (user?.location?.pathName === '/examples' || user?.location?.pathName === '/docs') {
+  //   return {
+  //     status: 'success',
+  //     randomKey: true,
+  //   };
+  // }
+
+  // return { status: 'error', errorCode: 'sync.clientFilteredOut' };
+  return {
+    status: 'success',
+    randomKey: true,
   }
-
-  return { status: 'error', errorCode: 'sync.clientFilteredOut' };
 };

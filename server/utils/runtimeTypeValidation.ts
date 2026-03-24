@@ -64,12 +64,14 @@ const parseObjectFields = (typeText: string): {
     if (char === ';' && depth === 0) {
       const trimmed = part.trim();
       if (trimmed) {
-        const fieldMatch = trimmed.match(/^(["']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/);
+        const fieldMatch = trimmed.match(/^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?(\?)?\s*:\s*([\s\S]+)$/);
         if (fieldMatch) {
+          const keyMatch = trimmed.match(/^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?/);
+          const rawKey = keyMatch?.[0] ?? '';
           fields.push({
-            key: fieldMatch[1].replace(/^['"]|['"]$/g, ''),
-            optional: Boolean(fieldMatch[2]),
-            type: fieldMatch[3].trim(),
+            key: rawKey.replace(/^['"]|['"]$/g, ''),
+            optional: Boolean(fieldMatch[3]),
+            type: fieldMatch[4].trim(),
           });
         } else {
           const indexMatch = trimmed.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/);
@@ -91,13 +93,14 @@ const parseObjectFields = (typeText: string): {
 
   const final = part.trim();
   if (final) {
-    const match = final.match(/^(\w+)(\?)?\s*:\s*([\s\S]+)$/);
-    const fieldMatch = final.match(/^(["']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/);
+    const fieldMatch = final.match(/^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?(\?)?\s*:\s*([\s\S]+)$/);
     if (fieldMatch) {
+      const keyMatch = final.match(/^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?/);
+      const rawKey = keyMatch?.[0] ?? '';
       fields.push({
-        key: fieldMatch[1].replace(/^['"]|['"]$/g, ''),
-        optional: Boolean(fieldMatch[2]),
-        type: fieldMatch[3].trim(),
+        key: rawKey.replace(/^['"]|['"]$/g, ''),
+        optional: Boolean(fieldMatch[3]),
+        type: fieldMatch[4].trim(),
       });
     } else {
       const indexMatch = final.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/);
