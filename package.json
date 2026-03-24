@@ -10,7 +10,7 @@
     "generateArtifacts": "tsx scripts/generateTypeMaps.ts && tsx scripts/generateServerRequests.ts",
     "buildClient": "tsx scripts/generateTypeMaps.ts && tsc -b && vite build",
     "buildServer": "npm run generateArtifacts && tsx scripts/bundleServer.ts",
-    "build": " tsc -b && npm run generateArtifacts && vite build && tsx scripts/bundleServer.ts",
+    "build": " npm run generateArtifacts && tsc -b && vite build && tsx scripts/bundleServer.ts",
     "prod": "node dist/server.js",
     "production": "node dist/server.js",
     "prisma:format": "prisma format",
