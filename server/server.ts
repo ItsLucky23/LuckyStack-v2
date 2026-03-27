@@ -13,7 +13,7 @@ import { serveFavicon, serveFile } from './prod/serveFile';
 import loadSocket from './sockets/socket';
 import z from 'zod';
 import oauthProviders from "./auth/loginConfig";
-import { deleteSession } from './functions/session';
+import { deleteSession, getSession } from './functions/session';
 import allowedOrigin from './auth/checkOrigin';
 import config, { SessionLayout } from '../config';
 
@@ -22,6 +22,9 @@ import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
 import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
 import { checkRateLimit } from './utils/rateLimiter';
+
+const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
+const SESSION_COOKIE_OPTIONS = `HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; ${process.env.SECURE == 'true' ? "Secure;" : ""}`;
 
 const REDACTED_LOG_KEYS = new Set([
   'password',
@@ -86,6 +89,14 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   }
 
   const token = extractTokenFromRequest(req);
+
+  if (!config.sessionBasedToken && token) {
+    const currentSession = await getSession(token);
+    if (currentSession?.id) {
+      // Sliding expiration for cookie mode: keep browser token lifetime aligned with Redis TTL.
+      res.setHeader("Set-Cookie", `token=${token}; ${SESSION_COOKIE_OPTIONS}`);
+    }
+  }
 
   //? here we load the application icon
   if (z.literal('/favicon.ico').safeParse(routePath).success) {
@@ -185,10 +196,8 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       if (process.env.NODE_ENV === 'development') {
         console.log('setting cookie with new token', 'green');
       }
-      const cookieOptions = `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800; ${process.env.SECURE == 'true' ? "Secure;" : ""}`
-
       if (!config.sessionBasedToken) {
-        res.setHeader("Set-Cookie", `token=${newToken}; ${cookieOptions}`);
+        res.setHeader("Set-Cookie", `token=${newToken}; ${SESSION_COOKIE_OPTIONS}`);
       }
 
       if (config.sessionBasedToken) {
@@ -218,8 +227,6 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     if (process.env.NODE_ENV === 'development') {
       console.log('setting cookie or redirect with new token', 'green');
     }
-    const cookieOptions = `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800; ${process.env.SECURE == 'true' ? "Secure;" : ""}`
-
     const location = process.env.DNS
 
     if (config.sessionBasedToken) {
@@ -227,7 +234,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         Location: `${process.env.DNS}?token=${newToken}`,
       });
     } else {
-      res.setHeader("Set-Cookie", `token=${newToken}; ${cookieOptions}`);
+      res.setHeader("Set-Cookie", `token=${newToken}; ${SESSION_COOKIE_OPTIONS}`);
       res.writeHead(302, { Location: location }); // Redirect without exposing token in URL
     }
     return res.end();

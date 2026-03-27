@@ -97,8 +97,12 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
   if (!token) return null;
 
   try {
-    const session = await redis.get(`${process.env.PROJECT_NAME}-session:${token}`);
+    const sessionKey = `${process.env.PROJECT_NAME}-session:${token}`;
+    const session = await redis.get(sessionKey);
     if (!session) return null;
+
+    // Sliding expiration: each successful authenticated access extends session lifetime.
+    await redis.expire(sessionKey, SESSION_TTL);
 
     const parsed = JSON.parse(session);
     if (!parsed) return null;

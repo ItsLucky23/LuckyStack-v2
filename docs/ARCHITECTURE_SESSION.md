@@ -27,6 +27,11 @@ Value: JSON-encoded SessionLayout
 Expiry: config.sessionExpiryDays (default: 7 days)
 ```
 
+Sliding behavior:
+- Session TTL is refreshed on successful authenticated session reads.
+- In cookie mode, `Set-Cookie` with matching `Max-Age` is reissued on valid requests.
+- Result: active users stay logged in, idle users expire after `sessionExpiryDays`.
+
 ---
 
 ## SessionLayout
