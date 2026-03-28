@@ -30,6 +30,7 @@ uploads/*
 apiTypes.generated.ts
 apiDocs.generated.json
 generatedApis.ts
+server/prod/generatedApis.ts
 
 # Repomix
 repomix-output.xml
