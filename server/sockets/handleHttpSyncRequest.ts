@@ -8,7 +8,7 @@ import tryCatch from "../../shared/tryCatch";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "../utils/responseNormalizer";
 import { validateInputByType } from '../utils/runtimeTypeValidation';
 import { checkRateLimit } from '../utils/rateLimiter';
-import { captureException, setSentryUser, startSpan } from '../functions/sentry';
+import { setSentryUser, startSpan } from '../functions/sentry';
 
 interface HttpSyncRequestParams {
   name: string;

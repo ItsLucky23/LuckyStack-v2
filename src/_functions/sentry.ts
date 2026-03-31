@@ -9,7 +9,7 @@
 
 import * as Sentry from '@sentry/react';
 import { initSharedSentry } from '../../shared/sentrySetup';
-import config from '../../config';
+import { sentry } from '../../config';
 
 const env = import.meta.env;
 
@@ -43,16 +43,16 @@ export const initializeSentry = () => {
 
     // Performance Monitoring
     tracesSampleRate: isProduction
-      ? config.sentry.client.tracesSampleRate.production
-      : config.sentry.client.tracesSampleRate.development,
+      ? sentry.client.tracesSampleRate.production
+      : sentry.client.tracesSampleRate.development,
 
     // Session Replay
     replaysSessionSampleRate: isProduction
-      ? config.sentry.client.replaysSessionSampleRate.production
-      : config.sentry.client.replaysSessionSampleRate.development,
+      ? sentry.client.replaysSessionSampleRate.production
+      : sentry.client.replaysSessionSampleRate.development,
     replaysOnErrorSampleRate: isProduction
-      ? config.sentry.client.replaysOnErrorSampleRate.production
-      : config.sentry.client.replaysOnErrorSampleRate.development,
+      ? sentry.client.replaysOnErrorSampleRate.production
+      : sentry.client.replaysOnErrorSampleRate.development,
 
     // Integrations
     integrations: [
