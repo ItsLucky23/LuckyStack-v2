@@ -8,12 +8,16 @@
 
 ```typescript
 // Client A sends sync event
-await syncRequest({
+const response = await syncRequest({
   name: "examples/updateCounter",
   version: "v1",
   data: { amount: 5 },
   receiver: "game-room-123",
 });
+
+if (response.status === "error") {
+  console.error(response.errorCode, response.message);
+}
 
 // Client B receives (via callback)
 const { upsertSyncEventCallback } = useSyncEvents();
@@ -41,13 +45,15 @@ await syncRequest({
 ```
 src/
 ├── {page}/_sync/
-│   ├── {syncName}_server_v1.ts    # Runs on the server just once
-│   ├── {syncName}_client_v1.ts    # Runs on the server for each client
+│   ├── {syncName}_server_v1.ts    # Optional: runs once on server
+│   ├── {syncName}_client_v1.ts    # Optional: runs once per target client
 │   └── ...
-Versioned naming is required:
+Versioned naming is required when a file exists:
 
 - `{syncName}_server_v1.ts`
 - `{syncName}_client_v1.ts`
+
+At least one of these files must exist for a sync route.
 
 └── _sockets/
     ├── syncRequest.ts          # Client-side sync caller
@@ -102,7 +108,7 @@ export const main = async ({
 };
 ```
 
-### 2. Client handler (optional)
+### 2. Client handler (optional, only when needed)
 
 ```typescript
 import {
@@ -147,7 +153,21 @@ export const main = async ({
 };
 ```
 
+If your `_client.ts` only returns `{ status: 'success' }` and does no filtering or payload changes, remove the file. Keeping a no-op client sync file adds unnecessary per-client execution overhead.
+
 Client sync handlers no longer receive `user` automatically. This avoids a Redis session lookup for every target socket. When you need target session data, call `functions.session.getSession(token)` inside `_client.ts`.
+
+## Client File Decision Rule (AI + Performance)
+
+Default behavior: create only `_server.ts`.
+
+Create `_client.ts` only if you need one of these:
+
+- Per-target-client filtering (for example skip users not on a specific page)
+- Per-target-client authorization or rejection
+- Per-target-client output transformation (custom `clientOutput`)
+
+Do not create `_client.ts` for pass-through syncs. Without `_client.ts`, the framework still broadcasts successfully with `serverOutput` and an empty `clientOutput`.
 
 ## Receiving Sync Events
 
@@ -181,6 +201,17 @@ upsertSyncEventCallback({
 ## Offline Request Queue
 
 When the socket is disconnected or the browser is offline, `syncRequest` queues requests in memory and flushes on reconnect or when the browser comes back online.
+
+## syncRequest Return Contract
+
+`syncRequest` resolves to a typed response object:
+
+- Success: `{ status: 'success', message: string, result: serverOutput }`
+- Error: `{ status: 'error', message: string, errorCode: string, errorParams?, httpStatus? }`
+
+`result` is typed from the generated sync map for the selected route/version.
+
+This allows the caller to handle validation/network/runtime errors consistently with API-style error contracts while keeping sync delivery asynchronous.
 
 ---
 
@@ -236,7 +267,7 @@ When exceeded, handlers return `sync.rateLimitExceeded` with `seconds` in `error
 | -------------- | ------------------------------ | ------------------------ |
 | `clientInput`  | `data` param in syncRequest    | What client sends        |
 | `serverOutput` | `_server.ts` return            | Server processing result |
-| `clientOutput` | `_client.ts` clientMain return | Client processing result |
+| `clientOutput` | `_client.ts` clientMain return | Client processing result (or `{}` when no `_client.ts`) |
 
 Generated sync output typing preserves direct literal return values in object properties (for example `allowed: true` vs `allowed: false`) so TypeScript can narrow branch-specific shapes safely.
 

@@ -72,3 +72,11 @@ You are an active participant in this project, not just a code-monkey. When work
 - **No Random/Arbitrary Files**: Do not start creating random test files, `todo.md` lists, scratchpads, or similar arbitrary files. Only create documentation or code files explicitly required by the user, or ask for permission first explaining why it would be beneficial.
 - **Post-Task Summary**: After each task/prompt, you MUST summarize what you did and why. Provide clear instructions on how the user can test the changes themselves, state whether a server restart is needed, and provide any other useful operational info.
 - **Next Steps**: Always provide suggestions on what the user should do next, whether it's testing a flow, refactoring a related piece of code, or updating docs.
+
+## 6. Sync File Creation Policy (Important)
+
+- For sync routes, `_client.ts` is optional.
+- Default to creating only `_server.ts` unless there is a real per-target-client requirement.
+- Only create `_client.ts` when you need per-client filtering, per-client authorization, or per-client `clientOutput` transformation.
+- Do not generate a no-op `_client.ts` that only returns `{ status: 'success' }`. It introduces avoidable per-client execution overhead.
+- If no `_client.ts` exists, sync delivery still works: clients receive `serverOutput` and an empty `clientOutput`.

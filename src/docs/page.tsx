@@ -596,7 +596,7 @@ export default function DocsPage() {
     const name = buildSyncRequestName(selectedSync);
 
     void (async () => {
-      const success = await syncRequest({
+      const response = await syncRequest({
         name,
         version: selectedSync.version,
         data: parsedInput,
@@ -604,13 +604,20 @@ export default function DocsPage() {
         ignoreSelf,
       } as never);
 
-      if (!success) {
+      if (response.status === 'error') {
         setSyncResult({
           status: 'error',
-          message: 'docs.httpSyncRequestFailed',
+          message: response.message || 'docs.httpSyncRequestFailed',
+          errorCode: response.errorCode,
+          errorParams: response.errorParams,
+          httpStatus: response.httpStatus,
         });
         setStatus('error');
+        return;
       }
+
+      setSyncResult(response);
+      setStatus('success');
     })();
   };
 

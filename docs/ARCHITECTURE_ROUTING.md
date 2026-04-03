@@ -323,6 +323,8 @@ export const main = async ({
 };
 ```
 
+Use `_client.ts` only when needed for per-target-client behavior. If a client file only returns `{ status: 'success' }` and does no filtering or transformation, omit it to avoid unnecessary per-client execution overhead.
+
 Important: `_client.ts` handlers do not receive `user` directly. Use `token` and fetch session data only when needed via `functions.session.getSession(token)`.
 
 ### Receiving Sync Events

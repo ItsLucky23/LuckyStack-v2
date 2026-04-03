@@ -407,5 +407,9 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
   }
 
-  return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, { status: 'success', message: `sync ${name} success` });
+  return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, {
+    status: 'success',
+    message: `sync ${name} success`,
+    result: serverOutput,
+  });
 }

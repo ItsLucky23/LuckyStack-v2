@@ -211,7 +211,7 @@ LuckyStack/
 
 - `src/{page}/page.tsx` renders at route `/{page}`
 - `src/{page}/_api/{name}.ts` creates an API endpoint accessible as `api/{page}/{name}`
-- `src/{page}/_sync/{name}_server.ts` + `{name}_client.ts` creates a sync event as `sync/{page}/{name}`
+- `src/{page}/_sync/{name}_server.ts` and/or `{name}_client.ts` creates a sync event as `sync/{page}/{name}`
 - Folders prefixed with `_` are private (not routes)
 - For full routing details see `docs/ARCHITECTURE_ROUTING.md`
 
@@ -242,6 +242,9 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
 - `_server.ts` runs once on server for validation
 - `_client.ts` runs on server for each client in the room
+- `_client.ts` is optional and should not be created by default
+- Create `_client.ts` only when per-target-client logic is required (filtering, per-client auth, or custom `clientOutput`)
+- If a `_client.ts` would only return `{ status: 'success' }`, do not create it; this adds avoidable per-client overhead
 - `_client.ts` does NOT receive `user`; it receives `token` and should call `functions.session.getSession(token)` only when session data is actually needed
 - Client sends: `syncRequest({ name, data, receiver: roomCode, ignoreSelf?: boolean })`
 - Client receives: `upsertSyncEventCallback(name, ({ clientOutput, serverOutput }) => {})`

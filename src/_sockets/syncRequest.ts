@@ -8,6 +8,7 @@ import type {
   SyncTypeMap
 } from "./apiTypes.generated";
 import { Socket } from "socket.io-client";
+import { normalizeErrorResponseCore } from "../../shared/responseNormalizer";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Type Helpers for Sync Requests
@@ -21,6 +22,8 @@ type UnionToIntersection<U> =
   (U extends unknown ? (arg: U) => void : never) extends ((arg: infer I) => void)
     ? I
     : never;
+
+type Prettify<T> = { [K in keyof T]: T[K] } & {};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Global Sync Params
@@ -75,6 +78,38 @@ interface RuntimeSyncParams {
   ignoreSelf?: boolean;
 }
 
+interface SyncErrorParam { key: string; value: string | number | boolean };
+
+interface SyncResponseError {
+  status: 'error';
+  message: string;
+  errorCode: string;
+  errorParams?: SyncErrorParam[];
+  httpStatus?: number;
+}
+
+interface SyncAckResponse {
+  status?: 'success' | 'error';
+  message?: string;
+  result?: unknown;
+  errorCode?: string;
+  errorParams?: SyncErrorParam[];
+  httpStatus?: number;
+}
+
+type SyncResultForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> =
+  [ServerOutputForFullName<F, V>] extends [never]
+    ? Record<string, never>
+    : ServerOutputForFullName<F, V>;
+
+type SyncRequestResponseForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> =
+  | SyncResponseError
+  | {
+    status: 'success';
+    message: string;
+    result: SyncResultForFullName<F, V>;
+  };
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Sync Event Callbacks Registry
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -126,21 +161,57 @@ const triggerSyncCallbacks = (name: string, clientOutput: unknown, serverOutput:
 // syncRequest Function Overloads
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export function syncRequest<F extends SyncFullName, V extends VersionsForFullName<F>>(
-  params: SyncParamsForFullName<F, V>
-): Promise<boolean> {
+const normalizeSyncError = ({
+  response,
+  fallbackErrorCode,
+}: {
+  response: SyncAckResponse;
+  fallbackErrorCode: string;
+}): SyncResponseError => {
+  const normalized = normalizeErrorResponseCore({
+    response,
+    fallbackErrorCode,
+    resolveMessage: ({ errorCode }) => {
+      if (typeof response.message === 'string' && response.message.trim().length > 0) {
+        return response.message;
+      }
+
+      return errorCode;
+    },
+  });
+
+  return {
+    status: 'error',
+    message: normalized.message,
+    errorCode: normalized.errorCode,
+    errorParams: normalized.errorParams,
+    httpStatus: normalized.httpStatus,
+  };
+};
+
+type SyncRequestParamsWithOptions<F extends SyncFullName, V extends VersionsForFullName<F>> =
+  SyncParamsForFullName<F, V>;
+
+const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullName<F>>(
+  params: SyncRequestParamsWithOptions<F, V>
+): Promise<Prettify<SyncRequestResponseForFullName<F, V>>> => {
   const runtimeParams = params as RuntimeSyncParams;
   const { name, version, receiver, ignoreSelf } = runtimeParams;
   const payloadData = runtimeParams.data;
 
-  return new Promise((resolve) => {
+  type RequestOutput = Prettify<SyncRequestResponseForFullName<F, V>>;
+
+  return new Promise<RequestOutput>((resolve) => {
     void (async () => {
       if (!name || typeof name !== "string") {
         if (dev) {
           console.error("Invalid name for syncRequest");
           notify.error({ key: 'sync.invalidName' });
         }
-        resolve(false);
+        resolve(normalizeSyncError({
+          response: { status: 'error', errorCode: 'sync.invalidName' },
+          fallbackErrorCode: 'sync.invalidName',
+        }) as RequestOutput);
         return;
       }
 
@@ -151,7 +222,10 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
           console.error("Invalid version for syncRequest");
           notify.error({ key: 'sync.invalidVersion' });
         }
-        resolve(false);
+        resolve(normalizeSyncError({
+          response: { status: 'error', errorCode: 'sync.invalidVersion' },
+          fallbackErrorCode: 'sync.invalidVersion',
+        }) as RequestOutput);
         return;
       }
 
@@ -160,16 +234,25 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
           console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
           notify.error({ key: 'sync.missingReceiver' });
         }
-        resolve(false);
+        resolve(normalizeSyncError({
+          response: { status: 'error', errorCode: 'sync.missingReceiver' },
+          fallbackErrorCode: 'sync.missingReceiver',
+        }) as RequestOutput);
         return;
       }
 
       if (!await waitForSocket()) {
-        resolve(false);
+        resolve(normalizeSyncError({
+          response: { status: 'error', errorCode: 'sync.ioUnavailable' },
+          fallbackErrorCode: 'sync.ioUnavailable',
+        }) as RequestOutput);
         return;
       }
       if (!socket) {
-        resolve(false);
+        resolve(normalizeSyncError({
+          response: { status: 'error', errorCode: 'sync.ioUnavailable' },
+          fallbackErrorCode: 'sync.ioUnavailable',
+        }) as RequestOutput);
         return;
       }
 
@@ -193,33 +276,64 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
 
         const tempIndex = incrementResponseIndex();
 
-        if (dev) { console.log(`Client Sync Request:`, { name: sanitizedName, data, receiver, ignoreSelf }) }
+        if (dev) {
+          console.log(`Client Sync Request(${String(tempIndex)}):`, { syncName: sanitizedName, data, receiver, ignoreSelf });
+        }
 
         socketInstance.emit('sync', { name: fullName, data, cb: `${sanitizedName}/${version}`, receiver, responseIndex: tempIndex, ignoreSelf });
 
-        socketInstance.once(`sync-${String(tempIndex)}`, (responseData: { status: "success" | "error", message: string }) => {
+        socketInstance.once(`sync-${String(tempIndex)}`, (responseData: SyncAckResponse) => {
           if (responseData.status === "error") {
+            const normalizedError = normalizeSyncError({
+              response: responseData,
+              fallbackErrorCode: 'sync.failedRequest',
+            });
+
             if (dev) {
-              console.error(`Sync ${sanitizedName} failed: ${responseData.message}`);
+              console.error(`Sync ${sanitizedName} failed: ${normalizedError.message}`);
               notify.error({
                 key: 'sync.failedRequest',
                 params: [
                   { key: 'name', value: sanitizedName },
-                  { key: 'message', value: responseData.message },
+                  { key: 'message', value: normalizedError.message },
                 ],
               });
             }
-            resolve(false);
+            resolve(normalizedError);
             return;
           }
 
-          resolve(true);
+          if (responseData.status !== 'success') {
+            resolve(normalizeSyncError({
+              response: responseData,
+              fallbackErrorCode: 'sync.invalidServerResponse',
+            }) as RequestOutput);
+            return;
+          }
+
+          const result = responseData.result && typeof responseData.result === 'object'
+            ? responseData.result
+            : {};
+
+          resolve({
+            status: 'success',
+            message: typeof responseData.message === 'string' && responseData.message.trim().length > 0
+              ? responseData.message
+              : `sync ${sanitizedName} success`,
+            result,
+          } as RequestOutput);
         });
       };
 
       runRequest(socket);
     })();
-  })
+  });
+};
+
+export function syncRequest<F extends SyncFullName, V extends VersionsForFullName<F>>(
+  params: SyncRequestParamsWithOptions<F, V>
+): Promise<Prettify<SyncRequestResponseForFullName<F, V>>> {
+  return syncRequestInternal(params);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
