@@ -1,5 +1,5 @@
 import { AuthProps, SessionLayout } from '../../../config';
-import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
+import { Functions, ApiResponse, MaybePromise } from '../../../src/_sockets/apiTypes.generated';
 
 export const auth: AuthProps = {
   login: false,
@@ -16,7 +16,7 @@ export interface ApiParams {
   functions: Functions;
 }
 
-export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
+export const main = ({ data }: ApiParams): MaybePromise<ApiResponse> => {
   console.log("received message: " + data.message);
   return {
     status: 'success',

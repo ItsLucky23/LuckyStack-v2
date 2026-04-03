@@ -195,7 +195,7 @@ npm run build
 This runs:
 1. `npm run generateArtifacts` - Generates API/Sync type maps and production route maps
 2. `tsc -b && vite build` - Builds the frontend to `dist/`
-3. `tsx scripts/bundleServer.ts` - Bundles the server
+3. `node scripts/bundleServer.mjs` - Bundles the server
 
 ### 2. Build Output
 

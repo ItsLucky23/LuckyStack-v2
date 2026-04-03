@@ -12,30 +12,30 @@ const Translator = () => {
   const language = session?.language ?? defaultLanguage;
 
   switch (language) {
-    case "nl": return nlJson;
-    case "en": return enJson;
-    case "de": return deJson;
-    case "fr": return frJson;
-    default: return enJson;
+    case "nl": { return nlJson; }
+    case "en": { return enJson; }
+    case "de": { return deJson; }
+    case "fr": { return frJson; }
+    default: { return enJson; }
   }
 }
 
 const notify = {
   success: ({ key, params }: { key: string, params?: { key: string, value: string | number | boolean }[]}) => {
     const translationList = Translator();
-    if (translationList) {toast.success(translate({ translationList, key, params })); }
+    toast.success(translate({ translationList, key, params }));
   },
   error: ({ key, params }: { key: string, params?: { key: string, value: string | number | boolean }[]}) => {
     const translationList = Translator();
-    if (translationList) {toast.error(translate({ translationList, key, params })); }
+    toast.error(translate({ translationList, key, params }));
   },
   info: ({ key, params }: { key: string, params?: { key: string, value: string | number | boolean }[]}) => {
     const translationList = Translator();
-    if (translationList) {toast.info(translate({ translationList, key, params })); }
+    toast.info(translate({ translationList, key, params }));
   },
   warning: ({ key, params }: { key: string, params?: { key: string, value: string | number | boolean }[]}) => {
     const translationList = Translator();
-    if (translationList) {toast.warning(translate({ translationList, key, params })); }
+    toast.warning(translate({ translationList, key, params }));
   },
 }
 

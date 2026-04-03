@@ -21,6 +21,7 @@ export default defineConfig(({ command }) => {
 
   return {
     base: '/',
+    cacheDir: '.cache/vite',
     plugins: [
       react(),
       tsconfigPaths({

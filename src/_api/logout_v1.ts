@@ -1,5 +1,5 @@
 import { AuthProps, SessionLayout } from '../../config';
-import { Functions, ApiResponse } from '../_sockets/apiTypes.generated';
+import { Functions, ApiResponse, MaybePromise } from '../_sockets/apiTypes.generated';
 
 export const auth: AuthProps = {
   login: false,
@@ -8,12 +8,12 @@ export const auth: AuthProps = {
 export const httpMethod = 'DELETE' as const;
 
 export interface ApiParams {
-  data: {};
+  data: Record<string, never>;
   user: SessionLayout | null;
   functions: Functions;
 }
 
-export const main = async (_params: ApiParams): Promise<ApiResponse> => {
+export const main = (): MaybePromise<ApiResponse> => {
   return {
     status: 'success',
     result: true

@@ -1,0 +1,265 @@
+stages:
+  - prepare
+  - lint
+  - build
+  - deploy
+
+variables:
+  NODE_IMAGE: node:22-alpine
+  DEPLOY_IMAGE: alpine:latest
+  NPM_CONFIG_CACHE: .npm
+  PIPELINE_RUN_LINT: "true"
+
+  STAGING_HOST: $STAGING_IP
+  STAGING_DEPLOY_USER: $STAGING_SERVER_USER
+  STAGING_SSH_KEY: $STAGING_SSH_PRIVATE_KEY
+  PRODUCTION_HOST: $PROD_IP
+  PRODUCTION_DEPLOY_USER: $PROD_SERVER_USER
+  PRODUCTION_SSH_KEY: $PROD_SSH_PRIVATE_KEY
+
+  # Repalace YOURSERVER and URLs/paths with your actual server name and paths.
+
+  STAGING_ENV_URL: https://staging.YOURSERVER.nl
+  STAGING_APP_ROOT: /var/www/YOURSERVER-staging
+  STAGING_DIST_ROOT: /var/www/YOURSERVER-staging/dist
+  STAGING_DIST_ASSETS_ROOT: /var/www/YOURSERVER-staging/dist/assets
+  STAGING_PRISMA_ROOT: /var/www/YOURSERVER-staging/prisma
+  STAGING_PM2_PROCESS_NAME: YOURSERVER-staging
+
+  PRODUCTION_ENV_URL: https://app.YOURSERVER.nl
+  PRODUCTION_APP_ROOT: /var/www/YOURSERVER
+  PRODUCTION_DIST_ROOT: /var/www/YOURSERVER/dist
+  PRODUCTION_DIST_ASSETS_ROOT: /var/www/YOURSERVER/dist/assets
+  PRODUCTION_PRISMA_ROOT: /var/www/YOURSERVER/prisma
+  PRODUCTION_PM2_PROCESS_NAME: YOURSERVER-production
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 0. PREPARE STAGE
+#    Generates type artifacts once and exposes them to later jobs.
+#    This keeps lint deterministic and avoids generation/lint timing issues.
+# ─────────────────────────────────────────────────────────────────────────────
+prepare_artifacts:
+  stage: prepare
+  image: $NODE_IMAGE
+  cache:
+    - key:
+        files:
+          - package-lock.json
+      paths:
+        - node_modules/
+        - .npm/
+    - key: "build-cache-$CI_COMMIT_REF_SLUG"
+      paths:
+        - .cache/
+      policy: pull-push
+  script:
+    - npm ci --prefer-offline
+    - npm run generateArtifacts
+    - test -s src/_sockets/apiTypes.generated.ts
+    - test -s src/docs/apiDocs.generated.json
+    - test -s server/prod/generatedApis.ts
+  artifacts:
+    name: "YOURSERVER-generated-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - src/_sockets/apiTypes.generated.ts
+      - src/docs/apiDocs.generated.json
+      - server/prod/generatedApis.ts
+    expire_in: 1 week
+  rules:
+    - if: $DEPLOY_TEST == "true"
+      when: never
+    - if: '$PIPELINE_RUN_LINT == "true"'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. LINT STAGE
+#    Runs ESLint on all TypeScript / TSX source files.
+#    Toggle by setting PIPELINE_RUN_LINT in this file.
+# ─────────────────────────────────────────────────────────────────────────────
+lint:
+  stage: lint
+  image: $NODE_IMAGE
+  needs:
+    - job: prepare_artifacts
+      artifacts: true
+  dependencies:
+    - prepare_artifacts
+  cache:
+    - key:
+        files:
+          - package-lock.json
+      paths:
+        - node_modules/
+        - .npm/
+    - key: "eslint-cache-$CI_COMMIT_REF_SLUG"
+      paths:
+        - .eslintcache
+      policy: pull-push
+    - key: "build-cache-$CI_COMMIT_REF_SLUG"
+      paths:
+        - .cache/
+      policy: pull-push
+  script:
+    - npm ci --prefer-offline
+    - npm run generateArtifacts
+    - test -s src/_sockets/apiTypes.generated.ts
+    - test -s src/docs/apiDocs.generated.json
+    - test -s server/prod/generatedApis.ts
+    - npm run lint
+  rules:
+    - if: $DEPLOY_TEST == "true"
+      when: never
+    - if: '$PIPELINE_RUN_LINT == "true"'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. BUILD STAGE
+#    Installs dependencies and runs the full production build:
+#      - Generates type-maps & server request artifacts
+#      - Compiles TypeScript (tsc -b)
+#      - Bundles the React client with Vite  →  dist/
+#      - Bundles the Node server with esbuild  →  dist/server.js
+#
+#    The resulting dist/ folder is passed to the deploy jobs via GitLab artifacts.
+# ─────────────────────────────────────────────────────────────────────────────
+build:
+  stage: build
+  image: $NODE_IMAGE
+  cache:
+    - key:
+        files:
+          - package-lock.json
+      paths:
+        - node_modules/
+        - .npm/
+    - key: "build-cache-$CI_COMMIT_REF_SLUG"
+      paths:
+        - .cache/
+      policy: pull-push
+  script:
+    - npm ci --prefer-offline
+    - npm run build
+  artifacts:
+    name: "YOURSERVER-dist-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - dist/
+    expire_in: 1 week
+  rules:
+    - if: $DEPLOY_TEST == "true"
+      when: never
+    - when: on_success
+#    - if: $CI_COMMIT_BRANCH == "main"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SSH TEMPLATE
+#    Reusable anchor that sets up the SSH agent with the private key stored in
+#    the GitLab CI/CD staging/production key variables, and trusts both server IPs.
+# ─────────────────────────────────────────────────────────────────────────────
+.ssh_setup: &ssh_setup
+  image: $DEPLOY_IMAGE
+  before_script:
+    - apk add --no-cache rsync openssh
+    - eval $(ssh-agent -s)
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - |
+      if [ "$CI_ENVIRONMENT_NAME" = "staging" ]; then
+        SSH_KEY="$STAGING_SSH_KEY"
+        SERVER_IP="$STAGING_HOST"
+      elif [ "$CI_ENVIRONMENT_NAME" = "production" ]; then
+        SSH_KEY="$PRODUCTION_SSH_KEY"
+        SERVER_IP="$PRODUCTION_HOST"
+      fi
+
+      if [ -z "$SSH_KEY" ]; then
+        echo "Error: SSH_PRIVATE_KEY for $CI_ENVIRONMENT_NAME is empty."
+        exit 1
+      fi
+
+      # IMPORTANT: tr -d '\r' fixes the "Permission denied" caused by bad line endings
+      echo "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+      chmod 600 ~/.ssh/id_ed25519
+      ssh-add ~/.ssh/id_ed25519
+      ssh-keyscan "$SERVER_IP" >> ~/.ssh/known_hosts
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. DEPLOY TO STAGING (Automatic)
+# ─────────────────────────────────────────────────────────────────────────────
+deploy_to_staging:
+  <<: *ssh_setup
+  stage: deploy
+  environment:
+    name: staging
+    url: $STAGING_ENV_URL
+  dependencies:
+    - build
+  script:
+    - echo "Deploying to Staging..."
+    - ssh $STAGING_DEPLOY_USER@$STAGING_HOST "mkdir -p $STAGING_DIST_ASSETS_ROOT $STAGING_PRISMA_ROOT"
+    
+    # Sync dist/ (clean sync)
+    - rsync -rzh --delete --omit-dir-times --no-owner --no-group --no-perms
+      --exclude='.git*'
+      --exclude='assets/'
+      dist/
+      $STAGING_DEPLOY_USER@$STAGING_HOST:$STAGING_DIST_ROOT/
+
+    # Sync assets/ (keeping old hashes for active clients)
+    - rsync -rzh --omit-dir-times --no-owner --no-group --no-perms
+      dist/assets/
+      $STAGING_DEPLOY_USER@$STAGING_HOST:$STAGING_DIST_ASSETS_ROOT/
+
+    # Sync manifests & prisma
+    - rsync -rzh --omit-dir-times --no-owner --no-group --no-perms
+      package.json package-lock.json prisma/
+      $STAGING_DEPLOY_USER@$STAGING_HOST:$STAGING_APP_ROOT/
+
+    - ssh $STAGING_DEPLOY_USER@$STAGING_HOST "
+      cd $STAGING_APP_ROOT &&
+      npm ci --omit=dev --prefer-offline &&
+      npx prisma generate &&
+      pm2 restart $STAGING_PM2_PROCESS_NAME --update-env || pm2 start dist/server.js --name $STAGING_PM2_PROCESS_NAME
+      "
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: always
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. DEPLOY TO PRODUCTION (Manual)
+# ─────────────────────────────────────────────────────────────────────────────
+deploy_to_production:
+  <<: *ssh_setup
+  stage: deploy
+  environment:
+    name: production
+    url: $PRODUCTION_ENV_URL
+  dependencies:
+    - build
+  script:
+    - echo "Deploying to Production..."
+    - ssh $PRODUCTION_DEPLOY_USER@$PRODUCTION_HOST "mkdir -p $PRODUCTION_DIST_ASSETS_ROOT $PRODUCTION_PRISMA_ROOT"
+    
+    # Sync dist/ (clean sync)
+    - rsync -rzh --delete --omit-dir-times --no-owner --no-group --no-perms
+      --exclude='.git*'
+      --exclude='assets/'
+      dist/
+      $PRODUCTION_DEPLOY_USER@$PRODUCTION_HOST:$PRODUCTION_DIST_ROOT/
+
+    # Sync assets/ (keeping old hashes for active clients)
+    - rsync -rzh --omit-dir-times --no-owner --no-group --no-perms
+      dist/assets/
+      $PRODUCTION_DEPLOY_USER@$PRODUCTION_HOST:$PRODUCTION_DIST_ASSETS_ROOT/
+
+    # Sync manifests & prisma
+    - rsync -rzh --omit-dir-times --no-owner --no-group --no-perms
+      package.json package-lock.json prisma/
+      $PRODUCTION_DEPLOY_USER@$PRODUCTION_HOST:$PRODUCTION_APP_ROOT/
+
+    - ssh $PRODUCTION_DEPLOY_USER@$PRODUCTION_HOST "
+      cd $PRODUCTION_APP_ROOT &&
+      npm ci --omit=dev --prefer-offline &&
+      npx prisma generate &&
+      pm2 restart $PRODUCTION_PM2_PROCESS_NAME --update-env || pm2 start dist/server.js --name $PRODUCTION_PM2_PROCESS_NAME
+      "
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual

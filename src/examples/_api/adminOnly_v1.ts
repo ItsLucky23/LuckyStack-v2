@@ -1,5 +1,5 @@
 import { AuthProps, SessionLayout } from '../../../config';
-import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
+import { Functions, ApiResponse, MaybePromise } from '../../../src/_sockets/apiTypes.generated';
 
 export const auth: AuthProps = {
   login: true,
@@ -9,12 +9,12 @@ export const auth: AuthProps = {
 };
 
 export interface ApiParams {
-  data: {};
+  data: Record<string, never>;
   user: SessionLayout;
   functions: Functions;
 }
 
-export const main = async ({ user }: ApiParams): Promise<ApiResponse> => {
+export const main = ({ user }: ApiParams): MaybePromise<ApiResponse> => {
   return {
     status: 'success',
     result: {

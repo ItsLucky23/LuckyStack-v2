@@ -1,18 +1,18 @@
 import { Socket } from "socket.io-client";
 
-type ApiQueueItem = {
+interface ApiQueueItem {
   id: string;
   key: string;
   run: (socketInstance: Socket) => void;
   createdAt: number;
-};
+}
 
-type SyncQueueItem = {
+interface SyncQueueItem {
   id: string;
   key: string;
   run: (socketInstance: Socket) => void;
   createdAt: number;
-};
+}
 
 const apiQueue: ApiQueueItem[] = [];
 const syncQueue: SyncQueueItem[] = [];
@@ -20,7 +20,7 @@ let isFlushing = false;
 
 export const isOnline = () => {
   if (typeof navigator === "undefined") return true;
-  return navigator.onLine !== false;
+  return navigator.onLine;
 };
 
 export const enqueueApiRequest = (item: ApiQueueItem) => {
@@ -33,14 +33,14 @@ export const enqueueSyncRequest = (item: SyncQueueItem) => {
 
 export const removeApiQueueItem = (id: string) => {
   const index = apiQueue.findIndex((item) => item.id === id);
-  if (index >= 0) {
+  if (index !== -1) {
     apiQueue.splice(index, 1);
   }
 };
 
 export const removeSyncQueueItem = (id: string) => {
   const index = syncQueue.findIndex((item) => item.id === id);
-  if (index >= 0) {
+  if (index !== -1) {
     syncQueue.splice(index, 1);
   }
 };

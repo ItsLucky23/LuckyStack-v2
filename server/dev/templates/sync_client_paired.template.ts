@@ -1,5 +1,5 @@
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { Functions, SyncClientResponse, SyncClientInput, SyncServerOutput } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
+import { Functions, SyncClientResponse, SyncClientInput, SyncServerOutput, MaybePromise } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 // Types are imported from the generated file based on the _server.ts definition
 type PagePath = '{{PAGE_PATH}}';
@@ -13,7 +13,7 @@ export interface SyncParams {
   roomCode: string; // room code
 }
 
-export const main = async ({  }: SyncParams): Promise<SyncClientResponse> => {
+export const main = ({  }: SyncParams): MaybePromise<SyncClientResponse> => {
   // PAIRED SYNC: Types are shared with the _server.ts file
   // clientInput type comes from _server.ts SyncParams
   // serverOutput type is inferred from _server.ts return value

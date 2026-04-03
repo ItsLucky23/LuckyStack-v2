@@ -1,5 +1,5 @@
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { Functions, SyncClientResponse } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
+import { Functions, SyncClientResponse, MaybePromise } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 
 export interface SyncParams {
@@ -13,7 +13,7 @@ export interface SyncParams {
   roomCode: string; // room code
 }
 
-export const main = async ({  }: SyncParams): Promise<SyncClientResponse> => {
+export const main = ({  }: SyncParams): MaybePromise<SyncClientResponse> => {
   // CLIENT-ONLY SYNC: No server processing, runs for each client in the room
   // Use functions.session.getSession(token) when you need session data for this target client.
   // Returning error here only affects the current target client and does not stop other clients.

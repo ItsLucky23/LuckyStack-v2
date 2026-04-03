@@ -83,14 +83,14 @@ type SyncEventCallback = (params: { clientOutput: unknown; serverOutput: unknown
 const syncEvents: Partial<Record<string, SyncEventCallback[]>> = {};
 const noop = () => null;
 
-type SyncLifecycleHandlers = {
+interface SyncLifecycleHandlers {
   connect: () => void;
   disconnect: () => void;
   reconnectAttempt: (attempt: number) => void;
   userAfk: (payload: { userId: string; endTime?: number }) => void;
   userBack: (payload: { userId: string }) => void;
   connectError: (err: { message: string }) => void;
-};
+}
 
 let activeLifecycleHandlers: SyncLifecycleHandlers | null = null;
 
@@ -183,7 +183,9 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
           enqueueSyncRequest({
             id: queueId,
             key: fullName,
-            run: (s) => runRequest(s),
+            run: (s) => {
+              runRequest(s);
+            },
             createdAt: Date.now(),
           });
           return;
@@ -195,7 +197,7 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
 
         socketInstance.emit('sync', { name: fullName, data, cb: `${sanitizedName}/${version}`, receiver, responseIndex: tempIndex, ignoreSelf });
 
-        socketInstance.once(`sync-${tempIndex}`, (responseData: { status: "success" | "error", message: string }) => {
+        socketInstance.once(`sync-${String(tempIndex)}`, (responseData: { status: "success" | "error", message: string }) => {
           if (responseData.status === "error") {
             if (dev) {
               console.error(`Sync ${sanitizedName} failed: ${responseData.message}`);
@@ -211,7 +213,7 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
             return;
           }
 
-          resolve(responseData.status === "success");
+          resolve(true);
         });
       };
 
@@ -227,30 +229,22 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
 export const useSyncEvents = () => {
   const localRegistryRef = useRef<Map<string, SyncEventCallback>>(new Map());
 
-  type TypedCallbackParams<F extends SyncFullName, V extends VersionsForFullName<F>> = {
+  interface TypedCallbackParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
     clientOutput: ClientOutputForFullName<F, V>;
     serverOutput: ServerOutputForFullName<F, V>;
-  };
+  }
 
-  type UpsertParams<F extends SyncFullName, V extends VersionsForFullName<F>> = {
+  interface UpsertParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
     name: F;
     version: V;
     callback: (params: TypedCallbackParams<F, V>) => void;
-  };
+  }
 
   const upsertSyncEventCallback = useCallback(<F extends SyncFullName, V extends VersionsForFullName<F>>(
     params: UpsertParams<F, V>
   ): (() => void) => {
 
-    if (!params.name || typeof params.name !== 'string') {
-      if (dev) {
-        console.error("Invalid name for upsertSyncEventCallback");
-        notify.error({ key: 'sync.invalidName' });
-      }
-      return noop;
-    }
-
-    if (!params.version || typeof params.version !== 'string') {
+    if (typeof params.version !== 'string') {
       if (dev) {
         console.error("Invalid version for upsertSyncEventCallback");
         notify.error({ key: 'sync.invalidVersion' });
@@ -267,6 +261,14 @@ export const useSyncEvents = () => {
     }
 
     const sanitizedName = params.name.replaceAll(/^\/+|\/+$/g, '');
+    if (sanitizedName.length === 0) {
+      if (dev) {
+        console.error("Invalid name for upsertSyncEventCallback");
+        notify.error({ key: 'sync.invalidName' });
+      }
+      return noop;
+    }
+
     const fullName = `sync/${sanitizedName}/${params.version}`;
     const callback = params.callback as unknown as SyncEventCallback;
     const callbacks = getCallbacksForRoute(fullName);
@@ -391,7 +393,7 @@ export const initSyncRequest = async ({
         reconnectAttempt: attempt,
       }
     }));
-    console.log(`Reconnecting attempt ${attempt}...`);
+    console.log(`Reconnecting attempt ${String(attempt)}...`);
   };
 
   //? will not trigger when you call this event

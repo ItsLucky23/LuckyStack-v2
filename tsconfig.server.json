@@ -4,6 +4,8 @@
     "module": "ES2022", /* Server uses ES2022 modules specifically */
     "moduleResolution": "bundler", /* Modern resolver for ESM + esbuild bundling */
     "outDir": "dist/server", /* Redirect output structure to the directory. */
+    "incremental": true,
+    "tsBuildInfoFile": "./.cache/tsbuild/server.tsbuildinfo",
     "types": [
       "node"
     ], /* Type declaration files to be included in compilation. */

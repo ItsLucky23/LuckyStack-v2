@@ -6,7 +6,7 @@ export const auth: AuthProps = {
 };
 
 export interface ApiParams {
-  data: {};
+  data: Record<string, never>;
   user: SessionLayout;
   functions: Functions;
 }
@@ -22,12 +22,12 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
   });
 
   const updatedUser = { ...user, admin: newAdminStatus };
-  saveSession(user.token, updatedUser);
+  await saveSession(user.token, updatedUser);
 
   return {
     status: 'success',
     result: {
-      message: `Admin status toggled to: ${newAdminStatus}`,
+      message: newAdminStatus ? 'Admin status toggled to: true' : 'Admin status toggled to: false',
       admin: newAdminStatus,
       previousStatus: user.admin
     }

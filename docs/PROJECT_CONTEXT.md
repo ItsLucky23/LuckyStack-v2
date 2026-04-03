@@ -142,7 +142,7 @@ When a user logs in, the system automatically kicks all previous sessions for th
 | Script                      | Purpose                                                            |
 | --------------------------- | ------------------------------------------------------------------ |
 | `generateServerRequests.ts` | Scans `src/` for `_api/` and `_sync/` folders, generates route map |
-| `bundleServer.ts`           | Bundles server for production                                      |
+| `bundleServer.mjs`          | Bundles server for production                                      |
 | `clearServerRequests.ts`    | Clears generated route map for dev restart                         |
 
 ---

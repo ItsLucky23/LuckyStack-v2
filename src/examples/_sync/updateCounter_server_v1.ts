@@ -1,5 +1,5 @@
 import { AuthProps, SessionLayout } from '../../../config';
-import { Functions, SyncServerResponse } from '../../../src/_sockets/apiTypes.generated';
+import { Functions, SyncServerResponse, MaybePromise } from '../../../src/_sockets/apiTypes.generated';
 
 export const auth: AuthProps = {
   login: true,
@@ -13,7 +13,7 @@ export interface SyncParams {
   roomCode: string;
 }
 
-export const main = async ({ clientInput }: SyncParams): Promise<SyncServerResponse> => {
+export const main = ({ clientInput }: SyncParams): MaybePromise<SyncServerResponse> => {
   console.log(clientInput);
 
   return {

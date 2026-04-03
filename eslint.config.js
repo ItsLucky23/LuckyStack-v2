@@ -56,15 +56,7 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
-      'unicorn/filename-case': [
-        'error',
-        {
-          cases: {
-            camelCase: true,
-            pascalCase: true,
-          },
-        },
-      ],
+      'unicorn/filename-case': "off",
       'unicorn/prevent-abbreviations': 'off',
       'unicorn/no-null': 'off',
       'import-x/order': [

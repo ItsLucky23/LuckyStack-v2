@@ -1,4 +1,4 @@
-import { Functions, SyncClientResponse, SyncClientInput, SyncServerOutput } from '../../../src/_sockets/apiTypes.generated';
+import { Functions, SyncClientResponse, SyncClientInput, SyncServerOutput, MaybePromise } from '../../../src/_sockets/apiTypes.generated';
 
 type PagePath = 'examples';
 type SyncName = 'updateCounter';
@@ -11,7 +11,7 @@ export interface SyncParams {
   roomCode: string;
 }
 
-export const main = async (): Promise<SyncClientResponse> => {
+export const main = (): MaybePromise<SyncClientResponse> => {
 // export const main = async ({ token, functions }: SyncParams): Promise<SyncClientResponse> => {
   // const user = token ? await functions.session.getSession(token) : null;
   // console.log('Sync client check:', user?.location?.pathName);

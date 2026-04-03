@@ -37,6 +37,8 @@ const setDisconnectedStatus = (setSocketStatus: ReturnType<typeof useSocketStatu
   }));
 };
 
+const isLocationProviderEnabled: boolean = locationProviderEnabled;
+
 export let socket: Socket | null = null;
 
 let responseIndex = 0;
@@ -91,7 +93,7 @@ export function useSocket(session: SessionLayout | null) {
         socketConnection.emit("intentionalDisconnect");
 
         //? user switched back to the tab
-      } else if (document.visibilityState === "visible") {
+      } else {
         if (socketStatusRef.current.self.status !== "CONNECTED") {
           socketConnection.connect();
         }
@@ -101,10 +103,10 @@ export function useSocket(session: SessionLayout | null) {
     document.addEventListener("visibilitychange", handleVisibility);
 
     if (socketActivityBroadcaster) {
-      initSyncRequest({
+      void initSyncRequest({
         setSocketStatus,
         sessionRef,
-      })
+      });
     } else {
       socketConnection.on("connect", () => {
         console.log("Connected to server");
@@ -115,10 +117,10 @@ export function useSocket(session: SessionLayout | null) {
       });
 
       socketConnection.on("reconnect_attempt", (attempt) => {
-        console.log(`Reconnecting attempt ${attempt}...`);
+        console.log("Reconnecting attempt", attempt);
       });
 
-      socketConnection.on("connect_error", (err) => {
+      socketConnection.on("connect_error", (err: { message: string }) => {
         if (dev) {
           console.error(`Connection error: ${err.message}`);
           notify.error({ key: 'common.connectionError' });
@@ -343,7 +345,8 @@ export const getJoinedRooms = async () => {
 }
 
 export const updateLocationRequest = async ({ location }: { location: { pathName: string, searchParams: Record<string, string> } }) => {
-  if (!locationProviderEnabled) { return null; }
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- this guard is required because deployments can toggle locationProviderEnabled
+  if (!isLocationProviderEnabled) { return null; }
 
   if (!location.pathName) {
     if (dev) {

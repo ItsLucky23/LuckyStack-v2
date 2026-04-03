@@ -170,6 +170,7 @@ export interface JsonObject {
 	[key: string]: JsonValue | undefined;
 }
 export type JsonArray = JsonValue[];
+export type MaybePromise<T> = T | Promise<T>;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // API Type Definitions

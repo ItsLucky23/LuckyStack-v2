@@ -8,38 +8,38 @@ import notify from "src/_functions/notify";
 
 export default function middlewareHandler({ 
   location, 
-  // @ts-ignore // we use ts-ignore because we dont use the searchParams in the example and this will cause a bundle error
-  searchParams, 
   session 
 }: { 
   location: string, 
-  searchParams: Record<string, any>, 
+  searchParams: Record<string, unknown>, 
   session: SessionLayout | null 
 }) {
 
   switch (location) {
 
-    case '/admin':
-      if (session?.email && session?.provider && session?.admin === true) {
-        return { success: true };
-      } else if (!session?.email || !session?.provider) {
+    case '/admin': {
+      if (!session) {
         return { redirect: '/login' };
-      } else if (!session?.admin) {
-        notify.error({ key: 'middleware.notAdmin' });
       }
+
+      if (session.admin) {
+        return { success: true };
+      }
+
+      notify.error({ key: 'middleware.notAdmin' });
       return
+    }
 
-    case '/examples':
-      if (session?.email && session?.provider) {
-        return { success: true };
-      } else {
-        return { redirect: '/login' };
-      }
+    case '/examples': {
+      return session ? { success: true } : { redirect: '/login' };
+    }
 
-    case '/example':
+    case '/example': {
       return { redirect: '/examples' };
+    }
 
-    default:
+    default: {
       return { success: true };
+    }
   }
 }

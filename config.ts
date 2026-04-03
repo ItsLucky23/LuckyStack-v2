@@ -16,6 +16,12 @@ const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
     sessionBasedToken: true,
     allowMultipleSessions: true
   },
+  "http://localhost:5174": {
+    backendUrl: "http://localhost:81",
+    dev: true,
+    sessionBasedToken: true,
+    allowMultipleSessions: true
+  },
   "https://staging.server.com": {
     backendUrl: "https://staging.server.com",
     dev: false,

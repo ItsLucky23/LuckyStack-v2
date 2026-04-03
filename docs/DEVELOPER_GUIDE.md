@@ -204,6 +204,16 @@ tsc -b
 
 The type-map generator is strict: unresolved symbols fail generation instead of emitting `any` fallbacks.
 
+## Build Caches
+
+Build tooling now uses explicit cache locations so local runs and CI jobs can reuse work between runs:
+
+- TypeScript build mode: `.cache/tsbuild/client.tsbuildinfo` and `.cache/tsbuild/server.tsbuildinfo`
+- Vite cache: `.cache/vite`
+- ESLint cache: `.eslintcache`
+
+For GitLab CI, cache both `.cache/` and `.eslintcache` between jobs to reduce repeated type-check and bundling work.
+
 ---
 
 ## Testing APIs

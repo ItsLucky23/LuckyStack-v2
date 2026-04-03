@@ -1,7 +1,7 @@
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
 import { AuthProps, SessionLayout } from '{{REL_PATH}}config';
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { Functions, ApiResponse } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
+import { Functions, ApiResponse, MaybePromise } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 // Set the request limit per minute. Set to false to use the default config value config.rateLimiting
 export const rateLimit: number | false = 20;
@@ -24,7 +24,7 @@ export interface ApiParams {
   functions: Functions;
 }
 
-export const main = async ({  }: ApiParams): Promise<ApiResponse> => {
+export const main = ({  }: ApiParams): MaybePromise<ApiResponse> => {
   // Error responses must include errorCode
   // return { status: 'error', errorCode: 'api.someError', errorParams: [{ key: 'id', value: 1 }] };
 

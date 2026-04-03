@@ -1,9 +1,10 @@
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import sharp from 'sharp';
-import path from 'path';
-import { mkdir } from 'fs/promises';
+import path from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import { UPLOADS_DIR } from '../../../server/utils/paths';
+import { tryCatch } from '../../../server/functions/tryCatch';
 
 export const rateLimit: number | false = 20;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -16,8 +17,8 @@ export const auth: AuthProps = {
 export interface ApiParams {
   data: {
     name?: string;
-    theme?: 'light' | 'dark';
-    language?: string;
+    theme?: SessionLayout['theme'];
+    language?: SessionLayout['language'];
     avatar?: string;
   };
   user: SessionLayout;
@@ -29,7 +30,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   const { avatar, name, theme, language } = data;
 
   if (avatar) {
-    const matches = avatar.match(/^data:(.+);base64,(.+)$/);
+    const matches = /^data:(.+);base64,(.+)$/.exec(avatar);
     if (matches) {
       const base64Data = matches[2];
       const buffer = Buffer.from(base64Data, "base64");
@@ -37,27 +38,29 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       const fileName = `${user.id}.webp`;
       const filePath = path.join(UPLOADS_DIR, fileName);
 
-      try {
+      const [avatarSaveError] = await tryCatch(async () => {
         await mkdir(UPLOADS_DIR, { recursive: true });
 
         await sharp(buffer)
           .webp({ quality: 80 })
           .toFile(filePath);
+      });
 
-        console.log(`✅ Avatar saved for ${user.name} at ${filePath}`);
-      } catch (err) {
-        console.error("Error saving avatar:", err);
+      if (avatarSaveError) {
+        console.error("Error saving avatar:", avatarSaveError);
         return { status: "error", errorCode: 'avatar.uploadFailed' };
       }
+
+      console.log(`✅ Avatar saved for ${user.name} at ${filePath}`);
     } else {
       console.log("failed to upload new avatar")
       return { status: "error", errorCode: 'avatar.invalidFormat' };
     }
   }
 
-  let newData = {};
+  let newData: Partial<Pick<SessionLayout, 'avatar' | 'name' | 'theme' | 'language'>> = {};
 
-  if (avatar) newData = { ...newData, avatar: `${user.id}` }
+  if (avatar) newData = { ...newData, avatar: user.id }
   if (name) newData = { ...newData, name }
   if (theme) newData = { ...newData, theme }
   if (language) newData = { ...newData, language }
