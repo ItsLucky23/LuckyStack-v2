@@ -22,6 +22,7 @@ import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
 import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
 import { checkRateLimit } from './utils/rateLimiter';
+import { hasCookie } from './utils/cookies';
 
 const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
 const SESSION_COOKIE_OPTIONS = `HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; ${process.env.SECURE == 'true' ? "Secure;" : ""}`;
@@ -53,6 +54,22 @@ const sanitizeForLog = (value: unknown): unknown => {
   return value;
 };
 
+const parseSessionBasedTokenHeader = (headerValue: string | string[] | undefined): boolean | null => {
+  if (typeof headerValue !== 'string') {
+    return null;
+  }
+
+  const normalized = headerValue.trim().toLowerCase();
+  if (normalized === 'true') {
+    return true;
+  }
+  if (normalized === 'false') {
+    return false;
+  }
+
+  return null;
+};
+
 const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
 
   const origin = req.headers.origin ?? req.headers.referer ?? req.headers.host ?? '';
@@ -65,7 +82,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Based-Token");
   res.setHeader("Access-Control-Expose-Headers", "X-Session-Token");
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader('Referrer-Policy', 'no-referrer'); // prevents the browser from leaking sensative urls
@@ -90,7 +107,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
   const token = extractTokenFromRequest(req);
 
-  if (!config.sessionBasedToken && token) {
+  const hasTokenCookie = hasCookie(req.headers.cookie, 'token');
+
+  if (hasTokenCookie && token) {
     const currentSession = await getSession(token);
     if (currentSession?.id) {
       // Sliding expiration for cookie mode: keep browser token lifetime aligned with Redis TTL.
@@ -191,16 +210,20 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
     //? if it was successful then we apply the cookie and return the user id and reason for the login or account creation
     if (newToken) {
-      if (token) { await deleteSession(token); }
+      if (token) { await deleteSession(token, { notifyClients: false }); }
+
+      const requestedSessionMode = parseSessionBasedTokenHeader(req.headers['x-session-based-token']);
+      const useSessionBasedToken = requestedSessionMode ?? config.sessionBasedToken;
 
       if (process.env.NODE_ENV === 'development') {
         console.log('setting cookie with new token', 'green');
       }
-      if (!config.sessionBasedToken) {
+
+      if (!useSessionBasedToken) {
         res.setHeader("Set-Cookie", `token=${newToken}; ${SESSION_COOKIE_OPTIONS}`);
       }
 
-      if (config.sessionBasedToken) {
+      if (useSessionBasedToken) {
         res.setHeader("X-Session-Token", newToken);
       }
       // return res.end(JSON.stringify({ status, reason, session })) 
@@ -221,7 +244,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     //? we successfully logged in or created an acocunt
 
     //? if the user already had a token then we delete the previous session data
-    if (token) { await deleteSession(token); }
+    if (token) { await deleteSession(token, { notifyClients: false }); }
 
     //? we set the cookie with the new token and redirect the user to the frontend
     if (process.env.NODE_ENV === 'development') {

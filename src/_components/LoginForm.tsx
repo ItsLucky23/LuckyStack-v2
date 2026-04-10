@@ -55,7 +55,10 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     const fetchUser = async () => {
       const res = await fetch(`${backendUrl}/auth/api/credentials`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Session-Based-Token": String(sessionBasedToken),
+        },
         body: JSON.stringify({ name, email, password, confirmPassword, provider }),
         credentials: "include",
       });

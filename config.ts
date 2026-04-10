@@ -62,10 +62,10 @@ const config = {
   loginPageUrl: '/login',
  
   /** URL to redirect after successful login */
-  loginRedirectUrl: '/examples',
+  loginRedirectUrl: '/dashboard',
  
   /**
-   * If false, logging in on a new device will automatically sign out all other sessions.
+   * If false, logging in on a new device will automatically sign out all other sessions for the user.
    * Useful for security-sensitive apps. Set to true to allow multiple simultaneous sessions.
    */
   allowMultipleSessions: resolvedEnvironment.allowMultipleSessions ?? false,

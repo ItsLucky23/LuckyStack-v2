@@ -35,7 +35,7 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
     console.log(`Logging out user with token: ${token}`, 'cyan');
 
     if (!skipSessionDelete) {
-      await deleteSession(token);
+      await deleteSession(token, { notifyClients: false });
     }
     const tokensOfActiveUsers = `${process.env.PROJECT_NAME}-activeUsers:${userId}`
     await redis.srem(tokensOfActiveUsers, token);

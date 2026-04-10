@@ -1,5 +1,6 @@
 import { IncomingMessage } from 'http';
 import config from '../../config';
+import { getCookieValue } from './cookies';
 
 /**
  * Extract the authentication token from an HTTP request.
@@ -18,25 +19,17 @@ import config from '../../config';
  * ```
  */
 export const extractTokenFromRequest = (req: IncomingMessage): string | null => {
-  // Strict extraction by configured token mode.
+  const authHeader = req.headers.authorization;
+  const bearerToken = authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+
+  const cookieToken = getCookieValue(req.headers.cookie, 'token');
+
+  // Prefer the configured mode, but fall back to the other transport.
   if (config.sessionBasedToken) {
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      return authHeader.slice(7);
-    }
-    return null;
+    return bearerToken ?? cookieToken;
   }
 
-  const cookieHeader = req.headers.cookie;
-  if (cookieHeader) {
-    const tokenCookie = cookieHeader
-      .split('; ')
-      .find(row => row.startsWith('token='));
-
-    if (tokenCookie) {
-      return tokenCookie.split('=')[1] ?? null;
-    }
-  }
-
-  return null;
+  return cookieToken ?? bearerToken;
 };

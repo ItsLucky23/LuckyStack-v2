@@ -13,8 +13,12 @@ window.location.href = "/auth/api/google";
 // Credentials login
 const response = await fetch("/auth/api/credentials", {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+    "X-Session-Based-Token": "false", // optional: force cookie-mode response
+  },
   body: JSON.stringify({ email, password }),
+  credentials: "include",
 });
 ```
 
@@ -221,7 +225,10 @@ switch (location) {
 
 1. **OAuth state** - One-time state is generated/validated to mitigate OAuth login CSRF
 2. **CORS** - Only `DNS` and `EXTERNAL_ORIGINS` are allowed
-3. **Token delivery by mode** - `sessionBasedToken=false` uses HttpOnly cookies; `sessionBasedToken=true` avoids cookie token writes and uses session-token delivery for development workflows
-4. **bcrypt** - Passwords hashed with salt rounds
-4. **CSRF** - WebSocket architecture inherently prevents CSRF
-5. **Origin check** - Every request validates origin header
+3. **Token delivery by mode** - `sessionBasedToken=false` uses HttpOnly cookies; `sessionBasedToken=true` uses session-token delivery for development workflows
+4. **Mode negotiation for credentials login** - client can send `X-Session-Based-Token` so backend responds with cookie/token transport that matches the active frontend DNS config
+5. **Token extraction fallback** - server prefers the configured mode but can read both cookie and bearer/session auth token to prevent DNS-mode mismatch lockouts
+6. **Silent token rotation on login** - when replacing an existing token during successful login/callback, the previous session is cleaned up without emitting a forced client logout event to avoid redirect races
+7. **bcrypt** - Passwords hashed with salt rounds
+8. **CSRF** - WebSocket architecture inherently prevents CSRF
+9. **Origin check** - Every request validates origin header

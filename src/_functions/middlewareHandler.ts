@@ -30,6 +30,13 @@ export default function middlewareHandler({
       return
     }
 
+    case '/dashboard': {
+      if (!session) {
+        return { redirect: '/login' };
+      }
+      return { success: true };
+    }
+
     default: {
       return { success: true };
     }
