@@ -3,9 +3,9 @@
     /* Language and Environment */
     "target": "ES2022", /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */
     "lib": [
-      "ES2020",
+      "ES2023",
       "DOM",
-      "DOM.Iterable",
+      "DOM.Iterable"
     ], /* Specify a set of bundled library declaration files that describe the target runtime environment. */
     "module": "ESNext", /* Specify what module code is generated. */
     "skipLibCheck": true, /* Skip type checking all .d.ts files. */

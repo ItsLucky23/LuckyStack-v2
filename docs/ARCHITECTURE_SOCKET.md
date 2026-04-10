@@ -28,7 +28,6 @@ socket.emit("event", data);
 | `leaveRoom`           | Client → Server  | Leave a specific room        |
 | `getJoinedRooms`      | Client → Server  | Get current room membership  |
 | `updateLocation`      | Client → Server  | Track user's current page    |
-| `forceLogout`         | Server → Client  | Force logout (other session) |
 
 ---
 

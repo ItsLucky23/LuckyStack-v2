@@ -25,11 +25,9 @@
       ]
     },
     "lib": [
-      "ES2020",
+      "ES2023",
       "DOM",
-      "ES2021",
-      "DOM.Iterable",
-      "ES2023.Array"
+      "DOM.Iterable"
     ],
   },
   "include": [

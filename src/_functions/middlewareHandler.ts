@@ -30,14 +30,6 @@ export default function middlewareHandler({
       return
     }
 
-    case '/examples': {
-      return session ? { success: true } : { redirect: '/login' };
-    }
-
-    case '/example': {
-      return { redirect: '/examples' };
-    }
-
     default: {
       return { success: true };
     }

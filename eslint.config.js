@@ -27,12 +27,14 @@ export default tseslint.config(
       jsxA11y.flatConfigs.recommended,
     ],
     languageOptions: {
-      ecmaVersion: 2020,
+      ecmaVersion: 'latest',
       globals: globals.browser,
       parserOptions: {
-        projectService: {
-          noWarnOnMultipleProjects: true,
-        },
+        project: [
+          './tsconfig.json',
+          './tsconfig.client.json',
+          './tsconfig.server.json',
+        ],
         tsconfigRootDir: import.meta.dirname,
       },
     },

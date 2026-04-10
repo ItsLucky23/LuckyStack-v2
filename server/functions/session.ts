@@ -131,9 +131,24 @@ const deleteSession = async (token: string): Promise<boolean> => {
         const activeUsersKey = `${process.env.PROJECT_NAME}-activeUsers:${userId}`;
         const { ioInstance } = await import('../sockets/socket');
 
-        // Notify connected clients to logout
-        if (ioInstance?.sockets.adapter.rooms.has(token)) {
-          ioInstance.to(token).emit('forceLogout');
+        // Reuse the same logout flow as single-session enforcement.
+        if (ioInstance) {
+          const { logout } = await import('../sockets/utils/logout');
+          const sockets = ioInstance.sockets.adapter.rooms.get(token);
+
+          if (sockets) {
+            await Promise.all(Array.from(sockets).map(async (socketId) => {
+              const socket = ioInstance.sockets.sockets.get(socketId);
+              if (!socket) { return; }
+
+              await logout({
+                token,
+                socket,
+                userId,
+                skipSessionDelete: true,
+              });
+            }));
+          }
         }
 
         await redis.srem(activeUsersKey, token);

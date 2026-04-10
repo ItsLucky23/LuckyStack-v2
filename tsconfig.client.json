@@ -1,14 +1,12 @@
 {
   "extends": "./tsconfig.shared.json",
   "compilerOptions": {
-    "target": "ES2020", /* Override base target for broader browser support */
+    "target": "ES2022", /* Override base target for broader browser support */
     "useDefineForClassFields": true, /* Emit class fields with Define semantics. */
     "lib": [
-      "ES2020",
+      "ES2023",
       "DOM",
-      "ES2021",
-      "DOM.Iterable",
-      "ES2023.Array"
+      "DOM.Iterable"
     ], /* Include DOM libraries for frontend code */
     /* Bundler mode */
     "moduleResolution": "bundler", /* optimal for bundlers like Vite */

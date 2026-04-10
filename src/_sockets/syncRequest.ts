@@ -37,7 +37,7 @@ type SyncRouteRecord = UnionToIntersection<{
 }[keyof SyncTypeMap]>;
 
 type SyncFullName = Extract<keyof SyncRouteRecord, string>;
-type VersionsForFullName<F extends SyncFullName> = keyof SyncRouteRecord[F] & string;
+type VersionsForFullName<F extends SyncFullName> = Extract<keyof SyncRouteRecord[F], string>;
 
 type ClientInputForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> = SyncRouteRecord[F][V] extends { clientInput: infer I }
   ? I
@@ -374,7 +374,8 @@ export const useSyncEvents = () => {
       return noop;
     }
 
-    const sanitizedName = params.name.replaceAll(/^\/+|\/+$/g, '');
+    const routeName = String(params.name);
+    const sanitizedName = routeName.replaceAll(/^\/+|\/+$/g, '');
     if (sanitizedName.length === 0) {
       if (dev) {
         console.error("Invalid name for upsertSyncEventCallback");
@@ -383,7 +384,8 @@ export const useSyncEvents = () => {
       return noop;
     }
 
-    const fullName = `sync/${sanitizedName}/${params.version}`;
+    const routeVersion = String(params.version);
+    const fullName = `sync/${sanitizedName}/${routeVersion}`;
     const callback = params.callback as unknown as SyncEventCallback;
     const callbacks = getCallbacksForRoute(fullName);
 

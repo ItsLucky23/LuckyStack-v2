@@ -4,10 +4,11 @@ import { disconnectTimers, tempDisconnectedSockets } from "./activityBroadcaster
 import { deleteSession } from "../../functions/session";
 import tryCatch from "../../../shared/tryCatch";
 
-export const logout = async ({ token, socket, userId }: {
+export const logout = async ({ token, socket, userId, skipSessionDelete }: {
   token: string | null,
   socket: Socket | undefined,
   userId: string | null,
+  skipSessionDelete?: boolean,
 }) => {
   const [error, result] = await tryCatch(async () => {
     if (!socket) {
@@ -33,7 +34,9 @@ export const logout = async ({ token, socket, userId }: {
 
     console.log(`Logging out user with token: ${token}`, 'cyan');
 
-    await deleteSession(token);
+    if (!skipSessionDelete) {
+      await deleteSession(token);
+    }
     const tokensOfActiveUsers = `${process.env.PROJECT_NAME}-activeUsers:${userId}`
     await redis.srem(tokensOfActiveUsers, token);
     socket.leave(token);
