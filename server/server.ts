@@ -210,7 +210,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
     //? if it was successful then we apply the cookie and return the user id and reason for the login or account creation
     if (newToken) {
-      if (token) { await deleteSession(token, { notifyClients: false }); }
+      if (token) { await deleteSession(token); }
 
       const requestedSessionMode = parseSessionBasedTokenHeader(req.headers['x-session-based-token']);
       const useSessionBasedToken = requestedSessionMode ?? config.sessionBasedToken;
@@ -244,7 +244,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     //? we successfully logged in or created an acocunt
 
     //? if the user already had a token then we delete the previous session data
-    if (token) { await deleteSession(token, { notifyClients: false }); }
+    if (token) { await deleteSession(token); }
 
     //? we set the cookie with the new token and redirect the user to the frontend
     if (process.env.NODE_ENV === 'development') {

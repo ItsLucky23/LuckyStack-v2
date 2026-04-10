@@ -121,12 +121,8 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
  * @param token - The session token to delete
  * @returns true if successful
  */
-const deleteSession = async (
-  token: string,
-  options?: { notifyClients?: boolean }
-): Promise<boolean> => {
+const deleteSession = async (token: string): Promise<boolean> => {
   try {
-    const notifyClients = options?.notifyClients ?? true;
     const user = await redis.get(`${process.env.PROJECT_NAME}-session:${token}`);
 
     if (user) {
@@ -136,7 +132,7 @@ const deleteSession = async (
         const { ioInstance } = await import('../sockets/socket');
 
         // Reuse the same logout flow as single-session enforcement.
-        if (notifyClients && ioInstance) {
+        if (ioInstance) {
           const { logout } = await import('../sockets/utils/logout');
           const sockets = ioInstance.sockets.adapter.rooms.get(token);
 
