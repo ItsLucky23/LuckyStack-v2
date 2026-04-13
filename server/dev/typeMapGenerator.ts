@@ -3,11 +3,14 @@ import { extractApiName, extractApiVersion, extractPagePath, extractSyncName, ex
 import { extractAuth, extractHttpMethod, extractRateLimit, HttpMethod } from './typeMap/apiMeta';
 import { buildTypeMapArtifacts, writeTypeMapArtifacts } from './typeMap/emitterArtifacts';
 import {
+  getApiStreamPayloadTypeDetailsFromFile,
   getInputTypeDetailsFromFile,
   getOutputTypeDetailsFromFile,
   getSyncClientDataTypeDetailsFromFile,
   getSyncClientOutputTypeDetailsFromFile,
+  getSyncClientStreamPayloadTypeDetailsFromFile,
   getSyncServerOutputTypeDetailsFromFile,
+  getSyncServerStreamPayloadTypeDetailsFromFile,
 } from './typeMap/extractors';
 import { generateServerFunctions } from './typeMap/functionsMeta';
 import { invalidateProgramCache } from './typeMap/tsProgram';
@@ -33,7 +36,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   // Collect API Types
   // ═══════════════════════════════════════════════════════════════════════════
   const apiFiles = findAllApiFiles(SRC_DIR);
-  const typesByPage = new Map<string, Map<string, { input: string; output: string; method: HttpMethod; rateLimit: number | false | undefined; auth: any; version: string; description?: string }>>();
+  const typesByPage = new Map<string, Map<string, { input: string; output: string; stream: string; method: HttpMethod; rateLimit: number | false | undefined; auth: any; version: string; description?: string }>>();
   const unresolvedTypeAliases = new Set<string>();
 
   if (!quiet) {
@@ -53,13 +56,15 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     // No import collection or sanitization is needed for API types.
     const inputTypeResult = getInputTypeDetailsFromFile(filePath);
     const outputTypeResult = getOutputTypeDetailsFromFile(filePath);
+    const streamTypeResult = getApiStreamPayloadTypeDetailsFromFile(filePath);
     const inputType = inputTypeResult.text;
     const outputType = outputTypeResult.text;
+    const streamType = streamTypeResult.text;
     const httpMethod = extractHttpMethod(filePath, apiName);
     const rateLimit = extractRateLimit(filePath);
     const auth = extractAuth(filePath);
 
-    for (const symbol of [...inputTypeResult.unresolvedSymbols, ...outputTypeResult.unresolvedSymbols]) {
+    for (const symbol of [...inputTypeResult.unresolvedSymbols, ...outputTypeResult.unresolvedSymbols, ...streamTypeResult.unresolvedSymbols]) {
       if (!symbol.importPath) {
         unresolvedTypeAliases.add(symbol.name);
         console.error(`[TypeMapGenerator] Unresolved API type (${pagePath}/${apiName}/${apiVersion}): ${symbol.name}`);
@@ -78,7 +83,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     if (!typesByPage.has(pagePath)) {
       typesByPage.set(pagePath, new Map());
     }
-    typesByPage.get(pagePath)!.set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, method: httpMethod, rateLimit, auth, version: apiVersion });
+    typesByPage.get(pagePath)!.set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, stream: streamType, method: httpMethod, rateLimit, auth, version: apiVersion });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -86,7 +91,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   // ═══════════════════════════════════════════════════════════════════════════
   const syncServerFiles = findAllSyncServerFiles(SRC_DIR);
   const syncClientFiles = findAllSyncClientFiles(SRC_DIR);
-  const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverOutput: string; clientOutput: string; version: string }>>();
+  const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverOutput: string; clientOutput: string; serverStream: string; clientStream: string; version: string }>>();
 
   if (!quiet) {
     console.log(' ═══════════════════════════════════════════════════════════════════════════');
@@ -140,15 +145,25 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     const clientOutputTypeResult = clientFile
       ? getSyncClientOutputTypeDetailsFromFile(clientFile)
       : { text: '{ }', unresolvedSymbols: [] };
+    const serverStreamTypeResult = serverFile
+      ? getSyncServerStreamPayloadTypeDetailsFromFile(serverFile)
+      : { text: 'never', unresolvedSymbols: [] };
+    const clientStreamTypeResult = clientFile
+      ? getSyncClientStreamPayloadTypeDetailsFromFile(clientFile)
+      : { text: 'never', unresolvedSymbols: [] };
 
     const clientInputType = clientInputTypeResult.text;
     const serverOutputType = serverOutputTypeResult.text;
     const clientOutputType = clientOutputTypeResult.text;
+    const serverStreamType = serverStreamTypeResult.text;
+    const clientStreamType = clientStreamTypeResult.text;
 
     const allSyncUnresolvedSymbols = [
       ...clientInputTypeResult.unresolvedSymbols,
       ...serverOutputTypeResult.unresolvedSymbols,
       ...clientOutputTypeResult.unresolvedSymbols,
+      ...serverStreamTypeResult.unresolvedSymbols,
+      ...clientStreamTypeResult.unresolvedSymbols,
     ];
 
     for (const symbol of allSyncUnresolvedSymbols) {
@@ -170,7 +185,14 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     if (!syncTypesByPage.has(pagePath)) {
       syncTypesByPage.set(pagePath, new Map());
     }
-    syncTypesByPage.get(pagePath)!.set(`${syncName}@${syncVersion}`, { clientInput: clientInputType, serverOutput: serverOutputType, clientOutput: clientOutputType, version: syncVersion });
+    syncTypesByPage.get(pagePath)!.set(`${syncName}@${syncVersion}`, {
+      clientInput: clientInputType,
+      serverOutput: serverOutputType,
+      clientOutput: clientOutputType,
+      serverStream: serverStreamType,
+      clientStream: clientStreamType,
+      version: syncVersion,
+    });
   }
 
   const functionsInterface = generateServerFunctions({ namedImports, defaultImports });

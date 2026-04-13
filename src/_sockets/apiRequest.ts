@@ -1,6 +1,6 @@
 import { dev } from "config";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
-import type { ApiTypeMap } from './apiTypes.generated';
+import type { ApiTypeMap, StreamPayload } from './apiTypes.generated';
 import notify from "src/_functions/notify";
 import { enqueueApiRequest, isOnline, removeApiQueueItem } from "./offlineQueue";
 import { Socket } from "socket.io-client";
@@ -11,6 +11,8 @@ import { normalizeErrorResponseCore } from "../../shared/responseNormalizer";
 //? - abortable: false → never use abort controller
 //? - abortable: undefined → use abort controller for GET APIs (from generated types)
 const abortControllers = new Map<string, AbortController>();
+
+export type ApiStreamEvent<T extends StreamPayload = StreamPayload> = T;
 
 /**
  * Check if an API is a GET method using the generated type map.
@@ -85,13 +87,22 @@ type OutputForFullName<F extends ApiFullName, V extends VersionsForFullName<F>> 
   ? O
   : never;
 
+type StreamForFullName<F extends ApiFullName, V extends VersionsForFullName<F>> = ApiRouteRecord[F][V] extends { stream: infer S }
+  ? S
+  : never;
+
+type ApiStreamCallbackForFullName<F extends ApiFullName, V extends VersionsForFullName<F>> =
+  [StreamForFullName<F, V>] extends [never]
+    ? never
+    : (event: ApiStreamEvent<Prettify<StreamForFullName<F, V> extends StreamPayload ? StreamForFullName<F, V> : StreamPayload>>) => void;
+
 // Build params type for a specific API name
 type ApiParamsForFullName<
   F extends ApiFullName,
   V extends VersionsForFullName<F>
 > = DataRequired<InputForFullName<F, V>> extends true
-  ? { name: F; version: V; data: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; }
-  : { name: F; version: V; data?: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; };
+  ? { name: F; version: V; data: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; }
+  : { name: F; version: V; data?: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; };
 
 interface RuntimeApiParams {
   name?: string;
@@ -99,6 +110,7 @@ interface RuntimeApiParams {
   data?: unknown;
   abortable?: boolean;
   disableErrorMessage?: boolean;
+  onStream?: (event: ApiStreamEvent<StreamPayload>) => void;
 }
 
 interface ApiErrorResponse {
@@ -135,7 +147,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
 ): Promise<Prettify<OutputForFullName<F, V>>> {
   type RequestOutput = Prettify<OutputForFullName<F, V> & ApiResponse>;
   const runtimeParams = params as RuntimeApiParams;
-  const { name, version, disableErrorMessage = false } = runtimeParams;
+  const { name, version, disableErrorMessage = false, onStream } = runtimeParams;
   const payloadData = runtimeParams.data;
 
   return new Promise<RequestOutput>((resolve, reject) => {
@@ -186,6 +198,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
       let signal: AbortSignal | null = null;
       let abortHandler: (() => void) | null = null;
       let queueId: string | null = null;
+      let cleanupStreamListener: (() => void) | null = null;
 
       const cleanupAbortController = () => {
         if (signal && abortHandler) {
@@ -204,6 +217,8 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         signal = abortController.signal;
 
         abortHandler = () => {
+          cleanupStreamListener?.();
+          cleanupStreamListener = null;
           cleanupAbortController();
           if (queueId) {
             removeApiQueueItem(queueId);
@@ -235,6 +250,22 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         const tempIndex = incrementResponseIndex();
         socketInstance.emit('apiRequest', { name: fullName, data, responseIndex: tempIndex });
 
+        if (typeof onStream === 'function') {
+          const streamEventName = `apiStream-${String(tempIndex)}`;
+          const streamListener = (streamPayload: ApiStreamEvent) => {
+            if (signal?.aborted) {
+              return;
+            }
+
+            onStream(streamPayload);
+          };
+
+          socketInstance.on(streamEventName, streamListener);
+          cleanupStreamListener = () => {
+            socketInstance.off(streamEventName, streamListener);
+          };
+        }
+
         if (dev) {
           console.log(`Client API Request(${String(tempIndex)}):`, { APINAME: sanitizedName, data });
         }
@@ -243,6 +274,9 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           if (signal?.aborted) {
             return;
           }
+
+          cleanupStreamListener?.();
+          cleanupStreamListener = null;
 
           const status = response.status;
 

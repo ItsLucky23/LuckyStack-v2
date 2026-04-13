@@ -44,6 +44,7 @@ interface HttpApiRequestParams {
   acceptLanguageHeader?: string | string[];
   /** HTTP method from the request */
   method?: HttpMethod;
+  stream?: (payload: ApiHttpStreamEvent) => void;
 }
 
 const getRuntimeApiMaps = async () => {
@@ -74,6 +75,12 @@ type ApiNetworkResponse<T = any> =
     }[];
   };
 
+type ApiStreamPayload = {
+  [key: string]: unknown;
+};
+
+export type ApiHttpStreamEvent = ApiStreamPayload;
+
 export async function handleHttpApiRequest({
   name,
   data,
@@ -81,7 +88,8 @@ export async function handleHttpApiRequest({
   requesterIp,
   xLanguageHeader,
   acceptLanguageHeader,
-  method = 'POST'
+  method = 'POST',
+  stream,
 }: HttpApiRequestParams): Promise<ApiNetworkResponse> {
 
   const normalizedName = name.startsWith('api/') ? name : `api/${name}`;
@@ -270,9 +278,13 @@ export async function handleHttpApiRequest({
   }
 
   // Execute the API handler
+  const emitApiStream = (payload: ApiStreamPayload = {}) => {
+    stream?.(payload);
+  };
+
   const span = startSpan(normalizedName, 'api.request.http') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
-    async () => await main({ data: requestData, user, functions: functionsObject }),
+    async () => await main({ data: requestData, user, functions: functionsObject, stream: emitApiStream }),
     undefined,
     {
       handler: 'handleHttpApiRequest',

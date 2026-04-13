@@ -20,6 +20,7 @@ interface HttpSyncRequestParams {
   requesterIp?: string;
   xLanguageHeader?: string | string[];
   acceptLanguageHeader?: string | string[];
+  stream?: (payload: HttpSyncStreamEvent) => void;
 }
 
 type HttpSyncResponse = {
@@ -29,6 +30,12 @@ type HttpSyncResponse = {
   errorParams?: { key: string; value: string | number | boolean; }[];
   httpStatus?: number;
 };
+
+type SyncStreamPayload = {
+  [key: string]: unknown;
+};
+
+export type HttpSyncStreamEvent = SyncStreamPayload;
 
 const getRuntimeSyncMaps = async () => {
   if (process.env.NODE_ENV !== 'production') {
@@ -55,7 +62,9 @@ export default async function handleHttpSyncRequest({
   requesterIp,
   xLanguageHeader,
   acceptLanguageHeader,
+  stream,
 }: HttpSyncRequestParams): Promise<HttpSyncResponse> {
+  const normalizedReceiver = typeof receiver === 'string' ? receiver.trim() : '';
   const preferredLocale =
     extractLanguageFromHeader(xLanguageHeader)
     || extractLanguageFromHeader(acceptLanguageHeader);
@@ -118,7 +127,7 @@ export default async function handleHttpSyncRequest({
       });
     }
 
-    if (!receiver || typeof receiver !== 'string') {
+    if (!normalizedReceiver) {
       return buildSyncError({
         response: { status: 'error', errorCode: 'sync.missingReceiver' },
         preferred: preferredLocale,
@@ -201,6 +210,9 @@ export default async function handleHttpSyncRequest({
     let serverOutput = {};
     if (syncObject[`${resolvedName}_server`]) {
       const { auth, main: serverMain, inputType, inputTypeFilePath } = syncObject[`${resolvedName}_server`];
+      const emitServerSyncStream = (payload: SyncStreamPayload = {}) => {
+        stream?.(payload);
+      };
 
       const inputValidation = await validateInputByType({
         typeText: inputType,
@@ -242,7 +254,7 @@ export default async function handleHttpSyncRequest({
       }
 
       const [serverSyncError, serverSyncResult] = await tryCatch(
-        async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }),
+        async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: normalizedReceiver, stream: emitServerSyncStream }),
         undefined,
         {
           handler: 'handleHttpSyncRequest',
@@ -282,7 +294,7 @@ export default async function handleHttpSyncRequest({
 
     const sockets = receiver === 'all'
       ? ioInstance.sockets.sockets
-      : ioInstance.sockets.adapter.rooms.get(receiver);
+      : ioInstance.sockets.adapter.rooms.get(normalizedReceiver);
 
     if (!sockets) {
       return buildSyncError({
@@ -306,8 +318,17 @@ export default async function handleHttpSyncRequest({
       }
 
       if (syncObject[`${resolvedName}_client`]) {
+        const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
+          tempSocket.emit('sync', {
+            ...payload,
+            cb: callbackName,
+            fullName: resolvedName,
+            status: 'stream',
+          });
+        };
+
         const [clientSyncError, clientSyncResult] = await tryCatch(
-          async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }),
+          async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: normalizedReceiver, stream: emitClientSyncStream }),
           undefined,
           {
             handler: 'handleHttpSyncRequest',

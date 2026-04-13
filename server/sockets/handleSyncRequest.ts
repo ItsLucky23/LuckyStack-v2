@@ -11,6 +11,10 @@ import { validateInputByType } from "../utils/runtimeTypeValidation";
 import { checkRateLimit } from "../utils/rateLimiter";
 import { setSentryUser } from '../functions/sentry';
 
+type SyncStreamPayload = {
+  [key: string]: unknown;
+};
+
 const getRuntimeSyncMaps = async () => {
   if (process.env.NODE_ENV !== 'production') {
     const { devSyncs, devFunctions } = await import('../dev/loader');
@@ -54,7 +58,8 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     });
   }
 
-  const { name, data, cb, receiver, responseIndex, ignoreSelf } = msg;
+  const { name, data, cb, receiver: rawReceiver, responseIndex, ignoreSelf } = msg;
+  const receiver = typeof rawReceiver === 'string' ? rawReceiver.trim() : '';
   const preferredLocale =
     extractLanguageFromHeader(socket.handshake.headers['x-language'])
     || extractLanguageFromHeader(socket.handshake.headers['accept-language']);
@@ -149,6 +154,14 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       userLanguage: user?.language,
     }));
   }
+
+  const emitServerSyncStream = (payload: SyncStreamPayload = {}) => {
+    if (typeof responseIndex !== 'number') {
+      return;
+    }
+
+    socket.emit(`sync-progress-${responseIndex}`, payload);
+  };
 
   //? Rate limit check: per-sync bucket fallback + global per-IP cap
   if (config.rateLimiting.defaultApiLimit !== false && config.rateLimiting.defaultApiLimit > 0) {
@@ -247,7 +260,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
     //? if the user has passed all the checks we call the preload sync function and return the result
     const [serverSyncError, serverSyncResult] = await tryCatch(
-      async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }),
+      async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver, stream: emitServerSyncStream }),
       undefined,
       {
         handler: 'handleSyncRequest',
@@ -328,8 +341,17 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
 
     if (syncObject[`${resolvedName}_client`]) {
+      const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
+        tempSocket.emit('sync', {
+          ...payload,
+          cb,
+          fullName: resolvedName,
+          status: 'stream',
+        });
+      };
+
       const [clientSyncError, clientSyncResult] = await tryCatch(
-        async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }),
+        async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver, stream: emitClientSyncStream }),
         undefined,
         {
           handler: 'handleSyncRequest',

@@ -6,6 +6,7 @@ import { GENERATED_API_DOCS_PATH, GENERATED_SOCKET_TYPES_PATH } from '../../util
 export interface ApiTypeEntry {
 	input: string;
 	output: string;
+	stream: string;
 	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
 	rateLimit: number | false | undefined;
 	auth: any;
@@ -16,6 +17,8 @@ export interface SyncTypeEntry {
 	clientInput: string;
 	serverOutput: string;
 	clientOutput: string;
+	serverStream: string;
+	clientStream: string;
 	version: string;
 }
 
@@ -172,6 +175,14 @@ export interface JsonObject {
 export type JsonArray = JsonValue[];
 export type MaybePromise<T> = T | Promise<T>;
 
+export type StreamPayload = {
+	[key: string]: unknown;
+};
+
+export type ApiStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
+export type SyncServerStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
+export type SyncClientStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // API Type Definitions
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -218,6 +229,7 @@ export interface ApiTypeMap {
 					method: entry.method,
 					input: entry.input,
 					output: entry.output,
+					stream: entry.stream,
 					rateLimit: entry.rateLimit,
 					auth: entry.auth,
 					path: pagePath === 'root' ? `api/${apiName}/${version}` : `api/${pagePath}/${apiName}/${version}`,
@@ -226,6 +238,7 @@ export interface ApiTypeMap {
 				content += `      '${version}': {\n`;
 				content += `        input: ${indentStr(entry.input, '        ')};\n`;
 				content += `        output: ${indentStr(entry.output, '        ')};\n`;
+				content += `        stream: ${indentStr(entry.stream, '        ')};\n`;
 				content += `        method: '${entry.method}';\n`;
 				if (entry.rateLimit !== undefined) {
 					content += `        rateLimit: ${entry.rateLimit};\n`;
@@ -246,6 +259,7 @@ export type ApiName<P extends PagePath> = keyof ApiTypeMap[P];
 export type ApiVersion<P extends PagePath, N extends ApiName<P>> = keyof ApiTypeMap[P][N];
 export type ApiInput<P extends PagePath, N extends ApiName<P>, V extends ApiVersion<P, N> = ApiVersion<P, N>> = ApiTypeMap[P][N][V] extends { input: infer I } ? I : never;
 export type ApiOutput<P extends PagePath, N extends ApiName<P>, V extends ApiVersion<P, N> = ApiVersion<P, N>> = ApiTypeMap[P][N][V] extends { output: infer O } ? O : never;
+export type ApiStream<P extends PagePath, N extends ApiName<P>, V extends ApiVersion<P, N> = ApiVersion<P, N>> = ApiTypeMap[P][N][V] extends { stream: infer S } ? S : never;
 export type ApiMethod<P extends PagePath, N extends ApiName<P>, V extends ApiVersion<P, N> = ApiVersion<P, N>> = ApiTypeMap[P][N][V] extends { method: infer M } ? M : never;
 
 export type FullApiPath<P extends PagePath, N extends ApiName<P>, V extends ApiVersion<P, N>> = \`api/\${P}/\${N & string}/\${V & string}\`;
@@ -321,6 +335,8 @@ export interface SyncTypeMap {
 					clientInput: entry.clientInput,
 					serverOutput: entry.serverOutput,
 					clientOutput: entry.clientOutput,
+					serverStream: entry.serverStream,
+					clientStream: entry.clientStream,
 					path: pagePath === 'root' ? `sync/${syncName}/${version}` : `sync/${pagePath}/${syncName}/${version}`,
 				});
 
@@ -328,6 +344,8 @@ export interface SyncTypeMap {
 				content += `        clientInput: ${indentStr(entry.clientInput, '        ')};\n`;
 				content += `        serverOutput: ${indentStr(entry.serverOutput, '        ')};\n`;
 				content += `        clientOutput: ${indentStr(entry.clientOutput, '        ')};\n`;
+				content += `        serverStream: ${indentStr(entry.serverStream, '        ')};\n`;
+				content += `        clientStream: ${indentStr(entry.clientStream, '        ')};\n`;
 				content += `      };\n`;
 			}
 			content += `    };\n`;
@@ -343,6 +361,8 @@ export type SyncVersion<P extends SyncPagePath, N extends SyncName<P>> = keyof S
 export type SyncClientInput<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N> = SyncVersion<P, N>> = SyncTypeMap[P][N][V] extends { clientInput: infer C } ? C : never;
 export type SyncServerOutput<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N> = SyncVersion<P, N>> = SyncTypeMap[P][N][V] extends { serverOutput: infer S } ? S : never;
 export type SyncClientOutput<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N> = SyncVersion<P, N>> = SyncTypeMap[P][N][V] extends { clientOutput: infer O } ? O : never;
+export type SyncServerStream<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N> = SyncVersion<P, N>> = SyncTypeMap[P][N][V] extends { serverStream: infer S } ? S : never;
+export type SyncClientStream<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N> = SyncVersion<P, N>> = SyncTypeMap[P][N][V] extends { clientStream: infer O } ? O : never;
 
 export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N>> = \`sync/\${P}/\${N & string}/\${V & string}\`;
 `;

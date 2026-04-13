@@ -5,10 +5,18 @@ import { statusContent } from "src/_providers/socketStatusProvider";
 import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useRef } from "react";
 import { enqueueSyncRequest, isOnline } from "./offlineQueue";
 import type {
-  SyncTypeMap
+  StreamPayload,
+  SyncTypeMap,
 } from "./apiTypes.generated";
 import { Socket } from "socket.io-client";
 import { normalizeErrorResponseCore } from "../../shared/responseNormalizer";
+
+export type SyncRequestStreamEvent<T extends StreamPayload = StreamPayload> = T;
+
+export type SyncRouteStreamEvent<T extends StreamPayload = StreamPayload> = T;
+
+type SyncRequestStreamCallback = (event: SyncRequestStreamEvent) => void;
+type SyncEventStreamCallback = (params: { stream: SyncRouteStreamEvent }) => void;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Type Helpers for Sync Requests
@@ -51,6 +59,24 @@ type ClientOutputForFullName<F extends SyncFullName, V extends VersionsForFullNa
   ? O
   : never;
 
+type ServerStreamForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> = SyncRouteRecord[F][V] extends { serverStream: infer O }
+  ? O
+  : never;
+
+type ClientStreamForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> = SyncRouteRecord[F][V] extends { clientStream: infer O }
+  ? O
+  : never;
+
+type SyncRequestStreamCallbackForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> =
+  [ServerStreamForFullName<F, V>] extends [never]
+    ? never
+    : (event: SyncRequestStreamEvent<Prettify<ServerStreamForFullName<F, V> extends StreamPayload ? ServerStreamForFullName<F, V> : StreamPayload>>) => void;
+
+type SyncRouteStreamCallbackForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> =
+  [ClientStreamForFullName<F, V>] extends [never]
+    ? never
+    : (params: { stream: SyncRouteStreamEvent<Prettify<ClientStreamForFullName<F, V> extends StreamPayload ? ClientStreamForFullName<F, V> : StreamPayload>> }) => void;
+
 type SyncParamsForFullName<
   F extends SyncFullName,
   V extends VersionsForFullName<F>
@@ -61,6 +87,7 @@ type SyncParamsForFullName<
     data: ClientInputForFullName<F, V>;
     receiver: string;
     ignoreSelf?: boolean;
+    onStream?: SyncRequestStreamCallbackForFullName<F, V>;
   }
   : {
     name: F;
@@ -68,6 +95,7 @@ type SyncParamsForFullName<
     data?: ClientInputForFullName<F, V>;
     receiver: string;
     ignoreSelf?: boolean;
+    onStream?: SyncRequestStreamCallbackForFullName<F, V>;
   };
 
 interface RuntimeSyncParams {
@@ -76,6 +104,7 @@ interface RuntimeSyncParams {
   data?: unknown;
   receiver?: string;
   ignoreSelf?: boolean;
+  onStream?: SyncRequestStreamCallback;
 }
 
 interface SyncErrorParam { key: string; value: string | number | boolean };
@@ -116,6 +145,7 @@ type SyncRequestResponseForFullName<F extends SyncFullName, V extends VersionsFo
 
 type SyncEventCallback = (params: { clientOutput: unknown; serverOutput: unknown }) => void;
 const syncEvents: Partial<Record<string, SyncEventCallback[]>> = {};
+const syncStreamEvents: Partial<Record<string, SyncEventStreamCallback[]>> = {};
 const noop = () => null;
 
 interface SyncLifecycleHandlers {
@@ -143,6 +173,11 @@ const getCallbacksForRoute = (route: string): SyncEventCallback[] => {
   return syncEvents[route];
 };
 
+const getStreamCallbacksForRoute = (route: string): SyncEventStreamCallback[] => {
+  syncStreamEvents[route] ??= [];
+  return syncStreamEvents[route];
+};
+
 const triggerSyncCallbacks = (name: string, clientOutput: unknown, serverOutput: unknown) => {
   const callbacks = syncEvents[name] ?? [];
   if (callbacks.length === 0) {
@@ -154,6 +189,17 @@ const triggerSyncCallbacks = (name: string, clientOutput: unknown, serverOutput:
 
   for (const callback of callbacks) {
     callback({ clientOutput, serverOutput });
+  }
+};
+
+const triggerSyncStreamCallbacks = (name: string, stream: SyncRouteStreamEvent) => {
+  const callbacks = syncStreamEvents[name] ?? [];
+  if (callbacks.length === 0) {
+    return;
+  }
+
+  for (const callback of callbacks) {
+    callback({ stream });
   }
 };
 
@@ -196,7 +242,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
   params: SyncRequestParamsWithOptions<F, V>
 ): Promise<Prettify<SyncRequestResponseForFullName<F, V>>> => {
   const runtimeParams = params as RuntimeSyncParams;
-  const { name, version, receiver, ignoreSelf } = runtimeParams;
+  const { name, version, receiver, ignoreSelf, onStream } = runtimeParams;
   const payloadData = runtimeParams.data;
 
   type RequestOutput = Prettify<SyncRequestResponseForFullName<F, V>>;
@@ -229,7 +275,9 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         return;
       }
 
-      if (!receiver) {
+      const normalizedReceiver = typeof receiver === 'string' ? receiver.trim() : '';
+
+      if (!normalizedReceiver) {
         if (dev) {
           console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
           notify.error({ key: 'sync.missingReceiver' });
@@ -276,13 +324,29 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
 
         const tempIndex = incrementResponseIndex();
 
+        let cleanupProgressListener: (() => void) | null = null;
+
         if (dev) {
-          console.log(`Client Sync Request(${String(tempIndex)}):`, { syncName: sanitizedName, data, receiver, ignoreSelf });
+          console.log(`Client Sync Request(${String(tempIndex)}):`, { syncName: sanitizedName, data, receiver: normalizedReceiver, ignoreSelf });
         }
 
-        socketInstance.emit('sync', { name: fullName, data, cb: `${sanitizedName}/${version}`, receiver, responseIndex: tempIndex, ignoreSelf });
+        if (typeof onStream === 'function') {
+          const progressEventName = `sync-progress-${String(tempIndex)}`;
+          const progressListener = (streamPayload: SyncRequestStreamEvent) => {
+            onStream(streamPayload);
+          };
+
+          socketInstance.on(progressEventName, progressListener);
+          cleanupProgressListener = () => {
+            socketInstance.off(progressEventName, progressListener);
+          };
+        }
+
+        socketInstance.emit('sync', { name: fullName, data, cb: `${sanitizedName}/${version}`, receiver: normalizedReceiver, responseIndex: tempIndex, ignoreSelf });
 
         socketInstance.once(`sync-${String(tempIndex)}`, (responseData: SyncAckResponse) => {
+          cleanupProgressListener?.();
+
           if (responseData.status === "error") {
             const normalizedError = normalizeSyncError({
               response: responseData,
@@ -342,6 +406,7 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
 
 export const useSyncEvents = () => {
   const localRegistryRef = useRef<Map<string, SyncEventCallback>>(new Map());
+  const localStreamRegistryRef = useRef<Map<string, SyncEventStreamCallback>>(new Map());
 
   interface TypedCallbackParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
     clientOutput: ClientOutputForFullName<F, V>;
@@ -352,6 +417,12 @@ export const useSyncEvents = () => {
     name: F;
     version: V;
     callback: (params: TypedCallbackParams<F, V>) => void;
+  }
+
+  interface UpsertStreamParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
+    name: F;
+    version: V;
+    callback: SyncRouteStreamCallbackForFullName<F, V>;
   }
 
   const upsertSyncEventCallback = useCallback(<F extends SyncFullName, V extends VersionsForFullName<F>>(
@@ -428,19 +499,99 @@ export const useSyncEvents = () => {
     };
   }, []);
 
+  const upsertSyncEventStreamCallback = useCallback(<F extends SyncFullName, V extends VersionsForFullName<F>>(
+    params: UpsertStreamParams<F, V>
+  ): (() => void) => {
+
+    if (typeof params.version !== 'string') {
+      if (dev) {
+        console.error("Invalid version for upsertSyncEventStreamCallback");
+        notify.error({ key: 'sync.invalidVersion' });
+      }
+      return noop;
+    }
+
+    if (typeof params.callback !== 'function') {
+      if (dev) {
+        console.error("Invalid callback for upsertSyncEventStreamCallback");
+        notify.error({ key: 'sync.invalidCallback' });
+      }
+      return noop;
+    }
+
+    const routeName = String(params.name);
+    const sanitizedName = routeName.replaceAll(/^\/+|\/+$/g, '');
+    if (sanitizedName.length === 0) {
+      if (dev) {
+        console.error("Invalid name for upsertSyncEventStreamCallback");
+        notify.error({ key: 'sync.invalidName' });
+      }
+      return noop;
+    }
+
+    const routeVersion = String(params.version);
+    const fullName = `sync/${sanitizedName}/${routeVersion}`;
+    const callback = params.callback as unknown as SyncEventStreamCallback;
+    const callbacks = getStreamCallbacksForRoute(fullName);
+
+    const previousForRoute = localStreamRegistryRef.current.get(fullName);
+    if (previousForRoute) {
+      syncStreamEvents[fullName] = callbacks.filter((cb) => cb !== previousForRoute);
+    }
+
+    const nextCallbacks = getStreamCallbacksForRoute(fullName);
+    if (nextCallbacks.includes(callback)) {
+      if (dev) {
+        console.warn(`[SyncEvents] Duplicate stream callback registration for ${fullName} was ignored.`);
+      }
+
+      localStreamRegistryRef.current.set(fullName, callback);
+
+      return () => {
+        const current = getStreamCallbacksForRoute(fullName);
+        syncStreamEvents[fullName] = current.filter((cb) => cb !== callback);
+
+        if (localStreamRegistryRef.current.get(fullName) === callback) {
+          localStreamRegistryRef.current.delete(fullName);
+        }
+      };
+    }
+
+    nextCallbacks.push(callback);
+    syncStreamEvents[fullName] = nextCallbacks;
+    localStreamRegistryRef.current.set(fullName, callback);
+
+    return () => {
+      const current = getStreamCallbacksForRoute(fullName);
+      syncStreamEvents[fullName] = current.filter((cb) => cb !== callback);
+
+      if (localStreamRegistryRef.current.get(fullName) === callback) {
+        localStreamRegistryRef.current.delete(fullName);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const localRegistry = localRegistryRef.current;
+    const localStreamRegistry = localStreamRegistryRef.current;
 
     return () => {
       for (const [fullName, callback] of localRegistry.entries()) {
         const current = getCallbacksForRoute(fullName);
         syncEvents[fullName] = current.filter((cb) => cb !== callback);
       }
+
+      for (const [fullName, callback] of localStreamRegistry.entries()) {
+        const current = getStreamCallbacksForRoute(fullName);
+        syncStreamEvents[fullName] = current.filter((cb) => cb !== callback);
+      }
+
       localRegistry.clear();
+      localStreamRegistry.clear();
     };
   }, []);
 
-  return { upsertSyncEventCallback };
+  return { upsertSyncEventCallback, upsertSyncEventStreamCallback };
 }
 
 export const useSyncEventTrigger = () => {
@@ -448,7 +599,11 @@ export const useSyncEventTrigger = () => {
     triggerSyncCallbacks(name, clientOutput, serverOutput);
   }, []);
 
-  return { triggerSyncEvent }
+  const triggerSyncStreamEvent = useCallback((name: string, stream: SyncRouteStreamEvent) => {
+    triggerSyncStreamCallbacks(name, stream);
+  }, []);
+
+  return { triggerSyncEvent, triggerSyncStreamEvent }
 }
 
 export const initSyncRequest = async ({

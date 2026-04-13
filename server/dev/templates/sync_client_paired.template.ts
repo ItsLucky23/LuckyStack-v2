@@ -1,5 +1,5 @@
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { Functions, SyncClientResponse, SyncClientInput, SyncServerOutput, MaybePromise } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
+import { Functions, SyncClientResponse, SyncClientInput, SyncServerOutput, MaybePromise, SyncClientStreamEmitter } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 // Types are imported from the generated file based on the _server.ts definition
 type PagePath = '{{PAGE_PATH}}';
@@ -11,12 +11,14 @@ export interface SyncParams {
   token: string | null; // target client's session token (fetch session only when needed)
   functions: Functions; // contains all functions that are available on the server in the functions folder
   roomCode: string; // room code
+  stream: SyncClientStreamEmitter;
 }
 
 export const main = ({  }: SyncParams): MaybePromise<SyncClientResponse> => {
   // PAIRED SYNC: Types are shared with the _server.ts file
   // clientInput type comes from _server.ts SyncParams
   // serverOutput type is inferred from _server.ts return value
+  // stream payload types are generated from your stream(...) calls in this file
   // Use functions.session.getSession(token) when you need session data for this target client.
   // Returning error here only affects the current target client and does not stop other clients.
 

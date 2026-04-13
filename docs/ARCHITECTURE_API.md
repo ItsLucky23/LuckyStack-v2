@@ -58,7 +58,7 @@ Template is injected automatically for empty files.
 ```typescript
 // src/examples/_api/getUserData_v1.ts
 import { AuthProps, SessionLayout } from "config";
-import { Functions, ApiResponse } from "src/_sockets/apiTypes.generated";
+import { Functions, ApiResponse, ApiStreamEmitter } from "src/_sockets/apiTypes.generated";
 
 // Rate limit: requests per minute (false = use global config)
 export const rateLimit: number | false = 60;
@@ -77,6 +77,7 @@ export interface ApiParams {
   };
   user: SessionLayout;
   functions: Functions;
+  stream: ApiStreamEmitter;
 }
 
 export const main = async ({
@@ -185,6 +186,80 @@ await apiRequest({ name: 'examples/getUserData', version: 'v1', data: {...} });
 await apiRequest({ name: 'examples/createUser', version: 'v1', data: {...}, abortable: true });  // Force
 await apiRequest({ name: 'examples/getUser', version: 'v1', data: {...}, abortable: false });    // Disable
 ```
+
+## Streaming
+
+API streaming is available on both transports:
+
+- Socket: `apiRequest({ onStream })`
+- HTTP: Server-Sent Events (SSE) using `Accept: text/event-stream` or `?stream=true`
+
+### Socket Streaming
+
+Client usage:
+
+```typescript
+const response = await apiRequest({
+  name: "examples/getUserData",
+  version: "v1",
+  data: { userId: "123" },
+  onStream: (stream) => {
+    // stream is the payload you emit from stream(...)
+    console.log(stream);
+  },
+});
+```
+
+Server usage in an API file:
+
+```typescript
+export const main = async ({ stream }: ApiParams): Promise<ApiResponse> => {
+  stream({ phase: "started", progress: 0 });
+  // long operation ...
+  stream({ phase: "fetching", progress: 50 });
+  // long operation ...
+  stream({ phase: "done", progress: 100, done: true });
+
+  return { status: "success" };
+};
+```
+
+### HTTP Streaming (SSE)
+
+```typescript
+const response = await fetch("/api/examples/getUserData/v1?stream=true", {
+  method: "GET",
+  headers: { Accept: "text/event-stream" },
+});
+
+const reader = response.body?.getReader();
+const decoder = new TextDecoder();
+
+while (reader) {
+  const { done, value } = await reader.read();
+  if (done) break;
+
+  const text = decoder.decode(value, { stream: true });
+  // SSE events are emitted as:
+  // event: stream  -> partial payloads
+  // event: final   -> final API response object
+}
+```
+
+### Strict Stream Payload Typing (Generated)
+
+Stream payload types are generated per route from your actual `stream(...)` calls in `main`.
+
+- The generator infers a union of all emitted payload shapes.
+- `apiRequest({ onStream })` receives this exact inferred type per route/version.
+- If no `stream(...)` call exists yet, fallback is `never` (so `onStream` is not allowed for that route/version).
+
+This matches how final return output typing is already generated from route return objects.
+
+Repository note:
+
+- The previous `/streaming` demo page and demo handlers were intentionally removed from source.
+- Use `docs/STREAMING_RECONSTRUCTION.md` to recreate that exact demo implementation when needed.
 
 ## Offline Request Queue
 

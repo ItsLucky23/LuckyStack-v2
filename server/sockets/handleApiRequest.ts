@@ -17,6 +17,10 @@ type handleApiRequestType = {
   token: string | null,
 }
 
+type ApiStreamPayload = {
+  [key: string]: unknown;
+}
+
 const getRuntimeApiMaps = async () => {
   if (process.env.NODE_ENV !== 'production') {
     const { devApis, devFunctions } = await import('../dev/loader');
@@ -127,6 +131,10 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const inputType = apisObject[resolvedName].inputType as string | undefined;
   const inputTypeFilePath = apisObject[resolvedName].inputTypeFilePath as string | undefined;
 
+  const emitApiStream = (payload: ApiStreamPayload = {}) => {
+    socket.emit(`apiStream-${responseIndex}`, payload);
+  };
+
   const inputValidation = await validateInputByType({
     typeText: inputType,
     value: data,
@@ -226,7 +234,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   //? Execute the API handler
   const span = startSpan(name, 'api.request') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
-    async () => await main({ data, user, functions: functionsObject }),
+    async () => await main({ data, user, functions: functionsObject, stream: emitApiStream }),
     undefined,
     {
       handler: 'handleApiRequest',

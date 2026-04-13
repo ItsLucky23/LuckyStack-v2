@@ -13,6 +13,10 @@ const response = await syncRequest({
   version: "v1",
   data: { amount: 5 },
   receiver: "game-room-123",
+  onStream: (stream) => {
+    // Requester progress emitted from _server.ts
+    console.log(stream);
+  },
 });
 
 if (response.status === "error") {
@@ -72,6 +76,7 @@ import { AuthProps, SessionLayout } from "../../../config";
 import {
   Functions,
   SyncServerResponse,
+  SyncServerStreamEmitter,
 } from "../../../src/_sockets/apiTypes.generated";
 
 export const auth: AuthProps = {
@@ -87,6 +92,7 @@ export interface SyncParams {
   user: SessionLayout; // session data of the user who called the sync event
   functions: Functions; // functions object
   roomCode: string; // room code
+  stream: SyncServerStreamEmitter;
 }
 
 export const main = async ({
@@ -116,6 +122,7 @@ import {
   SyncClientResponse,
   SyncClientInput,
   SyncServerOutput,
+  SyncClientStreamEmitter,
 } from "../../../src/_sockets/apiTypes.generated";
 
 // Types are imported from the generated file based on the _server.ts definition
@@ -129,6 +136,7 @@ export interface SyncParams {
   token: string | null; // target client token (fetch session only when needed)
   functions: Functions; // contains functions available from server/functions
   roomCode: string; // room code
+  stream: SyncClientStreamEmitter;
 }
 
 export const main = async ({
@@ -198,6 +206,73 @@ upsertSyncEventCallback({
 });
 ```
 
+Stream events for recipients can be registered with the same hook:
+
+```typescript
+const { upsertSyncEventStreamCallback } = useSyncEvents();
+
+useEffect(() => {
+  return upsertSyncEventStreamCallback({
+    name: "examples/updateCounter",
+    version: "v1",
+    callback: ({ stream }) => {
+      // stream is emitted by _client.ts via stream(...)
+      console.log(stream);
+    },
+  });
+}, [upsertSyncEventStreamCallback]);
+```
+
+## Streaming
+
+Sync streaming has two channels:
+
+- `_server.ts` stream calls go back to the request initiator via `syncRequest({ onStream })`.
+- `_client.ts` stream calls go to each target socket and can be handled with `upsertSyncEventStreamCallback`.
+
+Both channels are strict-typed by generated maps:
+
+- `_server.ts` emitted payloads generate `serverStream` route types.
+- `_client.ts` emitted payloads generate `clientStream` route types.
+- `syncRequest({ onStream })` and `upsertSyncEventStreamCallback` use those exact generated payload unions.
+- Stream callbacks receive the payload you emit in `stream(...)`; stream payloads do not have framework-enforced keys.
+
+If no `stream(...)` call exists yet for a stage, that stage falls back to `never`.
+
+This means:
+- `syncRequest({ onStream })` is only available for routes that emit from `_server.ts`.
+- `upsertSyncEventStreamCallback` is only available for routes that emit from `_client.ts`.
+
+Example server progress:
+
+```typescript
+export const main = async ({ stream }: SyncParams): Promise<SyncServerResponse> => {
+  stream({ phase: "validate", progress: 10 });
+  // long operation ...
+  stream({ phase: "persist", progress: 70 });
+  // long operation ...
+
+  return { status: "success", updated: true };
+};
+```
+
+Example client-stage progress for each receiver:
+
+```typescript
+export const main = async ({ stream }: SyncParams): Promise<SyncClientResponse> => {
+  stream({ phase: "prepare", progress: 20 });
+  // receiver-specific work ...
+  stream({ phase: "ready", progress: 100, done: true });
+
+  return { status: "success" };
+};
+```
+
+Repository note:
+
+- The previous `/streaming` demo page and demo sync handlers were intentionally removed from source.
+- Use `docs/STREAMING_RECONSTRUCTION.md` to recreate that exact demo implementation when needed.
+
 ## Offline Request Queue
 
 When the socket is disconnected or the browser is offline, `syncRequest` queues requests in memory and flushes on reconnect or when the browser comes back online.
@@ -244,6 +319,35 @@ Body:
 ```
 
 Note: HTTP is only the trigger. Actual delivery still happens via Socket.io to users in the target room.
+
+HTTP requester streaming is available via SSE:
+
+- Add `Accept: text/event-stream` header, or
+- Add `?stream=true` query parameter
+
+SSE events:
+
+- `event: stream` for `_server.ts` progress payloads
+- `event: final` for final HTTP sync response
+
+Example:
+
+```typescript
+const response = await fetch("/sync/examples/updateCounter/v1?stream=true", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  },
+  body: JSON.stringify({
+    data: { amount: 1 },
+    receiver: "game-room-123",
+    ignoreSelf: false,
+  }),
+});
+
+// Parse SSE chunks from response.body
+```
 
 HTTP sync requests are rate-limited using global `config.rateLimiting` settings:
 
@@ -346,3 +450,4 @@ AI self-check before finalizing changes:
 | `server/sockets/socket.ts` | `socket.on('sync', ...)` | Wires incoming sync events to the sync handler. |
 | `src/_sockets/syncRequest.ts` | `syncRequest` | Typed client sender for sync events. |
 | `src/_sockets/syncRequest.ts` | `useSyncEvents().upsertSyncEventCallback` | Typed callback registry for incoming sync events. |
+| `src/_sockets/syncRequest.ts` | `useSyncEvents().upsertSyncEventStreamCallback` | Callback registry for route-level stream updates emitted during sync execution. |

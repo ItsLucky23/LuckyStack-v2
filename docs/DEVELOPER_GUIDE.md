@@ -43,7 +43,7 @@ npm run client
 ```typescript
 // src/mypage/_api/hello_v1.ts
 import { AuthProps, SessionLayout } from "config";
-import { Functions, ApiResponse } from "src/_sockets/apiTypes.generated";
+import { Functions, ApiResponse, ApiStreamEmitter } from "src/_sockets/apiTypes.generated";
 
 export const auth: AuthProps = { login: false, additional: [] };
 
@@ -51,6 +51,7 @@ export interface ApiParams {
   data: { name: string };
   user: SessionLayout;
   functions: Functions;
+  stream: ApiStreamEmitter;
 }
 
 export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
@@ -161,12 +162,35 @@ function GameBoard() {
 
   // Send a move
   const handleMove = (move) => {
-    syncRequest({ name: "game/movePlayer", version: "v1", data: move });
+    syncRequest({
+      name: "game/movePlayer",
+      version: "v1",
+      data: move,
+      receiver: "game-room-123",
+      onStream: (stream) => {
+        console.log("Requester progress", stream);
+      },
+    });
   };
 
   return <Board onMove={handleMove} {...state} />;
 }
 ```
+
+For receiver-side stream updates from `_client.ts`, register `upsertSyncEventStreamCallback` via `useSyncEvents`.
+
+Strict stream typing note:
+
+- If a route does not call `stream(...)`, its generated stream type is `never`.
+- For those routes, TypeScript disallows `onStream`/stream callback registration.
+
+This repository no longer ships a permanent streaming playground route.
+
+To recreate the exact previous demo route and handlers, use:
+
+- `docs/STREAMING_RECONSTRUCTION.md`
+
+That guide contains copy-paste source templates for the removed files and the validation checklist.
 
 ---
 
@@ -238,6 +262,30 @@ curl http://localhost/api/mypage/getGameState/v1?gameId=123 \
   -H "Cookie: token=your-token-here" \
   -H "Accept-Language: en"
 ```
+
+### HTTP Streaming (SSE)
+
+You can stream API or sync progress over HTTP using either:
+
+- `Accept: text/event-stream`
+- `?stream=true`
+
+```bash
+# API streaming over SSE
+curl -N "http://localhost/api/mypage/getGameState/v1?gameId=123&stream=true" \
+  -H "Accept: text/event-stream"
+
+# Sync streaming over SSE (requester receives _server.ts stream payloads)
+curl -N -X POST "http://localhost/sync/game/movePlayer/v1?stream=true" \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"data":{"x":1,"y":2},"receiver":"game-room-123","ignoreSelf":false}'
+```
+
+SSE event names:
+
+- `stream` = partial updates
+- `final` = final JSON response envelope
 
 ### Via Browser Console
 

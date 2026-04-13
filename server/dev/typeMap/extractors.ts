@@ -175,6 +175,52 @@ const collectReturnObjectTypeDetails = (
   return { text: unionTypes(types), unresolvedSymbols };
 };
 
+// Collects the expanded payload type strings of stream(...) calls
+// in a function body, without descending into nested function definitions.
+const collectStreamCallPayloadTypeDetails = (
+  funcNode: ts.FunctionLikeDeclaration,
+  checker: ts.TypeChecker,
+): TypeExtractionResult => {
+  const types: string[] = [];
+  let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
+
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && node.expression.text === 'stream'
+      && node.arguments.length > 0
+    ) {
+      const firstArg = node.arguments[0];
+      const argType = checker.getTypeAtLocation(firstArg);
+      const nonNullableArgType = checker.getNonNullableType(argType);
+      const expanded = expandTypeDetailed(nonNullableArgType, checker);
+
+      if (expanded.text.trim().length > 0) {
+        types.push(expanded.text);
+      }
+
+      unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
+      unresolvedSymbols = mergeUnresolvedSymbols(
+        unresolvedSymbols,
+        collectFallbackSymbolsFromTypeText(expanded.text, firstArg, checker),
+      );
+    }
+
+    // Recurse into control flow but not into nested function bodies
+    if (
+      !ts.isArrowFunction(node)
+      && !ts.isFunctionExpression(node)
+      && !ts.isFunctionDeclaration(node)
+    ) {
+      ts.forEachChild(node, visit);
+    }
+  };
+
+  ts.forEachChild(funcNode, visit);
+  return { text: unionTypes(types), unresolvedSymbols };
+};
+
 // Returns the deduplicated union of an array of type strings.
 const unionTypes = (types: string[]): string => {
   const unique = [...new Set(types)];
@@ -212,6 +258,30 @@ export const getInputTypeDetailsFromFile = (filePath: string): TypeExtractionRes
 
 export const getOutputTypeFromFile = (filePath: string): string => {
   return getOutputTypeDetailsFromFile(filePath).text;
+};
+
+export const getApiStreamPayloadTypeFromFile = (filePath: string): string => {
+  return getApiStreamPayloadTypeDetailsFromFile(filePath).text;
+};
+
+export const getApiStreamPayloadTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
+  const DEFAULT = 'never';
+
+  try {
+    const program = getServerProgram();
+    const sourceFile = program.getSourceFile(filePath);
+    if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
+
+    const checker = program.getTypeChecker();
+    const mainFn = findMainFunction(sourceFile);
+    if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
+
+    const details = collectStreamCallPayloadTypeDetails(mainFn, checker);
+    return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
+  } catch (error) {
+    console.error(`[TypeMapGenerator] Error extracting API stream payload type from ${filePath}:`, error);
+    return { text: DEFAULT, unresolvedSymbols: [] };
+  }
 };
 
 export const getOutputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
@@ -268,6 +338,30 @@ export const getSyncServerOutputType = (filePath: string): string => {
   return getSyncServerOutputTypeDetailsFromFile(filePath).text;
 };
 
+export const getSyncServerStreamPayloadTypeFromFile = (filePath: string): string => {
+  return getSyncServerStreamPayloadTypeDetailsFromFile(filePath).text;
+};
+
+export const getSyncServerStreamPayloadTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
+  const DEFAULT = 'never';
+
+  try {
+    const program = getServerProgram();
+    const sourceFile = program.getSourceFile(filePath);
+    if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
+
+    const checker = program.getTypeChecker();
+    const mainFn = findMainFunction(sourceFile);
+    if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
+
+    const details = collectStreamCallPayloadTypeDetails(mainFn, checker);
+    return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
+  } catch (error) {
+    console.error(`[TypeMapGenerator] Error extracting sync server stream payload type from ${filePath}:`, error);
+    return { text: DEFAULT, unresolvedSymbols: [] };
+  }
+};
+
 export const getSyncServerOutputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ status: string }';
 
@@ -290,6 +384,30 @@ export const getSyncServerOutputTypeDetailsFromFile = (filePath: string): TypeEx
 
 export const getSyncClientOutputType = (filePath: string): string => {
   return getSyncClientOutputTypeDetailsFromFile(filePath).text;
+};
+
+export const getSyncClientStreamPayloadTypeFromFile = (filePath: string): string => {
+  return getSyncClientStreamPayloadTypeDetailsFromFile(filePath).text;
+};
+
+export const getSyncClientStreamPayloadTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
+  const DEFAULT = 'never';
+
+  try {
+    const program = getServerProgram();
+    const sourceFile = program.getSourceFile(filePath);
+    if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
+
+    const checker = program.getTypeChecker();
+    const mainFn = findMainFunction(sourceFile);
+    if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
+
+    const details = collectStreamCallPayloadTypeDetails(mainFn, checker);
+    return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
+  } catch (error) {
+    console.error(`[TypeMapGenerator] Error extracting sync client stream payload type from ${filePath}:`, error);
+    return { text: DEFAULT, unresolvedSymbols: [] };
+  }
 };
 
 export const getSyncClientOutputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {

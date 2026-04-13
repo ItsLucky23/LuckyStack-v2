@@ -1,7 +1,7 @@
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
 import { AuthProps, SessionLayout } from '{{REL_PATH}}config';
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { Functions, ApiResponse, MaybePromise } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
+import { Functions, ApiResponse, MaybePromise, ApiStreamEmitter } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 // Set the request limit per minute. Set to false to use the default config value config.rateLimiting
 export const rateLimit: number | false = 20;
@@ -22,9 +22,14 @@ export interface ApiParams {
   };
   user: SessionLayout;
   functions: Functions;
+  stream: ApiStreamEmitter;
 }
 
 export const main = ({  }: ApiParams): MaybePromise<ApiResponse> => {
+  // Stream payload types are generated from your stream(...) calls.
+  // stream({ phase: 'started', progress: 0 });
+  // stream({ phase: 'done', progress: 100, done: true });
+
   // Error responses must include errorCode
   // return { status: 'error', errorCode: 'api.someError', errorParams: [{ key: 'id', value: 1 }] };
 

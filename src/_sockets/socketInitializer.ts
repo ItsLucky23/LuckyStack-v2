@@ -12,6 +12,7 @@ import notify from "src/_functions/notify";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { useEffect, useRef } from "react";
 import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
+import type { SyncRouteStreamEvent } from "./syncRequest";
 import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
 
 interface SyncEventPayload {
@@ -19,12 +20,46 @@ interface SyncEventPayload {
   clientOutput?: unknown;
   serverOutput?: unknown;
   message?: string;
-  status?: 'success' | 'error';
+  status?: 'success' | 'error' | 'stream';
   fullName?: string;
   errorCode?: string;
   errorParams?: { key: string; value: string | number | boolean }[];
   httpStatus?: number;
+  [key: string]: unknown;
 }
+
+const normalizeSyncRouteKey = (value: string): string => {
+  const sanitized = value.replaceAll(/^\/+|\/+$/g, '');
+  if (sanitized.length === 0) return '';
+  if (sanitized.startsWith('sync/')) return sanitized;
+  return `sync/${sanitized}`;
+};
+
+const getSyncRouteKeys = ({
+  fullName,
+  cb,
+}: {
+  fullName?: string;
+  cb?: string;
+}) => {
+  const keys = new Set<string>();
+
+  if (typeof fullName === 'string') {
+    const normalized = normalizeSyncRouteKey(fullName);
+    if (normalized) {
+      keys.add(normalized);
+    }
+  }
+
+  if (typeof cb === 'string') {
+    const normalized = normalizeSyncRouteKey(cb);
+    if (normalized) {
+      keys.add(normalized);
+    }
+  }
+
+  return [...keys];
+};
 
 const setDisconnectedStatus = (setSocketStatus: ReturnType<typeof useSocketStatus>["setSocketStatus"]) => {
   setSocketStatus(prev => ({
@@ -48,7 +83,7 @@ export const incrementResponseIndex = () => {
 
 export function useSocket(session: SessionLayout | null) {
   const { socketStatus, setSocketStatus } = useSocketStatus();
-  const { triggerSyncEvent } = useSyncEventTrigger();
+  const { triggerSyncEvent, triggerSyncStreamEvent } = useSyncEventTrigger();
   const sessionRef = useRef(session);
   const socketStatusRef = useRef(socketStatus);
 
@@ -145,8 +180,29 @@ export function useSocket(session: SessionLayout | null) {
       }
     });
 
-    socketConnection.on("sync", ({ cb, clientOutput, serverOutput, message, status, fullName, errorCode, errorParams, httpStatus }: SyncEventPayload) => {
-      if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverOutput, status, message, fullName, errorCode, errorParams, httpStatus });
+    socketConnection.on("sync", (payload: SyncEventPayload) => {
+      const { cb, clientOutput, serverOutput, message, status, fullName, errorCode, errorParams } = payload;
+      if (dev) console.log("Server Sync Response:", payload);
+
+      const routeKeys = getSyncRouteKeys({ fullName, cb });
+
+      if (status === "stream") {
+        if (routeKeys.length === 0) {
+          return;
+        }
+
+        const {
+          status: _status,
+          fullName: _fullName,
+          cb: _cb,
+          ...streamPayload
+        } = payload;
+
+        for (const routeKey of routeKeys) {
+          triggerSyncStreamEvent(routeKey, streamPayload as SyncRouteStreamEvent);
+        }
+        return;
+      }
 
       if (status === "error") {
         if (errorCode === 'sync.ignore' || message === 'sync.ignore') {
@@ -162,7 +218,7 @@ export function useSocket(session: SessionLayout | null) {
         return;
       }
 
-      if (typeof fullName !== 'string' || fullName.length === 0) {
+      if (routeKeys.length === 0) {
         const errorMessage = `Sync response is missing fullName for cb '${cb ?? 'unknown'}'.`;
         if (dev) {
           console.error(errorMessage);
@@ -171,7 +227,9 @@ export function useSocket(session: SessionLayout | null) {
         throw new Error(errorMessage);
       }
 
-      triggerSyncEvent(fullName, clientOutput, serverOutput);
+      for (const routeKey of routeKeys) {
+        triggerSyncEvent(routeKey, clientOutput, serverOutput);
+      }
     });
 
 
@@ -197,7 +255,7 @@ export function useSocket(session: SessionLayout | null) {
       globalThis.removeEventListener("online", handleOnline)
     };
 
-  }, [setSocketStatus, triggerSyncEvent]);
+  }, [setSocketStatus, triggerSyncEvent, triggerSyncStreamEvent]);
 
   return socket;
 }

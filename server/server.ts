@@ -70,6 +70,64 @@ const parseSessionBasedTokenHeader = (headerValue: string | string[] | undefined
   return null;
 };
 
+const normalizeHeaderValue = (value: string | string[] | undefined): string => {
+  if (Array.isArray(value)) {
+    return value.join(',').toLowerCase();
+  }
+
+  if (typeof value === 'string') {
+    return value.toLowerCase();
+  }
+
+  return '';
+};
+
+const shouldUseHttpStream = ({
+  acceptHeader,
+  queryString,
+}: {
+  acceptHeader: string | string[] | undefined;
+  queryString: string | undefined;
+}) => {
+  const accept = normalizeHeaderValue(acceptHeader);
+  if (accept.includes('text/event-stream')) {
+    return true;
+  }
+
+  if (!queryString) {
+    return false;
+  }
+
+  return /(^|&)stream=true(&|$)/i.test(queryString);
+};
+
+const initSseResponse = (res: http.ServerResponse) => {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.writeHead(200);
+  res.write(': connected\n\n');
+};
+
+const sendSseEvent = ({
+  res,
+  event,
+  data,
+}: {
+  res: http.ServerResponse;
+  event: string;
+  data: unknown;
+}) => {
+  if (res.writableEnded) {
+    return;
+  }
+
+  const serializedData = JSON.stringify(data);
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${serializedData}\n\n`);
+};
+
 const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
 
   const origin = req.headers.origin ?? req.headers.referer ?? req.headers.host ?? '';
@@ -265,25 +323,50 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     //? HTTP API route - allows calling APIs via HTTP instead of WebSocket
     //? Supports: GET/POST/PUT/DELETE /api/{name}
   } else if (routePath.startsWith('/api/')) {
+    let useHttpStream = false;
+    let streamClosed = false;
     try {
       const httpToken = extractTokenFromRequest(req);
+      useHttpStream = shouldUseHttpStream({
+        acceptHeader: req.headers.accept,
+        queryString,
+      });
+
+      if (useHttpStream) {
+        initSseResponse(res);
+        req.on('close', () => {
+          streamClosed = true;
+        });
+      }
 
       // Extract API name from path: /api/examples/getUserData → examples/getUserData
       const apiName = routePath.slice(5); // Remove "/api/" prefix (5 chars)
 
       if (!apiName) {
-        res.setHeader('Content-Type', 'application/json');
-        res.writeHead(400);
-        return res.end(JSON.stringify({
+        const response = {
           status: 'error',
           httpStatus: 400,
           message: 'api.invalidName',
           errorCode: 'api.invalidName',
-        }));
+        };
+
+        if (useHttpStream) {
+          if (!streamClosed) {
+            sendSseEvent({ res, event: 'final', data: response });
+          }
+          return res.end();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(400);
+        return res.end(JSON.stringify(response));
       }
 
       // Use getParams to parse request data (handles GET query params, POST/PUT/DELETE body)
-      const apiData = params || {};
+      const apiData = params && typeof params === 'object'
+        ? { ...(params as Record<string, unknown>) }
+        : {};
+      delete apiData.stream;
 
       const result = await handleHttpApiRequest({
         name: apiName,
@@ -292,14 +375,47 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         requesterIp: req.socket.remoteAddress ?? undefined,
         xLanguageHeader: req.headers['x-language'],
         acceptLanguageHeader: req.headers['accept-language'],
-        method: (method as 'GET' | 'POST' | 'PUT' | 'DELETE') || 'POST'
+        method: (method as 'GET' | 'POST' | 'PUT' | 'DELETE') || 'POST',
+        stream: useHttpStream
+          ? (payload) => {
+            if (streamClosed || res.writableEnded) {
+              return;
+            }
+
+            sendSseEvent({ res, event: 'stream', data: payload });
+          }
+          : undefined,
       });
+
+      if (useHttpStream) {
+        if (!streamClosed) {
+          sendSseEvent({ res, event: 'final', data: result });
+        }
+        return res.end();
+      }
 
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(result.httpStatus);
       return res.end(JSON.stringify(result));
     } catch (error) {
       console.log('HTTP API error:', error, 'red');
+
+      if (useHttpStream) {
+        if (!res.writableEnded) {
+          sendSseEvent({
+            res,
+            event: 'error',
+            data: {
+              status: 'error',
+              httpStatus: 500,
+              message: 'api.invalidRequestFormat',
+              errorCode: 'api.invalidRequestFormat',
+            },
+          });
+        }
+        return res.end();
+      }
+
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(500);
       return res.end(JSON.stringify({
@@ -311,31 +427,66 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     }
 
   } else if (routePath.startsWith('/sync/')) {
+    let useHttpStream = false;
+    let streamClosed = false;
     try {
+      useHttpStream = shouldUseHttpStream({
+        acceptHeader: req.headers.accept,
+        queryString,
+      });
+
+      if (useHttpStream) {
+        initSseResponse(res);
+        req.on('close', () => {
+          streamClosed = true;
+        });
+      }
+
       if (method !== 'POST') {
-        res.setHeader('Content-Type', 'application/json');
-        res.writeHead(405);
-        return res.end(JSON.stringify({
+        const response = {
           status: 'error',
           message: 'sync.methodNotAllowed',
           errorCode: 'sync.methodNotAllowed',
-        }));
+        };
+
+        if (useHttpStream) {
+          if (!streamClosed) {
+            sendSseEvent({ res, event: 'final', data: response });
+          }
+          return res.end();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(405);
+        return res.end(JSON.stringify(response));
       }
 
       const httpToken = extractTokenFromRequest(req);
       const syncName = routePath.slice(6);
 
       if (!syncName) {
-        res.setHeader('Content-Type', 'application/json');
-        res.writeHead(400);
-        return res.end(JSON.stringify({
+        const response = {
           status: 'error',
           message: 'sync.invalidName',
           errorCode: 'sync.invalidName',
-        }));
+        };
+
+        if (useHttpStream) {
+          if (!streamClosed) {
+            sendSseEvent({ res, event: 'final', data: response });
+          }
+          return res.end();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(400);
+        return res.end(JSON.stringify(response));
       }
 
-      const syncParams = params || {};
+      const syncParams = params && typeof params === 'object'
+        ? { ...(params as Record<string, unknown>) }
+        : {};
+      delete syncParams.stream;
 
       const result = await handleHttpSyncRequest({
         name: `sync/${syncName}`,
@@ -347,13 +498,45 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         requesterIp: req.socket.remoteAddress ?? undefined,
         xLanguageHeader: req.headers['x-language'],
         acceptLanguageHeader: req.headers['accept-language'],
+        stream: useHttpStream
+          ? (payload) => {
+            if (streamClosed || res.writableEnded) {
+              return;
+            }
+
+            sendSseEvent({ res, event: 'stream', data: payload });
+          }
+          : undefined,
       });
+
+      if (useHttpStream) {
+        if (!streamClosed) {
+          sendSseEvent({ res, event: 'final', data: result });
+        }
+        return res.end();
+      }
 
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(result.status === 'success' ? 200 : 400);
       return res.end(JSON.stringify(result));
     } catch (error) {
       console.log('HTTP SYNC error:', error, 'red');
+
+      if (useHttpStream) {
+        if (!res.writableEnded) {
+          sendSseEvent({
+            res,
+            event: 'error',
+            data: {
+              status: 'error',
+              message: 'sync.invalidRequestFormat',
+              errorCode: 'sync.invalidRequestFormat',
+            },
+          });
+        }
+        return res.end();
+      }
+
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(500);
       return res.end(JSON.stringify({
