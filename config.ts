@@ -222,7 +222,7 @@ export interface AuthProps {
     key: keyof SessionLayout;
  
     /** Exact value the property must equal (strict comparison) */
-    value?: any;
+    value?: unknown;
  
     /** Type the property must be */
     type?: 'string' | 'number' | 'boolean';

@@ -3,6 +3,7 @@ import redis from "../../functions/redis";
 import { disconnectTimers, tempDisconnectedSockets } from "./activityBroadcaster";
 import { deleteSession } from "../../functions/session";
 import tryCatch from "../../../shared/tryCatch";
+import { socketEventNames } from '../../../shared/socketEvents';
 
 export const logout = async ({ token, socket, userId, skipSessionDelete }: {
   token: string | null,
@@ -44,11 +45,11 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
   });
   if (error) {
     if (socket) {
-      socket.emit(`logout`, "error");
+      socket.emit(socketEventNames.logout, "error");
     }
   } else if (result) {
     if (socket) {
-      socket.emit(`logout`, "success");
+      socket.emit(socketEventNames.logout, "success");
     }
   }
 }

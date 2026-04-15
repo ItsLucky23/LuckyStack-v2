@@ -6,15 +6,13 @@ import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractor
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { SERVER_FUNCTIONS_DIR, SRC_DIR } from '../utils/paths';
 import { clearRuntimeTypeResolverCache } from '../utils/runtimeTypeResolver';
+import { API_VERSION_TOKEN_REGEX, SYNC_VERSION_TOKEN_REGEX } from './routeConventions';
 
 const nodeRequire = createRequire(import.meta.url);
 
 export const devApis: Record<string, any> = {};
 export const devSyncs: Record<string, any> = {};
 export const devFunctions: Record<string, any> = {};
-
-const API_VERSION_REGEX = /_v(\d+)$/;
-const SYNC_VERSION_REGEX = /_(server|client)_v(\d+)$/;
 
 const normalizePath = (value: string): string => value.replace(/\\/g, '/');
 
@@ -37,14 +35,14 @@ const resolveApiRouteMetaFromPath = (filePath: string): { routeKey: string; abso
   const pageLocation = segments.slice(0, apiIndex).join('/');
   const apiFilePath = segments.slice(apiIndex + 1).join('/');
   const rawApiName = apiFilePath.replace(/\.ts$/, '');
-  const versionMatch = rawApiName.match(API_VERSION_REGEX);
+  const versionMatch = rawApiName.match(API_VERSION_TOKEN_REGEX);
 
   if (!versionMatch) {
     return null;
   }
 
   const version = `v${versionMatch[1]}`;
-  const apiName = rawApiName.replace(API_VERSION_REGEX, '');
+  const apiName = rawApiName.replace(API_VERSION_TOKEN_REGEX, '');
   const routeKey = pageLocation
     ? `api/${pageLocation}/${apiName}/${version}`
     : `api/${apiName}/${version}`;
@@ -73,7 +71,7 @@ const resolveSyncRouteMetaFromPath = (
   const pageLocation = segments.slice(0, syncIndex).join('/');
   const syncFilePath = segments.slice(syncIndex + 1).join('/');
   const rawSyncName = syncFilePath.replace(/\.ts$/, '');
-  const match = rawSyncName.match(SYNC_VERSION_REGEX);
+  const match = rawSyncName.match(SYNC_VERSION_TOKEN_REGEX);
 
   if (!match) {
     return null;
@@ -81,7 +79,7 @@ const resolveSyncRouteMetaFromPath = (
 
   const kind = match[1] as 'server' | 'client';
   const version = `v${match[2]}`;
-  const syncName = rawSyncName.replace(SYNC_VERSION_REGEX, '');
+  const syncName = rawSyncName.replace(SYNC_VERSION_TOKEN_REGEX, '');
   const routeBaseKey = pageLocation
     ? `sync/${pageLocation}/${syncName}/${version}`
     : `sync/${syncName}/${version}`;
@@ -165,6 +163,13 @@ export const initializeApis = async () => {
 export const upsertApiFromFile = async (filePath: string): Promise<void> => {
   const routeMeta = resolveApiRouteMetaFromPath(filePath);
   if (!routeMeta) {
+    const normalized = normalizePath(path.resolve(filePath));
+    if (normalized.includes('/_api/') && normalized.endsWith('.ts')) {
+      console.log(
+        `[loader][api] ignored invalid filename: ${normalized}. Expected <name>_v<number>.ts`,
+        'yellow'
+      );
+    }
     return;
   }
 
@@ -229,13 +234,17 @@ const scanApiFolder = async (file: string, basePath = "") => {
 
   for (const relFile of tsFiles) {
     const rawApiName = relFile.replace(/\.ts$/, "").replace(/\\/g, '/');
-    const versionMatch = rawApiName.match(API_VERSION_REGEX);
+    const versionMatch = rawApiName.match(API_VERSION_TOKEN_REGEX);
     if (!versionMatch) {
+      console.log(
+        `[loader][api] ignored invalid filename: ${path.join(fullPath, relFile)}. Expected <name>_v<number>.ts`,
+        'yellow'
+      );
       continue;
     }
 
     const version = `v${versionMatch[1]}`;
-    const apiName = rawApiName.replace(API_VERSION_REGEX, '');
+    const apiName = rawApiName.replace(API_VERSION_TOKEN_REGEX, '');
     const routeKey = pageLocation
       ? `api/${pageLocation}/${apiName}/${version}`
       : `api/${apiName}/${version}`;
@@ -281,6 +290,13 @@ export const initializeSyncs = async () => {
 export const upsertSyncFromFile = async (filePath: string): Promise<void> => {
   const routeMeta = resolveSyncRouteMetaFromPath(filePath);
   if (!routeMeta) {
+    const normalized = normalizePath(path.resolve(filePath));
+    if (normalized.includes('/_sync/') && normalized.endsWith('.ts')) {
+      console.log(
+        `[loader][sync] ignored invalid filename: ${normalized}. Expected <name>_server_v<number>.ts or <name>_client_v<number>.ts`,
+        'yellow'
+      );
+    }
     return;
   }
 
@@ -351,14 +367,18 @@ const scanSyncFolder = async (file: string, basePath = "") => {
 
   for (const relFile of tsFiles) {
     const rawSyncFileName = relFile.replace(/\.ts$/, "").replace(/\\/g, '/');
-    const syncMatch = rawSyncFileName.match(SYNC_VERSION_REGEX);
+    const syncMatch = rawSyncFileName.match(SYNC_VERSION_TOKEN_REGEX);
     if (!syncMatch) {
+      console.log(
+        `[loader][sync] ignored invalid filename: ${path.join(fullPath, relFile)}. Expected <name>_server_v<number>.ts or <name>_client_v<number>.ts`,
+        'yellow'
+      );
       continue;
     }
 
     const kind = syncMatch[1];
     const version = `v${syncMatch[2]}`;
-    const syncName = rawSyncFileName.replace(SYNC_VERSION_REGEX, '');
+    const syncName = rawSyncFileName.replace(SYNC_VERSION_TOKEN_REGEX, '');
     const routeBaseKey = pageLocation
       ? `sync/${pageLocation}/${syncName}/${version}`
       : `sync/${syncName}/${version}`;

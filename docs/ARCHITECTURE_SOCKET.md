@@ -9,10 +9,13 @@
 ```typescript
 // Client: Access socket instance
 import { socket, waitForSocket } from "src/_sockets/socketInitializer";
+import { socketEventNames } from "shared/socketEvents";
 
 await waitForSocket(); // Ensure connected
-socket.emit("event", data);
+socket.emit(socketEventNames.sync, data);
 ```
+
+Socket event names and dynamic response event builders are centralized in `shared/socketEvents.ts` and reused by both server and client runtime modules.
 
 ---
 
@@ -116,6 +119,7 @@ socket.on("disconnect", (reason) => {
 
 | File | Function | Purpose |
 | ---- | -------- | ------- |
+| `shared/socketEvents.ts` | `socketEventNames` + builders | Canonical socket event names and indexed response/progress event helpers shared across client/server. |
 | `server/sockets/socket.ts` | `loadSocket` | Initializes Socket.io server, registers all socket event handlers. |
 | `src/_sockets/socketInitializer.ts` | `useSocket` | Initializes client socket, listeners, queue flushing, visibility reconnection behavior. |
 | `src/_sockets/socketInitializer.ts` | `joinRoom` / `leaveRoom` / `getJoinedRooms` | Client room management helpers. |

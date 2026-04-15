@@ -14,6 +14,7 @@ import {
   injectTemplate,
   isSyncServerFile,
   getPairedSyncFile,
+  getRouteFilenameValidationMessage,
   extractClientInputFromFile,
   extractClientInputFromGeneratedTypes,
   extractSyncPagePath,
@@ -29,6 +30,7 @@ import {
 import { findDependentRouteFiles } from "./importDependencyGraph";
 import tryCatch from "../functions/tryCatch";
 import { reloadLocaleTranslations } from "../utils/responseNormalizer";
+import { serverRuntimeConfig } from "../config/runtimeConfig";
 
 // ----------------------------
 // Watcher for Hot Reload + Type Generation
@@ -149,7 +151,7 @@ export const setupWatchers = () => {
   const scheduleReload = (
     key: 'api' | 'sync' | 'functions' | 'typemap' | 'locales',
     task: () => Promise<void> | void,
-    delay = 120
+    delay = serverRuntimeConfig.dev.hotReloadDebounceMs
   ) => {
     const activeTimer = reloadTimers.get(key);
     if (activeTimer) {
@@ -166,6 +168,19 @@ export const setupWatchers = () => {
 
   const handleAdd = async (path: string) => {
     const normalizedPath = normalizeFsPath(path);
+
+    const routeValidationMessage = getRouteFilenameValidationMessage(normalizedPath);
+    if (routeValidationMessage) {
+      if (shouldInjectTemplate(path)) {
+        const injected = await injectTemplate(path);
+        if (injected) {
+          return;
+        }
+      }
+
+      console.log(`[HotReload] ${routeValidationMessage}`, 'yellow');
+      return;
+    }
 
     // Check if this is a new empty file that needs a template
     if (shouldInjectTemplate(path)) {
@@ -266,6 +281,19 @@ export const setupWatchers = () => {
 
   const handleChange = async (path: string) => {
     const normalizedPath = normalizeFsPath(path);
+
+    const routeValidationMessage = getRouteFilenameValidationMessage(normalizedPath);
+    if (routeValidationMessage) {
+      if (shouldInjectTemplate(path)) {
+        const injected = await injectTemplate(path);
+        if (injected) {
+          return;
+        }
+      }
+
+      console.log(`[HotReload] ${routeValidationMessage}`, 'yellow');
+      return;
+    }
 
     if (shouldInjectTemplate(path)) {
       const injected = await injectTemplate(path);
@@ -412,8 +440,8 @@ export const setupWatchers = () => {
   chokidar.watch('src', {
     ignoreInitial: true,
     awaitWriteFinish: {
-      stabilityThreshold: 120,
-      pollInterval: 20,
+      stabilityThreshold: serverRuntimeConfig.dev.watcherStabilityThresholdMs,
+      pollInterval: serverRuntimeConfig.dev.watcherPollIntervalMs,
     },
   })
     .on('add', handleAdd)

@@ -10,6 +10,12 @@ import allowedOrigin from '../auth/checkOrigin';
 import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from './utils/activityBroadcaster';
 import config, { SessionLayout } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
+import {
+  buildGetJoinedRoomsResponseEventName,
+  buildJoinRoomResponseEventName,
+  buildLeaveRoomResponseEventName,
+  socketEventNames,
+} from '../../shared/socketEvents';
 
 //? Per-token lock to serialize session mutations (prevents read-modify-write races)
 const sessionLocks = new Map<string, Promise<void>>();
@@ -83,37 +89,37 @@ export default function loadSocket(httpServer: any) {
   console.log('SocketIO server initialized', 'green');
 
   //? when a client connects to the SocketIO server we extract their token and set up event handlers
-  io.on('connection', (socket) => {
+  io.on(socketEventNames.connect, (socket) => {
     const token = extractTokenFromSocket(socket);
 
     if (token) {
       socketConnected({ token, io });
     }
 
-    socket.on('apiRequest', async (msg: apiMessage) => {
+    socket.on(socketEventNames.apiRequest, async (msg: apiMessage) => {
       handleApiRequest({ msg, socket, token });
     });
-    socket.on('sync', async (msg: syncMessage) => {
+    socket.on(socketEventNames.sync, async (msg: syncMessage) => {
       handleSyncRequest({ msg, socket, token });
     });
-    socket.on('joinRoom', async (data) => {
+    socket.on(socketEventNames.joinRoom, async (data) => {
       const group = typeof data?.group === 'string' ? data.group.trim() : '';
       const responseIndex = data?.responseIndex;
       if (typeof responseIndex !== 'number') {
         return;
       }
       if (!token) {
-        socket.emit(`joinRoom-${responseIndex}`, { error: 'Not authenticated' });
+        socket.emit(buildJoinRoomResponseEventName(responseIndex), { error: 'Not authenticated' });
         return;
       }
       if (!group) {
-        socket.emit(`joinRoom-${responseIndex}`, { error: 'Invalid room' });
+        socket.emit(buildJoinRoomResponseEventName(responseIndex), { error: 'Invalid room' });
         return;
       }
       await withSessionLock(token, async () => {
         const session = await getSession(token);
         if (!session) {
-          socket.emit(`joinRoom-${responseIndex}`, { error: 'Session not found' });
+          socket.emit(buildJoinRoomResponseEventName(responseIndex), { error: 'Session not found' });
           return;
         }
 
@@ -123,12 +129,12 @@ export default function loadSocket(httpServer: any) {
         await socket.join(group);
         const sanitizedSession = sanitizeSessionRoomKeys(session);
         await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
-        socket.emit(`joinRoom-${responseIndex}`, { rooms: getVisibleSocketRooms(socket, token) });
+        socket.emit(buildJoinRoomResponseEventName(responseIndex), { rooms: getVisibleSocketRooms(socket, token) });
         console.log(`Socket ${socket.id} joined group ${group}`, 'cyan');
       });
     });
 
-    socket.on('leaveRoom', async (data) => {
+    socket.on(socketEventNames.leaveRoom, async (data) => {
       const group = typeof data?.group === 'string' ? data.group.trim() : '';
       const responseIndex = data?.responseIndex;
       if (typeof responseIndex !== 'number') {
@@ -136,19 +142,19 @@ export default function loadSocket(httpServer: any) {
       }
 
       if (!token) {
-        socket.emit(`leaveRoom-${responseIndex}`, { error: 'Not authenticated' });
+        socket.emit(buildLeaveRoomResponseEventName(responseIndex), { error: 'Not authenticated' });
         return;
       }
 
       if (!group) {
-        socket.emit(`leaveRoom-${responseIndex}`, { error: 'Invalid room' });
+        socket.emit(buildLeaveRoomResponseEventName(responseIndex), { error: 'Invalid room' });
         return;
       }
 
       await withSessionLock(token, async () => {
         const session = await getSession(token);
         if (!session) {
-          socket.emit(`leaveRoom-${responseIndex}`, { error: 'Session not found' });
+          socket.emit(buildLeaveRoomResponseEventName(responseIndex), { error: 'Session not found' });
           return;
         }
 
@@ -160,26 +166,26 @@ export default function loadSocket(httpServer: any) {
         const sanitizedSession = sanitizeSessionRoomKeys(session);
         await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
 
-        socket.emit(`leaveRoom-${responseIndex}`, { rooms: getVisibleSocketRooms(socket, token) });
+        socket.emit(buildLeaveRoomResponseEventName(responseIndex), { rooms: getVisibleSocketRooms(socket, token) });
         console.log(`Socket ${socket.id} left group ${group}`, 'cyan');
       });
     });
 
-    socket.on('getJoinedRooms', (data) => {
+    socket.on(socketEventNames.getJoinedRooms, (data) => {
       const responseIndex = data?.responseIndex;
       if (typeof responseIndex !== 'number') {
         return;
       }
 
       if (!token) {
-        socket.emit(`getJoinedRooms-${responseIndex}`, { error: 'Not authenticated', rooms: [] });
+        socket.emit(buildGetJoinedRoomsResponseEventName(responseIndex), { error: 'Not authenticated', rooms: [] });
         return;
       }
 
-      socket.emit(`getJoinedRooms-${responseIndex}`, { rooms: getVisibleSocketRooms(socket, token) });
+      socket.emit(buildGetJoinedRoomsResponseEventName(responseIndex), { rooms: getVisibleSocketRooms(socket, token) });
     });
 
-    socket.on('disconnect', async (reason) => {
+    socket.on(socketEventNames.disconnect, async (reason) => {
       if (config.socketActivityBroadcaster && token) {
         socketDisconnecting({ token, socket, reason });
       } else {
@@ -188,7 +194,7 @@ export default function loadSocket(httpServer: any) {
       }
     });
 
-    socket.on('updateLocation', async (newLocation) => {
+    socket.on(socketEventNames.updateLocation, async (newLocation) => {
       if (!token) { return; }
       if (!config.locationProviderEnabled) { return; }
       console.log('updating location to: ', newLocation.pathName, 'yellow')

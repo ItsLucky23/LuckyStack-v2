@@ -14,7 +14,7 @@ const response = await syncRequest({
   data: { amount: 5 },
   receiver: "game-room-123",
   onStream: (stream) => {
-    // Requester progress emitted from _server.ts
+    // Requester progress emitted from _server_v{n}.ts
     console.log(stream);
   },
 });
@@ -125,14 +125,14 @@ import {
   SyncClientStreamEmitter,
 } from "../../../src/_sockets/apiTypes.generated";
 
-// Types are imported from the generated file based on the _server.ts definition
+// Types are imported from the generated file based on the _server_v{n}.ts definition
 type PagePath = "examples";
 type SyncName = "updateCounter";
 export interface SyncParams {
   clientInput: SyncClientInput<PagePath, SyncName>;
 
   serverOutput: SyncServerOutput<PagePath, SyncName>;
-  // Note: No serverOutput in client-only syncs (no _server.ts file)
+  // Note: No serverOutput in client-only syncs (no _server_v{n}.ts file)
   token: string | null; // target client token (fetch session only when needed)
   functions: Functions; // contains functions available from server/functions
   roomCode: string; // room code
@@ -161,21 +161,21 @@ export const main = async ({
 };
 ```
 
-If your `_client.ts` only returns `{ status: 'success' }` and does no filtering or payload changes, remove the file. Keeping a no-op client sync file adds unnecessary per-client execution overhead.
+If your `_client_v{n}.ts` only returns `{ status: 'success' }` and does no filtering or payload changes, remove the file. Keeping a no-op client sync file adds unnecessary per-client execution overhead.
 
-Client sync handlers no longer receive `user` automatically. This avoids a Redis session lookup for every target socket. When you need target session data, call `functions.session.getSession(token)` inside `_client.ts`.
+Client sync handlers no longer receive `user` automatically. This avoids a Redis session lookup for every target socket. When you need target session data, call `functions.session.getSession(token)` inside `_client_v{n}.ts`.
 
 ## Client File Decision Rule (AI + Performance)
 
-Default behavior: create only `_server.ts`.
+Default behavior: create only `_server_v{n}.ts`.
 
-Create `_client.ts` only if you need one of these:
+Create `_client_v{n}.ts` only if you need one of these:
 
 - Per-target-client filtering (for example skip users not on a specific page)
 - Per-target-client authorization or rejection
 - Per-target-client output transformation (custom `clientOutput`)
 
-Do not create `_client.ts` for pass-through syncs. Without `_client.ts`, the framework still broadcasts successfully with `serverOutput` and an empty `clientOutput`.
+Do not create `_client_v{n}.ts` for pass-through syncs. Without `_client_v{n}.ts`, the framework still broadcasts successfully with `serverOutput` and an empty `clientOutput`.
 
 ## Receiving Sync Events
 
@@ -189,8 +189,8 @@ useEffect(() => {
     name: "examples/updateCounter",
     version: "v1",
     callback: ({ clientOutput, serverOutput }) => {
-      // clientOutput = result from _client.ts
-      // serverOutput = result from _server.ts
+      // clientOutput = result from _client_v{n}.ts
+      // serverOutput = result from _server_v{n}.ts
       updateUI(serverOutput.newValue);
     },
   });
@@ -216,7 +216,7 @@ useEffect(() => {
     name: "examples/updateCounter",
     version: "v1",
     callback: ({ stream }) => {
-      // stream is emitted by _client.ts via stream(...)
+      // stream is emitted by _client_v{n}.ts via stream(...)
       console.log(stream);
     },
   });
@@ -227,21 +227,21 @@ useEffect(() => {
 
 Sync streaming has two channels:
 
-- `_server.ts` stream calls go back to the request initiator via `syncRequest({ onStream })`.
-- `_client.ts` stream calls go to each target socket and can be handled with `upsertSyncEventStreamCallback`.
+- `_server_v{n}.ts` stream calls go back to the request initiator via `syncRequest({ onStream })`.
+- `_client_v{n}.ts` stream calls go to each target socket and can be handled with `upsertSyncEventStreamCallback`.
 
 Both channels are strict-typed by generated maps:
 
-- `_server.ts` emitted payloads generate `serverStream` route types.
-- `_client.ts` emitted payloads generate `clientStream` route types.
+- `_server_v{n}.ts` emitted payloads generate `serverStream` route types.
+- `_client_v{n}.ts` emitted payloads generate `clientStream` route types.
 - `syncRequest({ onStream })` and `upsertSyncEventStreamCallback` use those exact generated payload unions.
 - Stream callbacks receive the payload you emit in `stream(...)`; stream payloads do not have framework-enforced keys.
 
 If no `stream(...)` call exists yet for a stage, that stage falls back to `never`.
 
 This means:
-- `syncRequest({ onStream })` is only available for routes that emit from `_server.ts`.
-- `upsertSyncEventStreamCallback` is only available for routes that emit from `_client.ts`.
+- `syncRequest({ onStream })` is only available for routes that emit from `_server_v{n}.ts`.
+- `upsertSyncEventStreamCallback` is only available for routes that emit from `_client_v{n}.ts`.
 
 Example server progress:
 
@@ -327,7 +327,7 @@ HTTP requester streaming is available via SSE:
 
 SSE events:
 
-- `event: stream` for `_server.ts` progress payloads
+- `event: stream` for `_server_v{n}.ts` progress payloads
 - `event: final` for final HTTP sync response
 
 Example:
@@ -370,8 +370,8 @@ When exceeded, handlers return `sync.rateLimitExceeded` with `seconds` in `error
 | Property       | Source                         | Description              |
 | -------------- | ------------------------------ | ------------------------ |
 | `clientInput`  | `data` param in syncRequest    | What client sends        |
-| `serverOutput` | `_server.ts` return            | Server processing result |
-| `clientOutput` | `_client.ts` clientMain return | Client processing result (or `{}` when no `_client.ts`) |
+| `serverOutput` | `_server_v{n}.ts` return            | Server processing result |
+| `clientOutput` | `_client_v{n}.ts` clientMain return | Client processing result (or `{}` when no `_client_v{n}.ts`) |
 
 Generated sync output typing preserves direct literal return values in object properties (for example `allowed: true` vs `allowed: false`) so TypeScript can narrow branch-specific shapes safely.
 

@@ -8,6 +8,16 @@ interface BasicProvider {
   name: string;
 }
 
+type OAuthUserData = Record<string, unknown>;
+
+const asOAuthUserData = (value: unknown): OAuthUserData => {
+  if (value && typeof value === 'object') {
+    return value as OAuthUserData;
+  }
+
+  return {};
+};
+
 interface FullProvider {
   name: string,
   clientID: string,
@@ -24,7 +34,7 @@ interface FullProvider {
 
   avatarKey?: string, //? the avatarKey represent the url to the img
   avatarCodeKey: string, //? the avatarCodeKey should be the key representing the avatar id if the provider doesnt give the avatar url directly, we use the getAvatar function with this value together
-  getAvatar?: ({ userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => any
+  getAvatar?: ({ userData, avatarId }: { userData: OAuthUserData, avatarId?: string }) => string | undefined | Promise<string | undefined>
 }
 
 type oauthProvidersProps = BasicProvider | FullProvider;
@@ -123,14 +133,18 @@ const oauthProviders: oauthProvidersProps[] = [
     nameKey: 'username',
     emailKey: 'email',
     avatarCodeKey: 'avatar',
-    getAvatar: ({ userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => {
+    getAvatar: ({ userData, avatarId }: { userData: OAuthUserData, avatarId?: string }) => {
       if (!avatarId) {
         // Default avatar (based on discriminator % 5)
         // const defaultAvatarIndex = userId % 5;
         // return `https://cdn.discordapp.com/embed/avatars/${defaultAvatarIndex}.png`;
         return undefined;
       }
-      const userId = userData.id;
+      const userId = typeof userData.id === 'string' ? userData.id : '';
+      if (!userId) {
+        return undefined;
+      }
+
       const format = avatarId.startsWith("a_") ? "gif" : "png";
       return `https://cdn.discordapp.com/avatars/${userId}/${avatarId}.${format}`;
     }
@@ -148,8 +162,11 @@ const oauthProviders: oauthProvidersProps[] = [
     nameKey: 'name',
     emailKey: 'email',
     avatarCodeKey: '',
-    getAvatar: ({ userData }: { userData: Record<string, any> }) => {
-      return userData?.picture?.data?.url || undefined;
+    getAvatar: ({ userData }: { userData: OAuthUserData }) => {
+      const picture = asOAuthUserData(userData.picture);
+      const pictureData = asOAuthUserData(picture.data);
+      const url = pictureData.url;
+      return typeof url === 'string' ? url : undefined;
     }
   },
   {
@@ -166,11 +183,15 @@ const oauthProviders: oauthProvidersProps[] = [
     nameKey: 'displayName',
     emailKey: 'mail', // Note: some personal accounts use 'userPrincipalName' if 'mail' is null
     avatarCodeKey: 'id',
-    getAvatar: async ({ userData: _userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => {
+    getAvatar: async ({ userData: _userData, avatarId }: { userData: OAuthUserData, avatarId?: string }) => {
       // Microsoft doesn't give a URL, it gives a binary blob via a separate endpoint.
       // You typically need the access_token here to fetch it. 
       // If your architecture doesn't pass the token to getAvatar, 
       // you can return this Graph URL for your frontend to fetch (with a token):
+      if (!avatarId) {
+        return undefined;
+      }
+
       return `https://graph.microsoft.com/v1.0/users/${avatarId}/photo/$value`;
     },
     getEmail: async (access_token: string) => {
@@ -196,11 +217,15 @@ const oauthProviders: oauthProvidersProps[] = [
 
       if (!getEmailResponse) { return false; }
 
-      const tempEmailReponse: any = getEmailResponse;
+      const tempEmailReponse = asOAuthUserData(getEmailResponse);
 
       // 1. 'mail' is the standard property for work/school accounts
       // 2. 'userPrincipalName' is used for personal accounts or as a fallback
-      const mainEmail = tempEmailReponse.mail || tempEmailReponse.userPrincipalName;
+      const mail = typeof tempEmailReponse.mail === 'string' ? tempEmailReponse.mail : '';
+      const userPrincipalName = typeof tempEmailReponse.userPrincipalName === 'string'
+        ? tempEmailReponse.userPrincipalName
+        : '';
+      const mainEmail = mail || userPrincipalName;
       return mainEmail || false;
     }
   }

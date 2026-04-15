@@ -1,11 +1,12 @@
-import fs from "fs";
-import path from "path";
+/// <reference types="node" />
+
+import fs from "node:fs";
+import path from "node:path";
 import { getInputTypeFromFile, getSyncClientDataType } from '../server/dev/typeMap/extractors';
+import { API_VERSION_TOKEN_REGEX, SYNC_VERSION_TOKEN_REGEX } from '../server/dev/routeConventions';
 import { resolveFromRoot } from '../server/utils/paths';
 
 const normalizePath = (p: string) => p.split(path.sep).join("/");
-const API_VERSION_REGEX = /_v(\d+)$/;
-const SYNC_VERSION_REGEX = /_(server|client)_v(\d+)$/;
 
 // Recursively walk dirs to collect _api and _sync files
 const walkSrcFiles = (dir: string, results: string[] = []) => {
@@ -76,16 +77,16 @@ rawSrcFiles.forEach((normalized) => {
     apiImports.push(`import * as ${varName} from '${importPath}';`);
 
     // capture optional page path and API name (supports root-level and nested _api)
-    // Root: src/_api/session.ts → pagePath=undefined, apiName="session"
-    // Nested: src/examples/_api/user/changeName.ts → pagePath="examples", apiName="user/changeName"
+    // Root: src/_api/session_v1.ts → pagePath=undefined, apiName="session"
+    // Nested: src/examples/_api/user/changeName_v1.ts → pagePath="examples", apiName="user/changeName"
     const match = normalized.match(/src\/(?:(.+?)\/)?_api\/(.+)\.ts$/i);
     if (!match) return;
     const [_, pagePath, apiNameWithVersion] = match;
-    const versionMatch = apiNameWithVersion.match(API_VERSION_REGEX);
+    const versionMatch = apiNameWithVersion.match(API_VERSION_TOKEN_REGEX);
     if (!versionMatch) return;
 
     const version = `v${versionMatch[1]}`;
-    const apiName = apiNameWithVersion.replace(API_VERSION_REGEX, '');
+    const apiName = apiNameWithVersion.replace(API_VERSION_TOKEN_REGEX, '');
     const routeKey = pagePath ? `api/${pagePath}/${apiName}/${version}` : `api/${apiName}/${version}`;
 
     apiMap += `  "${routeKey}": {\n    auth: "auth" in ${varName} ? ${varName}.auth : {},\n    main: ${varName}.main,\n    rateLimit: "rateLimit" in ${varName} ? (${varName}.rateLimit as number | false | undefined) : undefined,\n    httpMethod: "httpMethod" in ${varName} ? (${varName}.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined) : undefined,\n    inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n    inputTypeFilePath: ${JSON.stringify(normalized)},\n  },\n`;
@@ -97,12 +98,12 @@ rawSrcFiles.forEach((normalized) => {
     const match = normalized.match(/src\/(?:(.+?)\/)?_sync\/(.+)\.ts$/i);
     if (!match) return;
     const [_, pagePath, syncNameWithVersion] = match;
-    const syncMatch = syncNameWithVersion.match(SYNC_VERSION_REGEX);
+    const syncMatch = syncNameWithVersion.match(SYNC_VERSION_TOKEN_REGEX);
     if (!syncMatch) return;
 
     const kind = syncMatch[1];
     const version = `v${syncMatch[2]}`;
-    const syncName = syncNameWithVersion.replace(SYNC_VERSION_REGEX, '');
+    const syncName = syncNameWithVersion.replace(SYNC_VERSION_TOKEN_REGEX, '');
     const routeKey = pagePath ? `sync/${pagePath}/${syncName}/${version}` : `sync/${syncName}/${version}`;
 
     console.log(syncName)

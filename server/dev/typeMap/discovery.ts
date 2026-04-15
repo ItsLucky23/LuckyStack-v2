@@ -1,5 +1,10 @@
 import fs from 'fs';
 import path from 'path';
+import {
+  isVersionedApiFileName,
+  isVersionedSyncClientFileName,
+  isVersionedSyncServerFileName,
+} from '../routeConventions';
 
 const walkFiles = (
   dir: string,
@@ -32,20 +37,20 @@ const walkFiles = (
 export const findAllApiFiles = (srcDir: string): string[] => {
   return walkFiles(srcDir, (fullPath, entryName) => {
     const normalized = fullPath.replace(/\\/g, '/');
-    return /_v\d+\.ts$/.test(entryName) && normalized.includes('/_api/');
+    return isVersionedApiFileName(entryName) && normalized.includes('/_api/');
   });
 };
 
 export const findAllSyncServerFiles = (srcDir: string): string[] => {
   return walkFiles(srcDir, (fullPath, entryName) => {
     const normalized = fullPath.replace(/\\/g, '/');
-    return /_server_v\d+\.ts$/.test(entryName) && normalized.includes('/_sync/');
+    return isVersionedSyncServerFileName(entryName) && normalized.includes('/_sync/');
   });
 };
 
 export const findAllSyncClientFiles = (srcDir: string): string[] => {
   return walkFiles(srcDir, (fullPath, entryName) => {
     const normalized = fullPath.replace(/\\/g, '/');
-    return /_client_v\d+\.ts$/.test(entryName) && normalized.includes('/_sync/');
+    return isVersionedSyncClientFileName(entryName) && normalized.includes('/_sync/');
   });
 };

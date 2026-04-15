@@ -225,7 +225,7 @@ At least one of the two files must exist. Both are optional individually.
 
 ### How It Works
 
-**Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_sync/` that end with `_server.ts` or `_client.ts`.
+**Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_sync/` that end with `_server_v{number}.ts` or `_client_v{number}.ts`.
 After initial load, the dev watcher performs incremental in-memory updates for changed `_sync` files instead of rebuilding the entire sync map on every save.
 
 For non-route dependency changes in `src`, `shared`, or `server/functions`, the watcher resolves the dependency graph and reloads only affected API/sync routes in memory.
@@ -253,7 +253,7 @@ Client calls syncRequest({ name: 'test/nestedTest/room', version: 'v1', ... })
    |
 2. Server validates message format
    |
-3. If _server.ts exists:
+3. If _server_v{n}.ts exists:
    |  a. Check auth requirements
    |  b. Run main() for validation/DB operations
    |  c. Get serverOutput
@@ -263,18 +263,18 @@ Client calls syncRequest({ name: 'test/nestedTest/room', version: 'v1', ... })
 5. For each socket in room:
   |  a. Resolve target token from socket
   |  b. If ignoreSelf and it's the sender, skip
-  |  c. If _client.ts exists:
+  |  c. If _client_v{n}.ts exists:
   |     - Run main() with { clientInput, serverOutput, token, functions, roomCode }
   |     - If returns { status: 'error' }, emit error to this client and continue
    |     - If returns { status: 'success' }, emit to this client
-   |  d. If no _client.ts, emit serverOutput directly
+  |  d. If no _client_v{n}.ts, emit serverOutput directly
    |
 6. Confirm success back to sender via sync-{responseIndex}
 ```
 
 ### Required Exports
 
-**Server file (`_server.ts`):**
+**Server file (`_server_v{number}.ts`):**
 
 ```typescript
 export const auth: AuthProps = { login: true, additional: [] };
@@ -299,7 +299,7 @@ export const main = async ({
 };
 ```
 
-**Client file (`_client.ts`):**
+**Client file (`_client_v{number}.ts`):**
 
 ```typescript
 export interface SyncParams {
@@ -323,9 +323,9 @@ export const main = async ({
 };
 ```
 
-Use `_client.ts` only when needed for per-target-client behavior. If a client file only returns `{ status: 'success' }` and does no filtering or transformation, omit it to avoid unnecessary per-client execution overhead.
+Use `_client_v{number}.ts` only when needed for per-target-client behavior. If a client file only returns `{ status: 'success' }` and does no filtering or transformation, omit it to avoid unnecessary per-client execution overhead.
 
-Important: `_client.ts` handlers do not receive `user` directly. Use `token` and fetch session data only when needed via `functions.session.getSession(token)`.
+Important: `_client_v{number}.ts` handlers do not receive `user` directly. Use `token` and fetch session data only when needed via `functions.session.getSession(token)`.
 
 ### Receiving Sync Events
 
@@ -338,8 +338,8 @@ upsertSyncEventCallback({
   name: "examples/updateCounter",
   version: "v1",
   callback: ({ clientOutput, serverOutput }) => {
-    // clientOutput = return from _client.ts (success only)
-    // serverOutput = return from _server.ts
+    // clientOutput = return from _client_v{n}.ts (success only)
+    // serverOutput = return from _server_v{n}.ts
   },
 });
 ```
@@ -349,8 +349,8 @@ upsertSyncEventCallback({
 | Type           | Source                | Description                                           |
 | -------------- | --------------------- | ----------------------------------------------------- |
 | `clientInput`  | Sender's `data` param | Original data passed to `syncRequest({ data: ... })`  |
-| `serverOutput` | `_server.ts` return   | Data returned from server-side handler                |
-| `clientOutput` | `_client.ts` return   | Data returned from client-side handler (success only) |
+| `serverOutput` | `_server_v{n}.ts` return   | Data returned from server-side handler                |
+| `clientOutput` | `_client_v{n}.ts` return   | Data returned from client-side handler (success only) |
 
 ---
 
@@ -363,6 +363,7 @@ Template injection is a development scaffold step, not the long-term type source
 - API files must end with `_v{number}.ts` (example: `getUser_v1.ts`)
 - Sync files must end with `_server_v{number}.ts` or `_client_v{number}.ts`
 - Invalid names get a guidance template instead of route registration
+- Naming patterns are centralized in `server/dev/routeConventions.ts` so loader, type-map discovery, and generation stay in sync
 
 ### Paired sync behavior
 

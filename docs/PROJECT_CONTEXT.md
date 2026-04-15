@@ -9,6 +9,8 @@
 > **Human-readable documentation for AI assistants and developers to understand this project.**
 > Last updated: 2026-02-10
 
+Related architecture doc: `docs/ARCHITECTURE_PACKAGING.md` (package-split migration strategy and hook model).
+
 ---
 
 # Part 1: Framework Summary
@@ -20,6 +22,7 @@ The framework is a **custom-built React + Node.js stack** inspired by Next.js bu
 | File                   | Purpose                                                                                        |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
 | `config.ts`            | Main app configuration (URLs, defaults, session layout). Gitignored - use `configTemplate.txt` |
+| `server/config/runtimeConfig.ts` | Server runtime defaults (HTTP/body limits, auth TTL, stream query flags, watcher timing) |
 | `.env_template`        | Safe `.env` config template with placeholders (for architecture context, no real secrets)      |
 | `.env.local_template`  | Template for `.env.local` secret overrides (real credentials belong in `.env.local`)           |
 | `vite.config.ts`       | Vite bundler config with path aliases (`src/`, `config`) and exclusions for server files       |
@@ -90,7 +93,7 @@ Handles all real-time communication:
 
 - Validates server-side sync file before broadcasting
 - Loops through all sockets in the room and runs client-side sync for each
-- Passes target `token` to `_client.ts` instead of auto-loading each target session
+- Passes target `token` to `_client_v{n}.ts` instead of auto-loading each target session
 - Supports `ignoreSelf` to exclude sender from receiving the event
 
 ### `server/functions/` - Server Utilities
@@ -113,6 +116,7 @@ Handles all real-time communication:
 | `sleep.ts`       | Shared Promise-based delay utility                                |
 | `sentry.ts`      | Shared Sentry wrapper for browser/server contexts                 |
 | `responseNormalizer.ts` | Shared response/error normalization for API + sync flows      |
+| `socketEvents.ts` | Shared canonical socket event names and indexed event-name builders |
 
 ### Session Kicking Feature (`session.ts`)
 
@@ -268,15 +272,16 @@ The sync type system has three distinct data types that flow through the system:
 | Type           | Source                | Description                                           |
 | -------------- | --------------------- | ----------------------------------------------------- |
 | `clientInput`  | Sender's `data` param | Original data passed to `syncRequest({ data: ... })`  |
-| `serverOutput` | `_server.ts` return   | Data returned from server-side sync handler           |
-| `clientOutput` | `_client.ts` return   | Data returned from client-side handler (success only) |
+| `serverOutput` | `_server_v{n}.ts` return   | Data returned from server-side sync handler           |
+| `clientOutput` | `_client_v{n}.ts` return   | Data returned from client-side handler (success only) |
 
 **Type Generation:**
 
 - Types auto-generated in `src/_sockets/apiTypes.generated.ts`
-- Watches `_sync/*_server.ts` and `_sync/*_client.ts` files
+- Watches `_sync/*_server_v{n}.ts` and `_sync/*_client_v{n}.ts` files
 - Also regenerates when `server/functions` or `shared` files change
 - `clientOutput` only includes successful returns (error returns are filtered out)
+- Route naming conventions are centralized in `server/dev/routeConventions.ts`
 
 #### `joinRoom(roomCode)` → Promise
 
@@ -322,14 +327,14 @@ Pages export a `template` constant to specify their wrapper:
 
 **API Routes** (server-only functions):
 
-- Place files in `src/{page}/_api/{name}.ts`
+- Place files in `src/{page}/_api/{name}_v{number}.ts`
 - Export `main` function and optional `auth` guard
 - Call from client: `apiRequest({ name: '{name}' })`
 
 **Sync Routes** (real-time client-server events):
 
-- `src/{page}/_sync/{name}_server.ts` - Runs on server for validation, returns `serverOutput`
-- `src/{page}/_sync/{name}_client.ts` - Runs on receiving clients, returns `clientOutput`
+- `src/{page}/_sync/{name}_server_v{number}.ts` - Runs on server for validation, returns `serverOutput`
+- `src/{page}/_sync/{name}_client_v{number}.ts` - Runs on receiving clients, returns `clientOutput`
 - Both files use `clientInput` in SyncParams for the original sender's data
 - Client sync handlers receive `token` and can call `functions.session.getSession(token)` only when session data is needed
 - Call from client: `syncRequest({ name: '{name}', data: clientInput, receiver: 'room-code' })`

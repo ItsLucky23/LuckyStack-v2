@@ -4,6 +4,7 @@ import { createContext, use, useState, ReactNode, useEffect, useMemo } from 'rea
 import { apiRequest } from 'src/_sockets/apiRequest';
 import { socket, useSocket } from 'src/_sockets/socketInitializer';
 import { setSentryUser } from 'src/_functions/sentry';
+import { socketEventNames } from '../../shared/socketEvents';
 
 import { dev, pageTitle, SessionLayout } from '../../config';
 
@@ -66,11 +67,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    socket.on('updateSession', handler)
+    socket.on(socketEventNames.updateSession, handler)
 
     return () => {
       if (!socket) return;
-      socket.off('updateSession', handler);
+      socket.off(socketEventNames.updateSession, handler);
     }
     
   }, [])

@@ -14,6 +14,12 @@ import { useEffect, useRef } from "react";
 import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
 import type { SyncRouteStreamEvent } from "./syncRequest";
 import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
+import {
+  buildGetJoinedRoomsResponseEventName,
+  buildJoinRoomResponseEventName,
+  buildLeaveRoomResponseEventName,
+  socketEventNames,
+} from "../../shared/socketEvents";
 
 interface SyncEventPayload {
   cb?: string;
@@ -125,14 +131,14 @@ export function useSocket(session: SessionLayout | null) {
 
       //? user switched tab or navigated away
       if (document.visibilityState === "hidden") {
-        socketConnection.emit("intentionalDisconnect");
+        socketConnection.emit(socketEventNames.intentionalDisconnect);
 
         //? user switched back to the tab
       } else {
         if (socketStatusRef.current.self.status !== "CONNECTED") {
           socketConnection.connect();
         }
-        socketConnection.emit("intentionalReconnect");
+        socketConnection.emit(socketEventNames.intentionalReconnect);
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
@@ -143,19 +149,19 @@ export function useSocket(session: SessionLayout | null) {
         sessionRef,
       });
     } else {
-      socketConnection.on("connect", () => {
+      socketConnection.on(socketEventNames.connect, () => {
         console.log("Connected to server");
       });
 
-      socketConnection.on("disconnect", () => {
+      socketConnection.on(socketEventNames.disconnect, () => {
         console.log("Disconnected, trying to reconnect...");
       });
 
-      socketConnection.on("reconnect_attempt", (attempt) => {
+      socketConnection.on(socketEventNames.reconnectAttempt, (attempt) => {
         console.log("Reconnecting attempt", attempt);
       });
 
-      socketConnection.on("connect_error", (err: { message: string }) => {
+      socketConnection.on(socketEventNames.connectError, (err: { message: string }) => {
         if (dev) {
           console.error(`Connection error: ${err.message}`);
           notify.error({ key: 'common.connectionError' });
@@ -163,12 +169,12 @@ export function useSocket(session: SessionLayout | null) {
       });
     }
 
-    socketConnection.on("connect", () => {
+    socketConnection.on(socketEventNames.connect, () => {
       flushApiQueue(canFlushQueue, socketConnection);
       flushSyncQueue(canFlushQueue, socketConnection);
     });
 
-    socketConnection.on("logout", (status: "success" | "error") => {
+    socketConnection.on(socketEventNames.logout, (status: "success" | "error") => {
       if (status === "success") {
         if (sessionBasedToken) {
           sessionStorage.clear();
@@ -180,7 +186,7 @@ export function useSocket(session: SessionLayout | null) {
       }
     });
 
-    socketConnection.on("sync", (payload: SyncEventPayload) => {
+    socketConnection.on(socketEventNames.sync, (payload: SyncEventPayload) => {
       const { cb, clientOutput, serverOutput, message, status, fullName, errorCode, errorParams } = payload;
       if (dev) console.log("Server Sync Response:", payload);
 
@@ -301,9 +307,9 @@ export const joinRoom = async (group: string) => {
       }
 
       const tempIndex = incrementResponseIndex();
-      socket.emit('joinRoom', { group, responseIndex: tempIndex });
+      socket.emit(socketEventNames.joinRoom, { group, responseIndex: tempIndex });
 
-      socket.once(`joinRoom-${String(tempIndex)}`, (response?: { error?: string; rooms?: unknown }) => {
+      socket.once(buildJoinRoomResponseEventName(tempIndex), (response?: { error?: string; rooms?: unknown }) => {
         if (response?.error) {
           if (dev) {
             console.error(response.error);
@@ -345,9 +351,9 @@ export const leaveRoom = async (group: string) => {
       }
 
       const tempIndex = incrementResponseIndex();
-      socket.emit('leaveRoom', { group, responseIndex: tempIndex });
+      socket.emit(socketEventNames.leaveRoom, { group, responseIndex: tempIndex });
 
-      socket.once(`leaveRoom-${String(tempIndex)}`, (response?: { error?: string; rooms?: unknown }) => {
+      socket.once(buildLeaveRoomResponseEventName(tempIndex), (response?: { error?: string; rooms?: unknown }) => {
         if (response?.error) {
           if (dev) {
             console.error(response.error);
@@ -380,9 +386,9 @@ export const getJoinedRooms = async () => {
       }
 
       const tempIndex = incrementResponseIndex();
-      socket.emit('getJoinedRooms', { responseIndex: tempIndex });
+      socket.emit(socketEventNames.getJoinedRooms, { responseIndex: tempIndex });
 
-      socket.once(`getJoinedRooms-${String(tempIndex)}`, (response?: { error?: string; rooms?: unknown }) => {
+      socket.once(buildGetJoinedRoomsResponseEventName(tempIndex), (response?: { error?: string; rooms?: unknown }) => {
         if (response?.error) {
           if (dev) {
             console.error(response.error);
@@ -417,6 +423,6 @@ export const updateLocationRequest = async ({ location }: { location: { pathName
   if (!await waitForSocket()) { return null; }
   if (!socket) { return null; }
 
-  socket.emit('updateLocation', location);
+  socket.emit(socketEventNames.updateLocation, location);
   return null;
 }

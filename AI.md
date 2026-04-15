@@ -19,9 +19,9 @@ To maintain a clean codebase and avoid wasting context tokens on unnecessary det
 - **Error Handling is Mandatory**: NEVER use raw `try/catch` blocks. You **must** always use our custom `tryCatch` wrapper for all async operations.
   ```typescript
   // Client usage:
-  import tryCatch from "src/_functions/helper";
+  import tryCatch from "shared/tryCatch";
   // Server usage:
-  import { tryCatch } from "server/functions/helper";
+  import { tryCatch } from "server/functions/tryCatch";
   // Usage: const [error, result] = await tryCatch(myAsyncFunc());
   ```
 - **Terminal Commands**: NEVER run terminal commands that mutate state or update code (like file creation scripts or servers) without first asking the user for permission and explaining exactly what the command does. Running commands strictly to retrieve data or check status is fine. Check exceptions below.
@@ -75,8 +75,24 @@ You are an active participant in this project, not just a code-monkey. When work
 
 ## 6. Sync File Creation Policy (Important)
 
-- For sync routes, `_client.ts` is optional.
-- Default to creating only `_server.ts` unless there is a real per-target-client requirement.
-- Only create `_client.ts` when you need per-client filtering, per-client authorization, or per-client `clientOutput` transformation.
-- Do not generate a no-op `_client.ts` that only returns `{ status: 'success' }`. It introduces avoidable per-client execution overhead.
-- If no `_client.ts` exists, sync delivery still works: clients receive `serverOutput` and an empty `clientOutput`.
+- Sync files must be versioned: `{name}_server_v{number}.ts` and `{name}_client_v{number}.ts`.
+- For sync routes, `{name}_client_v{number}.ts` is optional.
+- Default to creating only `{name}_server_v{number}.ts` unless there is a real per-target-client requirement.
+- Only create `{name}_client_v{number}.ts` when you need per-client filtering, per-client authorization, or per-client `clientOutput` transformation.
+- Do not generate a no-op `{name}_client_v{number}.ts` that only returns `{ status: 'success' }`. It introduces avoidable per-client execution overhead.
+- If no `{name}_client_v{number}.ts` exists, sync delivery still works: clients receive `serverOutput` and an empty `clientOutput`.
+
+## 7. Prisma Model Type Convention
+
+- When you need an app-level type for a Prisma model, place it in `src/_types/{ModelName}.ts`.
+- Prefer exporting the Prisma model type directly (single source of truth), then compose from it when needed.
+
+```typescript
+import type { Vehicle } from "@prisma/client";
+
+export type VehicleType = Vehicle;
+
+export type VehicleWithDisplayName = Vehicle & {
+  displayName: string;
+};
+```

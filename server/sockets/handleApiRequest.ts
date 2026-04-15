@@ -10,6 +10,10 @@ import { checkRateLimit } from '../utils/rateLimiter';
 import tryCatch from '../../shared/tryCatch';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '../utils/responseNormalizer';
 import { validateInputByType } from '../utils/runtimeTypeValidation';
+import {
+  buildApiResponseEventName,
+  buildApiStreamEventName,
+} from '../../shared/socketEvents';
 
 type handleApiRequestType = {
   msg: apiMessage,
@@ -62,7 +66,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     response: { status: 'error'; httpStatus?: number; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[] };
     fallbackHttpStatus?: number;
   }) => {
-    return socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
+    return socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
       response,
       preferredLocale,
       userLanguage: user?.language,
@@ -82,7 +86,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const apiBaseName = nameSegments[nameSegments.length - 2];
   if (apiBaseName == 'logout') {
     await logout({ token, socket, userId: user?.id || null });
-    return socket.emit(`apiResponse-${responseIndex}`, {
+    return socket.emit(buildApiResponseEventName(responseIndex), {
       status: 'success',
       httpStatus: 200,
       result: true,
@@ -132,7 +136,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const inputTypeFilePath = apisObject[resolvedName].inputTypeFilePath as string | undefined;
 
   const emitApiStream = (payload: ApiStreamPayload = {}) => {
-    socket.emit(`apiStream-${responseIndex}`, payload);
+    socket.emit(buildApiStreamEventName(responseIndex), payload);
   };
 
   const inputValidation = await validateInputByType({
@@ -247,7 +251,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   if (error) {
     console.log(`ERROR in ${name}:`, error, 'red');
-    socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
+    socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
       response: {
         status: 'error',
         errorCode: 'api.internalServerError',
@@ -261,7 +265,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
     if (result && typeof result === 'object' && (result.status === 'success' || result.status === 'error')) {
       if (result.status === 'error') {
-        socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
+        socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
           response: result,
           preferredLocale,
           userLanguage: user?.language,
@@ -271,7 +275,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
           }),
         }));
       } else {
-        socket.emit(`apiResponse-${responseIndex}`, {
+        socket.emit(buildApiResponseEventName(responseIndex), {
           ...result,
           status: 'success',
           httpStatus: defaultHttpStatusForResponse({
@@ -281,7 +285,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
         });
       }
     } else {
-      socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
+      socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
         response: {
           status: 'error',
           errorCode: 'api.invalidResponseStatus',
@@ -293,7 +297,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     }
   } else {
     console.log(`WARNING: ${name} returned nothing`, 'yellow');
-    socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
+    socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
       response: {
         status: 'error',
         errorCode: 'api.emptyResponse',

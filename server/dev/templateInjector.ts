@@ -2,6 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GENERATED_SOCKET_TYPES_PATH } from '../utils/paths';
+import {
+  ROUTE_NAMING_EXAMPLES,
+  ROUTE_NAMING_RULES,
+  isVersionedApiFileName,
+  isVersionedSyncClientFileName,
+  isVersionedSyncFileName,
+  isVersionedSyncServerFileName,
+} from './routeConventions';
 
 /**
  * Template Injector
@@ -47,31 +55,111 @@ export const isInSyncFolder = (filePath: string): boolean => {
 };
 
 export const isSyncServerFile = (filePath: string): boolean => {
-  return /_server_v\d+\.ts$/.test(filePath);
+  return isVersionedSyncServerFileName(filePath);
 };
 
 export const isSyncClientFile = (filePath: string): boolean => {
-  return /_client_v\d+\.ts$/.test(filePath);
+  return isVersionedSyncClientFileName(filePath);
 };
 
 const isVersionedApiFile = (filePath: string): boolean => {
-  return /_v\d+\.ts$/.test(filePath);
+  return isVersionedApiFileName(filePath);
 };
 
 const isVersionedSyncFile = (filePath: string): boolean => {
-  return /_(?:server|client)_v\d+\.ts$/.test(filePath);
+  return isVersionedSyncFileName(filePath);
+};
+
+const getFileName = (filePath: string): string => {
+  return path.basename(filePath.replace(/\\/g, '/'));
+};
+
+const stripTsExtension = (fileName: string): string => {
+  return fileName.replace(/\.ts$/, '');
+};
+
+const toApiBaseName = (fileName: string): string => {
+  const withoutExtension = stripTsExtension(fileName);
+  const withoutVersion = withoutExtension.replace(/_v\d+$/, '');
+  return withoutVersion || 'myApi';
+};
+
+const toSyncBaseName = (fileName: string): string => {
+  const withoutExtension = stripTsExtension(fileName);
+  const withoutVersionedKind = withoutExtension.replace(/_(?:server|client)_v\d+$/, '');
+  const withoutKindOnly = withoutVersionedKind.replace(/_(?:server|client)$/, '');
+  const withoutVersionOnly = withoutKindOnly.replace(/_v\d+$/, '');
+  return withoutVersionOnly || 'mySync';
+};
+
+const getApiFilenameReason = (fileName: string): string => {
+  const withoutExtension = stripTsExtension(fileName);
+
+  if (/_v\d+$/.test(withoutExtension)) {
+    return 'The filename already looks versioned.';
+  }
+
+  if (/_v\d+/.test(withoutExtension)) {
+    return 'The version token must be at the end of the filename.';
+  }
+
+  if (/_server|_client/.test(withoutExtension)) {
+    return 'API files do not use _server/_client suffixes.';
+  }
+
+  return 'Missing required version suffix.';
+};
+
+const getSyncFilenameReason = (fileName: string): string => {
+  const withoutExtension = stripTsExtension(fileName);
+
+  if (/_(?:server|client)_v\d+$/.test(withoutExtension)) {
+    return 'The filename already looks versioned.';
+  }
+
+  if (/_(?:server|client)$/.test(withoutExtension)) {
+    return 'Sync files with _server/_client must include a version suffix like _v1.';
+  }
+
+  if (/_v\d+$/.test(withoutExtension)) {
+    return 'Sync files with versions must also include _server or _client.';
+  }
+
+  return 'Missing required sync kind and version suffix.';
+};
+
+export const getRouteFilenameValidationMessage = (filePath: string): string | null => {
+  const normalized = filePath.replace(/\\/g, '/');
+  const fileName = getFileName(normalized);
+
+  if (isInApiFolder(normalized) && !isVersionedApiFile(normalized)) {
+    const base = toApiBaseName(fileName);
+    return [
+      `Invalid API filename: ${fileName}`,
+      `Reason: ${getApiFilenameReason(fileName)}`,
+      `Expected: ${ROUTE_NAMING_RULES.api}`,
+      `Example: ${base}_v1.ts (for example ${ROUTE_NAMING_EXAMPLES.api})`,
+      'This file is ignored by route loading and type generation until it is renamed.'
+    ].join(' ');
+  }
+
+  if (isInSyncFolder(normalized) && !isVersionedSyncFile(normalized)) {
+    const base = toSyncBaseName(fileName);
+    return [
+      `Invalid sync filename: ${fileName}`,
+      `Reason: ${getSyncFilenameReason(fileName)}`,
+      `Expected: ${ROUTE_NAMING_RULES.syncServer} or ${ROUTE_NAMING_RULES.syncClient}`,
+      `Examples: ${base}_server_v1.ts, ${base}_client_v1.ts (for example ${ROUTE_NAMING_EXAMPLES.syncServer})`,
+      'This file is ignored by route loading and type generation until it is renamed.'
+    ].join(' ');
+  }
+
+  return null;
 };
 
 const getInvalidVersionMessage = (filePath: string): string => {
-  if (isInApiFolder(filePath)) {
-    return `// Invalid API filename.\n// API files must end with _v<number>.ts\n// Example: updateUser_v1.ts\n`;
-  }
-
-  if (isInSyncFolder(filePath)) {
-    return `// Invalid sync filename.\n// Sync files must end with _server_v<number>.ts or _client_v<number>.ts\n// Example: updateCounter_server_v1.ts\n`;
-  }
-
-  return `// Invalid route filename.`;
+  const validationMessage = getRouteFilenameValidationMessage(filePath) || 'Invalid route filename.';
+  return `// ${validationMessage}\n`;
 };
 
 /**
@@ -98,7 +186,7 @@ export const hasPairedFile = (filePath: string): boolean => {
 };
 
 /**
- * Extract page path from a sync file path (e.g., "examples" from "src/examples/_sync/test_server.ts")
+ * Extract page path from a sync file path (e.g., "examples" from "src/examples/_sync/test_server_v1.ts")
  */
 export const extractSyncPagePath = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/');
@@ -107,7 +195,7 @@ export const extractSyncPagePath = (filePath: string): string => {
 };
 
 /**
- * Extract sync name from a sync file path (e.g., "test" from "src/examples/_sync/test_server.ts")
+ * Extract sync name from a sync file path (e.g., "test" from "src/examples/_sync/test_server_v1.ts")
  */
 export const extractSyncName = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/');
@@ -299,15 +387,9 @@ const getTemplate = (filePath: string): string | null => {
 };
 
 export const injectTemplate = async (filePath: string): Promise<boolean> => {
-  if (isInApiFolder(filePath) && !isVersionedApiFile(filePath)) {
+  if (getRouteFilenameValidationMessage(filePath)) {
     fs.writeFileSync(filePath, getInvalidVersionMessage(filePath), 'utf-8');
-    console.log(`[TemplateInjector] Invalid API filename, injected guidance: ${filePath}`);
-    return true;
-  }
-
-  if (isInSyncFolder(filePath) && !isVersionedSyncFile(filePath)) {
-    fs.writeFileSync(filePath, getInvalidVersionMessage(filePath), 'utf-8');
-    console.log(`[TemplateInjector] Invalid sync filename, injected guidance: ${filePath}`);
+    console.log(`[TemplateInjector] Invalid route filename, injected guidance: ${filePath}`);
     return true;
   }
 

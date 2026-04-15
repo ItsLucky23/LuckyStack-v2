@@ -10,6 +10,11 @@ import { extractLanguageFromHeader, normalizeErrorResponse } from "../utils/resp
 import { validateInputByType } from "../utils/runtimeTypeValidation";
 import { checkRateLimit } from "../utils/rateLimiter";
 import { setSentryUser } from '../functions/sentry';
+import {
+  buildSyncProgressEventName,
+  buildSyncResponseEventName,
+  socketEventNames,
+} from '../../shared/socketEvents';
 
 type SyncStreamPayload = {
   [key: string]: unknown;
@@ -49,7 +54,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         extractLanguageFromHeader(socket.handshake.headers['x-language'])
         || extractLanguageFromHeader(socket.handshake.headers['accept-language']),
     });
-    return socket.emit('sync', {
+    return socket.emit(socketEventNames.sync, {
       status: normalized.status,
       message: normalized.message,
       errorCode: normalized.errorCode,
@@ -100,14 +105,14 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   };
 
   if (!name || !data || typeof name != 'string' || typeof data != 'object') {
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.invalidRequest' },
       preferred: preferredLocale,
     }))
   }
 
   if (!cb || typeof cb != 'string') {
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.invalidCallback' },
       preferred: preferredLocale,
     }));
@@ -115,7 +120,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
   if (!receiver) {
     console.log('receiver / roomCode: ', receiver, 'red')
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.missingReceiver' },
       preferred: preferredLocale,
     }));
@@ -148,7 +153,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   //? we check if there is a client file or/and a server file, if they both dont exist we abort
   if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
     console.log("ERROR!!!, ", `you need ${name}_client or ${name}_server file to sync`, 'red');
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.notFound' },
       preferred: preferredLocale,
       userLanguage: user?.language,
@@ -160,7 +165,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       return;
     }
 
-    socket.emit(`sync-progress-${responseIndex}`, payload);
+    socket.emit(buildSyncProgressEventName(responseIndex), payload);
   };
 
   //? Rate limit check: per-sync bucket fallback + global per-IP cap
@@ -175,7 +180,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     });
 
     if (!allowed) {
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: {
           status: 'error',
           errorCode: 'sync.rateLimitExceeded',
@@ -197,7 +202,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     });
 
     if (!allowed) {
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: {
           status: 'error',
           errorCode: 'sync.rateLimitExceeded',
@@ -221,7 +226,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       filePath: inputTypeFilePath,
     });
     if (inputValidation.status === 'error') {
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: {
           status: 'error',
           errorCode: 'sync.invalidInputType',
@@ -236,7 +241,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     if (auth.login) {
       if (!user?.id) {
         console.log(`ERROR!!!, not logged in but sync requires login`, 'red');
-        return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+        return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
           response: { status: 'error', errorCode: 'auth.required' },
           preferred: preferredLocale,
         }));
@@ -246,7 +251,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     const validationResult = validateRequest({ auth, user: user as SessionLayout });
     if (validationResult.status === 'error') {
       console.log('ERROR!!!, ', validationResult.errorCode, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: {
           status: 'error',
           errorCode: validationResult.errorCode || 'auth.forbidden',
@@ -273,7 +278,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     );
     if (serverSyncError) {
       console.log('ERROR!!!, ', serverSyncError.message, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
         preferred: preferredLocale,
         userLanguage: user?.language,
@@ -285,11 +290,11 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         userLanguage: user?.language,
       });
       console.log('ERROR!!!, ', normalizedServerError.message, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, normalizedServerError);
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), normalizedServerError);
     } else if (serverSyncResult?.status !== 'success') {
       //? badReturn means it doesnt include a status key with the value 'success' || 'error'
       console.log('ERROR!!!, ', `sync ${resolvedName}_server function didnt return a status key with the value 'success' or 'error'`, 'red');
-      return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: { status: 'error', errorCode: 'sync.invalidServerResponse' },
         preferred: preferredLocale,
         userLanguage: user?.language,
@@ -311,7 +316,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     console.log('data: ', msg, 'red');
     console.log('receiver: ', receiver, 'red');
     console.log('no sockets found', 'red');
-    return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.noReceiversFound' },
       preferred: preferredLocale,
       userLanguage: user?.language,
@@ -342,7 +347,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
     if (syncObject[`${resolvedName}_client`]) {
       const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
-        tempSocket.emit('sync', {
+        tempSocket.emit(socketEventNames.sync, {
           ...payload,
           cb,
           fullName: resolvedName,
@@ -364,7 +369,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         },
       );
       if (clientSyncError) {
-        tempSocket.emit(`sync`, {
+        tempSocket.emit(socketEventNames.sync, {
           cb,
           fullName: resolvedName,
           ...buildSyncError({
@@ -377,7 +382,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         continue;
       }
       if (clientSyncResult?.status == 'error') {
-        tempSocket.emit(`sync`, {
+        tempSocket.emit(socketEventNames.sync, {
           cb,
           fullName: resolvedName,
           ...buildSyncError({
@@ -390,7 +395,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         continue;
       }
       if (clientSyncResult?.status !== 'success') {
-        tempSocket.emit(`sync`, {
+        tempSocket.emit(socketEventNames.sync, {
           cb,
           fullName: resolvedName,
           ...buildSyncError({
@@ -412,7 +417,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
           status: 'success'
         };
         console.log(result, 'blue')
-        tempSocket.emit(`sync`, result);
+        tempSocket.emit(socketEventNames.sync, result);
       }
     } else {
       //? if there is no client function we still want to send the server data to the clients
@@ -425,11 +430,11 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         status: 'success'
       };
       console.log(result, 'blue')
-      tempSocket.emit(`sync`, result);
+      tempSocket.emit(socketEventNames.sync, result);
     }
   }
 
-  return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, {
+  return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), {
     status: 'success',
     message: `sync ${name} success`,
     result: serverOutput,

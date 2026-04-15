@@ -10,6 +10,7 @@ import {
   getDisconnectTime,
   tempDisconnectedSockets,
 } from './state';
+import { socketEventNames } from '../../../../shared/socketEvents';
 
 export const socketConnected = async ({
   token,
@@ -39,7 +40,7 @@ export const socketConnected = async ({
   if (!roomCodes.length) { return; }
   if (!userId) { return; }
 
-  informRoomPeers({ token, io, event: 'userBack', extraData: { ignoreSelf: true } });
+  informRoomPeers({ token, io, event: socketEventNames.userBack, extraData: { ignoreSelf: true } });
 }
 
 export const socketDisconnecting = async ({
@@ -105,11 +106,11 @@ export const initAcitivityBroadcaster = ({
   token: string,
   socket: Socket,
 }) => {
-  socket.on("intentionalDisconnect", async () => {
+  socket.on(socketEventNames.intentionalDisconnect, async () => {
     clientSwitchedTab.add(token);
     const time = getDisconnectTime({ token, reason: undefined });
 
-    await informRoomPeers({ token, event: 'userAfk', extraData: { time } });
+    await informRoomPeers({ token, event: socketEventNames.userAfk, extraData: { time } });
 
     socket.disconnect(false);
   });

@@ -9,11 +9,12 @@ import { extractLanguageFromHeader, normalizeErrorResponse } from "../utils/resp
 import { validateInputByType } from '../utils/runtimeTypeValidation';
 import { checkRateLimit } from '../utils/rateLimiter';
 import { setSentryUser, startSpan } from '../functions/sentry';
+import { socketEventNames } from '../../shared/socketEvents';
 
 interface HttpSyncRequestParams {
   name: string;
   cb?: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   receiver: string;
   ignoreSelf?: boolean;
   token: string | null;
@@ -319,7 +320,7 @@ export default async function handleHttpSyncRequest({
 
       if (syncObject[`${resolvedName}_client`]) {
         const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
-          tempSocket.emit('sync', {
+          tempSocket.emit(socketEventNames.sync, {
             ...payload,
             cb: callbackName,
             fullName: resolvedName,
@@ -341,7 +342,7 @@ export default async function handleHttpSyncRequest({
           },
         );
         if (clientSyncError) {
-          tempSocket.emit('sync', {
+          tempSocket.emit(socketEventNames.sync, {
             cb: callbackName,
             fullName: resolvedName,
             ...buildSyncError({
@@ -353,7 +354,7 @@ export default async function handleHttpSyncRequest({
         }
 
         if (clientSyncResult?.status === 'error') {
-          tempSocket.emit('sync', {
+          tempSocket.emit(socketEventNames.sync, {
             cb: callbackName,
             fullName: resolvedName,
             ...buildSyncError({
@@ -365,7 +366,7 @@ export default async function handleHttpSyncRequest({
         }
 
         if (clientSyncResult?.status !== 'success') {
-          tempSocket.emit('sync', {
+          tempSocket.emit(socketEventNames.sync, {
             cb: callbackName,
             fullName: resolvedName,
             ...buildSyncError({
@@ -376,7 +377,7 @@ export default async function handleHttpSyncRequest({
           continue;
         }
 
-        tempSocket.emit('sync', {
+        tempSocket.emit(socketEventNames.sync, {
           cb: callbackName,
           fullName: resolvedName,
           serverOutput,
@@ -387,7 +388,7 @@ export default async function handleHttpSyncRequest({
         continue;
       }
 
-      tempSocket.emit('sync', {
+      tempSocket.emit(socketEventNames.sync, {
         cb: callbackName,
         fullName: resolvedName,
         serverOutput,

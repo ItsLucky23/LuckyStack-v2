@@ -1,6 +1,7 @@
 import path from 'path';
+import { API_VERSION_TOKEN_REGEX, SYNC_VERSION_TOKEN_REGEX } from '../routeConventions';
 
-const VERSION_SUFFIX_REGEX = /_v(\d+)$/;
+const VERSION_SUFFIX_REGEX = API_VERSION_TOKEN_REGEX;
 
 const stripVersionSuffix = (name: string): string => {
   return name.replace(VERSION_SUFFIX_REGEX, '');
@@ -56,14 +57,12 @@ export const extractSyncName = (filePath: string): string => {
   if (!match) {
     const basename = path.basename(filePath, '.ts');
     const rawName = basename
-      .replace(/_server_v\d+$/, '')
-      .replace(/_client_v\d+$/, '');
+      .replace(SYNC_VERSION_TOKEN_REGEX, '');
     return rawName;
   }
 
   const rawName = match[1]
-    .replace(/_server_v\d+$/, '')
-    .replace(/_client_v\d+$/, '');
+    .replace(SYNC_VERSION_TOKEN_REGEX, '');
 
   return rawName;
 };
@@ -73,10 +72,10 @@ export const extractSyncVersion = (filePath: string): string => {
   const match = normalized.match(/_sync\/(.+)\.ts$/);
   if (!match) {
     const basename = path.basename(filePath, '.ts');
-    const versionMatch = basename.match(/_(?:server|client)_v(\d+)$/);
-    return versionMatch ? `v${versionMatch[1]}` : 'v1';
+    const versionMatch = basename.match(SYNC_VERSION_TOKEN_REGEX);
+    return versionMatch ? `v${versionMatch[2]}` : 'v1';
   }
 
-  const versionMatch = match[1].match(/_(?:server|client)_v(\d+)$/);
-  return versionMatch ? `v${versionMatch[1]}` : 'v1';
+  const versionMatch = match[1].match(SYNC_VERSION_TOKEN_REGEX);
+  return versionMatch ? `v${versionMatch[2]}` : 'v1';
 };

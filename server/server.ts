@@ -23,14 +23,17 @@ import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
 import { checkRateLimit } from './utils/rateLimiter';
 import { hasCookie } from './utils/cookies';
+import { serverRuntimeConfig } from './config/runtimeConfig';
 
 const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
+const SESSION_COOKIE_NAME = serverRuntimeConfig.http.sessionCookieName;
 const SESSION_COOKIE_OPTIONS = `HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; ${process.env.SECURE == 'true' ? "Secure;" : ""}`;
 
 const REDACTED_LOG_KEYS = new Set([
   'password',
   'confirmPassword',
   'token',
+  SESSION_COOKIE_NAME.toLowerCase(),
   'authorization',
   'cookie',
   'clientSecret',
@@ -98,7 +101,34 @@ const shouldUseHttpStream = ({
     return false;
   }
 
-  return /(^|&)stream=true(&|$)/i.test(queryString);
+  const params = new URLSearchParams(queryString);
+  return params.get(serverRuntimeConfig.http.stream.queryParam) === serverRuntimeConfig.http.stream.enabledValue;
+};
+
+interface NormalizedHttpSyncParams {
+  cb?: string;
+  data: Record<string, unknown>;
+  receiver: string;
+  ignoreSelf?: boolean;
+}
+
+const normalizeHttpSyncParams = (params: object | null): NormalizedHttpSyncParams => {
+  const parsed = params && typeof params === 'object'
+    ? { ...(params as Record<string, unknown>) }
+    : {};
+
+  delete parsed.stream;
+
+  const dataCandidate = parsed.data;
+
+  return {
+    cb: typeof parsed.cb === 'string' ? parsed.cb : undefined,
+    data: dataCandidate && typeof dataCandidate === 'object'
+      ? { ...(dataCandidate as Record<string, unknown>) }
+      : {},
+    receiver: typeof parsed.receiver === 'string' ? parsed.receiver : '',
+    ignoreSelf: typeof parsed.ignoreSelf === 'boolean' ? parsed.ignoreSelf : undefined,
+  };
 };
 
 const initSseResponse = (res: http.ServerResponse) => {
@@ -107,7 +137,7 @@ const initSseResponse = (res: http.ServerResponse) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.writeHead(200);
-  res.write(': connected\n\n');
+  res.write(`${serverRuntimeConfig.http.stream.connectedComment}\n\n`);
 };
 
 const sendSseEvent = ({
@@ -165,13 +195,13 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
   const token = extractTokenFromRequest(req);
 
-  const hasTokenCookie = hasCookie(req.headers.cookie, 'token');
+  const hasTokenCookie = hasCookie(req.headers.cookie, SESSION_COOKIE_NAME);
 
   if (hasTokenCookie && token) {
     const currentSession = await getSession(token);
     if (currentSession?.id) {
       // Sliding expiration for cookie mode: keep browser token lifetime aligned with Redis TTL.
-      res.setHeader("Set-Cookie", `token=${token}; ${SESSION_COOKIE_OPTIONS}`);
+      res.setHeader("Set-Cookie", `${SESSION_COOKIE_NAME}=${token}; ${SESSION_COOKIE_OPTIONS}`);
     }
   }
 
@@ -278,7 +308,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       }
 
       if (!useSessionBasedToken) {
-        res.setHeader("Set-Cookie", `token=${newToken}; ${SESSION_COOKIE_OPTIONS}`);
+        res.setHeader("Set-Cookie", `${SESSION_COOKIE_NAME}=${newToken}; ${SESSION_COOKIE_OPTIONS}`);
       }
 
       if (useSessionBasedToken) {
@@ -315,7 +345,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         Location: `${process.env.DNS}?token=${newToken}`,
       });
     } else {
-      res.setHeader("Set-Cookie", `token=${newToken}; ${SESSION_COOKIE_OPTIONS}`);
+      res.setHeader("Set-Cookie", `${SESSION_COOKIE_NAME}=${newToken}; ${SESSION_COOKIE_OPTIONS}`);
       res.writeHead(302, { Location: location }); // Redirect without exposing token in URL
     }
     return res.end();
@@ -483,17 +513,14 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         return res.end(JSON.stringify(response));
       }
 
-      const syncParams = params && typeof params === 'object'
-        ? { ...(params as Record<string, unknown>) }
-        : {};
-      delete syncParams.stream;
+      const syncParams = normalizeHttpSyncParams(params);
 
       const result = await handleHttpSyncRequest({
         name: `sync/${syncName}`,
-        cb: typeof (syncParams as any).cb === 'string' ? (syncParams as any).cb : undefined,
-        data: (syncParams as any).data || {},
-        receiver: (syncParams as any).receiver,
-        ignoreSelf: (syncParams as any).ignoreSelf,
+        cb: syncParams.cb,
+        data: syncParams.data,
+        receiver: syncParams.receiver,
+        ignoreSelf: syncParams.ignoreSelf,
         token: httpToken,
         requesterIp: req.socket.remoteAddress ?? undefined,
         xLanguageHeader: req.headers['x-language'],

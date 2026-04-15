@@ -47,8 +47,8 @@
 ### 5. Error Handling
 
 - Always use the custom `tryCatch` function for error handling:
-  - **Client:** `import tryCatch from 'src/_functions/helper'` - returns `[error, result]` tuple.
-  - **Server:** `import { tryCatch } from 'server/functions/helper'` - returns `[error, result]` tuple with automatic Sentry capture (in api and sync calls we get tryCatch in the function parameter ).
+  - **Client:** `import tryCatch from 'shared/tryCatch'` - returns `[error, result]` tuple.
+  - **Server:** `import { tryCatch } from 'server/functions/tryCatch'` - returns `[error, result]` tuple with automatic Sentry capture (in api and sync calls we get tryCatch in the function parameter ).
 - Check the first value: if truthy, there's an error. If null, access the second value for the result.
 - Never use raw `try/catch` blocks. Always wrap async operations in `tryCatch`.
 
@@ -210,15 +210,15 @@ LuckyStack/
 ### File-Based Routing
 
 - `src/{page}/page.tsx` renders at route `/{page}`
-- `src/{page}/_api/{name}.ts` creates an API endpoint accessible as `api/{page}/{name}`
-- `src/{page}/_sync/{name}_server.ts` and/or `{name}_client.ts` creates a sync event as `sync/{page}/{name}`
+- `src/{page}/_api/{name}_v{number}.ts` creates an API endpoint accessible as `api/{page}/{name}/v{number}`
+- `src/{page}/_sync/{name}_server_v{number}.ts` and/or `{name}_client_v{number}.ts` creates a sync event as `sync/{page}/{name}/v{number}`
 - Folders prefixed with `_` are private (not routes)
 - For full routing details see `docs/ARCHITECTURE_ROUTING.md`
 
 ### API Pattern
 
 ```typescript
-// src/{page}/_api/{name}.ts
+// src/{page}/_api/{name}_v1.ts
 export const rateLimit: number | false = 60;
 export const method: "GET" | "POST" | "PUT" | "DELETE" = "POST";
 
@@ -240,14 +240,19 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
 ### Sync Pattern
 
-- `_server.ts` runs once on server for validation
-- `_client.ts` runs on server for each client in the room
-- `_client.ts` is optional and should not be created by default
-- Create `_client.ts` only when per-target-client logic is required (filtering, per-client auth, or custom `clientOutput`)
-- If a `_client.ts` would only return `{ status: 'success' }`, do not create it; this adds avoidable per-client overhead
-- `_client.ts` does NOT receive `user`; it receives `token` and should call `functions.session.getSession(token)` only when session data is actually needed
+- `{name}_server_v{number}.ts` runs once on server for validation
+- `{name}_client_v{number}.ts` runs on server for each client in the room
+- `{name}_client_v{number}.ts` is optional and should not be created by default
+- Create `{name}_client_v{number}.ts` only when per-target-client logic is required (filtering, per-client auth, or custom `clientOutput`)
+- If a `{name}_client_v{number}.ts` file would only return `{ status: 'success' }`, do not create it; this adds avoidable per-client overhead
+- `{name}_client_v{number}.ts` does NOT receive `user`; it receives `token` and should call `functions.session.getSession(token)` only when session data is actually needed
 - Client sends: `syncRequest({ name, data, receiver: roomCode, ignoreSelf?: boolean })`
 - Client receives: `upsertSyncEventCallback(name, ({ clientOutput, serverOutput }) => {})`
+
+### Prisma Model Type Convention
+
+- When a Prisma model type is needed in app code, create a file in `src/_types/{ModelName}.ts`.
+- Export the Prisma model type from `@prisma/client` as the base type and extend from that when needed.
 
 ### Provider Hierarchy
 
@@ -269,6 +274,7 @@ Pages export `template` as `'plain'`, `'home'`, or a new template that you can c
 For detailed architecture docs, read the files in `docs/`:
 - Routing: `docs/ARCHITECTURE_ROUTING.md`
 - API system: `docs/ARCHITECTURE_API.md`
+- Packaging strategy: `docs/ARCHITECTURE_PACKAGING.md`
 - Auth flows: `docs/ARCHITECTURE_AUTH.md`
 - Sessions: `docs/ARCHITECTURE_SESSION.md`
 - Socket setup: `docs/ARCHITECTURE_SOCKET.md`

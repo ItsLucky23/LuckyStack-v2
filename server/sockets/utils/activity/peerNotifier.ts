@@ -4,6 +4,7 @@ import { extractTokenFromSocket } from '../../../utils/extractToken';
 import { getSession } from '../../../functions/session';
 import { ioInstance } from '../../socket';
 import { ensureIo } from './state';
+import { socketEventNames } from '../../../../shared/socketEvents';
 
 export const informRoomPeers = async ({
   token,
@@ -13,7 +14,7 @@ export const informRoomPeers = async ({
 }: {
   token: string,
   io?: Server | null,
-  event: 'userAfk' | 'userBack',
+  event: typeof socketEventNames.userAfk | typeof socketEventNames.userBack,
   extraData?: any
 }) => {
   if (!ensureIo(io)) {
@@ -46,10 +47,10 @@ export const informRoomPeers = async ({
         if (token == tempToken) { continue; }
       }
 
-      if (event == 'userAfk') {
-        tempSocket.emit('userAfk', { userId: session.id, endTime: Date.now() + (extraData?.time || 0) });
-      } else if (event == 'userBack') {
-        tempSocket.emit('userBack', { userId: session.id });
+      if (event == socketEventNames.userAfk) {
+        tempSocket.emit(socketEventNames.userAfk, { userId: session.id, endTime: Date.now() + (extraData?.time || 0) });
+      } else if (event == socketEventNames.userBack) {
+        tempSocket.emit(socketEventNames.userBack, { userId: session.id });
       }
     }
   }

@@ -14,6 +14,7 @@ import { existsSync } from 'fs';
 import tryCatch from '../../shared/tryCatch';
 import { UPLOADS_DIR } from '../utils/paths';
 import redis from '../functions/redis';
+import { serverRuntimeConfig } from '../config/runtimeConfig';
 
 dotenv.config({ path: '.env' });
 dotenv.config({ path: '.env.local', override: true });
@@ -26,18 +27,17 @@ type paramsType = {
 }
 
 const uploadsFolder = UPLOADS_DIR;
-const OAUTH_STATE_TTL_SECONDS = 60 * 10;
 const isDevMode = process.env.NODE_ENV === 'development';
 
 const getOAuthStateKey = (providerName: string, state: string): string => {
-  const projectName = process.env.PROJECT_NAME || 'luckystack';
+  const projectName = process.env.PROJECT_NAME || serverRuntimeConfig.auth.oauthStateProjectNameFallback;
   return `${projectName}-oauth-state:${providerName}:${state}`;
 };
 
 export const createOAuthState = async (providerName: string): Promise<string | null> => {
   const state = randomBytes(32).toString('hex');
   const key = getOAuthStateKey(providerName, state);
-  const result = await redis.set(key, '1', 'EX', OAUTH_STATE_TTL_SECONDS, 'NX');
+  const result = await redis.set(key, '1', 'EX', serverRuntimeConfig.auth.oauthStateTtlSeconds, 'NX');
 
   if (result !== 'OK') {
     return null;
@@ -65,9 +65,9 @@ const consumeOAuthState = async (providerName: string, state: string): Promise<b
   return getResult[1] === '1';
 };
 
-const asRecord = (value: unknown): Record<string, any> => {
+const asRecord = (value: unknown): Record<string, unknown> => {
   if (value && typeof value === 'object') {
-    return value as Record<string, any>;
+    return value as Record<string, unknown>;
   }
   return {};
 };
@@ -338,9 +338,12 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
   const emailValue = userData[provider.emailKey];
   let email: string | undefined = typeof emailValue === 'string' ? emailValue : undefined;
   const avatarId = provider.avatarCodeKey ? userData[provider.avatarCodeKey] : undefined;
-  const avatar: string =
-    provider?.avatarKey ? String(userData[provider.avatarKey] || '') :
-      provider.getAvatar ? provider.getAvatar({ userData, avatarId: typeof avatarId === 'string' ? avatarId : '' }) : '';
+  const avatarValue = provider?.avatarKey
+    ? String(userData[provider.avatarKey] || '')
+    : provider.getAvatar
+      ? await provider.getAvatar({ userData, avatarId: typeof avatarId === 'string' ? avatarId : '' })
+      : '';
+  const avatar = typeof avatarValue === 'string' ? avatarValue : '';
 
   //? if we didnt find the email we try to get it with a external link if this one is provided
   if (!email && provider.getEmail) {

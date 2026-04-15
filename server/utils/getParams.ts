@@ -1,7 +1,8 @@
 import { IncomingMessage, ServerResponse } from "http";
 import tryCatch from "../../shared/tryCatch";
+import { serverRuntimeConfig } from "../config/runtimeConfig";
 
-const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
+const MAX_BODY_BYTES = serverRuntimeConfig.http.requestBodyMaxBytes;
 
 type getParamsType = {
   method: string;
@@ -10,7 +11,7 @@ type getParamsType = {
   queryString?: string;
 }
 
-export default async function getParams({ method, req, res: _res, queryString }: getParamsType): Promise<Record<string, any> | null> {
+export default async function getParams({ method, req, res: _res, queryString }: getParamsType): Promise<Record<string, unknown> | null> {
 
   if (method == "GET") {
     //? if get request we return the query string as an object

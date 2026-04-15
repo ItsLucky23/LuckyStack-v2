@@ -13,6 +13,7 @@
 import config, { SessionLayout } from "../../config";
 import redis from "./redis";
 import { captureException } from "./sentry";
+import { socketEventNames } from '../../shared/socketEvents';
 
 /** Convert days to seconds for Redis TTL */
 const SESSION_TTL = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
@@ -79,7 +80,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
 
     // Broadcast session updates to connected clients
     if (io.sockets.adapter.rooms.has(token)) {
-      io.to(token).emit('updateSession', JSON.stringify(data));
+      io.to(token).emit(socketEventNames.updateSession, JSON.stringify(data));
     }
   } catch (error) {
     console.log('Error saving session:', error, 'red');

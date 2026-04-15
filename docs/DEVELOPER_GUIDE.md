@@ -177,7 +177,7 @@ function GameBoard() {
 }
 ```
 
-For receiver-side stream updates from `_client.ts`, register `upsertSyncEventStreamCallback` via `useSyncEvents`.
+For receiver-side stream updates from `_client_v{n}.ts`, register `upsertSyncEventStreamCallback` via `useSyncEvents`.
 
 Strict stream typing note:
 
@@ -209,6 +209,8 @@ Type-map regeneration for route files runs on add/delete events, not on every sa
 For non-route dependencies in `src/`, `shared/`, and `server/functions/`, the watcher computes affected imports and reloads only dependent API/sync routes.
 
 Type regeneration is asynchronous and can lag briefly (usually hundreds of milliseconds).
+
+Runtime defaults for watcher debounce, watcher stability thresholds, HTTP request body size, session cookie name, and HTTP stream flags are centralized in `server/config/runtimeConfig.ts`.
 
 Timing-aware workflow:
 
@@ -275,7 +277,7 @@ You can stream API or sync progress over HTTP using either:
 curl -N "http://localhost/api/mypage/getGameState/v1?gameId=123&stream=true" \
   -H "Accept: text/event-stream"
 
-# Sync streaming over SSE (requester receives _server.ts stream payloads)
+# Sync streaming over SSE (requester receives _server_v{n}.ts stream payloads)
 curl -N -X POST "http://localhost/sync/game/movePlayer/v1?stream=true" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
@@ -341,9 +343,11 @@ Errors are automatically captured when Sentry DSNs are configured:
 4. **Clean up callbacks** - Register sync callbacks inside `useEffect` and return the disposer from `upsertSyncEventCallback`
 5. **Use rooms** - Don't broadcast to everyone, use targeted rooms
 6. **Avoid unsafe wrappers** - Do not create local `unsafe*` wrapper aliases around `apiRequest`, `syncRequest`, or sync callbacks
+7. **Prisma model type convention** - Create app-level model aliases in `src/_types/{ModelName}.ts` and export from `@prisma/client` before extending with app-specific fields
 
 See architecture deep dives:
 
 - `docs/ARCHITECTURE_API.md`
 - `docs/ARCHITECTURE_SYNC.md`
 - `docs/ARCHITECTURE_SOCKET.md`
+- `docs/ARCHITECTURE_PACKAGING.md`

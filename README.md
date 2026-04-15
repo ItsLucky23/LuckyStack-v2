@@ -80,6 +80,7 @@ You can change the ports in the `.env` file.
 | [Session architecture](./docs/ARCHITECTURE_SESSION.md)     | Session architecture overview              |
 | [Socket architecture](./docs/ARCHITECTURE_SOCKET.md)       | Socket architecture overview               |
 | [Sync architecture](./docs/ARCHITECTURE_SYNC.md)           | Sync architecture overview                 |
+| [Packaging architecture](./docs/ARCHITECTURE_PACKAGING.md) | Package-split migration and hook strategy  |
 | [Developer guide](./docs/DEVELOPER_GUIDE.md)               | Developer guide                            |
 | [Hosting guide](./docs/HOSTING.md)                         | Deployment and hosting guide               |
 

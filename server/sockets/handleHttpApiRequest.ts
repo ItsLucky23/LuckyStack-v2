@@ -37,7 +37,7 @@ import { validateInputByType } from '../utils/runtimeTypeValidation';
 
 interface HttpApiRequestParams {
   name: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   token: string | null;
   requesterIp?: string;
   xLanguageHeader?: string | string[];

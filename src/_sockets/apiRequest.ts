@@ -5,6 +5,11 @@ import notify from "src/_functions/notify";
 import { enqueueApiRequest, isOnline, removeApiQueueItem } from "./offlineQueue";
 import { Socket } from "socket.io-client";
 import { normalizeErrorResponseCore } from "../../shared/responseNormalizer";
+import {
+  buildApiResponseEventName,
+  buildApiStreamEventName,
+  socketEventNames,
+} from "../../shared/socketEvents";
 
 //? Abort controller logic:
 //? - abortable: true → always use abort controller
@@ -248,10 +253,10 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         }
 
         const tempIndex = incrementResponseIndex();
-        socketInstance.emit('apiRequest', { name: fullName, data, responseIndex: tempIndex });
+        socketInstance.emit(socketEventNames.apiRequest, { name: fullName, data, responseIndex: tempIndex });
 
         if (typeof onStream === 'function') {
-          const streamEventName = `apiStream-${String(tempIndex)}`;
+          const streamEventName = buildApiStreamEventName(tempIndex);
           const streamListener = (streamPayload: ApiStreamEvent) => {
             if (signal?.aborted) {
               return;
@@ -270,7 +275,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           console.log(`Client API Request(${String(tempIndex)}):`, { APINAME: sanitizedName, data });
         }
 
-        socketInstance.once(`apiResponse-${String(tempIndex)}`, (response: RequestOutput) => {
+        socketInstance.once(buildApiResponseEventName(tempIndex), (response: RequestOutput) => {
           if (signal?.aborted) {
             return;
           }

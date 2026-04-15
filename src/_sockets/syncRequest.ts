@@ -10,6 +10,11 @@ import type {
 } from "./apiTypes.generated";
 import { Socket } from "socket.io-client";
 import { normalizeErrorResponseCore } from "../../shared/responseNormalizer";
+import {
+  buildSyncProgressEventName,
+  buildSyncResponseEventName,
+  socketEventNames,
+} from "../../shared/socketEvents";
 
 export type SyncRequestStreamEvent<T extends StreamPayload = StreamPayload> = T;
 
@@ -331,7 +336,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         }
 
         if (typeof onStream === 'function') {
-          const progressEventName = `sync-progress-${String(tempIndex)}`;
+          const progressEventName = buildSyncProgressEventName(tempIndex);
           const progressListener = (streamPayload: SyncRequestStreamEvent) => {
             onStream(streamPayload);
           };
@@ -342,9 +347,9 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
           };
         }
 
-        socketInstance.emit('sync', { name: fullName, data, cb: `${sanitizedName}/${version}`, receiver: normalizedReceiver, responseIndex: tempIndex, ignoreSelf });
+        socketInstance.emit(socketEventNames.sync, { name: fullName, data, cb: `${sanitizedName}/${version}`, receiver: normalizedReceiver, responseIndex: tempIndex, ignoreSelf });
 
-        socketInstance.once(`sync-${String(tempIndex)}`, (responseData: SyncAckResponse) => {
+        socketInstance.once(buildSyncResponseEventName(tempIndex), (responseData: SyncAckResponse) => {
           cleanupProgressListener?.();
 
           if (responseData.status === "error") {
@@ -457,7 +462,12 @@ export const useSyncEvents = () => {
 
     const routeVersion = String(params.version);
     const fullName = `sync/${sanitizedName}/${routeVersion}`;
-    const callback = params.callback as unknown as SyncEventCallback;
+    const callback: SyncEventCallback = ({ clientOutput, serverOutput }) => {
+      params.callback({
+        clientOutput: clientOutput as ClientOutputForFullName<F, V>,
+        serverOutput: serverOutput as ServerOutputForFullName<F, V>,
+      });
+    };
     const callbacks = getCallbacksForRoute(fullName);
 
     const previousForRoute = localRegistryRef.current.get(fullName);
@@ -531,7 +541,14 @@ export const useSyncEvents = () => {
 
     const routeVersion = String(params.version);
     const fullName = `sync/${sanitizedName}/${routeVersion}`;
-    const callback = params.callback as unknown as SyncEventStreamCallback;
+    const typedCallback = params.callback as (params: {
+      stream: SyncRouteStreamEvent<Prettify<ClientStreamForFullName<F, V> extends StreamPayload ? ClientStreamForFullName<F, V> : StreamPayload>>;
+    }) => void;
+    const callback: SyncEventStreamCallback = ({ stream }) => {
+      typedCallback({
+        stream: stream as SyncRouteStreamEvent<Prettify<ClientStreamForFullName<F, V> extends StreamPayload ? ClientStreamForFullName<F, V> : StreamPayload>>,
+      });
+    };
     const callbacks = getStreamCallbacksForRoute(fullName);
 
     const previousForRoute = localStreamRegistryRef.current.get(fullName);
@@ -624,12 +641,12 @@ export const initSyncRequest = async ({
   if (!sessionRef) { return; }
 
   if (activeLifecycleHandlers) {
-    socket.off("connect", activeLifecycleHandlers.connect);
-    socket.off("disconnect", activeLifecycleHandlers.disconnect);
-    socket.off("reconnect_attempt", activeLifecycleHandlers.reconnectAttempt);
-    socket.off("userAfk", activeLifecycleHandlers.userAfk);
-    socket.off("userBack", activeLifecycleHandlers.userBack);
-    socket.off("connect_error", activeLifecycleHandlers.connectError);
+    socket.off(socketEventNames.connect, activeLifecycleHandlers.connect);
+    socket.off(socketEventNames.disconnect, activeLifecycleHandlers.disconnect);
+    socket.off(socketEventNames.reconnectAttempt, activeLifecycleHandlers.reconnectAttempt);
+    socket.off(socketEventNames.userAfk, activeLifecycleHandlers.userAfk);
+    socket.off(socketEventNames.userBack, activeLifecycleHandlers.userBack);
+    socket.off(socketEventNames.connectError, activeLifecycleHandlers.connectError);
   }
 
   const connect = () => {
@@ -727,11 +744,11 @@ export const initSyncRequest = async ({
     connectError,
   };
 
-  socket.on("connect", connect);
-  socket.on("disconnect", disconnect);
-  socket.on("reconnect_attempt", reconnectAttempt);
-  socket.on("userAfk", userAfk);
-  socket.on("userBack", userBack);
-  socket.on("connect_error", connectError);
+  socket.on(socketEventNames.connect, connect);
+  socket.on(socketEventNames.disconnect, disconnect);
+  socket.on(socketEventNames.reconnectAttempt, reconnectAttempt);
+  socket.on(socketEventNames.userAfk, userAfk);
+  socket.on(socketEventNames.userBack, userBack);
+  socket.on(socketEventNames.connectError, connectError);
 
 }

@@ -154,7 +154,6 @@ export const buildTypeMapArtifacts = ({
 
 	let content = `/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 /* eslint-disable @typescript-eslint/ban-types */
-// @ts-nocheck
 
 /**
  * Auto-generated type map for all API and Sync endpoints.
