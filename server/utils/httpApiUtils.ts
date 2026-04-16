@@ -28,9 +28,9 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 export const inferHttpMethod = (apiName: string): HttpMethod => {
   // Extract the method name from the full path (e.g., "api/examples/getUserData" → "getUserData")
   const nameParts = apiName.split('/');
-  const lastPart = nameParts[nameParts.length - 1]?.toLowerCase() || '';
+  const lastPart = nameParts.at(-1)?.toLowerCase() ?? '';
   const methodName = /^v\d+$/.test(lastPart)
-    ? (nameParts[nameParts.length - 2] || '').toLowerCase()
+    ? (nameParts.at(-2) ?? '').toLowerCase()
     : lastPart;
 
   if (methodName.startsWith('get') || methodName.startsWith('fetch') || methodName.startsWith('list')) {

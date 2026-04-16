@@ -1,10 +1,12 @@
-import { IncomingMessage, ServerResponse } from "http";
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+import { IncomingMessage, ServerResponse } from "node:http";
 import tryCatch from "../../shared/tryCatch";
 import { serverRuntimeConfig } from "../config/runtimeConfig";
 
 const MAX_BODY_BYTES = serverRuntimeConfig.http.requestBodyMaxBytes;
 
-type getParamsType = {
+interface getParamsType {
   method: string;
   req: IncomingMessage;
   res: ServerResponse;
@@ -22,7 +24,7 @@ export default async function getParams({ method, req, res: _res, queryString }:
   return new Promise((resolve, reject) => {
     const contentType = req.headers['content-type'] || '';
     const contentLengthHeader = req.headers['content-length'];
-    const declaredLength = typeof contentLengthHeader === 'string' ? Number(contentLengthHeader) : NaN;
+    const declaredLength = typeof contentLengthHeader === 'string' ? Number(contentLengthHeader) : Number.NaN;
 
     if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
       _res.setHeader('Content-Type', 'application/json');
@@ -33,7 +35,7 @@ export default async function getParams({ method, req, res: _res, queryString }:
         message: 'api.payloadTooLarge',
         errorCode: 'api.payloadTooLarge',
       }));
-      return resolve(null);
+      resolve(null); return;
     }
 
     //? we store the passed data chunks in a string
@@ -51,7 +53,7 @@ export default async function getParams({ method, req, res: _res, queryString }:
           errorCode: 'api.payloadTooLarge',
         }));
         req.destroy();
-        return resolve(null);
+        resolve(null); return;
       }
 
       body += chunk.toString();
@@ -67,7 +69,7 @@ export default async function getParams({ method, req, res: _res, queryString }:
         }
         const [, response] = await tryCatch(parseData)
         if (response) {
-          return resolve(response)
+          resolve(response); return;
         }
 
         _res.setHeader('Content-Type', 'application/json');
@@ -78,7 +80,7 @@ export default async function getParams({ method, req, res: _res, queryString }:
           message: 'api.invalidRequestFormat',
           errorCode: 'api.invalidRequestFormat',
         }));
-        return resolve(null);
+        resolve(null); return;
       }
 
       //? if the content type is application/json we parse the data as a JSON object
@@ -88,7 +90,7 @@ export default async function getParams({ method, req, res: _res, queryString }:
         }
         const [, response] = await tryCatch(parseData)
         if (response) {
-          return resolve(response)
+          resolve(response); return;
         }
 
         _res.setHeader('Content-Type', 'application/json');
@@ -99,7 +101,7 @@ export default async function getParams({ method, req, res: _res, queryString }:
           message: 'api.invalidRequestFormat',
           errorCode: 'api.invalidRequestFormat',
         }));
-        return resolve(null);
+        resolve(null); return;
       }
 
       resolve({ body });

@@ -1,13 +1,12 @@
-import Redis from 'ioredis';
-import dotenv from 'dotenv';
+/* eslint-disable @typescript-eslint/no-misused-promises, @typescript-eslint/require-await */
 
-dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
+import Redis from 'ioredis';
+import { env } from '../bootstrap/env';
 
 //? here we create a Redis instance
 const redis = new Redis({
-  host: process.env.REDIS_HOST as string,
-  port: parseInt(process.env.REDIS_PORT as string),
+  host: env.REDIS_HOST,
+  port: Number.parseInt(env.REDIS_PORT, 10),
   ...(process.env.REDIS_USERNAME && { username: process.env.REDIS_USERNAME }),
   ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
   
@@ -43,4 +42,4 @@ redis.on('error', (err) => {
 // }
 
 export { redis };
-export default redis as Redis;
+export default redis;

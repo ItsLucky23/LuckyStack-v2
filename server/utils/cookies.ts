@@ -1,5 +1,5 @@
 const escapeRegExp = (value: string): string => {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 };
 
 export const getCookieValue = (cookieHeader: string | undefined, cookieName: string): string | null => {
@@ -8,7 +8,7 @@ export const getCookieValue = (cookieHeader: string | undefined, cookieName: str
   }
 
   const safeCookieName = escapeRegExp(cookieName);
-  const cookieRegex = new RegExp(`(?:^|;\\s*)${safeCookieName}=([^;]*)`);
+  const cookieRegex = new RegExp(String.raw`(?:^|;\s*)${safeCookieName}=([^;]*)`);
   const match = cookieHeader.match(cookieRegex);
   const rawValue = match?.[1];
 

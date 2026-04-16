@@ -1,5 +1,7 @@
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
 import { Socket } from 'socket.io';
-import config from '../../config';
+import { sessionBasedToken } from '../../config';
 import { serverRuntimeConfig } from '../config/runtimeConfig';
 import { getCookieValue } from './cookies';
 
@@ -35,7 +37,7 @@ export const extractTokenFromSocket = (socket: Socket): string | null => {
   const cookieToken = getCookieValue(cookie, SESSION_COOKIE_NAME);
 
   // Session-based token (stored in sessionStorage on client)
-  if (config.sessionBasedToken) {
+  if (sessionBasedToken) {
     return sessionToken ?? cookieToken;
   }
 

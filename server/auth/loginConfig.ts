@@ -1,8 +1,10 @@
-import dotenv from 'dotenv';
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+import { config as loadEnv } from 'dotenv';
 import tryCatch from '../../shared/tryCatch';
 
-dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
+loadEnv({ path: '.env' });
+loadEnv({ path: '.env.local', override: true });
 
 interface BasicProvider {
   name: string;
@@ -138,11 +140,11 @@ const oauthProviders: oauthProvidersProps[] = [
         // Default avatar (based on discriminator % 5)
         // const defaultAvatarIndex = userId % 5;
         // return `https://cdn.discordapp.com/embed/avatars/${defaultAvatarIndex}.png`;
-        return undefined;
+        return;
       }
       const userId = typeof userData.id === 'string' ? userData.id : '';
       if (!userId) {
-        return undefined;
+        return;
       }
 
       const format = avatarId.startsWith("a_") ? "gif" : "png";
@@ -189,7 +191,7 @@ const oauthProviders: oauthProvidersProps[] = [
       // If your architecture doesn't pass the token to getAvatar, 
       // you can return this Graph URL for your frontend to fetch (with a token):
       if (!avatarId) {
-        return undefined;
+        return;
       }
 
       return `https://graph.microsoft.com/v1.0/users/${avatarId}/photo/$value`;

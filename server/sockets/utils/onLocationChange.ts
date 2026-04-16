@@ -1,0 +1,1 @@
+export const onLocationChangePlaceholder = 'onLocationChange';

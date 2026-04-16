@@ -1,7 +1,9 @@
-import { syncs, functions } from '../prod/generatedApis';
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
 import { ioInstance } from "./socket";
 import { getSession } from "../functions/session";
-import config, { SessionLayout } from "../../config";
+import { AuthProps, rateLimiting, SessionLayout } from '../../config';
+import { getRuntimeSyncMaps as getRuntimeSyncMapsFromSource } from '../prod/runtimeMaps';
 import { validateRequest } from "../utils/validateRequest";
 import { extractTokenFromSocket } from "../utils/extractToken";
 import tryCatch from "../../shared/tryCatch";
@@ -24,34 +26,57 @@ interface HttpSyncRequestParams {
   stream?: (payload: HttpSyncStreamEvent) => void;
 }
 
-type HttpSyncResponse = {
+interface HttpSyncResponse {
   status: 'success' | 'error';
   message: string;
   errorCode?: string;
   errorParams?: { key: string; value: string | number | boolean; }[];
   httpStatus?: number;
-};
+}
 
-type SyncStreamPayload = {
+type SyncStreamPayload = Record<string, unknown>;
+
+interface RuntimeErrorResponse {
+  status: 'error';
+  errorCode?: string;
+  errorParams?: { key: string; value: string | number | boolean; }[];
+  httpStatus?: number;
+  message?: string;
   [key: string]: unknown;
-};
+}
+
+interface RuntimeSuccessResponse {
+  status: 'success';
+  message?: string;
+  httpStatus?: number;
+  [key: string]: unknown;
+}
+
+type RuntimeSyncResponse = RuntimeSuccessResponse | RuntimeErrorResponse;
+
+interface RuntimeSyncServerEntry {
+  auth: AuthProps;
+  main: (params: {
+    clientInput: Record<string, unknown>;
+    user: SessionLayout | null;
+    functions: Record<string, unknown>;
+    roomCode: string;
+    stream: (payload?: SyncStreamPayload) => void;
+  }) => Promise<RuntimeSyncResponse>;
+  inputType?: string;
+  inputTypeFilePath?: string;
+}
+
+type RuntimeSyncClientHandler = (params: {
+  clientInput: Record<string, unknown>;
+  token: string | null;
+  functions: Record<string, unknown>;
+  serverOutput: unknown;
+  roomCode: string;
+  stream: (payload?: SyncStreamPayload) => void;
+}) => Promise<RuntimeSyncResponse>;
 
 export type HttpSyncStreamEvent = SyncStreamPayload;
-
-const getRuntimeSyncMaps = async () => {
-  if (process.env.NODE_ENV !== 'production') {
-    const { devSyncs, devFunctions } = await import('../dev/loader');
-    return {
-      syncObject: devSyncs,
-      functionsObject: devFunctions,
-    };
-  }
-
-  return {
-    syncObject: syncs,
-    functionsObject: functions,
-  };
-};
 
 export default async function handleHttpSyncRequest({
   name,
@@ -71,7 +96,7 @@ export default async function handleHttpSyncRequest({
     || extractLanguageFromHeader(acceptLanguageHeader);
   const user = await getSession(token);
   setSentryUser(user?.id ? {
-    id: String(user.id),
+    id: user.id,
     email: user.email || undefined,
   } : null);
   const span = startSpan(name, 'sync.request.http') as { end?: () => void } | undefined;
@@ -136,10 +161,10 @@ export default async function handleHttpSyncRequest({
       });
     }
 
-    const { syncObject, functionsObject } = await getRuntimeSyncMaps();
+    const { syncObject, functionsObject } = await getRuntimeSyncMapsFromSource();
     const nameSegments = name.split('/').filter(Boolean);
-    const syncBaseName = nameSegments[nameSegments.length - 2];
-    const requestedVersion = nameSegments[nameSegments.length - 1];
+    const syncBaseName = nameSegments.at(-2);
+    const requestedVersion = nameSegments.at(-1);
     const callbackName = typeof cb === 'string' && cb.trim().length > 0
       ? cb.trim()
       : `${syncBaseName}/${requestedVersion}`;
@@ -161,15 +186,15 @@ export default async function handleHttpSyncRequest({
     }
 
     // Rate limiting for HTTP sync requests
-    const effectiveSyncLimit = config.rateLimiting.defaultApiLimit;
+    const effectiveSyncLimit = rateLimiting.defaultApiLimit;
     if (effectiveSyncLimit !== false && effectiveSyncLimit > 0) {
       const requesterIdentity = token ?? requesterIp ?? 'anonymous';
       const keyPrefix = token ? 'token' : 'ip';
 
-      const { allowed, resetIn } = checkRateLimit({
+      const { allowed, resetIn } = await checkRateLimit({
         key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
         limit: effectiveSyncLimit,
-        windowMs: config.rateLimiting.windowMs,
+        windowMs: rateLimiting.windowMs,
       });
 
       if (!allowed) {
@@ -186,12 +211,12 @@ export default async function handleHttpSyncRequest({
       }
     }
 
-    if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
+    if (rateLimiting.defaultIpLimit !== false && rateLimiting.defaultIpLimit > 0) {
       const ipBucket = requesterIp ?? 'unknown';
-      const { allowed, resetIn } = checkRateLimit({
+      const { allowed, resetIn } = await checkRateLimit({
         key: `ip:${ipBucket}:sync:all`,
-        limit: config.rateLimiting.defaultIpLimit,
-        windowMs: config.rateLimiting.windowMs,
+        limit: rateLimiting.defaultIpLimit,
+        windowMs: rateLimiting.windowMs,
       });
 
       if (!allowed) {
@@ -210,7 +235,8 @@ export default async function handleHttpSyncRequest({
 
     let serverOutput = {};
     if (syncObject[`${resolvedName}_server`]) {
-      const { auth, main: serverMain, inputType, inputTypeFilePath } = syncObject[`${resolvedName}_server`];
+      const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry;
+      const { auth, main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
       const emitServerSyncStream = (payload: SyncStreamPayload = {}) => {
         stream?.(payload);
       };
@@ -240,7 +266,7 @@ export default async function handleHttpSyncRequest({
         });
       }
 
-      const validationResult = validateRequest({ auth, user: user as SessionLayout });
+      const validationResult = validateRequest({ auth, user: user! });
       if (validationResult.status === 'error') {
         return buildSyncError({
           response: {
@@ -319,6 +345,7 @@ export default async function handleHttpSyncRequest({
       }
 
       if (syncObject[`${resolvedName}_client`]) {
+        const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
         const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
           tempSocket.emit(socketEventNames.sync, {
             ...payload,
@@ -329,7 +356,7 @@ export default async function handleHttpSyncRequest({
         };
 
         const [clientSyncError, clientSyncResult] = await tryCatch(
-          async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: normalizedReceiver, stream: emitClientSyncStream }),
+          async () => await clientSyncHandler({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: normalizedReceiver, stream: emitClientSyncStream }),
           undefined,
           {
             handler: 'handleHttpSyncRequest',

@@ -1,9 +1,11 @@
-import { apis, functions } from '../prod/generatedApis'
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
 import { apiMessage } from './socket';
 import { getSession } from '../functions/session';
-import config, { SessionLayout } from '../../config';
+import { AuthProps, rateLimiting, SessionLayout } from '../../config';
 import { Socket } from 'socket.io';
 import { logout } from './utils/logout';
+import { getRuntimeApiMaps } from '../prod/runtimeMaps';
 import { validateRequest } from '../utils/validateRequest';
 import { setSentryUser, startSpan } from '../functions/sentry';
 import { checkRateLimit } from '../utils/rateLimiter';
@@ -15,30 +17,44 @@ import {
   buildApiStreamEventName,
 } from '../../shared/socketEvents';
 
-type handleApiRequestType = {
+interface handleApiRequestType {
   msg: apiMessage,
   socket: Socket,
   token: string | null,
 }
 
-type ApiStreamPayload = {
+type ApiStreamPayload = Record<string, unknown>;
+
+interface RuntimeErrorResponse {
+  status: 'error';
+  errorCode?: string;
+  errorParams?: { key: string; value: string | number | boolean; }[];
+  httpStatus?: number;
+  message?: string;
   [key: string]: unknown;
 }
 
-const getRuntimeApiMaps = async () => {
-  if (process.env.NODE_ENV !== 'production') {
-    const { devApis, devFunctions } = await import('../dev/loader');
-    return {
-      apisObject: devApis,
-      functionsObject: devFunctions,
-    };
-  }
+interface RuntimeSuccessResponse {
+  status: 'success';
+  message?: string;
+  httpStatus?: number;
+  [key: string]: unknown;
+}
 
-  return {
-    apisObject: apis,
-    functionsObject: functions,
-  };
-};
+type RuntimeApiResponse = RuntimeSuccessResponse | RuntimeErrorResponse;
+
+interface RuntimeApiEntry {
+  auth: AuthProps;
+  main: (params: {
+    data: Record<string, unknown>;
+    user: SessionLayout | null;
+    functions: Record<string, unknown>;
+    stream: (payload?: ApiStreamPayload) => void;
+  }) => Promise<RuntimeApiResponse>;
+  inputType?: string;
+  inputTypeFilePath?: string;
+  rateLimit?: number | false;
+}
 
 export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
   //? This event gets triggered when the client uses the apiRequest function
@@ -52,7 +68,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const { name, data, responseIndex } = msg;
   const user = await getSession(token)
   setSentryUser(user?.id ? {
-    id: String(user.id),
+    id: user.id,
     email: user.email || undefined,
   } : null);
   const preferredLocale =
@@ -82,8 +98,8 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   //? 'logout' needs special handling since it requires socket access
   // Extract the API name (last segment) to check for logout regardless of page path
   const nameSegments = name.split('/').filter(Boolean);
-  const requestedVersion = nameSegments[nameSegments.length - 1];
-  const apiBaseName = nameSegments[nameSegments.length - 2];
+  const requestedVersion = nameSegments.at(-1);
+  const apiBaseName = nameSegments.at(-2);
   if (apiBaseName == 'logout') {
     await logout({ token, socket, userId: user?.id || null });
     return socket.emit(buildApiResponseEventName(responseIndex), {
@@ -104,6 +120,8 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
       fallbackHttpStatus: 400,
     });
   }
+
+  const normalizedData = data as Record<string, unknown>;
 
   console.log(`api: ${name} called`, 'blue');
 
@@ -131,9 +149,10 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     });
   }
 
-  const { auth, main } = apisObject[resolvedName];
-  const inputType = apisObject[resolvedName].inputType as string | undefined;
-  const inputTypeFilePath = apisObject[resolvedName].inputTypeFilePath as string | undefined;
+  const apiEntry = apisObject[resolvedName] as RuntimeApiEntry;
+  const { auth, main } = apiEntry;
+  const inputType = apiEntry.inputType;
+  const inputTypeFilePath = apiEntry.inputTypeFilePath;
 
   const emitApiStream = (payload: ApiStreamPayload = {}) => {
     socket.emit(buildApiStreamEventName(responseIndex), payload);
@@ -141,7 +160,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   const inputValidation = await validateInputByType({
     typeText: inputType,
-    value: data,
+    value: normalizedData,
     rootKey: 'data',
     filePath: inputTypeFilePath,
   });
@@ -157,18 +176,16 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Auth validation: check login requirement
-  if (auth.login) {
-    if (!user?.id) {
+  if (auth.login && !user?.id) {
       console.log(`ERROR: API ${name} requires login`, 'red');
       return emitApiError({
         response: { status: 'error', errorCode: 'auth.required' },
         fallbackHttpStatus: 401,
       });
     }
-  }
 
   //? Auth validation: check additional requirements
-  const authResult = validateRequest({ auth, user: user as SessionLayout });
+  const authResult = validateRequest({ auth, user: user! });
   if (authResult.status === "error") {
     console.log(`ERROR: Auth failed for ${name}: ${authResult.errorCode}`, 'red');
     return emitApiError({
@@ -183,20 +200,20 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Rate limiting check: per-API bucket (custom rateLimit or defaultApiLimit fallback)
-  const apiRateLimit = apisObject[resolvedName].rateLimit;
-  const effectiveApiLimit = apiRateLimit !== undefined
-    ? apiRateLimit
-    : config.rateLimiting.defaultApiLimit;
+  const apiRateLimit = apiEntry.rateLimit;
+  const effectiveApiLimit = apiRateLimit === undefined
+    ? rateLimiting.defaultApiLimit
+    : apiRateLimit;
 
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
     const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
     const keyPrefix = token ? 'token' : 'ip';
     const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${name}`;
 
-    const { allowed, resetIn } = checkRateLimit({
+    const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
       limit: effectiveApiLimit,
-      windowMs: config.rateLimiting.windowMs
+      windowMs: rateLimiting.windowMs
     });
 
     if (!allowed) {
@@ -213,13 +230,13 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Global per-IP bucket across all APIs
-  if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
+  if (rateLimiting.defaultIpLimit !== false && rateLimiting.defaultIpLimit > 0) {
     const requesterIp = socket.handshake.address ?? 'unknown';
 
-    const { allowed, resetIn } = checkRateLimit({
+    const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${requesterIp}:api:all`,
-      limit: config.rateLimiting.defaultIpLimit,
-      windowMs: config.rateLimiting.windowMs
+      limit: rateLimiting.defaultIpLimit,
+      windowMs: rateLimiting.windowMs
     });
 
     if (!allowed) {
@@ -238,7 +255,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   //? Execute the API handler
   const span = startSpan(name, 'api.request') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
-    async () => await main({ data, user, functions: functionsObject, stream: emitApiStream }),
+    async () => await main({ data: normalizedData, user, functions: functionsObject, stream: emitApiStream }),
     undefined,
     {
       handler: 'handleApiRequest',
@@ -263,7 +280,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   } else if (result !== undefined && result !== null) {
     console.log(`api: ${name} completed`, 'blue');
 
-    if (result && typeof result === 'object' && (result.status === 'success' || result.status === 'error')) {
+    if (result.status === 'success' || result.status === 'error') {
       if (result.status === 'error') {
         socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
           response: result,

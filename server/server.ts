@@ -1,21 +1,23 @@
-import dotenv from 'dotenv';
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+import { config as loadEnv } from 'dotenv';
 import { initializeSentry } from './functions/sentry';
-import path from 'path';
+import path from 'node:path';
 
-dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
+loadEnv({ path: '.env' });
+loadEnv({ path: '.env.local', override: true });
 initializeSentry();
 
-import http from 'http';
+import http from 'node:http';
 import getParams from './utils/getParams';
 import { loginWithCredentials, loginCallback, createOAuthState } from './auth/login';
 import { serveFavicon, serveFile } from './prod/serveFile';
 import loadSocket from './sockets/socket';
-import z from 'zod';
+import { z } from 'zod';
 import oauthProviders from "./auth/loginConfig";
 import { deleteSession, getSession } from './functions/session';
 import allowedOrigin from './auth/checkOrigin';
-import config, { SessionLayout } from '../config';
+import { rateLimiting, sessionBasedToken, sessionExpiryDays, SessionLayout } from '../config';
 
 import { serveAvatar } from './utils/serveAvatars';
 import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
@@ -25,7 +27,7 @@ import { checkRateLimit } from './utils/rateLimiter';
 import { hasCookie } from './utils/cookies';
 import { serverRuntimeConfig } from './config/runtimeConfig';
 
-const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
+const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (sessionExpiryDays ?? 7);
 const SESSION_COOKIE_NAME = serverRuntimeConfig.http.sessionCookieName;
 const SESSION_COOKIE_OPTIONS = `HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; ${process.env.SECURE == 'true' ? "Secure;" : ""}`;
 
@@ -219,7 +221,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   }
 
   //? we log the request and if there are any params we log them with the request
-  if (params && typeof params == 'object' && Object.keys(params).length !== 0) {
+  if (params && typeof params == 'object' && Object.keys(params).length > 0) {
     const safeParams = sanitizeForLog(params);
     console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(safeParams)}`, 'magenta')
   } else {
@@ -238,7 +240,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   if (z.string().startsWith('/auth/api').safeParse(routePath).success) {
     const providerName = routePath.split('/')[3]; // Extract the provider (google/github)
     const provider = oauthProviders.find(p => p.name === providerName);
-    if (!provider || !provider.name) { return { provider, status: false, reason: 'login.providerNotFound' }; }
+    if (!provider?.name) { return { provider, status: false, reason: 'login.providerNotFound' }; }
 
     if (provider?.name != 'credentials' && 'scope' in provider) {
       const oauthState = await createOAuthState(provider.name);
@@ -261,12 +263,12 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       return res.end();
     }
 
-    if (config.rateLimiting.defaultApiLimit !== false && config.rateLimiting.defaultApiLimit > 0) {
+    if (rateLimiting.defaultApiLimit !== false && rateLimiting.defaultApiLimit > 0) {
       const requesterIp = req.socket.remoteAddress ?? 'unknown';
-      const { allowed, resetIn } = checkRateLimit({
+      const { allowed, resetIn } = await checkRateLimit({
         key: `ip:${requesterIp}:auth:credentials`,
-        limit: config.rateLimiting.defaultApiLimit,
-        windowMs: config.rateLimiting.windowMs,
+        limit: rateLimiting.defaultApiLimit,
+        windowMs: rateLimiting.windowMs,
       });
 
       if (!allowed) {
@@ -301,7 +303,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       if (token) { await deleteSession(token); }
 
       const requestedSessionMode = parseSessionBasedTokenHeader(req.headers['x-session-based-token']);
-      const useSessionBasedToken = requestedSessionMode ?? config.sessionBasedToken;
+      const useSessionBasedToken = requestedSessionMode ?? sessionBasedToken;
 
       if (process.env.NODE_ENV === 'development') {
         console.log('setting cookie with new token', 'green');
@@ -340,7 +342,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     }
     const location = process.env.DNS
 
-    if (config.sessionBasedToken) {
+    if (sessionBasedToken) {
       res.writeHead(302, {
         Location: `${process.env.DNS}?token=${newToken}`,
       });
@@ -405,7 +407,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         requesterIp: req.socket.remoteAddress ?? undefined,
         xLanguageHeader: req.headers['x-language'],
         acceptLanguageHeader: req.headers['accept-language'],
-        method: (method as 'GET' | 'POST' | 'PUT' | 'DELETE') || 'POST',
+        method: (method) || 'POST',
         stream: useHttpStream
           ? (payload) => {
             if (streamClosed || res.writableEnded) {

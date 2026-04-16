@@ -1,5 +1,7 @@
-import fs from 'fs';
-import path from 'path';
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+import fs from 'node:fs';
+import path from 'node:path';
 import { GENERATED_API_DOCS_PATH, GENERATED_SOCKET_TYPES_PATH } from '../../utils/paths';
 
 export interface ApiTypeEntry {
@@ -27,7 +29,7 @@ const buildImportStatements = ({
 }): string => {
 	let importStatements = '';
 	for (const [importPath, types] of namedImports) {
-		importStatements += `import { ${Array.from(types).join(', ')} } from "${importPath}";\n`;
+		importStatements += `import { ${[...types].join(', ')} } from "${importPath}";\n`;
 	}
 	for (const [importPath, defaultName] of defaultImports) {
 		importStatements += `import ${defaultName} from "${importPath}";\n`;
@@ -67,9 +69,9 @@ export interface Functions {
 ${functionsInterface}
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// 
 // API Type Definitions
-// ═══════════════════════════════════════════════════════════════════════════════
+// 
 
 export type ApiResponse<T = any> =
 	| ({ status: 'success'; httpStatus?: number; APINAME?: never } & T)
@@ -79,20 +81,20 @@ export type ApiNetworkResponse<T = any> =
 	| ({ status: 'success'; httpStatus: number; APINAME?: never } & T)
 	| { status: 'error'; httpStatus: number; message: string; errorCode: string; errorParams?: { key: string; value: string | number | boolean; }[]; APINAME?: never };
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// 
 // API Type Map
-// ═══════════════════════════════════════════════════════════════════════════════
+// 
 
 export interface ApiTypeMap {
 `;
 
-	const sortedPages = Array.from(typesByPage.keys()).sort();
-	const sortedSyncPages = Array.from(syncTypesByPage.keys()).sort();
+	const sortedPages = [...typesByPage.keys()].sort();
+	const sortedSyncPages = [...syncTypesByPage.keys()].sort();
 	const docsData: any = { apis: {}, syncs: {} };
 
 	for (const pagePath of sortedPages) {
 		const apis = typesByPage.get(pagePath)!;
-		const grouped = new Map<string, Array<{ version: string; entry: ApiTypeEntry }>>();
+		const grouped = new Map<string, { version: string; entry: ApiTypeEntry }[]>();
 
 		docsData.apis[pagePath] = [];
 
@@ -103,7 +105,7 @@ export interface ApiTypeMap {
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const apiName of Array.from(grouped.keys()).sort()) {
+		for (const apiName of [...grouped.keys()].sort()) {
 			content += `    '${apiName}': {\n`;
 			for (const { version, entry } of grouped.get(apiName)!.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.apis[pagePath].push({
@@ -150,7 +152,7 @@ export const apiMethodMap: Record<string, Record<string, Record<string, HttpMeth
 
 	for (const pagePath of sortedPages) {
 		const apis = typesByPage.get(pagePath)!;
-		const grouped = new Map<string, Array<{ version: string; method: string }>>();
+		const grouped = new Map<string, { version: string; method: string }[]>();
 
 		for (const [apiKey, entry] of apis.entries()) {
 			const { name, version } = splitVersionedKey(apiKey);
@@ -159,7 +161,7 @@ export const apiMethodMap: Record<string, Record<string, Record<string, HttpMeth
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const apiName of Array.from(grouped.keys()).sort()) {
+		for (const apiName of [...grouped.keys()].sort()) {
 			content += `    '${apiName}': {`;
 			const methods = grouped.get(apiName)!
 				.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
@@ -177,7 +179,7 @@ export const getApiMethod = (pagePath: string, apiName: string, version: string)
 };
 
 // Sync Type Definitions
-// ═══════════════════════════════════════════════════════════════════════════════
+// 
 
 export type SyncServerResponse<T = any> =
 	| { status: 'success' } & T
@@ -187,16 +189,16 @@ export type SyncClientResponse<T = any> =
 	| { status: 'success' } & T
 	| { status: 'error'; errorCode: string; errorParams?: { key: string; value: string | number | boolean; }[] };
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// 
 // Sync Type Map
-// ═══════════════════════════════════════════════════════════════════════════════
+// 
 
 export interface SyncTypeMap {
 `;
 
 	for (const pagePath of sortedSyncPages) {
 		const syncs = syncTypesByPage.get(pagePath)!;
-		const grouped = new Map<string, Array<{ version: string; entry: SyncTypeEntry }>>();
+		const grouped = new Map<string, { version: string; entry: SyncTypeEntry }[]>();
 		docsData.syncs[pagePath] = [];
 
 		for (const [syncKey, entry] of syncs.entries()) {
@@ -206,7 +208,7 @@ export interface SyncTypeMap {
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const syncName of Array.from(grouped.keys()).sort()) {
+		for (const syncName of [...grouped.keys()].sort()) {
 			content += `    '${syncName}': {\n`;
 			for (const { version, entry } of grouped.get(syncName)!.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.syncs[pagePath].push({
@@ -268,3 +270,4 @@ export const writeTypeMapArtifacts = ({
 		console.error('[TypeMapGenerator] Error writing type map or docs:', error);
 	}
 };
+

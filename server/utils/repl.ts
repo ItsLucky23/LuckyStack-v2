@@ -1,33 +1,18 @@
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
 import { getAllGameDatas, getGameData, saveGameData } from "../functions/game"
 import { deleteSession, getAllSessions, getSession } from "../functions/session"
-import repl from 'repl';
-import { apis, syncs } from "../prod/generatedApis";
-
-const getRuntimeDevMaps = async () => {
-  if (process.env.NODE_ENV !== 'production') {
-    return await import('../dev/loader');
-  }
-
-  return {
-    devApis: {},
-    devSyncs: {},
-  };
-};
+import repl from 'node:repl';
+import { getRuntimeReplMaps } from "../prod/runtimeMaps";
 
 const getActiveApiMap = async (): Promise<Record<string, unknown>> => {
-  const { devApis } = await getRuntimeDevMaps();
-  if (Object.keys(devApis).length > 0) {
-    return devApis;
-  }
-  return apis;
+  const { apiMap } = await getRuntimeReplMaps();
+  return apiMap;
 };
 
 const getActiveSyncMap = async (): Promise<Record<string, unknown>> => {
-  const { devSyncs } = await getRuntimeDevMaps();
-  if (Object.keys(devSyncs).length > 0) {
-    return devSyncs;
-  }
-  return syncs as Record<string, unknown>;
+  const { syncMap } = await getRuntimeReplMaps();
+  return syncMap;
 };
 
 const normalizeApiUrls = async (): Promise<string[]> => {
@@ -36,7 +21,7 @@ const normalizeApiUrls = async (): Promise<string[]> => {
     .map((key) => `/${key}`)
     .sort((a, b) => a.localeCompare(b));
 
-  return Array.from(new Set(routeKeys));
+  return [...new Set(routeKeys)];
 };
 
 const normalizeSyncUrls = async (): Promise<string[]> => {
@@ -46,7 +31,7 @@ const normalizeSyncUrls = async (): Promise<string[]> => {
     .map((key) => `/${key}`)
     .sort((a, b) => a.localeCompare(b));
 
-  return Array.from(new Set(routeKeys));
+  return [...new Set(routeKeys)];
 };
 
 export const initRepl = () => {
@@ -86,7 +71,7 @@ export const initRepl = () => {
     if (typeof gameData == 'object' && gameData?.gameCode) {
       if (keys) {
         const parts = keys
-        .replace(/\[(\w+)\]/g, ".$1")   // turn [0] into .0
+        .replaceAll(/\[(\w+)\]/g, ".$1")   // turn [0] into .0
         .replace(/^\./, "")             // remove leading dot
         .split(/(?:\?\.)|\./);          // split on ?. or .
         
@@ -106,7 +91,7 @@ export const initRepl = () => {
       return;
     }
   
-    let gameData = await getGameData(code);
+    const gameData = await getGameData(code);
     if (typeof gameData !== "object" || !gameData?.gameCode) {
       console.log("No session found");
       return;
@@ -114,7 +99,7 @@ export const initRepl = () => {
   
     // Parse the keys string into parts (supporting [0], ?. etc.)
     const parts = keys
-      .replace(/\[(\w+)\]/g, ".$1") // turn [0] into .0
+      .replaceAll(/\[(\w+)\]/g, ".$1") // turn [0] into .0
       .replace(/^\./, "")           // remove leading dot
       .split(/(?:\?\.)|\./);        // split on ?. or .
   
@@ -130,7 +115,7 @@ export const initRepl = () => {
       target = target[key];
     }
   
-    const lastKey = parts[parts.length - 1];
+    const lastKey = parts.at(-1);
     // @ts-ignore
     target[lastKey] = value;
   

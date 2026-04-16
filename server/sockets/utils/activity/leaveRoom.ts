@@ -3,10 +3,10 @@ import { Socket } from 'socket.io';
 import type { SessionLayout } from '../../../../config';
 import { getSession } from '../../../functions/session';
 
-export const socketLeaveRoom = async ({ token, socket: _socket, newPath: _newPath }: {
+export const socketLeaveRoom = async ({ token }: {
   token: string | null,
   socket: Socket,
-  newPath: string | null
+  newPath: string | null,
 }): Promise<SessionLayout | null> => {
 
   if (!token) {

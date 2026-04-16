@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/restrict-template-expressions */
+
 const normalizeOrigin = ({ value, secure }: { value: string; secure: boolean }): string => {
   const trimmedValue = value.trim().toLowerCase();
   if (!trimmedValue) { return ''; }
@@ -7,7 +9,7 @@ const normalizeOrigin = ({ value, secure }: { value: string; secure: boolean }):
     : `http${secure ? 's' : ''}://${trimmedValue}`;
 
   // Keep only scheme + host[:port] so paths, query params, and fragments don't affect allowlist checks.
-  const extractedOrigin = withProtocol.match(/^(https?:\/\/[^/?#]+)/)?.[1] || '';
+  const extractedOrigin = (/^(https?:\/\/[^/?#]+)/.exec(withProtocol))?.[1] || '';
   if (!extractedOrigin) { return ''; }
 
   return extractedOrigin

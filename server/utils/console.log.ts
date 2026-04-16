@@ -1,31 +1,31 @@
 const COLORS: Record<string, string> = {
-  black: "\x1b[30m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  blue: "\x1b[34m",
-  magenta: "\x1b[35m",
-  cyan: "\x1b[36m",
-  white: "\x1b[37m",
-  reset: "\x1b[0m",
+  black: "\u001B[30m",
+  red: "\u001B[31m",
+  green: "\u001B[32m",
+  yellow: "\u001B[33m",
+  blue: "\u001B[34m",
+  magenta: "\u001B[35m",
+  cyan: "\u001B[36m",
+  white: "\u001B[37m",
+  reset: "\u001B[0m",
 };
 
 export const initConsolelog = () => {
   const originalLog = console.log;
-  console.log = (...args: any[]) => {
-    const stack = new Error().stack?.split("\n")[2]?.trim();
-    if (!stack) return originalLog(...args);
+  console.log = (...args: unknown[]) => {
+    const stack = new Error('console.log trace').stack?.split("\n")[2]?.trim();
+    if (!stack) { originalLog(...args); return; }
   
-    let lineInfo = stack.substring(stack.indexOf("(") + 1, stack.lastIndexOf(")"));
+    let lineInfo = stack.slice(stack.indexOf("(") + 1, stack.lastIndexOf(")"));
     if (lineInfo === "") lineInfo = stack;
     const extractedInfo = lineInfo
-      .substring(lineInfo.lastIndexOf("\\") + 1)
+      .slice(Math.max(0, lineInfo.lastIndexOf("\\") + 1))
       .replace(/:\d+$/, "");
   
     // find color keyword and remove it from args
     let colorCode = COLORS.white;
     for (const key of Object.keys(COLORS)) {
-      const index = args.findIndex((a) => a === key);
+      const index = args.indexOf(key);
       if (index !== -1) {
         colorCode = COLORS[key];
         args.splice(index, 1);
@@ -36,7 +36,7 @@ export const initConsolelog = () => {
     // handle object vs text
     if (typeof args[0] === "object") {
       originalLog(`${colorCode}${extractedInfo}${COLORS.reset}`);
-      originalLog(args);
+      originalLog(...args);
     } else {
       originalLog(`${colorCode}${extractedInfo} -- ${args.join(" ")}${COLORS.reset}`);
     }

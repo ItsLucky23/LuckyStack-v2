@@ -1,13 +1,14 @@
 import { LANGUAGE, THEME, User } from "@prisma/client";
 
-type AppEnvironmentConfig = {
+interface AppEnvironmentConfig {
   backendUrl: string;
   dev: boolean;
   sessionBasedToken?: boolean;
   allowMultipleSessions?: boolean;
-};
+}
 
 const normalizeDns = (dns: string): string => dns.replace(/\/+$/, "");
+const runtimeWindow = globalThis as typeof globalThis & { window?: Window };
 
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
   "http://localhost:5173": {
@@ -37,9 +38,8 @@ const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
 };
 
 const detectedDns = normalizeDns(
-  typeof window !== "undefined"
-    ? window.location.origin
-    : (process.env.DNS ?? "http://localhost:5173"),
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  runtimeWindow.window?.location.origin ?? (process.env.DNS ?? "http://localhost:5173"),
 );
 
 const resolvedEnvironment =
@@ -138,12 +138,16 @@ const config = {
    * ```
    */
   rateLimiting: {
+    /** Storage backend used for rate limiting counters. Use 'redis' for multi-instance consistency. */
+    store: 'memory' as 'memory' | 'redis',
+    /** Redis key namespace suffix used when store is set to 'redis'. */
+    redisKeyPrefix: 'rate-limit',
     /** Fallback requests per minute for any API that does not export its own rateLimit. */
     defaultApiLimit: 60 as number | false,
     /** Global requests per minute per IP across all API routes combined. */
     defaultIpLimit: 100 as number | false,
     /** Request window duration in milliseconds used by both limits. */
-    windowMs: 60000,
+    windowMs: 60_000,
   },
 
   /**
@@ -178,24 +182,20 @@ const config = {
 // TYPE DEFINITIONS
 // ============================================
  
-export type SessionLocation = {
+export interface SessionLocation {
   pathName: string;
-  searchParams: {
-    [key: string]: string;
-  };
-};
+  searchParams: Record<string, string>;
+}
 
-type SessionLayoutBase = Omit<User, 'password'> & {
+interface SessionLayoutBase extends Omit<User, 'password'> {
   avatarFallback: string;
   token: string;
   roomCodes?: string[];
-};
+}
 
-export type SessionLayout = SessionLayoutBase & (
-  typeof config.locationProviderEnabled extends true
-    ? { location?: SessionLocation }
-    : {}
-);
+export interface SessionLayout extends SessionLayoutBase {
+  location?: SessionLocation;
+}
  
 /**
  * Authentication configuration for API and Sync handlers.
@@ -251,6 +251,7 @@ export const {
   sessionExpiryDays,
   socketActivityBroadcaster,
   locationProviderEnabled,
+  defaultTheme,
   rateLimiting,
   sentry,
   pageTitle

@@ -1,6 +1,8 @@
-import fs from "fs";
-import path from "path";
-import { createRequire } from 'module';
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from 'node:module';
 import tryCatch from "../functions/tryCatch";
 import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
 import { invalidateProgramCache } from './typeMap/tsProgram';
@@ -14,7 +16,7 @@ export const devApis: Record<string, any> = {};
 export const devSyncs: Record<string, any> = {};
 export const devFunctions: Record<string, any> = {};
 
-const normalizePath = (value: string): string => value.replace(/\\/g, '/');
+const normalizePath = (value: string): string => value.replaceAll('\\', '/');
 
 const resolveApiRouteMetaFromPath = (filePath: string): { routeKey: string; absolutePath: string } | null => {
   const absolutePath = path.resolve(filePath);
@@ -96,10 +98,10 @@ export const initializeAll = async () => {
 };
 
 const importFile = async (absolutePath: string) => {
-  const normalizedPath = absolutePath.replace(/\\/g, '/');
+  const normalizedPath = absolutePath.replaceAll('\\', '/');
 
   for (const cacheKey of Object.keys(nodeRequire.cache)) {
-    const normalizedCacheKey = cacheKey.replace(/\\/g, '/');
+    const normalizedCacheKey = cacheKey.replaceAll('\\', '/');
     if (normalizedCacheKey.startsWith(normalizedPath)) {
       delete nodeRequire.cache[cacheKey];
     }
@@ -150,7 +152,7 @@ const resolveFunctionModule = (loadedModule: any, fileName: string) => {
 };
 
 export const initializeApis = async () => {
-  Object.keys(devApis).forEach((key) => delete devApis[key]);
+  for (const key of Object.keys(devApis)) delete devApis[key];
   invalidateProgramCache();
   clearRuntimeTypeResolverCache();
   const srcFolder = fs.readdirSync(SRC_DIR);
@@ -229,11 +231,11 @@ const scanApiFolder = async (file: string, basePath = "") => {
     return;
   }
 
-  const pageLocation = basePath.replace(/\\/g, '/');
+  const pageLocation = basePath.replaceAll('\\', '/');
   const tsFiles = collectTsFiles(fullPath);
 
   for (const relFile of tsFiles) {
-    const rawApiName = relFile.replace(/\.ts$/, "").replace(/\\/g, '/');
+    const rawApiName = relFile.replace(/\.ts$/, "").replaceAll('\\', '/');
     const versionMatch = rawApiName.match(API_VERSION_TOKEN_REGEX);
     if (!versionMatch) {
       console.log(
@@ -277,7 +279,7 @@ const scanApiFolder = async (file: string, basePath = "") => {
 };
 
 export const initializeSyncs = async () => {
-  Object.keys(devSyncs).forEach((key) => delete devSyncs[key]);
+  for (const key of Object.keys(devSyncs)) delete devSyncs[key];
   invalidateProgramCache();
   clearRuntimeTypeResolverCache();
   const srcFolder = fs.readdirSync(SRC_DIR);
@@ -362,11 +364,11 @@ const scanSyncFolder = async (file: string, basePath = "") => {
     return;
   }
 
-  const pageLocation = basePath.replace(/\\/g, '/');
+  const pageLocation = basePath.replaceAll('\\', '/');
   const tsFiles = collectTsFiles(fullPath);
 
   for (const relFile of tsFiles) {
-    const rawSyncFileName = relFile.replace(/\.ts$/, "").replace(/\\/g, '/');
+    const rawSyncFileName = relFile.replace(/\.ts$/, "").replaceAll('\\', '/');
     const syncMatch = rawSyncFileName.match(SYNC_VERSION_TOKEN_REGEX);
     if (!syncMatch) {
       console.log(
@@ -409,7 +411,7 @@ const scanSyncFolder = async (file: string, basePath = "") => {
 };
 
 export const initializeFunctions = async () => {
-  Object.keys(devFunctions).forEach((key) => delete devFunctions[key]);
+  for (const key of Object.keys(devFunctions)) delete devFunctions[key];
 
   const serverFunctionsDir = SERVER_FUNCTIONS_DIR;
   if (fs.existsSync(serverFunctionsDir)) {

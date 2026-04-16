@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
-import config, { dev, loginRedirectUrl } from "config";
+import { defaultTheme, dev, loginRedirectUrl } from "config";
 import Middleware from 'src/_components/Middleware';
 import Navbar from "src/_components/Navbar";
 import { useSocketStatus } from 'src/_providers/socketStatusProvider';
@@ -121,8 +121,8 @@ function PlainTemplate({ children }: { children: React.ReactNode }) {
   const reactLocation = useLocation();
 
   useEffect(() => {
-    updateTheme(config.defaultTheme);
-    document.documentElement.classList.toggle("dark", config.defaultTheme === "dark");
+    updateTheme(defaultTheme);
+    document.documentElement.classList.toggle("dark", defaultTheme === "dark");
   }, [updateTheme, reactLocation]);
 
   return (

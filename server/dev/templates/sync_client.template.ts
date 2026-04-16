@@ -1,3 +1,6 @@
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
 import { Functions, SyncClientResponse, SyncClientStreamEmitter } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 

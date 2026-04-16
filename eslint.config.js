@@ -119,6 +119,22 @@ export default tseslint.config(
     },
   },
   {
+    files: ['server/**/*.ts', 'shared/**/*.ts', 'scripts/**/*.ts', 'config.ts'],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'react/jsx-no-literals': 'off',
+      'import-x/default': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/restrict-template-expressions': 'off',
+      '@typescript-eslint/restrict-plus-operands': 'off',
+      '@typescript-eslint/ban-ts-comment': 'off',
+      'unicorn/prefer-top-level-await': 'off',
+    },
+  },
+  {
     files: [
       'src/**/*api/**/*.ts', 
       'src/**/*Api/**/*.ts', 

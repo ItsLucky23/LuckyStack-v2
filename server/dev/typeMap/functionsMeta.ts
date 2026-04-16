@@ -1,6 +1,6 @@
-import ts from 'typescript';
-import fs from 'fs';
-import path from 'path';
+import * as ts from 'typescript';
+import fs from 'node:fs';
+import path from 'node:path';
 import { FileImport, ImportCollectors, parseFileTypeContext, sanitizeTypeAndCollectImports } from './typeContext';
 import { SERVER_FUNCTIONS_DIR } from '../../utils/paths';
 import { expandType, getServerProgram } from './tsProgram';
@@ -9,11 +9,11 @@ import { expandType, getServerProgram } from './tsProgram';
 // is a clean type signature without runtime values.
 const stripDefaultValues = (params: string): string => {
   // Replace default values (= expr) while preserving arrow functions (=>)
-  return params.replace(/\s*=(?!>)[^,)]+/g, '');
+  return params.replaceAll(/\s*=(?!>)[^,)]+/g, '');
 };
 
 const normalizeInlineType = (value: string): string => {
-  return value.replace(/\s+/g, ' ').trim();
+  return value.replaceAll(/\s+/g, ' ').trim();
 };
 
 const simplifyInferredType = (value: string): string => {
@@ -69,7 +69,7 @@ const resolveLocalExportedTypes = ({
   let resolved = type;
 
   for (const exportName of availableExports) {
-    const hasReference = new RegExp(`\\b${exportName}\\b`).test(resolved);
+    const hasReference = new RegExp(String.raw`\b${exportName}\b`).test(resolved);
     if (!hasReference) continue;
 
     const declaration = findProgramTypeDeclaration(programSource, exportName);
@@ -78,15 +78,15 @@ const resolveLocalExportedTypes = ({
     const declarationNode = (
       ts.isClassDeclaration(declaration)
       ? (declaration.name ?? declaration)
-      : ts.isTypeAliasDeclaration(declaration)
+      : (ts.isTypeAliasDeclaration(declaration)
         ? declaration.type
-        : declaration
+        : declaration)
     );
 
     const declarationType = checker.getTypeAtLocation(declarationNode);
     const expanded = normalizeInlineType(expandType(declarationType, checker));
 
-    resolved = resolved.replace(new RegExp(`\\b${exportName}\\b`, 'g'), expanded);
+    resolved = resolved.replaceAll(new RegExp(String.raw`\b${exportName}\b`, 'g'), expanded);
   }
 
   return resolved;
@@ -310,7 +310,7 @@ const generateFunctionsForDir = (dir: string, collectors: ImportCollectors, inde
     let fileOutput = '';
 
     try {
-      const rawContent = fs.readFileSync(fullPath, 'utf-8');
+      const rawContent = fs.readFileSync(fullPath, 'utf8');
       const sourceFile = ts.createSourceFile(fullPath, rawContent, ts.ScriptTarget.Latest, true);
       const { availableExports, fileImports } = parseFileTypeContext(rawContent);
       const program = getServerProgram();
@@ -403,8 +403,8 @@ const generateFunctionsForDir = (dir: string, collectors: ImportCollectors, inde
       if (fileOutput) {
         output += `${indent}${fileName}: {\n${fileOutput}${indent}};\n`;
       }
-    } catch (err) {
-      console.error(`[TypeMapGenerator] Error parsing functions file ${fullPath}:`, err);
+    } catch (error) {
+      console.error(`[TypeMapGenerator] Error parsing functions file ${fullPath}:`, error);
     }
   }
 
@@ -414,3 +414,4 @@ const generateFunctionsForDir = (dir: string, collectors: ImportCollectors, inde
 export const generateServerFunctions = (collectors: ImportCollectors): string => {
   return generateFunctionsForDir(SERVER_FUNCTIONS_DIR, collectors, '\t');
 };
+

@@ -10,13 +10,23 @@
 
 // import type { SessionLayout } from "config";
 
-import config, { SessionLayout } from "../../config";
-import redis from "./redis";
+import { allowMultipleSessions, sessionExpiryDays, SessionLayout } from "../../config";
+import { redis } from "./redis";
 import { captureException } from "./sentry";
 import { socketEventNames } from '../../shared/socketEvents';
 
 /** Convert days to seconds for Redis TTL */
-const SESSION_TTL = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
+const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
+const SESSION_TTL = 60 * 60 * 24 * sessionExpiryDays;
+
+const isSessionLayout = (value: unknown): value is SessionLayout => {
+  return value !== null && typeof value === 'object' && 'id' in value;
+};
+
+const parseSessionLayout = (value: string): SessionLayout | null => {
+  const parsed = JSON.parse(value) as unknown;
+  return isSessionLayout(parsed) ? parsed : null;
+};
 
 /**
  * Save or update a user session in Redis.
@@ -27,7 +37,7 @@ const SESSION_TTL = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
  */
 const saveSession = async (token: string, data: SessionLayout, newUser?: boolean): Promise<void> => {
   try {
-    const sessionKey = `${process.env.PROJECT_NAME}-session:${token}`;
+    const sessionKey = `${PROJECT_NAME}-session:${token}`;
     await redis.set(sessionKey, JSON.stringify(data));
     await redis.expire(sessionKey, SESSION_TTL);
 
@@ -35,20 +45,20 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     const io = ioInstance;
     if (!io) { return; }
 
-    const userId = data?.id;
+    const userId = data.id;
 
     // Always track active tokens so server-side user/session updates can fan out in real time
     if (userId) {
-      const activeUsersKey = `${process.env.PROJECT_NAME}-activeUsers:${userId}`;
+      const activeUsersKey = `${PROJECT_NAME}-activeUsers:${userId}`;
       await redis.sadd(activeUsersKey, token);
       await redis.expire(activeUsersKey, SESSION_TTL);
     }
 
     // Handle single-session enforcement on new login
-    if (newUser && config.allowMultipleSessions === false) {
+    if (newUser && !allowMultipleSessions) {
       if (!userId) return;
 
-      const activeUsersKey = `${process.env.PROJECT_NAME}-activeUsers:${userId}`;
+      const activeUsersKey = `${PROJECT_NAME}-activeUsers:${userId}`;
       // const previousTokens = await redis.smembers(activeUsersKey);
 
       const allTokens = await redis.smembers(activeUsersKey);
@@ -71,7 +81,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
             }
           } else {
             // No active sockets, just clean up Redis
-            await redis.del(`${process.env.PROJECT_NAME}-session:${previousToken}`);
+            await redis.del(`${PROJECT_NAME}-session:${previousToken}`);
             await redis.srem(activeUsersKey, previousToken);
           }
         }));
@@ -98,14 +108,14 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
   if (!token) return null;
 
   try {
-    const sessionKey = `${process.env.PROJECT_NAME}-session:${token}`;
+    const sessionKey = `${PROJECT_NAME}-session:${token}`;
     const session = await redis.get(sessionKey);
     if (!session) return null;
 
     // Sliding expiration: each successful authenticated access extends session lifetime.
     await redis.expire(sessionKey, SESSION_TTL);
 
-    const parsed = JSON.parse(session);
+    const parsed = parseSessionLayout(session);
     if (!parsed) return null;
 
     return { ...parsed, token };
@@ -124,12 +134,12 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
  */
 const deleteSession = async (token: string): Promise<boolean> => {
   try {
-    const user = await redis.get(`${process.env.PROJECT_NAME}-session:${token}`);
+    const user = await redis.get(`${PROJECT_NAME}-session:${token}`);
 
     if (user) {
-      const userId = JSON.parse(user)?.id;
+      const userId = parseSessionLayout(user)?.id;
       if (userId) {
-        const activeUsersKey = `${process.env.PROJECT_NAME}-activeUsers:${userId}`;
+        const activeUsersKey = `${PROJECT_NAME}-activeUsers:${userId}`;
         const { ioInstance } = await import('../sockets/socket');
 
         // Reuse the same logout flow as single-session enforcement.
@@ -138,7 +148,7 @@ const deleteSession = async (token: string): Promise<boolean> => {
           const sockets = ioInstance.sockets.adapter.rooms.get(token);
 
           if (sockets) {
-            await Promise.all(Array.from(sockets).map(async (socketId) => {
+            await Promise.all([...sockets].map(async (socketId) => {
               const socket = ioInstance.sockets.sockets.get(socketId);
               if (!socket) { return; }
 
@@ -156,7 +166,7 @@ const deleteSession = async (token: string): Promise<boolean> => {
       }
     }
 
-    await redis.del(`${process.env.PROJECT_NAME}-session:${token}`);
+    await redis.del(`${PROJECT_NAME}-session:${token}`);
     return true;
   } catch (error) {
     console.log('Error deleting session:', error, 'red');
@@ -172,9 +182,33 @@ const deleteSession = async (token: string): Promise<boolean> => {
  */
 const getAllSessions = async (): Promise<SessionLayout[]> => {
   try {
-    const keys = await redis.keys(`${process.env.PROJECT_NAME}-session:*`);
+    const pattern = `${PROJECT_NAME}-session:*`;
+    const keys: string[] = [];
+    let cursor = '0';
+
+    do {
+      const [nextCursor, batchKeys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (Array.isArray(batchKeys) && batchKeys.length > 0) {
+        keys.push(...batchKeys);
+      }
+    } while (cursor !== '0');
+
     const sessions = await Promise.all(keys.map((key) => redis.get(key)));
-    return sessions.map((s) => JSON.parse(s || "{}"));
+
+    const parsedSessions: SessionLayout[] = [];
+    for (const session of sessions) {
+      if (!session) {
+        continue;
+      }
+
+      const parsed = parseSessionLayout(session);
+      if (parsed) {
+        parsedSessions.push(parsed);
+      }
+    }
+
+    return parsedSessions;
   } catch (error) {
     console.log('Error getting all sessions:', error, 'red');
     captureException(error, { fn: 'getAllSessions' });

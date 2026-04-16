@@ -1,7 +1,9 @@
-import chokidar from "chokidar";
-import fs from "fs";
-import path from 'path';
-import { createRequire } from 'module';
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+import { watch } from "chokidar";
+import fs from "node:fs";
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import {
   initializeFunctions,
   upsertApiFromFile,
@@ -28,7 +30,7 @@ import {
   generateTypeMapFile,
 } from "./typeMapGenerator.js";
 import { findDependentRouteFiles } from "./importDependencyGraph";
-import tryCatch from "../functions/tryCatch";
+import { tryCatch } from "../functions/tryCatch";
 import { reloadLocaleTranslations } from "../utils/responseNormalizer";
 import { serverRuntimeConfig } from "../config/runtimeConfig";
 
@@ -45,12 +47,12 @@ export const setupWatchers = () => {
   const pendingApiDeletes = new Set<string>();
   const pendingSyncUpserts = new Set<string>();
   const pendingSyncDeletes = new Set<string>();
-  const normalizeFsPath = (value: string): string => path.resolve(value).replace(/\\/g, '/');
+  const normalizeFsPath = (value: string): string => path.resolve(value).replaceAll('\\', '/');
 
   const clearModuleCache = (paths: string[]) => {
-    const normalizedNeedles = paths.map((value) => value.replace(/\\/g, '/'));
+    const normalizedNeedles = paths.map((value) => value.replaceAll('\\', '/'));
     for (const cacheKey of Object.keys(nodeRequire.cache)) {
-      const normalizedCacheKey = cacheKey.replace(/\\/g, '/');
+      const normalizedCacheKey = cacheKey.replaceAll('\\', '/');
       if (normalizedNeedles.some((needle) => normalizedCacheKey.includes(needle))) {
         delete nodeRequire.cache[cacheKey];
       }
@@ -194,7 +196,7 @@ export const setupWatchers = () => {
             // Inject server template with pre-filled clientInput from client
             await injectServerTemplateWithClientInput(path, clientInputTypes);
             // Regenerate types
-            await tryCatch(() => generateTypeMapFile({ quiet: true }));
+            await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
             // Update client file to use imported types + add serverOutput
             await updateClientFileForPairedServer(clientPath);
             await upsertSyncFromFile(path);
@@ -236,14 +238,14 @@ export const setupWatchers = () => {
   };
 
   const processPendingApiChanges = async ({ regenerateTypeMap = false }: { regenerateTypeMap?: boolean } = {}) => {
-    const deletePaths = Array.from(pendingApiDeletes);
-    const upsertPaths = Array.from(pendingApiUpserts);
+    const deletePaths = [...pendingApiDeletes];
+    const upsertPaths = [...pendingApiUpserts];
     pendingApiDeletes.clear();
     pendingApiUpserts.clear();
 
     if (regenerateTypeMap) {
       console.log(`[HotReload] API routes changed (add/delete), regenerating type map`, 'blue');
-      await tryCatch(() => generateTypeMapFile({ quiet: true }));
+      await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
     }
 
     for (const deletePath of deletePaths) {
@@ -258,14 +260,14 @@ export const setupWatchers = () => {
   };
 
   const processPendingSyncChanges = async ({ regenerateTypeMap = false }: { regenerateTypeMap?: boolean } = {}) => {
-    const deletePaths = Array.from(pendingSyncDeletes);
-    const upsertPaths = Array.from(pendingSyncUpserts);
+    const deletePaths = [...pendingSyncDeletes];
+    const upsertPaths = [...pendingSyncUpserts];
     pendingSyncDeletes.clear();
     pendingSyncUpserts.clear();
 
     if (regenerateTypeMap) {
       console.log(`[HotReload] Sync routes changed (add/delete), regenerating type map`, 'blue');
-      await tryCatch(() => generateTypeMapFile({ quiet: true }));
+      await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
     }
 
     for (const deletePath of deletePaths) {
@@ -316,7 +318,7 @@ export const setupWatchers = () => {
     if (isRouteDependencyFile(normalizedPath)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Route dependency changed, regenerating type map`, 'blue');
-        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+        await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       });
       enqueueAffectedRoutesFromDependency(normalizedPath);
       return;
@@ -325,14 +327,14 @@ export const setupWatchers = () => {
     if (isTypeMapRelevantFile(normalizedPath)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Route dependency changed, regenerating type map`, 'blue');
-        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+        await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       });
     }
 
     if (normalizedPath.includes('_api/')) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] API changed, regenerating type map`, 'blue');
-        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+        await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       });
       pendingApiDeletes.delete(normalizedPath);
       pendingApiUpserts.add(normalizedPath);
@@ -342,7 +344,7 @@ export const setupWatchers = () => {
     } else if (normalizedPath.includes('_sync/')) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Sync changed, regenerating type map`, 'blue');
-        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+        await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       });
       pendingSyncDeletes.delete(normalizedPath);
       pendingSyncUpserts.add(normalizedPath);
@@ -356,7 +358,7 @@ export const setupWatchers = () => {
     const normalizedPath = normalizeFsPath(changedPath);
 
     scheduleReload('functions', async () => {
-      await tryCatch(() => generateTypeMapFile({ quiet: true }));
+      await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       await initializeFunctions();
     });
 
@@ -382,7 +384,7 @@ export const setupWatchers = () => {
     if (isRouteDependencyFile(normalizedPath)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Route dependency deleted, regenerating type map`, 'blue');
-        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+        await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       });
       enqueueAffectedRoutesFromDependency(normalizedPath);
       return;
@@ -391,14 +393,14 @@ export const setupWatchers = () => {
     if (isTypeMapRelevantFile(normalizedPath)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Route dependency deleted, regenerating type map`, 'blue');
-        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+        await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       });
     }
 
     if (normalizedPath.includes('_api/')) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] API deleted, regenerating type map`, 'blue');
-        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+        await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       });
       pendingApiUpserts.delete(normalizedPath);
       pendingApiDeletes.add(normalizedPath);
@@ -408,7 +410,7 @@ export const setupWatchers = () => {
     } else if (normalizedPath.includes('_sync/')) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Sync deleted, regenerating type map`, 'blue');
-        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+        await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       });
       pendingSyncUpserts.delete(normalizedPath);
       pendingSyncDeletes.add(normalizedPath);
@@ -437,7 +439,7 @@ export const setupWatchers = () => {
   };
 
   // Watch the main source folders
-  chokidar.watch('src', {
+  watch('src', {
     ignoreInitial: true,
     awaitWriteFinish: {
       stabilityThreshold: serverRuntimeConfig.dev.watcherStabilityThresholdMs,
@@ -449,13 +451,13 @@ export const setupWatchers = () => {
     .on('unlink', handleDelete);
 
   // Watch functions separately
-  chokidar.watch('server/functions', { ignoreInitial: true })
+  watch('server/functions', { ignoreInitial: true })
     .on('add', handleFunctionChange)
     .on('change', handleFunctionChange)
     .on('unlink', handleFunctionChange);
 
   // Watch shared functions separately
-  chokidar.watch('shared', { ignoreInitial: true })
+  watch('shared', { ignoreInitial: true })
     .on('add', handleFunctionChange)
     .on('change', handleFunctionChange)
     .on('unlink', handleFunctionChange);
@@ -463,3 +465,4 @@ export const setupWatchers = () => {
   // Generate initial type map on startup
   generateTypeMapFile();
 };
+

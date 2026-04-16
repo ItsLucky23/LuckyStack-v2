@@ -1,4 +1,6 @@
-import redis from "./redis";
+/* eslint-disable @typescript-eslint/restrict-template-expressions, @typescript-eslint/no-unsafe-return, @typescript-eslint/prefer-nullish-coalescing */
+
+import { redis } from "./redis";
 
 export interface GameDataProps {
   players: { 
@@ -14,7 +16,7 @@ export interface GameDataProps {
   currentCountdownId: number,
   state: 'lobby' | 'loadingScreen' | 'started' | 'finished',
   loadingScreenState: 'roulette' | 'focusFarmer' | 'focusPersonalCard' | null;
-  selectedRewards: { [key: string]: string[] },
+  selectedRewards: Record<string, string[]>,
   availableRewards: {
     name: string,
     id: string

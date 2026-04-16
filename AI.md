@@ -24,6 +24,10 @@ To maintain a clean codebase and avoid wasting context tokens on unnecessary det
   import { tryCatch } from "server/functions/tryCatch";
   // Usage: const [error, result] = await tryCatch(myAsyncFunc());
   ```
+- **Error Code Contract is Mandatory**: `errorCode` must always be a stable i18n key (for example `auth.noOrganization` or `timeregister_customer_fetch_failed`). Never return human sentences in `errorCode`.
+  - Bad: `errorCode: 'Missing date value or invalid date'`
+  - Good: `errorCode: 'timesheet.invalidDateValue'`
+  - If you need extra context, use `errorParams` (and optionally `errorMessage` for debugging), but keep `errorCode` as the translation key used for notifications.
 - **Terminal Commands**: NEVER run terminal commands that mutate state or update code (like file creation scripts or servers) without first asking the user for permission and explaining exactly what the command does. Running commands strictly to retrieve data or check status is fine. Check exceptions below.
 - **Code Quality & ESLint**: The codebase uses ESLint with strict plugins. You MUST ask the user to run `npm run lint` and resolve ALL errors and warnings. Do not ignore them.
 - **SOLID Principles**: Adhere strictly to SOLID principles in all code you write (Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion). Each function/file should do one thing, and logic should be modular.

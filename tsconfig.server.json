@@ -32,6 +32,7 @@
   },
   "include": [
     "vite.config.ts",
+    "config.ts",
     "server/**/*",
     "src/**/_api/**/*",
     "src/**/_sync/**/*",

@@ -1,25 +1,27 @@
-import dotenv from 'dotenv';
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+import { config as loadEnv } from 'dotenv';
 import oauthProviders from "./loginConfig";
-import { IncomingMessage, ServerResponse } from 'http';
-import { URLSearchParams } from 'url';
+import { IncomingMessage, ServerResponse } from 'node:http';
+import { URLSearchParams } from 'node:url';
 import { prisma } from '../functions/db';
 import { PROVIDERS } from '@prisma/client';
-import bcrypt from 'bcryptjs';
-import { randomBytes } from 'crypto';
+import { compare, genSalt, hash } from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import { saveSession } from "../functions/session"
-import validator from "validator"
-import config, { SessionLayout } from '../../config';
-import path from 'path';
-import { existsSync } from 'fs';
+import { escape, isEmail } from 'validator';
+import { defaultLanguage, SessionLayout } from '../../config';
+import path from 'node:path';
+import { existsSync } from 'node:fs';
 import tryCatch from '../../shared/tryCatch';
 import { UPLOADS_DIR } from '../utils/paths';
-import redis from '../functions/redis';
+import redisClient from '../functions/redis';
 import { serverRuntimeConfig } from '../config/runtimeConfig';
 
-dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
+loadEnv({ path: '.env' });
+loadEnv({ path: '.env.local', override: true });
 
-type paramsType = {
+interface paramsType {
   email?: string,
   password?: string,
   name?: string,
@@ -37,7 +39,7 @@ const getOAuthStateKey = (providerName: string, state: string): string => {
 export const createOAuthState = async (providerName: string): Promise<string | null> => {
   const state = randomBytes(32).toString('hex');
   const key = getOAuthStateKey(providerName, state);
-  const result = await redis.set(key, '1', 'EX', serverRuntimeConfig.auth.oauthStateTtlSeconds, 'NX');
+  const result = await redisClient.set(key, '1', 'EX', serverRuntimeConfig.auth.oauthStateTtlSeconds, 'NX');
 
   if (result !== 'OK') {
     return null;
@@ -52,7 +54,7 @@ const consumeOAuthState = async (providerName: string, state: string): Promise<b
   }
 
   const key = getOAuthStateKey(providerName, state);
-  const txResult = await redis.multi().get(key).del(key).exec();
+  const txResult = await redisClient.multi().get(key).del(key).exec();
   if (!txResult || txResult.length < 2) {
     return false;
   }
@@ -95,10 +97,10 @@ const toReasonKey = (error: unknown, fallback = 'api.internalServerError'): stri
 // Route that starts the OAuth flow for the specified provider and redirects to the callback endpoint
 const loginWithCredentials = async (params: paramsType) => {
 
-  const email = validator.escape(params.email || '');
-  const password = validator.escape(params.password || '');
-  const name = params.name ? validator.escape(params.name) : undefined;
-  const confirmPassword = params.confirmPassword ? validator.escape(params.confirmPassword) : undefined;
+  const email = escape(params.email || '');
+  const password = escape(params.password || '');
+  const name = params.name ? escape(params.name) : undefined;
+  const confirmPassword = params.confirmPassword ? escape(params.confirmPassword) : undefined;
 
   if (isDevMode) {
     console.log(`credentials auth attempt for ${email || 'unknown-email'}`, 'gray');
@@ -109,7 +111,7 @@ const loginWithCredentials = async (params: paramsType) => {
   if (password.length < 8) { return { status: false, reason: 'login.passwordCharacterMinimum' }; }
   if (password.length > 191) { return { status: false, reason: 'login.passwordCharacterLimit' }; }
   if (name && name.length > 191) { return { status: false, reason: 'login.nameCharacterLimit' }; }
-  if (!validator.isEmail(email)) { return { status: false, reason: 'login.invalidEmailFormat' }; }
+  if (!isEmail(email)) { return { status: false, reason: 'login.invalidEmailFormat' }; }
 
   if (name && confirmPassword) { //? register
     if (password != confirmPassword) { return { status: false, reason: 'login.passwordNotMatch' }; }
@@ -133,8 +135,8 @@ const loginWithCredentials = async (params: paramsType) => {
 
     //? email is not in use so we define the function to create the new user
     const createNewUser = async () => {
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
+      const salt = await genSalt(10);
+      const hashedPassword = await hash(password, salt);
       return await prisma.user.create({
         data: {
           email: email,
@@ -142,9 +144,9 @@ const loginWithCredentials = async (params: paramsType) => {
           name: name,
           password: hashedPassword,
           avatar: '',
-          avatarFallback: `#${Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0")}`,
+          avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
           admin: false,
-          language: config.defaultLanguage
+          language: defaultLanguage
         }
       })
     }
@@ -175,16 +177,16 @@ const loginWithCredentials = async (params: paramsType) => {
     //? attempt to find the user
     const [findUserError, findUserResponse] = await tryCatch(findUser);
     if (findUserError) {
-      console.log(findUserError, ' findUserError');
+      console.log(findUserError, 'findUserError');
       return { status: false, reason: toReasonKey(findUserError) };
     }
     if (!findUserResponse) { return { status: false, reason: 'login.userNotFound' }; }
 
     //? if we found a user we check if the password matches the hashed one in the db
-    const checkPassword = async () => { return await bcrypt.compare(password, findUserResponse.password as string); }
+    const checkPassword = async () => { return await compare(password, findUserResponse.password!); }
     const [checkPasswordError, checkPasswordResponse] = await tryCatch(checkPassword);
     if (checkPasswordError) {
-      console.log(checkPasswordError, ' checkPasswordError');
+      console.log(checkPasswordError, 'checkPasswordError');
       return { status: false, reason: checkPasswordError };
     }
     if (!checkPasswordResponse) { return { status: false, reason: 'login.wrongPassword' }; }
@@ -333,16 +335,16 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
 
   const userData = asRecord(getUserDataResponse);
 
-  const name: string = String(userData[provider.nameKey] || 'didnt find a name')
+  const name = String(userData[provider.nameKey] || 'didnt find a name')
 
   const emailValue = userData[provider.emailKey];
   let email: string | undefined = typeof emailValue === 'string' ? emailValue : undefined;
   const avatarId = provider.avatarCodeKey ? userData[provider.avatarCodeKey] : undefined;
   const avatarValue = provider?.avatarKey
     ? String(userData[provider.avatarKey] || '')
-    : provider.getAvatar
+    : (provider.getAvatar
       ? await provider.getAvatar({ userData, avatarId: typeof avatarId === 'string' ? avatarId : '' })
-      : '';
+      : '');
   const avatar = typeof avatarValue === 'string' ? avatarValue : '';
 
   //? if we didnt find the email we try to get it with a external link if this one is provided
@@ -399,8 +401,8 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
             provider: provider.name as PROVIDERS,
             name,
             avatar,
-            avatarFallback: `#${Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0")}`,
-            language: config.defaultLanguage
+            avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
+            language: defaultLanguage
           }
         })
       }

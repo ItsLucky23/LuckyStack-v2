@@ -197,12 +197,10 @@ export function useSocket(session: SessionLayout | null) {
           return;
         }
 
-        const {
-          status: _status,
-          fullName: _fullName,
-          cb: _cb,
-          ...streamPayload
-        } = payload;
+        const streamPayload = { ...payload };
+        delete streamPayload.status;
+        delete streamPayload.fullName;
+        delete streamPayload.cb;
 
         for (const routeKey of routeKeys) {
           triggerSyncStreamEvent(routeKey, streamPayload as SyncRouteStreamEvent);

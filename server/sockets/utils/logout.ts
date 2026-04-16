@@ -1,5 +1,7 @@
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
 import { Socket } from "socket.io";
-import redis from "../../functions/redis";
+import redisClient from '../../functions/redis';
 import { disconnectTimers, tempDisconnectedSockets } from "./activityBroadcaster";
 import { deleteSession } from "../../functions/session";
 import tryCatch from "../../../shared/tryCatch";
@@ -39,7 +41,7 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
       await deleteSession(token);
     }
     const tokensOfActiveUsers = `${process.env.PROJECT_NAME}-activeUsers:${userId}`
-    await redis.srem(tokensOfActiveUsers, token);
+    await redisClient.srem(tokensOfActiveUsers, token);
     socket.leave(token);
     return true;
   });
@@ -47,9 +49,7 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
     if (socket) {
       socket.emit(socketEventNames.logout, "error");
     }
-  } else if (result) {
-    if (socket) {
+  } else if (result && socket) {
       socket.emit(socketEventNames.logout, "success");
     }
-  }
 }

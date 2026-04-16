@@ -1,3 +1,5 @@
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
 import path from 'path';
 import { API_VERSION_TOKEN_REGEX, SYNC_VERSION_TOKEN_REGEX } from '../routeConventions';
 

@@ -1,10 +1,10 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import { ROOT_DIR, SERVER_FUNCTIONS_DIR, SHARED_DIR, SRC_DIR } from '../utils/paths';
 
 const SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts'];
 
-const normalizePath = (value: string): string => path.resolve(value).replace(/\\/g, '/');
+const normalizePath = (value: string): string => path.resolve(value).replaceAll('\\', '/');
 
 const isSupportedScriptFile = (value: string): boolean => {
   return SUPPORTED_EXTENSIONS.some((extension) => value.endsWith(extension));
@@ -49,7 +49,7 @@ const collectScriptFiles = (dir: string, output: Set<string>): void => {
 
 const extractImportSpecifiers = (filePath: string): string[] => {
   try {
-    const source = fs.readFileSync(filePath, 'utf-8');
+    const source = fs.readFileSync(filePath, 'utf8');
     const specifiers = new Set<string>();
 
     const importExportRegex = /(?:import|export)\s+(?:[^'"\n]*?\s+from\s+)?['"]([^'"\n]+)['"]/g;
@@ -65,7 +65,7 @@ const extractImportSpecifiers = (filePath: string): string[] => {
       if (match[1]) specifiers.add(match[1]);
     }
 
-    return Array.from(specifiers);
+    return [...specifiers];
   } catch {
     return [];
   }
@@ -191,3 +191,4 @@ export const findDependentRouteFiles = (changedFilePath: string): Set<string> =>
 
   return affectedRoutes;
 };
+

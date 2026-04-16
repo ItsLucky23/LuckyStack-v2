@@ -3,16 +3,16 @@
  */
 
 interface SentryInstance {
-  captureException: (exception: any, context?: any) => string;
-  captureMessage: (message: string, level?: any) => string;
-  setUser: (user: any) => void;
-  setContext: (key: string, context: any) => void;
-  startInactiveSpan?: (context: any) => any;
+  captureException: (exception: unknown, ...args: unknown[]) => string;
+  captureMessage: (message: string, ...args: unknown[]) => string;
+  setUser: (user: unknown) => void;
+  setContext: (key: string, context: unknown) => void;
+  startInactiveSpan?: (context: unknown) => unknown;
 }
 
 let sentry: SentryInstance | undefined;
 
-export const initSharedSentry = (instance: any) => {
+export const initSharedSentry = (instance: SentryInstance) => {
   sentry = instance;
 };
 

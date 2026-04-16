@@ -172,6 +172,32 @@ For translated error responses over HTTP, send one of:
 - HTTP responses normalize errors to include localized `message` and final `httpStatus`.
 - Generated output typing preserves direct literal return values in object properties (for example `submitted: true` and `submitted: false`) so branch-specific unions stay discriminated in TypeScript.
 
+### Error Code Rules (Do Not Skip)
+
+- `errorCode` is a translation key, not a human-readable sentence.
+- Never pass raw exception text into `errorCode`.
+- Use `errorParams` for dynamic details (for example `{ key: 'reason', value: 'timeout' }`).
+- If you choose to include `errorMessage` for debugging, keep it optional and never use it as a replacement for `errorCode`.
+
+Good:
+
+```typescript
+return {
+  status: 'error',
+  errorCode: 'timeregister_customer_fetch_failed',
+  errorParams: [{ key: 'reason', value: 'timeout' }],
+};
+```
+
+Bad:
+
+```typescript
+return {
+  status: 'error',
+  errorCode: error?.message ?? 'Request failed',
+};
+```
+
 ---
 
 ## Abort Controller
@@ -271,6 +297,8 @@ Configure globally in `config.ts`:
 
 ```typescript
 rateLimiting: {
+  store: 'memory',      // 'memory' (default) or 'redis' for multi-instance consistency
+  redisKeyPrefix: 'rate-limit',
   defaultApiLimit: 60,   // Fallback requests/min per API when no per-API rateLimit is exported
   defaultIpLimit: 100,   // Global requests/min cap per IP across all APIs combined
   windowMs: 60000,       // Request window size in milliseconds

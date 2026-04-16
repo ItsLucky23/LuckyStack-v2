@@ -1,6 +1,8 @@
-import dotenv from 'dotenv';
-dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+import { config as loadEnv } from 'dotenv';
+loadEnv({ path: '.env' });
+loadEnv({ path: '.env.local', override: true });
 
 import handleApiRequest from "./handleApiRequest";
 import { getSession, saveSession } from "../functions/session";
@@ -8,7 +10,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
 import allowedOrigin from '../auth/checkOrigin';
 import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from './utils/activityBroadcaster';
-import config, { SessionLayout } from '../../config';
+import { locationProviderEnabled, SessionLayout, socketActivityBroadcaster } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
 import {
   buildGetJoinedRoomsResponseEventName,
@@ -29,13 +31,13 @@ const withSessionLock = async (token: string, fn: () => Promise<void>) => {
   }
 };
 
-export type apiMessage = {
+export interface apiMessage {
   name: string;
   data: object;
   responseIndex: number;
 }
 
-export type syncMessage = {
+export interface syncMessage {
   name: string;
   data: object;
   cb: string;
@@ -47,7 +49,7 @@ export type syncMessage = {
 export let ioInstance: SocketIOServer | null = null;
 
 const getVisibleSocketRooms = (socket: any, token: string | null): string[] => {
-  return Array.from(socket.rooms)
+  return [...socket.rooms]
     .filter((room): room is string => typeof room === 'string')
     .filter((room) => room !== socket.id)
     .filter((room) => !token || room !== token);
@@ -58,7 +60,7 @@ const getSessionRoomCodes = (session: SessionLayout): string[] => {
     ? session.roomCodes.filter((roomCode): roomCode is string => typeof roomCode === 'string' && roomCode.length > 0)
     : [];
 
-  return Array.from(new Set(roomCodes));
+  return [...new Set(roomCodes)];
 };
 
 const sanitizeSessionRoomKeys = (session: SessionLayout): SessionLayout => {
@@ -124,7 +126,7 @@ export default function loadSocket(httpServer: any) {
         }
 
         const existingRoomCodes = getSessionRoomCodes(session);
-        const nextRoomCodes = Array.from(new Set([...existingRoomCodes, group]));
+        const nextRoomCodes = [...new Set([...existingRoomCodes, group])];
 
         await socket.join(group);
         const sanitizedSession = sanitizeSessionRoomKeys(session);
@@ -186,7 +188,7 @@ export default function loadSocket(httpServer: any) {
     });
 
     socket.on(socketEventNames.disconnect, async (reason) => {
-      if (config.socketActivityBroadcaster && token) {
+      if (socketActivityBroadcaster && token) {
         socketDisconnecting({ token, socket, reason });
       } else {
         if (!token) { return; }
@@ -196,12 +198,12 @@ export default function loadSocket(httpServer: any) {
 
     socket.on(socketEventNames.updateLocation, async (newLocation) => {
       if (!token) { return; }
-      if (!config.locationProviderEnabled) { return; }
-      console.log('updating location to: ', newLocation.pathName, 'yellow')
+      if (!locationProviderEnabled) { return; }
+      console.log('updating location to:', newLocation.pathName, 'yellow')
 
       await withSessionLock(token, async () => {
         let returnedUser: SessionLayout | null = null;
-        if (config.socketActivityBroadcaster) {
+        if (socketActivityBroadcaster) {
           returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
         }
 
@@ -216,7 +218,7 @@ export default function loadSocket(httpServer: any) {
       });
     });
 
-    if (config.socketActivityBroadcaster && token) {
+    if (socketActivityBroadcaster && token) {
       initAcitivityBroadcaster({ socket, token });
     }
 

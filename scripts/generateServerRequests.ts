@@ -89,7 +89,7 @@ rawSrcFiles.forEach((normalized) => {
     const apiName = apiNameWithVersion.replace(API_VERSION_TOKEN_REGEX, '');
     const routeKey = pagePath ? `api/${pagePath}/${apiName}/${version}` : `api/${apiName}/${version}`;
 
-    apiMap += `  "${routeKey}": {\n    auth: "auth" in ${varName} ? ${varName}.auth : {},\n    main: ${varName}.main,\n    rateLimit: "rateLimit" in ${varName} ? (${varName}.rateLimit as number | false | undefined) : undefined,\n    httpMethod: "httpMethod" in ${varName} ? (${varName}.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined) : undefined,\n    inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n    inputTypeFilePath: ${JSON.stringify(normalized)},\n  },\n`;
+    apiMap += `  "${routeKey}": (() => {\n    const mod = ${varName} as Record<string, any>;\n    return {\n      auth: "auth" in mod ? mod.auth : {},\n      main: mod.main,\n      rateLimit: mod.rateLimit as number | false | undefined,\n      httpMethod: mod.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined,\n      inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n      inputTypeFilePath: ${JSON.stringify(normalized)},\n    };\n  })(),\n`;
   }
 
   // Sync
@@ -106,7 +106,6 @@ rawSrcFiles.forEach((normalized) => {
     const syncName = syncNameWithVersion.replace(SYNC_VERSION_TOKEN_REGEX, '');
     const routeKey = pagePath ? `sync/${pagePath}/${syncName}/${version}` : `sync/${syncName}/${version}`;
 
-    console.log(syncName)
     if (kind === 'client') {
       const varName = `syncClient${syncCount++}`;
       syncImports.push(`import * as ${varName} from '${importPath}';`);

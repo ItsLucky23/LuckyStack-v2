@@ -8,7 +8,7 @@
  */
 
 import * as Sentry from '@sentry/node';
-import config from '../../config';
+import { sentry } from '../../config';
 import {
   initSharedSentry,
   captureException as sharedCaptureException,
@@ -30,7 +30,7 @@ import {
  * ```
  */
 export const initializeSentry = () => {
-  const dsn = process.env.SENTRY_DSN || process.env.VITE_SENTRY_DSN;
+  const dsn = process.env.SENTRY_DSN ?? process.env.VITE_SENTRY_DSN;
   const isProduction = process.env.NODE_ENV === 'production';
   const enabledOverride = process.env.SENTRY_ENABLED ?? process.env.VITE_SENTRY_ENABLED;
 
@@ -43,18 +43,18 @@ export const initializeSentry = () => {
 
   Sentry.init({
     dsn,
-    environment: process.env.NODE_ENV || 'development',
+    environment: process.env.NODE_ENV ?? 'development',
 
     // Performance monitoring
     tracesSampleRate: isProduction
-      ? config.sentry.server.tracesSampleRate.production
-      : config.sentry.server.tracesSampleRate.development,
+      ? sentry.server.tracesSampleRate.production
+      : sentry.server.tracesSampleRate.development,
 
     // Profiling (optional - requires @sentry/profiling-node)
     // profilesSampleRate: 0.1,
 
     // Additional options
-    serverName: process.env.PROJECT_NAME || "",
+    serverName: process.env.PROJECT_NAME ?? "",
 
     // Only send errors in production by default
     enabled: isProduction || enabledOverride === 'true',
@@ -76,7 +76,27 @@ export const initializeSentry = () => {
   });
 
   // Initialize shared Sentry instance for shared utilities
-  initSharedSentry(Sentry);
+  initSharedSentry({
+    captureException: (exception, context) => Sentry.captureException(
+      exception,
+      context as Parameters<typeof Sentry.captureException>[1],
+    ),
+    captureMessage: (message, level) => Sentry.captureMessage(
+      message,
+      level as Parameters<typeof Sentry.captureMessage>[1],
+    ),
+    setUser: (user) => {
+      Sentry.setUser(user as Parameters<typeof Sentry.setUser>[0]);
+    },
+    setContext: (key, context) => {
+      Sentry.setContext(key, context as Parameters<typeof Sentry.setContext>[1]);
+    },
+    startInactiveSpan: (context) => {
+      return Sentry.startInactiveSpan(
+        context as Parameters<typeof Sentry.startInactiveSpan>[0],
+      );
+    },
+  });
 
   console.log('Sentry initialized for error monitoring', 'green');
 };
@@ -85,7 +105,7 @@ export const captureException = (
   error: unknown,
   context?: Record<string, unknown>
 ): void => {
-  return sharedCaptureException(error, context);
+  sharedCaptureException(error, context);
 };
 
 export const captureMessage = (
@@ -93,7 +113,7 @@ export const captureMessage = (
   level: 'info' | 'warning' | 'error' | 'fatal' = 'info',
   context?: Record<string, unknown>
 ): void => {
-  return sharedCaptureMessage(message, level, context);
+  sharedCaptureMessage(message, level, context);
 };
 
 export const setSentryUser = (user: {
@@ -101,7 +121,7 @@ export const setSentryUser = (user: {
   email?: string;
   username?: string;
 } | null): void => {
-  return sharedSetSentryUser(user);
+  sharedSetSentryUser(user);
 };
 
 export const startSpan = (name: string, op: string): unknown => {
