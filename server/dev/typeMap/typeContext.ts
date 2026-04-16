@@ -1,5 +1,5 @@
-import ts from 'typescript';
-import path from 'path';
+import * as ts from 'typescript';
+import path from 'node:path';
 import { GENERATED_SOCKET_TYPES_PATH } from '../../utils/paths';
 
 export interface FileImport {
@@ -18,7 +18,7 @@ const toGeneratedImportPath = (source: string, filePath: string): string => {
 
   const outputDir = path.dirname(GENERATED_SOCKET_TYPES_PATH);
   const absoluteSource = path.resolve(path.dirname(filePath), source);
-  let relPath = path.relative(outputDir, absoluteSource).replace(/\\/g, '/');
+  let relPath = path.relative(outputDir, absoluteSource).replaceAll('\\', '/');
   relPath = relPath.replace(/\.tsx?$/, '');
   if (!relPath.startsWith('.')) relPath = `./${relPath}`;
   return relPath;
@@ -108,7 +108,7 @@ export const sanitizeTypeAndCollectImports = ({
 }): string => {
   const { namedImports, defaultImports } = collectors;
 
-  return type.replace(/\b([A-Z][a-zA-Z0-9_]*)(<[^>]+>)?(\[\])?\b/g, (match, typeName, _generics, isArray) => {
+  return type.replaceAll(/\b([A-Z][a-zA-Z0-9_]*)(<[^>]+>)?(\[\])?\b/g, (match, typeName, _generics, isArray) => {
     const builtins = ['Promise', 'Date', 'Function', 'Array', 'Record', 'Partial', 'Pick', 'Omit', 'Error', 'Map', 'Set', 'Buffer', 'Uint8Array', 'Object'];
     const existingImports = ['SessionLayout'];
 
@@ -155,3 +155,4 @@ export const sanitizeTypeAndCollectImports = ({
     return `any${isArray || ''}`;
   });
 };
+

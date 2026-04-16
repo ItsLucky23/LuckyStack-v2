@@ -1,14 +1,14 @@
-import dotenv from 'dotenv';
-dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
+/* eslint-disable @typescript-eslint/consistent-type-definitions, @typescript-eslint/no-floating-promises, @typescript-eslint/no-unnecessary-condition */
+
+import '../bootstrap/env';
 
 import handleApiRequest from "./handleApiRequest";
 import { getSession, saveSession } from "../functions/session";
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
 import allowedOrigin from '../auth/checkOrigin';
 import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from './utils/activityBroadcaster';
-import config, { SessionLayout } from '../../config';
+import { locationProviderEnabled, socketActivityBroadcaster, SessionLayout, SessionLocation } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
 
 //? Per-token lock to serialize session mutations (prevents read-modify-write races)
@@ -23,13 +23,13 @@ const withSessionLock = async (token: string, fn: () => Promise<void>) => {
   }
 };
 
-export type apiMessage = {
+export interface apiMessage {
   name: string;
   data: object;
   responseIndex: number;
 }
 
-export type syncMessage = {
+export interface syncMessage {
   name: string;
   data: object;
   cb: string;
@@ -40,11 +40,39 @@ export type syncMessage = {
 
 export let ioInstance: SocketIOServer | null = null;
 
-const getVisibleSocketRooms = (socket: any, token: string | null): string[] => {
-  return Array.from(socket.rooms)
+type RoomEventPayload = {
+  group?: unknown;
+  responseIndex?: unknown;
+};
+
+type ResponseIndexPayload = {
+  responseIndex?: unknown;
+};
+
+const toRecord = (value: unknown): Record<string, unknown> => {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+};
+
+const toRoomEventPayload = (value: unknown): RoomEventPayload => {
+  return toRecord(value) as RoomEventPayload;
+};
+
+const toResponseIndexPayload = (value: unknown): ResponseIndexPayload => {
+  return toRecord(value) as ResponseIndexPayload;
+};
+
+const isSessionLocation = (value: unknown): value is SessionLocation => {
+  if (!value || typeof value !== 'object') return false;
+
+  const record = value as Record<string, unknown>;
+  return typeof record.pathName === 'string' && typeof record.searchParams === 'object' && record.searchParams !== null;
+};
+
+const getVisibleSocketRooms = (socket: Socket, token: string | null): string[] => {
+  return [...socket.rooms]
     .filter((room): room is string => typeof room === 'string')
     .filter((room) => room !== socket.id)
-    .filter((room) => !token || room !== token);
+    .filter((room) => token == null || room !== token);
 };
 
 const getSessionRoomCodes = (session: SessionLayout): string[] => {
@@ -52,15 +80,17 @@ const getSessionRoomCodes = (session: SessionLayout): string[] => {
     ? session.roomCodes.filter((roomCode): roomCode is string => typeof roomCode === 'string' && roomCode.length > 0)
     : [];
 
-  return Array.from(new Set(roomCodes));
+  return [...new Set(roomCodes)];
 };
 
 const sanitizeSessionRoomKeys = (session: SessionLayout): SessionLayout => {
-  const { code: _legacyCode, codes: _legacyCodes, ...sanitizedSession } = session as SessionLayout & { code?: string; codes?: string[] };
+  const sanitizedSession = { ...session } as SessionLayout & { code?: string; codes?: string[] };
+  Reflect.deleteProperty(sanitizedSession, 'code');
+  Reflect.deleteProperty(sanitizedSession, 'codes');
   return sanitizedSession;
 };
 
-export default function loadSocket(httpServer: any) {
+export default function loadSocket(httpServer: ConstructorParameters<typeof SocketIOServer>[0]) {
 
   //? here we create the SocketIOServer instance
   const io = new SocketIOServer(httpServer, {
@@ -90,65 +120,67 @@ export default function loadSocket(httpServer: any) {
       socketConnected({ token, io });
     }
 
-    socket.on('apiRequest', async (msg: apiMessage) => {
-      handleApiRequest({ msg, socket, token });
+    socket.on('apiRequest', (msg: apiMessage) => {
+      void handleApiRequest({ msg, socket, token });
     });
-    socket.on('sync', async (msg: syncMessage) => {
-      handleSyncRequest({ msg, socket, token });
+    socket.on('sync', (msg: syncMessage) => {
+      void handleSyncRequest({ msg, socket, token });
     });
-    socket.on('joinRoom', async (data) => {
-      const group = typeof data?.group === 'string' ? data.group.trim() : '';
-      const responseIndex = data?.responseIndex;
+    socket.on('joinRoom', async (data: unknown) => {
+      const payload = toRoomEventPayload(data);
+      const group = typeof payload.group === 'string' ? payload.group.trim() : '';
+      const responseIndex = payload.responseIndex;
       if (typeof responseIndex !== 'number') {
         return;
       }
       if (!token) {
-        socket.emit(`joinRoom-${responseIndex}`, { error: 'Not authenticated' });
+        socket.emit(`joinRoom-${String(responseIndex)}`, { error: 'Not authenticated' });
         return;
       }
       if (!group) {
-        socket.emit(`joinRoom-${responseIndex}`, { error: 'Invalid room' });
+        socket.emit(`joinRoom-${String(responseIndex)}`, { error: 'Invalid room' });
         return;
       }
       await withSessionLock(token, async () => {
         const session = await getSession(token);
         if (!session) {
-          socket.emit(`joinRoom-${responseIndex}`, { error: 'Session not found' });
+          socket.emit(`joinRoom-${String(responseIndex)}`, { error: 'Session not found' });
           return;
         }
 
         const existingRoomCodes = getSessionRoomCodes(session);
-        const nextRoomCodes = Array.from(new Set([...existingRoomCodes, group]));
+        const nextRoomCodes = [...new Set([...existingRoomCodes, group])];
 
         await socket.join(group);
         const sanitizedSession = sanitizeSessionRoomKeys(session);
         await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
-        socket.emit(`joinRoom-${responseIndex}`, { rooms: getVisibleSocketRooms(socket, token) });
+        socket.emit(`joinRoom-${String(responseIndex)}`, { rooms: getVisibleSocketRooms(socket, token) });
         console.log(`Socket ${socket.id} joined group ${group}`, 'cyan');
       });
     });
 
-    socket.on('leaveRoom', async (data) => {
-      const group = typeof data?.group === 'string' ? data.group.trim() : '';
-      const responseIndex = data?.responseIndex;
+    socket.on('leaveRoom', async (data: unknown) => {
+      const payload = toRoomEventPayload(data);
+      const group = typeof payload.group === 'string' ? payload.group.trim() : '';
+      const responseIndex = payload.responseIndex;
       if (typeof responseIndex !== 'number') {
         return;
       }
 
       if (!token) {
-        socket.emit(`leaveRoom-${responseIndex}`, { error: 'Not authenticated' });
+        socket.emit(`leaveRoom-${String(responseIndex)}`, { error: 'Not authenticated' });
         return;
       }
 
       if (!group) {
-        socket.emit(`leaveRoom-${responseIndex}`, { error: 'Invalid room' });
+        socket.emit(`leaveRoom-${String(responseIndex)}`, { error: 'Invalid room' });
         return;
       }
 
       await withSessionLock(token, async () => {
         const session = await getSession(token);
         if (!session) {
-          socket.emit(`leaveRoom-${responseIndex}`, { error: 'Session not found' });
+          socket.emit(`leaveRoom-${String(responseIndex)}`, { error: 'Session not found' });
           return;
         }
 
@@ -160,62 +192,63 @@ export default function loadSocket(httpServer: any) {
         const sanitizedSession = sanitizeSessionRoomKeys(session);
         await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
 
-        socket.emit(`leaveRoom-${responseIndex}`, { rooms: getVisibleSocketRooms(socket, token) });
+        socket.emit(`leaveRoom-${String(responseIndex)}`, { rooms: getVisibleSocketRooms(socket, token) });
         console.log(`Socket ${socket.id} left group ${group}`, 'cyan');
       });
     });
 
-    socket.on('getJoinedRooms', (data) => {
-      const responseIndex = data?.responseIndex;
+    socket.on('getJoinedRooms', (data: unknown) => {
+      const payload = toResponseIndexPayload(data);
+      const responseIndex = payload.responseIndex;
       if (typeof responseIndex !== 'number') {
         return;
       }
 
       if (!token) {
-        socket.emit(`getJoinedRooms-${responseIndex}`, { error: 'Not authenticated', rooms: [] });
+        socket.emit(`getJoinedRooms-${String(responseIndex)}`, { error: 'Not authenticated', rooms: [] });
         return;
       }
 
-      socket.emit(`getJoinedRooms-${responseIndex}`, { rooms: getVisibleSocketRooms(socket, token) });
+      socket.emit(`getJoinedRooms-${String(responseIndex)}`, { rooms: getVisibleSocketRooms(socket, token) });
     });
 
-    socket.on('disconnect', async (reason) => {
-      if (config.socketActivityBroadcaster && token) {
-        socketDisconnecting({ token, socket, reason });
+    socket.on('disconnect', (reason: string) => {
+      if (socketActivityBroadcaster && token) {
+        void socketDisconnecting({ token, socket, reason });
       } else {
         if (!token) { return; }
         console.log(`user disconnected, reason: ${reason}`, 'yellow');
       }
     });
 
-    socket.on('updateLocation', async (newLocation) => {
+    socket.on('updateLocation', async (newLocation: unknown) => {
       if (!token) { return; }
-      if (!config.locationProviderEnabled) { return; }
-      console.log('updating location to: ', newLocation.pathName, 'yellow')
+      if (!locationProviderEnabled) { return; }
+
+      if (!isSessionLocation(newLocation)) { return; }
+
+      console.log('updating location to:', newLocation.pathName, 'yellow')
 
       await withSessionLock(token, async () => {
         let returnedUser: SessionLayout | null = null;
-        if (config.socketActivityBroadcaster) {
+        if (socketActivityBroadcaster) {
           returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
         }
 
-        if (!newLocation) { return; }
-        const user = returnedUser || await getSession(token);
+        const user = returnedUser ?? await getSession(token);
         if (!user) { return; }
 
-        const extendedUser = user as SessionLayout & { location?: SessionLayout };
-
-        extendedUser.location = newLocation;
+        user.location = newLocation;
         await saveSession(token, user);
       });
     });
 
-    if (config.socketActivityBroadcaster && token) {
+    if (socketActivityBroadcaster && token) {
       initAcitivityBroadcaster({ socket, token });
     }
 
     if (token) {
-      socket.join(token);
+      void socket.join(token);
     }
 
   });

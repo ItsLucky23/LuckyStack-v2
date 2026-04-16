@@ -1,5 +1,5 @@
-import { IncomingMessage } from 'http';
-import config from '../../config';
+import { IncomingMessage } from 'node:http';
+import { sessionBasedToken } from '../../config';
 import { getCookieValue } from './cookies';
 
 /**
@@ -27,9 +27,10 @@ export const extractTokenFromRequest = (req: IncomingMessage): string | null => 
   const cookieToken = getCookieValue(req.headers.cookie, 'token');
 
   // Prefer the configured mode, but fall back to the other transport.
-  if (config.sessionBasedToken) {
+  if (sessionBasedToken) {
     return bearerToken ?? cookieToken;
   }
 
   return cookieToken ?? bearerToken;
 };
+

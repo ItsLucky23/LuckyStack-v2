@@ -1,5 +1,5 @@
-import ts from 'typescript';
-import path from 'path';
+import * as ts from 'typescript';
+import path from 'node:path';
 import { getServerProgram, expandTypeDetailed, ExpandedTypeResult, UnresolvedTypeSymbol } from './tsProgram';
 import { ROOT_DIR } from '../../utils/paths';
 
@@ -15,9 +15,9 @@ const KNOWN_GLOBAL_TYPE_NAMES = new Set([
 
 const normalizeImportPath = (targetFilePath: string): string => {
   const fromDir = path.join(ROOT_DIR, 'src', '_sockets');
-  const from = fromDir.replace(/\\/g, '/');
-  const to = targetFilePath.replace(/\\/g, '/');
-  const normalized = path.posix.relative(from, to).replace(/\\/g, '/');
+  const from = fromDir.replaceAll('\\', '/');
+  const to = targetFilePath.replaceAll('\\', '/');
+  const normalized = path.posix.relative(from, to).replaceAll('\\', '/');
   const withoutExtension = normalized.replace(/(\.d)?\.(ts|tsx|js|jsx)$/i, '');
   if (withoutExtension.startsWith('.')) return withoutExtension;
   return `./${withoutExtension}`;
@@ -57,9 +57,9 @@ const collectFallbackSymbolsFromTypeText = (
     const localSymbol = symbolsInScope.find((symbol) => symbol.name === name);
     if (!localSymbol) continue;
 
-    const targetSymbol = (localSymbol.flags & ts.SymbolFlags.Alias) !== 0
-      ? checker.getAliasedSymbol(localSymbol)
-      : localSymbol;
+    const targetSymbol = (localSymbol.flags & ts.SymbolFlags.Alias) === 0
+      ? localSymbol
+      : checker.getAliasedSymbol(localSymbol);
     const declaration = targetSymbol.declarations?.[0];
 
     if (!declaration) {
@@ -82,12 +82,12 @@ const collectFallbackSymbolsFromTypeText = (
   return unresolvedSymbols;
 };
 
-// Kept for backwards compatibility — callers outside this module may still import it.
+// Kept for backwards compatibility  callers outside this module may still import it.
 export const stripComments = (str: string): string => {
-  return str.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
+  return str.replaceAll(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
 };
 
-// ─── shared helpers ──────────────────────────────────────────────────────────
+//  shared helpers 
 
 // Finds a top-level interface declaration by name in a source file's statements.
 const findInterface = (sourceFile: ts.SourceFile, name: string): ts.InterfaceDeclaration | null => {
@@ -227,7 +227,7 @@ const unionTypes = (types: string[]): string => {
   return unique.length > 0 ? unique.join(' | ') : '';
 };
 
-// ─── public API ──────────────────────────────────────────────────────────────
+//  public API 
 
 export const getInputTypeFromFile = (filePath: string): string => {
   return getInputTypeDetailsFromFile(filePath).text;
@@ -429,3 +429,4 @@ export const getSyncClientOutputTypeDetailsFromFile = (filePath: string): TypeEx
     return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
+

@@ -1,5 +1,5 @@
 import { Socket } from "socket.io";
-import redis from "../../functions/redis";
+import { redis } from "../../functions/redis";
 import { disconnectTimers, tempDisconnectedSockets } from "./activityBroadcaster";
 import { deleteSession } from "../../functions/session";
 import tryCatch from "../../../shared/tryCatch";
@@ -37,18 +37,18 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
     if (!skipSessionDelete) {
       await deleteSession(token);
     }
-    const tokensOfActiveUsers = `${process.env.PROJECT_NAME}-activeUsers:${userId}`
+    const projectName = process.env.PROJECT_NAME ?? 'project';
+    const safeUserId = userId ?? 'unknown';
+    const tokensOfActiveUsers = `${projectName}-activeUsers:${safeUserId}`
     await redis.srem(tokensOfActiveUsers, token);
-    socket.leave(token);
+    void socket.leave(token);
     return true;
   });
   if (error) {
     if (socket) {
       socket.emit(`logout`, "error");
     }
-  } else if (result) {
-    if (socket) {
+  } else if (result && socket) {
       socket.emit(`logout`, "success");
     }
-  }
 }

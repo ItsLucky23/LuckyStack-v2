@@ -2,17 +2,17 @@ type ValidationResult =
   | { status: 'success' }
   | { status: 'error'; message: string };
 
-  type ParsedObjectField = {
+  interface ParsedObjectField {
   key: string;
   optional: boolean;
   type: string;
-};
+}
 
-type ParsedObjectIndexSignature = {
+interface ParsedObjectIndexSignature {
   keyName: string;
   keyType: string;
   type: string;
-};
+}
 
 const splitTopLevel = (value: string, splitter: '|' | '&'): string[] => {
   const items: string[] = [];
@@ -64,17 +64,17 @@ const parseObjectFields = (typeText: string): {
     if (char === ';' && depth === 0) {
       const trimmed = part.trim();
       if (trimmed) {
-        const fieldMatch = trimmed.match(/^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?(\?)?\s*:\s*([\s\S]+)$/);
+        const fieldMatch = /^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?(\?)?\s*:\s*([\s\S]+)$/.exec(trimmed);
         if (fieldMatch) {
-          const keyMatch = trimmed.match(/^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?/);
+          const keyMatch = /^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?/.exec(trimmed);
           const rawKey = keyMatch?.[0] ?? '';
           fields.push({
-            key: rawKey.replace(/^['"]|['"]$/g, ''),
+            key: rawKey.replaceAll(/^['"]|['"]$/g, ''),
             optional: Boolean(fieldMatch[3]),
             type: fieldMatch[4].trim(),
           });
         } else {
-          const indexMatch = trimmed.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/);
+          const indexMatch = /^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/.exec(trimmed);
           if (indexMatch) {
             indexSignatures.push({
               keyName: indexMatch[1].trim(),
@@ -93,17 +93,17 @@ const parseObjectFields = (typeText: string): {
 
   const final = part.trim();
   if (final) {
-    const fieldMatch = final.match(/^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?(\?)?\s*:\s*([\s\S]+)$/);
+    const fieldMatch = /^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?(\?)?\s*:\s*([\s\S]+)$/.exec(final);
     if (fieldMatch) {
-      const keyMatch = final.match(/^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?/);
+      const keyMatch = /^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?/.exec(final);
       const rawKey = keyMatch?.[0] ?? '';
       fields.push({
-        key: rawKey.replace(/^['"]|['"]$/g, ''),
+        key: rawKey.replaceAll(/^['"]|['"]$/g, ''),
         optional: Boolean(fieldMatch[3]),
         type: fieldMatch[4].trim(),
       });
     } else {
-      const indexMatch = final.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/);
+      const indexMatch = /^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/.exec(final);
       if (indexMatch) {
         indexSignatures.push({
           keyName: indexMatch[1].trim(),
@@ -189,8 +189,8 @@ const validateType = (typeText: string, value: unknown, path: string): Validatio
     if (itemType === type) {
       return { status: 'success' };
     }
-    for (let index = 0; index < value.length; index += 1) {
-      const result = validateType(itemType, value[index], `${path}[${index}]`);
+    for (const [index, element] of value.entries()) {
+      const result = validateType(itemType, element, `${path}[${String(index)}]`);
       if (result.status === 'error') return result;
     }
     return { status: 'success' };

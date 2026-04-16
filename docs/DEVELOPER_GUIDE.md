@@ -12,8 +12,7 @@
 # Install dependencies
 npm install
 
-# Copy config templates
-cp configTemplate.txt config.ts
+# Copy environment templates
 cp .env_template .env
 cp .env.local_template .env.local
 
@@ -36,6 +35,14 @@ npm run server
 
 # Terminal 2: Start frontend (Vite)
 npm run client
+```
+
+`npm run server` now uses a core-file supervisor: route logic (`_api`/`_sync`) stays on incremental hot reload, while core backend files (auth/bootstrap/socket/server) trigger a fast process restart.
+
+If you need to run without the supervisor, use:
+
+```bash
+npm run server:direct
 ```
 
 ### 3. Create Your First API

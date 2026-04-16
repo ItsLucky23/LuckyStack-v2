@@ -1,7 +1,7 @@
-import fs from "fs";
-import { IncomingMessage, ServerResponse } from "http";
-import path from "path";
-import { fileURLToPath } from 'url';
+import fs from "node:fs";
+import { IncomingMessage, ServerResponse } from "node:http";
+import path from "node:path";
+import { fileURLToPath } from 'node:url';
 import { PUBLIC_DIR } from '../utils/paths';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -50,9 +50,9 @@ export const serveFavicon = (res: ServerResponse) => {
 export const serveFile = async (req: IncomingMessage | { url: string }, res: ServerResponse) => {
 
   //? if request is / (root) we serve the index.html 
-  const url = !req.url ? 'index.html' : req.url == '/' ? 'index.html' : req.url;
-  const safePath = path.normalize(decodeURIComponent(url)).replace(/^(\.\.[\/\\])+/, '');
-  let filePath = path.join(rootFolder, safePath);
+  const url = req.url ? (req.url == '/' ? 'index.html' : req.url) : 'index.html';
+  const safePath = path.normalize(decodeURIComponent(url)).replace(/^(\.\.[/\\])+/, '');
+  const filePath = path.join(rootFolder, safePath);
 
   console.log(filePath)
   console.log(rootFolder)
@@ -93,18 +93,28 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
   //? here we get the content type of the file and serve it to the client
   //? if the file extension is not in the list below, we serve the index.html file
   switch (extname) {
-    case '.html': contentType = 'text/html'; break;
-    case '.css': contentType = 'text/css'; break;
-    case '.js': contentType = 'text/javascript'; break;
-    case '.json': contentType = 'application/json'; break;
-    case '.png': contentType = 'image/png'; break;
+    case '.html': { contentType = 'text/html'; break;
+    }
+    case '.css': { contentType = 'text/css'; break;
+    }
+    case '.js': { contentType = 'text/javascript'; break;
+    }
+    case '.json': { contentType = 'application/json'; break;
+    }
+    case '.png': { contentType = 'image/png'; break;
+    }
     case '.jpg':
-    case '.jpeg': contentType = 'image/jpeg'; break;
-    case '.gif': contentType = 'image/gif'; break;
-    case '.svg': contentType = 'image/svg+xml'; break;
-    case '.ico': contentType = 'image/x-icon'; break;
-    default:
+    case '.jpeg': { contentType = 'image/jpeg'; break;
+    }
+    case '.gif': { contentType = 'image/gif'; break;
+    }
+    case '.svg': { contentType = 'image/svg+xml'; break;
+    }
+    case '.ico': { contentType = 'image/x-icon'; break;
+    }
+    default: {
       contentType = null;
+    }
   }
 
   if (!contentType) {
@@ -118,7 +128,7 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.writeHead(200, { 'Content-Type': contentType });
     res.end(content);
-  } catch (err) {
+  } catch {
     if (url == 'index.html') {
       res.end("-_- you have to run the 'npm run build' command first -_-")
     } else {

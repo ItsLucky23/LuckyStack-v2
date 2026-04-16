@@ -90,7 +90,27 @@ export const initializeSentry = () => {
   });
 
   // Initialize shared Sentry instance
-  initSharedSentry(Sentry);
+  initSharedSentry({
+    captureException: (exception, context) => Sentry.captureException(
+      exception,
+      context as Parameters<typeof Sentry.captureException>[1],
+    ),
+    captureMessage: (message, level) => Sentry.captureMessage(
+      message,
+      level as Parameters<typeof Sentry.captureMessage>[1],
+    ),
+    setUser: (user) => {
+      Sentry.setUser(user as Parameters<typeof Sentry.setUser>[0]);
+    },
+    setContext: (key, context) => {
+      Sentry.setContext(key, context as Parameters<typeof Sentry.setContext>[1]);
+    },
+    startInactiveSpan: (context) => {
+      return Sentry.startInactiveSpan(
+        context as Parameters<typeof Sentry.startInactiveSpan>[0],
+      );
+    },
+  });
 
   console.log('Sentry initialized for error monitoring');
 };

@@ -119,6 +119,16 @@ export default tseslint.config(
     },
   },
   {
+    files: ['server/**/*.ts', 'shared/**/*.ts', 'scripts/**/*.ts', 'config.ts'],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'react/jsx-no-literals': 'off',
+    },
+  },
+  {
     files: [
       'src/**/*api/**/*.ts', 
       'src/**/*Api/**/*.ts', 

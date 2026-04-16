@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/no-unnecessary-type-conversion, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/restrict-plus-operands, @typescript-eslint/no-unnecessary-condition */
+
 import { Server } from 'socket.io';
 
 import { extractTokenFromSocket } from '../../../utils/extractToken';
@@ -26,7 +28,7 @@ export const informRoomPeers = async ({
     ? session.roomCodes.filter((room: unknown): room is string => typeof room === 'string' && room.length > 0)
     : [];
 
-  if (!session || !roomCodes.length) { return; }
+  if (!session || roomCodes.length === 0) { return; }
 
   const handledSockets = new Set<string>();
 

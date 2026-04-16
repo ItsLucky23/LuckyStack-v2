@@ -20,10 +20,10 @@ variables:
   # Repalace YOURSERVER and URLs/paths with your actual server name and paths.
 
   STAGING_ENV_URL: https://staging.YOURSERVER.nl
-  STAGING_APP_ROOT: /var/www/YOURSERVER-staging
-  STAGING_DIST_ROOT: /var/www/YOURSERVER-staging/dist
-  STAGING_DIST_ASSETS_ROOT: /var/www/YOURSERVER-staging/dist/assets
-  STAGING_PRISMA_ROOT: /var/www/YOURSERVER-staging/prisma
+  STAGING_APP_ROOT: /var/www/YOURSERVER
+  STAGING_DIST_ROOT: /var/www/YOURSERVER/dist
+  STAGING_DIST_ASSETS_ROOT: /var/www/YOURSERVER/dist/assets
+  STAGING_PRISMA_ROOT: /var/www/YOURSERVER/prisma
   STAGING_PM2_PROCESS_NAME: YOURSERVER-staging
 
   PRODUCTION_ENV_URL: https://app.YOURSERVER.nl
@@ -104,7 +104,7 @@ lint:
     - test -s src/_sockets/apiTypes.generated.ts
     - test -s src/docs/apiDocs.generated.json
     - test -s server/prod/generatedApis.ts
-    - npm run lint
+    - npm run lint:all
   rules:
     - if: $DEPLOY_TEST == "true"
       when: never

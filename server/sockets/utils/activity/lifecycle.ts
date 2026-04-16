@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/no-floating-promises, @typescript-eslint/require-await, @typescript-eslint/restrict-template-expressions, @typescript-eslint/no-misused-promises */
+
 import { Server, Socket } from 'socket.io';
 
 import { deleteSession, getSession } from '../../../functions/session';
@@ -36,7 +38,7 @@ export const socketConnected = async ({
     ? session.roomCodes.filter((room: unknown): room is string => typeof room === 'string' && room.length > 0)
     : [];
 
-  if (!roomCodes.length) { return; }
+  if (roomCodes.length === 0) { return; }
   if (!userId) { return; }
 
   informRoomPeers({ token, io, event: 'userBack', extraData: { ignoreSelf: true } });
@@ -58,10 +60,10 @@ export const socketDisconnecting = async ({
   }
 
   if (!token) { return; }
-  if (!tempDisconnectedSockets.has(token)) {
-    tempDisconnectedSockets.add(token);
-  } else {
+  if (tempDisconnectedSockets.has(token)) {
     return;
+  } else {
+    tempDisconnectedSockets.add(token);
   }
 
   const time = getDisconnectTime({ token, reason });
@@ -91,7 +93,7 @@ export const socketDisconnecting = async ({
   }, time);
 
   if (disconnectTimers.has(token)) {
-    clearTimeout(disconnectTimers.get(token)!);
+    clearTimeout(disconnectTimers.get(token));
     disconnectTimers.delete(token);
   }
   disconnectTimers.set(token, timeout);

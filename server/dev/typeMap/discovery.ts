@@ -1,5 +1,5 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const walkFiles = (
   dir: string,
@@ -31,21 +31,22 @@ const walkFiles = (
 
 export const findAllApiFiles = (srcDir: string): string[] => {
   return walkFiles(srcDir, (fullPath, entryName) => {
-    const normalized = fullPath.replace(/\\/g, '/');
+    const normalized = fullPath.replaceAll('\\', '/');
     return /_v\d+\.ts$/.test(entryName) && normalized.includes('/_api/');
   });
 };
 
 export const findAllSyncServerFiles = (srcDir: string): string[] => {
   return walkFiles(srcDir, (fullPath, entryName) => {
-    const normalized = fullPath.replace(/\\/g, '/');
+    const normalized = fullPath.replaceAll('\\', '/');
     return /_server_v\d+\.ts$/.test(entryName) && normalized.includes('/_sync/');
   });
 };
 
 export const findAllSyncClientFiles = (srcDir: string): string[] => {
   return walkFiles(srcDir, (fullPath, entryName) => {
-    const normalized = fullPath.replace(/\\/g, '/');
+    const normalized = fullPath.replaceAll('\\', '/');
     return /_client_v\d+\.ts$/.test(entryName) && normalized.includes('/_sync/');
   });
 };
+

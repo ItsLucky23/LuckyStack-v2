@@ -12,7 +12,7 @@ A **socket-first full-stack framework** for building real-time web applications 
 
 ## What is LuckyStack?
 
-LuckyStack is a custom full-stack framework that takes a **socket-first approach** to client-server communication. Instead of traditional REST APIs, all communication happens over WebSockets, enabling:
+LuckyStack is a custom full-stack framework that takes a **socket-first approach** to client-server communication. WebSockets are the primary path, with HTTP API/sync fallback endpoints when needed, enabling:
 
 - **Real-time sync** between clients in the same room
 - **Multiplayer awareness** (AFK detection, user presence)
@@ -23,7 +23,7 @@ LuckyStack is a custom full-stack framework that takes a **socket-first approach
 
 | Feature                | Description                                           |
 | ---------------------- | ----------------------------------------------------- |
-| **Socket-First**       | All client-server communication via Socket.io         |
+| **Socket-First**       | Socket.io-first communication with HTTP fallback      |
 | **Authentication**     | Credentials + Google, GitHub, Discord, Facebook OAuth |
 | **Room System**        | Join rooms for targeted real-time sync                |
 | **Activity Awareness** | Track user AFK status and presence                    |
@@ -51,11 +51,12 @@ cd PROJECT_NAME
 # Copy environment template
 cp .env_template .env
 cp .env.local_template .env.local
-cp configTemplate.txt config.ts
 
 # Start all services (client, server, MongoDB, Redis)
 docker compose up
 ```
+
+`config.ts` is tracked in this repository. Update it directly for project-level configuration.
 
 MongoDB and Redis are included in the Docker setup — no separate installation needed.
 

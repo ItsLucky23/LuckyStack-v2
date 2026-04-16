@@ -1,5 +1,5 @@
-import ts from 'typescript';
-import fs from 'fs';
+import * as ts from 'typescript';
+import fs from 'node:fs';
 import { inferHttpMethod } from '../../utils/httpApiUtils';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -20,7 +20,7 @@ const findExportedConst = (sourceFile: ts.SourceFile, name: string): ts.Variable
 
 export const extractHttpMethod = (filePath: string, apiName: string): HttpMethod => {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'httpMethod');
 
@@ -37,7 +37,7 @@ export const extractHttpMethod = (filePath: string, apiName: string): HttpMethod
 
 export const extractRateLimit = (filePath: string): number | false | undefined => {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'rateLimit');
 
@@ -75,7 +75,7 @@ const parseAdditionalItem = (objectLiteral: ts.ObjectLiteralExpression): Record<
 
 export const extractAuth = (filePath: string): { login: boolean; additional?: Record<string, unknown>[] } => {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'auth');
     if (!decl?.initializer || !ts.isObjectLiteralExpression(decl.initializer)) return { login: true };
@@ -107,3 +107,4 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
 
   return { login: true };
 };
+

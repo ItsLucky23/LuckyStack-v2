@@ -1,21 +1,21 @@
-import dotenv from 'dotenv';
-import { initializeSentry } from './functions/sentry';
-import path from 'path';
+/* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/prefer-nullish-coalescing */
 
-dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
+import { env } from './bootstrap/env';
+import { initializeSentry } from './functions/sentry';
+import path from 'node:path';
+
 initializeSentry();
 
-import http from 'http';
+import http from 'node:http';
 import getParams from './utils/getParams';
 import { loginWithCredentials, loginCallback, createOAuthState } from './auth/login';
 import { serveFavicon, serveFile } from './prod/serveFile';
 import loadSocket from './sockets/socket';
-import z from 'zod';
+import { z } from 'zod';
 import oauthProviders from "./auth/loginConfig";
 import { deleteSession, getSession } from './functions/session';
 import allowedOrigin from './auth/checkOrigin';
-import config, { SessionLayout } from '../config';
+import { rateLimiting, sessionBasedToken, sessionExpiryDays, SessionLayout } from '../config';
 
 import { serveAvatar } from './utils/serveAvatars';
 import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
@@ -24,8 +24,8 @@ import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
 import { checkRateLimit } from './utils/rateLimiter';
 import { hasCookie } from './utils/cookies';
 
-const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
-const SESSION_COOKIE_OPTIONS = `HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; ${process.env.SECURE == 'true' ? "Secure;" : ""}`;
+const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (sessionExpiryDays || 7);
+const SESSION_COOKIE_OPTIONS = `HttpOnly; SameSite=Strict; Path=/; Max-Age=${String(SESSION_COOKIE_MAX_AGE_SECONDS)}; ${env.SECURE == 'true' ? "Secure;" : ""}`;
 
 const REDACTED_LOG_KEYS = new Set([
   'password',
@@ -40,7 +40,7 @@ const REDACTED_LOG_KEYS = new Set([
 
 const sanitizeForLog = (value: unknown): unknown => {
   if (Array.isArray(value)) {
-    return value.map(sanitizeForLog);
+    return value.map((item) => sanitizeForLog(item));
   }
 
   if (value && typeof value === 'object') {
@@ -128,6 +128,14 @@ const sendSseEvent = ({
   res.write(`data: ${serializedData}\n\n`);
 };
 
+const toRecord = (value: unknown): Record<string, unknown> => {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+};
+
+const resolveHttpStatus = (value: unknown, fallback = 200): number => {
+  return typeof value === 'number' ? value : fallback;
+};
+
 const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
 
   const origin = req.headers.origin ?? req.headers.referer ?? req.headers.host ?? '';
@@ -154,13 +162,14 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   }
 
   const method = req.method;
+  const methodName = method ?? 'UNKNOWN';
   const url = req.url || '/';
   const [routePath, queryString] = url.split('?');
 
   if (method !== 'GET' && method != 'POST' && method != 'PUT' && method != 'DELETE') {
     res.statusCode = 404;
     res.setHeader('Content-Type', 'text/plain');
-    return res.end(`method: ${method} not supported, use one of the following methods: GET, POST, PUT, DELETE`);
+    return res.end(`method: ${methodName} not supported, use one of the following methods: GET, POST, PUT, DELETE`);
   }
 
   const token = extractTokenFromRequest(req);
@@ -182,18 +191,18 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
   //? here we get the params from the request
   let params: object | null;
-  params = await getParams({ method, req, res, queryString });
+  params = await getParams({ method: methodName, req, res, queryString });
 
   if (res.writableEnded) {
     return;
   }
 
   //? we log the request and if there are any params we log them with the request
-  if (params && typeof params == 'object' && Object.keys(params).length !== 0) {
+  if (params && typeof params == 'object' && Object.keys(params).length > 0) {
     const safeParams = sanitizeForLog(params);
-    console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(safeParams)}`, 'magenta')
+    console.log(`method: ${methodName}, url: ${routePath}, params: ${JSON.stringify(safeParams)}`, 'magenta')
   } else {
-    console.log(`method: ${method}, url: ${routePath}`, 'magenta');
+    console.log(`method: ${methodName}, url: ${routePath}`, 'magenta');
     params = {};
   }
 
@@ -208,9 +217,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   if (z.string().startsWith('/auth/api').safeParse(routePath).success) {
     const providerName = routePath.split('/')[3]; // Extract the provider (google/github)
     const provider = oauthProviders.find(p => p.name === providerName);
-    if (!provider || !provider.name) { return { provider, status: false, reason: 'login.providerNotFound' }; }
+    if (!provider?.name) { return { provider, status: false, reason: 'login.providerNotFound' }; }
 
-    if (provider?.name != 'credentials' && 'scope' in provider) {
+    if (provider.name != 'credentials' && 'scope' in provider) {
       const oauthState = await createOAuthState(provider.name);
       if (!oauthState) {
         res.writeHead(500, { "Content-Type": "application/json" });
@@ -231,12 +240,12 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       return res.end();
     }
 
-    if (config.rateLimiting.defaultApiLimit !== false && config.rateLimiting.defaultApiLimit > 0) {
+    if (rateLimiting.defaultApiLimit !== false && rateLimiting.defaultApiLimit > 0) {
       const requesterIp = req.socket.remoteAddress ?? 'unknown';
-      const { allowed, resetIn } = checkRateLimit({
+      const { allowed, resetIn } = await checkRateLimit({
         key: `ip:${requesterIp}:auth:credentials`,
-        limit: config.rateLimiting.defaultApiLimit,
-        windowMs: config.rateLimiting.windowMs,
+        limit: rateLimiting.defaultApiLimit,
+        windowMs: rateLimiting.windowMs,
       });
 
       if (!allowed) {
@@ -271,9 +280,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       if (token) { await deleteSession(token); }
 
       const requestedSessionMode = parseSessionBasedTokenHeader(req.headers['x-session-based-token']);
-      const useSessionBasedToken = requestedSessionMode ?? config.sessionBasedToken;
+      const useSessionBasedToken = requestedSessionMode ?? sessionBasedToken;
 
-      if (process.env.NODE_ENV === 'development') {
+      if (env.NODE_ENV === 'development') {
         console.log('setting cookie with new token', 'green');
       }
 
@@ -291,7 +300,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
   } else if (z.string().startsWith('/auth/callback').safeParse(routePath).success) {
     //? this endpoint is triggerd by the oauth provider after the user has logged in
-    const newToken = await loginCallback(routePath, req, res);
+    const newToken = await loginCallback(routePath, req);
 
     //? if it failed to either login or creating an account then we return
     if (!newToken) {
@@ -305,14 +314,14 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     if (token) { await deleteSession(token); }
 
     //? we set the cookie with the new token and redirect the user to the frontend
-    if (process.env.NODE_ENV === 'development') {
+    if (env.NODE_ENV === 'development') {
       console.log('setting cookie or redirect with new token', 'green');
     }
-    const location = process.env.DNS
+    const location = env.DNS
 
-    if (config.sessionBasedToken) {
+    if (sessionBasedToken) {
       res.writeHead(302, {
-        Location: `${process.env.DNS}?token=${newToken}`,
+        Location: `${env.DNS}?token=${newToken}`,
       });
     } else {
       res.setHeader("Set-Cookie", `token=${newToken}; ${SESSION_COOKIE_OPTIONS}`);
@@ -339,7 +348,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         });
       }
 
-      // Extract API name from path: /api/examples/getUserData → examples/getUserData
+      // Extract API name from path: /api/examples/getUserData  examples/getUserData
       const apiName = routePath.slice(5); // Remove "/api/" prefix (5 chars)
 
       if (!apiName) {
@@ -375,7 +384,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         requesterIp: req.socket.remoteAddress ?? undefined,
         xLanguageHeader: req.headers['x-language'],
         acceptLanguageHeader: req.headers['accept-language'],
-        method: (method as 'GET' | 'POST' | 'PUT' | 'DELETE') || 'POST',
+        method: (method) || 'POST',
         stream: useHttpStream
           ? (payload) => {
             if (streamClosed || res.writableEnded) {
@@ -395,7 +404,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       }
 
       res.setHeader('Content-Type', 'application/json');
-      res.writeHead(result.httpStatus);
+      res.writeHead(resolveHttpStatus((result as Record<string, unknown>).httpStatus, 200));
       return res.end(JSON.stringify(result));
     } catch (error) {
       console.log('HTTP API error:', error, 'red');
@@ -488,12 +497,18 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
         : {};
       delete syncParams.stream;
 
+      const syncPayload = toRecord(syncParams);
+      const syncCb = typeof syncPayload.cb === 'string' ? syncPayload.cb : undefined;
+      const syncData = toRecord(syncPayload.data);
+      const syncReceiver = typeof syncPayload.receiver === 'string' ? syncPayload.receiver : '';
+      const syncIgnoreSelf = typeof syncPayload.ignoreSelf === 'boolean' ? syncPayload.ignoreSelf : undefined;
+
       const result = await handleHttpSyncRequest({
         name: `sync/${syncName}`,
-        cb: typeof (syncParams as any).cb === 'string' ? (syncParams as any).cb : undefined,
-        data: (syncParams as any).data || {},
-        receiver: (syncParams as any).receiver,
-        ignoreSelf: (syncParams as any).ignoreSelf,
+        cb: syncCb,
+        data: syncData,
+        receiver: syncReceiver,
+        ignoreSelf: syncIgnoreSelf,
         token: httpToken,
         requesterIp: req.socket.remoteAddress ?? undefined,
         xLanguageHeader: req.headers['x-language'],
@@ -552,7 +567,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     return serveFile(req, res);
 
   } else if (z.string()
-    .regex(/^\/(assets\/[a-zA-Z0-9_\-/]+|[a-zA-Z0-9_\-]+)\.(png|jpg|jpeg|gif|svg|html|css|js)$/)
+    .regex(/^\/(assets\/[a-zA-Z0-9_/-]+|[a-zA-Z0-9_-]+)\.(png|jpg|jpeg|gif|svg|html|css|js)$/)
     .safeParse(routePath).success) {
     //? if the request is a file with one of the following extensions then we serve it
     //? png|jpg|jpeg|gif|svg|html|css|js
@@ -568,28 +583,49 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   }
 }
 
-const ip: string = process.env.SERVER_IP || '127.0.0.1';
-const port: string = process.env.SERVER_PORT || '80';
+const ip: string = env.SERVER_IP;
+const port: string = env.SERVER_PORT;
+const startupStartedAt = Date.now();
 
-(async () => {
-  const isDevMode = process.env.NODE_ENV !== 'production';
+{
+  const isDevMode = env.NODE_ENV !== 'production';
   if (isDevMode) {
-    const { initConsolelog } = await import('./utils/console.log');
+    const devBootstrapStartedAt = Date.now();
+    const [
+      { initConsolelog },
+      { initializeAll },
+      { setupWatchers },
+      { initRepl },
+    ] = await Promise.all([
+      import('./utils/console.log'),
+      import('./dev/loader'),
+      import('./dev/hotReload'),
+      import('./utils/repl'),
+    ]);
+
     initConsolelog();
-    const { initializeAll } = await import('./dev/loader');
     await initializeAll();
-    const { setupWatchers } = await import('./dev/hotReload');
     setupWatchers();
-    const { initRepl } = await import('./utils/repl');
     initRepl();
+
+    const devBootstrapDurationMs = Date.now() - devBootstrapStartedAt;
+    console.log(`[Startup] Dev bootstrap completed in ${String(devBootstrapDurationMs)}ms`, 'cyan');
   }
 
-  const httpServer = http.createServer(async (req, res) => { ServerRequest(req, res) });
+  const networkBootstrapStartedAt = Date.now();
+  const httpServer = http.createServer((req, res) => {
+    void ServerRequest(req, res);
+  });
   loadSocket(httpServer);
-  // @ts-ignore // typescript thinks ip needs to be a number
+  const networkBootstrapDurationMs = Date.now() - networkBootstrapStartedAt;
+  console.log(`[Startup] HTTP and socket setup completed in ${String(networkBootstrapDurationMs)}ms`, 'cyan');
+
+  // @ts-expect-error typescript thinks ip needs to be a number
   httpServer.listen(port, ip, () => {
+    const startupDurationMs = Date.now() - startupStartedAt;
     console.log(`Server is running on http://${ip}:${port}/`, 'green');
+    console.log(`[Startup] Total startup completed in ${String(startupDurationMs)}ms`, 'green');
   });
 
 
-})()
+}

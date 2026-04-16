@@ -1,5 +1,5 @@
 import { Socket } from 'socket.io';
-import config from '../../config';
+import { sessionBasedToken } from '../../config';
 import { getCookieValue } from './cookies';
 
 /**
@@ -26,13 +26,13 @@ import { getCookieValue } from './cookies';
  */
 export const extractTokenFromSocket = (socket: Socket): string | null => {
   const cookie = socket.handshake.headers.cookie;
-  const sessionToken = typeof socket.handshake.auth?.token === 'string'
+  const sessionToken = typeof socket.handshake.auth.token === 'string'
     ? socket.handshake.auth.token
     : null;
   const cookieToken = getCookieValue(cookie, 'token');
 
   // Session-based token (stored in sessionStorage on client)
-  if (config.sessionBasedToken) {
+  if (sessionBasedToken) {
     return sessionToken ?? cookieToken;
   }
 

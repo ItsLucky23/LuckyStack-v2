@@ -1,9 +1,9 @@
-import { apis, functions } from '../prod/generatedApis'
 import { apiMessage } from './socket';
 import { getSession } from '../functions/session';
-import config, { SessionLayout } from '../../config';
+import { rateLimiting, AuthProps, SessionLayout } from '../../config';
 import { Socket } from 'socket.io';
 import { logout } from './utils/logout';
+import { getRuntimeApiMaps } from '../prod/runtimeMaps';
 import { validateRequest } from '../utils/validateRequest';
 import { setSentryUser, startSpan } from '../functions/sentry';
 import { checkRateLimit } from '../utils/rateLimiter';
@@ -11,29 +11,50 @@ import tryCatch from '../../shared/tryCatch';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '../utils/responseNormalizer';
 import { validateInputByType } from '../utils/runtimeTypeValidation';
 
-type handleApiRequestType = {
+interface handleApiRequestType {
   msg: apiMessage,
   socket: Socket,
   token: string | null,
 }
 
-type ApiStreamPayload = {
-  [key: string]: unknown;
+type ApiStreamPayload = Record<string, unknown>;
+
+interface RuntimeApiRoute {
+  auth: AuthProps;
+  main: (params: {
+    data: object;
+    user: SessionLayout | null;
+    functions: Record<string, unknown>;
+    stream: (payload?: ApiStreamPayload) => void;
+  }) => Promise<RuntimeApiResult> | RuntimeApiResult;
+  inputType?: string;
+  inputTypeFilePath?: string;
+  rateLimit?: number | false;
 }
 
-const getRuntimeApiMaps = async () => {
-  if (process.env.NODE_ENV !== 'production') {
-    const { devApis, devFunctions } = await import('../dev/loader');
-    return {
-      apisObject: devApis,
-      functionsObject: devFunctions,
-    };
+type RuntimeApiResult =
+  | {
+    status: 'success';
+    httpStatus?: number;
+    message?: string;
+    [key: string]: unknown;
+  }
+  | {
+    status: 'error';
+    httpStatus?: number;
+    errorCode?: string;
+    errorParams?: { key: string; value: string | number | boolean }[];
+    message?: string;
+    [key: string]: unknown;
+  };
+
+const isRuntimeApiResult = (value: unknown): value is RuntimeApiResult => {
+  if (!value || typeof value !== 'object') {
+    return false;
   }
 
-  return {
-    apisObject: apis,
-    functionsObject: functions,
-  };
+  const status = (value as { status?: unknown }).status;
+  return status === 'success' || status === 'error';
 };
 
 export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
@@ -46,14 +67,19 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   const { name, data, responseIndex } = msg;
+  if (typeof responseIndex !== 'number') {
+    console.log('no response index given!!!!', 'red')
+    return;
+  }
+
   const user = await getSession(token)
   setSentryUser(user?.id ? {
-    id: String(user.id),
-    email: user.email || undefined,
+    id: typeof user.id === 'string' ? user.id : String(user.id),
+    email: user.email,
   } : null);
   const preferredLocale =
     extractLanguageFromHeader(socket.handshake.headers['x-language'])
-    || extractLanguageFromHeader(socket.handshake.headers['accept-language']);
+    ?? extractLanguageFromHeader(socket.handshake.headers['accept-language']);
 
   const emitApiError = ({
     response,
@@ -62,7 +88,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     response: { status: 'error'; httpStatus?: number; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[] };
     fallbackHttpStatus?: number;
   }) => {
-    return socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
+    return socket.emit(`apiResponse-${String(responseIndex)}`, normalizeErrorResponse({
       response,
       preferredLocale,
       userLanguage: user?.language,
@@ -70,19 +96,14 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     }));
   };
 
-  if (!responseIndex && typeof responseIndex !== 'number') {
-    console.log('no response index given!!!!', 'red')
-    return;
-  }
-
   //? 'logout' needs special handling since it requires socket access
   // Extract the API name (last segment) to check for logout regardless of page path
   const nameSegments = name.split('/').filter(Boolean);
-  const requestedVersion = nameSegments[nameSegments.length - 1];
-  const apiBaseName = nameSegments[nameSegments.length - 2];
-  if (apiBaseName == 'logout') {
-    await logout({ token, socket, userId: user?.id || null });
-    return socket.emit(`apiResponse-${responseIndex}`, {
+  const requestedVersion = nameSegments.at(-1);
+  const apiBaseName = nameSegments.at(-2);
+  if (apiBaseName === 'logout') {
+    await logout({ token, socket, userId: user?.id ?? null });
+    return socket.emit(`apiResponse-${String(responseIndex)}`, {
       status: 'success',
       httpStatus: 200,
       result: true,
@@ -90,16 +111,6 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Built-in API handlers
-
-  if (!name || !data || typeof name != 'string' || typeof data != 'object') {
-    return emitApiError({
-      response: {
-        status: 'error',
-        errorCode: 'api.invalidRequest',
-      },
-      fallbackHttpStatus: 400,
-    });
-  }
 
   console.log(`api: ${name} called`, 'blue');
 
@@ -127,12 +138,13 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     });
   }
 
-  const { auth, main } = apisObject[resolvedName];
-  const inputType = apisObject[resolvedName].inputType as string | undefined;
-  const inputTypeFilePath = apisObject[resolvedName].inputTypeFilePath as string | undefined;
+  const runtimeApiRoute = apisObject[resolvedName] as RuntimeApiRoute;
+  const { auth, main } = runtimeApiRoute;
+  const inputType = runtimeApiRoute.inputType;
+  const inputTypeFilePath = runtimeApiRoute.inputTypeFilePath;
 
   const emitApiStream = (payload: ApiStreamPayload = {}) => {
-    socket.emit(`apiStream-${responseIndex}`, payload);
+    socket.emit(`apiStream-${String(responseIndex)}`, payload);
   };
 
   const inputValidation = await validateInputByType({
@@ -153,24 +165,29 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Auth validation: check login requirement
-  if (auth.login) {
-    if (!user?.id) {
+  if (auth.login && !user?.id) {
       console.log(`ERROR: API ${name} requires login`, 'red');
       return emitApiError({
         response: { status: 'error', errorCode: 'auth.required' },
         fallbackHttpStatus: 401,
       });
     }
+
+  if (!user) {
+    return emitApiError({
+      response: { status: 'error', errorCode: 'auth.forbidden' },
+      fallbackHttpStatus: 403,
+    });
   }
 
   //? Auth validation: check additional requirements
-  const authResult = validateRequest({ auth, user: user as SessionLayout });
+  const authResult = validateRequest({ auth, user });
   if (authResult.status === "error") {
-    console.log(`ERROR: Auth failed for ${name}: ${authResult.errorCode}`, 'red');
+    console.log(`ERROR: Auth failed for ${name}: ${authResult.errorCode ?? 'unknown'}`, 'red');
     return emitApiError({
       response: {
         status: 'error',
-        errorCode: authResult.errorCode || 'auth.forbidden',
+        errorCode: authResult.errorCode ?? 'auth.forbidden',
         errorParams: authResult.errorParams,
         httpStatus: authResult.httpStatus,
       },
@@ -179,20 +196,17 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Rate limiting check: per-API bucket (custom rateLimit or defaultApiLimit fallback)
-  const apiRateLimit = apisObject[resolvedName].rateLimit;
-  const effectiveApiLimit = apiRateLimit !== undefined
-    ? apiRateLimit
-    : config.rateLimiting.defaultApiLimit;
+  const effectiveApiLimit = runtimeApiRoute.rateLimit ?? rateLimiting.defaultApiLimit;
 
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
-    const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
+    const requesterIdentity = token ?? socket.handshake.address;
     const keyPrefix = token ? 'token' : 'ip';
     const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${name}`;
 
-    const { allowed, resetIn } = checkRateLimit({
+    const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
       limit: effectiveApiLimit,
-      windowMs: config.rateLimiting.windowMs
+      windowMs: rateLimiting.windowMs
     });
 
     if (!allowed) {
@@ -209,13 +223,13 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Global per-IP bucket across all APIs
-  if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
-    const requesterIp = socket.handshake.address ?? 'unknown';
+  if (rateLimiting.defaultIpLimit !== false && rateLimiting.defaultIpLimit > 0) {
+    const requesterIp = socket.handshake.address;
 
-    const { allowed, resetIn } = checkRateLimit({
+    const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${requesterIp}:api:all`,
-      limit: config.rateLimiting.defaultIpLimit,
-      windowMs: config.rateLimiting.windowMs
+      limit: rateLimiting.defaultIpLimit,
+      windowMs: rateLimiting.windowMs
     });
 
     if (!allowed) {
@@ -239,7 +253,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     {
       handler: 'handleApiRequest',
       api: resolvedName,
-      userId: user?.id,
+        userId: user.id,
       transport: 'socket',
     },
   );
@@ -247,31 +261,42 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   if (error) {
     console.log(`ERROR in ${name}:`, error, 'red');
-    socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
+    socket.emit(`apiResponse-${String(responseIndex)}`, normalizeErrorResponse({
       response: {
         status: 'error',
         errorCode: 'api.internalServerError',
       },
       preferredLocale,
-      userLanguage: user?.language,
+      userLanguage: user.language,
       fallbackHttpStatus: 500,
     }));
-  } else if (result !== undefined && result !== null) {
+  } else if (result === null) {
+    console.log(`WARNING: ${name} returned nothing`, 'yellow');
+    socket.emit(`apiResponse-${String(responseIndex)}`, normalizeErrorResponse({
+      response: {
+        status: 'error',
+        errorCode: 'api.emptyResponse',
+      },
+      preferredLocale,
+      userLanguage: user.language,
+      fallbackHttpStatus: 500,
+    }));
+  } else {
     console.log(`api: ${name} completed`, 'blue');
 
-    if (result && typeof result === 'object' && (result.status === 'success' || result.status === 'error')) {
+    if (isRuntimeApiResult(result)) {
       if (result.status === 'error') {
-        socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
+        socket.emit(`apiResponse-${String(responseIndex)}`, normalizeErrorResponse({
           response: result,
           preferredLocale,
-          userLanguage: user?.language,
+          userLanguage: user.language,
           fallbackHttpStatus: defaultHttpStatusForResponse({
             status: 'error',
             explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
           }),
         }));
       } else {
-        socket.emit(`apiResponse-${responseIndex}`, {
+        socket.emit(`apiResponse-${String(responseIndex)}`, {
           ...result,
           status: 'success',
           httpStatus: defaultHttpStatusForResponse({
@@ -280,26 +305,16 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
           }),
         });
       }
-    } else {
-      socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
-        response: {
-          status: 'error',
-          errorCode: 'api.invalidResponseStatus',
-        },
-        preferredLocale,
-        userLanguage: user?.language,
-        fallbackHttpStatus: 500,
-      }));
+      return;
     }
-  } else {
-    console.log(`WARNING: ${name} returned nothing`, 'yellow');
-    socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
+
+    socket.emit(`apiResponse-${String(responseIndex)}`, normalizeErrorResponse({
       response: {
         status: 'error',
-        errorCode: 'api.emptyResponse',
+        errorCode: 'api.invalidResponseStatus',
       },
       preferredLocale,
-      userLanguage: user?.language,
+      userLanguage: user.language,
       fallbackHttpStatus: 500,
     }));
   }

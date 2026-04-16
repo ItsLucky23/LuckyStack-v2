@@ -83,7 +83,7 @@ src/{page}/_api/{name}_v1.ts  -->  accessible as api/{page}/{name}/v1
 **Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_api/` as API handlers.
 After initial load, the dev watcher performs incremental in-memory updates for changed `_api` files instead of rebuilding the entire API map on every save.
 
-**Production:** The `scripts/generateServerRequests.ts` build script statically generates a route map that's bundled into `server/prod/generatedApis.ts`.
+**Production:** The `scripts/generateServerRequests.ts` build script statically generates `server/prod/generatedApis.ts`. Runtime handlers lazily load that file once and gracefully fall back to empty maps if the artifact is missing.
 
 ### Name Resolution
 
@@ -225,12 +225,12 @@ At least one of the two files must exist. Both are optional individually.
 
 ### How It Works
 
-**Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_sync/` that end with `_server.ts` or `_client.ts`.
+**Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_sync/` that end with `_server_v{n}.ts` or `_client_v{n}.ts`.
 After initial load, the dev watcher performs incremental in-memory updates for changed `_sync` files instead of rebuilding the entire sync map on every save.
 
 For non-route dependency changes in `src`, `shared`, or `server/functions`, the watcher resolves the dependency graph and reloads only affected API/sync routes in memory.
 
-**Production:** Same build script generates static route maps.
+**Production:** Same build script generates static route maps in `server/prod/generatedApis.ts`, which are loaded lazily at runtime.
 
 ### Name Resolution
 

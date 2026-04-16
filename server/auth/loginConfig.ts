@@ -1,12 +1,32 @@
-import dotenv from 'dotenv';
+import { env } from '../bootstrap/env';
 import tryCatch from '../../shared/tryCatch';
-
-dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
 
 interface BasicProvider {
   name: string;
 }
+
+type UnknownRecord = Record<string, unknown>;
+
+interface GitHubEmailEntry {
+  email: string;
+  primary?: boolean;
+}
+
+const toRecord = (value: unknown): UnknownRecord => {
+  return value && typeof value === 'object' ? (value as UnknownRecord) : {};
+};
+
+const toGitHubEmails = (value: unknown): GitHubEmailEntry[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry) => toRecord(entry))
+    .filter((entry) => typeof entry.email === 'string')
+    .map((entry) => ({
+      email: entry.email as string,
+      primary: entry.primary === true,
+    }));
+};
 
 interface FullProvider {
   name: string,
@@ -24,18 +44,18 @@ interface FullProvider {
 
   avatarKey?: string, //? the avatarKey represent the url to the img
   avatarCodeKey: string, //? the avatarCodeKey should be the key representing the avatar id if the provider doesnt give the avatar url directly, we use the getAvatar function with this value together
-  getAvatar?: ({ userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => any
+  getAvatar?: ({ userData, avatarId }: { userData: UnknownRecord; avatarId: string }) => string | undefined
 }
 
 type oauthProvidersProps = BasicProvider | FullProvider;
 
 // const backendUrl = `http${process.env.SECURE == 'true' ? 's' : ''}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
-const prod = process.env.NODE_ENV !== 'development';
-const secure = process.env.SECURE == 'true';
+const prod = env.NODE_ENV !== 'development';
+const secure = env.SECURE == 'true';
 const protocol = secure ? 'https' : 'http';
 const backendUrl = prod
-  ? (process.env.DNS || "")
-  : `${protocol}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`
+  ? env.DNS
+  : `${protocol}://${env.SERVER_IP}:${env.SERVER_PORT}`
 
 const oauthProviders: oauthProvidersProps[] = [
   {
@@ -84,10 +104,9 @@ const oauthProviders: oauthProvidersProps[] = [
           },
         })
         if (!response.ok) { return false; }
-        const emails = await response.json();
-        // return data;
-        if (!Array.isArray(emails)) { return false; }
-        return emails;
+        const emails: unknown = await response.json();
+        const parsedEmails = toGitHubEmails(emails);
+        return parsedEmails.length > 0 ? parsedEmails : false;
       }
 
       const [getEmailError, getEmailResponse] = await tryCatch(getEmail);
@@ -101,9 +120,9 @@ const oauthProviders: oauthProvidersProps[] = [
       //? if we found the email we set it to the user object
       let mainEmail: string | undefined;
       for (const email of getEmailResponse) {
-        if (email.primary) { mainEmail = email.email; }
+        if (email.primary === true) { mainEmail = email.email; }
       }
-      if (!mainEmail) { mainEmail = getEmailResponse?.[0]?.email; }
+      mainEmail ??= getEmailResponse[0]?.email;
       return mainEmail;
     },
   },
@@ -123,14 +142,14 @@ const oauthProviders: oauthProvidersProps[] = [
     nameKey: 'username',
     emailKey: 'email',
     avatarCodeKey: 'avatar',
-    getAvatar: ({ userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => {
+    getAvatar: ({ userData, avatarId }: { userData: UnknownRecord; avatarId: string }) => {
       if (!avatarId) {
         // Default avatar (based on discriminator % 5)
         // const defaultAvatarIndex = userId % 5;
         // return `https://cdn.discordapp.com/embed/avatars/${defaultAvatarIndex}.png`;
-        return undefined;
+        return;
       }
-      const userId = userData.id;
+      const userId = typeof userData.id === 'string' ? userData.id : '';
       const format = avatarId.startsWith("a_") ? "gif" : "png";
       return `https://cdn.discordapp.com/avatars/${userId}/${avatarId}.${format}`;
     }
@@ -148,14 +167,16 @@ const oauthProviders: oauthProvidersProps[] = [
     nameKey: 'name',
     emailKey: 'email',
     avatarCodeKey: '',
-    getAvatar: ({ userData }: { userData: Record<string, any> }) => {
-      return userData?.picture?.data?.url || undefined;
+    getAvatar: ({ userData }: { userData: UnknownRecord }) => {
+      const picture = toRecord(userData.picture);
+      const data = toRecord(picture.data);
+      return typeof data.url === 'string' ? data.url : undefined;
     }
   },
   {
     name: 'microsoft',
-    clientID: prod && secure ? process.env.MICROSOFT_CLIENT_ID! : process.env.DEV_MICROSOFT_CLIENT_ID!,
-    clientSecret: prod && secure ? process.env.MICROSOFT_CLIENT_SECRET! : process.env.DEV_MICROSOFT_CLIENT_SECRET!,
+    clientID: prod && secure ? (process.env.MICROSOFT_CLIENT_ID ?? '') : (process.env.DEV_MICROSOFT_CLIENT_ID ?? ''),
+    clientSecret: prod && secure ? (process.env.MICROSOFT_CLIENT_SECRET ?? '') : (process.env.DEV_MICROSOFT_CLIENT_SECRET ?? ''),
     callbackURL: `${backendUrl}/auth/callback/microsoft`,
     // 'common' allows both personal and work accounts
     authorizationURL: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
@@ -166,7 +187,7 @@ const oauthProviders: oauthProvidersProps[] = [
     nameKey: 'displayName',
     emailKey: 'mail', // Note: some personal accounts use 'userPrincipalName' if 'mail' is null
     avatarCodeKey: 'id',
-    getAvatar: async ({ userData: _userData, avatarId }: { userData: Record<string, any>, avatarId: string }) => {
+    getAvatar: ({ avatarId }: { userData: UnknownRecord; avatarId: string }) => {
       // Microsoft doesn't give a URL, it gives a binary blob via a separate endpoint.
       // You typically need the access_token here to fetch it. 
       // If your architecture doesn't pass the token to getAvatar, 
@@ -183,7 +204,7 @@ const oauthProviders: oauthProvidersProps[] = [
           },
         });
         if (!response.ok) { return false; }
-        const data = await response.json();
+        const data: unknown = await response.json();
         if (!data) { return false; }
         return data;
       };
@@ -196,12 +217,14 @@ const oauthProviders: oauthProvidersProps[] = [
 
       if (!getEmailResponse) { return false; }
 
-      const tempEmailReponse: any = getEmailResponse;
+      const tempEmailReponse = toRecord(getEmailResponse);
 
       // 1. 'mail' is the standard property for work/school accounts
       // 2. 'userPrincipalName' is used for personal accounts or as a fallback
-      const mainEmail = tempEmailReponse.mail || tempEmailReponse.userPrincipalName;
-      return mainEmail || false;
+      const mainEmail =
+        (typeof tempEmailReponse.mail === 'string' ? tempEmailReponse.mail : null)
+        ?? (typeof tempEmailReponse.userPrincipalName === 'string' ? tempEmailReponse.userPrincipalName : null);
+      return mainEmail ?? false;
     }
   }
 ];

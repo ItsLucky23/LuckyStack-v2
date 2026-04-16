@@ -77,7 +77,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     }
 
     if (!quiet) {
-      console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}/${apiVersion} (${httpMethod}${rateLimit !== undefined ? `, rateLimit: ${rateLimit}` : ''})`);
+      console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}/${apiVersion} (${httpMethod}${rateLimit === undefined ? '' : `, rateLimit: ${rateLimit}`})`);
     }
 
     if (!typesByPage.has(pagePath)) {
@@ -135,9 +135,9 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
 
     const clientInputTypeResult = serverFile
       ? getSyncClientDataTypeDetailsFromFile(serverFile)
-      : clientFile
+      : (clientFile
         ? getSyncClientDataTypeDetailsFromFile(clientFile)
-        : { text: '{ }', unresolvedSymbols: [] };
+        : { text: '{ }', unresolvedSymbols: [] });
 
     const serverOutputTypeResult = serverFile
       ? getSyncServerOutputTypeDetailsFromFile(serverFile)
@@ -198,7 +198,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   const functionsInterface = generateServerFunctions({ namedImports, defaultImports });
 
   if (unresolvedTypeAliases.size > 0) {
-    const unresolvedList = Array.from(unresolvedTypeAliases).sort().join(', ');
+    const unresolvedList = [...unresolvedTypeAliases].sort().join(', ');
     throw new Error(`[TypeMapGenerator] Aborting generation because unresolved type symbols were found: ${unresolvedList}`);
   }
 

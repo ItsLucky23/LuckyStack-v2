@@ -1,7 +1,7 @@
-import path from "path";
-import { access } from 'fs/promises';
-import fs from "fs";
-import { ServerResponse } from "http";
+import path from "node:path";
+import { access } from 'node:fs/promises';
+import fs from "node:fs";
+import { ServerResponse } from "node:http";
 import { UPLOADS_DIR } from './paths';
 
 export const serveAvatar = async ({
@@ -31,7 +31,7 @@ export const serveAvatar = async ({
 
     const readStream = fs.createReadStream(filePath);
     readStream.pipe(res);
-  } catch (err) {
+  } catch {
     // console.log('File not found:', err, 'red');
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("File not found");

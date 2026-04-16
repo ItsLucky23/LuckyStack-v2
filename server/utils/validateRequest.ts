@@ -16,7 +16,7 @@ export const isFalsy = (value: unknown): boolean => {
     value === '' ||
     value === null ||
     value === undefined ||
-    (typeof value === 'number' && isNaN(value))
+    (typeof value === 'number' && Number.isNaN(value))
   );
 };
 
@@ -62,35 +62,27 @@ export const validateRequest = ({
   }
 
   for (const condition of auth.additional) {
-    // Validate condition has required key
-    if (!condition.key) {
-      return {
-        status: 'error',
-        errorCode: 'auth.invalidCondition',
-        httpStatus: 500,
-      };
-    }
-
     // Check if key exists in user session
     if (!(condition.key in user)) {
       return {
         status: 'error',
         errorCode: 'auth.invalidCondition',
-        errorParams: [{ key: 'key', value: String(condition.key) }],
+        errorParams: [{ key: 'key', value: condition.key }],
         httpStatus: 500,
       };
     }
 
-    const val = user[condition.key as keyof SessionLayout];
+    const val = user[condition.key];
 
     // Check nullish constraint
     if (typeof condition.nullish === 'boolean') {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       const isNullish = val === null || val === undefined;
       if (condition.nullish && !isNullish) {
         return {
           status: 'error',
           errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: String(condition.key) }],
+          errorParams: [{ key: 'key', value: condition.key }],
           httpStatus: 403,
         };
       }
@@ -98,35 +90,31 @@ export const validateRequest = ({
         return {
           status: 'error',
           errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: String(condition.key) }],
+          errorParams: [{ key: 'key', value: condition.key }],
           httpStatus: 403,
         };
       }
     }
 
     // Check type constraint (skip null or undefined values)
-    if (condition.type && val != null) {
-      if (typeof val !== condition.type) {
+    if (condition.type && val != null && typeof val !== condition.type) {
         return {
           status: 'error',
           errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: String(condition.key) }],
+          errorParams: [{ key: 'key', value: condition.key }],
           httpStatus: 403,
         };
       }
-    }
 
     // Check exact value constraint (strict equality)
-    if ('value' in condition) {
-      if (val !== condition.value) {
+    if ('value' in condition && val !== condition.value) {
         return {
           status: 'error',
           errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: String(condition.key) }],
+          errorParams: [{ key: 'key', value: condition.key }],
           httpStatus: 403,
         };
       }
-    }
 
     // Check truthy/falsy constraint
     if (typeof condition.mustBeFalsy === 'boolean') {
@@ -134,7 +122,7 @@ export const validateRequest = ({
         return {
           status: 'error',
           errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: String(condition.key) }],
+          errorParams: [{ key: 'key', value: condition.key }],
           httpStatus: 403,
         };
       }
@@ -142,7 +130,7 @@ export const validateRequest = ({
         return {
           status: 'error',
           errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: String(condition.key) }],
+          errorParams: [{ key: 'key', value: condition.key }],
           httpStatus: 403,
         };
       }

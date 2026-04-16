@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { GENERATED_SOCKET_TYPES_PATH } from '../utils/paths';
 
 /**
@@ -18,7 +18,7 @@ const templatesDir = path.join(__dirname, 'templates');
 
 export const isEmptyFile = (filePath: string): boolean => {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = fs.readFileSync(filePath, 'utf8');
     return content.trim().length === 0;
   } catch {
     return false;
@@ -27,9 +27,9 @@ export const isEmptyFile = (filePath: string): boolean => {
 
 const isCommentOnlyFile = (filePath: string): boolean => {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const withoutBlockComments = content.replace(/\/\*[\s\S]*?\*\//g, '');
-    const withoutLineComments = withoutBlockComments.replace(/(^|\s)\/\/.*$/gm, '$1');
+    const content = fs.readFileSync(filePath, 'utf8');
+    const withoutBlockComments = content.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    const withoutLineComments = withoutBlockComments.replaceAll(/(^|\s)\/\/.*$/gm, '$1');
     return withoutLineComments.trim().length === 0;
   } catch {
     return false;
@@ -37,12 +37,12 @@ const isCommentOnlyFile = (filePath: string): boolean => {
 };
 
 export const isInApiFolder = (filePath: string): boolean => {
-  const normalized = filePath.replace(/\\/g, '/');
+  const normalized = filePath.replaceAll('\\', '/');
   return normalized.includes('/_api/') && filePath.endsWith('.ts');
 };
 
 export const isInSyncFolder = (filePath: string): boolean => {
-  const normalized = filePath.replace(/\\/g, '/');
+  const normalized = filePath.replaceAll('\\', '/');
   return normalized.includes('/_sync/') && filePath.endsWith('.ts');
 };
 
@@ -78,7 +78,7 @@ const getInvalidVersionMessage = (filePath: string): string => {
  * Get the paired sync file path (server -> client or client -> server)
  */
 export const getPairedSyncFile = (filePath: string): string | null => {
-  const normalized = filePath.replace(/\\/g, '/');
+  const normalized = filePath.replaceAll('\\', '/');
   if (isSyncServerFile(normalized)) {
     return normalized.replace(/_server_v(\d+)\.ts$/, '_client_v$1.ts');
   }
@@ -101,8 +101,8 @@ export const hasPairedFile = (filePath: string): boolean => {
  * Extract page path from a sync file path (e.g., "examples" from "src/examples/_sync/test_server.ts")
  */
 export const extractSyncPagePath = (filePath: string): string => {
-  const normalized = filePath.replace(/\\/g, '/');
-  const match = normalized.match(/src\/(.+?)\/_sync\//);
+  const normalized = filePath.replaceAll('\\', '/');
+  const match = /src\/(.+?)\/_sync\//.exec(normalized);
   return match ? match[1] : '';
 };
 
@@ -110,8 +110,8 @@ export const extractSyncPagePath = (filePath: string): string => {
  * Extract sync name from a sync file path (e.g., "test" from "src/examples/_sync/test_server.ts")
  */
 export const extractSyncName = (filePath: string): string => {
-  const normalized = filePath.replace(/\\/g, '/');
-  const match = normalized.match(/_sync\/(.+)\.ts$/);
+  const normalized = filePath.replaceAll('\\', '/');
+  const match = /_sync\/(.+)\.ts$/.exec(normalized);
   if (!match) {
     const basename = path.basename(filePath, '.ts');
     return basename.replace(/_server_v\d+$/, '').replace(/_client_v\d+$/, '');
@@ -126,18 +126,18 @@ export const extractSyncName = (filePath: string): string => {
  */
 export const extractClientInputFromFile = (filePath: string): string | null => {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = fs.readFileSync(filePath, 'utf8');
 
     // Find interface SyncParams
-    const syncParamsMatch = content.match(/interface\s+SyncParams\s*\{/);
+    const syncParamsMatch = /interface\s+SyncParams\s*\{/.exec(content);
     if (!syncParamsMatch) return null;
 
     // Find clientInput property
-    const clientInputMatch = content.match(/clientInput\s*:\s*\{/);
+    const clientInputMatch = /clientInput\s*:\s*\{/.exec(content);
     if (!clientInputMatch) return null;
 
     // Extract balanced braces
-    const startIndex = content.indexOf('{', clientInputMatch.index!);
+    const startIndex = content.indexOf('{', clientInputMatch.index);
     let depth = 0;
     let endIndex = startIndex;
 
@@ -165,22 +165,22 @@ export const extractClientInputFromFile = (filePath: string): string | null => {
 export const extractClientInputFromGeneratedTypes = (pagePath: string, syncName: string): string | null => {
   try {
     const generatedTypesPath = GENERATED_SOCKET_TYPES_PATH;
-    const content = fs.readFileSync(generatedTypesPath, 'utf-8');
+    const content = fs.readFileSync(generatedTypesPath, 'utf8');
 
-    const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapeRegex = (value: string) => value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
     const escapedPagePath = escapeRegex(pagePath);
     const escapedSyncName = escapeRegex(syncName);
 
-    const pageBlockRegex = new RegExp(`'${escapedPagePath}'\\s*:\\s*\\{([\\s\\S]*?)\\n\\s{2}\\};`, 'm');
+    const pageBlockRegex = new RegExp(String.raw`'${escapedPagePath}'\s*:\s*\{([\s\S]*?)\n\s{2}\};`, 'm');
     const pageBlockMatch = content.match(pageBlockRegex);
-    if (!pageBlockMatch || !pageBlockMatch[1]) {
+    if (!pageBlockMatch?.[1]) {
       console.log(`[TemplateInjector] Could not find page block for ${pagePath}`);
       return null;
     }
 
     const pageBlock = pageBlockMatch[1];
 
-    const syncEntryPattern = new RegExp(`'${escapedSyncName}':\\s*\\{\\s*clientInput:\\s*`);
+    const syncEntryPattern = new RegExp(String.raw`'${escapedSyncName}':\s*\{\s*clientInput:\s*`);
     const match = pageBlock.match(syncEntryPattern);
 
     if (!match || typeof match.index !== 'number') {
@@ -226,7 +226,7 @@ export const extractClientInputFromGeneratedTypes = (pagePath: string, syncName:
  * @returns The relative path prefix to reach project root
  */
 export const calculateRelativePath = (filePath: string): string => {
-  const normalized = filePath.replace(/\\/g, '/');
+  const normalized = filePath.replaceAll('\\', '/');
 
   // Find the 'src/' part of the path
   const srcIndex = normalized.indexOf('src/');
@@ -237,7 +237,7 @@ export const calculateRelativePath = (filePath: string): string => {
   }
 
   // Get path after 'src/' (e.g., 'examples/examples2/_api/file.ts')
-  const relativePath = normalized.substring(srcIndex + 4); // +4 to skip 'src/'
+  const relativePath = normalized.slice(Math.max(0, srcIndex + 4)); // +4 to skip 'src/'
 
   // Count segments (directories + filename)
   const segments = relativePath.split('/').filter(s => s.length > 0).length;
@@ -275,20 +275,20 @@ const getTemplate = (filePath: string): string | null => {
   }
 
   try {
-    let content = fs.readFileSync(templateFile, 'utf-8');
+    let content = fs.readFileSync(templateFile, 'utf8');
 
     // Replace path placeholders with computed relative paths
     const relPath = calculateRelativePath(filePath);
     const pattern = /\/\/\s*@ts-expect-error.*(?:\r?\n)(.*)(?:\{\{REL_PATH\}\})/g;
 
-    content = content.replace(pattern, (_, prefix) => {
+    content = content.replaceAll(pattern, (_, prefix) => {
       return `${prefix}${relPath}`;
     });
 
     // Replace page path and sync name placeholders for paired templates
     if (pagePath && syncName) {
-      content = content.replace(/\{\{PAGE_PATH\}\}/g, pagePath);
-      content = content.replace(/\{\{SYNC_NAME\}\}/g, syncName);
+      content = content.replaceAll('{{PAGE_PATH}}', pagePath);
+      content = content.replaceAll('{{SYNC_NAME}}', syncName);
     }
 
     return content;
@@ -346,7 +346,7 @@ export const updateClientFileForPairedServer = async (clientFilePath: string): P
     const syncName = extractSyncName(clientFilePath);
 
     // Read the existing client file (preserve user's code)
-    let content = fs.readFileSync(clientFilePath, 'utf-8');
+    let content = fs.readFileSync(clientFilePath, 'utf8');
 
     // Update imports: add SyncClientInput, SyncServerOutput if not present
     if (!content.includes('SyncClientInput')) {
@@ -362,8 +362,12 @@ export const updateClientFileForPairedServer = async (clientFilePath: string): P
     if (!content.includes('type PagePath')) {
       const importEndMatch = content.match(/import .+?;[\r\n]+/g);
       if (importEndMatch) {
-        const lastImportEnd = content.lastIndexOf(importEndMatch[importEndMatch.length - 1]) +
-          importEndMatch[importEndMatch.length - 1].length;
+        const lastImport = importEndMatch.at(-1);
+        if (!lastImport) {
+          return false;
+        }
+
+        const lastImportEnd = content.lastIndexOf(lastImport) + lastImport.length;
         const typeAliases = `\n// Types are imported from the generated file based on the _server.ts definition\ntype PagePath = '${pagePath}';\ntype SyncName = '${syncName}';\n`;
         content = content.slice(0, lastImportEnd) + typeAliases + content.slice(lastImportEnd);
       }
@@ -384,7 +388,7 @@ export const updateClientFileForPairedServer = async (clientFilePath: string): P
     }
 
     // Add serverOutput to main function destructuring if not present
-    if (content.includes('main') && !content.match(/\{\s*[^}]*serverOutput[^}]*\}\s*:\s*SyncParams/)) {
+    if (content.includes('main') && !/\{\s*[^}]*serverOutput[^}]*\}\s*:\s*SyncParams/.test(content)) {
       content = content.replace(
         /\{\s*([^}]*?clientInput)([^}]*)\}\s*:\s*SyncParams/,
         '{ $1, serverOutput$2 }: SyncParams'
@@ -412,7 +416,7 @@ export const updateClientFileForDeletedServer = async (
 ): Promise<boolean> => {
   try {
     // Read the existing client file (preserve user's code)
-    let content = fs.readFileSync(clientFilePath, 'utf-8');
+    let content = fs.readFileSync(clientFilePath, 'utf8');
 
     // STEP 1: Replace clientInput type declaration FIRST (before removing imports)
     // Pattern matches: clientInput: SyncClientInput<...> or clientInput: { ... }
@@ -439,20 +443,20 @@ export const updateClientFileForDeletedServer = async (
     );
 
     // STEP 3: Remove serverOutput from main function destructuring
-    content = content.replace(/,\s*serverOutput(?=\s*[,}])/g, '');
-    content = content.replace(/serverOutput\s*,\s*/g, '');
+    content = content.replaceAll(/,\s*serverOutput(?=\s*[,}])/g, '');
+    content = content.replaceAll(/serverOutput\s*,\s*/g, '');
 
     // STEP 4: NOW clean up imports (after type declarations are replaced)
-    content = content.replace(/,\s*SyncClientInput(?=\s*[,}])/g, '');
-    content = content.replace(/,\s*SyncServerOutput(?=\s*[,}])/g, '');
+    content = content.replaceAll(/,\s*SyncClientInput(?=\s*[,}])/g, '');
+    content = content.replaceAll(/,\s*SyncServerOutput(?=\s*[,}])/g, '');
 
     // STEP 5: Remove type aliases if present
-    content = content.replace(/\/\/\s*Types are imported.*\n?/g, '');
-    content = content.replace(/type PagePath = '[^']*';\s*\n?/g, '');
-    content = content.replace(/type SyncName = '[^']*';\s*\n?/g, '');
+    content = content.replaceAll(/\/\/\s*Types are imported.*\n?/g, '');
+    content = content.replaceAll(/type PagePath = '[^']*';\s*\n?/g, '');
+    content = content.replaceAll(/type SyncName = '[^']*';\s*\n?/g, '');
 
     // Clean up any double newlines
-    content = content.replace(/\n{3,}/g, '\n\n');
+    content = content.replaceAll(/\n{3,}/g, '\n\n');
 
     fs.writeFileSync(clientFilePath, content, 'utf-8');
     console.log(`[TemplateInjector] Updated client file for deleted server (preserved code): ${clientFilePath}`);
@@ -474,11 +478,11 @@ export const injectServerTemplateWithClientInput = async (
     const relPath = calculateRelativePath(serverFilePath);
 
     const templateFile = path.join(templatesDir, 'sync_server.template.ts');
-    let content = fs.readFileSync(templateFile, 'utf-8');
+    let content = fs.readFileSync(templateFile, 'utf8');
 
     // Replace placeholders
     const pattern = /\/\/\s*@ts-expect-error.*(?:\r?\n)(.*)(?:\{\{REL_PATH\}\})/g;
-    content = content.replace(pattern, (_, prefix) => {
+    content = content.replaceAll(pattern, (_, prefix) => {
       return `${prefix}${relPath}`;
     });
 
@@ -496,3 +500,4 @@ export const injectServerTemplateWithClientInput = async (
     return false;
   }
 };
+

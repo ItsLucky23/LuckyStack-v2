@@ -154,9 +154,9 @@ DATABASE_URL="mongodb://localhost:27017/PROJECT_NAME"
 
 ### 3. Configure Application
 
-Copy the config template:
+Edit the tracked config file:
 ```bash
-cp configTemplate.txt config.ts
+# Edit config.ts directly
 ```
 
 ### 4. Initialize Database
@@ -536,7 +536,7 @@ docker-compose up -d --build
 **Symptom:** TypeScript or Vite build errors.
 
 **Solutions:**
-1. Ensure `config.ts` exists (copy from `configTemplate.txt`)
+1. Ensure `config.ts` exists and contains valid project settings
 2. Run `npx prisma generate` before building
 3. Check all dependencies installed: `rm -rf node_modules && npm install`
 

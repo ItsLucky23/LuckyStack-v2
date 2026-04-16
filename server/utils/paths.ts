@@ -1,6 +1,8 @@
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,7 +21,9 @@ const findWorkspaceRoot = (startDir: string): string | null => {
 	let current = path.resolve(startDir);
 
 	while (true) {
-		if (isWorkspaceRoot(current)) return current;
+		if (isWorkspaceRoot(current)) {
+			return current;
+		}
 
 		const parent = path.dirname(current);
 		if (parent === current) return null;
@@ -29,8 +33,8 @@ const findWorkspaceRoot = (startDir: string): string | null => {
 
 export const ROOT_DIR =
 	findWorkspaceRoot(process.cwd())
-	|| findWorkspaceRoot(__dirname)
-	|| process.cwd();
+	?? findWorkspaceRoot(__dirname)
+	?? process.cwd();
 export const SRC_DIR = path.join(ROOT_DIR, 'src');
 export const SERVER_DIR = path.join(ROOT_DIR, 'server');
 export const SHARED_DIR = path.join(ROOT_DIR, 'shared');

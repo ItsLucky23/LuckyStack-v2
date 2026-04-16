@@ -1,5 +1,5 @@
-import ts from 'typescript';
-import path from 'path';
+import * as ts from 'typescript';
+import path from 'node:path';
 import { ROOT_DIR } from '../../utils/paths';
 
 let cachedProgram: ts.Program | null = null;
@@ -82,7 +82,7 @@ const getLiteralTypeFromExpression = (
   if (expression.kind === ts.SyntaxKind.NullKeyword) return 'null';
 
   if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
-    return `'${expression.text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+    return `'${expression.text.replaceAll('\\', '\\\\').replaceAll('\'', String.raw`\'`)}'`;
   }
 
   if (ts.isNumericLiteral(expression)) {
@@ -142,10 +142,10 @@ const getLiteralTypeFromPropertySymbol = (
 
 const normalizeImportPath = (targetFilePath: string): string => {
   const fromDir = path.join(ROOT_DIR, 'src', '_sockets');
-  const from = fromDir.replace(/\\/g, '/');
-  const to = targetFilePath.replace(/\\/g, '/');
+  const from = fromDir.replaceAll('\\', '/');
+  const to = targetFilePath.replaceAll('\\', '/');
 
-  const normalized = path.posix.relative(from, to).replace(/\\/g, '/');
+  const normalized = path.posix.relative(from, to).replaceAll('\\', '/');
   const withoutExtension = normalized.replace(/(\.d)?\.(ts|tsx|js|jsx)$/i, '');
 
   if (withoutExtension.startsWith('.')) return withoutExtension;
@@ -224,8 +224,8 @@ export const expandTypeDetailed = (
 
     if (isJsonLikeType(type, checker)) return { text: 'JsonValue', unresolvedSymbols: [] };
 
-    // String literals ('hello') — use single quotes for consistency with the codebase
-    if (type.isStringLiteral()) return { text: `'${type.value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`, unresolvedSymbols: [] };
+    // String literals ('hello')  use single quotes for consistency with the codebase
+    if (type.isStringLiteral()) return { text: `'${type.value.replaceAll('\\', '\\\\').replaceAll('\'', String.raw`\'`)}'`, unresolvedSymbols: [] };
 
     // Number literals (42, 3.14)
     if (type.isNumberLiteral()) return { text: String(type.value), unresolvedSymbols: [] };
@@ -291,7 +291,7 @@ export const expandTypeDetailed = (
       const refType = objectType as ts.TypeReference;
       const targetName = refType.target?.symbol?.name ?? '';
 
-      // Array<T> / ReadonlyArray<T> → T[]
+      // Array<T> / ReadonlyArray<T>  T[]
       if (targetName === 'Array' || targetName === 'ReadonlyArray') {
         const typeArgs = checker.getTypeArguments(refType);
         if (typeArgs.length > 0) {
@@ -306,7 +306,7 @@ export const expandTypeDetailed = (
         }
       }
 
-      // Known opaque containers — return as-is without expanding internals
+      // Known opaque containers  return as-is without expanding internals
       if (SKIP_EXPANSION.has(targetName)) {
         return { text: checker.typeToString(type), unresolvedSymbols: [] };
       }
@@ -373,3 +373,4 @@ export const expandTypeDetailed = (
 export const expandType = (type: ts.Type, checker: ts.TypeChecker, depth = 0): string => {
   return expandTypeDetailed(type, checker, depth).text;
 };
+

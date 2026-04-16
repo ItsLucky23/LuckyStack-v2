@@ -110,7 +110,7 @@ interface RuntimeApiParams {
   data?: unknown;
   abortable?: boolean;
   disableErrorMessage?: boolean;
-  onStream?: (event: ApiStreamEvent<StreamPayload>) => void;
+  onStream?: (event: ApiStreamEvent) => void;
 }
 
 interface ApiErrorResponse {

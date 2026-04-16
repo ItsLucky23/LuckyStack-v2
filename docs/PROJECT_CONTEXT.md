@@ -19,7 +19,7 @@ The framework is a **custom-built React + Node.js stack** inspired by Next.js bu
 
 | File                   | Purpose                                                                                        |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
-| `config.ts`            | Main app configuration (URLs, defaults, session layout). Gitignored - use `configTemplate.txt` |
+| `config.ts`            | Main app configuration (URLs, defaults, session layout)                                       |
 | `.env_template`        | Safe `.env` config template with placeholders (for architecture context, no real secrets)      |
 | `.env.local_template`  | Template for `.env.local` secret overrides (real credentials belong in `.env.local`)           |
 | `vite.config.ts`       | Vite bundler config with path aliases (`src/`, `config`) and exclusions for server files       |
@@ -89,7 +89,8 @@ Handles all real-time communication:
 ### `server/sockets/handleSyncRequest.ts` - Sync Request Handler
 
 - Validates server-side sync file before broadcasting
-- Loops through all sockets in the room and runs client-side sync for each
+- Uses direct room broadcast when no `_client.ts` exists (fast-path)
+- Loops through target sockets only when `_client.ts` exists (per-client logic)
 - Passes target `token` to `_client.ts` instead of auto-loading each target session
 - Supports `ignoreSelf` to exclude sender from receiving the event
 
@@ -129,6 +130,7 @@ When a user logs in, the system automatically kicks all previous sessions for th
 | -------------- | ----------------------------------------------------------- |
 | `loader.ts`    | Hot-reloads `_api` and `_sync` files without server restart, with per-file incremental updates after initial scan |
 | `hotReload.ts` | File watcher that triggers incremental route reloads for direct `_api`/`_sync` edits and import-aware reloads for dependent routes when shared helpers change |
+| `supervisor.ts` | Development supervisor that restarts process for core backend file changes while preserving route-level HMR |
 
 ### `server/sockets/utils/` - Socket Utilities
 
@@ -143,7 +145,6 @@ When a user logs in, the system automatically kicks all previous sessions for th
 | --------------------------- | ------------------------------------------------------------------ |
 | `generateServerRequests.ts` | Scans `src/` for `_api/` and `_sync/` folders, generates route map |
 | `bundleServer.mjs`          | Bundles server for production                                      |
-| `clearServerRequests.ts`    | Clears generated route map for dev restart                         |
 
 ---
 

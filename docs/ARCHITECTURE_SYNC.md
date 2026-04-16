@@ -206,6 +206,31 @@ upsertSyncEventCallback({
 });
 ```
 
+## Sync Error Contract
+
+- When returning an error from `_server.ts` or `_client.ts`, `errorCode` must be a stable i18n key.
+- Do not return human text in `errorCode`.
+- Use `errorParams` for dynamic context.
+- Optional `message` or `errorMessage` values may be useful for debugging, but UI notifications should rely on translated `errorCode` keys.
+
+Good:
+
+```typescript
+return {
+  status: 'error',
+  errorCode: 'sync.invalidRequest',
+};
+```
+
+Bad:
+
+```typescript
+return {
+  status: 'error',
+  errorCode: 'Missing date value or invalid date',
+};
+```
+
 Stream events for recipients can be registered with the same hook:
 
 ```typescript

@@ -1,6 +1,8 @@
-import { apis, functions } from '../prod/generatedApis';
+/* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing */
+
 import { getSession } from '../functions/session';
-import config, { SessionLayout } from '../../config';
+import { rateLimiting, AuthProps, SessionLayout } from '../../config';
+import { getRuntimeApiMaps as getRuntimeApiMapsFromSource } from '../prod/runtimeMaps';
 import { validateRequest } from '../utils/validateRequest';
 import { setSentryUser, startSpan } from '../functions/sentry';
 import { checkRateLimit } from '../utils/rateLimiter';
@@ -37,7 +39,7 @@ import { validateInputByType } from '../utils/runtimeTypeValidation';
 
 interface HttpApiRequestParams {
   name: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   token: string | null;
   requesterIp?: string;
   xLanguageHeader?: string | string[];
@@ -47,22 +49,7 @@ interface HttpApiRequestParams {
   stream?: (payload: ApiHttpStreamEvent) => void;
 }
 
-const getRuntimeApiMaps = async () => {
-  if (process.env.NODE_ENV !== 'production') {
-    const { devApis, devFunctions } = await import('../dev/loader');
-    return {
-      apisObject: devApis,
-      functionsObject: devFunctions,
-    };
-  }
-
-  return {
-    apisObject: apis,
-    functionsObject: functions,
-  };
-};
-
-type ApiNetworkResponse<T = any> =
+type ApiNetworkResponse<T = Record<string, unknown>> =
   | ({ status: 'success'; httpStatus: number } & T)
   | {
     status: 'error';
@@ -75,8 +62,45 @@ type ApiNetworkResponse<T = any> =
     }[];
   };
 
-type ApiStreamPayload = {
-  [key: string]: unknown;
+type ApiStreamPayload = Record<string, unknown>;
+
+interface RuntimeApiRoute {
+  auth: AuthProps;
+  main: (params: {
+    data: Record<string, unknown>;
+    user: SessionLayout | null;
+    functions: Record<string, unknown>;
+    stream: (payload?: ApiStreamPayload) => void;
+  }) => Promise<RuntimeApiResult> | RuntimeApiResult;
+  inputType?: string;
+  inputTypeFilePath?: string;
+  rateLimit?: number | false;
+  httpMethod?: HttpMethod;
+}
+
+type RuntimeApiResult =
+  | {
+    status: 'success';
+    httpStatus?: number;
+    message?: string;
+    [key: string]: unknown;
+  }
+  | {
+    status: 'error';
+    httpStatus?: number;
+    errorCode?: string;
+    errorParams?: { key: string; value: string | number | boolean }[];
+    message?: string;
+    [key: string]: unknown;
+  };
+
+const isRuntimeApiResult = (value: unknown): value is RuntimeApiResult => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const status = (value as { status?: unknown }).status;
+  return status === 'success' || status === 'error';
 };
 
 export type ApiHttpStreamEvent = ApiStreamPayload;
@@ -96,11 +120,11 @@ export async function handleHttpApiRequest({
 
   const preferredLocale =
     extractLanguageFromHeader(xLanguageHeader)
-    || extractLanguageFromHeader(acceptLanguageHeader);
+    ?? extractLanguageFromHeader(acceptLanguageHeader);
   const user = await getSession(token);
   setSentryUser(user?.id ? {
-    id: String(user.id),
-    email: user.email || undefined,
+    id: typeof user.id === 'string' ? user.id : String(user.id),
+    email: user.email,
   } : null);
 
   const buildNetworkError = ({
@@ -126,24 +150,24 @@ export async function handleHttpApiRequest({
     });
   }
 
-  if (data && typeof data !== 'object') {
+  if (typeof data !== 'object' || data === null) {
     return buildNetworkError({
       response: { status: 'error', errorCode: 'api.invalidDataObject' },
       fallbackHttpStatus: 400,
     });
   }
 
-  const requestData = data || {};
+  const requestData = data ?? {};
 
   console.log(`http api: ${normalizedName} called`, 'cyan');
 
-  const { apisObject, functionsObject } = await getRuntimeApiMaps();
+  const { apisObject, functionsObject } = await getRuntimeApiMapsFromSource();
 
   //? Resolve API: try exact match first, then fall back to root-level
   //? e.g. "api/examples/session" → not found → try "api/session"
   const nameSegments = normalizedName.split('/').filter(Boolean);
-  const requestedVersion = nameSegments[nameSegments.length - 1];
-  const apiBaseName = nameSegments[nameSegments.length - 2];
+  const requestedVersion = nameSegments.at(-1);
+  const apiBaseName = nameSegments.at(-2);
   let resolvedName = normalizedName;
   if (!apisObject[normalizedName] && apiBaseName && requestedVersion) {
     const rootKey = `api/${apiBaseName}/${requestedVersion}`;
@@ -164,9 +188,10 @@ export async function handleHttpApiRequest({
     });
   }
 
-  const { auth, main, httpMethod: declaredMethod } = apisObject[resolvedName];
-  const inputType = apisObject[resolvedName].inputType as string | undefined;
-  const inputTypeFilePath = apisObject[resolvedName].inputTypeFilePath as string | undefined;
+  const runtimeApiRoute = apisObject[resolvedName] as RuntimeApiRoute;
+  const { auth, main, httpMethod: declaredMethod } = runtimeApiRoute;
+  const inputType = runtimeApiRoute.inputType;
+  const inputTypeFilePath = runtimeApiRoute.inputTypeFilePath;
 
   const inputValidation = await validateInputByType({
     typeText: inputType,
@@ -200,24 +225,29 @@ export async function handleHttpApiRequest({
   }
 
   // Auth validation: check login requirement
-  if (auth?.login) {
-    if (!user?.id) {
+  if (auth.login && !user?.id) {
       console.log(`ERROR: HTTP API ${name} requires login`, 'red');
       return buildNetworkError({
         response: { status: 'error', errorCode: 'auth.required' },
         fallbackHttpStatus: 401,
       });
     }
+
+  if (!user) {
+    return buildNetworkError({
+      response: { status: 'error', errorCode: 'auth.forbidden' },
+      fallbackHttpStatus: 403,
+    });
   }
 
   // Auth validation: check additional requirements
-  const authResult = validateRequest({ auth, user: user as SessionLayout });
+  const authResult = validateRequest({ auth, user });
   if (authResult.status === 'error') {
     console.log(`ERROR: Auth failed for HTTP API ${name}: ${authResult.errorCode}`, 'red');
     return buildNetworkError({
       response: {
         status: 'error',
-        errorCode: authResult.errorCode || 'auth.forbidden',
+        errorCode: authResult.errorCode ?? 'auth.forbidden',
         errorParams: authResult.errorParams,
         httpStatus: authResult.httpStatus,
       },
@@ -226,20 +256,20 @@ export async function handleHttpApiRequest({
   }
 
   // Rate limiting check: per-API bucket (custom rateLimit or defaultApiLimit fallback)
-  const apiRateLimit = apisObject[resolvedName].rateLimit;
-  const effectiveApiLimit = apiRateLimit !== undefined
-    ? apiRateLimit
-    : config.rateLimiting.defaultApiLimit;
+  const apiRateLimit = runtimeApiRoute.rateLimit;
+  const effectiveApiLimit = apiRateLimit === undefined
+    ? rateLimiting.defaultApiLimit
+    : apiRateLimit;
 
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
     const requesterIdentity = token ?? requesterIp ?? 'anonymous';
     const keyPrefix = token ? 'token' : 'ip';
     const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${normalizedName}`;
 
-    const { allowed, resetIn } = checkRateLimit({
+    const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
       limit: effectiveApiLimit,
-      windowMs: config.rateLimiting.windowMs
+      windowMs: rateLimiting.windowMs
     });
 
     if (!allowed) {
@@ -256,12 +286,12 @@ export async function handleHttpApiRequest({
   }
 
   // Global per-IP bucket across all APIs
-  if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
+  if (rateLimiting.defaultIpLimit !== false && rateLimiting.defaultIpLimit > 0) {
     const ipBucket = requesterIp ?? 'unknown';
-    const { allowed, resetIn } = checkRateLimit({
+    const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${ipBucket}:api:all`,
-      limit: config.rateLimiting.defaultIpLimit,
-      windowMs: config.rateLimiting.windowMs
+      limit: rateLimiting.defaultIpLimit,
+      windowMs: rateLimiting.windowMs
     });
 
     if (!allowed) {
@@ -279,7 +309,11 @@ export async function handleHttpApiRequest({
 
   // Execute the API handler
   const emitApiStream = (payload: ApiStreamPayload = {}) => {
-    stream?.(payload);
+    if (!stream) {
+      return;
+    }
+
+    stream(payload);
   };
 
   const span = startSpan(normalizedName, 'api.request.http') as { end?: () => void } | undefined;
@@ -307,7 +341,7 @@ export async function handleHttpApiRequest({
     console.log(`http api: ${normalizedName} completed`, 'cyan');
 
     // Check if result is already formatted as ApiResponse
-    if (result && typeof result === 'object' && (result.status === 'success' || result.status === 'error')) {
+    if (isRuntimeApiResult(result)) {
       if (result.status === 'error') {
         return buildNetworkError({
           response: result,

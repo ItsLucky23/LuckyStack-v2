@@ -14,12 +14,12 @@ export const getDisconnectTime = ({
   reason: string | undefined
 }) => {
   return clientSwitchedTab.has(token)
-    ? 20000
-    : disconnectReasonsWeAllow.includes(reason ?? "NULL")
-      ? 60000
-      : 2000;
+    ? 20_000
+    : (disconnectReasonsWeAllow.includes(reason ?? "NULL")
+      ? 60_000
+      : 2000);
 };
 
 export const ensureIo = (io?: Server | null): io is Server => {
-  return Boolean(io);
+  return io !== null && io !== undefined;
 };

@@ -1,22 +1,22 @@
-export type ErrorParam = {
+export interface ErrorParam {
   key: string;
   value: string | number | boolean;
-};
+}
 
-export type ErrorResponseInput = {
+export interface ErrorResponseInput {
   status?: unknown;
   errorCode?: unknown;
   errorParams?: unknown;
   httpStatus?: unknown;
-};
+}
 
-export type NormalizedErrorResponse = {
+export interface NormalizedErrorResponse {
   status: 'error';
   message: string;
   errorCode: string;
   errorParams?: ErrorParam[];
   httpStatus?: number;
-};
+}
 
 export const INVALID_ERROR_RESPONSE_CODE = 'error.invalidResponse';
 
@@ -45,7 +45,7 @@ export const normalizeErrorResponseCore = ({
   const normalizedParams = isErrorParamArray(response.errorParams) ? response.errorParams : undefined;
   const errorCodeValue = typeof response.errorCode === 'string' ? response.errorCode.trim() : '';
   const hasErrorCode = errorCodeValue.length > 0;
-  const finalErrorCode = hasErrorCode ? errorCodeValue : (fallbackErrorCode || INVALID_ERROR_RESPONSE_CODE);
+  const finalErrorCode = hasErrorCode ? errorCodeValue : (fallbackErrorCode ?? INVALID_ERROR_RESPONSE_CODE);
   const providedHttpStatus = typeof response.httpStatus === 'number' ? response.httpStatus : undefined;
 
   const message = resolveMessage

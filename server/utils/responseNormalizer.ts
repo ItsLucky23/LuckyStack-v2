@@ -1,6 +1,8 @@
-import config from '../../config';
-import fs from 'fs';
-import path from 'path';
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+
+import { defaultLanguage } from '../../config';
+import fs from 'node:fs';
+import path from 'node:path';
 import deJson from '../../src/_locales/de.json';
 import enJson from '../../src/_locales/en.json';
 import frJson from '../../src/_locales/fr.json';
@@ -37,12 +39,10 @@ export const reloadLocaleTranslations = () => {
   for (const language of Object.keys(localePaths) as LanguageCode[]) {
     try {
       const filePath = localePaths[language];
-      const rawJson = fs.readFileSync(filePath, 'utf-8');
+      const rawJson = fs.readFileSync(filePath, 'utf8');
       const parsed = JSON.parse(rawJson) as TranslationRecord;
 
-      if (parsed && typeof parsed === 'object') {
-        nextTranslations[language] = parsed;
-      }
+      nextTranslations[language] = parsed;
     } catch (error) {
       console.log(`Failed to reload locale ${language}:`, error, 'yellow');
     }
@@ -86,9 +86,9 @@ const resolveLanguage = ({
 }): LanguageCode => {
   return (
     normalizeLanguage(userLanguage)
-    || normalizeLanguage(preferredLocale)
-    || normalizeLanguage(config.defaultLanguage)
-    || 'en'
+    ?? normalizeLanguage(preferredLocale)
+    ?? normalizeLanguage(defaultLanguage)
+    ?? 'en'
   );
 };
 
@@ -101,12 +101,12 @@ const translate = ({
   key: string;
   params?: ErrorParam[];
 }): string => {
-  const translationList = translationsByLanguage[language] || translationsByLanguage.en;
+  const translationList = translationsByLanguage[language] ?? translationsByLanguage.en;
   const parts = key.split('.');
   let result: unknown = translationList;
 
   for (const part of parts) {
-    if (result && typeof result === 'object' && part in result) {
+    if (typeof result === 'object' && result !== null && part in result) {
       result = (result as Record<string, unknown>)[part];
     } else {
       return key;
@@ -118,7 +118,6 @@ const translate = ({
 
   let finalResult = result;
   for (const param of params) {
-    if (!param.key) continue;
     const regex = new RegExp(`{{${param.key}}}`, 'g');
     finalResult = finalResult.replace(regex, String(param.value));
   }
@@ -172,4 +171,7 @@ export const normalizeErrorResponse = ({
   };
 };
 
-export { defaultHttpStatusForResponse };
+
+
+
+export {defaultHttpStatusForResponse} from '../../shared/responseNormalizer';
