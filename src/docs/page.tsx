@@ -188,28 +188,28 @@ const generateRandomInput = (typeText: string): Record<string, unknown> => {
 
 const buildApiRoutePath = (api: ApiDoc): string => {
   if (api.page === 'root') {
-    return `api/${api.name}/${api.version}`;
+    return `api/system/${api.name}/${api.version}`;
   }
   return `api/${api.page}/${api.name}/${api.version}`;
 };
 
 const buildApiRequestName = (api: ApiDoc): string => {
   if (api.page === 'root') {
-    return api.name;
+    return `system/${api.name}`;
   }
   return `${api.page}/${api.name}`;
 };
 
 const buildSyncRoutePath = (sync: SyncDoc): string => {
   if (sync.page === 'root') {
-    return `sync/${sync.name}/${sync.version}`;
+    return `sync/system/${sync.name}/${sync.version}`;
   }
   return `sync/${sync.page}/${sync.name}/${sync.version}`;
 };
 
 const buildSyncRequestName = (sync: SyncDoc): string => {
   if (sync.page === 'root') {
-    return sync.name;
+    return `system/${sync.name}`;
   }
   return `${sync.page}/${sync.name}`;
 };

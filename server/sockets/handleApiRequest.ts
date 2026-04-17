@@ -2,7 +2,7 @@
 /* eslint-disable */
 import { apiMessage } from './socket';
 import { getSession } from '../functions/session';
-import { AuthProps, rateLimiting, SessionLayout } from '../../config';
+import { AuthProps, logging, rateLimiting, SessionLayout } from '../../config';
 import { Socket } from 'socket.io';
 import { logout } from './utils/logout';
 import { getRuntimeApiMaps } from '../prod/runtimeMaps';
@@ -10,6 +10,7 @@ import { validateRequest } from '../utils/validateRequest';
 import { setSentryUser, startSpan } from '../functions/sentry';
 import { checkRateLimit } from '../utils/rateLimiter';
 import tryCatch from '../../shared/tryCatch';
+import { parseTransportRouteName } from '../../shared/serviceRoute';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '../utils/responseNormalizer';
 import { validateInputByType } from '../utils/runtimeTypeValidation';
 import {
@@ -56,12 +57,17 @@ interface RuntimeApiEntry {
   rateLimit?: number | false;
 }
 
+const shouldLogDev = logging.devLogs;
+const shouldLogStream = logging.stream;
+
 export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
   //? This event gets triggered when the client uses the apiRequest function
   //? We validate the message, check auth then execute
 
   if (typeof msg != 'object') {
-    console.log('socket message was not a json object!!!!', 'red')
+    if (shouldLogDev) {
+      console.log('socket message was not a json object!!!!', 'red');
+    }
     return;
   }
 
@@ -91,25 +97,11 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   };
 
   if (!responseIndex && typeof responseIndex !== 'number') {
-    console.log('no response index given!!!!', 'red')
+    if (shouldLogDev) {
+      console.log('no response index given!!!!', 'red');
+    }
     return;
   }
-
-  //? 'logout' needs special handling since it requires socket access
-  // Extract the API name (last segment) to check for logout regardless of page path
-  const nameSegments = name.split('/').filter(Boolean);
-  const requestedVersion = nameSegments.at(-1);
-  const apiBaseName = nameSegments.at(-2);
-  if (apiBaseName == 'logout') {
-    await logout({ token, socket, userId: user?.id || null });
-    return socket.emit(buildApiResponseEventName(responseIndex), {
-      status: 'success',
-      httpStatus: 200,
-      result: true,
-    });
-  }
-
-  //? Built-in API handlers
 
   if (!name || !data || typeof name != 'string' || typeof data != 'object') {
     return emitApiError({
@@ -123,19 +115,36 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   const normalizedData = data as Record<string, unknown>;
 
-  console.log(`api: ${name} called`, 'blue');
+  const parsedRoute = parseTransportRouteName({ value: name, prefix: 'api' });
+  if (parsedRoute.status === 'error') {
+    return emitApiError({
+      response: {
+        status: 'error',
+        errorCode: 'routing.invalidServiceRouteName',
+        errorParams: [{ key: 'name', value: name }],
+      },
+      fallbackHttpStatus: 400,
+    });
+  }
+
+  const resolvedName = parsedRoute.normalizedFullName;
+  const routeLeaf = parsedRoute.serviceRoute.routeName.split('/').at(-1);
+
+  //? 'logout' needs special handling since it requires socket access
+  if (routeLeaf === 'logout') {
+    await logout({ token, socket, userId: user?.id || null });
+    return socket.emit(buildApiResponseEventName(responseIndex), {
+      status: 'success',
+      httpStatus: 200,
+      result: true,
+    });
+  }
+
+  if (shouldLogDev) {
+    console.log(`api: ${resolvedName} called`, 'blue');
+  }
 
   const { apisObject, functionsObject } = await getRuntimeApiMaps();
-
-  //? Resolve API: try exact match first, then fall back to root-level
-  //? e.g. client sends "api/examples/session" → not found → try "api/session"
-  let resolvedName = name;
-  if (!apisObject[name] && apiBaseName && requestedVersion) {
-    const rootKey = `api/${apiBaseName}/${requestedVersion}`;
-    if (apisObject[rootKey]) {
-      resolvedName = rootKey;
-    }
-  }
 
   //? Check if API exists
   if (!apisObject[resolvedName]) {
@@ -155,6 +164,10 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const inputTypeFilePath = apiEntry.inputTypeFilePath;
 
   const emitApiStream = (payload: ApiStreamPayload = {}) => {
+    if (shouldLogStream) {
+      console.log(`api: ${resolvedName} stream`, payload, 'cyan');
+    }
+
     socket.emit(buildApiStreamEventName(responseIndex), payload);
   };
 
@@ -177,7 +190,9 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   //? Auth validation: check login requirement
   if (auth.login && !user?.id) {
-      console.log(`ERROR: API ${name} requires login`, 'red');
+      if (shouldLogDev) {
+        console.log(`ERROR: API ${name} requires login`, 'red');
+      }
       return emitApiError({
         response: { status: 'error', errorCode: 'auth.required' },
         fallbackHttpStatus: 401,
@@ -187,7 +202,9 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   //? Auth validation: check additional requirements
   const authResult = validateRequest({ auth, user: user! });
   if (authResult.status === "error") {
-    console.log(`ERROR: Auth failed for ${name}: ${authResult.errorCode}`, 'red');
+    if (shouldLogDev) {
+      console.log(`ERROR: Auth failed for ${name}: ${authResult.errorCode}`, 'red');
+    }
     return emitApiError({
       response: {
         status: 'error',
@@ -208,7 +225,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
     const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
     const keyPrefix = token ? 'token' : 'ip';
-    const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${name}`;
+    const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${resolvedName}`;
 
     const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
@@ -217,7 +234,9 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     });
 
     if (!allowed) {
-      console.log(`Rate limit exceeded for ${name}`, 'yellow');
+      if (shouldLogDev) {
+        console.log(`Rate limit exceeded for ${resolvedName}`, 'yellow');
+      }
       return emitApiError({
         response: {
           status: 'error',
@@ -240,7 +259,9 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     });
 
     if (!allowed) {
-      console.log(`Global IP rate limit exceeded for ${requesterIp}`, 'yellow');
+      if (shouldLogDev) {
+        console.log(`Global IP rate limit exceeded for ${requesterIp}`, 'yellow');
+      }
       return emitApiError({
         response: {
           status: 'error',
@@ -267,7 +288,9 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   span?.end?.();
 
   if (error) {
-    console.log(`ERROR in ${name}:`, error, 'red');
+    if (shouldLogDev) {
+      console.log(`ERROR in ${resolvedName}:`, error, 'red');
+    }
     socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
       response: {
         status: 'error',
@@ -278,7 +301,9 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
       fallbackHttpStatus: 500,
     }));
   } else if (result !== undefined && result !== null) {
-    console.log(`api: ${name} completed`, 'blue');
+    if (shouldLogDev) {
+      console.log(`api: ${resolvedName} completed`, 'blue');
+    }
 
     if (result.status === 'success' || result.status === 'error') {
       if (result.status === 'error') {
@@ -313,7 +338,9 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
       }));
     }
   } else {
-    console.log(`WARNING: ${name} returned nothing`, 'yellow');
+    if (shouldLogDev) {
+      console.log(`WARNING: ${resolvedName} returned nothing`, 'yellow');
+    }
     socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
       response: {
         status: 'error',

@@ -21,13 +21,18 @@ const nestedResult = await apiRequest({
   version: "v1",
 });
 
-// Root-level API call (no prefix)
-const session = await apiRequest({ name: "session", version: "v1" });
+// Global API call (service-first)
+const session = await apiRequest({ name: "system/session", version: "v1" });
 
 // HTTP fallback (same API, no WebSocket needed)
 // GET /api/examples/getUserData/v1?userId=123
 // POST /api/examples/getUserData/v1 with JSON body
 ```
+
+Request naming contract:
+
+- `apiRequest` requires service-first route names (`service/name`).
+- Invalid route names return `routing.invalidServiceRouteName`.
 
 ---
 
@@ -35,9 +40,9 @@ const session = await apiRequest({ name: "session", version: "v1" });
 
 ```
 src/
-├── _api/                       # Root-level APIs (callable from any page)
-│   ├── session_v1.ts           # → api/session/v1
-│   └── logout_v1.ts            # → api/logout/v1
+├── _api/                       # Global system APIs (mapped to service key 'system')
+│   ├── session_v1.ts           # → api/system/session/v1
+│   └── logout_v1.ts            # → api/system/logout/v1
 ├── {page}/_api/
 │   ├── {apiName}_v1.ts         # → api/{page}/{apiName}/v1
 │   └── {subfolder}/            # Nested: api/{page}/{subfolder}/{apiName}/v1

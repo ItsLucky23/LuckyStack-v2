@@ -12,7 +12,7 @@ export interface ApiParams {
 }
 
 export const main = ({ user }: ApiParams): MaybePromise<ApiResponse> => {
-  console.log(user)
+  console.log(user);
   return {
     status: 'success',
     result: user

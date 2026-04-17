@@ -1,4 +1,4 @@
-import { dev, SessionLayout } from "config";
+import { logging, SessionLayout } from "config";
 import notify from "src/_functions/notify";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
 import { statusContent } from "src/_providers/socketStatusProvider";
@@ -10,6 +10,7 @@ import type {
 } from "./apiTypes.generated";
 import { Socket } from "socket.io-client";
 import { normalizeErrorResponseCore } from "../../shared/responseNormalizer";
+import { parseServiceRouteName } from "../../shared/serviceRoute";
 import {
   buildSyncProgressEventName,
   buildSyncResponseEventName,
@@ -22,6 +23,11 @@ export type SyncRouteStreamEvent<T extends StreamPayload = StreamPayload> = T;
 
 type SyncRequestStreamCallback = (event: SyncRequestStreamEvent) => void;
 type SyncEventStreamCallback = (params: { stream: SyncRouteStreamEvent }) => void;
+
+const shouldLogDev = logging.devLogs;
+const shouldNotifyDev = logging.devNotifications;
+const shouldLogSocketStatus = logging.socketStatus;
+const shouldLogStream = logging.stream;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Type Helpers for Sync Requests
@@ -45,7 +51,9 @@ type Prettify<T> = { [K in keyof T]: T[K] } & {};
 // All possible sync names across all pages
 type SyncRouteRecord = UnionToIntersection<{
   [P in keyof SyncTypeMap]: {
-    [N in keyof SyncTypeMap[P] as `${Extract<P, string>}/${Extract<N, string>}`]: SyncTypeMap[P][N]
+    [N in keyof SyncTypeMap[P] as P extends 'root'
+      ? `system/${Extract<N, string>}`
+      : `${Extract<P, string>}/${Extract<N, string>}`]: SyncTypeMap[P][N]
   }
 }[keyof SyncTypeMap]>;
 
@@ -186,7 +194,7 @@ const getStreamCallbacksForRoute = (route: string): SyncEventStreamCallback[] =>
 const triggerSyncCallbacks = (name: string, clientOutput: unknown, serverOutput: unknown) => {
   const callbacks = syncEvents[name] ?? [];
   if (callbacks.length === 0) {
-    if (dev) {
+    if (shouldLogDev) {
       console.warn(`Sync event ${name} has no registered callback on this page`);
     }
     return;
@@ -255,8 +263,10 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
   return new Promise<RequestOutput>((resolve) => {
     void (async () => {
       if (!name || typeof name !== "string") {
-        if (dev) {
+        if (shouldLogDev) {
           console.error("Invalid name for syncRequest");
+        }
+        if (shouldNotifyDev) {
           notify.error({ key: 'sync.invalidName' });
         }
         resolve(normalizeSyncError({
@@ -266,11 +276,34 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         return;
       }
 
+      const parsedRoute = parseServiceRouteName(name);
+      if (parsedRoute.status === 'error') {
+        if (shouldLogDev) {
+          console.error(`[syncRequest] Invalid service route name '${name}': ${parsedRoute.reason}`);
+        }
+        if (shouldNotifyDev) {
+          notify.error({ key: 'routing.invalidServiceRouteName' });
+        }
+        resolve(normalizeSyncError({
+          response: {
+            status: 'error',
+            errorCode: 'routing.invalidServiceRouteName',
+            errorParams: [{ key: 'name', value: name }],
+          },
+          fallbackErrorCode: 'routing.invalidServiceRouteName',
+        }) as RequestOutput);
+        return;
+      }
+
+      const sanitizedName = parsedRoute.normalizedRouteName;
+
       const data = payloadData && typeof payloadData === "object" ? payloadData : {};
 
       if (!version || typeof version !== 'string') {
-        if (dev) {
+        if (shouldLogDev) {
           console.error("Invalid version for syncRequest");
+        }
+        if (shouldNotifyDev) {
           notify.error({ key: 'sync.invalidVersion' });
         }
         resolve(normalizeSyncError({
@@ -283,8 +316,10 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
       const normalizedReceiver = typeof receiver === 'string' ? receiver.trim() : '';
 
       if (!normalizedReceiver) {
-        if (dev) {
+        if (shouldLogDev) {
           console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
+        }
+        if (shouldNotifyDev) {
           notify.error({ key: 'sync.missingReceiver' });
         }
         resolve(normalizeSyncError({
@@ -309,7 +344,6 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         return;
       }
 
-      const sanitizedName = name.replaceAll(/^\/+|\/+$/g, '');
       const fullName = `sync/${sanitizedName}/${version}`;
       let queueId: string | null = null;
 
@@ -331,13 +365,17 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
 
         let cleanupProgressListener: (() => void) | null = null;
 
-        if (dev) {
+        if (shouldLogDev) {
           console.log(`Client Sync Request(${String(tempIndex)}):`, { syncName: sanitizedName, data, receiver: normalizedReceiver, ignoreSelf });
         }
 
         if (typeof onStream === 'function') {
           const progressEventName = buildSyncProgressEventName(tempIndex);
           const progressListener = (streamPayload: SyncRequestStreamEvent) => {
+            if (shouldLogStream) {
+              console.log(`Server Sync Stream(${String(tempIndex)}):`, { syncName: sanitizedName, streamPayload });
+            }
+
             onStream(streamPayload);
           };
 
@@ -358,8 +396,10 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
               fallbackErrorCode: 'sync.failedRequest',
             });
 
-            if (dev) {
+            if (shouldLogDev) {
               console.error(`Sync ${sanitizedName} failed: ${normalizedError.message}`);
+            }
+            if (shouldNotifyDev) {
               notify.error({
                 key: 'sync.failedRequest',
                 params: [
@@ -435,30 +475,37 @@ export const useSyncEvents = () => {
   ): (() => void) => {
 
     if (typeof params.version !== 'string') {
-      if (dev) {
+      if (shouldLogDev) {
         console.error("Invalid version for upsertSyncEventCallback");
+      }
+      if (shouldNotifyDev) {
         notify.error({ key: 'sync.invalidVersion' });
       }
       return noop;
     }
 
     if (typeof params.callback !== 'function') {
-      if (dev) {
+      if (shouldLogDev) {
         console.error("Invalid callback for upsertSyncEventCallback");
+      }
+      if (shouldNotifyDev) {
         notify.error({ key: 'sync.invalidCallback' });
       }
       return noop;
     }
 
     const routeName = String(params.name);
-    const sanitizedName = routeName.replaceAll(/^\/+|\/+$/g, '');
-    if (sanitizedName.length === 0) {
-      if (dev) {
-        console.error("Invalid name for upsertSyncEventCallback");
-        notify.error({ key: 'sync.invalidName' });
+    const parsedRoute = parseServiceRouteName(routeName);
+    if (parsedRoute.status === 'error') {
+      if (shouldLogDev) {
+        console.error(`Invalid name for upsertSyncEventCallback: '${routeName}', ${parsedRoute.reason}`);
+      }
+      if (shouldNotifyDev) {
+        notify.error({ key: 'routing.invalidServiceRouteName' });
       }
       return noop;
     }
+    const sanitizedName = parsedRoute.normalizedRouteName;
 
     const routeVersion = String(params.version);
     const fullName = `sync/${sanitizedName}/${routeVersion}`;
@@ -479,7 +526,7 @@ export const useSyncEvents = () => {
     // Multiple components can intentionally subscribe to the same sync event.
     // Only warn when the exact same callback is registered twice.
     if (nextCallbacks.includes(callback)) {
-      if (dev) {
+      if (shouldLogDev) {
         console.warn(`[SyncEvents] Duplicate callback registration for ${fullName} was ignored.`);
       }
 
@@ -514,30 +561,37 @@ export const useSyncEvents = () => {
   ): (() => void) => {
 
     if (typeof params.version !== 'string') {
-      if (dev) {
+      if (shouldLogDev) {
         console.error("Invalid version for upsertSyncEventStreamCallback");
+      }
+      if (shouldNotifyDev) {
         notify.error({ key: 'sync.invalidVersion' });
       }
       return noop;
     }
 
     if (typeof params.callback !== 'function') {
-      if (dev) {
+      if (shouldLogDev) {
         console.error("Invalid callback for upsertSyncEventStreamCallback");
+      }
+      if (shouldNotifyDev) {
         notify.error({ key: 'sync.invalidCallback' });
       }
       return noop;
     }
 
     const routeName = String(params.name);
-    const sanitizedName = routeName.replaceAll(/^\/+|\/+$/g, '');
-    if (sanitizedName.length === 0) {
-      if (dev) {
-        console.error("Invalid name for upsertSyncEventStreamCallback");
-        notify.error({ key: 'sync.invalidName' });
+    const parsedRoute = parseServiceRouteName(routeName);
+    if (parsedRoute.status === 'error') {
+      if (shouldLogDev) {
+        console.error(`Invalid name for upsertSyncEventStreamCallback: '${routeName}', ${parsedRoute.reason}`);
+      }
+      if (shouldNotifyDev) {
+        notify.error({ key: 'routing.invalidServiceRouteName' });
       }
       return noop;
     }
+    const sanitizedName = parsedRoute.normalizedRouteName;
 
     const routeVersion = String(params.version);
     const fullName = `sync/${sanitizedName}/${routeVersion}`;
@@ -558,7 +612,7 @@ export const useSyncEvents = () => {
 
     const nextCallbacks = getStreamCallbacksForRoute(fullName);
     if (nextCallbacks.includes(callback)) {
-      if (dev) {
+      if (shouldLogDev) {
         console.warn(`[SyncEvents] Duplicate stream callback registration for ${fullName} was ignored.`);
       }
 
@@ -650,7 +704,9 @@ export const initSyncRequest = async ({
   }
 
   const connect = () => {
-    console.log("Connected to server");
+    if (shouldLogSocketStatus) {
+      console.log("Connected to server");
+    }
     setSocketStatus(prev => ({
       ...prev,
       self: {
@@ -669,7 +725,9 @@ export const initSyncRequest = async ({
         status: "DISCONNECTED",
       }
     }));
-    console.log("Disconnected, trying to reconnect...");
+    if (shouldLogSocketStatus) {
+      console.log("Disconnected, trying to reconnect...");
+    }
   };
 
   const reconnectAttempt = (attempt: number) => {
@@ -681,7 +739,9 @@ export const initSyncRequest = async ({
         reconnectAttempt: attempt,
       }
     }));
-    console.log(`Reconnecting attempt ${String(attempt)}...`);
+    if (shouldLogSocketStatus) {
+      console.log(`Reconnecting attempt ${String(attempt)}...`);
+    }
   };
 
   //? will not trigger when you call this event
@@ -708,7 +768,9 @@ export const initSyncRequest = async ({
 
   //? will not trigger when you call this event
   const userBack = ({ userId }: { userId: string }) => {
-    console.log("userBack", { userId });
+    if (shouldLogSocketStatus) {
+      console.log("userBack", { userId });
+    }
 
     setSocketStatus(prev => ({
       ...prev,
@@ -720,7 +782,9 @@ export const initSyncRequest = async ({
   };
 
   const connectError = (err: { message: string }) => {
-    console.log("connect_error", { err });
+    if (shouldLogSocketStatus) {
+      console.log("connect_error", { err });
+    }
     setSocketStatus(prev => ({
       ...prev,
       self: {
@@ -729,8 +793,10 @@ export const initSyncRequest = async ({
         reconnectAttempt: undefined,
       }
     }));
-    if (dev) {
+    if (shouldLogDev) {
       console.error(`Connection error: ${err.message}`);
+    }
+    if (shouldNotifyDev) {
       notify.error({ key: 'common.connectionError' });
     }
   };

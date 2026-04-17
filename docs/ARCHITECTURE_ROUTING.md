@@ -362,7 +362,10 @@ Template injection is a development scaffold step, not the long-term type source
 
 - API files must end with `_v{number}.ts` (example: `getUser_v1.ts`)
 - Sync files must end with `_server_v{number}.ts` or `_client_v{number}.ts`
-- Invalid names get a guidance template instead of route registration
+- Invalid route names are treated as errors during dev server startup and build generation (type maps + server request map generation)
+- Route tokens under `_api/` and `_sync/` must be file-based (`<name>_v{n}`, `<name>_server_v{n}`, `<name>_client_v{n}`) and must not include nested path segments after `_api/` or `_sync/`
+- Request helper names are service-first only (`service/name`), and invalid request route names fail with `routing.invalidServiceRouteName`
+- Runtime resolution does not fall back from page-scoped routes to legacy root routes
 - Naming patterns are centralized in `server/dev/routeConventions.ts` so loader, type-map discovery, and generation stay in sync
 
 ### Paired sync behavior

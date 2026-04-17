@@ -17,6 +17,7 @@ import {
 import { generateServerFunctions } from './typeMap/functionsMeta';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { SRC_DIR } from '../utils/paths';
+import { assertValidRouteNaming } from './routeNamingValidation';
 
 // Collect required imports for the Functions interface only.
 // API/Sync types are now fully expanded by the TypeChecker and need no imports.
@@ -29,6 +30,11 @@ interface GenerateTypeMapOptions {
 
 export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void => {
   const { quiet = false } = options;
+  assertValidRouteNaming({
+    srcDir: SRC_DIR,
+    context: 'generating API/sync type maps',
+  });
+
   // Rebuild the TypeScript Program on each generation to pick up file changes.
   invalidateProgramCache();
   namedImports.clear();

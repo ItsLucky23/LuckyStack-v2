@@ -241,14 +241,16 @@ const result = await apiRequest({ name: "jow" }); // ❌ Property 'data' is miss
 ```typescript
 // Type-safe sync with auto-complete
 await syncRequest({
-  name: "updateCounter", // ← Autocomplete for sync names
+  name: "examples/updateCounter", // ← Autocomplete for service-first sync names
+  version: "v1",
   data: { increase: true }, // ← Type-checked
   receiver: roomCode,
 });
 
 // Exact typing with page path
-await syncRequest<"examples">({
-  name: "updateCounter",
+await syncRequest({
+  name: "examples/updateCounter",
+  version: "v1",
   data: { increase: true },
   receiver: roomCode,
 });
@@ -260,9 +262,13 @@ await syncRequest<"examples">({
 const { upsertSyncEventCallback } = useSyncEvents();
 
 // Type-safe: clientOutput and serverOutput are inferred from sync definition
-upsertSyncEventCallback("updateCounter", ({ clientOutput, serverOutput }) => {
-  console.log(clientOutput.randomKey); // ← Type from _client file return (success only)
-  console.log(serverOutput.increase); // ← Type from _server file return
+upsertSyncEventCallback({
+  name: "examples/updateCounter",
+  version: "v1",
+  callback: ({ clientOutput, serverOutput }) => {
+    console.log(clientOutput.randomKey); // ← Type from _client file return (success only)
+    console.log(serverOutput.increase); // ← Type from _server file return
+  },
 });
 ```
 

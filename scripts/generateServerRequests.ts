@@ -4,9 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { getInputTypeFromFile, getSyncClientDataType } from '../server/dev/typeMap/extractors';
 import { API_VERSION_TOKEN_REGEX, SYNC_VERSION_TOKEN_REGEX } from '../server/dev/routeConventions';
-import { resolveFromRoot } from '../server/utils/paths';
+import { assertValidRouteNaming } from '../server/dev/routeNamingValidation';
+import { ROOT_DIR, resolveFromRoot } from '../server/utils/paths';
 
 const normalizePath = (p: string) => p.split(path.sep).join("/");
+
+const mapApiPagePath = (pagePath?: string): string => {
+  return pagePath && pagePath.length > 0 ? pagePath : 'system';
+};
 
 // Recursively walk dirs to collect _api and _sync files
 const walkSrcFiles = (dir: string, results: string[] = []) => {
@@ -47,7 +52,13 @@ const walkFunctionFiles = (dir: string, results: string[] = []) => {
 // --------------------
 // Collect files
 // --------------------
-const rawSrcFiles = walkSrcFiles("./src").map(normalizePath).sort();
+const srcDir = resolveFromRoot('src');
+assertValidRouteNaming({
+  srcDir,
+  context: 'generating server request maps for build',
+});
+
+const rawSrcFiles = walkSrcFiles(srcDir).map(normalizePath).sort();
 const functionFiles = walkFunctionFiles("./server/functions").sort();
 
 // --------------------
@@ -69,7 +80,8 @@ let fnCount = 0;
 // Process API + Sync
 // --------------------
 rawSrcFiles.forEach((normalized) => {
-  const importPath = "../../" + normalized.replace(/\.ts$/, "");
+  const workspaceRelativePath = normalizePath(path.relative(ROOT_DIR, normalized));
+  const importPath = "../../" + workspaceRelativePath.replace(/\.ts$/, "");
 
   // API
   if (normalized.includes("_api/")) {
@@ -77,7 +89,7 @@ rawSrcFiles.forEach((normalized) => {
     apiImports.push(`import * as ${varName} from '${importPath}';`);
 
     // capture optional page path and API name (supports root-level and nested _api)
-    // Root: src/_api/session_v1.ts → pagePath=undefined, apiName="session"
+    // Root: src/_api/session_v1.ts → pagePath=undefined, apiName="session" (emitted under system service)
     // Nested: src/examples/_api/user/changeName_v1.ts → pagePath="examples", apiName="user/changeName"
     const match = normalized.match(/src\/(?:(.+?)\/)?_api\/(.+)\.ts$/i);
     if (!match) return;
@@ -87,9 +99,10 @@ rawSrcFiles.forEach((normalized) => {
 
     const version = `v${versionMatch[1]}`;
     const apiName = apiNameWithVersion.replace(API_VERSION_TOKEN_REGEX, '');
-    const routeKey = pagePath ? `api/${pagePath}/${apiName}/${version}` : `api/${apiName}/${version}`;
+    const routeKey = `api/${mapApiPagePath(pagePath)}/${apiName}/${version}`;
+    const inputTypeFilePath = workspaceRelativePath;
 
-    apiMap += `  "${routeKey}": (() => {\n    const mod = ${varName} as Record<string, any>;\n    return {\n      auth: "auth" in mod ? mod.auth : {},\n      main: mod.main,\n      rateLimit: mod.rateLimit as number | false | undefined,\n      httpMethod: mod.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined,\n      inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n      inputTypeFilePath: ${JSON.stringify(normalized)},\n    };\n  })(),\n`;
+    apiMap += `  "${routeKey}": (() => {\n    const mod = ${varName} as Record<string, any>;\n    return {\n      auth: "auth" in mod ? mod.auth : {},\n      main: mod.main,\n      rateLimit: mod.rateLimit as number | false | undefined,\n      httpMethod: mod.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined,\n      inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n      inputTypeFilePath: ${JSON.stringify(inputTypeFilePath)},\n    };\n  })(),\n`;
   }
 
   // Sync
@@ -116,7 +129,7 @@ rawSrcFiles.forEach((normalized) => {
       const varName = `syncServer${syncCount++}`;
       syncImports.push(`import * as ${varName} from '${importPath}';`);
       const inputType = getSyncClientDataType(normalized);
-      syncMap += `  "${routeKey}_server": { auth: "auth" in ${varName} ? ${varName}.auth : {}, main: ${varName}.main, inputType: ${JSON.stringify(inputType)}, inputTypeFilePath: ${JSON.stringify(normalized)} },\n`;
+      syncMap += `  "${routeKey}_server": { auth: "auth" in ${varName} ? ${varName}.auth : {}, main: ${varName}.main, inputType: ${JSON.stringify(inputType)}, inputTypeFilePath: ${JSON.stringify(workspaceRelativePath)} },\n`;
     }
   }
 });

@@ -91,7 +91,7 @@ const navbarItems = [
     label: 'Logout',
     bottom: true,
     action: () => {
-      void apiRequest({ name: 'logout', version: 'v1' });
+      void apiRequest({ name: 'system/logout', version: 'v1' });
     }
   },
 ]

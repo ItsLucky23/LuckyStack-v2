@@ -1,7 +1,7 @@
 import { io, ManagerOptions, Socket, SocketOptions } from 'socket.io-client';
 import {
-  dev,
   backendUrl,
+  logging,
   SessionLayout,
   sessionBasedToken,
   socketActivityBroadcaster,
@@ -79,6 +79,10 @@ const setDisconnectedStatus = (setSocketStatus: ReturnType<typeof useSocketStatu
 };
 
 const isLocationProviderEnabled: boolean = locationProviderEnabled;
+const shouldLogDev = logging.devLogs;
+const shouldNotifyDev = logging.devNotifications;
+const shouldLogSocketStatus = logging.socketStatus;
+const shouldLogStream = logging.stream;
 
 export let socket: Socket | null = null;
 
@@ -127,7 +131,9 @@ export function useSocket(session: SessionLayout | null) {
     const handleVisibility = () => {
       if (!socketActivityBroadcaster) { return; }
 
-      console.log(document.visibilityState)
+      if (shouldLogSocketStatus) {
+        console.log(document.visibilityState);
+      }
 
       //? user switched tab or navigated away
       if (document.visibilityState === "hidden") {
@@ -150,20 +156,28 @@ export function useSocket(session: SessionLayout | null) {
       });
     } else {
       socketConnection.on(socketEventNames.connect, () => {
-        console.log("Connected to server");
+        if (shouldLogSocketStatus) {
+          console.log("Connected to server");
+        }
       });
 
       socketConnection.on(socketEventNames.disconnect, () => {
-        console.log("Disconnected, trying to reconnect...");
+        if (shouldLogSocketStatus) {
+          console.log("Disconnected, trying to reconnect...");
+        }
       });
 
       socketConnection.on(socketEventNames.reconnectAttempt, (attempt) => {
-        console.log("Reconnecting attempt", attempt);
+        if (shouldLogSocketStatus) {
+          console.log("Reconnecting attempt", attempt);
+        }
       });
 
       socketConnection.on(socketEventNames.connectError, (err: { message: string }) => {
-        if (dev) {
+        if (shouldLogDev) {
           console.error(`Connection error: ${err.message}`);
+        }
+        if (shouldNotifyDev) {
           notify.error({ key: 'common.connectionError' });
         }
       });
@@ -188,7 +202,9 @@ export function useSocket(session: SessionLayout | null) {
 
     socketConnection.on(socketEventNames.sync, (payload: SyncEventPayload) => {
       const { cb, clientOutput, serverOutput, message, status, fullName, errorCode, errorParams } = payload;
-      if (dev) console.log("Server Sync Response:", payload);
+      if (shouldLogDev) {
+        console.log("Server Sync Response:", payload);
+      }
 
       const routeKeys = getSyncRouteKeys({ fullName, cb });
 
@@ -202,6 +218,10 @@ export function useSocket(session: SessionLayout | null) {
         delete streamPayload.fullName;
         delete streamPayload.cb;
 
+        if (shouldLogStream) {
+          console.log("Server Sync Stream:", { routeKeys, streamPayload });
+        }
+
         for (const routeKey of routeKeys) {
           triggerSyncStreamEvent(routeKey, streamPayload as SyncRouteStreamEvent);
         }
@@ -212,7 +232,7 @@ export function useSocket(session: SessionLayout | null) {
         if (errorCode === 'sync.ignore' || message === 'sync.ignore') {
           return;
         }
-        if (dev) {
+        if (shouldNotifyDev) {
           if (errorCode) {
             notify.error({ key: errorCode, params: errorParams });
           } else if (message) {
@@ -224,8 +244,10 @@ export function useSocket(session: SessionLayout | null) {
 
       if (routeKeys.length === 0) {
         const errorMessage = `Sync response is missing fullName for cb '${cb ?? 'unknown'}'.`;
-        if (dev) {
+        if (shouldLogDev) {
           console.error(errorMessage);
+        }
+        if (shouldNotifyDev) {
           notify.error({ key: 'sync.invalidRequestFormat' });
         }
         throw new Error(errorMessage);
@@ -272,8 +294,10 @@ export const waitForSocket = async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     i++
     if (i > 500) {
-      if (dev) {
+      if (shouldLogDev) {
         console.error("Socket is not initialized, giving up");
+      }
+      if (shouldNotifyDev) {
         notify.error({ key: 'common.socketNotInitialized' });
       }
       return false
@@ -287,8 +311,10 @@ export const joinRoom = async (group: string) => {
   return new Promise<{ success: true; rooms: string[] } | null>((resolve) => {
     void (async () => {
       if (!group || typeof group !== "string") {
-        if (dev) {
+        if (shouldLogDev) {
           console.error("Invalid group");
+        }
+        if (shouldNotifyDev) {
           notify.error({ key: 'common.invalidGroup' });
         }
         resolve(null);
@@ -309,8 +335,10 @@ export const joinRoom = async (group: string) => {
 
       socket.once(buildJoinRoomResponseEventName(tempIndex), (response?: { error?: string; rooms?: unknown }) => {
         if (response?.error) {
-          if (dev) {
+          if (shouldLogDev) {
             console.error(response.error);
+          }
+          if (shouldNotifyDev) {
             notify.error({ key: response.error });
           }
           resolve(null);
@@ -331,8 +359,10 @@ export const leaveRoom = async (group: string) => {
   return new Promise<{ success: true; rooms: string[] } | null>((resolve) => {
     void (async () => {
       if (!group || typeof group !== "string") {
-        if (dev) {
+        if (shouldLogDev) {
           console.error("Invalid group");
+        }
+        if (shouldNotifyDev) {
           notify.error({ key: 'common.invalidGroup' });
         }
         resolve(null);
@@ -353,8 +383,10 @@ export const leaveRoom = async (group: string) => {
 
       socket.once(buildLeaveRoomResponseEventName(tempIndex), (response?: { error?: string; rooms?: unknown }) => {
         if (response?.error) {
-          if (dev) {
+          if (shouldLogDev) {
             console.error(response.error);
+          }
+          if (shouldNotifyDev) {
             notify.error({ key: response.error });
           }
           resolve(null);
@@ -388,8 +420,10 @@ export const getJoinedRooms = async () => {
 
       socket.once(buildGetJoinedRoomsResponseEventName(tempIndex), (response?: { error?: string; rooms?: unknown }) => {
         if (response?.error) {
-          if (dev) {
+          if (shouldLogDev) {
             console.error(response.error);
+          }
+          if (shouldNotifyDev) {
             notify.error({ key: response.error });
           }
           resolve(null);
@@ -411,8 +445,10 @@ export const updateLocationRequest = async ({ location }: { location: { pathName
   if (!isLocationProviderEnabled) { return null; }
 
   if (!location.pathName) {
-    if (dev) {
+    if (shouldLogDev) {
       console.error("Invalid location");
+    }
+    if (shouldNotifyDev) {
       notify.error({ key: 'common.invalidLocation' });
     }
     return null;

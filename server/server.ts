@@ -17,7 +17,7 @@ import { z } from 'zod';
 import oauthProviders from "./auth/loginConfig";
 import { deleteSession, getSession } from './functions/session';
 import allowedOrigin from './auth/checkOrigin';
-import { rateLimiting, sessionBasedToken, sessionExpiryDays, SessionLayout } from '../config';
+import { logging, rateLimiting, sessionBasedToken, sessionExpiryDays, SessionLayout } from '../config';
 
 import { serveAvatar } from './utils/serveAvatars';
 import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
@@ -30,6 +30,8 @@ import { serverRuntimeConfig } from './config/runtimeConfig';
 const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (sessionExpiryDays ?? 7);
 const SESSION_COOKIE_NAME = serverRuntimeConfig.http.sessionCookieName;
 const SESSION_COOKIE_OPTIONS = `HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; ${process.env.SECURE == 'true' ? "Secure;" : ""}`;
+const shouldLogDev = logging.devLogs;
+const shouldLogStream = logging.stream;
 
 const REDACTED_LOG_KEYS = new Set([
   'password',
@@ -158,6 +160,10 @@ const sendSseEvent = ({
   const serializedData = JSON.stringify(data);
   res.write(`event: ${event}\n`);
   res.write(`data: ${serializedData}\n\n`);
+
+  if (event === 'stream' && shouldLogStream) {
+    console.log('http stream event', data, 'cyan');
+  }
 };
 
 const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
@@ -222,10 +228,14 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
   //? we log the request and if there are any params we log them with the request
   if (params && typeof params == 'object' && Object.keys(params).length > 0) {
-    const safeParams = sanitizeForLog(params);
-    console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(safeParams)}`, 'magenta')
+    if (shouldLogDev) {
+      const safeParams = sanitizeForLog(params);
+      console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(safeParams)}`, 'magenta');
+    }
   } else {
-    console.log(`method: ${method}, url: ${routePath}`, 'magenta');
+    if (shouldLogDev) {
+      console.log(`method: ${method}, url: ${routePath}`, 'magenta');
+    }
     params = {};
   }
 
@@ -305,7 +315,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       const requestedSessionMode = parseSessionBasedTokenHeader(req.headers['x-session-based-token']);
       const useSessionBasedToken = requestedSessionMode ?? sessionBasedToken;
 
-      if (process.env.NODE_ENV === 'development') {
+      if (shouldLogDev) {
         console.log('setting cookie with new token', 'green');
       }
 
@@ -337,7 +347,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     if (token) { await deleteSession(token); }
 
     //? we set the cookie with the new token and redirect the user to the frontend
-    if (process.env.NODE_ENV === 'development') {
+    if (shouldLogDev) {
       console.log('setting cookie or redirect with new token', 'green');
     }
     const location = process.env.DNS
@@ -430,7 +440,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       res.writeHead(result.httpStatus);
       return res.end(JSON.stringify(result));
     } catch (error) {
-      console.log('HTTP API error:', error, 'red');
+      if (shouldLogDev) {
+        console.log('HTTP API error:', error, 'red');
+      }
 
       if (useHttpStream) {
         if (!res.writableEnded) {
@@ -549,7 +561,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       res.writeHead(result.status === 'success' ? 200 : 400);
       return res.end(JSON.stringify(result));
     } catch (error) {
-      console.log('HTTP SYNC error:', error, 'red');
+      if (shouldLogDev) {
+        console.log('HTTP SYNC error:', error, 'red');
+      }
 
       if (useHttpStream) {
         if (!res.writableEnded) {

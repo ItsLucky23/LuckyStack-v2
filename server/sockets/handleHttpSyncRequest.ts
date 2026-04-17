@@ -2,11 +2,12 @@
 /* eslint-disable */
 import { ioInstance } from "./socket";
 import { getSession } from "../functions/session";
-import { AuthProps, rateLimiting, SessionLayout } from '../../config';
+import { AuthProps, logging, rateLimiting, SessionLayout } from '../../config';
 import { getRuntimeSyncMaps as getRuntimeSyncMapsFromSource } from '../prod/runtimeMaps';
 import { validateRequest } from "../utils/validateRequest";
 import { extractTokenFromSocket } from "../utils/extractToken";
 import tryCatch from "../../shared/tryCatch";
+import { parseTransportRouteName } from '../../shared/serviceRoute';
 import { extractLanguageFromHeader, normalizeErrorResponse } from "../utils/responseNormalizer";
 import { validateInputByType } from '../utils/runtimeTypeValidation';
 import { checkRateLimit } from '../utils/rateLimiter';
@@ -76,6 +77,9 @@ type RuntimeSyncClientHandler = (params: {
   stream: (payload?: SyncStreamPayload) => void;
 }) => Promise<RuntimeSyncResponse>;
 
+const shouldLogDev = logging.devLogs;
+const shouldLogStream = logging.stream;
+
 export type HttpSyncStreamEvent = SyncStreamPayload;
 
 export default async function handleHttpSyncRequest({
@@ -90,6 +94,10 @@ export default async function handleHttpSyncRequest({
   acceptLanguageHeader,
   stream,
 }: HttpSyncRequestParams): Promise<HttpSyncResponse> {
+  if (shouldLogDev) {
+    console.log(`http sync: ${name} called`, 'cyan');
+  }
+
   const normalizedReceiver = typeof receiver === 'string' ? receiver.trim() : '';
   const preferredLocale =
     extractLanguageFromHeader(xLanguageHeader)
@@ -153,6 +161,24 @@ export default async function handleHttpSyncRequest({
       });
     }
 
+    const parsedRoute = parseTransportRouteName({ value: name, prefix: 'sync' });
+    if (parsedRoute.status === 'error') {
+      return buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'routing.invalidServiceRouteName',
+          errorParams: [{ key: 'name', value: name }],
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      });
+    }
+
+    const resolvedName = parsedRoute.normalizedFullName;
+    const callbackName = typeof cb === 'string' && cb.trim().length > 0
+      ? cb.trim()
+      : `${parsedRoute.serviceRoute.normalizedRouteName}/${parsedRoute.version}`;
+
     if (!normalizedReceiver) {
       return buildSyncError({
         response: { status: 'error', errorCode: 'sync.missingReceiver' },
@@ -162,20 +188,6 @@ export default async function handleHttpSyncRequest({
     }
 
     const { syncObject, functionsObject } = await getRuntimeSyncMapsFromSource();
-    const nameSegments = name.split('/').filter(Boolean);
-    const syncBaseName = nameSegments.at(-2);
-    const requestedVersion = nameSegments.at(-1);
-    const callbackName = typeof cb === 'string' && cb.trim().length > 0
-      ? cb.trim()
-      : `${syncBaseName}/${requestedVersion}`;
-
-    let resolvedName = name;
-    if (!syncObject[`${name}_client`] && !syncObject[`${name}_server`] && syncBaseName && requestedVersion) {
-      const rootKey = `sync/${syncBaseName}/${requestedVersion}`;
-      if (syncObject[`${rootKey}_client`] || syncObject[`${rootKey}_server`]) {
-        resolvedName = rootKey;
-      }
-    }
 
     if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
       return buildSyncError({
@@ -238,6 +250,10 @@ export default async function handleHttpSyncRequest({
       const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry;
       const { auth, main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
       const emitServerSyncStream = (payload: SyncStreamPayload = {}) => {
+        if (shouldLogStream) {
+          console.log(`http sync: ${resolvedName} server stream`, payload, 'cyan');
+        }
+
         stream?.(payload);
       };
 
@@ -347,6 +363,10 @@ export default async function handleHttpSyncRequest({
       if (syncObject[`${resolvedName}_client`]) {
         const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
         const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
+          if (shouldLogStream) {
+            console.log(`http sync: ${resolvedName} client stream`, payload, 'cyan');
+          }
+
           tempSocket.emit(socketEventNames.sync, {
             ...payload,
             cb: callbackName,
@@ -409,7 +429,7 @@ export default async function handleHttpSyncRequest({
           fullName: resolvedName,
           serverOutput,
           clientOutput: clientSyncResult,
-          message: clientSyncResult.message || `${name} sync success`,
+          message: clientSyncResult.message || `${resolvedName} sync success`,
           status: 'success',
         });
         continue;
@@ -420,12 +440,16 @@ export default async function handleHttpSyncRequest({
         fullName: resolvedName,
         serverOutput,
         clientOutput: {},
-        message: `${name} sync success`,
+        message: `${resolvedName} sync success`,
         status: 'success',
       });
     }
 
-    return { status: 'success', message: `sync ${name} success` };
+    if (shouldLogDev) {
+      console.log(`http sync: ${resolvedName} completed`, 'cyan');
+    }
+
+    return { status: 'success', message: `sync ${resolvedName} success` };
   } finally {
     span?.end?.();
   }

@@ -323,6 +323,20 @@ Colorized console output:
 - **Yellow** - Warnings
 - **Magenta** - HTTP requests
 
+Logging is now configurable in `config.ts` via `logging`:
+
+```typescript
+logging: {
+  devLogs: true,          // general API/sync/client/server debug logs
+  devNotifications: true, // dev-only notify.error toasts
+  socketStatus: true,     // connect/disconnect/reconnect status logs
+  socketStartup: true,    // "SocketIO server initialized" startup log
+  stream: true,           // API/sync stream payload logs
+}
+```
+
+Use this to disable noisy logs without turning off all development diagnostics.
+
 ### Dev REPL
 
 In server terminal, type commands directly:

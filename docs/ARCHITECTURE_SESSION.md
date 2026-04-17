@@ -8,11 +8,11 @@
 
 ```typescript
 // Client: Get current session
-const session = await apiRequest({ name: "session", version: "v1" });
+const session = await apiRequest({ name: "system/session", version: "v1" });
 // Returns: { id, email, name, provider, ... } or null
 
 // Client: Logout
-await apiRequest({ name: "logout", version: "v1" });
+await apiRequest({ name: "system/logout", version: "v1" });
 ```
 
 ---

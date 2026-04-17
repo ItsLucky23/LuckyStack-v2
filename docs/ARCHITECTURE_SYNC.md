@@ -40,7 +40,15 @@ await syncRequest({
   data: { step: 1, active: true },
   receiver: "game-room-123",
 });
+
+// Invalid shape (missing service segment) fails with routing.invalidServiceRouteName
+// await syncRequest({ name: "updateCounter", version: "v1", receiver: "game-room-123" });
 ```
+
+Naming contract:
+
+- `syncRequest` and sync event callback registrations require service-first names (`service/name`).
+- Invalid names are rejected with `routing.invalidServiceRouteName`.
 
 ---
 

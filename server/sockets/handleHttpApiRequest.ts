@@ -1,13 +1,14 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing */
 
 import { getSession } from '../functions/session';
-import { rateLimiting, AuthProps, SessionLayout } from '../../config';
+import { rateLimiting, AuthProps, logging, SessionLayout } from '../../config';
 import { getRuntimeApiMaps as getRuntimeApiMapsFromSource } from '../prod/runtimeMaps';
 import { validateRequest } from '../utils/validateRequest';
 import { setSentryUser, startSpan } from '../functions/sentry';
 import { checkRateLimit } from '../utils/rateLimiter';
 import { inferHttpMethod, HttpMethod } from '../utils/httpApiUtils';
 import tryCatch from '../../shared/tryCatch';
+import { parseTransportRouteName } from '../../shared/serviceRoute';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '../utils/responseNormalizer';
 import { validateInputByType } from '../utils/runtimeTypeValidation';
 
@@ -103,6 +104,9 @@ const isRuntimeApiResult = (value: unknown): value is RuntimeApiResult => {
   return status === 'success' || status === 'error';
 };
 
+const shouldLogDev = logging.devLogs;
+const shouldLogStream = logging.stream;
+
 export type ApiHttpStreamEvent = ApiStreamPayload;
 
 export async function handleHttpApiRequest({
@@ -159,22 +163,25 @@ export async function handleHttpApiRequest({
 
   const requestData = data ?? {};
 
-  console.log(`http api: ${normalizedName} called`, 'cyan');
+  const parsedRoute = parseTransportRouteName({ value: normalizedName, prefix: 'api' });
+  if (parsedRoute.status === 'error') {
+    return buildNetworkError({
+      response: {
+        status: 'error',
+        errorCode: 'routing.invalidServiceRouteName',
+        errorParams: [{ key: 'name', value: normalizedName }],
+      },
+      fallbackHttpStatus: 400,
+    });
+  }
+
+  const resolvedName = parsedRoute.normalizedFullName;
+
+  if (shouldLogDev) {
+    console.log(`http api: ${resolvedName} called`, 'cyan');
+  }
 
   const { apisObject, functionsObject } = await getRuntimeApiMapsFromSource();
-
-  //? Resolve API: try exact match first, then fall back to root-level
-  //? e.g. "api/examples/session" → not found → try "api/session"
-  const nameSegments = normalizedName.split('/').filter(Boolean);
-  const requestedVersion = nameSegments.at(-1);
-  const apiBaseName = nameSegments.at(-2);
-  let resolvedName = normalizedName;
-  if (!apisObject[normalizedName] && apiBaseName && requestedVersion) {
-    const rootKey = `api/${apiBaseName}/${requestedVersion}`;
-    if (apisObject[rootKey]) {
-      resolvedName = rootKey;
-    }
-  }
 
   // Check if API exists
   if (!apisObject[resolvedName]) {
@@ -182,7 +189,7 @@ export async function handleHttpApiRequest({
       response: {
         status: 'error',
         errorCode: 'api.notFound',
-        errorParams: [{ key: 'name', value: normalizedName }],
+        errorParams: [{ key: 'name', value: resolvedName }],
       },
       fallbackHttpStatus: 404,
     });
@@ -213,7 +220,9 @@ export async function handleHttpApiRequest({
   // HTTP method validation
   const expectedMethod = declaredMethod ?? inferHttpMethod(resolvedName);
   if (method !== expectedMethod) {
-    console.log(`Method mismatch for ${normalizedName}: expected ${expectedMethod}, got ${method}`, 'yellow');
+    if (shouldLogDev) {
+      console.log(`Method mismatch for ${resolvedName}: expected ${expectedMethod}, got ${method}`, 'yellow');
+    }
     return buildNetworkError({
       response: {
         status: 'error',
@@ -226,7 +235,9 @@ export async function handleHttpApiRequest({
 
   // Auth validation: check login requirement
   if (auth.login && !user?.id) {
-      console.log(`ERROR: HTTP API ${name} requires login`, 'red');
+      if (shouldLogDev) {
+        console.log(`ERROR: HTTP API ${name} requires login`, 'red');
+      }
       return buildNetworkError({
         response: { status: 'error', errorCode: 'auth.required' },
         fallbackHttpStatus: 401,
@@ -243,7 +254,9 @@ export async function handleHttpApiRequest({
   // Auth validation: check additional requirements
   const authResult = validateRequest({ auth, user });
   if (authResult.status === 'error') {
-    console.log(`ERROR: Auth failed for HTTP API ${name}: ${authResult.errorCode}`, 'red');
+    if (shouldLogDev) {
+      console.log(`ERROR: Auth failed for HTTP API ${name}: ${authResult.errorCode}`, 'red');
+    }
     return buildNetworkError({
       response: {
         status: 'error',
@@ -264,7 +277,7 @@ export async function handleHttpApiRequest({
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
     const requesterIdentity = token ?? requesterIp ?? 'anonymous';
     const keyPrefix = token ? 'token' : 'ip';
-    const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${normalizedName}`;
+    const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${resolvedName}`;
 
     const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
@@ -273,7 +286,9 @@ export async function handleHttpApiRequest({
     });
 
     if (!allowed) {
-      console.log(`Rate limit exceeded for HTTP API ${normalizedName}`, 'yellow');
+      if (shouldLogDev) {
+        console.log(`Rate limit exceeded for HTTP API ${resolvedName}`, 'yellow');
+      }
       return buildNetworkError({
         response: {
           status: 'error',
@@ -295,7 +310,9 @@ export async function handleHttpApiRequest({
     });
 
     if (!allowed) {
-      console.log(`Global IP rate limit exceeded for ${ipBucket}`, 'yellow');
+      if (shouldLogDev) {
+        console.log(`Global IP rate limit exceeded for ${ipBucket}`, 'yellow');
+      }
       return buildNetworkError({
         response: {
           status: 'error',
@@ -313,10 +330,14 @@ export async function handleHttpApiRequest({
       return;
     }
 
+    if (shouldLogStream) {
+      console.log(`http api: ${resolvedName} stream`, payload, 'cyan');
+    }
+
     stream(payload);
   };
 
-  const span = startSpan(normalizedName, 'api.request.http') as { end?: () => void } | undefined;
+  const span = startSpan(resolvedName, 'api.request.http') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
     async () => await main({ data: requestData, user, functions: functionsObject, stream: emitApiStream }),
     undefined,
@@ -330,7 +351,9 @@ export async function handleHttpApiRequest({
   span?.end?.();
 
   if (error) {
-    console.log(`ERROR in HTTP API ${normalizedName}:`, error, 'red');
+    if (shouldLogDev) {
+      console.log(`ERROR in HTTP API ${resolvedName}:`, error, 'red');
+    }
     return buildNetworkError({
       response: { status: 'error', errorCode: 'api.internalServerError' },
       fallbackHttpStatus: 500,
@@ -338,7 +361,9 @@ export async function handleHttpApiRequest({
   }
 
   if (result !== undefined && result !== null) {
-    console.log(`http api: ${normalizedName} completed`, 'cyan');
+    if (shouldLogDev) {
+      console.log(`http api: ${resolvedName} completed`, 'cyan');
+    }
 
     // Check if result is already formatted as ApiResponse
     if (isRuntimeApiResult(result)) {
@@ -368,7 +393,9 @@ export async function handleHttpApiRequest({
     });
   }
 
-  console.log(`WARNING: HTTP API ${normalizedName} returned nothing`, 'yellow');
+  if (shouldLogDev) {
+    console.log(`WARNING: HTTP API ${resolvedName} returned nothing`, 'yellow');
+  }
   return buildNetworkError({
     response: { status: 'error', errorCode: 'api.emptyResponse' },
     fallbackHttpStatus: 500,

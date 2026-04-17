@@ -10,7 +10,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
 import allowedOrigin from '../auth/checkOrigin';
 import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from './utils/activityBroadcaster';
-import { locationProviderEnabled, SessionLayout, socketActivityBroadcaster } from '../../config';
+import { locationProviderEnabled, logging, SessionLayout, socketActivityBroadcaster } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
 import {
   buildGetJoinedRoomsResponseEventName,
@@ -47,6 +47,8 @@ export interface syncMessage {
 }
 
 export let ioInstance: SocketIOServer | null = null;
+const shouldLogDev = logging.devLogs;
+const shouldLogSocketStartup = logging.socketStartup;
 
 const getVisibleSocketRooms = (socket: any, token: string | null): string[] => {
   return [...socket.rooms]
@@ -88,7 +90,9 @@ export default function loadSocket(httpServer: any) {
 
   ioInstance = io;
 
-  console.log('SocketIO server initialized', 'green');
+  if (shouldLogSocketStartup) {
+    console.log('SocketIO server initialized', 'green');
+  }
 
   //? when a client connects to the SocketIO server we extract their token and set up event handlers
   io.on(socketEventNames.connect, (socket) => {
@@ -132,7 +136,9 @@ export default function loadSocket(httpServer: any) {
         const sanitizedSession = sanitizeSessionRoomKeys(session);
         await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
         socket.emit(buildJoinRoomResponseEventName(responseIndex), { rooms: getVisibleSocketRooms(socket, token) });
-        console.log(`Socket ${socket.id} joined group ${group}`, 'cyan');
+        if (shouldLogDev) {
+          console.log(`Socket ${socket.id} joined group ${group}`, 'cyan');
+        }
       });
     });
 
@@ -169,7 +175,9 @@ export default function loadSocket(httpServer: any) {
         await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
 
         socket.emit(buildLeaveRoomResponseEventName(responseIndex), { rooms: getVisibleSocketRooms(socket, token) });
-        console.log(`Socket ${socket.id} left group ${group}`, 'cyan');
+        if (shouldLogDev) {
+          console.log(`Socket ${socket.id} left group ${group}`, 'cyan');
+        }
       });
     });
 
@@ -192,14 +200,18 @@ export default function loadSocket(httpServer: any) {
         socketDisconnecting({ token, socket, reason });
       } else {
         if (!token) { return; }
-        console.log(`user disconnected, reason: ${reason}`, 'yellow');
+        if (shouldLogDev) {
+          console.log(`user disconnected, reason: ${reason}`, 'yellow');
+        }
       }
     });
 
     socket.on(socketEventNames.updateLocation, async (newLocation) => {
       if (!token) { return; }
       if (!locationProviderEnabled) { return; }
-      console.log('updating location to:', newLocation.pathName, 'yellow')
+      if (shouldLogDev) {
+        console.log('updating location to:', newLocation.pathName, 'yellow');
+      }
 
       await withSessionLock(token, async () => {
         let returnedUser: SessionLayout | null = null;

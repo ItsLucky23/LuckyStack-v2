@@ -44,7 +44,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void (async () => {
-      const response = await apiRequest({ name: 'session', version: 'v1' });
+      const response = await apiRequest({ name: 'system/session', version: 'v1' });
       if (!response.result) { return }
       setSession(response.result);
       setSessionLoaded(true);

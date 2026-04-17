@@ -19,10 +19,10 @@ export const extractPagePath = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/');
   const match = normalized.match(/src\/(?:(.+?)\/)_api\//);
   if (match) {
-    return match[1] || 'root';
+    return match[1] || 'system';
   }
   if (normalized.includes('/src/_api/')) {
-    return 'root';
+    return 'system';
   }
   return '';
 };

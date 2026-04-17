@@ -10,4 +10,7 @@ const run = async () => {
   }
 };
 
-run();
+run().catch((error) => {
+  console.error('[TypeMapGenerator] Generation failed:', error);
+  process.exit(1);
+});

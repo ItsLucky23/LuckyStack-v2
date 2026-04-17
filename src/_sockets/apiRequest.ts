@@ -1,10 +1,11 @@
-import { dev } from "config";
+import { logging } from "config";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
 import type { ApiTypeMap, StreamPayload } from './apiTypes.generated';
 import notify from "src/_functions/notify";
 import { enqueueApiRequest, isOnline, removeApiQueueItem } from "./offlineQueue";
 import { Socket } from "socket.io-client";
 import { normalizeErrorResponseCore } from "../../shared/responseNormalizer";
+import { parseServiceRouteName } from "../../shared/serviceRoute";
 import {
   buildApiResponseEventName,
   buildApiStreamEventName,
@@ -37,7 +38,9 @@ const createQueueId = () => {
   return `${String(Date.now())}-${String(Math.random())}`;
 };
 
-const sanitizeName = (name: string) => name.replaceAll(/^\/+|\/+$/g, '');
+const shouldLogDev = logging.devLogs;
+const shouldNotifyDev = logging.devNotifications;
+const shouldLogStream = logging.stream;
 
 const shouldUseAbortController = ({
   abortable,
@@ -71,7 +74,7 @@ type UnionToIntersection<U> =
 type ApiRouteRecord = UnionToIntersection<{
   [P in keyof ApiTypeMap]: {
     [N in keyof ApiTypeMap[P] as P extends 'root'
-      ? Extract<N, string>
+      ? `system/${Extract<N, string>}`
       : `${Extract<P, string>}/${Extract<N, string>}`]: ApiTypeMap[P][N]
   }
 }[keyof ApiTypeMap]>;
@@ -142,8 +145,8 @@ type ApiResponse = ApiErrorResponse | ApiSuccessResponse;
  * const result = await apiRequest({ name: 'examples/publicApi', version: 'v1', data: { message: 'hello' } });
  * // result is typed correctly for publicApi
  * 
- * // Root APIs do not include a page prefix
- * await apiRequest({ name: 'session', version: 'v1' });
+ * // Global APIs use service-first naming
+ * await apiRequest({ name: 'system/session', version: 'v1' });
  * ```
  */
 
@@ -158,8 +161,10 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
   return new Promise<RequestOutput>((resolve, reject) => {
     void (async () => {
       if (!name || typeof name !== "string") {
-        if (dev) {
+        if (shouldLogDev) {
           console.error("Invalid name");
+        }
+        if (shouldNotifyDev) {
           notify.error({ key: 'api.invalidName' });
         }
         resolve(null as unknown as RequestOutput);
@@ -167,13 +172,36 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
       }
 
       if (!version || typeof version !== 'string') {
-        if (dev) {
+        if (shouldLogDev) {
           console.error("Invalid version");
+        }
+        if (shouldNotifyDev) {
           notify.error({ key: 'api.invalidVersion' });
         }
         resolve(null as unknown as RequestOutput);
         return;
       }
+
+      const parsedRoute = parseServiceRouteName(name);
+      if (parsedRoute.status === 'error') {
+        if (shouldLogDev) {
+          console.error(`[apiRequest] Invalid service route name '${name}': ${parsedRoute.reason}`);
+        }
+        if (shouldNotifyDev) {
+          notify.error({ key: 'routing.invalidServiceRouteName' });
+        }
+        resolve(normalizeErrorResponseCore({
+          response: {
+            status: 'error',
+            errorCode: 'routing.invalidServiceRouteName',
+            errorParams: [{ key: 'name', value: name }],
+          },
+          fallbackErrorCode: 'routing.invalidServiceRouteName',
+        }) as RequestOutput);
+        return;
+      }
+
+      const sanitizedName = parsedRoute.normalizedRouteName;
 
       const data = payloadData && typeof payloadData === "object" ? payloadData : {};
 
@@ -185,8 +213,6 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         resolve(null as unknown as RequestOutput);
         return;
       }
-
-      const sanitizedName = sanitizeName(name);
 
       //? Abort controller logic:
       //? - abortable: true → always use abort controller
@@ -262,6 +288,10 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
               return;
             }
 
+            if (shouldLogStream) {
+              console.log(`Server API Stream(${String(tempIndex)}):`, { APINAME: sanitizedName, streamPayload });
+            }
+
             onStream(streamPayload);
           };
 
@@ -271,7 +301,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           };
         }
 
-        if (dev) {
+        if (shouldLogDev) {
           console.log(`Client API Request(${String(tempIndex)}):`, { APINAME: sanitizedName, data });
         }
 
@@ -285,7 +315,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
 
           const status = response.status;
 
-          if (dev) {
+          if (shouldLogDev) {
             console.log(`Server API Response(${String(tempIndex)}):`, { ...response, APINAME: sanitizedName });
           }
 

@@ -6,10 +6,10 @@ import { IncomingMessage, ServerResponse } from 'node:http';
 import { URLSearchParams } from 'node:url';
 import { prisma } from '../functions/db';
 import { PROVIDERS } from '@prisma/client';
-import { compare, genSalt, hash } from 'bcryptjs';
+import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { saveSession } from "../functions/session"
-import { escape, isEmail } from 'validator';
+import validator from 'validator';
 import { defaultLanguage, SessionLayout } from '../../config';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -30,6 +30,8 @@ interface paramsType {
 
 const uploadsFolder = UPLOADS_DIR;
 const isDevMode = process.env.NODE_ENV === 'development';
+const { compare, genSalt, hash } = bcrypt;
+const { escape, isEmail } = validator;
 
 const getOAuthStateKey = (providerName: string, state: string): string => {
   const projectName = process.env.PROJECT_NAME || serverRuntimeConfig.auth.oauthStateProjectNameFallback;

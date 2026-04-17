@@ -51,6 +51,24 @@ const config = {
  
   /** Enable extra console logs for debugging */
   dev: resolvedEnvironment.dev,
+
+  /**
+   * Granular logging and debug notification controls.
+   *
+   * Use these flags to avoid coupling all diagnostics to a single `dev` switch.
+   */
+  logging: {
+    /** General debug logs in API/sync/client/server flows. */
+    devLogs: resolvedEnvironment.dev,
+    /** Dev-only toast notifications for socket/API/sync errors. */
+    devNotifications: resolvedEnvironment.dev,
+    /** Client socket lifecycle status logs (connect/disconnect/reconnect). */
+    socketStatus: resolvedEnvironment.dev,
+    /** Server socket startup log line (SocketIO initialized). */
+    socketStartup: true,
+    /** Stream payload logs for API/Sync stream events. */
+    stream: resolvedEnvironment.dev,
+  },
  
   /** Enable mobile-friendly console overlay (useful for debugging on phones) */
   mobileConsole: false,
@@ -252,6 +270,7 @@ export const {
   socketActivityBroadcaster,
   locationProviderEnabled,
   defaultTheme,
+  logging,
   rateLimiting,
   sentry,
   pageTitle

@@ -9,6 +9,7 @@ import { invalidateProgramCache } from './typeMap/tsProgram';
 import { SERVER_FUNCTIONS_DIR, SRC_DIR } from '../utils/paths';
 import { clearRuntimeTypeResolverCache } from '../utils/runtimeTypeResolver';
 import { API_VERSION_TOKEN_REGEX, SYNC_VERSION_TOKEN_REGEX } from './routeConventions';
+import { assertValidRouteNaming } from './routeNamingValidation';
 
 const nodeRequire = createRequire(import.meta.url);
 
@@ -17,6 +18,10 @@ export const devSyncs: Record<string, any> = {};
 export const devFunctions: Record<string, any> = {};
 
 const normalizePath = (value: string): string => value.replaceAll('\\', '/');
+
+const mapApiPageLocation = (pageLocation: string): string => {
+  return pageLocation ? pageLocation : 'system';
+};
 
 const resolveApiRouteMetaFromPath = (filePath: string): { routeKey: string; absolutePath: string } | null => {
   const absolutePath = path.resolve(filePath);
@@ -45,9 +50,8 @@ const resolveApiRouteMetaFromPath = (filePath: string): { routeKey: string; abso
 
   const version = `v${versionMatch[1]}`;
   const apiName = rawApiName.replace(API_VERSION_TOKEN_REGEX, '');
-  const routeKey = pageLocation
-    ? `api/${pageLocation}/${apiName}/${version}`
-    : `api/${apiName}/${version}`;
+  const mappedPageLocation = mapApiPageLocation(pageLocation);
+  const routeKey = `api/${mappedPageLocation}/${apiName}/${version}`;
 
   return { routeKey, absolutePath };
 };
@@ -94,6 +98,11 @@ const resolveSyncRouteMetaFromPath = (
 };
 
 export const initializeAll = async () => {
+  assertValidRouteNaming({
+    srcDir: SRC_DIR,
+    context: 'starting dev server (npm run server)',
+  });
+
   await Promise.all([initializeApis(), initializeSyncs(), initializeFunctions()]);
 };
 
@@ -168,8 +177,8 @@ export const upsertApiFromFile = async (filePath: string): Promise<void> => {
     const normalized = normalizePath(path.resolve(filePath));
     if (normalized.includes('/_api/') && normalized.endsWith('.ts')) {
       console.log(
-        `[loader][api] ignored invalid filename: ${normalized}. Expected <name>_v<number>.ts`,
-        'yellow'
+        `[loader][api] invalid filename: ${normalized}. Expected <name>_v<number>.ts. File will not be loaded.`,
+        'red'
       );
     }
     return;
@@ -232,6 +241,7 @@ const scanApiFolder = async (file: string, basePath = "") => {
   }
 
   const pageLocation = basePath.replaceAll('\\', '/');
+  const mappedPageLocation = mapApiPageLocation(pageLocation);
   const tsFiles = collectTsFiles(fullPath);
 
   for (const relFile of tsFiles) {
@@ -239,17 +249,15 @@ const scanApiFolder = async (file: string, basePath = "") => {
     const versionMatch = rawApiName.match(API_VERSION_TOKEN_REGEX);
     if (!versionMatch) {
       console.log(
-        `[loader][api] ignored invalid filename: ${path.join(fullPath, relFile)}. Expected <name>_v<number>.ts`,
-        'yellow'
+        `[loader][api] invalid filename: ${path.join(fullPath, relFile)}. Expected <name>_v<number>.ts. File will not be loaded.`,
+        'red'
       );
       continue;
     }
 
     const version = `v${versionMatch[1]}`;
     const apiName = rawApiName.replace(API_VERSION_TOKEN_REGEX, '');
-    const routeKey = pageLocation
-      ? `api/${pageLocation}/${apiName}/${version}`
-      : `api/${apiName}/${version}`;
+    const routeKey = `api/${mappedPageLocation}/${apiName}/${version}`;
 
     const modulePath = path.resolve(path.join(fullPath, relFile));
     const [err, module] = await tryCatch(async () => importFile(modulePath));
@@ -295,8 +303,8 @@ export const upsertSyncFromFile = async (filePath: string): Promise<void> => {
     const normalized = normalizePath(path.resolve(filePath));
     if (normalized.includes('/_sync/') && normalized.endsWith('.ts')) {
       console.log(
-        `[loader][sync] ignored invalid filename: ${normalized}. Expected <name>_server_v<number>.ts or <name>_client_v<number>.ts`,
-        'yellow'
+        `[loader][sync] invalid filename: ${normalized}. Expected <name>_server_v<number>.ts or <name>_client_v<number>.ts. File will not be loaded.`,
+        'red'
       );
     }
     return;
@@ -372,8 +380,8 @@ const scanSyncFolder = async (file: string, basePath = "") => {
     const syncMatch = rawSyncFileName.match(SYNC_VERSION_TOKEN_REGEX);
     if (!syncMatch) {
       console.log(
-        `[loader][sync] ignored invalid filename: ${path.join(fullPath, relFile)}. Expected <name>_server_v<number>.ts or <name>_client_v<number>.ts`,
-        'yellow'
+        `[loader][sync] invalid filename: ${path.join(fullPath, relFile)}. Expected <name>_server_v<number>.ts or <name>_client_v<number>.ts. File will not be loaded.`,
+        'red'
       );
       continue;
     }

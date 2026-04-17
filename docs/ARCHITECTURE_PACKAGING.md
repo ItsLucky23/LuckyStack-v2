@@ -2,7 +2,7 @@
 
 > Single source of truth for LuckyStack package extraction strategy.
 
-Last updated: 2026-04-16
+Last updated: 2026-04-17
 Status: Active implementation plan
 
 ---
@@ -411,10 +411,6 @@ Required behavior:
 2. Reject invalid names with stable error code (for example `routing.invalidServiceRouteName`).
 3. Route parsing must use first segment as service key.
 
-Optional compatibility mode during migration:
-
-- If legacy root name is detected and compatibility mode is on, auto-map to `system/*` with warning.
-
 ### 9.3 Dev loader and typegen changes
 
 Dev/runtime loaders and generated maps must emit normalized service-first route keys.
@@ -624,8 +620,7 @@ Implementation scope for this first PR:
 1. Add one shared route-name parser/validator used by API and sync request flows.
 2. Update `apiRequest` and `syncRequest` to require a service segment in route names.
 3. Return stable routing errors for invalid names (for example `routing.invalidServiceRouteName`).
-4. Add temporary compatibility mapping from legacy root names to `system/*` behind an explicit config toggle.
-5. Update existing root/global call sites to use `system/*` directly.
+4. Update existing root/global call sites to use `system/*` directly.
 
 Out of scope for this first PR:
 
@@ -637,13 +632,51 @@ Definition of done:
 
 1. All API/sync request names used by app code are service-first.
 2. Invalid route-name shape is rejected with stable routing error code.
-3. Legacy route mapping only applies when compatibility toggle is enabled.
-4. Runtime route resolution no longer depends on implicit root-level names.
-5. This document and routing/API/sync docs are updated to reflect final behavior.
+3. Runtime route resolution no longer depends on implicit root-level names.
+4. This document and routing/API/sync docs are updated to reflect final behavior.
 
 Manual verification checklist:
 
 1. Request `system/session` succeeds.
 2. Request with invalid name shape fails with `routing.invalidServiceRouteName`.
-3. Legacy root route only succeeds when compatibility toggle is enabled.
-4. Disabling compatibility toggle makes legacy root route fail with explicit routing error.
+3. Legacy root route fails with explicit routing error.
+
+Status update (2026-04-17):
+
+1. Shared service-first route parsing is implemented and reused in API/sync request paths.
+2. Client and server request handling rejects invalid route names with `routing.invalidServiceRouteName`.
+3. Runtime route resolution no longer falls back to implicit root-level route names.
+4. Global API source files remain in `src/_api`, but are mapped to `api/system/*` at generation/load time.
+5. Route naming validation now hard-fails dev startup and build generation for invalid `_api/_sync` filenames.
+
+---
+
+## 14) Next Session Plan (2026-04-18)
+
+Primary goal:
+
+- Close the routing-contract milestone cleanly, then start service-scoped build foundations.
+
+Step-by-step plan:
+
+1. Finalize routing-contract hardening:
+- Add duplicate normalized route-key detection in dev/build generation and fail with explicit error context.
+- Ensure duplicate checks run in both type-map generation and server request map generation.
+
+2. Complete documentation sync for new contract:
+- Update README examples to use service-first helper names (`system/*`, `service/*`).
+- Update any remaining developer guide snippets that imply implicit root helper names.
+
+3. Start service-scoped backend build design (Section 9.5):
+- Define build inputs for selected service roots (for example `system`, `vehicles`, `housing`).
+- Define output naming contract for scoped server artifacts.
+- Define route-filtering behavior based on first-segment service keys.
+
+4. Implement first thin slice for service-scoped builds:
+- Extend generation script(s) with a services filter argument.
+- Generate a scoped map artifact for one service and validate runtime loading.
+
+5. End-of-session verification before moving to next milestone:
+- `npm run lint`
+- `npm run build`
+- Confirm `system/session` success and invalid helper route-name rejection.
