@@ -125,6 +125,7 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
       envKey: input.currentEnvKey,
       fallbackEnvKey: currentEnv.fallback,
       fallbackBaseUrl: envMap[currentEnv.fallback]?.bindings['system'],
+      strict: deployConfig.routing?.strictBootHandshake ?? false,
     });
   }
 

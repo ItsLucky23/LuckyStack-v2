@@ -1,93 +1,88 @@
 # SESSION_STATE
 
 ## Session Summary
-Branch `chore/package-split-prep`. This sitting closes the previous session's §34.1-§34.3 follow-ups AND adds the Socket.io Redis adapter (filed as a gap during planning — routers can land a client on instance X, but room fanout only works when every instance shares a pub/sub channel). Also scaffolds `@luckystack/test-runner`.
+Branch `chore/package-split-prep`. This sitting closes every item from §35's refinement plan. The original split→ship packaging arc is done; what's left is scope expansion (real fuzz via Zod, monitoring package, NPM publishability audit), not missing foundations.
 
-Six concrete changes landed this session:
+Seven changes landed:
 
-1. **Socket.io Redis adapter** — `attachSocketRedisAdapter(io)` in `@luckystack/core`, wired into `server/sockets/socket.ts`. Room broadcasts now fan out across every backend sharing the Redis.
-2. **Router WebSocket proxying** — `createWsProxy` + `server.on('upgrade', ...)`. Socket.io upgrades route to the `system` service by convention.
-3. **Redis-backed router health state** — `createRedisHealthStore` with keys `router:health:<env>:<service>` and pub/sub channel `router:health:events:<env>`. Resolver reads a hydrated cache (sync), writes+publishes fire-and-forget.
-4. **Boot-time shared-Redis handshake** — `writeBootUuid()` on backend startup, `/_health` endpoint returns it, router probes fallback `/_health` and compares against its own Redis. Catches divergent Redis URLs.
-5. **Hard-fail guard** — split/fallback mode (`environment.fallback` set) refuses to boot without Redis per §9.6 #7. Smoke-verified.
-6. **`@luckystack/test-runner`** package — contract-smoke layer driven by `apiTypes.generated.ts -> apiMethodMap`. `npm run test:contract` walks every endpoint, asserts `{status, errorCode}` envelope. Deferred layers (auth, rate-limit, schema fuzz) need generator changes.
+1. **Auth metadata in generated map** — `apiMetaMap` emits `{ method, auth, rateLimit }` per endpoint alongside `apiMethodMap`. Reuses the existing `extractAuth` AST walker.
+2. **Auth-enforcement test layer** — `runAuthEnforcementTests` walks `auth.login: true` endpoints, expects `auth.required` without a session. CLI: `npm run test:auth`.
+3. **`responseNormalizer` split** — `createLocalizedNormalizer({ translate })` factory in `@luckystack/core`. Project registers on boot via `registerLocalizedNormalizer`. Framework packages (`@luckystack/api`, `sync`) now import `normalizeErrorResponse` / `extractLanguageFromHeader` from core — no more deep-reaching into `server/utils/…`.
+4. **`apiTypes.generated.ts` decoupling** — generator emits `declare module '@luckystack/core' { interface ApiTypeMap extends _ProjectApiTypeMap {} }` augmentation. `apiRequest.ts` / `syncRequest.ts` now import types from core instead of the deep-relative generated file.
+5. **Emitter re-relativizer** — `typeof import('<relative>')` specifiers are now resolved + re-relativized to the generated file's directory. Shims at any depth produce working imports.
+6. **Rate-limit + fuzz test layers** — `runRateLimitTests` fires N+1 requests and expects `api.rateLimitExceeded`; `runFuzzTests` sends junk payloads and asserts no 5xx, envelope preserved. CLIs: `test:rate-limit`, `test:fuzz`. Schema-driven fuzz still deferred (needs Zod emission).
+7. **Boot handshake strict mode** — new `routing.strictBootHandshake` flag in `deploy.config.ts`. Warning-only by default; flip to `true` per-deployment once `/_health` is universal.
 
-## §8 Execution Order progress — **ALL 12 STEPS ✅ (done in previous session)**
+## §8 Execution Order progress — **ALL 12 STEPS ✅ (two sessions ago)**
 
-Refinement status from §34 (previous session's plan):
+Refinement status from §35:
 
 | # | Refinement | Status |
 |---|------------|--------|
-| 34.1 | WebSocket proxying | ✅ this session |
-| 34.2 | Redis-backed health state | ✅ this session |
-| 34.3 | Boot-time shared-Redis handshake | ✅ this session |
-| NEW  | Socket.io Redis adapter (gap) | ✅ this session |
-| NEW  | `@luckystack/test-runner` scaffold | ✅ this session |
-| 34.4 | `responseNormalizer` split | ⏸ not started |
-| 34.5 | `apiTypes.generated.ts` decoupling | ⏸ not started |
-| 34.6 | Emitter re-relativizer | ⏸ not started |
+| 35.1 | Auth metadata in generated map | ✅ this session |
+| 35.2 | Auth-enforcement test layer | ✅ this session |
+| 35.3 | `responseNormalizer` split | ✅ this session |
+| 35.4 | `apiTypes.generated.ts` decoupling | ✅ this session |
+| 35.5 | Emitter re-relativizer | ✅ this session |
+| 35.6 | Rate-limit + fuzz test layers | ✅ this session (schema-driven fuzz deferred) |
+| 35.7 | `/_health` → fatal (opt-in) | ✅ this session (flag-based) |
 
 ## Current package map
 
 ```
 @luckystack/core       (base: transport, utilities, DI, hooks, CORS, runtime validation,
-                        socket Redis adapter, boot UUID)
+                        socket Redis adapter, boot UUID, apiTypeStubs, localizedNormalizer)
    ↑
 @luckystack/login      (auth + session; owns BaseSessionLayout, AuthProps)
    ↑
 @luckystack/presence   (registers postLogout handler on core; one-way dep on login)
 @luckystack/sentry     @luckystack/sync (server + client)     @luckystack/api
 
-@luckystack/devkit     (dev-time only; external in prod bundle)
+@luckystack/devkit     (dev-time only; external in prod bundle; emitter re-relativizer)
 @luckystack/router     (load balancer + health store + boot handshake + WS proxy;
                         raw ioredis, no @luckystack/* runtime imports)
-@luckystack/test-runner (NEW — contract-smoke tests driven by generated route map)
+@luckystack/test-runner (contract + auth + rate-limit + fuzz layers, all driven by
+                        apiTypes.generated.ts)
 ```
 
-## NEXT TASK (per §35, new plan)
+## NEXT TASK (per §36 in packaging doc)
 
-1. **Auth metadata in generated map** — emit `apiMetaMap` next to `apiMethodMap` with `{ method, auth: { login, additional } }`. Unlocks test-runner's auth-enforcement layer.
-2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project provides translate. Design-first.
-3. **`apiTypes.generated.ts` decoupling** — optional. Emitter outputs `declare module '@luckystack/core'` augmentation.
-4. **Emitter re-relativizer** — if function shims ever live outside `server/functions/`, `typeof import('<relative>')` resolves wrong. Compute absolute + re-relativize.
-5. **`/_health` contract → fatal** — once every service exposes `/_health`, flip the handshake from warning to throw.
-6. **Rate-limit + schema-fuzz test layers** — needs per-test token issuer + Zod schema emission.
+Original arc is closed. Forward items are scope expansions, not foundations:
 
-None of these are blockers; all are refinements.
+1. **Zod/JSON-schema emission** — generator emits runtime schemas; unlocks property-based fuzz via `fast-check`.
+2. **`clearAllRateLimits()` test hook** — expose a dev-only `/_test/reset` so test runners can drain limiter state between runs.
+3. **NPM publishability audit** — grep for every remaining deep-relative import from `packages/**` into project files. Should be near zero after §35.4.
+4. **Shared-secret sync checks** — enforce `synchronizedEnvKeys` from `deploy.config.ts` at the same pass as the Redis UUID handshake.
+5. **`@luckystack/web-vitals`** — client-side RUM (§15 backlog).
+6. **`@luckystack/monitoring`** — dual-stream Sentry + audit trail (§15 backlog, needs self-host-vs-SaaS decision).
 
 ## Technical State
 
 - Branch: `chore/package-split-prep`
 - `npm run lint` — clean
-- `npm run build` — clean (vite 465 modules ~3.5s; dist/server.js 214.5 KB, +1.8 KB vs last session)
-- `npm run router` — boots in single-instance; hard-fails without Redis in split/fallback mode (verified)
-- `npm run test:contract` — new; runs contract smoke against `TEST_BASE_URL` (default `http://localhost:80`)
-- New dep: `@socket.io/redis-adapter@^8.3.0`
-
-## Router quick-reference
-
-```bash
-# dev with Redis, full functionality
-npm run router
-
-# opt out of shared-health (ignored when env.fallback is set)
-# single-instance dev without Redis: unset the fallback in deploy.config.ts
-
-# bound to a single preset (other services go straight to fallback)
-LUCKYSTACK_ENV=development LUCKYSTACK_PRESET=fleet-preset npm run router
-```
+- `npm run build` — clean (`dist/server.js` 211.9 KB — down 2.6 KB vs last session because `server/utils/responseNormalizer.ts` no longer drags a duplicate of the core module into the bundle)
+- `npm run router` — boots in split/fallback mode when Redis is up
+- Test runner CLIs: `test:contract`, `test:auth`, `test:rate-limit`, `test:fuzz`
 
 ## Test runner quick-reference
 
 ```bash
-# walk every endpoint in apiMethodMap against a running backend
+# contract smoke: every endpoint returns {status, errorCode} envelope
 npm run test:contract
 
-# custom URL + auth cookie
-TEST_BASE_URL=http://localhost:4019 TEST_AUTH_TOKEN=<token> npm run test:contract
+# auth enforcement: auth.login:true endpoints reject with auth.required
+npm run test:auth
 
-# skip specific endpoints (known to need real input)
-TEST_SKIP="settings/updateUser,system/logout" npm run test:contract
+# rate limit: N+1 requests hit api.rateLimitExceeded
+TEST_MAX_RATE_LIMIT=50 npm run test:rate-limit
+
+# fuzz: junk payloads don't 5xx and stay in envelope
+TEST_AUTH_TOKEN=<cookie> npm run test:fuzz
+
+# shared env:
+TEST_BASE_URL=http://localhost:4019
+TEST_SKIP="settings/updateUser,system/logout"   # comma-separated <page>/<name>
+TEST_SESSION_COOKIE_NAME=luckystack_token
 ```
 
 ## Key invariants (cumulative)
@@ -104,7 +99,10 @@ TEST_SKIP="settings/updateUser,system/logout" npm run test:contract
 - **Sentry split**: DI surface in core; concrete `@sentry/node` init in sentry package.
 - **One-way package deps**: no circular deps. Cross-package side effects go through the core hook registry.
 - **Router in its own process**: `npm run router` is a separate `tsx` invocation, not bundled with `dist/server.js`. Router reads `deploy.config.ts` + `services.config.ts` directly; does not depend on any `@luckystack/*` runtime package. Redis access uses raw ioredis.
-- **WS target rule** (NEW): router forwards WebSocket upgrades to the `system` service (overridable via `wsTargetService`). Safe because every backend attaches the Socket.io Redis adapter.
-- **Shared-Redis hard-fail rule** (NEW): when `environment.fallback` is set, router MUST boot with reachable Redis. `disableSharedHealthState` is ignored.
-- **Boot-UUID rule** (NEW): every backend writes `luckystack:boot:<env>` on startup. `/_health` returns it. Routers cross-check to detect divergent Redis URLs.
-- **Socket.io Redis adapter always on** (NEW): `attachSocketRedisAdapter(io)` runs on every backend boot. Rooms fan out across instances via pub/sub. Safe no-op in single-instance.
+- **WS target rule**: router forwards WebSocket upgrades to the `system` service (overridable via `wsTargetService`). Safe because every backend attaches the Socket.io Redis adapter.
+- **Shared-Redis hard-fail rule**: when `environment.fallback` is set, router MUST boot with reachable Redis. `disableSharedHealthState` is ignored.
+- **Boot-UUID rule**: every backend writes `luckystack:boot:<env>` on startup. `/_health` returns it. Routers cross-check to detect divergent Redis URLs.
+- **Socket.io Redis adapter always on**: `attachSocketRedisAdapter(io)` runs on every backend boot. Rooms fan out across instances via pub/sub. Safe no-op in single-instance.
+- **Normalizer registration rule** (NEW): framework packages call `normalizeErrorResponse` / `extractLanguageFromHeader` from `@luckystack/core`. The project MUST side-effect-import the module that calls `registerLocalizedNormalizer` on startup, or framework errors fall back to identity translate (returns the errorCode key as the message).
+- **Augmentation-load rule** (NEW): the `declare module '@luckystack/core'` augmentation in `src/_sockets/apiTypes.generated.ts` is a side-effect type load. Any file that imports from the generated file pulls it into the compilation. If no file imports it, `ApiTypeMap` stays empty.
+- **Boot handshake strict flag** (NEW): `deploy.config.ts -> routing.strictBootHandshake` is warning-only by default. Flip to `true` per-deployment once `/_health` is universal.

@@ -14,10 +14,7 @@ import {
 } from "../../core/src/socketEvents";
 import { statusContent } from "../../../src/_providers/socketStatusProvider";
 import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useRef } from "react";
-import type {
-  StreamPayload,
-  SyncTypeMap,
-} from "../../../src/_sockets/apiTypes.generated";
+import type { StreamPayload, SyncTypeMap } from "../../core/src/apiTypeStubs";
 import { Socket } from "socket.io-client";
 
 export type SyncRequestStreamEvent<T extends StreamPayload = StreamPayload> = T;

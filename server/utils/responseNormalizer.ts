@@ -9,11 +9,9 @@ import frJson from '../../src/_locales/fr.json';
 import nlJson from '../../src/_locales/nl.json';
 import {
   ErrorParam,
-  ErrorResponseInput,
-  NormalizedErrorResponse,
-  defaultHttpStatusForResponse,
-  normalizeErrorResponseCore,
-} from '../../shared/responseNormalizer';
+  createLocalizedNormalizer,
+  registerLocalizedNormalizer,
+} from '@luckystack/core';
 import { SRC_DIR } from './paths';
 
 type LanguageCode = 'nl' | 'en' | 'de' | 'fr';
@@ -51,45 +49,9 @@ export const reloadLocaleTranslations = () => {
   translationsByLanguage = nextTranslations;
 };
 
-const normalizeLanguage = (language?: string | null): LanguageCode | null => {
-  if (!language) return null;
-  const short = language.toLowerCase().split('-')[0];
-  if (short === 'nl' || short === 'en' || short === 'de' || short === 'fr') {
-    return short;
-  }
-  return null;
-};
-
-export const extractLanguageFromHeader = (header?: string | string[]): LanguageCode | null => {
-  if (!header) return null;
-  const normalized = Array.isArray(header) ? header.join(',') : header;
-
-  const candidates = normalized
-    .split(',')
-    .map((part) => part.trim().split(';')[0])
-    .filter(Boolean);
-
-  for (const candidate of candidates) {
-    const language = normalizeLanguage(candidate);
-    if (language) return language;
-  }
-
-  return null;
-};
-
-const resolveLanguage = ({
-  preferredLocale,
-  userLanguage,
-}: {
-  preferredLocale?: string | null;
-  userLanguage?: string | null;
-}): LanguageCode => {
-  return (
-    normalizeLanguage(userLanguage)
-    ?? normalizeLanguage(preferredLocale)
-    ?? normalizeLanguage(defaultLanguage)
-    ?? 'en'
-  );
+const SUPPORTED_LANGUAGES: LanguageCode[] = ['nl', 'en', 'de', 'fr'];
+const isSupportedLanguage = (code: string): code is LanguageCode => {
+  return (SUPPORTED_LANGUAGES as string[]).includes(code);
 };
 
 const translate = ({
@@ -97,11 +59,12 @@ const translate = ({
   key,
   params,
 }: {
-  language: LanguageCode;
+  language: string;
   key: string;
   params?: ErrorParam[];
 }): string => {
-  const translationList = translationsByLanguage[language] ?? translationsByLanguage.en;
+  const resolvedLanguage = isSupportedLanguage(language) ? language : 'en';
+  const translationList = translationsByLanguage[resolvedLanguage] ?? translationsByLanguage.en;
   const parts = key.split('.');
   let result: unknown = translationList;
 
@@ -125,53 +88,16 @@ const translate = ({
   return finalResult;
 };
 
-export const resolveErrorMessage = ({
-  errorCode,
-  errorParams,
-  preferredLocale,
-  userLanguage,
-}: {
-  errorCode: string;
-  errorParams?: ErrorParam[];
-  preferredLocale?: string | null;
-  userLanguage?: string | null;
-}): string => {
-  const language = resolveLanguage({ preferredLocale, userLanguage });
-  return translate({ language, key: errorCode, params: errorParams });
-};
+const projectNormalizer = createLocalizedNormalizer({
+  translate,
+  defaultLanguage: defaultLanguage ?? 'en',
+  isSupportedLanguage,
+});
 
-export const normalizeErrorResponse = ({
-  response,
-  preferredLocale,
-  userLanguage,
-  fallbackHttpStatus,
-}: {
-  response: ErrorResponseInput;
-  preferredLocale?: string | null;
-  userLanguage?: string | null;
-  fallbackHttpStatus?: number;
-}): NormalizedErrorResponse => {
-  const normalized = normalizeErrorResponseCore({
-    response,
-    fallbackHttpStatus,
-    resolveMessage: ({ errorCode, errorParams }) => resolveErrorMessage({
-      errorCode,
-      errorParams,
-      preferredLocale,
-      userLanguage,
-    }),
-  });
+//? Register as the framework-wide active normalizer so @luckystack/api,
+//? @luckystack/sync, and any future framework package consuming
+//? `getLocalizedNormalizer()` use project translations.
+registerLocalizedNormalizer(projectNormalizer);
 
-  return {
-    ...normalized,
-    httpStatus: defaultHttpStatusForResponse({
-      status: 'error',
-      explicitHttpStatus: normalized.httpStatus,
-    }),
-  };
-};
-
-
-
-
-export {defaultHttpStatusForResponse} from '../../shared/responseNormalizer';
+export const { normalizeErrorResponse, resolveErrorMessage, extractLanguageFromHeader } = projectNormalizer;
+export { defaultHttpStatusForResponse } from '@luckystack/core';

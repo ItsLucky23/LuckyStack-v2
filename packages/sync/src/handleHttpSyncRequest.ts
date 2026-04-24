@@ -14,7 +14,7 @@ import {
   socketEventNames,
   validateInputByType,
 } from "@luckystack/core";
-import { extractLanguageFromHeader, normalizeErrorResponse } from "../../../server/utils/responseNormalizer";
+import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
 import { setSentryUser, startSpan } from '@luckystack/sentry';
 
 interface HttpSyncRequestParams {

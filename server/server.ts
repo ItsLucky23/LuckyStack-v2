@@ -10,6 +10,12 @@ loadEnv({ path: '.env.local', override: true });
 initializeSentry();
 registerPresenceHooks();
 
+//? Side-effect import: registers the project's translate-backed normalizer
+//? with @luckystack/core. Framework packages (@luckystack/api, sync) call
+//? `normalizeErrorResponse` from core; it routes through whatever normalizer
+//? is registered. Without this import, they'd see the identity default.
+import './utils/responseNormalizer';
+
 import http from 'node:http';
 import getParams from './utils/getParams';
 import { loginWithCredentials, loginCallback, createOAuthState } from './auth/login';

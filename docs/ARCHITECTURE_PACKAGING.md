@@ -1321,12 +1321,55 @@ Known gaps / not done this session:
 
 ---
 
-## 35) Next Session Plan
+## 35) Session Log (2026-04-24, sixteenth pass — all §35 refinements closed)
 
-1. **Auth metadata in generated map** — emit `apiMetaMap` alongside `apiMethodMap` with `{ method, auth: { login, additional } }`. Enables test-runner's auth-enforcement layer: call each `auth.login: true` endpoint without session; expect `session.invalid`.
-2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project provides translate. Design-first.
-3. **`apiTypes.generated.ts` decoupling** — optional. Emitter outputs `declare module '@luckystack/core'` augmentation. Removes deep-relative type-only imports in apiRequest/syncRequest.
-4. **Emitter re-relativizer** — if function shims ever live outside `server/functions/`, the `typeof import('<relative>')` output will resolve wrong. Compute absolute + re-relativize.
-5. **`/_health` contract → fatal** — once every service in the hosting guide documents it, flip the router boot handshake from warning to throw on mismatch.
-6. **Rate-limit + schema-fuzz test layers** — needs a per-test token issuer (reset limiters) and a generator change to emit Zod schemas alongside TypeScript types.
+Six tasks from the previous-session plan landed in this sitting. The original "split, close gaps, then ship npm" arc is now essentially complete; every remaining item is polish or scope expansion rather than a missing foundation.
+
+Completed:
+
+1. **Auth metadata in generated map.** `apiMetaMap: Record<string, Record<string, Record<string, ApiMetaEntry>>>` now emits alongside `apiMethodMap`. Each entry carries `{ method, auth: { login, additional? }, rateLimit? }`. Generator reuses the existing `extractAuth()` AST walker — no new extraction code. Exposes the auth contract at runtime without having to re-read route files.
+
+2. **Auth-enforcement test layer.** `@luckystack/test-runner` gained `runAuthEnforcementTests` — walks endpoints with `auth.login: true`, sends each without a session, asserts `errorCode: 'auth.required'`. Public endpoints are silently skipped. New CLI: `npm run test:auth`.
+
+3. **`responseNormalizer` split.** New `packages/core/src/localizedNormalizer.ts` exports `createLocalizedNormalizer({ translate, defaultLanguage?, isSupportedLanguage? })`. Project's `server/utils/responseNormalizer.ts` calls this + `registerLocalizedNormalizer(normalizer)` on import. Core's `normalizeErrorResponse`, `resolveErrorMessage`, `extractLanguageFromHeader` are now delegating wrappers that resolve through the active registration at call time (import-order-safe). `@luckystack/api` + `@luckystack/sync` import these from core instead of deep-reaching into `server/utils/…`. Server boots now side-effect-import the project normalizer module early to trigger registration.
+
+4. **`apiTypes.generated.ts` decoupling.** Added `packages/core/src/apiTypeStubs.ts` with empty `ApiTypeMap` and `SyncTypeMap` interfaces. Generator now emits:
+   - `type _ProjectApiTypeMap = { ... };` + `export interface ApiTypeMap extends _ProjectApiTypeMap {}`
+   - Same for sync.
+   - A trailing `declare module '@luckystack/core' { interface ApiTypeMap extends _ProjectApiTypeMap {} interface SyncTypeMap extends _ProjectSyncTypeMap {} }` augmentation block.
+   - Interface merging means core's `apiRequest.ts` / sync's `syncRequest.ts` import `ApiTypeMap` from within their own package and get the full shape whenever the generated file is loaded (any project API import triggers it).
+
+5. **Emitter re-relativizer.** `relativizeModuleSpecifier()` in `functionsMeta.ts` resolves relative `moduleSpecifier` strings to absolute, then re-relativizes them to the generated file's directory. Shims at any depth now produce working `typeof import(...)` paths. Package aliases (`@luckystack/*`) and node built-ins pass through. Fixes latent edge case flagged in §32.
+
+6. **Rate-limit + fuzz test layers.** Two new runners:
+   - `runRateLimitTests` — for each endpoint with numeric `rateLimit`, fires N then expects the N+1 to hit `api.rateLimitExceeded`. Skips endpoints above `maxRateLimitToTest` (default 50) to avoid accidental storm. CLI: `npm run test:rate-limit`.
+   - `runFuzzTests` — sends a fixed battery of junk payloads (null, arrays, huge strings, prototype pollution, NaN, wrong primitive types). Asserts no 5xx, all responses stay in `{status, errorCode}` envelope. This is the "crash resistance" layer; schema-driven fuzz still needs Zod emission and is noted as future work. CLI: `npm run test:fuzz`.
+
+7. **`/_health` handshake → opt-in fatal.** Added `routing.strictBootHandshake?: boolean` to `deploy.config.ts`. When true, the handshake throws on mismatch/unreachable instead of warning. Default stays warning-only so partially-migrated deployments don't lock out. Flip to `true` once every service is known to expose `/_health`.
+
+Verification: `npm run lint` clean, `npm run build` clean (`dist/server.js` 211.9 KB — down 2.6 KB because `server/utils/responseNormalizer.ts` no longer re-imports the core module into the bundle).
+
+Key invariants added:
+
+- **Normalizer registration rule**: framework packages call `normalizeErrorResponse`/`extractLanguageFromHeader` from `@luckystack/core`. The project MUST side-effect-import `server/utils/responseNormalizer` (or any file that calls `registerLocalizedNormalizer`) on startup, or framework errors fall back to identity translate (returns the errorCode key as the message).
+- **Augmentation-load rule**: the `declare module '@luckystack/core'` augmentation in `src/_sockets/apiTypes.generated.ts` is a side-effect type load. Any file that imports from the generated file pulls it into the compilation. If no file imports it (a hypothetical pure-devkit-only compile), `ApiTypeMap` stays empty.
+- **Boot handshake strict flag** (new): `deploy.config.ts -> routing.strictBootHandshake` is warning-only by default. Flip to `true` per-deployment once the `/_health` contract is universally adopted.
+
+Known gaps / not done this session:
+
+- Schema-driven fuzz still deferred — needs Zod/JSON-schema emission alongside TS types. Current fuzz is a fixed junk list. Real property-based testing (`fast-check` + generated schemas) is follow-up work.
+- Rate-limit tests assume shared IP-based limiter state isn't reset between runs — the `clearAllRateLimits()` helper exists in core but isn't wired to a test-setup hook yet.
+
+---
+
+## 36) Next Session Plan
+
+The original packaging arc is closed. Remaining ideas are scope expansions:
+
+1. **Zod/JSON-schema emission** — generator emits runtime schemas alongside TS types. Unlocks real property-based fuzz via `fast-check`.
+2. **`clearAllRateLimits()` hook for tests** — expose a `/_test/reset` endpoint behind a dev-only flag so test runners can drain limiter state between runs.
+3. **Web vitals package** (`@luckystack/web-vitals`, from §15 backlog) — client-side RUM once the backend observability story is frozen.
+4. **Monitoring package** (`@luckystack/monitoring`, from §15 backlog) — dual-stream Sentry + audit trail. Depends on a self-host-vs-SaaS decision first.
+5. **NPM publishability audit** — list every deep-relative import from `packages/**` into project files. Current count should be near zero after §35. Any remaining ones are publishability blockers.
+6. **Shared-secret sync checks** — `synchronizedEnvKeys` on shared resources is typed in `deploy.config.ts` but isn't yet enforced at startup. Validate at the same pass as the Redis UUID handshake.
 7. **`server/sockets/socket.ts`** — stays in server/ as project glue (already decided).

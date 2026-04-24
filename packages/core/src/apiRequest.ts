@@ -1,6 +1,6 @@
 import { logging } from "../../../config";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketState";
-import type { ApiTypeMap, StreamPayload } from '../../../src/_sockets/apiTypes.generated';
+import type { ApiTypeMap, StreamPayload } from './apiTypeStubs';
 import notify from "../../../src/_functions/notify";
 import { enqueueApiRequest, isOnline, removeApiQueueItem } from "./offlineQueue";
 import { Socket } from "socket.io-client";

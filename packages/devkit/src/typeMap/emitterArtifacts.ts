@@ -195,11 +195,11 @@ export type ApiNetworkResponse<T = unknown> =
 	| ({ status: 'success'; httpStatus: number; APINAME?: never; [key: string]: unknown } & T)
 	| { status: 'error'; httpStatus: number; message: string; errorCode: string; errorParams?: { key: string; value: string | number | boolean; }[]; APINAME?: never };
 
-// 
+//
 // API Type Map
-// 
+//
 
-export interface ApiTypeMap {
+type _ProjectApiTypeMap = {
 `;
 
 	const sortedPages = [...typesByPage.keys()].sort();
@@ -250,7 +250,9 @@ export interface ApiTypeMap {
 		content += `  };\n`;
 	}
 
-	content += `}
+	content += `};
+
+export interface ApiTypeMap extends _ProjectApiTypeMap {}
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
@@ -295,6 +297,51 @@ export const getApiMethod = (pagePath: string, apiName: string, version: string)
 	return apiMethodMap[pagePath]?.[apiName]?.[version];
 };
 
+export interface ApiMetaEntry {
+	method: HttpMethod;
+	auth: { login: boolean; additional?: Record<string, unknown>[] };
+	rateLimit?: number | false;
+}
+
+export const apiMetaMap: Record<string, Record<string, Record<string, ApiMetaEntry>>> = {
+`;
+
+	for (const pagePath of sortedPages) {
+		const apis = typesByPage.get(pagePath)!;
+		const grouped = new Map<string, { version: string; entry: ApiTypeEntry }[]>();
+
+		for (const [apiKey, entry] of apis.entries()) {
+			const { name, version } = splitVersionedKey(apiKey);
+			if (!grouped.has(name)) grouped.set(name, []);
+			grouped.get(name)!.push({ version, entry });
+		}
+
+		content += `  '${pagePath}': {\n`;
+		for (const apiName of [...grouped.keys()].sort()) {
+			content += `    '${apiName}': {\n`;
+			for (const { version, entry } of grouped.get(apiName)!.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+				const auth = entry.auth && typeof entry.auth === 'object'
+					? entry.auth as { login: boolean; additional?: Record<string, unknown>[] }
+					: { login: true };
+				const rateLimitPart = entry.rateLimit === undefined
+					? ''
+					: `, rateLimit: ${entry.rateLimit === false ? 'false' : String(entry.rateLimit)}`;
+				const additionalPart = auth.additional && auth.additional.length > 0
+					? `, additional: ${JSON.stringify(auth.additional)}`
+					: '';
+				content += `      '${version}': { method: '${entry.method}', auth: { login: ${auth.login === false ? 'false' : 'true'}${additionalPart} }${rateLimitPart} },\n`;
+			}
+			content += `    },\n`;
+		}
+		content += `  },\n`;
+	}
+
+	content += `};
+
+export const getApiMeta = (pagePath: string, apiName: string, version: string): ApiMetaEntry | undefined => {
+	return apiMetaMap[pagePath]?.[apiName]?.[version];
+};
+
 // Sync Type Definitions
 // 
 
@@ -306,11 +353,11 @@ export type SyncClientResponse<T = unknown> =
 	| ({ status: 'success'; [key: string]: unknown } & T)
 	| { status: 'error'; errorCode: string; errorParams?: { key: string; value: string | number | boolean; }[] };
 
-// 
+//
 // Sync Type Map
-// 
+//
 
-export interface SyncTypeMap {
+type _ProjectSyncTypeMap = {
 `;
 
 	for (const pagePath of sortedSyncPages) {
@@ -353,7 +400,9 @@ export interface SyncTypeMap {
 		content += `  };\n`;
 	}
 
-	content += `}
+	content += `};
+
+export interface SyncTypeMap extends _ProjectSyncTypeMap {}
 
 export type SyncPagePath = keyof SyncTypeMap;
 export type SyncName<P extends SyncPagePath> = keyof SyncTypeMap[P];
@@ -365,6 +414,17 @@ export type SyncServerStream<P extends SyncPagePath, N extends SyncName<P>, V ex
 export type SyncClientStream<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N> = SyncVersion<P, N>> = SyncTypeMap[P][N][V] extends { clientStream: infer O } ? O : never;
 
 export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N>> = \`sync/\${P}/\${N & string}/\${V & string}\`;
+
+//
+// Type-level augmentation — merges the project's concrete ApiTypeMap / SyncTypeMap
+// into @luckystack/core's stub interfaces so framework code (apiRequest / syncRequest)
+// can rely on the same shapes without deep-relative imports. Loaded as a side
+// effect on any import of this file.
+//
+declare module '@luckystack/core' {
+	interface ApiTypeMap extends _ProjectApiTypeMap {}
+	interface SyncTypeMap extends _ProjectSyncTypeMap {}
+}
 `;
 
 	validateGeneratedTypeIdentifiers(content);

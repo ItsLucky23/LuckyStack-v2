@@ -2,7 +2,7 @@ import * as ts from 'typescript';
 import fs from 'node:fs';
 import path from 'node:path';
 import { FileImport, ImportCollectors, parseFileTypeContext, sanitizeTypeAndCollectImports } from './typeContext';
-import { SERVER_FUNCTIONS_DIR } from '@luckystack/core';
+import { GENERATED_SOCKET_TYPES_PATH, SERVER_FUNCTIONS_DIR } from '@luckystack/core';
 import { expandType, getServerProgram } from './tsProgram';
 
 // Strips default parameter values from argument lists so the generated interface
@@ -20,6 +20,28 @@ const simplifyInferredType = (value: string): string => {
   if (/\bPrismaClient\b/.test(value)) return 'PrismaClient';
   if (/\bRedis\b/.test(value)) return 'Redis';
   return value;
+};
+
+//? Rewrites a relative module specifier so it resolves correctly when emitted
+//? into `src/_sockets/apiTypes.generated.ts`. The specifier is relative to
+//? `sourceFilePath` (the shim file); after this, it becomes relative to the
+//? generated file's directory. Non-relative specifiers (package aliases,
+//? node built-ins) pass through untouched.
+//?
+//? Before this lived, emitted paths were preserved verbatim and only worked
+//? when the shim file shared a depth with the generated file (depth 2 from
+//? repo root). Shims at other depths produced unresolvable type imports.
+const GENERATED_FILE_DIR = path.dirname(GENERATED_SOCKET_TYPES_PATH);
+
+const relativizeModuleSpecifier = (specifier: string, sourceFilePath: string): string => {
+  if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
+    return specifier;
+  }
+
+  const absolute = path.resolve(path.dirname(sourceFilePath), specifier);
+  const rel = path.relative(GENERATED_FILE_DIR, absolute);
+  const normalized = rel.split(path.sep).join('/');
+  return normalized.startsWith('.') ? normalized : `./${normalized}`;
 };
 
 const findProgramVariableDeclaration = (
@@ -368,12 +390,13 @@ const generateFunctionsForDir = (dir: string, collectors: ImportCollectors, inde
             if (moduleSpecifier) {
               // Re-export from another module. `typeof import(...)` resolves
               // through package aliases (`@luckystack/*`) and relative paths.
-              // Relative paths are preserved verbatim — callers with the same
-              // depth-from-root as the generated file will still resolve
-              // correctly. Package aliases (starting with `@` or a word char
-              // but no `.` / `/`) work from anywhere. Wildcard re-exports
-              // (`export * from ...`) are not handled here and fall through.
-              exports.set(exportName, `typeof import('${moduleSpecifier}')['${originalName}']`);
+              // Relative paths are rewritten to be relative to the generated
+              // file location, so shims at any depth produce working imports.
+              // Package aliases (starting with `@` or a word char but no
+              // `.` / `/`) pass through. Wildcard re-exports (`export * from
+              // ...`) are not handled here and fall through.
+              const resolvedSpecifier = relativizeModuleSpecifier(moduleSpecifier, fullPath);
+              exports.set(exportName, `typeof import('${resolvedSpecifier}')['${originalName}']`);
               continue;
             }
 

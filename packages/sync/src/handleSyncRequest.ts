@@ -18,7 +18,7 @@ import {
   dispatchHook,
   validateInputByType,
 } from "@luckystack/core";
-import { extractLanguageFromHeader, normalizeErrorResponse } from "../../../server/utils/responseNormalizer";
+import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
 import { setSentryUser } from '@luckystack/sentry';
 
 type SyncStreamPayload = Record<string, unknown>;

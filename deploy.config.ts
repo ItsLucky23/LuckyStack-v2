@@ -63,6 +63,14 @@ export interface DeployConfig<TEnvKey extends string = string> {
     onMissingService?: 'hard-error' | 'proxy-fallback';
     missingServiceErrorCode?: string;
     enableUnhealthyFallback?: boolean;
+    /**
+     * When true, the router's boot handshake (UUID cross-check against the
+     * fallback env's /_health) throws on mismatch or unreachable, refusing
+     * to start. Default is warning-only: the handshake logs but proceeds.
+     * Flip to true once every service in your deployment is known to expose
+     * /_health.
+     */
+    strictBootHandshake?: boolean;
   };
   development?: {
     enableFallbackRouting?: boolean;

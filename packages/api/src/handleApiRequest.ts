@@ -17,7 +17,7 @@ import {
   validateInputByType,
 } from '@luckystack/core';
 import { setSentryUser, startSpan } from '@luckystack/sentry';
-import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '../../../server/utils/responseNormalizer';
+import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '@luckystack/core';
 
 interface handleApiRequestType {
   msg: apiMessage,
