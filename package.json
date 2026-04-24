@@ -7,6 +7,7 @@
     "client": "vite --host",
     "server": "npx tsx --tsconfig tsconfig.server.json server/dev/supervisor.ts",
     "server:direct": "npx tsx --tsconfig tsconfig.server.json server/server.ts",
+    "router": "npx tsx --tsconfig tsconfig.server.json scripts/router.ts",
     "lint": "npm run lint:all",
     "lint:client": "eslint \"src/**/*.{ts,tsx}\" --cache --cache-location .eslintcache --ignore-pattern \"**/*.generated.*\"",
     "lint:server": "eslint \"server/**/*.ts\" \"shared/**/*.ts\" \"config.ts\" --cache --cache-location .eslintcache --ignore-pattern \"**/*.generated.*\" --ignore-pattern \"server/prod/generatedApis.ts\" --ignore-pattern \"server/prod/generatedApis.*.ts\"",

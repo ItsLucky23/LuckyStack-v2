@@ -43,6 +43,9 @@
       ],
       "@luckystack/presence": [
         "./packages/presence/src/index.ts"
+      ],
+      "@luckystack/router": [
+        "./packages/router/src/index.ts"
       ]
     },
     "lib": [
@@ -63,6 +66,7 @@
     "packages/api/src/**/*",
     "packages/devkit/src/**/*",
     "packages/presence/src/**/*",
+    "packages/router/src/**/*",
     "src/**/_api/**/*",
     "src/**/_sync/**/*",
     "src/**/_server/**/*",

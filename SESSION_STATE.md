@@ -1,20 +1,18 @@
 # SESSION_STATE
 
 ## Session Summary
-Branch `chore/package-split-prep`. After the last commit, this sitting moved client-side transport code per the user's design decision: **API client goes in `@luckystack/core`, sync client goes in `@luckystack/sync` as an additional package**.
+Branch `chore/package-split-prep`. After the last commit, this sitting shipped **`@luckystack/router` — the load-balancer backend**. Completes §8 steps 11 (load balancer) + 12 (dev forwarding to staging).
 
-Moves:
-- `src/_sockets/offlineQueue.ts` → `packages/core/src/offlineQueue.ts` (shared by api + sync)
-- Created `packages/core/src/socketState.ts` (shared mutable `socket` + `setSocket` + `incrementResponseIndex` + `waitForSocket`)
-- `src/_sockets/apiRequest.ts` → `packages/core/src/apiRequest.ts`
-- `src/_sockets/syncRequest.ts` → `packages/sync/src/syncRequest.ts`
-- `src/_sockets/socketInitializer.ts` **stays in src/** (project glue) but now delegates socket-state ownership to core
+One `npm run router` boots a node-native HTTP proxy that:
+- Parses the first route segment of each request as a service key
+- Forwards to the service's URL from `deploy.config.ts -> environments[env].bindings[service]`
+- Falls through to `environment.fallback`'s bindings when no local binding exists OR the local target fails health
+- Returns `serviceNotAssigned` (HTTP 502) when nothing resolves
+- In dev, polls local service URLs and flips health state; switches traffic to local when it comes up
 
-Surfaced two new invariants:
-- **Client/server barrel split rule** — packages with both slices use `src/index.ts` (server-safe) + `src/client.ts` (React/browser-coupled). Prevents the server tsconfig (no `jsx`) from pulling React code in transitively.
-- **Barrel vs direct-path rule** — project-side client code and cross-package internal imports use direct file paths (`../../packages/<pkg>/src/<file>`) to avoid barrel-pulls-everything problems in Vite (no Node APIs) and server tsconfig (no JSX).
+Smoke-tested: `ROUTER_PORT=4019 npm run router` boots, listens, health-polls, logs correctly.
 
-## §8 Execution Order progress
+## §8 Execution Order progress — **ALL 12 STEPS NOW ✅**
 
 | # | Step | Status |
 |---|------|--------|
@@ -23,55 +21,81 @@ Surfaced two new invariants:
 | 3 | Finalize core boundaries | ✅ |
 | 4 | Project-level `functions/` contract | ✅ Phase 1 |
 | 5 | Extract login | ✅ |
-| 6 | Extract sync | ✅ **(server + client)** |
+| 6 | Extract sync (server + client) | ✅ |
 | 7 | Extract presence | ✅ |
 | 8 | Sentry package | ✅ |
 | 9 | Ship devkit | ✅ (+ excluded from prod bundle) |
 | 10 | Service-scoped backend build | ✅ |
-| 11 | Load balancer backend | ⬜ |
-| 12 | Dev forwarding to staging | ⬜ |
+| 11 | **Load balancer backend** | ✅ **this sitting** |
+| 12 | **Dev forwarding to staging** | ✅ **this sitting** |
 
-**Only steps 11-12 remain in the original §8 execution order.**
+The original packaging execution plan is complete. What remains is refinement, not new scope.
 
 ## Current package map
 
 ```
 @luckystack/core       (base: transport, utilities, DI, hooks, CORS, runtime validation)
-                        - index.ts: server-safe surface
-                        - client.ts: apiRequest (React-coupled)
-                        - socketState / offlineQueue: shared client primitives
+                        - index.ts / client.ts / socketState / offlineQueue
    ↑
-@luckystack/login      (auth + session)
+@luckystack/login      (auth + session; owns BaseSessionLayout, AuthProps)
    ↑
-@luckystack/presence   (registers postLogout hook on core)
-@luckystack/sentry     @luckystack/sync                     @luckystack/api
-                        - index.ts: server handlers
-                        - client.ts: syncRequest + React hooks
+@luckystack/presence   (registers postLogout handler on core; one-way dep on login)
+@luckystack/sentry     @luckystack/sync (server + client)     @luckystack/api
    (feature peers — none depend on each other)
 
 @luckystack/devkit     (dev-time only; external in prod bundle)
+@luckystack/router     (load-balancer backend; separate process; consumes
+                        deploy.config.ts + services.config.ts)
 ```
 
-## NEXT TASK (per §33)
+## NEXT TASK (per §34)
 
-1. **`server/sockets/socket.ts`** — 242 lines; stays in server/ as project glue (documented). No move needed.
-2. **`responseNormalizer` split** — `createLocalizedNormalizer({ translate })` factory; project provides translate fn. Design-first.
-3. **`apiTypes.generated.ts` decoupling** — optional. Emitter outputs `declare module '@luckystack/core'` augmentation instead of a standalone file. Removes the deep-relative type-only imports in apiRequest/syncRequest. Purity improvement, not blocker.
-4. **Emitter re-relativizer** — if function shims ever live outside `server/functions/`, the `typeof import('<relative>')` output will resolve wrong. Compute absolute path + re-relativize against generated file's location.
-5. **Load balancer + service forwarding** (§8 #11 + #12) — separate workstream.
+1. **Socket.io / websocket proxying** in the router — same resolver, handle `Upgrade: websocket`.
+2. **Redis-backed health state** — share across multiple router instances. §9.6 #7 wants startup hard-fail when Redis is unavailable in split/fallback mode.
+3. **Boot-time shared-Redis handshake** — UUID round-trip to catch two Redis URLs that both respond.
+4. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory.
+5. **`apiTypes.generated.ts` decoupling** — optional. Emit `declare module '@luckystack/core'` augmentation.
+6. **Emitter re-relativizer** — if function shims move outside `server/functions/`, the `typeof import('<relative>')` output needs absolute+re-relativize.
+
+Nothing above is blocking the framework's core functionality; all are refinements.
 
 ## Technical State
 
 - Branch: `chore/package-split-prep`
 - `npm run lint` — clean
-- `npm run build` — clean (vite 465 modules ~3.7s; **dist/server.js 212.7 KB**; client bundle 825.5 KB)
+- `npm run build` — clean (vite 465 modules ~4.7s; dist/server.js 212.7 KB)
+- `npm run router` — smoke-tested; boots, listens, health-polls
 - Current changes unstaged since last commit
+
+## Router quick-reference
+
+```bash
+# dev, default port 4000, forwards to local services, falls back to staging for unknowns
+npm run router
+
+# custom port
+ROUTER_PORT=4000 npm run router
+
+# point router at a specific env's bindings
+LUCKYSTACK_ENV=staging npm run router
+
+# bound to a single preset (other services go straight to fallback)
+LUCKYSTACK_ENV=development LUCKYSTACK_PRESET=fleet-preset npm run router
+```
+
+Router config surface (already in `deploy.config.ts`):
+- `routing.onMissingService` — `'hard-error'` or `'proxy-fallback'`
+- `routing.missingServiceErrorCode` — defaults to `serviceNotAssigned`
+- `routing.enableUnhealthyFallback` — whether unhealthy local targets fall through to fallback
+- `development.enableFallbackRouting` — enables dev health polling + fallback
+- `development.healthPollMs` — poll interval
+- `development.switchNewTrafficToLocalWhenHealthy` — currently always on when `enableFallbackRouting` is true
 
 ## Key invariants (cumulative)
 
 - **Shim path rule**: shims use direct file paths (`../../packages/<pkg>/src/<file>`), never barrel.
-- **Barrel vs direct-path rule**: within the monorepo, project-side client code and cross-package internal imports use direct file paths, not barrels. Prevents Vite client bundle from pulling server Node APIs, and prevents server tsconfig from pulling React/JSX code.
-- **Client/server barrel split rule**: packages with both slices provide `src/index.ts` (server-safe) + `src/client.ts` (React/browser). `tsconfig.server.json` excludes the `client.ts` files. Currently applies to core and sync.
+- **Barrel vs direct-path rule**: within the monorepo, project-side client code and cross-package internal imports use direct file paths, not barrels.
+- **Client/server barrel split rule**: packages with both slices provide `src/index.ts` (server-safe) + `src/client.ts` (React/browser). `tsconfig.server.json` excludes the `client.ts` files.
 - **Script-exit rule**: tsx-run scripts importing any `@luckystack/*` barrel MUST end with `process.exit(0)`.
 - **Devkit externality rule**: runtime code that needs devkit must use `await import('@luckystack/devkit')` behind `env.NODE_ENV !== 'production'`.
 - **Package-listing parity rule**: every `@luckystack/*` package must be in both tsconfigs (paths + include).
@@ -80,3 +104,4 @@ Surfaced two new invariants:
 - **Hook handler return-type rule**: `HookHandler<T>` requires `: HookResult` annotation + explicit `return undefined`.
 - **Sentry split**: DI surface in core; concrete `@sentry/node` init in sentry package.
 - **One-way package deps**: no circular deps. Cross-package side effects go through the core hook registry.
+- **Router in its own process**: `npm run router` is a separate `tsx` invocation, not bundled with `dist/server.js`. Router reads `deploy.config.ts` + `services.config.ts` directly; does not depend on any `@luckystack/*` runtime package (so it has no Redis connection of its own until §34.2 lands).

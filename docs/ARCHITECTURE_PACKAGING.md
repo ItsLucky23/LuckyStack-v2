@@ -1249,10 +1249,46 @@ Completed:
 
 ---
 
-## 33) Next Session Plan
+## 33) Session Log (2026-04-24, fourteenth pass — `@luckystack/router` load balancer + dev forwarding)
 
-1. **`server/sockets/socket.ts`** — stays in server/ as project glue (documented).
-2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project provides translate. Design-first.
-3. **`apiTypes.generated.ts` decoupling** — optional. Change emitter to output `declare module '@luckystack/core'` augmentation (so core exports empty `ApiTypeMap`/`SyncTypeMap`/etc. that the project augments) instead of a standalone file. Removes the deep-relative type-only imports in `apiRequest.ts` / `syncRequest.ts`. More of a purity improvement than a blocker.
-4. **Emitter re-relativizer** — if a function shim ever lives outside `server/functions/` the current `typeof import('<relative>')` output will resolve wrong. Compute absolute path in the emitter and re-relativize against the generated file's location.
-5. **Load balancer + service forwarding** (§8 #11 + #12) — separate workstream.
+**Completes §8 steps 11-12.** New package at `packages/router/` provides the load-balancer backend described in §9.6. One `npm run router` command boots it.
+
+Completed:
+
+1. **`@luckystack/router` scaffolded** — `package.json`, `src/index.ts` barrel. Path alias added to both tsconfigs. Not in `scripts/bundleServer.mjs` esbuild alias (router runs as its own process, not bundled into the main server).
+2. **`packages/router/src/resolveTarget.ts`** — `createServiceTargetResolver(input)` returns a resolver that:
+   - Parses the first route segment (strips `api/` or `sync/` transport prefix) — `api/vehicles/getAll` → `vehicles`.
+   - Looks up `deploy.config.ts -> environments[env].bindings[service]`.
+   - Falls through to `environments[env].fallback` env's bindings when the service isn't owned locally OR the local target is unhealthy.
+   - `setLocalHealth(service, healthy)` / `getLocalHealth(service)` let the poller flip state without restarting.
+   - Optional `localPresetKey` bounds which services count as "local"; others go straight to fallback (per the `services.config.ts` preset model).
+3. **`packages/router/src/healthPoller.ts`** — probes each local URL via `HEAD /` with a 2s `AbortController` timeout. Flips state on the resolver when health changes. Interval is `unref()`'d so the router shuts down cleanly. **In-memory only** — Redis-backed shared state is §34.2.
+4. **`packages/router/src/httpProxy.ts`** — node `http`/`https` forwarder. Strips hop-by-hop headers; adds `x-forwarded-host`, `x-forwarded-proto`, `x-luckystack-resolved-env`, `x-luckystack-via-fallback`. 502 with `errorCode: serviceNotAssigned` when resolver returns null; 502 with `errorCode: routing.upstreamUnreachable` on upstream error.
+5. **`packages/router/src/startRouter.ts`** — single entrypoint. Reads configs, builds resolver, starts the health poller when `development.enableFallbackRouting` is true + env is `development`, starts `http.Server`, resolves when listening.
+6. **`scripts/router.ts`** — thin CLI wrapper. Reads `ROUTER_PORT`, `LUCKYSTACK_ENV`, `LUCKYSTACK_PRESET`. Uses top-level `await`.
+7. **`npm run router`** added.
+8. **Smoke-tested**: `ROUTER_PORT=4019 npm run router` boots, listens, probes `http://localhost:{4100,4101,4102}`, correctly logs each as unhealthy (nothing running locally in the test).
+
+Router behavior today:
+
+- **Step 11 (load balancer)** ✅ — parse first segment → forward to service URL → `serviceNotAssigned` when unknown. HTTP only for now.
+- **Step 12 (dev forwarding)** ✅ — `development.enableFallbackRouting` + `environment.fallback` route unknown-local traffic to staging. When local comes up healthy the poller flips state and new requests route local.
+
+Known gaps (tracked in §34):
+
+- No socket.io / websocket proxying yet. Resolver logic is ready; needs an `Upgrade: websocket` handler.
+- Health state is in-memory per router process. Multiple instances don't share yet (§9.6 #5 / #7 wants Redis).
+- No zero-loss reconnect when local health flips mid-session.
+- No boot-time shared-Redis handshake (write UUID, read from fallback's `/health` — mentioned in `deploy.config.ts` header comment).
+
+---
+
+## 34) Next Session Plan
+
+1. **Socket.io / websocket proxying in `@luckystack/router`.** Extend `createHttpProxy` to handle `Upgrade: websocket` and forward socket.io sessions to the resolved target. Same resolver; route on first path segment.
+2. **Redis-backed health state** — replace the in-memory Map in the resolver with a Redis-backed view (`router:health:<envKey>:<service>` key). Multiple router instances share truth. Startup hard-fails when Redis is unavailable in split/fallback mode (§9.6 #7).
+3. **Boot-time shared-Redis handshake** — write UUID under a well-known key at startup; hit fallback's `/health`; assert the UUID round-trips. Catches two Redis URLs that both happen to respond (`deploy.config.ts` header comment).
+4. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project provides translate. Design-first.
+5. **`apiTypes.generated.ts` decoupling** — optional. Emitter outputs `declare module '@luckystack/core'` augmentation. Removes deep-relative type-only imports in apiRequest/syncRequest.
+6. **Emitter re-relativizer** — if function shims ever live outside `server/functions/`, the `typeof import('<relative>')` output will resolve wrong. Compute absolute + re-relativize.
+7. **`server/sockets/socket.ts`** — stays in server/ as project glue (already decided).
