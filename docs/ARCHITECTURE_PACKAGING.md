@@ -1283,12 +1283,50 @@ Known gaps (tracked in §34):
 
 ---
 
-## 34) Next Session Plan
+## 34) Session Log (2026-04-24, fifteenth pass — multi-instance foundations + test-runner scaffold)
 
-1. **Socket.io / websocket proxying in `@luckystack/router`.** Extend `createHttpProxy` to handle `Upgrade: websocket` and forward socket.io sessions to the resolved target. Same resolver; route on first path segment.
-2. **Redis-backed health state** — replace the in-memory Map in the resolver with a Redis-backed view (`router:health:<envKey>:<service>` key). Multiple router instances share truth. Startup hard-fails when Redis is unavailable in split/fallback mode (§9.6 #7).
-3. **Boot-time shared-Redis handshake** — write UUID under a well-known key at startup; hit fallback's `/health`; assert the UUID round-trips. Catches two Redis URLs that both happen to respond (`deploy.config.ts` header comment).
-4. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project provides translate. Design-first.
-5. **`apiTypes.generated.ts` decoupling** — optional. Emitter outputs `declare module '@luckystack/core'` augmentation. Removes deep-relative type-only imports in apiRequest/syncRequest.
-6. **Emitter re-relativizer** — if function shims ever live outside `server/functions/`, the `typeof import('<relative>')` output will resolve wrong. Compute absolute + re-relativize.
+**Closes §34.1-§34.3 from the previous session and adds the Socket.io Redis adapter** (not previously in scope — filed as a gap during planning). Introduces `@luckystack/test-runner`.
+
+Completed:
+
+1. **Socket.io Redis adapter** — new `packages/core/src/socketRedisAdapter.ts` exports `attachSocketRedisAdapter(io)`. `server/sockets/socket.ts` calls it right after creating the `SocketIOServer`. Uses two `redis.duplicate()` handles (ioredis in subscribe mode blocks non-pub/sub commands on the main connection). Without this, room broadcasts only reach clients on the same process — a silent architectural footgun in any multi-instance deploy. Dependency: `@socket.io/redis-adapter@^8.3.0` added.
+
+2. **Router WebSocket proxying** (`packages/router/src/wsProxy.ts`) — `server.on('upgrade', wsProxy)`. Forwards socket.io upgrade handshakes to the resolved target. Socket.io clients connect to `/socket.io/?...` with no service key in the path, so WS is routed to the `system` service by convention (overridable via `wsTargetService`). The Redis adapter makes this safe: rooms fan out across instances regardless of which one holds the WS.
+
+3. **Redis-backed router health state** (`packages/router/src/redisHealthStore.ts`) — keys `router:health:<envKey>:<service>`, pub/sub channel `router:health:events:<envKey>`. Routers keep an in-memory cache hydrated from Redis and updated via subscribe; local resolve reads stay sync. Resolver accepts optional `healthStore` to swap the in-memory Map transparently. Startup hard-fails when shared Redis is mandated (current env has `fallback`) and Redis is unreachable — smoke-tested: Redis down → `Error: [router] split/fallback mode requires shared Redis...`.
+
+4. **Boot-time shared-Redis handshake** (`packages/router/src/bootHandshake.ts` + `packages/core/src/bootUuid.ts` + `/_health` endpoint in `server/server.ts`):
+   - On backend startup, `writeBootUuid()` writes `luckystack:boot:<env>` (TTL 1h) with a fresh UUID.
+   - `GET /_health` returns `{ status, bootUuid, envKey }` from Redis.
+   - On router startup (when the env has a `fallback`), the handshake probes `<fallbackBaseUrl>/_health`, then reads `luckystack:boot:<fallbackEnv>` from its own Redis and compares. Mismatch → warning (non-fatal until the `/_health` contract is fully adopted). Catches "two Redis URLs that both respond" per `deploy.config.ts` header comment.
+
+5. **`@luckystack/test-runner`** — new package. Driven by `src/_sockets/apiTypes.generated.ts -> apiMethodMap`. Layer: **contract smoke** — POST each endpoint with `{}`, assert response has `{status: 'success'}` or `{status: 'error', errorCode}`. Exit 1 on any failure.
+   - Entry: `npm run test:contract` (uses `scripts/testContract.ts`, config via `TEST_BASE_URL`, `TEST_SKIP`, `TEST_AUTH_TOKEN`, `TEST_SESSION_COOKIE_NAME`).
+   - Deferred layers: auth-enforcement (needs auth metadata in generated map), rate-limit (needs token reset hook), schema fuzz (needs Zod/JSON-schema emission).
+
+6. **Verification**: `npm run lint` clean, `npm run build` clean (`dist/server.js` 214.5 KB, +1.8 KB for adapter + boot UUID). Router boots and correctly hard-fails without Redis in split/fallback mode.
+
+Key invariants added:
+
+- **WS target rule**: router forwards WebSocket upgrades to the `system` service (overridable). Safe because every backend attaches the Socket.io Redis adapter, fanning rooms across instances.
+- **Shared-Redis hard-fail rule**: when `environment.fallback` is set on the current env, the router MUST boot with a reachable Redis or die. Opt-out (`disableSharedHealthState`) is ignored in this mode.
+- **Boot-UUID rule**: every backend writes `luckystack:boot:<env>` on startup. `/_health` returns it. Routers cross-check against their own Redis to detect divergent URLs.
+- **Router-independence rule (unchanged)**: the router does not import `@luckystack/*` runtime packages — its Redis access uses raw ioredis. This keeps the router self-contained and deployable separately.
+
+Known gaps / not done this session:
+
+- `/_health` handshake is warning-only, not fatal. Flip to throw once every service is known to expose it.
+- Test-runner only covers the contract-smoke layer. Auth, rate-limit, and fuzz layers need generator changes first.
+- No zero-loss reconnect when local health flips mid-WS-session (§9.6 #8 explicitly says this is not required).
+
+---
+
+## 35) Next Session Plan
+
+1. **Auth metadata in generated map** — emit `apiMetaMap` alongside `apiMethodMap` with `{ method, auth: { login, additional } }`. Enables test-runner's auth-enforcement layer: call each `auth.login: true` endpoint without session; expect `session.invalid`.
+2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project provides translate. Design-first.
+3. **`apiTypes.generated.ts` decoupling** — optional. Emitter outputs `declare module '@luckystack/core'` augmentation. Removes deep-relative type-only imports in apiRequest/syncRequest.
+4. **Emitter re-relativizer** — if function shims ever live outside `server/functions/`, the `typeof import('<relative>')` output will resolve wrong. Compute absolute + re-relativize.
+5. **`/_health` contract → fatal** — once every service in the hosting guide documents it, flip the router boot handshake from warning to throw on mismatch.
+6. **Rate-limit + schema-fuzz test layers** — needs a per-test token issuer (reset limiters) and a generator change to emit Zod schemas alongside TypeScript types.
 7. **`server/sockets/socket.ts`** — stays in server/ as project glue (already decided).

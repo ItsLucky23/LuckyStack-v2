@@ -492,6 +492,15 @@ docker-compose up -d --build
 
 ## Troubleshooting
 
+### Multi-Instance Deployment Notes
+
+When you run more than one backend process (horizontal scaling, preset-split services, blue/green) behind the built-in `@luckystack/router` or any load balancer:
+
+1. **Shared Redis is mandatory.** Every backend attaches `@socket.io/redis-adapter` at startup so room broadcasts fan out across instances. All backends must point at the same Redis (`REDIS_HOST` + `REDIS_PORT`).
+2. **Split/fallback mode hard-fails without Redis.** When `environment.fallback` is set in `deploy.config.ts`, the router refuses to start if Redis is unreachable. This is deliberate — `disableSharedHealthState` is ignored in that mode.
+3. **`/_health` contract.** Each backend writes a boot UUID to `luckystack:boot:<envKey>` on startup and exposes it via `GET /_health`. The router's boot handshake cross-checks this to detect the "two Redis URLs that both respond" failure mode. Your edge proxy should let `/_health` through unauthenticated (it already skips auth in the default server config).
+4. **WebSocket upgrades.** The router forwards `/socket.io/?...` upgrades to the `system` service by convention. Make sure at least one backend in your deployment owns the `system` service.
+
 ### Socket.io Connection Fails
 
 **Symptom:** Frontend can't connect to backend, WebSocket errors in console.

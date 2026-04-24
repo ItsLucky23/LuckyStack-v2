@@ -7,6 +7,8 @@ export * from './sentrySetup';
 export * from './env';
 export * from './db';
 export { redis } from './redis';
+export { attachSocketRedisAdapter } from './socketRedisAdapter';
+export { writeBootUuid, readBootUuid, resolveEnvKey } from './bootUuid';
 export { initConsolelog } from './consoleLog';
 export * from './cookies';
 export * from './httpApiUtils';

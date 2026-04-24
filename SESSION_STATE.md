@@ -1,95 +1,94 @@
 # SESSION_STATE
 
 ## Session Summary
-Branch `chore/package-split-prep`. After the last commit, this sitting shipped **`@luckystack/router` — the load-balancer backend**. Completes §8 steps 11 (load balancer) + 12 (dev forwarding to staging).
+Branch `chore/package-split-prep`. This sitting closes the previous session's §34.1-§34.3 follow-ups AND adds the Socket.io Redis adapter (filed as a gap during planning — routers can land a client on instance X, but room fanout only works when every instance shares a pub/sub channel). Also scaffolds `@luckystack/test-runner`.
 
-One `npm run router` boots a node-native HTTP proxy that:
-- Parses the first route segment of each request as a service key
-- Forwards to the service's URL from `deploy.config.ts -> environments[env].bindings[service]`
-- Falls through to `environment.fallback`'s bindings when no local binding exists OR the local target fails health
-- Returns `serviceNotAssigned` (HTTP 502) when nothing resolves
-- In dev, polls local service URLs and flips health state; switches traffic to local when it comes up
+Six concrete changes landed this session:
 
-Smoke-tested: `ROUTER_PORT=4019 npm run router` boots, listens, health-polls, logs correctly.
+1. **Socket.io Redis adapter** — `attachSocketRedisAdapter(io)` in `@luckystack/core`, wired into `server/sockets/socket.ts`. Room broadcasts now fan out across every backend sharing the Redis.
+2. **Router WebSocket proxying** — `createWsProxy` + `server.on('upgrade', ...)`. Socket.io upgrades route to the `system` service by convention.
+3. **Redis-backed router health state** — `createRedisHealthStore` with keys `router:health:<env>:<service>` and pub/sub channel `router:health:events:<env>`. Resolver reads a hydrated cache (sync), writes+publishes fire-and-forget.
+4. **Boot-time shared-Redis handshake** — `writeBootUuid()` on backend startup, `/_health` endpoint returns it, router probes fallback `/_health` and compares against its own Redis. Catches divergent Redis URLs.
+5. **Hard-fail guard** — split/fallback mode (`environment.fallback` set) refuses to boot without Redis per §9.6 #7. Smoke-verified.
+6. **`@luckystack/test-runner`** package — contract-smoke layer driven by `apiTypes.generated.ts -> apiMethodMap`. `npm run test:contract` walks every endpoint, asserts `{status, errorCode}` envelope. Deferred layers (auth, rate-limit, schema fuzz) need generator changes.
 
-## §8 Execution Order progress — **ALL 12 STEPS NOW ✅**
+## §8 Execution Order progress — **ALL 12 STEPS ✅ (done in previous session)**
 
-| # | Step | Status |
-|---|------|--------|
-| 1 | Freeze package map | ✅ |
-| 2 | Hook inventory + ownership | ✅ |
-| 3 | Finalize core boundaries | ✅ |
-| 4 | Project-level `functions/` contract | ✅ Phase 1 |
-| 5 | Extract login | ✅ |
-| 6 | Extract sync (server + client) | ✅ |
-| 7 | Extract presence | ✅ |
-| 8 | Sentry package | ✅ |
-| 9 | Ship devkit | ✅ (+ excluded from prod bundle) |
-| 10 | Service-scoped backend build | ✅ |
-| 11 | **Load balancer backend** | ✅ **this sitting** |
-| 12 | **Dev forwarding to staging** | ✅ **this sitting** |
+Refinement status from §34 (previous session's plan):
 
-The original packaging execution plan is complete. What remains is refinement, not new scope.
+| # | Refinement | Status |
+|---|------------|--------|
+| 34.1 | WebSocket proxying | ✅ this session |
+| 34.2 | Redis-backed health state | ✅ this session |
+| 34.3 | Boot-time shared-Redis handshake | ✅ this session |
+| NEW  | Socket.io Redis adapter (gap) | ✅ this session |
+| NEW  | `@luckystack/test-runner` scaffold | ✅ this session |
+| 34.4 | `responseNormalizer` split | ⏸ not started |
+| 34.5 | `apiTypes.generated.ts` decoupling | ⏸ not started |
+| 34.6 | Emitter re-relativizer | ⏸ not started |
 
 ## Current package map
 
 ```
-@luckystack/core       (base: transport, utilities, DI, hooks, CORS, runtime validation)
-                        - index.ts / client.ts / socketState / offlineQueue
+@luckystack/core       (base: transport, utilities, DI, hooks, CORS, runtime validation,
+                        socket Redis adapter, boot UUID)
    ↑
 @luckystack/login      (auth + session; owns BaseSessionLayout, AuthProps)
    ↑
 @luckystack/presence   (registers postLogout handler on core; one-way dep on login)
 @luckystack/sentry     @luckystack/sync (server + client)     @luckystack/api
-   (feature peers — none depend on each other)
 
 @luckystack/devkit     (dev-time only; external in prod bundle)
-@luckystack/router     (load-balancer backend; separate process; consumes
-                        deploy.config.ts + services.config.ts)
+@luckystack/router     (load balancer + health store + boot handshake + WS proxy;
+                        raw ioredis, no @luckystack/* runtime imports)
+@luckystack/test-runner (NEW — contract-smoke tests driven by generated route map)
 ```
 
-## NEXT TASK (per §34)
+## NEXT TASK (per §35, new plan)
 
-1. **Socket.io / websocket proxying** in the router — same resolver, handle `Upgrade: websocket`.
-2. **Redis-backed health state** — share across multiple router instances. §9.6 #7 wants startup hard-fail when Redis is unavailable in split/fallback mode.
-3. **Boot-time shared-Redis handshake** — UUID round-trip to catch two Redis URLs that both respond.
-4. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory.
-5. **`apiTypes.generated.ts` decoupling** — optional. Emit `declare module '@luckystack/core'` augmentation.
-6. **Emitter re-relativizer** — if function shims move outside `server/functions/`, the `typeof import('<relative>')` output needs absolute+re-relativize.
+1. **Auth metadata in generated map** — emit `apiMetaMap` next to `apiMethodMap` with `{ method, auth: { login, additional } }`. Unlocks test-runner's auth-enforcement layer.
+2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project provides translate. Design-first.
+3. **`apiTypes.generated.ts` decoupling** — optional. Emitter outputs `declare module '@luckystack/core'` augmentation.
+4. **Emitter re-relativizer** — if function shims ever live outside `server/functions/`, `typeof import('<relative>')` resolves wrong. Compute absolute + re-relativize.
+5. **`/_health` contract → fatal** — once every service exposes `/_health`, flip the handshake from warning to throw.
+6. **Rate-limit + schema-fuzz test layers** — needs per-test token issuer + Zod schema emission.
 
-Nothing above is blocking the framework's core functionality; all are refinements.
+None of these are blockers; all are refinements.
 
 ## Technical State
 
 - Branch: `chore/package-split-prep`
 - `npm run lint` — clean
-- `npm run build` — clean (vite 465 modules ~4.7s; dist/server.js 212.7 KB)
-- `npm run router` — smoke-tested; boots, listens, health-polls
-- Current changes unstaged since last commit
+- `npm run build` — clean (vite 465 modules ~3.5s; dist/server.js 214.5 KB, +1.8 KB vs last session)
+- `npm run router` — boots in single-instance; hard-fails without Redis in split/fallback mode (verified)
+- `npm run test:contract` — new; runs contract smoke against `TEST_BASE_URL` (default `http://localhost:80`)
+- New dep: `@socket.io/redis-adapter@^8.3.0`
 
 ## Router quick-reference
 
 ```bash
-# dev, default port 4000, forwards to local services, falls back to staging for unknowns
+# dev with Redis, full functionality
 npm run router
 
-# custom port
-ROUTER_PORT=4000 npm run router
-
-# point router at a specific env's bindings
-LUCKYSTACK_ENV=staging npm run router
+# opt out of shared-health (ignored when env.fallback is set)
+# single-instance dev without Redis: unset the fallback in deploy.config.ts
 
 # bound to a single preset (other services go straight to fallback)
 LUCKYSTACK_ENV=development LUCKYSTACK_PRESET=fleet-preset npm run router
 ```
 
-Router config surface (already in `deploy.config.ts`):
-- `routing.onMissingService` — `'hard-error'` or `'proxy-fallback'`
-- `routing.missingServiceErrorCode` — defaults to `serviceNotAssigned`
-- `routing.enableUnhealthyFallback` — whether unhealthy local targets fall through to fallback
-- `development.enableFallbackRouting` — enables dev health polling + fallback
-- `development.healthPollMs` — poll interval
-- `development.switchNewTrafficToLocalWhenHealthy` — currently always on when `enableFallbackRouting` is true
+## Test runner quick-reference
+
+```bash
+# walk every endpoint in apiMethodMap against a running backend
+npm run test:contract
+
+# custom URL + auth cookie
+TEST_BASE_URL=http://localhost:4019 TEST_AUTH_TOKEN=<token> npm run test:contract
+
+# skip specific endpoints (known to need real input)
+TEST_SKIP="settings/updateUser,system/logout" npm run test:contract
+```
 
 ## Key invariants (cumulative)
 
@@ -104,4 +103,8 @@ Router config surface (already in `deploy.config.ts`):
 - **Hook handler return-type rule**: `HookHandler<T>` requires `: HookResult` annotation + explicit `return undefined`.
 - **Sentry split**: DI surface in core; concrete `@sentry/node` init in sentry package.
 - **One-way package deps**: no circular deps. Cross-package side effects go through the core hook registry.
-- **Router in its own process**: `npm run router` is a separate `tsx` invocation, not bundled with `dist/server.js`. Router reads `deploy.config.ts` + `services.config.ts` directly; does not depend on any `@luckystack/*` runtime package (so it has no Redis connection of its own until §34.2 lands).
+- **Router in its own process**: `npm run router` is a separate `tsx` invocation, not bundled with `dist/server.js`. Router reads `deploy.config.ts` + `services.config.ts` directly; does not depend on any `@luckystack/*` runtime package. Redis access uses raw ioredis.
+- **WS target rule** (NEW): router forwards WebSocket upgrades to the `system` service (overridable via `wsTargetService`). Safe because every backend attaches the Socket.io Redis adapter.
+- **Shared-Redis hard-fail rule** (NEW): when `environment.fallback` is set, router MUST boot with reachable Redis. `disableSharedHealthState` is ignored.
+- **Boot-UUID rule** (NEW): every backend writes `luckystack:boot:<env>` on startup. `/_health` returns it. Routers cross-check to detect divergent Redis URLs.
+- **Socket.io Redis adapter always on** (NEW): `attachSocketRedisAdapter(io)` runs on every backend boot. Rooms fan out across instances via pub/sub. Safe no-op in single-instance.

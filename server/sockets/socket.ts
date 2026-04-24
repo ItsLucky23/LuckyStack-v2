@@ -8,7 +8,7 @@ import handleApiRequest from "./handleApiRequest";
 import { getSession, saveSession } from "../functions/session";
 import { Server as SocketIOServer } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
-import { allowedOrigin } from '@luckystack/core';
+import { allowedOrigin, attachSocketRedisAdapter } from '@luckystack/core';
 import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from '@luckystack/presence';
 import { locationProviderEnabled, logging, SessionLayout, socketActivityBroadcaster } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
@@ -90,8 +90,13 @@ export default function loadSocket(httpServer: any) {
 
   ioInstance = io;
 
+  //? Attach Redis-backed adapter so room broadcasts fan out across every
+  //? instance that shares the same Redis resource. Required for split/fallback
+  //? deployments; safe no-op overhead in single-instance deploys.
+  attachSocketRedisAdapter(io);
+
   if (shouldLogSocketStartup) {
-    console.log('SocketIO server initialized', 'green');
+    console.log('SocketIO server initialized (redis adapter attached)', 'green');
   }
 
   //? when a client connects to the SocketIO server we extract their token and set up event handlers

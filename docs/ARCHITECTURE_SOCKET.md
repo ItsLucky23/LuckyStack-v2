@@ -115,13 +115,31 @@ socket.on("disconnect", (reason) => {
 
 ---
 
+## Multi-Instance / Cross-Server Broadcasting
+
+When you run more than one backend instance behind a load balancer (including the built-in `@luckystack/router`), a room broadcast fired from instance A must still reach clients connected to instance B. Socket.io solves this with an adapter.
+
+LuckyStack attaches `@socket.io/redis-adapter` automatically on every backend via `attachSocketRedisAdapter(io)` in `server/sockets/socket.ts`. The adapter:
+
+- Reuses the `redis` handle from `@luckystack/core` (no extra config).
+- Creates two `redis.duplicate()` connections — one for publish, one for subscribe. A subscribe-mode Redis connection cannot issue other commands, so duplicating is required.
+- Works identically in single-instance deploys (the pub/sub channel has no peers) and in multi-instance deploys (all backends sharing the same Redis exchange room events).
+
+Without this adapter, `io.to(roomCode).emit('sync', ...)` only reaches sockets connected to the same process — a silent failure mode when scaling horizontally. It's on by default; do not remove it.
+
+The router's WebSocket proxy routes socket.io upgrades to the `system` service by convention. Because the adapter fans broadcasts out across instances, a client doesn't need to be on the "right" service's socket.io — any instance sharing the Redis will receive and re-emit room events.
+
+---
+
 ## Runtime Function Reference
 
 | File | Function | Purpose |
 | ---- | -------- | ------- |
 | `shared/socketEvents.ts` | `socketEventNames` + builders | Canonical socket event names and indexed response/progress event helpers shared across client/server. |
 | `server/sockets/socket.ts` | `loadSocket` | Initializes Socket.io server, registers all socket event handlers. |
+| `packages/core/src/socketRedisAdapter.ts` | `attachSocketRedisAdapter` | Wires `@socket.io/redis-adapter` onto the Socket.io server so room fanout works across instances. |
 | `src/_sockets/socketInitializer.ts` | `useSocket` | Initializes client socket, listeners, queue flushing, visibility reconnection behavior. |
 | `src/_sockets/socketInitializer.ts` | `joinRoom` / `leaveRoom` / `getJoinedRooms` | Client room management helpers. |
 | `server/sockets/handleApiRequest.ts` | `default export` | Handles incoming `apiRequest` socket messages. |
 | `server/sockets/handleSyncRequest.ts` | `default export` | Handles incoming `sync` socket messages and room fanout. |
+| `packages/router/src/wsProxy.ts` | `createWsProxy` | Router-side WebSocket upgrade forwarder. Routes `/socket.io/` upgrades to the `system` service's backend. |

@@ -55,6 +55,9 @@
       ],
       "@luckystack/router": [
         "./packages/router/src/index.ts"
+      ],
+      "@luckystack/test-runner": [
+        "./packages/test-runner/src/index.ts"
       ]
     }
   },
@@ -68,7 +71,8 @@
     "packages/api/src",
     "packages/devkit/src",
     "packages/presence/src",
-    "packages/router/src"
+    "packages/router/src",
+    "packages/test-runner/src"
   ],
   "exclude": [
     "src/**/_api/**",

@@ -10,3 +10,5 @@ export { startHealthPoller } from './healthPoller';
 export type { StartHealthPollerInput, HealthPoller } from './healthPoller';
 export { createHttpProxy } from './httpProxy';
 export type { CreateHttpProxyInput } from './httpProxy';
+export { createWsProxy } from './wsProxy';
+export type { CreateWsProxyInput } from './wsProxy';

@@ -16,7 +16,9 @@
       "Bash(cp -r server/dev/templates packages/devkit/src/templates)",
       "Bash(echo \"LINT_EXIT=$?\")",
       "Bash(echo \"BUILD_EXIT=$?\")",
-      "Bash(ROUTER_PORT=4019 timeout 5 npm run router)"
+      "Bash(ROUTER_PORT=4019 timeout 5 npm run router)",
+      "Bash(npm info *)",
+      "Bash(npm install *)"
     ]
   }
 }

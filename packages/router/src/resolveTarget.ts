@@ -1,5 +1,6 @@
 import type { DeployConfig, EnvironmentDefinition } from '../../../deploy.config';
 import type { ServicesConfig } from '../../../services.config';
+import type { RedisHealthStore } from './redisHealthStore';
 
 /**
  * Resolves the target URL for a given service key, using the
@@ -32,6 +33,12 @@ export interface ResolveTargetInput {
    * Not provided → every service with a binding in the current env is "owned".
    */
   localPresetKey?: string;
+  /**
+   * Optional shared-state store. When provided, the resolver reads/writes
+   * health through it so multiple router instances see the same view and
+   * propagate changes via pub/sub. Not provided → in-memory per-process.
+   */
+  healthStore?: RedisHealthStore;
 }
 
 export interface ResolveTargetResult {
@@ -74,7 +81,7 @@ export const parseServiceFromPath = (pathname: string): string | null => {
 };
 
 export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceTargetResolver => {
-  const { deploy, services, currentEnvKey, localPresetKey } = input;
+  const { deploy, services, currentEnvKey, localPresetKey, healthStore } = input;
 
   const currentEnv = deploy.environments[currentEnvKey] as EnvironmentDefinition | undefined;
   if (!currentEnv) {
@@ -102,11 +109,16 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
 
   const enableUnhealthyFallback = deploy.routing?.enableUnhealthyFallback ?? true;
 
+  const readHealth = (service: string): boolean => {
+    if (healthStore) return healthStore.get(service);
+    return healthState.get(service) ?? true;
+  };
+
   const resolve = (service: string): ResolveTargetResult | null => {
     // Try the local env binding first when this service is owned locally.
     if (locallyOwnedSet.has(service)) {
       const localBinding = currentEnv.bindings[service];
-      const isHealthy = healthState.get(service) ?? true;
+      const isHealthy = readHealth(service);
 
       if (localBinding && (isHealthy || !enableUnhealthyFallback)) {
         return { target: localBinding, viaFallback: false, resolvedEnvKey: currentEnvKey };
@@ -127,11 +139,17 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
   const setLocalHealth = (service: string, healthy: boolean): void => {
     if (!locallyOwnedSet.has(service)) return;
     healthState.set(service, healthy);
+    //? Fire-and-forget Redis write + publish. The in-memory cache already has
+    //? the new value, so local reads stay fast; sibling routers get notified
+    //? via pub/sub in the next event loop tick.
+    if (healthStore) {
+      void healthStore.set(service, healthy).catch((err: unknown) => {
+        console.error('[router] failed to publish health change:', err);
+      });
+    }
   };
 
-  const getLocalHealth = (service: string): boolean => {
-    return healthState.get(service) ?? true;
-  };
+  const getLocalHealth = (service: string): boolean => readHealth(service);
 
   const getLocallyOwnedServices = (): string[] => [...locallyOwnedServices];
 

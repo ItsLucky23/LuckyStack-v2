@@ -18,7 +18,7 @@ import loadSocket from './sockets/socket';
 import { z } from 'zod';
 import oauthProviders from "./auth/loginConfig";
 import { deleteSession, getSession } from './functions/session';
-import { allowedOrigin } from '@luckystack/core';
+import { allowedOrigin, readBootUuid, resolveEnvKey, writeBootUuid } from '@luckystack/core';
 import { logging, rateLimiting, sessionBasedToken, sessionExpiryDays, SessionLayout } from '../config';
 
 import { serveAvatar } from './utils/serveAvatars';
@@ -218,6 +218,15 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   //? here we load the application icon
   if (z.literal('/favicon.ico').safeParse(routePath).success) {
     return serveFavicon(res);
+  }
+
+  //? Router boot handshake reads this endpoint to verify shared-Redis topology.
+  //? Returns the boot UUID this env wrote to `luckystack:boot:<env>` on startup.
+  if (routePath === '/_health') {
+    const bootUuid = await readBootUuid();
+    res.statusCode = bootUuid ? 200 : 503;
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ status: bootUuid ? 'ok' : 'degraded', bootUuid, envKey: resolveEnvKey() }));
   }
 
   //? here we get the params from the request
@@ -627,6 +636,10 @@ const port: string = process.env.SERVER_PORT || '80';
     const { initRepl } = await import('./utils/repl');
     initRepl();
   }
+
+  //? Boot UUID must be written before /_health can answer truthfully. Router
+  //? boot handshake consumes this endpoint to verify shared-Redis topology.
+  await writeBootUuid();
 
   const httpServer = http.createServer(async (req, res) => { ServerRequest(req, res) });
   loadSocket(httpServer);

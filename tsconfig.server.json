@@ -46,6 +46,9 @@
       ],
       "@luckystack/router": [
         "./packages/router/src/index.ts"
+      ],
+      "@luckystack/test-runner": [
+        "./packages/test-runner/src/index.ts"
       ]
     },
     "lib": [
@@ -67,6 +70,7 @@
     "packages/devkit/src/**/*",
     "packages/presence/src/**/*",
     "packages/router/src/**/*",
+    "packages/test-runner/src/**/*",
     "src/**/_api/**/*",
     "src/**/_sync/**/*",
     "src/**/_server/**/*",
