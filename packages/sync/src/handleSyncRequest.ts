@@ -1,0 +1,537 @@
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
+import { ioInstance, syncMessage } from "../../../server/sockets/socket";
+import { Socket } from "socket.io";
+import { getSession } from "@luckystack/login";
+import { logging, rateLimiting, SessionLayout } from '../../../config';
+import type { AuthProps } from '@luckystack/login';
+import { getRuntimeSyncMaps } from '../../../server/prod/runtimeMaps';
+import {
+  validateRequest,
+  extractTokenFromSocket,
+  tryCatch,
+  parseTransportRouteName,
+  checkRateLimit,
+  buildSyncProgressEventName,
+  buildSyncResponseEventName,
+  socketEventNames,
+  dispatchHook,
+  validateInputByType,
+} from "@luckystack/core";
+import { extractLanguageFromHeader, normalizeErrorResponse } from "../../../server/utils/responseNormalizer";
+import { setSentryUser } from '@luckystack/sentry';
+
+type SyncStreamPayload = Record<string, unknown>;
+
+interface RuntimeErrorResponse {
+  status: 'error';
+  errorCode?: string;
+  errorParams?: { key: string; value: string | number | boolean; }[];
+  httpStatus?: number;
+  message?: string;
+  [key: string]: unknown;
+}
+
+interface RuntimeSuccessResponse {
+  status: 'success';
+  message?: string;
+  httpStatus?: number;
+  [key: string]: unknown;
+}
+
+type RuntimeSyncResponse = RuntimeSuccessResponse | RuntimeErrorResponse;
+
+interface RuntimeSyncServerEntry {
+  auth: AuthProps;
+  main: (params: {
+    clientInput: Record<string, unknown>;
+    user: SessionLayout | null;
+    functions: Record<string, unknown>;
+    roomCode: string;
+    stream: (payload?: SyncStreamPayload) => void;
+  }) => Promise<RuntimeSyncResponse>;
+  inputType?: string;
+  inputTypeFilePath?: string;
+}
+
+type RuntimeSyncClientHandler = (params: {
+  clientInput: Record<string, unknown>;
+  token: string | null;
+  functions: Record<string, unknown>;
+  serverOutput: unknown;
+  roomCode: string;
+  stream: (payload?: SyncStreamPayload) => void;
+}) => Promise<RuntimeSyncResponse>;
+
+const shouldLogDev = logging.devLogs;
+const shouldLogStream = logging.stream;
+
+
+// export default async function handleSyncRequest({ name, clientData, user, serverOutput, roomCode }: syncMessage) {
+export default async function handleSyncRequest({ msg, socket, token }: {
+  msg: syncMessage,
+  socket: Socket,
+  token: string | null,
+}) {
+
+  if (!ioInstance) { return; }
+
+  //? first we validate the data
+  if (typeof msg != 'object') {
+    if (shouldLogDev) {
+      console.log('message', 'socket message was not a json object', 'red');
+    }
+    const normalized = normalizeErrorResponse({
+      response: { status: 'error', errorCode: 'sync.invalidRequest' },
+      preferredLocale:
+        extractLanguageFromHeader(socket.handshake.headers['x-language'])
+        || extractLanguageFromHeader(socket.handshake.headers['accept-language']),
+    });
+    return socket.emit(socketEventNames.sync, {
+      status: normalized.status,
+      message: normalized.message,
+      errorCode: normalized.errorCode,
+      errorParams: normalized.errorParams,
+      httpStatus: normalized.httpStatus,
+    });
+  }
+
+  const { name, data, cb, receiver: rawReceiver, responseIndex, ignoreSelf } = msg;
+  const receiver = typeof rawReceiver === 'string' ? rawReceiver.trim() : '';
+  const preferredLocale =
+    extractLanguageFromHeader(socket.handshake.headers['x-language'])
+    || extractLanguageFromHeader(socket.handshake.headers['accept-language']);
+
+  const buildSyncError = ({
+    response,
+    preferred,
+    userLanguage,
+  }: {
+    response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[]; httpStatus?: number };
+    preferred?: string | null;
+    userLanguage?: string | null;
+  }) => {
+    const normalized = normalizeErrorResponse({
+      response,
+      preferredLocale: preferred,
+      userLanguage,
+    });
+
+    return {
+      status: normalized.status,
+      message: normalized.message,
+      errorCode: normalized.errorCode,
+      errorParams: normalized.errorParams,
+      httpStatus: normalized.httpStatus,
+    };
+  };
+
+  const ensureSyncErrorShape = (response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[]; httpStatus?: number }) => {
+    if (typeof response.errorCode === 'string' && response.errorCode.trim().length > 0) {
+      return response;
+    }
+
+    return {
+      ...response,
+      errorCode: 'sync.clientRejected',
+    };
+  };
+
+  if (!name || !data || typeof name != 'string' || typeof data != 'object') {
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: { status: 'error', errorCode: 'sync.invalidRequest' },
+      preferred: preferredLocale,
+    }))
+  }
+
+  const normalizedData = data as Record<string, unknown>;
+
+  const parsedRoute = parseTransportRouteName({ value: name, prefix: 'sync' });
+  if (parsedRoute.status === 'error') {
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: {
+        status: 'error',
+        errorCode: 'routing.invalidServiceRouteName',
+        errorParams: [{ key: 'name', value: name }],
+      },
+      preferred: preferredLocale,
+    }));
+  }
+
+  const resolvedName = parsedRoute.normalizedFullName;
+
+  if (!cb || typeof cb != 'string') {
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: { status: 'error', errorCode: 'sync.invalidCallback' },
+      preferred: preferredLocale,
+    }));
+  }
+
+  if (!receiver) {
+    if (shouldLogDev) {
+      console.log('receiver / roomCode:', receiver, 'red');
+    }
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: { status: 'error', errorCode: 'sync.missingReceiver' },
+      preferred: preferredLocale,
+    }));
+  }
+
+  if (shouldLogDev) {
+    console.log(' ', 'blue');
+    console.log(' ', 'blue');
+    console.log(`sync: ${resolvedName} called`, 'blue');
+  }
+
+  const user = await getSession(token);
+  setSentryUser(user?.id ? {
+    id: user.id,
+    email: user.email || undefined,
+  } : null);
+  const { syncObject, functionsObject } = await getRuntimeSyncMaps();
+
+  //? we check if there is a client file or/and a server file, if they both dont exist we abort
+  if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
+    if (shouldLogDev) {
+      console.log("ERROR!!!,", `you need ${name}_client or ${name}_server file to sync`, 'red');
+    }
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: { status: 'error', errorCode: 'sync.notFound' },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    }));
+  }
+
+  const emitServerSyncStream = (payload: SyncStreamPayload = {}) => {
+    if (typeof responseIndex !== 'number') {
+      return;
+    }
+
+    if (shouldLogStream) {
+      console.log(`sync: ${resolvedName} server stream`, payload, 'cyan');
+    }
+
+    socket.emit(buildSyncProgressEventName(responseIndex), payload);
+  };
+
+  //? Rate limit check: per-sync bucket fallback + global per-IP cap
+  if (rateLimiting.defaultApiLimit !== false && rateLimiting.defaultApiLimit > 0) {
+    const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
+    const keyPrefix = token ? 'token' : 'ip';
+
+    const { allowed, resetIn } = await checkRateLimit({
+      key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
+      limit: rateLimiting.defaultApiLimit,
+      windowMs: rateLimiting.windowMs,
+    });
+
+    if (!allowed) {
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+          httpStatus: 429,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    }
+  }
+
+  if (rateLimiting.defaultIpLimit !== false && rateLimiting.defaultIpLimit > 0) {
+    const requesterIp = socket.handshake.address ?? 'unknown';
+    const { allowed, resetIn } = await checkRateLimit({
+      key: `ip:${requesterIp}:sync:all`,
+      limit: rateLimiting.defaultIpLimit,
+      windowMs: rateLimiting.windowMs,
+    });
+
+    if (!allowed) {
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+          httpStatus: 429,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    }
+  }
+
+  let serverOutput = {};
+  if (syncObject[`${resolvedName}_server`]) {
+    const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry;
+    const { auth, main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
+
+    const inputValidation = await validateInputByType({
+      typeText: inputType,
+      value: normalizedData,
+      rootKey: 'clientInput',
+      filePath: inputTypeFilePath,
+    });
+    if (inputValidation.status === 'error') {
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.invalidInputType',
+          errorParams: [{ key: 'message', value: inputValidation.message }],
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    }
+
+    //? if the login key is true we check if the user has an id in the session object
+    if (auth.login && !user?.id) {
+        if (shouldLogDev) {
+          console.log(`ERROR!!!, not logged in but sync requires login`, 'red');
+        }
+        return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+          response: { status: 'error', errorCode: 'auth.required' },
+          preferred: preferredLocale,
+        }));
+      }
+
+    const validationResult = validateRequest({ auth, user: user! });
+    if (validationResult.status === 'error') {
+      if (shouldLogDev) {
+        console.log('ERROR!!!,', validationResult.errorCode, 'red');
+      }
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: validationResult.errorCode || 'auth.forbidden',
+          errorParams: validationResult.errorParams,
+          httpStatus: validationResult.httpStatus,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    }
+
+    //? if the user has passed all the checks we call the preload sync function and return the result
+    const [serverSyncError, serverSyncResult] = await tryCatch(
+      async () => await serverMain({ clientInput: normalizedData, user, functions: functionsObject, roomCode: receiver, stream: emitServerSyncStream }),
+      undefined,
+      {
+        handler: 'handleSyncRequest',
+        sync: resolvedName,
+        stage: 'server',
+        userId: user?.id,
+        receiver,
+        transport: 'socket',
+      },
+    );
+    if (serverSyncError) {
+      if (shouldLogDev) {
+        console.log('ERROR!!!,', serverSyncError.message, 'red');
+      }
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    } else if (serverSyncResult?.status == 'error') {
+      const normalizedServerError = buildSyncError({
+        response: serverSyncResult,
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      });
+      if (shouldLogDev) {
+        console.log('ERROR!!!,', normalizedServerError.message, 'red');
+      }
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), normalizedServerError);
+    } else if (serverSyncResult?.status !== 'success') {
+      //? badReturn means it doesnt include a status key with the value 'success' || 'error'
+      if (shouldLogDev) {
+        console.log('ERROR!!!,', `sync ${resolvedName}_server function didnt return a status key with the value 'success' or 'error'`, 'red');
+      }
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: { status: 'error', errorCode: 'sync.invalidServerResponse' },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    } else if (serverSyncResult?.status == 'success') {
+      serverOutput = serverSyncResult;
+    }
+  }
+
+  //? from here on we can assume that we have either called a server sync and got a proper result of we didnt call a server sync
+
+  //? get the desired sockets based on the receiver key
+  const sockets = receiver === 'all'
+    ? ioInstance.sockets.sockets //? all connected sockets (Map)
+    : ioInstance.sockets.adapter.rooms.get(receiver) //? Set of socket IDs in room
+
+  //? now we check if we found any sockets
+  if (!sockets) {
+    if (shouldLogDev) {
+      console.log('data:', msg, 'red');
+      console.log('receiver:', receiver, 'red');
+      console.log('no sockets found', 'red');
+    }
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: { status: 'error', errorCode: 'sync.noReceiversFound' },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    }));
+  }
+
+  const preFanoutResult = await dispatchHook('preSyncFanout', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+    receiver,
+    serverOutput,
+  });
+  if (preFanoutResult.stopped) {
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: {
+        status: 'error',
+        errorCode: preFanoutResult.signal.errorCode,
+        httpStatus: preFanoutResult.signal.httpStatus,
+      },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    }));
+  }
+
+  //? here we loop over all the connected clients
+  //? we keep track of an counter and await the loop every 100 iterations to avoid the server running out of memory and crashing
+  let recipientCount = 0;
+  let tempCount = 1;
+  for (const socketEntry of sockets) {
+    tempCount++;
+    if (tempCount % 100 == 0) { await new Promise(resolve => setTimeout(resolve, 1)); }
+
+    const tempSocket = receiver === 'all'
+      ? (socketEntry as [string, Socket])[1] //? Map entry
+      : ioInstance.sockets.sockets.get(socketEntry as string); //? socket ID from Set
+
+    if (!tempSocket) { continue; }
+
+    //? check if they have a token stored in their cookie or session based on the settings
+    const tempToken = extractTokenFromSocket(tempSocket);
+
+    if (ignoreSelf && typeof ignoreSelf == 'boolean' && token == tempToken) {
+        continue;
+      }
+
+    recipientCount++;
+
+    if (syncObject[`${resolvedName}_client`]) {
+      const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
+      const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
+        if (shouldLogStream) {
+          console.log(`sync: ${resolvedName} client stream`, payload, 'cyan');
+        }
+
+        tempSocket.emit(socketEventNames.sync, {
+          ...payload,
+          cb,
+          fullName: resolvedName,
+          status: 'stream',
+        });
+      };
+
+      const [clientSyncError, clientSyncResult] = await tryCatch(
+        async () => await clientSyncHandler({ clientInput: normalizedData, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver, stream: emitClientSyncStream }),
+        undefined,
+        {
+          handler: 'handleSyncRequest',
+          sync: resolvedName,
+          stage: 'client',
+          sourceUserId: user?.id,
+          targetToken: tempToken,
+          receiver,
+          transport: 'socket',
+        },
+      );
+      if (clientSyncError) {
+        tempSocket.emit(socketEventNames.sync, {
+          cb,
+          fullName: resolvedName,
+          ...buildSyncError({
+            response: { status: 'error', errorCode: 'sync.clientExecutionFailed' },
+            preferred:
+              extractLanguageFromHeader(tempSocket.handshake.headers['x-language'])
+              || extractLanguageFromHeader(tempSocket.handshake.headers['accept-language']),
+          }),
+        });
+        continue;
+      }
+      if (clientSyncResult?.status == 'error') {
+        tempSocket.emit(socketEventNames.sync, {
+          cb,
+          fullName: resolvedName,
+          ...buildSyncError({
+            response: ensureSyncErrorShape(clientSyncResult),
+            preferred:
+              extractLanguageFromHeader(tempSocket.handshake.headers['x-language'])
+              || extractLanguageFromHeader(tempSocket.handshake.headers['accept-language']),
+          }),
+        });
+        continue;
+      }
+      if (clientSyncResult?.status !== 'success') {
+        tempSocket.emit(socketEventNames.sync, {
+          cb,
+          fullName: resolvedName,
+          ...buildSyncError({
+            response: { status: 'error', errorCode: 'sync.invalidClientResponse' },
+            preferred:
+              extractLanguageFromHeader(tempSocket.handshake.headers['x-language'])
+              || extractLanguageFromHeader(tempSocket.handshake.headers['accept-language']),
+          }),
+        });
+        continue;
+      }
+      else if (clientSyncResult?.status == 'success') {
+        const result = {
+          cb,
+          fullName: resolvedName,
+          serverOutput,
+          clientOutput: clientSyncResult,  // Return from _client file (success only)
+          message: clientSyncResult.message || `${resolvedName} sync success`,
+          status: 'success'
+        };
+        if (shouldLogDev) {
+          console.log(result, 'blue');
+        }
+        tempSocket.emit(socketEventNames.sync, result);
+      }
+    } else {
+      //? if there is no client function we still want to send the server data to the clients
+      const result = {
+        cb,
+        fullName: resolvedName,
+        serverOutput,
+        clientOutput: {},  // No client file, so empty output
+        message: `${resolvedName} sync success`,
+        status: 'success'
+      };
+      if (shouldLogDev) {
+        console.log(result, 'blue');
+      }
+      tempSocket.emit(socketEventNames.sync, result);
+    }
+  }
+
+  await dispatchHook('postSyncFanout', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+    receiver,
+    serverOutput,
+    recipientCount,
+  });
+
+  return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), {
+    status: 'success',
+    message: `sync ${resolvedName} success`,
+    result: serverOutput,
+  });
+}

@@ -1,7 +1,5 @@
 import { allowMultipleSessions, sessionExpiryDays, sessionBasedToken, SessionLayout } from "../../../config";
-import { redis } from '@luckystack/core';
-import { captureException, socketEventNames } from '@luckystack/core';
-import { dispatchHook } from '../../../server/hooks/registry';
+import { redis, captureException, socketEventNames, dispatchHook } from '@luckystack/core';
 
 const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
 const SESSION_TTL = 60 * 60 * 24 * sessionExpiryDays;

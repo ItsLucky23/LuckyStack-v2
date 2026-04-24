@@ -2,10 +2,15 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { getInputTypeFromFile, getSyncClientDataType } from '../server/dev/typeMap/extractors';
-import { API_VERSION_TOKEN_REGEX, SYNC_VERSION_TOKEN_REGEX } from '../server/dev/routeConventions';
-import { assertNoDuplicateNormalizedRouteKeys, assertValidRouteNaming } from '../server/dev/routeNamingValidation';
-import { ROOT_DIR, resolveFromRoot } from '../server/utils/paths';
+import {
+  getInputTypeFromFile,
+  getSyncClientDataType,
+  API_VERSION_TOKEN_REGEX,
+  SYNC_VERSION_TOKEN_REGEX,
+  assertNoDuplicateNormalizedRouteKeys,
+  assertValidRouteNaming,
+} from '@luckystack/devkit';
+import { ROOT_DIR, resolveFromRoot } from '@luckystack/core';
 import { loadBuildConfig, validatePresetsAndServices, resolveRequestedPresets, getServicesForPreset } from '../server/config/presetLoader';
 
 const normalizePath = (p: string) => p.split(path.sep).join("/");
@@ -202,3 +207,8 @@ for (const presetName of targetPresets) {
   fs.writeFileSync(resolveFromRoot('server', 'prod', outFileName), output);
   console.log(`✅ server/prod/${outFileName} created for preset '${presetName}'`);
 }
+
+// Explicit exit: loading `@luckystack/{core,devkit}` transitively connects to
+// Redis on import. Without an explicit exit the dangling ioredis handle keeps
+// the event loop alive and the script hangs.
+process.exit(0);

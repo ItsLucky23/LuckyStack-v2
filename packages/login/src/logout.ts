@@ -1,11 +1,9 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
 import { Socket } from "socket.io";
-import { redis as redisClient } from '@luckystack/core';
+import { redis as redisClient, tryCatch, socketEventNames, dispatchHook } from '@luckystack/core';
 import { disconnectTimers, tempDisconnectedSockets } from "../../../server/sockets/utils/activityBroadcaster";
 import { deleteSession } from "./session";
-import { tryCatch, socketEventNames } from '@luckystack/core';
-import { dispatchHook } from '../../../server/hooks/registry';
 
 export const logout = async ({ token, socket, userId, skipSessionDelete }: {
   token: string | null,

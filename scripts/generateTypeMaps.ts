@@ -1,4 +1,4 @@
-import { generateTypeMapFile } from "../server/dev/typeMapGenerator.ts";
+import { generateTypeMapFile } from "@luckystack/devkit";
 import { execSync } from "child_process";
 
 const run = async () => {
@@ -10,7 +10,12 @@ const run = async () => {
   }
 };
 
-run().catch((error) => {
-  console.error('[TypeMapGenerator] Generation failed:', error);
-  process.exit(1);
-});
+// Explicit exit: loading `@luckystack/devkit` transitively loads `@luckystack/core`,
+// whose barrel connects to Redis on import. Without an explicit exit the dangling
+// ioredis handle keeps the event loop alive and the script hangs.
+run()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error('[TypeMapGenerator] Generation failed:', error);
+    process.exit(1);
+  });

@@ -19,3 +19,18 @@ export { extractTokenFromRequest } from './extractTokenFromRequest';
 export { validateRequest, isFalsy } from './validateRequest';
 export type { ValidationResult } from './validateRequest';
 export { checkRateLimit, getRateLimitStatus, clearRateLimit, clearAllRateLimits } from './rateLimiter';
+export { validateInputByType } from './runtimeTypeValidation';
+export { registerHook, dispatchHook } from './hooks/registry';
+export type { DispatchResult } from './hooks/registry';
+export type {
+  HookSessionShape,
+  HookStopSignal,
+  HookResult,
+  HookHandler,
+  HookName,
+  HookPayloads,
+  PreApiExecutePayload,
+  PostApiExecutePayload,
+  PreSyncFanoutPayload,
+  PostSyncFanoutPayload,
+} from './hooks/types';

@@ -1,47 +1,73 @@
 # SESSION_STATE
 
 ## Session Summary
-Branch `chore/package-split-prep`. `@luckystack/core` now contains the full set of general-purpose server utilities. All 11 files from the previous session plan (console.log, cookies, httpApiUtils, paths, runtimeConfig, serveAvatars, getParams, extractToken, extractTokenFromRequest, validateRequest, rateLimiter) have been moved to `packages/core/src/` with one-liner shims left behind. Build and lint both pass clean. The next task is to start `@luckystack/sync` extraction.
+Branch `chore/package-split-prep`. This sitting added `@luckystack/devkit` — the biggest single move so far (21 files from `server/dev/**` + `server/utils/runtimeTypeResolver.ts`, ~5000 LOC). Scripts `generateTypeMaps.ts` and `generateServerRequests.ts` now import from `@luckystack/devkit`; both gained explicit `process.exit(0)` calls because loading the devkit barrel transitively loads the core barrel which opens a Redis connection (same hang bug from §21, now from a different path). `npm run lint` and `npm run build` pass clean.
 
-## Completed (this branch so far)
-- `shared/` utilities (sleep, tryCatch, serviceRoute, socketEvents, responseNormalizer, sentrySetup) → `packages/core/src/` with shims
-- `server/bootstrap/env.ts` + `server/functions/db.ts` + `server/functions/redis.ts` → `packages/core/src/` with shims
-- `server/auth/login.ts` + `server/auth/loginConfig.ts` + `server/functions/session.ts` + `server/sockets/utils/logout.ts` → `packages/login/src/` with shims
-- Auth/session lifecycle hooks wired (`postLogin`, `postRegister`, `postLogout`, `postSessionCreate`, `postSessionDelete`)
-- `server/functions/game.ts` deleted (moved to `functions/game.ts` in root in a previous session)
-- All build/runtime regressions fixed (tsx tsconfig flag, import style, esbuild alias, stale generated files)
-- **Moved 11 more server utilities to `packages/core/src/`**:
-  - Group 1 (no internal deps): console.log → consoleLog, cookies, httpApiUtils, paths, runtimeConfig
-  - Group 2 (depends on Group 1): serveAvatars, getParams, extractToken, extractTokenFromRequest
-  - Group 3 (depends on `@luckystack/login`): validateRequest (signature changed to `user: BaseSessionLayout`), rateLimiter
-- Shim pattern: all new shims use direct file paths (`../../packages/core/src/...`) to avoid pulling in the full core barrel (which would hang `tsx` generator scripts on the ioredis connection).
-- Added `--tsconfig tsconfig.server.json` to `generateArtifacts` and `buildClient` npm scripts so `tsx` resolves `@luckystack/*` path aliases during type-map generation.
-- `npm run lint` and `npm run build` pass clean.
+## Completed on this branch (cumulative)
 
----
+**Core (`@luckystack/core`):**
+- `shared/` utilities (sleep, tryCatch, serviceRoute, socketEvents, responseNormalizer, sentrySetup)
+- Env bootstrap + db + redis
+- 11 server utilities (console.log → consoleLog, cookies, httpApiUtils, paths, runtimeConfig, serveAvatars, getParams, extractToken, extractTokenFromRequest, validateRequest, rateLimiter)
+- `runtimeTypeValidation`
+- Hooks registry + types (augmentable `HookPayloads`, framework-generic `HookSessionShape`)
 
-## NEXT TASK: Start `@luckystack/sync` extraction
+**Login (`@luckystack/login`):**
+- session/login/loginConfig/logout; `sessionLayout.ts` owns `BaseSessionLayout` + `AuthProps`
+- `hookPayloads.ts` augments `HookPayloads` with auth/session hooks
 
-Scope summary:
-- **Server-side**: `server/sockets/handleSyncRequest.ts` and `server/sockets/handleHttpSyncRequest.ts` are the canonical sync handlers. Same shim pattern as login.
-- **Client-side**: `src/_sockets/syncRequest.ts` and `src/_sockets/offlineQueue.ts` are sync-specific. `src/_sockets/socketInitializer.ts` is shared between sync and API — must NOT move entirely to sync; needs splitting or stays in core.
-- **Dev tooling**: sync templates + type extractors live in `server/dev/` — these belong in `@luckystack/devkit` eventually, not in sync.
+**Sync (`@luckystack/sync`):**
+- `handleSyncRequest`, `handleHttpSyncRequest`
 
-Recommended first slice (server-side only):
-1. Create `packages/sync/` scaffold (`package.json`, `src/index.ts`).
-2. Move `handleSyncRequest.ts` and `handleHttpSyncRequest.ts` to `packages/sync/src/`.
-3. Replace originals with re-export shims (use direct file paths, not barrel, to avoid loading unrelated sibling modules).
-4. Add `@luckystack/sync` path alias to both tsconfigs and `bundleServer.mjs`.
-5. Run `npm run lint && npm run build` to verify.
+**API (`@luckystack/api`):**
+- `handleApiRequest`, `handleHttpApiRequest`
 
----
+**Sentry (`@luckystack/sentry`):**
+- `sentry.ts` (concrete `@sentry/node` init; DI surface stays in core)
+
+**Devkit (`@luckystack/devkit` — NEW this sitting):**
+- `hotReload`, `loader`, `supervisor`, `templateInjector`, `typeMapGenerator`, `importDependencyGraph`, `routeConventions`, `routeNamingValidation`
+- `typeMap/` (9 files: apiMeta, discovery, emitter, emitterArtifacts, extractors, functionsMeta, routeMeta, tsProgram, typeContext)
+- `templates/` (5 template strings)
+- `runtimeTypeResolver` (moved from server/utils/ — deep-type resolver using TS compiler API)
+- NOT in esbuild alias map (intentional — keeps devkit out of runtime boundary)
+
+## Package layer map
+
+```
+@luckystack/core      (base)
+   ↑
+@luckystack/login     (owns BaseSessionLayout + AuthProps; augments HookPayloads)
+   ↑
+@luckystack/sentry    @luckystack/sync    @luckystack/api
+   (feature layer)
+
+@luckystack/devkit    (dev-time only; not in prod bundle alias map)
+```
+
+## NEXT TASK (per §28)
+
+1. **`server/sockets/socket.ts` + `activityBroadcaster.ts` review** — socket.ts wires socket.io + dispatches to api/sync. Decide: `@luckystack/transport` or fold into core. `activityBroadcaster.ts` → likely `@luckystack/presence`.
+2. **Lazy-load dev loader in `server/prod/runtimeMaps.ts`** — replace top-level `import { devApis, devFunctions, devSyncs } from '../dev/loader';` with a dev-only `await import('../dev/loader')` inside each getter's non-prod branch. Excludes devkit from the production esbuild bundle. Satisfies §5.1 fully.
+3. **Delete `server/functions/tryCatch.ts`** — redundant wrapper; update the last caller (`src/settings/_api/updateUser_v1.ts`) to `@luckystack/core`, then delete.
+4. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory, project wires up its own translate fn. Design-first.
+5. **Client-side sync/API split** — `socketInitializer.ts` design, then move `syncRequest.ts` + `offlineQueue.ts` → sync client slice; `apiRequest.ts` → api client slice. Design-first.
+6. **`@luckystack/presence`** — after client splits; augments `HookPayloads` for `prePresenceUpdate` / `postPresenceUpdate`.
 
 ## Technical State
 
-**Environment:**
 - Branch: `chore/package-split-prep`
-- `npm run lint` — passes clean
-- `npm run build` — passes clean
-- All changes unstaged/uncommitted
+- `npm run lint` — clean
+- `npm run build` — clean (vite 462 modules ~3.9s; dist/server.js 9.8mb)
+- Current changes unstaged since last commit
+- Pre-existing issue surfaced: devkit code is still in the prod bundle because `server/prod/runtimeMaps.ts` has a top-level static import of the dev loader. Fix documented as §28.2.
 
-**Key invariant (learned this session):** shims that point at `@luckystack/core` (barrel) will pull in `redis` at module-load time, which keeps the Node event loop alive and hangs any `tsx` script that doesn't explicitly `process.exit(0)`. Always use direct file paths in shims (e.g. `export * from '../../packages/core/src/paths'`) unless the consumer is itself the runtime server.
+## Key invariants (still in force)
+
+- **Shim path rule**: shims use direct file paths (`../../packages/<pkg>/src/<file>`), never barrel.
+- **Script-exit rule**: tsx-run scripts that import any `@luckystack/*` barrel MUST end with `process.exit(0)` (or `.then(() => process.exit(0))`) — the core barrel opens a Redis connection that keeps the event loop alive.
+- **Type ownership**: `AuthProps` + `BaseSessionLayout` in login; `HookSessionShape` in core (structurally compatible); `SessionLayout` in project `config.ts`.
+- **Hook payloads**: core owns api/sync; feature packages add their own via `declare module '@luckystack/core' { interface HookPayloads { ... } }`.
+- **Sentry split**: DI surface in core, concrete `@sentry/node` init in sentry package.
+- **Devkit alias**: added to tsconfig.server.json (NOT tsconfig.client.json, NOT bundleServer.mjs). Prod bundle failures on `import '@luckystack/devkit'` are by design.
+- **Package layering**: feature packages (sync/api/sentry/login) are peers; none depend on each other. Devkit is consumed by scripts and server/dev/ shims only.

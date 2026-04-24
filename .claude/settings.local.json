@@ -10,7 +10,10 @@
       "Bash(taskkill //F //PID 568 //T)",
       "PowerShell(Stop-Process *)",
       "Bash(echo \"EXIT=$?\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(xargs wc *)",
+      "Bash(cp -r server/dev/typeMap packages/devkit/src/typeMap)",
+      "Bash(cp -r server/dev/templates packages/devkit/src/templates)"
     ]
   }
 }

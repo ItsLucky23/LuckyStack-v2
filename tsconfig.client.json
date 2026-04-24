@@ -37,6 +37,15 @@
       ],
       "@luckystack/login": [
         "./packages/login/src/index.ts"
+      ],
+      "@luckystack/sync": [
+        "./packages/sync/src/index.ts"
+      ],
+      "@luckystack/sentry": [
+        "./packages/sentry/src/index.ts"
+      ],
+      "@luckystack/api": [
+        "./packages/api/src/index.ts"
       ]
     }
   },
@@ -44,7 +53,10 @@
     "src",
     "shared",
     "packages/core/src",
-    "packages/login/src"
+    "packages/login/src",
+    "packages/sync/src",
+    "packages/sentry/src",
+    "packages/api/src"
   ],
   "exclude": [
     "src/**/_api/**",

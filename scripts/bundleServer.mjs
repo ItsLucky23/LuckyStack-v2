@@ -32,6 +32,9 @@ const run = async () => {
     alias: {
       '@luckystack/core': path.join(root, 'packages/core/src/index.ts'),
       '@luckystack/login': path.join(root, 'packages/login/src/index.ts'),
+      '@luckystack/sync': path.join(root, 'packages/sync/src/index.ts'),
+      '@luckystack/sentry': path.join(root, 'packages/sentry/src/index.ts'),
+      '@luckystack/api': path.join(root, 'packages/api/src/index.ts'),
     },
   });
 };
