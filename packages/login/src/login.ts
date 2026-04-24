@@ -10,7 +10,8 @@ import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { saveSession } from "./session"
 import validator from 'validator';
-import { defaultLanguage, SessionLayout } from '../../../config';
+import type { SessionLayout } from '../../../config';
+import { getProjectConfig } from '@luckystack/core';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -144,7 +145,7 @@ const loginWithCredentials = async (params: paramsType) => {
           avatar: '',
           avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
           admin: false,
-          language: defaultLanguage
+          language: getProjectConfig().defaultLanguage as SessionLayout["language"]
         }
       })
     }
@@ -387,7 +388,7 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
             name,
             avatar,
             avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
-            language: defaultLanguage
+            language: getProjectConfig().defaultLanguage as SessionLayout["language"]
           }
         })
       }

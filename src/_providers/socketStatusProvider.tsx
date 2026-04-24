@@ -9,17 +9,11 @@ import {
   useMemo,
 } from "react";
 
-export type SOCKETSTATUS =
-  | "CONNECTED"
-  | "DISCONNECTED"
-  | "RECONNECTING"
-  | "STARTUP";
-
-export interface statusContent {
-  status: SOCKETSTATUS;
-  reconnectAttempt?: number;
-  endTime?: number;
-}
+//? statusContent / SOCKETSTATUS now live in @luckystack/core. Re-exported
+//? here for any project code that still imports from this provider.
+import type { statusContent as _statusContent, SOCKETSTATUS as _SOCKETSTATUS } from '../../packages/core/src/socketStatusTypes';
+export type statusContent = _statusContent;
+export type SOCKETSTATUS = _SOCKETSTATUS;
 
 interface SocketStatusContextType {
   socketStatus: {

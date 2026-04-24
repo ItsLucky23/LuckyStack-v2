@@ -3,9 +3,10 @@
 import type { syncMessage } from "@luckystack/core";
 import { Socket } from "socket.io";
 import { getSession } from "@luckystack/login";
-import { logging, rateLimiting, SessionLayout } from '../../../config';
+import type { SessionLayout } from '../../../config';
+import { getProjectConfig } from '@luckystack/core';
 import type { AuthProps } from '@luckystack/login';
-import { getRuntimeSyncMaps } from '../../../server/prod/runtimeMaps';
+import { getRuntimeSyncMaps } from '@luckystack/core';
 import {
   validateRequest,
   extractTokenFromSocket,
@@ -64,8 +65,8 @@ type RuntimeSyncClientHandler = (params: {
   stream: (payload?: SyncStreamPayload) => void;
 }) => Promise<RuntimeSyncResponse>;
 
-const shouldLogDev = logging.devLogs;
-const shouldLogStream = logging.stream;
+const shouldLogDev = () => getProjectConfig().logging.devLogs;
+const shouldLogStream = () => getProjectConfig().logging.stream;
 
 
 // export default async function handleSyncRequest({ name, clientData, user, serverOutput, roomCode }: syncMessage) {
@@ -80,7 +81,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
   //? first we validate the data
   if (typeof msg != 'object') {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log('message', 'socket message was not a json object', 'red');
     }
     const normalized = normalizeErrorResponse({
@@ -170,7 +171,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   }
 
   if (!receiver) {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log('receiver / roomCode:', receiver, 'red');
     }
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
@@ -179,7 +180,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }));
   }
 
-  if (shouldLogDev) {
+  if (shouldLogDev()) {
     console.log(' ', 'blue');
     console.log(' ', 'blue');
     console.log(`sync: ${resolvedName} called`, 'blue');
@@ -194,7 +195,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
   //? we check if there is a client file or/and a server file, if they both dont exist we abort
   if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log("ERROR!!!,", `you need ${name}_client or ${name}_server file to sync`, 'red');
     }
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
@@ -209,7 +210,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       return;
     }
 
-    if (shouldLogStream) {
+    if (shouldLogStream()) {
       console.log(`sync: ${resolvedName} server stream`, payload, 'cyan');
     }
 
@@ -217,14 +218,15 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   };
 
   //? Rate limit check: per-sync bucket fallback + global per-IP cap
-  if (rateLimiting.defaultApiLimit !== false && rateLimiting.defaultApiLimit > 0) {
+  const defaultApiLimit = getProjectConfig().rateLimiting.defaultApiLimit;
+  if (defaultApiLimit !== false && defaultApiLimit > 0) {
     const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
     const keyPrefix = token ? 'token' : 'ip';
 
     const { allowed, resetIn } = await checkRateLimit({
       key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
-      limit: rateLimiting.defaultApiLimit,
-      windowMs: rateLimiting.windowMs,
+      limit: defaultApiLimit,
+      windowMs: getProjectConfig().rateLimiting.windowMs,
     });
 
     if (!allowed) {
@@ -241,12 +243,13 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
   }
 
-  if (rateLimiting.defaultIpLimit !== false && rateLimiting.defaultIpLimit > 0) {
+  const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
+  if (defaultIpLimit !== false && defaultIpLimit > 0) {
     const requesterIp = socket.handshake.address ?? 'unknown';
     const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${requesterIp}:sync:all`,
-      limit: rateLimiting.defaultIpLimit,
-      windowMs: rateLimiting.windowMs,
+      limit: defaultIpLimit,
+      windowMs: getProjectConfig().rateLimiting.windowMs,
     });
 
     if (!allowed) {
@@ -288,7 +291,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
     //? if the login key is true we check if the user has an id in the session object
     if (auth.login && !user?.id) {
-        if (shouldLogDev) {
+        if (shouldLogDev()) {
           console.log(`ERROR!!!, not logged in but sync requires login`, 'red');
         }
         return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
@@ -299,7 +302,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
     const validationResult = validateRequest({ auth, user: user! });
     if (validationResult.status === 'error') {
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log('ERROR!!!,', validationResult.errorCode, 'red');
       }
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
@@ -328,7 +331,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       },
     );
     if (serverSyncError) {
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log('ERROR!!!,', serverSyncError.message, 'red');
       }
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
@@ -342,13 +345,13 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         preferred: preferredLocale,
         userLanguage: user?.language,
       });
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log('ERROR!!!,', normalizedServerError.message, 'red');
       }
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), normalizedServerError);
     } else if (serverSyncResult?.status !== 'success') {
       //? badReturn means it doesnt include a status key with the value 'success' || 'error'
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log('ERROR!!!,', `sync ${resolvedName}_server function didnt return a status key with the value 'success' or 'error'`, 'red');
       }
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
@@ -370,7 +373,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
   //? now we check if we found any sockets
   if (!sockets) {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log('data:', msg, 'red');
       console.log('receiver:', receiver, 'red');
       console.log('no sockets found', 'red');
@@ -427,7 +430,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     if (syncObject[`${resolvedName}_client`]) {
       const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
       const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
-        if (shouldLogStream) {
+        if (shouldLogStream()) {
           console.log(`sync: ${resolvedName} client stream`, payload, 'cyan');
         }
 
@@ -500,7 +503,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
           message: clientSyncResult.message || `${resolvedName} sync success`,
           status: 'success'
         };
-        if (shouldLogDev) {
+        if (shouldLogDev()) {
           console.log(result, 'blue');
         }
         tempSocket.emit(socketEventNames.sync, result);
@@ -515,7 +518,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         message: `${resolvedName} sync success`,
         status: 'success'
       };
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log(result, 'blue');
       }
       tempSocket.emit(socketEventNames.sync, result);

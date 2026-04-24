@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing */
 
 import { getSession } from '@luckystack/login';
-import { rateLimiting, logging, SessionLayout } from '../../../config';
+import type { SessionLayout } from '../../../config';
+import { getProjectConfig } from '@luckystack/core';
 import type { AuthProps } from '@luckystack/login';
-import { getRuntimeApiMaps as getRuntimeApiMapsFromSource } from '../../../server/prod/runtimeMaps';
+import { getRuntimeApiMaps as getRuntimeApiMapsFromSource } from '@luckystack/core';
 import {
   validateRequest,
   checkRateLimit,
@@ -108,8 +109,8 @@ const isRuntimeApiResult = (value: unknown): value is RuntimeApiResult => {
   return status === 'success' || status === 'error';
 };
 
-const shouldLogDev = logging.devLogs;
-const shouldLogStream = logging.stream;
+const shouldLogDev = () => getProjectConfig().logging.devLogs;
+const shouldLogStream = () => getProjectConfig().logging.stream;
 
 export type ApiHttpStreamEvent = ApiStreamPayload;
 
@@ -181,7 +182,7 @@ export async function handleHttpApiRequest({
 
   const resolvedName = parsedRoute.normalizedFullName;
 
-  if (shouldLogDev) {
+  if (shouldLogDev()) {
     console.log(`http api: ${resolvedName} called`, 'cyan');
   }
 
@@ -224,7 +225,7 @@ export async function handleHttpApiRequest({
   // HTTP method validation
   const expectedMethod = declaredMethod ?? inferHttpMethod(resolvedName);
   if (method !== expectedMethod) {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log(`Method mismatch for ${resolvedName}: expected ${expectedMethod}, got ${method}`, 'yellow');
     }
     return buildNetworkError({
@@ -239,7 +240,7 @@ export async function handleHttpApiRequest({
 
   // Auth validation: check login requirement
   if (auth.login && !user?.id) {
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log(`ERROR: HTTP API ${name} requires login`, 'red');
       }
       return buildNetworkError({
@@ -258,7 +259,7 @@ export async function handleHttpApiRequest({
   // Auth validation: check additional requirements
   const authResult = validateRequest({ auth, user });
   if (authResult.status === 'error') {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log(`ERROR: Auth failed for HTTP API ${name}: ${authResult.errorCode}`, 'red');
     }
     return buildNetworkError({
@@ -275,7 +276,7 @@ export async function handleHttpApiRequest({
   // Rate limiting check: per-API bucket (custom rateLimit or defaultApiLimit fallback)
   const apiRateLimit = runtimeApiRoute.rateLimit;
   const effectiveApiLimit = apiRateLimit === undefined
-    ? rateLimiting.defaultApiLimit
+    ? getProjectConfig().rateLimiting.defaultApiLimit
     : apiRateLimit;
 
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
@@ -286,11 +287,11 @@ export async function handleHttpApiRequest({
     const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
       limit: effectiveApiLimit,
-      windowMs: rateLimiting.windowMs
+      windowMs: getProjectConfig().rateLimiting.windowMs
     });
 
     if (!allowed) {
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log(`Rate limit exceeded for HTTP API ${resolvedName}`, 'yellow');
       }
       return buildNetworkError({
@@ -305,16 +306,17 @@ export async function handleHttpApiRequest({
   }
 
   // Global per-IP bucket across all APIs
-  if (rateLimiting.defaultIpLimit !== false && rateLimiting.defaultIpLimit > 0) {
+  const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
+  if (defaultIpLimit !== false && defaultIpLimit > 0) {
     const ipBucket = requesterIp ?? 'unknown';
     const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${ipBucket}:api:all`,
-      limit: rateLimiting.defaultIpLimit,
-      windowMs: rateLimiting.windowMs
+      limit: defaultIpLimit,
+      windowMs: getProjectConfig().rateLimiting.windowMs
     });
 
     if (!allowed) {
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log(`Global IP rate limit exceeded for ${ipBucket}`, 'yellow');
       }
       return buildNetworkError({
@@ -334,7 +336,7 @@ export async function handleHttpApiRequest({
       return;
     }
 
-    if (shouldLogStream) {
+    if (shouldLogStream()) {
       console.log(`http api: ${resolvedName} stream`, payload, 'cyan');
     }
 
@@ -355,7 +357,7 @@ export async function handleHttpApiRequest({
   span?.end?.();
 
   if (error) {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log(`ERROR in HTTP API ${resolvedName}:`, error, 'red');
     }
     return buildNetworkError({
@@ -365,7 +367,7 @@ export async function handleHttpApiRequest({
   }
 
   if (result !== undefined && result !== null) {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log(`http api: ${resolvedName} completed`, 'cyan');
     }
 
@@ -397,7 +399,7 @@ export async function handleHttpApiRequest({
     });
   }
 
-  if (shouldLogDev) {
+  if (shouldLogDev()) {
     console.log(`WARNING: HTTP API ${resolvedName} returned nothing`, 'yellow');
   }
   return buildNetworkError({

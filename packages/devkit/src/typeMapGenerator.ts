@@ -214,7 +214,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     throw new Error(`[TypeMapGenerator] Aborting generation because unresolved type symbols were found: ${unresolvedList}`);
   }
 
-  const { content, docsData } = buildTypeMapArtifacts({
+  const { content, docsData, schemasContent } = buildTypeMapArtifacts({
     typesByPage,
     syncTypesByPage,
     namedImports,
@@ -222,5 +222,5 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     functionsInterface,
   });
 
-  writeTypeMapArtifacts({ content, docsData });
+  writeTypeMapArtifacts({ content, docsData, schemasContent });
 };

@@ -7,6 +7,36 @@ export * from './localizedNormalizer';
 export type { ApiTypeMap, SyncTypeMap, StreamPayload } from './apiTypeStubs';
 export type { apiMessage, syncMessage } from './socketTypes';
 export { setIoInstance, getIoInstance } from './socketTypes';
+export {
+  registerProjectConfig,
+  getProjectConfig,
+  isProjectConfigRegistered,
+} from './projectConfig';
+export {
+  registerRuntimeMapsProvider,
+  getRuntimeApiMaps,
+  getRuntimeSyncMaps,
+} from './runtimeMapsRegistry';
+export type {
+  RuntimeMapsProvider,
+  RuntimeApiMapsResult,
+  RuntimeSyncMapsResult,
+} from './runtimeMapsRegistry';
+export {
+  registerNotifier,
+  getNotifier,
+  notify,
+} from './notifier';
+export type { Notifier, NotifyInput, NotifyParam } from './notifier';
+export type { statusContent, SOCKETSTATUS } from './socketStatusTypes';
+export type {
+  ProjectConfig,
+  LoggingConfig,
+  RateLimitingConfig,
+  SessionConfig,
+  SentryConfig,
+  SentrySampleRates,
+} from './projectConfig';
 export * from './sentrySetup';
 export * from './env';
 export * from './db';

@@ -1,5 +1,9 @@
 import { LANGUAGE, THEME, User } from "@prisma/client";
 import type { BaseSessionLayout } from '@luckystack/login';
+//? Import from the specific file (not the barrel) so Vite's client bundle
+//? doesn't drag server-only core modules (bootUuid, ioredis, etc.) into the
+//? browser. Same rule we use in apiRequest/syncRequest.
+import { registerProjectConfig } from './packages/core/src/projectConfig';
 
 interface AppEnvironmentConfig {
   backendUrl: string;
@@ -220,6 +224,22 @@ export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true
 /** Supported OAuth providers */
 export const providers = ['credentials', 'google', 'github', 'facebook', 'discord'];
  
+//? Side-effect registration: any import of this file — client bundle entry,
+//? server entry, tests — wires the project config into @luckystack/core so
+//? framework packages read the right values. Server re-registers explicitly
+//? in server.ts for order safety, which is a no-op overwrite.
+registerProjectConfig({
+  logging: config.logging,
+  rateLimiting: config.rateLimiting,
+  session: {
+    basedToken: config.sessionBasedToken,
+    expiryDays: config.sessionExpiryDays,
+    allowMultiple: config.allowMultipleSessions,
+  },
+  defaultLanguage: config.defaultLanguage as unknown as string,
+  sentry: config.sentry,
+});
+
 export default config;
 export const {
   backendUrl,

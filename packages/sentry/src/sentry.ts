@@ -8,8 +8,8 @@
  */
 
 import * as Sentry from '@sentry/node';
-import { sentry } from '../../../config';
 import {
+  getProjectConfig,
   initSharedSentry,
   captureException as sharedCaptureException,
   captureMessage as sharedCaptureMessage,
@@ -40,8 +40,8 @@ export const initializeSentry = () => {
 
     // Performance monitoring
     tracesSampleRate: isProduction
-      ? sentry.server.tracesSampleRate.production
-      : sentry.server.tracesSampleRate.development,
+      ? getProjectConfig().sentry?.server?.tracesSampleRate?.production ?? 0.2
+      : getProjectConfig().sentry?.server?.tracesSampleRate?.development ?? 1,
 
     // Additional options
     serverName: process.env.PROJECT_NAME ?? "",

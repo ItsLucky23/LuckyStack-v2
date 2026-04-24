@@ -3,7 +3,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as ts from 'typescript';
-import { GENERATED_API_DOCS_PATH, GENERATED_SOCKET_TYPES_PATH } from '@luckystack/core';
+import { GENERATED_API_DOCS_PATH, GENERATED_API_SCHEMAS_PATH, GENERATED_SOCKET_TYPES_PATH } from '@luckystack/core';
+import { typeTextToZodSource } from './zodEmitter';
 
 export interface ApiTypeEntry {
 	input: string;
@@ -429,21 +430,90 @@ declare module '@luckystack/core' {
 
 	validateGeneratedTypeIdentifiers(content);
 
-	return { content, docsData };
+	//? Zod schemas for every API input. Runtime validators + test-runner fuzz
+	//? use this file. Emitted alongside the type map so the two always track.
+	const schemasContent = buildSchemasContent({ typesByPage });
+
+	return { content, docsData, schemasContent };
+};
+
+const buildSchemasContent = ({
+	typesByPage,
+}: {
+	typesByPage: Map<string, Map<string, ApiTypeEntry>>;
+}): string => {
+	const sortedPages = [...typesByPage.keys()].sort();
+
+	let body = `/* eslint-disable */
+//? Auto-generated Zod schemas for every API input. Driven by the same walk
+//? as apiTypes.generated.ts; see @luckystack/devkit/src/typeMap/zodEmitter.ts
+//? for the TS-AST → Zod converter. Types that fall outside the converter's
+//? scope emit \`z.any()\` with a TODO comment.
+
+import { z } from 'zod';
+
+export const apiInputSchemas: Record<string, Record<string, Record<string, z.ZodTypeAny>>> = {
+`;
+
+	for (const pagePath of sortedPages) {
+		const apis = typesByPage.get(pagePath)!;
+		const grouped = new Map<string, { version: string; entry: ApiTypeEntry }[]>();
+
+		for (const [apiKey, entry] of apis.entries()) {
+			const { name, version } = splitVersionedKey(apiKey);
+			if (!grouped.has(name)) grouped.set(name, []);
+			grouped.get(name)!.push({ version, entry });
+		}
+
+		body += `  '${pagePath}': {\n`;
+		for (const apiName of [...grouped.keys()].sort()) {
+			body += `    '${apiName}': {\n`;
+			for (const { version, entry } of grouped.get(apiName)!.sort(
+				(a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }),
+			)) {
+				const schemaSrc = typeTextToZodSource(entry.input) ?? 'z.any() /* unparseable input type */';
+				body += `      '${version}': ${schemaSrc},\n`;
+			}
+			body += `    },\n`;
+		}
+		body += `  },\n`;
+	}
+
+	body += `};
+
+export const getApiInputSchema = (
+	pagePath: string,
+	apiName: string,
+	version: string,
+): z.ZodTypeAny | undefined => {
+	return apiInputSchemas[pagePath]?.[apiName]?.[version];
+};
+`;
+
+	return body;
 };
 
 export const writeTypeMapArtifacts = ({
 	content,
 	docsData,
+	schemasContent,
 }: {
 	content: string;
 	docsData: any;
+	schemasContent?: string;
 }) => {
 	try {
 		const outputPath = GENERATED_SOCKET_TYPES_PATH;
 		const hasUpdatedTypeMap = writeFileIfChanged(outputPath, content);
 		if (hasUpdatedTypeMap) {
 			console.log('[TypeMapGenerator] Generated apiTypes.generated.ts');
+		}
+
+		if (schemasContent !== undefined) {
+			const hasUpdatedSchemas = writeFileIfChanged(GENERATED_API_SCHEMAS_PATH, schemasContent);
+			if (hasUpdatedSchemas) {
+				console.log('[TypeMapGenerator] Generated apiInputSchemas.generated.ts');
+			}
 		}
 
 		const docsPath = GENERATED_API_DOCS_PATH;

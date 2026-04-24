@@ -7,7 +7,7 @@
  * multi-instance deployments.
  */
 
-import { rateLimiting } from '../../../config';
+import { getProjectConfig } from './projectConfig';
 import tryCatch from './tryCatch';
 import { redis } from './redis';
 
@@ -17,8 +17,14 @@ interface RateLimitEntry {
 }
 
 const rateLimitStore = new Map<string, RateLimitEntry>();
-const RATE_LIMIT_REDIS_PREFIX = `${process.env.PROJECT_NAME ?? 'luckystack'}:${rateLimiting.redisKeyPrefix ?? 'rate-limit'}`;
-const RATE_LIMIT_REDIS_MODE = rateLimiting.store === 'redis';
+
+//? Resolved at call time so `registerProjectConfig` can run after this
+//? module is imported. If the project never registers, the defaults from
+//? projectConfig.ts take effect (memory store, 'rate-limit' prefix).
+const getRedisPrefix = (): string =>
+  `${process.env.PROJECT_NAME ?? 'luckystack'}:${getProjectConfig().rateLimiting.redisKeyPrefix}`;
+
+const isRedisMode = (): boolean => getProjectConfig().rateLimiting.store === 'redis';
 let redisFallbackLogged = false;
 
 const RATE_LIMIT_INCREMENT_SCRIPT = `
@@ -57,7 +63,7 @@ const normalizeWindowMs = (windowMs: number): number => {
 };
 
 const getRedisRateLimitKey = (key: string): string => {
-  return `${RATE_LIMIT_REDIS_PREFIX}:${key}`;
+  return `${getRedisPrefix()}:${key}`;
 };
 
 const checkRateLimitInMemory = ({
@@ -183,7 +189,7 @@ export const checkRateLimit = async ({
   limit,
   windowMs = 60_000,
 }: CheckRateLimitParams): Promise<RateLimitResult> => {
-  if (RATE_LIMIT_REDIS_MODE) {
+  if (isRedisMode()) {
     const redisResult = await checkRateLimitInRedis({ key, limit, windowMs });
     if (redisResult) {
       return redisResult;
@@ -200,7 +206,7 @@ export const checkRateLimit = async ({
  * Useful for rate limit headers in responses.
  */
 export const getRateLimitStatus = async (key: string, limit: number): Promise<RateLimitResult> => {
-  if (RATE_LIMIT_REDIS_MODE) {
+  if (isRedisMode()) {
     const redisResult = await getRateLimitStatusInRedis(key, limit);
     if (redisResult) {
       return redisResult;
@@ -217,7 +223,7 @@ export const getRateLimitStatus = async (key: string, limit: number): Promise<Ra
  * Useful for admin overrides or testing.
  */
 export const clearRateLimit = async (key: string): Promise<void> => {
-  if (RATE_LIMIT_REDIS_MODE) {
+  if (isRedisMode()) {
     await tryCatch(async () => await redis.del(getRedisRateLimitKey(key)));
   }
 
@@ -229,11 +235,11 @@ export const clearRateLimit = async (key: string): Promise<void> => {
  * Useful for testing or server restart.
  */
 export const clearAllRateLimits = async (): Promise<void> => {
-  if (RATE_LIMIT_REDIS_MODE) {
+  if (isRedisMode()) {
     let cursor = '0';
     do {
       const [scanError, scanResponse] = await tryCatch(
-        async () => await redis.scan(cursor, 'MATCH', `${RATE_LIMIT_REDIS_PREFIX}:*`, 'COUNT', 100),
+        async () => await redis.scan(cursor, 'MATCH', `${getRedisPrefix()}:*`, 'COUNT', 100),
       );
 
       if (scanError || !scanResponse || scanResponse.length < 2) {

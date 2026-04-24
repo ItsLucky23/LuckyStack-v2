@@ -1,7 +1,7 @@
-import { logging } from "../../../config";
+import { getProjectConfig } from "./projectConfig";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketState";
 import type { ApiTypeMap, StreamPayload } from './apiTypeStubs';
-import notify from "../../../src/_functions/notify";
+import { notify } from "./notifier";
 import { enqueueApiRequest, isOnline, removeApiQueueItem } from "./offlineQueue";
 import { Socket } from "socket.io-client";
 import { normalizeErrorResponseCore } from "./responseNormalizer";
@@ -38,9 +38,12 @@ const createQueueId = () => {
   return `${String(Date.now())}-${String(Math.random())}`;
 };
 
-const shouldLogDev = logging.devLogs;
-const shouldNotifyDev = logging.devNotifications;
-const shouldLogStream = logging.stream;
+//? Resolve logging flags at call time so registration order doesn't matter.
+//? `getLogging()` is called inside each handler instead of captured at load.
+const getLogging = () => getProjectConfig().logging;
+const shouldLogDev = () => getLogging().devLogs;
+const shouldNotifyDev = () => getLogging().devNotifications;
+const shouldLogStream = () => getLogging().stream;
 
 const shouldUseAbortController = ({
   abortable,
@@ -161,10 +164,10 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
   return new Promise<RequestOutput>((resolve, reject) => {
     void (async () => {
       if (!name || typeof name !== "string") {
-        if (shouldLogDev) {
+        if (shouldLogDev()) {
           console.error("Invalid name");
         }
-        if (shouldNotifyDev) {
+        if (shouldNotifyDev()) {
           notify.error({ key: 'api.invalidName' });
         }
         resolve(null as unknown as RequestOutput);
@@ -172,10 +175,10 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
       }
 
       if (!version || typeof version !== 'string') {
-        if (shouldLogDev) {
+        if (shouldLogDev()) {
           console.error("Invalid version");
         }
-        if (shouldNotifyDev) {
+        if (shouldNotifyDev()) {
           notify.error({ key: 'api.invalidVersion' });
         }
         resolve(null as unknown as RequestOutput);
@@ -184,10 +187,10 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
 
       const parsedRoute = parseServiceRouteName(name);
       if (parsedRoute.status === 'error') {
-        if (shouldLogDev) {
+        if (shouldLogDev()) {
           console.error(`[apiRequest] Invalid service route name '${name}': ${parsedRoute.reason}`);
         }
-        if (shouldNotifyDev) {
+        if (shouldNotifyDev()) {
           notify.error({ key: 'routing.invalidServiceRouteName' });
         }
         resolve(normalizeErrorResponseCore({
@@ -288,7 +291,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
               return;
             }
 
-            if (shouldLogStream) {
+            if (shouldLogStream()) {
               console.log(`Server API Stream(${String(tempIndex)}):`, { APINAME: sanitizedName, streamPayload });
             }
 
@@ -301,7 +304,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           };
         }
 
-        if (shouldLogDev) {
+        if (shouldLogDev()) {
           console.log(`Client API Request(${String(tempIndex)}):`, { APINAME: sanitizedName, data });
         }
 
@@ -315,7 +318,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
 
           const status = response.status;
 
-          if (shouldLogDev) {
+          if (shouldLogDev()) {
             console.log(`Server API Response(${String(tempIndex)}):`, { ...response, APINAME: sanitizedName });
           }
 

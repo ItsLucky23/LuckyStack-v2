@@ -1,4 +1,5 @@
 import { env } from '../bootstrap/env';
+import { registerRuntimeMapsProvider } from '@luckystack/core';
 
 type RuntimeMapRecord = Record<string, unknown>;
 
@@ -112,6 +113,12 @@ export const getRuntimeSyncMaps = async (): Promise<{
   const { syncObject, functionsObject } = await loadProdRuntimeMaps();
   return { syncObject, functionsObject };
 };
+
+//? Register with the framework DI surface so @luckystack/api and
+//? @luckystack/sync resolve runtime maps through core instead of deep-relative
+//? imports. Side-effect on module load — the project's server.ts imports
+//? this file (directly or transitively via handleHttpApiRequest) at startup.
+registerRuntimeMapsProvider({ getRuntimeApiMaps, getRuntimeSyncMaps });
 
 export const getRuntimeReplMaps = async (): Promise<{
   apiMap: RuntimeMapRecord;

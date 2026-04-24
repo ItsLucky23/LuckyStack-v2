@@ -8,6 +8,7 @@ export { runRateLimitTests } from './runRateLimitTests';
 export { runFuzzCheck } from './fuzzCheck';
 export { runFuzzTests } from './runFuzzTests';
 export { resetServerState } from './resetServerState';
+export { sampleSchemaInput } from './schemaSampleInput';
 export { logContractResult, logContractSummary } from './reporter';
 export type {
   EndpointDescriptor,

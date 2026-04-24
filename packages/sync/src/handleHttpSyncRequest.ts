@@ -1,9 +1,10 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
 import { getSession } from "@luckystack/login";
-import { logging, rateLimiting, SessionLayout } from '../../../config';
+import type { SessionLayout } from '../../../config';
+import { getProjectConfig } from '@luckystack/core';
 import type { AuthProps } from '@luckystack/login';
-import { getRuntimeSyncMaps as getRuntimeSyncMapsFromSource } from '../../../server/prod/runtimeMaps';
+import { getRuntimeSyncMaps as getRuntimeSyncMapsFromSource } from '@luckystack/core';
 import {
   validateRequest,
   extractTokenFromSocket,
@@ -80,8 +81,8 @@ type RuntimeSyncClientHandler = (params: {
   stream: (payload?: SyncStreamPayload) => void;
 }) => Promise<RuntimeSyncResponse>;
 
-const shouldLogDev = logging.devLogs;
-const shouldLogStream = logging.stream;
+const shouldLogDev = () => getProjectConfig().logging.devLogs;
+const shouldLogStream = () => getProjectConfig().logging.stream;
 
 export type HttpSyncStreamEvent = SyncStreamPayload;
 
@@ -97,7 +98,7 @@ export default async function handleHttpSyncRequest({
   acceptLanguageHeader,
   stream,
 }: HttpSyncRequestParams): Promise<HttpSyncResponse> {
-  if (shouldLogDev) {
+  if (shouldLogDev()) {
     console.log(`http sync: ${name} called`, 'cyan');
   }
 
@@ -203,7 +204,7 @@ export default async function handleHttpSyncRequest({
     }
 
     // Rate limiting for HTTP sync requests
-    const effectiveSyncLimit = rateLimiting.defaultApiLimit;
+    const effectiveSyncLimit = getProjectConfig().rateLimiting.defaultApiLimit;
     if (effectiveSyncLimit !== false && effectiveSyncLimit > 0) {
       const requesterIdentity = token ?? requesterIp ?? 'anonymous';
       const keyPrefix = token ? 'token' : 'ip';
@@ -211,7 +212,7 @@ export default async function handleHttpSyncRequest({
       const { allowed, resetIn } = await checkRateLimit({
         key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
         limit: effectiveSyncLimit,
-        windowMs: rateLimiting.windowMs,
+        windowMs: getProjectConfig().rateLimiting.windowMs,
       });
 
       if (!allowed) {
@@ -228,12 +229,13 @@ export default async function handleHttpSyncRequest({
       }
     }
 
-    if (rateLimiting.defaultIpLimit !== false && rateLimiting.defaultIpLimit > 0) {
+    const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
+    if (defaultIpLimit !== false && defaultIpLimit > 0) {
       const ipBucket = requesterIp ?? 'unknown';
       const { allowed, resetIn } = await checkRateLimit({
         key: `ip:${ipBucket}:sync:all`,
-        limit: rateLimiting.defaultIpLimit,
-        windowMs: rateLimiting.windowMs,
+        limit: defaultIpLimit,
+        windowMs: getProjectConfig().rateLimiting.windowMs,
       });
 
       if (!allowed) {
@@ -255,7 +257,7 @@ export default async function handleHttpSyncRequest({
       const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry;
       const { auth, main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
       const emitServerSyncStream = (payload: SyncStreamPayload = {}) => {
-        if (shouldLogStream) {
+        if (shouldLogStream()) {
           console.log(`http sync: ${resolvedName} server stream`, payload, 'cyan');
         }
 
@@ -368,7 +370,7 @@ export default async function handleHttpSyncRequest({
       if (syncObject[`${resolvedName}_client`]) {
         const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
         const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
-          if (shouldLogStream) {
+          if (shouldLogStream()) {
             console.log(`http sync: ${resolvedName} client stream`, payload, 'cyan');
           }
 
@@ -450,7 +452,7 @@ export default async function handleHttpSyncRequest({
       });
     }
 
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log(`http sync: ${resolvedName} completed`, 'cyan');
     }
 

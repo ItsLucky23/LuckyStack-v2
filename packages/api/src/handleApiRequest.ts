@@ -2,10 +2,11 @@
 /* eslint-disable */
 import type { apiMessage } from '@luckystack/core';
 import { getSession, logout } from '@luckystack/login';
-import { logging, rateLimiting, SessionLayout } from '../../../config';
+import type { SessionLayout } from '../../../config';
+import { getProjectConfig } from '@luckystack/core';
 import type { AuthProps } from '@luckystack/login';
 import { Socket } from 'socket.io';
-import { getRuntimeApiMaps } from '../../../server/prod/runtimeMaps';
+import { getRuntimeApiMaps } from '@luckystack/core';
 import {
   validateRequest,
   checkRateLimit,
@@ -58,15 +59,15 @@ interface RuntimeApiEntry {
   rateLimit?: number | false;
 }
 
-const shouldLogDev = logging.devLogs;
-const shouldLogStream = logging.stream;
+const shouldLogDev = () => getProjectConfig().logging.devLogs;
+const shouldLogStream = () => getProjectConfig().logging.stream;
 
 export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
   //? This event gets triggered when the client uses the apiRequest function
   //? We validate the message, check auth then execute
 
   if (typeof msg != 'object') {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log('socket message was not a json object!!!!', 'red');
     }
     return;
@@ -98,7 +99,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   };
 
   if (!responseIndex && typeof responseIndex !== 'number') {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log('no response index given!!!!', 'red');
     }
     return;
@@ -141,7 +142,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     });
   }
 
-  if (shouldLogDev) {
+  if (shouldLogDev()) {
     console.log(`api: ${resolvedName} called`, 'blue');
   }
 
@@ -165,7 +166,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const inputTypeFilePath = apiEntry.inputTypeFilePath;
 
   const emitApiStream = (payload: ApiStreamPayload = {}) => {
-    if (shouldLogStream) {
+    if (shouldLogStream()) {
       console.log(`api: ${resolvedName} stream`, payload, 'cyan');
     }
 
@@ -191,7 +192,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   //? Auth validation: check login requirement
   if (auth.login && !user?.id) {
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log(`ERROR: API ${name} requires login`, 'red');
       }
       return emitApiError({
@@ -203,7 +204,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   //? Auth validation: check additional requirements
   const authResult = validateRequest({ auth, user: user! });
   if (authResult.status === "error") {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log(`ERROR: Auth failed for ${name}: ${authResult.errorCode}`, 'red');
     }
     return emitApiError({
@@ -220,7 +221,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   //? Rate limiting check: per-API bucket (custom rateLimit or defaultApiLimit fallback)
   const apiRateLimit = apiEntry.rateLimit;
   const effectiveApiLimit = apiRateLimit === undefined
-    ? rateLimiting.defaultApiLimit
+    ? getProjectConfig().rateLimiting.defaultApiLimit
     : apiRateLimit;
 
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
@@ -231,11 +232,11 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
       limit: effectiveApiLimit,
-      windowMs: rateLimiting.windowMs
+      windowMs: getProjectConfig().rateLimiting.windowMs
     });
 
     if (!allowed) {
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log(`Rate limit exceeded for ${resolvedName}`, 'yellow');
       }
       return emitApiError({
@@ -250,17 +251,18 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Global per-IP bucket across all APIs
-  if (rateLimiting.defaultIpLimit !== false && rateLimiting.defaultIpLimit > 0) {
+  const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
+  if (defaultIpLimit !== false && defaultIpLimit > 0) {
     const requesterIp = socket.handshake.address ?? 'unknown';
 
     const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${requesterIp}:api:all`,
-      limit: rateLimiting.defaultIpLimit,
-      windowMs: rateLimiting.windowMs
+      limit: defaultIpLimit,
+      windowMs: getProjectConfig().rateLimiting.windowMs
     });
 
     if (!allowed) {
-      if (shouldLogDev) {
+      if (shouldLogDev()) {
         console.log(`Global IP rate limit exceeded for ${requesterIp}`, 'yellow');
       }
       return emitApiError({
@@ -314,7 +316,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   });
 
   if (error) {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log(`ERROR in ${resolvedName}:`, error, 'red');
     }
     socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
@@ -327,7 +329,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
       fallbackHttpStatus: 500,
     }));
   } else if (result !== undefined && result !== null) {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log(`api: ${resolvedName} completed`, 'blue');
     }
 
@@ -364,7 +366,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
       }));
     }
   } else {
-    if (shouldLogDev) {
+    if (shouldLogDev()) {
       console.log(`WARNING: ${resolvedName} returned nothing`, 'yellow');
     }
     socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({

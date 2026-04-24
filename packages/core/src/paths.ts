@@ -44,6 +44,7 @@ export const PUBLIC_DIR = path.join(ROOT_DIR, 'public');
 export const SERVER_FUNCTIONS_DIR = path.join(SERVER_DIR, 'functions');
 
 export const GENERATED_SOCKET_TYPES_PATH = path.join(SRC_DIR, '_sockets', 'apiTypes.generated.ts');
+export const GENERATED_API_SCHEMAS_PATH = path.join(SRC_DIR, '_sockets', 'apiInputSchemas.generated.ts');
 export const GENERATED_API_DOCS_PATH = path.join(SRC_DIR, 'docs', 'apiDocs.generated.json');
 
 export const TSCONFIG_ALIAS_FILES = ['tsconfig.server.json', 'tsconfig.client.json'];

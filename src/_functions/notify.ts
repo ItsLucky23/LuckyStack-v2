@@ -6,6 +6,7 @@ import deJson from "src/_locales/de.json";
 import frJson from "src/_locales/fr.json";
 import { getCurrentSession } from "src/_providers/SessionProvider";
 import { defaultLanguage } from "config";
+import { registerNotifier } from "../../packages/core/src/notifier";
 
 const Translator = () => {
   const session = getCurrentSession();
@@ -38,5 +39,11 @@ const notify = {
     toast.warning(translate({ translationList, key, params }));
   },
 }
+
+//? Register with @luckystack/core so framework packages (apiRequest,
+//? syncRequest) emit toasts through the project's i18n-backed notifier
+//? instead of the no-op default. Side effect fires on any import of this
+//? file — client bootstrap (main.tsx) already imports it transitively.
+registerNotifier(notify);
 
 export default notify;

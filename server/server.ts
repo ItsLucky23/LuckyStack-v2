@@ -7,6 +7,13 @@ import path from 'node:path';
 
 loadEnv({ path: '.env' });
 loadEnv({ path: '.env.local', override: true });
+
+//? Project config registration happens as a side effect of importing
+//? `../config` (see bottom of config.ts — `registerProjectConfig(...)`).
+//? Any import of it wires values into @luckystack/core before framework
+//? code reads them. We import it here explicitly for order clarity.
+import '../config';
+
 initializeSentry();
 registerPresenceHooks();
 
@@ -15,6 +22,11 @@ registerPresenceHooks();
 //? `normalizeErrorResponse` from core; it routes through whatever normalizer
 //? is registered. Without this import, they'd see the identity default.
 import './utils/responseNormalizer';
+
+//? Same pattern: importing runtimeMaps triggers registerRuntimeMapsProvider,
+//? so framework packages resolve generated API/sync maps through core rather
+//? than deep-importing this file.
+import './prod/runtimeMaps';
 
 import http from 'node:http';
 import getParams from './utils/getParams';

@@ -1402,11 +1402,51 @@ Known gaps / not done this session:
 
 ---
 
-## 37) Next Session Plan
+## 37) Session Log (2026-04-24, eighteenth pass — DI sweep + Zod emission)
 
-1. **Config DI (publishability blocker A)** — single `registerProjectConfig({ rateLimiting, logging, session, sentry, defaultLanguage })` call in core; framework packages consume via getter. Biggest impact for NPM publishability.
-2. **Runtime-maps DI (blocker B)** — `registerRuntimeMaps({ apis, syncs })` pattern.
-3. **Notify DI (blocker C)** — `registerNotifier({ error, success })` hook + default no-op.
-4. **Zod/JSON-schema emission** — generator emits runtime schemas; unlocks `fast-check`-driven property-based fuzz.
-5. **Web vitals / Monitoring packages** (§15 backlog) — pending product direction.
-6. **`server/sockets/socket.ts`** — stays in server/ as project glue (already decided; socket-type half lives in core now).
+Cleared the three publishability blockers from §36 (config, runtime-maps, notify) and shipped a minimal Zod schema emitter. Framework packages no longer deep-import project files for runtime values, only for `SessionLayout` as a type.
+
+Completed:
+
+1. **Config DI.** New `packages/core/src/projectConfig.ts` with `registerProjectConfig({...})`, `getProjectConfig()`, `isProjectConfigRegistered()`, and a safe identity default. Interface covers `logging`, `rateLimiting`, `session`, `defaultLanguage`, optional `sentry`. The project's `config.ts` calls `registerProjectConfig(...)` as a bottom-of-file side effect, so any import of the config file wires values into core. Server `server.ts` imports `../config` explicitly for boot-order clarity. Framework callers switched from `import { rateLimiting } from '../../../config'` to `getProjectConfig().rateLimiting.*`, resolved at call time — import-order-safe, and narrowing is preserved by hoisting each field to a local const per block. Swept: `packages/core/src/{rateLimiter,apiRequest,extractToken,extractTokenFromRequest}.ts`, `packages/api/src/{handleApiRequest,handleHttpApiRequest}.ts`, `packages/sync/src/{handleSyncRequest,handleHttpSyncRequest,syncRequest}.ts`, `packages/login/src/{login,session}.ts`, `packages/sentry/src/sentry.ts`.
+
+2. **Runtime-maps DI.** New `packages/core/src/runtimeMapsRegistry.ts` with `registerRuntimeMapsProvider({ getRuntimeApiMaps, getRuntimeSyncMaps })` + delegating `getRuntimeApiMaps()` / `getRuntimeSyncMaps()`. Project's `server/prod/runtimeMaps.ts` registers on load. Framework packages (`@luckystack/api`, `@luckystack/sync`) switched from `../../../server/prod/runtimeMaps` to `@luckystack/core`. Default returns empty maps so tests and headless tooling don't crash.
+
+3. **Notify DI.** New `packages/core/src/notifier.ts` with `registerNotifier({ success, error, info, warning })` + no-op default + pre-destructured `notify` helper that matches the project's existing shape. `packages/core/src/apiRequest.ts` and `packages/sync/src/syncRequest.ts` import `notify` from core. Project's `src/_functions/notify.ts` calls `registerNotifier(notify)` on load. Also moved `statusContent` / `SOCKETSTATUS` types from `src/_providers/socketStatusProvider.tsx` into new `packages/core/src/socketStatusTypes.ts` so `@luckystack/sync/syncRequest.ts` can import the type without reaching into the project; the provider file re-exports for back-compat.
+
+4. **Zod schema emission.** New `packages/devkit/src/typeMap/zodEmitter.ts` — a minimal TS-AST → Zod source converter. Handles primitives, literal types, unions (including `| undefined` → `.optional()`), arrays, object literals, `Record<K,V>`, `[key: string]: never` (LuckyStack's "no input" convention → `z.object({}).strict()`), and `Partial<T>`. Falls back to `z.any()` with a TODO comment for intersections / unresolved type references. Generator emits a parallel `src/_sockets/apiInputSchemas.generated.ts` alongside the type map, exporting `apiInputSchemas` and `getApiInputSchema()`. Test-runner gained `sampleSchemaInput(schema)` — walks a Zod schema and returns a deterministic minimal valid value. `scripts/testContract.ts` now uses it as the default `inputFor`, so smoke tests produce valid-ish inputs instead of plain `{}`. Property-based fuzz via `fast-check` is still a follow-up; the emitter and consumer surface are in place.
+
+Verification: `npm run lint` clean, `npm run build` clean. `dist/server.js` 223.1 KB (+3.1 KB vs §36 for the DI registries + Zod runtime dep surface).
+
+Key invariants added:
+
+- **Project-config registration rule** (NEW): framework packages call `getProjectConfig()` from `@luckystack/core`. The project MUST side-effect-import its `config.ts` (or any file that calls `registerProjectConfig`) on startup, or framework packages read the identity default — safe at runtime but will log-friendly values instead of the configured ones.
+- **Runtime-maps registration rule** (NEW): framework `@luckystack/api` and `@luckystack/sync` call `getRuntimeApiMaps()` / `getRuntimeSyncMaps()` from core. The project's `server/prod/runtimeMaps.ts` MUST be imported on startup so `registerRuntimeMapsProvider` runs before the first API/sync request.
+- **Notifier registration rule** (NEW): `@luckystack/core` ships a no-op notifier by default. The client bootstrap MUST import the project's `src/_functions/notify.ts` so `registerNotifier(notify)` fires before the first `apiRequest` / `syncRequest` error path. The default is silent, not a crash.
+- **Schema emission rule** (NEW): every API endpoint gets a Zod schema in `src/_sockets/apiInputSchemas.generated.ts`. Unparseable input types fall back to `z.any()` — intentional so generator output never rejects valid TS. See `packages/devkit/src/typeMap/zodEmitter.ts` for the supported TypeScript subset.
+- **Barrel-import-from-client-bundle rule** (clarified): `config.ts` now uses `import { registerProjectConfig } from './packages/core/src/projectConfig'` (direct file path), not the barrel — the barrel pulls `bootUuid` (uses `node:crypto`) and `ioredis`, both of which break Vite's client bundle. Same rule already applied in `apiRequest.ts` / `syncRequest.ts`.
+
+Publishability audit status after this sweep:
+
+- **A. Config reach**: **closed**. Only remaining `../../../config` imports are `SessionLayout` type-only.
+- **B. Runtime-maps reach**: **closed**.
+- **C. Notify/UI reach**: **closed** for runtime values; `SessionLayout` type-only imports remain.
+- **D. Dev-only devkit reach**: unchanged (acceptable — devkit is dev-only).
+
+Known gaps / not done this session:
+
+- **`SessionLayout` type still imported from `../../../config`** in 6+ files. Making `@luckystack/api` / `@luckystack/sync` fully publishable as npm packages requires either generic-ifying (`handleApiRequest<TSession>(...)`) or treating `BaseSessionLayout` from `@luckystack/login` as the canonical shape. Deferred — this is a bigger refactor.
+- **Fast-check property-based fuzz** still not wired. `sampleSchemaInput` returns one deterministic value per schema; true property testing needs a randomizing generator.
+- **Zod emitter scope** is minimal. Intersections, complex generics, mapped types fall back to `z.any()`. Good enough for current endpoints; revisit when the first API hits the fallback in practice.
+- **`@luckystack/monitoring`** and **`@luckystack/web-vitals`** — explicitly parked per user's instruction; keep in §15 backlog for when product direction is clear.
+
+---
+
+## 38) Next Session Plan
+
+1. **`SessionLayout` generic-ification** — the only remaining `packages/** → project` value import. Two options: (a) make `handleApiRequest` / `handleHttpApiRequest` / `handleSyncRequest` generic over `TSession extends BaseSessionLayout`, project-level wrappers pass their concrete type. (b) Treat `BaseSessionLayout` from `@luckystack/login` as the framework-visible type; project augmentation extends it via `declare module`. Option (b) is lower-risk.
+2. **fast-check integration** — add `fast-check` as a devDep; write a Zod → Arbitrary adapter for the types the emitter produces. Extend `runFuzzTests` with a property-based pass: generate N valid inputs per endpoint, assert no 5xx and response envelope.
+3. **Zod emitter coverage** — handle intersections (merge object shapes), basic `Pick`/`Omit` by resolving the referenced interface.
+4. **NPM publish dry-run** — with A/B/C closed and `SessionLayout` resolved, try `npm pack` in each framework package. Report remaining blockers (bundled paths, peer deps, etc.).
+5. **Web vitals / Monitoring packages** (§15 backlog) — deferred per current product direction.
+6. **`server/sockets/socket.ts`** — stays in server/ as project glue (already decided).

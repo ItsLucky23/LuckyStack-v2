@@ -1,8 +1,9 @@
-import { allowMultipleSessions, sessionExpiryDays, sessionBasedToken, SessionLayout } from "../../../config";
-import { redis, captureException, socketEventNames, dispatchHook } from '@luckystack/core';
+import type { SessionLayout } from "../../../config";
+import { redis, captureException, socketEventNames, dispatchHook, getProjectConfig } from '@luckystack/core';
 
 const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
-const SESSION_TTL = 60 * 60 * 24 * sessionExpiryDays;
+//? Resolved at call time so project registration order doesn't matter.
+const getSessionTtl = (): number => 60 * 60 * 24 * getProjectConfig().session.expiryDays;
 
 const isSessionLayout = (value: unknown): value is SessionLayout => {
   return value !== null && typeof value === 'object' && 'id' in value;
@@ -24,7 +25,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
   try {
     const sessionKey = `${PROJECT_NAME}-session:${token}`;
     await redis.set(sessionKey, JSON.stringify(data));
-    await redis.expire(sessionKey, SESSION_TTL);
+    await redis.expire(sessionKey, getSessionTtl());
 
     const { getIoInstance } = await import('@luckystack/core');
     const ioInstance = getIoInstance();
@@ -37,11 +38,11 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     if (userId) {
       const activeUsersKey = `${PROJECT_NAME}-activeUsers:${userId}`;
       await redis.sadd(activeUsersKey, token);
-      await redis.expire(activeUsersKey, SESSION_TTL);
+      await redis.expire(activeUsersKey, getSessionTtl());
     }
 
     // Handle single-session enforcement on new login
-    if (newUser && !allowMultipleSessions) {
+    if (newUser && !getProjectConfig().session.allowMultiple) {
       if (!userId) return;
 
       const activeUsersKey = `${PROJECT_NAME}-activeUsers:${userId}`;
@@ -78,7 +79,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     }
 
     if (newUser) {
-      await dispatchHook('postSessionCreate', { token, user: data, persistent: !sessionBasedToken });
+      await dispatchHook('postSessionCreate', { token, user: data, persistent: !getProjectConfig().session.basedToken });
     }
   } catch (error) {
     console.log('Error saving session:', error, 'red');
@@ -101,7 +102,7 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
     if (!session) return null;
 
     // Sliding expiration: each successful authenticated access extends session lifetime.
-    await redis.expire(sessionKey, SESSION_TTL);
+    await redis.expire(sessionKey, getSessionTtl());
 
     const parsed = parseSessionLayout(session);
     if (!parsed) return null;
