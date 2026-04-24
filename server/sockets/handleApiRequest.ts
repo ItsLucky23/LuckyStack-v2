@@ -17,6 +17,7 @@ import {
   buildApiResponseEventName,
   buildApiStreamEventName,
 } from '../../shared/socketEvents';
+import { dispatchHook } from '../hooks/registry';
 
 interface handleApiRequestType {
   msg: apiMessage,
@@ -273,7 +274,23 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     }
   }
 
+  const preExecuteResult = await dispatchHook('preApiExecute', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+  });
+  if (preExecuteResult.stopped) {
+    return emitApiError({
+      response: {
+        status: 'error',
+        errorCode: preExecuteResult.signal.errorCode,
+      },
+      fallbackHttpStatus: preExecuteResult.signal.httpStatus ?? 403,
+    });
+  }
+
   //? Execute the API handler
+  const executeStart = Date.now();
   const span = startSpan(name, 'api.request') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
     async () => await main({ data: normalizedData, user, functions: functionsObject, stream: emitApiStream }),
@@ -286,6 +303,15 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     },
   );
   span?.end?.();
+
+  await dispatchHook('postApiExecute', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+    result,
+    error: error ?? null,
+    durationMs: Date.now() - executeStart,
+  });
 
   if (error) {
     if (shouldLogDev) {

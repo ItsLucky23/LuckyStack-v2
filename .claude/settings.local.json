@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(pkill -f \"npm run build\")",
+      "Bash(pkill -f \"node.*vite\")",
+      "Bash(pkill -f \"tsx scripts\")",
+      "Bash(taskkill //F //PID 578 //T)",
+      "Bash(taskkill //F //PID 566 //T)",
+      "Bash(taskkill //F //PID 568 //T)",
+      "PowerShell(Stop-Process *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Read(//tmp/**)"
+    ]
+  }
+}

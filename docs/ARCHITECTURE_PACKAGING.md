@@ -2,7 +2,7 @@
 
 > Single source of truth for LuckyStack package extraction strategy.
 
-Last updated: 2026-04-17
+Last updated: 2026-04-21
 Status: Active implementation plan
 
 ---
@@ -163,39 +163,35 @@ Clarification:
 
 Hook model remains required for package extensibility.
 
+Status: Scaffold implemented (2026-04-23). `server/hooks/registry.ts` and `server/hooks/types.ts` are live. `preApiExecute`, `postApiExecute`, `preSyncFanout`, `postSyncFanout` dispatch calls are wired. Auth/session/presence hooks are typed in the payload map but dispatch calls are deferred to their respective package extraction phases.
+
 Stages:
 
 - `pre:*` hooks (validate/transform/short-circuit)
 - `post:*` hooks (augment side effects)
 
-Initial hook targets:
-
-- `preLogin` / `postLogin`
-- `preLogout` / `postLogout`
-- API lifecycle hooks
-- Sync lifecycle hooks
-
 Rules:
 
 - Deterministic order
 - Typed payloads
-- Isolated errors per hook
+- Isolated errors per hook — one failing handler never interrupts the main flow
 
-Hook planning requirement before implementation:
+Full inventory (typed in `server/hooks/types.ts`):
 
-1. Validate package boundaries with user/team first.
-2. Build an exhaustive pre/post hook inventory before coding hooks.
-3. Mark each hook as required/optional and define package ownership.
-
-Minimum first inventory list:
-
-- Auth: preLogin, postLogin, preRegister, postRegister, preLogout, postLogout
-- Session: preSessionCreate, postSessionCreate, preSessionRefresh, postSessionRefresh, preSessionDelete, postSessionDelete
-- API: preApiValidate, postApiValidate, preApiExecute, postApiExecute, preApiRespond, postApiRespond
-- Sync: preSyncValidate, postSyncValidate, preSyncAuthorize, postSyncAuthorize, preSyncFanout, postSyncFanout
+- Auth: postLogin, postRegister, postLogout
+- Session: postSessionCreate, postSessionDelete
+- API: preApiExecute, postApiExecute
+- Sync: preSyncFanout, postSyncFanout
 - Presence: prePresenceUpdate, postPresenceUpdate
-- Routing: preRouteResolve, postRouteResolve
-- Error: preErrorNormalize, postErrorNormalize
+
+Hooks not yet in the type map (add when packages need them):
+
+- preLogin, preRegister, preLogout
+- preSessionCreate, preSessionDelete, preSessionRefresh, postSessionRefresh
+- preApiValidate, postApiValidate, preApiRespond, postApiRespond
+- preSyncValidate, postSyncValidate, preSyncAuthorize, postSyncAuthorize
+- preRouteResolve, postRouteResolve
+- preErrorNormalize, postErrorNormalize
 
 ---
 
@@ -249,23 +245,25 @@ Build outputs required:
 1. Frontend aggregate build
 - Scans full `src` and emits one frontend asset output with all pages.
 
-2. Service-scoped backend builds
-- Build only API/sync handlers for selected roots.
-- Example outputs:
-	- `server-vehicles` serves only `src/vehicles/**` APIs/syncs
-	- `server-housing-candidates` serves `src/housing/**` and `src/candidates/**`
+2. Preset-scoped backend builds
+- Build inputs are preset names from a dedicated build-routing config file.
+- Each preset maps to one or more service keys.
+- Backend generation emits one route map file per preset: `generatedApis.PRESETNAME.ts`.
+- Running build with no preset arguments builds all presets.
+- Running build with preset arguments builds only those presets.
 
-3. System backend build
-- Build a dedicated `system` service for root/global capabilities.
-- Example routes:
-	- `system/session`
-	- `system/logout`
-	- `system/health`
+3. Service ownership model
+- Root `src/` is the `system` service.
+- Service folders are first-level folders inside `src/` (for example `src/vehicles`, `src/candidates`).
+- Single-service backend builds are represented as a preset containing exactly one service.
+- Services not assigned to any preset are excluded from scoped builds and logged as warnings.
 
 Routing/runtime behavior target:
 
-- In development, engineers should be able to run frontend plus one local service.
+- In development, engineers should be able to run frontend plus one local service, multiple local services, or a full local server.
 - Requests for routes not owned by local service should be forwarded to configured remote environments (for example staging service endpoints).
+- Health polling discovers newly started local service servers and routes new traffic to local targets when healthy.
+- When a service target changes in development, socket reconnection/switching is acceptable; transient in-memory state loss or in-flight call loss is acceptable in dev mode.
 - This enables focused local debugging in large codebases without running every service locally.
 
 Important runtime note:
@@ -278,8 +276,10 @@ Service routing contract:
 - API/sync route names must start with service key as first segment:
 	- `vehicles/getAll`
 	- `system/session`
-- The load balancer reads the first segment and forwards to configured backend URL for that service.
+- Transport URLs keep the service key in the segment after `api/` or `sync/` (for example `/api/candidates/getAll/v1` -> `candidates`).
+- The load balancer reads that service segment and forwards to configured backend URL for that service.
 - If requested service key has no backend assignment, load balancer returns a clear error (`serviceNotAssigned`).
+- Service ownership is one-to-one: a service may belong to only one preset.
 
 Load balancer config model:
 
@@ -334,6 +334,8 @@ Validation rules for template injector and type generation:
 1. API/sync file names must not contain `/` in route name segments.
 2. Invalid route naming must fail generation with explicit error.
 3. Duplicate emitted route keys must fail generation.
+4. `system` is reserved for root `src/` and `src/system` is invalid.
+5. Preset configuration must fail when a service is assigned to multiple presets.
 
 Example collision scenario to block:
 
@@ -434,14 +436,15 @@ Required validation:
 
 ### 9.5 Service-scoped backend build outputs
 
-Build system must support service-level backend targets.
+Build system must support preset-level backend targets.
 
 Required outputs:
 
 1. Frontend aggregate output (all pages).
-2. System backend output.
-3. Per-service backend output (for example vehicles only).
-4. Grouped backend output (for example system+vehicles, housing+candidates).
+2. One backend map artifact per preset (`generatedApis.PRESETNAME.ts`).
+3. Single-service builds via single-service presets (for example `vehicles-only`).
+4. Grouped builds via multi-service presets (for example `platform-core`, `marketplace-domain`).
+5. Presetless build invocation should compile all presets.
 
 ### 9.6 Load balancer backend output
 
@@ -453,6 +456,10 @@ Required behavior:
 2. Forward to configured service backend URL.
 3. Return explicit `serviceNotAssigned` error when mapping is missing.
 4. Support local + remote target mix for development.
+5. In development fallback mode, poll local service targets and switch new traffic to local when healthy.
+6. Socket/API routing decisions should use the same service-target resolver.
+7. Split/fallback mode requires shared Redis; startup hard-fails when Redis is unavailable.
+8. Development mode may reconnect socket targets when local service health changes; this does not need zero-loss guarantees.
 
 ### 9.7 Presence package decoupling
 
@@ -477,6 +484,10 @@ Required behavior:
 	3. Core fallbacks
 3. Type generation includes all resolved function sources.
 4. Project override must immediately affect runtime behavior.
+5. Phase 1 (current target): keep full resolved function registry in scoped builds for runtime safety.
+6. Phase 2 (future optimization): optional import-graph-based function pruning after explicit design + validation.
+
+Status: Phase 1 implemented (2026-04-23). `functions/` folder established at project root. `scripts/generateServerRequests.ts` merges `functions/` (project) over `server/functions/` (package defaults) by module name — a file in `functions/session.ts` fully replaces `server/functions/session.ts` in the generated map. Phase 2 pruning remains deferred.
 
 ### 9.9 Sentry package activation contract
 
@@ -508,19 +519,78 @@ All helpers must use same package-level initialization and respect enabled/disab
 
 ## 10) Configuration Examples
 
-### 10.1 Service routing config
+Canonical shape is TypeScript, split into two files at project root:
 
-```yaml
-services:
-	system: http://localhost:4100
-	vehicles: http://localhost:4101
-	housing: http://staging-housing.internal
-	candidates: http://staging-candidates.internal
+- `services.config.ts` — services + preset grouping. Stable build-time source of truth. Changes when services are added/renamed/regrouped.
+- `deploy.config.ts` — resources (named redis/mongo handles) + environments (resource refs, per-service URL bindings, optional typed `fallback`). Changes when infra changes.
 
-routing:
-	onMissingService: error
-	missingServiceErrorCode: serviceNotAssigned
+Validator (in `server/config/presetLoader.ts`) enforces:
+
+1. `system` service must have `source: 'root'`; `src/system` is reserved.
+2. A service belongs to exactly one preset.
+3. Every environment `redis` / `mongo` must reference a known resource of the correct type.
+4. If `env.fallback` is set, the source and target environments must reference the SAME resource key for both redis and mongo. This makes "two different Redis URLs that both respond" unrepresentable.
+5. No fallback cycles.
+
+### 10.1 services.config.ts (sketch)
+
+```ts
+export default {
+	services: {
+		system:   { source: 'root' },
+		vehicles: { source: 'vehicles' },
+		billing:  { source: 'billing' },
+	},
+	presets: {
+		'core-preset':    { services: ['system'] },
+		'fleet-preset':   { services: ['vehicles'] },
+		'finance-preset': { services: ['billing'] },
+	},
+};
 ```
+
+### 10.2 deploy.config.ts (sketch)
+
+```ts
+export default defineDeploy({
+	resources: {
+		redisShared: { type: 'redis', urlEnvKey: 'REDIS_URL', synchronizedEnvKeys: ['COOKIE_SECRET'] },
+		mongoShared: { type: 'mongo', urlEnvKey: 'DATABASE_URL' },
+	},
+	environments: {
+		development: {
+			redis: 'redisShared',
+			mongo: 'mongoShared',
+			fallback: 'staging',                  // typed: keyof environments
+			bindings: { system: 'http://localhost:4100', vehicles: 'http://localhost:4101' },
+		},
+		staging: {
+			redis: 'redisShared',
+			mongo: 'mongoShared',
+			bindings: { system: 'https://staging-api.../system', vehicles: 'https://staging-api.../vehicles' },
+		},
+	},
+	routing: { onMissingService: 'proxy-fallback', missingServiceErrorCode: 'serviceNotAssigned' },
+	development: { enableFallbackRouting: true, healthPollMs: 5000, switchNewTrafficToLocalWhenHealthy: true },
+});
+```
+
+### 10.1a Runtime bundle selection
+
+Which preset's generated route map loads at runtime is controlled by the `LUCKYSTACK_BUNDLE` env var (previously `LUCKY_PRESET`):
+
+- Unset: loads `server/prod/generatedApis.default.ts` (aggregate build).
+- Set to a preset key: loads `server/prod/generatedApis.{preset}.ts`.
+- The file is emitted by `scripts/generateServerRequests.ts` for every preset defined in `services.config.ts`.
+
+### 10.1b Boot-time shared-resource handshake (recommended)
+
+In addition to the static config check, on startup each bundle should:
+
+1. Generate a boot UUID and write it to Redis at a well-known key (for example `luckystack:boot:{env}`).
+2. If the current environment declares a `fallback`, hit the fallback's `/health` endpoint and assert it reports the same UUID.
+
+This catches divergent `redis://...` URLs that both happen to respond. Implementation is out of scope for this doc; it belongs with the load balancer backend (§9.6).
 
 ### 10.2 Type generation config
 
@@ -529,6 +599,8 @@ typegen:
 	strictTypegen: true
 	failOnInvalidRouteName: true
 	failOnDuplicateRouteKey: true
+	failOnReservedServiceFolder: true
+	failOnServicePresetCollision: true
 ```
 
 ### 10.3 Sentry config
@@ -584,6 +656,17 @@ routing:
 	fallbackToBuiltInLoadBalancer: true
 ```
 
+### 10.5 CI affected-build strategy
+
+```yaml
+ci:
+	affectedMode: true
+	buildOnlyChangedPresets: true
+	lintOnlyChangedPresets: true
+	buildAllOnSharedOrCoreChanges: true
+	lintAllOnSharedOrCoreChanges: true
+```
+
 ---
 
 ## 11) Documentation Updates Required Across Repository
@@ -607,6 +690,8 @@ If strategy changes, update this file first and treat it as the canonical refere
 ---
 
 ## 13) Immediate Next Step (Start Now)
+
+Status: Completed (2026-04-20). Kept as historical record of the first routing-contract milestone.
 
 Ship one non-breaking routing-contract PR before package extraction.
 
@@ -651,7 +736,7 @@ Status update (2026-04-17):
 
 ---
 
-## 14) Next Session Plan (2026-04-18)
+## 14) Next Session Plan (2026-04-21)
 
 Primary goal:
 
@@ -659,24 +744,161 @@ Primary goal:
 
 Step-by-step plan:
 
-1. Finalize routing-contract hardening:
-- Add duplicate normalized route-key detection in dev/build generation and fail with explicit error context.
-- Ensure duplicate checks run in both type-map generation and server request map generation.
+1. Finalize routing-contract hardening (Completed 2026-04-20):
+- Duplicate normalized route-key detection now fails generation with explicit context.
+- Duplicate checks now run in both type-map generation and server request map generation.
 
-2. Complete documentation sync for new contract:
-- Update README examples to use service-first helper names (`system/*`, `service/*`).
-- Update any remaining developer guide snippets that imply implicit root helper names.
+2. Complete documentation sync for new contract (Completed 2026-04-20):
+- README examples now use service-first helper names with explicit versions.
+- Developer guide snippets no longer imply implicit root helper names.
 
-3. Start service-scoped backend build design (Section 9.5):
-- Define build inputs for selected service roots (for example `system`, `vehicles`, `housing`).
-- Define output naming contract for scoped server artifacts.
-- Define route-filtering behavior based on first-segment service keys.
+3. Start service-scoped backend build design (Section 9.5) (Completed 2026-04-21):
+- Build inputs are preset names from a dedicated config file.
+- Backend map output is one file per preset (`generatedApis.PRESETNAME.ts`).
+- Root `src/` is `system`, `src/system` is invalid, and service ownership is one-to-one across presets.
+- Development fallback routing uses polling and can switch new traffic to a newly healthy local service target.
+- Split/fallback mode requires shared Redis and hard-fails when Redis is unavailable.
+- Function handling remains Phase 1 (safe full registry); Phase 2 pruning is documented as future work.
 
-4. Implement first thin slice for service-scoped builds:
-- Extend generation script(s) with a services filter argument.
-- Generate a scoped map artifact for one service and validate runtime loading.
+4. Implement first thin slice for preset-scoped builds:
+- Introduce dedicated preset config loader + validation.
+- Extend generation script(s) with preset selection arguments.
+- Generate preset-scoped map artifact(s) and validate runtime loading.
+- Add validation that rejects `src/system` and service-to-multiple-presets assignments.
 
 5. End-of-session verification before moving to next milestone:
 - `npm run lint`
 - `npm run build`
-- Confirm `system/session` success and invalid helper route-name rejection.
+- Confirm `system/session` success, invalid helper route-name rejection, and hard errors for invalid preset/service config.
+
+---
+
+## 15) Deferred / Backlog
+
+Parked items that are intentionally out of scope for the current packaging push. Revisit when the core package split has shipped.
+
+- **`@luckystack/monitoring`** — full request-forensics package sketched in `docs/MONITORING.md` (dual-stream: Sentry for "why", monitoring package for "what"; OpenSearch-backed audit trail; P95/P99 metrics; RUM). Parked pending a decision on whether we self-host a search engine for this or consume an external one. The package would hang off `postApiExecute` / `postSyncFanout` hooks (now live in §4), so no core design changes are blocked on it.
+- **Phase 2 function pruning** — import-graph-based pruning of the per-preset function registry (§9.8 point 6). Current Phase 1 bundles all functions in every preset for safety; optimize only after measurement.
+- **Frontend typegen scope in split deployments** — define whether `apiTypes.generated.ts` should include all presets' routes or be preset-scoped when projects split frontend per domain. Currently aggregate.
+- **`@luckystack/web-vitals`** — client-side RUM package (from `docs/MONITORING.md` §4C). Lower priority than backend observability.
+
+---
+
+## 16) Session Log (2026-04-23)
+
+Completed:
+
+1. Hook registry scaffold (§4) — `server/hooks/types.ts` + `server/hooks/registry.ts` live. `preApiExecute`, `postApiExecute`, `preSyncFanout`, `postSyncFanout` wired in socket handlers.
+2. Functions/ merge contract Phase 1 (§9.8) — `functions/` root folder established, `generateServerRequests.ts` merges project overrides over server defaults by module name.
+3. `game.ts` migrated from `server/functions/` to `functions/` — first proof of the project-functions override contract working end-to-end.
+4. `@luckystack/core` package scaffold created at `packages/core/` — all six `shared/` utilities (sleep, tryCatch, serviceRoute, socketEvents, responseNormalizer, sentrySetup) moved to `packages/core/src/` as the canonical source. `shared/` files are now thin re-export shims for backwards compatibility. `@luckystack/core` path alias added to both tsconfigs; Vite picks it up automatically via `tsconfigPaths`.
+
+---
+
+## 17) Session Log (2026-04-23, continued)
+
+Completed:
+
+1. `@luckystack/login` package scaffold created at `packages/login/`.
+2. `BaseSessionLayout`, `SessionLocation`, `AuthProps` defined in `packages/login/src/sessionLayout.ts` as the framework-owned type contracts.
+3. `@luckystack/login` path alias added to both tsconfigs; `packages/login/src` added to include arrays.
+4. `config.ts` updated: `SessionLocation` and `AuthProps` removed from the file body and re-exported from `@luckystack/login`. `SessionLayout` kept as the project-specific type (extends Prisma `User`). Structural compatibility check added as a compile-time assertion.
+5. `server/hooks/types.ts` updated: now imports `BaseSessionLayout` from `@luckystack/login` instead of `SessionLayout` from `config`.
+
+---
+
+## 18) Session Log (2026-04-23, continued)
+
+Completed:
+
+1. `server/functions/session.ts` → `packages/login/src/session.ts`. Hook dispatches added: `postSessionCreate` (on `newUser === true` in `saveSession`) and `postSessionDelete` (in `deleteSession`). Dynamic import of `logout` updated to `./logout` (same package dir). Dynamic import of socket updated to `../../../server/sockets/socket`.
+2. `server/auth/login.ts` → `packages/login/src/login.ts`. Hook dispatches added: `postRegister` (credentials register + OAuth new user) and `postLogin` (credentials login + OAuth callback). `isNewOAuthUser` flag added to track new vs returning OAuth users.
+3. `server/auth/loginConfig.ts` → `packages/login/src/loginConfig.ts`. `tryCatch` now from `@luckystack/core`.
+4. `server/sockets/utils/logout.ts` → `packages/login/src/logout.ts`. Hook dispatch added: `postLogout`.
+5. All four original server files replaced with one-liner re-export shims — no import-site changes needed across the server.
+6. `packages/login/src/index.ts` updated to barrel-export all runtime functions.
+
+All auth lifecycle hooks (`postLogin`, `postRegister`, `postLogout`, `postSessionCreate`, `postSessionDelete`) are now wired.
+
+---
+
+## 19) Session Log (2026-04-24)
+
+Completed:
+
+1. Fixed `tsx` not resolving `@luckystack/core` at runtime — added `--tsconfig tsconfig.server.json` to both `server` and `server:direct` scripts in `package.json` so tsx loads the correct path aliases.
+2. Fixed `tryCatch` default-vs-named import mismatch in `packages/login/src/loginConfig.ts`, `login.ts`, and `logout.ts` — changed `import tryCatch from '@luckystack/core'` to `import { tryCatch } from '@luckystack/core'`; combined two separate imports in `logout.ts` into one.
+3. Deleted stale `server/functions/game.ts` (moved to `functions/game.ts` in previous session; `repl.ts` imports from the new location).
+4. Fixed `config.ts` compile-time structural check — replaced unused runtime variable with `export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true : never` to satisfy `noUnusedLocals`.
+5. Fixed `server/dev/typeMap/emitterArtifacts.ts` — removed hardcoded `import { SessionLayout } from "../../config"` from the generated file header; it was unconditionally emitted but unused in the current type map output.
+6. Fixed `deploy.config.ts` generic inference — `defineDeploy<T>` was narrowing `T` to `'staging'` via the `fallback` literal; added explicit type parameter `defineDeploy<'development' | 'staging' | 'production'>` to anchor inference on environment keys.
+7. Deleted stale `server/prod/generatedApis.default.ts` — referenced deleted `server/functions/game`; the generator only emits preset-specific files now. `runtimeMaps.ts` falls back gracefully when the file is missing. Production deployments must set `LUCKYSTACK_BUNDLE` to a preset key.
+8. Fixed `scripts/bundleServer.mjs` (esbuild) — added `alias` entries for `@luckystack/core` and `@luckystack/login` pointing to their `packages/*/src/index.ts` so the production server bundle resolves them correctly.
+9. `npm run lint` and `npm run build` both pass cleanly.
+
+---
+
+## 20) Session Log (2026-04-24, continued)
+
+Completed:
+
+1. `server/bootstrap/env.ts` → `packages/core/src/env.ts`. Canonical source for env bootstrap (dotenv + zod validation). `env`, `bootstrapEnv`, `isProduction`, `RuntimeEnv` are now core exports.
+2. `server/functions/db.ts` → `packages/core/src/db.ts`. Canonical Prisma client singleton. Side-effect `import './env'` replaces the old `import '../bootstrap/env'`.
+3. `server/functions/redis.ts` → `packages/core/src/redis.ts`. Canonical ioredis singleton. `import { env } from './env'` replaces the old relative path.
+4. `packages/core/src/index.ts` updated — barrel now exports `env`, `bootstrapEnv`, `isProduction`, `RuntimeEnv`, `prisma`, `redis`.
+5. All three originals replaced with one-liner re-export shims pointing to `@luckystack/core`.
+6. `packages/login/src/{login,session,logout}.ts` updated — relative imports of `server/functions/db` and `server/functions/redis` replaced with `@luckystack/core` named imports (`prisma`, `redis`, `redis as redisClient`).
+7. `npm run build` passes clean.
+
+---
+
+## 21) Session Log (2026-04-24, third pass — core utilities move)
+
+Completed:
+
+1. **Group 1 (no internal deps)** — moved to `packages/core/src/`:
+   - `server/utils/console.log.ts` → `consoleLog.ts` (renamed to drop the dot).
+   - `server/utils/cookies.ts` → `cookies.ts`.
+   - `server/utils/httpApiUtils.ts` → `httpApiUtils.ts`.
+   - `server/utils/paths.ts` → `paths.ts`.
+   - `server/config/runtimeConfig.ts` → `runtimeConfig.ts`.
+2. **Group 2 (depends on Group 1)** — moved to `packages/core/src/`:
+   - `server/utils/serveAvatars.ts` → `serveAvatars.ts`.
+   - `server/utils/getParams.ts` → `getParams.ts` (default export; barrel re-exports as `{ default as getParams }`; shim uses `export { default } from '../../packages/core/src/getParams'`).
+   - `server/utils/extractToken.ts` → `extractToken.ts` (config import updated to `../../../config`).
+   - `server/utils/extractTokenFromRequest.ts` → `extractTokenFromRequest.ts`.
+3. **Group 3 (depends on `@luckystack/login`)** — moved to `packages/core/src/`:
+   - `server/utils/validateRequest.ts` → `validateRequest.ts`. Function signature changed from `user: SessionLayout` to `user: BaseSessionLayout` (from `@luckystack/login`). `AuthProps` now also comes from `@luckystack/login`. The function is now framework-generic — it only accesses `user[condition.key]` where `key: keyof BaseSessionLayout`.
+   - `server/utils/rateLimiter.ts` → `rateLimiter.ts` (config import updated to `../../../config`, `tryCatch` and `redis` imports switched to core-internal `./` paths).
+4. `packages/core/src/index.ts` barrel updated with all 11 new exports.
+5. All 11 originals replaced with one-liner re-export shims.
+6. **Shim pattern note**: all shims point at the direct source file (`../../packages/core/src/...`), matching `shared/tryCatch.ts`. Using `@luckystack/core` in shims pulls the full barrel (including `redis`/`prisma`), which keeps ioredis' event loop alive and causes `tsx`-based generator scripts to hang after "Connected to Redis". Direct file paths avoid loading sibling modules that aren't needed.
+7. Fixed `package.json` — added `--tsconfig tsconfig.server.json` to both `generateArtifacts` sub-invocations and `buildClient` so `tsx` resolves `@luckystack/*` path aliases when transitively imported.
+8. `npm run lint` and `npm run build` both pass cleanly.
+
+Files intentionally NOT moved:
+
+- `server/hooks/registry.ts` + `server/hooks/types.ts` — `types.ts` imports `@luckystack/login`; moving registry to core would create a core → login dependency (wrong direction). Needs module augmentation pattern first.
+- `server/utils/responseNormalizer.ts` — loads locale JSON files from `src/_locales/`; project-specific i18n.
+- `server/utils/runtimeTypeResolver.ts` + `runtimeTypeValidation.ts` — belong in `@luckystack/devkit`.
+- `server/utils/repl.ts` — project-specific REPL, imports `functions/game`.
+- `server/functions/sentry.ts` — belongs in `@luckystack/sentry`, not core.
+- All `src/_sockets/`, `src/_functions/`, `src/_components/` — React client-side concerns.
+
+---
+
+## 22) Next Session Plan
+
+Primary goal: Start `@luckystack/sync` extraction.
+
+Scope summary:
+- **Server-side**: `server/sockets/handleSyncRequest.ts` and `server/sockets/handleHttpSyncRequest.ts` are the canonical sync handlers. Same shim pattern as login.
+- **Client-side**: `src/_sockets/syncRequest.ts` and `src/_sockets/offlineQueue.ts` are sync-specific. `src/_sockets/socketInitializer.ts` is shared between sync and API — must NOT move entirely to sync; needs splitting or stays in core.
+- **Dev tooling**: sync templates + type extractors live in `server/dev/` — these belong in `@luckystack/devkit` eventually, not in sync.
+
+Recommended first slice (server-side only):
+1. Create `packages/sync/` scaffold (`package.json`, `src/index.ts`).
+2. Move `handleSyncRequest.ts` and `handleHttpSyncRequest.ts` to `packages/sync/src/`.
+3. Replace originals with re-export shims.
+4. Add `@luckystack/sync` path alias to both tsconfigs and `bundleServer.mjs`.
+5. Run `npm run build` to verify.

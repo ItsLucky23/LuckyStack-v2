@@ -31,12 +31,20 @@
       ],
       "shared/*": [
         "./shared/*"
+      ],
+      "@luckystack/core": [
+        "./packages/core/src/index.ts"
+      ],
+      "@luckystack/login": [
+        "./packages/login/src/index.ts"
       ]
     }
   },
   "include": [
     "src",
-    "shared"
+    "shared",
+    "packages/core/src",
+    "packages/login/src"
   ],
   "exclude": [
     "src/**/_api/**",

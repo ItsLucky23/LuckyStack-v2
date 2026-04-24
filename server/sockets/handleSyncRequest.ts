@@ -18,6 +18,7 @@ import {
   buildSyncResponseEventName,
   socketEventNames,
 } from '../../shared/socketEvents';
+import { dispatchHook } from '../hooks/registry';
 
 type SyncStreamPayload = Record<string, unknown>;
 
@@ -378,8 +379,28 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }));
   }
 
+  const preFanoutResult = await dispatchHook('preSyncFanout', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+    receiver,
+    serverOutput,
+  });
+  if (preFanoutResult.stopped) {
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: {
+        status: 'error',
+        errorCode: preFanoutResult.signal.errorCode,
+        httpStatus: preFanoutResult.signal.httpStatus,
+      },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    }));
+  }
+
   //? here we loop over all the connected clients
   //? we keep track of an counter and await the loop every 100 iterations to avoid the server running out of memory and crashing
+  let recipientCount = 0;
   let tempCount = 1;
   for (const socketEntry of sockets) {
     tempCount++;
@@ -397,6 +418,8 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     if (ignoreSelf && typeof ignoreSelf == 'boolean' && token == tempToken) {
         continue;
       }
+
+    recipientCount++;
 
     if (syncObject[`${resolvedName}_client`]) {
       const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
@@ -495,6 +518,15 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       tempSocket.emit(socketEventNames.sync, result);
     }
   }
+
+  await dispatchHook('postSyncFanout', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+    receiver,
+    serverOutput,
+    recipientCount,
+  });
 
   return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), {
     status: 'success',

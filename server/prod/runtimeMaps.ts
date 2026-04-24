@@ -44,12 +44,15 @@ const loadProdRuntimeMaps = async (): Promise<LoadedRuntimeMaps> => {
   }
 
   prodRuntimeMapsPromise = (async () => {
-    const generatedModule: unknown = await (import('./' + 'generatedApis') as Promise<unknown>).catch(() => null);
+    const bundle = process.env.LUCKYSTACK_BUNDLE;
+    const targetMap = bundle ? `./generatedApis.${bundle}` : `./generatedApis.default`;
+
+    const generatedModule: unknown = await (import(targetMap) as Promise<unknown>).catch(() => null);
 
     if (!generatedModule) {
       if (!warnedAboutMissingGeneratedMaps) {
         warnedAboutMissingGeneratedMaps = true;
-        console.log('[runtimeMaps] server/prod/generatedApis.ts not found, falling back to empty production route maps', 'yellow');
+        console.log(`[runtimeMaps] target ${targetMap} not found, falling back to empty production route maps`, 'yellow');
       }
 
       return emptyRuntimeMaps;

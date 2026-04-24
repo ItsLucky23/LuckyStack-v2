@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/restrict-template-expressions, @typescript-eslint/no-unsafe-return, @typescript-eslint/prefer-nullish-coalescing */
 
-import { redis } from "./redis";
+import { redis } from "../server/functions/redis";
 
 export interface GameDataProps {
-  players: { 
-    id: string, 
-    name: string, 
+  players: {
+    id: string,
+    name: string,
     avatar: string,
     role: 'farmer' | 'queen' | 'manipulator' | null,
     selected?: boolean
@@ -26,18 +26,16 @@ export interface GameDataProps {
   gameStartTime: number | null,
   totalDrinkTime: number,
   won: 'farmer' | 'player' | 'none' | false,
-  revealed: { 
-    id: string, 
+  revealed: {
+    id: string,
     role: 'queen' | 'manipulator'
   }[],
 }
 
 
 const saveGameData = async (gameCode: string, data: GameDataProps): Promise<boolean> => {
-  // console.log(gameCode)
-  // console.log(data)
   await redis.set(`${process.env.PROJECT_NAME}-games:${gameCode}`, JSON.stringify(data));
-  await redis.expire(`${process.env.PROJECT_NAME}-games:${gameCode}`, 60 * 60 * 24 * 7); // same TTL as session or adjust
+  await redis.expire(`${process.env.PROJECT_NAME}-games:${gameCode}`, 60 * 60 * 24 * 7);
   return true;
 };
 
@@ -49,7 +47,7 @@ const getGameData = async (gameCode: string): Promise<GameDataProps | null> => {
 const getAllGameDatas = async (): Promise<GameDataProps[]> => {
   const allGameDatas = await redis.keys("*");
   const GameDatas = await Promise.all(allGameDatas.map((gameData) => redis.get(gameData)));
-  return GameDatas.map((gameData) => JSON.parse(gameData || "{}")); 
+  return GameDatas.map((gameData) => JSON.parse(gameData || "{}"));
 }
 
 
@@ -63,4 +61,4 @@ const gameExists = async (gameCode: string): Promise<boolean> => {
   return exists === 1;
 };
 
-export { saveGameData, getGameData, getAllGameDatas, deleteGameData, gameExists  };
+export { saveGameData, getGameData, getAllGameDatas, deleteGameData, gameExists };

@@ -121,6 +121,11 @@ LuckyStack-v2/
 
 LuckyStack distinguishes between two types of server communication:
 
+Route naming contract:
+
+- Request helpers use service-first names (`service/name`) and explicit versions.
+- Invalid helper names are rejected with `routing.invalidServiceRouteName`.
+
 ### API Requests
 
 Server-only operations (database queries, external APIs):
@@ -128,11 +133,12 @@ Server-only operations (database queries, external APIs):
 ```typescript
 // Client
 const result = await apiRequest({
-  name: "getUserData",
+  name: "settings/getUserData",
+  version: "v1",
   data: { userId: "123" },
 });
 
-// Server: src/settings/_api/getUserData.ts
+// Server: src/settings/_api/getUserData_v1.ts
 export const auth = { login: true };
 export const main = async ({ data, user, functions }) => {
   return await functions.prisma.user.findUnique({ where: { id: data.userId } });
@@ -146,7 +152,8 @@ Real-time events between clients:
 ```typescript
 // Client: Send to all users in room
 await syncRequest({
-  name: "cursorMove",
+  name: "game/cursorMove",
+  version: "v1",
   data: { x: 100, y: 200 },
   receiver: "room-abc123",
   ignoreSelf: true,

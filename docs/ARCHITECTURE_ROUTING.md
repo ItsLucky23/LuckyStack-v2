@@ -83,7 +83,7 @@ src/{page}/_api/{name}_v1.ts  -->  accessible as api/{page}/{name}/v1
 **Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_api/` as API handlers.
 After initial load, the dev watcher performs incremental in-memory updates for changed `_api` files instead of rebuilding the entire API map on every save.
 
-**Production:** The `scripts/generateServerRequests.ts` build script statically generates a route map that's bundled into `server/prod/generatedApis.ts`.
+**Production:** The `scripts/generateServerRequests.ts` build script statically generates one route map per preset, emitted as `server/prod/generatedApis.{presetName}.ts`. At runtime the `LUCKYSTACK_BUNDLE` env var selects which file is loaded (unset falls back to `generatedApis.default.ts`). Preset definitions live in `services.config.ts`.
 
 ### Name Resolution
 

@@ -1,4 +1,5 @@
 import { LANGUAGE, THEME, User } from "@prisma/client";
+import type { BaseSessionLayout } from '@luckystack/login';
 
 interface AppEnvironmentConfig {
   backendUrl: string;
@@ -17,8 +18,8 @@ const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
     sessionBasedToken: true,
     allowMultipleSessions: true
   },
-  "http://localhost:5174": {
-    backendUrl: "http://localhost:81",
+  "http://localhost:5176": {
+    backendUrl: "http://localhost:83",
     dev: true,
     sessionBasedToken: true,
     allowMultipleSessions: true
@@ -199,12 +200,10 @@ const config = {
 // ============================================
 // TYPE DEFINITIONS
 // ============================================
- 
-export interface SessionLocation {
-  pathName: string;
-  searchParams: Record<string, string>;
-}
 
+export type { SessionLocation, AuthProps } from '@luckystack/login';
+
+// Project-specific session shape — extends the Prisma User model and satisfies BaseSessionLayout.
 interface SessionLayoutBase extends Omit<User, 'password'> {
   avatarFallback: string;
   token: string;
@@ -212,46 +211,11 @@ interface SessionLayoutBase extends Omit<User, 'password'> {
 }
 
 export interface SessionLayout extends SessionLayoutBase {
-  location?: SessionLocation;
+  location?: import('@luckystack/login').SessionLocation;
 }
- 
-/**
- * Authentication configuration for API and Sync handlers.
- *
- * @example
- * ```typescript
- * // Require login only
- * export const auth: AuthProps = { login: true };
- *
- * // Require admin user
- * export const auth: AuthProps = {
- *   login: true,
- *   additional: [{ key: 'admin', value: true }]
- * };
- * ```
- */
-export interface AuthProps {
-  /** If true, user must have a valid session with an ID */
-  login: boolean;
- 
-  /** Additional validation rules for session properties */
-  additional?: {
-    /** The session property to check (e.g., 'admin', 'email') */
-    key: keyof SessionLayout;
- 
-    /** Exact value the property must equal (strict comparison) */
-    value?: unknown;
- 
-    /** Type the property must be */
-    type?: 'string' | 'number' | 'boolean';
- 
-    /** If true, property must be null/undefined. If false, must NOT be null/undefined */
-    nullish?: boolean;
- 
-    /** If true, property must be falsy. If false, must be truthy */
-    mustBeFalsy?: boolean;
-  }[]
-}
+
+// Verify SessionLayout is structurally compatible with BaseSessionLayout at compile time.
+export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true : never;
  
 /** Supported OAuth providers */
 export const providers = ['credentials', 'google', 'github', 'facebook', 'discord'];

@@ -72,7 +72,7 @@ export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
 Types are auto-generated! Just save the file and use:
 
 ```typescript
-const result = await apiRequest({ name: "hello", version: "v1", data: { name: "World" } });
+const result = await apiRequest({ name: "mypage/hello", version: "v1", data: { name: "World" } });
 ```
 
 ---
@@ -151,7 +151,7 @@ function GameBoard() {
 
   // Fetch initial state
   useEffect(() => {
-    apiRequest({ name: "getGameState", version: "v1", data: { gameId } }).then((result) =>
+    apiRequest({ name: "game/getGameState", version: "v1", data: { gameId } }).then((result) =>
       setState(result),
     );
   }, [gameId]);
@@ -301,7 +301,7 @@ SSE event names:
 ```javascript
 // If socket is connected
 socket.emit("apiRequest", {
-  name: "api/mypage/hello",
+  name: "api/mypage/hello/v1",
   data: { name: "Test" },
   responseIndex: 999,
 });

@@ -1,6 +1,11 @@
 import { build } from 'esbuild';
 import { builtinModules } from 'node:module';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, '..');
 
 const packageJsonRaw = fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8');
 const packageJson = JSON.parse(packageJsonRaw);
@@ -24,6 +29,10 @@ const run = async () => {
     sourcemap: true,
     external: externalDeps,
     logLevel: 'info',
+    alias: {
+      '@luckystack/core': path.join(root, 'packages/core/src/index.ts'),
+      '@luckystack/login': path.join(root, 'packages/login/src/index.ts'),
+    },
   });
 };
 

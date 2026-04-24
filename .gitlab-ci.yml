@@ -57,13 +57,13 @@ prepare_artifacts:
     - npm run generateArtifacts
     - test -s src/_sockets/apiTypes.generated.ts
     - test -s src/docs/apiDocs.generated.json
-    - test -s server/prod/generatedApis.ts
+    - ls server/prod/generatedApis.*.ts >/dev/null
   artifacts:
     name: "YOURSERVER-generated-$CI_COMMIT_SHORT_SHA"
     paths:
       - src/_sockets/apiTypes.generated.ts
       - src/docs/apiDocs.generated.json
-      - server/prod/generatedApis.ts
+      - server/prod/generatedApis.*.ts
     expire_in: 1 week
   rules:
     - if: $DEPLOY_TEST == "true"
@@ -103,7 +103,7 @@ lint:
     - npm run generateArtifacts
     - test -s src/_sockets/apiTypes.generated.ts
     - test -s src/docs/apiDocs.generated.json
-    - test -s server/prod/generatedApis.ts
+    - ls server/prod/generatedApis.*.ts >/dev/null
     - npm run lint:all
   rules:
     - if: $DEPLOY_TEST == "true"

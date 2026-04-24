@@ -22,6 +22,12 @@
       ],
       "shared/*": [
         "./shared/*"
+      ],
+      "@luckystack/core": [
+        "./packages/core/src/index.ts"
+      ],
+      "@luckystack/login": [
+        "./packages/login/src/index.ts"
       ]
     },
     "lib": [
@@ -34,6 +40,9 @@
     "vite.config.ts",
     "config.ts",
     "server/**/*",
+    "shared/**/*",
+    "packages/core/src/**/*",
+    "packages/login/src/**/*",
     "src/**/_api/**/*",
     "src/**/_sync/**/*",
     "src/**/_server/**/*",

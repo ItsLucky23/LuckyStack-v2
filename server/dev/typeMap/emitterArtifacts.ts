@@ -162,7 +162,6 @@ export const buildTypeMapArtifacts = ({
  * Enables type-safe apiRequest and syncRequest calls.
  */
 
-import { SessionLayout } from "../../config";
 ${importStatements}
 export interface Functions {
 ${functionsInterface}
