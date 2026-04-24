@@ -619,9 +619,8 @@ const port: string = process.env.SERVER_PORT || '80';
   if (isDevMode) {
     const { initConsolelog } = await import('./utils/console.log');
     initConsolelog();
-    const { initializeAll } = await import('./dev/loader');
+    const { initializeAll, setupWatchers } = await import('@luckystack/devkit');
     await initializeAll();
-    const { setupWatchers } = await import('./dev/hotReload');
     setupWatchers();
     const { initRepl } = await import('./utils/repl');
     initRepl();

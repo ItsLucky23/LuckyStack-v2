@@ -1,5 +1,4 @@
 import { env } from '../bootstrap/env';
-import { devApis, devFunctions, devSyncs } from '../dev/loader';
 
 type RuntimeMapRecord = Record<string, unknown>;
 
@@ -17,6 +16,24 @@ const emptyRuntimeMaps: LoadedRuntimeMaps = {
 
 let prodRuntimeMapsPromise: Promise<LoadedRuntimeMaps> | null = null;
 let warnedAboutMissingGeneratedMaps = false;
+
+// Cache the devkit module so we only pay the dynamic-import resolution once.
+// Lazy: devkit is deliberately excluded from the production esbuild bundle
+// (see scripts/bundleServer.mjs `external` list). In production the dev
+// branch below is never entered, so this import never runs and the bundle
+// does not need devkit at all.
+interface DevkitRuntimeMaps {
+  devApis: RuntimeMapRecord;
+  devSyncs: RuntimeMapRecord;
+  devFunctions: RuntimeMapRecord;
+}
+
+let devkitModulePromise: Promise<DevkitRuntimeMaps> | null = null;
+
+const getDevkit = async (): Promise<DevkitRuntimeMaps> => {
+  devkitModulePromise ??= import('@luckystack/devkit') as Promise<DevkitRuntimeMaps>;
+  return await devkitModulePromise;
+};
 
 const isRuntimeMapRecord = (value: unknown): value is RuntimeMapRecord => {
   return Boolean(value) && typeof value === 'object';
@@ -69,6 +86,7 @@ export const getRuntimeApiMaps = async (): Promise<{
   functionsObject: RuntimeMapRecord;
 }> => {
   if (env.NODE_ENV !== 'production') {
+    const { devApis, devFunctions } = await getDevkit();
     return {
       apisObject: isRuntimeMapRecord(devApis) ? devApis : {},
       functionsObject: isRuntimeMapRecord(devFunctions) ? devFunctions : {},
@@ -84,6 +102,7 @@ export const getRuntimeSyncMaps = async (): Promise<{
   functionsObject: RuntimeMapRecord;
 }> => {
   if (env.NODE_ENV !== 'production') {
+    const { devSyncs, devFunctions } = await getDevkit();
     return {
       syncObject: isRuntimeMapRecord(devSyncs) ? devSyncs : {},
       functionsObject: isRuntimeMapRecord(devFunctions) ? devFunctions : {},
@@ -99,6 +118,7 @@ export const getRuntimeReplMaps = async (): Promise<{
   syncMap: RuntimeMapRecord;
 }> => {
   if (env.NODE_ENV !== 'production') {
+    const { devApis, devSyncs } = await getDevkit();
     return {
       apiMap: isRuntimeMapRecord(devApis) ? devApis : {},
       syncMap: isRuntimeMapRecord(devSyncs) ? devSyncs : {},

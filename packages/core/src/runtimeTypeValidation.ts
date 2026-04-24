@@ -307,15 +307,13 @@ export const validateInputByType = async ({
   }
 
   // Dev-only: the resolver uses TypeScript's compiler API for deep type
-  // expansion. Lives in @luckystack/devkit; loaded here lazily via a relative
-  // path (not the `@luckystack/devkit` alias) so esbuild can follow it without
-  // requiring a bundle-time alias — devkit is intentionally not in the prod
-  // alias map. Guarded by `NODE_ENV !== 'production'` above, so the prod
-  // bundle only needs the module reachable via file path at build time, not
-  // actually executed.
+  // expansion. `@luckystack/devkit` is marked external in the prod esbuild
+  // bundle (see scripts/bundleServer.mjs), so this branch compiles in prod but
+  // cannot run (import would fail). That is fine — the `NODE_ENV !== 'production'`
+  // guard above means the import is never reached in prod.
   const {
     resolveRuntimeTypeText,
-  } = await import('../../devkit/src/runtimeTypeResolver');
+  } = await import('@luckystack/devkit');
 
   const resolvedType = resolveRuntimeTypeText({ typeText, filePath });
   if (resolvedType.status === 'error') {

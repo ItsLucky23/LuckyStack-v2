@@ -1072,11 +1072,33 @@ Deferred for a future pass:
 
 ---
 
-## 28) Next Session Plan
+## 28) Session Log (2026-04-24, ninth pass — devkit fully excluded from prod bundle)
 
-1. **`server/sockets/socket.ts` + `server/sockets/utils/activityBroadcaster.ts` review** — these are the remaining non-project files in `server/sockets/`. `socket.ts` wires up the socket.io server and dispatches to api/sync handlers. Consider a `@luckystack/transport` package or fold into core. `activityBroadcaster.ts` is presence-adjacent and will likely belong in `@luckystack/presence`.
-2. **Production-bundle devkit exclusion** — rewrite `server/prod/runtimeMaps.ts` to lazy-import `../dev/loader` inside the dev branches of its three getters. This excludes devkit from the production esbuild bundle and satisfies §5.1 in both design and bundle layout.
-3. **`server/functions/tryCatch.ts` removal** — update the last caller (`src/settings/_api/updateUser_v1.ts`) to import from `@luckystack/core`, then delete the redundant wrapper.
-4. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory, project wires up its own translate fn. Design-first.
-5. **Client-side sync/API split** — `socketInitializer.ts` transport vs callback registries; `syncRequest.ts` + `offlineQueue.ts` → sync client slice; `apiRequest.ts` → api client slice. Design-first.
-6. **`@luckystack/presence`** — after client splits; augments `HookPayloads` for `prePresenceUpdate` / `postPresenceUpdate`.
+Completed:
+
+1. **`server/prod/runtimeMaps.ts` converted to lazy dev-loader import.** Removed the top-level `import { devApis, devFunctions, devSyncs } from '../dev/loader';`. Each of the three getters (`getRuntimeApiMaps`, `getRuntimeSyncMaps`, `getRuntimeReplMaps`) now does `await getDevkit()` inside the `env.NODE_ENV !== 'production'` branch, where `getDevkit` is a module-scoped cached `Promise<DevkitRuntimeMaps>` that dynamic-imports `@luckystack/devkit`. First call pays the import cost; subsequent calls reuse the promise. Explicit `DevkitRuntimeMaps` interface (mirrors `{ devApis, devSyncs, devFunctions }` as `Record<string, unknown>`) avoids the `any`-propagation lint errors that surfaced when reading them through `typeof import(...)`.
+2. **`server/server.ts` dev-only imports consolidated to `@luckystack/devkit`** — `await import('./dev/loader')` + `await import('./dev/hotReload')` merged into one `await import('@luckystack/devkit')` destructuring `{ initializeAll, setupWatchers }`. Inside the same `if (isDevMode) { ... }` branch as before.
+3. **`packages/core/src/runtimeTypeValidation.ts` dev-only resolver call migrated to the barrel** — was `await import('../../devkit/src/runtimeTypeResolver')` (relative, still bundled); now `await import('@luckystack/devkit')` (external in prod, fully excluded from the bundle). Same `NODE_ENV !== 'production'` guard.
+4. **`scripts/bundleServer.mjs` — `@luckystack/devkit` added to the `external` array.** Esbuild leaves `import('@luckystack/devkit')` as an unresolved bare specifier in the output; node resolves it at runtime ONLY when the dev branch executes, which never happens in production.
+5. **Result: `dist/server.js` went from 9.8 MB to 211.7 KB (97.8% smaller).** `dist/server.js.map`: 14.1 MB → 385.3 KB. `grep -c "@luckystack/devkit" dist/server.js` shows 3 references (the three `await import(...)` call sites retained as externals); `grep -c "generateTypeMapFile\|clearRuntimeTypeResolverCache\|upsertApiFromFile" dist/server.js` shows 0 — all devkit internals are gone.
+6. **`server/functions/tryCatch.ts` deleted.** Was a redundant wrapper around `shared/tryCatch` (which is already the core tryCatch, with the `context` arg forwarded). The one remaining caller (`src/settings/_api/updateUser_v1.ts`) was switched to `import { tryCatch } from '@luckystack/core'` (combined with its existing `UPLOADS_DIR` import from the same barrel).
+7. **Pre-existing lint errors surfaced on `updateUser_v1.ts`** — the generated `Functions` map types `prisma` and `saveSession` as `any`, which made `.user.update(...)` and `saveSession(...)` calls flag `no-unsafe-call` / `no-unsafe-member-access`. Previously masked by `.eslintcache`. Added two targeted `eslint-disable-next-line` comments with explanatory text. Fixing the generator's `any` emission is out of scope; tracked as a devkit-internals follow-up.
+8. **`@luckystack/devkit` added to `tsconfig.client.json` paths + include** for eslint-plugin-import-x consistency. Other `@luckystack/*` packages are listed in both tsconfigs even when the client doesn't need them — matching that pattern makes the import-x typescript resolver find the alias regardless of which tsconfig it picked for a given file.
+9. `npm run lint` and `npm run build` pass clean.
+
+Production bundle contents now:
+
+```
+dist/server.js       211.7kb   ← down from 9.8mb (pre-session: §26)
+dist/server.js.map   385.3kb   ← down from 14.1mb
+```
+
+---
+
+## 29) Next Session Plan
+
+1. **`server/sockets/socket.ts` + `server/sockets/utils/activityBroadcaster.ts` review** — `socket.ts` wires socket.io + dispatches to api/sync. Decide: `@luckystack/transport` package or fold into core. `activityBroadcaster.ts` is presence-adjacent, will likely land in `@luckystack/presence`.
+2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory, project wires up its own translate fn. Design-first.
+3. **Client-side sync/API split** — `src/_sockets/socketInitializer.ts` splits transport vs callback-registry concerns; `syncRequest.ts` + `offlineQueue.ts` → `packages/sync/src/` client slice; `apiRequest.ts` → `packages/api/src/` client slice. Design-first.
+4. **Generator `any` cleanup** — the type-map emitter in `@luckystack/devkit` emits `Record<string, any>` for function re-exports (see `Functions.db.prisma: any` in the generated `apiTypes.generated.ts`). Devkit improvement: emit the actual resolved types. Would drop the two `eslint-disable-next-line` comments from `src/settings/_api/updateUser_v1.ts` and any future callers.
+5. **`@luckystack/presence`** — after the socket and activity-broadcaster split.

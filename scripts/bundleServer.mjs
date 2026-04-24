@@ -16,7 +16,18 @@ const nodeBuiltins = builtinModules.flatMap((moduleName) => {
   return [normalized, `node:${normalized}`];
 });
 
-const externalDeps = [...new Set([...dependencyNames, ...nodeBuiltins])];
+// Devkit is a dev-time-only package; mark it external so esbuild does not
+// bundle `server/dev/**` or the TypeScript compiler into the production
+// server. Runtime consumers (`server/server.ts`, `server/prod/runtimeMaps.ts`)
+// only reach devkit behind an `env.NODE_ENV !== 'production'` guard, so
+// leaving the import unresolved in prod is safe — the branch never executes.
+const externalDeps = [
+  ...new Set([
+    ...dependencyNames,
+    ...nodeBuiltins,
+    '@luckystack/devkit',
+  ]),
+];
 
 const run = async () => {
   await build({

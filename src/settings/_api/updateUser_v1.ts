@@ -3,8 +3,7 @@ import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated
 import sharp from 'sharp';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
-import { UPLOADS_DIR } from '../../../server/utils/paths';
-import { tryCatch } from '../../../server/functions/tryCatch';
+import { UPLOADS_DIR, tryCatch } from '@luckystack/core';
 
 export const rateLimit: number | false = 20;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -67,11 +66,15 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   if (!user.token) return { status: 'error', errorCode: 'session.invalid' }
 
+  // Generated `Functions` map types `prisma` and `saveSession` as `any` —
+  // upstream limitation of the type emitter, not a local unsafe call.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   await functions.db.prisma.user.update({
     where: { id: user.id },
     data: newData
   })
 
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   await functions.session.saveSession(user.token, { ...user, ...newData });
 
   return { status: 'success', result: {} }
