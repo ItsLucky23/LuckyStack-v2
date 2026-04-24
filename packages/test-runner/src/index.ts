@@ -7,6 +7,7 @@ export { runRateLimitCheck } from './rateLimitCheck';
 export { runRateLimitTests } from './runRateLimitTests';
 export { runFuzzCheck } from './fuzzCheck';
 export { runFuzzTests } from './runFuzzTests';
+export { resetServerState } from './resetServerState';
 export { logContractResult, logContractSummary } from './reporter';
 export type {
   EndpointDescriptor,
@@ -22,3 +23,4 @@ export type { RateLimitCheckInput } from './rateLimitCheck';
 export type { RunRateLimitTestsInput } from './runRateLimitTests';
 export type { FuzzCheckInput } from './fuzzCheck';
 export type { RunFuzzTestsInput } from './runFuzzTests';
+export type { ResetServerStateInput } from './resetServerState';

@@ -26,7 +26,8 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     await redis.set(sessionKey, JSON.stringify(data));
     await redis.expire(sessionKey, SESSION_TTL);
 
-    const { ioInstance } = await import('../../../server/sockets/socket');
+    const { getIoInstance } = await import('@luckystack/core');
+    const ioInstance = getIoInstance();
     const io = ioInstance;
     if (!io) { return; }
 
@@ -129,7 +130,8 @@ const deleteSession = async (token: string): Promise<boolean> => {
 
       if (resolvedUserId) {
         const activeUsersKey = `${PROJECT_NAME}-activeUsers:${resolvedUserId}`;
-        const { ioInstance } = await import('../../../server/sockets/socket');
+        const { getIoInstance } = await import('@luckystack/core');
+    const ioInstance = getIoInstance();
 
         // Reuse the same logout flow as single-session enforcement.
         if (ioInstance) {

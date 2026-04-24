@@ -24,7 +24,7 @@ import loadSocket from './sockets/socket';
 import { z } from 'zod';
 import oauthProviders from "./auth/loginConfig";
 import { deleteSession, getSession } from './functions/session';
-import { allowedOrigin, readBootUuid, resolveEnvKey, writeBootUuid } from '@luckystack/core';
+import { allowedOrigin, clearAllRateLimits, computeSynchronizedEnvHashes, readBootUuid, resolveEnvKey, writeBootUuid } from '@luckystack/core';
 import { logging, rateLimiting, sessionBasedToken, sessionExpiryDays, SessionLayout } from '../config';
 
 import { serveAvatar } from './utils/serveAvatars';
@@ -227,12 +227,45 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   }
 
   //? Router boot handshake reads this endpoint to verify shared-Redis topology.
-  //? Returns the boot UUID this env wrote to `luckystack:boot:<env>` on startup.
+  //? Returns the boot UUID this env wrote to `luckystack:boot:<env>` on startup
+  //? plus SHA-256 hashes of every env key listed under `synchronizedEnvKeys`
+  //? in `deploy.config.ts`. Hashes (not values) keep secrets on-prem while
+  //? still letting the router detect cross-env drift.
   if (routePath === '/_health') {
     const bootUuid = await readBootUuid();
+    const synchronizedHashes = computeSynchronizedEnvHashes();
     res.statusCode = bootUuid ? 200 : 503;
     res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify({ status: bootUuid ? 'ok' : 'degraded', bootUuid, envKey: resolveEnvKey() }));
+    return res.end(JSON.stringify({
+      status: bootUuid ? 'ok' : 'degraded',
+      bootUuid,
+      envKey: resolveEnvKey(),
+      synchronizedHashes,
+    }));
+  }
+
+  //? Dev-only state reset endpoint. Currently clears rate-limit counters so
+  //? test-runner rate-limit tests start from a clean bucket. Gated hard:
+  //?   - NODE_ENV must not be 'production'
+  //?   - If TEST_RESET_TOKEN is set in env, requests must match it via the
+  //?     X-Test-Reset-Token header (covers staging/preview deploys that
+  //?     want the endpoint enabled for CI but not publicly callable).
+  if (routePath === '/_test/reset') {
+    if (process.env.NODE_ENV === 'production') {
+      res.statusCode = 404;
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify({ status: 'error', errorCode: 'notFound' }));
+    }
+    const requiredToken = process.env.TEST_RESET_TOKEN;
+    if (requiredToken && req.headers['x-test-reset-token'] !== requiredToken) {
+      res.statusCode = 403;
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify({ status: 'error', errorCode: 'auth.forbidden' }));
+    }
+    await clearAllRateLimits();
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ status: 'success', cleared: ['rateLimits'] }));
   }
 
   //? here we get the params from the request

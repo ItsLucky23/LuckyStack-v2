@@ -8,7 +8,8 @@ import handleApiRequest from "./handleApiRequest";
 import { getSession, saveSession } from "../functions/session";
 import { Server as SocketIOServer } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
-import { allowedOrigin, attachSocketRedisAdapter } from '@luckystack/core';
+import { allowedOrigin, attachSocketRedisAdapter, setIoInstance } from '@luckystack/core';
+import type { apiMessage, syncMessage } from '@luckystack/core';
 import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from '@luckystack/presence';
 import { locationProviderEnabled, logging, SessionLayout, socketActivityBroadcaster } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
@@ -31,21 +32,13 @@ const withSessionLock = async (token: string, fn: () => Promise<void>) => {
   }
 };
 
-export interface apiMessage {
-  name: string;
-  data: object;
-  responseIndex: number;
-}
+//? apiMessage / syncMessage types now live in @luckystack/core/socketTypes.
+//? Re-exported for any existing server-side importers that haven't migrated.
+export type { apiMessage, syncMessage } from '@luckystack/core';
 
-export interface syncMessage {
-  name: string;
-  data: object;
-  cb: string;
-  receiver: string;
-  responseIndex?: number;
-  ignoreSelf?: boolean;
-}
-
+//? ioInstance now lives in @luckystack/core. Re-exported here so existing
+//? callers that `import { ioInstance } from './socket'` still work; new
+//? consumers should call `getIoInstance()` from core instead.
 export let ioInstance: SocketIOServer | null = null;
 const shouldLogDev = logging.devLogs;
 const shouldLogSocketStartup = logging.socketStartup;
@@ -89,6 +82,7 @@ export default function loadSocket(httpServer: any) {
   });
 
   ioInstance = io;
+  setIoInstance(io);
 
   //? Attach Redis-backed adapter so room broadcasts fan out across every
   //? instance that shares the same Redis resource. Required for split/fallback

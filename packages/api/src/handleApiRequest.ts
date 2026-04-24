@@ -1,6 +1,6 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-import { apiMessage } from '../../../server/sockets/socket';
+import type { apiMessage } from '@luckystack/core';
 import { getSession, logout } from '@luckystack/login';
 import { logging, rateLimiting, SessionLayout } from '../../../config';
 import type { AuthProps } from '@luckystack/login';

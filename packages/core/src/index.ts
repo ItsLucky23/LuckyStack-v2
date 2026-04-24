@@ -5,12 +5,19 @@ export * from './socketEvents';
 export * from './responseNormalizer';
 export * from './localizedNormalizer';
 export type { ApiTypeMap, SyncTypeMap, StreamPayload } from './apiTypeStubs';
+export type { apiMessage, syncMessage } from './socketTypes';
+export { setIoInstance, getIoInstance } from './socketTypes';
 export * from './sentrySetup';
 export * from './env';
 export * from './db';
 export { redis } from './redis';
 export { attachSocketRedisAdapter } from './socketRedisAdapter';
 export { writeBootUuid, readBootUuid, resolveEnvKey } from './bootUuid';
+export {
+  collectSynchronizedEnvKeys,
+  computeSynchronizedEnvHashes,
+  hashSynchronizedValue,
+} from './synchronizedEnvHashes';
 export { initConsolelog } from './consoleLog';
 export * from './cookies';
 export * from './httpApiUtils';

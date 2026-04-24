@@ -1,6 +1,5 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-import { ioInstance } from "../../../server/sockets/socket";
 import { getSession } from "@luckystack/login";
 import { logging, rateLimiting, SessionLayout } from '../../../config';
 import type { AuthProps } from '@luckystack/login';
@@ -8,6 +7,7 @@ import { getRuntimeSyncMaps as getRuntimeSyncMapsFromSource } from '../../../ser
 import {
   validateRequest,
   extractTokenFromSocket,
+  getIoInstance,
   tryCatch,
   parseTransportRouteName,
   checkRateLimit,
@@ -146,6 +146,8 @@ export default async function handleHttpSyncRequest({
       errorCode: 'sync.clientRejected',
     };
   };
+
+  const ioInstance = getIoInstance();
 
   try {
     if (!ioInstance) {

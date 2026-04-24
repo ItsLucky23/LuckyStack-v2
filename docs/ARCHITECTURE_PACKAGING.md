@@ -1362,14 +1362,51 @@ Known gaps / not done this session:
 
 ---
 
-## 36) Next Session Plan
+## 36) Session Log (2026-04-24, seventeenth pass — test reset, publishability audit, synchronized-env hashes)
 
-The original packaging arc is closed. Remaining ideas are scope expansions:
+Picked the three cheapest wins from §36. The audit also lists real blockers to NPM publication of `@luckystack/core` / `@luckystack/api` / `@luckystack/sync` — none fixed this sitting beyond the socket-layer one, but the list is now explicit.
 
-1. **Zod/JSON-schema emission** — generator emits runtime schemas alongside TS types. Unlocks real property-based fuzz via `fast-check`.
-2. **`clearAllRateLimits()` hook for tests** — expose a `/_test/reset` endpoint behind a dev-only flag so test runners can drain limiter state between runs.
-3. **Web vitals package** (`@luckystack/web-vitals`, from §15 backlog) — client-side RUM once the backend observability story is frozen.
-4. **Monitoring package** (`@luckystack/monitoring`, from §15 backlog) — dual-stream Sentry + audit trail. Depends on a self-host-vs-SaaS decision first.
-5. **NPM publishability audit** — list every deep-relative import from `packages/**` into project files. Current count should be near zero after §35. Any remaining ones are publishability blockers.
-6. **Shared-secret sync checks** — `synchronizedEnvKeys` on shared resources is typed in `deploy.config.ts` but isn't yet enforced at startup. Validate at the same pass as the Redis UUID handshake.
-7. **`server/sockets/socket.ts`** — stays in server/ as project glue (already decided).
+Completed:
+
+1. **`/_test/reset` endpoint** — new branch in `server/server.ts -> ServerRequest`. Gates: `NODE_ENV !== 'production'` hard, plus optional `X-Test-Reset-Token` header match against `process.env.TEST_RESET_TOKEN`. Production requests always return 404. Calls `clearAllRateLimits()` from core, returns `{ status: 'success', cleared: ['rateLimits'] }`.
+2. **Test-runner reset helper** — new `packages/test-runner/src/resetServerState.ts` (`resetServerState({ baseUrl, token? })`). `runRateLimitTests` now accepts `resetBetweenEndpoints?: boolean` (default via CLI: `true`) and `resetToken?: string`, calling reset before every endpoint so the shared IP-based limiter bucket starts clean. CLI: `TEST_RESET_BETWEEN=false npm run test:rate-limit` opts out.
+3. **Socket-layer publishability fix** — moved `apiMessage` / `syncMessage` types + `ioInstance` slot into new `packages/core/src/socketTypes.ts`. Framework packages (`@luckystack/api`, `@luckystack/sync`, `@luckystack/login`) now import `apiMessage`/`syncMessage` types and `getIoInstance()` from `@luckystack/core` instead of deep-relative `../../../server/sockets/socket`. The project's `server/sockets/socket.ts` calls `setIoInstance(io)` right after construction and re-exports the types for any remaining server-side consumers. `session.ts` switched from dynamic `await import('../../../server/sockets/socket')` to `await import('@luckystack/core')`.
+4. **Synchronized-env hash check** — new `packages/core/src/synchronizedEnvHashes.ts` exports `collectSynchronizedEnvKeys()` and `computeSynchronizedEnvHashes()`. `/_health` endpoint now returns `synchronizedHashes: { [envKey]: sha256Hex | null }` alongside the boot UUID. Router's `bootHandshake.ts` computes the same hashes locally during the fallback cross-check and emits a warning (or throws under `strictBootHandshake`) per mismatched key. Catches "sessions encrypted by one side can't be decrypted by the other" at boot.
+
+Publishability audit findings (not fixed this sitting):
+
+The remaining deep-relative imports from `packages/**` into project files fall into four categories:
+
+**A. Config reach** (11 files) — packages read `rateLimiting`, `logging`, `sessionBasedToken`, `sessionExpiryDays`, `allowMultipleSessions`, `defaultLanguage`, `sentry`, and the `SessionLayout` type from `../../../config`. Affected: `@luckystack/api`, `@luckystack/sync`, `@luckystack/core` (`apiRequest`, `rateLimiter`, `extractToken`, `extractTokenFromRequest`), `@luckystack/login`, `@luckystack/sentry`. Fix pattern: framework exposes a `configure*` setter per concern, project calls once at boot. Each fix is small but multiplies across call sites that read the config at every request — consider a single `registerProjectConfig({...})` call in core and a shared getter.
+
+**B. Runtime-maps reach** (4 files) — `packages/{api,sync}/src/handle*Request.ts` imports from `../../../server/prod/runtimeMaps`. That file loads per-preset generated map files that the project emits. Fix: framework exposes a `registerRuntimeMaps({ apis, syncs })` DI surface; project's `server.ts` wires generated maps at boot.
+
+**C. UI / notify reach** (3 files) — `packages/core/src/apiRequest.ts` and `packages/sync/src/syncRequest.ts` import `notify` from `../../../src/_functions/notify`; `syncRequest.ts` also imports `statusContent` from `../../../src/_providers/socketStatusProvider`. Fix: core exposes a `registerNotifier({ error, success, ... })` hook; project wires project-specific toasts during client bootstrap.
+
+**D. Dev-only reach** — `packages/devkit/src/hotReload.ts` imports `reloadLocaleTranslations` from `../../../server/utils/responseNormalizer`. Acceptable (devkit is dev-only and the function is idempotent) but could be DI'd with the same pattern as the normalizer split.
+
+**Router reach** — intentional. `@luckystack/router` reads `deploy.config.ts` and `services.config.ts` directly per §33 invariant. Not a publishability blocker because the router is meant to consume the consumer's deploy topology.
+
+Verification: `npm run lint` clean, `npm run build` clean. `dist/server.js` 220.0 KB (+8.1 KB for synchronized-env helpers + socket types into core; acceptable for the safety wins).
+
+Key invariants added:
+
+- **Socket slot rule** (NEW): the project's socket-server wiring MUST call `setIoInstance(io)` from `@luckystack/core` immediately after construction. Framework packages resolve the instance through `getIoInstance()`; there is no other supported way to reach it.
+- **Synchronized-env hash rule** (NEW): the backend's `/_health` endpoint returns SHA-256 hashes of every env key declared under any resource's `synchronizedEnvKeys` in `deploy.config.ts`. The router cross-checks at boot. Hashes (not values) keep secrets on-prem.
+- **Test-reset endpoint rule** (NEW): `/_test/reset` is dev-only. Production requests return 404 regardless of configuration. Staging/preview deploys that want CI access must set `TEST_RESET_TOKEN` server-side and pass the same value via `X-Test-Reset-Token`.
+
+Known gaps / not done this session:
+
+- Config reach + runtime-maps reach + notify reach all remain publishability blockers. Audit captured above as follow-up.
+- Zod/JSON-schema emission still deferred — real property-based fuzz still waiting.
+
+---
+
+## 37) Next Session Plan
+
+1. **Config DI (publishability blocker A)** — single `registerProjectConfig({ rateLimiting, logging, session, sentry, defaultLanguage })` call in core; framework packages consume via getter. Biggest impact for NPM publishability.
+2. **Runtime-maps DI (blocker B)** — `registerRuntimeMaps({ apis, syncs })` pattern.
+3. **Notify DI (blocker C)** — `registerNotifier({ error, success })` hook + default no-op.
+4. **Zod/JSON-schema emission** — generator emits runtime schemas; unlocks `fast-check`-driven property-based fuzz.
+5. **Web vitals / Monitoring packages** (§15 backlog) — pending product direction.
+6. **`server/sockets/socket.ts`** — stays in server/ as project glue (already decided; socket-type half lives in core now).

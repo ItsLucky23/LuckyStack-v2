@@ -1,5 +1,6 @@
 import { walkEndpoints } from './walkEndpoints';
 import { runRateLimitCheck } from './rateLimitCheck';
+import { resetServerState } from './resetServerState';
 import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
 type ApiMethodMap = Record<string, Record<string, Record<string, string>>>;
@@ -21,6 +22,18 @@ export interface RunRateLimitTestsInput {
    * to avoid firing thousands of requests in CI.
    */
   maxRateLimitToTest?: number;
+  /**
+   * When true, hit `/_test/reset` before each endpoint so limiter state is
+   * clean. Requires the server to allow the endpoint (NODE_ENV !== production
+   * or `TEST_RESET_TOKEN` configured). Without resetting, the shared IP bucket
+   * leaks state between endpoints.
+   */
+  resetBetweenEndpoints?: boolean;
+  /**
+   * Token forwarded as `X-Test-Reset-Token` when resetting. Only relevant in
+   * staging/preview deploys that enable the endpoint behind a token.
+   */
+  resetToken?: string;
   onResult?: (result: ContractCheckResult) => void;
 }
 
@@ -71,6 +84,10 @@ export const runRateLimitTests = async (
       results.push(skipped);
       input.onResult?.(skipped);
       continue;
+    }
+
+    if (input.resetBetweenEndpoints) {
+      await resetServerState({ baseUrl: input.baseUrl, token: input.resetToken });
     }
 
     const result = await runRateLimitCheck({

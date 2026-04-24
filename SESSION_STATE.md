@@ -1,108 +1,50 @@
 # SESSION_STATE
 
 ## Session Summary
-Branch `chore/package-split-prep`. This sitting closes every item from §35's refinement plan. The original split→ship packaging arc is done; what's left is scope expansion (real fuzz via Zod, monitoring package, NPM publishability audit), not missing foundations.
+Branch `chore/package-split-prep`. Continued after the §35 sweep with three fast-value items from §36: `/_test/reset` for reliable rate-limit tests, an explicit NPM publishability audit (with a socket-layer fix landed), and `synchronizedEnvKeys` enforcement so divergent session secrets between fallback-linked envs are caught at boot. The audit captured four remaining categories of deep-relative `packages/** → project` imports as the real publishability blockers — documented in packaging doc §36 for the next session.
 
-Seven changes landed:
+## Completed Tasks
+- **`/_test/reset` endpoint** — new branch in `server/server.ts -> ServerRequest` handler. Hard-gated by `NODE_ENV !== 'production'` (returns 404 in prod). Optional `X-Test-Reset-Token` match against `process.env.TEST_RESET_TOKEN` for staging use. Calls `clearAllRateLimits()` from core and returns `{ status: 'success', cleared: ['rateLimits'] }`.
+- **Test-runner reset helper** — new `packages/test-runner/src/resetServerState.ts` (`resetServerState({ baseUrl, token? })`). `runRateLimitTests` now accepts `resetBetweenEndpoints: boolean` (default `true` in CLI) + `resetToken: string`, calling reset before every endpoint. Opt-out via `TEST_RESET_BETWEEN=false`.
+- **Socket-layer publishability fix** — new `packages/core/src/socketTypes.ts` exports `apiMessage`, `syncMessage` types and `setIoInstance`/`getIoInstance` functions. Updated: `server/sockets/socket.ts` (calls `setIoInstance(io)` after construction, re-exports types), `packages/api/src/handleApiRequest.ts`, `packages/sync/src/handleSyncRequest.ts` and `handleHttpSyncRequest.ts` (use `getIoInstance()` + `@luckystack/core` types), `packages/login/src/session.ts` (dynamic import switched from `../../../server/sockets/socket` to `@luckystack/core`).
+- **Synchronized-env hash check** — new `packages/core/src/synchronizedEnvHashes.ts` (`collectSynchronizedEnvKeys`, `computeSynchronizedEnvHashes`, `hashSynchronizedValue`). `/_health` returns `synchronizedHashes: { [envKey]: sha256Hex | null }` alongside the boot UUID. Router's `bootHandshake.ts` computes local hashes via raw crypto and compares; mismatch warns (or throws under `strictBootHandshake`) per key. Secrets never leave the deployment — hashes only.
+- **NPM publishability audit** — full grep of `packages/** → project` deep imports completed; four blocker categories identified (config reach, runtime-maps reach, notify/UI reach, dev-only reach) plus one intentional (router reads deploy/services configs). Documented as §36 audit section with fix patterns for next session.
+- **Docs** — `docs/ARCHITECTURE_PACKAGING.md` gained §36 session log (session work + audit findings + new invariants) and §37 next-session plan.
+- `npm run lint` clean, `npm run build` clean. `dist/server.js` 220.0 KB (+8.1 KB this session for synchronized-env helpers + socket types moved into core).
 
-1. **Auth metadata in generated map** — `apiMetaMap` emits `{ method, auth, rateLimit }` per endpoint alongside `apiMethodMap`. Reuses the existing `extractAuth` AST walker.
-2. **Auth-enforcement test layer** — `runAuthEnforcementTests` walks `auth.login: true` endpoints, expects `auth.required` without a session. CLI: `npm run test:auth`.
-3. **`responseNormalizer` split** — `createLocalizedNormalizer({ translate })` factory in `@luckystack/core`. Project registers on boot via `registerLocalizedNormalizer`. Framework packages (`@luckystack/api`, `sync`) now import `normalizeErrorResponse` / `extractLanguageFromHeader` from core — no more deep-reaching into `server/utils/…`.
-4. **`apiTypes.generated.ts` decoupling** — generator emits `declare module '@luckystack/core' { interface ApiTypeMap extends _ProjectApiTypeMap {} }` augmentation. `apiRequest.ts` / `syncRequest.ts` now import types from core instead of the deep-relative generated file.
-5. **Emitter re-relativizer** — `typeof import('<relative>')` specifiers are now resolved + re-relativized to the generated file's directory. Shims at any depth produce working imports.
-6. **Rate-limit + fuzz test layers** — `runRateLimitTests` fires N+1 requests and expects `api.rateLimitExceeded`; `runFuzzTests` sends junk payloads and asserts no 5xx, envelope preserved. CLIs: `test:rate-limit`, `test:fuzz`. Schema-driven fuzz still deferred (needs Zod emission).
-7. **Boot handshake strict mode** — new `routing.strictBootHandshake` flag in `deploy.config.ts`. Warning-only by default; flip to `true` per-deployment once `/_health` is universal.
+## Pending Logic / Known Bugs
+- **Config DI not wired** (publishability blocker A). 11 files in `packages/**` still import from `../../../config`. Needs `registerProjectConfig({...})` pattern in core.
+- **Runtime-maps DI not wired** (blocker B). `packages/{api,sync}/src/handle*Request.ts` import `getRuntimeApiMaps`/`getRuntimeSyncMaps` from `server/prod/runtimeMaps` directly.
+- **Notify DI not wired** (blocker C). `packages/core/src/apiRequest.ts` and `packages/sync/src/syncRequest.ts` import `notify` from `src/_functions/notify`; `syncRequest.ts` also imports `statusContent` from `_providers/socketStatusProvider`.
+- **Zod/JSON-schema emission still deferred.** Schema-driven fuzz via `fast-check` still waiting on the generator to emit runtime schemas alongside TS types.
+- **Synchronized-env check is warning-only by default** — respects `strictBootHandshake` like the UUID check. Flip the flag once config is known good.
 
-## §8 Execution Order progress — **ALL 12 STEPS ✅ (two sessions ago)**
-
-Refinement status from §35:
-
-| # | Refinement | Status |
-|---|------------|--------|
-| 35.1 | Auth metadata in generated map | ✅ this session |
-| 35.2 | Auth-enforcement test layer | ✅ this session |
-| 35.3 | `responseNormalizer` split | ✅ this session |
-| 35.4 | `apiTypes.generated.ts` decoupling | ✅ this session |
-| 35.5 | Emitter re-relativizer | ✅ this session |
-| 35.6 | Rate-limit + fuzz test layers | ✅ this session (schema-driven fuzz deferred) |
-| 35.7 | `/_health` → fatal (opt-in) | ✅ this session (flag-based) |
-
-## Current package map
-
-```
-@luckystack/core       (base: transport, utilities, DI, hooks, CORS, runtime validation,
-                        socket Redis adapter, boot UUID, apiTypeStubs, localizedNormalizer)
-   ↑
-@luckystack/login      (auth + session; owns BaseSessionLayout, AuthProps)
-   ↑
-@luckystack/presence   (registers postLogout handler on core; one-way dep on login)
-@luckystack/sentry     @luckystack/sync (server + client)     @luckystack/api
-
-@luckystack/devkit     (dev-time only; external in prod bundle; emitter re-relativizer)
-@luckystack/router     (load balancer + health store + boot handshake + WS proxy;
-                        raw ioredis, no @luckystack/* runtime imports)
-@luckystack/test-runner (contract + auth + rate-limit + fuzz layers, all driven by
-                        apiTypes.generated.ts)
-```
-
-## NEXT TASK (per §36 in packaging doc)
-
-Original arc is closed. Forward items are scope expansions, not foundations:
-
-1. **Zod/JSON-schema emission** — generator emits runtime schemas; unlocks property-based fuzz via `fast-check`.
-2. **`clearAllRateLimits()` test hook** — expose a dev-only `/_test/reset` so test runners can drain limiter state between runs.
-3. **NPM publishability audit** — grep for every remaining deep-relative import from `packages/**` into project files. Should be near zero after §35.4.
-4. **Shared-secret sync checks** — enforce `synchronizedEnvKeys` from `deploy.config.ts` at the same pass as the Redis UUID handshake.
-5. **`@luckystack/web-vitals`** — client-side RUM (§15 backlog).
-6. **`@luckystack/monitoring`** — dual-stream Sentry + audit trail (§15 backlog, needs self-host-vs-SaaS decision).
+## Exact Next Step
+Start §37.1 (Config DI). In `packages/core/src/`, create `projectConfig.ts` exporting `registerProjectConfig(config)` + `getProjectConfig()` with a module-level slot and a thin default. Then rewrite `packages/core/src/rateLimiter.ts:10` (`import { rateLimiting } from '../../../config'`) to `const { rateLimiting } = getProjectConfig();` inside each rate-limit function (not at module scope — avoids import-time fragility). Verify by running `Grep` for `from '../../../config'` across `packages/**` and systematically replacing each. Target: zero hits after the sweep. Run `npm run lint && npm run build` after each package is migrated to catch mis-ordered registration.
 
 ## Technical State
 
-- Branch: `chore/package-split-prep`
-- `npm run lint` — clean
-- `npm run build` — clean (`dist/server.js` 211.9 KB — down 2.6 KB vs last session because `server/utils/responseNormalizer.ts` no longer drags a duplicate of the core module into the bundle)
-- `npm run router` — boots in split/fallback mode when Redis is up
-- Test runner CLIs: `test:contract`, `test:auth`, `test:rate-limit`, `test:fuzz`
+### Files modified this session
+- `server/server.ts` — added `/_test/reset` branch (dev-only, token-gated); `/_health` now returns `synchronizedHashes` in addition to `bootUuid`/`envKey`; imports `clearAllRateLimits` + `computeSynchronizedEnvHashes` from core.
+- `server/sockets/socket.ts` — calls `setIoInstance(io)` alongside legacy `ioInstance = io`; re-exports `apiMessage`/`syncMessage` types from `@luckystack/core` for back-compat.
+- `packages/core/src/index.ts` — re-exports `apiMessage`, `syncMessage`, `setIoInstance`, `getIoInstance`, `collectSynchronizedEnvKeys`, `computeSynchronizedEnvHashes`, `hashSynchronizedValue`.
+- `packages/core/src/socketTypes.ts` — NEW. Wire-protocol types + ioInstance slot.
+- `packages/core/src/synchronizedEnvHashes.ts` — NEW. Env-hash collector backed by `deploy.config.ts` resource definitions.
+- `packages/api/src/handleApiRequest.ts` — `apiMessage` import switched to `@luckystack/core`.
+- `packages/sync/src/handleSyncRequest.ts` — `syncMessage` + `ioInstance` switched; added `getIoInstance()` import; hoisted local `ioInstance` from `getIoInstance()` at function top.
+- `packages/sync/src/handleHttpSyncRequest.ts` — same migration pattern.
+- `packages/login/src/session.ts` — two dynamic `await import('../../../server/sockets/socket')` calls switched to `await import('@luckystack/core')` using `getIoInstance()`.
+- `packages/router/src/bootHandshake.ts` — imports `deployConfig`; new `collectSynchronizedEnvKeysFromConfig`, `hashLocalEnvValue`, `compareSynchronizedHashes` helpers; called after the Redis UUID check completes.
+- `packages/test-runner/src/resetServerState.ts` — NEW.
+- `packages/test-runner/src/runRateLimitTests.ts` — accepts `resetBetweenEndpoints` + `resetToken`; calls `resetServerState` before each endpoint when enabled.
+- `packages/test-runner/src/index.ts` — re-exports `resetServerState` + type.
+- `scripts/testRateLimit.ts` — wires `TEST_RESET_BETWEEN` (default `true`) and `TEST_RESET_TOKEN` env vars through to the runner.
+- `docs/ARCHITECTURE_PACKAGING.md` — §36 session log with audit findings, §37 next-session plan.
 
-## Test runner quick-reference
+### Temporary/dev-only changes to revert before shipping
+- None. All changes are intended production behavior. `/_test/reset` is permanently dev-gated (404 in production regardless of config), so no manual revert.
 
-```bash
-# contract smoke: every endpoint returns {status, errorCode} envelope
-npm run test:contract
-
-# auth enforcement: auth.login:true endpoints reject with auth.required
-npm run test:auth
-
-# rate limit: N+1 requests hit api.rateLimitExceeded
-TEST_MAX_RATE_LIMIT=50 npm run test:rate-limit
-
-# fuzz: junk payloads don't 5xx and stay in envelope
-TEST_AUTH_TOKEN=<cookie> npm run test:fuzz
-
-# shared env:
-TEST_BASE_URL=http://localhost:4019
-TEST_SKIP="settings/updateUser,system/logout"   # comma-separated <page>/<name>
-TEST_SESSION_COOKIE_NAME=luckystack_token
-```
-
-## Key invariants (cumulative)
-
-- **Shim path rule**: shims use direct file paths (`../../packages/<pkg>/src/<file>`), never barrel.
-- **Barrel vs direct-path rule**: within the monorepo, project-side client code and cross-package internal imports use direct file paths, not barrels.
-- **Client/server barrel split rule**: packages with both slices provide `src/index.ts` (server-safe) + `src/client.ts` (React/browser). `tsconfig.server.json` excludes the `client.ts` files.
-- **Script-exit rule**: tsx-run scripts importing any `@luckystack/*` barrel MUST end with `process.exit(0)`.
-- **Devkit externality rule**: runtime code that needs devkit must use `await import('@luckystack/devkit')` behind `env.NODE_ENV !== 'production'`.
-- **Package-listing parity rule**: every `@luckystack/*` package must be in both tsconfigs (paths + include).
-- **Type ownership**: `AuthProps` + `BaseSessionLayout` in login; `HookSessionShape` in core; `SessionLayout` in project `config.ts`.
-- **Hook payload ownership**: core owns api/sync; feature packages augment via `declare module '@luckystack/core' { interface HookPayloads { ... } }`.
-- **Hook handler return-type rule**: `HookHandler<T>` requires `: HookResult` annotation + explicit `return undefined`.
-- **Sentry split**: DI surface in core; concrete `@sentry/node` init in sentry package.
-- **One-way package deps**: no circular deps. Cross-package side effects go through the core hook registry.
-- **Router in its own process**: `npm run router` is a separate `tsx` invocation, not bundled with `dist/server.js`. Router reads `deploy.config.ts` + `services.config.ts` directly; does not depend on any `@luckystack/*` runtime package. Redis access uses raw ioredis.
-- **WS target rule**: router forwards WebSocket upgrades to the `system` service (overridable via `wsTargetService`). Safe because every backend attaches the Socket.io Redis adapter.
-- **Shared-Redis hard-fail rule**: when `environment.fallback` is set, router MUST boot with reachable Redis. `disableSharedHealthState` is ignored.
-- **Boot-UUID rule**: every backend writes `luckystack:boot:<env>` on startup. `/_health` returns it. Routers cross-check to detect divergent Redis URLs.
-- **Socket.io Redis adapter always on**: `attachSocketRedisAdapter(io)` runs on every backend boot. Rooms fan out across instances via pub/sub. Safe no-op in single-instance.
-- **Normalizer registration rule** (NEW): framework packages call `normalizeErrorResponse` / `extractLanguageFromHeader` from `@luckystack/core`. The project MUST side-effect-import the module that calls `registerLocalizedNormalizer` on startup, or framework errors fall back to identity translate (returns the errorCode key as the message).
-- **Augmentation-load rule** (NEW): the `declare module '@luckystack/core'` augmentation in `src/_sockets/apiTypes.generated.ts` is a side-effect type load. Any file that imports from the generated file pulls it into the compilation. If no file imports it, `ApiTypeMap` stays empty.
-- **Boot handshake strict flag** (NEW): `deploy.config.ts -> routing.strictBootHandshake` is warning-only by default. Flip to `true` per-deployment once `/_health` is universal.
+### Environment notes
+- No server running; no staged git changes. Everything unstaged/untracked relative to `master`.
+- `dist/server.js` grew from 211.9 KB → 220.0 KB due to synchronized-env helpers and the socket-types move into core. Acceptable trade.
+- Previous session's commit message still stands for the §35 work; this session is a separate commit. Suggested message: `feat: test reset endpoint + publishability audit (socket layer fixed) + synchronizedEnvKeys check at boot`.

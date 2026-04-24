@@ -1,6 +1,6 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-import { ioInstance, syncMessage } from "../../../server/sockets/socket";
+import type { syncMessage } from "@luckystack/core";
 import { Socket } from "socket.io";
 import { getSession } from "@luckystack/login";
 import { logging, rateLimiting, SessionLayout } from '../../../config';
@@ -9,6 +9,7 @@ import { getRuntimeSyncMaps } from '../../../server/prod/runtimeMaps';
 import {
   validateRequest,
   extractTokenFromSocket,
+  getIoInstance,
   tryCatch,
   parseTransportRouteName,
   checkRateLimit,
@@ -74,6 +75,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   token: string | null,
 }) {
 
+  const ioInstance = getIoInstance();
   if (!ioInstance) { return; }
 
   //? first we validate the data
