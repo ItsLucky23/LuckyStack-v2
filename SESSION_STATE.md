@@ -52,12 +52,12 @@ Surfaced two new invariants:
 @luckystack/devkit     (dev-time only; external in prod bundle)
 ```
 
-## NEXT TASK (per §32)
+## NEXT TASK (per §33)
 
 1. **`server/sockets/socket.ts`** — 242 lines; stays in server/ as project glue (documented). No move needed.
 2. **`responseNormalizer` split** — `createLocalizedNormalizer({ translate })` factory; project provides translate fn. Design-first.
-3. **Generator `any` cleanup** — devkit emits `Record<string, any>` for function re-exports. Internal refinement.
-4. **`apiTypes.generated.ts` decoupling** — emitter outputs `declare module '@luckystack/core'` instead of standalone file. Removes the deep-relative type-only imports in apiRequest/syncRequest.
+3. **`apiTypes.generated.ts` decoupling** — optional. Emitter outputs `declare module '@luckystack/core'` augmentation instead of a standalone file. Removes the deep-relative type-only imports in apiRequest/syncRequest. Purity improvement, not blocker.
+4. **Emitter re-relativizer** — if function shims ever live outside `server/functions/`, the `typeof import('<relative>')` output will resolve wrong. Compute absolute path + re-relativize against generated file's location.
 5. **Load balancer + service forwarding** (§8 #11 + #12) — separate workstream.
 
 ## Technical State

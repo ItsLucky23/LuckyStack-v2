@@ -66,15 +66,11 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   if (!user.token) return { status: 'error', errorCode: 'session.invalid' }
 
-  // Generated `Functions` map types `prisma` and `saveSession` as `any` —
-  // upstream limitation of the type emitter, not a local unsafe call.
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   await functions.db.prisma.user.update({
     where: { id: user.id },
     data: newData
   })
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   await functions.session.saveSession(user.token, { ...user, ...newData });
 
   return { status: 'success', result: {} }

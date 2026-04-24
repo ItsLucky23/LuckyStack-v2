@@ -351,11 +351,31 @@ const generateFunctionsForDir = (dir: string, collectors: ImportCollectors, inde
           exports.set(statement.name.text, findSignatureForExport(statement.name.text, sourceFile, rawContent, fullPath, availableExports, fileImports, collectors, checker, programSource ?? undefined));
         }
 
-        // export { a, b as c }
+        // export { a, b as c } [from 'module']
         if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+          // `export { x } from 'module'` — extract the source module so we can
+          // emit `typeof import('module')['x']` and let TypeScript resolve the
+          // real type at compile time (instead of falling back to `any`).
+          const moduleSpecifier =
+            statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)
+              ? statement.moduleSpecifier.text
+              : null;
+
           for (const specifier of statement.exportClause.elements) {
             const exportName = specifier.name.text;
             const originalName = specifier.propertyName ? specifier.propertyName.text : exportName;
+
+            if (moduleSpecifier) {
+              // Re-export from another module. `typeof import(...)` resolves
+              // through package aliases (`@luckystack/*`) and relative paths.
+              // Relative paths are preserved verbatim — callers with the same
+              // depth-from-root as the generated file will still resolve
+              // correctly. Package aliases (starting with `@` or a word char
+              // but no `.` / `/`) work from anywhere. Wildcard re-exports
+              // (`export * from ...`) are not handled here and fall through.
+              exports.set(exportName, `typeof import('${moduleSpecifier}')['${originalName}']`);
+              continue;
+            }
 
             const signature = findSignatureForExport(originalName, sourceFile, rawContent, fullPath, availableExports, fileImports, collectors, checker, programSource ?? undefined);
             if (signature !== 'any') {

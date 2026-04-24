@@ -1217,10 +1217,42 @@ Package layer map after this pass:
 
 ---
 
-## 32) Next Session Plan
+## 32) Session Log (2026-04-24, thirteenth pass — devkit emitter emits real types for function re-exports)
 
-1. **`server/sockets/socket.ts`** — probably stays in server/ as project glue (mixes `locationProviderEnabled`, `socketActivityBroadcaster`, session room persistence, etc.). Decision documented; move on.
+Completed:
+
+1. **Devkit type-emitter fix in `packages/devkit/src/typeMap/functionsMeta.ts`.** The `export { x } from 'module'` branch previously fell through to `any` whenever the target symbol lived in another module (which is the common case for shim files like `server/functions/db.ts`: `export { prisma } from '@luckystack/core'`). Now emits `typeof import('module')['x']` — a TypeScript expression that resolves to the target's actual type at compile time.
+2. **Regenerated `Functions` map now has real types.** Example (trimmed):
+   ```ts
+   export interface Functions {
+     db: {
+       prisma: (typeof import("@luckystack/core"))["prisma"];
+     };
+     redis: {
+       redis: (typeof import("@luckystack/core"))["redis"];
+       default: (typeof import("@luckystack/core"))["redis"];
+     };
+     sentry: {
+       initializeSentry: (typeof import("../../packages/sentry/src/sentry"))["initializeSentry"];
+       ...
+     };
+     session: {
+       saveSession: (typeof import("../../packages/login/src/session"))["saveSession"];
+       ...
+     };
+     ...
+   }
+   ```
+3. **Relative-path caveat**: the emitter preserves module specifiers verbatim. This works today because the generated file (`src/_sockets/apiTypes.generated.ts`) and the function shim files (`server/functions/*.ts`) are both at depth 2 from the repo root — so `../../packages/...` resolves to the same target from both. If a future shim lives at a different depth, the emitter will need to resolve + re-relativize. Noted as a latent edge case, not blocking.
+4. **Dropped `eslint-disable-next-line` from `src/settings/_api/updateUser_v1.ts`.** `functions.db.prisma.user.update(...)` and `functions.session.saveSession(...)` are now fully typed through the generated interface → no more `any`-call lint violations.
+5. `npm run lint` and `npm run build` pass clean. `dist/server.js` stable at 212.7 KB.
+
+---
+
+## 33) Next Session Plan
+
+1. **`server/sockets/socket.ts`** — stays in server/ as project glue (documented).
 2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project provides translate. Design-first.
-3. **Generator `any` cleanup** — devkit type-map emitter emits `Record<string, any>` for function re-exports. Internal refinement.
-4. **`apiTypes.generated.ts` decoupling** — change emitter to output `declare module '@luckystack/core'` augmentation instead of a standalone file. Removes the deep-relative type-only import in apiRequest.ts / syncRequest.ts.
-5. **Load balancer + service forwarding** (§8 steps 11-12) — separate workstream.
+3. **`apiTypes.generated.ts` decoupling** — optional. Change emitter to output `declare module '@luckystack/core'` augmentation (so core exports empty `ApiTypeMap`/`SyncTypeMap`/etc. that the project augments) instead of a standalone file. Removes the deep-relative type-only imports in `apiRequest.ts` / `syncRequest.ts`. More of a purity improvement than a blocker.
+4. **Emitter re-relativizer** — if a function shim ever lives outside `server/functions/` the current `typeof import('<relative>')` output will resolve wrong. Compute absolute path in the emitter and re-relativize against the generated file's location.
+5. **Load balancer + service forwarding** (§8 #11 + #12) — separate workstream.
