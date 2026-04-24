@@ -1,4 +1,4 @@
-import { io, ManagerOptions, Socket, SocketOptions } from 'socket.io-client';
+import { io, ManagerOptions, SocketOptions } from 'socket.io-client';
 import {
   backendUrl,
   logging,
@@ -84,12 +84,15 @@ const shouldNotifyDev = logging.devNotifications;
 const shouldLogSocketStatus = logging.socketStatus;
 const shouldLogStream = logging.stream;
 
-export let socket: Socket | null = null;
-
-let responseIndex = 0;
-export const incrementResponseIndex = () => {
-  return responseIndex = responseIndex + 1;
-}
+// Socket state (`socket`, `incrementResponseIndex`, `waitForSocket`) now
+// lives in @luckystack/core/socketState — single source of truth shared with
+// `apiRequest` (core) and `syncRequest` (sync). This React hook is the only
+// place that assigns the socket via `setSocket(io(...))`. Re-exported below
+// so existing callers that still import these symbols from this file keep
+// working.
+import { socket, setSocket, incrementResponseIndex, waitForSocket } from '../../packages/core/src/socketState';
+// eslint-disable-next-line unicorn/prefer-export-from
+export { socket, incrementResponseIndex, waitForSocket };
 
 export function useSocket(session: SessionLayout | null) {
   const { socketStatus, setSocketStatus } = useSocketStatus();
@@ -124,7 +127,7 @@ export function useSocket(session: SessionLayout | null) {
     }
 
     const socketConnection = io(backendUrl, socketOptions);
-    socket = socketConnection;
+    setSocket(socketConnection);
 
     const canFlushQueue = () => socketConnection.connected && isOnline();
 
@@ -273,7 +276,7 @@ export function useSocket(session: SessionLayout | null) {
     return () => {
       if (socket) {
         socket.disconnect();
-        socket = null;
+        setSocket(null);
         setDisconnectedStatus(setSocketStatus);
       }
 
@@ -287,25 +290,8 @@ export function useSocket(session: SessionLayout | null) {
 }
 
 
-export const waitForSocket = async () => {
-
-  let i = 0;
-  while (!socket) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    i++
-    if (i > 500) {
-      if (shouldLogDev) {
-        console.error("Socket is not initialized, giving up");
-      }
-      if (shouldNotifyDev) {
-        notify.error({ key: 'common.socketNotInitialized' });
-      }
-      return false
-    } //? we give it 500 * 10 so 5000ms or 5s to load the socket connection
-  }
-
-  return true
-}
+// `waitForSocket` moved to @luckystack/core/socketState — re-exported at the
+// top of this file to keep the existing symbol visible to callers.
 
 export const joinRoom = async (group: string) => {
   return new Promise<{ success: true; rooms: string[] } | null>((resolve) => {

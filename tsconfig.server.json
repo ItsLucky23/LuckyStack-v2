@@ -70,5 +70,11 @@
     "src/**/*_server.tsx",
     "src/**/*_server.js",
     "src/**/*_server.jsx"
+  ],
+  "exclude": [
+    "packages/core/src/apiRequest.ts",
+    "packages/core/src/client.ts",
+    "packages/sync/src/syncRequest.ts",
+    "packages/sync/src/client.ts"
   ]
 }

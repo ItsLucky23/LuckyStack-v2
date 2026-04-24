@@ -1171,10 +1171,56 @@ All packages now have one-way dependencies (presence → login via `getSession`/
 
 ---
 
-## 31) Next Session Plan
+## 31) Session Log (2026-04-24, twelfth pass — client-side transport split)
 
-1. **`server/sockets/socket.ts` review/move** — still the last non-trivial server-side file outside packages. 242 lines; heavily mixes transport setup, session-aware room management, location provider logic, and activity broadcaster. Decision: probably **stays in server/** long-term because project-specific configuration (`locationProviderEnabled`, `socketActivityBroadcaster`, `SessionLayout`, session room persistence) dominates the file. Document as "project glue" in §2 and move on. Alternative: design a `loadSocket({ handlers, lifecycle, config })` factory in core that `server/sockets/socket.ts` thin-wraps — big refactor, not worth it for §8 completion.
-2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project wires up its own translate fn. Design-first.
-3. **Client-side sync/API split** — `src/_sockets/socketInitializer.ts` splits transport vs callback-registry concerns; `syncRequest.ts` + `offlineQueue.ts` → sync client slice; `apiRequest.ts` → api client slice. Design-first.
-4. **Generator `any` cleanup** — devkit type-map emitter emits `Record<string, any>` for function re-exports. Internal refinement.
-5. **Load balancer backend + service forwarding** — §8 steps 11–12. Separate workstream.
+User's design decision: client-side API code goes into `@luckystack/core` (transport is core's responsibility per §2.1); client-side sync code goes into `@luckystack/sync` as an additional package.
+
+Completed:
+
+1. **`offlineQueue.ts` → `packages/core/src/offlineQueue.ts`.** Self-contained FIFO queue for offline API/sync requests. Both apiRequest and syncRequest share it.
+2. **`socketState.ts` new in `packages/core/src/`.** Hosts the mutable module-level `socket: Socket | null` (ESM live binding), `setSocket(next)` setter, `incrementResponseIndex()`, `waitForSocket()`. Single source of truth for the socket client instance across apiRequest (core), syncRequest (sync), and the React hook wiring (src/).
+3. **`apiRequest.ts` → `packages/core/src/apiRequest.ts`.** Imports rewritten: project `config` via `../../../config`, `src/_functions/notify` via deep relative, socket primitives via `./socketState`, core utilities via sibling relative paths (`./responseNormalizer`, `./serviceRoute`, `./socketEvents`). `apiTypes.generated.ts` remains a type-only import via deep relative path — acknowledged as future work (generator should emit `declare module '@luckystack/core'` augmentation so the types aren't reached via path).
+4. **`syncRequest.ts` → `packages/sync/src/syncRequest.ts`.** Same import rewriting pattern. Reaches into `@luckystack/core` via **direct file paths** (not the barrel) — see point 7.
+5. **`src/_sockets/socketInitializer.ts` stays in src/** (project glue — uses `useSocketStatus`, `notify`, `loginPageUrl`, etc.) but now delegates socket-state ownership to core: imports `{ socket, setSocket, incrementResponseIndex, waitForSocket }` via direct path `../../packages/core/src/socketState`. `setSocket(io(...))` on connect; `setSocket(null)` on teardown. Re-exports `socket` / `incrementResponseIndex` / `waitForSocket` for existing callers that still import these from this file (with targeted `unicorn/prefer-export-from` disable — needed because we also need local access to the `socket` binding for the hook body).
+6. **Shims at `src/_sockets/{apiRequest,syncRequest,offlineQueue}.ts`** point at canonical locations via direct file paths.
+7. **Barrel split for packages with client + server surfaces.** Discovered that `export { apiRequest } from './apiRequest'` in the core barrel pulls React-coupled project code (notify → TranslationProvider.tsx) into the server tsconfig build (which has no `jsx` setting). Same for `syncRequest` in sync's barrel. Fix:
+   - `packages/core/src/index.ts` — server-safe surface only; does NOT re-export `apiRequest`.
+   - `packages/core/src/client.ts` — new file; exports `apiRequest`, `ApiStreamEvent`.
+   - `packages/sync/src/index.ts` — server-safe; only `handleSyncRequest`, `handleHttpSyncRequest`.
+   - `packages/sync/src/client.ts` — new file; exports `syncRequest`, `useSyncEvents`, `useSyncEventTrigger`, `initSyncRequest`, stream event types.
+   - `tsconfig.server.json` `exclude` adds the four client files (`apiRequest.ts`, `client.ts` in both core and sync) to prevent transitive pickup via `packages/*/src/**/*` includes.
+8. **Vite bundle also had a barrel problem.** Any `src/` file that did `import … from '@luckystack/core'` caused Vite to follow the barrel and bundle server-only Node-API utilities (`paths.ts` with `fileURLToPath`) into the browser. Fixed by updating `src/_sockets/socketInitializer.ts` and `packages/sync/src/syncRequest.ts` to use direct file paths into core (not the barrel). `src/settings/_api/updateUser_v1.ts` keeps using the barrel because it's server-side (`src/**/_api/**` excluded from client tsconfig). Project-side client code must import core utilities via direct paths OR use `packages/core/src/client.ts` for client-only surface.
+9. `npm run lint` + `npm run build` pass clean. `dist/server.js` = 212.7 KB (stable); client bundle 825.5 KB.
+
+New invariants documented:
+
+- **Client/server barrel split rule**: packages with both slices use `src/index.ts` (server-safe) + `src/client.ts` (React / browser-coupled). Neither barrel transitively imports the other. `tsconfig.server.json` excludes all `client.ts` files and the React-coupled source files they re-export.
+- **Barrel vs direct-path rule**: project-side client code and cross-package internal code imports via direct file paths (`../../packages/<pkg>/src/<file>`), not `@luckystack/<pkg>` barrels. The barrels are meant for the future public surface (when packages are published to npm) — within the monorepo, direct paths avoid barrel-pulls-everything issues in both Vite (client, no Node APIs) and server tsconfig (server, no JSX).
+
+Package layer map after this pass:
+
+```
+@luckystack/core       (base: transport, utilities, DI, hooks, CORS, runtime validation)
+                        - index.ts: server-safe surface
+                        - client.ts: apiRequest (React-coupled via notify)
+                        - socketState / offlineQueue: shared client primitives
+   ↑
+@luckystack/login      (auth + session)
+   ↑
+@luckystack/presence   (hook-registered postLogout handler; no circular with login)
+@luckystack/sentry     @luckystack/sync                     @luckystack/api
+                        - index.ts: server handlers          (server handlers)
+                        - client.ts: syncRequest + hooks
+
+@luckystack/devkit     (dev-time only; external in prod bundle)
+```
+
+---
+
+## 32) Next Session Plan
+
+1. **`server/sockets/socket.ts`** — probably stays in server/ as project glue (mixes `locationProviderEnabled`, `socketActivityBroadcaster`, session room persistence, etc.). Decision documented; move on.
+2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project provides translate. Design-first.
+3. **Generator `any` cleanup** — devkit type-map emitter emits `Record<string, any>` for function re-exports. Internal refinement.
+4. **`apiTypes.generated.ts` decoupling** — change emitter to output `declare module '@luckystack/core'` augmentation instead of a standalone file. Removes the deep-relative type-only import in apiRequest.ts / syncRequest.ts.
+5. **Load balancer + service forwarding** (§8 steps 11-12) — separate workstream.

@@ -21,6 +21,22 @@ export type { ValidationResult } from './validateRequest';
 export { checkRateLimit, getRateLimitStatus, clearRateLimit, clearAllRateLimits } from './rateLimiter';
 export { validateInputByType } from './runtimeTypeValidation';
 export { default as allowedOrigin } from './checkOrigin';
+export {
+  isOnline,
+  enqueueApiRequest,
+  enqueueSyncRequest,
+  removeApiQueueItem,
+  removeSyncQueueItem,
+  removeApiQueueItemsByKey,
+  flushApiQueue,
+  flushSyncQueue,
+  getApiQueueSize,
+  getSyncQueueSize,
+} from './offlineQueue';
+export { socket, setSocket, incrementResponseIndex, waitForSocket } from './socketState';
+// `apiRequest` is exported from `./client.ts` — it imports React-coupled
+// project code (notify → TranslationProvider.tsx) that must not be pulled
+// into server compilation via this server-safe barrel.
 export { registerHook, dispatchHook } from './hooks/registry';
 export type { DispatchResult } from './hooks/registry';
 export type {
