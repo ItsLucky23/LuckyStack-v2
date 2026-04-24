@@ -40,6 +40,9 @@
       ],
       "@luckystack/devkit": [
         "./packages/devkit/src/index.ts"
+      ],
+      "@luckystack/presence": [
+        "./packages/presence/src/index.ts"
       ]
     },
     "lib": [
@@ -59,6 +62,7 @@
     "packages/sentry/src/**/*",
     "packages/api/src/**/*",
     "packages/devkit/src/**/*",
+    "packages/presence/src/**/*",
     "src/**/_api/**/*",
     "src/**/_sync/**/*",
     "src/**/_server/**/*",

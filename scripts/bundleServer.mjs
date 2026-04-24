@@ -46,6 +46,7 @@ const run = async () => {
       '@luckystack/sync': path.join(root, 'packages/sync/src/index.ts'),
       '@luckystack/sentry': path.join(root, 'packages/sentry/src/index.ts'),
       '@luckystack/api': path.join(root, 'packages/api/src/index.ts'),
+      '@luckystack/presence': path.join(root, 'packages/presence/src/index.ts'),
     },
   });
 };

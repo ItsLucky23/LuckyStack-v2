@@ -1095,10 +1095,52 @@ dist/server.js.map   385.3kb   ← down from 14.1mb
 
 ---
 
-## 29) Next Session Plan
+## 29) Session Log (2026-04-24, tenth pass — @luckystack/presence extraction)
 
-1. **`server/sockets/socket.ts` + `server/sockets/utils/activityBroadcaster.ts` review** — `socket.ts` wires socket.io + dispatches to api/sync. Decide: `@luckystack/transport` package or fold into core. `activityBroadcaster.ts` is presence-adjacent, will likely land in `@luckystack/presence`.
-2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory, project wires up its own translate fn. Design-first.
+Completed:
+
+1. **`@luckystack/presence` scaffolded** at `packages/presence/` with `package.json` + `src/index.ts` barrel. Path alias added to both `tsconfig.server.json` + `tsconfig.client.json` (paths + include) and `scripts/bundleServer.mjs` (esbuild alias). Presence IS a runtime dep of login for the logout-cleanup path (see point 4), so it goes in the runtime alias map — unlike devkit.
+2. **Activity broadcaster moved** — `server/sockets/utils/activity/{leaveRoom,lifecycle,peerNotifier,state}.ts` → `packages/presence/src/activity/{...}` (4 files, ~225 LOC) + barrel `server/sockets/utils/activityBroadcaster.ts` replicated in `packages/presence/src/index.ts`.
+3. **Import rewrites inside presence**:
+   - `SessionLayout` from `../../../../config` → dropped; return type of `socketLeaveRoom` is now inferred from `getSession` (flows back as project-level `SessionLayout` without the package needing to import it)
+   - `getSession` / `deleteSession` from `../../../functions/session` → `@luckystack/login`
+   - `extractTokenFromSocket` from `../../../utils/extractToken` → `@luckystack/core`
+   - `socketEventNames` from `../../../../shared/socketEvents` → `@luckystack/core`
+   - `ioInstance` from `../../socket` → `../../../../server/sockets/socket` (deep relative — socket.ts itself is not yet in a package)
+4. **Caller updates**:
+   - `packages/login/src/logout.ts` — `disconnectTimers` + `tempDisconnectedSockets` now imported from `@luckystack/presence` (was deep relative into `server/sockets/utils/activityBroadcaster`).
+   - `server/sockets/socket.ts` — `initAcitivityBroadcaster`, `socketConnected`, `socketDisconnecting`, `socketLeaveRoom` now imported from `@luckystack/presence` (was `./utils/activityBroadcaster`).
+5. **Shims left** at `server/sockets/utils/activityBroadcaster.ts` and each of the four `server/sockets/utils/activity/*.ts` files (per the shim-path rule: direct relative to `packages/presence/src/...`).
+6. **Type adjustment**: the move surfaced a latent type-flow issue — `socketLeaveRoom` previously returned `Promise<SessionLayout | null>` (project type). Moving the file into presence tried to narrow it to `BaseSessionLayout | null` which was not assignable to the project `SessionLayout` variable in `socket.ts`. Resolved by removing the explicit return type; TS infers it from `getSession`, which still returns the project-level `SessionLayout`. Framework-generic callers can treat it as `BaseSessionLayout | null` structurally.
+7. `npm run lint` and `npm run build` pass clean. `dist/server.js` stays at 211.5 KB (presence bundled as expected; devkit still excluded).
+
+Known dependency direction (documented, not blocking):
+
+- `@luckystack/login` → `@luckystack/presence` (via `logout.ts` importing `disconnectTimers` + `tempDisconnectedSockets`)
+- `@luckystack/presence` → `@luckystack/login` (via `getSession` / `deleteSession`)
+
+This is a circular dependency at the package boundary. It works because the circular use is resolved at runtime (not at module-load time — both packages just reference the same module via the path alias). Documented in §29.3's design note: breaking it requires either moving presence-state cleanup out of logout (into a `postLogout` hook handler registered by presence) OR moving `getSession`/`deleteSession` into a core/session-contract layer that both can depend on. Deferred — not causing concrete issues today.
+
+Package layer map after this pass:
+
+```
+@luckystack/core       (base: transport, utilities, DI, hooks, runtime type validation)
+   ↑
+@luckystack/login     ⇄  @luckystack/presence
+   ↑                        ↑
+@luckystack/sentry      @luckystack/sync      @luckystack/api
+   (feature peers — none depend on each other)
+
+@luckystack/devkit     (dev-time tooling; not in prod bundle alias map)
+```
+
+---
+
+## 30) Next Session Plan
+
+1. **`server/sockets/socket.ts` review/move** — still the last server-side non-project file outside packages. Wires socket.io + dispatches to api/sync + calls presence lifecycle hooks. Decision: fold into core as "transport wiring" (per §2.1 core owns transport contract) or create a `@luckystack/transport` package. Socket.ts currently reaches into config + login + presence + core; whichever home it gets, the coupling is real.
+2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project wires up its own translate fn. Design-first.
 3. **Client-side sync/API split** — `src/_sockets/socketInitializer.ts` splits transport vs callback-registry concerns; `syncRequest.ts` + `offlineQueue.ts` → `packages/sync/src/` client slice; `apiRequest.ts` → `packages/api/src/` client slice. Design-first.
-4. **Generator `any` cleanup** — the type-map emitter in `@luckystack/devkit` emits `Record<string, any>` for function re-exports (see `Functions.db.prisma: any` in the generated `apiTypes.generated.ts`). Devkit improvement: emit the actual resolved types. Would drop the two `eslint-disable-next-line` comments from `src/settings/_api/updateUser_v1.ts` and any future callers.
-5. **`@luckystack/presence`** — after the socket and activity-broadcaster split.
+4. **Generator `any` cleanup** — devkit type-map emitter emits `Record<string, any>` for function re-exports. Internal refinement.
+5. **Login ⇄ presence circular fix** — move presence-state cleanup from `logout.ts` into a `postLogout` hook handler registered by presence at its init. Presence becomes a one-way dependent on login.
+6. **Load balancer backend + service forwarding** — §8 steps 11–12. Separate workstream.

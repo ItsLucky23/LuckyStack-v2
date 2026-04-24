@@ -2,70 +2,67 @@
 
 ## Session Summary
 Branch `chore/package-split-prep`. After the last commit, this sitting:
-- Excluded `@luckystack/devkit` entirely from the production bundle (**97.8% size reduction: 9.9 MB → 212 KB**) by making `server/prod/runtimeMaps.ts` lazy-import the devkit via `await import('@luckystack/devkit')`, adding the package to esbuild's `external` list, and consolidating the two dev imports in `server/server.ts` into one devkit barrel import.
-- Deleted the redundant `server/functions/tryCatch.ts` wrapper; the one remaining caller (`src/settings/_api/updateUser_v1.ts`) now imports `tryCatch` directly from `@luckystack/core`.
-- Added two explanatory `eslint-disable-next-line` comments in `updateUser_v1.ts` for pre-existing `any`-type issues that surfaced when the eslint cache was invalidated.
-- Added `@luckystack/devkit` to `tsconfig.client.json` paths for eslint import-x resolver consistency.
+- Extracted `@luckystack/presence` — the activity-broadcaster lives there now. Login (logout) + server/sockets/socket.ts consume it via the barrel.
+- Documented a circular `login ⇄ presence` dependency that we accept for now (logout needs to clean up presence state; presence needs login's session API). Fix sketched in §30.5.
 
-`npm run lint` and `npm run build` pass clean.
+`npm run lint` and `npm run build` pass clean. `dist/server.js` = 211.5 KB.
 
-## Completed on this branch (cumulative)
+## §8 Execution Order progress
 
-**Core (`@luckystack/core`):**
-- `shared/` utilities, env/db/redis bootstrap, 11 server utilities, hooks registry (augmentable), `runtimeTypeValidation`
+| # | Step | Status |
+|---|------|--------|
+| 1 | Freeze v1 package map | ✅ |
+| 2 | Hook inventory + ownership | ✅ |
+| 3 | Finalize core boundaries | ✅ |
+| 4 | Project-level `functions/` contract | ✅ (Phase 1; Phase 2 pruning deferred) |
+| 5 | Extract login | ✅ |
+| 6 | Extract sync | ⚠️ server-side done; **client-side pending** |
+| 7 | Extract presence | ✅ (this session) |
+| 8 | Sentry package | ✅ |
+| 9 | Ship devkit | ✅ (+ excluded from prod bundle) |
+| 10 | Service-scoped backend build | ✅ (presets generate) |
+| 11 | Load balancer backend | ⬜ not started |
+| 12 | Dev forwarding to staging | ⬜ not started |
 
-**Login (`@luckystack/login`):**
-- session/login/loginConfig/logout + `sessionLayout.ts` (owns `BaseSessionLayout`, `AuthProps`) + `hookPayloads.ts` (augments `HookPayloads`)
+**Plus bonus**: `@luckystack/api` (extracted because handlers import login) and the project-level `functions/` override mechanism.
 
-**Sync (`@luckystack/sync`):** `handleSyncRequest`, `handleHttpSyncRequest`
-
-**API (`@luckystack/api`):** `handleApiRequest`, `handleHttpApiRequest`
-
-**Sentry (`@luckystack/sentry`):** `sentry.ts` (concrete `@sentry/node` wiring; DI surface stays in core)
-
-**Devkit (`@luckystack/devkit`):** `server/dev/**` (21 files) + `runtimeTypeResolver`. **Not in prod bundle** — external in esbuild, lazy-imported behind `NODE_ENV !== 'production'` guards.
-
-**Other cleanups:**
-- `server/functions/game.ts` replaced by project-level `functions/game.ts`
-- `server/functions/tryCatch.ts` deleted (redundant wrapper)
-- All originals left as one-liner re-export shims (direct file paths)
-
-## Package dependency layers
+## Current package map
 
 ```
-@luckystack/core      (base: transport, utilities, DI surfaces, hooks, runtime type validation)
+@luckystack/core       (base: transport, utilities, DI, hooks, runtime type validation)
    ↑
-@luckystack/login     (auth + session; owns BaseSessionLayout, AuthProps; augments HookPayloads)
-   ↑
-@luckystack/sentry    @luckystack/sync    @luckystack/api
+@luckystack/login    ⇄  @luckystack/presence    (circular — see §29 known debt)
+   ↑                          ↑
+@luckystack/sentry     @luckystack/sync      @luckystack/api
    (feature peers — none depend on each other)
 
-@luckystack/devkit    (dev-time tooling; external in prod bundle; peer packages only at dev time)
+@luckystack/devkit     (dev-time tooling; external in prod bundle)
 ```
 
-Production bundle (`dist/server.js`): **211.7 KB**. Devkit internals (typescript compiler, type emitter, hot reload, etc.) fully excluded.
+**Production bundle (`dist/server.js`): 211.5 KB** (from 9.9 MB baseline before devkit exclusion).
 
-## NEXT TASK (per §29)
+## NEXT TASK (per §30)
 
-1. **`server/sockets/socket.ts` + `activityBroadcaster.ts` review** — decide: `@luckystack/transport` or fold socket.ts into core. `activityBroadcaster.ts` → likely `@luckystack/presence`.
-2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory, project wires up its own translate fn. Design-first.
-3. **Client-side sync/API split** — `socketInitializer.ts` transport vs callback registries; `syncRequest.ts` + `offlineQueue.ts` → sync client slice; `apiRequest.ts` → api client slice. Design-first.
-4. **Generator `any` cleanup** — devkit type-map emitter emits `Record<string, any>` for function re-exports (see `Functions.db.prisma: any` in the generated `apiTypes.generated.ts`). Devkit internal improvement; would drop the `eslint-disable` comments from `updateUser_v1.ts` and any future callers.
-5. **`@luckystack/presence`** — after the socket and activity-broadcaster split.
+1. **`server/sockets/socket.ts` review/move** — last server-side file outside packages. Decide: fold into core (transport is core's responsibility per §2.1) or make a `@luckystack/transport` package.
+2. **`responseNormalizer` split** — `createLocalizedNormalizer({ translate })` factory. Design-first.
+3. **Client-side sync/API split** — `socketInitializer.ts` split; `syncRequest.ts` + `offlineQueue.ts` → sync client slice; `apiRequest.ts` → api client slice. Design-first.
+4. **Login ⇄ presence circular fix** — move logout's presence-state cleanup into a `postLogout` hook handler registered by presence at init. Makes presence a one-way dependent on login.
+5. **Devkit type-emitter cleanup** — `Record<string, any>` → resolved types.
+6. **Load balancer + service forwarding** (§8 steps 11-12) — separate workstream.
 
 ## Technical State
 
 - Branch: `chore/package-split-prep`
 - `npm run lint` — clean
-- `npm run build` — clean (vite 462 modules ~3.9s; **dist/server.js 211.7 KB**)
+- `npm run build` — clean (vite 462 modules ~3.8s; dist/server.js 211.5 KB)
 - Current changes unstaged since last commit
 
 ## Key invariants (still in force)
 
 - **Shim path rule**: shims use direct file paths (`../../packages/<pkg>/src/<file>`), never barrel.
-- **Script-exit rule**: tsx-run scripts that import any `@luckystack/*` barrel MUST end with `process.exit(0)` — the core barrel opens a Redis connection that keeps the event loop alive.
-- **Devkit externality rule**: all runtime code that needs devkit must use `await import('@luckystack/devkit')` behind an `env.NODE_ENV !== 'production'` guard. Static imports OR non-alias paths bundle devkit into prod.
-- **Type ownership**: `AuthProps` + `BaseSessionLayout` in login; `HookSessionShape` in core (structurally compatible); `SessionLayout` in project `config.ts`.
-- **Hook payload ownership**: core owns api/sync payloads; feature packages add their own via `declare module '@luckystack/core' { interface HookPayloads { ... } }` in their own `hookPayloads.ts` + side-effect import from `index.ts`.
-- **Sentry split**: DI surface (`initSharedSentry` + `captureException`/etc.) in core; concrete `@sentry/node` init in `@luckystack/sentry`. Framework code calls `captureException` via core, so core never depends on sentry.
-- **Package-listing parity rule**: every `@luckystack/*` package must appear in both `tsconfig.server.json` and `tsconfig.client.json` paths + include — eslint-plugin-import-x's typescript resolver fails on aliases that exist in only one.
+- **Script-exit rule**: tsx-run scripts that import any `@luckystack/*` barrel MUST end with `process.exit(0)` (Redis connection holds event loop open).
+- **Devkit externality rule**: runtime code that needs devkit must use `await import('@luckystack/devkit')` behind `env.NODE_ENV !== 'production'`. Static imports bundle it in.
+- **Package-listing parity rule**: every `@luckystack/*` package must be listed in both tsconfigs (paths + include) — eslint-plugin-import-x fails on one-sided aliases.
+- **Type ownership**: `AuthProps` + `BaseSessionLayout` in login; `HookSessionShape` in core (structurally compatible); `SessionLayout` in project `config.ts` (extends Prisma `User`).
+- **Hook payload ownership**: core owns api/sync; feature packages augment via `declare module '@luckystack/core' { interface HookPayloads { ... } }`.
+- **Sentry split**: DI surface in core; concrete `@sentry/node` init in sentry package.

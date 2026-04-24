@@ -9,7 +9,7 @@ import { getSession, saveSession } from "../functions/session";
 import { Server as SocketIOServer } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
 import allowedOrigin from '../auth/checkOrigin';
-import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from './utils/activityBroadcaster';
+import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from '@luckystack/presence';
 import { locationProviderEnabled, logging, SessionLayout, socketActivityBroadcaster } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
 import {

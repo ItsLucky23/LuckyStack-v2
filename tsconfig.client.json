@@ -49,6 +49,9 @@
       ],
       "@luckystack/devkit": [
         "./packages/devkit/src/index.ts"
+      ],
+      "@luckystack/presence": [
+        "./packages/presence/src/index.ts"
       ]
     }
   },
@@ -60,7 +63,8 @@
     "packages/sync/src",
     "packages/sentry/src",
     "packages/api/src",
-    "packages/devkit/src"
+    "packages/devkit/src",
+    "packages/presence/src"
   ],
   "exclude": [
     "src/**/_api/**",

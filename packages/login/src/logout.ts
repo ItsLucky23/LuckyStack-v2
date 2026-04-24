@@ -2,7 +2,7 @@
 /* eslint-disable */
 import { Socket } from "socket.io";
 import { redis as redisClient, tryCatch, socketEventNames, dispatchHook } from '@luckystack/core';
-import { disconnectTimers, tempDisconnectedSockets } from "../../../server/sockets/utils/activityBroadcaster";
+import { disconnectTimers, tempDisconnectedSockets } from "@luckystack/presence";
 import { deleteSession } from "./session";
 
 export const logout = async ({ token, socket, userId, skipSessionDelete }: {
