@@ -8,7 +8,7 @@ import handleApiRequest from "./handleApiRequest";
 import { getSession, saveSession } from "../functions/session";
 import { Server as SocketIOServer } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
-import allowedOrigin from '../auth/checkOrigin';
+import { allowedOrigin } from '@luckystack/core';
 import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from '@luckystack/presence';
 import { locationProviderEnabled, logging, SessionLayout, socketActivityBroadcaster } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';

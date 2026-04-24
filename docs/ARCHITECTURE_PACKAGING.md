@@ -1136,11 +1136,45 @@ Package layer map after this pass:
 
 ---
 
-## 30) Next Session Plan
+## 30) Session Log (2026-04-24, eleventh pass — login ⇄ presence circular fix + checkOrigin to core)
 
-1. **`server/sockets/socket.ts` review/move** — still the last server-side non-project file outside packages. Wires socket.io + dispatches to api/sync + calls presence lifecycle hooks. Decision: fold into core as "transport wiring" (per §2.1 core owns transport contract) or create a `@luckystack/transport` package. Socket.ts currently reaches into config + login + presence + core; whichever home it gets, the coupling is real.
+Completed:
+
+1. **Broke the login ⇄ presence circular dependency.** Created `packages/presence/src/hooks.ts` exporting `registerPresenceHooks()`, which registers a `postLogout` handler on the core hook registry. The handler clears `disconnectTimers` and `tempDisconnectedSockets` for the logged-out token — the exact cleanup that used to live inline at the top of `@luckystack/login`'s `logout()` function.
+2. **Removed presence imports from `packages/login/src/logout.ts`.** The file no longer references `disconnectTimers` / `tempDisconnectedSockets`. Left a comment pointing to the hook handler for anyone tracing the cleanup flow.
+3. **Wired `registerPresenceHooks()` at server startup** in `server/server.ts`, immediately after `initializeSentry()`. Registration is idempotent (guarded by a module-level `registered` flag inside `hooks.ts`), so re-imports from tests or alternate entry points are safe.
+4. **Timing change documented**: the cleanup now runs AFTER `deleteSession` + socket.leave + the rest of the logout work, instead of before. Safe because (a) the timer's own callback gates on `tempDisconnectedSockets.has(token)` at its very first line, so a timer firing during the race window returns early once the hook runs, (b) all underlying operations are idempotent.
+5. **TypeScript quirk**: `HookHandler<T>` requires a return type of `HookResult | Promise<HookResult>` where `HookResult = undefined | HookStopSignal`. A handler with no explicit return was inferred as `void`, which TS does not accept. Fix: explicit `: HookResult` annotation + explicit `return undefined` branches.
+
+Additional move this pass:
+
+6. **`server/auth/checkOrigin.ts` → `packages/core/src/checkOrigin.ts`.** CORS origin allow-listing; self-contained (env-driven, no internal imports). Exported from the core barrel as `allowedOrigin`. Shim left at the original path; both callers (`server/server.ts`, `server/sockets/socket.ts`) updated to import directly from `@luckystack/core`.
+
+Package layer map after this pass:
+
+```
+@luckystack/core       (base: transport, utilities, DI, hooks, runtime type validation, CORS allowlist)
+   ↑
+@luckystack/login        (auth + session; owns BaseSessionLayout, AuthProps; augments HookPayloads)
+   ↑                  ↘
+@luckystack/sentry      @luckystack/presence   (presence registers postLogout handler on core,
+                                                no direct login import)
+@luckystack/sync        @luckystack/api
+   (feature peers — none depend on each other)
+
+@luckystack/devkit     (dev-time tooling; external in prod bundle)
+```
+
+All packages now have one-way dependencies (presence → login via `getSession`/`deleteSession`; login does NOT import presence).
+
+`npm run lint` and `npm run build` pass clean. `dist/server.js` = 212.2 KB.
+
+---
+
+## 31) Next Session Plan
+
+1. **`server/sockets/socket.ts` review/move** — still the last non-trivial server-side file outside packages. 242 lines; heavily mixes transport setup, session-aware room management, location provider logic, and activity broadcaster. Decision: probably **stays in server/** long-term because project-specific configuration (`locationProviderEnabled`, `socketActivityBroadcaster`, `SessionLayout`, session room persistence) dominates the file. Document as "project glue" in §2 and move on. Alternative: design a `loadSocket({ handlers, lifecycle, config })` factory in core that `server/sockets/socket.ts` thin-wraps — big refactor, not worth it for §8 completion.
 2. **`responseNormalizer` split** — framework `createLocalizedNormalizer({ translate })` factory; project wires up its own translate fn. Design-first.
-3. **Client-side sync/API split** — `src/_sockets/socketInitializer.ts` splits transport vs callback-registry concerns; `syncRequest.ts` + `offlineQueue.ts` → `packages/sync/src/` client slice; `apiRequest.ts` → `packages/api/src/` client slice. Design-first.
+3. **Client-side sync/API split** — `src/_sockets/socketInitializer.ts` splits transport vs callback-registry concerns; `syncRequest.ts` + `offlineQueue.ts` → sync client slice; `apiRequest.ts` → api client slice. Design-first.
 4. **Generator `any` cleanup** — devkit type-map emitter emits `Record<string, any>` for function re-exports. Internal refinement.
-5. **Login ⇄ presence circular fix** — move presence-state cleanup from `logout.ts` into a `postLogout` hook handler registered by presence at its init. Presence becomes a one-way dependent on login.
-6. **Load balancer backend + service forwarding** — §8 steps 11–12. Separate workstream.
+5. **Load balancer backend + service forwarding** — §8 steps 11–12. Separate workstream.

@@ -13,7 +13,9 @@
       "Read(//tmp/**)",
       "Bash(xargs wc *)",
       "Bash(cp -r server/dev/typeMap packages/devkit/src/typeMap)",
-      "Bash(cp -r server/dev/templates packages/devkit/src/templates)"
+      "Bash(cp -r server/dev/templates packages/devkit/src/templates)",
+      "Bash(echo \"LINT_EXIT=$?\")",
+      "Bash(echo \"BUILD_EXIT=$?\")"
     ]
   }
 }

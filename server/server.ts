@@ -2,11 +2,13 @@
 /* eslint-disable */
 import { config as loadEnv } from 'dotenv';
 import { initializeSentry } from './functions/sentry';
+import { registerPresenceHooks } from '@luckystack/presence';
 import path from 'node:path';
 
 loadEnv({ path: '.env' });
 loadEnv({ path: '.env.local', override: true });
 initializeSentry();
+registerPresenceHooks();
 
 import http from 'node:http';
 import getParams from './utils/getParams';
@@ -16,7 +18,7 @@ import loadSocket from './sockets/socket';
 import { z } from 'zod';
 import oauthProviders from "./auth/loginConfig";
 import { deleteSession, getSession } from './functions/session';
-import allowedOrigin from './auth/checkOrigin';
+import { allowedOrigin } from '@luckystack/core';
 import { logging, rateLimiting, sessionBasedToken, sessionExpiryDays, SessionLayout } from '../config';
 
 import { serveAvatar } from './utils/serveAvatars';

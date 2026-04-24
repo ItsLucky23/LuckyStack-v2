@@ -7,3 +7,4 @@ export {
   tempDisconnectedSockets,
   clientSwitchedTab,
 } from './activity/state';
+export { registerPresenceHooks } from './hooks';
