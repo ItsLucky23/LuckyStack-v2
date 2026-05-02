@@ -28,7 +28,14 @@ export {
   notify,
 } from './notifier';
 export type { Notifier, NotifyInput, NotifyParam } from './notifier';
+export {
+  registerDeployConfig,
+  getDeployConfig,
+  isDeployConfigRegistered,
+} from './deployConfigRegistry';
+export type { DeployConfigShape, DeployResourceShape } from './deployConfigRegistry';
 export type { statusContent, SOCKETSTATUS } from './socketStatusTypes';
+export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionTypes';
 export type {
   ProjectConfig,
   LoggingConfig,

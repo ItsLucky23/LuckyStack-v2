@@ -2,7 +2,7 @@
 /* eslint-disable */
 import type { apiMessage } from '@luckystack/core';
 import { getSession, logout } from '@luckystack/login';
-import type { SessionLayout } from '../../../config';
+import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
 import { getProjectConfig } from '@luckystack/core';
 import type { AuthProps } from '@luckystack/login';
 import { Socket } from 'socket.io';

@@ -6,11 +6,12 @@ import { IncomingMessage, ServerResponse } from 'node:http';
 import { URLSearchParams } from 'node:url';
 import { prisma, tryCatch, redis as redisClient, serverRuntimeConfig, UPLOADS_DIR, dispatchHook } from '@luckystack/core';
 import { PROVIDERS } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { saveSession } from "./session"
 import validator from 'validator';
-import type { SessionLayout } from '../../../config';
+import type { BaseSessionLayout as SessionLayout } from './sessionLayout';
 import { getProjectConfig } from '@luckystack/core';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -145,7 +146,7 @@ const loginWithCredentials = async (params: paramsType) => {
           avatar: '',
           avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
           admin: false,
-          language: getProjectConfig().defaultLanguage as SessionLayout["language"]
+          language: getProjectConfig().defaultLanguage as Prisma.UserCreateInput['language']
         }
       })
     }
@@ -388,7 +389,7 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
             name,
             avatar,
             avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
-            language: getProjectConfig().defaultLanguage as SessionLayout["language"]
+            language: getProjectConfig().defaultLanguage as Prisma.UserCreateInput['language']
           }
         })
       }

@@ -1,21 +1,28 @@
-import type { SessionLayout } from "../../../config";
-import { getProjectConfig } from "../../core/src/projectConfig";
-import { notify } from "../../core/src/notifier";
-// Import from specific core files (not the barrel) so Vite's client build does
-// not pull server-only Node-API utilities (paths.ts, env.ts, etc.) into the
-// browser bundle. Same rule as `packages/core/src/apiRequest.ts`.
-import { incrementResponseIndex, socket, waitForSocket } from "../../core/src/socketState";
-import { enqueueSyncRequest, isOnline } from "../../core/src/offlineQueue";
-import { normalizeErrorResponseCore } from "../../core/src/responseNormalizer";
-import { parseServiceRouteName } from "../../core/src/serviceRoute";
+//? All cross-package imports go through `@luckystack/core/client` (the
+//? browser-safe subpath) — never the main `@luckystack/core` barrel which
+//? re-exports server-only modules (paths.ts, db.ts, redis.ts) that must
+//? not enter a Vite client bundle.
+import type {
+  BaseSessionLayout as SessionLayout,
+  StreamPayload,
+  SyncTypeMap,
+  statusContent,
+} from "@luckystack/core/client";
 import {
+  getProjectConfig,
+  notify,
+  incrementResponseIndex,
+  socket,
+  waitForSocket,
+  enqueueSyncRequest,
+  isOnline,
+  normalizeErrorResponseCore,
+  parseServiceRouteName,
   buildSyncProgressEventName,
   buildSyncResponseEventName,
   socketEventNames,
-} from "../../core/src/socketEvents";
-import type { statusContent } from "../../core/src/socketStatusTypes";
+} from "@luckystack/core/client";
 import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useRef } from "react";
-import type { StreamPayload, SyncTypeMap } from "../../core/src/apiTypeStubs";
 import { Socket } from "socket.io-client";
 
 export type SyncRequestStreamEvent<T extends StreamPayload = StreamPayload> = T;
@@ -450,26 +457,29 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
 // useSyncEvents Hook - Type-Safe Event Registration
 // ═══════════════════════════════════════════════════════════════════════════════
 
+//? Hoisted to module scope so the emitted `.d.ts` for `useSyncEvents` can
+//? reference them. Local interface declarations inside an exported function
+//? trigger TS4025 ("has or is using private name") under `declaration: true`.
+interface TypedCallbackParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
+  clientOutput: ClientOutputForFullName<F, V>;
+  serverOutput: ServerOutputForFullName<F, V>;
+}
+
+interface UpsertParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
+  name: F;
+  version: V;
+  callback: (params: TypedCallbackParams<F, V>) => void;
+}
+
+interface UpsertStreamParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
+  name: F;
+  version: V;
+  callback: SyncRouteStreamCallbackForFullName<F, V>;
+}
+
 export const useSyncEvents = () => {
   const localRegistryRef = useRef<Map<string, SyncEventCallback>>(new Map());
   const localStreamRegistryRef = useRef<Map<string, SyncEventStreamCallback>>(new Map());
-
-  interface TypedCallbackParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
-    clientOutput: ClientOutputForFullName<F, V>;
-    serverOutput: ServerOutputForFullName<F, V>;
-  }
-
-  interface UpsertParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
-    name: F;
-    version: V;
-    callback: (params: TypedCallbackParams<F, V>) => void;
-  }
-
-  interface UpsertStreamParams<F extends SyncFullName, V extends VersionsForFullName<F>> {
-    name: F;
-    version: V;
-    callback: SyncRouteStreamCallbackForFullName<F, V>;
-  }
 
   const upsertSyncEventCallback = useCallback(<F extends SyncFullName, V extends VersionsForFullName<F>>(
     params: UpsertParams<F, V>

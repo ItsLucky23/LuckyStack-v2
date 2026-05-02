@@ -1,3 +1,8 @@
+//? Import from the specific file (not the @luckystack/core barrel) so any
+//? client-bundled file that pulls deploy.config.ts won't drag server-only
+//? core modules (Redis, paths, etc.) into the browser. Same rule as config.ts.
+import { registerDeployConfig } from './packages/core/src/deployConfigRegistry';
+
 /**
  * DEPLOY CONFIG (per-environment runtime topology)
  *
@@ -139,5 +144,10 @@ const deployConfig = defineDeploy<'development' | 'staging' | 'production'>({
     switchNewTrafficToLocalWhenHealthy: true,
   },
 });
+
+//? Side-effect registration: any import of this file wires the deploy
+//? topology into @luckystack/core so framework packages (e.g.,
+//? synchronizedEnvHashes) can read it without `import '../../../deploy.config'`.
+registerDeployConfig({ resources: deployConfig.resources });
 
 export default deployConfig;

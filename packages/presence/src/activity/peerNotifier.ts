@@ -2,14 +2,13 @@
 
 import { Server } from 'socket.io';
 
-import { extractTokenFromSocket, socketEventNames } from '@luckystack/core';
+import { extractTokenFromSocket, getIoInstance, socketEventNames } from '@luckystack/core';
 import { getSession } from '@luckystack/login';
-import { ioInstance } from '../../../../server/sockets/socket';
 import { ensureIo } from './state';
 
 export const informRoomPeers = async ({
   token,
-  io = ioInstance,
+  io = getIoInstance(),
   event,
   extraData,
 }: {

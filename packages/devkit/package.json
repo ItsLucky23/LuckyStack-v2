@@ -3,8 +3,48 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
+  "description": "Project-side dev tooling for LuckyStack: hot reload, route discovery, generated type-map emitter, Zod schema emitter, template injection. Tier-B (project-glue, not for npm).",
+  "license": "MIT",
+  "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
+    "directory": "packages/devkit"
+  },
+  "keywords": [
+    "luckystack",
+    "dev-tools",
+    "hot-reload",
+    "code-generation",
+    "type-map",
+    "zod-emitter"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch"
+  },
+  "dependencies": {
+    "@luckystack/core": "^0.0.1",
+    "chokidar": "^4.0.3"
+  },
+  "peerDependencies": {
+    "@prisma/client": "^6.19.3",
+    "typescript": "~5.7.3",
+    "zod": "^3.25.76"
   }
 }

@@ -35,6 +35,12 @@
       "@luckystack/core": [
         "./packages/core/src/index.ts"
       ],
+      "@luckystack/core/client": [
+        "./packages/core/src/client.ts"
+      ],
+      "@luckystack/sync/client": [
+        "./packages/sync/src/client.ts"
+      ],
       "@luckystack/login": [
         "./packages/login/src/index.ts"
       ],
@@ -58,6 +64,9 @@
       ],
       "@luckystack/test-runner": [
         "./packages/test-runner/src/index.ts"
+      ],
+      "@luckystack/server": [
+        "./packages/server/src/index.ts"
       ]
     }
   },
@@ -72,6 +81,7 @@
     "packages/devkit/src",
     "packages/presence/src",
     "packages/router/src",
+    "packages/server/src",
     "packages/test-runner/src"
   ],
   "exclude": [

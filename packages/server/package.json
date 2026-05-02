@@ -1,0 +1,57 @@
+{
+  "name": "@luckystack/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "One-call server bootstrap for LuckyStack: HTTP + Socket.io + framework routes (api, sync, _health, /auth, uploads) wired together. Consumer's server.ts shrinks to ~20 lines.",
+  "license": "MIT",
+  "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
+    "directory": "packages/server"
+  },
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/server#readme",
+  "bugs": {
+    "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
+  },
+  "keywords": [
+    "luckystack",
+    "server",
+    "bootstrap",
+    "socket.io",
+    "http",
+    "framework",
+    "fullstack"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch"
+  },
+  "dependencies": {
+    "@luckystack/api": "^0.0.1",
+    "@luckystack/core": "^0.0.1",
+    "@luckystack/login": "^0.0.1",
+    "@luckystack/presence": "^0.0.1",
+    "@luckystack/sync": "^0.0.1"
+  },
+  "peerDependencies": {
+    "socket.io": "^4.8.3"
+  }
+}

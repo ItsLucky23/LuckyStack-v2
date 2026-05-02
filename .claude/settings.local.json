@@ -18,7 +18,10 @@
       "Bash(echo \"BUILD_EXIT=$?\")",
       "Bash(ROUTER_PORT=4019 timeout 5 npm run router)",
       "Bash(npm info *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npx tsup *)",
+      "Bash(grep -n \"^const\\\\|^function\\\\|^if \\(pathname\\\\|^export\\\\|=> {$\\\\|server.listen\" server/server.ts)"
     ]
   }
 }

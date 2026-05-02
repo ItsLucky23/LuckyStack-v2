@@ -3,7 +3,7 @@
  * Extracted to avoid code duplication between handleApiRequest and handleSyncRequest.
  */
 
-import type { AuthProps, BaseSessionLayout } from '@luckystack/login';
+import type { AuthProps, BaseSessionLayout } from './sessionTypes';
 
 /**
  * Check if a value is falsy (false, 0, 0n, '', null, undefined, or NaN)

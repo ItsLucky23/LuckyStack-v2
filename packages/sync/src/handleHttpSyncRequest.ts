@@ -1,7 +1,7 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
 import { getSession } from "@luckystack/login";
-import type { SessionLayout } from '../../../config';
+import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
 import { getProjectConfig } from '@luckystack/core';
 import type { AuthProps } from '@luckystack/login';
 import { getRuntimeSyncMaps as getRuntimeSyncMapsFromSource } from '@luckystack/core';

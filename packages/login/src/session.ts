@@ -1,4 +1,4 @@
-import type { SessionLayout } from "../../../config";
+import type { BaseSessionLayout as SessionLayout } from "./sessionLayout";
 import { redis, captureException, socketEventNames, dispatchHook, getProjectConfig } from '@luckystack/core';
 
 const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';

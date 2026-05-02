@@ -1444,9 +1444,414 @@ Known gaps / not done this session:
 
 ## 38) Next Session Plan
 
-1. **`SessionLayout` generic-ification** — the only remaining `packages/** → project` value import. Two options: (a) make `handleApiRequest` / `handleHttpApiRequest` / `handleSyncRequest` generic over `TSession extends BaseSessionLayout`, project-level wrappers pass their concrete type. (b) Treat `BaseSessionLayout` from `@luckystack/login` as the framework-visible type; project augmentation extends it via `declare module`. Option (b) is lower-risk.
+1. ~~**`SessionLayout` generic-ification**~~ — **DONE** (§38.1 below). Decoupled by aliasing `BaseSessionLayout` from `@luckystack/login` in all 7 framework files. No generic introduced; structural compatibility from `_SessionLayoutCheck` carries the project shape across.
 2. **fast-check integration** — add `fast-check` as a devDep; write a Zod → Arbitrary adapter for the types the emitter produces. Extend `runFuzzTests` with a property-based pass: generate N valid inputs per endpoint, assert no 5xx and response envelope.
 3. **Zod emitter coverage** — handle intersections (merge object shapes), basic `Pick`/`Omit` by resolving the referenced interface.
 4. **NPM publish dry-run** — with A/B/C closed and `SessionLayout` resolved, try `npm pack` in each framework package. Report remaining blockers (bundled paths, peer deps, etc.).
 5. **Web vitals / Monitoring packages** (§15 backlog) — deferred per current product direction.
 6. **`server/sockets/socket.ts`** — stays in server/ as project glue (already decided).
+
+---
+
+## 38.1) SessionLayout type-only decoupling — COMPLETED
+
+Goal: remove the last `packages/** → ../../../config` import. Strategy: Option B from §38 — treat `BaseSessionLayout` (from `@luckystack/login`) as the framework-visible session type. The project's richer `SessionLayout` extends it (verified by `_SessionLayoutCheck` in `config.ts`), so structural compatibility carries the concrete shape into framework callsites without a generic parameter.
+
+### Pattern applied
+
+```typescript
+// Before
+import type { SessionLayout } from '../../../config';
+
+// After (cross-package callsites)
+import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
+
+// After (intra-login package, avoids barrel self-import)
+import type { BaseSessionLayout as SessionLayout } from './sessionLayout';
+
+// After (client-facing syncRequest, mirrors the Vite-bundle rule already used
+// for `getProjectConfig` / `notify` in apiRequest/syncRequest — import from the
+// specific source file rather than the barrel)
+import type { BaseSessionLayout as SessionLayout } from '../../login/src/sessionLayout';
+```
+
+### Files swept (7)
+
+| File | Type-level usage | Other change |
+| --- | --- | --- |
+| `packages/api/src/handleApiRequest.ts` | `user: SessionLayout \| null` in `RuntimeApiEntry.main` | — |
+| `packages/api/src/handleHttpApiRequest.ts` | `user: SessionLayout \| null` in `RuntimeApiRoute.main` | — |
+| `packages/sync/src/handleSyncRequest.ts` | `user: SessionLayout \| null` in `RuntimeSyncServerEntry.main` | — |
+| `packages/sync/src/handleHttpSyncRequest.ts` | same | — |
+| `packages/sync/src/syncRequest.ts` | `RefObject<SessionLayout \| null>` for `sessionRef` | client-bundle-safe import path |
+| `packages/login/src/session.ts` | `SessionLayout` payload in `saveSession`/`getSession`/`getAllSessions` | — |
+| `packages/login/src/login.ts` | `const newUser: SessionLayout` constructions, `SessionLayout["language"]` casts | language casts replaced with `Prisma.UserCreateInput['language']` (login already pulls `PROVIDERS` from `@prisma/client`, so no new coupling) |
+
+### Why no generic was needed
+
+Option A would have made `handleApiRequest` / `handleHttpApiRequest` / `handleSyncRequest` generic over `TSession extends BaseSessionLayout`. Option B turned out cleaner because:
+
+- All 5 api/sync handler usages of `SessionLayout` are pure type annotations on the runtime-loaded `main` callable, which already takes a generic `Record<string, unknown>` for `data`. Project handlers do their own narrowing on the user object inside their own typed signatures, so framework code never needs to reach into project-specific session fields.
+- `session.ts` only serializes/parses sessions through Redis. Storage is opaque; `BaseSessionLayout`'s loose shape is sufficient.
+- `login.ts` constructs sessions by spreading `Omit<User, 'password'>` (already typed by Prisma) into a `BaseSessionLayout`-typed local. The spread carries every project-specific field structurally; assignment to `BaseSessionLayout` succeeds because Prisma User has all of BaseSessionLayout's required fields. Generic-ification here would just propagate `Prisma.User` outward without buying anything.
+
+### Why `login.ts` decoupling is partial
+
+The login package already imports `prisma`, `PROVIDERS`, and now `Prisma` types from `@prisma/client` (transitively via `@luckystack/core`'s `db.ts`). It will never be publishable as a stand-alone npm package without first generic-ifying over the User shape — which is a much larger surgery than the SessionLayout swap. The SessionLayout decoupling was done here for consistency and to remove the `../../../config` dependency, not because it makes login publishable on its own.
+
+### Audit result
+
+- `packages/** → ../../../config` value imports: **0** (was 7).
+- `packages/** → ../../../config` type imports: **0** (was 7).
+- Remaining `packages/** → project` references: only re-exports (`@luckystack/login` re-exports `SessionLocation`, `AuthProps`); no value or runtime dependency.
+
+### Verification
+
+- `_SessionLayoutCheck` in `config.ts` still compiles (project `SessionLayout` extends `BaseSessionLayout`).
+- `tsc --noEmit` clean.
+- No callsite changes in framework files; the `BaseSessionLayout as SessionLayout` alias keeps every existing `SessionLayout` reference unchanged.
+
+---
+
+## 39) Publishability Audit (npm pack readiness)
+
+With §38.1 complete, the `packages/** → ../../../config` import surface is gone. This section audits what *else* must change before each package can be published to npm.
+
+### 39.0 Audit method
+
+Static read of every `packages/*/package.json` and a grep over `packages/**` for: (a) imports from outside `packages/` (project paths like `../../../config`, `../../../server/...`), (b) cross-package imports (`@luckystack/*`), (c) external npm imports (used to derive each package's true dependency set).
+
+### 39.1 Per-package publishability tier
+
+Three tiers based on intent and remaining coupling:
+
+| Package | Tier | Rationale |
+| --- | --- | --- |
+| `@luckystack/core` | **A — Publishable target** | Foundation layer. Holds DI registries (config, runtime-maps, notifier), socket helpers, Redis. One blocker: `synchronizedEnvHashes.ts` imports `../../../deploy.config`. |
+| `@luckystack/api` | **A — Publishable target** | Now zero project value imports. Pure framework — handlers + HTTP variants. |
+| `@luckystack/sync` | **A — Publishable target** | Same status as api. |
+| `@luckystack/sentry` | **A — Publishable target** | Single file, only consumes `getProjectConfig()` from core. Clean. |
+| `@luckystack/test-runner` | **A — Publishable target** | Dev-only utilities (Zod schema sampler). No project coupling. |
+| `@luckystack/presence` | **A — Publishable target** | After §39.2's `peerNotifier.ts` fix, zero project imports. |
+| `@luckystack/login` | **C — Coupled to project Prisma** | Imports `prisma.user.create` etc. from core's PrismaClient. Would need generic-ification over `User` shape, or registration of a session factory via DI, to be tier-A. Out of scope for the current pass. |
+| `@luckystack/devkit` | **B — Project-glue** | Hot-reload tooling that reads project locale paths and imports `reloadLocaleTranslations` from `server/utils/responseNormalizer`. Stays project-coupled by design — it's dev tooling, not a framework runtime package. |
+| `@luckystack/router` | **B — Project-glue** | Imports `deploy.config` and `services.config` directly. Router topology is project-specific by nature. Could be tier-A if configs were registered via DI, but the value of doing so is unclear since router is project deployment infra. |
+
+### 39.2 Code-level coupling matrix
+
+After §38.1, remaining `packages/** → project` imports:
+
+| Package | File | Import | Disposition |
+| --- | --- | --- | --- |
+| `core` | `synchronizedEnvHashes.ts` | `../../../deploy.config` | **Closed (§39.7)** — `getDeployConfig()` from new `deployConfigRegistry`. |
+| `presence` | `activity/peerNotifier.ts` | `../../../../server/sockets/socket` | **Closed (§39.5)** — `getIoInstance()` from core. |
+| `devkit` | `hotReload.ts` | `../../../server/utils/responseNormalizer` | **Accept** — devkit is tier-B. |
+| `router` | `resolveTarget.ts`, `bootHandshake.ts`, `startRouter.ts` | `../../../deploy.config`, `../../../services.config` | **Accept for tier-B** — or DI if router moves to tier-A. |
+
+After §39.7, every tier-A package has **zero** project-level value or type imports. The remaining `packages/** → project` imports are all in tier-B (devkit, router) and accepted by design.
+
+### 39.3 Universal `package.json` blockers (apply to every tier-A package)
+
+| Field / Concern | Current State | Required for npm |
+| --- | --- | --- |
+| `private: true` | Set in all 9 packages | Remove (or set `false`). |
+| `main` | `./src/index.ts` | Point at compiled output, e.g. `./dist/index.js`. |
+| `types` | Missing | Add `./dist/index.d.ts`. |
+| `module` | Missing | Add `./dist/index.js` (ESM). |
+| `exports` | `{ ".": "./src/index.ts" }` | `{ ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } }`. |
+| `files` | Missing | Add `["dist", "README.md"]` (or use `.npmignore`). |
+| `dependencies` | Missing | Each package declares its true npm deps (e.g., `ioredis` for core, `bcryptjs`/`validator` for login). |
+| `peerDependencies` | Missing | Declare `react`/`socket.io`/`@prisma/client` etc. as peers where appropriate. |
+| `version` | All `0.0.1` | Pick a versioning policy (lockstep simplest for a monorepo). |
+| Build step | None — packages run from `src/*.ts` directly via tsx in dev | Add per-package `tsup` / `tsc` build emitting to `dist/`. |
+| README | Missing | Add a one-paragraph README to each before publishing (npm requires it). |
+
+### 39.4 Recommended fix order before `npm pack` dry-run
+
+1. ~~**Tier-A code blocker** — DI for `deploy.config`.~~ **Done (§39.7).**
+2. **Build pipeline** — pick `tsup` (zero-config dual ESM/CJS + `.d.ts`) and add a `build` script per tier-A package. Confirm output by running `npm pack --dry-run` per package.
+3. **Dependency declarations** — generate per-package `dependencies`/`peerDependencies` from the import audit in 39.2. Ensure consumers don't get duplicate copies of `react`/`socket.io`/`@prisma/client` (peer them).
+4. **Cross-package consumption** — verify `@luckystack/api` published as `0.0.1` resolves `@luckystack/core` `0.0.1` — i.e., dependencies between framework packages are also declared.
+5. **Trial publish** — `npm pack` (writes a `.tgz` locally without publishing) for each tier-A package; inspect tarball contents.
+6. **Real publish** — only after the rest, to a registry (npm public, GitHub Packages, or private).
+
+### 39.5 What this session changed
+
+- `peerNotifier.ts` decoupled from `server/sockets/socket` (`ioInstance` → `getIoInstance()`). Presence is now tier-A clean at code level.
+- Audit recorded; remaining tier-A code blocker is the single `deploy.config` import in `core/synchronizedEnvHashes.ts`.
+
+### 39.6 Out of scope for this audit
+
+- `@luckystack/login` Prisma decoupling — non-trivial, would require DI for User model or generic-ification.
+- Build tooling decision (`tsup` vs `tsc -b` vs `rollup`) — needs a small spike on each before committing.
+- Versioning policy — lockstep vs independent. Lockstep is simpler; independent allows independent semver but needs Changesets or similar.
+
+---
+
+## 39.7) deploy.config DI — COMPLETED
+
+Closes §39.4 step 1. Last tier-A code blocker eliminated.
+
+### Pattern (same as `projectConfig` / `runtimeMapsRegistry` / `notifier`)
+
+- New `packages/core/src/deployConfigRegistry.ts` exports `registerDeployConfig`, `getDeployConfig`, `isDeployConfigRegistered`, plus `DeployConfigShape` / `DeployResourceShape` types. Safe default is empty `resources: {}`.
+- `packages/core/src/index.ts` re-exports the registry surface.
+- `packages/core/src/synchronizedEnvHashes.ts` swaps `import deployConfig from '../../../deploy.config'` for `import { getDeployConfig } from './deployConfigRegistry'`. `collectSynchronizedEnvKeys()` now reads `getDeployConfig().resources` at call time — registration order doesn't matter.
+- Project `deploy.config.ts` imports `registerDeployConfig` from the **direct file path** `./packages/core/src/deployConfigRegistry` (not the barrel — same Vite-bundle rule we use elsewhere) and calls `registerDeployConfig({ resources: deployConfig.resources })` at module load.
+- `server/server.ts` adds an explicit `import '../deploy.config'` next to the existing `import '../config'`, so the registration is wired before any code reads `computeSynchronizedEnvHashes()` (used by `/_health`).
+
+### Why only `resources` is registered
+
+`@luckystack/core` only consumes `resources[*].synchronizedEnvKeys`. Environments, bindings, and routing fields stay private to the project — they're only consumed by `@luckystack/router`, which is tier-B and intentionally project-coupled. If router is ever promoted to tier-A, extend `DeployConfigShape` with `environments` (and the project pre-registers the full config); for now, narrow shape = narrow contract.
+
+### Verification
+
+- All `packages/** → ../../../deploy.config` value imports: **0** in tier-A. (1 remains in router; tier-B, accepted.)
+- Boot order preserved: `server.ts` side-effect-imports `../deploy.config` immediately after `../config`, before any framework code that calls `computeSynchronizedEnvHashes()`.
+- `synchronizedEnvHashes.ts` still re-exports `resolveEnvKey` from `./bootUuid`; that re-export path is unchanged.
+
+### Tier-A code-coupling status: clean
+
+| Package | `packages/** → project` imports |
+| --- | --- |
+| `@luckystack/core` | 0 |
+| `@luckystack/api` | 0 |
+| `@luckystack/sync` | 0 |
+| `@luckystack/sentry` | 0 |
+| `@luckystack/test-runner` | 0 |
+| `@luckystack/presence` | 0 |
+
+Next step: §39.4 step 2 — pick a build tool and add `build` scripts per tier-A package.
+
+---
+
+## 39.8) Build pipeline (tsup) — COMPLETED
+
+Closes §39.4 step 2. Every package (tier-A and tier-B) now has a tsup-based build that emits ESM `.js` + `.d.ts` to `dist/`.
+
+### Choices
+
+- **Tool**: `tsup` (esbuild + rollup-plugin-dts wrapper). Zero-config, handles dts generation, supports multi-entry.
+- **Format**: ESM only. Project is already `"type": "module"`; modern Node + Vite consumers are ESM-first. CJS dual-build adds dts/exports gymnastics for marginal benefit and can be added later if needed.
+- **Externals**: `@luckystack/*` (sister packages stay external — consumers install them) + `skipNodeModulesBundle: true` (third-party deps come from the consumer's `node_modules`, not bundled). Once we declare per-package `dependencies`/`peerDependencies` in §39.4 step 3, tsup will respect those automatically.
+- **Target**: ES2022 (matches `tsconfig.shared.json`).
+
+### File layout per package
+
+```
+packages/<name>/
+  package.json        # main/types/exports/files/build script
+  tsconfig.json       # extends ../../tsconfig.packages.base.json
+  tsup.config.ts      # entry, format, dts, externals
+  src/                # source (unchanged)
+  dist/               # build output (gitignored)
+```
+
+### Shared base tsconfig
+
+`tsconfig.packages.base.json` at the repo root carries:
+
+- `module: ESNext`, `moduleResolution: bundler`
+- `declaration: true`, `declarationMap: true`, `sourceMap: true`, `noEmit: false`
+- `lib: ['ES2023', 'DOM', 'DOM.Iterable']`, `jsx: 'react-jsx'` (so files importing React types compile)
+
+Notably **no `paths`** — see §39.8.1 for why.
+
+Each package's `tsconfig.json` is a 7-line file: extends the base, adds `outDir: dist` + `rootDir: src` + `include: ['src']`.
+
+### npm workspaces
+
+Root `package.json` declares `"workspaces": ["packages/*"]`. After `npm install`, every package is symlinked into `node_modules/@luckystack/*`. Sister-package imports inside the build pipeline resolve through `node_modules` to the target's `package.json` `exports` map (which points at `dist/`).
+
+Dev mode is unaffected: `tsconfig.server.json` and `tsconfig.client.json` still carry their `@luckystack/* → packages/*/src/index.ts` paths, which Vite (`vite-tsconfig-paths`) and `tsx` use to resolve to source. Workspaces and tsconfig paths coexist; for dev, paths win.
+
+### Multi-entry packages
+
+`@luckystack/core` and `@luckystack/sync` ship two entries:
+
+| Entry | File | Why |
+| --- | --- | --- |
+| `.` (default) | `src/index.ts` | Server-safe surface (Redis, sockets, registries / handlers) |
+| `./client` | `src/client.ts` | Browser-safe transport (`apiRequest`, `syncRequest`) — quarantined because it pulls React-coupled project code |
+
+The `exports` map advertises both subpaths with their own `types`/`import` pairs.
+
+### Build orchestration
+
+- Per-package: `cd packages/<name> && npm run build` (runs `tsup`).
+- All packages: `npm run build:packages` from root — runs `scripts/buildPackages.mjs`, which builds in topological order (core → sentry/login → api/sync → presence/test-runner → devkit/router).
+- Pack dry-run: `npm run pack:dry` from root — builds, then runs `npm pack --dry-run` per package so you can inspect what would be published.
+
+### Why every package is still `private: true`
+
+Building does not imply publishing. Packages stay private until §39.4 steps 3-6 land (per-package dep declarations, README per package, registry choice, real publish). Removing `private: true` is the last switch flipped, intentionally.
+
+### Tier-B packages get builds too (full JS + dts)
+
+devkit and router are project-glue and not intended for npm publishing, but they ship the same tsup setup so the build pipeline is uniform across the monorepo. They emit ESM + `.d.ts` like tier-A. The only difference: their per-package `tsconfig.json` omits `rootDir` so tsc accepts cross-`src` imports from project files (devkit: `server/utils/responseNormalizer`; router: `deploy.config`, `services.config`). Tarball layout is unaffected — rollup-plugin-dts bundles intermediate types into a single `dist/index.d.ts` regardless of where source files lived during compilation.
+
+If the project ever wants to deploy router from compiled output (instead of running `tsx` on src), the JS + dts build is already there.
+
+### Verification
+
+To verify after this commit:
+
+```bash
+npm install                     # picks up tsup devDep
+npm run build:packages          # builds all 9 packages
+ls packages/core/dist           # expect: index.js, index.d.ts, client.js, client.d.ts, .map files
+npm run pack:dry                # dry-run npm pack per package; tarball file lists print to stdout
+```
+
+The expected tarball contents per package: `package.json` + `dist/**` only (no `src/`, no `tsconfig.json`, no `tsup.config.ts` — `files: ["dist"]` whitelist enforces this).
+
+### Known follow-ups (not blockers, but worth doing soon)
+
+- ~~**Per-package `dependencies` / `peerDependencies`**~~ — done in §39.9.
+- **README per package** — npm publish requires it.
+- **Sourcemap paths** — tsup emits sourcemaps that point at `src/` paths relative to the package dir; should work out of the box but worth verifying once a real consumer pulls a built tarball.
+- **Bundle size sanity check** — first build revealed devkit at 195 KB (typescript compiler API + AST walkers, expected) and core at 47 KB server / 13.7 KB client; everything else under 30 KB.
+
+---
+
+## 39.8.1) Build-time circular type dep — RESOLVED
+
+The first `npm run build:packages` exposed a circular type dep between core and login: `core/validateRequest.ts` imported `BaseSessionLayout` and `AuthProps` from `@luckystack/login`, while login's value-level code imported from `@luckystack/core` (prisma, redis, etc.). With path-based resolution to source, tsc's dts step pulled `packages/login/src/index.ts` into core's program and rejected it under `rootDir: src`.
+
+### Fix: foundational types belong in core
+
+- New `packages/core/src/sessionTypes.ts` — canonical home for `BaseSessionLayout`, `SessionLocation`, `AuthProps`. Definitions moved verbatim.
+- `core/validateRequest.ts` imports from `./sessionTypes` (no more `@luckystack/login` dep in core).
+- `core/index.ts` exports the three types from `./sessionTypes`.
+- `login/sessionLayout.ts` collapsed to a single re-export line: `export type { BaseSessionLayout, SessionLocation, AuthProps } from '@luckystack/core'`. Login's barrel still re-exports them, so existing project imports (`import type { BaseSessionLayout } from '@luckystack/login'`) keep working.
+
+### Fix: drop `@luckystack/*` paths from the build base
+
+- `tsconfig.packages.base.json` no longer carries path mappings.
+- Sister packages now resolve through `node_modules` (workspaces symlinks), where each package's `package.json` `exports` map points at `dist/`.
+- This means **build order matters at type-check time**: a package can't be type-checked until its dependencies have been built. `scripts/buildPackages.mjs` builds in topological order (core → sentry/login → api/sync/presence/test-runner → devkit/router).
+
+### Build dependency graph (after type move)
+
+```
+core ─┬─> sentry
+      ├─> login ─┬─> api
+      │          └─> sync
+      ├─> presence
+      ├─> test-runner
+      ├─> devkit
+      └─> router
+```
+
+No cycles. Every package's incoming edges resolve before it builds.
+
+### Re-bootstrap steps for anyone re-cloning
+
+```bash
+npm install                  # creates node_modules/@luckystack/* symlinks via workspaces
+npm run build:packages       # builds in topological order
+```
+
+---
+
+## 39.10) `@luckystack/server` — one-call bootstrap helper
+
+New tier-A package consolidating HTTP + Socket.io + framework-routes wiring. Consumer's `server.ts` shrinks from 700+ lines to ~25.
+
+### Surface
+
+```ts
+import { createLuckyStackServer } from '@luckystack/server';
+
+const server = await createLuckyStackServer({
+  port: 80,
+  ip: '0.0.0.0',
+  serveFile: (req, res) => /* project static-file handler */,
+  serveFavicon: (res) => /* project favicon handler */,
+  customRoutes: async (req, res, ctx) => {
+    // return true if you handled the request, false otherwise
+    return false;
+  },
+  enableDevTools: process.env.NODE_ENV !== 'production',
+});
+
+await server.listen();
+```
+
+### What's wired automatically
+
+- HTTP framework routes: `/api/*`, `/sync/*`, `/_health`, `/_test/reset`, `/uploads/*`, `/auth/api/*`, `/auth/callback/*`
+- CORS + standard security headers (Referrer-Policy, X-Frame-Options, X-XSS-Protection, X-Content-Type-Options)
+- Cookie-mode session sliding expiration
+- SSE streaming for `/api/*` and `/sync/*` when client opts in via `Accept: text/event-stream` or `?stream=1`
+- Socket.io with the Redis adapter, connection token extraction, room join/leave handlers, optional presence broadcasting, optional location syncing
+- Boot-UUID write before `listen()` so the router handshake works
+
+### Project responsibilities (passed in as options)
+
+- `serveFile`: how to serve your built Vite output / static assets
+- `serveFavicon`: how to serve `/favicon.ico`
+- `customRoutes`: any project-specific HTTP endpoints
+
+### Pre-conditions
+
+Before calling `createLuckyStackServer(...)`, the project must side-effect-import:
+1. `./config` — registers project config
+2. `./deploy.config` — registers deploy topology
+3. `./prod/runtimeMaps` — registers runtime API/sync maps
+4. `./utils/responseNormalizer` — registers locale-aware error normalizer
+
+### Project config additions
+
+`ProjectConfig` gained three fields used by the server package:
+- `socketActivityBroadcaster?: boolean` — toggle presence broadcasting on socket connect/disconnect
+- `locationProviderEnabled?: boolean` — toggle client → server `updateLocation` syncing
+- `loginRedirectUrl?: string` — where to redirect after a successful OAuth callback
+
+The project's `config.ts` already has these as top-level keys; we now propagate them through `registerProjectConfig`.
+
+### Why this isn't `@luckystack/core`
+
+Keeping the bootstrap helper in its own package means consumers who don't want it (advanced users wiring their own HTTP server) don't pull in `@luckystack/api` + `@luckystack/sync` + `@luckystack/login` + `@luckystack/presence` transitively just by importing `core`.
+
+---
+
+## 39.9) Per-package dependency declarations — COMPLETED
+
+Closes §39.4 step 3. Each package's `package.json` now declares its real `dependencies` and `peerDependencies` based on a static import audit.
+
+### Classification rules used
+
+- **`peerDependencies`** for libs that:
+  - must not be duplicated across the consumer's tree (`react`, `socket.io`, `socket.io-client` — singleton clients/servers; `zod` — instanceof checks across schema modules; `ioredis` — singleton connection; `@prisma/client` — schema must match the consumer's; `typescript` — devkit's runtime type resolver should use the consumer's tsc; `@sentry/node` — single tracer instance).
+- **`dependencies`** for everything else (`bcryptjs`, `validator`, `dotenv`, `chokidar`, `@socket.io/redis-adapter`).
+- **Cross-package** (`@luckystack/*`) goes in `dependencies` with `^0.0.1`. Workspaces resolve via symlink today; a registry resolves the constraint when published.
+
+### Final matrix
+
+| Package | `dependencies` | `peerDependencies` |
+| --- | --- | --- |
+| `@luckystack/core` | `dotenv`, `@socket.io/redis-adapter` | `@prisma/client`, `ioredis`, `socket.io`, `socket.io-client`, `zod` |
+| `@luckystack/sentry` | `@luckystack/core` | `@sentry/node` |
+| `@luckystack/login` | `@luckystack/core`, `bcryptjs`, `dotenv`, `validator` | `@prisma/client`, `socket.io` |
+| `@luckystack/api` | `@luckystack/core`, `@luckystack/login`, `@luckystack/sentry` | `socket.io` |
+| `@luckystack/sync` | `@luckystack/core`, `@luckystack/login`, `@luckystack/sentry` | `react`, `socket.io`, `socket.io-client` |
+| `@luckystack/presence` | `@luckystack/core`, `@luckystack/login` | `socket.io` |
+| `@luckystack/test-runner` | — | `zod` |
+| `@luckystack/devkit` | `@luckystack/core`, `chokidar` | `@prisma/client`, `typescript`, `zod` |
+| `@luckystack/router` | `ioredis` | — |
+
+### What this changes for builds
+
+- **No build-time difference today** — workspaces was already resolving sister packages and root `node_modules` was already hoisting third-party deps. tsup's `skipNodeModulesBundle: true` continues to leave them as imports.
+- **Real consumers** doing `npm install @luckystack/api` will now correctly pull `@luckystack/core`, `@luckystack/login`, `@luckystack/sentry` automatically, and npm will warn (not fail) if they're missing the peer deps.
+- **`tsup` will start respecting the declared peer/regular split** — once we drop `skipNodeModulesBundle`, peers become mandatory externals automatically.
+
+### What's still missing for actual publish
+
+1. README per package (npm requires it; consumers expect it).
+2. Pick a registry (npm public, GitHub Packages, private).
+3. Flip `private: false` on packages we want to publish (tier-A first; tier-B stays private).
+4. Decide on a versioning policy. Lockstep at `0.0.1` is fine for a first release; later we can adopt Changesets if tier-A versions drift.
+5. Add `repository`, `license`, `description`, `keywords` fields to every published package.json.
+6. Run `npm pack` (not dry-run) and inspect the actual tarball. Optionally test-install one in a fresh directory to confirm consumer DX.

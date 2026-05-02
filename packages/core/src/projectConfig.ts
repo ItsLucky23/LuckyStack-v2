@@ -56,6 +56,12 @@ export interface ProjectConfig {
   session: SessionConfig;
   defaultLanguage: string;
   sentry?: SentryConfig;
+  /** Enable per-room activity broadcasting (presence). Read by @luckystack/server's socket setup. */
+  socketActivityBroadcaster?: boolean;
+  /** Enable client → server `updateLocation` syncing. Read by @luckystack/server's socket setup. */
+  locationProviderEnabled?: boolean;
+  /** Where to redirect the user after a successful OAuth callback. */
+  loginRedirectUrl?: string;
 }
 
 const DEFAULT_CONFIG: ProjectConfig = {
@@ -79,6 +85,9 @@ const DEFAULT_CONFIG: ProjectConfig = {
     allowMultiple: false,
   },
   defaultLanguage: 'en',
+  socketActivityBroadcaster: false,
+  locationProviderEnabled: false,
+  loginRedirectUrl: '/',
 };
 
 let activeConfig: ProjectConfig = DEFAULT_CONFIG;

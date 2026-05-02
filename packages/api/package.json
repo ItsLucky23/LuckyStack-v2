@@ -3,8 +3,56 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
+  "description": "Type-safe API request handlers for LuckyStack. WebSocket-first via socket.io, with HTTP fallback. File-based routing, generated route map, integrated rate limiting, validation, hooks, and Sentry tracing.",
+  "license": "MIT",
+  "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
+    "directory": "packages/api"
+  },
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/api#readme",
+  "bugs": {
+    "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
+  },
+  "keywords": [
+    "luckystack",
+    "api",
+    "socket.io",
+    "websocket",
+    "http",
+    "realtime",
+    "typescript",
+    "framework",
+    "rate-limiting",
+    "validation"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch"
+  },
+  "dependencies": {
+    "@luckystack/core": "^0.0.1",
+    "@luckystack/login": "^0.0.1",
+    "@luckystack/sentry": "^0.0.1"
+  },
+  "peerDependencies": {
+    "socket.io": "^4.8.3"
   }
 }

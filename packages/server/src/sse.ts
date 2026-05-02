@@ -1,0 +1,48 @@
+import type { ServerResponse } from 'node:http';
+
+//? Server-Sent Events (SSE) helpers shared by /api/* and /sync/* HTTP
+//? streaming. Only used when the client opted in via Accept: text/event-stream
+//? or ?stream=1.
+
+const isExpectingEventStream = (acceptHeader: string | string[] | undefined): boolean => {
+  if (!acceptHeader) return false;
+  const value = Array.isArray(acceptHeader) ? acceptHeader.join(',') : acceptHeader;
+  return value.toLowerCase().includes('text/event-stream');
+};
+
+const queryRequestsStream = (queryString: string | undefined): boolean => {
+  if (!queryString) return false;
+  const params = new URLSearchParams(queryString);
+  return params.get('stream') === '1' || params.get('stream') === 'true';
+};
+
+export const shouldUseHttpStream = ({
+  acceptHeader,
+  queryString,
+}: {
+  acceptHeader: string | string[] | undefined;
+  queryString: string | undefined;
+}): boolean => isExpectingEventStream(acceptHeader) || queryRequestsStream(queryString);
+
+export const initSseResponse = (res: ServerResponse): void => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+};
+
+export const sendSseEvent = ({
+  res,
+  event,
+  data,
+}: {
+  res: ServerResponse;
+  event: string;
+  data: unknown;
+}): void => {
+  if (res.writableEnded) return;
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+};

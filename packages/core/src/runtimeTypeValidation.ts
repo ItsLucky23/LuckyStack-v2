@@ -311,14 +311,22 @@ export const validateInputByType = async ({
   // bundle (see scripts/bundleServer.mjs), so this branch compiles in prod but
   // cannot run (import would fail). That is fine — the `NODE_ENV !== 'production'`
   // guard above means the import is never reached in prod.
-  const {
-    resolveRuntimeTypeText,
-  } = await import('@luckystack/devkit');
-
-  const resolvedType = resolveRuntimeTypeText({ typeText, filePath });
+  //
+  // Indirect module ID (string variable, not literal) so tsc doesn't try to
+  // type-resolve devkit at build time. Devkit depends on core, so a literal
+  // type-resolved import would be a build-time circular dep.
+  const devkitModuleId: string = '@luckystack/devkit';
+  const devkit = (await import(devkitModuleId)) as DevkitTypeResolverModule;
+  const resolvedType = devkit.resolveRuntimeTypeText({ typeText, filePath });
   if (resolvedType.status === 'error') {
     return { status: 'error', message: `${rootKey}: ${resolvedType.message}` };
   }
 
   return validateType(resolvedType.typeText, value, rootKey);
 };
+
+interface DevkitTypeResolverModule {
+  resolveRuntimeTypeText: (params: { typeText: string; filePath?: string }) =>
+    | { status: 'success'; typeText: string }
+    | { status: 'error'; message: string };
+}

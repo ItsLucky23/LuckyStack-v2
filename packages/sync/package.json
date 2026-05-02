@@ -3,8 +3,62 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
+  "description": "Real-time sync transport for LuckyStack: type-safe room-based fanout, server + per-client validation, streaming, optimistic offline queue. Server entry plus a browser-safe ./client subpath.",
+  "license": "MIT",
+  "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
+    "directory": "packages/sync"
+  },
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/sync#readme",
+  "bugs": {
+    "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
+  },
+  "keywords": [
+    "luckystack",
+    "sync",
+    "realtime",
+    "socket.io",
+    "websocket",
+    "react",
+    "multiplayer",
+    "fanout",
+    "rooms",
+    "framework"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch"
+  },
+  "dependencies": {
+    "@luckystack/core": "^0.0.1",
+    "@luckystack/login": "^0.0.1",
+    "@luckystack/sentry": "^0.0.1"
+  },
+  "peerDependencies": {
+    "react": "^19.2.5",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   }
 }

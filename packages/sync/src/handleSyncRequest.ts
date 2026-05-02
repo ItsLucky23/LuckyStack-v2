@@ -3,7 +3,7 @@
 import type { syncMessage } from "@luckystack/core";
 import { Socket } from "socket.io";
 import { getSession } from "@luckystack/login";
-import type { SessionLayout } from '../../../config';
+import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
 import { getProjectConfig } from '@luckystack/core';
 import type { AuthProps } from '@luckystack/login';
 import { getRuntimeSyncMaps } from '@luckystack/core';

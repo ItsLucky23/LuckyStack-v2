@@ -238,6 +238,9 @@ registerProjectConfig({
   },
   defaultLanguage: config.defaultLanguage as unknown as string,
   sentry: config.sentry,
+  socketActivityBroadcaster: config.socketActivityBroadcaster,
+  locationProviderEnabled: config.locationProviderEnabled,
+  loginRedirectUrl: config.loginRedirectUrl,
 });
 
 export default config;

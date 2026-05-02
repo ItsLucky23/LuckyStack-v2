@@ -14,6 +14,11 @@ loadEnv({ path: '.env.local', override: true });
 //? code reads them. We import it here explicitly for order clarity.
 import '../config';
 
+//? Same pattern: importing deploy.config triggers registerDeployConfig,
+//? so framework packages (e.g. synchronizedEnvHashes) read deploy
+//? topology through core rather than reaching into the project file.
+import '../deploy.config';
+
 initializeSentry();
 registerPresenceHooks();
 

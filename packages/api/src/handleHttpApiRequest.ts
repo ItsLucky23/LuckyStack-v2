@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing */
 
 import { getSession } from '@luckystack/login';
-import type { SessionLayout } from '../../../config';
+import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
 import { getProjectConfig } from '@luckystack/core';
 import type { AuthProps } from '@luckystack/login';
 import { getRuntimeApiMaps as getRuntimeApiMapsFromSource } from '@luckystack/core';
@@ -133,7 +133,7 @@ export async function handleHttpApiRequest({
   const user = await getSession(token);
   setSentryUser(user?.id ? {
     id: typeof user.id === 'string' ? user.id : String(user.id),
-    email: user.email,
+    email: user.email ?? undefined,
   } : null);
 
   const buildNetworkError = ({

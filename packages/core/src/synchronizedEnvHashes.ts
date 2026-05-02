@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import deployConfig from '../../../deploy.config';
+import { getDeployConfig } from './deployConfigRegistry';
 import { resolveEnvKey } from './bootUuid';
 
 //? Cross-env consistency check: when env A declares `fallback: B`, any env
@@ -18,7 +18,7 @@ const hashValue = (value: string): string => {
 
 export const collectSynchronizedEnvKeys = (): string[] => {
   const keys = new Set<string>();
-  for (const resource of Object.values(deployConfig.resources)) {
+  for (const resource of Object.values(getDeployConfig().resources)) {
     for (const key of resource.synchronizedEnvKeys ?? []) {
       keys.add(key);
     }

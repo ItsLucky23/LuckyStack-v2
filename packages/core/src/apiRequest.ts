@@ -308,7 +308,14 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           console.log(`Client API Request(${String(tempIndex)}):`, { APINAME: sanitizedName, data });
         }
 
-        socketInstance.once(buildApiResponseEventName(tempIndex), (response: RequestOutput) => {
+        //? Inside the handler we type as the runtime envelope (ApiResponse).
+        //? Project-specific output narrowing only matters at the call site,
+        //? where `RequestOutput = OutputForFullName<F,V> & ApiResponse` is
+        //? returned via `resolve(... as RequestOutput)`. When core is type-
+        //? checked in isolation (e.g. per-package tsup dts build), ApiTypeMap
+        //? is empty so OutputForFullName collapses to never; using ApiResponse
+        //? here keeps the body type-safe in both cases.
+        socketInstance.once(buildApiResponseEventName(tempIndex), (response: ApiResponse) => {
           if (signal?.aborted) {
             return;
           }
@@ -335,13 +342,13 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
 
             Object.assign(response, normalizedError);
             cleanupAbortController();
-            resolve(response);
+            resolve(response as RequestOutput);
             return;
           }
 
           cleanupAbortController();
 
-          resolve(response);
+          resolve(response as RequestOutput);
         });
       };
 

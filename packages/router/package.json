@@ -3,8 +3,43 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
+  "description": "Standalone HTTP + WebSocket load-balancer for multi-instance LuckyStack deployments. Redis-backed health, boot-UUID handshake, fallback proxy. Tier-B (project-glue, not for npm).",
+  "license": "MIT",
+  "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
+    "directory": "packages/router"
+  },
+  "keywords": [
+    "luckystack",
+    "router",
+    "load-balancer",
+    "proxy",
+    "multi-instance",
+    "websocket",
+    "redis"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch"
+  },
+  "dependencies": {
+    "ioredis": "^5.10.1"
   }
 }
