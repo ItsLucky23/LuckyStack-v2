@@ -10,6 +10,7 @@ import {
   buildGetJoinedRoomsResponseEventName,
   extractTokenFromSocket,
   getProjectConfig,
+  dispatchHook,
   type apiMessage,
   type syncMessage,
   type BaseSessionLayout,
@@ -18,7 +19,7 @@ import { handleApiRequest } from '@luckystack/api';
 import { handleSyncRequest } from '@luckystack/sync';
 import { getSession, saveSession } from '@luckystack/login';
 import {
-  initAcitivityBroadcaster,
+  initActivityBroadcaster,
   socketConnected,
   socketDisconnecting,
   socketLeaveRoom,
@@ -101,10 +102,20 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
 
   io.on(socketEventNames.connect, (socket) => {
     const token = extractTokenFromSocket(socket);
+    //? Cache per-connection feature flags so we don't refetch the project
+    //? config on every event.
+    const activityBroadcasterEnabled = config.socketActivityBroadcaster ?? false;
+    const locationProviderEnabled = config.locationProviderEnabled ?? false;
 
     if (token) {
       socketConnected({ token, io });
     }
+
+    void dispatchHook('onSocketConnect', {
+      socketId: socket.id,
+      token,
+      ip: socket.handshake.address,
+    });
 
     socket.on(socketEventNames.apiRequest, (msg: apiMessage) => {
       void handleApiRequest({ msg, socket, token });
@@ -135,18 +146,28 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
           return;
         }
 
+        //? Allow consumers to veto a join (auth check, allowlist, ...).
+        const preResult = await dispatchHook('preRoomJoin', { token, room: group });
+        if (preResult.stopped) {
+          socket.emit(buildJoinRoomResponseEventName(responseIndex), {
+            error: preResult.signal.errorCode || 'Join blocked',
+          });
+          return;
+        }
+
         const existingRoomCodes = getSessionRoomCodes(session);
         const nextRoomCodes = [...new Set([...existingRoomCodes, group])];
 
         await socket.join(group);
         const sanitizedSession = sanitizeSessionRoomKeys(session);
         await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
-        socket.emit(buildJoinRoomResponseEventName(responseIndex), {
-          rooms: getVisibleSocketRooms(socket, token),
-        });
+        const visibleRooms = getVisibleSocketRooms(socket, token);
+        socket.emit(buildJoinRoomResponseEventName(responseIndex), { rooms: visibleRooms });
         if (shouldLogDev) {
           console.log(`Socket ${socket.id} joined group ${group}`);
         }
+
+        void dispatchHook('postRoomJoin', { token, room: group, allRooms: visibleRooms });
       });
     });
 
@@ -171,6 +192,14 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
           return;
         }
 
+        const preResult = await dispatchHook('preRoomLeave', { token, room: group });
+        if (preResult.stopped) {
+          socket.emit(buildLeaveRoomResponseEventName(responseIndex), {
+            error: preResult.signal.errorCode || 'Leave blocked',
+          });
+          return;
+        }
+
         const existingRoomCodes = getSessionRoomCodes(session);
         const nextRoomCodes = existingRoomCodes.filter((roomCode) => roomCode !== group);
 
@@ -178,12 +207,13 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
         const sanitizedSession = sanitizeSessionRoomKeys(session);
         await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
 
-        socket.emit(buildLeaveRoomResponseEventName(responseIndex), {
-          rooms: getVisibleSocketRooms(socket, token),
-        });
+        const visibleRooms = getVisibleSocketRooms(socket, token);
+        socket.emit(buildLeaveRoomResponseEventName(responseIndex), { rooms: visibleRooms });
         if (shouldLogDev) {
           console.log(`Socket ${socket.id} left group ${group}`);
         }
+
+        void dispatchHook('postRoomLeave', { token, room: group, allRooms: visibleRooms });
       });
     });
 
@@ -205,8 +235,9 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     });
 
     socket.on(socketEventNames.disconnect, (reason: string) => {
-      const activityEnabled = getProjectConfig().socketActivityBroadcaster ?? false;
-      if (activityEnabled && token) {
+      void dispatchHook('onSocketDisconnect', { socketId: socket.id, token, reason });
+
+      if (activityBroadcasterEnabled && token) {
         socketDisconnecting({ token, socket, reason });
       } else {
         if (!token) return;
@@ -220,16 +251,14 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       socketEventNames.updateLocation,
       (newLocation: { pathName: string; searchParams?: Record<string, string> }) => {
         if (!token) return;
-        const locationEnabled = getProjectConfig().locationProviderEnabled ?? false;
-        if (!locationEnabled) return;
+        if (!locationProviderEnabled) return;
         if (shouldLogDev) {
           console.log('updating location to:', newLocation.pathName);
         }
 
         void withSessionLock(token, async () => {
           let returnedUser: BaseSessionLayout | null = null;
-          const activityEnabled = getProjectConfig().socketActivityBroadcaster ?? false;
-          if (activityEnabled) {
+          if (activityBroadcasterEnabled) {
             returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
           }
 
@@ -238,14 +267,17 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
           if (!user) return;
 
           const extendedUser = user as BaseSessionLayout & { location?: typeof newLocation };
+          const oldLocation = extendedUser.location;
           extendedUser.location = newLocation;
           await saveSession(token, user);
+
+          void dispatchHook('onLocationUpdate', { token, oldLocation, newLocation });
         });
       }
     );
 
-    if (getProjectConfig().socketActivityBroadcaster && token) {
-      initAcitivityBroadcaster({ socket, token });
+    if (activityBroadcasterEnabled && token) {
+      initActivityBroadcaster({ socket, token });
     }
 
     if (token) {

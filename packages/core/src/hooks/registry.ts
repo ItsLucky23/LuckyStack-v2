@@ -1,4 +1,6 @@
 import type { HookName, HookPayloads, HookHandler, HookResult, HookStopSignal } from './types';
+import { captureException } from '../sentrySetup';
+import { getLogger } from '../loggerRegistry';
 
 export type DispatchResult =
   | { stopped: false }
@@ -29,8 +31,12 @@ export const dispatchHook = async <TName extends HookName>(
     let result: HookResult;
     try {
       result = await handler(payload);
-    } catch {
-      // Isolated per hook — one failing handler never interrupts the main flow.
+    } catch (error) {
+      // Isolated per hook — one failing handler never interrupts the main flow,
+      // but plugin failures must still be visible. Surface to logger + Sentry
+      // so installers can spot bugs in their registered handlers.
+      getLogger().error(`hook: handler for "${name}" threw`, error, { hook: name });
+      captureException(error, { hook: name });
       continue;
     }
 
@@ -40,4 +46,12 @@ export const dispatchHook = async <TName extends HookName>(
   }
 
   return { stopped: false };
+};
+
+//? Test-only: drop every registered hook handler. Used by the dev `/_test/reset`
+//? endpoint when integration tests need a clean slate. Never call this from
+//? production code paths — it would silently break framework-internal hooks
+//? (presence post-logout cleanup, etc.).
+export const clearAllHooks = (): void => {
+  hookHandlers.clear();
 };

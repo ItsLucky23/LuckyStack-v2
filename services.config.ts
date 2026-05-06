@@ -13,6 +13,10 @@
  *   - Route names follow the service-first contract: `service/name` (see docs/ARCHITECTURE_ROUTING.md).
  */
 
+//? Import directly from the file path, same as deploy.config.ts and config.ts
+//? do, so Vite's client bundle doesn't drag server-only modules into the browser.
+import { registerServicesConfig } from './packages/core/src/servicesConfigRegistry';
+
 export interface ServiceDefinition {
   /** 'root' -> src/_api, src/_sync (reserved for `system`). Otherwise a folder name under src/. */
   source: 'root' | string;
@@ -51,5 +55,9 @@ const servicesConfig: ServicesConfig = {
     },
   },
 };
+
+//? Side-effect registration: any import wires the services topology into
+//? @luckystack/core so the router can read it via getServicesConfig().
+registerServicesConfig(servicesConfig);
 
 export default servicesConfig;

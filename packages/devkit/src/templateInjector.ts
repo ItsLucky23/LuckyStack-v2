@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GENERATED_SOCKET_TYPES_PATH } from '@luckystack/core';
+import { getGeneratedSocketTypesPath } from '@luckystack/core';
 import {
   ROUTE_NAMING_EXAMPLES,
   ROUTE_NAMING_RULES,
@@ -254,7 +254,7 @@ export const extractClientInputFromFile = (filePath: string): string | null => {
  */
 export const extractClientInputFromGeneratedTypes = (pagePath: string, syncName: string): string | null => {
   try {
-    const generatedTypesPath = GENERATED_SOCKET_TYPES_PATH;
+    const generatedTypesPath = getGeneratedSocketTypesPath();
     const content = fs.readFileSync(generatedTypesPath, 'utf8');
 
     const escapeRegex = (value: string) => value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);

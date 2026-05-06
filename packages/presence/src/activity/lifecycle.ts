@@ -7,12 +7,12 @@ import { informRoomPeers } from './peerNotifier';
 import { socketLeaveRoom } from './leaveRoom';
 import {
   clientSwitchedTab,
-  disconnectReasonsWeIgnore,
   disconnectTimers,
   getDisconnectTime,
   tempDisconnectedSockets,
 } from './state';
-import { socketEventNames } from '@luckystack/core';
+import { socketEventNames, getLogger } from '@luckystack/core';
+import { getPresenceConfig } from '../presenceConfig';
 
 export const socketConnected = async ({
   token,
@@ -23,13 +23,13 @@ export const socketConnected = async ({
 }) => {
   const timer = disconnectTimers.get(token);
   if (timer) {
-    console.log(`user came back with token: ${token}`, 'yellow');
+    getLogger().debug(`presence: user came back`, { token });
     clearTimeout(timer);
     disconnectTimers.delete(token);
     if (tempDisconnectedSockets.has(token)) {
       tempDisconnectedSockets.delete(token);
     } else {
-      console.log(`a user connected with token: ${token}`, 'cyan');
+      getLogger().debug(`presence: user connected`, { token });
     }
   }
 
@@ -55,8 +55,10 @@ export const socketDisconnecting = async ({
   socket: Socket
 }) => {
 
-  if (disconnectReasonsWeIgnore.includes(reason)) {
-    console.log(`user disconnected but we ignore it, reason: ${reason}`, 'yellow');
+  //? Read from the live config so `registerPresenceConfig({ ignoreReasons })`
+  //? works even if it ran after this module was imported.
+  if (getPresenceConfig().ignoreReasons.includes(reason)) {
+    getLogger().debug(`presence: ignored disconnect`, { reason });
     return;
   }
 
@@ -75,7 +77,7 @@ export const socketDisconnecting = async ({
     clientSwitchedTab.delete(token);
   }
 
-  console.log(`user disconnected, reason: ${reason}, timer: ${time / 1000} seconds`, 'yellow');
+  getLogger().debug(`presence: user disconnected`, { reason, timerSeconds: time / 1000 });
 
   const timeout = setTimeout(async () => {
     if (tempDisconnectedSockets.has(token)) {
@@ -90,7 +92,7 @@ export const socketDisconnecting = async ({
       await deleteSession(token);
     }
 
-    console.log(`user fully disconnected, reason: ${reason}, timer : ${time / 1000} seconds, deleteSessionOnDisconnect: ${deleteSessionOnDisconnect}`, 'yellow');
+    getLogger().debug(`presence: user fully disconnected`, { reason, timerSeconds: time / 1000, deleteSessionOnDisconnect });
   }, time);
 
   if (disconnectTimers.has(token)) {
@@ -101,7 +103,7 @@ export const socketDisconnecting = async ({
 
 }
 
-export const initAcitivityBroadcaster = ({
+export const initActivityBroadcaster = ({
   token,
   socket
 }: {

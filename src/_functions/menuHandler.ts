@@ -1,4 +1,6 @@
-import { ReactElement } from 'react';
+import { ReactElement, createElement } from 'react';
+
+import { ConfirmMenu, type ConfirmMenuProps } from 'src/_components/ConfirmMenu';
 import { useMenuHandler } from 'src/_components/MenuHandler';
 
 interface MenuOptions {
@@ -45,5 +47,23 @@ export const menuHandler = {
     return success;
   },
   closeAll: () => getHandler()?.closeAll(),
-  logStack: () => getHandler()?.logStack()
+  logStack: () => getHandler()?.logStack(),
+
+  /**
+   * Open a confirm dialog. Resolves to `true` when the user confirms,
+   * `false` on cancel/dismiss. Auto-closes the menu when resolved.
+   */
+  confirm: (props: Omit<ConfirmMenuProps, 'resolve'>): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      const handleResolve = (confirmed: boolean) => {
+        getHandler()?.close();
+        resolve(confirmed);
+      };
+
+      void menuHandler.open(
+        createElement(ConfirmMenu, { ...props, resolve: handleResolve }),
+        { dimBackground: true, background: 'bg-container1', size: 'sm' },
+      );
+    });
+  },
 };

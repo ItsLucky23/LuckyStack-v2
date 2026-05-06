@@ -1,0 +1,18 @@
+export { sendEmail } from './sendEmail';
+export { renderEmailLayout } from './renderEmailLayout';
+export type { RenderEmailLayoutInput, RenderedEmail } from './renderEmailLayout';
+
+export { ConsoleSender } from './adapters/console';
+export { ResendSender } from './adapters/resend';
+export { SmtpSender } from './adapters/smtp';
+export { autoSelectEmailSender } from './autoSelect';
+export type { AutoSelectEmailSenderOptions } from './autoSelect';
+
+//? Re-exports of the registry surface so consumers can do everything from
+//? one import path: `import { ConsoleSender, registerEmailSender } from '@luckystack/email';`
+export {
+  registerEmailSender,
+  getEmailSender,
+  isEmailSenderRegistered,
+} from '@luckystack/core';
+export type { EmailSender, EmailMessage, EmailResult } from '@luckystack/core';

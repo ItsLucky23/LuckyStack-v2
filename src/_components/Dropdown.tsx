@@ -1,38 +1,24 @@
-import { faCaretDown, faCheck } from "@fortawesome/free-solid-svg-icons";
+import { faCheck } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { ReactNode, useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
-import { createPortal } from "react-dom";
+import { ReactNode, useState } from "react";
 
-type DropdownValue = string | number;
-type DropdownSize = "sm" | "md" | "lg" | "xl";
-type DropdownDirection = "up" | "down";
+import {
+  DropdownMenuShell,
+  filterOptions,
+  normalizeOptions,
+  useDropdownMenu,
+  type DropdownItem,
+  type DropdownSize,
+  type DropdownValue,
+  type NormalizedOption,
+} from "./dropdownInternals";
 
-interface DropdownItem {
-  id: string | number;
-  value: DropdownValue;
-  item?: ReactNode;
-  placeholder?: string;
-  selectedItem?: ReactNode;
-  searchText?: string;
-  disabled?: boolean;
-}
+export type { DropdownItem } from "./dropdownInternals";
 
 interface DropdownSelectMeta {
   value: DropdownValue;
   index: number;
   label: string;
-}
-
-interface NormalizedOption {
-  key: string;
-  value: DropdownValue;
-  label: string;
-  item: ReactNode;
-  selectedItem: ReactNode;
-  searchText: string;
-  disabled: boolean;
-  index: number;
-  sourceItem: DropdownItem;
 }
 
 interface DropdownProps {
@@ -50,17 +36,6 @@ interface DropdownProps {
   noResultsText?: string;
 }
 
-const isPrimitiveItem = (item: unknown): item is string | number =>
-  typeof item === "string" || typeof item === "number";
-
-const getHiddenMenuStateClass = (direction: DropdownDirection) => {
-  if (direction === "up") {
-    return "opacity-0 scale-90 translate-y-2 pointer-events-none";
-  }
-
-  return "opacity-0 scale-90 -translate-y-2 pointer-events-none";
-};
-
 export default function Dropdown({
   items,
   onChange,
@@ -68,407 +43,79 @@ export default function Dropdown({
   placeholder,
   value,
   defaultValue,
-  className = "",
-  menuClassName = "",
+  className,
+  menuClassName,
   size,
   showSearch = false,
-  searchPlaceholder = "Search...",
-  noResultsText = "No results",
+  searchPlaceholder,
+  noResultsText,
 }: DropdownProps) {
-  const animationDuration = 200;
-  const listMaxHeight = 320;
-  const searchSectionHeight = 56;
-  const menuVerticalPadding = 8;
-  const [isOpen, setIsOpen] = useState(false);
-  const [isMenuMounted, setIsMenuMounted] = useState(false);
-  const [isMenuPositionReady, setIsMenuPositionReady] = useState(false);
-  const [isMenuVisible, setIsMenuVisible] = useState(false);
-  const [searchValue, setSearchValue] = useState("");
-  const [menuDirection, setMenuDirection] = useState<DropdownDirection>("down");
-  const [listViewportMaxHeight, setListViewportMaxHeight] = useState(listMaxHeight);
+  const controller = useDropdownMenu({ showSearch });
   const [internalSelectedItem, setInternalSelectedItem] = useState<DropdownItem | undefined>(defaultValue);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const openAnimationFrameRef = useRef<number | null>(null);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, width: 0 });
-
-  const sizeConfig: Record<DropdownSize, { minWidthPx: number; triggerWidth: string; option: string; icon: string }> = {
-    sm: { minWidthPx: 160, triggerWidth: "w-40", option: "px-2.5 py-1.5 text-sm", icon: "text-xs" },
-    md: { minWidthPx: 220, triggerWidth: "w-[220px]", option: "px-2.5 py-1.5 text-sm", icon: "text-xs" },
-    lg: { minWidthPx: 320, triggerWidth: "w-80", option: "px-2.5 py-1.5 text-sm", icon: "text-xs" },
-    xl: { minWidthPx: 420, triggerWidth: "w-[420px]", option: "px-2.5 py-1.5 text-sm", icon: "text-xs" },
-  };
-
-  const selectedSizeConfig = size ? sizeConfig[size] : undefined;
-  const containerWidthClass = selectedSizeConfig ? "inline-flex" : "flex w-full";
-  const triggerWidthClass = selectedSizeConfig?.triggerWidth ?? "w-full";
-  const optionClass = selectedSizeConfig?.option ?? sizeConfig.md.option;
-  const iconClass = selectedSizeConfig?.icon ?? sizeConfig.md.icon;
-
-  const normalizedOptions: NormalizedOption[] = items.map((item, index) => {
-    const rawItem = item.item ?? item.placeholder ?? String(item.value);
-    const label = item.placeholder ?? (isPrimitiveItem(rawItem) ? String(rawItem) : String(item.value));
-
-    return {
-      key: String(item.id),
-      value: item.value,
-      label,
-      item: rawItem,
-      selectedItem: item.selectedItem ?? (isPrimitiveItem(rawItem) ? rawItem : label),
-      searchText: item.searchText ?? label,
-      disabled: item.disabled ?? false,
-      index,
-      sourceItem: item,
-    };
-  });
 
   const isControlled = value !== undefined;
   const selectedItem = isControlled ? value : internalSelectedItem;
-  const selectedItemId = selectedItem?.id;
+  const selectedId = selectedItem?.id;
 
-  const updateMenuPosition = useCallback(() => {
-    if (!dropdownRef.current) return;
+  const options = normalizeOptions(items);
+  if (options.length === 0) return null;
 
-    const rect = dropdownRef.current.getBoundingClientRect();
-    const viewportPadding = 8;
-    const triggerGap = 4;
-    const viewportHeight = globalThis.innerHeight;
-    const searchHeight = showSearch ? searchSectionHeight : 0;
-    const listContentHeight = listRef.current?.scrollHeight ?? listMaxHeight;
-    const desiredListHeight = Math.min(listMaxHeight, listContentHeight);
-    const desiredDropdownHeight = searchHeight + desiredListHeight + menuVerticalPadding;
-    const spaceBelow = viewportHeight - rect.bottom - viewportPadding;
-    const spaceAbove = rect.top - viewportPadding;
-    const canFitDesiredDown = spaceBelow >= desiredDropdownHeight;
-    const canFitDesiredUp = spaceAbove >= desiredDropdownHeight;
-
-    let nextDirection: DropdownDirection;
-    if (canFitDesiredDown) {
-      nextDirection = "down";
-    } else if (canFitDesiredUp) {
-      nextDirection = "up";
-    } else {
-      nextDirection = "down";
-    }
-
-    const availableSpace = nextDirection === "up" ? spaceAbove : spaceBelow;
-    const availableListHeight = Math.max(1, availableSpace - triggerGap - searchHeight - menuVerticalPadding);
-    const nextListMaxHeight = Math.min(listMaxHeight, availableListHeight);
-    const maxRenderedMenuHeight = searchHeight + menuVerticalPadding + nextListMaxHeight;
-    const measuredMenuHeight = menuRef.current?.offsetHeight;
-    const renderedMenuHeight = measuredMenuHeight
-      ? Math.min(measuredMenuHeight, maxRenderedMenuHeight)
-      : maxRenderedMenuHeight;
-    const maxTop = viewportHeight - viewportPadding - renderedMenuHeight;
-
-    const top = nextDirection === "up"
-      ? Math.max(viewportPadding, rect.top - triggerGap - renderedMenuHeight)
-      : Math.min(rect.bottom + triggerGap, Math.max(viewportPadding, maxTop));
-
-    setMenuDirection(nextDirection);
-    setListViewportMaxHeight(nextListMaxHeight);
-
-    setMenuPosition({
-      top,
-      left: rect.left,
-      width: rect.width,
-    });
-  }, [listMaxHeight, menuVerticalPadding, searchSectionHeight, showSearch]);
-
-  const openDropdown = () => {
-    if (closeTimeoutRef.current) {
-      globalThis.clearTimeout(closeTimeoutRef.current);
-      closeTimeoutRef.current = null;
-    }
-
-    if (openAnimationFrameRef.current !== null) {
-      globalThis.cancelAnimationFrame(openAnimationFrameRef.current);
-      openAnimationFrameRef.current = null;
-    }
-
-    setSearchValue("");
-    setIsMenuMounted(true);
-    setIsMenuPositionReady(false);
-    setIsOpen(true);
-    setIsMenuVisible(false);
-  };
-
-  const closeDropdown = () => {
-    setIsOpen(false);
-    setIsMenuVisible(false);
-
-    if (openAnimationFrameRef.current !== null) {
-      globalThis.cancelAnimationFrame(openAnimationFrameRef.current);
-      openAnimationFrameRef.current = null;
-    }
-
-    if (closeTimeoutRef.current) {
-      globalThis.clearTimeout(closeTimeoutRef.current);
-    }
-
-    closeTimeoutRef.current = globalThis.setTimeout(() => {
-      setIsMenuMounted(false);
-      setIsMenuPositionReady(false);
-      closeTimeoutRef.current = null;
-    }, animationDuration);
-  };
-
-  const toggleDropdown = () => {
-    if (isOpen) {
-      closeDropdown();
-      return;
-    }
-
-    openDropdown();
-  };
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node;
-      const clickedInsideTrigger = dropdownRef.current?.contains(target);
-      const clickedInsideMenu = menuRef.current?.contains(target);
-
-      if (!clickedInsideTrigger && !clickedInsideMenu) {
-        closeDropdown();
-      }
-    }
-
-    document.addEventListener("click", handleClickOutside);
-    return () => {
-      document.removeEventListener("click", handleClickOutside);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isMenuMounted) return;
-
-    updateMenuPosition();
-
-    const handleReposition = () => {
-      updateMenuPosition();
-    };
-
-    globalThis.addEventListener("resize", handleReposition);
-    globalThis.addEventListener("scroll", handleReposition, true);
-
-    return () => {
-      globalThis.removeEventListener("resize", handleReposition);
-      globalThis.removeEventListener("scroll", handleReposition, true);
-    };
-  }, [isMenuMounted, updateMenuPosition]);
-
-  useLayoutEffect(() => {
-    if (!isMenuMounted || !isOpen || isMenuPositionReady) return;
-
-    updateMenuPosition();
-    setIsMenuPositionReady(true);
-  }, [isMenuMounted, isOpen, isMenuPositionReady, updateMenuPosition]);
-
-  useEffect(() => {
-    if (!isMenuMounted || !isOpen || !isMenuPositionReady || isMenuVisible) return;
-
-    openAnimationFrameRef.current = globalThis.requestAnimationFrame(() => {
-      openAnimationFrameRef.current = globalThis.requestAnimationFrame(() => {
-        setIsMenuVisible(true);
-        openAnimationFrameRef.current = null;
-      });
-    });
-
-    return () => {
-      if (openAnimationFrameRef.current !== null) {
-        globalThis.cancelAnimationFrame(openAnimationFrameRef.current);
-        openAnimationFrameRef.current = null;
-      }
-    };
-  }, [isMenuMounted, isOpen, isMenuPositionReady, isMenuVisible]);
-
-  useEffect(() => {
-    if (!showSearch || !isMenuVisible) return;
-
-    searchInputRef.current?.focus();
-  }, [showSearch, isMenuVisible]);
-
-  useEffect(() => {
-    if (!isMenuMounted) return;
-    updateMenuPosition();
-  }, [isMenuMounted, searchValue, updateMenuPosition]);
-
-  useEffect(() => {
-    return () => {
-      if (closeTimeoutRef.current) {
-        globalThis.clearTimeout(closeTimeoutRef.current);
-      }
-
-      if (openAnimationFrameRef.current !== null) {
-        globalThis.cancelAnimationFrame(openAnimationFrameRef.current);
-      }
-    };
-  }, []);
-
-  if (normalizedOptions.length === 0) return null;
-
-  const selectedOption = selectedItemId === undefined
+  const filtered = showSearch ? filterOptions(options, controller.searchValue) : options;
+  const selectedOption = selectedId === undefined
     ? undefined
-    : normalizedOptions.find((option) => option.sourceItem.id === selectedItemId);
+    : options.find((option) => option.sourceItem.id === selectedId);
 
-  const query = searchValue.trim().toLowerCase();
-  const shouldFilterOptions = showSearch && query.length > 0;
-
-  const filteredOptions = normalizedOptions.filter((option) => {
-    if (shouldFilterOptions) {
-      return `${option.label} ${option.searchText} ${String(option.value)}`.toLowerCase().includes(query);
-    }
-
-    return true;
-  });
-
-  const currentLabel = selectedOption?.selectedItem ?? placeholder;
-  const hiddenMenuStateClass = getHiddenMenuStateClass(menuDirection);
-  const menuStateClass = isMenuPositionReady
-    ? (isMenuVisible ? "opacity-100 scale-100 translate-y-0 pointer-events-auto" : hiddenMenuStateClass)
-    : hiddenMenuStateClass;
+  const handleSelect = (option: NormalizedOption) => {
+    if (option.disabled) return;
+    if (!isControlled) setInternalSelectedItem(option.sourceItem);
+    onChange?.(option.sourceItem);
+    onSelect?.({ value: option.value, index: option.index, label: option.label });
+    controller.closeDropdown();
+  };
 
   return (
-    <div
-      ref={dropdownRef}
-      className={`
-        relative max-w-full ${containerWidthClass}
-        ${className}
-      `}
+    <DropdownMenuShell
+      controller={controller}
+      size={size}
+      className={className}
+      menuClassName={menuClassName}
+      showSearch={showSearch}
+      searchPlaceholder={searchPlaceholder}
+      noResultsText={noResultsText}
+      triggerLabel={selectedOption?.selectedItem ?? placeholder}
+      hasSelection={selectedOption !== undefined}
+      filteredOptions={filtered}
+      onActivate={handleSelect}
+      initialFocusKey={selectedOption?.key}
     >
-      <div
-        role="button"
-        tabIndex={0}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            toggleDropdown();
-          }
-        }}
-        className={`
-          flex min-w-0 items-center justify-between gap-3 rounded-md border border-container1-border
-          bg-container1 transition-colors hover:bg-container1-hover cursor-pointer select-none
-          px-2.5 py-2 text-sm ${size ? triggerWidthClass : "w-full"}
-        `}
-        aria-expanded={isOpen}
-        aria-haspopup="listbox"
-        onClick={toggleDropdown}
-      >
-        <div className={`min-w-0 truncate ${selectedOption ? "text-title font-medium" : "text-common"}`}>
-          {currentLabel}
-        </div>
+      {(option, optionClass, isFocused) => {
+        const isSelected = selectedId !== undefined && option.sourceItem.id === selectedId;
 
-        <FontAwesomeIcon
-          icon={faCaretDown}
-          className={`${iconClass} text-common transition-transform duration-300 ${
-            isOpen ? "rotate-180" : ""
-          }`}
-        />
-      </div>
-
-      {isMenuMounted && createPortal(
-        <div
-          ref={menuRef}
-          style={{
-            top: menuPosition.top,
-            left: menuPosition.left,
-            width: selectedSizeConfig?.minWidthPx ?? menuPosition.width,
-          }}
-          className={`
-            fixed z-[9999] rounded-md
-            border border-container1-border bg-container1 shadow-lg
-            ${isMenuPositionReady ? "transition duration-200 ease-out" : ""}
-            ${menuDirection === "up" ? "origin-bottom" : "origin-top"}
-            ${menuClassName}
-            ${menuStateClass}
-          `}
-          onMouseDown={(event) => {
-            event.stopPropagation();
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-          }}
-        >
-          {showSearch && (
-            <div className="p-2 border-b border-container1-border">
-              <input
-                ref={searchInputRef}
-                value={searchValue}
-                onChange={(event) => { setSearchValue(event.target.value); }}
-                placeholder={searchPlaceholder}
-                className="w-full rounded-md border border-container2-border bg-container2 p-2 text-sm text-title outline-none focus:border-primary-border"
-                onClick={(event) => {
-                  event.stopPropagation();
-                }}
-              />
-            </div>
-          )}
-
+        return (
           <div
-            ref={listRef}
-            className="flex flex-col overflow-y-auto p-1"
-            style={{ maxHeight: listViewportMaxHeight }}
-            role="listbox"
+            key={option.key}
+            role="option"
+            tabIndex={isFocused ? 0 : -1}
+            aria-selected={isSelected}
+            aria-disabled={option.disabled}
+            data-focus-key={option.key}
+            onMouseEnter={() => { if (!option.disabled) controller.setFocusedKey(option.key); }}
+            className={`flex w-full items-center justify-between gap-2 rounded-sm text-left transition-colors
+              border border-transparent ${optionClass}
+              ${option.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
+              ${isSelected ? "bg-container2 border-container2-border text-title font-medium" : "text-title"}
+              ${isFocused && !isSelected ? "bg-container1-hover" : ""}
+              ${isFocused ? "outline-none ring-1 ring-primary/40" : ""}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleSelect(option);
+            }}
           >
-            {filteredOptions.map((option) => {
-              const isSelected = selectedItemId !== undefined && option.sourceItem.id === selectedItemId;
-
-              return (
-                <div
-                  key={option.key}
-                  role="option"
-                  aria-selected={isSelected}
-                  aria-disabled={option.disabled}
-                  tabIndex={option.disabled ? -1 : 0}
-                  className={`
-                    flex w-full items-center justify-between gap-2 rounded-sm text-left transition-colors
-                    border border-transparent
-                    ${optionClass}
-                    ${option.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
-                    ${isSelected ? "bg-container2 border-container2-border text-title font-medium" : "hover:bg-container1-hover text-title"}
-                  `}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (option.disabled) return;
-
-                    if (!isControlled) {
-                      setInternalSelectedItem(option.sourceItem);
-                    }
-
-                    onChange?.(option.sourceItem);
-                    onSelect?.({ value: option.value, index: option.index, label: option.label });
-                    closeDropdown();
-                  }}
-                  onKeyDown={(event) => {
-                    if (option.disabled) return;
-                    if (event.key !== "Enter" && event.key !== " ") return;
-
-                    event.preventDefault();
-                    if (!isControlled) {
-                      setInternalSelectedItem(option.sourceItem);
-                    }
-
-                    onChange?.(option.sourceItem);
-                    onSelect?.({ value: option.value, index: option.index, label: option.label });
-                    closeDropdown();
-                  }}
-                >
-                  <span className="flex-1 min-w-0">{option.item}</span>
-                  {isSelected && <FontAwesomeIcon icon={faCheck} className="ml-2 text-xs" />}
-                </div>
-              );
-            })}
-
-            {filteredOptions.length === 0 && (
-              <div className="px-2 py-1.5 text-sm text-common">{noResultsText}</div>
-            )}
+            <span className="flex-1 min-w-0">{option.item}</span>
+            {isSelected && <FontAwesomeIcon icon={faCheck} className="ml-2 text-xs" />}
           </div>
-        </div>,
-        document.body,
-      )}
-    </div>
+        );
+      }}
+    </DropdownMenuShell>
   );
 }

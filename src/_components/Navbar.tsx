@@ -1,4 +1,17 @@
-import { ReactNode, useEffect, useRef, useState } from "react";
+import {
+  faAngleLeft,
+  faAngleRight,
+  faBars,
+  faFlask,
+  faGear,
+  faHouse,
+  faRightFromBracket,
+  faUserShield,
+  faXmark,
+} from "@fortawesome/free-solid-svg-icons";
+import { type IconDefinition } from "@fortawesome/fontawesome-svg-core";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { ReactNode, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 
 import { SessionLayout } from "config";
@@ -7,315 +20,213 @@ import { apiRequest } from "src/_sockets/apiRequest";
 import { useSession } from "../_providers/SessionProvider";
 
 import Avatar from "./Avatar";
-import Icon from "./Icon";
 import useRouter from "./Router";
 
-interface NavbarItemProps {
-  item: {
-    init?: (props: {
-      item: NavbarItemProps["item"],
-      state: NavbarItemProps["state"],
-      setState: NavbarItemProps["setState"],
-      pathname: NavbarItemProps["pathname"],
-      session: NavbarItemProps["session"],
-      router: NavbarItemProps["router"]
-    }) => ReactNode,
-    icon?: string,
-    label?: string,
-    path?: string,
-    action?: (props: { 
-      item: NavbarItemProps["item"], 
-      state: NavbarItemProps["state"], 
-      setState: NavbarItemProps["setState"], 
-      pathname: NavbarItemProps["pathname"],
-      session: NavbarItemProps["session"],
-      router: NavbarItemProps["router"]
-    }) => void,
-    bottom?: boolean,
-    hideOnFolded?: boolean,
-    hideOnExpended?: boolean
-  },
-  state: 'folded' | 'expended',
-  setState: (state: 'folded' | 'expended') => void,
-  pathname: string,
-  session: SessionLayout | null,
-  router: (location: string) => Promise<void> | void
+export type NavbarState = 'folded' | 'expanded';
+
+export interface NavbarItemContext {
+  state: NavbarState;
+  setState: (state: NavbarState) => void;
+  pathname: string;
+  session: SessionLayout | null;
+  router: (location: string) => Promise<void> | void;
 }
 
-const navbarItems = [
+export interface NavbarItem {
+  /** Render-your-own item (e.g. an avatar). When set, `icon`/`label` are ignored. */
+  init?: (ctx: NavbarItemContext) => ReactNode;
+  icon?: IconDefinition;
+  label?: string;
+  path?: string;
+  action?: (ctx: NavbarItemContext) => void;
+  /** Pin to bottom of sidebar. */
+  bottom?: boolean;
+  hideOnFolded?: boolean;
+  hideOnExpanded?: boolean;
+}
+
+const DEFAULT_ITEMS: NavbarItem[] = [
   {
-    init: function InitComponent({ session }: NavbarItemProps) {
-      if (!session) { return null }
+    init: ({ session, state }) => {
+      if (!session) return null;
       return (
-        <div className="w-6 h-6">
-          <Avatar 
-            user={session}
-          />
-        </div>
-      )
+        <>
+          <div className="w-6 h-6 flex-shrink-0">
+            <Avatar user={session} />
+          </div>
+          {state === 'expanded' && (
+            <div className="line-clamp-1 select-none text-sm font-medium text-title">
+              {session.name}
+            </div>
+          )}
+        </>
+      );
     },
   },
+  { icon: faAngleLeft,  label: 'Close sidebar', action: ({ setState }) => { setState('folded'); }, hideOnFolded: true },
+  { icon: faAngleRight, label: 'Show sidebar',  action: ({ setState }) => { setState('expanded'); }, hideOnExpanded: true },
+  { icon: faHouse,       label: 'Dashboard',     path: '/dashboard' },
+  { icon: faGear,        label: 'Settings',      path: '/settings' },
+  { icon: faUserShield,  label: 'Admin',         path: '/admin' },
+  { icon: faFlask,       label: 'Playground',    path: '/playground' },
   {
-    icon: 'close_fullscreen',
-    label: 'Close sidebar',
-    action: ({ setState }: NavbarItemProps) => {
-      setState('folded')
-    },
-    hideOnFolded: true
-  },
-  {
-    icon: 'open_in_full',
-    label: 'Show sidebar',
-    action: ({ setState }: NavbarItemProps) => {
-      setState('expended')
-    },
-    hideOnExpended: true
-  },
-  {
-    icon: 'home',
-    label: 'Test',
-    path: '/test'
-  },
-  {
-    icon: 'settings',
-    label: 'Settings',
-    path: '/settings'
-  },
-  {
-    icon: 'admin_panel_settings',
-    label: 'Admin',
-    path: '/admin'
-  },
-  {
-    icon: 'logout',
+    icon: faRightFromBracket,
     label: 'Logout',
     bottom: true,
-    action: () => {
-      void apiRequest({ name: 'system/logout', version: 'v1' });
-    }
+    action: () => { void apiRequest({ name: 'system/logout', version: 'v1' }); },
   },
-]
+];
 
-const activePopups: HTMLElement[] = [];
-const clearPopups = () => {
-  for (const popup of activePopups) {
-    popup.remove();
-  }
-  activePopups.length = 0;
-};
-
-const displayPopup = ({ element, text }: { element: HTMLElement, text: string }) => {
-  const popup = document.createElement('div');
-  popup.className = `
-    bg-container2 text-title border border-container2-border rounded-md p-2 absolute z-50 shadow-lg whitespace-nowrap pointer-events-none
-    transform scale-90 opacity-0 transition-all duration-200
-  `;
-
-  popup.innerHTML = text;
-
-  const rect = element.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) { return };
-  
-  popup.style.position = 'absolute';
-  popup.style.top = `${String(rect.top + window.scrollY - 10)}px`;
-  popup.style.left = `${String(rect.left + window.scrollX + rect.width + 5)}px`;
-  document.body.append(popup);
-
-  activePopups.push(popup);
-  void popup.offsetHeight;
-
-  popup.classList.remove('scale-90', 'opacity-0');
-  popup.classList.add('scale-100', 'opacity-100');
-
-  element.addEventListener('mouseleave', () => { 
-    popup.remove(); 
-    const index = activePopups.indexOf(popup);
-    if (index !== -1) activePopups.splice(index, 1);
-  }, { once: true });
-};
-
-const NavbarItem = ({ item, state, setState, pathname, session, router }: NavbarItemProps) => {
-  const toggleId = useRef<number | null>(null);
-  return (
-   <div
-     role="button"
-     tabIndex={0}
-     className={`hover:bg-container1-hover hover:text-title w-full h-10 items-center rounded-sm transition-all duration-100 cursor-pointer gap-2 py-2
-      ${state === 'expended' && item.hideOnExpended ? 'hidden' :
-        (state === 'folded' && item.hideOnFolded ? 'hidden' : 
-        'flex')
-      }
-      ${state === 'folded' ? 'px-2' : 'px-2'}
-      ${item.path === pathname ? 'bg-container2 text-title' : 'text-common'}
-      ${item.bottom ? 'mt-auto' : ''}
-    `}
-    onMouseEnter={(e) => {
-      if (state === 'expended') { return }
-      const target = e.currentTarget as HTMLElement;
-      const randomId = Math.floor(Math.random() * 1_000_000_000_000_000);
-      toggleId.current = randomId;
-      setTimeout(() => {
-        requestAnimationFrame(() => {
-          if (item.label === undefined) { return }
-          if (toggleId.current !== randomId) { return }
-          console.log('toggleId', toggleId.current);
-          displayPopup({ element: target, text: item.label });
-        })
-      }, 100);
-    }}
-    onMouseLeave={() => {
-      if (state === 'expended') { return }
-      toggleId.current = null;
-    }}
-    onKeyDown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        if (item.action) { item.action({ item, state, setState, pathname, session, router }) }
-        else if (item.path) {
-          clearPopups();
-          void router(item.path);
-          setState('folded');
-        }
-      }
-    }}
-    onClick={() => {
-      if (item.action) { item.action({ item, state, setState, pathname, session, router }) }
-      else if (item.path) { 
-        clearPopups();
-        void router(item.path);
-        setState('folded');
-      }
-    }}>
-      {item.init ? 
-        item.init({ item, state, setState, pathname, session: session, router })
-      :
-      <>
-        <Icon 
-          name={item.icon ?? ''} 
-          size={state === 'folded' ? '18px' : '22px'}
-          weight={'lighter'}
-          customClasses="relative left-0.75"
-        />
-        {state === 'expended' &&
-          <div className="line-clamp-1 select-none">{item.label}</div>
-        }
-      </>
-      }
-   </div> 
-  ) 
+interface NavbarItemViewProps {
+  item: NavbarItem;
+  ctx: NavbarItemContext;
 }
 
-export default function Navbar() {
+function NavbarItemView({ item, ctx }: NavbarItemViewProps) {
+  const { state, pathname } = ctx;
+  const isHidden =
+    (state === 'expanded' && item.hideOnExpanded === true) ||
+    (state === 'folded' && item.hideOnFolded === true);
+  if (isHidden) return null;
 
-  const [state, setState] = useState<'folded' | 'expended'>('folded');
-  const location = useLocation();
-  const router = useRouter()
-  const { session } = useSession();
+  const isActive = item.path !== undefined && item.path === pathname;
 
-  useEffect(() => {
-    clearPopups();
-  }, [location.pathname]);
-
-  const ref = useRef<HTMLDivElement>(null);
-  const [parentWidth, setParentWidth] = useState<number>(0);
-
-  useEffect(() => {
-    const parent = ref.current?.parentElement;
-    if (!parent) return;
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setParentWidth(entry.contentRect.width);
-      }
-    });
-
-    observer.observe(parent);
-
-    return () => { observer.disconnect(); };
-  }, []);
-
-  if (!session) { return null; }
+  const handleActivate = () => {
+    if (item.action) {
+      item.action(ctx);
+    } else if (item.path) {
+      void ctx.router(item.path);
+      ctx.setState('folded');
+    }
+  };
 
   return (
-    <div ref={ref}>
-      {parentWidth < 768 &&
+    <div
+      role="button"
+      tabIndex={0}
+      className={`group relative w-full h-10 px-2 py-2 flex items-center gap-3 rounded-md cursor-pointer transition-colors
+        hover:bg-container1-hover hover:text-title
+        ${isActive ? 'bg-container2 text-title' : 'text-common'}
+        ${item.bottom ? 'mt-auto' : ''}`}
+      onClick={handleActivate}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleActivate();
+        }
+      }}
+    >
+      {item.init ? item.init(ctx) : (
         <>
-          <div className="w-full py-2 px-4 bg-container1 text-title flex justify-between items-center">
-            <div className="w-8 h-8">
-              <Avatar 
-                user={session}
-              />
-            </div>
-            <div>
-              <Icon
-                name={state === 'expended' ? 'close_fullscreen' : 'open_in_full'}
-                size={'22px'}
-                weight={'lighter'}
-                onClick={() => {
-                  const value = state === 'expended' ? 'folded' : 'expended';
-                  setState(value)
-                }}
-              />
-            </div>
-          </div>
-        </>
-      }
-      <div className={`h-full bg-container1 text-common flex flex-col items-center @md:py-4 transition-all duration-200 @md:px-2 absolute z-20 @md:z-0 @md:relative
-        ${state === 'folded' ? 
-          '@md:w-14 w-0 gap-3' : 
-          'w-64 gap-1 px-2'
-        }`}>
-
-          {(parentWidth >= 768 || state === 'expended') && (
-            <>
-              {/* Top items */}
-              {navbarItems.filter((item) => item.bottom !== true).map((item, index) => {
-                const shouldRender = item.init !== undefined || (item.icon && item.label);
-                if (!shouldRender) return null;
-
-                return (
-                  <NavbarItem
-                    key={`top-${String(index)}`}
-                    pathname={location.pathname}
-                    item={item}
-                    state={state}
-                    setState={setState}
-                    session={session}
-                    router={router}
-                  />
-                );
-              })}
-
-              {/* Bottom items, inside a mt-auto wrapper */}
-              <div className="mt-auto w-full flex flex-col gap-2 items-center">
-                {navbarItems.filter((item) => item.bottom === true).map((item, index) => {
-                  const shouldRender = item.init !== undefined || (item.icon && item.label);
-                  if (!shouldRender) return null;
-
-                  return (
-                    <NavbarItem
-                      key={`bottom-${String(index)}`}
-                      pathname={location.pathname}
-                      item={item}
-                      state={state}
-                      setState={setState}
-                      session={session}
-                      router={router}
-                    />
-                  );
-                })}
-              </div>
-            </>
+          {item.icon && (
+            <FontAwesomeIcon
+              icon={item.icon}
+              className={`flex-shrink-0 ${state === 'folded' ? 'text-base' : 'text-lg'}`}
+            />
           )}
+          {state === 'expanded' && item.label && (
+            <div className="line-clamp-1 select-none text-sm">{item.label}</div>
+          )}
+        </>
+      )}
 
+      {/* CSS-only tooltip — only renders when collapsed and the item has a label */}
+      {state === 'folded' && item.label && (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded-md bg-container2 border border-container2-border text-title text-xs whitespace-nowrap shadow-lg opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 z-50"
+        >
+          {item.label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+export interface NavbarProps {
+  items?: NavbarItem[];
+}
+
+export default function Navbar({ items = DEFAULT_ITEMS }: NavbarProps = {}) {
+  const [state, setState] = useState<NavbarState>('folded');
+  const location = useLocation();
+  const router = useRouter();
+  const { session } = useSession();
+
+  // Auto-collapse on route change so the mobile drawer doesn't stay open.
+  useEffect(() => {
+    setState('folded');
+  }, [location.pathname]);
+
+  if (!session) return null;
+
+  const ctx: NavbarItemContext = {
+    state,
+    setState,
+    pathname: location.pathname,
+    session,
+    router,
+  };
+
+  const renderableItems = items.filter((item) => item.init !== undefined || (item.icon && item.label));
+  const topItems = renderableItems.filter((item) => !item.bottom);
+  const bottomItems = renderableItems.filter((item) => item.bottom === true);
+
+  const isOpen = state === 'expanded';
+
+  return (
+    <>
+      {/* Mobile top bar — only visible below md */}
+      <div className="md:hidden w-full py-2 px-4 bg-container1 border-b border-container1-border text-title flex justify-between items-center">
+        <div className="w-8 h-8">
+          <Avatar user={session} />
+        </div>
+        <button
+          type="button"
+          aria-label={isOpen ? 'Close menu' : 'Open menu'}
+          className="w-9 h-9 flex items-center justify-center rounded-md hover:bg-container1-hover transition-colors cursor-pointer"
+          onClick={() => { setState(isOpen ? 'folded' : 'expanded'); }}
+        >
+          <FontAwesomeIcon icon={isOpen ? faXmark : faBars} className="text-lg" />
+        </button>
       </div>
+
+      {/* Sidebar.
+          Mobile (default): absolute drawer at full w-64; slides via transform
+          so it never sits in flow (no 6px peek, no reflow on toggle).
+          Desktop (md+): translate is reset, position is in-flow rail when
+          closed, absolute overlay when open. */}
+      <div
+        className={`bg-container1 border-r border-container1-border text-common flex flex-col py-4 px-2 gap-1 z-20
+          absolute inset-y-0 left-0 w-64 transition-transform duration-200
+          ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+          md:translate-x-0 md:transition-[width] md:duration-200 md:h-full
+          ${isOpen
+            ? 'md:absolute md:inset-0 md:w-64'
+            : 'md:relative md:inset-auto md:w-14'}`}
+      >
+        {topItems.map((item, index) => (
+          <NavbarItemView key={`top-${String(index)}`} item={item} ctx={ctx} />
+        ))}
+        {bottomItems.length > 0 && (
+          <div className="mt-auto w-full flex flex-col gap-1">
+            {bottomItems.map((item, index) => (
+              <NavbarItemView key={`bottom-${String(index)}`} item={item} ctx={ctx} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Mobile backdrop */}
       <div
         role="button"
-        tabIndex={0}
-        className={`@md:hidden flex absolute top-0 left-0 z-10 bg-black ${state === 'folded' ? 'opacity-0 pointer-events-none' : 'opacity-80'} transition-all duration-300 w-full h-full`}
-        onClick={() => { setState('folded') }}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setState('folded'); }}>
-      </div>
-    </div>
-  )
+        tabIndex={-1}
+        aria-hidden={!isOpen}
+        className={`md:hidden fixed inset-0 z-10 bg-black transition-opacity duration-300
+          ${isOpen ? 'opacity-60' : 'opacity-0 pointer-events-none'}`}
+        onClick={() => { setState('folded'); }}
+        onKeyDown={(e) => { if (e.key === 'Escape') setState('folded'); }}
+      />
+    </>
+  );
 }

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
-import deployConfig from '../../../deploy.config';
+import { getDeployConfig } from '@luckystack/core';
 
 //? Detects "two Redis URLs that both respond" — a failure mode where two
 //? environments think they share Redis but don't. Protocol:
@@ -55,7 +55,7 @@ const probeFallbackHealth = async (baseUrl: string): Promise<FallbackHealthRespo
 
 const collectSynchronizedEnvKeysFromConfig = (): string[] => {
   const keys = new Set<string>();
-  for (const resource of Object.values(deployConfig.resources)) {
+  for (const resource of Object.values(getDeployConfig().resources)) {
     for (const key of resource.synchronizedEnvKeys ?? []) {
       keys.add(key);
     }

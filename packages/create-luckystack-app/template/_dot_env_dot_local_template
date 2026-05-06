@@ -1,0 +1,22 @@
+# Local secrets. NOT checked into git. Copy this to `.env.local` and fill in.
+
+# Database connection used by Prisma. Pick the format that matches your
+# `prisma/schema.prisma` provider.
+DATABASE_URL="postgresql://user:password@localhost:5432/{{PROJECT_NAME}}"
+
+# Redis credentials (only required when your Redis instance has auth).
+REDIS_USERNAME=
+REDIS_PASSWORD=
+
+# OAuth client secrets — uncomment a provider in
+# `luckystack/login/oauthProviders.ts` AFTER you populate the matching pair here.
+# DEV_GOOGLE_CLIENT_ID=
+# DEV_GOOGLE_CLIENT_SECRET=
+# DEV_GITHUB_CLIENT_ID=
+# DEV_GITHUB_CLIENT_SECRET=
+
+# Sentry — optional. Leave blank to disable error reporting.
+SENTRY_DSN=
+
+# Test-only — protects /_test/reset in dev. Set this if you run integration tests.
+TEST_RESET_TOKEN=

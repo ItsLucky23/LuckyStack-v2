@@ -40,7 +40,7 @@ src/page.tsx         -->  renders at /
 
 ```typescript
 // src/settings/page.tsx
-export const template = 'home';
+export const template = 'dashboard';
 
 export default function SettingsPage() {
   return <div>...</div>;
@@ -52,10 +52,9 @@ Available templates:
 | Template    | Description                                                         |
 | ----------- | ------------------------------------------------------------------- |
 | `plain`     | Minimal wrapper, no UI chrome. Sets theme to `config.defaultTheme`. |
-| `home`      | Top bar with user avatar, settings/home toggle, and logout button.  |
 | `dashboard` | Side navigation bar with main content area.                         |
 
-Both `home` and `dashboard` templates include `Middleware` for route authentication guards.
+The `dashboard` template includes `Middleware` for route authentication guards.
 
 ### Route Resolution Logic
 

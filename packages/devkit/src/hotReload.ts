@@ -30,8 +30,8 @@ import {
   generateTypeMapFile,
 } from "./typeMapGenerator.js";
 import { findDependentRouteFiles } from "./importDependencyGraph";
-import { tryCatch, serverRuntimeConfig } from "@luckystack/core";
-import { reloadLocaleTranslations } from "../../../server/utils/responseNormalizer";
+import { tryCatch, getProjectConfig, getLocaleReloader } from "@luckystack/core";
+import { getRoutingRules } from './routingRules';
 
 // ----------------------------
 // Watcher for Hot Reload + Type Generation
@@ -41,6 +41,19 @@ export const setupWatchers = () => {
   const isDevMode = process.env.NODE_ENV !== 'production';
   if (!isDevMode) return;
   const nodeRequire = createRequire(import.meta.url);
+  //? Marker path segments resolved once per startup. If a consumer registers
+  //? custom marker names, those wire through here automatically.
+  const apiMarkerSlash = `/${getRoutingRules().apiMarker}/`;
+  const syncMarkerSlash = `/${getRoutingRules().syncMarker}/`;
+  const apiMarkerNoLead = `${getRoutingRules().apiMarker}/`;
+  const syncMarkerNoLead = `${getRoutingRules().syncMarker}/`;
+  //? Path segments derived from configured paths. Consumers with custom
+  //? `srcDir`/`sharedDir`/`serverFunctionsDir` get correct watcher behavior.
+  const pathsCfg = getProjectConfig().paths;
+  const srcSegment = `/${pathsCfg.srcDir.replaceAll('\\', '/')}/`;
+  const sharedSegment = `/${pathsCfg.sharedDir.replaceAll('\\', '/')}/`;
+  const serverFunctionsSegment = `/${pathsCfg.serverFunctionsDir.replaceAll('\\', '/')}/`;
+  const localesSegment = `${srcSegment}_locales/`;
   const reloadTimers = new Map<'api' | 'sync' | 'functions' | 'typemap' | 'locales', NodeJS.Timeout>();
   const pendingApiUpserts = new Set<string>();
   const pendingApiDeletes = new Set<string>();
@@ -63,11 +76,11 @@ export const setupWatchers = () => {
       return false;
     }
 
-    if (!normalizedPath.includes('/src/')) {
+    if (!normalizedPath.includes(srcSegment)) {
       return false;
     }
 
-    if (normalizedPath.includes('/_api/') || normalizedPath.includes('/_sync/')) {
+    if (normalizedPath.includes(apiMarkerSlash) || normalizedPath.includes(syncMarkerSlash)) {
       return false;
     }
 
@@ -79,7 +92,7 @@ export const setupWatchers = () => {
   };
 
   const isSharedDependencyFile = (normalizedPath: string): boolean => {
-    return (normalizedPath.includes('/shared/') || normalizedPath.includes('/server/functions/'))
+    return (normalizedPath.includes(sharedSegment) || normalizedPath.includes(serverFunctionsSegment))
       && (normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'));
   };
 
@@ -97,11 +110,11 @@ export const setupWatchers = () => {
     let queuedSyncCount = 0;
 
     for (const routePath of affectedRoutes) {
-      if (routePath.includes('/_api/')) {
+      if (routePath.includes(apiMarkerSlash)) {
         pendingApiDeletes.delete(routePath);
         pendingApiUpserts.add(routePath);
         queuedApiCount += 1;
-      } else if (routePath.includes('/_sync/')) {
+      } else if (routePath.includes(syncMarkerSlash)) {
         pendingSyncDeletes.delete(routePath);
         pendingSyncUpserts.add(routePath);
         queuedSyncCount += 1;
@@ -136,23 +149,23 @@ export const setupWatchers = () => {
   const isTypeMapRelevantFile = (normalizedPath: string): boolean => {
     if (isGeneratedPath(normalizedPath)) return false;
     if (!(normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'))) return false;
-    if (normalizedPath.includes('/_api/') || normalizedPath.includes('/_sync/')) return false;
+    if (normalizedPath.includes(apiMarkerSlash) || normalizedPath.includes(syncMarkerSlash)) return false;
 
     return (
-      normalizedPath.includes('/src/')
+      normalizedPath.includes(srcSegment)
       || normalizedPath.endsWith('/config.ts')
-      || normalizedPath.includes('/shared/')
+      || normalizedPath.includes(sharedSegment)
     );
   };
 
   const isLocaleFile = (normalizedPath: string): boolean => {
-    return normalizedPath.includes('/src/_locales/') && normalizedPath.endsWith('.json');
+    return normalizedPath.includes(localesSegment) && normalizedPath.endsWith('.json');
   };
 
   const scheduleReload = (
     key: 'api' | 'sync' | 'functions' | 'typemap' | 'locales',
     task: () => Promise<void> | void,
-    delay = serverRuntimeConfig.dev.hotReloadDebounceMs
+    delay = getProjectConfig().dev.hotReloadDebounceMs
   ) => {
     const activeTimer = reloadTimers.get(key);
     if (activeTimer) {
@@ -214,7 +227,7 @@ export const setupWatchers = () => {
       }
     }
 
-    if (normalizedPath.includes('_api/')) {
+    if (normalizedPath.includes(apiMarkerNoLead)) {
       pendingApiDeletes.delete(normalizedPath);
       pendingApiUpserts.add(normalizedPath);
       scheduleReload('api', async () => {
@@ -223,7 +236,7 @@ export const setupWatchers = () => {
       return;
     }
 
-    if (normalizedPath.includes('_sync/')) {
+    if (normalizedPath.includes(syncMarkerNoLead)) {
       pendingSyncDeletes.delete(normalizedPath);
       pendingSyncUpserts.add(normalizedPath);
       scheduleReload('sync', async () => {
@@ -308,8 +321,8 @@ export const setupWatchers = () => {
     }
 
     if (isLocaleFile(normalizedPath)) {
-      scheduleReload('locales', () => {
-        reloadLocaleTranslations();
+      scheduleReload('locales', async () => {
+        await getLocaleReloader()?.();
       });
       return;
     }
@@ -330,7 +343,7 @@ export const setupWatchers = () => {
       });
     }
 
-    if (normalizedPath.includes('_api/')) {
+    if (normalizedPath.includes(apiMarkerNoLead)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] API changed, regenerating type map`, 'blue');
         await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
@@ -340,7 +353,7 @@ export const setupWatchers = () => {
       scheduleReload('api', async () => {
         await processPendingApiChanges();
       });
-    } else if (normalizedPath.includes('_sync/')) {
+    } else if (normalizedPath.includes(syncMarkerNoLead)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Sync changed, regenerating type map`, 'blue');
         await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
@@ -374,8 +387,8 @@ export const setupWatchers = () => {
     }
 
     if (isLocaleFile(normalizedPath)) {
-      scheduleReload('locales', () => {
-        reloadLocaleTranslations();
+      scheduleReload('locales', async () => {
+        await getLocaleReloader()?.();
       });
       return;
     }
@@ -396,7 +409,7 @@ export const setupWatchers = () => {
       });
     }
 
-    if (normalizedPath.includes('_api/')) {
+    if (normalizedPath.includes(apiMarkerNoLead)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] API deleted, regenerating type map`, 'blue');
         await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
@@ -406,7 +419,7 @@ export const setupWatchers = () => {
       scheduleReload('api', async () => {
         await processPendingApiChanges();
       });
-    } else if (normalizedPath.includes('_sync/')) {
+    } else if (normalizedPath.includes(syncMarkerNoLead)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Sync deleted, regenerating type map`, 'blue');
         await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
@@ -437,12 +450,15 @@ export const setupWatchers = () => {
     }
   };
 
-  // Watch the main source folders
-  watch('src', {
+  const devConfig = getProjectConfig().dev;
+  const pathsConfig = getProjectConfig().paths;
+  // Watch the main source folders. Paths come from the registered project
+  // config so consumers with non-default layouts (e.g. `app/src`) work.
+  watch(pathsConfig.srcDir, {
     ignoreInitial: true,
     awaitWriteFinish: {
-      stabilityThreshold: serverRuntimeConfig.dev.watcherStabilityThresholdMs,
-      pollInterval: serverRuntimeConfig.dev.watcherPollIntervalMs,
+      stabilityThreshold: devConfig.watcherStabilityThresholdMs,
+      pollInterval: devConfig.watcherPollIntervalMs,
     },
   })
     .on('add', handleAdd)
@@ -450,13 +466,13 @@ export const setupWatchers = () => {
     .on('unlink', handleDelete);
 
   // Watch functions separately
-  watch('server/functions', { ignoreInitial: true })
+  watch(pathsConfig.serverFunctionsDir, { ignoreInitial: true })
     .on('add', handleFunctionChange)
     .on('change', handleFunctionChange)
     .on('unlink', handleFunctionChange);
 
   // Watch shared functions separately
-  watch('shared', { ignoreInitial: true })
+  watch(pathsConfig.sharedDir, { ignoreInitial: true })
     .on('add', handleFunctionChange)
     .on('change', handleFunctionChange)
     .on('unlink', handleFunctionChange);

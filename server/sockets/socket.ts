@@ -9,8 +9,8 @@ import { getSession, saveSession } from "../functions/session";
 import { Server as SocketIOServer } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
 import { allowedOrigin, attachSocketRedisAdapter, setIoInstance } from '@luckystack/core';
-import type { apiMessage, syncMessage } from '@luckystack/core';
-import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from '@luckystack/presence';
+import type { apiMessage, syncMessage, BaseSessionLayout } from '@luckystack/core';
+import { initActivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from '@luckystack/presence';
 import { locationProviderEnabled, logging, SessionLayout, socketActivityBroadcaster } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
 import {
@@ -50,7 +50,7 @@ const getVisibleSocketRooms = (socket: any, token: string | null): string[] => {
     .filter((room) => !token || room !== token);
 };
 
-const getSessionRoomCodes = (session: SessionLayout): string[] => {
+const getSessionRoomCodes = (session: BaseSessionLayout): string[] => {
   const roomCodes = Array.isArray(session.roomCodes)
     ? session.roomCodes.filter((roomCode): roomCode is string => typeof roomCode === 'string' && roomCode.length > 0)
     : [];
@@ -58,9 +58,9 @@ const getSessionRoomCodes = (session: SessionLayout): string[] => {
   return [...new Set(roomCodes)];
 };
 
-const sanitizeSessionRoomKeys = (session: SessionLayout): SessionLayout => {
-  const { code: _legacyCode, codes: _legacyCodes, ...sanitizedSession } = session as SessionLayout & { code?: string; codes?: string[] };
-  return sanitizedSession;
+const sanitizeSessionRoomKeys = <T extends BaseSessionLayout>(session: T): T => {
+  const { code: _legacyCode, codes: _legacyCodes, ...sanitizedSession } = session as T & { code?: string; codes?: string[] };
+  return sanitizedSession as T;
 };
 
 export default function loadSocket(httpServer: any) {
@@ -213,7 +213,7 @@ export default function loadSocket(httpServer: any) {
       }
 
       await withSessionLock(token, async () => {
-        let returnedUser: SessionLayout | null = null;
+        let returnedUser: BaseSessionLayout | null = null;
         if (socketActivityBroadcaster) {
           returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
         }
@@ -230,7 +230,7 @@ export default function loadSocket(httpServer: any) {
     });
 
     if (socketActivityBroadcaster && token) {
-      initAcitivityBroadcaster({ socket, token });
+      initActivityBroadcaster({ socket, token });
     }
 
     if (token) {

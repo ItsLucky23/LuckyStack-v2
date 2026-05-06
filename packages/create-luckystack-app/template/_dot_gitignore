@@ -1,0 +1,13 @@
+node_modules
+dist
+.eslintcache
+
+# Local env (commit only the templates).
+.env
+.env.local
+
+# Generated artifacts.
+src/_sockets/apiTypes.generated.ts
+src/_sockets/apiInputSchemas.generated.ts
+src/docs/apiDocs.generated.json
+server/prod/generatedApis*.ts

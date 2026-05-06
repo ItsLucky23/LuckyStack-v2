@@ -1,4 +1,5 @@
 import type { BaseSessionLayout as SessionLayout } from "./sessionLayout";
+import { randomBytes } from 'node:crypto';
 import { redis, captureException, socketEventNames, dispatchHook, getProjectConfig } from '@luckystack/core';
 
 const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
@@ -23,6 +24,25 @@ const parseSessionLayout = (value: string): SessionLayout | null => {
  */
 const saveSession = async (token: string, data: SessionLayout, newUser?: boolean): Promise<void> => {
   try {
+    if (newUser) {
+      const preSessionCreateResult = await dispatchHook('preSessionCreate', {
+        token,
+        user: data,
+        persistent: !getProjectConfig().session.basedToken,
+      });
+      if (preSessionCreateResult.stopped) {
+        console.log(`session create aborted by preSessionCreate hook: ${preSessionCreateResult.signal.errorCode}`, 'yellow');
+        return;
+      }
+    }
+
+    //? Mint a CSRF token on first session write. Subsequent writes preserve
+    //? the existing token so the client doesn't have to re-fetch on every
+    //? session update. The token is rotated on logout via `deleteSession`.
+    if (!data.csrfToken) {
+      data.csrfToken = randomBytes(32).toString('hex');
+    }
+
     const sessionKey = `${PROJECT_NAME}-session:${token}`;
     await redis.set(sessionKey, JSON.stringify(data));
     await redis.expire(sessionKey, getSessionTtl());
@@ -128,6 +148,15 @@ const deleteSession = async (token: string): Promise<boolean> => {
 
     if (rawUser) {
       resolvedUserId = parseSessionLayout(rawUser)?.id ?? null;
+    }
+
+    const preSessionDeleteResult = await dispatchHook('preSessionDelete', { token, userId: resolvedUserId });
+    if (preSessionDeleteResult.stopped) {
+      console.log(`session delete aborted by preSessionDelete hook: ${preSessionDeleteResult.signal.errorCode}`, 'yellow');
+      return false;
+    }
+
+    if (rawUser) {
 
       if (resolvedUserId) {
         const activeUsersKey = `${PROJECT_NAME}-activeUsers:${resolvedUserId}`;
@@ -209,4 +238,28 @@ const getAllSessions = async (): Promise<SessionLayout[]> => {
   }
 };
 
-export { saveSession, getSession, deleteSession, getAllSessions };
+/**
+ * Revoke every active session for a user, optionally keeping one alive.
+ *
+ * @param userId - The user whose sessions to revoke
+ * @param exceptToken - If provided, this session is left untouched. Pass the
+ *   caller's own token when revoking after a password change so the user
+ *   isn't logged out of the device they just changed it from. Pass null/omit
+ *   to revoke everything (account deletion, "sign out everywhere", etc.).
+ *
+ * Each revocation goes through `deleteSession`, so connected sockets are
+ * told to log out via the same flow as a normal logout. Returns the number
+ * of sessions actually revoked.
+ */
+const revokeUserSessions = async (userId: string, exceptToken?: string | null): Promise<number> => {
+  if (!userId) return 0;
+
+  const activeUsersKey = `${PROJECT_NAME}-activeUsers:${userId}`;
+  const tokens = await redis.smembers(activeUsersKey);
+  const targets = exceptToken ? tokens.filter((t) => t !== exceptToken) : tokens;
+
+  await Promise.all(targets.map((token) => deleteSession(token)));
+  return targets.length;
+};
+
+export { saveSession, getSession, deleteSession, getAllSessions, revokeUserSessions };

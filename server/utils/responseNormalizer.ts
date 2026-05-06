@@ -11,6 +11,7 @@ import {
   ErrorParam,
   createLocalizedNormalizer,
   registerLocalizedNormalizer,
+  registerLocaleReloader,
 } from '@luckystack/core';
 import { SRC_DIR } from './paths';
 
@@ -98,6 +99,10 @@ const projectNormalizer = createLocalizedNormalizer({
 //? @luckystack/sync, and any future framework package consuming
 //? `getLocalizedNormalizer()` use project translations.
 registerLocalizedNormalizer(projectNormalizer);
+
+//? Lets `@luckystack/devkit`'s hot-reload watcher trigger a translations
+//? refresh without taking a relative-path dependency on this file.
+registerLocaleReloader(reloadLocaleTranslations);
 
 export const { normalizeErrorResponse, resolveErrorMessage, extractLanguageFromHeader } = projectNormalizer;
 export { defaultHttpStatusForResponse } from '@luckystack/core';

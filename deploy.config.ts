@@ -146,8 +146,14 @@ const deployConfig = defineDeploy<'development' | 'staging' | 'production'>({
 });
 
 //? Side-effect registration: any import of this file wires the deploy
-//? topology into @luckystack/core so framework packages (e.g.,
-//? synchronizedEnvHashes) can read it without `import '../../../deploy.config'`.
-registerDeployConfig({ resources: deployConfig.resources });
+//? topology into @luckystack/core so framework packages (router,
+//? synchronizedEnvHashes, ...) can read it without
+//? `import '../../../deploy.config'`.
+registerDeployConfig({
+  resources: deployConfig.resources,
+  environments: deployConfig.environments,
+  routing: deployConfig.routing,
+  development: deployConfig.development,
+});
 
 export default deployConfig;

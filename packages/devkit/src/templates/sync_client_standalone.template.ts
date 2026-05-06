@@ -1,7 +1,7 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
 
-//@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
+//@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
 import { Functions, SyncClientResponse, MaybePromise, SyncClientStreamEmitter } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 

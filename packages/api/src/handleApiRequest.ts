@@ -16,6 +16,7 @@ import {
   buildApiStreamEventName,
   dispatchHook,
   validateInputByType,
+  getLogger,
 } from '@luckystack/core';
 import { setSentryUser, startSpan } from '@luckystack/sentry';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '@luckystack/core';
@@ -68,7 +69,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   if (typeof msg != 'object') {
     if (shouldLogDev()) {
-      console.log('socket message was not a json object!!!!', 'red');
+      getLogger().warn('api: socket message was not a json object');
     }
     return;
   }
@@ -100,7 +101,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   if (!responseIndex && typeof responseIndex !== 'number') {
     if (shouldLogDev()) {
-      console.log('no response index given!!!!', 'red');
+      getLogger().warn('api: no response index given');
     }
     return;
   }
@@ -193,7 +194,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   //? Auth validation: check login requirement
   if (auth.login && !user?.id) {
       if (shouldLogDev()) {
-        console.log(`ERROR: API ${name} requires login`, 'red');
+        getLogger().warn(`api: ${name} requires login`, { route: name });
       }
       return emitApiError({
         response: { status: 'error', errorCode: 'auth.required' },
@@ -205,7 +206,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const authResult = validateRequest({ auth, user: user! });
   if (authResult.status === "error") {
     if (shouldLogDev()) {
-      console.log(`ERROR: Auth failed for ${name}: ${authResult.errorCode}`, 'red');
+      getLogger().warn(`api: auth failed for ${name}`, { route: name, errorCode: authResult.errorCode });
     }
     return emitApiError({
       response: {
@@ -236,8 +237,17 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     });
 
     if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: token ? 'user' : 'route',
+        key: rateLimitKey,
+        limit: effectiveApiLimit,
+        windowMs: getProjectConfig().rateLimiting.windowMs,
+        count: effectiveApiLimit + 1,
+        route: resolvedName,
+        userId: user?.id,
+      });
       if (shouldLogDev()) {
-        console.log(`Rate limit exceeded for ${resolvedName}`, 'yellow');
+        getLogger().warn(`api: rate limit exceeded for ${resolvedName}`, { route: resolvedName, key: rateLimitKey });
       }
       return emitApiError({
         response: {
@@ -262,8 +272,16 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     });
 
     if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: 'ip',
+        key: `ip:${requesterIp}:api:all`,
+        limit: defaultIpLimit,
+        windowMs: getProjectConfig().rateLimiting.windowMs,
+        count: defaultIpLimit + 1,
+        ip: requesterIp,
+      });
       if (shouldLogDev()) {
-        console.log(`Global IP rate limit exceeded for ${requesterIp}`, 'yellow');
+        getLogger().warn(`api: global IP rate limit exceeded`, { ip: requesterIp });
       }
       return emitApiError({
         response: {
@@ -317,7 +335,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   if (error) {
     if (shouldLogDev()) {
-      console.log(`ERROR in ${resolvedName}:`, error, 'red');
+      getLogger().error(`api: error in ${resolvedName}`, error, { route: resolvedName });
     }
     socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
       response: {

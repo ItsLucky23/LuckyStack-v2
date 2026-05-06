@@ -2,6 +2,7 @@ import http, { type Server as HttpServer } from 'node:http';
 import { writeBootUuid, getProjectConfig } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
+import { verifyBootstrap } from './verifyBootstrap';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -48,6 +49,15 @@ import type {
 export const createLuckyStackServer = async (
   options: CreateLuckyStackServerOptions = {}
 ): Promise<RunningLuckyStackServer> => {
+  //? Fail fast if a project's overlay forgot to register a critical piece.
+  //? Surface a single readable error instead of a stack trace deep inside
+  //? a request handler.
+  await verifyBootstrap({
+    requireDeployConfig: options.requireDeployConfig,
+    requireServicesConfig: options.requireServicesConfig,
+    requireOAuthProviders: options.requireOAuthProviders,
+  });
+
   const port = options.port ?? process.env.SERVER_PORT ?? 80;
   const ip = options.ip ?? process.env.SERVER_IP ?? '127.0.0.1';
   const enableDevTools = options.enableDevTools ?? process.env.NODE_ENV !== 'production';

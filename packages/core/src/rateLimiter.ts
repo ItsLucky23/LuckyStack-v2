@@ -56,7 +56,7 @@ interface RateLimitResult {
 
 const normalizeWindowMs = (windowMs: number): number => {
   if (!Number.isFinite(windowMs) || windowMs <= 0) {
-    return 60_000;
+    return getProjectConfig().rateLimiting.windowMs;
   }
 
   return windowMs;
@@ -258,19 +258,26 @@ export const clearAllRateLimits = async (): Promise<void> => {
   rateLimitStore.clear();
 };
 
-// Cleanup expired entries every minute
-const cleanupInterval = setInterval(() => {
-  const now = Date.now();
-  let cleaned = 0;
-  for (const [key, entry] of rateLimitStore) {
-    if (entry.resetAt < now) {
-      rateLimitStore.delete(key);
-      cleaned++;
+//? Cleanup expired entries on a configurable interval. Restart-aware: we
+//? schedule recursively so the interval picks up `getProjectConfig().rateLimiting.cleanupIntervalMs`
+//? whenever it changes (e.g. after `registerProjectConfig`).
+const scheduleCleanup = (): void => {
+  const intervalMs = getProjectConfig().rateLimiting.cleanupIntervalMs;
+  const timer = setTimeout(() => {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [key, entry] of rateLimitStore) {
+      if (entry.resetAt < now) {
+        rateLimitStore.delete(key);
+        cleaned++;
+      }
     }
-  }
-  if (cleaned > 0) {
-    console.log(`[RateLimiter] Cleaned ${String(cleaned)} expired entries`, 'gray');
-  }
-}, 60_000);
+    if (cleaned > 0) {
+      console.log(`[RateLimiter] Cleaned ${String(cleaned)} expired entries`, 'gray');
+    }
+    scheduleCleanup();
+  }, intervalMs);
+  timer.unref();
+};
 
-cleanupInterval.unref();
+scheduleCleanup();

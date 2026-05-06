@@ -1,0 +1,42 @@
+{
+  "name": "create-luckystack-app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Scaffold a new LuckyStack project. Run `npx create-luckystack-app my-app` to generate a starter with the recommended overlay layout, Prisma schema, and config files in place.",
+  "license": "MIT",
+  "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
+    "directory": "packages/create-luckystack-app"
+  },
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/create-luckystack-app#readme",
+  "bugs": {
+    "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
+  },
+  "keywords": [
+    "luckystack",
+    "scaffold",
+    "starter",
+    "create-app",
+    "framework"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "./dist/index.js",
+  "bin": {
+    "create-luckystack-app": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "template",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch"
+  }
+}

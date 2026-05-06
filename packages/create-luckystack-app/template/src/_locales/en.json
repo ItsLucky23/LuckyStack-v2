@@ -1,0 +1,21 @@
+{
+  "login": {
+    "loggedIn": "Logged in",
+    "userCreated": "Account created",
+    "wrongPassword": "Incorrect password",
+    "userNotFound": "Account not found",
+    "emailExists": "An account with that email already exists",
+    "empty": "Email and password are required",
+    "passwordNotMatch": "Passwords do not match",
+    "passwordCharacterMinimum": "Password must be at least 8 characters",
+    "passwordCharacterLimit": "Password must be at most 191 characters",
+    "emailCharacterLimit": "Email must be at most 191 characters",
+    "nameCharacterLimit": "Name must be at most 191 characters",
+    "invalidEmailFormat": "Invalid email address",
+    "providerNotFound": "Login provider not found"
+  },
+  "api": {
+    "rateLimitExceeded": "Too many requests — try again in {{seconds}} seconds",
+    "internalServerError": "Something went wrong"
+  }
+}

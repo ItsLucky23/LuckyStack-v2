@@ -1,23 +1,22 @@
-/* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
-import { createContext, use, useState, ReactNode, ReactElement, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
+/* eslint-disable react-refresh/only-export-components -- hooks colocated with provider */
+import { createContext, use, useState, ReactNode, ReactElement, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { setMenuHandlerRef } from 'src/_functions/menuHandler';
 
-// Types
-interface MenuEntry {
-  id: string;
-  element: ReactElement;
-  options: MenuOptions;
-  isClosing?: boolean;
-  soonIsTop?: boolean;
-  resolver?: (value: unknown) => void;
-}
+import { setMenuHandlerRef } from 'src/_functions/menuHandler';
 
 interface MenuOptions {
   dimBackground?: boolean;
   background?: string;
   size?: 'sm' | 'md' | 'lg';
+}
+
+interface MenuEntry {
+  id: string;
+  element: ReactElement;
+  options: MenuOptions;
+  isClosing: boolean;
+  resolver?: (value: unknown) => void;
 }
 
 interface MenuHandlerContextType {
@@ -28,62 +27,12 @@ interface MenuHandlerContextType {
   logStack: () => void;
 }
 
-interface SlideInWrapperProps {
-  children: ReactNode;
-  isTop: boolean;
-  options: MenuOptions;
-  isClosing?: boolean;
-  soonIsTop?: boolean;
-}
-
-const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: SlideInWrapperProps) => {
-  const [location, setLocation] = useState<'left' | 'center' | 'right'>('right');
-  const hasMountedRef = useRef(false);
-
-  useLayoutEffect(() => {
-    // Start with off-screen to the right
-    setLocation('right');
-
-    const timer = requestAnimationFrame(() => {
-      hasMountedRef.current = true;
-      setLocation('center'); // trigger the transition
-    });
-
-    return () => { cancelAnimationFrame(timer); };
-  }, []);
-
-  let targetLocation: 'left' | 'center' | 'right' = 'left';
-  if (isClosing) {
-    targetLocation = 'right';
-  } else if (isTop || soonIsTop) {
-    targetLocation = 'center';
-  }
-
-  useEffect(() => {
-    // Keep the first-frame mount animation, then sync to the derived target state.
-    if (!hasMountedRef.current) {
-      return;
-    }
-
-    if (location !== targetLocation) {
-      setLocation(targetLocation);
-    }
-  }, [location, targetLocation]);
-
-  const isVisible = !isClosing;
-
-  return (
-    <div
-      className={`${isTop ? 'relative' : 'absolute inset-0'} flex h-full min-h-0 w-full flex-col text-text-primary transition-all duration-200 origin-center
-        ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none'}
-        ${options.background ?? ''}
-      `}
-    >
-      {children}
-    </div>
-  );
+const MENU_ANIMATION_MS = 200;
+const SIZE_PX: Record<NonNullable<MenuOptions['size']>, string> = {
+  sm: '384px',
+  md: '512px',
+  lg: '768px',
 };
-
 
 const MenuHandlerContext = createContext<MenuHandlerContextType | null>(null);
 
@@ -93,88 +42,105 @@ export function useMenuHandler() {
   return ctx;
 }
 
+interface MenuItemFrameProps {
+  entry: MenuEntry;
+  position: 'top' | 'beneath';
+  background?: string;
+}
+
+//? Each menu in the stack is a layered absolute frame. The top one slides in
+//? from the right and scales up; lower ones slide a tiny bit left and dim,
+//? giving a clear depth cue. On close, the top one slides back to the right.
+function MenuItemFrame({ entry, position, background }: MenuItemFrameProps) {
+  const [hasMounted, setHasMounted] = useState(false);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => { setHasMounted(true); });
+    return () => { cancelAnimationFrame(id); };
+  }, []);
+
+  const isVisible = hasMounted && !entry.isClosing;
+  const isTop = position === 'top';
+
+  const transformClass = isVisible
+    ? (isTop
+      ? 'opacity-100 scale-100 translate-x-0'
+      : 'opacity-60 scale-95 -translate-x-4 pointer-events-none')
+    : 'opacity-0 scale-95 translate-x-4';
+
+  return (
+    <div
+      className={`${isTop ? 'relative' : 'absolute inset-0'} flex h-full min-h-0 w-full flex-col origin-center transition-all duration-200 ease-out
+        ${transformClass}
+        ${background ?? ''}`}
+    >
+      {entry.element}
+    </div>
+  );
+}
+
 export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   const [stack, setStack] = useState<MenuEntry[]>([]);
-  const attemptToCloseAllRef = useRef(false);
+  const closeTimeoutsRef = useRef(new Map<string, number>());
+  const backdropPressedRef = useRef(false);
 
   const submitTopFormFromEnter = useCallback(() => {
     const menuRoot = document.querySelector('#MENUHANDLER');
     if (!(menuRoot instanceof HTMLElement)) return;
-
     const form = menuRoot.querySelector('form[data-menuhandler-submit-on-enter="true"]');
     if (!(form instanceof HTMLFormElement)) return;
-
     form.requestSubmit();
   }, []);
 
   const open = useCallback((element: ReactElement, options: MenuOptions = {}) => {
     return new Promise<unknown>((resolve) => {
-      const id = uuidv4();
-      setStack((prev) => [...prev, { id, element, options, resolver: resolve }]);
+      setStack((prev) => [...prev, {
+        id: uuidv4(),
+        element,
+        options,
+        isClosing: false,
+        resolver: resolve,
+      }]);
     });
   }, []);
 
   const replace = useCallback((element: ReactElement, options: MenuOptions = {}) => {
     return new Promise<unknown>((resolve) => {
-      const id = uuidv4();
       setStack((prev) => {
-        const newStack = [...prev];
-        newStack.pop();
-        newStack.push({ id, element, options, resolver: resolve });
-        return newStack;
+        const next = prev.slice(0, -1);
+        next.push({ id: uuidv4(), element, options, isClosing: false, resolver: resolve });
+        return next;
       });
     });
   }, []);
 
   const close = useCallback(() => {
     setStack((prev) => {
-      if (prev.length === 0) return prev;
-      const lastitem = prev.length === 1;
-      const newStack = [...prev];
-      const top = newStack.at(-1);
-      const second = newStack.at(-2);
+      const top = prev.at(-1);
+      if (!top || top.isClosing) return prev;
 
-      if (!top) return prev;
+      const next = prev.slice(0, -1);
+      next.push({ ...top, isClosing: true });
 
-      // Prevent double-close
-      if (top.isClosing) return prev;
+      const timeoutId = globalThis.setTimeout(() => {
+        closeTimeoutsRef.current.delete(top.id);
+        top.resolver?.(null);
+        setStack((current) => current.filter((entry) => entry.id !== top.id));
+      }, MENU_ANIMATION_MS);
 
-      // Mark top as closing
-      if (lastitem) {
-        top.resolver?.(null); // Resolve the promise with null
-        return [];
-      } else {
-        newStack[newStack.length - 1] = { ...top, isClosing: true };
-        if (second) {
-          newStack[newStack.length - 2] = { ...second, soonIsTop: true };
-        }
-      }
-
-      // Delay removal for animation
-      setTimeout(() => {
-        setStack((current) => {
-          const lastIndex = current.findIndex(s => s.id === top.id);
-          if (lastIndex !== -1 && current[lastIndex].isClosing) {
-            current[lastIndex].resolver?.(null);
-            
-            // If there's a second item, and it was marked as soonIsTop, update it
-            const secondIndex = current.findIndex(s => s.id === second?.id);
-            if (secondIndex !== -1 && current[secondIndex].soonIsTop) {
-              current[secondIndex] = { ...current[secondIndex], soonIsTop: false };
-            }
-
-            return current.filter(s => s.id !== top.id);
-          }
-          return current;
-        });
-      }, 200); // Match animation duration
-
-      return newStack;
+      //? Cast: `globalThis.setTimeout` picks up Node's overload (Timeout)
+      //? when @types/node is in scope. The Map stores DOM-typed `number`s.
+      closeTimeoutsRef.current.set(top.id, timeoutId as unknown as number);
+      return next;
     });
   }, []);
 
-
   const closeAll = useCallback(() => {
+    for (const timeoutId of closeTimeoutsRef.current.values()) {
+      globalThis.clearTimeout(timeoutId);
+    }
+    closeTimeoutsRef.current.clear();
+
     setStack((prev) => {
       for (const entry of prev) entry.resolver?.(null);
       return [];
@@ -182,38 +148,35 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logStack = useCallback(() => {
-    console.log('Menu stack:', stack.map(s => s.id));
+    console.log('Menu stack:', stack.map((s) => s.id));
   }, [stack]);
 
-
-
-  const stackTop = stack.at(-1);
-  const sizeClass = stackTop?.options.size
-    ? { sm: '384px', md: '512px', lg: '768px' }[stackTop.options.size]
-    : '384px';
-
-  const contextValue = useMemo(() => ({
-    open, replace, close, closeAll, logStack
-  }), [open, replace, close, closeAll, logStack]);
+  const contextValue = useMemo(
+    () => ({ open, replace, close, closeAll, logStack }),
+    [open, replace, close, closeAll, logStack],
+  );
 
   useEffect(() => {
     setMenuHandlerRef(contextValue);
-    return () => {
-      setMenuHandlerRef(null);
-    };
+    return () => { setMenuHandlerRef(null); };
   }, [contextValue]);
 
+  // Reset on Vite HMR.
   useEffect(() => {
     if (!import.meta.hot) return;
     import.meta.hot.dispose(() => {
+      for (const timeoutId of closeTimeoutsRef.current.values()) {
+        globalThis.clearTimeout(timeoutId);
+      }
+      closeTimeoutsRef.current.clear();
       setStack([]);
       setMenuHandlerRef(null);
     });
   }, []);
 
+  // Lock page scroll while any menu is open.
   useEffect(() => {
     if (stack.length === 0) return;
-
     const html = document.documentElement;
     const body = document.body;
     const previousHtmlOverflow = html.style.overflow;
@@ -228,45 +191,64 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
     };
   }, [stack.length]);
 
+  // Enter submits the top form. Escape closes the top menu.
   useEffect(() => {
     if (stack.length === 0) return;
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Enter' || event.repeat || event.isComposing) return;
+      if (event.repeat || event.isComposing) return;
 
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close();
+        return;
+      }
+
+      if (event.key !== 'Enter') return;
       const target = event.target;
       if (target instanceof HTMLElement && (target.tagName === 'TEXTAREA' || target.isContentEditable)) {
         return;
       }
-
       submitTopFormFromEnter();
     };
 
     document.addEventListener('keydown', onKeyDown);
+    return () => { document.removeEventListener('keydown', onKeyDown); };
+  }, [stack.length, submitTopFormFromEnter, close]);
+
+  // Cleanup any pending close timers on unmount.
+  useEffect(() => {
+    const timers = closeTimeoutsRef.current;
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
+      for (const timeoutId of timers.values()) {
+        globalThis.clearTimeout(timeoutId);
+      }
+      timers.clear();
     };
-  }, [stack.length, submitTopFormFromEnter]);
+  }, []);
+
+  const stackTop = stack.at(-1);
+  const sizeClass = SIZE_PX[stackTop?.options.size ?? 'sm'];
+  const dim = stackTop && !stackTop.isClosing && stackTop.options.dimBackground === true;
 
   return (
     <MenuHandlerContext value={contextValue}>
       {children}
       {createPortal(
         <div
-          role="button"
-          tabIndex={0}
+          role="presentation"
           className={`fixed inset-0 z-[1000] flex items-center justify-center overflow-y-auto p-3 sm:p-4 transition-colors duration-200 ${stack.length === 0 ? 'pointer-events-none' : ''}`}
-          style={{ backgroundColor: !stackTop?.isClosing && stackTop?.options.dimBackground === true ? 'rgba(0, 0, 0, 0.7)' : 'transparent' }}
-          onMouseDown={() => { attemptToCloseAllRef.current = true; }}
+          style={{ backgroundColor: dim ? 'rgba(0, 0, 0, 0.7)' : 'transparent' }}
+          onMouseDown={() => { backdropPressedRef.current = true; }}
           onMouseUp={() => {
-            if (!attemptToCloseAllRef.current) { return }
-            attemptToCloseAllRef.current = false;
+            if (!backdropPressedRef.current) return;
+            backdropPressedRef.current = false;
             closeAll();
           }}
         >
           <div
-            role="presentation"
             id="MENUHANDLER"
+            role="presentation"
             className={`relative flex min-h-0 flex-col overflow-hidden rounded-md transition-all duration-200 max-h-[calc(100dvh-2rem)] ${stackTop && !stackTop.isClosing ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`}
             style={{ width: sizeClass }}
             onMouseDown={(e) => { e.stopPropagation(); }}
@@ -274,19 +256,16 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
             onKeyDown={(e) => { e.stopPropagation(); }}
           >
             {stack.map((entry, index) => (
-              <SlideInWrapper
+              <MenuItemFrame
                 key={entry.id}
-                isTop={index === stack.length - 1}
-                isClosing={entry.isClosing}
-                soonIsTop={entry.soonIsTop}
-                options={entry.options}
-              >
-                {entry.element}
-              </SlideInWrapper>
+                entry={entry}
+                position={index === stack.length - 1 ? 'top' : 'beneath'}
+                background={entry.options.background}
+              />
             ))}
           </div>
         </div>,
-        document.body
+        document.body,
       )}
     </MenuHandlerContext>
   );

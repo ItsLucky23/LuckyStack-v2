@@ -177,8 +177,14 @@ const collectReturnObjectTypeDetails = (
   return { text: unionTypes(types), unresolvedSymbols };
 };
 
-// Collects the expanded payload type strings of stream(...) calls
-// in a function body, without descending into nested function definitions.
+// Collects the expanded payload type strings of stream(...) /
+// broadcastStream(...) / streamTo(tokens, ...) calls in a function body,
+// without descending into nested function definitions.
+//
+// `stream` and `broadcastStream` take the payload as the FIRST argument.
+// `streamTo` takes `(tokens, payload)` so the payload is the SECOND argument.
+const STREAM_EMIT_NAMES = new Set(['stream', 'broadcastStream', 'streamTo']);
+
 const collectStreamCallPayloadTypeDetails = (
   funcNode: ts.FunctionLikeDeclaration,
   checker: ts.TypeChecker,
@@ -190,23 +196,29 @@ const collectStreamCallPayloadTypeDetails = (
     if (
       ts.isCallExpression(node)
       && ts.isIdentifier(node.expression)
-      && node.expression.text === 'stream'
-      && node.arguments.length > 0
+      && STREAM_EMIT_NAMES.has(node.expression.text)
     ) {
-      const firstArg = node.arguments[0];
-      const argType = checker.getTypeAtLocation(firstArg);
-      const nonNullableArgType = checker.getNonNullableType(argType);
-      const expanded = expandTypeDetailed(nonNullableArgType, checker);
+      const callName = node.expression.text;
+      //? streamTo(tokens, payload) — payload is at index 1; everything else
+      //? puts the payload at index 0.
+      const payloadIndex = callName === 'streamTo' ? 1 : 0;
+      const payloadArg = node.arguments[payloadIndex];
 
-      if (expanded.text.trim().length > 0) {
-        types.push(expanded.text);
+      if (payloadArg) {
+        const argType = checker.getTypeAtLocation(payloadArg);
+        const nonNullableArgType = checker.getNonNullableType(argType);
+        const expanded = expandTypeDetailed(nonNullableArgType, checker);
+
+        if (expanded.text.trim().length > 0) {
+          types.push(expanded.text);
+        }
+
+        unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
+        unresolvedSymbols = mergeUnresolvedSymbols(
+          unresolvedSymbols,
+          collectFallbackSymbolsFromTypeText(expanded.text, payloadArg, checker),
+        );
       }
-
-      unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
-      unresolvedSymbols = mergeUnresolvedSymbols(
-        unresolvedSymbols,
-        collectFallbackSymbolsFromTypeText(expanded.text, firstArg, checker),
-      );
     }
 
     // Recurse into control flow but not into nested function bodies

@@ -5,6 +5,30 @@ import middlewareHandler from "src/_functions/middlewareHandler"
 
 import { useSession } from "../_providers/SessionProvider";
 
+//? Shown only after a short delay so quick checks don't flash a spinner.
+const LOADER_DELAY_MS = 200;
+
+function MiddlewareLoader() {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const id = globalThis.setTimeout(() => { setShow(true); }, LOADER_DELAY_MS);
+    return () => { globalThis.clearTimeout(id); };
+  }, []);
+
+  if (!show) return null;
+
+  return (
+    <div className="w-full h-full flex items-center justify-center" aria-busy="true" aria-live="polite">
+      <div
+        className="w-8 h-8 rounded-full border-2 border-container2-border border-t-primary animate-spin"
+        role="status"
+        aria-label="Loading"
+      />
+    </div>
+  );
+}
+
 export default function Middleware({ children }: { children: ReactNode }) {
   const [allowed, setAllowed] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -58,6 +82,7 @@ export default function Middleware({ children }: { children: ReactNode }) {
     };
   }, [location.pathname, location.search, navigate, session, sessionLoaded]); // important: rerun on path change
 
-  if (checking || !allowed) return null;
+  if (checking) return <MiddlewareLoader />;
+  if (!allowed) return null;
   return <div className="w-full h-full">{children}</div>;
 }

@@ -15,6 +15,13 @@ interface AppEnvironmentConfig {
 const normalizeDns = (dns: string): string => dns.replace(/\/+$/, "");
 const runtimeWindow = globalThis as typeof globalThis & { window?: Window };
 
+//? Browser-safe env reader. `process` is a Node global — referencing
+//? `process.env.X` directly inside the client bundle throws
+//? `ReferenceError: process is not defined`. Always go through `env(...)`
+//? when reading env vars from this file (it's imported by both bundles).
+const env = (key: string): string | undefined =>
+  typeof process === 'undefined' ? undefined : process.env[key];
+
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
   "http://localhost:5173": {
     backendUrl: "http://localhost:80",
@@ -44,7 +51,7 @@ const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
 
 const detectedDns = normalizeDns(
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  runtimeWindow.window?.location.origin ?? (process.env.DNS ?? "http://localhost:5173"),
+  runtimeWindow.window?.location.origin ?? (env('DNS') ?? "http://localhost:5173"),
 );
 
 const resolvedEnvironment =
@@ -131,6 +138,13 @@ const config = {
   socketActivityBroadcaster: false,
 
   /**
+   * Show the floating socket-status indicator badge in the corner of the screen.
+   * Renders the `<SocketStatusIndicator />` from `@luckystack/presence/client`.
+   * Useful in development to confirm connect/disconnect/reconnect state at a glance.
+   */
+  socketStatusIndicator: false,
+
+  /**
    * Enable route-based location syncing from client to server session.
    *
    * When FALSE:
@@ -171,6 +185,29 @@ const config = {
     defaultIpLimit: 100 as number | false,
     /** Request window duration in milliseconds used by both limits. */
     windowMs: 60_000,
+  },
+
+  /**
+   * Transactional email configuration. The actual sender adapter is
+   * registered in the server bootstrap (see `server/server.ts`). These values
+   * are read by `sendEmail()` and the framework's password-reset flow.
+   */
+  email: {
+    /**
+     * Default sender address. Override per-message by passing `from` to sendEmail.
+     * Read server-side only — the client bundle never sends email, so the value
+     * is just a placeholder there. `typeof process` guard keeps the browser
+     * bundle from blowing up on a `process is not defined` ReferenceError.
+     */
+    from: env('EMAIL_FROM') ?? 'onboarding@resend.dev',
+    /** Public app URL — used to build absolute reset-password / verification links. */
+    appUrl: resolvedEnvironment.backendUrl,
+    /** Throw if sendEmail() runs with no sender registered. False = silent no-op. */
+    required: false,
+    logging: {
+      errors: true,
+      sends: resolvedEnvironment.dev,
+    },
   },
 
   /**
@@ -216,6 +253,12 @@ interface SessionLayoutBase extends Omit<User, 'password'> {
 
 export interface SessionLayout extends SessionLayoutBase {
   location?: import('@luckystack/login').SessionLocation;
+  /** CSRF token bound to this session. Minted by `saveSession` in cookie mode. */
+  csrfToken?: string;
+  //? `lastLogin` already comes from Prisma's User model via SessionLayoutBase
+  //? — don't redeclare it here (TS would flag the widening as incompatible).
+  /** Previous successful login, runtime-only (not a Prisma column). */
+  previousLogin?: Date | string | null;
 }
 
 // Verify SessionLayout is structurally compatible with BaseSessionLayout at compile time.
@@ -224,6 +267,15 @@ export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true
 /** Supported OAuth providers */
 export const providers = ['credentials', 'google', 'github', 'facebook', 'discord'];
  
+//? Build the CORS allowedOrigins list from the env vars this project cares
+//? about. The framework no longer reads DNS/EXTERNAL_ORIGINS itself — it
+//? expects an explicit list via ProjectConfig.http.cors.allowedOrigins.
+const splitOriginEnv = (key: string): string[] =>
+  (env(key) ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+
+const collectAllowedOrigins = (): string[] =>
+  [...splitOriginEnv('DNS'), ...splitOriginEnv('EXTERNAL_ORIGINS')];
+
 //? Side-effect registration: any import of this file — client bundle entry,
 //? server entry, tests — wires the project config into @luckystack/core so
 //? framework packages read the right values. Server re-registers explicitly
@@ -236,11 +288,25 @@ registerProjectConfig({
     expiryDays: config.sessionExpiryDays,
     allowMultiple: config.allowMultipleSessions,
   },
+  http: {
+    cors: {
+      allowedOrigins: collectAllowedOrigins(),
+      //? Convenience for local dev: any localhost origin is accepted regardless
+      //? of port. Production deployments should keep this `false` (the framework
+      //? default) and rely on `allowedOrigins` only.
+      allowLocalhost: resolvedEnvironment.dev,
+    },
+  },
   defaultLanguage: config.defaultLanguage as unknown as string,
   sentry: config.sentry,
+  email: config.email,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
+  socketStatusIndicator: config.socketStatusIndicator,
   locationProviderEnabled: config.locationProviderEnabled,
   loginRedirectUrl: config.loginRedirectUrl,
+  auth: {
+    forgotPassword: 'framework',
+  },
 });
 
 export default config;
@@ -255,6 +321,7 @@ export const {
   sessionBasedToken,
   sessionExpiryDays,
   socketActivityBroadcaster,
+  socketStatusIndicator,
   locationProviderEnabled,
   defaultTheme,
   logging,

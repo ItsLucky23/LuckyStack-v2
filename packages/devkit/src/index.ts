@@ -13,6 +13,19 @@ export {
   assertValidRouteNaming,
 } from './routeNamingValidation';
 
+// Routing rules registry (Phase 1.5).
+export {
+  registerRoutingRules,
+  getRoutingRules,
+  apiMarkerSegment,
+  syncMarkerSegment,
+  isApiFileName,
+  isSyncFileName,
+  isSyncServerFileName,
+  isSyncClientFileName,
+} from './routingRules';
+export type { RoutingRules } from './routingRules';
+
 // Runtime dev loaders (consumed by server/prod/runtimeMaps.ts when NODE_ENV !== 'production')
 export {
   devApis,

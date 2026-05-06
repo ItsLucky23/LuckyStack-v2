@@ -1,6 +1,13 @@
-import type { DeployConfig, EnvironmentDefinition } from '../../../deploy.config';
-import type { ServicesConfig } from '../../../services.config';
+import type {
+  DeployConfigShape,
+  DeployEnvironmentShape,
+  ServicesConfigShape,
+} from '@luckystack/core';
 import type { RedisHealthStore } from './redisHealthStore';
+
+type DeployConfig = DeployConfigShape;
+type EnvironmentDefinition = DeployEnvironmentShape;
+type ServicesConfig = ServicesConfigShape;
 
 /**
  * Resolves the target URL for a given service key, using the
@@ -83,14 +90,15 @@ export const parseServiceFromPath = (pathname: string): string | null => {
 export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceTargetResolver => {
   const { deploy, services, currentEnvKey, localPresetKey, healthStore } = input;
 
-  const currentEnv = deploy.environments[currentEnvKey] as EnvironmentDefinition | undefined;
+  const environments = deploy.environments ?? {};
+  const currentEnv = environments[currentEnvKey] as EnvironmentDefinition | undefined;
   if (!currentEnv) {
     throw new Error(`[router] Current environment '${currentEnvKey}' not found in deploy.config.ts`);
   }
 
   const fallbackEnvKey = currentEnv.fallback;
   const fallbackEnv = fallbackEnvKey
-    ? (deploy.environments[fallbackEnvKey] as EnvironmentDefinition | undefined)
+    ? (environments[fallbackEnvKey] as EnvironmentDefinition | undefined)
     : undefined;
   if (fallbackEnvKey && !fallbackEnv) {
     throw new Error(`[router] Current environment '${currentEnvKey}' declares fallback '${fallbackEnvKey}' which is not defined.`);

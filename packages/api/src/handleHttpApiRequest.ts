@@ -13,6 +13,7 @@ import {
   tryCatch,
   parseTransportRouteName,
   validateInputByType,
+  getLogger,
 } from '@luckystack/core';
 import { setSentryUser, startSpan } from '@luckystack/sentry';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '@luckystack/core';
@@ -241,7 +242,7 @@ export async function handleHttpApiRequest({
   // Auth validation: check login requirement
   if (auth.login && !user?.id) {
       if (shouldLogDev()) {
-        console.log(`ERROR: HTTP API ${name} requires login`, 'red');
+        getLogger().warn(`http-api: ${name} requires login`, { route: name, transport: 'http' });
       }
       return buildNetworkError({
         response: { status: 'error', errorCode: 'auth.required' },
@@ -260,7 +261,7 @@ export async function handleHttpApiRequest({
   const authResult = validateRequest({ auth, user });
   if (authResult.status === 'error') {
     if (shouldLogDev()) {
-      console.log(`ERROR: Auth failed for HTTP API ${name}: ${authResult.errorCode}`, 'red');
+      getLogger().warn(`http-api: auth failed for ${name}`, { route: name, errorCode: authResult.errorCode, transport: 'http' });
     }
     return buildNetworkError({
       response: {
@@ -358,7 +359,7 @@ export async function handleHttpApiRequest({
 
   if (error) {
     if (shouldLogDev()) {
-      console.log(`ERROR in HTTP API ${resolvedName}:`, error, 'red');
+      getLogger().error(`http-api: error in ${resolvedName}`, error, { route: resolvedName, transport: 'http' });
     }
     return buildNetworkError({
       response: { status: 'error', errorCode: 'api.internalServerError' },

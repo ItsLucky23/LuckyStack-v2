@@ -1,3 +1,5 @@
+import { faRightToBracket, faUserPlus } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -15,6 +17,9 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
   const subtitleLink = isLogin ? "Create one now" : "Log in";
   const redirectURL = isLogin ? "/register" : "/login";
   const buttonText = isLogin ? "Log in" : "Sign up";
+  const headerIcon = isLogin ? faRightToBracket : faUserPlus;
+
+  const inputClass = "rounded-md w-full h-9 border border-container1-border bg-container1 px-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors";
 
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [loading, setLoading] = useState(false);
@@ -103,91 +108,95 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
   };
 
   return (
-    <div className="w-full overflow-y-auto flex items-center justify-center">
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- form container needs Enter key handling */}
-      <form
-        tabIndex={-1}
-        onKeyDown={handleKeyDown}
-        className="p-8 bg-container1 rounded-md text-title flex flex-col gap-10 max-w-[400px] w-full"
-      >
-        <div className="flex flex-col gap-2">
-          <h1 className="font-semibold text-lg">{title}</h1>
-          <p className="font-medium text-sm text-common">
-            {subtitleText}
-            <Link to={redirectURL} className="text-primary cursor-pointer">
-              {subtitleLink}
-            </Link>
-          </p>
+    /* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- form container needs Enter key handling */
+    <form
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+      className="p-6 bg-container1 border border-container1-border rounded-xl shadow-sm text-title flex flex-col gap-5 max-w-[360px] w-full"
+    >
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-11 h-11 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+            <FontAwesomeIcon icon={headerIcon} size="lg" />
+          </div>
+          <div className="flex flex-col items-center gap-1 text-center">
+            <h1 className="font-semibold text-lg leading-tight">{title}</h1>
+            <p className="text-xs text-common">
+              {subtitleText}
+              <Link to={redirectURL} className="text-primary hover:text-primary-hover font-medium cursor-pointer">
+                {subtitleLink}
+              </Link>
+            </p>
+          </div>
         </div>
 
         {providers.includes("credentials") && (
           <>
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3">
               {!isLogin && (
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="name" className="font-medium text-sm">{translate({ key: 'login.name' })}</label>
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="name" className="font-medium text-xs">{translate({ key: 'login.name' })}</label>
                   <input
                     id="name"
                     name="name"
                     type="text"
                     placeholder="John Pork"
-                    className="rounded-md w-full h-8 border border-container1-border focus:outline-blue-500 p-2"
+                    className={inputClass}
                   />
                 </div>
               )}
-              <div className="flex flex-col gap-2">
-                <label htmlFor="email" className="font-medium text-sm">{translate({ key: 'login.emailAddress' })}</label>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="email" className="font-medium text-xs">{translate({ key: 'login.emailAddress' })}</label>
                 <input
                   id="email"
                   name="email"
                   type="email"
                   placeholder="johnpork@gmail.com"
-                  className="rounded-md w-full h-8 border border-container1-border focus:outline-blue-500 p-2"
+                  className={inputClass}
                 />
               </div>
-              <div className="flex flex-col gap-2">
-                <label htmlFor="password" className="font-medium text-sm">{translate({ key: 'login.password' })}</label>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="password" className="font-medium text-xs">{translate({ key: 'login.password' })}</label>
+                  {isLogin && (
+                    <Link to="/reset-password" className="text-xs text-primary hover:text-primary-hover cursor-pointer">
+                      {translate({ key: 'login.forgotPassword' })}
+                    </Link>
+                  )}
+                </div>
                 <input
                   id="password"
                   name="password"
                   type="password"
                   placeholder="********"
-                  className="rounded-md w-full h-8 border border-container1-border focus:outline-blue-500 p-2"
+                  className={inputClass}
                 />
               </div>
               {!isLogin && (
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="confirmPassword" className="font-medium text-sm">{translate({ key: 'login.confirmPassword' })}</label>
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="confirmPassword" className="font-medium text-xs">{translate({ key: 'login.confirmPassword' })}</label>
                   <input
                     id="confirmPassword"
                     name="confirmPassword"
                     type="password"
                     placeholder="********"
-                    className="rounded-md w-full h-8 border border-container1-border focus:outline-blue-500 p-2"
+                    className={inputClass}
                   />
                 </div>
               )}
 
-              <div className="flex items-center justify-center">
-                {isLogin && (
-                  <button type="button" className="px-8 h-10 cursor-pointer rounded-md text-primary hover:scale-105 transition-all duration-300">
-                    {translate({ key: 'login.forgotPassword' })}
-                  </button>
-                )}
-              </div>
-
               <button
                 type="button"
                 ref={buttonRef}
-                className="px-8 h-10 rounded-md bg-primary text-white hover:bg-primary-hover hover:scale-105 transition-all duration-300 cursor-pointer"
+                className="mt-1 h-9 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60"
                 onClick={(e) => void handleSubmit(e, "credentials")}
+                disabled={loading}
               >
                 {loading ? "Loading..." : buttonText}
               </button>
             </div>
 
-            <div className="flex items-center w-full text-gray-500 text-sm before:flex-1 before:border-t before:border-container1-border before:content-[''] after:flex-1 after:border-t after:border-container1-border after:content-['']">
-              <span className="px-4 bg-container1 text-title">{translate({ key: 'login.orContinueWith' })}</span>
+            <div className="flex items-center w-full text-common text-xs before:flex-1 before:border-t before:border-container1-border before:content-[''] after:flex-1 after:border-t after:border-container1-border after:content-['']">
+              <span className="px-3">{translate({ key: 'login.orContinueWith' })}</span>
             </div>
           </>
         )}
@@ -200,14 +209,13 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 type="button"
                 key={provider}
                 onClick={(e) => void handleSubmit(e, provider)}
-                className="h-10 rounded-md cursor-pointer bg-container1 text-title border border-container1-border flex gap-2 items-center justify-center hover:scale-105 transition-all duration-300"
+                className="h-9 rounded-md cursor-pointer bg-container1 text-title text-sm border border-container1-border flex gap-2 items-center justify-center hover:bg-container1-hover transition-colors"
               >
-                <img src={`/${provider}.png`} alt={provider} className="w-5 h-5" />
-                <span className="text-lg">{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
+                <img src={`/${provider}.png`} alt={provider} className="w-4 h-4" />
+                <span>{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
               </button>
             ))}
         </div>
-      </form>
-    </div>
+    </form>
   );
 }

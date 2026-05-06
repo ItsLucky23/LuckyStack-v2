@@ -1,10 +1,16 @@
 import type { Server } from 'socket.io';
 
+import { getPresenceConfig } from '../presenceConfig';
+
 export const disconnectTimers = new Map<string, NodeJS.Timeout>();
-export const disconnectReasonsWeIgnore: string[] = ['ping timeout'];
-export const disconnectReasonsWeAllow: string[] = ['transport close', 'transport error'];
 export const tempDisconnectedSockets = new Set<string>();
 export const clientSwitchedTab = new Set<string>();
+
+//? Back-compat exports — kept so any caller that read these constants directly
+//? still resolves. Internal callsites should prefer `getPresenceConfig()` so
+//? per-install overrides take effect at call-time.
+export const disconnectReasonsWeIgnore: string[] = getPresenceConfig().ignoreReasons;
+export const disconnectReasonsWeAllow: string[] = getPresenceConfig().allowReasons;
 
 export const getDisconnectTime = ({
   token,
@@ -12,12 +18,11 @@ export const getDisconnectTime = ({
 }: {
   token: string,
   reason: string | undefined
-}) => {
-  return clientSwitchedTab.has(token)
-    ? 20_000
-    : (disconnectReasonsWeAllow.includes(reason ?? "NULL")
-      ? 60_000
-      : 2000);
+}): number => {
+  const config = getPresenceConfig();
+  if (clientSwitchedTab.has(token)) return config.disconnectTimers.tabSwitchMs;
+  if (config.allowReasons.includes(reason ?? 'NULL')) return config.disconnectTimers.transportCloseMs;
+  return config.disconnectTimers.defaultMs;
 };
 
 export const ensureIo = (io?: Server | null): io is Server => {

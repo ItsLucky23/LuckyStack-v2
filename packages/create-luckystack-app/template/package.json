@@ -1,0 +1,50 @@
+{
+  "name": "{{PROJECT_NAME}}",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "client": "vite --host",
+    "server": "tsx --tsconfig tsconfig.server.json server/server.ts",
+    "build": "vite build",
+    "prod": "node dist/server.js",
+    "prisma:generate": "dotenv -e .env.local -- prisma generate",
+    "prisma:migrate:dev": "dotenv -e .env.local -- prisma migrate dev",
+    "prisma:studio": "dotenv -e .env.local -- prisma studio"
+  },
+  "dependencies": {
+    "@luckystack/api": "^{{LUCKYSTACK_VERSION}}",
+    "@luckystack/core": "^{{LUCKYSTACK_VERSION}}",
+    "@luckystack/login": "^{{LUCKYSTACK_VERSION}}",
+    "@luckystack/presence": "^{{LUCKYSTACK_VERSION}}",
+    "@luckystack/sentry": "^{{LUCKYSTACK_VERSION}}",
+    "@luckystack/server": "^{{LUCKYSTACK_VERSION}}",
+    "@luckystack/sync": "^{{LUCKYSTACK_VERSION}}",
+    "@prisma/client": "^6.19.3",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.6.1",
+    "ioredis": "^5.10.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-router-dom": "^7.14.1",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "validator": "^13.15.35",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/validator": "^13.15.10",
+    "@vitejs/plugin-react-swc": "^3.11.0",
+    "dotenv-cli": "^11.0.0",
+    "prisma": "^6.19.3",
+    "tsx": "^4.21.0",
+    "typescript": "~5.7.3",
+    "vite": "^6.4.2"
+  }
+}

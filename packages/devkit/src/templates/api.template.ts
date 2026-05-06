@@ -1,9 +1,9 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
 
-//@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
+//@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
 import { AuthProps, SessionLayout } from '{{REL_PATH}}config';
-//@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
+//@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
 import { Functions, ApiResponse, MaybePromise, ApiStreamEmitter } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 // Set the request limit per minute. Set to false to use the default config value config.rateLimiting

@@ -258,41 +258,128 @@ useEffect(() => {
 
 ## Streaming
 
-Sync streaming has two channels:
+Sync exposes four streaming primitives, each picking a different audience and cost profile. The `_server_v{n}.ts` handler receives all of them in its params object; pick the one whose audience matches your use case.
 
-- `_server_v{n}.ts` stream calls go back to the request initiator via `syncRequest({ onStream })`.
-- `_client_v{n}.ts` stream calls go to each target socket and can be handled with `upsertSyncEventStreamCallback`.
+### The four primitives
 
-Both channels are strict-typed by generated maps:
+| Primitive | Audience | Cost | Use when |
+| --- | --- | --- | --- |
+| `stream(payload)` | Originator only | Cheapest — single unicast emit | Per-user progress (uploads, query progress, "AI thinking" indicators only the asker sees) |
+| `broadcastStream(payload)` | Everyone in `roomCode` | Fan-out across the room | Live AI chat tokens, collaborative editor diffs, anything every viewer should see in real time |
+| `streamTo(tokens, payload)` | Specific session tokens only | Targeted fan-out | Selective subscribers (admin viewers, "active reader" markers, low-priority audit logs) |
+| `_client_v{n}.ts` stream | Per-recipient (after `_server` finishes) | One run per recipient | Per-target customization (filtering, translating, branding the payload differently per receiver) |
 
-- `_server_v{n}.ts` emitted payloads generate `serverStream` route types.
-- `_client_v{n}.ts` emitted payloads generate `clientStream` route types.
-- `syncRequest({ onStream })` and `upsertSyncEventStreamCallback` use those exact generated payload unions.
-- Stream callbacks receive the payload you emit in `stream(...)`; stream payloads do not have framework-enforced keys.
+`broadcastStream` automatically degrades to a unicast emit when the receiver room contains a single socket — solo rooms cost the same as `stream()`. Free optimization.
 
-If no `stream(...)` call exists yet for a stage, that stage falls back to `never`.
+`streamTo` targets recipients by their session token. Every authenticated socket joins a room named after its own token at connect time, so emitting to a token-room reaches every device/tab signed in as that user.
 
-This means:
-- `syncRequest({ onStream })` is only available for routes that emit from `_server_v{n}.ts`.
-- `upsertSyncEventStreamCallback` is only available for routes that emit from `_client_v{n}.ts`.
+### Wire format and listeners
 
-Example server progress:
+- `stream(...)` payloads travel over `buildSyncProgressEventName(responseIndex)` — only the originator's socket listens. Consumed via `syncRequest({ onStream })`.
+- `broadcastStream(...)`, `streamTo(...)`, and `_client_v{n}.ts` `stream(...)` all use the same `socketEventNames.sync` envelope with `status: 'stream'`. Recipients consume them indistinguishably via `upsertSyncEventCallback({ callback: ({ stream }) => ... })`.
+
+### Generated types
+
+- `_server_v{n}.ts` emitted payloads (any of `stream`, `broadcastStream`, `streamTo`) generate the `serverStream` route type.
+- `_client_v{n}.ts` emitted payloads generate the `clientStream` route type.
+- `syncRequest({ onStream })` is typed against `serverStream`.
+- `upsertSyncEventCallback` stream payloads are typed against the union of `serverStream` (when emitted via `broadcastStream` / `streamTo`) and `clientStream`.
+- A stage that never calls a stream helper falls back to `never` — calling the consumer side won't typecheck.
+
+### Decision tree
+
+```
+Does only the originator need to see chunks live?
+  → use `stream(payload)`            (cheapest)
+
+Does every viewer in the room need to see chunks live?
+  → use `broadcastStream(payload)`   (room fan-out, auto-degrades for solo)
+
+Do only specific subscribers need to see chunks?
+  → use `streamTo(tokens, payload)`  (targeted)
+
+Do recipients need different per-target chunks?
+  → use `_client_v{n}.ts` `stream`   (one run per recipient, after `_server`)
+```
+
+### Performance notes
+
+- The route author's choice of helper is the performance gate. Don't pay broadcast cost for per-user progress, and don't try to "save" bandwidth by streaming-via-`stream`-only when every viewer is going to receive the final result anyway (total bytes are roughly equal — broadcast just spreads them across time instead of one big message at the end).
+- For high-frequency streams (LLM token streams), use `createStreamThrottle({ flushEveryMs: 50, flushAtChars: 32 })` to coalesce small pieces. Cuts message count by 10-100× with no perceptible latency hit. See [Stream throttling](#stream-throttling) below.
+- Recipients without a registered `upsertSyncEventCallback` for the route never run any handler code — Socket.io still routes the message to their client, but the framework's dispatcher drops it after a hashmap lookup. Negligible cost.
+
+### Examples
+
+**Originator-only progress (cheapest):**
 
 ```typescript
-export const main = async ({ stream }: SyncParams): Promise<SyncServerResponse> => {
+// _server_v1.ts
+export const main = async ({ clientInput, stream }: SyncParams): Promise<SyncServerResponse> => {
   stream({ phase: "validate", progress: 10 });
   // long operation ...
   stream({ phase: "persist", progress: 70 });
-  // long operation ...
 
   return { status: "success", updated: true };
 };
 ```
 
-Example client-stage progress for each receiver:
+**AI chat — every viewer in the room sees tokens live:**
 
 ```typescript
-export const main = async ({ stream }: SyncParams): Promise<SyncClientResponse> => {
+// src/chat/_sync/sendMessage_server_v1.ts
+import { createStreamThrottle } from '@luckystack/sync';
+
+export const main = async ({ clientInput, broadcastStream }: SyncParams): Promise<SyncServerResponse> => {
+  const throttle = createStreamThrottle({ flushEveryMs: 50, flushAtChars: 32 });
+  const aiStream = await callOpenAI(clientInput.prompt);
+
+  let full = "";
+  for await (const chunk of aiStream) {
+    full += chunk.text;
+    throttle.push(chunk.text, broadcastStream);
+  }
+  throttle.flush(broadcastStream);
+
+  return { status: "success", message: full };
+};
+```
+
+```typescript
+// any page in any tab in the room
+upsertSyncEventCallback({
+  name: "chat/sendMessage",
+  version: "v1",
+  callback: ({ stream, status }) => {
+    if (status === "stream" && stream?.chunk) {
+      appendToken(stream.chunk);
+    }
+    if (status === "success") {
+      finalizeMessage();
+    }
+  },
+});
+```
+
+**Selective fanout — only admins see audit chunks:**
+
+```typescript
+// _server_v1.ts
+export const main = async ({ functions, streamTo }: SyncParams): Promise<SyncServerResponse> => {
+  const adminTokens = await functions.user.getOnlineAdminTokens();
+
+  for (const event of auditEvents) {
+    streamTo(adminTokens, { audit: event });
+  }
+
+  return { status: "success" };
+};
+```
+
+**Per-recipient customization (still useful, runs after `_server`):**
+
+```typescript
+// _client_v1.ts
+export const main = async ({ stream, token }: SyncParams): Promise<SyncClientResponse> => {
   stream({ phase: "prepare", progress: 20 });
   // receiver-specific work ...
   stream({ phase: "ready", progress: 100, done: true });
@@ -300,6 +387,28 @@ export const main = async ({ stream }: SyncParams): Promise<SyncClientResponse> 
   return { status: "success" };
 };
 ```
+
+### Stream throttling
+
+LLM providers stream tokens in 3-10 character pieces. Without coalescing, a 1000-token response means 1000 socket messages. `createStreamThrottle` buffers small pieces and flushes either at a character threshold or on a timer:
+
+```typescript
+import { createStreamThrottle } from '@luckystack/sync';
+
+const throttle = createStreamThrottle({
+  flushAtChars: 32,    // flush when buffered text crosses 32 chars
+  flushEveryMs: 50,    // OR after 50ms (whichever first)
+  field: 'chunk',      // payload field name (default 'chunk')
+});
+
+// In your stream loop:
+for await (const piece of aiStream) {
+  throttle.push(piece.text, broadcastStream);  // works with any of the three emit helpers
+}
+throttle.flush(broadcastStream);  // drain the buffer at the end
+```
+
+The same throttle works with `stream`, `broadcastStream`, or `streamTo` — the second argument to `push` / `flush` is whichever emit callback you're using. Pass `flushEveryMs: false` to disable the timer (only flush at the char threshold or on explicit `flush()`).
 
 Repository note:
 

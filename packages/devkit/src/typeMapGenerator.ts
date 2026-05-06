@@ -16,7 +16,7 @@ import {
 } from './typeMap/extractors';
 import { generateServerFunctions } from './typeMap/functionsMeta';
 import { invalidateProgramCache } from './typeMap/tsProgram';
-import { SRC_DIR } from '@luckystack/core';
+import { getSrcDir } from '@luckystack/core';
 import { assertNoDuplicateNormalizedRouteKeys, assertValidRouteNaming } from './routeNamingValidation';
 
 // Collect required imports for the Functions interface only.
@@ -31,11 +31,11 @@ interface GenerateTypeMapOptions {
 export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void => {
   const { quiet = false } = options;
   assertValidRouteNaming({
-    srcDir: SRC_DIR,
+    srcDir: getSrcDir(),
     context: 'generating API/sync type maps',
   });
   assertNoDuplicateNormalizedRouteKeys({
-    srcDir: SRC_DIR,
+    srcDir: getSrcDir(),
     context: 'generating API/sync type maps',
   });
 
@@ -47,7 +47,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   // ═══════════════════════════════════════════════════════════════════════════
   // Collect API Types
   // ═══════════════════════════════════════════════════════════════════════════
-  const apiFiles = findAllApiFiles(SRC_DIR);
+  const apiFiles = findAllApiFiles(getSrcDir());
   const typesByPage = new Map<string, Map<string, { input: string; output: string; stream: string; method: HttpMethod; rateLimit: number | false | undefined; auth: any; version: string; description?: string }>>();
   const unresolvedTypeAliases = new Set<string>();
 
@@ -101,8 +101,8 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   // ═══════════════════════════════════════════════════════════════════════════
   // Collect Sync Types
   // ═══════════════════════════════════════════════════════════════════════════
-  const syncServerFiles = findAllSyncServerFiles(SRC_DIR);
-  const syncClientFiles = findAllSyncClientFiles(SRC_DIR);
+  const syncServerFiles = findAllSyncServerFiles(getSrcDir());
+  const syncClientFiles = findAllSyncClientFiles(getSrcDir());
   const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverOutput: string; clientOutput: string; serverStream: string; clientStream: string; version: string }>>();
 
   if (!quiet) {

@@ -35,6 +35,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
     }
   },
   "files": [
@@ -51,6 +55,15 @@
     "@luckystack/login": "^0.0.1"
   },
   "peerDependencies": {
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "socket.io": {
+      "optional": true
+    }
   }
 }

@@ -2,9 +2,7 @@
 /* eslint-disable */
 import { IncomingMessage, ServerResponse } from "node:http";
 import tryCatch from "./tryCatch";
-import { serverRuntimeConfig } from "./runtimeConfig";
-
-const MAX_BODY_BYTES = serverRuntimeConfig.http.requestBodyMaxBytes;
+import { getProjectConfig } from "./projectConfig";
 
 interface getParamsType {
   method: string;
@@ -25,8 +23,9 @@ export default async function getParams({ method, req, res: _res, queryString }:
     const contentType = req.headers['content-type'] || '';
     const contentLengthHeader = req.headers['content-length'];
     const declaredLength = typeof contentLengthHeader === 'string' ? Number(contentLengthHeader) : Number.NaN;
+    const maxBodyBytes = getProjectConfig().http.requestBodyMaxBytes;
 
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+    if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
       _res.setHeader('Content-Type', 'application/json');
       _res.writeHead(413);
       _res.end(JSON.stringify({
@@ -43,7 +42,7 @@ export default async function getParams({ method, req, res: _res, queryString }:
     let bodySize = 0;
     req.on('data', (chunk) => {
       bodySize += chunk.length;
-      if (bodySize > MAX_BODY_BYTES) {
+      if (bodySize > maxBodyBytes) {
         _res.setHeader('Content-Type', 'application/json');
         _res.writeHead(413);
         _res.end(JSON.stringify({

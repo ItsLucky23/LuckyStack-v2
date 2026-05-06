@@ -2,22 +2,35 @@
 /* eslint-disable */
 import fs from 'fs';
 import path from 'path';
+import { ROOT_DIR } from '@luckystack/core';
 import {
-  isVersionedApiFileName,
-  isVersionedSyncClientFileName,
-  isVersionedSyncServerFileName,
-} from '../routeConventions';
+  getRoutingRules,
+  isApiFileName,
+  isSyncClientFileName,
+  isSyncServerFileName,
+  apiMarkerSegment,
+  syncMarkerSegment,
+} from '../routingRules';
+
+const toForwardSlashRelative = (absolute: string): string => {
+  const rel = path.relative(ROOT_DIR, absolute);
+  return rel.replaceAll('\\', '/');
+};
 
 const walkFiles = (
   dir: string,
   matcher: (fullPath: string, entryName: string) => boolean,
   results: string[] = []
 ): string[] => {
+  const { ignore } = getRoutingRules();
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
 
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
+      const relativePath = toForwardSlashRelative(fullPath);
+
+      if (ignore(relativePath)) continue;
 
       if (entry.isDirectory()) {
         if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
@@ -37,22 +50,25 @@ const walkFiles = (
 };
 
 export const findAllApiFiles = (srcDir: string): string[] => {
+  const apiSegment = apiMarkerSegment();
   return walkFiles(srcDir, (fullPath, entryName) => {
     const normalized = fullPath.replace(/\\/g, '/');
-    return isVersionedApiFileName(entryName) && normalized.includes('/_api/');
+    return isApiFileName(entryName) && normalized.includes(apiSegment);
   });
 };
 
 export const findAllSyncServerFiles = (srcDir: string): string[] => {
+  const syncSegment = syncMarkerSegment();
   return walkFiles(srcDir, (fullPath, entryName) => {
     const normalized = fullPath.replace(/\\/g, '/');
-    return isVersionedSyncServerFileName(entryName) && normalized.includes('/_sync/');
+    return isSyncServerFileName(entryName) && normalized.includes(syncSegment);
   });
 };
 
 export const findAllSyncClientFiles = (srcDir: string): string[] => {
+  const syncSegment = syncMarkerSegment();
   return walkFiles(srcDir, (fullPath, entryName) => {
     const normalized = fullPath.replace(/\\/g, '/');
-    return isVersionedSyncClientFileName(entryName) && normalized.includes('/_sync/');
+    return isSyncClientFileName(entryName) && normalized.includes(syncSegment);
   });
 };

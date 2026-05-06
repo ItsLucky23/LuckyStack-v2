@@ -20,6 +20,7 @@ import {
   buildLeaveRoomResponseEventName,
   socketEventNames,
 } from "../../shared/socketEvents";
+import { clearCsrfToken } from "@luckystack/core/client";
 
 interface SyncEventPayload {
   cb?: string;
@@ -196,6 +197,9 @@ export function useSocket(session: SessionLayout | null) {
         if (sessionBasedToken) {
           sessionStorage.clear();
         }
+        //? Drop the CSRF cache so the next login fetches a fresh token bound
+        //? to the new session.
+        clearCsrfToken();
         globalThis.location.href = loginPageUrl;
       } else {
         console.error("Logout failed");

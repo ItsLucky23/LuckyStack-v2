@@ -1,0 +1,19 @@
+# Public, non-secret environment configuration. Commit this file as `.env`.
+NODE_ENV=development
+SERVER_IP=127.0.0.1
+SERVER_PORT=80
+SECURE=false
+
+# Public app URL — used by OAuth callbacks and the email-link generator.
+DNS=http://localhost:80
+
+# Comma-separated list of additional origins permitted by the CORS layer.
+# (DNS is auto-included; you usually don't need to set EXTERNAL_ORIGINS.)
+EXTERNAL_ORIGINS=
+
+# Project namespace — used as the prefix for Redis session/active-user keys.
+PROJECT_NAME={{PROJECT_NAME}}
+
+# Redis connection (the framework defaults match these values).
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379

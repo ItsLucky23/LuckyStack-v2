@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as ts from 'typescript';
-import { GENERATED_API_DOCS_PATH, GENERATED_API_SCHEMAS_PATH, GENERATED_SOCKET_TYPES_PATH } from '@luckystack/core';
+import { getGeneratedApiDocsPath, getGeneratedApiSchemasPath, getGeneratedSocketTypesPath } from '@luckystack/core';
 import { typeTextToZodSource } from './zodEmitter';
 
 export interface ApiTypeEntry {
@@ -183,6 +183,13 @@ export type StreamPayload = {
 export type ApiStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
 export type SyncServerStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
 export type SyncClientStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
+//? Broadcast — fan-out to every socket in the receiver room. Auto-degrades to unicast for solo rooms.
+export type SyncBroadcastStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void;
+//? Targeted — emit only to the listed session tokens (each token is its own room).
+export type SyncStreamToEmitter<T extends StreamPayload = StreamPayload> = (
+	tokens: string | string[],
+	payload?: T,
+) => void;
 
 // 
 // API Type Definitions
@@ -503,20 +510,20 @@ export const writeTypeMapArtifacts = ({
 	schemasContent?: string;
 }) => {
 	try {
-		const outputPath = GENERATED_SOCKET_TYPES_PATH;
+		const outputPath = getGeneratedSocketTypesPath();
 		const hasUpdatedTypeMap = writeFileIfChanged(outputPath, content);
 		if (hasUpdatedTypeMap) {
 			console.log('[TypeMapGenerator] Generated apiTypes.generated.ts');
 		}
 
 		if (schemasContent !== undefined) {
-			const hasUpdatedSchemas = writeFileIfChanged(GENERATED_API_SCHEMAS_PATH, schemasContent);
+			const hasUpdatedSchemas = writeFileIfChanged(getGeneratedApiSchemasPath(), schemasContent);
 			if (hasUpdatedSchemas) {
 				console.log('[TypeMapGenerator] Generated apiInputSchemas.generated.ts');
 			}
 		}
 
-		const docsPath = GENERATED_API_DOCS_PATH;
+		const docsPath = getGeneratedApiDocsPath();
 		const docsDir = path.dirname(docsPath);
 		if (!fs.existsSync(docsDir)) {
 			fs.mkdirSync(docsDir, { recursive: true });

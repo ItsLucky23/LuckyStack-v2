@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT_DIR, SERVER_FUNCTIONS_DIR, SHARED_DIR, SRC_DIR } from '@luckystack/core';
+import { ROOT_DIR, getServerFunctionsDir, getSharedDir, getSrcDir } from '@luckystack/core';
 
 const SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts'];
 
@@ -111,11 +111,11 @@ const resolveImportToFile = (importerPath: string, specifier: string): string | 
 
   if (specifier.startsWith('src/') || specifier.startsWith('@/')) {
     const sourcePath = specifier.startsWith('@/') ? specifier.slice(2) : specifier.slice(4);
-    return tryResolveWithExtensions(path.join(SRC_DIR, sourcePath));
+    return tryResolveWithExtensions(path.join(getSrcDir(), sourcePath));
   }
 
   if (specifier.startsWith('shared/')) {
-    return tryResolveWithExtensions(path.join(SHARED_DIR, specifier.slice(7)));
+    return tryResolveWithExtensions(path.join(getSharedDir(), specifier.slice(7)));
   }
 
   return null;
@@ -127,9 +127,9 @@ const isRouteFile = (filePath: string): boolean => {
 
 const collectScopedFiles = (): Set<string> => {
   const files = new Set<string>();
-  collectScriptFiles(SRC_DIR, files);
-  collectScriptFiles(SHARED_DIR, files);
-  collectScriptFiles(SERVER_FUNCTIONS_DIR, files);
+  collectScriptFiles(getSrcDir(), files);
+  collectScriptFiles(getSharedDir(), files);
+  collectScriptFiles(getServerFunctionsDir(), files);
 
   const configFile = tryResolveWithExtensions(path.join(ROOT_DIR, 'config'));
   if (configFile) {

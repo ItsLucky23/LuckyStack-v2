@@ -1,9 +1,7 @@
 import http from 'node:http';
-import deployConfig from '../../../deploy.config';
-import servicesConfig from '../../../services.config';
+import { getDeployConfig, getServicesConfig, type DeployEnvironmentShape } from '@luckystack/core';
 import { createServiceTargetResolver } from './resolveTarget';
 import type { ServiceTargetResolver } from './resolveTarget';
-import type { EnvironmentDefinition } from '../../../deploy.config';
 import { startHealthPoller } from './healthPoller';
 import type { HealthPoller } from './healthPoller';
 import { createHttpProxy } from './httpProxy';
@@ -11,6 +9,8 @@ import { createWsProxy } from './wsProxy';
 import { createRedisHealthStore } from './redisHealthStore';
 import type { RedisHealthStore } from './redisHealthStore';
 import { runBootHandshake } from './bootHandshake';
+
+type EnvironmentDefinition = DeployEnvironmentShape;
 
 /**
  * Starts the LuckyStack load-balancer backend.
@@ -63,9 +63,11 @@ export interface RunningRouter {
 
 export const startRouter = async (input: StartRouterInput): Promise<RunningRouter> => {
   const port = input.port ?? Number(process.env.ROUTER_PORT ?? 4000);
+  const deployConfig = getDeployConfig();
+  const servicesConfig = getServicesConfig();
   const missingServiceErrorCode = deployConfig.routing?.missingServiceErrorCode ?? 'serviceNotAssigned';
 
-  const envMap = deployConfig.environments as Record<string, EnvironmentDefinition | undefined>;
+  const envMap = (deployConfig.environments ?? {}) as Record<string, EnvironmentDefinition | undefined>;
   const currentEnv = envMap[input.currentEnvKey];
   const hasFallback = Boolean(currentEnv?.fallback);
   const enableFallbackRouting = deployConfig.development?.enableFallbackRouting ?? false;

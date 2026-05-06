@@ -19,6 +19,7 @@ import {
   socketEventNames,
   dispatchHook,
   validateInputByType,
+  getLogger,
 } from "@luckystack/core";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
 import { setSentryUser } from '@luckystack/sentry';
@@ -43,6 +44,29 @@ interface RuntimeSuccessResponse {
 
 type RuntimeSyncResponse = RuntimeSuccessResponse | RuntimeErrorResponse;
 
+//? Stream-emit callbacks passed into the `_server` handler. Three flavors:
+//?
+//?   - `stream(payload)`           — unicast back to the originator socket
+//?                                   only. Cheapest. Use for per-user progress
+//?                                   that nobody else cares about.
+//?   - `broadcastStream(payload)`  — fan-out to every socket currently in
+//?                                   the receiver room. Use for live AI chat
+//?                                   tokens, collab-editor diffs, anything
+//?                                   the whole room should see in real time.
+//?                                   Auto-degrades to a unicast emit when the
+//?                                   room contains a single socket.
+//?   - `streamTo(tokens, payload)` — selective fanout to only the given
+//?                                   session tokens (each is its own room
+//?                                   because every socket joins a room named
+//?                                   after its token at connect time). Use
+//?                                   when you want explicit subscribers, not
+//?                                   "everyone in the room".
+type SyncBroadcastStream = (payload?: SyncStreamPayload) => void;
+type SyncStreamTo = (
+  tokens: string | string[],
+  payload?: SyncStreamPayload,
+) => void;
+
 interface RuntimeSyncServerEntry {
   auth: AuthProps;
   main: (params: {
@@ -51,6 +75,8 @@ interface RuntimeSyncServerEntry {
     functions: Record<string, unknown>;
     roomCode: string;
     stream: (payload?: SyncStreamPayload) => void;
+    broadcastStream: SyncBroadcastStream;
+    streamTo: SyncStreamTo;
   }) => Promise<RuntimeSyncResponse>;
   inputType?: string;
   inputTypeFilePath?: string;
@@ -82,7 +108,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   //? first we validate the data
   if (typeof msg != 'object') {
     if (shouldLogDev()) {
-      console.log('message', 'socket message was not a json object', 'red');
+      getLogger().warn('sync: socket message was not a json object');
     }
     const normalized = normalizeErrorResponse({
       response: { status: 'error', errorCode: 'sync.invalidRequest' },
@@ -172,7 +198,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
   if (!receiver) {
     if (shouldLogDev()) {
-      console.log('receiver / roomCode:', receiver, 'red');
+      getLogger().warn('sync: missing receiver / roomCode', { receiver });
     }
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.missingReceiver' },
@@ -181,9 +207,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   }
 
   if (shouldLogDev()) {
-    console.log(' ', 'blue');
-    console.log(' ', 'blue');
-    console.log(`sync: ${resolvedName} called`, 'blue');
+    getLogger().debug(`sync: ${resolvedName} called`, { sync: resolvedName });
   }
 
   const user = await getSession(token);
@@ -196,7 +220,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   //? we check if there is a client file or/and a server file, if they both dont exist we abort
   if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
     if (shouldLogDev()) {
-      console.log("ERROR!!!,", `you need ${name}_client or ${name}_server file to sync`, 'red');
+      getLogger().warn(`sync: ${name} has no _client or _server file`, { sync: name });
     }
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.notFound' },
@@ -217,6 +241,72 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     socket.emit(buildSyncProgressEventName(responseIndex), payload);
   };
 
+  //? Build the wire-shape every recipient expects on the sync channel. Same
+  //? envelope `_client`'s stream uses, so consumers' `upsertSyncEventCallback`
+  //? listeners receive both indistinguishably.
+  const buildBroadcastFrame = (payload: SyncStreamPayload) => ({
+    ...payload,
+    cb,
+    fullName: resolvedName,
+    status: 'stream' as const,
+  });
+
+  //? broadcastStream: fan a chunk out to every socket currently joined to
+  //? the receiver room. Auto-degrades to unicast when the room has at most
+  //? one socket — saves the room-iterator round-trip in solo cases (e.g. a
+  //? user querying an AI in their own private session).
+  const emitBroadcastSyncStream = (payload: SyncStreamPayload = {}) => {
+    if (shouldLogStream()) {
+      console.log(`sync: ${resolvedName} broadcastStream`, payload, 'cyan');
+    }
+    if (!receiver) return;
+    const io = getIoInstance();
+    if (!io) return;
+
+    const frame = buildBroadcastFrame(payload);
+    const roomMembers = io.sockets.adapter.rooms.get(receiver);
+    if (!roomMembers || roomMembers.size === 0) return;
+
+    //? Solo-room shortcut: if only one socket is listening (typically the
+    //? originator), unicast directly instead of iterating. Identical wire
+    //? output, slightly cheaper path.
+    if (roomMembers.size <= 1) {
+      const onlyId = roomMembers.values().next().value;
+      const onlySocket = onlyId ? io.sockets.sockets.get(onlyId) : undefined;
+      if (onlySocket) {
+        onlySocket.emit(socketEventNames.sync, frame);
+      }
+      return;
+    }
+
+    io.to(receiver).emit(socketEventNames.sync, frame);
+  };
+
+  //? streamTo: selective fanout. Each socket joins a room keyed by its own
+  //? auth token at connect time, so emitting to those rooms reaches exactly
+  //? the targeted users (across multiple devices/tabs of the same token,
+  //? you'll hit every connection sharing that token).
+  const emitStreamToTokens = (
+    tokens: string | string[],
+    payload: SyncStreamPayload = {},
+  ) => {
+    const list = Array.isArray(tokens) ? tokens : [tokens];
+    const filtered = list.filter((t): t is string => typeof t === 'string' && t.length > 0);
+    if (filtered.length === 0) return;
+
+    if (shouldLogStream()) {
+      console.log(`sync: ${resolvedName} streamTo`, { tokens: filtered, payload }, 'cyan');
+    }
+    const io = getIoInstance();
+    if (!io) return;
+
+    const frame = buildBroadcastFrame(payload);
+    //? Single emit covers the union of all matching token-rooms. Socket.io
+    //? deduplicates per-socket so a recipient on two tabs (both joined to
+    //? their token-room) won't receive the chunk twice.
+    io.to(filtered).emit(socketEventNames.sync, frame);
+  };
+
   //? Rate limit check: per-sync bucket fallback + global per-IP cap
   const defaultApiLimit = getProjectConfig().rateLimiting.defaultApiLimit;
   if (defaultApiLimit !== false && defaultApiLimit > 0) {
@@ -230,6 +320,15 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     });
 
     if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: token ? 'user' : 'route',
+        key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
+        limit: defaultApiLimit,
+        windowMs: getProjectConfig().rateLimiting.windowMs,
+        count: defaultApiLimit + 1,
+        route: resolvedName,
+        userId: user?.id,
+      });
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: {
           status: 'error',
@@ -253,6 +352,14 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     });
 
     if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: 'ip',
+        key: `ip:${requesterIp}:sync:all`,
+        limit: defaultIpLimit,
+        windowMs: getProjectConfig().rateLimiting.windowMs,
+        count: defaultIpLimit + 1,
+        ip: requesterIp,
+      });
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: {
           status: 'error',
@@ -292,7 +399,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     //? if the login key is true we check if the user has an id in the session object
     if (auth.login && !user?.id) {
         if (shouldLogDev()) {
-          console.log(`ERROR!!!, not logged in but sync requires login`, 'red');
+          getLogger().warn(`sync: ${resolvedName} requires login`, { sync: resolvedName });
         }
         return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
           response: { status: 'error', errorCode: 'auth.required' },
@@ -303,7 +410,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     const validationResult = validateRequest({ auth, user: user! });
     if (validationResult.status === 'error') {
       if (shouldLogDev()) {
-        console.log('ERROR!!!,', validationResult.errorCode, 'red');
+        getLogger().warn(`sync: auth failed for ${resolvedName}`, { sync: resolvedName, errorCode: validationResult.errorCode });
       }
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: {
@@ -319,7 +426,15 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
     //? if the user has passed all the checks we call the preload sync function and return the result
     const [serverSyncError, serverSyncResult] = await tryCatch(
-      async () => await serverMain({ clientInput: normalizedData, user, functions: functionsObject, roomCode: receiver, stream: emitServerSyncStream }),
+      async () => await serverMain({
+        clientInput: normalizedData,
+        user,
+        functions: functionsObject,
+        roomCode: receiver,
+        stream: emitServerSyncStream,
+        broadcastStream: emitBroadcastSyncStream,
+        streamTo: emitStreamToTokens,
+      }),
       undefined,
       {
         handler: 'handleSyncRequest',
@@ -332,7 +447,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     );
     if (serverSyncError) {
       if (shouldLogDev()) {
-        console.log('ERROR!!!,', serverSyncError.message, 'red');
+        getLogger().error(`sync: server execution failed for ${resolvedName}`, serverSyncError, { sync: resolvedName });
       }
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
@@ -346,13 +461,13 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         userLanguage: user?.language,
       });
       if (shouldLogDev()) {
-        console.log('ERROR!!!,', normalizedServerError.message, 'red');
+        getLogger().warn(`sync: server returned error for ${resolvedName}`, { sync: resolvedName, message: normalizedServerError.message });
       }
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), normalizedServerError);
     } else if (serverSyncResult?.status !== 'success') {
       //? badReturn means it doesnt include a status key with the value 'success' || 'error'
       if (shouldLogDev()) {
-        console.log('ERROR!!!,', `sync ${resolvedName}_server function didnt return a status key with the value 'success' or 'error'`, 'red');
+        getLogger().warn(`sync: ${resolvedName}_server returned invalid response`, { sync: resolvedName });
       }
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: { status: 'error', errorCode: 'sync.invalidServerResponse' },
@@ -374,9 +489,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   //? now we check if we found any sockets
   if (!sockets) {
     if (shouldLogDev()) {
-      console.log('data:', msg, 'red');
-      console.log('receiver:', receiver, 'red');
-      console.log('no sockets found', 'red');
+      getLogger().warn('sync: no sockets found for receiver', { receiver, sync: resolvedName });
     }
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.noReceiversFound' },

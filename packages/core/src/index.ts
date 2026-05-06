@@ -11,6 +11,26 @@ export {
   registerProjectConfig,
   getProjectConfig,
   isProjectConfigRegistered,
+  DEFAULT_PROJECT_CONFIG,
+} from './projectConfig';
+export type {
+  ProjectConfig,
+  ProjectConfigInput,
+  LoggingConfig,
+  RateLimitingConfig,
+  SessionConfig,
+  SentryConfig,
+  SentrySampleRates,
+  HttpConfig,
+  HttpStreamConfig,
+  SecurityHeadersConfig,
+  CorsConfig,
+  AuthConfig,
+  SocketConfig,
+  DevConfig,
+  PathsConfig,
+  EmailConfig,
+  EmailLoggingConfig,
 } from './projectConfig';
 export {
   registerRuntimeMapsProvider,
@@ -29,25 +49,52 @@ export {
 } from './notifier';
 export type { Notifier, NotifyInput, NotifyParam } from './notifier';
 export {
+  registerEmailSender,
+  getEmailSender,
+  isEmailSenderRegistered,
+} from './emailRegistry';
+export type { EmailSender, EmailMessage, EmailResult } from './emailRegistry';
+export {
   registerDeployConfig,
   getDeployConfig,
   isDeployConfigRegistered,
 } from './deployConfigRegistry';
-export type { DeployConfigShape, DeployResourceShape } from './deployConfigRegistry';
+export type {
+  DeployConfigShape,
+  DeployResourceShape,
+  DeployEnvironmentShape,
+  DeployRoutingShape,
+  DeployDevelopmentShape,
+} from './deployConfigRegistry';
+export {
+  registerServicesConfig,
+  getServicesConfig,
+  isServicesConfigRegistered,
+} from './servicesConfigRegistry';
+export type {
+  ServicesConfigShape,
+  ServiceDefinition,
+  PresetDefinition,
+} from './servicesConfigRegistry';
+export {
+  registerLocaleReloader,
+  getLocaleReloader,
+} from './localeReloader';
+export type { LocaleReloader } from './localeReloader';
 export type { statusContent, SOCKETSTATUS } from './socketStatusTypes';
 export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionTypes';
-export type {
-  ProjectConfig,
-  LoggingConfig,
-  RateLimitingConfig,
-  SessionConfig,
-  SentryConfig,
-  SentrySampleRates,
-} from './projectConfig';
 export * from './sentrySetup';
 export * from './env';
 export * from './db';
 export { redis } from './redis';
+export {
+  registerPrismaClient,
+  registerRedisClient,
+  getPrismaClient,
+  getRedisClient,
+  isPrismaClientRegistered,
+  isRedisClientRegistered,
+} from './clients';
 export { attachSocketRedisAdapter } from './socketRedisAdapter';
 export { writeBootUuid, readBootUuid, resolveEnvKey } from './bootUuid';
 export {
@@ -56,11 +103,29 @@ export {
   hashSynchronizedValue,
 } from './synchronizedEnvHashes';
 export { initConsolelog } from './consoleLog';
+export {
+  registerLogger,
+  getLogger,
+  isLoggerRegistered,
+  resetLoggerForTests,
+} from './loggerRegistry';
+export type { Logger, LoggerContext } from './loggerRegistry';
+export {
+  registerRedactedLogKeys,
+  getRedactedLogKeys,
+  isRedactedLogKey,
+  resetRedactedLogKeysForTests,
+} from './redactedLogKeys';
 export * from './cookies';
 export * from './httpApiUtils';
 export * from './paths';
-export { serverRuntimeConfig } from './runtimeConfig';
 export { serveAvatar } from './serveAvatars';
+export {
+  registerAvatarConfig,
+  getAvatarConfig,
+  DEFAULT_AVATAR_CONFIG,
+} from './avatarConfig';
+export type { AvatarConfig, AvatarConfigInput } from './avatarConfig';
 export { default as getParams } from './getParams';
 export { extractTokenFromSocket } from './extractToken';
 export { extractTokenFromRequest } from './extractTokenFromRequest';
@@ -82,10 +147,11 @@ export {
   getSyncQueueSize,
 } from './offlineQueue';
 export { socket, setSocket, incrementResponseIndex, waitForSocket } from './socketState';
+export { getCsrfToken, clearCsrfToken, httpFetch } from './csrf';
 // `apiRequest` is exported from `./client.ts` — it imports React-coupled
 // project code (notify → TranslationProvider.tsx) that must not be pulled
 // into server compilation via this server-safe barrel.
-export { registerHook, dispatchHook } from './hooks/registry';
+export { registerHook, dispatchHook, clearAllHooks } from './hooks/registry';
 export type { DispatchResult } from './hooks/registry';
 export type {
   HookSessionShape,
@@ -98,4 +164,8 @@ export type {
   PostApiExecutePayload,
   PreSyncFanoutPayload,
   PostSyncFanoutPayload,
+  ApiErrorPayload,
+  SyncErrorPayload,
+  RateLimitExceededPayload,
+  CorsRejectedPayload,
 } from './hooks/types';

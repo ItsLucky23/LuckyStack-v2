@@ -1,5 +1,5 @@
 export { socketLeaveRoom } from './activity/leaveRoom';
-export { initAcitivityBroadcaster, socketConnected, socketDisconnecting } from './activity/lifecycle';
+export { initActivityBroadcaster, socketConnected, socketDisconnecting } from './activity/lifecycle';
 export {
   disconnectTimers,
   disconnectReasonsWeIgnore,
@@ -8,3 +8,13 @@ export {
   clientSwitchedTab,
 } from './activity/state';
 export { registerPresenceHooks } from './hooks';
+export {
+  registerPresenceConfig,
+  getPresenceConfig,
+  DEFAULT_PRESENCE_CONFIG,
+} from './presenceConfig';
+export type {
+  PresenceConfig,
+  PresenceConfigInput,
+  DisconnectTimers,
+} from './presenceConfig';

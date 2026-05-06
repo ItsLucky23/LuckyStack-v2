@@ -2,7 +2,9 @@ import path from "node:path";
 import { access } from 'node:fs/promises';
 import fs from "node:fs";
 import { ServerResponse } from "node:http";
-import { UPLOADS_DIR } from './paths';
+import { getUploadsDir } from './paths';
+import { getAvatarConfig } from './avatarConfig';
+import { getLogger } from './loggerRegistry';
 
 export const serveAvatar = async ({
   routePath,
@@ -11,31 +13,31 @@ export const serveAvatar = async ({
   routePath: string;
   res: ServerResponse;
 }) => {
-  const uploadsFolder = UPLOADS_DIR;
-
-  // Always append .webp since that's the stored format
-  const fileId = path.basename(routePath, path.extname(routePath)); // remove any extension if present
-  const fileName = `${fileId}.webp`;
-  const filePath = path.join(uploadsFolder, fileName);
-
-  console.log(`Serving avatar for file ID: ${fileId} at path: ${filePath}`);
+  const uploadsFolder = getUploadsDir();
+  const fileId = path.basename(routePath, path.extname(routePath));
   if (!fileId) return;
 
-  try {
-    await access(filePath)
+  const { formats, cacheControl } = getAvatarConfig();
 
-    res.writeHead(200, {
-      "Content-Type": "image/webp",
-      "Cache-Control": "public, max-age=86400",
-    });
+  //? Try each configured format in order; first existing file wins. This
+  //? lets an installer add `png` or `jpg` for backwards compatibility while
+  //? still preferring `webp` for new uploads.
+  for (const { extension, contentType } of formats) {
+    const filePath = path.join(uploadsFolder, `${fileId}.${extension}`);
+    try {
+      await access(filePath);
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': cacheControl,
+      });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    } catch {
+      //? next format
+    }
+  }
 
-    const readStream = fs.createReadStream(filePath);
-    readStream.pipe(res);
-  } catch {
-    // console.log('File not found:', err, 'red');
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("File not found");
-  };
-
-  return;
-}
+  getLogger().debug('avatar: file not found', { routePath, fileId });
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('File not found');
+};

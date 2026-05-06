@@ -47,7 +47,7 @@ import { apiRequest } from 'src/_sockets/apiRequest';
 import { joinRoom, leaveRoom } from 'src/_sockets/socketInitializer';
 import { syncRequest, useSyncEvents } from 'src/_sockets/syncRequest';
 
-export const template = 'home';
+export const template = 'dashboard';
 
 const formatEvent = (payload: unknown) => {
   return JSON.stringify(payload, null, 2);

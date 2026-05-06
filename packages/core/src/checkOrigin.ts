@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/restrict-template-expressions */
 
+import { getProjectConfig } from './projectConfig';
+import { getLogger } from './loggerRegistry';
+import { dispatchHook } from './hooks/registry';
+
 const normalizeOrigin = ({ value, secure }: { value: string; secure: boolean }): string => {
   const trimmedValue = value.trim().toLowerCase();
   if (!trimmedValue) { return ''; }
@@ -19,31 +23,28 @@ const normalizeOrigin = ({ value, secure }: { value: string; secure: boolean }):
     .replace(/^https:\/\/(.+):443$/i, 'https://$1');
 };
 
-const allowedOrigin = (origin: string) => {
+const isLocalhostOrigin = (normalized: string): boolean => {
+  return /^https?:\/\/localhost(:\d+)?$/i.test(normalized);
+};
+
+const allowedOrigin = (origin: string): boolean => {
   const secure = process.env.SECURE === 'true';
+  const cors = getProjectConfig().http.cors;
 
-  const externalOrigins = (process.env.EXTERNAL_ORIGINS || '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  // DNS can now contain multiple comma-separated values, same as EXTERNAL_ORIGINS.
-  const dnsOrigins = (process.env.DNS || '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean);
+  //? Project-supplied origins live in `ProjectConfig.http.cors.allowedOrigins`.
+  //? Consumers populate it from whatever env vars they prefer; the framework
+  //? makes no assumption about names like DNS or EXTERNAL_ORIGINS.
+  const configured = cors.allowedOrigins ?? [];
 
   const location = `http${secure ? 's' : ''}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
   const normalizedOrigin = normalizeOrigin({ value: origin, secure });
-  const allowedOrigins = [
-    location,
-    'localhost',
-    ...externalOrigins,
-    ...dnsOrigins,
-  ];
+
+  if (cors.allowLocalhost && normalizedOrigin && isLocalhostOrigin(normalizedOrigin)) {
+    return true;
+  }
 
   const normalizedAllowedOrigins = new Set(
-    allowedOrigins
+    [location, ...configured]
       .map((value) => normalizeOrigin({ value, secure }))
       .filter(Boolean)
   );
@@ -52,12 +53,25 @@ const allowedOrigin = (origin: string) => {
     return true;
   }
 
-  console.log('');
-  console.log('origin not allowed');
-  console.log('origin:', origin);
-  console.log('normalizedOrigin:', normalizedOrigin);
-  console.log('allowedOrigins:', [...normalizedAllowedOrigins]);
+  //? Gated behind `devLogs` to avoid amplifying CORS-rejection traffic into
+  //? production logs (an attacker could spam invalid origins otherwise). The
+  //? structured `corsRejected` hook is the durable signal for production —
+  //? subscribe via `registerHook('corsRejected', ...)` for audit/alerting.
+  if (getProjectConfig().logging.devLogs) {
+    getLogger().warn('cors: origin not allowed', {
+      origin,
+      normalizedOrigin,
+      allowedOrigins: [...normalizedAllowedOrigins],
+      allowLocalhost: cors.allowLocalhost,
+    });
+  }
+  void dispatchHook('corsRejected', {
+    origin,
+    normalizedOrigin,
+    allowedOrigins: [...normalizedAllowedOrigins],
+    allowLocalhost: cors.allowLocalhost,
+  });
   return false;
-}
+};
 
 export default allowedOrigin;

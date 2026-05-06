@@ -56,8 +56,14 @@
       "@luckystack/devkit": [
         "./packages/devkit/src/index.ts"
       ],
+      "@luckystack/email": [
+        "./packages/email/src/index.ts"
+      ],
       "@luckystack/presence": [
         "./packages/presence/src/index.ts"
+      ],
+      "@luckystack/presence/client": [
+        "./packages/presence/src/client/index.ts"
       ],
       "@luckystack/router": [
         "./packages/router/src/index.ts"
@@ -79,6 +85,7 @@
     "packages/sentry/src",
     "packages/api/src",
     "packages/devkit/src",
+    "packages/email/src",
     "packages/presence/src",
     "packages/router/src",
     "packages/server/src",

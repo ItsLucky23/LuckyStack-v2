@@ -59,6 +59,12 @@ interface RuntimeSuccessResponse {
 
 type RuntimeSyncResponse = RuntimeSuccessResponse | RuntimeErrorResponse;
 
+type SyncBroadcastStream = (payload?: SyncStreamPayload) => void;
+type SyncStreamTo = (
+  tokens: string | string[],
+  payload?: SyncStreamPayload,
+) => void;
+
 interface RuntimeSyncServerEntry {
   auth: AuthProps;
   main: (params: {
@@ -67,6 +73,8 @@ interface RuntimeSyncServerEntry {
     functions: Record<string, unknown>;
     roomCode: string;
     stream: (payload?: SyncStreamPayload) => void;
+    broadcastStream: SyncBroadcastStream;
+    streamTo: SyncStreamTo;
   }) => Promise<RuntimeSyncResponse>;
   inputType?: string;
   inputTypeFilePath?: string;
@@ -264,6 +272,59 @@ export default async function handleHttpSyncRequest({
         stream?.(payload);
       };
 
+      //? broadcastStream + streamTo mirror the socket-side handler so a route
+      //? written for either transport behaves identically. The originator's
+      //? response travels back via SSE (`stream?.()`); broadcast / targeted
+      //? chunks still flow over Socket.io to recipients in the receiver room.
+      const buildBroadcastFrame = (payload: SyncStreamPayload) => ({
+        ...payload,
+        cb,
+        fullName: resolvedName,
+        status: 'stream' as const,
+      });
+
+      const emitBroadcastSyncStream = (payload: SyncStreamPayload = {}) => {
+        if (shouldLogStream()) {
+          console.log(`http sync: ${resolvedName} broadcastStream`, payload, 'cyan');
+        }
+        if (!normalizedReceiver) return;
+        const io = getIoInstance();
+        if (!io) return;
+
+        const frame = buildBroadcastFrame(payload);
+        const roomMembers = io.sockets.adapter.rooms.get(normalizedReceiver);
+        if (!roomMembers || roomMembers.size === 0) return;
+
+        if (roomMembers.size <= 1) {
+          const onlyId = roomMembers.values().next().value;
+          const onlySocket = onlyId ? io.sockets.sockets.get(onlyId) : undefined;
+          if (onlySocket) {
+            onlySocket.emit(socketEventNames.sync, frame);
+          }
+          return;
+        }
+
+        io.to(normalizedReceiver).emit(socketEventNames.sync, frame);
+      };
+
+      const emitStreamToTokens = (
+        tokens: string | string[],
+        payload: SyncStreamPayload = {},
+      ) => {
+        const list = Array.isArray(tokens) ? tokens : [tokens];
+        const filtered = list.filter((t): t is string => typeof t === 'string' && t.length > 0);
+        if (filtered.length === 0) return;
+
+        if (shouldLogStream()) {
+          console.log(`http sync: ${resolvedName} streamTo`, { tokens: filtered, payload }, 'cyan');
+        }
+        const io = getIoInstance();
+        if (!io) return;
+
+        const frame = buildBroadcastFrame(payload);
+        io.to(filtered).emit(socketEventNames.sync, frame);
+      };
+
       const inputValidation = await validateInputByType({
         typeText: inputType,
         value: data,
@@ -304,7 +365,15 @@ export default async function handleHttpSyncRequest({
       }
 
       const [serverSyncError, serverSyncResult] = await tryCatch(
-        async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: normalizedReceiver, stream: emitServerSyncStream }),
+        async () => await serverMain({
+          clientInput: data,
+          user,
+          functions: functionsObject,
+          roomCode: normalizedReceiver,
+          stream: emitServerSyncStream,
+          broadcastStream: emitBroadcastSyncStream,
+          streamTo: emitStreamToTokens,
+        }),
         undefined,
         {
           handler: 'handleHttpSyncRequest',

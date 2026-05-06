@@ -1,10 +1,10 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
 
-//@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
+//@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
 import { AuthProps, SessionLayout } from '{{REL_PATH}}config';
-//@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { Functions, SyncServerResponse, MaybePromise, SyncServerStreamEmitter } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
+//@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
+import { Functions, SyncServerResponse, MaybePromise, SyncServerStreamEmitter, SyncBroadcastStreamEmitter, SyncStreamToEmitter } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 export const auth: AuthProps = {
   login: true,
@@ -20,15 +20,28 @@ export interface SyncParams {
   user: SessionLayout; // session data of the user who called the sync event
   functions: Functions; // functions object
   roomCode: string; // room code
+  //? Stream primitives — pick whichever audience matches your use case:
+  //?   stream            → originator only (cheapest)
+  //?   broadcastStream   → every socket in the receiver room (live AI chat, collab)
+  //?   streamTo          → specific session tokens only (selective subscribers)
   stream: SyncServerStreamEmitter;
+  broadcastStream: SyncBroadcastStreamEmitter;
+  streamTo: SyncStreamToEmitter;
 }
 
 export const main = ({  }: SyncParams): MaybePromise<SyncServerResponse> => {
   // THIS FILE RUNS JUST ONCE ON THE SERVER
 
   // Stream payload types are generated from your stream(...) calls.
-  // stream({ phase: 'validate', progress: 10 });
-  // stream({ phase: 'done', progress: 100, done: true });
+  // stream({ phase: 'validate', progress: 10 });           // → originator only
+  // broadcastStream({ chunk: 'hello' });                   // → everyone in the room
+  // streamTo([adminToken], { audit: 'event' });            // → specific tokens
+
+  // For LLM token streams, coalesce small pieces with createStreamThrottle:
+  //   import { createStreamThrottle } from '@luckystack/sync';
+  //   const throttle = createStreamThrottle({ flushEveryMs: 50, flushAtChars: 32 });
+  //   for await (const piece of aiStream) throttle.push(piece.text, broadcastStream);
+  //   throttle.flush(broadcastStream);
 
   // Return { status: 'error', message: '...' } OR { status: 'error', errorCode: '...' }
   // Returning error here aborts the full sync flow.

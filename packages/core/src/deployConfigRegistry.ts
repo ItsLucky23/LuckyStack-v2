@@ -19,8 +19,31 @@ export interface DeployResourceShape {
   synchronizedEnvKeys?: string[];
 }
 
+export interface DeployEnvironmentShape {
+  redis: string;
+  mongo: string;
+  fallback?: string;
+  bindings: Record<string, string>;
+}
+
+export interface DeployRoutingShape {
+  onMissingService?: 'hard-error' | 'proxy-fallback';
+  missingServiceErrorCode?: string;
+  enableUnhealthyFallback?: boolean;
+  strictBootHandshake?: boolean;
+}
+
+export interface DeployDevelopmentShape {
+  enableFallbackRouting?: boolean;
+  healthPollMs?: number;
+  switchNewTrafficToLocalWhenHealthy?: boolean;
+}
+
 export interface DeployConfigShape {
   resources: Record<string, DeployResourceShape>;
+  environments?: Record<string, DeployEnvironmentShape>;
+  routing?: DeployRoutingShape;
+  development?: DeployDevelopmentShape;
 }
 
 const DEFAULT_DEPLOY_CONFIG: DeployConfigShape = {
@@ -30,9 +53,10 @@ const DEFAULT_DEPLOY_CONFIG: DeployConfigShape = {
 let activeConfig: DeployConfigShape = DEFAULT_DEPLOY_CONFIG;
 let registered = false;
 
-export const registerDeployConfig = (config: DeployConfigShape): void => {
+export const registerDeployConfig = (config: DeployConfigShape): DeployConfigShape => {
   activeConfig = config;
   registered = true;
+  return activeConfig;
 };
 
 export const getDeployConfig = (): DeployConfigShape => activeConfig;

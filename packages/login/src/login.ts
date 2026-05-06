@@ -1,23 +1,19 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-import { config as loadEnv } from 'dotenv';
-import oauthProviders from "./loginConfig";
+import { getOAuthProviders, isFullOAuthProvider } from './oauthProviders';
+import { getPostLoginRedirect } from './redirectResolver';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { URLSearchParams } from 'node:url';
-import { prisma, tryCatch, redis as redisClient, serverRuntimeConfig, UPLOADS_DIR, dispatchHook } from '@luckystack/core';
-import { PROVIDERS } from '@prisma/client';
-import type { Prisma } from '@prisma/client';
+import { tryCatch, redis as redisClient, getUploadsDir, dispatchHook } from '@luckystack/core';
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { saveSession } from "./session"
 import validator from 'validator';
 import type { BaseSessionLayout as SessionLayout } from './sessionLayout';
 import { getProjectConfig } from '@luckystack/core';
+import { getUserAdapter } from './userAdapter';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-
-loadEnv({ path: '.env' });
-loadEnv({ path: '.env.local', override: true });
 
 interface paramsType {
   email?: string,
@@ -26,20 +22,21 @@ interface paramsType {
   confirmPassword?: string,
 }
 
-const uploadsFolder = UPLOADS_DIR;
+//? Resolved at call time via getUploadsDir() so consumer path overrides win.
+const uploadsFolder = (): string => getUploadsDir();
 const isDevMode = process.env.NODE_ENV === 'development';
 const { compare, genSalt, hash } = bcrypt;
 const { escape, isEmail } = validator;
 
 const getOAuthStateKey = (providerName: string, state: string): string => {
-  const projectName = process.env.PROJECT_NAME || serverRuntimeConfig.auth.oauthStateProjectNameFallback;
+  const projectName = process.env.PROJECT_NAME || getProjectConfig().auth.oauthStateProjectNameFallback;
   return `${projectName}-oauth-state:${providerName}:${state}`;
 };
 
 export const createOAuthState = async (providerName: string): Promise<string | null> => {
   const state = randomBytes(32).toString('hex');
   const key = getOAuthStateKey(providerName, state);
-  const result = await redisClient.set(key, '1', 'EX', serverRuntimeConfig.auth.oauthStateTtlSeconds, 'NX');
+  const result = await redisClient.set(key, '1', 'EX', getProjectConfig().auth.oauthStateTtlSeconds, 'NX');
 
   if (result !== 'OK') {
     return null;
@@ -106,49 +103,47 @@ const loginWithCredentials = async (params: paramsType) => {
     console.log(`credentials auth attempt for ${email || 'unknown-email'}`, 'gray');
   }
 
+  const authLimits = getProjectConfig().auth;
   if (!email || !password) { return { status: false, reason: 'login.empty' }; }
-  if (email.length > 191) { return { status: false, reason: 'login.emailCharacterLimit' }; }
-  if (password.length < 8) { return { status: false, reason: 'login.passwordCharacterMinimum' }; }
-  if (password.length > 191) { return { status: false, reason: 'login.passwordCharacterLimit' }; }
-  if (name && name.length > 191) { return { status: false, reason: 'login.nameCharacterLimit' }; }
+  if (email.length > authLimits.emailMaxLength) { return { status: false, reason: 'login.emailCharacterLimit' }; }
+  if (password.length < authLimits.passwordMinLength) { return { status: false, reason: 'login.passwordCharacterMinimum' }; }
+  if (password.length > authLimits.passwordMaxLength) { return { status: false, reason: 'login.passwordCharacterLimit' }; }
+  if (name && name.length > authLimits.nameMaxLength) { return { status: false, reason: 'login.nameCharacterLimit' }; }
   if (!isEmail(email)) { return { status: false, reason: 'login.invalidEmailFormat' }; }
+
+  const userAdapter = getUserAdapter();
 
   if (name && confirmPassword) { //? register
     if (password != confirmPassword) { return { status: false, reason: 'login.passwordNotMatch' }; }
 
-    const checkEmail = async () => {
-      return await prisma.user.findFirst({
-        where: {
-          email: email,
-          provider: PROVIDERS.credentials
-        },
-      })
+    const preRegisterResult = await dispatchHook('preRegister', { email, provider: 'credentials', name });
+    if (preRegisterResult.stopped) {
+      return { status: false, reason: preRegisterResult.signal.errorCode };
     }
 
     //? check if email already exists
-    const [checkEmailError, checkEmailResponse] = await tryCatch(checkEmail);
+    const [checkEmailError, checkEmailResponse] = await tryCatch(() =>
+      userAdapter.findByEmail({ email, provider: 'credentials' })
+    );
     if (checkEmailError) {
       console.log(checkEmailError);
       return { status: false, reason: toReasonKey(checkEmailError) };
     }
     if (checkEmailResponse) { return { status: false, reason: 'login.emailExists' }; }
 
-    //? email is not in use so we define the function to create the new user
+    //? email is not in use, create the new user
     const createNewUser = async () => {
-      const salt = await genSalt(10);
+      const salt = await genSalt(getProjectConfig().auth.bcryptRounds);
       const hashedPassword = await hash(password, salt);
-      return await prisma.user.create({
-        data: {
-          email: email,
-          provider: PROVIDERS.credentials,
-          name: name,
-          password: hashedPassword,
-          avatar: '',
-          avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
-          admin: false,
-          language: getProjectConfig().defaultLanguage as Prisma.UserCreateInput['language']
-        }
-      })
+      return await userAdapter.create({
+        email,
+        provider: 'credentials',
+        name,
+        password: hashedPassword,
+        avatar: '',
+        avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
+        language: getProjectConfig().defaultLanguage,
+      });
     }
 
     //? here we create the new user
@@ -165,18 +160,15 @@ const loginWithCredentials = async (params: paramsType) => {
     return { status: false, reason: 'login.createUserFailed' };
 
   } else { //? login
-    //? here we define the function to find the user
-    const findUser = async () => {
-      return await prisma.user.findFirst({
-        where: {
-          email: email,
-          provider: PROVIDERS.credentials
-        }
-      })
+    const preLoginResult = await dispatchHook('preLogin', { email, provider: 'credentials' });
+    if (preLoginResult.stopped) {
+      return { status: false, reason: preLoginResult.signal.errorCode };
     }
 
     //? attempt to find the user
-    const [findUserError, findUserResponse] = await tryCatch(findUser);
+    const [findUserError, findUserResponse] = await tryCatch(() =>
+      userAdapter.findByEmail({ email, provider: 'credentials' })
+    );
     if (findUserError) {
       console.log(findUserError, 'findUserError');
       return { status: false, reason: toReasonKey(findUserError) };
@@ -195,12 +187,21 @@ const loginWithCredentials = async (params: paramsType) => {
     //? if the password matches we return the user
     if (checkPasswordResponse) {
       const newToken = randomBytes(32).toString("hex")
+      const previousLogin = (findUserResponse as { lastLogin?: Date | null }).lastLogin ?? null;
+      const nowLogin = new Date();
+
+      // Best-effort lastLogin update — silently no-ops if the user adapter
+      // (or User schema) doesn't accept the field.
+      await tryCatch(() => userAdapter.update(findUserResponse.id, { lastLogin: nowLogin } as never));
+
       const newUser: SessionLayout = {
         ...sanitizeUserForSession(findUserResponse),
         token: newToken,
+        lastLogin: nowLogin,
+        previousLogin,
       }
 
-      const filePath = path.join(uploadsFolder, `${newUser.id}.webp`);
+      const filePath = path.join(uploadsFolder(), `${newUser.id}.webp`);
       if (existsSync(filePath)) {
         newUser.avatar = `${newUser.id}.webp`;
       }
@@ -215,13 +216,46 @@ const loginWithCredentials = async (params: paramsType) => {
   }
 }
 
+export interface OAuthCallbackResult {
+  token: string;
+  redirectUrl: string;
+  userId: string;
+  provider: string;
+  isNewUser: boolean;
+}
+
+const isAllowedRedirectUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url, 'http://placeholder');
+    if (parsed.origin === 'http://placeholder') {
+      // relative URL — same-origin, always safe
+      return true;
+    }
+    const allowed = getProjectConfig().http.cors.allowedOrigins ?? [];
+    return allowed.some((origin) => {
+      try {
+        return new URL(origin).origin === parsed.origin;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+};
+
 // Route that handles the callback from the OAuth provider
-const loginCallback = async (pathname: string, req: IncomingMessage, _res: ServerResponse) => {
+const loginCallback = async (
+  pathname: string,
+  req: IncomingMessage,
+  _res: ServerResponse,
+  options: { defaultRedirectUrl?: string } = {},
+): Promise<OAuthCallbackResult | false> => {
   //? check if provider exists
   const providerName = pathname.split('/')[3]; // Extract the provider (google/github)
-  const provider = oauthProviders.find(p => p.name === providerName);
+  const provider = getOAuthProviders().find(p => p.name === providerName);
   if (!provider || !req.url) { return false }
-  if (!('clientID' in provider)) { return }
+  if (!isFullOAuthProvider(provider)) { return false }
 
   const queryString = req.url.split('?')[1]; // Get the part after '?'
   const params = new URLSearchParams(queryString);
@@ -349,17 +383,18 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
   let isNewOAuthUser = false;
 
   if (email) {
-    const fetchUser = async () => {
-      return await prisma.user.findFirst({
-        where: {
-          email: email,
-          provider: provider.name as PROVIDERS
-        }
-      })
+    const preLoginResult = await dispatchHook('preLogin', { email, provider: provider.name });
+    if (preLoginResult.stopped) {
+      console.log(`oauth login aborted by preLogin hook: ${preLoginResult.signal.errorCode}`, 'yellow');
+      return false;
     }
 
+    const userAdapter = getUserAdapter();
+
     //? here we check if the user exists in the db
-    const [userDataError, userDataResponse] = await tryCatch(fetchUser);
+    const [userDataError, userDataResponse] = await tryCatch(() =>
+      userAdapter.findByEmail({ email: email!, provider: provider.name })
+    );
     if (userDataError) {
       console.log(userDataError);
       return false;
@@ -367,31 +402,41 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
 
     //? if the user exists we assign it to the tempUser variable
     if (userDataResponse?.id) {
-      const filePath = path.join(uploadsFolder, `${userDataResponse.id}.webp`);
+      const filePath = path.join(uploadsFolder(), `${userDataResponse.id}.webp`);
       if (existsSync(filePath)) {
         userDataResponse.avatar = `${userDataResponse.id}.webp`;
       }
 
+      const previousLogin = (userDataResponse as { lastLogin?: Date | null }).lastLogin ?? null;
+      const nowLogin = new Date();
+      await tryCatch(() => userAdapter.update(userDataResponse.id, { lastLogin: nowLogin } as never));
+
       tempUser = {
         ...sanitizeUserForSession(userDataResponse),
-        token: ''
+        token: '',
+        lastLogin: nowLogin,
+        previousLogin,
       };
     }
 
     //? if the user doesnt exist we create a new one
     if (!tempUser) {
+      const preRegisterResult = await dispatchHook('preRegister', { email, provider: provider.name, name });
+      if (preRegisterResult.stopped) {
+        console.log(`oauth register aborted by preRegister hook: ${preRegisterResult.signal.errorCode}`, 'yellow');
+        return false;
+      }
+
       const createNewUser = async () => {
-        if (!email) { return false; }
-        return await prisma.user.create({
-          data: {
-            email,
-            provider: provider.name as PROVIDERS,
-            name,
-            avatar,
-            avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
-            language: getProjectConfig().defaultLanguage as Prisma.UserCreateInput['language']
-          }
-        })
+        if (!email) { return null; }
+        return await userAdapter.create({
+          email,
+          provider: provider.name,
+          name,
+          avatar,
+          avatarFallback: `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`,
+          language: getProjectConfig().defaultLanguage,
+        });
       }
       const [createNewUserError, createNewUserResponse] = await tryCatch(createNewUser);
       if (createNewUserError) {
@@ -426,7 +471,45 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
   if (isDevMode) {
     console.log(`oauth login success for user ${tempUser.id}`, 'green');
   }
-  return newToken;
+
+  //? Resolve the redirect URL: project-supplied resolver wins, falls back to
+  //? the static `loginRedirectUrl` in ProjectConfig. Any URL that fails the
+  //? allowed-origin check is rejected as a defense against open-redirect.
+  const fallbackUrl =
+    options.defaultRedirectUrl
+    ?? getProjectConfig().loginRedirectUrl
+    ?? '/';
+
+  let redirectUrl = fallbackUrl;
+  const resolver = getPostLoginRedirect();
+  if (resolver) {
+    try {
+      const resolved = await resolver({
+        userId: tempUser.id,
+        provider: providerName,
+        isNewUser: isNewOAuthUser,
+        defaultUrl: fallbackUrl,
+      });
+      if (resolved && isAllowedRedirectUrl(resolved)) {
+        redirectUrl = resolved;
+      } else if (resolved) {
+        console.log(
+          `[oauth] postLoginRedirect returned a URL not in allowed origins: ${resolved} — falling back to ${fallbackUrl}`,
+          'yellow',
+        );
+      }
+    } catch (err) {
+      console.log(`[oauth] postLoginRedirect resolver threw: ${(err as Error).message}`, 'yellow');
+    }
+  }
+
+  return {
+    token: newToken,
+    redirectUrl,
+    userId: tempUser.id,
+    provider: providerName,
+    isNewUser: isNewOAuthUser,
+  };
 }
 
 export { loginWithCredentials, loginCallback }

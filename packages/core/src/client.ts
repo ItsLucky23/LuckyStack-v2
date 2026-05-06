@@ -49,6 +49,8 @@ export {
 
 export { normalizeErrorResponseCore } from './responseNormalizer';
 
+export { getCsrfToken, clearCsrfToken, httpFetch } from './csrf';
+
 export { parseServiceRouteName } from './serviceRoute';
 
 export {

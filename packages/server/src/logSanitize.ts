@@ -1,23 +1,15 @@
-//? Recursive log sanitizer: never log known-sensitive keys (passwords, tokens,
-//? cookies). Used by the framework's request-logging path. Project code can
-//? extend the redacted-keys set later via a config option if needed.
+//? Recursive log sanitizer: never log known-sensitive keys. Reads the
+//? extensible redacted-key registry from core so feature packages can register
+//? their own domain-specific keys (password, apiKey, mrn, etc.) at boot.
 
-import { serverRuntimeConfig } from '@luckystack/core';
-
-const sessionCookieName = serverRuntimeConfig.http.sessionCookieName.toLowerCase();
-
-const REDACTED_LOG_KEYS = new Set([
-  'password',
-  'confirmpassword',
-  'token',
-  'newtoken',
-  'authorization',
-  'cookie',
-  'set-cookie',
-  sessionCookieName,
-]);
+import { getProjectConfig, isRedactedLogKey } from '@luckystack/core';
 
 const REDACTED_PLACEHOLDER = '[REDACTED]';
+
+const isRedactedKey = (key: string): boolean => {
+  if (isRedactedLogKey(key)) return true;
+  return key.toLowerCase() === getProjectConfig().http.sessionCookieName.toLowerCase();
+};
 
 export const sanitizeForLog = (value: unknown): unknown => {
   if (value === null || typeof value !== 'object') return value;
@@ -25,7 +17,7 @@ export const sanitizeForLog = (value: unknown): unknown => {
 
   const out: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-    if (REDACTED_LOG_KEYS.has(key.toLowerCase())) {
+    if (isRedactedKey(key)) {
       out[key] = REDACTED_PLACEHOLDER;
     } else {
       out[key] = sanitizeForLog(val);

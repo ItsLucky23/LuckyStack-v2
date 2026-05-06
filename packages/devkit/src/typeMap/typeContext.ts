@@ -2,7 +2,7 @@
 /* eslint-disable */
 import * as ts from 'typescript';
 import path from 'node:path';
-import { GENERATED_SOCKET_TYPES_PATH } from '@luckystack/core';
+import { getGeneratedSocketTypesPath } from '@luckystack/core';
 
 export interface FileImport {
   source: string;
@@ -18,7 +18,7 @@ export interface ImportCollectors {
 const toGeneratedImportPath = (source: string, filePath: string): string => {
   if (!source.startsWith('.')) return source;
 
-  const outputDir = path.dirname(GENERATED_SOCKET_TYPES_PATH);
+  const outputDir = path.dirname(getGeneratedSocketTypesPath());
   const absoluteSource = path.resolve(path.dirname(filePath), source);
   let relPath = path.relative(outputDir, absoluteSource).replaceAll('\\', '/');
   relPath = relPath.replace(/\.tsx?$/, '');

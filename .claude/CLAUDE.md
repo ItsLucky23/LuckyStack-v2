@@ -21,7 +21,13 @@
 
 - Use **TailwindCSS** exclusively for styling.
 - Only use colors defined in `src/index.css` (the `@theme` block and `.dark` overrides). Never use arbitrary color values.
-- Available color tokens: `background`, `container`, `container2`, `container3`, `container4` (each with `-border` and `-hover` variants), `title`, `common`, `muted`, `correct`, `correct-hover`, `wrong`, `wrong-hover`.
+- Available color tokens (every token has the listed utility variants — bg-, text-, border-):
+  - **Surfaces**: `background`, `container1`, `container2` (each with `-hover` and `-border` variants).
+  - **Text**: `title` (headings), `common` (body), `muted` (captions/metadata), `disabled` (disabled inputs).
+  - **Accent**: `primary` (and `-hover`, `-border`), `secondary` (and `-hover`, `-border`).
+  - **On-accent text**: `title-primary` / `common-primary` for text rendered ON a primary-colored surface; `title-secondary` / `common-secondary` for text on secondary.
+  - **Semantic**: `correct`, `correct-hover`, `warning`, `warning-hover`, `wrong`, `wrong-hover`.
+  - **Utility**: `overlay` (modal/menu backdrop), `focus-ring` (consistent focus outline), `divider` (hairline separator, lighter than container border).
 - Prefer `flex` and `gap` for layout. Avoid using `margin` unless absolutely necessary.
 - Dark mode is handled via CSS class `.dark` on `<html>`. Colors auto-switch via CSS variables.
 - Use existing Components like our Dropdown, MenuHandler, Avatar, ConfirmMenu, Icon, etc.
@@ -68,6 +74,24 @@
 - Match the coding style, patterns, and conventions already in the codebase.
 - Reuse existing utilities (`tryCatch`, `notify`, `apiRequest`, `syncRequest`, etc.).
 - Follow the established file-based routing pattern for new APIs and sync events.
+- **Before building any UI primitive (dropdown, menu, modal, confirm dialog, avatar, tooltip), check `src/_components/` first.** Do NOT roll your own. The existing components are the canonical surface — use them or extend them, never re-implement. See the component reference table below.
+
+#### Existing global UI components (`src/_components/`)
+
+| Component / API | Use when… |
+| --- | --- |
+| `Dropdown` (`./Dropdown.tsx`) | Single-select picker. Supports search, keyboard nav, sm/md/lg/xl sizes, controlled or uncontrolled. |
+| `MultiSelectDropdown` (`./MultiSelectDropdown.tsx`) | Multi-select picker with checkboxes. Same shell + search as `Dropdown`. |
+| `MenuHandlerProvider` + `useMenuHandler` (`./MenuHandler.tsx`) | Stack-based modal/sheet system with backdrop, animations, and Escape/Enter handling. |
+| `menuHandler` (`src/_functions/menuHandler.ts`) | Imperative API to open menus from non-React code. Includes `menuHandler.confirm({ title, content, input? })` for one-line confirm dialogs (returns `Promise<boolean>`). |
+| `ConfirmMenu` (`./ConfirmMenu.tsx`) | Renderable confirm form (used inside `menuHandler.confirm` — only render directly if you need a non-modal confirm form). |
+| `Avatar` (`./Avatar.tsx`) | User avatar with image + first-letter fallback. Reads its image-load status from `AvatarProvider`. |
+| `Navbar` (`./Navbar.tsx`) | The dashboard sidebar. Accepts an `items` prop (`NavbarItem[]`, where `icon` is a FontAwesome `IconDefinition`) — pass your own list rather than editing the file. |
+| `ErrorPage` (`./ErrorPage.tsx`) | React Router error boundary fallback. Already wired — don't replace; extend if needed. |
+| `Middleware` (`./Middleware.tsx`) | Wraps protected pages and runs the `middlewareHandler`. Already part of `dashboard` template. |
+| `TemplateProvider` (`./TemplateProvider.tsx`) | Selects a template (`'plain'` or `'dashboard'`) per page from its exported `template` const. To add a new template, add it here and to the `Template` union. |
+
+If the existing component is missing a feature, **extend it or add a prop** — do not create a parallel implementation.
 
 ### 9. Ask When Unsure
 
@@ -262,10 +286,10 @@ SocketStatusProvider > SessionProvider > TranslationProvider > AvatarProvider > 
 
 ### Templates
 
-Pages export `template` as `'plain'`, `'home'`, or a new template that you can create yourself. 
+Pages export `template` as `'plain'`, `'dashboard'`, or a new template that you can create yourself.
 
 - `plain` - No UI chrome (login, register, docs)
-- `home` - Top bar with avatar, settings toggle, logout
+- `dashboard` - Side navigation bar with the main content area
 
 ---
 
@@ -279,6 +303,7 @@ For detailed architecture docs, read the files in `docs/`:
 - Sessions: `docs/ARCHITECTURE_SESSION.md`
 - Socket setup: `docs/ARCHITECTURE_SOCKET.md`
 - Sync events: `docs/ARCHITECTURE_SYNC.md`
+- Email (`@luckystack/email` + login forgot-password): `docs/ARCHITECTURE_EMAIL.md`
 - Getting started: `docs/DEVELOPER_GUIDE.md`
 - Deployment: `docs/HOSTING.md`
 - Full context: `PROJECT_CONTEXT.md`

@@ -1,3 +1,16 @@
+//? Static convention defaults. These remain exported for backwards
+//? compatibility with code that accesses them as RegExp/string literals
+//? (e.g. `name.replace(API_VERSION_TOKEN_REGEX, '')`). Call sites that
+//? must honor consumer-overridden conventions read from
+//? `getRoutingRules()` (in `./routingRules.ts`) instead.
+
+import {
+  isApiFileName as isApi,
+  isSyncFileName as isSync,
+  isSyncServerFileName as isSyncServer,
+  isSyncClientFileName as isSyncClient,
+} from './routingRules';
+
 export const API_VERSION_TOKEN_REGEX = /_v(\d+)$/;
 export const SYNC_VERSION_TOKEN_REGEX = /_(server|client)_v(\d+)$/;
 
@@ -18,18 +31,9 @@ export const ROUTE_NAMING_EXAMPLES = {
   syncClient: 'updateCounter_client_v1.ts',
 } as const;
 
-export const isVersionedApiFileName = (fileName: string): boolean => {
-  return API_VERSIONED_FILE_REGEX.test(fileName);
-};
-
-export const isVersionedSyncFileName = (fileName: string): boolean => {
-  return SYNC_VERSIONED_FILE_REGEX.test(fileName);
-};
-
-export const isVersionedSyncServerFileName = (fileName: string): boolean => {
-  return SYNC_SERVER_VERSIONED_FILE_REGEX.test(fileName);
-};
-
-export const isVersionedSyncClientFileName = (fileName: string): boolean => {
-  return SYNC_CLIENT_VERSIONED_FILE_REGEX.test(fileName);
-};
+//? These checks honor `registerRoutingRules({...})` overrides because they
+//? delegate to the registry-aware functions in `./routingRules`.
+export const isVersionedApiFileName = (fileName: string): boolean => isApi(fileName);
+export const isVersionedSyncFileName = (fileName: string): boolean => isSync(fileName);
+export const isVersionedSyncServerFileName = (fileName: string): boolean => isSyncServer(fileName);
+export const isVersionedSyncClientFileName = (fileName: string): boolean => isSyncClient(fileName);

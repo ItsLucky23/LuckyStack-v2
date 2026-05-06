@@ -1,8 +1,9 @@
 import type { ServerResponse } from 'node:http';
+import { getProjectConfig } from '@luckystack/core';
 
 //? Server-Sent Events (SSE) helpers shared by /api/* and /sync/* HTTP
 //? streaming. Only used when the client opted in via Accept: text/event-stream
-//? or ?stream=1.
+//? or the configured ?<queryParam>=<enabledValue>.
 
 const isExpectingEventStream = (acceptHeader: string | string[] | undefined): boolean => {
   if (!acceptHeader) return false;
@@ -12,8 +13,10 @@ const isExpectingEventStream = (acceptHeader: string | string[] | undefined): bo
 
 const queryRequestsStream = (queryString: string | undefined): boolean => {
   if (!queryString) return false;
+  const { queryParam, enabledValue } = getProjectConfig().http.stream;
   const params = new URLSearchParams(queryString);
-  return params.get('stream') === '1' || params.get('stream') === 'true';
+  const value = params.get(queryParam);
+  return value === enabledValue || value === '1';
 };
 
 export const shouldUseHttpStream = ({
@@ -31,6 +34,10 @@ export const initSseResponse = (res: ServerResponse): void => {
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  const connectedComment = getProjectConfig().http.stream.connectedComment;
+  if (connectedComment) {
+    res.write(`${connectedComment}\n\n`);
+  }
 };
 
 export const sendSseEvent = ({

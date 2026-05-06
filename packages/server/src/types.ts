@@ -8,8 +8,11 @@ export interface RouteContext {
   token: string | null;
 }
 
-export type StaticFileHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
-export type FaviconHandler = (res: ServerResponse) => void | Promise<void>;
+//? Return value is unused — call sites only `await` the handler. Typed as
+//? `unknown` so consumers whose handlers return `ServerResponse` (Node's
+//? fluent API) or `void` both type-check.
+export type StaticFileHandler = (req: IncomingMessage, res: ServerResponse) => unknown;
+export type FaviconHandler = (res: ServerResponse) => unknown;
 export type CustomRouteHandler = (
   req: IncomingMessage,
   res: ServerResponse,
@@ -41,6 +44,12 @@ export interface CreateLuckyStackServerOptions {
    * stream large payloads through sockets.
    */
   maxHttpBufferSize?: number;
+  /** Fail boot if no DeployConfig has been registered. Default: false. */
+  requireDeployConfig?: boolean;
+  /** Fail boot if no ServicesConfig has been registered. Default: false. */
+  requireServicesConfig?: boolean;
+  /** Fail boot if no OAuth providers have been registered. Default: false. */
+  requireOAuthProviders?: boolean;
 }
 
 export interface RunningLuckyStackServer {

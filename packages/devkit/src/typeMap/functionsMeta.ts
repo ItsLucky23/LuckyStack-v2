@@ -2,7 +2,7 @@ import * as ts from 'typescript';
 import fs from 'node:fs';
 import path from 'node:path';
 import { FileImport, ImportCollectors, parseFileTypeContext, sanitizeTypeAndCollectImports } from './typeContext';
-import { GENERATED_SOCKET_TYPES_PATH, SERVER_FUNCTIONS_DIR } from '@luckystack/core';
+import { getGeneratedSocketTypesPath, getServerFunctionsDir } from '@luckystack/core';
 import { expandType, getServerProgram } from './tsProgram';
 
 // Strips default parameter values from argument lists so the generated interface
@@ -31,7 +31,7 @@ const simplifyInferredType = (value: string): string => {
 //? Before this lived, emitted paths were preserved verbatim and only worked
 //? when the shim file shared a depth with the generated file (depth 2 from
 //? repo root). Shims at other depths produced unresolvable type imports.
-const GENERATED_FILE_DIR = path.dirname(GENERATED_SOCKET_TYPES_PATH);
+const getGeneratedFileDir = (): string => path.dirname(getGeneratedSocketTypesPath());
 
 const relativizeModuleSpecifier = (specifier: string, sourceFilePath: string): string => {
   if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
@@ -39,7 +39,7 @@ const relativizeModuleSpecifier = (specifier: string, sourceFilePath: string): s
   }
 
   const absolute = path.resolve(path.dirname(sourceFilePath), specifier);
-  const rel = path.relative(GENERATED_FILE_DIR, absolute);
+  const rel = path.relative(getGeneratedFileDir(), absolute);
   const normalized = rel.split(path.sep).join('/');
   return normalized.startsWith('.') ? normalized : `./${normalized}`;
 };
@@ -455,6 +455,6 @@ const generateFunctionsForDir = (dir: string, collectors: ImportCollectors, inde
 };
 
 export const generateServerFunctions = (collectors: ImportCollectors): string => {
-  return generateFunctionsForDir(SERVER_FUNCTIONS_DIR, collectors, '\t');
+  return generateFunctionsForDir(getServerFunctionsDir(), collectors, '\t');
 };
 

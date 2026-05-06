@@ -1,117 +1,58 @@
 import { backendUrl, SessionLayout } from "config";
 
-import { useAvatarContext, AvatarStatus } from "./AvatarProvider";
+import { useAvatarContext } from "./AvatarProvider";
 
 type UserType = SessionLayout | { name: string; avatar?: string; avatarFallback?: string };
-type TextSize = "text-sm" | "text-base" | "text-lg" | "text-xl" | "text-2xl" | "text-3xl" | "text-4xl" | "text-5xl" | "text-6xl" | "text-7xl" | "text-8xl" | "text-9xl";
+type TextSize = `text-${'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl' | '7xl' | '8xl' | '9xl'}`;
 
-const getAvatarSrc = (avatar: string) => {
-  return avatar.startsWith('http') ? avatar : `${backendUrl}/uploads/${avatar}`;
+const resolveAvatarUrl = (avatar: string) =>
+  avatar.startsWith('http') ? avatar : `${backendUrl}/uploads/${avatar}`;
+
+//? Stable identity key per avatar (file name + ?v= cache buster).
+//? Used to share success/fail state across all <Avatar> instances rendering
+//? the same image, so the first onError fans out to every other Avatar.
+const getAvatarStatusKey = (avatar: string | undefined, fallbackName: string): string => {
+  if (!avatar) return `fallback:${fallbackName}`;
+
+  const url = resolveAvatarUrl(avatar);
+  const [path, query = ''] = url.split('?');
+  const fileName = path.split('/').pop() ?? path;
+  const id = fileName.replace(/\.[^/.]+$/, '') || fileName;
+  const refresh = new URLSearchParams(query).get('v') ?? '';
+
+  return `${id}|${refresh}`;
 };
 
-const getAvatarIdentity = (avatar?: string) => {
-  if (!avatar) return null;
-
-  const source = getAvatarSrc(avatar);
-
-  if (source.startsWith('http')) {
-    try {
-      const parsed = new URL(source);
-      const fileName = parsed.pathname.split('/').pop() ?? parsed.pathname;
-      const avatarId = fileName.replace(/\.[^/.]+$/, '') || fileName;
-      const refreshKey = parsed.searchParams.get('v') ?? '';
-      return { avatarId, refreshKey, source };
-    } catch {
-      const [rawPath] = source.split('?');
-      const fileName = rawPath.split('/').pop() ?? rawPath;
-      return {
-        avatarId: fileName.replace(/\.[^/.]+$/, '') || fileName,
-        refreshKey: '',
-        source,
-      };
-    }
-  }
-
-  const [rawPath, rawQuery = ''] = source.split('?');
-  const avatarId = (rawPath.split('/').pop() ?? rawPath).replace(/\.[^/.]+$/, '');
-  const queryParams = new URLSearchParams(rawQuery);
-
-  return {
-    avatarId,
-    refreshKey: queryParams.get('v') ?? '',
-    source,
-  };
-};
-
-const getAvatarStatusKey = (avatar?: string, fallbackName = '') => {
-  const identity = getAvatarIdentity(avatar);
-  if (!identity) {
-    return `fallback:${fallbackName}`;
-  }
-
-  return `${identity.avatarId}|${identity.refreshKey}`;
-};
-
-export default function Avatar({
-  user,
-  textSize,
-}: {
+interface AvatarProps {
   user: UserType;
   textSize?: TextSize;
-}) {
+}
+
+export default function Avatar({ user, textSize = 'text-lg' }: AvatarProps) {
   const { avatarStatuses, setAvatarStatus } = useAvatarContext();
+  const statusKey = getAvatarStatusKey(user.avatar, user.name);
+  const status = avatarStatuses[statusKey];
+  const showFallback = !user.avatar || status === 'fallback';
 
-  const avatarStatusKey = getAvatarStatusKey(user.avatar, user.name);
-  const avatarStatus = avatarStatuses[avatarStatusKey];
-  
-  const formattedName = user.name[0].toUpperCase();
-
-  return user.avatar && avatarStatus !== 'fallback' ? (
-    <Img user={user} key={avatarStatusKey} avatarStatusKey={avatarStatusKey} setAvatarStatus={setAvatarStatus} />
-  ) : (
-    <FallbackImg user={user} formattedName={formattedName} textSize={textSize} />
-  );
-}
-
-interface ImgProps {
-  user: UserType;
-  avatarStatusKey: string;
-  setAvatarStatus: (key: string, status: AvatarStatus) => void;
-}
-
-const Img = ({ user, avatarStatusKey, setAvatarStatus }: ImgProps) => {
-  if (!user.avatar) {
-    setAvatarStatus(avatarStatusKey, 'fallback');
-    return null;
+  if (showFallback) {
+    return (
+      <div
+        className={`rounded-full aspect-square text-white flex items-center justify-center w-full h-full select-none ${textSize}`}
+        style={{ backgroundColor: user.avatarFallback ?? '#9ca3af' }}
+      >
+        {user.name ? user.name[0].toUpperCase() : null}
+      </div>
+    );
   }
-
-  const identity = getAvatarIdentity(user.avatar);
-  const src = identity?.source ?? getAvatarSrc(user.avatar);
 
   return (
     <img
+      key={statusKey}
       className="rounded-full w-full h-full select-none object-cover aspect-square"
-      src={src}
-      alt="Avatar"
-      onError={() => { setAvatarStatus(avatarStatusKey, 'fallback'); }}
-      onLoad={() => { setAvatarStatus(avatarStatusKey, 'avatar'); }}
+      src={resolveAvatarUrl(user.avatar ?? '')}
+      alt={user.name}
+      onError={() => { setAvatarStatus(statusKey, 'fallback'); }}
+      onLoad={() => { setAvatarStatus(statusKey, 'avatar'); }}
     />
   );
-};
-
-interface FallbackImgProps {
-  user: UserType;
-  formattedName: string;
-  textSize?: TextSize;
 }
-
-const FallbackImg = ({ user, formattedName, textSize }: FallbackImgProps) => {
-  return (
-    <div
-      className={`rounded-full bg-gray-300 aspect-square text-white flex items-center justify-center w-full h-full select-none ${textSize ?? 'text-lg'}`}
-      style={{ backgroundColor: user.avatarFallback }}
-    >
-      {user.name && user.name !== 'Wachten op speler' ? formattedName : null}
-    </div>
-  );
-};

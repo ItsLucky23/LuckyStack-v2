@@ -71,6 +71,8 @@ model User {
   language       LANGUAGE  @default(en)
   theme          THEME     @default(dark)
   provider       PROVIDERS
+  preferences    Json?
+  lastLogin      DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

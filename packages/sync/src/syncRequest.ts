@@ -93,10 +93,22 @@ type SyncRequestStreamCallbackForFullName<F extends SyncFullName, V extends Vers
     ? never
     : (event: SyncRequestStreamEvent<Prettify<ServerStreamForFullName<F, V> extends StreamPayload ? ServerStreamForFullName<F, V> : StreamPayload>>) => void;
 
+//? Recipients see chunks from THREE sources, all on the same wire channel:
+//?   1. `_client_v{n}.ts`'s `stream(...)` (per-recipient, runs after _server)
+//?   2. `_server_v{n}.ts`'s `broadcastStream(...)` (room-wide fan-out)
+//?   3. `_server_v{n}.ts`'s `streamTo(tokens, ...)` (selective fan-out)
+//? All three flow into `upsertSyncEventCallback`'s `stream` argument. Both
+//? serverStream and clientStream are folded into the union so the callback
+//? sees every shape the route can emit. If neither side ever streams, the
+//? callback type collapses to never (compile error to register one).
+type CombinedRouteStream<F extends SyncFullName, V extends VersionsForFullName<F>> =
+  | (ClientStreamForFullName<F, V> extends never ? never : ClientStreamForFullName<F, V>)
+  | (ServerStreamForFullName<F, V> extends never ? never : ServerStreamForFullName<F, V>);
+
 type SyncRouteStreamCallbackForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> =
-  [ClientStreamForFullName<F, V>] extends [never]
+  [CombinedRouteStream<F, V>] extends [never]
     ? never
-    : (params: { stream: SyncRouteStreamEvent<Prettify<ClientStreamForFullName<F, V> extends StreamPayload ? ClientStreamForFullName<F, V> : StreamPayload>> }) => void;
+    : (params: { stream: SyncRouteStreamEvent<Prettify<CombinedRouteStream<F, V> extends StreamPayload ? CombinedRouteStream<F, V> : StreamPayload>> }) => void;
 
 type SyncParamsForFullName<
   F extends SyncFullName,
@@ -606,12 +618,15 @@ export const useSyncEvents = () => {
 
     const routeVersion = String(params.version);
     const fullName = `sync/${sanitizedName}/${routeVersion}`;
+    //? Combined union: both `serverStream` (from `broadcastStream` /
+    //? `streamTo`) and `clientStream` (from `_client_v{n}.ts`) flow through
+    //? this callback. The type matches `SyncRouteStreamCallbackForFullName`.
     const typedCallback = params.callback as (params: {
-      stream: SyncRouteStreamEvent<Prettify<ClientStreamForFullName<F, V> extends StreamPayload ? ClientStreamForFullName<F, V> : StreamPayload>>;
+      stream: SyncRouteStreamEvent<Prettify<CombinedRouteStream<F, V> extends StreamPayload ? CombinedRouteStream<F, V> : StreamPayload>>;
     }) => void;
     const callback: SyncEventStreamCallback = ({ stream }) => {
       typedCallback({
-        stream: stream as SyncRouteStreamEvent<Prettify<ClientStreamForFullName<F, V> extends StreamPayload ? ClientStreamForFullName<F, V> : StreamPayload>>,
+        stream: stream as SyncRouteStreamEvent<Prettify<CombinedRouteStream<F, V> extends StreamPayload ? CombinedRouteStream<F, V> : StreamPayload>>,
       });
     };
     const callbacks = getStreamCallbacksForRoute(fullName);

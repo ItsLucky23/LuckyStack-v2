@@ -1,12 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { ROOT_DIR } from '@luckystack/core';
 import {
-  API_VERSION_TOKEN_REGEX,
   isVersionedApiFileName,
   isVersionedSyncFileName,
   ROUTE_NAMING_RULES,
-  SYNC_VERSION_TOKEN_REGEX,
 } from './routeConventions';
+import {
+  apiMarkerSegment,
+  syncMarkerSegment,
+  getRoutingRules,
+} from './routingRules';
 
 export interface RouteNamingIssue {
   kind: 'api' | 'sync';
@@ -27,10 +31,17 @@ const normalizePath = (value: string): string => {
 
 const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const apiSeg = apiMarkerSegment();
+  const syncSeg = syncMarkerSegment();
+  const { ignore } = getRoutingRules();
+  const toRel = (absolute: string): string =>
+    path.relative(ROOT_DIR, absolute).replaceAll('\\', '/');
 
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     const normalizedFullPath = normalizePath(fullPath);
+
+    if (ignore(toRel(fullPath))) continue;
 
     if (entry.isDirectory()) {
       if (entry.name.startsWith('.') || entry.name === 'node_modules') {
@@ -45,7 +56,7 @@ const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
       continue;
     }
 
-    if (normalizedFullPath.includes('/_api/') || normalizedFullPath.includes('/_sync/')) {
+    if (normalizedFullPath.includes(apiSeg) || normalizedFullPath.includes(syncSeg)) {
       results.push(fullPath);
     }
   }
@@ -58,7 +69,7 @@ const getFileRouteToken = ({
   marker,
 }: {
   normalizedFilePath: string;
-  marker: '/_api/' | '/_sync/';
+  marker: string;
 }): string => {
   const markerIndex = normalizedFilePath.indexOf(marker);
   if (markerIndex === -1) {
@@ -73,9 +84,11 @@ const validateRouteFilePath = (filePath: string): RouteNamingIssue[] => {
   const issues: RouteNamingIssue[] = [];
   const normalizedFilePath = normalizePath(path.resolve(filePath));
   const fileName = path.basename(filePath);
+  const apiSeg = apiMarkerSegment();
+  const syncSeg = syncMarkerSegment();
 
-  if (normalizedFilePath.includes('/_api/')) {
-    const apiRouteToken = getFileRouteToken({ normalizedFilePath, marker: '/_api/' });
+  if (normalizedFilePath.includes(apiSeg)) {
+    const apiRouteToken = getFileRouteToken({ normalizedFilePath, marker: apiSeg });
     if (apiRouteToken.includes('/')) {
       issues.push({
         kind: 'api',
@@ -95,8 +108,8 @@ const validateRouteFilePath = (filePath: string): RouteNamingIssue[] => {
     }
   }
 
-  if (normalizedFilePath.includes('/_sync/')) {
-    const syncRouteToken = getFileRouteToken({ normalizedFilePath, marker: '/_sync/' });
+  if (normalizedFilePath.includes(syncSeg)) {
+    const syncRouteToken = getFileRouteToken({ normalizedFilePath, marker: syncSeg });
     if (syncRouteToken.includes('/')) {
       issues.push({
         kind: 'sync',
@@ -126,9 +139,10 @@ const resolveApiRouteKey = ({
   srcDir: string;
   filePath: string;
 }): string | null => {
+  const rules = getRoutingRules();
   const relativePath = normalizePath(path.relative(srcDir, filePath));
   const segments = relativePath.split('/');
-  const apiIndex = segments.indexOf('_api');
+  const apiIndex = segments.indexOf(rules.apiMarker);
   if (apiIndex === -1 || apiIndex === segments.length - 1) {
     return null;
   }
@@ -136,13 +150,13 @@ const resolveApiRouteKey = ({
   const pageLocation = segments.slice(0, apiIndex).join('/');
   const apiFilePath = segments.slice(apiIndex + 1).join('/');
   const rawApiName = apiFilePath.replace(/\.ts$/, '');
-  const versionMatch = rawApiName.match(API_VERSION_TOKEN_REGEX);
+  const versionMatch = rawApiName.match(rules.apiVersionRegex);
   if (!versionMatch) {
     return null;
   }
 
   const version = `v${versionMatch[1]}`;
-  const apiName = rawApiName.replace(API_VERSION_TOKEN_REGEX, '');
+  const apiName = rawApiName.replace(rules.apiVersionRegex, '');
   const mappedPageLocation = pageLocation || 'system';
   return `api/${mappedPageLocation}/${apiName}/${version}`;
 };
@@ -154,9 +168,10 @@ const resolveSyncRouteKey = ({
   srcDir: string;
   filePath: string;
 }): string | null => {
+  const rules = getRoutingRules();
   const relativePath = normalizePath(path.relative(srcDir, filePath));
   const segments = relativePath.split('/');
-  const syncIndex = segments.indexOf('_sync');
+  const syncIndex = segments.indexOf(rules.syncMarker);
   if (syncIndex === -1 || syncIndex === segments.length - 1) {
     return null;
   }
@@ -164,14 +179,14 @@ const resolveSyncRouteKey = ({
   const pageLocation = segments.slice(0, syncIndex).join('/');
   const syncFilePath = segments.slice(syncIndex + 1).join('/');
   const rawSyncName = syncFilePath.replace(/\.ts$/, '');
-  const syncMatch = rawSyncName.match(SYNC_VERSION_TOKEN_REGEX);
+  const syncMatch = rawSyncName.match(rules.syncVersionRegex);
   if (!syncMatch) {
     return null;
   }
 
   const kind = syncMatch[1];
   const version = `v${syncMatch[2]}`;
-  const syncName = rawSyncName.replace(SYNC_VERSION_TOKEN_REGEX, '');
+  const syncName = rawSyncName.replace(rules.syncVersionRegex, '');
   const routeBaseKey = pageLocation
     ? `sync/${pageLocation}/${syncName}/${version}`
     : `sync/${syncName}/${version}`;
@@ -195,10 +210,12 @@ export const collectDuplicateNormalizedRouteKeyIssues = (srcDir: string): Duplic
   const routeKeyToFilePaths = new Map<string, string[]>();
   const routeKeyKinds = new Map<string, 'api' | 'sync'>();
 
+  const apiSeg = apiMarkerSegment();
+  const syncSeg = syncMarkerSegment();
   for (const filePath of allRouteFiles) {
     const normalizedFilePath = normalizePath(path.resolve(filePath));
 
-    if (normalizedFilePath.includes('/_api/')) {
+    if (normalizedFilePath.includes(apiSeg)) {
       const routeKey = resolveApiRouteKey({ srcDir, filePath });
       if (!routeKey) {
         continue;
@@ -212,7 +229,7 @@ export const collectDuplicateNormalizedRouteKeyIssues = (srcDir: string): Duplic
       continue;
     }
 
-    if (normalizedFilePath.includes('/_sync/')) {
+    if (normalizedFilePath.includes(syncSeg)) {
       const routeKey = resolveSyncRouteKey({ srcDir, filePath });
       if (!routeKey) {
         continue;

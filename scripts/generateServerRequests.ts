@@ -10,7 +10,7 @@ import {
   assertNoDuplicateNormalizedRouteKeys,
   assertValidRouteNaming,
 } from '@luckystack/devkit';
-import { ROOT_DIR, resolveFromRoot } from '@luckystack/core';
+import { ROOT_DIR, resolveFromRoot, getSrcDir, getServerDir } from '@luckystack/core';
 import { loadBuildConfig, validatePresetsAndServices, resolveRequestedPresets, getServicesForPreset } from '../server/config/presetLoader';
 
 const normalizePath = (p: string) => p.split(path.sep).join("/");
@@ -74,7 +74,7 @@ validatePresetsAndServices(buildConfig);
 const requestedArgs = process.argv.slice(2);
 const targetPresets = resolveRequestedPresets(requestedArgs, buildConfig);
 
-const srcDir = resolveFromRoot('src');
+const srcDir = getSrcDir();
 assertValidRouteNaming({
   srcDir,
   context: 'generating server request maps for build',
@@ -204,7 +204,7 @@ for (const presetName of targetPresets) {
   const output = `${importStatements}\n\n${apiMap}\n${syncMap}\n${functionsMap}`;
 
   const outFileName = `generatedApis.${presetName}.ts`;
-  fs.writeFileSync(resolveFromRoot('server', 'prod', outFileName), output);
+  fs.writeFileSync(path.join(getServerDir(), 'prod', outFileName), output);
   console.log(`✅ server/prod/${outFileName} created for preset '${presetName}'`);
 }
 

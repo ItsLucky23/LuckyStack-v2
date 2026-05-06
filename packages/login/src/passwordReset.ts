@@ -1,0 +1,61 @@
+//? Password-reset primitives. Used by the framework's own forgot-password
+//? flow when `ProjectConfig.auth.forgotPassword === 'framework'`, AND
+//? exported as building blocks for consumers who picked `'custom'` and want
+//? to wire their own UI / email layer without re-implementing crypto + Redis.
+//?
+//? Token format: 32 random bytes hex-encoded → 64-char URL-safe string.
+//? Storage: `<projectName>-pwreset:<token> → userId` with a configurable TTL
+//? (`auth.passwordResetTtlSeconds`, default 3600 = 1 hour).
+
+import bcrypt from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
+
+import { getProjectConfig, redis } from '@luckystack/core';
+
+import { getUserAdapter } from './userAdapter';
+
+const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
+const tokenKey = (token: string): string => `${PROJECT_NAME}-pwreset:${token}`;
+
+/**
+ * Create a one-time password-reset token bound to a user id. Stored in Redis
+ * with the configured TTL. Returns the token string — caller emails it to
+ * the user (typically embedded in a URL).
+ */
+export const createPasswordResetToken = async (userId: string): Promise<string> => {
+  const token = randomBytes(32).toString('hex');
+  const ttl = getProjectConfig().auth.passwordResetTtlSeconds;
+  await redis.set(tokenKey(token), userId, 'EX', ttl);
+  return token;
+};
+
+/**
+ * Validate and consume a password-reset token. Returns the bound userId on
+ * success and removes the token (one-time use). Returns null when the token
+ * is missing, expired, or malformed.
+ */
+export const consumePasswordResetToken = async (token: string): Promise<string | null> => {
+  if (!token || typeof token !== 'string') return null;
+  const key = tokenKey(token);
+  const txResult = await redis.multi().get(key).del(key).exec();
+  if (!txResult || txResult.length < 1) return null;
+  const [getErr, value] = txResult[0];
+  if (getErr) return null;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+};
+
+/**
+ * Bcrypt-hash a plaintext password and write it to the user record via the
+ * registered user adapter. Used by the reset flow and by the settings
+ * password-change flow.
+ */
+export const updatePasswordHash = async (userId: string, plaintext: string): Promise<void> => {
+  const salt = await bcrypt.genSalt(getProjectConfig().auth.bcryptRounds);
+  const hashedPassword = await bcrypt.hash(plaintext, salt);
+  await getUserAdapter().update(userId, { password: hashedPassword } as never);
+};
+
+/** Verify a plaintext password against a stored bcrypt hash. */
+export const verifyPassword = async (plaintext: string, hash: string): Promise<boolean> => {
+  return bcrypt.compare(plaintext, hash);
+};

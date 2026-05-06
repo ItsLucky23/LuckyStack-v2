@@ -1,7 +1,7 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
 import { Socket } from "socket.io";
-import { redis as redisClient, tryCatch, socketEventNames, dispatchHook } from '@luckystack/core';
+import { redis as redisClient, tryCatch, socketEventNames, dispatchHook, getLogger } from '@luckystack/core';
 import { deleteSession } from "./session";
 
 export const logout = async ({ token, socket, userId, skipSessionDelete }: {
@@ -12,20 +12,27 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
 }) => {
   const [error, result] = await tryCatch(async () => {
     if (!socket) {
-      console.log('Trying to logout but invalid socket', 'red');
+      getLogger().warn('logout: invalid socket');
       return;
     }
     if (!token) {
-      console.log('Trying to logout without a token', 'red');
+      getLogger().warn('logout: no token provided');
       return;
     }
 
-    console.log(`Logging out user with token: ${token}`, 'cyan');
+    const preLogoutResult = await dispatchHook('preLogout', { userId, token });
+    if (preLogoutResult.stopped) {
+      getLogger().warn('logout: aborted by preLogout hook', { errorCode: preLogoutResult.signal.errorCode });
+      socket.emit(socketEventNames.logout, "error");
+      return;
+    }
+
+    getLogger().debug(`logout: user ${userId ?? '?'}`, { token });
 
     if (!skipSessionDelete) {
       await deleteSession(token);
     }
-    const tokensOfActiveUsers = `${process.env.PROJECT_NAME}-activeUsers:${userId}`
+    const tokensOfActiveUsers = `${process.env.PROJECT_NAME ?? 'luckystack'}-activeUsers:${userId}`
     await redisClient.srem(tokensOfActiveUsers, token);
     socket.leave(token);
 

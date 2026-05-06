@@ -78,6 +78,59 @@ export interface PostSyncFanoutPayload extends PreSyncFanoutPayload {
   recipientCount: number;
 }
 
+// --- Error / security signals ---
+
+//? These payloads are dispatched from the server / api / sync packages when
+//? a request fails, gets rate-limited, or is rejected by CORS. Third-party
+//? packages (audit logs, abuse detection, alerting) subscribe via
+//? `registerHook(...)` instead of forking the framework.
+
+export interface ApiErrorPayload {
+  route: string;
+  method?: string;
+  requestId?: string;
+  user?: HookSessionShape | null;
+  error: Error;
+}
+
+export interface SyncErrorPayload {
+  route: string;
+  method?: string;
+  requestId?: string;
+  user?: HookSessionShape | null;
+  error: Error;
+}
+
+export interface RateLimitExceededPayload {
+  /** Where the limit was hit — IP, user, or route. */
+  scope: 'ip' | 'user' | 'route' | 'auth';
+  /** The key that exceeded its limit (sanitized — no tokens). */
+  key: string;
+  /** Configured limit count for this key. */
+  limit: number;
+  /** Window in milliseconds. */
+  windowMs: number;
+  /** Current bucket count after the rejected request. */
+  count: number;
+  /** Optional route or transport context. */
+  route?: string;
+  ip?: string;
+  userId?: string;
+}
+
+export interface CorsRejectedPayload {
+  /** Origin header sent by the client. */
+  origin: string;
+  /** Origin after framework normalization (scheme + host[:port]). */
+  normalizedOrigin: string;
+  /** Effective allowed-origins set at the time of rejection. */
+  allowedOrigins: string[];
+  /** Whether `allowLocalhost` was on. */
+  allowLocalhost: boolean;
+  /** Optional route the rejected request was for. */
+  route?: string;
+}
+
 // --- Augmentable payload map ---
 
 export interface HookPayloads {
@@ -85,6 +138,10 @@ export interface HookPayloads {
   postApiExecute: PostApiExecutePayload;
   preSyncFanout: PreSyncFanoutPayload;
   postSyncFanout: PostSyncFanoutPayload;
+  apiError: ApiErrorPayload;
+  syncError: SyncErrorPayload;
+  rateLimitExceeded: RateLimitExceededPayload;
+  corsRejected: CorsRejectedPayload;
 }
 
 export type HookName = keyof HookPayloads;

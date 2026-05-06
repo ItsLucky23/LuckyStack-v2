@@ -2,7 +2,7 @@
 /* eslint-disable */
 import fs from 'node:fs';
 import path from 'node:path';
-import { GENERATED_API_DOCS_PATH, GENERATED_SOCKET_TYPES_PATH } from '@luckystack/core';
+import { getGeneratedApiDocsPath, getGeneratedSocketTypesPath } from '@luckystack/core';
 
 export interface ApiTypeEntry {
 	input: string;
@@ -255,11 +255,11 @@ export const writeTypeMapArtifacts = ({
 	docsData: any;
 }) => {
 	try {
-		const outputPath = GENERATED_SOCKET_TYPES_PATH;
+		const outputPath = getGeneratedSocketTypesPath();
 		fs.writeFileSync(outputPath, content, 'utf-8');
 		console.log('[TypeMapGenerator] Generated apiTypes.generated.ts');
 
-		const docsPath = GENERATED_API_DOCS_PATH;
+		const docsPath = getGeneratedApiDocsPath();
 		const docsDir = path.dirname(docsPath);
 		if (!fs.existsSync(docsDir)) {
 			fs.mkdirSync(docsDir, { recursive: true });
