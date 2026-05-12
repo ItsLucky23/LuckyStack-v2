@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/test-runner",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Generated-type-driven test layers for LuckyStack: contract smoke (Zod-valid input), auth enforcement, rate-limit, and crash-resistance fuzz. Walks every endpoint via the generated apiMethodMap.",
@@ -45,7 +45,10 @@
     "build": "tsup",
     "build:watch": "tsup --watch"
   },
+  "dependencies": {
+    "@luckystack/core": "^0.1.0"
+  },
   "peerDependencies": {
-    "zod": "^3.25.76"
+    "zod": "^3.25.0"
   }
 }

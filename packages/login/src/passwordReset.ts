@@ -10,12 +10,15 @@
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 
-import { getProjectConfig, redis } from '@luckystack/core';
+import { getProjectConfig, getProjectName, redis } from '@luckystack/core';
 
 import { getUserAdapter } from './userAdapter';
 
-const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
-const tokenKey = (token: string): string => `${PROJECT_NAME}-pwreset:${token}`;
+//? Resolve at call time via the shared `getProjectName()` helper (single
+//? source of truth — see also session.ts, rateLimiter.ts, login.ts). Avoids
+//? the module-load capture bug where dotenv timing could put tokens under
+//? the wrong namespace.
+const tokenKey = (token: string): string => `${getProjectName()}-pwreset:${token}`;
 
 /**
  * Create a one-time password-reset token bound to a user id. Stored in Redis

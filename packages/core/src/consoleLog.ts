@@ -10,18 +10,36 @@ const COLORS: Record<string, string> = {
   reset: "\u001B[0m",
 };
 
+//? Strip both POSIX `/` and Windows `\` separators so the file:line tag is
+//? consistent across platforms. Drop the column suffix too — `:42:7` becomes
+//? `:42`. If the regex finds no separator at all, fall back to the bare
+//? string (avoids leaking the full filesystem path).
+const FILE_NAME_REGEX = /[\\/]([^\\/]+)$/;
+
+const extractFrameLabel = (frame: string): string => {
+  let lineInfo = frame.slice(frame.indexOf("(") + 1, frame.lastIndexOf(")"));
+  if (lineInfo === "") lineInfo = frame;
+  const match = FILE_NAME_REGEX.exec(lineInfo);
+  const fileName = match ? match[1] : lineInfo;
+  return fileName.replace(/:\d+(?::\d+)?$/, "");
+};
+
 export const initConsolelog = () => {
   const originalLog = console.log;
   console.log = (...args: unknown[]) => {
-    const stack = new Error('console.log trace').stack?.split("\n")[2]?.trim();
-    if (!stack) { originalLog(...args); return; }
-  
-    let lineInfo = stack.slice(stack.indexOf("(") + 1, stack.lastIndexOf(")"));
-    if (lineInfo === "") lineInfo = stack;
-    const extractedInfo = lineInfo
-      .slice(Math.max(0, lineInfo.lastIndexOf("\\") + 1))
-      .replace(/:\d+$/, "");
-  
+    const stackLines = new Error('console.log trace').stack?.split("\n") ?? [];
+    //? Search for the first frame outside this module so wrapper functions
+    //? (e.g. `getLogger().info` → `console.log`) don't pin the label to the
+    //? wrapper. Frame 0 is the Error itself; skip it.
+    const frame = stackLines.slice(1).find((line) => {
+      const trimmed = line.trim();
+      return trimmed.length > 0 && !trimmed.includes('consoleLog.ts') && !trimmed.includes('loggerRegistry.ts');
+    })?.trim();
+
+    if (!frame) { originalLog(...args); return; }
+
+    const extractedInfo = extractFrameLabel(frame);
+
     // find color keyword and remove it from args
     let colorCode = COLORS.white;
     for (const key of Object.keys(COLORS)) {
@@ -32,7 +50,7 @@ export const initConsolelog = () => {
         break;
       }
     }
-  
+
     // handle object vs text
     if (typeof args[0] === "object") {
       originalLog(`${colorCode}${extractedInfo}${COLORS.reset}`);

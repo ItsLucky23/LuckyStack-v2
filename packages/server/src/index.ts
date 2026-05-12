@@ -16,6 +16,11 @@ export type { BootstrapLuckyStackOptions } from './bootstrap';
 export { verifyBootstrap } from './verifyBootstrap';
 export type { BootstrapRequirements } from './verifyBootstrap';
 export {
+  createProdRuntimeMapsProvider,
+  registerProdRuntimeMapsProvider,
+} from './runtimeMapsLoader';
+export type { ProdRuntimeMapsLoaderOptions } from './runtimeMapsLoader';
+export {
   registerCustomRoute,
   getCustomRoutes,
   clearCustomRoutes,

@@ -2,7 +2,7 @@
 
 import { Server } from 'socket.io';
 
-import { extractTokenFromSocket, getIoInstance, socketEventNames } from '@luckystack/core';
+import { dispatchHook, extractTokenFromSocket, getIoInstance, getLogger, socketEventNames } from '@luckystack/core';
 import { getSession } from '@luckystack/login';
 import { ensureIo } from './state';
 
@@ -18,7 +18,7 @@ export const informRoomPeers = async ({
   extraData?: any
 }) => {
   if (!ensureIo(io)) {
-    console.log('no io instance found to inform room peers', 'red');
+    getLogger().warn('presence: no io instance found to inform room peers');
     return;
   }
 
@@ -29,7 +29,13 @@ export const informRoomPeers = async ({
 
   if (!session || roomCodes.length === 0) { return; }
 
+  const kind: 'afk' | 'back' = event === socketEventNames.userAfk ? 'afk' : 'back';
+  const userId = session.id ?? null;
+
+  await dispatchHook('prePresenceUpdate', { token, userId, kind, roomCodes });
+
   const handledSockets = new Set<string>();
+  let recipientCount = 0;
 
   for (const room of roomCodes) {
     const roomSockets = io.sockets.adapter.rooms.get(room);
@@ -49,9 +55,13 @@ export const informRoomPeers = async ({
 
       if (event == socketEventNames.userAfk) {
         tempSocket.emit(socketEventNames.userAfk, { userId: session.id, endTime: Date.now() + (extraData?.time || 0) });
+        recipientCount++;
       } else if (event == socketEventNames.userBack) {
         tempSocket.emit(socketEventNames.userBack, { userId: session.id });
+        recipientCount++;
       }
     }
   }
+
+  await dispatchHook('postPresenceUpdate', { token, userId, kind, roomCodes, recipientCount });
 };

@@ -10,7 +10,12 @@ import { getUserAdapter } from './userAdapter';
 
 interface SendResetEmailArgs {
   email: string;
-  /** App-facing display name used in the email greeting + subject. Defaults to "LuckyStack". */
+  /**
+   * App-facing display name used in the email greeting + subject. If omitted,
+   * falls back to `projectConfig.auth.passwordResetBrand`, then to `'LuckyStack'`
+   * as the absolute fallback. Real consumers should set this on either the
+   * call site OR via `projectConfig.auth.passwordResetBrand`.
+   */
   brand?: string;
 }
 
@@ -20,11 +25,13 @@ interface SendResetEmailArgs {
  * whether the email matched a user (anti-enumeration). Returns the result
  * of the email send for diagnostics.
  */
-export const sendPasswordResetEmail = async ({ email, brand = 'LuckyStack' }: SendResetEmailArgs): Promise<{ ok: boolean; reason?: string }> => {
+export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArgs): Promise<{ ok: boolean; reason?: string }> => {
   const config = getProjectConfig();
   if (config.auth.forgotPassword !== 'framework') {
     return { ok: false, reason: 'forgotPassword-not-framework' };
   }
+
+  const resolvedBrand = brand ?? config.auth.passwordResetBrand ?? 'LuckyStack';
 
   // Lazy import — the email package is an optional peer dep so its types
   // may not be resolvable at the framework's compile time.
@@ -57,23 +64,23 @@ export const sendPasswordResetEmail = async ({ email, brand = 'LuckyStack' }: Se
     token,
     ttlSeconds: config.auth.passwordResetTtlSeconds,
   });
-  const baseUrl = (config.email.appUrl || '').replace(/\/+$/, '');
+  const baseUrl = (config.app.publicUrl || '').replace(/\/+$/, '');
   const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
 
   const ttlMinutes = Math.round(config.auth.passwordResetTtlSeconds / 60);
   const { html, text } = renderEmailLayout({
-    brand,
+    brand: resolvedBrand,
     title: 'Reset your password',
-    intro: `Hi ${user.name ?? 'there'}, we received a request to reset the password on your ${brand} account. Click the button below to choose a new one. The link expires in ${String(ttlMinutes)} minutes.`,
+    intro: `Hi ${user.name ?? 'there'}, we received a request to reset the password on your ${resolvedBrand} account. Click the button below to choose a new one. The link expires in ${String(ttlMinutes)} minutes.`,
     ctaLabel: 'Reset password',
     ctaUrl: resetUrl,
     outro: `If you didn't request this, you can safely ignore this email — your password will stay the same. The link: ${resetUrl}`,
-    footer: `Sent by ${brand}. If you have questions, reply to this email.`,
+    footer: `Sent by ${resolvedBrand}. If you have questions, reply to this email.`,
   });
 
   const result = await sendEmail({
     to: user.email,
-    subject: `Reset your ${brand} password`,
+    subject: `Reset your ${resolvedBrand} password`,
     html,
     text,
   });

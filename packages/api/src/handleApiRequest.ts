@@ -18,7 +18,7 @@ import {
   validateInputByType,
   getLogger,
 } from '@luckystack/core';
-import { setSentryUser, startSpan } from '@luckystack/sentry';
+import { setSentryUser, startSpan } from '@luckystack/error-tracking';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '@luckystack/core';
 
 interface handleApiRequestType {
@@ -60,155 +60,76 @@ interface RuntimeApiEntry {
   rateLimit?: number | false;
 }
 
+interface ApiErrorResponse {
+  status: 'error';
+  httpStatus?: number;
+  errorCode?: string;
+  errorParams?: { key: string; value: string | number | boolean; }[];
+}
+
+type EmitApiError = (args: { response: ApiErrorResponse; fallbackHttpStatus?: number; }) => void;
+
 const shouldLogDev = () => getProjectConfig().logging.devLogs;
 const shouldLogStream = () => getProjectConfig().logging.stream;
 
-export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
-  //? This event gets triggered when the client uses the apiRequest function
-  //? We validate the message, check auth then execute
+//? Track routes we've already warned about so we don't spam the log every
+//? request. Set is module-level — fine for the dev-only warning.
+const warnedMissingInputType = new Set<string>();
+const warnIfInputTypeMissing = (resolvedName: string, inputType: string | undefined): void => {
+  if (!getProjectConfig().dev.warnOnMissingInputType) return;
+  if (inputType && inputType.trim().length > 0 && inputType.trim() !== 'any') return;
+  if (warnedMissingInputType.has(resolvedName)) return;
+  warnedMissingInputType.add(resolvedName);
+  getLogger().warn(`api: route ${resolvedName} has no inputType — runtime input validation is disabled. Regenerate types or set the inputType on the handler.`);
+};
 
-  if (typeof msg != 'object') {
-    if (shouldLogDev()) {
-      getLogger().warn('api: socket message was not a json object');
-    }
-    return;
-  }
-
+const validateApiMessage = ({ msg, emitApiError }: {
+  msg: apiMessage;
+  emitApiError: EmitApiError;
+}): { name: string; data: Record<string, unknown> } | null => {
   const { name, data, responseIndex } = msg;
-  const user = await getSession(token)
-  setSentryUser(user?.id ? {
-    id: user.id,
-    email: user.email || undefined,
-  } : null);
-  const preferredLocale =
-    extractLanguageFromHeader(socket.handshake.headers['x-language'])
-    || extractLanguageFromHeader(socket.handshake.headers['accept-language']);
-
-  const emitApiError = ({
-    response,
-    fallbackHttpStatus,
-  }: {
-    response: { status: 'error'; httpStatus?: number; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[] };
-    fallbackHttpStatus?: number;
-  }) => {
-    return socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
-      response,
-      preferredLocale,
-      userLanguage: user?.language,
-      fallbackHttpStatus,
-    }));
-  };
 
   if (!responseIndex && typeof responseIndex !== 'number') {
     if (shouldLogDev()) {
       getLogger().warn('api: no response index given');
     }
-    return;
+    return null;
   }
 
   if (!name || !data || typeof name != 'string' || typeof data != 'object') {
-    return emitApiError({
-      response: {
-        status: 'error',
-        errorCode: 'api.invalidRequest',
-      },
+    emitApiError({
+      response: { status: 'error', errorCode: 'api.invalidRequest' },
       fallbackHttpStatus: 400,
     });
+    return null;
   }
 
-  const normalizedData = data as Record<string, unknown>;
+  return { name, data: data as Record<string, unknown> };
+};
 
-  const parsedRoute = parseTransportRouteName({ value: name, prefix: 'api' });
-  if (parsedRoute.status === 'error') {
-    return emitApiError({
-      response: {
-        status: 'error',
-        errorCode: 'routing.invalidServiceRouteName',
-        errorParams: [{ key: 'name', value: name }],
-      },
-      fallbackHttpStatus: 400,
-    });
-  }
-
-  const resolvedName = parsedRoute.normalizedFullName;
-  const routeLeaf = parsedRoute.serviceRoute.routeName.split('/').at(-1);
-
-  //? 'logout' needs special handling since it requires socket access
-  if (routeLeaf === 'logout') {
-    await logout({ token, socket, userId: user?.id || null });
-    return socket.emit(buildApiResponseEventName(responseIndex), {
-      status: 'success',
-      httpStatus: 200,
-      result: true,
-    });
-  }
-
-  if (shouldLogDev()) {
-    console.log(`api: ${resolvedName} called`, 'blue');
-  }
-
-  const { apisObject, functionsObject } = await getRuntimeApiMaps();
-
-  //? Check if API exists
-  if (!apisObject[resolvedName]) {
-    return emitApiError({
-      response: {
-        status: 'error',
-        errorCode: 'api.notFound',
-        errorParams: [{ key: 'name', value: name }],
-      },
-      fallbackHttpStatus: 404,
-    });
-  }
-
-  const apiEntry = apisObject[resolvedName] as RuntimeApiEntry;
-  const { auth, main } = apiEntry;
-  const inputType = apiEntry.inputType;
-  const inputTypeFilePath = apiEntry.inputTypeFilePath;
-
-  const emitApiStream = (payload: ApiStreamPayload = {}) => {
-    if (shouldLogStream()) {
-      console.log(`api: ${resolvedName} stream`, payload, 'cyan');
+const checkApiAuth = ({ apiEntry, user, name, emitApiError }: {
+  apiEntry: RuntimeApiEntry;
+  user: SessionLayout | null;
+  name: string;
+  emitApiError: EmitApiError;
+}): boolean => {
+  if (apiEntry.auth.login && !user?.id) {
+    if (shouldLogDev()) {
+      getLogger().warn(`api: ${name} requires login`, { route: name });
     }
-
-    socket.emit(buildApiStreamEventName(responseIndex), payload);
-  };
-
-  const inputValidation = await validateInputByType({
-    typeText: inputType,
-    value: normalizedData,
-    rootKey: 'data',
-    filePath: inputTypeFilePath,
-  });
-  if (inputValidation.status === 'error') {
-    return emitApiError({
-      response: {
-        status: 'error',
-        errorCode: 'api.invalidInputType',
-        errorParams: [{ key: 'message', value: inputValidation.message }],
-      },
-      fallbackHttpStatus: 400,
+    emitApiError({
+      response: { status: 'error', errorCode: 'auth.required' },
+      fallbackHttpStatus: 401,
     });
+    return false;
   }
 
-  //? Auth validation: check login requirement
-  if (auth.login && !user?.id) {
-      if (shouldLogDev()) {
-        getLogger().warn(`api: ${name} requires login`, { route: name });
-      }
-      return emitApiError({
-        response: { status: 'error', errorCode: 'auth.required' },
-        fallbackHttpStatus: 401,
-      });
-    }
-
-  //? Auth validation: check additional requirements
-  const authResult = validateRequest({ auth, user: user! });
-  if (authResult.status === "error") {
+  const authResult = validateRequest({ auth: apiEntry.auth, user: user! });
+  if (authResult.status === 'error') {
     if (shouldLogDev()) {
       getLogger().warn(`api: auth failed for ${name}`, { route: name, errorCode: authResult.errorCode });
     }
-    return emitApiError({
+    emitApiError({
       response: {
         status: 'error',
         errorCode: authResult.errorCode || 'auth.forbidden',
@@ -217,9 +138,20 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
       },
       fallbackHttpStatus: authResult.httpStatus ?? 403,
     });
+    return false;
   }
 
-  //? Rate limiting check: per-API bucket (custom rateLimit or defaultApiLimit fallback)
+  return true;
+};
+
+const applyApiRateLimits = async ({ apiEntry, resolvedName, token, socket, user, emitApiError }: {
+  apiEntry: RuntimeApiEntry;
+  resolvedName: string;
+  token: string | null;
+  socket: Socket;
+  user: SessionLayout | null;
+  emitApiError: EmitApiError;
+}): Promise<boolean> => {
   const apiRateLimit = apiEntry.rateLimit;
   const effectiveApiLimit = apiRateLimit === undefined
     ? getProjectConfig().rateLimiting.defaultApiLimit
@@ -233,7 +165,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
       limit: effectiveApiLimit,
-      windowMs: getProjectConfig().rateLimiting.windowMs
+      windowMs: getProjectConfig().rateLimiting.windowMs,
     });
 
     if (!allowed) {
@@ -249,7 +181,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
       if (shouldLogDev()) {
         getLogger().warn(`api: rate limit exceeded for ${resolvedName}`, { route: resolvedName, key: rateLimitKey });
       }
-      return emitApiError({
+      emitApiError({
         response: {
           status: 'error',
           errorCode: 'api.rateLimitExceeded',
@@ -257,10 +189,10 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
         },
         fallbackHttpStatus: 429,
       });
+      return false;
     }
   }
 
-  //? Global per-IP bucket across all APIs
   const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
   if (defaultIpLimit !== false && defaultIpLimit > 0) {
     const requesterIp = socket.handshake.address ?? 'unknown';
@@ -268,7 +200,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${requesterIp}:api:all`,
       limit: defaultIpLimit,
-      windowMs: getProjectConfig().rateLimiting.windowMs
+      windowMs: getProjectConfig().rateLimiting.windowMs,
     });
 
     if (!allowed) {
@@ -283,7 +215,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
       if (shouldLogDev()) {
         getLogger().warn(`api: global IP rate limit exceeded`, { ip: requesterIp });
       }
-      return emitApiError({
+      emitApiError({
         response: {
           status: 'error',
           errorCode: 'api.rateLimitExceeded',
@@ -291,29 +223,26 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
         },
         fallbackHttpStatus: 429,
       });
+      return false;
     }
   }
 
-  const preExecuteResult = await dispatchHook('preApiExecute', {
-    routeName: resolvedName,
-    data: normalizedData,
-    user,
-  });
-  if (preExecuteResult.stopped) {
-    return emitApiError({
-      response: {
-        status: 'error',
-        errorCode: preExecuteResult.signal.errorCode,
-      },
-      fallbackHttpStatus: preExecuteResult.signal.httpStatus ?? 403,
-    });
-  }
+  return true;
+};
 
-  //? Execute the API handler
+const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObject, resolvedName, name, emitStream }: {
+  apiEntry: RuntimeApiEntry;
+  normalizedData: Record<string, unknown>;
+  user: SessionLayout | null;
+  functionsObject: Record<string, unknown>;
+  resolvedName: string;
+  name: string;
+  emitStream: (payload?: ApiStreamPayload) => void;
+}): Promise<{ error: Error | null; result: RuntimeApiResponse | undefined; durationMs: number }> => {
   const executeStart = Date.now();
   const span = startSpan(name, 'api.request') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
-    async () => await main({ data: normalizedData, user, functions: functionsObject, stream: emitApiStream }),
+    async () => await apiEntry.main({ data: normalizedData, user, functions: functionsObject, stream: emitStream }),
     undefined,
     {
       handler: 'handleApiRequest',
@@ -323,6 +252,266 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     },
   );
   span?.end?.();
+  return { error: error ?? null, result: result ?? undefined, durationMs: Date.now() - executeStart };
+};
+
+const buildApiResponseEnvelope = ({
+  resolvedName,
+  error,
+  result,
+  preferredLocale,
+  user,
+}: {
+  resolvedName: string;
+  error: Error | null;
+  result: RuntimeApiResponse | undefined;
+  preferredLocale: string | undefined;
+  user: SessionLayout | null;
+}): { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } => {
+  if (error) {
+    if (shouldLogDev()) {
+      getLogger().error(`api: error in ${resolvedName}`, error, { route: resolvedName });
+    }
+    return { ...normalizeErrorResponse({
+      response: { status: 'error', errorCode: 'api.internalServerError' },
+      preferredLocale,
+      userLanguage: user?.language,
+      fallbackHttpStatus: 500,
+    }) };
+  }
+
+  if (result === undefined || result === null) {
+    if (shouldLogDev()) {
+      getLogger().warn(`api: ${resolvedName} returned nothing`);
+    }
+    return { ...normalizeErrorResponse({
+      response: { status: 'error', errorCode: 'api.emptyResponse' },
+      preferredLocale,
+      userLanguage: user?.language,
+      fallbackHttpStatus: 500,
+    }) };
+  }
+
+  if (shouldLogDev()) {
+    getLogger().debug(`api: ${resolvedName} completed`);
+  }
+
+  if (result.status !== 'success' && result.status !== 'error') {
+    return { ...normalizeErrorResponse({
+      response: { status: 'error', errorCode: 'api.invalidResponseStatus' },
+      preferredLocale,
+      userLanguage: user?.language,
+      fallbackHttpStatus: 500,
+    }) };
+  }
+
+  if (result.status === 'error') {
+    return { ...normalizeErrorResponse({
+      response: result,
+      preferredLocale,
+      userLanguage: user?.language,
+      fallbackHttpStatus: defaultHttpStatusForResponse({
+        status: 'error',
+        explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
+      }),
+    }) };
+  }
+
+  return {
+    ...result,
+    status: 'success',
+    httpStatus: defaultHttpStatusForResponse({
+      status: 'success',
+      explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
+    }),
+  };
+};
+
+const emitApiResult = async ({
+  socket,
+  responseIndex,
+  resolvedName,
+  error,
+  result,
+  preferredLocale,
+  user,
+}: {
+  socket: Socket;
+  responseIndex: number;
+  resolvedName: string;
+  error: Error | null;
+  result: RuntimeApiResponse | undefined;
+  preferredLocale: string | undefined;
+  user: SessionLayout | null;
+}): Promise<void> => {
+  const envelope = buildApiResponseEnvelope({ resolvedName, error, result, preferredLocale, user });
+
+  //? `preApiRespond` handlers may mutate `payload.response` to swap or rewrite
+  //? the outgoing envelope (PII redaction, response signing, schema injection).
+  //? A handler may also return a stop signal — when that happens we build a
+  //? fresh error envelope from the signal's `errorCode` / `httpStatus` and
+  //? emit that instead of the original.
+  const preRespond = { routeName: resolvedName, user, response: envelope as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } };
+  const preRespondResult = await dispatchHook('preApiRespond', preRespond);
+
+  const finalResponse = preRespondResult.stopped
+    ? { ...normalizeErrorResponse({
+        response: { status: 'error', errorCode: preRespondResult.signal.errorCode },
+        preferredLocale,
+        userLanguage: user?.language,
+        fallbackHttpStatus: preRespondResult.signal.httpStatus ?? 403,
+      }) }
+    : preRespond.response;
+
+  socket.emit(buildApiResponseEventName(responseIndex), finalResponse);
+
+  await dispatchHook('postApiRespond', { routeName: resolvedName, user, response: finalResponse });
+};
+
+export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
+  //? This event gets triggered when the client uses the apiRequest function.
+  //? Validate the message, check auth, then execute the registered handler.
+
+  if (typeof msg != 'object') {
+    if (shouldLogDev()) {
+      getLogger().warn('api: socket message was not a json object');
+    }
+    return;
+  }
+
+  const { responseIndex } = msg;
+  const user = await getSession(token);
+  setSentryUser(user?.id ? {
+    id: user.id,
+    email: user.email || undefined,
+  } : null);
+  const preferredLocale =
+    extractLanguageFromHeader(socket.handshake.headers['x-language'])
+    || extractLanguageFromHeader(socket.handshake.headers['accept-language'])
+    || undefined;
+
+  const emitApiError: EmitApiError = ({ response, fallbackHttpStatus }) => {
+    socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
+      response,
+      preferredLocale,
+      userLanguage: user?.language,
+      fallbackHttpStatus,
+    }));
+  };
+
+  const validated = validateApiMessage({ msg, emitApiError });
+  if (!validated) return;
+  const { name, data: normalizedData } = validated;
+
+  const parsedRoute = parseTransportRouteName({ value: name, prefix: 'api' });
+  if (parsedRoute.status === 'error') {
+    return emitApiError({
+      response: {
+        status: 'error',
+        errorCode: 'routing.invalidServiceRouteName',
+        errorParams: [{ key: 'name', value: name }],
+      },
+      fallbackHttpStatus: 400,
+    });
+  }
+
+  const resolvedName = parsedRoute.normalizedFullName;
+
+  //? Built-in 'system/logout' needs special handling since it requires socket access.
+  //? Match the full normalized route to avoid hijacking consumer routes whose final
+  //? segment happens to be 'logout' (e.g. 'admin/logout/vN').
+  if (parsedRoute.serviceRoute.normalizedRouteName === 'system/logout') {
+    await logout({ token, socket, userId: user?.id || null });
+    return socket.emit(buildApiResponseEventName(responseIndex), {
+      status: 'success',
+      httpStatus: 200,
+      result: true,
+    });
+  }
+
+  if (shouldLogDev()) {
+    getLogger().debug(`api: ${resolvedName} called`);
+  }
+
+  const { apisObject, functionsObject } = await getRuntimeApiMaps();
+
+  if (!apisObject[resolvedName]) {
+    return emitApiError({
+      response: {
+        status: 'error',
+        errorCode: 'api.notFound',
+        errorParams: [{ key: 'name', value: name }],
+      },
+      fallbackHttpStatus: 404,
+    });
+  }
+
+  const apiEntry = apisObject[resolvedName] as RuntimeApiEntry;
+
+  const emitStream = (payload: ApiStreamPayload = {}) => {
+    if (shouldLogStream()) {
+      getLogger().debug(`api: ${resolvedName} stream`, { payload });
+    }
+    socket.emit(buildApiStreamEventName(responseIndex), payload);
+  };
+
+  //? Auth → rate-limit → validate → execute → respond.
+  //? Auth runs before validate so unauthenticated probes can't enumerate
+  //? routes or learn input shape from `inputValidation.message`.
+  if (!checkApiAuth({ apiEntry, user, name, emitApiError })) return;
+
+  const rateLimitOk = await applyApiRateLimits({ apiEntry, resolvedName, token, socket, user, emitApiError });
+  if (!rateLimitOk) return;
+
+  warnIfInputTypeMissing(resolvedName, apiEntry.inputType);
+  await dispatchHook('preApiValidate', { routeName: resolvedName, data: normalizedData, user });
+
+  const inputValidation = await validateInputByType({
+    typeText: apiEntry.inputType,
+    value: normalizedData,
+    rootKey: 'data',
+    filePath: apiEntry.inputTypeFilePath,
+  });
+
+  await dispatchHook('postApiValidate', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+    validation: inputValidation,
+  });
+
+  if (inputValidation.status === 'error') {
+    return emitApiError({
+      response: {
+        status: 'error',
+        errorCode: 'api.invalidInputType',
+        errorParams: [{ key: 'message', value: inputValidation.message }],
+      },
+      fallbackHttpStatus: 400,
+    });
+  }
+
+  const preExecuteResult = await dispatchHook('preApiExecute', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+  });
+  if (preExecuteResult.stopped) {
+    return emitApiError({
+      response: { status: 'error', errorCode: preExecuteResult.signal.errorCode },
+      fallbackHttpStatus: preExecuteResult.signal.httpStatus ?? 403,
+    });
+  }
+
+  const { error, result, durationMs } = await executeApiHandler({
+    apiEntry,
+    normalizedData,
+    user,
+    functionsObject,
+    resolvedName,
+    name,
+    emitStream,
+  });
 
   await dispatchHook('postApiExecute', {
     routeName: resolvedName,
@@ -330,71 +519,8 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     user,
     result,
     error: error ?? null,
-    durationMs: Date.now() - executeStart,
+    durationMs,
   });
 
-  if (error) {
-    if (shouldLogDev()) {
-      getLogger().error(`api: error in ${resolvedName}`, error, { route: resolvedName });
-    }
-    socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
-      response: {
-        status: 'error',
-        errorCode: 'api.internalServerError',
-      },
-      preferredLocale,
-      userLanguage: user?.language,
-      fallbackHttpStatus: 500,
-    }));
-  } else if (result !== undefined && result !== null) {
-    if (shouldLogDev()) {
-      console.log(`api: ${resolvedName} completed`, 'blue');
-    }
-
-    if (result.status === 'success' || result.status === 'error') {
-      if (result.status === 'error') {
-        socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
-          response: result,
-          preferredLocale,
-          userLanguage: user?.language,
-          fallbackHttpStatus: defaultHttpStatusForResponse({
-            status: 'error',
-            explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
-          }),
-        }));
-      } else {
-        socket.emit(buildApiResponseEventName(responseIndex), {
-          ...result,
-          status: 'success',
-          httpStatus: defaultHttpStatusForResponse({
-            status: 'success',
-            explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
-          }),
-        });
-      }
-    } else {
-      socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
-        response: {
-          status: 'error',
-          errorCode: 'api.invalidResponseStatus',
-        },
-        preferredLocale,
-        userLanguage: user?.language,
-        fallbackHttpStatus: 500,
-      }));
-    }
-  } else {
-    if (shouldLogDev()) {
-      console.log(`WARNING: ${resolvedName} returned nothing`, 'yellow');
-    }
-    socket.emit(buildApiResponseEventName(responseIndex), normalizeErrorResponse({
-      response: {
-        status: 'error',
-        errorCode: 'api.emptyResponse',
-      },
-      preferredLocale,
-      userLanguage: user?.language,
-      fallbackHttpStatus: 500,
-    }));
-  }
+  await emitApiResult({ socket, responseIndex, resolvedName, error, result, preferredLocale, user });
 }

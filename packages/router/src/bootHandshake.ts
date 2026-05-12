@@ -1,6 +1,14 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
-import { getDeployConfig } from '@luckystack/core';
+import {
+  BOOT_KEY_PREFIX,
+  collectSynchronizedEnvKeys,
+  getDeployConfig,
+  getLogger,
+  getRedisConnectionOptions,
+  hashSynchronizedValue,
+  tryCatch,
+} from '@luckystack/core';
 
 //? Detects "two Redis URLs that both respond" — a failure mode where two
 //? environments think they share Redis but don't. Protocol:
@@ -12,8 +20,13 @@ import { getDeployConfig } from '@luckystack/core';
 //? to `true` to refuse startup on mismatch/unreachable — do this once every
 //? service in your deployment is known to expose /_health.
 
-const BOOT_KEY_PREFIX = 'luckystack:boot:';
-const HEALTH_PROBE_TIMEOUT_MS = 3000;
+const DEFAULT_HEALTH_PROBE_TIMEOUT_MS = 3000;
+const DEFAULT_BOOT_KEY_TTL_SECONDS = 3600;
+
+const getHealthProbeTimeoutMs = (): number =>
+  getDeployConfig().routing?.healthProbeTimeoutMs ?? DEFAULT_HEALTH_PROBE_TIMEOUT_MS;
+const getBootKeyTtlSeconds = (): number =>
+  getDeployConfig().routing?.bootKeyTtlSeconds ?? DEFAULT_BOOT_KEY_TTL_SECONDS;
 
 export interface RunBootHandshakeInput {
   envKey: string;
@@ -39,39 +52,24 @@ interface FallbackHealthResponse {
 
 const probeFallbackHealth = async (baseUrl: string): Promise<FallbackHealthResponse | null> => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), HEALTH_PROBE_TIMEOUT_MS);
-  try {
+  const timeout = setTimeout(() => controller.abort(), getHealthProbeTimeoutMs());
+  const [error, payload] = await tryCatch<FallbackHealthResponse | null, undefined>(async () => {
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/_health`, {
       signal: controller.signal,
     });
     if (!response.ok) return null;
     return await response.json() as FallbackHealthResponse;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-};
-
-const collectSynchronizedEnvKeysFromConfig = (): string[] => {
-  const keys = new Set<string>();
-  for (const resource of Object.values(getDeployConfig().resources)) {
-    for (const key of resource.synchronizedEnvKeys ?? []) {
-      keys.add(key);
-    }
-  }
-  return [...keys].sort();
-};
-
-const hashLocalEnvValue = (value: string): string => {
-  return createHash('sha256').update(value).digest('hex');
+  });
+  clearTimeout(timeout);
+  if (error) return null;
+  return payload ?? null;
 };
 
 const compareSynchronizedHashes = (
   fallbackHashes: Record<string, string | null> | undefined,
   report: (msg: string) => void,
 ): void => {
-  const keys = collectSynchronizedEnvKeysFromConfig();
+  const keys = collectSynchronizedEnvKeys();
   if (keys.length === 0) return;
 
   if (!fallbackHashes) {
@@ -81,7 +79,7 @@ const compareSynchronizedHashes = (
 
   for (const key of keys) {
     const localValue = process.env[key];
-    const localHash = localValue === undefined ? null : hashLocalEnvValue(localValue);
+    const localHash = localValue === undefined ? null : hashSynchronizedValue(localValue);
     const remoteHash = fallbackHashes[key] ?? null;
 
     if (localHash === null && remoteHash === null) {
@@ -95,33 +93,33 @@ const compareSynchronizedHashes = (
 };
 
 export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<void> => {
-  const host = process.env.REDIS_HOST ?? '127.0.0.1';
-  const port = Number.parseInt(process.env.REDIS_PORT ?? '6379', 10);
-  const password = process.env.REDIS_PASSWORD;
+  //? Centralized connection options so a Redis env-rename touches one file
+  //? in core, not both core and router.
+  const redisOptions = getRedisConnectionOptions();
 
-  const client = new Redis({ host, port, password, lazyConnect: true });
+  const client = new Redis({ ...redisOptions, lazyConnect: true });
   const bootUuid = randomUUID();
 
-  try {
+  const [writeError] = await tryCatch(async () => {
     await client.connect();
-    await client.set(`${BOOT_KEY_PREFIX}${input.envKey}`, bootUuid, 'EX', 3600);
-  } catch (err) {
+    await client.set(`${BOOT_KEY_PREFIX}${input.envKey}`, bootUuid, 'EX', getBootKeyTtlSeconds());
+  });
+  client.disconnect();
+  if (writeError) {
     throw new Error(
-      `[router] boot handshake failed to write Redis key: ${(err as Error).message}`,
+      `[router] boot handshake failed to write Redis key: ${writeError.message}`,
     );
-  } finally {
-    client.disconnect();
   }
 
   const reportIssue = (message: string): void => {
     if (input.strict) {
       throw new Error(`[router] ${message}`);
     }
-    console.warn(`[router] ${message}`);
+    getLogger().warn(`[router] ${message}`);
   };
 
   if (!input.fallbackBaseUrl) {
-    console.log(`[router] boot handshake: wrote UUID to local Redis; no fallback probe target`);
+    getLogger().info(`[router] boot handshake: wrote UUID to local Redis; no fallback probe target`);
     return;
   }
 
@@ -143,22 +141,23 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   //? Write our UUID, then read fallback's UUID (should be fallback's own boot
   //? value). If the two envs truly share Redis, fallback's key would be
   //? readable from here too. Check that separately.
-  const fallbackClient = new Redis({ host, port, password, lazyConnect: true });
-  try {
+  const fallbackClient = new Redis({ ...redisOptions, lazyConnect: true });
+  const [compareError, localReadOfFallbackKey] = await tryCatch(async () => {
     await fallbackClient.connect();
-    const localReadOfFallbackKey = await fallbackClient.get(`${BOOT_KEY_PREFIX}${input.fallbackEnvKey}`);
-    if (localReadOfFallbackKey !== fallbackHealth.bootUuid) {
-      reportIssue(
-        `boot handshake MISMATCH: fallback env '${input.fallbackEnvKey}' is connected to a different Redis than this router. ` +
-        `Expected key ${BOOT_KEY_PREFIX}${input.fallbackEnvKey} to equal '${fallbackHealth.bootUuid}' but got '${localReadOfFallbackKey ?? 'null'}'.`,
-      );
-      return;
-    }
-    console.log(`[router] boot handshake: shared Redis verified with fallback env '${input.fallbackEnvKey}'`);
-  } catch (err) {
-    reportIssue(`boot handshake: Redis compare failed: ${(err as Error).message}`);
-  } finally {
-    fallbackClient.disconnect();
+    return await fallbackClient.get(`${BOOT_KEY_PREFIX}${input.fallbackEnvKey}`);
+  });
+  fallbackClient.disconnect();
+
+  if (compareError) {
+    reportIssue(`boot handshake: Redis compare failed: ${compareError.message}`);
+  } else if (localReadOfFallbackKey !== fallbackHealth.bootUuid) {
+    reportIssue(
+      `boot handshake MISMATCH: fallback env '${input.fallbackEnvKey}' is connected to a different Redis than this router. ` +
+      `Expected key ${BOOT_KEY_PREFIX}${input.fallbackEnvKey} to equal '${fallbackHealth.bootUuid}' but got '${localReadOfFallbackKey ?? 'null'}'.`,
+    );
+    return;
+  } else {
+    getLogger().info(`[router] boot handshake: shared Redis verified with fallback env '${input.fallbackEnvKey}'`);
   }
 
   //? Once shared Redis is verified, also check that synchronized env vars

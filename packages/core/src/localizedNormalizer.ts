@@ -7,6 +7,7 @@ import {
   defaultHttpStatusForResponse,
   normalizeErrorResponseCore,
 } from './responseNormalizer';
+import { dispatchSyncHook } from './hooks/registry';
 
 //? Factory that turns a project-provided translate function into the full
 //? normalizer surface the framework packages need.
@@ -127,24 +128,37 @@ export const createLocalizedNormalizer = (
     userLanguage,
     fallbackHttpStatus,
   }: NormalizeErrorResponseInput): NormalizedErrorResponse => {
+    //? `preErrorNormalize` handlers may mutate `payload.response` to remap
+    //? error codes (e.g. translate `auth.required` → custom domain code, redact
+    //? internal codes for unauth users) before normalization.
+    const preNormalize = { response: { ...response }, preferredLocale, userLanguage, fallbackHttpStatus };
+    dispatchSyncHook('preErrorNormalize', preNormalize);
+
     const normalized = normalizeErrorResponseCore({
-      response,
-      fallbackHttpStatus,
+      response: preNormalize.response,
+      fallbackHttpStatus: preNormalize.fallbackHttpStatus,
       resolveMessage: ({ errorCode, errorParams }) => resolveErrorMessage({
         errorCode,
         errorParams,
-        preferredLocale,
-        userLanguage,
+        preferredLocale: preNormalize.preferredLocale,
+        userLanguage: preNormalize.userLanguage,
       }),
     });
 
-    return {
+    const finalized: NormalizedErrorResponse = {
       ...normalized,
       httpStatus: defaultHttpStatusForResponse({
         status: 'error',
         explicitHttpStatus: normalized.httpStatus,
       }),
     };
+
+    //? `postErrorNormalize` handlers may mutate `payload.normalized` to
+    //? post-process the localized envelope (replace messages, scrub fields).
+    const postNormalize = { normalized: finalized, preferredLocale: preNormalize.preferredLocale, userLanguage: preNormalize.userLanguage };
+    dispatchSyncHook('postErrorNormalize', postNormalize);
+
+    return postNormalize.normalized;
   };
 
   return { normalizeErrorResponse, resolveErrorMessage, extractLanguageFromHeader };
@@ -159,12 +173,19 @@ const identityNormalizer: LocalizedNormalizer = createLocalizedNormalizer({
 });
 
 let activeNormalizer: LocalizedNormalizer = identityNormalizer;
+let normalizerRegistered = false;
 
 export const registerLocalizedNormalizer = (normalizer: LocalizedNormalizer): void => {
   activeNormalizer = normalizer;
+  normalizerRegistered = true;
 };
 
 export const getLocalizedNormalizer = (): LocalizedNormalizer => activeNormalizer;
+
+//? Used by `verifyBootstrap` to detect the silent-degradation case where the
+//? identity normalizer is in use (passes errorCode through as the message,
+//? no i18n). Production projects should always register a real normalizer.
+export const isLocalizedNormalizerRegistered = (): boolean => normalizerRegistered;
 
 //? Delegating wrappers for consumers (@luckystack/api, @luckystack/sync, etc.)
 //? that want import-time-safe references. The project registers its

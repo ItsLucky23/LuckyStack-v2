@@ -21,17 +21,18 @@ LuckyStack is a custom full-stack framework that takes a **socket-first approach
 
 ## Key Features
 
-| Feature                | Description                                           |
-| ---------------------- | ----------------------------------------------------- |
-| **Socket-First**       | Socket.io-first communication with HTTP fallback      |
-| **Authentication**     | Credentials + Google, GitHub, Discord, Facebook OAuth |
-| **Room System**        | Join rooms for targeted real-time sync                |
-| **Activity Awareness** | Track user AFK status and presence                    |
-| **File-Based Routing** | Next.js-style page and API routing                    |
-| **Tailwind v4**        | Modern CSS with custom theming                        |
-| **Redis Sessions**     | Scalable session storage                              |
-| **Prisma + MongoDB**   | Type-safe database access                             |
-| **Sentry Integration** | Error monitoring for client and server                |
+| Feature                | Description                                                         |
+| ---------------------- | ------------------------------------------------------------------- |
+| **Socket-First**       | Socket.io-first communication with HTTP fallback                    |
+| **Authentication**     | Credentials + Google, GitHub, Discord, Facebook, Microsoft OAuth    |
+| **Room System**        | Join rooms for targeted real-time sync                              |
+| **Activity Awareness** | Track user AFK status and presence                                  |
+| **File-Based Routing** | Next.js-style page and API routing                                  |
+| **Tailwind v4**        | Modern CSS with custom theming                                      |
+| **Redis Sessions**     | Scalable session storage                                            |
+| **Prisma**             | Type-safe DB access (MongoDB, MySQL, PostgreSQL, SQLite)            |
+| **Sentry Integration** | Optional error monitoring for client and server                     |
+| **Multi-instance**     | Redis-backed Socket.io adapter; optional `@luckystack/router` proxy |
 
 ---
 
@@ -39,28 +40,39 @@ LuckyStack is a custom full-stack framework that takes a **socket-first approach
 
 ### Prerequisites
 
-- Docker + Docker Compose
+- Node.js 20+
+- A Redis instance (local or hosted) — required for sessions and the Socket.io adapter
+- A database supported by Prisma (MongoDB, MySQL, PostgreSQL, or SQLite)
 
-### Installation
+### Scaffold a new project
 
 ```bash
-# Clone the repository
-git clone https://github.com/ItsLucky23/LuckyStack-v2 PROJECT_NAME
-cd PROJECT_NAME
+npx create-luckystack-app my-app
+cd my-app
 
-# Copy environment template
-cp .env_template .env
-cp .env.local_template .env.local
-
-# Start all services (client, server, MongoDB, Redis)
-docker compose up
+# Two terminals:
+npm run server    # backend (Node.js + Socket.io)
+npm run client    # frontend (Vite)
 ```
 
-`config.ts` is tracked in this repository. Update it directly for project-level configuration.
+Open `http://localhost:5173`. The scaffolder writes a small project (~30 files) — framework internals live in `node_modules/@luckystack/*`.
 
-MongoDB and Redis are included in the Docker setup — no separate installation needed.
+### Working inside this monorepo
 
-> **Without Docker:** Install Node.js 18+, Redis 6+, and MongoDB manually, then run `npm install && npm run server` / `npm run client`.
+If you cloned this repository to contribute to the framework itself:
+
+```bash
+git clone https://github.com/ItsLucky23/LuckyStack-v2
+cd LuckyStack-v2
+npm install
+npm run build       # builds every workspace package
+cp .env_template .env
+cp .env.local_template .env.local
+```
+
+`config.ts`, `services.config.ts`, and `deploy.config.ts` are tracked. Update them directly for project-level changes; secrets go in `.env.local`.
+
+A Docker Compose file is included for spinning up Redis + the framework's own dev playground (`docker compose up`). Most contributors do not need it day-to-day.
 
 ### Access the App
 
@@ -73,17 +85,38 @@ You can change the ports in the `.env` file.
 
 ## Documentation
 
-| Document                                                   | Description                                |
-| ---------------------------------------------------------- | ------------------------------------------ |
-| [Routing architecture](./docs/ARCHITECTURE_ROUTING.md)     | File-based routing (pages, APIs, syncs)    |
-| [API architecture](./docs/ARCHITECTURE_API.md)             | API architecture overview                  |
-| [Authentication architecture](./docs/ARCHITECTURE_AUTH.md) | Authentication architecture overview       |
-| [Session architecture](./docs/ARCHITECTURE_SESSION.md)     | Session architecture overview              |
-| [Socket architecture](./docs/ARCHITECTURE_SOCKET.md)       | Socket architecture overview               |
-| [Sync architecture](./docs/ARCHITECTURE_SYNC.md)           | Sync architecture overview                 |
-| [Packaging architecture](./docs/ARCHITECTURE_PACKAGING.md) | Package-split migration and hook strategy  |
-| [Developer guide](./docs/DEVELOPER_GUIDE.md)               | Developer guide                            |
-| [Hosting guide](./docs/HOSTING.md)                         | Deployment and hosting guide               |
+| Document                                                       | Description                                          |
+| -------------------------------------------------------------- | ---------------------------------------------------- |
+| [Routing architecture](./docs/ARCHITECTURE_ROUTING.md)         | File-based routing (pages, APIs, syncs)              |
+| [API architecture](./docs/ARCHITECTURE_API.md)                 | API request lifecycle, transport, hooks              |
+| [Sync architecture](./docs/ARCHITECTURE_SYNC.md)               | Real-time sync events, fanout, streaming             |
+| [Authentication architecture](./docs/ARCHITECTURE_AUTH.md)     | OAuth + credentials flows, providers, middleware     |
+| [Session architecture](./docs/ARCHITECTURE_SESSION.md)         | Redis-backed sessions and lifecycle                  |
+| [Socket architecture](./docs/ARCHITECTURE_SOCKET.md)           | Socket.io setup, Redis adapter, room model           |
+| [Email architecture](./docs/ARCHITECTURE_EMAIL.md)             | `@luckystack/email` adapters and forgot-password     |
+| [Monitoring architecture](./docs/MONITORING.md)                | Strategy spec for `@luckystack/monitoring` (planned) |
+| [Packaging architecture](./docs/ARCHITECTURE_PACKAGING.md)     | Package-split, hooks, multi-service builds           |
+| [Developer guide](./docs/DEVELOPER_GUIDE.md)                   | Getting started inside the monorepo                  |
+| [Hosting guide](./docs/HOSTING.md)                             | Deployment, Docker, multi-instance routing           |
+| [Streaming reconstruction](./docs/STREAMING_RECONSTRUCTION.md) | Recreating the streaming demo page                   |
+
+### Packages
+
+The framework lives in `packages/` and is consumed as a set of `@luckystack/*` workspace packages. Each Tier-A package carries its own README:
+
+| Package                                                          | Purpose                                               |
+| ---------------------------------------------------------------- | ----------------------------------------------------- |
+| [`@luckystack/core`](./packages/core/README.md)                  | Foundation: project config, hooks, session types      |
+| [`@luckystack/server`](./packages/server/README.md)              | One-call HTTP + Socket.io bootstrap                   |
+| [`@luckystack/api`](./packages/api/README.md)                    | API request handlers (Socket.io + HTTP)               |
+| [`@luckystack/sync`](./packages/sync/README.md)                  | Real-time sync transport + streaming primitives       |
+| [`@luckystack/login`](./packages/login/README.md)                | Credentials + OAuth + sessions                        |
+| [`@luckystack/presence`](./packages/presence/README.md)          | Activity awareness + disconnect grace                 |
+| [`@luckystack/email`](./packages/email/README.md)                | Pluggable transactional email                         |
+| [`@luckystack/error-tracking`](./packages/error-tracking/README.md) | Optional error-tracking (Sentry-backed)            |
+| [`@luckystack/test-runner`](./packages/test-runner/README.md)    | Generated-type-driven contract / auth / fuzz tests    |
+| [`@luckystack/docs-ui`](./packages/docs-ui/README.md)            | Dev-only `/_docs` API browser                         |
+| [`create-luckystack-app`](./packages/create-luckystack-app/README.md) | Project scaffolder                               |
 
 ---
 
@@ -91,28 +124,34 @@ You can change the ports in the `.env` file.
 
 ```
 LuckyStack-v2/
-├── server/                 # Backend (Node.js)
-│   ├── auth/               # Authentication (OAuth + credentials)
-│   ├── sockets/            # Socket.io handlers
-│   │   ├── socket.ts       # Main socket server
-│   │   ├── handleApiRequest.ts
-│   │   └── handleSyncRequest.ts
-│   ├── functions/          # Server utilities (session, db, redis)
-│   └── utils/              # Shared utilities
+├── packages/                  # Framework workspaces (@luckystack/*)
+│   ├── core/                  # Project config, hooks, session types
+│   ├── server/                # bootstrapLuckyStack / createLuckyStackServer
+│   ├── api/                   # API request handlers
+│   ├── sync/                  # Sync transport + streaming
+│   ├── login/                 # Credentials + OAuth + sessions
+│   ├── presence/              # Activity / disconnect grace
+│   ├── email/                 # Transactional email adapters
+│   ├── sentry/                # Sentry integration
+│   ├── test-runner/           # Contract / auth / rate-limit / fuzz tests
+│   ├── docs-ui/               # Dev-only /_docs browser
+│   ├── create-luckystack-app/ # Project scaffolder
+│   ├── devkit/                # Tier-B: hot reload + type emitter
+│   └── router/                # Tier-B: multi-instance proxy
 │
-├── src/                    # Frontend (React)
-│   ├── _components/        # Shared UI components
-│   ├── _sockets/           # Socket client utilities
-│   ├── _providers/         # React context providers
-│   ├── _functions/         # Client utilities
-│   └── {page}/             # Page routes
-│       ├── page.tsx        # Page component
-│       ├── _api/           # Server-only API endpoints
-│       └── _sync/          # Real-time sync handlers
+├── server/                    # This repo's own server entry (consumer of @luckystack/server)
+│   ├── server.ts              # ~25 lines: calls bootstrapLuckyStack(...)
+│   ├── prod/runtimeMaps.ts    # Selects preset bundle via LUCKYSTACK_BUNDLE
+│   └── prod/generatedApis.*.ts # Per-preset route maps emitted by build
 │
-├── scripts/                # Build scripts
-├── prisma/                 # Database schema
-└── config.ts               # Application configuration
+├── luckystack/                # Overlay folder (consumer-style hooks + DI registries)
+├── src/                       # Frontend (React 19) + page-local _api / _sync
+├── prisma/schema.prisma       # User model
+├── scripts/                   # Build / generation scripts (typegen, Zod emit, packaging)
+├── config.ts                  # registerProjectConfig({...})
+├── services.config.ts         # services + presets
+├── deploy.config.ts           # resources + bindings + fallback routing
+└── docs/                      # Architecture documentation
 ```
 
 ---
@@ -166,15 +205,13 @@ await syncRequest({
 
 ## Scripts
 
-| Command                  | Description                          |
-| ------------------------ | ------------------------------------ |
-| `docker compose up`      | Start all services (recommended)     |
-| `docker compose up -d`   | Start all services in the background |
-| `docker compose down`    | Stop all services                    |
-| `npm run client`         | Start Vite dev server (no Docker)    |
-| `npm run server`         | Start Node.js server (no Docker)     |
-| `npm run build`          | Build for production                 |
-| `npm run prod`           | Run production server                |
+| Command                  | Description                                       |
+| ------------------------ | ------------------------------------------------- |
+| `npm run client`         | Start Vite dev server                             |
+| `npm run server`         | Start Node.js server (calls `bootstrapLuckyStack`) |
+| `npm run build`          | Build all `@luckystack/*` packages + the project  |
+| `npm run prod`           | Run the production server                         |
+| `docker compose up`      | Optional: start the bundled Redis dev stack       |
 
 ---
 
@@ -214,12 +251,12 @@ Supported: Google, GitHub, Discord, Facebook
 | -------------- | --------------------------------------- |
 | **Frontend**   | React 19, React Router 7, TailwindCSS 4 |
 | **Backend**    | Node.js (raw HTTP), Socket.io           |
-| **Database**   | MongoDB with Prisma 6.5 ORM             |
+| **Database**   | Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite) |
 | **Sessions**   | Redis                                   |
-| **Auth**       | Custom OAuth + bcrypt                   |
+| **Auth**       | Built-in credentials + OAuth + bcryptjs |
 | **Icons**      | Lucide React, Font Awesome              |
-| **Monitoring** | Sentry                                  |
-| **Build**      | Vite, TypeScript, tsx                   |
+| **Monitoring** | Sentry (optional)                       |
+| **Build**      | Vite, TypeScript, tsx, tsup             |
 
 ---
 
@@ -231,4 +268,4 @@ MIT
 
 ## Links
 
-- 📖 [GitBook Documentation](https://lucky23.gitbook.io/luckystack/)
+- [GitBook Documentation](https://lucky23.gitbook.io/luckystack/)

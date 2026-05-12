@@ -2,6 +2,17 @@
 
 This guide covers everything you need to deploy LuckyStack from development to production.
 
+> **Multi-instance deployments:** LuckyStack supports per-preset bundles selected at runtime via `LUCKYSTACK_BUNDLE`. Production deploys SHOULD set this env var explicitly — `runtimeMaps.ts` falls back to empty maps when it's unset, which serves no routes. For service-key-aware HTTP/WS routing across multiple backends, see [`@luckystack/router`](../packages/router/README.md). For the full topology model see [`docs/ARCHITECTURE_PACKAGING.md`](./ARCHITECTURE_PACKAGING.md).
+
+> **Bootstrap pre-flight:** call `verifyBootstrap({ requireDeployConfig, requireServicesConfig, requireOAuthProviders })` from `@luckystack/server` after your overlay loads and before `server.listen()`. In production the check hard-fails when `RuntimeMapsProvider` or `LocalizedNormalizer` is unregistered (otherwise every API/sync request silently returns `notFound`, and error responses leak raw `errorCode` strings instead of i18n messages). Dev runs only warn so devkit hot-reload can keep working before the registry settles. See [`packages/server/README.md`](../packages/server/README.md#pre-flight-check--verifybootstrap) for the full requirements list.
+
+> **Programmatic bind address (no env vars needed):** `createLuckyStackServer({ ip, port })` now writes the resolved bind address into `@luckystack/core`'s `registerBindAddress(...)` registry at boot. Framework code that previously read `process.env.SERVER_IP` / `SERVER_PORT` (most notably `checkOrigin` building the same-origin entry) now goes through `getBindAddress()` instead, so programmatic configuration no longer drifts from the env-derived values. You can keep using `SERVER_IP` / `SERVER_PORT` if that fits your deploy — the registry falls back to those exact env vars when no explicit address has been registered.
+
+> **Security defaults you must know before deploying:**
+> - **CORS is fail-closed.** When neither `Origin` nor `Referer` is present, only read-only methods (GET/HEAD/OPTIONS) are allowed. State-changing methods (POST/PUT/PATCH/DELETE) return 403. Any non-browser caller hitting a write endpoint (server-to-server probes, `curl` smoke tests, native apps) MUST send `Origin: https://your-allowed-origin`. Add the origin to `EXTERNAL_ORIGINS` in `.env`.
+> - **`/_test/reset` is fail-closed.** It requires `NODE_ENV` to be exactly `development` or `test` AND a non-empty `TEST_RESET_TOKEN`. Anything else returns 403. Production deploys should leave `TEST_RESET_TOKEN` unset; dev/test deploys should set it AND keep the URL behind a private network if at all possible.
+> - **CSRF middleware** runs on every `/api/*` and `/sync/*` write. The `apiRequest` helper in `@luckystack/core/client` attaches the token automatically; non-browser callers should `GET /csrf-token` first and forward `x-csrf-token` on writes.
+
 ---
 
 ## Table of Contents
@@ -24,7 +35,7 @@ Before deploying LuckyStack, ensure you have:
 
 | Requirement  | Version | Notes                                            |
 | ------------ | ------- | ------------------------------------------------ |
-| **Node.js**  | 18+     | LTS recommended                                  |
+| **Node.js**  | 20+     | LTS recommended (matches `engines.node` in every package) |
 | **Redis**    | 6+      | Used for session storage                         |
 | **Database** | -       | Your choice (see database section below)         |
 | **npm**      | 9+      | Comes with Node.js                               |

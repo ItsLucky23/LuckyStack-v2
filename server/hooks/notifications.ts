@@ -46,7 +46,7 @@ export const registerNotificationHooks = (): void => {
         if (!prefs.notifyOnNewSignIn) return;
 
         const { sendEmail, renderEmailLayout } = await lazyEmail();
-        const appUrl = (getProjectConfig().email.appUrl || '').replace(/\/+$/, '');
+        const appUrl = (getProjectConfig().app.publicUrl || '').replace(/\/+$/, '');
         const { html, text } = renderEmailLayout({
           brand: 'LuckyStack',
           title: 'New sign-in detected',
@@ -86,7 +86,7 @@ export const sendPasswordChangedNotification = async (userId: string): Promise<v
     if (!prefs.notifyOnPasswordChange) return;
 
     const { sendEmail, renderEmailLayout } = await lazyEmail();
-    const appUrl = (getProjectConfig().email.appUrl || '').replace(/\/+$/, '');
+    const appUrl = (getProjectConfig().app.publicUrl || '').replace(/\/+$/, '');
     const { html, text } = renderEmailLayout({
       brand: 'LuckyStack',
       title: 'Your password was changed',

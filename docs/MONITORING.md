@@ -1,4 +1,6 @@
-# LuckyStack Observability & Monitoring Strategy
+# LuckyStack Observability and Monitoring Strategy
+
+> **Status — 2026-05-11:** this document is a *strategy spec for a future `@luckystack/monitoring` package*. The package itself is **not yet built**. The "Why?" half (error capture + breadcrumbs + spans) is shipping today as [`@luckystack/error-tracking`](../packages/error-tracking/README.md). The "What?" half (input/output audit trail + Prometheus vitals) is the work this document plans for.
 
 ## 1. Packaging Strategy: @luckystack/monitoring
 To align with the "Compose & Hook" architecture, monitoring should be extracted into a dedicated package that consumes the core lifecycle hooks. This prevents "monitoring bloat" in the core and allows the AI to extend functionality via hooks rather than internal edits.

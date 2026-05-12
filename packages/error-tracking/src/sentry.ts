@@ -9,13 +9,16 @@
 
 import * as Sentry from '@sentry/node';
 import {
-  getProjectConfig,
+  getLogger,
+  getProjectName,
   initSharedSentry,
   captureException as sharedCaptureException,
   captureMessage as sharedCaptureMessage,
   setSentryUser as sharedSetSentryUser,
   startSpan as sharedStartSpan,
 } from '@luckystack/core';
+
+import { getSentryConfig } from './sentryConfig';
 
 /**
  * Initialize Sentry error monitoring.
@@ -29,31 +32,33 @@ export const initializeSentry = () => {
 
   if (!dsn) {
     if (process.env.NODE_ENV === 'production') {
-      console.log('SENTRY_DSN not configured. Error monitoring disabled.', 'yellow');
+      getLogger().warn('SENTRY_DSN not configured. Error monitoring disabled.');
     }
     return;
   }
+
+  const sentryConfig = getSentryConfig().server;
+  const tracesSampleRate = isProduction
+    ? sentryConfig?.tracesSampleRate?.production ?? 0.2
+    : sentryConfig?.tracesSampleRate?.development ?? 1;
+  const ignoreErrors = sentryConfig?.ignoreErrors ?? ['Socket connection timeout', 'ECONNREFUSED'];
 
   Sentry.init({
     dsn,
     environment: process.env.NODE_ENV ?? 'development',
 
     // Performance monitoring
-    tracesSampleRate: isProduction
-      ? getProjectConfig().sentry?.server?.tracesSampleRate?.production ?? 0.2
-      : getProjectConfig().sentry?.server?.tracesSampleRate?.development ?? 1,
+    tracesSampleRate,
 
-    // Additional options
-    serverName: process.env.PROJECT_NAME ?? "",
+    // Additional options — `getProjectName()` resolves at call time and
+    // honors projectConfig overrides, not just the raw env var.
+    serverName: getProjectName(),
 
     // Only send errors in production by default
     enabled: isProduction || enabledOverride === 'true',
 
     // Ignore certain errors
-    ignoreErrors: [
-      'Socket connection timeout',
-      'ECONNREFUSED',
-    ],
+    ignoreErrors,
 
     // Attach additional context
     beforeSend(event) {
@@ -89,7 +94,7 @@ export const initializeSentry = () => {
     },
   });
 
-  console.log('Sentry initialized for error monitoring', 'green');
+  getLogger().info('Sentry initialized for error monitoring');
 };
 
 export const captureException = (

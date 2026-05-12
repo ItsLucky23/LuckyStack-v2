@@ -1,5 +1,7 @@
 # Streaming Reconstruction Guide
 
+> Last verified: 2026-05-10. This file is a recreation recipe for the removed `src/streaming` demo, not state docs — content is intentionally frozen until the demo is rebuilt or the streaming primitives change shape.
+
 This document preserves the exact streaming demo implementation that was removed from `src/streaming`.
 
 Use this when you want to recreate the previous playground route and handlers from documentation only.

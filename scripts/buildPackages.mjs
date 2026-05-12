@@ -3,7 +3,7 @@
 //?
 //? Topology:
 //?   wave 1 → core                                         (no @luckystack deps)
-//?   wave 2 → sentry, email, login, devkit, router,
+//?   wave 2 → error-tracking, email, login, devkit, router,
 //?            test-runner, create-luckystack-app, docs-ui  (depend on core only — or nothing)
 //?   wave 3 → api, sync, presence                          (depend on login + core)
 //?   wave 4 → server                                       (depends on api, sync, presence, login, core)
@@ -26,7 +26,7 @@ import process from 'node:process';
 
 const WAVES = [
   ['core'],
-  ['sentry', 'email', 'login', 'devkit', 'router', 'test-runner', 'create-luckystack-app', 'docs-ui'],
+  ['error-tracking', 'email', 'login', 'devkit', 'router', 'test-runner', 'create-luckystack-app', 'docs-ui'],
   ['api', 'sync', 'presence'],
   ['server'],
 ];

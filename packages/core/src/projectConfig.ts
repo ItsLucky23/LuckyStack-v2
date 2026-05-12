@@ -39,22 +39,22 @@ export interface SessionConfig {
   basedToken: boolean;
   expiryDays: number;
   allowMultiple: boolean;
+  /**
+   * Prefix used for Redis session/activeUsers keys (e.g. `${projectName}-session:<token>`).
+   * Falls back to `process.env.PROJECT_NAME` then this default at config build time.
+   */
+  projectName: string;
 }
 
-export interface SentrySampleRates {
-  development: number;
-  production: number;
-}
-
-export interface SentryConfig {
-  client?: {
-    tracesSampleRate?: SentrySampleRates;
-    replaysSessionSampleRate?: SentrySampleRates;
-    replaysOnErrorSampleRate?: SentrySampleRates;
-  };
-  server?: {
-    tracesSampleRate?: SentrySampleRates;
-  };
+export interface AppConfig {
+  /**
+   * Public URL of the app — used by OAuth callback redirects, transactional
+   * email links (when `@luckystack/email` is installed), and any other
+   * framework code that needs to render an absolute link to your app.
+   * Empty default — consumers should set this to the public origin of their
+   * deployment (e.g. `https://app.example.com`).
+   */
+  publicUrl: string;
 }
 
 export interface HttpStreamConfig {
@@ -122,8 +122,6 @@ export interface HttpConfig {
 export interface AuthConfig {
   /** TTL for OAuth state tokens stored in Redis. */
   oauthStateTtlSeconds: number;
-  /** PROJECT_NAME env fallback used for OAuth state Redis key prefixes. */
-  oauthStateProjectNameFallback: string;
   /** Minimum password length for credentials auth. */
   passwordMinLength: number;
   /** Maximum password length for credentials auth. */
@@ -159,6 +157,47 @@ export interface AuthConfig {
   forgotPassword: 'framework' | 'custom' | 'disabled';
   /** Reset-token TTL in seconds when `forgotPassword === 'framework'`. */
   passwordResetTtlSeconds: number;
+  /**
+   * Brand/display name used in framework-mode password-reset emails (subject +
+   * greeting + footer). Falls back to `'LuckyStack'` if unset; consumers should
+   * override this to their own brand.
+   */
+  passwordResetBrand?: string;
+}
+
+export interface OfflineQueueConfig {
+  /** Hard cap on items per queue (api + sync are tracked separately). Default 200. */
+  maxSize: number;
+  /** Drop items older than this many ms when flushing/enqueuing. Default 1 hour. */
+  maxAgeMs: number;
+  /**
+   * What to do when the queue is full:
+   * - 'drop-oldest' (default): evict the oldest item, append the new one.
+   * - 'drop-newest': reject the new item, keep the existing queue.
+   * - 'reject': do not enqueue; caller must handle the failure.
+   */
+  dropPolicy: 'drop-oldest' | 'drop-newest' | 'reject';
+}
+
+export interface SyncStreamThrottleConfig {
+  /** Default `flushAtChars` for `createStreamThrottle({...})`. */
+  flushAtChars: number;
+  /** Default `flushEveryMs` for `createStreamThrottle({...})`. */
+  flushEveryMs: number | false;
+  /** Default `field` (payload key) for emitted chunks. */
+  field: string;
+}
+
+export interface SyncConfig {
+  streamThrottle: SyncStreamThrottleConfig;
+  /**
+   * Yield to the event loop every N recipients during a broadcast fanout
+   * (`receiver: 'all'` or large rooms). Lower = more responsive, higher
+   * overhead. Default 100.
+   */
+  fanoutYieldEvery: number;
+  /** Milliseconds to sleep when yielding. Default 1ms. */
+  fanoutYieldMs: number;
 }
 
 export interface SocketConfig {
@@ -177,30 +216,14 @@ export interface DevConfig {
   watcherStabilityThresholdMs: number;
   /** Chokidar `awaitWriteFinish.pollInterval`. */
   watcherPollIntervalMs: number;
-}
-
-export interface EmailLoggingConfig {
-  /** Log a warning to terminal when an email fails to send. */
-  errors: boolean;
-  /** Log a concise success line for each sent email (recipient + subject). */
-  sends: boolean;
-}
-
-export interface EmailConfig {
-  /** Default `from` address used when a message doesn't override it. */
-  from: string;
   /**
-   * Public-facing app URL — used to build absolute links in emails
-   * (password reset, verification, etc.). Falls back to `''` if unset.
+   * When true, log a warning the first time an api/sync route is invoked
+   * without an `inputType` (typically because generated types haven't been
+   * regenerated since the route was added). Helps catch routes that ship
+   * with no runtime input validation. Default false (silent), set to true
+   * in dev to surface missing types.
    */
-  appUrl: string;
-  /**
-   * When true, `sendEmail()` throws if no email sender is registered.
-   * Default false: it returns `{ ok: false, reason: 'no-sender' }` instead.
-   */
-  required: boolean;
-  /** Terminal logging flags (independent of any Sentry adapter). */
-  logging: EmailLoggingConfig;
+  warnOnMissingInputType?: boolean;
 }
 
 export interface PathsConfig {
@@ -225,17 +248,18 @@ export interface PathsConfig {
 }
 
 export interface ProjectConfig {
+  app: AppConfig;
   logging: LoggingConfig;
   rateLimiting: RateLimitingConfig;
   session: SessionConfig;
   http: HttpConfig;
   auth: AuthConfig;
   socket: SocketConfig;
+  sync: SyncConfig;
+  offlineQueue: OfflineQueueConfig;
   dev: DevConfig;
   paths: PathsConfig;
-  email: EmailConfig;
   defaultLanguage: string;
-  sentry?: SentryConfig;
   /** Enable per-room activity broadcasting (presence). */
   socketActivityBroadcaster?: boolean;
   /** Show the floating socket-status indicator badge from `@luckystack/presence/client`. */
@@ -253,6 +277,9 @@ type DeepPartial<T> = {
 export type ProjectConfigInput = DeepPartial<ProjectConfig>;
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
+  app: {
+    publicUrl: '',
+  },
   logging: {
     devLogs: false,
     devNotifications: false,
@@ -272,6 +299,10 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     basedToken: false,
     expiryDays: 7,
     allowMultiple: false,
+    //? Empty default — `getProjectName()` reads `process.env.PROJECT_NAME` at
+    //? call time and falls back to `'luckystack'`. Avoids capturing env at
+    //? module-load before dotenv runs.
+    projectName: '',
   },
   http: {
     sessionCookieName: 'token',
@@ -304,7 +335,6 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   },
   auth: {
     oauthStateTtlSeconds: 60 * 10,
-    oauthStateProjectNameFallback: 'luckystack',
     passwordMinLength: 8,
     passwordMaxLength: 191,
     emailMaxLength: 191,
@@ -318,6 +348,20 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     maxHttpBufferSize: 5 * 1024 * 1024,
     pingTimeout: 20_000,
     pingInterval: 25_000,
+  },
+  sync: {
+    streamThrottle: {
+      flushAtChars: 32,
+      flushEveryMs: 50,
+      field: 'chunk',
+    },
+    fanoutYieldEvery: 100,
+    fanoutYieldMs: 1,
+  },
+  offlineQueue: {
+    maxSize: 200,
+    maxAgeMs: 60 * 60 * 1000,
+    dropPolicy: 'drop-oldest',
   },
   dev: {
     hotReloadDebounceMs: 120,
@@ -334,15 +378,6 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     generatedSocketTypes: 'src/_sockets/apiTypes.generated.ts',
     generatedApiSchemas: 'src/_sockets/apiInputSchemas.generated.ts',
     generatedApiDocs: 'src/docs/apiDocs.generated.json',
-  },
-  email: {
-    from: 'noreply@example.com',
-    appUrl: '',
-    required: false,
-    logging: {
-      errors: true,
-      sends: false,
-    },
   },
   defaultLanguage: 'en',
   socketActivityBroadcaster: false,
@@ -385,6 +420,23 @@ export const registerProjectConfig = (config: ProjectConfigInput): void => {
 };
 
 export const getProjectConfig = (): ProjectConfig => activeConfig;
+
+//? Resolve the project namespace at call time. Single source of truth used
+//? for Redis key prefixes (`<projectName>-session:`, `-activeUsers:`,
+//? `-pwreset:`, `-oauth-state:`, etc.) across session.ts, logout.ts,
+//? rateLimiter.ts, passwordReset.ts, login.ts, testResetRoute.ts.
+//?
+//? Resolution order (first non-empty wins):
+//?   1. `projectConfig.session.projectName` (if a consumer set it explicitly)
+//?   2. `process.env.PROJECT_NAME` (read at call time — works after dotenv)
+//?   3. literal `'luckystack'` as the absolute fallback
+export const getProjectName = (): string => {
+  const fromConfig = activeConfig.session.projectName;
+  if (fromConfig && fromConfig.length > 0) return fromConfig;
+  const fromEnv = process.env.PROJECT_NAME;
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  return 'luckystack';
+};
 
 //? Guard for code paths that MUST run after registration (e.g. the server's
 //? startup sequence). Log once, never throw — framework packages should

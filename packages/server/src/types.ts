@@ -50,6 +50,27 @@ export interface CreateLuckyStackServerOptions {
   requireServicesConfig?: boolean;
   /** Fail boot if no OAuth providers have been registered. Default: false. */
   requireOAuthProviders?: boolean;
+  /**
+   * Dynamic-import callback for production runtime maps. When provided, the
+   * framework registers its built-in `RuntimeMapsProvider` and the consumer
+   * no longer needs a hand-rolled `server/prod/runtimeMaps.ts`. Pass a
+   * function that calls `import()` with a path relative to the consumer's
+   * server module — the framework cannot resolve that path on the
+   * consumer's behalf because dynamic-import resolution is module-scoped.
+   *
+   * @example
+   * loadGeneratedMaps: (preset) => import(`./prod/generatedApis.${preset}`)
+   */
+  loadGeneratedMaps?: (preset: string) => Promise<unknown>;
+  /**
+   * Override the env var that selects the production maps preset. Default
+   * `LUCKYSTACK_BUNDLE`. Resolved to `'default'` when unset.
+   */
+  runtimeMapsPresetEnvVar?: string;
+  /**
+   * Override the literal preset name (skips env lookup). Useful in tests.
+   */
+  runtimeMapsPreset?: string;
 }
 
 export interface RunningLuckyStackServer {

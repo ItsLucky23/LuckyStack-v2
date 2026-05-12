@@ -1,4 +1,4 @@
-import type { EmailSender } from '@luckystack/core';
+import { tryCatch, type EmailSender } from '@luckystack/core';
 
 interface SmtpSenderOptions {
   host: string;
@@ -53,25 +53,24 @@ export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
         return { ok: false, reason: 'missing-from' };
       }
 
-      try {
-        const info = await transporter.sendMail({
-          from: fromAddress,
-          to: message.to,
-          subject: message.subject,
-          html: message.html,
-          text: message.text,
-          replyTo: message.replyTo,
-          cc: message.cc,
-          bcc: message.bcc,
-        });
-        return { ok: true, id: String(info.messageId ?? `smtp-${String(Date.now())}`) };
-      } catch (cause) {
+      const [error, info] = await tryCatch(() => transporter.sendMail({
+        from: fromAddress,
+        to: message.to,
+        subject: message.subject,
+        html: message.html,
+        text: message.text,
+        replyTo: message.replyTo,
+        cc: message.cc,
+        bcc: message.bcc,
+      }));
+      if (error) {
         return {
           ok: false,
-          reason: cause instanceof Error ? cause.message : 'smtp-error',
-          cause,
+          reason: error.message || 'smtp-error',
+          cause: error,
         };
       }
+      return { ok: true, id: String(info?.messageId ?? `smtp-${String(Date.now())}`) };
     },
   };
 };

@@ -9,8 +9,11 @@
 //? validators (e.g. `getProjectConfig()` always returns a deeply-merged value).
 
 import {
-  isProjectConfigRegistered,
+  getLogger,
   isDeployConfigRegistered,
+  isLocalizedNormalizerRegistered,
+  isProjectConfigRegistered,
+  isRuntimeMapsProviderRegistered,
 } from '@luckystack/core';
 
 export interface BootstrapRequirements {
@@ -62,6 +65,35 @@ export const verifyBootstrap = async (requirements: BootstrapRequirements = {}):
       // the consumer never registered providers.
       missing.push(
         'OAuth providers — call `registerOAuthProviders([...])` from `luckystack/login/oauthProviders.ts` (or skip this check if your app uses credentials only).'
+      );
+    }
+  }
+
+  //? Runtime maps provider — without it, every API/sync request silently
+  //? returns `notFound`. Hard-fail in production; loud-warn in dev because
+  //? tests and the bare-server dev mode legitimately boot without one.
+  if (!isRuntimeMapsProviderRegistered()) {
+    if (process.env.NODE_ENV === 'production') {
+      missing.push(
+        'RuntimeMapsProvider — call `registerRuntimeMapsProvider({...})` from `server/prod/runtimeMaps.ts`. Without it, every api/sync request returns notFound.'
+      );
+    } else {
+      getLogger().warn(
+        '[LuckyStack] No RuntimeMapsProvider registered — api/sync requests will resolve to empty maps. Devkit hot-reload usually registers one automatically.',
+      );
+    }
+  }
+
+  //? Localized normalizer — without it, error responses degrade to
+  //? errorCode-as-message (no i18n). Hard-fail in production; warn in dev.
+  if (!isLocalizedNormalizerRegistered()) {
+    if (process.env.NODE_ENV === 'production') {
+      missing.push(
+        'LocalizedNormalizer — call `registerLocalizedNormalizer({...})` from your bootstrap. Without it, error response messages will be the raw errorCode (no i18n).'
+      );
+    } else {
+      getLogger().warn(
+        '[LuckyStack] No LocalizedNormalizer registered — error messages will pass through as the raw errorCode.',
       );
     }
   }

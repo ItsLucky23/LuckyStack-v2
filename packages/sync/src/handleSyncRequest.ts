@@ -22,7 +22,8 @@ import {
   getLogger,
 } from "@luckystack/core";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
-import { setSentryUser } from '@luckystack/sentry';
+import { setSentryUser } from '@luckystack/error-tracking';
+import { buildSyncStreamEmitters } from './_shared/streamEmitters';
 
 type SyncStreamPayload = Record<string, unknown>;
 
@@ -93,6 +94,109 @@ type RuntimeSyncClientHandler = (params: {
 
 const shouldLogDev = () => getProjectConfig().logging.devLogs;
 const shouldLogStream = () => getProjectConfig().logging.stream;
+
+interface SyncErrorBuilder {
+  (args: {
+    response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean }[]; httpStatus?: number };
+    preferred?: string | null;
+    userLanguage?: string | null;
+  }): RuntimeErrorResponse;
+}
+
+//? Returns true when both buckets passed; false when one rejected and the
+//? caller should bail. The caller still owns the socket emit + responseIndex
+//? wiring because the existing code structure interleaves emit logic with
+//? other guard returns.
+const applySyncRateLimits = async ({
+  resolvedName,
+  token,
+  socket,
+  user,
+  responseIndex,
+  buildSyncError,
+  preferredLocale,
+}: {
+  resolvedName: string;
+  token: string | null;
+  socket: Socket;
+  user: SessionLayout | null;
+  responseIndex: number | undefined;
+  buildSyncError: SyncErrorBuilder;
+  preferredLocale: string | null | undefined;
+}): Promise<boolean> => {
+  const config = getProjectConfig();
+  const defaultApiLimit = config.rateLimiting.defaultApiLimit;
+  if (defaultApiLimit !== false && defaultApiLimit > 0) {
+    const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
+    const keyPrefix = token ? 'token' : 'ip';
+    const rateLimitKey = `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`;
+    const { allowed, resetIn } = await checkRateLimit({
+      key: rateLimitKey,
+      limit: defaultApiLimit,
+      windowMs: config.rateLimiting.windowMs,
+    });
+    if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: token ? 'user' : 'route',
+        key: rateLimitKey,
+        limit: defaultApiLimit,
+        windowMs: config.rateLimiting.windowMs,
+        count: defaultApiLimit + 1,
+        route: resolvedName,
+        userId: user?.id,
+      });
+      if (typeof responseIndex === 'number') {
+        socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+          response: {
+            status: 'error',
+            errorCode: 'sync.rateLimitExceeded',
+            errorParams: [{ key: 'seconds', value: resetIn }],
+            httpStatus: 429,
+          },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        }));
+      }
+      return false;
+    }
+  }
+
+  const defaultIpLimit = config.rateLimiting.defaultIpLimit;
+  if (defaultIpLimit !== false && defaultIpLimit > 0) {
+    const requesterIp = socket.handshake.address ?? 'unknown';
+    const ipKey = `ip:${requesterIp}:sync:all`;
+    const { allowed, resetIn } = await checkRateLimit({
+      key: ipKey,
+      limit: defaultIpLimit,
+      windowMs: config.rateLimiting.windowMs,
+    });
+    if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: 'ip',
+        key: ipKey,
+        limit: defaultIpLimit,
+        windowMs: config.rateLimiting.windowMs,
+        count: defaultIpLimit + 1,
+        ip: requesterIp,
+      });
+      if (typeof responseIndex === 'number') {
+        socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+          response: {
+            status: 'error',
+            errorCode: 'sync.rateLimitExceeded',
+            errorParams: [{ key: 'seconds', value: resetIn }],
+            httpStatus: 429,
+          },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        }));
+      }
+      return false;
+    }
+  }
+
+  return true;
+};
 
 
 // export default async function handleSyncRequest({ name, clientData, user, serverOutput, roomCode }: syncMessage) {
@@ -229,154 +333,67 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }));
   }
 
-  const emitServerSyncStream = (payload: SyncStreamPayload = {}) => {
-    if (typeof responseIndex !== 'number') {
-      return;
-    }
+  const { emitServerSyncStream, emitBroadcastSyncStream, emitStreamToTokens } =
+    buildSyncStreamEmitters({
+      cb,
+      receiver,
+      resolvedName,
+      logLabel: 'sync',
+      emitOriginatorChunk: (payload) => {
+        if (typeof responseIndex !== 'number') return;
+        socket.emit(buildSyncProgressEventName(responseIndex), payload);
+      },
+    });
 
-    if (shouldLogStream()) {
-      console.log(`sync: ${resolvedName} server stream`, payload, 'cyan');
-    }
-
-    socket.emit(buildSyncProgressEventName(responseIndex), payload);
-  };
-
-  //? Build the wire-shape every recipient expects on the sync channel. Same
-  //? envelope `_client`'s stream uses, so consumers' `upsertSyncEventCallback`
-  //? listeners receive both indistinguishably.
-  const buildBroadcastFrame = (payload: SyncStreamPayload) => ({
-    ...payload,
-    cb,
-    fullName: resolvedName,
-    status: 'stream' as const,
-  });
-
-  //? broadcastStream: fan a chunk out to every socket currently joined to
-  //? the receiver room. Auto-degrades to unicast when the room has at most
-  //? one socket — saves the room-iterator round-trip in solo cases (e.g. a
-  //? user querying an AI in their own private session).
-  const emitBroadcastSyncStream = (payload: SyncStreamPayload = {}) => {
-    if (shouldLogStream()) {
-      console.log(`sync: ${resolvedName} broadcastStream`, payload, 'cyan');
-    }
-    if (!receiver) return;
-    const io = getIoInstance();
-    if (!io) return;
-
-    const frame = buildBroadcastFrame(payload);
-    const roomMembers = io.sockets.adapter.rooms.get(receiver);
-    if (!roomMembers || roomMembers.size === 0) return;
-
-    //? Solo-room shortcut: if only one socket is listening (typically the
-    //? originator), unicast directly instead of iterating. Identical wire
-    //? output, slightly cheaper path.
-    if (roomMembers.size <= 1) {
-      const onlyId = roomMembers.values().next().value;
-      const onlySocket = onlyId ? io.sockets.sockets.get(onlyId) : undefined;
-      if (onlySocket) {
-        onlySocket.emit(socketEventNames.sync, frame);
+  //? Pipeline order: auth → rate-limit → validate → execute → respond.
+  //? Auth runs first so unauthenticated probes can't consume rate-limit budget
+  //? or learn input shape from `inputValidation.message`. Mirrors api handlers.
+  const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry | undefined;
+  if (serverSyncEntry) {
+    const { auth } = serverSyncEntry;
+    if (auth.login && !user?.id) {
+      if (shouldLogDev()) {
+        getLogger().warn(`sync: ${resolvedName} requires login`, { sync: resolvedName });
       }
-      return;
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: { status: 'error', errorCode: 'auth.required' },
+        preferred: preferredLocale,
+      }));
     }
 
-    io.to(receiver).emit(socketEventNames.sync, frame);
-  };
-
-  //? streamTo: selective fanout. Each socket joins a room keyed by its own
-  //? auth token at connect time, so emitting to those rooms reaches exactly
-  //? the targeted users (across multiple devices/tabs of the same token,
-  //? you'll hit every connection sharing that token).
-  const emitStreamToTokens = (
-    tokens: string | string[],
-    payload: SyncStreamPayload = {},
-  ) => {
-    const list = Array.isArray(tokens) ? tokens : [tokens];
-    const filtered = list.filter((t): t is string => typeof t === 'string' && t.length > 0);
-    if (filtered.length === 0) return;
-
-    if (shouldLogStream()) {
-      console.log(`sync: ${resolvedName} streamTo`, { tokens: filtered, payload }, 'cyan');
+    const validationResult = validateRequest({ auth, user: user! });
+    if (validationResult.status === 'error') {
+      if (shouldLogDev()) {
+        getLogger().warn(`sync: auth failed for ${resolvedName}`, { sync: resolvedName, errorCode: validationResult.errorCode });
+      }
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: validationResult.errorCode || 'auth.forbidden',
+          errorParams: validationResult.errorParams,
+          httpStatus: validationResult.httpStatus,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
     }
-    const io = getIoInstance();
-    if (!io) return;
-
-    const frame = buildBroadcastFrame(payload);
-    //? Single emit covers the union of all matching token-rooms. Socket.io
-    //? deduplicates per-socket so a recipient on two tabs (both joined to
-    //? their token-room) won't receive the chunk twice.
-    io.to(filtered).emit(socketEventNames.sync, frame);
-  };
+  }
 
   //? Rate limit check: per-sync bucket fallback + global per-IP cap
-  const defaultApiLimit = getProjectConfig().rateLimiting.defaultApiLimit;
-  if (defaultApiLimit !== false && defaultApiLimit > 0) {
-    const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
-    const keyPrefix = token ? 'token' : 'ip';
-
-    const { allowed, resetIn } = await checkRateLimit({
-      key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
-      limit: defaultApiLimit,
-      windowMs: getProjectConfig().rateLimiting.windowMs,
-    });
-
-    if (!allowed) {
-      void dispatchHook('rateLimitExceeded', {
-        scope: token ? 'user' : 'route',
-        key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
-        limit: defaultApiLimit,
-        windowMs: getProjectConfig().rateLimiting.windowMs,
-        count: defaultApiLimit + 1,
-        route: resolvedName,
-        userId: user?.id,
-      });
-      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
-        response: {
-          status: 'error',
-          errorCode: 'sync.rateLimitExceeded',
-          errorParams: [{ key: 'seconds', value: resetIn }],
-          httpStatus: 429,
-        },
-        preferred: preferredLocale,
-        userLanguage: user?.language,
-      }));
-    }
-  }
-
-  const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
-  if (defaultIpLimit !== false && defaultIpLimit > 0) {
-    const requesterIp = socket.handshake.address ?? 'unknown';
-    const { allowed, resetIn } = await checkRateLimit({
-      key: `ip:${requesterIp}:sync:all`,
-      limit: defaultIpLimit,
-      windowMs: getProjectConfig().rateLimiting.windowMs,
-    });
-
-    if (!allowed) {
-      void dispatchHook('rateLimitExceeded', {
-        scope: 'ip',
-        key: `ip:${requesterIp}:sync:all`,
-        limit: defaultIpLimit,
-        windowMs: getProjectConfig().rateLimiting.windowMs,
-        count: defaultIpLimit + 1,
-        ip: requesterIp,
-      });
-      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
-        response: {
-          status: 'error',
-          errorCode: 'sync.rateLimitExceeded',
-          errorParams: [{ key: 'seconds', value: resetIn }],
-          httpStatus: 429,
-        },
-        preferred: preferredLocale,
-        userLanguage: user?.language,
-      }));
-    }
-  }
+  const rateLimitOk = await applySyncRateLimits({
+    resolvedName,
+    token,
+    socket,
+    user,
+    responseIndex,
+    buildSyncError,
+    preferredLocale,
+  });
+  if (!rateLimitOk) return;
 
   let serverOutput = {};
-  if (syncObject[`${resolvedName}_server`]) {
-    const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry;
-    const { auth, main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
+  if (serverSyncEntry) {
+    const { main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
 
     const inputValidation = await validateInputByType({
       typeText: inputType,
@@ -390,34 +407,6 @@ export default async function handleSyncRequest({ msg, socket, token }: {
           status: 'error',
           errorCode: 'sync.invalidInputType',
           errorParams: [{ key: 'message', value: inputValidation.message }],
-        },
-        preferred: preferredLocale,
-        userLanguage: user?.language,
-      }));
-    }
-
-    //? if the login key is true we check if the user has an id in the session object
-    if (auth.login && !user?.id) {
-        if (shouldLogDev()) {
-          getLogger().warn(`sync: ${resolvedName} requires login`, { sync: resolvedName });
-        }
-        return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
-          response: { status: 'error', errorCode: 'auth.required' },
-          preferred: preferredLocale,
-        }));
-      }
-
-    const validationResult = validateRequest({ auth, user: user! });
-    if (validationResult.status === 'error') {
-      if (shouldLogDev()) {
-        getLogger().warn(`sync: auth failed for ${resolvedName}`, { sync: resolvedName, errorCode: validationResult.errorCode });
-      }
-      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
-        response: {
-          status: 'error',
-          errorCode: validationResult.errorCode || 'auth.forbidden',
-          errorParams: validationResult.errorParams,
-          httpStatus: validationResult.httpStatus,
         },
         preferred: preferredLocale,
         userLanguage: user?.language,
@@ -518,12 +507,14 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   }
 
   //? here we loop over all the connected clients
-  //? we keep track of an counter and await the loop every 100 iterations to avoid the server running out of memory and crashing
+  //? Yield to the event loop periodically so a giant `receiver: 'all'` fanout
+  //? doesn't starve other requests. Tunables live in projectConfig.sync.
+  const { fanoutYieldEvery, fanoutYieldMs } = getProjectConfig().sync;
   let recipientCount = 0;
   let tempCount = 1;
   for (const socketEntry of sockets) {
     tempCount++;
-    if (tempCount % 100 == 0) { await new Promise(resolve => setTimeout(resolve, 1)); }
+    if (tempCount % fanoutYieldEvery === 0) { await new Promise(resolve => setTimeout(resolve, fanoutYieldMs)); }
 
     const tempSocket = receiver === 'all'
       ? (socketEntry as [string, Socket])[1] //? Map entry
@@ -544,7 +535,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
       const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
         if (shouldLogStream()) {
-          console.log(`sync: ${resolvedName} client stream`, payload, 'cyan');
+          getLogger().debug(`sync: ${resolvedName} client stream`, { payload });
         }
 
         tempSocket.emit(socketEventNames.sync, {
@@ -617,7 +608,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
           status: 'success'
         };
         if (shouldLogDev()) {
-          console.log(result, 'blue');
+          getLogger().debug(`sync: ${resolvedName} client success`, { result });
         }
         tempSocket.emit(socketEventNames.sync, result);
       }
@@ -632,7 +623,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         status: 'success'
       };
       if (shouldLogDev()) {
-        console.log(result, 'blue');
+        getLogger().debug(`sync: ${resolvedName} server-only success`, { result });
       }
       tempSocket.emit(socketEventNames.sync, result);
     }

@@ -1,5 +1,7 @@
 # Email architecture
 
+> See also: [`packages/email/README.md`](../packages/email/README.md) for the full public API and adapter setup.
+
 LuckyStack treats transactional email as a **plug-in**: framework code never depends on a specific provider. Adapters are registered at server boot via a registry in `@luckystack/core`, mirroring how the project handles `notify`, the Sentry adapter, and `projectConfig`.
 
 ## Why a separate package
@@ -58,6 +60,8 @@ if (process.env.RESEND_API_KEY) {
 
 `ConsoleSender` is the safe default — it logs the rendered email to terminal so devs can see what would have been sent.
 
+`autoSelectEmailSender(opts?)` reads the env-var *names* from `ProjectConfig.email.envVars` (typed as `EmailEnvVarsConfig`) so installers can rename `RESEND_API_KEY` → `MY_APP_RESEND_KEY` etc. without forking. Numeric fallbacks live in `ProjectConfig.email.defaults` (`EmailDefaultsConfig`, currently just `smtpPort`). Both sub-shapes are re-exported from `@luckystack/core`.
+
 ## Sending
 
 ```ts
@@ -88,9 +92,33 @@ if (!result.ok) {
 
 ## Sentry interplay
 
-When `@luckystack/sentry` is installed and initialized, `sendEmail` errors are auto-reported via `captureException` from `@luckystack/core`. When it isn't, the call is a silent no-op — no special detection needed.
+When `@luckystack/error-tracking` is installed and initialized, `sendEmail` errors are auto-reported via `captureException` from `@luckystack/core`. When it isn't, the call is a silent no-op — no special detection needed.
 
 Terminal logging is independent: `email.logging.errors` and `email.logging.sends` flip the console output regardless of Sentry state.
+
+## Send-time hooks
+
+`sendEmail` dispatches `preEmailSend` before calling the registered sender and `postEmailSend` after, regardless of success or failure. These fire for every send — application-driven mail AND framework-mode password-reset emails alike — so audit consumers see the complete trail without having to wrap the helper.
+
+```ts
+import { registerHook } from '@luckystack/core';
+
+registerHook('preEmailSend', async ({ message, adapter }) => {
+  // Audit / suppression list / DLQ
+  if (await isOnSuppressionList(message.to)) {
+    return { stop: true, errorCode: 'email.suppressed' };
+  }
+});
+
+registerHook('postEmailSend', async ({ adapter, messageId, reason, ok }) => {
+  if (!ok) await alertOps({ adapter, reason });
+});
+```
+
+Payload fields (concrete shape lives in `packages/email/src/hookPayloads.ts`):
+
+- `preEmailSend` — `{ message: EmailMessage, adapter: string }`. Return a stop signal to abort. The dispatcher honors the signal and `sendEmail` returns `{ ok: false, reason: signal.errorCode }`.
+- `postEmailSend` — `{ adapter: string, messageId?: string, reason?: string, ok: boolean }` (plus the original `message` summary). `messageId` is set on success, `reason` on failure.
 
 ## Login flow integration
 

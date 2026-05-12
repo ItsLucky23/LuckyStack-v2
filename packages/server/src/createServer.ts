@@ -1,8 +1,9 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { writeBootUuid, getProjectConfig } from '@luckystack/core';
+import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
+import { registerProdRuntimeMapsProvider } from './runtimeMapsLoader';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -49,6 +50,20 @@ import type {
 export const createLuckyStackServer = async (
   options: CreateLuckyStackServerOptions = {}
 ): Promise<RunningLuckyStackServer> => {
+  //? Auto-register the framework-shipped runtime maps provider when the
+  //? consumer supplied a `loadGeneratedMaps` callback. Runs before
+  //? `verifyBootstrap` so the registration counts toward the boot check.
+  //? Consumers who hand-rolled their own provider via
+  //? `registerRuntimeMapsProvider` can simply omit `loadGeneratedMaps` and
+  //? the framework leaves their registration alone.
+  if (options.loadGeneratedMaps) {
+    registerProdRuntimeMapsProvider({
+      loadGenerated: options.loadGeneratedMaps,
+      presetEnvVar: options.runtimeMapsPresetEnvVar,
+      preset: options.runtimeMapsPreset,
+    });
+  }
+
   //? Fail fast if a project's overlay forgot to register a critical piece.
   //? Surface a single readable error instead of a stack trace deep inside
   //? a request handler.
@@ -61,6 +76,15 @@ export const createLuckyStackServer = async (
   const port = options.port ?? process.env.SERVER_PORT ?? 80;
   const ip = options.ip ?? process.env.SERVER_IP ?? '127.0.0.1';
   const enableDevTools = options.enableDevTools ?? process.env.NODE_ENV !== 'production';
+
+  //? Register the resolved bind address so framework code that needs it
+  //? (e.g. `checkOrigin` building the same-origin entry) doesn't drift when
+  //? the consumer passed `options.ip`/`options.port` without also setting
+  //? the legacy `SERVER_IP`/`SERVER_PORT` env vars.
+  registerBindAddress({
+    ip,
+    port: typeof port === 'string' ? Number.parseInt(port, 10) : port,
+  });
 
   if (enableDevTools) {
     //? Dev-only: console-log color tagger + devkit hot reload + REPL.
@@ -95,7 +119,7 @@ export const createLuckyStackServer = async (
       httpServer.listen(portValue, ip, () => {
         const config = getProjectConfig();
         if (config.logging.socketStartup || config.logging.devLogs) {
-          console.log(`Server is running on http://${ip}:${String(port)}/`);
+          getLogger().info(`Server is running on http://${ip}:${String(port)}/`);
         }
         callback?.();
         resolve(httpServer);

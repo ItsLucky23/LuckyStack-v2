@@ -46,3 +46,12 @@ export { setupWatchers } from './hotReload';
 
 // Deep type resolver (consumed lazily by @luckystack/core's runtimeTypeValidation.ts, dev-only)
 export { resolveRuntimeTypeText, clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
+
+// Pre-deploy validator (consumed by the `luckystack-validate-deploy` CLI; safe to call directly from build scripts).
+export { validateDeploy } from './validateDeploy';
+export type {
+  ValidateDeployInput,
+  ValidateDeployResult,
+  ValidationFinding,
+  ValidationSeverity,
+} from './validateDeploy';

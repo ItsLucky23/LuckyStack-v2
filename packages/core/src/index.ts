@@ -10,33 +10,41 @@ export { setIoInstance, getIoInstance } from './socketTypes';
 export {
   registerProjectConfig,
   getProjectConfig,
+  getProjectName,
   isProjectConfigRegistered,
   DEFAULT_PROJECT_CONFIG,
 } from './projectConfig';
 export type {
   ProjectConfig,
   ProjectConfigInput,
+  AppConfig,
   LoggingConfig,
   RateLimitingConfig,
   SessionConfig,
-  SentryConfig,
-  SentrySampleRates,
   HttpConfig,
   HttpStreamConfig,
   SecurityHeadersConfig,
   CorsConfig,
   AuthConfig,
   SocketConfig,
+  SyncConfig,
+  SyncStreamThrottleConfig,
+  OfflineQueueConfig,
   DevConfig,
   PathsConfig,
-  EmailConfig,
-  EmailLoggingConfig,
 } from './projectConfig';
 export {
   registerRuntimeMapsProvider,
   getRuntimeApiMaps,
   getRuntimeSyncMaps,
+  isRuntimeMapsProviderRegistered,
 } from './runtimeMapsRegistry';
+export {
+  registerApiMethodMap,
+  getRegisteredApiMethod,
+  isApiMethodMapRegistered,
+} from './apiMethodMapRegistry';
+export type { HttpMethodLiteral, ApiMethodMap } from './apiMethodMapRegistry';
 export type {
   RuntimeMapsProvider,
   RuntimeApiMapsResult,
@@ -86,7 +94,8 @@ export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionTyp
 export * from './sentrySetup';
 export * from './env';
 export * from './db';
-export { redis } from './redis';
+export { redis, getRedisConnectionOptions } from './redis';
+export type { RedisConnectionOptions } from './redis';
 export {
   registerPrismaClient,
   registerRedisClient,
@@ -96,7 +105,7 @@ export {
   isRedisClientRegistered,
 } from './clients';
 export { attachSocketRedisAdapter } from './socketRedisAdapter';
-export { writeBootUuid, readBootUuid, resolveEnvKey } from './bootUuid';
+export { writeBootUuid, readBootUuid, resolveEnvKey, BOOT_KEY_PREFIX } from './bootUuid';
 export {
   collectSynchronizedEnvKeys,
   computeSynchronizedEnvHashes,
@@ -108,6 +117,7 @@ export {
   getLogger,
   isLoggerRegistered,
   resetLoggerForTests,
+  createDevLogger,
 } from './loggerRegistry';
 export type { Logger, LoggerContext } from './loggerRegistry';
 export {
@@ -120,6 +130,9 @@ export * from './cookies';
 export * from './httpApiUtils';
 export * from './paths';
 export { serveAvatar } from './serveAvatars';
+export { processUpload } from './processUpload';
+export type { ProcessUploadInput, ProcessUploadResult } from './processUpload';
+export { registerBindAddress, getBindAddress } from './bindAddress';
 export {
   registerAvatarConfig,
   getAvatarConfig,
@@ -151,7 +164,7 @@ export { getCsrfToken, clearCsrfToken, httpFetch } from './csrf';
 // `apiRequest` is exported from `./client.ts` — it imports React-coupled
 // project code (notify → TranslationProvider.tsx) that must not be pulled
 // into server compilation via this server-safe barrel.
-export { registerHook, dispatchHook, clearAllHooks } from './hooks/registry';
+export { registerHook, dispatchHook, clearAllHooks, registerSyncHook, dispatchSyncHook } from './hooks/registry';
 export type { DispatchResult } from './hooks/registry';
 export type {
   HookSessionShape,
@@ -160,12 +173,27 @@ export type {
   HookHandler,
   HookName,
   HookPayloads,
+  PreApiValidatePayload,
+  PostApiValidatePayload,
   PreApiExecutePayload,
   PostApiExecutePayload,
+  PreApiRespondPayload,
+  PostApiRespondPayload,
+  ApiResponseEnvelope,
   PreSyncFanoutPayload,
   PostSyncFanoutPayload,
   ApiErrorPayload,
   SyncErrorPayload,
   RateLimitExceededPayload,
   CorsRejectedPayload,
+  CsrfMismatchPayload,
+  PreSessionRefreshPayload,
+  PostSessionRefreshPayload,
+  OnUploadStartPayload,
+  OnUploadCompletePayload,
+  SyncHookName,
+  SyncHookHandler,
+  SyncHookPayloads,
+  PreErrorNormalizePayload,
+  PostErrorNormalizePayload,
 } from './hooks/types';

@@ -17,15 +17,15 @@
 
 import fs from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { getProjectConfig, getGeneratedApiDocsPath } from '@luckystack/core';
+import { getGeneratedApiDocsPath, tryCatch } from '@luckystack/core';
 import { renderDocsHtml } from './docsHtml';
 
 export interface MountDocsUiOptions {
   /** Path the docs UI is served from. Default: `/_docs`. */
   routePath?: string;
   /**
-   * Page title shown in the header + browser tab. Defaults to the project's
-   * `pageTitle` config followed by " — API docs".
+   * Page title shown in the header + browser tab. Defaults to
+   * "LuckyStack — API docs". Pass an explicit string to brand for a consumer.
    */
   pageTitle?: string;
   /**
@@ -79,13 +79,8 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
 
     if (pathOnly === jsonPath) {
       const docsPath = options.apiDocsPath ?? getGeneratedApiDocsPath();
-      try {
-        const content = await fs.readFile(docsPath, 'utf8');
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Cache-Control', 'no-store');
-        res.end(content);
-      } catch {
+      const [readError, content] = await tryCatch(() => fs.readFile(docsPath, 'utf8'));
+      if (readError) {
         res.statusCode = 404;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({
@@ -93,20 +88,20 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
           expectedAt: docsPath,
           hint: 'Run `npm run generateArtifacts` to generate it.',
         }));
+      } else {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(content);
       }
       return true;
     }
 
-    //? Serve the HTML page itself.
-    const projectTitle = (() => {
-      try {
-        return ((getProjectConfig() as unknown) as { pageTitle?: string }).pageTitle;
-      } catch {
-        return undefined;
-      }
-    })();
-    const fallbackTitle = projectTitle ?? 'LuckyStack';
-    const title = options.pageTitle ?? `${fallbackTitle} — API docs`;
+    //? Serve the HTML page itself. Title comes from `options.pageTitle`
+    //? (set via `mountDocsUi({ pageTitle })`) — there's no implicit lookup
+    //? from ProjectConfig because the consumer's `config.ts` `pageTitle`
+    //? field isn't part of the framework's typed ProjectConfig shape.
+    const title = options.pageTitle ?? 'LuckyStack — API docs';
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');

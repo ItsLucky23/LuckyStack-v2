@@ -13,9 +13,10 @@ import {
   tryCatch,
   parseTransportRouteName,
   validateInputByType,
+  dispatchHook,
   getLogger,
 } from '@luckystack/core';
-import { setSentryUser, startSpan } from '@luckystack/sentry';
+import { setSentryUser, startSpan } from '@luckystack/error-tracking';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '@luckystack/core';
 
 /**
@@ -113,25 +114,75 @@ const isRuntimeApiResult = (value: unknown): value is RuntimeApiResult => {
 const shouldLogDev = () => getProjectConfig().logging.devLogs;
 const shouldLogStream = () => getProjectConfig().logging.stream;
 
+const warnedMissingInputType = new Set<string>();
+const warnIfInputTypeMissing = (resolvedName: string, inputType: string | undefined): void => {
+  if (!getProjectConfig().dev.warnOnMissingInputType) return;
+  if (inputType && inputType.trim().length > 0 && inputType.trim() !== 'any') return;
+  if (warnedMissingInputType.has(resolvedName)) return;
+  warnedMissingInputType.add(resolvedName);
+  getLogger().warn(`http-api: route ${resolvedName} has no inputType — runtime input validation is disabled.`);
+};
+
 export type ApiHttpStreamEvent = ApiStreamPayload;
 
-export async function handleHttpApiRequest({
-  name,
-  data,
-  token,
-  requesterIp,
-  xLanguageHeader,
-  acceptLanguageHeader,
-  method = 'POST',
-  stream,
-}: HttpApiRequestParams): Promise<ApiNetworkResponse> {
+export async function handleHttpApiRequest(params: HttpApiRequestParams): Promise<ApiNetworkResponse> {
+  const { response, user, preferredLocale } = await runHandleHttpApiRequest(params);
+
+  //? `name` may not parse to a valid route — pass the original raw name as
+  //? routeName so hook handlers can still correlate the rejection.
+  const routeNameForHook = params.name.startsWith('api/') ? params.name : `api/${params.name}`;
+
+  const preRespond = { routeName: routeNameForHook, user, response: response as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } };
+  const preRespondResult = await dispatchHook('preApiRespond', preRespond);
+
+  //? Honor a stop signal from `preApiRespond`: rewrite the envelope into a
+  //? localized error response per the signal's errorCode/httpStatus instead
+  //? of letting the original through. Same contract as the socket variant.
+  const finalResponse = preRespondResult.stopped
+    ? normalizeErrorResponse({
+        response: { status: 'error', errorCode: preRespondResult.signal.errorCode },
+        preferredLocale,
+        userLanguage: user?.language,
+        fallbackHttpStatus: preRespondResult.signal.httpStatus ?? 403,
+      }) as ApiNetworkResponse
+    : preRespond.response as ApiNetworkResponse;
+
+  await dispatchHook('postApiRespond', { routeName: routeNameForHook, user, response: finalResponse });
+
+  return finalResponse;
+}
+
+interface RunHandleHttpApiRequestResult {
+  response: ApiNetworkResponse;
+  user: SessionLayout | null;
+  preferredLocale: string | null | undefined;
+}
+
+async function runHandleHttpApiRequest(params: HttpApiRequestParams): Promise<RunHandleHttpApiRequestResult> {
+  const preferredLocale =
+    extractLanguageFromHeader(params.xLanguageHeader)
+    ?? extractLanguageFromHeader(params.acceptLanguageHeader);
+  const user = await getSession(params.token);
+  const response = await runHandleHttpApiRequestInner(params, user, preferredLocale);
+  return { response, user, preferredLocale };
+}
+
+async function runHandleHttpApiRequestInner(
+  {
+    name,
+    data,
+    token,
+    requesterIp,
+    xLanguageHeader: _xLanguageHeader,
+    acceptLanguageHeader: _acceptLanguageHeader,
+    method = 'POST',
+    stream,
+  }: HttpApiRequestParams,
+  user: SessionLayout | null,
+  preferredLocale: string | null | undefined,
+): Promise<ApiNetworkResponse> {
 
   const normalizedName = name.startsWith('api/') ? name : `api/${name}`;
-
-  const preferredLocale =
-    extractLanguageFromHeader(xLanguageHeader)
-    ?? extractLanguageFromHeader(acceptLanguageHeader);
-  const user = await getSession(token);
   setSentryUser(user?.id ? {
     id: typeof user.id === 'string' ? user.id : String(user.id),
     email: user.email ?? undefined,
@@ -184,7 +235,7 @@ export async function handleHttpApiRequest({
   const resolvedName = parsedRoute.normalizedFullName;
 
   if (shouldLogDev()) {
-    console.log(`http api: ${resolvedName} called`, 'cyan');
+    getLogger().debug(`http api: ${resolvedName} called`);
   }
 
   const { apisObject, functionsObject } = await getRuntimeApiMapsFromSource();
@@ -206,38 +257,9 @@ export async function handleHttpApiRequest({
   const inputType = runtimeApiRoute.inputType;
   const inputTypeFilePath = runtimeApiRoute.inputTypeFilePath;
 
-  const inputValidation = await validateInputByType({
-    typeText: inputType,
-    value: requestData,
-    rootKey: 'data',
-    filePath: inputTypeFilePath,
-  });
-  if (inputValidation.status === 'error') {
-    return buildNetworkError({
-      response: {
-        status: 'error',
-        errorCode: 'api.invalidInputType',
-        errorParams: [{ key: 'message', value: inputValidation.message }],
-      },
-      fallbackHttpStatus: 400,
-    });
-  }
-
-  // HTTP method validation
-  const expectedMethod = declaredMethod ?? inferHttpMethod(resolvedName);
-  if (method !== expectedMethod) {
-    if (shouldLogDev()) {
-      console.log(`Method mismatch for ${resolvedName}: expected ${expectedMethod}, got ${method}`, 'yellow');
-    }
-    return buildNetworkError({
-      response: {
-        status: 'error',
-        errorCode: 'api.methodNotAllowed',
-        errorParams: [{ key: 'method', value: expectedMethod }],
-      },
-      fallbackHttpStatus: 405,
-    });
-  }
+  //? Pipeline order: auth → rate-limit → method → validate → execute → respond.
+  //? Auth runs first so unauthenticated probes can't enumerate routes or
+  //? learn input shape from `inputValidation.message` / method-mismatch params.
 
   // Auth validation: check login requirement
   if (auth.login && !user?.id) {
@@ -292,8 +314,17 @@ export async function handleHttpApiRequest({
     });
 
     if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: token ? 'user' : 'route',
+        key: rateLimitKey,
+        limit: effectiveApiLimit,
+        windowMs: getProjectConfig().rateLimiting.windowMs,
+        count: effectiveApiLimit + 1,
+        route: resolvedName,
+        userId: user?.id,
+      });
       if (shouldLogDev()) {
-        console.log(`Rate limit exceeded for HTTP API ${resolvedName}`, 'yellow');
+        getLogger().warn(`http api: rate limit exceeded for ${resolvedName}`);
       }
       return buildNetworkError({
         response: {
@@ -317,8 +348,16 @@ export async function handleHttpApiRequest({
     });
 
     if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: 'ip',
+        key: `ip:${ipBucket}:api:all`,
+        limit: defaultIpLimit,
+        windowMs: getProjectConfig().rateLimiting.windowMs,
+        count: defaultIpLimit + 1,
+        ip: ipBucket,
+      });
       if (shouldLogDev()) {
-        console.log(`Global IP rate limit exceeded for ${ipBucket}`, 'yellow');
+        getLogger().warn(`http api: global IP rate limit exceeded`, { ip: ipBucket });
       }
       return buildNetworkError({
         response: {
@@ -331,6 +370,51 @@ export async function handleHttpApiRequest({
     }
   }
 
+  // HTTP method validation (post-auth so unauthenticated probes don't learn the route exists)
+  const expectedMethod = declaredMethod ?? inferHttpMethod(resolvedName);
+  if (method !== expectedMethod) {
+    if (shouldLogDev()) {
+      getLogger().warn(`http api: method mismatch for ${resolvedName}`, { expected: expectedMethod, got: method });
+    }
+    return buildNetworkError({
+      response: {
+        status: 'error',
+        errorCode: 'api.methodNotAllowed',
+        errorParams: [{ key: 'method', value: expectedMethod }],
+      },
+      fallbackHttpStatus: 405,
+    });
+  }
+
+  // Input-type validation (post-auth so unauthenticated probes don't get input-shape leaks)
+  warnIfInputTypeMissing(resolvedName, inputType);
+  await dispatchHook('preApiValidate', { routeName: resolvedName, data: requestData, user });
+
+  const inputValidation = await validateInputByType({
+    typeText: inputType,
+    value: requestData,
+    rootKey: 'data',
+    filePath: inputTypeFilePath,
+  });
+
+  await dispatchHook('postApiValidate', {
+    routeName: resolvedName,
+    data: requestData,
+    user,
+    validation: inputValidation,
+  });
+
+  if (inputValidation.status === 'error') {
+    return buildNetworkError({
+      response: {
+        status: 'error',
+        errorCode: 'api.invalidInputType',
+        errorParams: [{ key: 'message', value: inputValidation.message }],
+      },
+      fallbackHttpStatus: 400,
+    });
+  }
+
   // Execute the API handler
   const emitApiStream = (payload: ApiStreamPayload = {}) => {
     if (!stream) {
@@ -338,12 +422,25 @@ export async function handleHttpApiRequest({
     }
 
     if (shouldLogStream()) {
-      console.log(`http api: ${resolvedName} stream`, payload, 'cyan');
+      getLogger().debug(`http api: ${resolvedName} stream`, { payload });
     }
 
     stream(payload);
   };
 
+  const preExecuteResult = await dispatchHook('preApiExecute', {
+    routeName: resolvedName,
+    data: requestData,
+    user,
+  });
+  if (preExecuteResult.stopped) {
+    return buildNetworkError({
+      response: { status: 'error', errorCode: preExecuteResult.signal.errorCode },
+      fallbackHttpStatus: preExecuteResult.signal.httpStatus ?? 403,
+    });
+  }
+
+  const executeStart = Date.now();
   const span = startSpan(resolvedName, 'api.request.http') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
     async () => await main({ data: requestData, user, functions: functionsObject, stream: emitApiStream }),
@@ -357,6 +454,15 @@ export async function handleHttpApiRequest({
   );
   span?.end?.();
 
+  await dispatchHook('postApiExecute', {
+    routeName: resolvedName,
+    data: requestData,
+    user,
+    result,
+    error: error ?? null,
+    durationMs: Date.now() - executeStart,
+  });
+
   if (error) {
     if (shouldLogDev()) {
       getLogger().error(`http-api: error in ${resolvedName}`, error, { route: resolvedName, transport: 'http' });
@@ -369,7 +475,7 @@ export async function handleHttpApiRequest({
 
   if (result !== undefined && result !== null) {
     if (shouldLogDev()) {
-      console.log(`http api: ${resolvedName} completed`, 'cyan');
+      getLogger().debug(`http api: ${resolvedName} completed`);
     }
 
     // Check if result is already formatted as ApiResponse
@@ -401,7 +507,7 @@ export async function handleHttpApiRequest({
   }
 
   if (shouldLogDev()) {
-    console.log(`WARNING: HTTP API ${resolvedName} returned nothing`, 'yellow');
+    getLogger().warn(`http api: ${resolvedName} returned nothing`);
   }
   return buildNetworkError({
     response: { status: 'error', errorCode: 'api.emptyResponse' },

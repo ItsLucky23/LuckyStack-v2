@@ -29,6 +29,21 @@ export interface ValidationResult {
 
 /**
  * Validate a request against authentication requirements.
+ *
+ * Multiple constraints on a single `additional` entry are AND'd: every
+ * specified field (`nullish`, `type`, `value`, `mustBeFalsy`) must pass
+ * for that entry to validate. Each entry across the array is also AND'd:
+ * the request must pass every entry to succeed.
+ *
+ * Constraint semantics:
+ *   - `nullish: true`     — `val` must be `null` or `undefined`.
+ *   - `nullish: false`    — `val` must NOT be `null` or `undefined`.
+ *   - `type: 'string'`    — `typeof val === 'string'` (skipped when val is null/undefined).
+ *   - `value: <x>`        — strict equality `val === x`. Omit the field entirely if you
+ *                           don't want this check; setting `value: undefined`
+ *                           explicitly means "val must be undefined".
+ *   - `mustBeFalsy: true`  — `isFalsy(val)`.
+ *   - `mustBeFalsy: false` — `!isFalsy(val)`.
  */
 export const validateRequest = ({
   auth,
@@ -42,8 +57,15 @@ export const validateRequest = ({
     return { status: 'success' };
   }
 
+  const forbid = (key: string): ValidationResult => ({
+    status: 'error',
+    errorCode: 'auth.forbidden',
+    errorParams: [{ key: 'key', value: key }],
+    httpStatus: 403,
+  });
+
   for (const condition of auth.additional) {
-    // Check if key exists in user session
+    // Key must exist in user session — that's a setup error, not a runtime auth fail.
     if (!(condition.key in user)) {
       return {
         status: 'error',
@@ -54,67 +76,25 @@ export const validateRequest = ({
     }
 
     const val = user[condition.key];
+    const isNullish = val === null || val === undefined;
 
-    // Check nullish constraint
-    if (typeof condition.nullish === 'boolean') {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      const isNullish = val === null || val === undefined;
-      if (condition.nullish && !isNullish) {
-        return {
-          status: 'error',
-          errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: condition.key }],
-          httpStatus: 403,
-        };
-      }
-      if (!condition.nullish && isNullish) {
-        return {
-          status: 'error',
-          errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: condition.key }],
-          httpStatus: 403,
-        };
-      }
+    if (typeof condition.nullish === 'boolean' && condition.nullish !== isNullish) {
+      return forbid(condition.key);
     }
 
-    // Check type constraint (skip null or undefined values)
-    if (condition.type && val != null && typeof val !== condition.type) {
-        return {
-          status: 'error',
-          errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: condition.key }],
-          httpStatus: 403,
-        };
-      }
+    if (condition.type && !isNullish && typeof val !== condition.type) {
+      return forbid(condition.key);
+    }
 
-    // Check exact value constraint (strict equality)
+    //? Use `'value' in condition` so an explicit `value: undefined` still
+    //? participates (caller saying "val must be undefined"), distinct from
+    //? the omitted case (no exact-value constraint).
     if ('value' in condition && val !== condition.value) {
-        return {
-          status: 'error',
-          errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: condition.key }],
-          httpStatus: 403,
-        };
-      }
+      return forbid(condition.key);
+    }
 
-    // Check truthy/falsy constraint
-    if (typeof condition.mustBeFalsy === 'boolean') {
-      if (condition.mustBeFalsy && !isFalsy(val)) {
-        return {
-          status: 'error',
-          errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: condition.key }],
-          httpStatus: 403,
-        };
-      }
-      if (!condition.mustBeFalsy && isFalsy(val)) {
-        return {
-          status: 'error',
-          errorCode: 'auth.forbidden',
-          errorParams: [{ key: 'key', value: condition.key }],
-          httpStatus: 403,
-        };
-      }
+    if (typeof condition.mustBeFalsy === 'boolean' && condition.mustBeFalsy !== isFalsy(val)) {
+      return forbid(condition.key);
     }
   }
 

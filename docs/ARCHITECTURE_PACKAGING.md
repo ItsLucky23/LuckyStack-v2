@@ -2,8 +2,10 @@
 
 > Single source of truth for LuckyStack package extraction strategy.
 
-Last updated: 2026-04-21
-Status: Active implementation plan
+Last updated: 2026-05-06
+Status: Implementation complete; awaiting first publish
+
+> **Current state (2026-05-06):** all 13 workspaces in `packages/` build clean. The 11 Tier-A packages have READMEs and are wired into `bootstrapLuckyStack` / `createLuckyStackServer`. Every `package.json` still has `"private": true` — flipping that to publish on the `@luckystack` npm scope is the remaining bootstrap step. See `scan-1.md` and `scan-2.md` for the verification pass behind this status. Per-package READMEs under `packages/<name>/README.md` are the source of truth for public API.
 
 ---
 
@@ -83,9 +85,9 @@ Dependencies:
 - If login package is installed, presence can consume its session adapter.
 - If login package is not installed, projects can provide a custom session adapter.
 
-### 2.5 Sentry (optional)
+### 2.5 Error tracking (optional)
 
-`@luckystack/sentry`
+`@luckystack/error-tracking` (renamed from `@luckystack/sentry` on 2026-05-11; kept Sentry-backed but the package name is now implementation-agnostic so future adapters can slot in)
 
 Responsibilities:
 
@@ -1530,12 +1532,12 @@ Three tiers based on intent and remaining coupling:
 | `@luckystack/core` | **A — Publishable target** | Foundation layer. Holds DI registries (config, runtime-maps, notifier), socket helpers, Redis. One blocker: `synchronizedEnvHashes.ts` imports `../../../deploy.config`. |
 | `@luckystack/api` | **A — Publishable target** | Now zero project value imports. Pure framework — handlers + HTTP variants. |
 | `@luckystack/sync` | **A — Publishable target** | Same status as api. |
-| `@luckystack/sentry` | **A — Publishable target** | Single file, only consumes `getProjectConfig()` from core. Clean. |
+| `@luckystack/error-tracking` | **A — Publishable target** | Single file, owns its own `registerSentryConfig` registry. Clean. |
 | `@luckystack/test-runner` | **A — Publishable target** | Dev-only utilities (Zod schema sampler). No project coupling. |
 | `@luckystack/presence` | **A — Publishable target** | After §39.2's `peerNotifier.ts` fix, zero project imports. |
 | `@luckystack/login` | **C — Coupled to project Prisma** | Imports `prisma.user.create` etc. from core's PrismaClient. Would need generic-ification over `User` shape, or registration of a session factory via DI, to be tier-A. Out of scope for the current pass. |
 | `@luckystack/devkit` | **B — Project-glue** | Hot-reload tooling that reads project locale paths and imports `reloadLocaleTranslations` from `server/utils/responseNormalizer`. Stays project-coupled by design — it's dev tooling, not a framework runtime package. |
-| `@luckystack/router` | **B — Project-glue** | Imports `deploy.config` and `services.config` directly. Router topology is project-specific by nature. Could be tier-A if configs were registered via DI, but the value of doing so is unclear since router is project deployment infra. |
+| `@luckystack/router` | **A — Publishable target** | Promoted on 2026-05-11. Reads deploy/services configs via `getDeployConfig()` / `getServicesConfig()` DI surfaces — the `luckystack-router` bin loads the consumer's compiled config modules via `--deploy` / `--services` flags before calling `startRouter()`. |
 
 ### 39.2 Code-level coupling matrix
 
@@ -1546,7 +1548,7 @@ After §38.1, remaining `packages/** → project` imports:
 | `core` | `synchronizedEnvHashes.ts` | `../../../deploy.config` | **Closed (§39.7)** — `getDeployConfig()` from new `deployConfigRegistry`. |
 | `presence` | `activity/peerNotifier.ts` | `../../../../server/sockets/socket` | **Closed (§39.5)** — `getIoInstance()` from core. |
 | `devkit` | `hotReload.ts` | `../../../server/utils/responseNormalizer` | **Accept** — devkit is tier-B. |
-| `router` | `resolveTarget.ts`, `bootHandshake.ts`, `startRouter.ts` | `../../../deploy.config`, `../../../services.config` | **Accept for tier-B** — or DI if router moves to tier-A. |
+| `router` | `resolveTarget.ts`, `bootHandshake.ts`, `startRouter.ts` | `getDeployConfig()`, `getServicesConfig()` from `@luckystack/core` | **Closed (2026-05-11)** — router uses DI surfaces; the `luckystack-router` bin loads consumer config modules. |
 
 After §39.7, every tier-A package has **zero** project-level value or type imports. The remaining `packages/** → project` imports are all in tier-B (devkit, router) and accepted by design.
 
@@ -1832,10 +1834,10 @@ Closes §39.4 step 3. Each package's `package.json` now declares its real `depen
 | Package | `dependencies` | `peerDependencies` |
 | --- | --- | --- |
 | `@luckystack/core` | `dotenv`, `@socket.io/redis-adapter` | `@prisma/client`, `ioredis`, `socket.io`, `socket.io-client`, `zod` |
-| `@luckystack/sentry` | `@luckystack/core` | `@sentry/node` |
+| `@luckystack/error-tracking` | `@luckystack/core` | `@sentry/node` |
 | `@luckystack/login` | `@luckystack/core`, `bcryptjs`, `dotenv`, `validator` | `@prisma/client`, `socket.io` |
-| `@luckystack/api` | `@luckystack/core`, `@luckystack/login`, `@luckystack/sentry` | `socket.io` |
-| `@luckystack/sync` | `@luckystack/core`, `@luckystack/login`, `@luckystack/sentry` | `react`, `socket.io`, `socket.io-client` |
+| `@luckystack/api` | `@luckystack/core`, `@luckystack/login`, `@luckystack/error-tracking` | `socket.io` |
+| `@luckystack/sync` | `@luckystack/core`, `@luckystack/login`, `@luckystack/error-tracking` | `react`, `socket.io`, `socket.io-client` |
 | `@luckystack/presence` | `@luckystack/core`, `@luckystack/login` | `socket.io` |
 | `@luckystack/test-runner` | — | `zod` |
 | `@luckystack/devkit` | `@luckystack/core`, `chokidar` | `@prisma/client`, `typescript`, `zod` |
@@ -1844,7 +1846,7 @@ Closes §39.4 step 3. Each package's `package.json` now declares its real `depen
 ### What this changes for builds
 
 - **No build-time difference today** — workspaces was already resolving sister packages and root `node_modules` was already hoisting third-party deps. tsup's `skipNodeModulesBundle: true` continues to leave them as imports.
-- **Real consumers** doing `npm install @luckystack/api` will now correctly pull `@luckystack/core`, `@luckystack/login`, `@luckystack/sentry` automatically, and npm will warn (not fail) if they're missing the peer deps.
+- **Real consumers** doing `npm install @luckystack/api` will now correctly pull `@luckystack/core`, `@luckystack/login`, `@luckystack/error-tracking` automatically, and npm will warn (not fail) if they're missing the peer deps.
 - **`tsup` will start respecting the declared peer/regular split** — once we drop `skipNodeModulesBundle`, peers become mandatory externals automatically.
 
 ### What's still missing for actual publish

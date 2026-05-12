@@ -6,11 +6,12 @@ export const disconnectTimers = new Map<string, NodeJS.Timeout>();
 export const tempDisconnectedSockets = new Set<string>();
 export const clientSwitchedTab = new Set<string>();
 
-//? Back-compat exports — kept so any caller that read these constants directly
-//? still resolves. Internal callsites should prefer `getPresenceConfig()` so
-//? per-install overrides take effect at call-time.
-export const disconnectReasonsWeIgnore: string[] = getPresenceConfig().ignoreReasons;
-export const disconnectReasonsWeAllow: string[] = getPresenceConfig().allowReasons;
+//? `disconnectReasonsWeIgnore` and `disconnectReasonsWeAllow` were removed.
+//? Earlier they were `string[]` constants captured at module-load (ignored
+//? `registerPresenceConfig()` overrides), then briefly switched to
+//? `() => string[]` (call-shape break for any consumer using `.includes()`).
+//? Both were dead-end APIs — no internal caller used them. Consumers should
+//? read from `getPresenceConfig().ignoreReasons` / `.allowReasons` directly.
 
 export const getDisconnectTime = ({
   token,

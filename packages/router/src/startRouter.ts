@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { getDeployConfig, getServicesConfig, type DeployEnvironmentShape } from '@luckystack/core';
+import { getDeployConfig, getLogger, getServicesConfig, tryCatch, type DeployEnvironmentShape } from '@luckystack/core';
 import { createServiceTargetResolver } from './resolveTarget';
 import type { ServiceTargetResolver } from './resolveTarget';
 import { startHealthPoller } from './healthPoller';
@@ -62,16 +62,18 @@ export interface RunningRouter {
 }
 
 export const startRouter = async (input: StartRouterInput): Promise<RunningRouter> => {
-  const port = input.port ?? Number(process.env.ROUTER_PORT ?? 4000);
   const deployConfig = getDeployConfig();
   const servicesConfig = getServicesConfig();
+  const defaultRouterPort = deployConfig.routing?.defaultRouterPort ?? 4000;
+  const port = input.port ?? Number(process.env.ROUTER_PORT ?? defaultRouterPort);
   const missingServiceErrorCode = deployConfig.routing?.missingServiceErrorCode ?? 'serviceNotAssigned';
 
   const envMap = (deployConfig.environments ?? {}) as Record<string, EnvironmentDefinition | undefined>;
   const currentEnv = envMap[input.currentEnvKey];
   const hasFallback = Boolean(currentEnv?.fallback);
   const enableFallbackRouting = deployConfig.development?.enableFallbackRouting ?? false;
-  const healthPollMs = deployConfig.development?.healthPollMs ?? 5000;
+  const defaultHealthPollMs = deployConfig.routing?.defaultHealthPollMs ?? 5000;
+  const healthPollMs = deployConfig.development?.healthPollMs ?? defaultHealthPollMs;
   const isDevMode = input.currentEnvKey === 'development';
 
   //? Split/fallback mode = `environment.fallback` is set on the current env.
@@ -87,23 +89,24 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   let resolverRef: ServiceTargetResolver | null = null;
 
   if (wantSharedHealth) {
-    try {
-      healthStore = await createRedisHealthStore({
-        envKey: input.currentEnvKey,
-        onExternalChange: (service, healthy) => {
-          //? Mirror Redis-published changes into the resolver's local map too,
-          //? so `getLocalHealth` returns a consistent view for tests/inspectors.
-          resolverRef?.setLocalHealth(service, healthy);
-          input.onHealthChange?.(service, healthy);
-        },
-      });
-    } catch (err) {
+    const [storeError, store] = await tryCatch(() => createRedisHealthStore({
+      envKey: input.currentEnvKey,
+      onExternalChange: (service, healthy) => {
+        //? Mirror Redis-published changes into the resolver's local map too,
+        //? so `getLocalHealth` returns a consistent view for tests/inspectors.
+        resolverRef?.setLocalHealth(service, healthy);
+        input.onHealthChange?.(service, healthy);
+      },
+    }));
+    if (storeError) {
       if (requireSharedHealth) {
         throw new Error(
-          `[router] split/fallback mode requires shared Redis, but the store failed to initialize: ${(err as Error).message}`,
+          `[router] split/fallback mode requires shared Redis, but the store failed to initialize: ${storeError.message}`,
         );
       }
-      console.warn(`[router] shared health state unavailable, falling back to in-memory: ${(err as Error).message}`);
+      getLogger().warn('[router] shared health state unavailable, falling back to in-memory', { message: storeError.message });
+    } else {
+      healthStore = store ?? null;
     }
   }
 
@@ -142,7 +145,7 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
       localBindings: currentEnv.bindings,
       intervalMs: healthPollMs,
       onStateChange: (service, healthy) => {
-        console.log(`[router] local service '${service}' is now ${healthy ? 'healthy' : 'unhealthy'}`);
+        getLogger().info(`[router] local service '${service}' is now ${healthy ? 'healthy' : 'unhealthy'}`);
         input.onHealthChange?.(service, healthy);
       },
     });
@@ -160,7 +163,7 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   }
   input.onReady?.({ port, localHealth });
   const sharedLabel = healthStore ? ' shared-health=redis' : ' shared-health=in-memory';
-  console.log(`[router] listening on http://0.0.0.0:${port}/ (env: ${input.currentEnvKey}${input.localPresetKey ? `, preset: ${input.localPresetKey}` : ''}${sharedLabel})`);
+  getLogger().info(`[router] listening on http://0.0.0.0:${port}/ (env: ${input.currentEnvKey}${input.localPresetKey ? `, preset: ${input.localPresetKey}` : ''}${sharedLabel})`);
 
   return {
     port,

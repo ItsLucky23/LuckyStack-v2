@@ -7,6 +7,7 @@
 //? that mode.
 
 import { getProjectConfig } from './projectConfig';
+import tryCatch from './tryCatch';
 
 let cachedToken: string | null = null;
 let inflightFetch: Promise<string | null> | null = null;
@@ -23,7 +24,7 @@ const resolveBackendUrl = (): string => {
 
 const fetchCsrfToken = async (): Promise<string | null> => {
   const base = resolveBackendUrl();
-  try {
+  const [error, token] = await tryCatch<string | null, undefined>(async () => {
     const response = await fetch(`${base}/auth/csrf`, {
       method: 'GET',
       credentials: 'include',
@@ -31,9 +32,9 @@ const fetchCsrfToken = async (): Promise<string | null> => {
     if (!response.ok) return null;
     const body = (await response.json()) as { csrfToken?: string | null };
     return body.csrfToken ?? null;
-  } catch {
-    return null;
-  }
+  });
+  if (error) return null;
+  return token ?? null;
 };
 
 /**
@@ -70,13 +71,13 @@ const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 const isCsrfMismatchResponse = async (response: Response): Promise<boolean> => {
   if (response.status !== 403) return false;
-  try {
+  const [error, isMismatch] = await tryCatch<boolean, undefined>(async () => {
     const cloned = response.clone();
     const body = (await cloned.json()) as { errorCode?: string };
     return body.errorCode === 'auth.csrfMismatch';
-  } catch {
-    return false;
-  }
+  });
+  if (error) return false;
+  return isMismatch ?? false;
 };
 
 /**

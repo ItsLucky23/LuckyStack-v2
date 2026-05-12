@@ -2,6 +2,10 @@
 
 > File-based routing for pages, APIs, and real-time sync events.
 
+> **Where the code lives (post-package-split):** route discovery, version-token validation, and the dev-mode loaders are in `@luckystack/devkit` (`packages/devkit/src/`). Production route maps are emitted into `server/prod/generatedApis.<preset>.ts` and selected at runtime via `LUCKYSTACK_BUNDLE`. The matching logic that turns an inbound request into a handler lives in `@luckystack/api` (`packages/api/src/handleApiRequest.ts`) and `@luckystack/sync` (`packages/sync/src/handleSyncRequest.ts`). HTTP-fallback dispatch is split across `packages/server/src/httpRoutes/*` (one handler per concern: csrf, health, /_test/reset, favicon, uploads, auth, api, sync, custom routes, static fallback) — see [`packages/server/README.md`](../packages/server/README.md#http-route-handler-layout) for the table.
+
+> **Framework `system/logout` is exact-match.** Earlier builds short-circuited any API whose final path segment was `logout` (so `admin/logout/v1` would silently invoke the framework logout instead of the consumer's handler). The framework now matches the full normalized route name (`system/logout`); consumer routes that happen to end in `logout` reach their own handler unchanged.
+
 ---
 
 ## Overview

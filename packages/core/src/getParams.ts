@@ -88,8 +88,12 @@ export default async function getParams({ method, req, res: _res, queryString }:
           return JSON.parse(body || '{}');
         }
         const [, response] = await tryCatch(parseData)
-        if (response) {
-          resolve(response); return;
+
+        //? Reject array/scalar/null bodies — only plain objects are accepted.
+        //? An attacker sending `[1,2,3]` or `42` could surface odd shapes in
+        //? handlers that didn't expect them.
+        if (response && typeof response === 'object' && !Array.isArray(response)) {
+          resolve(response as Record<string, unknown>); return;
         }
 
         _res.setHeader('Content-Type', 'application/json');
@@ -103,7 +107,18 @@ export default async function getParams({ method, req, res: _res, queryString }:
         resolve(null); return;
       }
 
-      resolve({ body });
+      //? Unknown content-type: don't attempt to interpret. Empty content-type
+      //? bodies in particular were previously parsed as `{ body }` which let
+      //? handlers mistake raw text for a typed payload.
+      _res.setHeader('Content-Type', 'application/json');
+      _res.writeHead(415);
+      _res.end(JSON.stringify({
+        status: 'error',
+        httpStatus: 415,
+        message: 'api.unsupportedMediaType',
+        errorCode: 'api.unsupportedMediaType',
+      }));
+      resolve(null);
     })
 
     req.on('error', (error) => {

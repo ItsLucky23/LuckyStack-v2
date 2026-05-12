@@ -1,0 +1,93 @@
+import {
+  clearAllHooks,
+  clearAllRateLimits,
+  getProjectConfig,
+  getProjectName,
+  redis,
+  tryCatch,
+} from '@luckystack/core';
+import type { HttpRouteHandler } from './types';
+
+//? Narrow shape for the redis methods this route needs. Avoids `(redis as any)`
+//? — ioredis' typings expose these methods but with overloads that don't
+//? always satisfy strict TS without intermediate widening.
+interface RedisScanDelete {
+  scan: (cursor: string, ...args: (string | number)[]) => Promise<[string, string[]]>;
+  del: (...keys: string[]) => Promise<number>;
+}
+
+export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePath }) => {
+  if (routePath !== getProjectConfig().http.testResetEndpoint) return false;
+
+  //? Fail-closed: require explicit dev/test NODE_ENV (not just "anything but
+  //? production") so a missing or misconfigured NODE_ENV cannot expose this
+  //? destructive endpoint. Also require TEST_RESET_TOKEN unconditionally —
+  //? an unset token must NOT mean "no auth required".
+  const nodeEnv = process.env.NODE_ENV;
+  if (nodeEnv !== 'development' && nodeEnv !== 'test') {
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ status: 'error', errorCode: 'notFound' }));
+    return true;
+  }
+  const requiredToken = process.env.TEST_RESET_TOKEN;
+  if (!requiredToken || req.headers['x-test-reset-token'] !== requiredToken) {
+    res.statusCode = 403;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ status: 'error', errorCode: 'auth.forbidden' }));
+    return true;
+  }
+
+  const cleared: string[] = [];
+  await clearAllRateLimits();
+  cleared.push('rateLimits');
+
+  //? Flush sessions + activeUsers Redis keys so integration tests start from
+  //? a clean slate. Project name comes from the shared `getProjectName()`
+  //? helper — single source of truth (see also session.ts, rateLimiter.ts).
+  const projectName = getProjectName();
+  const sessionPattern = `${projectName}-session:*`;
+  const activeUsersPattern = `${projectName}-activeUsers:*`;
+
+  const redisDelegate = redis as unknown as RedisScanDelete;
+  const scanAndDelete = async (pattern: string, label: string): Promise<number> => {
+    const [error, deleted] = await tryCatch(async () => {
+      let cursor = '0';
+      let total = 0;
+      do {
+        const [next, keys] = await redisDelegate.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
+        cursor = next;
+        if (Array.isArray(keys) && keys.length > 0) {
+          await redisDelegate.del(...keys);
+          total += keys.length;
+        }
+      } while (cursor !== '0');
+      return total;
+    });
+    if (error || !deleted) return 0;
+    if (deleted > 0) cleared.push(label);
+    return deleted;
+  };
+
+  await scanAndDelete(sessionPattern, 'sessions');
+  await scanAndDelete(activeUsersPattern, 'activeUsers');
+
+  //? Opt-in hook clear via `?include=hooks` because clearing all hooks would
+  //? also drop framework-internal handlers (e.g. presence postLogout). URL
+  //? parsing failure is the expected branch for malformed `req.url`, so use
+  //? `URL.canParse` instead of try/catch.
+  const rawUrl = req.url ?? '/';
+  const base = `http://${req.headers.host ?? 'localhost'}`;
+  const includeFlag = URL.canParse(rawUrl, base)
+    ? new URL(rawUrl, base).searchParams.get('include') ?? ''
+    : '';
+  if (includeFlag.split(',').map((s) => s.trim()).includes('hooks')) {
+    clearAllHooks();
+    cleared.push('hooks');
+  }
+
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ status: 'success', cleared }));
+  return true;
+};

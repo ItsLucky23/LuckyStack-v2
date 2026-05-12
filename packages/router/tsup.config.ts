@@ -1,18 +1,18 @@
 import { defineConfig } from 'tsup';
 
-//? Router is tier-B (project-glue) — it imports `deploy.config` and
-//? `services.config` from the project root by design (router topology is
-//? project-specific). The package's tsconfig omits `rootDir` so tsc
-//? accepts those project imports for dts generation. Output layout is
-//? unaffected — rollup-plugin-dts bundles into dist/index.d.ts.
+//? Router publishes both the runtime API (`./index.ts`) and a CLI entry
+//? (`./cli.ts`). The CLI is wired via `bin` in package.json so consumers
+//? can `npx luckystack-router --config ./dist/deploy.config.js ...` without
+//? writing a project-side entry script.
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/cli.ts'],
   format: ['esm'],
-  dts: true,
+  dts: { entry: 'src/index.ts' },
   sourcemap: true,
   clean: true,
   splitting: false,
   skipNodeModulesBundle: true,
   external: [/^@luckystack\//],
   target: 'es2022',
+  banner: ({ format: _format }) => ({ js: '' }),
 });

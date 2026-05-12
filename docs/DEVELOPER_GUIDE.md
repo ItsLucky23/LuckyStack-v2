@@ -2,15 +2,22 @@
 
 > Getting started with LuckyStack development.
 
+> **Two paths in:**
+> - **Building an app on top of the framework** — run `npx create-luckystack-app my-app` and follow the README it generates. The scaffolder writes the smallest possible project that boots against `@luckystack/*` packages.
+> - **Contributing to the framework** — clone this monorepo and follow the steps below. You will be working in `packages/*` (framework code) plus `src/`, `server/`, and `scripts/` (this repo's own playground app that doubles as the test surface).
+
 ---
 
-## Quick Start
+## Quick Start (monorepo contributors)
 
 ### 1. Setup
 
 ```bash
 # Install dependencies
 npm install
+
+# Build all @luckystack/* packages once
+npm run build
 
 # Copy environment templates
 cp .env_template .env

@@ -1,6 +1,7 @@
+import { tryCatch } from '@luckystack/core';
 import type { ContractCheckResult, EndpointDescriptor } from './types';
 
-const REQUEST_TIMEOUT_MS = 10000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const EXPECTED_ERROR_CODE = 'api.rateLimitExceeded';
 
 export interface RateLimitCheckInput {
@@ -9,6 +10,8 @@ export interface RateLimitCheckInput {
   rateLimit: number;
   inputFor?: (endpoint: EndpointDescriptor) => unknown;
   headers?: Record<string, string>;
+  /** Per-call request timeout in ms. Defaults to 10000. */
+  requestTimeoutMs?: number;
 }
 
 //? Rate-limit layer: fire `rateLimit + 1` requests back to back and assert the
@@ -24,25 +27,23 @@ export const runRateLimitCheck = async (input: RateLimitCheckInput): Promise<Con
   const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}`;
   const body = input.inputFor ? input.inputFor(endpoint) : {};
   const started = Date.now();
+  const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
   const send = async (): Promise<Response | null> => {
     const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      return await fetch(url, {
-        method: endpoint.method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...input.headers,
-        },
-        body: endpoint.method === 'GET' ? undefined : JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timeoutHandle);
-    }
+    const timeoutHandle = setTimeout(() => controller.abort(), requestTimeoutMs);
+    const [error, response] = await tryCatch(() => fetch(url, {
+      method: endpoint.method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...input.headers,
+      },
+      body: endpoint.method === 'GET' ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    }));
+    clearTimeout(timeoutHandle);
+    if (error || !response) return null;
+    return response;
   };
 
   //? Fire `rateLimit` allowed requests first (drain the bucket), then a final
@@ -63,10 +64,9 @@ export const runRateLimitCheck = async (input: RateLimitCheckInput): Promise<Con
     };
   }
 
-  const parsed = await final.json().catch(() => null) as {
-    status?: 'success' | 'error';
-    errorCode?: string;
-  } | null;
+  const [, parsed] = await tryCatch<{ status?: 'success' | 'error'; errorCode?: string } | null, undefined>(
+    async () => await final.json() as { status?: 'success' | 'error'; errorCode?: string },
+  );
 
   if (parsed?.status === 'error' && parsed.errorCode === EXPECTED_ERROR_CODE) {
     return {

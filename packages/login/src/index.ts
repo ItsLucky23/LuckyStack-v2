@@ -14,8 +14,8 @@ export type {
   PreSessionDeletePayload,
   PostSessionDeletePayload,
 } from './hookPayloads';
-export { saveSession, getSession, deleteSession, getAllSessions, revokeUserSessions } from './session';
-export { loginWithCredentials, loginCallback, createOAuthState } from './login';
+export { saveSession, getSession, deleteSession, getAllSessions, revokeUserSessions, sessionKeyFor, activeUsersKeyFor } from './session';
+export { loginWithCredentials, loginCallback, createOAuthState, registerWithCredentials, loginWithCredentialsCore } from './login';
 export { logout } from './logout';
 
 // Password-reset primitives. Used by the framework's `framework`-mode

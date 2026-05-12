@@ -3,6 +3,7 @@
 import { getProjectConfig } from './projectConfig';
 import { getLogger } from './loggerRegistry';
 import { dispatchHook } from './hooks/registry';
+import { getBindAddress } from './bindAddress';
 
 const normalizeOrigin = ({ value, secure }: { value: string; secure: boolean }): string => {
   const trimmedValue = value.trim().toLowerCase();
@@ -36,7 +37,16 @@ const allowedOrigin = (origin: string): boolean => {
   //? makes no assumption about names like DNS or EXTERNAL_ORIGINS.
   const configured = cors.allowedOrigins ?? [];
 
-  const location = `http${secure ? 's' : ''}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
+  //? Bind address comes from the registry (populated by `createLuckyStackServer`
+  //? from `options.ip`/`options.port`). Falls back to `SERVER_IP`/`SERVER_PORT`
+  //? env vars for legacy boots that don't go through the helper. Empty `port`
+  //? produces an unmatchable `host:` entry which is fine — same-origin requests
+  //? are typically allowed via `cors.allowLocalhost` or the configured
+  //? `allowedOrigins` list anyway.
+  const { ip: bindIp, port: bindPort } = getBindAddress();
+  const location = bindPort
+    ? `http${secure ? 's' : ''}://${bindIp}:${bindPort}`
+    : `http${secure ? 's' : ''}://${bindIp}`;
   const normalizedOrigin = normalizeOrigin({ value: origin, secure });
 
   if (cors.allowLocalhost && normalizedOrigin && isLocalhostOrigin(normalizedOrigin)) {

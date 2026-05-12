@@ -7,7 +7,9 @@
 # LuckyStack Project Context
 
 > **Human-readable documentation for AI assistants and developers to understand this project.**
-> Last updated: 2026-02-10
+> Last updated: 2026-05-06
+
+> **Note on package layout:** the framework now lives under `packages/` as `@luckystack/*` workspace packages. Older sections of this document still reference `server/sockets/`, `server/auth/`, `server/utils/`, and `server/functions/` paths — those have moved into `packages/api`, `packages/login`, `packages/core`, and `packages/login` respectively. See [`docs/ARCHITECTURE_PACKAGING.md`](./ARCHITECTURE_PACKAGING.md) and the per-package READMEs under `packages/<name>/README.md` for current source-of-truth paths.
 
 Related architecture doc: `docs/ARCHITECTURE_PACKAGING.md` (package-split migration strategy and hook model).
 

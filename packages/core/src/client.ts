@@ -17,11 +17,10 @@ export {
 } from './projectConfig';
 export type {
   ProjectConfig,
+  AppConfig,
   LoggingConfig,
   RateLimitingConfig,
   SessionConfig,
-  SentryConfig,
-  SentrySampleRates,
 } from './projectConfig';
 
 export { notify, registerNotifier, getNotifier } from './notifier';
@@ -66,3 +65,13 @@ export type { statusContent, SOCKETSTATUS } from './socketStatusTypes';
 export type { ApiTypeMap, SyncTypeMap, StreamPayload } from './apiTypeStubs';
 
 export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionTypes';
+
+export { getLogger, registerLogger } from './loggerRegistry';
+export type { Logger, LoggerContext } from './loggerRegistry';
+
+export {
+  registerApiMethodMap,
+  getRegisteredApiMethod,
+  isApiMethodMapRegistered,
+} from './apiMethodMapRegistry';
+export type { HttpMethodLiteral, ApiMethodMap } from './apiMethodMapRegistry';

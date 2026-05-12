@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/login",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Authentication for LuckyStack: credentials + OAuth (Google/GitHub/Facebook/Discord), Redis-backed sessions, single-session enforcement, lifecycle hooks. Pairs with @luckystack/core.",
@@ -47,15 +47,15 @@
     "build:watch": "tsup --watch"
   },
   "dependencies": {
-    "@luckystack/core": "^0.0.1",
+    "@luckystack/core": "^0.1.0",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.6.1",
     "validator": "^13.15.35"
   },
   "peerDependencies": {
-    "@prisma/client": "^6.19.3",
-    "socket.io": "^4.8.3",
-    "@luckystack/email": "^0.0.1"
+    "@prisma/client": "^6.19.0",
+    "socket.io": "^4.8.0",
+    "@luckystack/email": "^0.1.0"
   },
   "peerDependenciesMeta": {
     "@luckystack/email": { "optional": true }

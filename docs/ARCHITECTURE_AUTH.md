@@ -2,6 +2,8 @@
 
 > OAuth and credentials-based authentication system.
 
+> **Where the code lives (post-package-split):** the runtime described below is in `@luckystack/login` (`packages/login/src/`). The OAuth provider list is no longer hardcoded in `server/auth/loginConfig.ts` — it is registered via `registerOAuthProviders([...])` from a `luckystack/login/oauthProviders.ts` overlay file. Built-in provider factories: `googleProvider`, `githubProvider`, `discordProvider`, `facebookProvider`, `microsoftProvider`, `credentialsProvider`. See [`packages/login/README.md`](../packages/login/README.md) for the current API.
+
 ---
 
 ## Quick Reference
@@ -57,22 +59,31 @@ FACEBOOK_CLIENT_ID=...
 FACEBOOK_CLIENT_SECRET=...
 ```
 
-### Provider Config (`server/auth/loginConfig.ts`)
+### Provider registry (overlay file)
+
+Provider config now lives in your overlay folder, not in framework code:
 
 ```typescript
-const oauthProviders = [
-  {
-    name: "google",
-    clientID: process.env.GOOGLE_CLIENT_ID,
+// luckystack/login/oauthProviders.ts
+import { registerOAuthProviders, googleProvider, microsoftProvider, credentialsProvider } from '@luckystack/login';
+
+registerOAuthProviders([
+  credentialsProvider(),
+  googleProvider({
+    clientId: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    authorizationURL: "https://accounts.google.com/o/oauth2/auth",
-    tokenURL: "https://oauth2.googleapis.com/token",
-    callbackURL: `${process.env.DNS}/auth/callback/google`,
-    scope: ["email", "profile"],
-  },
-  // ... other providers
-];
+    callbackUrl: `${process.env.DNS}/auth/callback/google`,
+  }),
+  microsoftProvider({
+    clientId: process.env.MICROSOFT_CLIENT_ID,
+    clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+    callbackUrl: `${process.env.DNS}/auth/callback/microsoft`,
+    tenant: process.env.MICROSOFT_TENANT_ID,
+  }),
+]);
 ```
+
+Self-hosted instances (GitHub Enterprise, Azure custom tenant) override the default URLs via `endpoints?.{authorizationURL, tokenExchangeURL, userInfoURL}`. `facebookProvider` and `microsoftProvider` also accept `apiVersion?`; `microsoftProvider` additionally accepts `tenant?` (default `'common'`) and `graphApiVersion?` (default `'v1.0'`). See [`packages/login/README.md`](../packages/login/README.md#provider-options) for the full options table.
 
 ---
 
@@ -123,6 +134,16 @@ const oauthProviders = [
 6. Return { status: true, session, newToken }
 ```
 
+### Direct entry points
+
+The HTTP `/auth/api/credentials` route is a thin dispatcher around three exported functions in `@luckystack/login`:
+
+- `loginWithCredentials(params)` — legacy combined dispatcher; routes to `register*` or `login*` based on the body shape (presence of `confirmPassword`). Kept for backwards compatibility.
+- `registerWithCredentials({ email, password, name, confirmPassword })` — register-only path.
+- `loginWithCredentialsCore({ email, password })` — login-only path.
+
+Reach for the dedicated functions when you wire up a custom auth surface (admin invite flow, programmatic provisioning, signup wizard with extra steps) and want to avoid the dispatcher's body-shape branching. They share the same hook surface (`preRegister` / `postRegister` for register, `preLogin` / `postLogin` for login).
+
 ---
 
 ## Auth Endpoints
@@ -153,11 +174,13 @@ export const auth: AuthProps = {
 
 | File | Function | Purpose |
 | ---- | -------- | ------- |
-| `server/auth/login.ts` | `loginWithCredentials` | Handles credentials login/register, password checks, session creation. |
-| `server/auth/login.ts` | `loginCallback` | Handles OAuth callback flow and provider profile mapping. |
-| `server/auth/loginConfig.ts` | provider config | Defines OAuth provider metadata and endpoints. |
-| `server/auth/checkOrigin.ts` | `default export` | Validates allowed origins for HTTP/socket requests. |
-| `server/utils/validateRequest.ts` | `validateRequest` | Enforces `auth.additional` checks for APIs and sync handlers. |
+| `packages/login/src/login.ts` | `loginWithCredentials` | Handles credentials login/register, password checks, session creation. |
+| `packages/login/src/login.ts` | `loginCallback` | Handles OAuth callback flow and provider profile mapping. |
+| `packages/login/src/oauthProviders.ts` | `registerOAuthProviders`, `googleProvider`, … | Provider registry + built-in provider factories. Replace `server/auth/loginConfig.ts` calls with a `luckystack/login/oauthProviders.ts` overlay. |
+| `packages/login/src/userAdapter.ts` | `registerUserAdapter`, `defaultPrismaUserAdapter` | Pluggable user-store adapter for projects with non-default Prisma schemas. |
+| `packages/login/src/redirectResolver.ts` | `registerPostLoginRedirect` | Dynamically compute the OAuth callback destination per user/tenant/provider. |
+| `packages/core/src/checkOrigin.ts` | `default export` | Validates allowed origins for HTTP/socket requests. |
+| `packages/core/src/validateRequest.ts` | `validateRequest` | Enforces `auth.additional` checks for APIs and sync handlers. |
 
 ### Role-based access
 
@@ -224,10 +247,13 @@ switch (location) {
 ## Security Considerations
 
 1. **OAuth state** - One-time state is generated/validated to mitigate OAuth login CSRF
-2. **CORS** - Only `DNS` and `EXTERNAL_ORIGINS` are allowed
-3. **Token delivery by mode** - `sessionBasedToken=false` uses HttpOnly cookies; `sessionBasedToken=true` uses session-token delivery for development workflows
-4. **Mode negotiation for credentials login** - client can send `X-Session-Based-Token` so backend responds with cookie/token transport that matches the active frontend DNS config
-5. **Token extraction fallback** - server prefers the configured mode but can read both cookie and bearer/session auth token to prevent DNS-mode mismatch lockouts
-6. **bcrypt** - Passwords hashed with salt rounds
-7. **CSRF** - WebSocket architecture inherently prevents CSRF
-8. **Origin check** - Every request validates origin header
+2. **CORS (fail-closed)** - Only `DNS` and `EXTERNAL_ORIGINS` are allowed. As of 2026-05-06, requests where neither `Origin` nor `Referer` is present are now allowed only for read-only methods (GET, HEAD, OPTIONS); state-changing methods (POST, PUT, PATCH, DELETE) are rejected with 403. This closes the previous `host`-fallback bypass for non-browser clients (`curl`, server-to-server).
+3. **`csrfMismatch` hook** - The CSRF middleware dispatches `csrfMismatch` before returning 403, with `{ route, method?, requestId?, userId?, providedToken: boolean }`. The token *value* is never included in the payload — only its presence — so audit-log handlers cannot accidentally leak it.
+4. **Framework `system/logout` is exact-match** - Earlier builds short-circuited any API whose final path segment was `logout`. The framework now matches the full normalized route name (`system/logout`), so consumer routes like `admin/logout/v1` reach their own handler.
+5. **Token delivery by mode** - `sessionBasedToken=false` uses HttpOnly cookies; `sessionBasedToken=true` uses session-token delivery for development workflows
+6. **Mode negotiation for credentials login** - client can send `X-Session-Based-Token` so backend responds with cookie/token transport that matches the active frontend DNS config
+7. **Token extraction fallback** - server prefers the configured mode but can read both cookie and bearer/session auth token to prevent DNS-mode mismatch lockouts
+8. **bcrypt** - Passwords hashed with salt rounds. The framework no longer pipes the password or the email through `validator.escape()` before hashing/lookup — that was a no-op for HTML safety (neither value ever reaches HTML) and silently mangled passwords containing `& < > " '`. The `name` field is still escaped (it ends up rendered) — see the OAuth-name stored-XSS note in `packages/login/README.md`.
+9. **CSRF** - WebSocket architecture inherently prevents CSRF; the HTTP fallback adds a token middleware that emits `csrfMismatch` on rejection (see #3).
+10. **Origin check** - Every request validates origin header (see #2).
+11. **`/_test/reset` endpoint** - Now fail-closed. Requires both `NODE_ENV` exactly `development` or `test` AND a non-empty `TEST_RESET_TOKEN` env var; an unset token returns 403. See `docs/HOSTING.md` for the deployment checklist.

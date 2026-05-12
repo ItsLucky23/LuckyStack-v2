@@ -2,7 +2,7 @@
 /* eslint-disable */
 import { Socket } from "socket.io";
 import { redis as redisClient, tryCatch, socketEventNames, dispatchHook, getLogger } from '@luckystack/core';
-import { deleteSession } from "./session";
+import { deleteSession, activeUsersKeyFor } from "./session";
 
 export const logout = async ({ token, socket, userId, skipSessionDelete }: {
   token: string | null,
@@ -32,8 +32,9 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
     if (!skipSessionDelete) {
       await deleteSession(token);
     }
-    const tokensOfActiveUsers = `${process.env.PROJECT_NAME ?? 'luckystack'}-activeUsers:${userId}`
-    await redisClient.srem(tokensOfActiveUsers, token);
+    if (userId) {
+      await redisClient.srem(activeUsersKeyFor(userId), token);
+    }
     socket.leave(token);
 
     // Presence state (disconnectTimers, tempDisconnectedSockets) is cleaned up

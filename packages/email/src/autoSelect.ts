@@ -1,15 +1,15 @@
-import type { EmailSender } from '@luckystack/core';
+import { type EmailSender } from '@luckystack/core';
 
 import { ConsoleSender } from './adapters/console';
 import { ResendSender } from './adapters/resend';
 import { SmtpSender } from './adapters/smtp';
+import { getEmailConfig } from './emailConfig';
 
 export interface AutoSelectEmailSenderOptions {
   /**
    * Default `from` address for whichever adapter ends up selected. Override
-   * per-message by passing `from` to `sendEmail`. Falls back to
-   * `process.env.EMAIL_FROM` when omitted, matching the convention every
-   * adapter assumes.
+   * per-message by passing `from` to `sendEmail`. Falls back to the env var
+   * named by `emailConfig.envVars.emailFrom` (default `EMAIL_FROM`).
    */
   from?: string;
   /**
@@ -25,58 +25,62 @@ export interface AutoSelectEmailSenderOptions {
  * unregistered. The caller passes the result to `registerEmailSender(...)`.
  *
  * Selection order:
- *   1. `RESEND_API_KEY` set      → ResendSender
- *   2. `SMTP_HOST` set            → SmtpSender (port/secure/auth from env)
- *   3. otherwise                  → ConsoleSender (dev-safe; logs to terminal)
+ *   1. Resend API key env var set  → ResendSender
+ *   2. SMTP host env var set       → SmtpSender (port/secure/auth from env)
+ *   3. otherwise                   → ConsoleSender (dev-safe; logs to terminal)
  *
- * Recognized env vars:
- *   - `RESEND_API_KEY`
- *   - `SMTP_HOST`, `SMTP_PORT` (default 587), `SMTP_SECURE` ('true' for TLS),
- *     `SMTP_USER`, `SMTP_PASS`
- *   - `EMAIL_FROM` (used when `options.from` is omitted)
+ * Env var names default to `RESEND_API_KEY` / `SMTP_HOST` / `SMTP_PORT` /
+ * `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS` / `EMAIL_FROM` but can be renamed
+ * via `emailConfig.envVars` (e.g. when an installer keeps secrets
+ * under a `MY_APP_*` prefix).
  *
  * Every project used to repeat this logic in their own `server.ts`. Centralizing
  * it here is the difference between a one-line install and copy-paste boilerplate.
  */
 export const autoSelectEmailSender = (options: AutoSelectEmailSenderOptions = {}): EmailSender => {
-  const from = options.from ?? process.env.EMAIL_FROM;
+  const emailConfig = getEmailConfig();
+  const envVars = emailConfig.envVars;
+  const defaults = emailConfig.defaults;
+
+  const resendKey = process.env[envVars.resendApiKey];
+  const smtpHost = process.env[envVars.smtpHost];
+  const smtpPortRaw = process.env[envVars.smtpPort];
+  const smtpSecure = process.env[envVars.smtpSecure] === 'true';
+  const smtpUser = process.env[envVars.smtpUser];
+  const smtpPass = process.env[envVars.smtpPass];
+  const fromEnv = process.env[envVars.emailFrom];
+
+  const from = options.from ?? fromEnv;
   const force = options.force;
+
+  const resolvedSmtpPort = smtpPortRaw ? Number(smtpPortRaw) : defaults.smtpPort;
+  const buildSmtp = (host: string) => SmtpSender({
+    host,
+    port: resolvedSmtpPort,
+    secure: smtpSecure,
+    auth: smtpUser && smtpPass ? { user: smtpUser, pass: smtpPass } : undefined,
+    from,
+  });
 
   if (force === 'console') return ConsoleSender({ from });
   if (force === 'resend') {
-    if (!process.env.RESEND_API_KEY) {
-      throw new Error('autoSelectEmailSender: force=resend requires RESEND_API_KEY env var.');
+    if (!resendKey) {
+      throw new Error(`autoSelectEmailSender: force=resend requires the ${envVars.resendApiKey} env var.`);
     }
-    return ResendSender({ apiKey: process.env.RESEND_API_KEY, from });
+    return ResendSender({ apiKey: resendKey, from });
   }
   if (force === 'smtp') {
-    if (!process.env.SMTP_HOST) {
-      throw new Error('autoSelectEmailSender: force=smtp requires SMTP_HOST env var.');
+    if (!smtpHost) {
+      throw new Error(`autoSelectEmailSender: force=smtp requires the ${envVars.smtpHost} env var.`);
     }
-    return SmtpSender({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT ?? 587),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: process.env.SMTP_USER && process.env.SMTP_PASS
-        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-        : undefined,
-      from,
-    });
+    return buildSmtp(smtpHost);
   }
 
-  if (process.env.RESEND_API_KEY) {
-    return ResendSender({ apiKey: process.env.RESEND_API_KEY, from });
+  if (resendKey) {
+    return ResendSender({ apiKey: resendKey, from });
   }
-  if (process.env.SMTP_HOST) {
-    return SmtpSender({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT ?? 587),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: process.env.SMTP_USER && process.env.SMTP_PASS
-        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-        : undefined,
-      from,
-    });
+  if (smtpHost) {
+    return buildSmtp(smtpHost);
   }
   return ConsoleSender({ from });
 };

@@ -14,9 +14,12 @@ import {
   checkRateLimit,
   socketEventNames,
   validateInputByType,
+  dispatchHook,
+  getLogger,
 } from "@luckystack/core";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
-import { setSentryUser, startSpan } from '@luckystack/sentry';
+import { setSentryUser, startSpan } from '@luckystack/error-tracking';
+import { buildSyncStreamEmitters } from './_shared/streamEmitters';
 
 interface HttpSyncRequestParams {
   name: string;
@@ -92,6 +95,99 @@ type RuntimeSyncClientHandler = (params: {
 const shouldLogDev = () => getProjectConfig().logging.devLogs;
 const shouldLogStream = () => getProjectConfig().logging.stream;
 
+interface HttpSyncErrorBuilder {
+  (args: {
+    response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean }[]; httpStatus?: number };
+    preferred?: string | null;
+    userLanguage?: string | null;
+  }): HttpSyncResponse;
+}
+
+//? Returns an HttpSyncResponse when a rate limit was hit (caller should
+//? return it directly), or null when both buckets passed.
+const applyHttpSyncRateLimits = async ({
+  resolvedName,
+  token,
+  requesterIp,
+  user,
+  buildSyncError,
+  preferredLocale,
+}: {
+  resolvedName: string;
+  token: string | null;
+  requesterIp: string | undefined;
+  user: SessionLayout | null;
+  buildSyncError: HttpSyncErrorBuilder;
+  preferredLocale: string | null | undefined;
+}): Promise<HttpSyncResponse | null> => {
+  const config = getProjectConfig();
+  const effectiveSyncLimit = config.rateLimiting.defaultApiLimit;
+  if (effectiveSyncLimit !== false && effectiveSyncLimit > 0) {
+    const requesterIdentity = token ?? requesterIp ?? 'anonymous';
+    const keyPrefix = token ? 'token' : 'ip';
+    const rateLimitKey = `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`;
+    const { allowed, resetIn } = await checkRateLimit({
+      key: rateLimitKey,
+      limit: effectiveSyncLimit,
+      windowMs: config.rateLimiting.windowMs,
+    });
+    if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: token ? 'user' : 'route',
+        key: rateLimitKey,
+        limit: effectiveSyncLimit,
+        windowMs: config.rateLimiting.windowMs,
+        count: effectiveSyncLimit + 1,
+        route: resolvedName,
+        userId: user?.id,
+      });
+      return buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+          httpStatus: 429,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      });
+    }
+  }
+
+  const defaultIpLimit = config.rateLimiting.defaultIpLimit;
+  if (defaultIpLimit !== false && defaultIpLimit > 0) {
+    const ipBucket = requesterIp ?? 'unknown';
+    const ipKey = `ip:${ipBucket}:sync:all`;
+    const { allowed, resetIn } = await checkRateLimit({
+      key: ipKey,
+      limit: defaultIpLimit,
+      windowMs: config.rateLimiting.windowMs,
+    });
+    if (!allowed) {
+      void dispatchHook('rateLimitExceeded', {
+        scope: 'ip',
+        key: ipKey,
+        limit: defaultIpLimit,
+        windowMs: config.rateLimiting.windowMs,
+        count: defaultIpLimit + 1,
+        ip: ipBucket,
+      });
+      return buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: 'sync.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+          httpStatus: 429,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      });
+    }
+  }
+
+  return null;
+};
+
 export type HttpSyncStreamEvent = SyncStreamPayload;
 
 export default async function handleHttpSyncRequest({
@@ -107,7 +203,7 @@ export default async function handleHttpSyncRequest({
   stream,
 }: HttpSyncRequestParams): Promise<HttpSyncResponse> {
   if (shouldLogDev()) {
-    console.log(`http sync: ${name} called`, 'cyan');
+    getLogger().debug(`http sync: ${name} called`);
   }
 
   const normalizedReceiver = typeof receiver === 'string' ? receiver.trim() : '';
@@ -158,7 +254,10 @@ export default async function handleHttpSyncRequest({
 
   const ioInstance = getIoInstance();
 
-  try {
+  //? Wrap the body so the span always closes — including on an unexpected
+  //? throw. tryCatch returns `[error, value]` so we can call `span.end()`
+  //? in one place after the inner work resolves.
+  const [bodyError, bodyResult] = await tryCatch(async () => {
     if (!ioInstance) {
       return buildSyncError({
         response: { status: 'error', errorCode: 'sync.ioUnavailable' },
@@ -211,138 +310,12 @@ export default async function handleHttpSyncRequest({
       });
     }
 
-    // Rate limiting for HTTP sync requests
-    const effectiveSyncLimit = getProjectConfig().rateLimiting.defaultApiLimit;
-    if (effectiveSyncLimit !== false && effectiveSyncLimit > 0) {
-      const requesterIdentity = token ?? requesterIp ?? 'anonymous';
-      const keyPrefix = token ? 'token' : 'ip';
-
-      const { allowed, resetIn } = await checkRateLimit({
-        key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
-        limit: effectiveSyncLimit,
-        windowMs: getProjectConfig().rateLimiting.windowMs,
-      });
-
-      if (!allowed) {
-        return buildSyncError({
-          response: {
-            status: 'error',
-            errorCode: 'sync.rateLimitExceeded',
-            errorParams: [{ key: 'seconds', value: resetIn }],
-            httpStatus: 429,
-          },
-          preferred: preferredLocale,
-          userLanguage: user?.language,
-        });
-      }
-    }
-
-    const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
-    if (defaultIpLimit !== false && defaultIpLimit > 0) {
-      const ipBucket = requesterIp ?? 'unknown';
-      const { allowed, resetIn } = await checkRateLimit({
-        key: `ip:${ipBucket}:sync:all`,
-        limit: defaultIpLimit,
-        windowMs: getProjectConfig().rateLimiting.windowMs,
-      });
-
-      if (!allowed) {
-        return buildSyncError({
-          response: {
-            status: 'error',
-            errorCode: 'sync.rateLimitExceeded',
-            errorParams: [{ key: 'seconds', value: resetIn }],
-            httpStatus: 429,
-          },
-          preferred: preferredLocale,
-          userLanguage: user?.language,
-        });
-      }
-    }
-
-    let serverOutput = {};
-    if (syncObject[`${resolvedName}_server`]) {
-      const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry;
-      const { auth, main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
-      const emitServerSyncStream = (payload: SyncStreamPayload = {}) => {
-        if (shouldLogStream()) {
-          console.log(`http sync: ${resolvedName} server stream`, payload, 'cyan');
-        }
-
-        stream?.(payload);
-      };
-
-      //? broadcastStream + streamTo mirror the socket-side handler so a route
-      //? written for either transport behaves identically. The originator's
-      //? response travels back via SSE (`stream?.()`); broadcast / targeted
-      //? chunks still flow over Socket.io to recipients in the receiver room.
-      const buildBroadcastFrame = (payload: SyncStreamPayload) => ({
-        ...payload,
-        cb,
-        fullName: resolvedName,
-        status: 'stream' as const,
-      });
-
-      const emitBroadcastSyncStream = (payload: SyncStreamPayload = {}) => {
-        if (shouldLogStream()) {
-          console.log(`http sync: ${resolvedName} broadcastStream`, payload, 'cyan');
-        }
-        if (!normalizedReceiver) return;
-        const io = getIoInstance();
-        if (!io) return;
-
-        const frame = buildBroadcastFrame(payload);
-        const roomMembers = io.sockets.adapter.rooms.get(normalizedReceiver);
-        if (!roomMembers || roomMembers.size === 0) return;
-
-        if (roomMembers.size <= 1) {
-          const onlyId = roomMembers.values().next().value;
-          const onlySocket = onlyId ? io.sockets.sockets.get(onlyId) : undefined;
-          if (onlySocket) {
-            onlySocket.emit(socketEventNames.sync, frame);
-          }
-          return;
-        }
-
-        io.to(normalizedReceiver).emit(socketEventNames.sync, frame);
-      };
-
-      const emitStreamToTokens = (
-        tokens: string | string[],
-        payload: SyncStreamPayload = {},
-      ) => {
-        const list = Array.isArray(tokens) ? tokens : [tokens];
-        const filtered = list.filter((t): t is string => typeof t === 'string' && t.length > 0);
-        if (filtered.length === 0) return;
-
-        if (shouldLogStream()) {
-          console.log(`http sync: ${resolvedName} streamTo`, { tokens: filtered, payload }, 'cyan');
-        }
-        const io = getIoInstance();
-        if (!io) return;
-
-        const frame = buildBroadcastFrame(payload);
-        io.to(filtered).emit(socketEventNames.sync, frame);
-      };
-
-      const inputValidation = await validateInputByType({
-        typeText: inputType,
-        value: data,
-        rootKey: 'clientInput',
-        filePath: inputTypeFilePath,
-      });
-      if (inputValidation.status === 'error') {
-        return buildSyncError({
-          response: {
-            status: 'error',
-            errorCode: 'sync.invalidInputType',
-            errorParams: [{ key: 'message', value: inputValidation.message }],
-          },
-          preferred: preferredLocale,
-          userLanguage: user?.language,
-        });
-      }
-
+    //? Pipeline order: auth → rate-limit → validate → execute → respond.
+    //? Auth runs first so unauthenticated probes can't consume rate-limit budget
+    //? or learn input shape from `inputValidation.message`. Mirrors api handlers.
+    const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry | undefined;
+    if (serverSyncEntry) {
+      const { auth } = serverSyncEntry;
       if (auth.login && !user?.id) {
         return buildSyncError({
           response: { status: 'error', errorCode: 'auth.required' },
@@ -358,6 +331,52 @@ export default async function handleHttpSyncRequest({
             errorCode: validationResult.errorCode || 'auth.forbidden',
             errorParams: validationResult.errorParams,
             httpStatus: validationResult.httpStatus,
+          },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        });
+      }
+    }
+
+    // Rate limiting for HTTP sync requests (per-route + global IP buckets)
+    const rateLimitResult = await applyHttpSyncRateLimits({
+      resolvedName,
+      token,
+      requesterIp,
+      user,
+      buildSyncError,
+      preferredLocale,
+    });
+    if (rateLimitResult) return rateLimitResult;
+
+    let serverOutput = {};
+    if (serverSyncEntry) {
+      const { main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
+      const { emitServerSyncStream, emitBroadcastSyncStream, emitStreamToTokens } =
+        buildSyncStreamEmitters({
+          cb,
+          receiver: normalizedReceiver,
+          resolvedName,
+          logLabel: 'http sync',
+          //? Originator chunks travel back via SSE; broadcast / targeted
+          //? chunks still flow over Socket.io to recipients in the receiver room.
+          emitOriginatorChunk: (payload) => {
+            stream?.(payload);
+          },
+        });
+
+      const inputValidation = await validateInputByType({
+        typeText: inputType,
+        value: data,
+        rootKey: 'clientInput',
+        filePath: inputTypeFilePath,
+      });
+      if (inputValidation.status === 'error') {
+        return buildSyncError({
+          response: {
+            status: 'error',
+            errorCode: 'sync.invalidInputType',
+            errorParams: [{ key: 'message', value: inputValidation.message }],
           },
           preferred: preferredLocale,
           userLanguage: user?.language,
@@ -411,6 +430,14 @@ export default async function handleHttpSyncRequest({
       serverOutput = serverSyncResult;
     }
 
+    await dispatchHook('preSyncFanout', {
+      routeName: resolvedName,
+      data,
+      user,
+      receiver: normalizedReceiver,
+      serverOutput,
+    });
+
     const sockets = receiver === 'all'
       ? ioInstance.sockets.sockets
       : ioInstance.sockets.adapter.rooms.get(normalizedReceiver);
@@ -423,6 +450,7 @@ export default async function handleHttpSyncRequest({
       });
     }
 
+    let recipientCount = 0;
     for (const socketEntry of sockets) {
       const tempSocket = receiver === 'all'
         ? (socketEntry as [string, any])[1]
@@ -440,7 +468,7 @@ export default async function handleHttpSyncRequest({
         const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
         const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
           if (shouldLogStream()) {
-            console.log(`http sync: ${resolvedName} client stream`, payload, 'cyan');
+            getLogger().debug(`http sync: ${resolvedName} client stream`, { payload });
           }
 
           tempSocket.emit(socketEventNames.sync, {
@@ -508,6 +536,7 @@ export default async function handleHttpSyncRequest({
           message: clientSyncResult.message || `${resolvedName} sync success`,
           status: 'success',
         });
+        recipientCount++;
         continue;
       }
 
@@ -519,14 +548,36 @@ export default async function handleHttpSyncRequest({
         message: `${resolvedName} sync success`,
         status: 'success',
       });
+      recipientCount++;
     }
+
+    await dispatchHook('postSyncFanout', {
+      routeName: resolvedName,
+      data,
+      user,
+      receiver: normalizedReceiver,
+      serverOutput,
+      recipientCount,
+    });
 
     if (shouldLogDev()) {
-      console.log(`http sync: ${resolvedName} completed`, 'cyan');
+      getLogger().debug(`http sync: ${resolvedName} completed`);
     }
 
-    return { status: 'success', message: `sync ${resolvedName} success` };
-  } finally {
-    span?.end?.();
+    return { status: 'success' as const, message: `sync ${resolvedName} success` };
+  });
+  span?.end?.();
+  if (bodyError) {
+    getLogger().error(`http sync: ${name} threw`, bodyError, { sync: name });
+    return buildSyncError({
+      response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    });
   }
+  return bodyResult ?? buildSyncError({
+    response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
+    preferred: preferredLocale,
+    userLanguage: user?.language,
+  });
 }

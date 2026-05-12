@@ -1,15 +1,19 @@
 {
   "name": "@luckystack/router",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.1.0",
+  "private": false,
   "type": "module",
-  "description": "Standalone HTTP + WebSocket load-balancer for multi-instance LuckyStack deployments. Redis-backed health, boot-UUID handshake, fallback proxy. Tier-B (project-glue, not for npm).",
+  "description": "Standalone HTTP + WebSocket load-balancer for multi-instance LuckyStack deployments. Redis-backed health, boot-UUID handshake, service-key-aware routing, optional dev->staging fallback. Optional package — only needed for horizontal scale or split-environment dev.",
   "license": "MIT",
   "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/router"
+  },
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/router#readme",
+  "bugs": {
+    "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
   "keywords": [
     "luckystack",
@@ -31,8 +35,12 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "luckystack-router": "./dist/cli.js"
+  },
   "files": [
     "dist",
+    "README.md",
     "LICENSE"
   ],
   "scripts": {
@@ -40,6 +48,9 @@
     "build:watch": "tsup --watch"
   },
   "dependencies": {
-    "ioredis": "^5.10.1"
+    "@luckystack/core": "^0.1.0"
+  },
+  "peerDependencies": {
+    "ioredis": "^5.10.0"
   }
 }

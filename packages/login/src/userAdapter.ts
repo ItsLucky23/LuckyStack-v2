@@ -45,20 +45,38 @@ export const isUserAdapterRegistered = (): boolean => registeredAdapter !== null
 //? Once Phase 1.3 lands, the `prisma` export flows through a registry so
 //? consumers can substitute their own Prisma client (TLS, Accelerate, custom
 //? logger, ...) without touching this adapter.
+//?
+//? Why the narrow `PrismaUserDelegate` shape: framework can't know the
+//? consumer's User model (column names, extra fields, etc.). We define the
+//? minimum surface this adapter actually calls and assert that the runtime
+//? `prisma.user` provides it. Consumers whose User schema diverges from the
+//? recommended one should register their own `UserAdapter` via
+//? `registerUserAdapter(...)` instead of relying on this default.
+interface PrismaUserDelegate {
+  findFirst: (args: { where: { email: string; provider: string } }) => Promise<UserRecord | null>;
+  findUnique: (args: { where: { id: string } }) => Promise<UserRecord | null>;
+  create: (args: { data: Record<string, unknown> }) => Promise<UserRecord>;
+  update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<UserRecord>;
+}
+
 export const defaultPrismaUserAdapter = (): UserAdapter => {
-  const userClient = (): any => (prisma as any).user;
+  //? Single, well-defined boundary: type-erase to `unknown` once, narrow back
+  //? to the documented delegate shape. Resolved at call time so a registered
+  //? `prisma` proxy still wins.
+  const userClient = (): PrismaUserDelegate => {
+    const delegate = (prisma as unknown as { user: unknown }).user;
+    return delegate as PrismaUserDelegate;
+  };
 
   return {
     findByEmail: async ({ email, provider }) => {
-      const user = await userClient().findFirst({ where: { email, provider } });
-      return user as UserRecord | null;
+      return userClient().findFirst({ where: { email, provider } });
     },
     findById: async (id) => {
-      const user = await userClient().findUnique({ where: { id } });
-      return user as UserRecord | null;
+      return userClient().findUnique({ where: { id } });
     },
     create: async (input) => {
-      const created = await userClient().create({
+      return userClient().create({
         data: {
           email: input.email,
           provider: input.provider,
@@ -69,11 +87,9 @@ export const defaultPrismaUserAdapter = (): UserAdapter => {
           language: input.language,
         },
       });
-      return created as UserRecord;
     },
     update: async (id, patch) => {
-      const updated = await userClient().update({ where: { id }, data: patch });
-      return updated as UserRecord;
+      return userClient().update({ where: { id }, data: patch as Record<string, unknown> });
     },
   };
 };

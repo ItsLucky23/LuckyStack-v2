@@ -20,7 +20,7 @@
     "@luckystack/core": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/login": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/presence": "^{{LUCKYSTACK_VERSION}}",
-    "@luckystack/sentry": "^{{LUCKYSTACK_VERSION}}",
+    "@luckystack/error-tracking": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/server": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/sync": "^{{LUCKYSTACK_VERSION}}",
     "@prisma/client": "^6.19.3",

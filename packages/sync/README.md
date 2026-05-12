@@ -5,7 +5,7 @@
 ## Install
 
 ```bash
-npm install @luckystack/sync @luckystack/core @luckystack/login @luckystack/sentry react socket.io socket.io-client
+npm install @luckystack/sync @luckystack/core @luckystack/login @luckystack/error-tracking react socket.io socket.io-client
 ```
 
 ## Quickstart
@@ -124,6 +124,8 @@ Server entry (`@luckystack/sync`):
 | Type: `HttpSyncStreamEvent` | SSE event shape. |
 | Type: `StreamThrottle` / `CreateStreamThrottleOptions` | Throttle helper types. |
 
+Configure stream throttling and offline-queue policy via `registerProjectConfig({ sync, offlineQueue })`. The shapes are exported from `@luckystack/core` as **`SyncConfig`** (with nested `SyncStreamThrottleConfig`) and **`OfflineQueueConfig`** — they cover the throttle defaults, fanout iteration tuning, and the queue's max-size + drop policy (`'reject'` triggers the `offline.queueFull` error code on overflow).
+
 Client entry (`@luckystack/sync/client`):
 
 | Export | Purpose |
@@ -132,10 +134,21 @@ Client entry (`@luckystack/sync/client`):
 | `upsertSyncEventCallback({ name, version, callback })` | Subscribe to inbound sync payloads. |
 | `useSyncEvents(...)` | React hook for component-scoped subscriptions. |
 
+## Related architecture docs
+
+- [`docs/ARCHITECTURE_SYNC.md`](../../docs/ARCHITECTURE_SYNC.md) — full sync lifecycle, streaming decision tree, performance notes.
+- [`docs/ARCHITECTURE_SOCKET.md`](../../docs/ARCHITECTURE_SOCKET.md) — Socket.io + Redis adapter (required for cross-instance fanout).
+- [`docs/ARCHITECTURE_ROUTING.md`](../../docs/ARCHITECTURE_ROUTING.md) — `_sync/` file conventions and `_server` / `_client` split.
+- [`docs/STREAMING_RECONSTRUCTION.md`](../../docs/STREAMING_RECONSTRUCTION.md) — recreating the streaming demo page.
+
 ## Dependencies
 
-- Runtime: `@luckystack/core`, `@luckystack/login`, `@luckystack/sentry`
-- Peer: `react`, `socket.io`, `socket.io-client`
+- Runtime: `@luckystack/core`, `@luckystack/login`, `@luckystack/error-tracking`
+- Peer (canonical ranges, standardized 2026-05-07):
+  - `@prisma/client@^6.19.0` (transitively required via `@luckystack/core`)
+  - `react@^19.2.0` (`/client` entry only)
+  - `socket.io@^4.8.0`
+  - `socket.io-client@^4.8.0`
 
 ## License
 

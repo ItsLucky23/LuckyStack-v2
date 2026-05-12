@@ -1,3 +1,5 @@
+import { getProjectConfig } from '@luckystack/core';
+
 //? Stream-chunk throttle. Coalesces tiny pieces of data (e.g. AI-provider
 //? tokens of 3-10 characters each) into bigger chunks before they're sent
 //? over the wire, cutting message count by 10-100x with no perceptible
@@ -62,9 +64,10 @@ export interface StreamThrottle {
 export const createStreamThrottle = (
   options: CreateStreamThrottleOptions = {},
 ): StreamThrottle => {
-  const flushAtChars = options.flushAtChars ?? 32;
-  const flushEveryMs = options.flushEveryMs ?? 50;
-  const field = options.field ?? 'chunk';
+  const defaults = getProjectConfig().sync.streamThrottle;
+  const flushAtChars = options.flushAtChars ?? defaults.flushAtChars;
+  const flushEveryMs = options.flushEveryMs ?? defaults.flushEveryMs;
+  const field = options.field ?? defaults.field;
 
   let buffer = '';
   let timer: ReturnType<typeof setTimeout> | null = null;

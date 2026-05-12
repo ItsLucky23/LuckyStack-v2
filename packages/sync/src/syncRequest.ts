@@ -9,6 +9,7 @@ import type {
   statusContent,
 } from "@luckystack/core/client";
 import {
+  getLogger,
   getProjectConfig,
   notify,
   incrementResponseIndex,
@@ -215,7 +216,7 @@ const triggerSyncCallbacks = (name: string, clientOutput: unknown, serverOutput:
   const callbacks = syncEvents[name] ?? [];
   if (callbacks.length === 0) {
     if (shouldLogDev()) {
-      console.warn(`Sync event ${name} has no registered callback on this page`);
+      getLogger().warn(`Sync event ${name} has no registered callback on this page`);
     }
     return;
   }
@@ -284,7 +285,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
     void (async () => {
       if (!name || typeof name !== "string") {
         if (shouldLogDev()) {
-          console.error("Invalid name for syncRequest");
+          getLogger().error("Invalid name for syncRequest");
         }
         if (shouldNotifyDev()) {
           notify.error({ key: 'sync.invalidName' });
@@ -299,7 +300,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
       const parsedRoute = parseServiceRouteName(name);
       if (parsedRoute.status === 'error') {
         if (shouldLogDev()) {
-          console.error(`[syncRequest] Invalid service route name '${name}': ${parsedRoute.reason}`);
+          getLogger().error(`[syncRequest] Invalid service route name '${name}'`, undefined, { reason: parsedRoute.reason });
         }
         if (shouldNotifyDev()) {
           notify.error({ key: 'routing.invalidServiceRouteName' });
@@ -321,7 +322,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
 
       if (!version || typeof version !== 'string') {
         if (shouldLogDev()) {
-          console.error("Invalid version for syncRequest");
+          getLogger().error("Invalid version for syncRequest");
         }
         if (shouldNotifyDev()) {
           notify.error({ key: 'sync.invalidVersion' });
@@ -337,7 +338,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
 
       if (!normalizedReceiver) {
         if (shouldLogDev()) {
-          console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
+          getLogger().error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
         }
         if (shouldNotifyDev()) {
           notify.error({ key: 'sync.missingReceiver' });
@@ -370,7 +371,11 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
       const runRequest = (socketInstance: Socket) => {
         if (!canSendNow(socketInstance)) {
           queueId ??= createQueueId();
-          enqueueSyncRequest({
+          //? `enqueueSyncRequest` returns `false` when the offline queue is
+          //? full and `dropPolicy: 'reject'` is active. Resolve with a
+          //? normalized error envelope so the caller can branch instead of
+          //? awaiting forever.
+          const enqueued = enqueueSyncRequest({
             id: queueId,
             key: fullName,
             run: (s) => {
@@ -378,6 +383,12 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
             },
             createdAt: Date.now(),
           });
+          if (!enqueued) {
+            resolve(normalizeSyncError({
+              response: { status: 'error', errorCode: 'offline.queueFull' },
+              fallbackErrorCode: 'offline.queueFull',
+            }) as RequestOutput);
+          }
           return;
         }
 
@@ -386,14 +397,14 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         let cleanupProgressListener: (() => void) | null = null;
 
         if (shouldLogDev()) {
-          console.log(`Client Sync Request(${String(tempIndex)}):`, { syncName: sanitizedName, data, receiver: normalizedReceiver, ignoreSelf });
+          getLogger().debug(`Client Sync Request(${String(tempIndex)})`, { syncName: sanitizedName, data, receiver: normalizedReceiver, ignoreSelf });
         }
 
         if (typeof onStream === 'function') {
           const progressEventName = buildSyncProgressEventName(tempIndex);
           const progressListener = (streamPayload: SyncRequestStreamEvent) => {
             if (shouldLogStream()) {
-              console.log(`Server Sync Stream(${String(tempIndex)}):`, { syncName: sanitizedName, streamPayload });
+              getLogger().debug(`Server Sync Stream(${String(tempIndex)})`, { syncName: sanitizedName, streamPayload });
             }
 
             onStream(streamPayload);
@@ -417,7 +428,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
             });
 
             if (shouldLogDev()) {
-              console.error(`Sync ${sanitizedName} failed: ${normalizedError.message}`);
+              getLogger().error(`Sync ${sanitizedName} failed`, undefined, { message: normalizedError.message });
             }
             if (shouldNotifyDev()) {
               notify.error({
@@ -499,7 +510,7 @@ export const useSyncEvents = () => {
 
     if (typeof params.version !== 'string') {
       if (shouldLogDev()) {
-        console.error("Invalid version for upsertSyncEventCallback");
+        getLogger().error("Invalid version for upsertSyncEventCallback");
       }
       if (shouldNotifyDev()) {
         notify.error({ key: 'sync.invalidVersion' });
@@ -509,7 +520,7 @@ export const useSyncEvents = () => {
 
     if (typeof params.callback !== 'function') {
       if (shouldLogDev()) {
-        console.error("Invalid callback for upsertSyncEventCallback");
+        getLogger().error("Invalid callback for upsertSyncEventCallback");
       }
       if (shouldNotifyDev()) {
         notify.error({ key: 'sync.invalidCallback' });
@@ -521,7 +532,7 @@ export const useSyncEvents = () => {
     const parsedRoute = parseServiceRouteName(routeName);
     if (parsedRoute.status === 'error') {
       if (shouldLogDev()) {
-        console.error(`Invalid name for upsertSyncEventCallback: '${routeName}', ${parsedRoute.reason}`);
+        getLogger().error(`Invalid name for upsertSyncEventCallback`, undefined, { routeName, reason: parsedRoute.reason });
       }
       if (shouldNotifyDev()) {
         notify.error({ key: 'routing.invalidServiceRouteName' });
@@ -550,7 +561,7 @@ export const useSyncEvents = () => {
     // Only warn when the exact same callback is registered twice.
     if (nextCallbacks.includes(callback)) {
       if (shouldLogDev()) {
-        console.warn(`[SyncEvents] Duplicate callback registration for ${fullName} was ignored.`);
+        getLogger().warn(`[SyncEvents] Duplicate callback registration was ignored`, { fullName });
       }
 
       localRegistryRef.current.set(fullName, callback);
@@ -585,7 +596,7 @@ export const useSyncEvents = () => {
 
     if (typeof params.version !== 'string') {
       if (shouldLogDev()) {
-        console.error("Invalid version for upsertSyncEventStreamCallback");
+        getLogger().error("Invalid version for upsertSyncEventStreamCallback");
       }
       if (shouldNotifyDev()) {
         notify.error({ key: 'sync.invalidVersion' });
@@ -595,7 +606,7 @@ export const useSyncEvents = () => {
 
     if (typeof params.callback !== 'function') {
       if (shouldLogDev()) {
-        console.error("Invalid callback for upsertSyncEventStreamCallback");
+        getLogger().error("Invalid callback for upsertSyncEventStreamCallback");
       }
       if (shouldNotifyDev()) {
         notify.error({ key: 'sync.invalidCallback' });
@@ -607,7 +618,7 @@ export const useSyncEvents = () => {
     const parsedRoute = parseServiceRouteName(routeName);
     if (parsedRoute.status === 'error') {
       if (shouldLogDev()) {
-        console.error(`Invalid name for upsertSyncEventStreamCallback: '${routeName}', ${parsedRoute.reason}`);
+        getLogger().error(`Invalid name for upsertSyncEventStreamCallback`, undefined, { routeName, reason: parsedRoute.reason });
       }
       if (shouldNotifyDev()) {
         notify.error({ key: 'routing.invalidServiceRouteName' });
@@ -639,7 +650,7 @@ export const useSyncEvents = () => {
     const nextCallbacks = getStreamCallbacksForRoute(fullName);
     if (nextCallbacks.includes(callback)) {
       if (shouldLogDev()) {
-        console.warn(`[SyncEvents] Duplicate stream callback registration for ${fullName} was ignored.`);
+        getLogger().warn(`[SyncEvents] Duplicate stream callback registration was ignored`, { fullName });
       }
 
       localStreamRegistryRef.current.set(fullName, callback);
@@ -703,16 +714,70 @@ export const useSyncEventTrigger = () => {
   return { triggerSyncEvent, triggerSyncStreamEvent }
 }
 
+type SocketStatusSetter = Dispatch<
+  SetStateAction<{
+    self: statusContent;
+    [userId: string]: statusContent;
+  }>
+>;
+
+const buildConnectHandler = ({ setSocketStatus }: { setSocketStatus: SocketStatusSetter }) => () => {
+  if (shouldLogSocketStatus()) getLogger().info("Connected to server");
+  setSocketStatus(prev => ({ ...prev, self: { ...prev.self, status: "CONNECTED" } }));
+};
+
+const buildDisconnectHandler = ({ setSocketStatus }: { setSocketStatus: SocketStatusSetter }) => () => {
+  setSocketStatus(prev => ({ ...prev, self: { ...prev.self, status: "DISCONNECTED" } }));
+  if (shouldLogSocketStatus()) getLogger().info("Disconnected, trying to reconnect...");
+};
+
+const buildReconnectAttemptHandler = ({ setSocketStatus }: { setSocketStatus: SocketStatusSetter }) => (attempt: number) => {
+  setSocketStatus(prev => ({ ...prev, self: { ...prev.self, status: "RECONNECTING", reconnectAttempt: attempt } }));
+  if (shouldLogSocketStatus()) getLogger().info(`Reconnecting attempt ${String(attempt)}...`);
+};
+
+const buildUserAfkHandler = ({
+  setSocketStatus, sessionRef,
+}: {
+  setSocketStatus: SocketStatusSetter;
+  sessionRef: RefObject<SessionLayout | null>;
+}) => ({ userId, endTime }: { userId: string; endTime?: number }) => {
+  if (sessionRef.current !== null && userId === sessionRef.current.id) {
+    setSocketStatus(prev => ({
+      ...prev,
+      self: { status: "DISCONNECTED", reconnectAttempt: undefined, endTime },
+    }));
+  } else {
+    setSocketStatus(prev => ({
+      ...prev,
+      [userId]: { status: "DISCONNECTED", endTime },
+    }));
+  }
+};
+
+const buildUserBackHandler = ({ setSocketStatus }: { setSocketStatus: SocketStatusSetter }) => ({ userId }: { userId: string }) => {
+  if (shouldLogSocketStatus()) getLogger().debug("userBack", { userId });
+  setSocketStatus(prev => ({
+    ...prev,
+    [userId]: { status: "CONNECTED", endTime: undefined },
+  }));
+};
+
+const buildConnectErrorHandler = ({ setSocketStatus }: { setSocketStatus: SocketStatusSetter }) => (err: { message: string }) => {
+  if (shouldLogSocketStatus()) getLogger().debug("connect_error", { err });
+  setSocketStatus(prev => ({
+    ...prev,
+    self: { ...prev.self, status: "DISCONNECTED", reconnectAttempt: undefined },
+  }));
+  if (shouldLogDev()) getLogger().error(`Connection error`, err);
+  if (shouldNotifyDev()) notify.error({ key: 'common.connectionError' });
+};
+
 export const initSyncRequest = async ({
   setSocketStatus,
   sessionRef
 }: {
-  setSocketStatus: Dispatch<
-    SetStateAction<{
-      self: statusContent;
-      [userId: string]: statusContent;
-    }>
-  >;
+  setSocketStatus: SocketStatusSetter;
   sessionRef: RefObject<SessionLayout | null> | null;
 }) => {
 
@@ -729,103 +794,12 @@ export const initSyncRequest = async ({
     socket.off(socketEventNames.connectError, activeLifecycleHandlers.connectError);
   }
 
-  const connect = () => {
-    if (shouldLogSocketStatus()) {
-      console.log("Connected to server");
-    }
-    setSocketStatus(prev => ({
-      ...prev,
-      self: {
-        ...prev.self,
-        status: "CONNECTED",
-        // reconnectAttempt: undefined,
-      }
-    }));
-  };
-
-  const disconnect = () => {
-    setSocketStatus(prev => ({
-      ...prev,
-      self: {
-        ...prev.self,
-        status: "DISCONNECTED",
-      }
-    }));
-    if (shouldLogSocketStatus()) {
-      console.log("Disconnected, trying to reconnect...");
-    }
-  };
-
-  const reconnectAttempt = (attempt: number) => {
-    setSocketStatus(prev => ({
-      ...prev,
-      self: {
-        ...prev.self,
-        status: "RECONNECTING",
-        reconnectAttempt: attempt,
-      }
-    }));
-    if (shouldLogSocketStatus()) {
-      console.log(`Reconnecting attempt ${String(attempt)}...`);
-    }
-  };
-
-  //? will not trigger when you call this event
-  const userAfk = ({ userId, endTime }: { userId: string; endTime?: number }) => {
-    if (sessionRef.current !== null && userId === sessionRef.current.id) {
-      setSocketStatus(prev => ({
-        ...prev,
-        self: {
-          status: "DISCONNECTED",
-          reconnectAttempt: undefined,
-          endTime
-        }
-      }));
-    } else {
-      setSocketStatus(prev => ({
-        ...prev,
-        [userId]: {
-          status: "DISCONNECTED",
-          endTime
-        }
-      }));
-    }
-  };
-
-  //? will not trigger when you call this event
-  const userBack = ({ userId }: { userId: string }) => {
-    if (shouldLogSocketStatus()) {
-      console.log("userBack", { userId });
-    }
-
-    setSocketStatus(prev => ({
-      ...prev,
-      [userId]: {
-        status: "CONNECTED",
-        endTime: undefined,
-      }
-    }));
-  };
-
-  const connectError = (err: { message: string }) => {
-    if (shouldLogSocketStatus()) {
-      console.log("connect_error", { err });
-    }
-    setSocketStatus(prev => ({
-      ...prev,
-      self: {
-        ...prev.self,
-        status: "DISCONNECTED",
-        reconnectAttempt: undefined,
-      }
-    }));
-    if (shouldLogDev()) {
-      console.error(`Connection error: ${err.message}`);
-    }
-    if (shouldNotifyDev()) {
-      notify.error({ key: 'common.connectionError' });
-    }
-  };
+  const connect = buildConnectHandler({ setSocketStatus });
+  const disconnect = buildDisconnectHandler({ setSocketStatus });
+  const reconnectAttempt = buildReconnectAttemptHandler({ setSocketStatus });
+  const userAfk = buildUserAfkHandler({ setSocketStatus, sessionRef });
+  const userBack = buildUserBackHandler({ setSocketStatus });
+  const connectError = buildConnectErrorHandler({ setSocketStatus });
 
   activeLifecycleHandlers = {
     connect,

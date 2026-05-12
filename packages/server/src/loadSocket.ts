@@ -8,9 +8,13 @@ import {
   buildJoinRoomResponseEventName,
   buildLeaveRoomResponseEventName,
   buildGetJoinedRoomsResponseEventName,
+  extractLanguageFromHeader,
   extractTokenFromSocket,
+  getLogger,
   getProjectConfig,
   dispatchHook,
+  normalizeErrorResponse,
+  tryCatch,
   type apiMessage,
   type syncMessage,
   type BaseSessionLayout,
@@ -30,13 +34,16 @@ import {
 const sessionLocks = new Map<string, Promise<void>>();
 const withSessionLock = async (token: string, fn: () => Promise<void>) => {
   const prev = sessionLocks.get(token) ?? Promise.resolve();
+  //? Both `then` handlers point to `fn` so a previous lock failure (rejected
+  //? promise) doesn't block the next caller — we want each `withSessionLock`
+  //? invocation to run regardless of whether the prior one threw.
   const next = prev.then(fn, fn);
   sessionLocks.set(token, next);
-  try {
-    await next;
-  } finally {
-    if (sessionLocks.get(token) === next) sessionLocks.delete(token);
-  }
+  await tryCatch(() => next);
+  //? Cleanup runs unconditionally — same semantics the prior `try/finally`
+  //? provided. Only delete if we still own the slot (a later caller may
+  //? have already overwritten it with their own `next`).
+  if (sessionLocks.get(token) === next) sessionLocks.delete(token);
 };
 
 const getVisibleSocketRooms = (
@@ -87,7 +94,9 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       },
       credentials: true,
     },
-    maxHttpBufferSize: options.maxHttpBufferSize ?? 5 * 1024 * 1024,
+    maxHttpBufferSize: options.maxHttpBufferSize ?? config.socket.maxHttpBufferSize,
+    pingTimeout: config.socket.pingTimeout,
+    pingInterval: config.socket.pingInterval,
   });
 
   setIoInstance(io);
@@ -97,7 +106,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
   attachSocketRedisAdapter(io);
 
   if (shouldLogSocketStartup) {
-    console.log('SocketIO server initialized (redis adapter attached)');
+    getLogger().info('SocketIO server initialized (redis adapter attached)');
   }
 
   io.on(socketEventNames.connect, (socket) => {
@@ -106,6 +115,10 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     //? config on every event.
     const activityBroadcasterEnabled = config.socketActivityBroadcaster ?? false;
     const locationProviderEnabled = config.locationProviderEnabled ?? false;
+    const preferredLocale =
+      extractLanguageFromHeader(socket.handshake.headers['x-language'])
+      || extractLanguageFromHeader(socket.handshake.headers['accept-language'])
+      || undefined;
 
     if (token) {
       socketConnected({ token, io });
@@ -131,27 +144,41 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       if (typeof responseIndex !== 'number') return;
 
       if (!token) {
-        socket.emit(buildJoinRoomResponseEventName(responseIndex), { error: 'Not authenticated' });
+        socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
+          response: { status: 'error', errorCode: 'auth.required' },
+          preferredLocale,
+        }));
         return;
       }
       if (!group) {
-        socket.emit(buildJoinRoomResponseEventName(responseIndex), { error: 'Invalid room' });
+        socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
+          response: { status: 'error', errorCode: 'room.invalid' },
+          preferredLocale,
+        }));
         return;
       }
 
       void withSessionLock(token, async () => {
         const session = await getSession(token);
         if (!session) {
-          socket.emit(buildJoinRoomResponseEventName(responseIndex), { error: 'Session not found' });
+          socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
+            response: { status: 'error', errorCode: 'session.notFound' },
+            preferredLocale,
+          }));
           return;
         }
 
         //? Allow consumers to veto a join (auth check, allowlist, ...).
         const preResult = await dispatchHook('preRoomJoin', { token, room: group });
         if (preResult.stopped) {
-          socket.emit(buildJoinRoomResponseEventName(responseIndex), {
-            error: preResult.signal.errorCode || 'Join blocked',
-          });
+          socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
+            response: {
+              status: 'error',
+              errorCode: preResult.signal.errorCode || 'room.joinBlocked',
+            },
+            preferredLocale,
+            userLanguage: session.language,
+          }));
           return;
         }
 
@@ -164,7 +191,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
         const visibleRooms = getVisibleSocketRooms(socket, token);
         socket.emit(buildJoinRoomResponseEventName(responseIndex), { rooms: visibleRooms });
         if (shouldLogDev) {
-          console.log(`Socket ${socket.id} joined group ${group}`);
+          getLogger().debug(`Socket ${socket.id} joined group ${group}`);
         }
 
         void dispatchHook('postRoomJoin', { token, room: group, allRooms: visibleRooms });
@@ -177,26 +204,40 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       if (typeof responseIndex !== 'number') return;
 
       if (!token) {
-        socket.emit(buildLeaveRoomResponseEventName(responseIndex), { error: 'Not authenticated' });
+        socket.emit(buildLeaveRoomResponseEventName(responseIndex), normalizeErrorResponse({
+          response: { status: 'error', errorCode: 'auth.required' },
+          preferredLocale,
+        }));
         return;
       }
       if (!group) {
-        socket.emit(buildLeaveRoomResponseEventName(responseIndex), { error: 'Invalid room' });
+        socket.emit(buildLeaveRoomResponseEventName(responseIndex), normalizeErrorResponse({
+          response: { status: 'error', errorCode: 'room.invalid' },
+          preferredLocale,
+        }));
         return;
       }
 
       void withSessionLock(token, async () => {
         const session = await getSession(token);
         if (!session) {
-          socket.emit(buildLeaveRoomResponseEventName(responseIndex), { error: 'Session not found' });
+          socket.emit(buildLeaveRoomResponseEventName(responseIndex), normalizeErrorResponse({
+            response: { status: 'error', errorCode: 'session.notFound' },
+            preferredLocale,
+          }));
           return;
         }
 
         const preResult = await dispatchHook('preRoomLeave', { token, room: group });
         if (preResult.stopped) {
-          socket.emit(buildLeaveRoomResponseEventName(responseIndex), {
-            error: preResult.signal.errorCode || 'Leave blocked',
-          });
+          socket.emit(buildLeaveRoomResponseEventName(responseIndex), normalizeErrorResponse({
+            response: {
+              status: 'error',
+              errorCode: preResult.signal.errorCode || 'room.leaveBlocked',
+            },
+            preferredLocale,
+            userLanguage: session.language,
+          }));
           return;
         }
 
@@ -210,7 +251,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
         const visibleRooms = getVisibleSocketRooms(socket, token);
         socket.emit(buildLeaveRoomResponseEventName(responseIndex), { rooms: visibleRooms });
         if (shouldLogDev) {
-          console.log(`Socket ${socket.id} left group ${group}`);
+          getLogger().debug(`Socket ${socket.id} left group ${group}`);
         }
 
         void dispatchHook('postRoomLeave', { token, room: group, allRooms: visibleRooms });
@@ -223,7 +264,10 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
 
       if (!token) {
         socket.emit(buildGetJoinedRoomsResponseEventName(responseIndex), {
-          error: 'Not authenticated',
+          ...normalizeErrorResponse({
+            response: { status: 'error', errorCode: 'auth.required' },
+            preferredLocale,
+          }),
           rooms: [],
         });
         return;
@@ -242,7 +286,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       } else {
         if (!token) return;
         if (shouldLogDev) {
-          console.log(`user disconnected, reason: ${reason}`);
+          getLogger().debug(`user disconnected`, { reason });
         }
       }
     });
@@ -253,7 +297,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
         if (!token) return;
         if (!locationProviderEnabled) return;
         if (shouldLogDev) {
-          console.log('updating location to:', newLocation.pathName);
+          getLogger().debug('updating location', { pathName: newLocation.pathName });
         }
 
         void withSessionLock(token, async () => {

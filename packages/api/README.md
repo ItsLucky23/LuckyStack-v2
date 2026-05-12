@@ -1,11 +1,11 @@
 # @luckystack/api
 
-> Type-safe API request handlers for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). WebSocket-first via socket.io with HTTP fallback. File-based routing, generated route map, integrated rate limiting, validation, hooks, and Sentry tracing.
+> Type-safe API request handlers for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). WebSocket-first via socket.io with HTTP fallback. File-based routing, generated route map, integrated rate limiting, validation, hooks, and error-tracking tracing.
 
 ## Install
 
 ```bash
-npm install @luckystack/api @luckystack/core @luckystack/login @luckystack/sentry socket.io
+npm install @luckystack/api @luckystack/core @luckystack/login @luckystack/error-tracking socket.io
 ```
 
 ## Quickstart
@@ -60,6 +60,24 @@ You typically don't call these yourself — `createLuckyStackServer` does. Use t
 6. **Dispatches** the `postApiExecute` hook with the result + duration.
 7. **Returns** the response via socket `ack` or HTTP body / SSE stream.
 
+## Generated types
+
+`apiRequest` (in `@luckystack/core/client`) is fully typed against the route map emitted by `@luckystack/devkit` from your `_api/*` files (default location: `src/_sockets/apiTypes.generated.ts`). Use route-name + version literals so inference works:
+
+```ts
+const result = await apiRequest({
+  name: 'settings/updateUser',
+  version: 'v1',
+  data: { name: 'Alice' },
+});
+
+if (result.status === 'success') {
+  // result is typed from the matching `main` return type.
+}
+```
+
+Do not wrap `apiRequest` in `unknown` / `any` shims (see `.claude/CLAUDE.md` rule 16). If inference fails, fix the typing source or regenerate maps instead.
+
 ## Public API
 
 | Export | Purpose |
@@ -68,10 +86,17 @@ You typically don't call these yourself — `createLuckyStackServer` does. Use t
 | `handleHttpApiRequest(req, res)` | HTTP fallback for `/api/*` routes; supports SSE streaming. |
 | Type: `ApiHttpStreamEvent` | SSE event shape emitted by streaming endpoints. |
 
+## Related architecture docs
+
+- [`docs/ARCHITECTURE_API.md`](../../docs/ARCHITECTURE_API.md) — full request lifecycle, streaming, error contract.
+- [`docs/ARCHITECTURE_ROUTING.md`](../../docs/ARCHITECTURE_ROUTING.md) — `_api/` file conventions and method inference.
+
 ## Dependencies
 
-- Runtime: `@luckystack/core`, `@luckystack/login`, `@luckystack/sentry`
-- Peer: `socket.io`
+- Runtime: `@luckystack/core`, `@luckystack/login`, `@luckystack/error-tracking`
+- Peer (canonical ranges, standardized 2026-05-07):
+  - `@prisma/client@^6.19.0` (transitively required via `@luckystack/core`)
+  - `socket.io@^4.8.0`
 
 ## License
 

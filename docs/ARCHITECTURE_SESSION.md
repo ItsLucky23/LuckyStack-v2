@@ -2,6 +2,8 @@
 
 > Session management using Redis with OAuth provider support.
 
+> **Where the code lives (post-package-split):** sessions are managed by `@luckystack/login` (`packages/login/src/session.ts`). Import session helpers from the package: `import { saveSession, getSession, deleteSession, getAllSessions, revokeUserSessions } from '@luckystack/login';`. The legacy `server/functions/session` path no longer exists.
+
 ---
 
 ## Quick Reference
@@ -22,15 +24,57 @@ await apiRequest({ name: "system/logout", version: "v1" });
 Sessions are stored in **Redis** with configurable expiry.
 
 ```
-Redis Key: {PROJECT_NAME}:session:{token}
+Redis Key: {projectName}-session:{token}
+Active-users key: {projectName}-activeUsers:{userId}
 Value: JSON-encoded SessionLayout
-Expiry: config.sessionExpiryDays (default: 7 days)
+Expiry: ProjectConfig.session.expiryDays (default: 7 days)
 ```
+
+The `{projectName}` prefix is resolved at call time by `getProjectName()` from `@luckystack/core`:
+
+```ts
+import { getProjectName } from '@luckystack/core';
+
+getProjectName();
+// 1. ProjectConfig.session.projectName if a consumer set it explicitly
+// 2. process.env.PROJECT_NAME (read at call time — works after dotenv)
+// 3. literal 'luckystack' as the absolute fallback
+```
+
+Override it in `registerProjectConfig({ session: { projectName: 'my-app' } })` to share a Redis instance across multiple LuckyStack apps without key collisions. Reach for `getProjectName()` from any framework or project code that needs the prefix string instead of duplicating the env-read pattern.
+
+The key shape is centralized in `packages/login/src/session.ts` via two helpers:
+
+```ts
+import { sessionKeyFor, activeUsersKeyFor } from '@luckystack/login';
+
+const sessionKey = sessionKeyFor(token);          // -> '{projectName}-session:{token}'
+const activeKey = activeUsersKeyFor(userId);      // -> '{projectName}-activeUsers:{userId}'
+```
+
+Use them whenever you need to read or scan session data from outside `@luckystack/login` — they are the single source of truth for the key shape.
 
 Sliding behavior:
 - Session TTL is refreshed on successful authenticated session reads.
 - In cookie mode, `Set-Cookie` with matching `Max-Age` is reissued on valid requests.
-- Result: active users stay logged in, idle users expire after `sessionExpiryDays`.
+- Result: active users stay logged in, idle users expire after `session.expiryDays`.
+
+### Session-refresh hooks
+
+`getSession` dispatches `preSessionRefresh` before extending the TTL and `postSessionRefresh` after. Both are async hooks — consumers register via `registerHook(...)` from `@luckystack/core`:
+
+```ts
+import { registerHook } from '@luckystack/core';
+
+registerHook('postSessionRefresh', async ({ token, userId, oldTtl, newTtl, applied }) => {
+  if (!applied) return;                  // Redis EXPIRE failed or key disappeared
+  if (oldTtl != null && oldTtl < 60) {
+    // user is on the verge of expiring — log for analytics
+  }
+});
+```
+
+`oldTtl` may be `-1` (key has no TTL) or `null` (TTL command failed). `applied: boolean` on the post payload reflects the actual EXPIRE return.
 
 ---
 
@@ -123,7 +167,8 @@ import {
   getSession,
   saveSession,
   deleteSession,
-} from "server/functions/session";
+  revokeUserSessions,
+} from "@luckystack/login";
 
 // Get session from token
 const user = await getSession(token);
@@ -133,6 +178,9 @@ await saveSession(token, sessionData, true);
 
 // Delete session (logout)
 await deleteSession(token);
+
+// Force-logout every active session for a user
+await revokeUserSessions(userId);
 ```
 
 ### Client-side
@@ -181,8 +229,9 @@ allowMultipleSessions: false; // Default
 
 | File | Function | Purpose |
 | ---- | -------- | ------- |
-| `server/functions/session.ts` | `saveSession` | Persists session, enforces single-session mode, pushes updates to connected clients. |
-| `server/functions/session.ts` | `getSession` | Resolves session by token for API/sync/auth flows. |
-| `server/functions/session.ts` | `deleteSession` | Removes session and emits forced logout event channel. |
-| `server/functions/session.ts` | `getAllSessions` | Admin/debug helper to inspect active sessions. |
+| `packages/login/src/session.ts` | `saveSession` | Persists session, enforces single-session mode, pushes updates to connected clients. |
+| `packages/login/src/session.ts` | `getSession` | Resolves session by token for API/sync/auth flows. Slides TTL on success. |
+| `packages/login/src/session.ts` | `deleteSession` | Removes session and emits forced logout event channel. |
+| `packages/login/src/session.ts` | `getAllSessions` | Admin/debug helper to inspect active sessions. |
+| `packages/login/src/session.ts` | `revokeUserSessions` | Force-logout every active session for a user. |
 | `src/_providers/SessionProvider.tsx` | `useSession` | React hook to access `session` and `sessionLoaded` state. |

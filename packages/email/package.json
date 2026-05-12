@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/email",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Pluggable transactional email for LuckyStack: Console (dev), Resend, and SMTP adapters with a registry-based plug-in pattern. Optional dep — install only when forgotPassword='framework' or you want to send transactional mail.",
@@ -44,7 +44,7 @@
     "build:watch": "tsup --watch"
   },
   "dependencies": {
-    "@luckystack/core": "^0.0.1"
+    "@luckystack/core": "^0.1.0"
   },
   "peerDependencies": {
     "resend": "^4.0.0",

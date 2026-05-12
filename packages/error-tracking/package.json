@@ -1,26 +1,26 @@
 {
-  "name": "@luckystack/sentry",
-  "version": "0.0.1",
+  "name": "@luckystack/error-tracking",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Optional Sentry integration for LuckyStack. Auto-wires error/performance capture into the framework's hook surface and request transports. No-op when DSN is missing.",
+  "description": "Optional error-tracking integration for LuckyStack (currently Sentry-backed). Auto-wires error/performance capture into the framework's hook surface and request transports. No-op when DSN is missing.",
   "license": "MIT",
   "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
-    "directory": "packages/sentry"
+    "directory": "packages/error-tracking"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/sentry#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/error-tracking#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
   "keywords": [
     "luckystack",
+    "error-tracking",
     "sentry",
     "observability",
     "monitoring",
-    "error-tracking",
     "tracing",
     "apm"
   ],
@@ -45,7 +45,7 @@
     "build:watch": "tsup --watch"
   },
   "dependencies": {
-    "@luckystack/core": "^0.0.1"
+    "@luckystack/core": "^0.1.0"
   },
   "peerDependencies": {
     "@sentry/node": "^10.48.0"

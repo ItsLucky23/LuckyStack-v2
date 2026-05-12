@@ -2,6 +2,8 @@
 
 > Socket.io-based real-time communication layer.
 
+> **Where the code lives (post-package-split):** the Socket.io server is set up in `@luckystack/server` (`packages/server/src/loadSocket.ts`, `createServer.ts`). The Redis adapter is attached via `attachSocketRedisAdapter` from `@luckystack/core`. Client-side socket helpers (`socket`, `waitForSocket`, `setSocket`) are exported from `@luckystack/core/client`. Most code paths previously in `server/sockets/` now live in `packages/api/`, `packages/sync/`, and `packages/server/` respectively.
+
 ---
 
 ## Quick Reference

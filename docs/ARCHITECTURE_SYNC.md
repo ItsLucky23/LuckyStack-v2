@@ -2,6 +2,8 @@
 
 > Real-time event broadcasting between clients using rooms.
 
+> **Where the code lives (post-package-split):** the runtime described below is in `@luckystack/sync` (`packages/sync/src/handleSyncRequest.ts`, `handleHttpSyncRequest.ts`, `streamThrottle.ts`). Client-side helpers (`syncRequest`, `upsertSyncEventCallback`, `useSyncEvents`) live at `@luckystack/sync/client`. See [`packages/sync/README.md`](../packages/sync/README.md) for the public API surface.
+
 ---
 
 ## Quick Reference

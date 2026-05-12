@@ -7,9 +7,9 @@ import { defineConfig } from 'tsup';
 //? is unaffected — rollup-plugin-dts bundles into dist/index.d.ts
 //? regardless of where intermediate files came from.
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/cli/validateDeploy.ts'],
   format: ['esm'],
-  dts: true,
+  dts: { entry: 'src/index.ts' },
   sourcemap: true,
   clean: true,
   splitting: false,

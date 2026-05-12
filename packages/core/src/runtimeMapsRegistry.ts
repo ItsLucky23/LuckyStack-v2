@@ -32,10 +32,18 @@ let activeProvider: RuntimeMapsProvider = {
   getRuntimeApiMaps: async () => emptyApi,
   getRuntimeSyncMaps: async () => emptySync,
 };
+let providerRegistered = false;
 
 export const registerRuntimeMapsProvider = (provider: RuntimeMapsProvider): void => {
   activeProvider = provider;
+  providerRegistered = true;
 };
+
+//? Used by `verifyBootstrap` to detect the production fail-mode where no
+//? provider got registered (typically because the project forgot to import
+//? its `server/prod/runtimeMaps.ts` side-effect). Without this check, every
+//? api/sync request silently returns `api.notFound` / `sync.notFound`.
+export const isRuntimeMapsProviderRegistered = (): boolean => providerRegistered;
 
 export const getRuntimeApiMaps = async (): Promise<RuntimeApiMapsResult> =>
   activeProvider.getRuntimeApiMaps();

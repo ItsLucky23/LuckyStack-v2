@@ -47,8 +47,8 @@
       "@luckystack/sync": [
         "./packages/sync/src/index.ts"
       ],
-      "@luckystack/sentry": [
-        "./packages/sentry/src/index.ts"
+      "@luckystack/error-tracking": [
+        "./packages/error-tracking/src/index.ts"
       ],
       "@luckystack/api": [
         "./packages/api/src/index.ts"
@@ -82,7 +82,7 @@
     "packages/core/src",
     "packages/login/src",
     "packages/sync/src",
-    "packages/sentry/src",
+    "packages/error-tracking/src",
     "packages/api/src",
     "packages/devkit/src",
     "packages/email/src",

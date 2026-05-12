@@ -31,6 +31,14 @@ export interface DeployRoutingShape {
   missingServiceErrorCode?: string;
   enableUnhealthyFallback?: boolean;
   strictBootHandshake?: boolean;
+  /** Default port the router listens on when ROUTER_PORT env var is unset (default 4000). */
+  defaultRouterPort?: number;
+  /** Default ms between health polls when not specified per-call (default 5000). */
+  defaultHealthPollMs?: number;
+  /** ms before the fallback `/_health` probe times out (default 3000). */
+  healthProbeTimeoutMs?: number;
+  /** Seconds the boot-UUID Redis key lives for (default 3600 = 1h). */
+  bootKeyTtlSeconds?: number;
 }
 
 export interface DeployDevelopmentShape {

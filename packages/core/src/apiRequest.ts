@@ -1,4 +1,6 @@
 import { getProjectConfig } from "./projectConfig";
+import { getLogger } from "./loggerRegistry";
+import { getRegisteredApiMethod } from "./apiMethodMapRegistry";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketState";
 import type { ApiTypeMap, StreamPayload } from './apiTypeStubs';
 import { notify } from "./notifier";
@@ -21,12 +23,31 @@ const abortControllers = new Map<string, AbortController>();
 export type ApiStreamEvent<T extends StreamPayload = StreamPayload> = T;
 
 /**
- * Check if an API is a GET method using the generated type map.
- * Falls back to name inference if API not found in map.
+ * Check if an API is a GET method.
+ *
+ * Primary path: consult the registered `apiMethodMap` (generated from the
+ * actual handler's `httpMethod` export or name-based inference at codegen
+ * time). Falls back to name-prefix heuristic only when the map isn't
+ * registered yet — typically because the consumer hasn't called
+ * `registerApiMethodMap(...)` from their `socketInitializer.ts` boot file.
  */
-const isGetMethod = (apiName: string): boolean => {
+const isGetMethodByPrefix = (apiName: string): boolean => {
   const lower = apiName.toLowerCase();
   return lower.startsWith('get') || lower.startsWith('fetch') || lower.startsWith('list');
+};
+
+const isGetMethod = (apiName: string, version: string): boolean => {
+  //? Resolved-name shape: `pagePath/apiName`. apiMethodMap is nested by
+  //? pagePath → apiName → version. Split at the last `/` so multi-segment
+  //? page paths (e.g. 'admin/users') still resolve.
+  const lastSlash = apiName.lastIndexOf('/');
+  if (lastSlash > 0) {
+    const pagePath = apiName.slice(0, lastSlash);
+    const leaf = apiName.slice(lastSlash + 1);
+    const method = getRegisteredApiMethod(pagePath, leaf, version);
+    if (method) return method === 'GET';
+  }
+  return isGetMethodByPrefix(apiName);
 };
 
 const canSendNow = (socketInstance: Socket) => {
@@ -139,6 +160,36 @@ interface ApiSuccessResponse extends Record<string, unknown> {
 
 type ApiResponse = ApiErrorResponse | ApiSuccessResponse;
 
+const normalizeApiError = ({
+  response,
+  fallbackErrorCode,
+  fallbackHttpStatus = 500,
+}: {
+  response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean }[]; httpStatus?: number; message?: string };
+  fallbackErrorCode: string;
+  fallbackHttpStatus?: number;
+}): ApiErrorResponse => {
+  const normalized = normalizeErrorResponseCore({
+    response,
+    fallbackErrorCode,
+    fallbackHttpStatus,
+    resolveMessage: ({ errorCode }) => {
+      if (typeof response.message === 'string' && response.message.trim().length > 0) {
+        return response.message;
+      }
+      return errorCode;
+    },
+  });
+
+  return {
+    status: 'error',
+    message: normalized.message,
+    errorCode: normalized.errorCode,
+    errorParams: normalized.errorParams,
+    httpStatus: normalized.httpStatus ?? fallbackHttpStatus,
+  };
+};
+
 /**
  * Type-safe API request function.
  * 
@@ -165,30 +216,36 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
     void (async () => {
       if (!name || typeof name !== "string") {
         if (shouldLogDev()) {
-          console.error("Invalid name");
+          getLogger().error("apiRequest: Invalid name");
         }
         if (shouldNotifyDev()) {
           notify.error({ key: 'api.invalidName' });
         }
-        resolve(null as unknown as RequestOutput);
+        resolve(normalizeApiError({
+          response: { status: 'error', errorCode: 'api.invalidName' },
+          fallbackErrorCode: 'api.invalidName',
+        }) as RequestOutput);
         return;
       }
 
       if (!version || typeof version !== 'string') {
         if (shouldLogDev()) {
-          console.error("Invalid version");
+          getLogger().error("apiRequest: Invalid version");
         }
         if (shouldNotifyDev()) {
           notify.error({ key: 'api.invalidVersion' });
         }
-        resolve(null as unknown as RequestOutput);
+        resolve(normalizeApiError({
+          response: { status: 'error', errorCode: 'api.invalidVersion' },
+          fallbackErrorCode: 'api.invalidVersion',
+        }) as RequestOutput);
         return;
       }
 
       const parsedRoute = parseServiceRouteName(name);
       if (parsedRoute.status === 'error') {
         if (shouldLogDev()) {
-          console.error(`[apiRequest] Invalid service route name '${name}': ${parsedRoute.reason}`);
+          getLogger().error(`[apiRequest] Invalid service route name`, undefined, { name, reason: parsedRoute.reason });
         }
         if (shouldNotifyDev()) {
           notify.error({ key: 'routing.invalidServiceRouteName' });
@@ -209,11 +266,17 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
       const data = payloadData && typeof payloadData === "object" ? payloadData : {};
 
       if (!await waitForSocket()) {
-        resolve(null as unknown as RequestOutput);
+        resolve(normalizeApiError({
+          response: { status: 'error', errorCode: 'api.ioUnavailable' },
+          fallbackErrorCode: 'api.ioUnavailable',
+        }) as RequestOutput);
         return;
       }
       if (!socket) {
-        resolve(null as unknown as RequestOutput);
+        resolve(normalizeApiError({
+          response: { status: 'error', errorCode: 'api.ioUnavailable' },
+          fallbackErrorCode: 'api.ioUnavailable',
+        }) as RequestOutput);
         return;
       }
 
@@ -221,8 +284,10 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
       //? - abortable: true → always use abort controller
       //? - abortable: false → never use abort controller
       //? - abortable: undefined → smart default (GET-like APIs get abort controller)
-      const terminalName = sanitizedName.split('/').at(-1) ?? sanitizedName;
-      const isGet = isGetMethod(terminalName);
+      //? Pass the full pagePath/apiName so the registry lookup can resolve via
+      //? the generated apiMethodMap (falls back to the leaf-name prefix heuristic
+      //? when the map isn't registered yet).
+      const isGet = isGetMethod(sanitizedName, version);
       const useAbortController = shouldUseAbortController({
         abortable: runtimeParams.abortable,
         isGet,
@@ -266,7 +331,12 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
       const runRequest = (socketInstance: Socket) => {
         if (!canSendNow(socketInstance)) {
           queueId ??= createQueueId();
-          enqueueApiRequest({
+          //? `enqueueApiRequest` returns `false` when the offline queue is
+          //? full and `dropPolicy: 'reject'` is active. Without honoring
+          //? that signal the outer promise never settles and the caller
+          //? awaits forever. Resolve with a normalized error envelope so
+          //? callers can branch.
+          const enqueued = enqueueApiRequest({
             id: queueId,
             key: fullName,
             run: (nextSocket) => {
@@ -274,6 +344,13 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
             },
             createdAt: Date.now(),
           });
+          if (!enqueued) {
+            resolve(normalizeApiError({
+              response: { status: 'error', errorCode: 'offline.queueFull', httpStatus: 503 },
+              fallbackErrorCode: 'offline.queueFull',
+              fallbackHttpStatus: 503,
+            }) as RequestOutput);
+          }
           return;
         }
 
@@ -292,7 +369,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
             }
 
             if (shouldLogStream()) {
-              console.log(`Server API Stream(${String(tempIndex)}):`, { APINAME: sanitizedName, streamPayload });
+              getLogger().debug(`Server API Stream(${String(tempIndex)})`, { APINAME: sanitizedName, streamPayload });
             }
 
             onStream(streamPayload);
@@ -305,7 +382,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         }
 
         if (shouldLogDev()) {
-          console.log(`Client API Request(${String(tempIndex)}):`, { APINAME: sanitizedName, data });
+          getLogger().debug(`Client API Request(${String(tempIndex)})`, { APINAME: sanitizedName, data });
         }
 
         //? Inside the handler we type as the runtime envelope (ApiResponse).
@@ -326,7 +403,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           const status = response.status;
 
           if (shouldLogDev()) {
-            console.log(`Server API Response(${String(tempIndex)}):`, { ...response, APINAME: sanitizedName });
+            getLogger().debug(`Server API Response(${String(tempIndex)})`, { ...response, APINAME: sanitizedName });
           }
 
           if (status === "error") {

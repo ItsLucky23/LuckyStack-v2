@@ -24,7 +24,12 @@ Peer deps (already installed if you have any other LuckyStack package):
 // luckystack/docs-ui/index.ts (overlay file — auto-imported by bootstrapLuckyStack)
 import { mountDocsUi } from '@luckystack/docs-ui';
 
-export const docsUiHandler = mountDocsUi();
+export const docsUiHandler = mountDocsUi({
+  // Title shown in the header + browser tab. Defaults to 'LuckyStack — API docs'.
+  // Pass your project name explicitly — there's no implicit lookup from
+  // ProjectConfig because consumer config shapes vary too widely to introspect.
+  pageTitle: 'My App — API docs',
+});
 ```
 
 ```ts
@@ -55,7 +60,7 @@ your APIs are intentionally documented to the world.
 | Option | Default | Notes |
 | --- | --- | --- |
 | `routePath` | `/_docs` | Path the page is served from. The JSON is at `${routePath}/api.json`. |
-| `pageTitle` | `LuckyStack — API docs` | Shown in the header + browser tab. |
+| `pageTitle` | `LuckyStack — API docs` | Shown in the header + browser tab. Pass your project name explicitly — there is no implicit lookup from `ProjectConfig`. |
 | `enabledInProd` | `false` | Set to `true` to render the docs in production. |
 | `apiDocsPath` | `getGeneratedApiDocsPath()` | Override the JSON file path. Default reads from `ProjectConfig.paths.generatedApiDocs`. |
 
@@ -70,6 +75,11 @@ every `npm run generateArtifacts`.
 The handler is a `customRoutes` predicate: it returns `true` when it
 matches the configured paths, `false` otherwise — so it composes cleanly
 with any other custom HTTP handler.
+
+## Related architecture docs
+
+- [`docs/ARCHITECTURE_API.md`](../../docs/ARCHITECTURE_API.md) — the lifecycle these endpoints document.
+- [`docs/ARCHITECTURE_PACKAGING.md`](../../docs/ARCHITECTURE_PACKAGING.md) — how `apiDocs.generated.json` is produced.
 
 ## License
 

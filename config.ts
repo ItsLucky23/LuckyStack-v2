@@ -281,6 +281,9 @@ const collectAllowedOrigins = (): string[] =>
 //? framework packages read the right values. Server re-registers explicitly
 //? in server.ts for order safety, which is a no-op overwrite.
 registerProjectConfig({
+  app: {
+    publicUrl: resolvedEnvironment.backendUrl,
+  },
   logging: config.logging,
   rateLimiting: config.rateLimiting,
   session: {
@@ -298,8 +301,6 @@ registerProjectConfig({
     },
   },
   defaultLanguage: config.defaultLanguage as unknown as string,
-  sentry: config.sentry,
-  email: config.email,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
   socketStatusIndicator: config.socketStatusIndicator,
   locationProviderEnabled: config.locationProviderEnabled,

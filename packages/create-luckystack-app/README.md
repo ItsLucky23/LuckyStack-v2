@@ -2,13 +2,25 @@
 
 Scaffold a new [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2) project.
 
+## Prerequisites
+
+- Node.js 20+
+- A reachable Redis instance (`REDIS_HOST` / `REDIS_PORT` in `.env.local`)
+- A database supported by Prisma (MongoDB, MySQL, PostgreSQL, or SQLite). The default `prisma/schema.prisma` uses MongoDB; switch the provider before `prisma generate` if you want something else.
+
 ## Usage
 
 ```bash
 npx create-luckystack-app my-app
 cd my-app
+
+# Fill in real secrets (Redis password, OAuth client IDs, etc.):
+cp .env.local_template .env.local
+$EDITOR .env.local
+
+# Two terminals:
 npm run server    # starts the backend
-npm run client    # in another terminal — starts Vite
+npm run client    # starts Vite
 ```
 
 Open <http://localhost:5173>.
@@ -30,6 +42,11 @@ A starter project pre-configured with:
 | --- | --- | --- |
 | `--no-install` | (install runs) | Skip the `npm install` after copying. |
 | `--help`, `-h` | — | Show help. |
+
+## Related architecture docs
+
+- [`docs/DEVELOPER_GUIDE.md`](https://github.com/ItsLucky23/LuckyStack-v2/blob/master/docs/DEVELOPER_GUIDE.md) — full walkthrough after scaffolding.
+- [`docs/ARCHITECTURE_PACKAGING.md`](https://github.com/ItsLucky23/LuckyStack-v2/blob/master/docs/ARCHITECTURE_PACKAGING.md) — overlay folder convention + `bootstrapLuckyStack`.
 
 ## License
 

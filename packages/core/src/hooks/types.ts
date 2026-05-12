@@ -19,6 +19,8 @@
  * (`import './hookPayloads';`) guarantees this.
  */
 
+import type { ErrorResponseInput, NormalizedErrorResponse } from '../responseNormalizer';
+
 /**
  * Minimal session shape used inside core-owned hook payloads. Defined here
  * (instead of imported from `@luckystack/login`) so `@luckystack/core` stays
@@ -51,6 +53,16 @@ export type HookHandler<TPayload> = (payload: TPayload) => Promise<HookResult> |
 
 // --- Core-owned payloads (framework transport; concrete dispatch lives in @luckystack/api and @luckystack/sync) ---
 
+export interface PreApiValidatePayload {
+  routeName: string;
+  data: Record<string, unknown>;
+  user: HookSessionShape | null;
+}
+
+export interface PostApiValidatePayload extends PreApiValidatePayload {
+  validation: { status: 'success' } | { status: 'error'; message: string };
+}
+
 export interface PreApiExecutePayload {
   routeName: string;
   data: Record<string, unknown>;
@@ -64,6 +76,30 @@ export interface PostApiExecutePayload {
   result: unknown;
   error: Error | null;
   durationMs: number;
+}
+
+export interface ApiResponseEnvelope {
+  status: 'success' | 'error';
+  httpStatus?: number;
+  errorCode?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+//? Container so handlers can replace the outgoing response by mutating
+//? `payload.response`. This is intentionally object-shaped (not a return
+//? value) because the existing hook dispatcher reserves return values for
+//? stop signals.
+export interface PreApiRespondPayload {
+  routeName: string;
+  user: HookSessionShape | null;
+  response: ApiResponseEnvelope;
+}
+
+export interface PostApiRespondPayload {
+  routeName: string;
+  user: HookSessionShape | null;
+  response: ApiResponseEnvelope;
 }
 
 export interface PreSyncFanoutPayload {
@@ -131,17 +167,98 @@ export interface CorsRejectedPayload {
   route?: string;
 }
 
+export interface PreSessionRefreshPayload {
+  token: string;
+  userId: string | null;
+  oldTtl: number | null;
+  newTtl: number;
+}
+
+export interface PostSessionRefreshPayload {
+  token: string;
+  userId: string | null;
+  oldTtl: number | null;
+  newTtl: number;
+  /** True if Redis EXPIRE succeeded; false on failure or non-existent key. */
+  applied: boolean;
+}
+
+export interface OnUploadStartPayload {
+  userId: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadKind: 'avatar' | string;
+}
+
+export interface OnUploadCompletePayload {
+  userId: string;
+  fileName: string;
+  sizeBytes: number;
+  uploadKind: 'avatar' | string;
+}
+
+export interface CsrfMismatchPayload {
+  /** Path of the rejected request. */
+  route: string;
+  /** HTTP method of the rejected request. */
+  method?: string;
+  /** Request id (X-Request-Id) for log correlation. */
+  requestId?: string;
+  /** User id from the session that the request claimed, if any. */
+  userId?: string;
+  /** Whether a token was provided in `x-csrf-token` (presence only — never the value). */
+  providedToken: boolean;
+}
+
 // --- Augmentable payload map ---
 
 export interface HookPayloads {
+  preApiValidate: PreApiValidatePayload;
+  postApiValidate: PostApiValidatePayload;
   preApiExecute: PreApiExecutePayload;
   postApiExecute: PostApiExecutePayload;
+  preApiRespond: PreApiRespondPayload;
+  postApiRespond: PostApiRespondPayload;
   preSyncFanout: PreSyncFanoutPayload;
   postSyncFanout: PostSyncFanoutPayload;
   apiError: ApiErrorPayload;
   syncError: SyncErrorPayload;
   rateLimitExceeded: RateLimitExceededPayload;
   corsRejected: CorsRejectedPayload;
+  csrfMismatch: CsrfMismatchPayload;
+  preSessionRefresh: PreSessionRefreshPayload;
+  postSessionRefresh: PostSessionRefreshPayload;
+  onUploadStart: OnUploadStartPayload;
+  onUploadComplete: OnUploadCompletePayload;
 }
+
+// --- Synchronous mutator hooks ---
+
+//? `normalizeErrorResponse` is a synchronous primitive used in many hot paths,
+//? so its hooks are dispatched via a separate sync registry (`registerSyncHook`
+//? / `dispatchSyncHook`). Handlers mutate `payload.response` (preErrorNormalize)
+//? or `payload.normalized` (postErrorNormalize) in place.
+
+export interface PreErrorNormalizePayload {
+  response: ErrorResponseInput;
+  preferredLocale?: string | null;
+  userLanguage?: string | null;
+  fallbackHttpStatus?: number;
+}
+
+export interface PostErrorNormalizePayload {
+  normalized: NormalizedErrorResponse;
+  preferredLocale?: string | null;
+  userLanguage?: string | null;
+}
+
+export interface SyncHookPayloads {
+  preErrorNormalize: PreErrorNormalizePayload;
+  postErrorNormalize: PostErrorNormalizePayload;
+}
+
+export type SyncHookName = keyof SyncHookPayloads;
+
+export type SyncHookHandler<TPayload> = (payload: TPayload) => void;
 
 export type HookName = keyof HookPayloads;

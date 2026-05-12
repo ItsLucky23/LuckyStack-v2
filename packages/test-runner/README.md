@@ -50,8 +50,8 @@ The fuzz layer is intentionally exhaustive and slow — wire it into nightly CI 
 
 ## Server hooks it depends on
 
-- `/_test/reset` endpoint — exposed by `@luckystack/server` only when `ProjectConfig.test.enabled` is true. Used by `resetServerState` to clear DB + Redis between layers.
-- `apiMethodMap.generated.ts` — produced by `@luckystack/devkit` from your `_api/*` files.
+- `/_test/reset` endpoint — served by `@luckystack/server` outside production (gated on `NODE_ENV !== 'production'` and an optional `TEST_RESET_TOKEN`). Used by `resetServerState` to clear DB + Redis between layers. Make sure `TEST_RESET_TOKEN` is set in any non-prod environment that is reachable over the network.
+- `apiMethodMap.generated.ts` — produced by `@luckystack/devkit` from your `_api/*` files. Defaults are read via `getApiMethodMapPath()` from `@luckystack/core`.
 
 ## Public API
 
@@ -68,9 +68,15 @@ The fuzz layer is intentionally exhaustive and slow — wire it into nightly CI 
 
 Types: `EndpointDescriptor`, `HttpMethod`, `ContractCheckResult`, `RunContractSummary`, plus per-layer input types.
 
+## Related architecture docs
+
+- [`docs/ARCHITECTURE_API.md`](../../docs/ARCHITECTURE_API.md) — the contract this runner asserts against.
+- [`docs/ARCHITECTURE_PACKAGING.md`](../../docs/ARCHITECTURE_PACKAGING.md) — how generated maps are emitted per preset.
+
 ## Dependencies
 
-- Peer: `zod`
+- Peer (canonical ranges, standardized 2026-05-07):
+  - `zod@^3.25.0`
 
 ## License
 

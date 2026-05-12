@@ -1,5 +1,6 @@
 import { Socket } from 'socket.io';
 
+import { getLogger } from '@luckystack/core';
 import { getSession } from '@luckystack/login';
 
 // Return type inferred from `getSession`, which is currently typed to the
@@ -13,13 +14,13 @@ export const socketLeaveRoom = async ({ token }: {
 }) => {
 
   if (!token) {
-    console.log('trying to update room peers but no token provided', 'red');
+    getLogger().warn('presence: trying to update room peers but no token provided');
     return null;
   }
 
   const user = await getSession(token);
   if (!user?.id) {
-    console.log(`no session data for given token: ${token}`, 'red');
+    getLogger().warn('presence: no session data for given token', { token });
     return null;
   }
 

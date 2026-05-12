@@ -48,10 +48,21 @@ export type OAuthProvider = CredentialsProvider | FullOAuthProvider;
 export const isFullOAuthProvider = (provider: OAuthProvider): provider is FullOAuthProvider =>
   provider.name !== 'credentials';
 
+export interface OAuthEndpointOverrides {
+  /** Override the provider's authorization URL (e.g. GitHub Enterprise host, Microsoft custom tenant). */
+  authorizationURL?: string;
+  /** Override the token exchange URL. */
+  tokenExchangeURL?: string;
+  /** Override the userInfo URL. */
+  userInfoURL?: string;
+}
+
 interface OAuthHelperInput {
   clientId: string | undefined;
   clientSecret: string | undefined;
   callbackUrl: string;
+  /** Optional URL overrides for self-hosted / custom-tenant deployments. */
+  endpoints?: OAuthEndpointOverrides;
 }
 
 const requireString = (value: string | undefined, label: string): string => {
@@ -68,10 +79,10 @@ export const googleProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   clientID: requireString(input.clientId, 'google clientId'),
   clientSecret: requireString(input.clientSecret, 'google clientSecret'),
   callbackURL: input.callbackUrl,
-  authorizationURL: 'https://accounts.google.com/o/oauth2/v2/auth',
-  tokenExchangeURL: 'https://oauth2.googleapis.com/token',
+  authorizationURL: input.endpoints?.authorizationURL ?? 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? 'https://oauth2.googleapis.com/token',
   tokenExchangeMethod: 'json',
-  userInfoURL: 'https://www.googleapis.com/oauth2/v1/userinfo',
+  userInfoURL: input.endpoints?.userInfoURL ?? 'https://www.googleapis.com/oauth2/v1/userinfo',
   scope: [
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -87,10 +98,10 @@ export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   clientID: requireString(input.clientId, 'github clientId'),
   clientSecret: requireString(input.clientSecret, 'github clientSecret'),
   callbackURL: input.callbackUrl,
-  authorizationURL: 'https://github.com/login/oauth/authorize',
-  tokenExchangeURL: 'https://github.com/login/oauth/access_token',
+  authorizationURL: input.endpoints?.authorizationURL ?? 'https://github.com/login/oauth/authorize',
+  tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? 'https://github.com/login/oauth/access_token',
   tokenExchangeMethod: 'json',
-  userInfoURL: 'https://api.github.com/user',
+  userInfoURL: input.endpoints?.userInfoURL ?? 'https://api.github.com/user',
   scope: ['read:user', 'user:email'],
   nameKey: 'login',
   emailKey: 'email',
@@ -129,10 +140,10 @@ export const discordProvider = (input: OAuthHelperInput): FullOAuthProvider => (
   clientID: requireString(input.clientId, 'discord clientId'),
   clientSecret: requireString(input.clientSecret, 'discord clientSecret'),
   callbackURL: input.callbackUrl,
-  authorizationURL: 'https://discord.com/oauth2/authorize',
-  tokenExchangeURL: 'https://discord.com/api/oauth2/token',
+  authorizationURL: input.endpoints?.authorizationURL ?? 'https://discord.com/oauth2/authorize',
+  tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? 'https://discord.com/api/oauth2/token',
   tokenExchangeMethod: 'form',
-  userInfoURL: 'https://discord.com/api/users/@me',
+  userInfoURL: input.endpoints?.userInfoURL ?? 'https://discord.com/api/users/@me',
   scope: ['identify', 'email'],
   nameKey: 'username',
   emailKey: 'email',
@@ -146,15 +157,22 @@ export const discordProvider = (input: OAuthHelperInput): FullOAuthProvider => (
   },
 });
 
-export const facebookProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
+export interface FacebookProviderInput extends OAuthHelperInput {
+  /** Graph API version segment used in the URLs. Default `'v18.0'` (current as of 2026 — bump as Meta deprecates older versions). */
+  apiVersion?: string;
+}
+
+export const facebookProvider = (input: FacebookProviderInput): FullOAuthProvider => {
+  const v = input.apiVersion ?? 'v18.0';
+  return {
   name: 'facebook',
   clientID: requireString(input.clientId, 'facebook clientId'),
   clientSecret: requireString(input.clientSecret, 'facebook clientSecret'),
   callbackURL: input.callbackUrl,
-  authorizationURL: 'https://www.facebook.com/v10.0/dialog/oauth',
-  tokenExchangeURL: 'https://graph.facebook.com/v10.0/oauth/access_token',
+  authorizationURL: input.endpoints?.authorizationURL ?? `https://www.facebook.com/${v}/dialog/oauth`,
+  tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? `https://graph.facebook.com/${v}/oauth/access_token`,
   tokenExchangeMethod: 'form',
-  userInfoURL: 'https://graph.facebook.com/me?fields=id,name,email,picture.type(large)',
+  userInfoURL: input.endpoints?.userInfoURL ?? 'https://graph.facebook.com/me?fields=id,name,email,picture.type(large)',
   scope: ['public_profile', 'email'],
   nameKey: 'name',
   emailKey: 'email',
@@ -165,28 +183,42 @@ export const facebookProvider = (input: OAuthHelperInput): FullOAuthProvider => 
     const url = pictureData.url;
     return typeof url === 'string' ? url : undefined;
   },
-});
+  };
+};
 
-export const microsoftProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
+export interface MicrosoftProviderInput extends OAuthHelperInput {
+  /** Tenant id segment in the authorize/token URLs. Default `'common'`. */
+  tenant?: string;
+  /** OAuth API version segment. Default `'v2.0'`. */
+  apiVersion?: string;
+  /** Graph API version segment for /me. Default `'v1.0'`. */
+  graphApiVersion?: string;
+}
+
+export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvider => {
+  const tenant = input.tenant ?? 'common';
+  const oauthVersion = input.apiVersion ?? 'v2.0';
+  const graphVersion = input.graphApiVersion ?? 'v1.0';
+  return {
   name: 'microsoft',
   clientID: requireString(input.clientId, 'microsoft clientId'),
   clientSecret: requireString(input.clientSecret, 'microsoft clientSecret'),
   callbackURL: input.callbackUrl,
-  authorizationURL: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
-  tokenExchangeURL: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+  authorizationURL: input.endpoints?.authorizationURL ?? `https://login.microsoftonline.com/${tenant}/oauth2/${oauthVersion}/authorize`,
+  tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? `https://login.microsoftonline.com/${tenant}/oauth2/${oauthVersion}/token`,
   tokenExchangeMethod: 'form',
-  userInfoURL: 'https://graph.microsoft.com/v1.0/me',
+  userInfoURL: input.endpoints?.userInfoURL ?? `https://graph.microsoft.com/${graphVersion}/me`,
   scope: ['openid', 'profile', 'email', 'User.Read'],
   nameKey: 'displayName',
   emailKey: 'mail',
   avatarCodeKey: 'id',
   getAvatar: ({ avatarId }) => {
     if (!avatarId) return;
-    return `https://graph.microsoft.com/v1.0/users/${avatarId}/photo/$value`;
+    return `https://graph.microsoft.com/${graphVersion}/users/${avatarId}/photo/$value`;
   },
   getEmail: async (accessToken) => {
     const fetchProfile = async () => {
-      const response = await fetch('https://graph.microsoft.com/v1.0/me', {
+      const response = await fetch(`https://graph.microsoft.com/${graphVersion}/me`, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -207,7 +239,8 @@ export const microsoftProvider = (input: OAuthHelperInput): FullOAuthProvider =>
     const userPrincipalName = typeof record.userPrincipalName === 'string' ? record.userPrincipalName : '';
     return (mail || userPrincipalName) || false;
   },
-});
+  };
+};
 
 let registeredProviders: OAuthProvider[] = [{ name: 'credentials' }];
 

@@ -12,14 +12,20 @@ export const initSharedSentry = (instance: SentryInstance) => {
   sentry = instance;
 };
 
+//? Pass `extra` inline via Sentry's hint-shaped second argument so contexts
+//? don't leak across concurrent captures. Previously we called
+//? `sentry.setContext('additional', context)` which is process-global until
+//? cleared — under concurrent captures the first context could leak into the
+//? second's report.
 export const captureException = (
   error: unknown,
   context?: Record<string, unknown>
 ) => {
   if (context && sentry) {
-    sentry.setContext('additional', context);
+    sentry.captureException(error, { extra: context });
+  } else {
+    sentry?.captureException(error);
   }
-  sentry?.captureException(error);
 };
 
 export const captureMessage = (
@@ -28,9 +34,10 @@ export const captureMessage = (
   context?: Record<string, unknown>
 ) => {
   if (context && sentry) {
-    sentry.setContext('additional', context);
+    sentry.captureMessage(message, { level, extra: context });
+  } else {
+    sentry?.captureMessage(message, level);
   }
-  sentry?.captureMessage(message, level);
 };
 
 export const setSentryUser = (user: {

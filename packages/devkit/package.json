@@ -30,8 +30,12 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "luckystack-validate-deploy": "./dist/cli/validateDeploy.js"
+  },
   "files": [
     "dist",
+    "README.md",
     "LICENSE"
   ],
   "scripts": {
@@ -39,12 +43,12 @@
     "build:watch": "tsup --watch"
   },
   "dependencies": {
-    "@luckystack/core": "^0.0.1",
+    "@luckystack/core": "^0.1.0",
     "chokidar": "^4.0.3"
   },
   "peerDependencies": {
-    "@prisma/client": "^6.19.3",
+    "@prisma/client": "^6.19.0",
     "typescript": "~5.7.3",
-    "zod": "^3.25.76"
+    "zod": "^3.25.0"
   }
 }

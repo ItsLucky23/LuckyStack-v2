@@ -7,9 +7,10 @@
  * multi-instance deployments.
  */
 
-import { getProjectConfig } from './projectConfig';
+import { getProjectConfig, getProjectName } from './projectConfig';
 import tryCatch from './tryCatch';
 import { redis } from './redis';
+import { getLogger } from './loggerRegistry';
 
 interface RateLimitEntry {
   count: number;
@@ -20,9 +21,11 @@ const rateLimitStore = new Map<string, RateLimitEntry>();
 
 //? Resolved at call time so `registerProjectConfig` can run after this
 //? module is imported. If the project never registers, the defaults from
-//? projectConfig.ts take effect (memory store, 'rate-limit' prefix).
+//? projectConfig.ts take effect (memory store, 'rate-limit' prefix). The
+//? project name comes from projectConfig.session.projectName (single source
+//? of truth — see also session.ts and logout.ts).
 const getRedisPrefix = (): string =>
-  `${process.env.PROJECT_NAME ?? 'luckystack'}:${getProjectConfig().rateLimiting.redisKeyPrefix}`;
+  `${getProjectName()}:${getProjectConfig().rateLimiting.redisKeyPrefix}`;
 
 const isRedisMode = (): boolean => getProjectConfig().rateLimiting.store === 'redis';
 let redisFallbackLogged = false;
@@ -177,7 +180,7 @@ const logRedisFallback = () => {
   }
 
   redisFallbackLogged = true;
-  console.log('[RateLimiter] Redis mode unavailable, falling back to in-memory mode', 'yellow');
+  getLogger().warn('[RateLimiter] Redis mode unavailable, falling back to in-memory mode');
 };
 
 /**
@@ -273,7 +276,7 @@ const scheduleCleanup = (): void => {
       }
     }
     if (cleaned > 0) {
-      console.log(`[RateLimiter] Cleaned ${String(cleaned)} expired entries`, 'gray');
+      getLogger().debug(`[RateLimiter] Cleaned ${String(cleaned)} expired entries`);
     }
     scheduleCleanup();
   }, intervalMs);

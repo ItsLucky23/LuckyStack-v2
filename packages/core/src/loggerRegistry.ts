@@ -1,11 +1,13 @@
 //? Pluggable logger so framework code does not have to write directly to
-//? stdout. The default implementation preserves the existing colored
-//? `console.log('...', 'red')` shim behavior installed by `initConsolelog`
-//? so nothing changes for projects that do not register a logger.
+//? stdout. The default implementation uses `console.{debug,info,warn,error}`
+//? directly with no trailing color-code argument — that argument was only
+//? meaningful when `initConsolelog()` (a dev-only monkey-patch) had been
+//? installed, but the default logger needs to be safe in production too.
 //?
 //? Installers route framework logs to Pino / Winston / Datadog / etc. by
 //? calling `registerLogger({ debug, info, warn, error })` once at boot,
-//? mirroring the rest of the registry pattern in this package.
+//? mirroring the rest of the registry pattern in this package. Dev installs
+//? that want colored output should call `registerLogger(createDevLogger())`.
 //?
 //? Read at call-time via `getLogger()` so registration order does not matter
 //? — same contract as `getProjectConfig()` and friends.
@@ -22,6 +24,33 @@ export interface Logger {
 }
 
 const defaultLogger: Logger = {
+  debug: (message, context) => {
+    if (context !== undefined) console.debug(message, context);
+    else console.debug(message);
+  },
+  info: (message, context) => {
+    if (context !== undefined) console.info(message, context);
+    else console.info(message);
+  },
+  warn: (message, context) => {
+    if (context !== undefined) console.warn(message, context);
+    else console.warn(message);
+  },
+  error: (message, error, context) => {
+    if (error !== undefined && context !== undefined) console.error(message, error, context);
+    else if (error !== undefined) console.error(message, error);
+    else if (context !== undefined) console.error(message, context);
+    else console.error(message);
+  },
+};
+
+//? Dev-mode logger factory: wraps the default behavior with the colored
+//? terminal output that `initConsolelog()` produces. Install via
+//? `registerLogger(createDevLogger())` from a dev-only entry. Note: this
+//? still depends on `initConsolelog()` having been called to interpret the
+//? trailing color string — without it, the codes will appear as literal
+//? text. Use the default logger when running in production or unsure.
+export const createDevLogger = (): Logger => ({
   debug: (message, context) => {
     if (context !== undefined) console.log(message, context, 'cyan');
     else console.log(message, 'cyan');
@@ -40,7 +69,7 @@ const defaultLogger: Logger = {
     else if (context !== undefined) console.log(message, context, 'red');
     else console.log(message, 'red');
   },
-};
+});
 
 let activeLogger: Logger = defaultLogger;
 let isRegistered = false;

@@ -1,4 +1,13 @@
-import type { HookName, HookPayloads, HookHandler, HookResult, HookStopSignal } from './types';
+import type {
+  HookName,
+  HookPayloads,
+  HookHandler,
+  HookResult,
+  HookStopSignal,
+  SyncHookHandler,
+  SyncHookName,
+  SyncHookPayloads,
+} from './types';
 import { captureException } from '../sentrySetup';
 import { getLogger } from '../loggerRegistry';
 
@@ -54,4 +63,36 @@ export const dispatchHook = async <TName extends HookName>(
 //? (presence post-logout cleanup, etc.).
 export const clearAllHooks = (): void => {
   hookHandlers.clear();
+  syncHookHandlers.clear();
+};
+
+// --- Synchronous hooks ---
+
+type AnySyncHandler = (payload: unknown) => void;
+
+const syncHookHandlers = new Map<string, AnySyncHandler[]>();
+
+export const registerSyncHook = <TName extends SyncHookName>(
+  name: TName,
+  handler: SyncHookHandler<SyncHookPayloads[TName]>,
+): void => {
+  const existing = syncHookHandlers.get(name) ?? [];
+  existing.push(handler as AnySyncHandler);
+  syncHookHandlers.set(name, existing);
+};
+
+export const dispatchSyncHook = <TName extends SyncHookName>(
+  name: TName,
+  payload: SyncHookPayloads[TName],
+): void => {
+  const handlers = syncHookHandlers.get(name) ?? [];
+  for (const handler of handlers) {
+    try {
+      handler(payload);
+    } catch (error) {
+      // Isolated per hook — one failing handler never interrupts the main flow.
+      getLogger().error(`hook: sync handler for "${name}" threw`, error, { hook: name });
+      captureException(error, { hook: name });
+    }
+  }
 };

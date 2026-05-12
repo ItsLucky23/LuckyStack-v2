@@ -2,8 +2,8 @@ import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import sharp from 'sharp';
 import path from 'node:path';
-import { mkdir } from 'node:fs/promises';
-import { UPLOADS_DIR, tryCatch } from '@luckystack/core';
+import { mkdir, stat } from 'node:fs/promises';
+import { UPLOADS_DIR, processUpload } from '@luckystack/core';
 
 export const rateLimit: number | false = 20;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -30,30 +30,36 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   if (avatar) {
     const matches = /^data:(.+);base64,(.+)$/.exec(avatar);
-    if (matches) {
-      const base64Data = matches[2];
-      const buffer = Buffer.from(base64Data, "base64");
-
-      const fileName = `${user.id}.webp`;
-      const filePath = path.join(UPLOADS_DIR, fileName);
-
-      const [avatarSaveError] = await tryCatch(async () => {
-        await mkdir(UPLOADS_DIR, { recursive: true });
-
-        await sharp(buffer)
-          .webp({ quality: 80 })
-          .toFile(filePath);
-      });
-
-      if (avatarSaveError) {
-        console.error("Error saving avatar:", avatarSaveError);
-        return { status: "error", errorCode: 'avatar.uploadFailed' };
-      }
-
-      console.log(`✅ Avatar saved for ${user.name} at ${filePath}`);
-    } else {
-      console.log("failed to upload new avatar")
+    if (!matches) {
       return { status: "error", errorCode: 'avatar.invalidFormat' };
+    }
+    const contentType = matches[1];
+    const buffer = Buffer.from(matches[2], "base64");
+    const fileName = `${user.id}.webp`;
+    const filePath = path.join(UPLOADS_DIR, fileName);
+
+    //? `processUpload` handles the onUploadStart / onUploadComplete hooks
+    //? around our sharp encode-and-save callback. The framework owns the
+    //? hook contract; we just provide the encoder.
+    const result = await processUpload({
+      userId: user.id,
+      contentType,
+      buffer,
+      uploadKind: 'avatar',
+      fileName,
+      encodeAndSave: async (raw) => {
+        await mkdir(UPLOADS_DIR, { recursive: true });
+        await sharp(raw).webp({ quality: 80 }).toFile(filePath);
+        const savedStat = await stat(filePath).catch(() => null);
+        return savedStat?.size ?? raw.byteLength;
+      },
+    });
+
+    if (result.status === 'rejected') {
+      return { status: 'error', errorCode: result.errorCode };
+    }
+    if (result.status === 'error') {
+      return { status: 'error', errorCode: 'avatar.uploadFailed' };
     }
   }
 
