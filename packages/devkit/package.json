@@ -1,9 +1,12 @@
 {
   "name": "@luckystack/devkit",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.1.0",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
-  "description": "Project-side dev tooling for LuckyStack: hot reload, route discovery, generated type-map emitter, Zod schema emitter, template injection. Tier-B (project-glue, not for npm).",
+  "description": "Dev-time tooling for LuckyStack: hot reload, route discovery, generated type-map emitter, Zod schema emitter, deploy-config validator CLI. Install as a devDependency in projects that build LuckyStack apps locally.",
   "license": "MIT",
   "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
   "repository": {

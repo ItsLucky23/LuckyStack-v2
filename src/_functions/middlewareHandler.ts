@@ -4,35 +4,28 @@
 //? return nothing if the user is not allowed to access the route and it will be send back to its previous page
 //? if you dont add your page in here it will allow the user to access the page
 import { SessionLayout } from "config";
-import notify from "src/_functions/notify";
+import { i18nNotify as notify, type MiddlewareHandler } from "@luckystack/core/client";
 
-export default function middlewareHandler({ 
-  location, 
-  session 
-}: { 
-  location: string, 
-  searchParams: Record<string, unknown>, 
-  session: SessionLayout | null 
-}) {
+const middlewareHandler: MiddlewareHandler = ({ location, session: baseSession }) => {
+  //? Core sends `BaseSessionLayout | null`; this project extends it to
+  //? `SessionLayout` (Prisma User row), so cast for the in-handler reads.
+  const session = baseSession as SessionLayout | null;
 
   switch (location) {
-
     case '/admin': {
       if (!session) {
-        return { redirect: '/login' };
+        return { success: false, redirect: '/login' };
       }
-
       if (session.admin) {
         return { success: true };
       }
-
       notify.error({ key: 'middleware.notAdmin' });
-      return
+      return undefined;
     }
 
     case '/dashboard': {
       if (!session) {
-        return { redirect: '/login' };
+        return { success: false, redirect: '/login' };
       }
       return { success: true };
     }
@@ -41,4 +34,6 @@ export default function middlewareHandler({
       return { success: true };
     }
   }
-}
+};
+
+export default middlewareHandler;

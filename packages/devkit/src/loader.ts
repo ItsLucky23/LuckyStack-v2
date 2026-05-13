@@ -2,15 +2,13 @@
 /* eslint-disable */
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { tryCatch, getServerFunctionsDir, getSrcDir } from '@luckystack/core';
 import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
 import { getRoutingRules } from './routingRules';
 import { assertValidRouteNaming } from './routeNamingValidation';
-
-const nodeRequire = createRequire(import.meta.url);
 
 export const devApis: Record<string, any> = {};
 export const devSyncs: Record<string, any> = {};
@@ -107,17 +105,12 @@ export const initializeAll = async () => {
   await Promise.all([initializeApis(), initializeSyncs(), initializeFunctions()]);
 };
 
+// Dev hot-reload uses dynamic `import()` so module load yields to the event
+// loop instead of blocking it the way CommonJS `require()` did. The `?v=...`
+// query is a cachebust so the ESM loader returns a fresh evaluation each save.
 const importFile = async (absolutePath: string) => {
-  const normalizedPath = absolutePath.replaceAll('\\', '/');
-
-  for (const cacheKey of Object.keys(nodeRequire.cache)) {
-    const normalizedCacheKey = cacheKey.replaceAll('\\', '/');
-    if (normalizedCacheKey.startsWith(normalizedPath)) {
-      delete nodeRequire.cache[cacheKey];
-    }
-  }
-
-  return nodeRequire(absolutePath);
+  const url = `${pathToFileURL(absolutePath).href}?v=${Date.now()}`;
+  return import(url);
 };
 
 const collectTsFiles = (dir: string, relativeTo = ""): string[] => {

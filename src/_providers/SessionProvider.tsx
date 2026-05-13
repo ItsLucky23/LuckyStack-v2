@@ -1,21 +1,17 @@
-/* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
-import { createContext, use, useState, ReactNode, useEffect, useMemo } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+import { useState, ReactNode, useEffect, useMemo } from 'react';
 
 import { apiRequest } from 'src/_sockets/apiRequest';
 import { socket, useSocket } from 'src/_sockets/socketInitializer';
 import { setSentryUser } from 'src/_functions/sentry';
-import { socketEventNames } from '../../shared/socketEvents';
+import {
+  SessionContext,
+  setLatestSession,
+  getCurrentSession as coreGetCurrentSession,
+  socketEventNames,
+} from '@luckystack/core/client';
 
 import { dev, pageTitle, SessionLayout } from '../../config';
-
-interface UserContextType {
-  session: SessionLayout | null;
-  sessionLoaded: boolean;
-}
-
-let latestSession: SessionLayout | null = null;
-
-const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionLayout | null>(null);
@@ -23,8 +19,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useSocket(session); //? starts the socket connection
 
   useEffect(() => {
-    latestSession = session;
-  }, [session])
+    setLatestSession(session);
+  }, [session]);
 
   useEffect(() => {
     setSentryUser(session?.id ? {
@@ -38,18 +34,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       document.title = `[DEV] ${session.email} - ${pageTitle}`;
       return;
     }
-
     document.title = dev ? `[DEV] ${pageTitle}` : pageTitle;
   }, [session?.email]);
 
   useEffect(() => {
     void (async () => {
       const response = await apiRequest({ name: 'system/session', version: 'v1' });
-      if (!response.result) { return }
+      if (!response.result) return;
       setSession(response.result);
       setSessionLoaded(true);
-    })()
-  }, [])
+    })();
+  }, []);
 
   useEffect(() => {
     if (!socket) return;
@@ -62,40 +57,29 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return {
           ...prev,
           ...parsed,
-          avatar: `${parsed.avatar}?v=${String(Date.now())}`
+          avatar: `${parsed.avatar}?v=${String(Date.now())}`,
         };
       });
-    }
+    };
 
-    socket.on(socketEventNames.updateSession, handler)
-
+    socket.on(socketEventNames.updateSession, handler);
     return () => {
       if (!socket) return;
       socket.off(socketEventNames.updateSession, handler);
-    }
-    
-  }, [])
+    };
+  }, []);
 
   const contextValue = useMemo(() => ({
-    session, sessionLoaded
+    session, sessionLoaded,
   }), [session, sessionLoaded]);
 
   return (
-    <UserContext value={contextValue}>
+    <SessionContext value={contextValue}>
       {children}
-    </UserContext>
+    </SessionContext>
   );
 }
 
-// 5. Create a custom hook for easier usage
-export function useSession() {
-  const context = use(UserContext);
-  if (!context) {
-    throw new Error('useSession must be used within a SessionProvider');
-  }
-  return context;
-}
-
-export function getCurrentSession() {
-  return latestSession;
-}
+export { useSession } from '@luckystack/core/client';
+export const getCurrentSession = (): SessionLayout | null =>
+  coreGetCurrentSession<SessionLayout>();

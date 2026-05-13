@@ -1,7 +1,10 @@
 {
   "name": "@luckystack/test-runner",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "Generated-type-driven test layers for LuckyStack: contract smoke (Zod-valid input), auth enforcement, rate-limit, and crash-resistance fuzz. Walks every endpoint via the generated apiMethodMap.",
   "license": "MIT",

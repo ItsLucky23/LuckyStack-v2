@@ -28,6 +28,14 @@ const getRedisPrefix = (): string =>
   `${getProjectName()}:${getProjectConfig().rateLimiting.redisKeyPrefix}`;
 
 const isRedisMode = (): boolean => getProjectConfig().rateLimiting.store === 'redis';
+const isRateLimitingEnabled = (): boolean => getProjectConfig().rateLimiting.enabled;
+
+const buildAllowedResult = (limit: number): RateLimitResult => ({
+  allowed: true,
+  remaining: Math.max(0, limit),
+  resetIn: 0,
+});
+
 let redisFallbackLogged = false;
 
 const RATE_LIMIT_INCREMENT_SCRIPT = `
@@ -192,6 +200,10 @@ export const checkRateLimit = async ({
   limit,
   windowMs = 60_000,
 }: CheckRateLimitParams): Promise<RateLimitResult> => {
+  if (!isRateLimitingEnabled()) {
+    return buildAllowedResult(limit);
+  }
+
   if (isRedisMode()) {
     const redisResult = await checkRateLimitInRedis({ key, limit, windowMs });
     if (redisResult) {
@@ -209,6 +221,10 @@ export const checkRateLimit = async ({
  * Useful for rate limit headers in responses.
  */
 export const getRateLimitStatus = async (key: string, limit: number): Promise<RateLimitResult> => {
+  if (!isRateLimitingEnabled()) {
+    return buildAllowedResult(limit);
+  }
+
   if (isRedisMode()) {
     const redisResult = await getRateLimitStatusInRedis(key, limit);
     if (redisResult) {

@@ -2,16 +2,16 @@ import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import { SocketStatusIndicator } from '@luckystack/presence/client';
+import {
+  Middleware,
+  useSession,
+  useTheme,
+  useTranslator,
+} from '@luckystack/core/client';
 
-import { defaultTheme } from "config";
-import Middleware from 'src/_components/Middleware';
+import { defaultTheme, SessionLayout } from "config";
 import Navbar from "src/_components/Navbar";
 import { useSocketStatus } from 'src/_providers/socketStatusProvider';
-
-import { useSession } from '../_providers/SessionProvider';
-
-import ThemeToggler from './ThemeToggler';
-import { useTranslator } from '../_functions/translator';
 
 export type Template = 'dashboard' | 'plain';
 
@@ -34,13 +34,12 @@ function DashboardTemplate({ children }: { children: React.ReactNode }) {
 }
 
 function PlainTemplate({ children }: { children: React.ReactNode }) {
-  const { updateTheme } = ThemeToggler();
+  const { setTheme } = useTheme();
   const reactLocation = useLocation();
 
   useEffect(() => {
-    updateTheme(defaultTheme);
-    document.documentElement.classList.toggle("dark", defaultTheme === "dark");
-  }, [updateTheme, reactLocation]);
+    setTheme(defaultTheme);
+  }, [setTheme, reactLocation]);
 
   return (
     <div className="w-full h-full">
@@ -59,18 +58,17 @@ export default function TemplateProvider({
   const [template] = useState<Template>(initialTemplate);
   const TemplateComponent = Templates[template];
 
-  const { session } = useSession();
+  const { session } = useSession<SessionLayout>();
   const reactLocation = useLocation();
-  const { updateTheme } = ThemeToggler();
+  const { setTheme } = useTheme();
   const { socketStatus } = useSocketStatus();
   const translate = useTranslator();
 
   useEffect(() => {
-    if (session?.theme) {
-      updateTheme(session.theme);
-      document.documentElement.classList.toggle("dark", session.theme === "dark");
+    if (session?.theme === 'light' || session?.theme === 'dark') {
+      setTheme(session.theme);
     }
-  }, [session, updateTheme, reactLocation]);
+  }, [session?.theme, setTheme, reactLocation]);
 
   return (
     <div className='w-full h-full relative'>

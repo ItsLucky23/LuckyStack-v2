@@ -17,10 +17,9 @@ import { useLocation } from "react-router-dom";
 import { SessionLayout } from "config";
 import { apiRequest } from "src/_sockets/apiRequest";
 
-import { useSession } from "../_providers/SessionProvider";
+import { useSession, useRouter } from "@luckystack/core/client";
 
 import Avatar from "./Avatar";
-import useRouter from "./Router";
 
 export type NavbarState = 'folded' | 'expanded';
 
@@ -151,7 +150,7 @@ export default function Navbar({ items = DEFAULT_ITEMS }: NavbarProps = {}) {
   const [state, setState] = useState<NavbarState>('folded');
   const location = useLocation();
   const router = useRouter();
-  const { session } = useSession();
+  const { session } = useSession<SessionLayout>();
 
   // Auto-collapse on route change so the mobile drawer doesn't stay open.
   useEffect(() => {

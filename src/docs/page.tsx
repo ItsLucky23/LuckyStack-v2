@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { backendUrl, rateLimiting } from 'config';
-import notify from 'src/_functions/notify';
-import { useTranslator } from 'src/_functions/translator';
+import { i18nNotify as notify, useTranslator } from '@luckystack/core/client';
 import { apiRequest } from 'src/_sockets/apiRequest';
 import { joinRoom, leaveRoom } from 'src/_sockets/socketInitializer';
 import { syncRequest, useSyncEvents } from 'src/_sockets/syncRequest';

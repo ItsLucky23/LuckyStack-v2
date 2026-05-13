@@ -1,4 +1,4 @@
-import { useTranslator } from 'src/_functions/translator';
+import { useTranslator } from '@luckystack/core/client';
 
 export default function Home() {
   const translate = useTranslator();

@@ -6,8 +6,7 @@ import { Link } from "react-router-dom";
 import { backendUrl, loginRedirectUrl, loginPageUrl, providers, SessionLayout, sessionBasedToken } from "config";
 import tryCatch from "shared/tryCatch";
 
-import notify from "../_functions/notify";
-import { useTranslator } from "../_functions/translator";
+import { i18nNotify as notify, useTranslator } from "@luckystack/core/client";
 
 export default function LoginForm({ formType }: { formType: "login" | "register" }) {
   const translate = useTranslator();

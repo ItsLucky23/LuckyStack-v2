@@ -16,7 +16,8 @@
     "paths": {
       "src/*": ["src/*"],
       "server/*": ["server/*"],
-      "shared/*": ["shared/*"]
+      "shared/*": ["shared/*"],
+      "config": ["config.ts"]
     }
   },
   "include": ["src", "server", "config.ts", "deploy.config.ts", "services.config.ts", "luckystack"]

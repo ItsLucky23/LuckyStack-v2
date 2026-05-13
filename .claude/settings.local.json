@@ -23,7 +23,8 @@
       "Bash(npx tsup *)",
       "Bash(grep -n \"^const\\\\|^function\\\\|^if \\(pathname\\\\|^export\\\\|=> {$\\\\|server.listen\" server/server.ts)",
       "Bash(del *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(git grep *)"
     ]
   }
 }

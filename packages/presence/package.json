@@ -1,7 +1,10 @@
 {
   "name": "@luckystack/presence",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "Presence and activity awareness for LuckyStack: AFK detection, room-peer notifications, lifecycle (connect / disconnect / reconnect), single-session enforcement integration. For multiplayer and collaborative apps.",
   "license": "MIT",

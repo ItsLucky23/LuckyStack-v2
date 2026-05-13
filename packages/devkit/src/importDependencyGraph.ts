@@ -47,7 +47,33 @@ const collectScriptFiles = (dir: string, output: Set<string>): void => {
   }
 };
 
+interface CachedSpecifiers {
+  mtimeMs: number;
+  specifiers: string[];
+}
+
+//? Reverse-dependency lookups happen on every file save. Re-reading + regex-
+//? parsing every file in src/shared/serverFunctions per save adds tens of ms
+//? of synchronous IO. Cache per-file by mtime so unchanged files reuse the
+//? prior parse.
+const specifiersCache = new Map<string, CachedSpecifiers>();
+let scopedFilesCache: { files: Set<string>; expiresAt: number } | null = null;
+const SCOPED_FILES_TTL_MS = 1000;
+
 const extractImportSpecifiers = (filePath: string): string[] => {
+  let mtimeMs = 0;
+  try {
+    mtimeMs = fs.statSync(filePath).mtimeMs;
+  } catch {
+    specifiersCache.delete(filePath);
+    return [];
+  }
+
+  const cached = specifiersCache.get(filePath);
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached.specifiers;
+  }
+
   try {
     const source = fs.readFileSync(filePath, 'utf8');
     const specifiers = new Set<string>();
@@ -65,10 +91,18 @@ const extractImportSpecifiers = (filePath: string): string[] => {
       if (match[1]) specifiers.add(match[1]);
     }
 
-    return [...specifiers];
+    const result = [...specifiers];
+    specifiersCache.set(filePath, { mtimeMs, specifiers: result });
+    return result;
   } catch {
+    specifiersCache.delete(filePath);
     return [];
   }
+};
+
+export const invalidateGraphForFile = (absolutePath: string): void => {
+  specifiersCache.delete(normalizePath(absolutePath));
+  scopedFilesCache = null;
 };
 
 const tryResolveWithExtensions = (basePath: string): string | null => {
@@ -126,6 +160,11 @@ const isRouteFile = (filePath: string): boolean => {
 };
 
 const collectScopedFiles = (): Set<string> => {
+  const now = Date.now();
+  if (scopedFilesCache && scopedFilesCache.expiresAt > now) {
+    return scopedFilesCache.files;
+  }
+
   const files = new Set<string>();
   collectScriptFiles(getSrcDir(), files);
   collectScriptFiles(getSharedDir(), files);
@@ -136,6 +175,7 @@ const collectScopedFiles = (): Set<string> => {
     files.add(configFile);
   }
 
+  scopedFilesCache = { files, expiresAt: now + SCOPED_FILES_TTL_MS };
   return files;
 };
 

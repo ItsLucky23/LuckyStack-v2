@@ -305,11 +305,46 @@ If `@luckystack/docs-ui` is wired into the overlay folder or registered manually
 
 ### 3.6 Multi-instance router (if applicable)
 
-If you're using the router for staging/multi-instance:
-1. Boot two backend instances on different ports + the router.
-2. Confirm router round-trips: WebSocket handshake, HTTP API, sync events, presence events.
-3. Kill one backend, confirm the router fails over to the healthy one.
-4. Reboot the dead backend, confirm health-poll re-adds it.
+**Why this matters:** the router is now Tier-A (publishable) and ships a `luckystack-router` bin. Boot UUID handshake + Redis-backed health state are the safety nets — verify they actually fire.
+
+**Setup:** boot two backend instances on different ports (let's call them A `:3000` and B `:3001`) and the router on `:8080`, all pointing at the same Redis.
+
+1. **Happy path round-trip:** with both backends healthy, send 10 HTTP API + 10 sync requests through the router. Confirm:
+   - WebSocket handshake completes (router proxies the upgrade).
+   - HTTP api responses return the expected envelopes.
+   - Sync events broadcast to the right room across instances (Redis adapter mediates).
+   - Presence events (`postRoomJoin`, `onSocketConnect`) fire on the instance that holds the socket — log them server-side to confirm.
+
+2. **Boot UUID handshake (strict mode):**
+   - Set `strictBootHandshake: true` in `deploy.config.ts`.
+   - Boot two backends with DIFFERENT `REDIS_HOST` values (point at different Redis instances).
+   - Boot the router → it should **refuse to start** with a clear error about UUID mismatch.
+   - With `strictBootHandshake: false`, same setup → router boots but logs a yellow warning.
+
+3. **`synchronizedEnvKeys` mismatch:**
+   - Start backend A with `COOKIE_SECRET=A`, backend B with `COOKIE_SECRET=B` (both sharing the same Redis).
+   - On startup the framework computes a SHA-256 hash of each backend's synchronized envs and writes to Redis.
+   - The second backend to boot should crash with `synchronizedEnvHash mismatch` (or warn, depending on config).
+
+4. **Health-poll switchover:**
+   - With `enableFallbackRouting: true` and `healthPollMs: 1000`, kill backend A.
+   - Within ~`healthPollMs`, the router should start proxying new traffic to backend B.
+   - Existing socket connections on A stay until A's listener actually drops — by design.
+   - Restart A → new traffic flips back to A.
+   - With `switchNewTrafficToLocalWhenHealthy: false`, traffic stays on B until you manually fail B over.
+
+5. **Per-preset routing:**
+   - Boot backend A with `LUCKYSTACK_BUNDLE=core-preset`, backend B with `LUCKYSTACK_BUNDLE=fleet-preset`.
+   - A request to `vehicles/getAll` (a fleet route) sent to the router → should forward to B.
+   - A request to `core-only/route` → should forward to A.
+   - A request to `system/*` (shared) → either backend, configured via `fallback`.
+
+6. **Preset bundle selection (single backend):**
+   - Boot a backend with `LUCKYSTACK_BUNDLE=fleet-preset`.
+   - Confirm `vehicles/*` routes resolve via the loaded route map.
+   - A request to `billing/getAll` (not in fleet preset) → should return `serviceNotAssigned` (or whatever the not-in-bundle error code is).
+
+**Pass:** every step exhibits the documented behavior. Strict mode fails fast on mismatch; loose mode warns. Health-poll switches traffic within `healthPollMs`.
 
 ---
 
@@ -347,11 +382,13 @@ If Sentry is initialized:
 6. **Sync echo cross-broadcast:** in window A, type a message, click `Sync echo`. Both A and B receive it through their `playground/echo received` log entries.
 7. **API stream test:** click `API stream (counter)` in either window. That window's log fills with `tick N/10 = sum` chunks. Toggle `Log API stream chunks` off and re-run — chunks still arrive (server-side fires regardless), just don't appear in the log.
 
+8. **streamTo test (token-targeted, the third primitive):** open the playground in **two** tabs. In Tab A click `Copy` next to "My socket id" — that's its socket.id. In Tab B paste it into the "streamTo (token-targeted)" input field, then click `Sync streamTo`. **Tab A** should receive `streamTo chunk: "..."` lines in its log. **Tab B** receives the final summary in its sync log but NO chunk lines (Tab B isn't in the target list). If a third tab is joined to the same room, it also receives nothing — `streamTo` bypasses room fanout entirely.
+
 **Pass:**
 - Originator-only `stream(...)` payloads ONLY land in the requesting window.
 - `broadcastStream(...)` payloads land in EVERY window joined to the room.
+- `streamTo([token])` payloads land in ONLY the tabs whose token/socket-id is in the targets list — even if other tabs share the room.
 - Throttle visibly reduces chunk count without breaking the rendered text.
-- `streamTo` is exercised via the playground? Currently not wired with a UI button — verify by reading `packages/sync/src/handleSyncRequest.ts` `emitStreamToTokens` for a code review pass instead.
 
 ---
 
@@ -446,6 +483,142 @@ If Sentry is initialized:
 
 ---
 
+## 4.10 Playground — hooks demo section
+
+**Why this matters:** the playground exposes buttons that force-trigger `apiError`, `syncError`, and `rateLimitExceeded` so you can observe the hook surface end-to-end. Backed by `playground/throwError`, `playground/throwSync`, and `playground/spam` (with `rateLimit: 3`).
+
+**Steps:**
+
+1. Navigate to `/playground`, scroll to **Hooks demo**.
+2. Click `apiError (throw inside API)`:
+   - Server console should log the `apiError` hook firing with `{ route, requestId, user, error }`.
+   - Client log shows `← response (normalized)` with `status: 'error'` + `errorCode: 'api.internalServerError'`.
+   - If Sentry DSN is configured, the event lands in Sentry with the request id as a tag.
+3. Join a room first, then click `syncError (throw inside sync)`:
+   - Server console logs the `syncError` hook with the same payload shape.
+   - Client log shows the normalized error envelope from `playground/throwSync`.
+4. Click `rateLimitExceeded (spam playground/spam ×10)`:
+   - 10 requests fire in parallel against `playground/spam` (rateLimit 3).
+   - Server console logs `rateLimitExceeded` 7× with `scope`, `key`, `limit: 3`, `windowMs`, `count`.
+   - Client log shows `← 3 ok / 7 rate-limited`.
+
+**Pass:** every trigger fires the corresponding hook; server logs include the right payload; client log shows the normalized envelopes.
+
+---
+
+## 4.11 Playground — settings flows
+
+**Why this matters:** sanity check the `settings/*` APIs (the real CRUD that production apps use). Auth required.
+
+**Steps (logged-in only):**
+
+1. Click `List sessions` → should return `result.sessions[]` with at least the current token, `expiresInSeconds`, and `isCurrent: true`.
+2. Click `Update prefs (notify-on-* = true)` → response `{ status: 'success' }`. Verify by re-running `List sessions` or inspecting the DB user row.
+3. Click `Change password (demo prompt)` → opens the `menuHandler.confirm` form (placeholder for the real settings page form).
+4. Click `Sign out everywhere` → confirm dialog → if accepted, all sessions revoked. The current tab loses session immediately on the next API call.
+
+**Pass:** each button calls the right API; responses look correct; sign-out-everywhere actually kicks all sessions.
+
+---
+
+## 4.12 Playground — Auth & CSRF & OAuth providers
+
+**Why this matters:** consolidates the auth surface — CSRF lazy-fetch + cache, anti-enumeration forgot-password, and OAuth provider redirects.
+
+**Steps:**
+
+1. Scroll to **Auth & CSRF & OAuth providers**.
+2. Click `Fetch CSRF`:
+   - In cookie mode + logged in: badge shows the first 24 hex chars of the token.
+   - In token mode OR logged out: badge stays `— not fetched —` (returns null by design).
+3. Click `Clear cache` → badge resets. Click `Fetch CSRF` again → a new fetch hits `/auth/csrf` (verify in network tab).
+4. Enter an email in the forgot-password field, click `Send reset email`:
+   - Always returns success (anti-enumeration).
+   - If the email matches a real user, an email is sent via the registered email adapter (Console adapter in dev — check stdout).
+5. Click an OAuth provider button (Google / GitHub / Discord / Facebook / credentials):
+   - Browser redirects to `/auth/api/<provider>`.
+   - Standard OAuth dance kicks in (assuming the provider creds are configured in `.env.local`).
+   - `credentials` button redirects to the credentials page.
+
+**Pass:** CSRF fetch + clear cycle works; forgot-password always-success; every provider button issues the right redirect.
+
+---
+
+## 4.13 Playground — Health & test-reset endpoints
+
+**Why this matters:** these are the operator-facing endpoints. `/livez` and `/readyz` are what load balancers + Kubernetes probes hit.
+
+**Steps:**
+
+1. Click `/livez` → log shows `200` + `{ status: 'ok', uptime: ... }` (or whatever the framework returns). Should respond 200 even with Redis/Prisma down (process up = 200).
+2. Click `/readyz` → log shows `200` if Redis + Prisma + bootUuid all OK. Stop Redis → click `/readyz` again → should return `503` within a couple seconds.
+3. Click `/_health` → log shows `200` + `{ bootUuid, envKey, synchronizedHashes }` (the router-handshake payload).
+4. Click `POST /_test/reset` → confirm dialog → if accepted (and gated by `NODE_ENV != production` + `TEST_RESET_TOKEN`), response is `{ status: 'success', cleared: ['rateLimits', 'sessions', 'activeUsers'] }`. Any currently-logged-in session is now invalid.
+
+**Pass:** `/livez` always 200; `/readyz` reflects dependency state; `/_health` returns the boot payload; `/_test/reset` wipes the configured state when allowed.
+
+---
+
+## 4.14 Playground — File upload via processUpload
+
+**Why this matters:** validates `processUpload` + the `onUploadStart` / `onUploadComplete` hooks + Sharp encode pipeline end-to-end. Auth required.
+
+**Steps:**
+
+1. Scroll to **File upload**. Pick a PNG/JPG (any reasonable image — Sharp encodes to webp).
+2. The page logs:
+   - `→ encoding <filename>`
+   - `→ settings/updateUser {avatar: base64 N chars}`
+   - `← updateUser { status: 'success', result: {} }`
+3. Server console logs:
+   - `onUploadStart` hook with `{ userId, contentType, sizeBytes, uploadKind: 'avatar' }`.
+   - `onUploadComplete` hook with `{ userId, fileName, sizeBytes, uploadKind: 'avatar' }`.
+4. The page auto-reloads. Your avatar in the navbar should now show the uploaded image (it's served by `serveAvatars` from `UPLOADS_DIR`).
+5. Click `Clear avatar field` → calls `updateUser` with no avatar field → no upload runs; the user row is untouched (no avatar in the patch).
+
+**Pass:** upload completes; both hooks fire; webp file lands under `UPLOADS_DIR`; the framework's avatar component serves it.
+
+---
+
+## 4.15 Playground — Offline queue
+
+**Why this matters:** validates the offline queue's enqueue + replay-on-reconnect path. The queue is what makes the framework forgive flaky networks and tab-suspend states.
+
+**Steps:**
+
+1. Scroll to **Offline queue**. The status row shows live queue sizes (polled every 500ms).
+2. Join a room first (the queued syncs need a target).
+3. Click `Disconnect (start queueing)`:
+   - Status shows `Simulated offline: YES`.
+   - The socket disconnects. `canSendNow()` now returns false for new requests.
+4. Click `Fire 5 syncRequests (watch queue grow)`:
+   - Sync queue size jumps from 0 to 5.
+   - No log entries for the syncs yet — they're parked.
+5. Click `Reconnect (auto-flush queue)`:
+   - Socket reconnects.
+   - Within ~1s the queue drains; each parked sync replays and you see 5 `playground/echo received` log entries.
+   - Sync queue size returns to 0.
+
+**Pass:** disconnect parks new requests; reconnect drains them in order; final state matches what would have happened with a stable connection.
+
+---
+
+## 4.16 Playground — Presence observer
+
+**Why this matters:** the Presence section is a read-only window into the room/session state. Verifies `joinedRooms` and the socket-status path work.
+
+**Steps:**
+
+1. Open the playground in two tabs (signed in, same user OR different users — the framework allows multiple sessions if `allowMultipleSessions: true`).
+2. Both tabs join `playground-room`. The "Joined rooms" line in each tab shows `playground-room`.
+3. Close one tab (or run `socket.disconnect()` from devtools).
+4. In the other tab, the `SocketStatusIndicator` should flip the missing user's badge to a degraded state within the presence package's `disconnectGraceMs` window (default a few seconds).
+5. Reopen the closed tab → state recovers; both indicators back to connected.
+
+**Pass:** room membership reflects in-tab state; disconnect surfaces in the SocketStatusIndicator on other tabs.
+
+---
+
 ## 5. Stuff explicitly NOT done today (deferred)
 
 These were in the original plan but were either too disruptive given the in-flight parallel work, or low priority. Document them in a follow-up ticket:
@@ -454,7 +627,8 @@ These were in the original plan but were either too disruptive given the in-flig
 2. **Per-route `timeoutMs` / `responseTransform`** — useful but not blocking. `rateLimit` is already per-route which covers most needs.
 3. **devkit naming-validation message customization** — minor.
 4. **Router probe timeout / boot-key prefix tweaks** — only relevant for installers who actually deploy the multi-instance router; ship as default for now.
-5. **`csrfFailed` hook** — depends on what the CSRF AI window did with `packages/core/src/csrf.ts`; verify it dispatches a hook on validation failure as a follow-up.
+5. **`csrfFailed` hook** — depends on what the CSRF AI window did with `packages/core/src/csrf.ts`; verify it dispatches a hook on validation failure as a follow-up. **Update 2026-05-13:** the hook is named `csrfMismatch` and is dispatched in `packages/server/src/httpRoutes/csrfMiddleware.ts:40` — no follow-up needed.
+6. **`@luckystack/monitoring`** — was originally scoped as a new package in this monorepo. **Decision (2026-05-13):** monitoring lives in its OWN GitHub repo + npm package, separate from LuckyStack. The framework ships a thin adapter that hooks the standalone monitoring lib into `preApiExecute` / `postApiExecute` / `postSyncFanout`. `@luckystack/web-vitals` is folded INTO monitoring as a subpath export, not its own package.
 
 ---
 

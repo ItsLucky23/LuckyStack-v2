@@ -1,7 +1,10 @@
 {
   "name": "@luckystack/login",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "Authentication for LuckyStack: credentials + OAuth (Google/GitHub/Facebook/Discord), Redis-backed sessions, single-session enforcement, lifecycle hooks. Pairs with @luckystack/core.",
   "license": "MIT",

@@ -11,8 +11,14 @@ export const apiInputSchemas: Record<string, Record<string, Record<string, z.Zod
     'echo': {
       'v1': z.object({ "message": z.string() }),
     },
+    'spam': {
+      'v1': z.object({}).strict(),
+    },
     'streamCounter': {
       'v1': z.object({ "ticks": z.number().optional(), "intervalMs": z.number().optional() }),
+    },
+    'throwError': {
+      'v1': z.object({ "mode": z.union([z.literal("throw"), z.literal("returnError")]).optional(), "errorCode": z.string().optional() }),
     },
   },
   'reset-password': {

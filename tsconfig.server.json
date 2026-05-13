@@ -99,6 +99,7 @@
   "exclude": [
     "packages/core/src/apiRequest.ts",
     "packages/core/src/client.ts",
+    "packages/core/src/react/**/*",
     "packages/sync/src/syncRequest.ts",
     "packages/sync/src/client.ts",
     "packages/presence/src/client/**/*"

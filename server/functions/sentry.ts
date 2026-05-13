@@ -4,5 +4,5 @@ export {
   captureMessage,
   setSentryUser,
   startSpan,
-} from '../../packages/sentry/src/sentry';
-export { default } from '../../packages/sentry/src/sentry';
+} from '@luckystack/error-tracking';
+export { default } from '@luckystack/error-tracking';

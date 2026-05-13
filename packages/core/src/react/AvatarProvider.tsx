@@ -1,5 +1,5 @@
-/* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
-import { createContext, use, useState, useMemo, useCallback, ReactNode } from "react";
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, use, useState, useMemo, useCallback, ReactNode } from 'react';
 
 export type AvatarStatus = 'avatar' | 'fallback';
 
@@ -31,6 +31,6 @@ export const AvatarProvider = ({ children }: { children: ReactNode }) => {
 
 export function useAvatarContext() {
   const ctx = use(AvatarContext);
-  if (!ctx) throw new Error("useAvatarContext must be used within AvatarProvider");
+  if (!ctx) throw new Error('useAvatarContext must be used within AvatarProvider');
   return ctx;
 }

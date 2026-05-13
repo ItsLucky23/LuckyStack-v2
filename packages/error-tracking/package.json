@@ -1,7 +1,10 @@
 {
   "name": "@luckystack/error-tracking",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "Optional error-tracking integration for LuckyStack (currently Sentry-backed). Auto-wires error/performance capture into the framework's hook surface and request transports. No-op when DSN is missing.",
   "license": "MIT",

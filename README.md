@@ -124,7 +124,7 @@ The framework lives in `packages/` and is consumed as a set of `@luckystack/*` w
 
 ```
 LuckyStack-v2/
-├── packages/                  # Framework workspaces (@luckystack/*)
+├── packages/                  # Framework workspaces (all 13 are Tier-A publishable)
 │   ├── core/                  # Project config, hooks, session types
 │   ├── server/                # bootstrapLuckyStack / createLuckyStackServer
 │   ├── api/                   # API request handlers
@@ -132,12 +132,12 @@ LuckyStack-v2/
 │   ├── login/                 # Credentials + OAuth + sessions
 │   ├── presence/              # Activity / disconnect grace
 │   ├── email/                 # Transactional email adapters
-│   ├── sentry/                # Sentry integration
+│   ├── error-tracking/        # Optional error-tracking (Sentry-backed)
 │   ├── test-runner/           # Contract / auth / rate-limit / fuzz tests
 │   ├── docs-ui/               # Dev-only /_docs browser
 │   ├── create-luckystack-app/ # Project scaffolder
-│   ├── devkit/                # Tier-B: hot reload + type emitter
-│   └── router/                # Tier-B: multi-instance proxy
+│   ├── devkit/                # Dev-time tooling (hot reload, type emitter, validate-deploy CLI)
+│   └── router/                # Optional multi-instance proxy (Redis-backed health)
 │
 ├── server/                    # This repo's own server entry (consumer of @luckystack/server)
 │   ├── server.ts              # ~25 lines: calls bootstrapLuckyStack(...)

@@ -4,15 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import Avatar from "src/_components/Avatar";
 import Dropdown, { type DropdownItem } from "src/_components/Dropdown";
-import ThemeToggler from "src/_components/ThemeToggler";
-import { useUpdateLanguage } from "src/_components/TranslationProvider";
+import {
+  i18nNotify as notify,
+  useSession,
+  useTheme,
+  useTranslator,
+  useUpdateLanguage,
+} from "@luckystack/core/client";
 import { menuHandler } from "src/_functions/menuHandler";
-import notify from "src/_functions/notify";
-import { useTranslator } from "src/_functions/translator";
-import { useSession } from "src/_providers/SessionProvider";
 import { apiRequest } from "src/_sockets/apiRequest";
 
-import { backendUrl } from "../../config";
+import { backendUrl, SessionLayout } from "../../config";
 
 const stripAvatarVersion = (url: string) => url.replace(/[?&]v=\d+/, '');
 
@@ -54,8 +56,8 @@ const segmentedClass = (active: boolean) =>
       : 'bg-container2 border-container2-border text-common hover:bg-container2-hover hover:text-title'}`;
 
 export default function Home() {
-  const { session } = useSession();
-  const { updateTheme } = ThemeToggler();
+  const { session } = useSession<SessionLayout>();
+  const { setTheme: updateTheme } = useTheme();
   const setLanguage = useUpdateLanguage();
   const translate = useTranslator();
 

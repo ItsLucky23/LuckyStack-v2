@@ -99,6 +99,11 @@ export const createLuckyStackServer = async (
     };
     await devkit.initializeAll();
     devkit.setupWatchers();
+    //? Belt-and-braces: explicit SIGINT/SIGTERM handler so Ctrl+C is honored
+    //? even if a sync CPU burst (TS Program build, large require chain) is
+    //? still in flight when the signal arrives.
+    process.once('SIGINT', () => process.exit(0));
+    process.once('SIGTERM', () => process.exit(0));
   }
 
   //? Boot UUID must be written before /_health can answer truthfully. Router

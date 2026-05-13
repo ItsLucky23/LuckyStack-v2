@@ -1,7 +1,10 @@
 {
   "name": "@luckystack/server",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "One-call server bootstrap for LuckyStack: HTTP + Socket.io + framework routes (api, sync, _health, /auth, uploads) wired together. Consumer's server.ts shrinks to ~20 lines.",
   "license": "MIT",

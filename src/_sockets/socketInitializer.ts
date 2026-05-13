@@ -8,7 +8,7 @@ import {
   locationProviderEnabled,
   loginPageUrl,
 } from "config";
-import notify from "src/_functions/notify";
+import { i18nNotify as notify } from "@luckystack/core/client";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { useEffect, useRef } from "react";
 import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";

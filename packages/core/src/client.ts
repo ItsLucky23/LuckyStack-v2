@@ -75,3 +75,72 @@ export {
   isApiMethodMapRegistered,
 } from './apiMethodMapRegistry';
 export type { HttpMethodLiteral, ApiMethodMap } from './apiMethodMapRegistry';
+
+//? Locale registry — consumers register their translation JSON files via
+//? `registerLocales(...)` from an overlay (e.g. `luckystack/i18n/locales.ts`).
+//? `registerLanguageSource` wires up the framework's `TranslationProvider`
+//? + `notify` to read the active language from the consumer's session
+//? state (`() => session?.language ?? null`).
+export {
+  registerLocales,
+  getRegisteredLocales,
+  getDefaultLocale,
+  registerLanguageSource,
+  getActiveLanguage,
+  getLocaleByCode,
+} from './localesRegistry';
+export type { LocalesMap, LanguageSource } from './localesRegistry';
+
+//? Middleware handler registry — consumer ships the actual page-guard
+//? logic (`src/_functions/middlewareHandler.ts`) and registers it from
+//? their client bootstrap. Framework's `<Middleware>` and `useRouter`
+//? consume it via `getMiddlewareHandler()`.
+export {
+  registerMiddlewareHandler,
+  getMiddlewareHandler,
+} from './middlewareRegistry';
+export type {
+  MiddlewareInput,
+  MiddlewareResult,
+  MiddlewareHandler,
+} from './middlewareRegistry';
+
+//? Framework-React surface. Provider + hooks consumers compose into
+//? their app entry. Hooks (useSession, useTranslation, useTheme,
+//? useRouter, useAvatarContext) work anywhere inside the matching
+//? provider tree.
+export {
+  SessionContext,
+  useSession,
+  setLatestSession,
+  getCurrentSession,
+} from './react/sessionContext';
+export type { SessionContextValue } from './react/sessionContext';
+
+export { AvatarProvider, useAvatarContext } from './react/AvatarProvider';
+export type { AvatarStatus } from './react/AvatarProvider';
+
+export { useTheme } from './react/useTheme';
+export type { Theme } from './react/useTheme';
+
+export {
+  TranslationProvider,
+  useTranslation,
+  useUpdateLanguage,
+  translate,
+  useTranslator,
+} from './react/TranslationProvider';
+export type { TranslationRecord, TranslateParam } from './react/TranslationProvider';
+
+//? Re-export the i18n-backed notify from /react. Note: this is the
+//? *implementation* — importing it is a side-effect that calls
+//? `registerNotifier(...)` so framework packages emit through it.
+//? Re-exported separately from the no-op `notify` higher in this file
+//? so consumers can opt into the i18n implementation explicitly:
+//?   `import '@luckystack/core/client/notify';`
+//? (Actually re-exported here as well for convenience; importing this
+//? barrel triggers the registration.)
+export { default as i18nNotify } from './react/notify';
+
+export { default as Middleware } from './react/Middleware';
+export { default as useRouter } from './react/Router';

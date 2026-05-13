@@ -1,19 +1,42 @@
 /* eslint-disable react/jsx-no-literals -- temporary playground page; delete this file when done. */
 import {
+  faBolt,
+  faBomb,
   faBroadcastTower,
   faCircleCheck,
   faCircleExclamation,
   faCircleInfo,
   faDoorOpen,
+  faEnvelope,
+  faHeartPulse,
+  faKey,
+  faLink,
+  faList,
   faPaperPlane,
   faPlus,
+  faPlugCircleXmark,
+  faRotateRight,
+  faShieldHalved,
+  faSignOutAlt,
+  faStopwatch,
   faTrash,
   faTriangleExclamation,
+  faUser,
   faWaveSquare,
+  faWifi,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { toast } from 'sonner';
 import { useEffect, useRef, useState } from 'react';
+
+import {
+  getCsrfToken,
+  clearCsrfToken,
+  httpFetch,
+  socket,
+  getApiQueueSize,
+  getSyncQueueSize,
+} from '@luckystack/core/client';
 
 import Avatar from 'src/_components/Avatar';
 import Dropdown, { type DropdownItem } from 'src/_components/Dropdown';
@@ -22,6 +45,7 @@ import { menuHandler } from 'src/_functions/menuHandler';
 import { apiRequest } from 'src/_sockets/apiRequest';
 import { syncRequest, useSyncEvents } from 'src/_sockets/syncRequest';
 import { joinRoom, leaveRoom } from 'src/_sockets/socketInitializer';
+import { providers as oauthProviderIds, backendUrl } from 'config';
 
 export const template = 'dashboard';
 
@@ -96,7 +120,19 @@ function Row({ children, label }: { children: React.ReactNode; label?: string })
 interface LogEntry {
   id: number;
   ts: string;
-  channel: 'api' | 'api-stream' | 'sync' | 'sync-stream' | 'room' | 'system';
+  channel:
+    | 'api'
+    | 'api-stream'
+    | 'sync'
+    | 'sync-stream'
+    | 'room'
+    | 'system'
+    | 'auth'
+    | 'settings'
+    | 'health'
+    | 'upload'
+    | 'offline'
+    | 'hook';
   message: string;
   payload?: unknown;
 }
@@ -131,6 +167,12 @@ const channelLabel: Record<LogEntry['channel'], { label: string; tone: string }>
   'sync-stream': { label: 'sync stream', tone: 'bg-correct/25 text-correct' },
   'room': { label: 'room', tone: 'bg-warning/15 text-warning' },
   'system': { label: 'system', tone: 'bg-container2 text-common' },
+  'auth': { label: 'auth', tone: 'bg-primary/15 text-primary' },
+  'settings': { label: 'settings', tone: 'bg-container2 text-common' },
+  'health': { label: 'health', tone: 'bg-correct/15 text-correct' },
+  'upload': { label: 'upload', tone: 'bg-warning/15 text-warning' },
+  'offline': { label: 'offline', tone: 'bg-wrong/15 text-wrong' },
+  'hook': { label: 'hook', tone: 'bg-wrong/15 text-wrong' },
 };
 
 const handleConfirmBasic = async () => {
@@ -178,14 +220,35 @@ export default function Playground() {
   //? so batching is visible when the throttle is enabled. Real LLM streams
   //? sit in this range too.
   const [streamIntervalMs, setStreamIntervalMs] = useState<number>(20);
+  const [streamToTargets, setStreamToTargets] = useState<string>('');
+  const [mySocketId, setMySocketId] = useState<string>('');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+
+  //? Auxiliary state for the feature sections below the test bench.
+  const [csrfTokenDisplay, setCsrfTokenDisplay] = useState<string | null>(null);
+  const [forgotEmail, setForgotEmail] = useState<string>('');
+  const [avatarFileInfo, setAvatarFileInfo] = useState<string>('');
+  const [offlineSimulated, setOfflineSimulated] = useState<boolean>(false);
+  const [apiQueueSize, setApiQueueSize] = useState<number>(0);
+  const [syncQueueSize, setSyncQueueSize] = useState<number>(0);
 
   const showApiStreamsRef = useRef(showApiStreams);
   showApiStreamsRef.current = showApiStreams;
   const showSyncStreamsRef = useRef(showSyncStreams);
   showSyncStreamsRef.current = showSyncStreams;
   const logScrollRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  //? Live queue-size poll while the test bench is open. Cheap — single
+  //? interval reading two getters. Stops when the page unmounts.
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      setApiQueueSize(getApiQueueSize());
+      setSyncQueueSize(getSyncQueueSize());
+    }, 500);
+    return () => { window.clearInterval(handle); };
+  }, []);
 
   const log = (
     channel: LogEntry['channel'],
@@ -266,6 +329,35 @@ export default function Playground() {
     });
     return () => { teardown?.(); };
   }, [upsertSyncEventStreamCallback]);
+
+  //? streamTo callback: only tabs whose token / socket id was included in
+  //? the request's `targetTokens` receive these chunks. Tabs joined to the
+  //? same room but NOT in the target list see nothing — that's the whole
+  //? point of `streamTo` over `broadcastStream`.
+  useEffect(() => {
+    const teardown = upsertSyncEventStreamCallback({
+      name: 'playground/streamToToken',
+      version: 'v1',
+      callback: ({ stream }) => {
+        if (!showSyncStreamsRef.current) return;
+        const chunk = (stream as { chunk?: string } | undefined)?.chunk;
+        if (typeof chunk === 'string' && chunk.length > 0) {
+          log('sync-stream', `streamTo chunk: "${chunk}"`);
+        }
+      },
+    });
+    return () => { teardown?.(); };
+  }, [upsertSyncEventStreamCallback]);
+
+  //? Stash this tab's socket id so the streamTo demo can show "Copy socket id"
+  //? — paste into another tab's target field to direct chunks at this tab.
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      const id = socket?.id ?? '';
+      setMySocketId((prev) => (prev === id ? prev : id));
+    }, 300);
+    return () => { window.clearInterval(handle); };
+  }, []);
 
   const handleJoinRoom = async () => {
     const trimmed = roomCode.trim();
@@ -382,6 +474,44 @@ export default function Playground() {
     }
   };
 
+  const handleSyncStreamTo = async () => {
+    const room = requireRoom();
+    if (!room) return;
+    const targets = streamToTargets.trim();
+    if (!targets) {
+      toast.error('Paste at least one target token / socket id first.');
+      return;
+    }
+    setBusy('syncStreamTo');
+    log('sync', `→ playground/streamToToken (targets: ${targets})`);
+    const response = await syncRequest({
+      name: 'playground/streamToToken',
+      version: 'v1',
+      data: { targetTokens: targets, text: streamText, intervalMs: streamIntervalMs },
+      receiver: room,
+    });
+    setBusy(null);
+    if (response.status === 'success') {
+      log('sync', `← streamToToken complete`, response.result);
+    } else {
+      log('sync', `← streamToToken error`, response);
+    }
+  };
+
+  const handleCopySocketId = async () => {
+    if (!mySocketId) {
+      toast.error('No socket id yet — make sure the socket is connected.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(mySocketId);
+      toast.success(`Copied: ${mySocketId}`);
+    } catch {
+      toast.info(`Socket id: ${mySocketId} (clipboard failed — copy from log)`);
+      log('system', `socket.id = ${mySocketId}`);
+    }
+  };
+
   const handleSyncProgress = async () => {
     const room = requireRoom();
     if (!room) return;
@@ -442,6 +572,263 @@ export default function Playground() {
 
   const handleErrorPagePreview = () => {
     setShouldThrowForPreview(true);
+  };
+
+  // ───────────────────────── Auth & CSRF ─────────────────────────
+  const handleFetchCsrf = async () => {
+    setBusy('csrf');
+    const token = await getCsrfToken();
+    setBusy(null);
+    setCsrfTokenDisplay(token);
+    if (token) {
+      log('auth', `CSRF token fetched`, { preview: `${token.slice(0, 12)}…` });
+    } else {
+      log('auth', `CSRF skipped (token mode or no session)`);
+    }
+  };
+
+  const handleClearCsrf = () => {
+    clearCsrfToken();
+    setCsrfTokenDisplay(null);
+    log('auth', `CSRF cache cleared (next fetch re-fetches from /auth/csrf)`);
+  };
+
+  const handleSendForgotPassword = async () => {
+    const email = forgotEmail.trim();
+    if (!email) { toast.error('Enter an email first.'); return; }
+    setBusy('forgot');
+    log('auth', `→ reset-password/sendReset "${email}"`);
+    const response = await apiRequest({
+      name: 'reset-password/sendReset',
+      version: 'v1',
+      data: { email },
+    });
+    setBusy(null);
+    if (response.status === 'success') {
+      log('auth', `← reset-password/sendReset (always-success for anti-enumeration)`);
+    } else {
+      log('auth', `← reset-password/sendReset error`, response);
+    }
+  };
+
+  const handleOauthLaunch = (providerId: string) => {
+    log('auth', `Redirecting to /auth/api/${providerId}`);
+    window.location.href = `${backendUrl}/auth/api/${providerId}`;
+  };
+
+  // ───────────────────────── Settings flows ─────────────────────────
+  const handleListSessions = async () => {
+    setBusy('listSessions');
+    log('settings', `→ settings/listSessions`);
+    const response = await apiRequest({
+      name: 'settings/listSessions',
+      version: 'v1',
+      data: {},
+    });
+    setBusy(null);
+    if (response.status === 'success') {
+      log('settings', `← ${String(response.result.sessions.length)} session(s)`, response.result);
+    } else {
+      log('settings', `← listSessions error`, response);
+    }
+  };
+
+  const handleSignOutEverywhere = async () => {
+    const confirmed = await menuHandler.confirm({
+      title: 'Sign out everywhere?',
+      content: 'This revokes every session including the current one. You will be logged out.',
+    });
+    if (!confirmed) return;
+    setBusy('signOut');
+    log('settings', `→ settings/signOutEverywhere`);
+    const response = await apiRequest({
+      name: 'settings/signOutEverywhere',
+      version: 'v1',
+      data: {},
+    });
+    setBusy(null);
+    log('settings', `← signOutEverywhere`, response);
+  };
+
+  const handleUpdatePreferences = async () => {
+    setBusy('prefs');
+    log('settings', `→ settings/updatePreferences {notifyOnNewSignIn: true}`);
+    const response = await apiRequest({
+      name: 'settings/updatePreferences',
+      version: 'v1',
+      data: { preferences: { notifyOnNewSignIn: true, notifyOnPasswordChange: true } },
+    });
+    setBusy(null);
+    log('settings', `← updatePreferences`, response);
+  };
+
+  const handleChangePassword = async () => {
+    const current = await menuHandler.confirm({
+      title: 'Change password (demo)',
+      content: 'Type your current password — then a new one. This will revoke other sessions on success.',
+      input: '',
+    });
+    if (!current) return;
+    log('settings', `change-password flow opened (real form lives in /settings)`);
+  };
+
+  // ───────────────────────── Hooks demo ─────────────────────────
+  const handleTriggerApiError = async () => {
+    setBusy('throwError');
+    log('hook', `→ playground/throwError (mode=throw → apiError hook fires server-side)`);
+    const response = await apiRequest({
+      name: 'playground/throwError',
+      version: 'v1',
+      data: { mode: 'throw' },
+    });
+    setBusy(null);
+    log('hook', `← response (normalized)`, response);
+  };
+
+  const handleTriggerSyncError = async () => {
+    const room = requireRoom();
+    if (!room) return;
+    setBusy('throwSync');
+    log('hook', `→ playground/throwSync (room: ${room}) → syncError hook fires server-side`);
+    const response = await syncRequest({
+      name: 'playground/throwSync',
+      version: 'v1',
+      data: { reason: 'demo trigger from playground' },
+      receiver: room,
+    });
+    setBusy(null);
+    log('hook', `← sync response (normalized)`, response);
+  };
+
+  const handleRateLimitSpam = async () => {
+    setBusy('spam');
+    log('hook', `→ playground/spam ×10 (rateLimit: 3 ⇒ first 3 succeed, rest get rateLimit.exceeded)`);
+    const responses = await Promise.all(
+      Array.from({ length: 10 }).map(() => apiRequest({
+        name: 'playground/spam',
+        version: 'v1',
+        data: {},
+      })),
+    );
+    setBusy(null);
+    const successes = responses.filter((r) => r.status === 'success').length;
+    const blocked = responses.length - successes;
+    log('hook', `← ${String(successes)} ok / ${String(blocked)} rate-limited`, responses.map((r) => r.status));
+  };
+
+  // ───────────────────────── Health endpoints ─────────────────────────
+  const handleHealthFetch = async (path: '/livez' | '/readyz' | '/_health') => {
+    setBusy(`health:${path}`);
+    log('health', `→ GET ${path}`);
+    const [error, body] = await (async (): Promise<[Error | null, { status: number; body: unknown }]> => {
+      try {
+        const res = await fetch(`${backendUrl}${path}`, { credentials: 'include' });
+        const text = await res.text();
+        let parsed: unknown = text;
+        try { parsed = JSON.parse(text); } catch { /* keep raw */ }
+        return [null, { status: res.status, body: parsed }];
+      } catch (e) {
+        return [e as Error, { status: 0, body: null }];
+      }
+    })();
+    setBusy(null);
+    if (error) {
+      log('health', `← ${path} fetch error: ${error.message}`);
+    } else {
+      log('health', `← ${path} ${String(body.status)}`, body.body);
+    }
+  };
+
+  // ───────────────────────── Upload (avatar) ─────────────────────────
+  const fileToDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => { resolve(String(reader.result ?? '')); };
+    reader.onerror = () => { reject(new Error('file read failed')); };
+    reader.readAsDataURL(file);
+  });
+
+  const handleAvatarPicked = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setAvatarFileInfo(`${file.name} (${String(Math.round(file.size / 1024))} KB)`);
+    setBusy('upload');
+    log('upload', `→ encoding ${file.name}`);
+    let dataUrl: string;
+    try {
+      dataUrl = await fileToDataUrl(file);
+    } catch {
+      setBusy(null);
+      log('upload', `← file read failed`);
+      return;
+    }
+    log('upload', `→ settings/updateUser {avatar: base64 ${String(dataUrl.length)} chars}`);
+    const response = await apiRequest({
+      name: 'settings/updateUser',
+      version: 'v1',
+      data: { avatar: dataUrl },
+    });
+    setBusy(null);
+    log('upload', `← updateUser`, response);
+    //? Force re-render so the avatar element below picks up the new URL.
+    if (response.status === 'success') {
+      window.location.reload();
+    }
+  };
+
+  const handleClearAvatar = async () => {
+    setBusy('clearAvatar');
+    log('upload', `→ settings/updateUser {avatar: null}`);
+    const response = await apiRequest({
+      name: 'settings/updateUser',
+      version: 'v1',
+      data: {},
+    });
+    setBusy(null);
+    log('upload', `← clear avatar`, response);
+  };
+
+  // ───────────────────────── Offline queue ─────────────────────────
+  const handleToggleOffline = () => {
+    if (offlineSimulated) {
+      socket?.connect();
+      setOfflineSimulated(false);
+      log('offline', `socket.connect() — queued items will flush as the socket reconnects`);
+    } else {
+      socket?.disconnect();
+      setOfflineSimulated(true);
+      log('offline', `socket.disconnect() — subsequent api/sync calls will enqueue (offline queue)`);
+    }
+  };
+
+  const handleEnqueueOffline = async () => {
+    setBusy('queueFill');
+    log('offline', `→ firing 5 syncRequests while ${offlineSimulated ? 'OFFLINE' : 'online'} — watch the queue`);
+    const room = requireRoom() ?? 'playground-room';
+    //? Don't await — we want to see the queue fill, not block on each promise.
+    for (let i = 0; i < 5; i++) {
+      void syncRequest({
+        name: 'playground/echo',
+        version: 'v1',
+        data: { message: `queued-${String(i)}` },
+        receiver: room,
+      });
+    }
+    setBusy(null);
+  };
+
+  // ───────────────────────── Test reset ─────────────────────────
+  const handleTestReset = async () => {
+    const confirmed = await menuHandler.confirm({
+      title: '/_test/reset?',
+      content: 'Clears rateLimits, sessions, activeUsers. Dev/test only. Requires TEST_RESET_TOKEN if set.',
+    });
+    if (!confirmed) return;
+    setBusy('testReset');
+    log('health', `→ POST /_test/reset`);
+    const res = await httpFetch(`${backendUrl}/_test/reset`, { method: 'POST' });
+    const body = await res.json().catch(() => ({ raw: 'non-JSON' }));
+    setBusy(null);
+    log('health', `← ${String(res.status)}`, body);
   };
 
   return (
@@ -551,6 +938,26 @@ export default function Playground() {
             Throttle tip: the throttle's flush window is <code className="font-mono">50ms / 16 chars</code>. If your interval is <strong>≥ 50ms</strong> the timer fires before the next token arrives — you'll see one chunk per token even with throttle on. Try <strong>20ms or below</strong> to watch tokens batch.
           </p>
 
+          <Row label="streamTo (token-targeted — paste another tab's socket id here)">
+            <span className="text-xs text-common self-center font-mono">
+              My socket id: {mySocketId || '— not connected —'}
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleCopySocketId()}
+              className="h-7 px-2 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-xs font-medium transition-colors cursor-pointer"
+            >
+              Copy
+            </button>
+            <input
+              type="text"
+              value={streamToTargets}
+              placeholder="Comma-separated target tokens / socket ids"
+              onChange={(event) => { setStreamToTargets(event.target.value); }}
+              className="h-9 w-96 px-3 rounded-md border border-container1-border bg-container1 text-title text-xs font-mono focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors"
+            />
+          </Row>
+
           <Row label="Fire">
             <button
               type="button"
@@ -594,6 +1001,14 @@ export default function Playground() {
             </button>
             <button
               type="button"
+              disabled={busy === 'syncStreamTo'}
+              onClick={() => void handleSyncStreamTo()}
+              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faPaperPlane} /> Sync streamTo (target tokens)
+            </button>
+            <button
+              type="button"
               onClick={() => { setLogs([]); }}
               className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer"
             >
@@ -627,6 +1042,254 @@ export default function Playground() {
                 ))
               )}
             </div>
+          </Row>
+        </Section>
+
+        <Section title="Auth & CSRF & OAuth providers">
+          <p className="text-xs text-common">
+            <code className="font-mono">getCsrfToken()</code> lazily fetches <code className="font-mono">/auth/csrf</code> in cookie mode (returns <code className="font-mono">null</code> in token mode — CSRF-immune by design). <code className="font-mono">httpFetch()</code> auto-attaches the header on POST/PUT/DELETE.
+          </p>
+          <Row label="CSRF token">
+            <button
+              type="button"
+              disabled={busy === 'csrf'}
+              onClick={() => void handleFetchCsrf()}
+              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faShieldHalved} /> Fetch CSRF
+            </button>
+            <button
+              type="button"
+              onClick={handleClearCsrf}
+              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer"
+            >
+              Clear cache
+            </button>
+            <span className="text-xs text-muted self-center font-mono">
+              {csrfTokenDisplay === null ? '— not fetched —' : `${csrfTokenDisplay.slice(0, 24)}…`}
+            </span>
+          </Row>
+
+          <Row label="Forgot-password (anti-enumeration: always success)">
+            <input
+              type="email"
+              value={forgotEmail}
+              placeholder="user@example.com"
+              onChange={(event) => { setForgotEmail(event.target.value); }}
+              className="h-9 w-64 px-3 rounded-md border border-container1-border bg-container1 text-title text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors"
+            />
+            <button
+              type="button"
+              disabled={busy === 'forgot'}
+              onClick={() => void handleSendForgotPassword()}
+              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faEnvelope} /> Send reset email
+            </button>
+          </Row>
+
+          <Row label={`Registered OAuth providers (from config.providers — ${String(oauthProviderIds.length)} entries)`}>
+            {oauthProviderIds.map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => { handleOauthLaunch(id); }}
+                className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2"
+              >
+                <FontAwesomeIcon icon={faLink} /> {id}
+              </button>
+            ))}
+          </Row>
+        </Section>
+
+        <Section title="Settings flows (system/* APIs)">
+          <p className="text-xs text-common">
+            These call real APIs under <code className="font-mono">src/settings/_api/</code>. Auth required — log in first or you will see <code className="font-mono">auth.notLoggedIn</code>.
+          </p>
+          <Row label="Run">
+            <button
+              type="button"
+              disabled={busy === 'listSessions'}
+              onClick={() => void handleListSessions()}
+              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faList} /> List sessions
+            </button>
+            <button
+              type="button"
+              disabled={busy === 'prefs'}
+              onClick={() => void handleUpdatePreferences()}
+              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faUser} /> Update prefs (notify-on-* = true)
+            </button>
+            <button
+              type="button"
+              disabled={busy === 'changePw'}
+              onClick={() => void handleChangePassword()}
+              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2"
+            >
+              <FontAwesomeIcon icon={faKey} /> Change password (demo prompt)
+            </button>
+            <button
+              type="button"
+              disabled={busy === 'signOut'}
+              onClick={() => void handleSignOutEverywhere()}
+              className="h-9 px-3 rounded-md bg-wrong hover:bg-wrong-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faSignOutAlt} /> Sign out everywhere
+            </button>
+          </Row>
+        </Section>
+
+        <Section title="Hooks demo — trigger framework lifecycle hooks">
+          <p className="text-xs text-common">
+            Each button forces a server-side hook to fire. The hook handlers themselves live in <code className="font-mono">server/hooks/</code> (notifications, Sentry capture, etc.). What lands in this log is the normalized client response — the hook payload itself is server-only. Check the server console + Sentry to see the dispatched payloads.
+          </p>
+          <Row label="Triggers">
+            <button
+              type="button"
+              disabled={busy === 'throwError'}
+              onClick={() => void handleTriggerApiError()}
+              className="h-9 px-3 rounded-md bg-wrong hover:bg-wrong-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faBomb} /> apiError (throw inside API)
+            </button>
+            <button
+              type="button"
+              disabled={busy === 'throwSync'}
+              onClick={() => void handleTriggerSyncError()}
+              className="h-9 px-3 rounded-md bg-wrong hover:bg-wrong-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faBomb} /> syncError (throw inside sync)
+            </button>
+            <button
+              type="button"
+              disabled={busy === 'spam'}
+              onClick={() => void handleRateLimitSpam()}
+              className="h-9 px-3 rounded-md bg-warning hover:bg-warning-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faStopwatch} /> rateLimitExceeded (spam playground/spam ×10)
+            </button>
+          </Row>
+        </Section>
+
+        <Section title="Health & test-reset endpoints">
+          <p className="text-xs text-common">
+            <code className="font-mono">/livez</code> is process-up (200 always); <code className="font-mono">/readyz</code> checks Redis + Prisma + boot UUID (503 if degraded); <code className="font-mono">/_health</code> exposes boot UUID + synchronized env hashes for the router handshake. <code className="font-mono">/_test/reset</code> is gated by <code className="font-mono">NODE_ENV</code> + <code className="font-mono">TEST_RESET_TOKEN</code>.
+          </p>
+          <Row label="Probes">
+            <button
+              type="button"
+              disabled={busy === 'health:/livez'}
+              onClick={() => void handleHealthFetch('/livez')}
+              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faHeartPulse} /> /livez
+            </button>
+            <button
+              type="button"
+              disabled={busy === 'health:/readyz'}
+              onClick={() => void handleHealthFetch('/readyz')}
+              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faHeartPulse} /> /readyz
+            </button>
+            <button
+              type="button"
+              disabled={busy === 'health:/_health'}
+              onClick={() => void handleHealthFetch('/_health')}
+              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faHeartPulse} /> /_health
+            </button>
+            <button
+              type="button"
+              disabled={busy === 'testReset'}
+              onClick={() => void handleTestReset()}
+              className="h-9 px-3 rounded-md bg-warning hover:bg-warning-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faRotateRight} /> POST /_test/reset
+            </button>
+          </Row>
+        </Section>
+
+        <Section title="File upload — avatar via processUpload">
+          <p className="text-xs text-common">
+            Encodes the picked file to base64 and submits to <code className="font-mono">system/updateUser</code>. The endpoint runs <code className="font-mono">processUpload</code> which dispatches <code className="font-mono">onUploadStart</code> / <code className="font-mono">onUploadComplete</code> hooks around the Sharp encode step. Auth required.
+          </p>
+          <Row label="Pick a file">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={(event) => void handleAvatarPicked(event)}
+              className="text-xs text-common file:mr-3 file:h-9 file:px-3 file:rounded-md file:border-0 file:bg-primary file:text-white file:cursor-pointer hover:file:bg-primary-hover"
+            />
+            <button
+              type="button"
+              disabled={busy === 'clearAvatar'}
+              onClick={() => void handleClearAvatar()}
+              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faTrash} /> Clear avatar field
+            </button>
+            <span className="text-xs text-muted self-center">
+              {avatarFileInfo || '— no file picked yet —'}
+            </span>
+          </Row>
+        </Section>
+
+        <Section title="Offline queue — disconnect, enqueue, replay">
+          <p className="text-xs text-common">
+            <code className="font-mono">socket.disconnect()</code> makes <code className="font-mono">canSendNow()</code> return false; subsequent <code className="font-mono">syncRequest</code> / <code className="font-mono">apiRequest</code> calls drop into <code className="font-mono">offlineQueue</code> (drop policy + max-size from project config). <code className="font-mono">socket.connect()</code> auto-flushes both queues.
+          </p>
+          <Row label="State">
+            <span className="text-xs text-common self-center">
+              Simulated offline: <strong>{offlineSimulated ? 'YES' : 'no'}</strong>
+            </span>
+            <span className="text-xs text-common self-center">
+              API queue: <strong>{String(apiQueueSize)}</strong>
+            </span>
+            <span className="text-xs text-common self-center">
+              Sync queue: <strong>{String(syncQueueSize)}</strong>
+            </span>
+          </Row>
+          <Row label="Actions">
+            <button
+              type="button"
+              onClick={handleToggleOffline}
+              className={`h-9 px-3 rounded-md text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 ${offlineSimulated ? 'bg-correct hover:bg-correct-hover' : 'bg-wrong hover:bg-wrong-hover'}`}
+            >
+              <FontAwesomeIcon icon={offlineSimulated ? faWifi : faPlugCircleXmark} />
+              {offlineSimulated ? 'Reconnect (auto-flush queue)' : 'Disconnect (start queueing)'}
+            </button>
+            <button
+              type="button"
+              disabled={busy === 'queueFill'}
+              onClick={() => void handleEnqueueOffline()}
+              className="h-9 px-3 rounded-md bg-warning hover:bg-warning-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faBolt} /> Fire 5 syncRequests (watch queue grow)
+            </button>
+          </Row>
+        </Section>
+
+        <Section title="Presence & session — read-only observers">
+          <p className="text-xs text-common">
+            <code className="font-mono">@luckystack/presence</code> tracks socket connect / disconnect / AFK at the server. The <code className="font-mono">SocketStatusIndicator</code> component is the public client surface. Hooks: <code className="font-mono">prePresenceUpdate</code> / <code className="font-mono">postPresenceUpdate</code> fire on AFK transitions; <code className="font-mono">onSocketConnect</code> / <code className="font-mono">onSocketDisconnect</code> fire at the transport layer. The room list below mirrors what this tab has joined this session.
+          </p>
+          <Row label="Joined rooms">
+            <span className="text-xs text-common self-center font-mono">
+              {joinedRooms.length === 0 ? '— none —' : joinedRooms.join(', ')}
+            </span>
+          </Row>
+          <Row label="Tip">
+            <span className="text-xs text-muted">
+              Open this page in two tabs, click <strong>Join</strong> in both, then close one tab. The other tab's
+              SocketStatusIndicator should flip to a degraded state within the presence package's
+              <code className="font-mono"> disconnectGraceMs</code> window.
+            </span>
           </Row>
         </Section>
 

@@ -15,11 +15,10 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useCallback } from 'react';
 
 import Avatar from 'src/_components/Avatar';
-import useRouter from 'src/_components/Router';
-import { useTranslator } from 'src/_functions/translator';
-import { useSession } from 'src/_providers/SessionProvider';
+import { useRouter, useSession, useTranslator } from '@luckystack/core/client';
 import { useSocketStatus } from 'src/_providers/socketStatusProvider';
 import { apiRequest } from 'src/_sockets/apiRequest';
+import { SessionLayout } from 'config';
 
 export const template = 'dashboard';
 
@@ -94,7 +93,7 @@ function QuickAction({ icon, label, onClick, tone = 'neutral' }: QuickActionProp
 
 export default function DashboardPage() {
   const translate = useTranslator();
-  const { session } = useSession();
+  const { session } = useSession<SessionLayout>();
   const router = useRouter();
   const { socketStatus } = useSocketStatus();
 

@@ -3,3 +3,5 @@
 //? barrel so a Vite client bundle never pulls socket.io / Node APIs.
 export { SocketStatusIndicator } from './SocketStatusIndicator';
 export type { SocketStatusIndicatorProps } from './SocketStatusIndicator';
+
+export { default as LocationProvider } from './LocationProvider';

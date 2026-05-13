@@ -1,11 +1,14 @@
-import { ReactNode, useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+//? Framework-owned route guard. Wraps protected pages — runs the registered
+//? middleware handler (`registerMiddlewareHandler` in core) on every route
+//? change and renders children only when allowed. Redirects via React
+//? Router's `useNavigate` when the handler returns a redirect. Shows a
+//? loader only after a 200ms delay so fast checks don't flash a spinner.
 
-import middlewareHandler from "src/_functions/middlewareHandler"
+import { ReactNode, useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { getMiddlewareHandler } from '../middlewareRegistry';
+import { useSession } from './sessionContext';
 
-import { useSession } from "../_providers/SessionProvider";
-
-//? Shown only after a short delay so quick checks don't flash a spinner.
 const LOADER_DELAY_MS = 200;
 
 function MiddlewareLoader() {
@@ -45,25 +48,33 @@ export default function Middleware({ children }: { children: ReactNode }) {
     void (async () => {
       const params = new URLSearchParams(location.search);
       const queryObject: Record<string, string> = {};
-
       for (const [key, value] of params.entries()) {
         queryObject[key] = value;
       }
 
+      //? Wait for the SessionProvider to finish its initial fetch — up to
+      //? 5 seconds. Without this, we'd evaluate the middleware against a
+      //? not-yet-loaded session and bounce the user back to /login.
       let count = 0;
-      while (!sessionLoaded) { 
+      while (!sessionLoaded) {
         await new Promise(res => setTimeout(res, 10));
         count++;
-        if (count > 500) break; // after 5 seconds we stop waiting for the session
+        if (count > 500) break;
       }
 
-      const result = middlewareHandler({ location: location.pathname, searchParams: queryObject, session }) as { success: boolean, redirect: string } | undefined;
+      const handler = getMiddlewareHandler();
+      const result = await handler({
+        location: location.pathname,
+        searchParams: queryObject,
+        session,
+      });
 
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional check prevents navigation race conditions
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- isMounted intentional, see comment below
       if (!isMounted) return;
+
       if (result?.success) {
         setAllowed(true);
-      } else if (result?.redirect) {
+      } else if (result && !result.success && result.redirect) {
         void navigate(result.redirect);
       } else {
         void navigate(-1);
@@ -72,15 +83,12 @@ export default function Middleware({ children }: { children: ReactNode }) {
       setChecking(false);
     })();
 
-    //! dont remove isMounted, read below
-    //? i dont know why but the isMounted = false will always be false but because of this the navigate(-1) will always redirect to the previous page
-    //? if we remove the isMounted variable than it will redirect to the previous page and then to the page before that one and so on wich we dont want
-    //? e.g if we are on /test and go to /admin wich is not allowed we come back to /test, if we spam this request we come back to /test but if we remove the isMounted
-    //? we first go back to /test but the second time we go back to the route before /test e.g /dashboard wich we dont want
+    //! isMounted check is load-bearing — without it, repeated middleware
+    //? denials chain navigate(-1) and walk too far up history. Keep it.
     return () => {
       isMounted = false;
     };
-  }, [location.pathname, location.search, navigate, session, sessionLoaded]); // important: rerun on path change
+  }, [location.pathname, location.search, navigate, session, sessionLoaded]);
 
   if (checking) return <MiddlewareLoader />;
   if (!allowed) return null;

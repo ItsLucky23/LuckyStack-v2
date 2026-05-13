@@ -1,83 +1,186 @@
-# Session State — 2026-05-11
+# SESSION_STATE — 2026-05-13
 
-## Session summary
+## Session Summary
 
-Implemented all 5 "Yes" decisions from `suggestions.md` (the 2026-05-10 review session). All 13 packages still build green at the end.
+This session covered four arcs in one continuous block of work: (1) flipped all 12 `@luckystack/*` packages to `private: false` + Tier-A status (including promoting `devkit` from Tier-B and bumping it to `0.1.0`), (2) expanded the playground page with full demo sections for hooks, settings, auth/CSRF, health endpoints, file upload, offline queue, presence, and `streamTo` (token-targeted streaming), (3) shipped a complete starter into the `create-luckystack-app` template — login/register/reset-password/settings pages, all 7 settings APIs, full `_components/` + `_functions/` + `_locales/`, plus the `server/hooks/notifications.ts` and `shared/tryCatch.ts` glue, and (4) restructured the template + dogfood `src/` so framework-React plumbing (Middleware, Router, AvatarProvider, LocationProvider, TranslationProvider, ThemeToggler-as-`useTheme()`, i18n-backed notify, SessionContext) now lives in `@luckystack/core/client` and `@luckystack/presence/client` — the user-facing scaffold dropped from 16+7 files to 9+3 files. All 13 packages still build green; client + server tsc both clean.
 
-- **#4 Per-package config split**
-  - New `packages/email/src/emailConfig.ts` with `registerEmailConfig` / `getEmailConfig` / `DEFAULT_EMAIL_CONFIG` (mirrors the `@luckystack/presence` registry pattern).
-  - New `packages/error-tracking/src/sentryConfig.ts` with `registerSentryConfig` / `getSentryConfig` / `DEFAULT_SENTRY_CONFIG`.
-  - Removed `EmailConfig`, `SentryConfig`, and all their sub-types from `packages/core/src/projectConfig.ts`.
-  - Added `AppConfig` with `publicUrl` to core — replaces the cross-package `email.appUrl` used by both `@luckystack/email` (transactional links) and `@luckystack/server` (OAuth callback redirect).
-  - Updated `packages/email/src/sendEmail.ts`, `packages/email/src/autoSelect.ts`, `packages/error-tracking/src/sentry.ts`, `packages/login/src/forgotPassword.ts`, `packages/server/src/httpRoutes/authCallbackRoute.ts`, `server/hooks/notifications.ts`, root `config.ts`, and `server/server.ts` to use the new registries.
+### Second arc — devkit hot reload + rate-limit kill switch
 
-- **#2 Runtime maps loader to `@luckystack/server`**
-  - New `packages/server/src/runtimeMapsLoader.ts` shipping `createProdRuntimeMapsProvider` + `registerProdRuntimeMapsProvider`.
-  - `CreateLuckyStackServerOptions` gained `loadGeneratedMaps`, `runtimeMapsPresetEnvVar`, `runtimeMapsPreset` (`packages/server/src/types.ts`).
-  - `createLuckyStackServer` auto-registers the provider when `loadGeneratedMaps` is passed (`packages/server/src/createServer.ts`).
-  - Demo `server/server.ts` dropped its `import './prod/runtimeMaps'` side-effect; passes `loadGeneratedMaps` inline to `bootstrapLuckyStack`.
-  - `server/prod/runtimeMaps.ts` shrunk to just `getRuntimeReplMaps` (REPL still needs the raw maps).
-  - `packages/create-luckystack-app/template/server/server.ts` now demos the same pattern.
+A separate stretch in the same day diagnosed the dev-server freeze the user kept hitting when AI bursts saved many files at once (server became unresponsive, even Ctrl+C queued). Root cause: the hot reload pipeline ran fully synchronously on the main event loop — `createRequire().require()` for module reload, `ts.createProgram(...)` for every type-map regen, plus a full re-walk of the import dependency graph per save. Approach (per approved plan `~/.claude/plans/refine-dit-plan-nog-lazy-walrus.md`): incremental, no worker threads, no build/publish-shape changes. Outcome: async ESM `import()` with `?v=<ts>` cachebust replaces sync `require`; type-map regen now coalesced + fire-and-forget via `setImmediate`; import graph memoized by mtime; explicit `SIGINT`/`SIGTERM` handler added to dev boot. As bonus, a global `rateLimiting.enabled` kill-switch was added to `ProjectConfig` for local dev / load tests, short-circuited centrally in `checkRateLimit` + `getRateLimitStatus`. All devkit + core + server + root builds remain green; `npm pack --dry-run` for `@luckystack/devkit` produces an identical 7-file tarball (no shape drift).
 
-- **#3 Rename `@luckystack/sentry` -> `@luckystack/error-tracking`**
-  - `git mv packages/sentry packages/error-tracking`.
-  - `package.json` name + description + keywords + homepage + repository directory updated.
-  - All imports updated in `packages/api/src/handleApiRequest.ts`, `handleHttpApiRequest.ts`, `packages/sync/src/handleSyncRequest.ts`, `handleHttpSyncRequest.ts`, `server/server.ts`.
-  - Build/path config updated: `scripts/buildPackages.mjs` (wave 2), `scripts/bundleServer.mjs`, `tsconfig.server.json`, `tsconfig.client.json`.
-  - Peer-dep references updated in `packages/api/package.json`, `packages/sync/package.json`, `packages/create-luckystack-app/template/package.json`.
-  - Docs updated: `packages/error-tracking/README.md` (rewrite), root `README.md`, `packages/api/README.md`, `packages/sync/README.md`, `packages/server/README.md`, `packages/email/README.md`, `docs/ARCHITECTURE_PACKAGING.md`, `docs/ARCHITECTURE_EMAIL.md`, `docs/MONITORING.md`.
-  - `npm install` regenerated `package-lock.json`.
+## Completed Tasks
 
-- **#1 Promote `@luckystack/router` to Tier-A**
-  - `private: false`, version bumped to `0.1.0`, `ioredis` moved from `dependencies` to `peerDependencies`.
-  - New `packages/router/src/cli.ts` implementing `luckystack-router` bin with `--deploy`, `--services`, `--env`, `--preset`, `--port`, `--no-shared-health`, `--help`.
-  - `packages/router/tsup.config.ts` updated to emit both `index.ts` and `cli.ts`.
-  - `packages/router/package.json` gained the `bin` entry.
-  - `packages/router/README.md` rewritten for Tier-A audience (when-to-use, install, CLI flags, programmatic API).
-  - `docs/ARCHITECTURE_PACKAGING.md` tier table + coupling matrix updated.
+**Tier-A flip + docs sync:**
+- All 12 packages: `private: false` + `publishConfig.access: public` added (`packages/*/package.json`).
+- `@luckystack/devkit` bumped `0.0.1` → `0.1.0`; description rewritten to drop "Tier-B" language; README rewritten with install + CLI table (`packages/devkit/package.json`, `packages/devkit/README.md`).
+- `docs/ARCHITECTURE_PACKAGING.md` — tier table updated: `@luckystack/login` now A (DI'd via `userAdapter`), `@luckystack/devkit` now A (DI'd via `registerLocaleReloader`); "current state" header refreshed to 2026-05-13.
+- `server/functions/sentry.ts` re-pointed at `@luckystack/error-tracking` (previously imported stale `packages/sentry/src/sentry`).
+- Stale `packages/sentry/dist/` cleanup (left over from the earlier rename).
+- `node scripts/buildPackages.mjs --pack-dry-run` — 13/13 succeed, tarballs validated.
 
-- **#5 `luckystack-validate-deploy` CLI**
-  - New `packages/devkit/src/validateDeploy.ts` — pure validator with 9 rules (services unassigned/over-assigned, presets reference unknown services, bindings reference unknown services, unknown redis/mongo resource keys, unknown fallback env, fallback resource-key mismatch, missing `urlEnvKey` / `synchronizedEnvKeys` at config time, services bound in no env).
-  - New `packages/devkit/src/cli/validateDeploy.ts` — CLI wrapper. Loads compiled deploy/services configs as side-effects, runs `validateDeploy`, prints findings, exits 1 on errors; `--strict` also fails on warnings.
-  - `packages/devkit/package.json` gained `bin: { "luckystack-validate-deploy": ... }`.
-  - `packages/devkit/tsup.config.ts` updated to also emit `cli/validateDeploy.js`.
-  - `packages/devkit/src/index.ts` exports `validateDeploy` and the related types for programmatic use.
+**Playground extensions (in `src/playground/`):**
+- New `_api/throwError_v1.ts` (demos `apiError` hook), `_api/spam_v1.ts` (rateLimit: 3, demos `rateLimitExceeded`), `_sync/throwSync_server_v1.ts` (demos `syncError`), `_sync/streamToToken_server_v1.ts` (demos `streamTo` to specific socket-ids).
+- `src/playground/page.tsx` gained sections: Auth & CSRF & OAuth providers, Settings flows, Hooks demo, Health & test-reset, File upload (via `processUpload`), Offline queue (disconnect/reconnect + live queue size poll), Presence & session observer, plus a streamTo target-input row with "Copy my socket id" helper.
+- `src/playground/page.tsx`: `LogEntry.channel` widened with `auth | settings | health | upload | offline | hook` channels.
 
-- **Pre-existing build breakages fixed along the way** (working tree had broken types from prior uncommitted work — needed for build to pass):
-  - `packages/api/src/handleApiRequest.ts` — coerced `null` result to `undefined`; spreads `normalizeErrorResponse(...)` returns to satisfy the index-signature in `buildApiResponseEnvelope`'s return type; added `|| undefined` to `preferredLocale`.
-  - `packages/login/src/session.ts` — removed unused `captureException` import (TS6133).
-  - `packages/sync/src/handleHttpSyncRequest.ts` — used `name` instead of out-of-scope `resolvedName`; added `as const` on `'success'`.
-  - `packages/sync/src/handleSyncRequest.ts` — removed unused `buildBroadcastFrame` destructure (TS6133).
+**Hook audit (no code changes — all were already wired):**
+- Verified dispatch sites in code: `csrfMismatch` (`packages/server/src/httpRoutes/csrfMiddleware.ts:40`), `preEmailSend`/`postEmailSend` (`packages/email/src/sendEmail.ts:40,50`), `preSessionRefresh`/`postSessionRefresh` (`packages/login/src/session.ts:145,156`), `preApiRespond`/`postApiRespond` (api handlers), `onUploadStart`/`onUploadComplete` (`packages/core/src/processUpload.ts:54,70`), `preErrorNormalize`/`postErrorNormalize` (`packages/core/src/localizedNormalizer.ts:135,159`).
 
-- **Decisions log** in `suggestions.md` got a `Status (2026-05-11)` column showing each item's implementation state.
+**TESTING_PLAN.md updates:**
+- §3.6 multi-instance router expanded from 4 lines to 6 detailed test scenarios (boot UUID handshake, synchronizedEnvKeys mismatch, health-poll switchover, per-preset routing, preset bundle selection).
+- §4.5 streamTo test added (two tabs, copy socket id, fire streamTo, verify only targets receive).
+- New §4.10–§4.16 for the playground extensions (hooks, settings, auth/CSRF, health, upload, offline, presence).
+- §5 deferred list updated: csrfMismatch already wired; monitoring decision documented.
 
-## Current state
+**README.md root:**
+- Already led with `npx create-luckystack-app` install; cleaned stale `packages/sentry/` reference (renamed to `error-tracking/`); removed Tier-B labels from devkit/router lines.
 
-- All 13 packages build green via `npm run build:packages` (`core`, `error-tracking`, `email`, `login`, `devkit`, `router`, `test-runner`, `create-luckystack-app`, `docs-ui`, `api`, `sync`, `presence`, `server`).
-- Both new CLIs are wired into `node_modules/.bin/`:
-  - `node_modules/.bin/luckystack-router`
-  - `node_modules/.bin/luckystack-validate-deploy`
-- `npm install` ran cleanly (`package-lock.json` regenerated for the rename).
-- **Uncommitted**: everything from this session is in the working tree, not committed. `git status` will show new files (`packages/email/src/emailConfig.ts`, `packages/error-tracking/src/sentryConfig.ts`, `packages/server/src/runtimeMapsLoader.ts`, `packages/router/src/cli.ts`, `packages/devkit/src/validateDeploy.ts`, `packages/devkit/src/cli/validateDeploy.ts`), the `packages/sentry` -> `packages/error-tracking` rename, and edits across ~30 files.
-- Known limitation: the `luckystack-validate-deploy` CLI can't run against the demo project's TS source configs because the demo's `deploy.config.ts` / `services.config.ts` import `registerDeployConfig` / `registerServicesConfig` from `./packages/core/src/...` (relative source paths, intentional for Vite client-bundle reasons). That creates a separate module instance from the CLI's compiled `@luckystack/core` import, so registrations don't cross. The CLI works correctly against published compiled JS (the actual ship target).
+**Complete starter shipped in scaffolder template (`packages/create-luckystack-app/template/`):**
+- Pages: `src/login/page.tsx`, `src/register/page.tsx`, `src/reset-password/page.tsx`, `src/settings/page.tsx`, plus the existing `dashboard/page.tsx`.
+- APIs: `src/_api/{session,logout}_v1.ts`; `src/reset-password/_api/{sendReset,confirmReset}_v1.ts`; all 7 `src/settings/_api/*.ts`.
+- Server hook glue: `server/hooks/notifications.ts` (transactional email triggers).
+- `shared/tryCatch.ts` (client-safe stub, no Sentry coupling).
+- `src/index.css` (Tailwind 4 `@theme` block); `postcss.config.mjs`; `vite.config.ts` extended with `vite-tsconfig-paths`.
+- `template/package.json` — added: sharp, validator, fontawesome (5 entries), sonner, plus dev deps tailwindcss + @tailwindcss/postcss + postcss + vite-tsconfig-paths.
+- `template/tsconfig.json` — added `config` path alias.
 
-## Next steps
+**Framework-React migration to `@luckystack/core/client`:**
+- New `packages/core/src/localesRegistry.ts` — `registerLocales` / `getRegisteredLocales` / `getDefaultLocale` / `registerLanguageSource` / `getActiveLanguage` / `getLocaleByCode`.
+- New `packages/core/src/middlewareRegistry.ts` — `registerMiddlewareHandler` / `getMiddlewareHandler` + `MiddlewareInput`/`MiddlewareHandler`/`MiddlewareResult` types.
+- New `packages/core/src/react/` folder: `sessionContext.ts` (`SessionContext`, `useSession<T>()`, `setLatestSession`, `getCurrentSession`), `AvatarProvider.tsx`, `useTheme.ts`, `TranslationProvider.tsx` (folds in `useTranslator` + `translate` helpers), `notify.ts` (i18n-backed, auto-registers), `Middleware.tsx`, `Router.tsx` (`useRouter` hook).
+- `packages/core/src/client.ts` extended with re-exports of all the new react/* and registry surface.
+- `packages/core/src/projectConfig.ts` — added `defaultTheme?: 'light' \| 'dark'` field + default value.
+- `packages/core/package.json` — added react / react-dom / react-router-dom / sonner as optional peerDeps.
+- New `packages/presence/src/client/LocationProvider.tsx` + export from `packages/presence/src/client/index.ts`.
 
-1. **Smoke-test the demo server end-to-end** (`npm run server` from project root) — verify the per-package config split + the new `loadGeneratedMaps` plumbing actually boot. If something fails, the most likely suspects:
-   - `server/server.ts` — the `import projectConfig, { sentry as sentryConfigInput } from '../config'` line; make sure the named export `sentry` is still there.
-   - `server/server.ts` — `initializeSentry()` needs `registerSentryConfig` to have run first (it does, line above).
-2. **Commit the work in logical chunks** if you want a clean history. Suggested split:
-   - Commit 1: pre-existing build fixes in `packages/api/src/handleApiRequest.ts`, `packages/login/src/session.ts`, `packages/sync/src/handleHttpSyncRequest.ts`, `packages/sync/src/handleSyncRequest.ts`.
-   - Commit 2: #4 per-package config split (email + sentry configs + `app.publicUrl` move).
-   - Commit 3: #2 runtime maps loader move.
-   - Commit 4: #3 sentry -> error-tracking rename (this one is huge; consider squashing with #4 since they share the test surface).
-   - Commit 5: #1 router -> Tier-A + CLI.
-   - Commit 6: #5 validate-deploy CLI.
-3. **Bump remaining `0.0.1` versions to `0.1.0`** if you want all Tier-A packages to ship at the same version. `@luckystack/devkit` is still `0.0.1`.
-4. **Optional: add an npm script** to `package.json` for `npm run validate-deploy` that runs the CLI against the project's compiled configs once `npm run build` produces a `dist/` folder.
+**Template restructure (after framework moves):**
+- DELETED from `template/src/_components/`: Navbar, Middleware, AvatarProvider, Router, LocationProvider, ThemeToggler, TranslationProvider.
+- DELETED from `template/src/_functions/`: sentry, icon, notify, translator.
+- MOVED: Dropdown trio into `template/src/_components/dropdown/`; TemplateProvider into `template/src/_components/templates/`.
+- NEW: `template/src/_components/templates/Home.tsx` (sample 'home' layout — no Navbar, just header + Middleware-wrapped content).
+- NEW: `template/luckystack/i18n/locales.ts` (registers JSON locales + language source).
+- `template/src/main.tsx` rewritten: imports from `@luckystack/core/client` / `@luckystack/presence/client`, side-effect imports `luckystack/i18n/locales`, registers middlewareHandler.
+- `template/src/_providers/SessionProvider.tsx` rewritten: writes into core's `SessionContext`, mirrors to `setLatestSession`, drops Sentry coupling.
+- `template/src/settings/page.tsx`: `template = 'home'` (was 'dashboard'); imports refactored to `@luckystack/core/client`.
+- `template/README.md` rewritten to describe the new layout: what user owns vs what framework owns.
+- TemplateProvider in template renamed templates from `'dashboard' | 'plain'` → `'home' | 'plain'`.
 
-## User action required
+**Dogfood migration in this repo (`src/`):**
+- DELETED: `src/_components/{Middleware,Router,AvatarProvider,LocationProvider,ThemeToggler,TranslationProvider}.tsx`.
+- DELETED: `src/_functions/{notify,translator}.ts`.
+- KEPT (project-specific): `src/_components/Navbar.tsx`, `src/_functions/sentry.ts`, `src/_functions/icon.ts`.
+- Updated imports in: `src/main.tsx`, `src/_providers/SessionProvider.tsx`, `src/_sockets/socketInitializer.ts`, `src/_functions/middlewareHandler.ts`, `src/_components/{ConfirmMenu,ErrorPage,Avatar,Navbar,TemplateProvider,LoginForm}.tsx`, `src/{admin,dashboard,docs,reset-password,settings}/page.tsx`.
+- `src/_functions/middlewareHandler.ts`: re-typed to match core's `MiddlewareHandler` signature.
+- `tsconfig.server.json`: added `packages/core/src/react/**/*` to exclude list (JSX file in server compile context).
 
-- **Decide on commit strategy** — one big commit vs. the 5-6 logical commits above. I haven't committed anything.
-- **Run `npm run server`** locally to confirm the demo project still boots after the config split + runtime maps refactor. Auto mode is on but anything that talks to your local Redis/Prisma is your call to run.
-- **Optional: review `packages/router/README.md` and `packages/error-tracking/README.md`** — both got rewritten and you may want to tweak the marketing tone.
+**Hot reload non-blocking refactor (`packages/devkit/` + `packages/server/`):**
+- `packages/devkit/src/loader.ts`: dropped `createRequire(import.meta.url)` + CJS-cache loop; new `importFile()` uses `pathToFileURL(absolutePath).href + '?v=' + Date.now()` with dynamic `import()`. Module load now yields to the event loop during parse/transpile.
+- `packages/devkit/src/hotReload.ts`: introduced `typeMapQueue` + `requestTypeMapRegeneration()` + `runTypeMapRegeneration()` that coalesces concurrent requests into a single background `setImmediate` task and logs `[HotReload] type map ready in Xms`. Every inline `await tryCatch(() => generateTypeMapFile({ quiet: true }))` inside `processPendingApiChanges`, `processPendingSyncChanges`, `handleChange`, `handleDelete`, `handleFunctionChange`, and the sync-server template-injection branch replaced with `requestTypeMapRegeneration()`. Startup `generateTypeMapFile()` (line ~508) deliberately left synchronous-on-boot. Removed `clearModuleCache(...)` helper + its single caller in `enqueueAffectedRoutesFromDependency` (the ESM `?v=` cachebust replaces it).
+- `packages/devkit/src/importDependencyGraph.ts`: `extractImportSpecifiers` now memoizes per-file by mtime in `specifiersCache: Map<string, {mtimeMs, specifiers}>`; `collectScopedFiles` caches its `Set<string>` for `SCOPED_FILES_TTL_MS = 1000`; new export `invalidateGraphForFile(absolutePath)` for the watcher to call on add/change/unlink (wired in all four `handleAdd`/`handleChange`/`handleDelete`/`handleFunctionChange` handlers).
+- `packages/server/src/createServer.ts`: added `process.once('SIGINT', () => process.exit(0))` + `process.once('SIGTERM', () => process.exit(0))` inside the `if (enableDevTools)` block immediately after `devkit.setupWatchers()`. Ctrl+C now reliable even mid-typecheck.
+- Build verified: `npm --workspace packages/devkit run build` + `npm --workspace packages/server run build` + `npm run build` (root) all green. `npm --workspace packages/devkit pack --dry-run` reports same 7-file tarball shape as baseline (README, validateDeploy.js+map, index.d.ts, index.js+map, package.json) — no new entries, no missing entries.
+
+**Rate-limit kill-switch (`packages/core/`):**
+- `packages/core/src/projectConfig.ts`: added `enabled: boolean` to `RateLimitingConfig` interface (with JSDoc explaining global kill-switch semantics); added `enabled: true` to `DEFAULT_PROJECT_CONFIG.rateLimiting` so existing consumers keep current behavior.
+- `packages/core/src/rateLimiter.ts`: added `isRateLimitingEnabled()` getter + `buildAllowedResult(limit)` helper; both `checkRateLimit` and `getRateLimitStatus` short-circuit to `buildAllowedResult(limit)` when disabled — counters untouched, no Redis roundtrip. Centralized so all 5 callsites (api/sync handlers + `authApiRoute.ts`) are covered automatically.
+- Consumer opt-in: set `rateLimiting: { enabled: false }` (or e.g. `enabled: process.env.NODE_ENV === 'production'`) inside the project's `registerProjectConfig({...})` call.
+- `npm --workspace packages/core run build` green.
+
+**Plan + design artifacts:**
+- New plan file: `~/.claude/plans/refine-dit-plan-nog-lazy-walrus.md` — approved by user before implementation. Documents context, surgical approach (no worker threads, no tsup/package.json changes), critical files, deliberate non-changes for publish safety, reused utilities, and verification checklist.
+
+## Pending Logic / Known Bugs
+
+- **`npm run server` smoke test** — never run on this branch since the early `bootstrapLuckyStack` migration. Highest risk unverified change.
+- **`npm org create luckystack`** — scope still not registered on npm (memory entry tracks this).
+- **`LUCKYSTACK_BUNDLE` startup assertion** — `packages/server/src/runtimeMapsLoader.ts` falls back to `'default'` silently if the env var is unset. In production this could 30-min outage you. Need a refuse-to-boot guard when `NODE_ENV === 'production'` and the env var is missing.
+- **Tarball install smoke test** — `npm pack` each Tier-A package + install into a clean test directory; confirm types + runtime resolve.
+- **`@luckystack/core/client` peer deps marked optional** — react/react-dom/react-router-dom/sonner are `peerDependenciesMeta.optional: true`. That's correct for server-only consumers but means client consumers won't get install warnings if they forget react. Acceptable trade-off but worth a note in the README.
+- **The `i18nNotify` export from `@luckystack/core/client`** triggers `registerNotifier` as a side-effect on any import from the client barrel. The sonner import lands in any bundle that imports from `@luckystack/core/client` — tree-shaking depends on the bundler. Not a bug but a tradeoff that's worth flagging.
+- **`@luckystack/monitoring`** — not in this monorepo; per memory entry, ships as its own GitHub repo + thin adapter (web-vitals folds in as subpath). No work this session.
+
+**Hot reload + rate-limit arc:**
+- **Live dev-server smoke test not yet run.** Build is green and `pack --dry-run` shape is identical, but the user hasn't yet started `npm run dev` and observed the new behavior end-to-end. Expected log shape after a save: `[HotReload] API reloaded: <path>` (fast) followed shortly by `[HotReload] type map ready in Xms` asynchronously.
+- **Burst-save behavior unverified.** Theory: 20+ files saved at once → server keeps responding throughout, single coalesced type-map regen at the end. Worth confirming with a search-replace burst on the playground APIs.
+- **Burst coalescing nuance.** `requestTypeMapRegeneration()` may run twice in a worst-case burst (one immediate + one re-run from `pending=true`). The pre-existing `scheduleReload('typemap', ...)` debounce wrappers still front the helper for non-burst paths, so this is acceptable; revisit only if log noise becomes annoying.
+- **ESM module cache growth.** Each `import(url + '?v=' + Date.now())` keeps the prior module alive in the ESM registry. For dev sessions this is negligible (process is recycled), but worth flagging if anyone runs a long-lived dev process for hours of heavy churn.
+- **No template wiring for `rateLimiting.enabled`.** The `create-luckystack-app` template `config.ts` does not yet show the new field. Default `true` is safe; if we want consumers to discover the toggle, add a commented-out example to the template.
+
+## Exact Next Step
+
+Run `npm run server` from the repo root (after `npm run generateArtifacts` if you haven't generated since the latest route additions). Open `http://localhost:5173/login`, register a new account, navigate to `/settings`, change the avatar (verify upload + `onUploadStart`/`onUploadComplete` hooks fire in server log), then to `/playground`, click `Sync stream (originator-only)` and `Sync broadcastStream` in two tabs to confirm streaming still works after the framework-React move. If anything 500s or the playground page doesn't render, the most likely suspect is the `registerLanguageSource` wiring in `src/main.tsx` — it relies on `getCurrentSession()` from `src/_providers/SessionProvider.tsx` which now writes into core's `SessionContext` via `setLatestSession`; if the side-effect import order is wrong the language source returns null and translations fall back to `defaultLanguage`.
+
+**Also for the hot-reload arc:** while the dev server is up, edit `src/playground/_api/spam_v1.ts` and save — watch the terminal. You should see `[HotReload] API reloaded: ...` (sub-100ms) followed asynchronously by `[HotReload] type map ready in Xms`. Then trigger a curl/browser call to a *different* API immediately after a save and confirm the response returns within normal latency (no multi-second stall). Finally, save 10+ API files in one burst (find/replace a no-op string across `src/playground/_api/*.ts`) and confirm the server keeps responding throughout and the type map regenerates once at the end. Press Ctrl+C during a burst to verify the new SIGINT handler exits the process within < 500 ms.
+
+## Technical State
+
+### Files modified this session (one-line each)
+
+**New files:**
+- `packages/core/src/localesRegistry.ts` — locale + language source registry
+- `packages/core/src/middlewareRegistry.ts` — middleware handler registry
+- `packages/core/src/react/{sessionContext.ts,AvatarProvider.tsx,useTheme.ts,TranslationProvider.tsx,notify.ts,Middleware.tsx,Router.tsx}` — framework-React surface
+- `packages/presence/src/client/LocationProvider.tsx` — moved from template
+- `src/playground/_api/throwError_v1.ts`, `src/playground/_api/spam_v1.ts`, `src/playground/_sync/throwSync_server_v1.ts`, `src/playground/_sync/streamToToken_server_v1.ts` — playground demo routes
+- `packages/create-luckystack-app/template/luckystack/i18n/locales.ts` — locale registration overlay
+- `packages/create-luckystack-app/template/server/hooks/notifications.ts` — copied for changePassword email trigger
+- `packages/create-luckystack-app/template/shared/tryCatch.ts` — client-safe stub
+- `packages/create-luckystack-app/template/postcss.config.mjs` — Tailwind 4 PostCSS plugin
+- `packages/create-luckystack-app/template/src/index.css` — Tailwind 4 `@theme` block
+- `packages/create-luckystack-app/template/src/_components/templates/Home.tsx` — sample 'home' layout
+- `packages/create-luckystack-app/template/src/{login,register,reset-password,settings,_api,_components,_functions,_providers,_locales}/**` — full starter
+
+**Modified:**
+- 12 × `packages/*/package.json` — `private: false` + `publishConfig.access`
+- `packages/devkit/package.json` — version bump + description rewrite
+- `packages/devkit/README.md` — Tier-A install instructions
+- `packages/core/package.json` — react/sonner peerDeps added (optional)
+- `packages/core/src/projectConfig.ts` — `defaultTheme` field added
+- `packages/core/src/client.ts` — re-exports for new react/* + registries
+- `packages/presence/src/client/index.ts` — re-export LocationProvider
+- `docs/ARCHITECTURE_PACKAGING.md` — tier table + status header
+- `TESTING_PLAN.md` — §3.6 multi-instance router, §4.5 streamTo, §4.10–§4.16 new playground sections, §5 deferred update
+- `README.md` — clean stale `packages/sentry/` + Tier-B labels
+- `tsconfig.server.json` — exclude `packages/core/src/react/**`
+- `server/functions/sentry.ts` — re-export from `@luckystack/error-tracking`
+- `src/main.tsx` — imports from core/client + register* calls in entry
+- `src/_providers/SessionProvider.tsx` — writes into core's SessionContext
+- `src/_sockets/socketInitializer.ts` — notify import path
+- `src/_functions/middlewareHandler.ts` — typed via core's `MiddlewareHandler`
+- `src/_components/{ConfirmMenu,ErrorPage,Avatar,Navbar,TemplateProvider,LoginForm}.tsx` — imports
+- `src/{admin,dashboard,docs,reset-password,settings}/page.tsx` — imports + `useSession<SessionLayout>()` cast
+- `src/playground/page.tsx` — 8 new demo sections + state + handlers
+- `packages/devkit/src/loader.ts` — `createRequire` removed; `pathToFileURL` import added; `importFile()` now async ESM dynamic import with `?v=<ts>` cachebust
+- `packages/devkit/src/hotReload.ts` — coalesced background `requestTypeMapRegeneration()` introduced; all inline `generateTypeMapFile` calls in event handlers replaced (startup line ~508 left synchronous); `clearModuleCache` removed; `invalidateGraphForFile` invocations added to all four watcher handlers
+- `packages/devkit/src/importDependencyGraph.ts` — mtime-keyed `specifiersCache`, 1s-TTL `scopedFilesCache`, new exported `invalidateGraphForFile(absolutePath)`
+- `packages/server/src/createServer.ts` — `process.once('SIGINT'/'SIGTERM', () => process.exit(0))` added in dev-tools block
+- `packages/core/src/projectConfig.ts` — `RateLimitingConfig.enabled: boolean` field + JSDoc; default `enabled: true` in `DEFAULT_PROJECT_CONFIG.rateLimiting`
+- `packages/core/src/rateLimiter.ts` — `isRateLimitingEnabled()` + `buildAllowedResult()` helpers; short-circuits added to `checkRateLimit` and `getRateLimitStatus`
+
+**Deleted:**
+- `src/_components/{Middleware,Router,AvatarProvider,LocationProvider,ThemeToggler,TranslationProvider}.tsx`
+- `src/_functions/{notify,translator}.ts`
+- `packages/sentry/dist/` (stale leftover after earlier rename)
+
+### Dev/temp changes to revert before shipping
+
+None this session. All edits are intended for v1 ship.
+
+### Environment notes
+
+- Working tree: ~16 modified + ~26 new files/dirs. Nothing committed this session.
+- Branch: `chore/package-split-prep`. Main: `master`.
+- Type checks pass: `npx tsc --noEmit -p tsconfig.client.json` and `npx tsc --noEmit -p tsconfig.server.json` both clean.
+- Build: `node scripts/buildPackages.mjs` — 13/13 succeed in ~37s.
+- Type-map regenerated this session via `npm run generateArtifacts` after adding `streamToToken_server_v1.ts` and the new `playground/*` routes.
+- No server process running. No pending Vite restart. `package-lock.json` is in the modified set but only due to lockfile churn from earlier in the session.
+
+**Hot reload + rate-limit arc additions:**
+- Re-built individually + together: `npm --workspace packages/devkit run build`, `npm --workspace packages/server run build`, `npm --workspace packages/core run build`, `npm run build` (root, including `generateArtifacts` + Vite + bundleServer) — all green.
+- `npm --workspace packages/devkit pack --dry-run` confirmed identical 7-file tarball shape vs baseline (no shape drift, safe to publish).
+- Working tree now also includes the four edited devkit/server/core files listed above. Nothing committed.
+- Live `npm run dev` smoke not yet run — see "Exact Next Step".
+
+### Memory entries created/updated this session
+
+- New: `~/.claude/projects/.../memory/project_monitoring_separation.md` — `@luckystack/monitoring` ships in its own GitHub repo; web-vitals folds in as a subpath.

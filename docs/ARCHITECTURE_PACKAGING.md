@@ -2,10 +2,10 @@
 
 > Single source of truth for LuckyStack package extraction strategy.
 
-Last updated: 2026-05-06
-Status: Implementation complete; awaiting first publish
+Last updated: 2026-05-13
+Status: Tier-A across the board; awaiting first publish
 
-> **Current state (2026-05-06):** all 13 workspaces in `packages/` build clean. The 11 Tier-A packages have READMEs and are wired into `bootstrapLuckyStack` / `createLuckyStackServer`. Every `package.json` still has `"private": true` — flipping that to publish on the `@luckystack` npm scope is the remaining bootstrap step. See `scan-1.md` and `scan-2.md` for the verification pass behind this status. Per-package READMEs under `packages/<name>/README.md` are the source of truth for public API.
+> **Current state (2026-05-13):** all 13 workspaces in `packages/` build clean and are flagged `"private": false` + `publishConfig.access: "public"`. Every package targets Tier-A — `@luckystack/devkit` was promoted on 2026-05-13 (was Tier-B), `@luckystack/router` was promoted on 2026-05-11, all others were Tier-A by design. `@luckystack/login` is no longer Prisma-coupled (DI'd through `registerUserAdapter` / `defaultPrismaUserAdapter`). All Tier-A packages have READMEs and are wired into `bootstrapLuckyStack` / `createLuckyStackServer`. Remaining publish steps: register the `@luckystack` npm scope and run `npm pack --dry-run` per package to validate tarball contents. See `scan-1.md` and `scan-2.md` for the verification pass behind this status. Per-package READMEs under `packages/<name>/README.md` are the source of truth for public API.
 
 ---
 
@@ -1535,8 +1535,8 @@ Three tiers based on intent and remaining coupling:
 | `@luckystack/error-tracking` | **A — Publishable target** | Single file, owns its own `registerSentryConfig` registry. Clean. |
 | `@luckystack/test-runner` | **A — Publishable target** | Dev-only utilities (Zod schema sampler). No project coupling. |
 | `@luckystack/presence` | **A — Publishable target** | After §39.2's `peerNotifier.ts` fix, zero project imports. |
-| `@luckystack/login` | **C — Coupled to project Prisma** | Imports `prisma.user.create` etc. from core's PrismaClient. Would need generic-ification over `User` shape, or registration of a session factory via DI, to be tier-A. Out of scope for the current pass. |
-| `@luckystack/devkit` | **B — Project-glue** | Hot-reload tooling that reads project locale paths and imports `reloadLocaleTranslations` from `server/utils/responseNormalizer`. Stays project-coupled by design — it's dev tooling, not a framework runtime package. |
+| `@luckystack/login` | **A — Publishable target** | DI'd through `registerUserAdapter` / `defaultPrismaUserAdapter`; no longer directly imports `prisma.user.*` from app code. Consumers swap the adapter via `luckystack/login/userAdapter.ts`. |
+| `@luckystack/devkit` | **A — Publishable target** | Promoted on 2026-05-13. Reads project paths via `getProjectConfig().paths` getters and locale reload via `getLocaleReloader()` registry. The remaining `hotReload.ts → responseNormalizer.ts` import has been DI'd through `registerLocaleReloader`. Ships as a `devDependency` for consumers (build-time tool, not runtime). |
 | `@luckystack/router` | **A — Publishable target** | Promoted on 2026-05-11. Reads deploy/services configs via `getDeployConfig()` / `getServicesConfig()` DI surfaces — the `luckystack-router` bin loads the consumer's compiled config modules via `--deploy` / `--services` flags before calling `startRouter()`. |
 
 ### 39.2 Code-level coupling matrix
@@ -1547,7 +1547,7 @@ After §38.1, remaining `packages/** → project` imports:
 | --- | --- | --- | --- |
 | `core` | `synchronizedEnvHashes.ts` | `../../../deploy.config` | **Closed (§39.7)** — `getDeployConfig()` from new `deployConfigRegistry`. |
 | `presence` | `activity/peerNotifier.ts` | `../../../../server/sockets/socket` | **Closed (§39.5)** — `getIoInstance()` from core. |
-| `devkit` | `hotReload.ts` | `../../../server/utils/responseNormalizer` | **Accept** — devkit is tier-B. |
+| `devkit` | `hotReload.ts` | `../../../server/utils/responseNormalizer` | **Closed (2026-05-13)** — DI'd via `registerLocaleReloader()` in core; devkit calls `getLocaleReloader()?.()`. |
 | `router` | `resolveTarget.ts`, `bootHandshake.ts`, `startRouter.ts` | `getDeployConfig()`, `getServicesConfig()` from `@luckystack/core` | **Closed (2026-05-11)** — router uses DI surfaces; the `luckystack-router` bin loads consumer config modules. |
 
 After §39.7, every tier-A package has **zero** project-level value or type imports. The remaining `packages/** → project` imports are all in tier-B (devkit, router) and accepted by design.

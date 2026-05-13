@@ -1,7 +1,10 @@
 {
   "name": "@luckystack/api",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "Type-safe API request handlers for LuckyStack. WebSocket-first via socket.io, with HTTP fallback. File-based routing, generated route map, integrated rate limiting, validation, hooks, and error-tracking tracing.",
   "license": "MIT",

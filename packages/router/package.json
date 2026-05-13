@@ -2,6 +2,9 @@
   "name": "@luckystack/router",
   "version": "0.1.0",
   "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "Standalone HTTP + WebSocket load-balancer for multi-instance LuckyStack deployments. Redis-backed health, boot-UUID handshake, service-key-aware routing, optional dev->staging fallback. Optional package — only needed for horizontal scale or split-environment dev.",
   "license": "MIT",

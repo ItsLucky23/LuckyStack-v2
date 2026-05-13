@@ -1,13 +1,20 @@
 # @luckystack/devkit
 
-> Tier-B project-glue dev tooling for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2): hot reload, route discovery, generated type-map emitter, Zod schema emitter, template injection, deep type resolver. **Not intended for npm distribution.** Lives in this monorepo so the build pipeline can include it; consumed only by the project's own dev scripts and lazily by `@luckystack/core`'s `runtimeTypeValidation` (via dynamic `import()` to avoid a type cycle).
+> Dev-time tooling for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2): hot reload, route discovery, generated type-map emitter, Zod schema emitter, deep type resolver, plus the `luckystack-validate-deploy` CLI. Install as a `devDependency` in projects that build LuckyStack apps locally.
 
-## Why it's Tier-B
+## Install
 
-The devkit is tightly coupled to the project's `tsconfig`, file layout, and route conventions. Publishing it would require a stable public API for type extraction across arbitrary TypeScript configurations, which is outside the framework's current scope. Until that changes, projects that need typegen either:
+```bash
+npm install --save-dev @luckystack/devkit
+```
 
-- Use `create-luckystack-app` (which scaffolds a project that re-uses devkit indirectly through generated artifacts), or
-- Vendor the parts of devkit they need.
+This is a build-time tool, not a runtime dependency — your production server bundle doesn't ship it. Project paths and the locale reloader hook in via the registries exported from `@luckystack/core` (`getProjectConfig().paths`, `registerLocaleReloader`), so devkit has no app-side relative imports.
+
+## CLIs
+
+| Bin | What |
+| --- | --- |
+| `luckystack-validate-deploy` | Reads compiled `deploy.config.js` + `services.config.js` and asserts every service is bound, every preset references real services, env keys resolve. Exits non-zero on errors; `--strict` also fails on warnings. |
 
 ## What it exports
 

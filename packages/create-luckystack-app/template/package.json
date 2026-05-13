@@ -23,6 +23,11 @@
     "@luckystack/error-tracking": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/server": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/sync": "^{{LUCKYSTACK_VERSION}}",
+    "@fortawesome/fontawesome-svg-core": "^7.2.0",
+    "@fortawesome/free-brands-svg-icons": "^7.2.0",
+    "@fortawesome/free-regular-svg-icons": "^7.2.0",
+    "@fortawesome/free-solid-svg-icons": "^7.2.0",
+    "@fortawesome/react-fontawesome": "^3.3.0",
     "@prisma/client": "^6.19.3",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.6.1",
@@ -30,21 +35,27 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.14.1",
+    "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
+    "sonner": "^2.0.7",
     "validator": "^13.15.35",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/validator": "^13.15.10",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "dotenv-cli": "^11.0.0",
+    "postcss": "^8.5.6",
     "prisma": "^6.19.3",
+    "tailwindcss": "^4.2.2",
     "tsx": "^4.21.0",
     "typescript": "~5.7.3",
-    "vite": "^6.4.2"
+    "vite": "^6.4.2",
+    "vite-tsconfig-paths": "^5.1.4"
   }
 }

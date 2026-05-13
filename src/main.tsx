@@ -7,22 +7,41 @@ import 'src/scrollbar.css'
 import VConsole from 'vconsole'
 
 import { mobileConsole } from 'config'
-import LocationProvider from 'src/_components/LocationProvider'
+import { LocationProvider } from '@luckystack/presence/client'
+import {
+  AvatarProvider,
+  Middleware,
+  TranslationProvider,
+  registerLocales,
+  registerLanguageSource,
+  registerMiddlewareHandler,
+} from '@luckystack/core/client'
 import enJson from "src/_locales/en.json"
+import nlJson from "src/_locales/nl.json"
+import deJson from "src/_locales/de.json"
+import frJson from "src/_locales/fr.json"
 
-import { AvatarProvider } from './_components/AvatarProvider'
 import ErrorPage from './_components/ErrorPage';
-import Middleware from './_components/Middleware';
 import { MenuHandlerProvider } from './_components/MenuHandler'
 import TemplateProvider from './_components/TemplateProvider'
-import { TranslationProvider } from './_components/TranslationProvider'
 import { initializeSentry, SentryErrorBoundary } from './_functions/sentry'
-import { SessionProvider } from './_providers/SessionProvider'
+import { SessionProvider, getCurrentSession } from './_providers/SessionProvider'
 import { SocketStatusProvider } from './_providers/socketStatusProvider'
+import middlewareHandler from './_functions/middlewareHandler'
 
 import type { Template } from './_components/TemplateProvider'
 
 initializeSentry();
+
+//? Register translations + active language source so the framework's
+//? TranslationProvider + i18n notify can resolve keys without bundling
+//? locale JSON inside the package.
+registerLocales({ en: enJson, nl: nlJson, de: deJson, fr: frJson });
+registerLanguageSource(() => getCurrentSession()?.language ?? null);
+
+//? Wire the project's auth/redirect rules into the framework's <Middleware />
+//? and useRouter — both consume the active handler via getMiddlewareHandler().
+registerMiddlewareHandler(middlewareHandler);
 
 interface PageProps {
   params: Record<string, string | undefined>;

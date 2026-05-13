@@ -26,6 +26,13 @@ export interface LoggingConfig {
 }
 
 export interface RateLimitingConfig {
+  /**
+   * Global kill-switch for all rate limiting. When `false`, every
+   * `checkRateLimit` call short-circuits to "allowed" and counters are not
+   * touched. Useful for local dev, load tests, or trusted internal tooling.
+   * Defaults to `true`.
+   */
+  enabled: boolean;
   store: 'memory' | 'redis';
   redisKeyPrefix: string;
   defaultApiLimit: number | false;
@@ -260,6 +267,8 @@ export interface ProjectConfig {
   dev: DevConfig;
   paths: PathsConfig;
   defaultLanguage: string;
+  /** Default theme for new users / fallback when no session preference exists. */
+  defaultTheme?: 'light' | 'dark';
   /** Enable per-room activity broadcasting (presence). */
   socketActivityBroadcaster?: boolean;
   /** Show the floating socket-status indicator badge from `@luckystack/presence/client`. */
@@ -288,6 +297,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     stream: false,
   },
   rateLimiting: {
+    enabled: true,
     store: 'memory',
     redisKeyPrefix: 'rate-limit',
     defaultApiLimit: 60,
@@ -380,6 +390,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     generatedApiDocs: 'src/docs/apiDocs.generated.json',
   },
   defaultLanguage: 'en',
+  defaultTheme: 'light',
   socketActivityBroadcaster: false,
   socketStatusIndicator: false,
   locationProviderEnabled: false,
