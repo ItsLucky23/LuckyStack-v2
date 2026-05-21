@@ -1,3 +1,21 @@
+//? Legacy Sentry single-instance slot. Predates the multi-adapter
+//? ErrorTracker registry. New code should `registerErrorTracker(...)`
+//? from `@luckystack/error-tracking`; this file keeps backwards
+//? compatibility AND fans out events through any registered adapters so
+//? a project can mix legacy `initSharedSentry` + new `registerErrorTracker`
+//? during migration.
+//?
+//? The framework's own call sites (`captureException`, `captureMessage`,
+//? `setSentryUser`, `startSpan`) keep working unchanged — they now route
+//? through both the legacy slot and the new adapter list.
+
+import {
+  captureExceptionAcrossTrackers,
+  captureMessageAcrossTrackers,
+  setErrorTrackerUser,
+  startSpanAcrossTrackers,
+} from './errorTrackerRegistry';
+
 interface SentryInstance {
   captureException: (exception: unknown, ...args: unknown[]) => string;
   captureMessage: (message: string, ...args: unknown[]) => string;
@@ -8,7 +26,7 @@ interface SentryInstance {
 
 let sentry: SentryInstance | undefined;
 
-export const initSharedSentry = (instance: SentryInstance) => {
+export const initSharedSentry = (instance: SentryInstance): void => {
   sentry = instance;
 };
 
@@ -19,35 +37,50 @@ export const initSharedSentry = (instance: SentryInstance) => {
 //? second's report.
 export const captureException = (
   error: unknown,
-  context?: Record<string, unknown>
-) => {
-  if (context && sentry) {
-    sentry.captureException(error, { extra: context });
-  } else {
-    sentry?.captureException(error);
+  context?: Record<string, unknown>,
+): void => {
+  if (sentry) {
+    if (context) {
+      sentry.captureException(error, { extra: context });
+    } else {
+      sentry.captureException(error);
+    }
   }
+  //? Multi-adapter fan-out. When no adapter is registered this is a no-op.
+  captureExceptionAcrossTrackers(error, context);
 };
 
 export const captureMessage = (
   message: string,
   level: 'info' | 'warning' | 'error' | 'fatal' = 'info',
-  context?: Record<string, unknown>
-) => {
-  if (context && sentry) {
-    sentry.captureMessage(message, { level, extra: context });
-  } else {
-    sentry?.captureMessage(message, level);
+  context?: Record<string, unknown>,
+): void => {
+  if (sentry) {
+    if (context) {
+      sentry.captureMessage(message, { level, extra: context });
+    } else {
+      sentry.captureMessage(message, level);
+    }
   }
+  captureMessageAcrossTrackers(message, level, context);
 };
 
 export const setSentryUser = (user: {
   id?: string;
   email?: string;
   username?: string;
-} | null) => {
+} | null): void => {
   sentry?.setUser(user);
+  setErrorTrackerUser(user);
 };
 
-export const startSpan = (name: string, op: string) => {
-  return sentry?.startInactiveSpan?.({ name, op });
+export const startSpan = (name: string, op: string): unknown => {
+  //? Multi-adapter span coordination: first registered adapter that
+  //? supports spans wins (spans don't fan out cleanly). Legacy Sentry
+  //? single-instance path still creates the inactive span for backwards
+  //? compatibility on consumers that haven't migrated.
+  if (sentry?.startInactiveSpan) {
+    return sentry.startInactiveSpan({ name, op });
+  }
+  return startSpanAcrossTrackers(name, op, () => undefined);
 };

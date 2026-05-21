@@ -8,6 +8,7 @@
 //? shape for the REPL inspection helpers.
 
 import { env } from '../bootstrap/env';
+import { getParsedBundles } from '@luckystack/server';
 
 type RuntimeMapRecord = Record<string, unknown>;
 
@@ -23,12 +24,6 @@ interface DevkitRuntimeMaps {
   devFunctions: RuntimeMapRecord;
 }
 
-const emptyRuntimeMaps: LoadedRuntimeMaps = {
-  apisObject: {},
-  syncObject: {},
-  functionsObject: {},
-};
-
 const isRuntimeMapRecord = (value: unknown): value is RuntimeMapRecord =>
   Boolean(value) && typeof value === 'object';
 
@@ -42,16 +37,18 @@ let prodMapsPromise: Promise<LoadedRuntimeMaps> | null = null;
 const loadProdMaps = async (): Promise<LoadedRuntimeMaps> => {
   if (prodMapsPromise) return await prodMapsPromise;
   prodMapsPromise = (async () => {
-    const bundle = process.env.LUCKYSTACK_BUNDLE ?? 'default';
-    const target = `./generatedApis.${bundle}`;
-    const mod: unknown = await (import(target) as Promise<unknown>).catch(() => null);
-    if (!mod) return emptyRuntimeMaps;
-    const moduleRecord = mod && typeof mod === 'object' ? (mod as Record<string, unknown>) : {};
-    return {
-      apisObject: isRuntimeMapRecord(moduleRecord.apis) ? moduleRecord.apis : {},
-      syncObject: isRuntimeMapRecord(moduleRecord.syncs) ? moduleRecord.syncs : {},
-      functionsObject: isRuntimeMapRecord(moduleRecord.functions) ? moduleRecord.functions : {},
-    };
+    const presets = getParsedBundles().length > 0 ? getParsedBundles() : ['default'];
+    const merged: LoadedRuntimeMaps = { apisObject: {}, syncObject: {}, functionsObject: {} };
+    for (const bundle of presets) {
+      const target = `./generatedApis.${bundle}`;
+      const mod: unknown = await (import(target) as Promise<unknown>).catch(() => null);
+      if (!mod) continue;
+      const moduleRecord = typeof mod === 'object' ? (mod as Record<string, unknown>) : {};
+      if (isRuntimeMapRecord(moduleRecord.apis)) Object.assign(merged.apisObject, moduleRecord.apis);
+      if (isRuntimeMapRecord(moduleRecord.syncs)) Object.assign(merged.syncObject, moduleRecord.syncs);
+      if (isRuntimeMapRecord(moduleRecord.functions)) Object.assign(merged.functionsObject, moduleRecord.functions);
+    }
+    return merged;
   })();
   return await prodMapsPromise;
 };

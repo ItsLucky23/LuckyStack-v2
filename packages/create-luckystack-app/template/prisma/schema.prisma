@@ -7,9 +7,9 @@ generator client {
 }
 
 datasource db {
-  // Pick whichever provider you want — sqlite, postgresql, mysql, mongodb.
-  // Set DATABASE_URL in .env.local accordingly.
-  provider = "postgresql"
+  // Set during scaffold via `npx create-luckystack-app` interactive prompts.
+  // To switch providers later, edit `provider` here and update DATABASE_URL.
+  provider = "{{DB_PROVIDER}}"
   url      = env("DATABASE_URL")
 }
 

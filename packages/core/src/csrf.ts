@@ -6,6 +6,7 @@
 //? auto-attach the sessionStorage value; the cache simply stays empty in
 //? that mode.
 
+import { getCsrfConfig } from './csrfConfig';
 import { getProjectConfig } from './projectConfig';
 import tryCatch from './tryCatch';
 
@@ -108,10 +109,11 @@ export const httpFetch: typeof fetch = async (input, init = {}) => {
     headers.set('Content-Type', 'application/json');
   }
 
+  const csrfHeaderName = getCsrfConfig().headerName;
   const send = async (csrfToken: string | null): Promise<Response> => {
     const finalHeaders = new Headers(headers);
-    if (csrfToken && STATE_CHANGING.has(method) && !finalHeaders.has('x-csrf-token')) {
-      finalHeaders.set('x-csrf-token', csrfToken);
+    if (csrfToken && STATE_CHANGING.has(method) && !finalHeaders.has(csrfHeaderName)) {
+      finalHeaders.set(csrfHeaderName, csrfToken);
     }
     return fetch(input, {
       ...init,

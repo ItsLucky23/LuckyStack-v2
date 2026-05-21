@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { dispatchHook, getProjectConfig } from '@luckystack/core';
+import { dispatchHook, getCsrfConfig, getProjectConfig } from '@luckystack/core';
 import { getSession } from '@luckystack/login';
 
 //? Returns true when the request was rejected (CSRF mismatch) and the response
@@ -33,7 +33,11 @@ export const enforceCsrfOnStateChangingRequest = async ({
   const csrfSession = await getSession(token);
   if (!csrfSession?.id) return false;
 
-  const headerValue = req.headers['x-csrf-token'];
+  //? Read the active CSRF header name from the registry so consumers
+  //? can rename it (e.g. legacy `x-xsrf-token`, custom `x-app-csrf`).
+  const csrfConfig = getCsrfConfig();
+  const headerKey = csrfConfig.headerName.toLowerCase();
+  const headerValue = req.headers[headerKey];
   const provided = Array.isArray(headerValue) ? headerValue[0] : headerValue;
   if (provided && provided === csrfSession.csrfToken) return false;
 

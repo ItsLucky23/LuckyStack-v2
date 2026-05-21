@@ -21,10 +21,27 @@ export {
 } from './runtimeMapsLoader';
 export type { ProdRuntimeMapsLoaderOptions } from './runtimeMapsLoader';
 export {
+  applyServerArgv,
+  parseServerArgv,
+  getParsedBundles,
+  getParsedPort,
+} from './argv';
+export type { ParsedServerArgv } from './argv';
+export {
   registerCustomRoute,
   getCustomRoutes,
   clearCustomRoutes,
 } from './customRoutesRegistry';
+export {
+  registerSecurityHeaders,
+  getSecurityHeadersBuilder,
+} from './securityHeadersRegistry';
+export type { SecurityHeadersBuilder } from './securityHeadersRegistry';
+export {
+  registerErrorFormatter,
+  getErrorFormatter,
+} from './errorFormatterRegistry';
+export type { ErrorFormatter, ErrorFormatterContext } from './errorFormatterRegistry';
 export type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,

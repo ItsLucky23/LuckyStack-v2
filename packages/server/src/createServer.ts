@@ -4,6 +4,7 @@ import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
 import { registerProdRuntimeMapsProvider } from './runtimeMapsLoader';
+import { getParsedPort } from './argv';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -59,7 +60,6 @@ export const createLuckyStackServer = async (
   if (options.loadGeneratedMaps) {
     registerProdRuntimeMapsProvider({
       loadGenerated: options.loadGeneratedMaps,
-      presetEnvVar: options.runtimeMapsPresetEnvVar,
       preset: options.runtimeMapsPreset,
     });
   }
@@ -73,7 +73,7 @@ export const createLuckyStackServer = async (
     requireOAuthProviders: options.requireOAuthProviders,
   });
 
-  const port = options.port ?? process.env.SERVER_PORT ?? 80;
+  const port = options.port ?? getParsedPort() ?? process.env.SERVER_PORT ?? 80;
   const ip = options.ip ?? process.env.SERVER_IP ?? '127.0.0.1';
   const enableDevTools = options.enableDevTools ?? process.env.NODE_ENV !== 'production';
 

@@ -112,9 +112,13 @@ for (const presetName of targetPresets) {
   const syncImports: string[] = [];
   const functionImports: string[] = [];
 
-  let apiMap = "export const apis: Record<string, { auth: any, main: any, rateLimit?: number | false, httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE', inputType?: string, inputTypeFilePath?: string }> = {\n";
-  let syncMap = "export const syncs: Record<string, { main: any, auth: Record<string, any>, inputType?: string, inputTypeFilePath?: string }> | any = {\n";
-  let functionsMap = "export const functions: Record<string, any> = {\n";
+  //? Generated route maps use `unknown` because each consumer's API/sync
+  //? handler signature is unique — the framework dispatcher narrows at the
+  //? call site after auth + input validation. `auth` is loosely typed because
+  //? consumers can extend `AuthProps` via module augmentation.
+  let apiMap = "export const apis: Record<string, { auth: Record<string, unknown>, main: (...args: unknown[]) => unknown, rateLimit?: number | false, httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE', inputType?: string, inputTypeFilePath?: string }> = {\n";
+  let syncMap = "export const syncs: Record<string, { main: (...args: unknown[]) => unknown, auth: Record<string, unknown>, inputType?: string, inputTypeFilePath?: string }> = {\n";
+  let functionsMap = "export const functions: Record<string, Record<string, unknown>> = {\n";
 
   let apiCount = 0;
   let syncCount = 0;
@@ -144,7 +148,7 @@ for (const presetName of targetPresets) {
       const apiName = apiNameWithVersion.replace(API_VERSION_TOKEN_REGEX, '');
       const routeKey = `api/${mapApiPagePath(pagePath)}/${apiName}/${version}`;
 
-      apiMap += `  "${routeKey}": (() => {\n    const mod = ${varName} as Record<string, any>;\n    return {\n      auth: "auth" in mod ? mod.auth : {},\n      main: mod.main,\n      rateLimit: mod.rateLimit as number | false | undefined,\n      httpMethod: mod.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined,\n      inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n      inputTypeFilePath: ${JSON.stringify(workspaceRelativePath)},\n    };\n  })(),\n`;
+      apiMap += `  "${routeKey}": (() => {\n    const mod = ${varName} as Record<string, unknown>;\n    return {\n      auth: ("auth" in mod ? mod.auth : {}) as Record<string, unknown>,\n      main: mod.main as (...args: unknown[]) => unknown,\n      rateLimit: mod.rateLimit as number | false | undefined,\n      httpMethod: mod.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined,\n      inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n      inputTypeFilePath: ${JSON.stringify(workspaceRelativePath)},\n    };\n  })(),\n`;
     }
 
     // Sync
@@ -170,7 +174,7 @@ for (const presetName of targetPresets) {
         const varName = `syncServer${syncCount++}`;
         syncImports.push(`import * as ${varName} from '${importPath}';`);
         const inputType = getSyncClientDataType(normalized);
-        syncMap += `  "${routeKey}_server": { auth: "auth" in ${varName} ? ${varName}.auth : {}, main: ${varName}.main, inputType: ${JSON.stringify(inputType)}, inputTypeFilePath: ${JSON.stringify(workspaceRelativePath)} },\n`;
+        syncMap += `  "${routeKey}_server": { auth: (("auth" in ${varName} ? ${varName}.auth : {}) as Record<string, unknown>), main: ${varName}.main as (...args: unknown[]) => unknown, inputType: ${JSON.stringify(inputType)}, inputTypeFilePath: ${JSON.stringify(workspaceRelativePath)} },\n`;
       }
     }
   });
@@ -182,7 +186,7 @@ for (const presetName of targetPresets) {
     const fileName = path.basename(filePath, ".ts");
     functionImports.push(`import * as ${varName} from '${importPath}';`);
     functionsMap += `  ${JSON.stringify(fileName)}: (() => {\n`;
-    functionsMap += `    const { default: _default, ...named } = ${varName} as Record<string, any>;\n`;
+    functionsMap += `    const { default: _default, ...named } = ${varName} as Record<string, unknown>;\n`;
     functionsMap += `    const cleaned = Object.fromEntries(Object.entries(named).filter(([key]) => key !== '__esModule'));\n`;
     functionsMap += `    if (Object.keys(cleaned).length > 0) return cleaned;\n`;
     functionsMap += `    return _default !== undefined ? { ${JSON.stringify(fileName)}: _default } : {};\n`;

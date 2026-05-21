@@ -20,7 +20,14 @@ export type CustomRouteHandler = (
 ) => Promise<boolean> | boolean;
 
 export interface CreateLuckyStackServerOptions {
-  /** Port the HTTP server listens on. Defaults to process.env.SERVER_PORT or 80. */
+  /**
+   * Port the HTTP server listens on. Resolution order:
+   *   1. This option (`options.port`)
+   *   2. Second positional argv (`npm run server -- <bundles> <port>`), parsed
+   *      by `@luckystack/server/parseArgv`
+   *   3. `process.env.SERVER_PORT` (back-compat for boots that skip `parseArgv`)
+   *   4. `80`
+   */
   port?: number | string;
   /** Bind address. Defaults to process.env.SERVER_IP or '127.0.0.1'. */
   ip?: string;
@@ -63,14 +70,12 @@ export interface CreateLuckyStackServerOptions {
    */
   loadGeneratedMaps?: (preset: string) => Promise<unknown>;
   /**
-   * Override the env var that selects the production maps preset. Default
-   * `LUCKYSTACK_BUNDLE`. Resolved to `'default'` when unset.
+   * Override the preset(s) to load (skips argv lookup). Pass a single preset
+   * name or an array for multi-preset boots. Default: the first positional
+   * argv arg parsed by `@luckystack/server/parseArgv`, falling back to
+   * `'default'`.
    */
-  runtimeMapsPresetEnvVar?: string;
-  /**
-   * Override the literal preset name (skips env lookup). Useful in tests.
-   */
-  runtimeMapsPreset?: string;
+  runtimeMapsPreset?: string | string[];
 }
 
 export interface RunningLuckyStackServer {

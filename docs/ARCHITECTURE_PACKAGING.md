@@ -579,11 +579,19 @@ export default defineDeploy({
 
 ### 10.1a Runtime bundle selection
 
-Which preset's generated route map loads at runtime is controlled by the `LUCKYSTACK_BUNDLE` env var (previously `LUCKY_PRESET`):
+Which preset's generated route map(s) load at runtime is controlled by the **first positional argv** to `server.ts` (parsed by `@luckystack/server/parseArgv`, which the template imports as the first line):
 
-- Unset: loads `server/prod/generatedApis.default.ts` (aggregate build).
-- Set to a preset key: loads `server/prod/generatedApis.{preset}.ts`.
-- The file is emitted by `scripts/generateServerRequests.ts` for every preset defined in `services.config.ts`.
+```
+npm run server                              # loads generatedApis.default.ts
+npm run server -- billing                   # loads generatedApis.billing.ts
+npm run server -- billing,vehicles          # loads both, runtime-merged into one process
+npm run server -- billing,vehicles 4001     # same, listening on port 4001 (second positional)
+```
+
+- No args: loads `server/prod/generatedApis.default.ts` (aggregate build).
+- One preset name: loads `server/prod/generatedApis.{preset}.ts`.
+- Comma-separated list: loads each preset's map and shallow-merges `apis` / `syncs` / `functions`. **Key collisions across presets throw at boot** — services must own exactly one preset (§10.1 ownership rule).
+- The files are emitted by `scripts/generateServerRequests.ts` for every preset defined in `services.config.ts`.
 
 ### 10.1b Boot-time shared-resource handshake (recommended)
 
@@ -834,7 +842,7 @@ Completed:
 4. Fixed `config.ts` compile-time structural check — replaced unused runtime variable with `export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true : never` to satisfy `noUnusedLocals`.
 5. Fixed `server/dev/typeMap/emitterArtifacts.ts` — removed hardcoded `import { SessionLayout } from "../../config"` from the generated file header; it was unconditionally emitted but unused in the current type map output.
 6. Fixed `deploy.config.ts` generic inference — `defineDeploy<T>` was narrowing `T` to `'staging'` via the `fallback` literal; added explicit type parameter `defineDeploy<'development' | 'staging' | 'production'>` to anchor inference on environment keys.
-7. Deleted stale `server/prod/generatedApis.default.ts` — referenced deleted `server/functions/game`; the generator only emits preset-specific files now. `runtimeMaps.ts` falls back gracefully when the file is missing. Production deployments must set `LUCKYSTACK_BUNDLE` to a preset key.
+7. Deleted stale `server/prod/generatedApis.default.ts` — referenced deleted `server/functions/game`; the generator only emits preset-specific files now. `runtimeMaps.ts` falls back gracefully when the file is missing. Production deployments must pass a preset key as the first positional argv (see §10.1a).
 8. Fixed `scripts/bundleServer.mjs` (esbuild) — added `alias` entries for `@luckystack/core` and `@luckystack/login` pointing to their `packages/*/src/index.ts` so the production server bundle resolves them correctly.
 9. `npm run lint` and `npm run build` both pass cleanly.
 

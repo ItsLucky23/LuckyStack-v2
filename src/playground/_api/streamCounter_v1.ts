@@ -1,4 +1,3 @@
-/* eslint-disable */
 //? Playground: streams a fake counter to the originator over a configurable
 //? duration. Demonstrates API-side `stream(...)` with throttling. Use the
 //? "Stream" checkbox + this button on the playground to watch tokens roll in.
@@ -33,7 +32,7 @@ export const main = async ({ data, stream }: ApiParams): Promise<ApiResponse> =>
   let sum = 0;
   for (let i = 1; i <= ticks; i++) {
     sum += i;
-    stream({ tick: i, value: sum, total: ticks });
+    void stream({ tick: i, value: sum, total: ticks });
     if (i < ticks) await sleep(intervalMs);
   }
 

@@ -141,8 +141,8 @@ LuckyStack-v2/
 │
 ├── server/                    # This repo's own server entry (consumer of @luckystack/server)
 │   ├── server.ts              # ~25 lines: calls bootstrapLuckyStack(...)
-│   ├── prod/runtimeMaps.ts    # Selects preset bundle via LUCKYSTACK_BUNDLE
-│   └── prod/generatedApis.*.ts # Per-preset route maps emitted by build
+│   ├── prod/runtimeMaps.ts    # REPL-only helper (preset selection lives in @luckystack/server)
+│   └── prod/generatedApis.*.ts # Per-preset route maps emitted by build (selected via argv)
 │
 ├── luckystack/                # Overlay folder (consumer-style hooks + DI registries)
 ├── src/                       # Frontend (React 19) + page-local _api / _sync

@@ -1,6 +1,6 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-import { getOAuthProviders, isFullOAuthProvider, type FullOAuthProvider } from './oauthProviders';
+import { asOAuthUserData, getOAuthProviders, isFullOAuthProvider, type FullOAuthProvider } from './oauthProviders';
 import { getPostLoginRedirect } from './redirectResolver';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { URLSearchParams } from 'node:url';
@@ -12,6 +12,7 @@ import validator from 'validator';
 import type { BaseSessionLayout as SessionLayout } from './sessionLayout';
 import { getProjectConfig } from '@luckystack/core';
 import { getUserAdapter } from './userAdapter';
+import { validatePassword } from './passwordPolicy';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -123,10 +124,14 @@ const validateCredentialsShape = (creds: NormalizedCredentials): { status: false
   const authLimits = getProjectConfig().auth;
   if (!creds.email || !creds.password) return { status: false, reason: 'login.empty' };
   if (creds.email.length > authLimits.emailMaxLength) return { status: false, reason: 'login.emailCharacterLimit' };
-  if (creds.password.length < authLimits.passwordMinLength) return { status: false, reason: 'login.passwordCharacterMinimum' };
-  if (creds.password.length > authLimits.passwordMaxLength) return { status: false, reason: 'login.passwordCharacterLimit' };
   if (creds.name && creds.name.length > authLimits.nameMaxLength) return { status: false, reason: 'login.nameCharacterLimit' };
   if (!isEmail(creds.email)) return { status: false, reason: 'login.invalidEmailFormat' };
+  //? Full password-policy check (length, complexity, common-list, customValidator).
+  //? Policy lives in `projectConfig.auth.passwordPolicy`; the deprecated
+  //? `passwordMinLength`/`passwordMaxLength` top-level fields are still read
+  //? from the policy's `minLength`/`maxLength` defaults.
+  const passwordReason = validatePassword(creds.password);
+  if (passwordReason) return { status: false, reason: passwordReason };
   return null;
 };
 
@@ -279,7 +284,12 @@ const isAllowedRedirectUrl = (url: string): boolean => {
     // relative URL — same-origin, always safe
     return true;
   }
+  //? `allowedOrigins` is `string[] | (origin: string) => boolean` since we
+  //? added the function-resolver variant. Branch on the shape.
   const allowed = getProjectConfig().http.cors.allowedOrigins ?? [];
+  if (typeof allowed === 'function') {
+    return allowed(parsed.origin);
+  }
   return allowed.some((origin) => {
     if (!URL.canParse(origin)) return false;
     return new URL(origin).origin === parsed.origin;
@@ -376,7 +386,7 @@ const fetchOAuthProfile = async (
   const avatarValue = provider?.avatarKey
     ? String(userData[provider.avatarKey] || '')
     : (provider.getAvatar
-      ? await provider.getAvatar({ userData, avatarId: typeof avatarId === 'string' ? avatarId : '' })
+      ? await provider.getAvatar({ userData, avatarId: typeof avatarId === 'string' ? avatarId : '', accessToken })
       : '');
   const avatar = typeof avatarValue === 'string' ? avatarValue : '';
 
@@ -542,6 +552,24 @@ const loginCallback = async (
 
   const newToken = randomBytes(32).toString('hex');
   resolved.user.token = newToken;
+
+  //? Per-provider runtime extras (calendar tokens, tenant ids, etc.) are
+  //? merged into the session BEFORE save so saveSession + the resulting
+  //? sessionStorage broadcast see the final shape. Errors are logged but
+  //? do not block login — a missing extra is not worth keeping the user
+  //? from signing in.
+  const extraSessionFields = provider.extraSessionFields;
+  if (extraSessionFields) {
+    const [extraErr, extra] = await tryCatch(async () =>
+      extraSessionFields({ userData: asOAuthUserData(profile), accessToken }),
+    );
+    if (extraErr) {
+      getLogger().warn(`[oauth:${providerName}] extraSessionFields hook threw — continuing without extras`, { err: extraErr });
+    } else if (extra) {
+      Object.assign(resolved.user, extra);
+    }
+  }
+
   await saveSession(newToken, resolved.user, true);
 
   if (resolved.isNewUser) {

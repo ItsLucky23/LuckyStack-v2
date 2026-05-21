@@ -36,11 +36,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./parseArgv": {
+      "types": "./dist/parseArgv.d.ts",
+      "import": "./dist/parseArgv.js"
     }
   },
   "files": [
     "dist",
     "README.md",
+    "AI_INDEX.md",
+    "docs",
     "LICENSE"
   ],
   "scripts": {

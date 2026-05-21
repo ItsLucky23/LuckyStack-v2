@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT_DIR, getServerFunctionsDir, getSharedDir, getSrcDir } from '@luckystack/core';
 
+import { getOrInit } from './internal/mapUtils';
+
 const SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts'];
 
 const normalizePath = (value: string): string => path.resolve(value).replaceAll('\\', '/');
@@ -194,11 +196,7 @@ export const findDependentRouteFiles = (changedFilePath: string): Set<string> =>
         continue;
       }
 
-      if (!reverseDependencies.has(resolvedImport)) {
-        reverseDependencies.set(resolvedImport, new Set<string>());
-      }
-
-      reverseDependencies.get(resolvedImport)!.add(filePath);
+      getOrInit(reverseDependencies, resolvedImport, () => new Set<string>()).add(filePath);
     }
   }
 

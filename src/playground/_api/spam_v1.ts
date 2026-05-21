@@ -1,4 +1,3 @@
-/* eslint-disable */
 //? Playground: low rate-limit endpoint for demoing the rate-limiter. Hit it
 //? rapidly from the playground page (the "Spam playground/spam" button
 //? fires 10 calls in a tight loop). After the 3rd call inside the window,

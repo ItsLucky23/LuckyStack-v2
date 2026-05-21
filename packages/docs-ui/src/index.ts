@@ -20,6 +20,27 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getGeneratedApiDocsPath, tryCatch } from '@luckystack/core';
 import { renderDocsHtml } from './docsHtml';
 
+export interface DocsBranding {
+  /** Logo URL shown in the header. PNG / SVG / data: URLs all accepted. */
+  logoUrl?: string;
+  /** CSS color for the header / accent (`#hex` or `rgb()` literal). */
+  brandColor?: string;
+  /** Web-safe font family for the page. */
+  fontFamily?: string;
+}
+
+/**
+ * Custom HTML builder. Receives the JSON-endpoint path the page should
+ * fetch from + page title + branding; returns the full HTML document
+ * (`<!doctype html>` + everything). Use to swap layout entirely (sidebar
+ * vs tabs, dark/light theme, embedded auth-token field).
+ */
+export type DocsTemplateBuilder = (input: {
+  jsonPath: string;
+  pageTitle: string;
+  branding: DocsBranding;
+}) => string;
+
 export interface MountDocsUiOptions {
   /** Path the docs UI is served from. Default: `/_docs`. */
   routePath?: string;
@@ -39,6 +60,26 @@ export interface MountDocsUiOptions {
    * `getGeneratedApiDocsPath()` resolves to via ProjectConfig.paths.
    */
   apiDocsPath?: string;
+  /**
+   * Optional branding inputs (logo, brand color, font). Applied by the
+   * default template. Custom templates may ignore these.
+   */
+  branding?: DocsBranding;
+  /**
+   * Custom HTML template builder. When provided, the default `renderDocsHtml`
+   * is bypassed entirely. Use for radically different layouts (sidebar,
+   * tabs, dark mode, marketing-page-style). Receives a tested JSON path +
+   * title + branding so your template doesn't need to know about
+   * `getGeneratedApiDocsPath`.
+   */
+  template?: DocsTemplateBuilder;
+  /**
+   * Enable the inline "try-it-out" runner. When true, the default template
+   * renders a request-input box + send button per endpoint that calls
+   * `apiRequest` against the live server. Off by default because the
+   * runner needs a logged-in session.
+   */
+  enableTryItOut?: boolean;
 }
 
 export type DocsRouteHandler = (
@@ -97,15 +138,21 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
       return true;
     }
 
-    //? Serve the HTML page itself. Title comes from `options.pageTitle`
-    //? (set via `mountDocsUi({ pageTitle })`) — there's no implicit lookup
-    //? from ProjectConfig because the consumer's `config.ts` `pageTitle`
-    //? field isn't part of the framework's typed ProjectConfig shape.
+    //? Serve the HTML page itself. Title + branding + custom template
+    //? layered: explicit `template` builder wins over the built-in renderer.
+    //? Defaults render via `renderDocsHtml(jsonPath, title, { branding, enableTryItOut })`.
     const title = options.pageTitle ?? 'LuckyStack — API docs';
+    const branding = options.branding ?? {};
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
-    res.end(renderDocsHtml(jsonPath, title));
+    const html = options.template
+      ? options.template({ jsonPath, pageTitle: title, branding })
+      : renderDocsHtml(jsonPath, title, {
+          branding,
+          enableTryItOut: options.enableTryItOut ?? false,
+        });
+    res.end(html);
     return true;
   };
 };

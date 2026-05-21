@@ -12,6 +12,7 @@ import { randomBytes } from 'node:crypto';
 
 import { getProjectConfig, getProjectName, redis } from '@luckystack/core';
 
+import { validatePassword } from './passwordPolicy';
 import { getUserAdapter } from './userAdapter';
 
 //? Resolve at call time via the shared `getProjectName()` helper (single
@@ -50,13 +51,34 @@ export const consumePasswordResetToken = async (token: string): Promise<string |
 /**
  * Bcrypt-hash a plaintext password and write it to the user record via the
  * registered user adapter. Used by the reset flow and by the settings
- * password-change flow.
+ * password-change flow. Validates against the active password policy
+ * (`projectConfig.auth.passwordPolicy`) before hashing — throws a `PasswordPolicyError`
+ * when the plaintext fails policy. Catch and surface the error code to the
+ * client; framework-mode reset/change flows already do this.
  */
 export const updatePasswordHash = async (userId: string, plaintext: string): Promise<void> => {
+  const reason = validatePassword(plaintext);
+  if (reason) {
+    throw new PasswordPolicyError(reason);
+  }
   const salt = await bcrypt.genSalt(getProjectConfig().auth.bcryptRounds);
   const hashedPassword = await bcrypt.hash(plaintext, salt);
   await getUserAdapter().update(userId, { password: hashedPassword } as never);
 };
+
+/**
+ * Thrown by `updatePasswordHash` when the supplied plaintext violates the
+ * active password policy. `errorCode` matches the i18n reason key the rest
+ * of the login flow uses (e.g. `login.passwordRequiresUppercase`).
+ */
+export class PasswordPolicyError extends Error {
+  readonly errorCode: string;
+  constructor(errorCode: string) {
+    super(`Password policy violation: ${errorCode}`);
+    this.name = 'PasswordPolicyError';
+    this.errorCode = errorCode;
+  }
+}
 
 /** Verify a plaintext password against a stored bcrypt hash. */
 export const verifyPassword = async (plaintext: string, hash: string): Promise<boolean> => {

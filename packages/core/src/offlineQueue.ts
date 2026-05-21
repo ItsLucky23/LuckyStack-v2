@@ -7,6 +7,11 @@ interface ApiQueueItem {
   key: string;
   run: (socketInstance: Socket) => void;
   createdAt: number;
+  /**
+   * Per-request override of `projectConfig.offlineQueue.dropPolicy`. See
+   * `SyncQueueItem.dropPolicy` for details.
+   */
+  dropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
 }
 
 interface SyncQueueItem {
@@ -14,6 +19,13 @@ interface SyncQueueItem {
   key: string;
   run: (socketInstance: Socket) => void;
   createdAt: number;
+  /**
+   * Per-request override of `projectConfig.offlineQueue.dropPolicy`. Lets a
+   * specific sync ("editor cursor move") pick `'drop-oldest'` while the app
+   * default stays `'reject'` for safer sends. When omitted, falls back to
+   * the global config.
+   */
+  dropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
 }
 
 const apiQueue: ApiQueueItem[] = [];
@@ -40,28 +52,32 @@ const evictExpired = (queue: Array<{ createdAt: number }>): void => {
   }
 };
 
-const enqueueWithPolicy = <T extends { createdAt: number }>(
+const enqueueWithPolicy = <T extends { createdAt: number; dropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject' }>(
   queue: T[],
   item: T,
   label: string,
 ): boolean => {
   evictExpired(queue);
-  const { maxSize, dropPolicy } = getProjectConfig().offlineQueue;
+  const { maxSize, dropPolicy: globalPolicy } = getProjectConfig().offlineQueue;
+  //? Per-request override wins over the global policy. Lets specific
+  //? syncs pick 'drop-oldest' for liveness while the app default stays
+  //? 'reject' for safer sends.
+  const effectivePolicy = item.dropPolicy ?? globalPolicy;
   if (queue.length < maxSize) {
     queue.push(item);
     return true;
   }
-  if (dropPolicy === 'drop-oldest') {
+  if (effectivePolicy === 'drop-oldest') {
     queue.shift();
     queue.push(item);
-    getLogger().debug(`offlineQueue:${label} full — dropped oldest item`);
+    getLogger().debug(`offlineQueue:${label} full — dropped oldest item (policy=${effectivePolicy})`);
     return true;
   }
-  if (dropPolicy === 'drop-newest') {
-    getLogger().debug(`offlineQueue:${label} full — dropped newest item`);
+  if (effectivePolicy === 'drop-newest') {
+    getLogger().debug(`offlineQueue:${label} full — dropped newest item (policy=${effectivePolicy})`);
     return false;
   }
-  getLogger().warn(`offlineQueue:${label} full — rejecting enqueue (policy=reject)`);
+  getLogger().warn(`offlineQueue:${label} full — rejecting enqueue (policy=${effectivePolicy})`);
   return false;
 };
 

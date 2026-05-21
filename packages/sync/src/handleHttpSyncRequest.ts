@@ -18,7 +18,7 @@ import {
   getLogger,
 } from "@luckystack/core";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
-import { setSentryUser, startSpan } from '@luckystack/error-tracking';
+import type { PostSyncFanoutPayload } from '@luckystack/core';
 import { buildSyncStreamEmitters } from './_shared/streamEmitters';
 
 interface HttpSyncRequestParams {
@@ -211,11 +211,11 @@ export default async function handleHttpSyncRequest({
     extractLanguageFromHeader(xLanguageHeader)
     || extractLanguageFromHeader(acceptLanguageHeader);
   const user = await getSession(token);
-  setSentryUser(user?.id ? {
-    id: user.id,
-    email: user.email || undefined,
-  } : null);
-  const span = startSpan(name, 'sync.request.http') as { end?: () => void } | undefined;
+  //? Identity propagation + span lifecycle now flow via the
+  //? `preSyncAuthorize` / `preSyncFanout` / `postSyncFanout` hook subscribers
+  //? registered by `@luckystack/error-tracking`'s
+  //? `enableErrorTrackingAutoInstrumentation()`. Direct `setSentryUser` +
+  //? `startSpan` removed from this handler — see migration doc.
 
   const buildSyncError = ({
     response,
@@ -338,6 +338,28 @@ export default async function handleHttpSyncRequest({
       }
     }
 
+    //? Identity propagation hook — runs after basic auth + AuthProps check,
+    //? before rate-limit + input validation. `@luckystack/error-tracking`'s
+    //? auto-instrumentation subscribes here to call `setSentryUser(user)`.
+    const preAuthorizeResult = await dispatchHook('preSyncAuthorize', {
+      routeName: resolvedName,
+      data,
+      user,
+      receiver: normalizedReceiver,
+      transport: 'http',
+    });
+    if (preAuthorizeResult.stopped) {
+      return buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: preAuthorizeResult.signal.errorCode,
+          httpStatus: preAuthorizeResult.signal.httpStatus,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      });
+    }
+
     // Rate limiting for HTTP sync requests (per-route + global IP buckets)
     const rateLimitResult = await applyHttpSyncRateLimits({
       resolvedName,
@@ -430,13 +452,18 @@ export default async function handleHttpSyncRequest({
       serverOutput = serverSyncResult;
     }
 
-    await dispatchHook('preSyncFanout', {
+    //? Single payload reference reused by pre/post — span pinning in
+    //? `@luckystack/error-tracking` uses WeakMap on this object.
+    const fanoutPayload: PostSyncFanoutPayload = {
       routeName: resolvedName,
       data,
       user,
       receiver: normalizedReceiver,
       serverOutput,
-    });
+      transport: 'http',
+      recipientCount: 0,
+    };
+    await dispatchHook('preSyncFanout', fanoutPayload);
 
     const sockets = receiver === 'all'
       ? ioInstance.sockets.sockets
@@ -551,14 +578,8 @@ export default async function handleHttpSyncRequest({
       recipientCount++;
     }
 
-    await dispatchHook('postSyncFanout', {
-      routeName: resolvedName,
-      data,
-      user,
-      receiver: normalizedReceiver,
-      serverOutput,
-      recipientCount,
-    });
+    fanoutPayload.recipientCount = recipientCount;
+    await dispatchHook('postSyncFanout', fanoutPayload);
 
     if (shouldLogDev()) {
       getLogger().debug(`http sync: ${resolvedName} completed`);
@@ -566,7 +587,6 @@ export default async function handleHttpSyncRequest({
 
     return { status: 'success' as const, message: `sync ${resolvedName} success` };
   });
-  span?.end?.();
   if (bodyError) {
     getLogger().error(`http sync: ${name} threw`, bodyError, { sync: name });
     return buildSyncError({

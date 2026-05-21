@@ -29,8 +29,8 @@ const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
     sessionBasedToken: true,
     allowMultipleSessions: true
   },
-  "http://localhost:5176": {
-    backendUrl: "http://localhost:83",
+  "http://localhost:5174": {
+    backendUrl: "http://localhost:81",
     dev: true,
     sessionBasedToken: true,
     allowMultipleSessions: true
@@ -92,7 +92,7 @@ const config = {
   loginPageUrl: '/login',
  
   /** URL to redirect after successful login */
-  loginRedirectUrl: '/dashboard',
+  loginRedirectUrl: '/playground',
  
   /**
    * If false, logging in on a new device will automatically sign out all other sessions for the user.
@@ -300,7 +300,7 @@ registerProjectConfig({
       allowLocalhost: resolvedEnvironment.dev,
     },
   },
-  defaultLanguage: config.defaultLanguage as unknown as string,
+  defaultLanguage: config.defaultLanguage,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
   socketStatusIndicator: config.socketStatusIndicator,
   locationProviderEnabled: config.locationProviderEnabled,

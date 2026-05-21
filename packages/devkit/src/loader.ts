@@ -10,9 +10,9 @@ import { clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
 import { getRoutingRules } from './routingRules';
 import { assertValidRouteNaming } from './routeNamingValidation';
 
-export const devApis: Record<string, any> = {};
-export const devSyncs: Record<string, any> = {};
-export const devFunctions: Record<string, any> = {};
+export const devApis: Record<string, unknown> = {};
+export const devSyncs: Record<string, unknown> = {};
+export const devFunctions: Record<string, unknown> = {};
 
 const normalizePath = (value: string): string => value.replaceAll('\\', '/');
 
@@ -128,16 +128,16 @@ const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
   return results;
 };
 
-const isMergeable = (value: unknown): value is Record<string, unknown> | ((...args: any[]) => any) => {
+const isMergeable = (value: unknown): value is Record<string, unknown> | ((...args: unknown[]) => unknown) => {
   return (typeof value === 'object' && value !== null) || typeof value === 'function';
 };
 
-const resolveFunctionModule = (loadedModule: any, fileName: string) => {
+const resolveFunctionModule = (loadedModule: unknown, fileName: string) => {
   if (!loadedModule || typeof loadedModule !== 'object' || !("default" in loadedModule)) {
     return isMergeable(loadedModule) ? loadedModule : {};
   }
 
-  const moduleRecord = loadedModule as Record<string, any>;
+  const moduleRecord = loadedModule as Record<string, unknown>;
   const { default: defaultExport, ...namedExports } = moduleRecord;
   const filteredNamedExports = Object.fromEntries(
     Object.entries(namedExports).filter(([key]) => key !== '__esModule')
@@ -156,7 +156,12 @@ const resolveFunctionModule = (loadedModule: any, fileName: string) => {
 
 export const initializeApis = async () => {
   for (const key of Object.keys(devApis)) delete devApis[key];
-  invalidateProgramCache();
+  //? No invalidateProgramCache() here — cachedProgram starts as null on
+  //? module-load (tsProgram.ts), so the first getServerProgram() call
+  //? builds it from scratch. With initializeApis + initializeSyncs running
+  //? in parallel via Promise.all, invalidating here forced a redundant
+  //? double-build (~3-4s waste). Hot-reload paths (upsertApiFromFile,
+  //? removeApiFromFile etc.) DO invalidate — that's where it's needed.
   clearRuntimeTypeResolverCache();
   const srcFolder = fs.readdirSync(getSrcDir());
 
@@ -283,7 +288,9 @@ const scanApiFolder = async (file: string, basePath = "") => {
 
 export const initializeSyncs = async () => {
   for (const key of Object.keys(devSyncs)) delete devSyncs[key];
-  invalidateProgramCache();
+  //? See initializeApis above — no invalidation on the boot path. Hot-reload
+  //? paths (upsertSyncFromFile / removeSyncFromFile) handle invalidation
+  //? when a file actually changes.
   clearRuntimeTypeResolverCache();
   const srcFolder = fs.readdirSync(getSrcDir());
 
@@ -449,14 +456,25 @@ const scanFunctionsFolder = async (dir: string, basePath: string[] = []) => {
     const resolvedFunctionModule = resolveFunctionModule(module, fileName);
     if (!isMergeable(resolvedFunctionModule)) continue;
 
-    let target = devFunctions;
+    //? Walk into devFunctions tree, creating nested Record<string, unknown>
+    //? subtrees on demand. Each level is structurally a record but typed as
+    //? `unknown` after one level of indexing — re-narrow before descent.
+    let target: Record<string, unknown> = devFunctions;
     for (const part of basePath) {
-      if (!target[part]) target[part] = {};
-      target = target[part];
+      const existing = target[part];
+      if (!existing || typeof existing !== 'object') {
+        target[part] = {};
+      }
+      target = target[part] as Record<string, unknown>;
     }
 
-    if (target[fileName] && isMergeable(resolvedFunctionModule) && isMergeable(target[fileName])) {
-      Object.assign(resolvedFunctionModule, target[fileName]);
+    const existingAtFileName = target[fileName];
+    if (
+      existingAtFileName !== undefined
+      && isMergeable(resolvedFunctionModule)
+      && isMergeable(existingAtFileName)
+    ) {
+      Object.assign(resolvedFunctionModule, existingAtFileName);
     }
 
     target[fileName] = resolvedFunctionModule;

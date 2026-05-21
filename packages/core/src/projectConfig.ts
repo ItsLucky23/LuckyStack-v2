@@ -45,7 +45,44 @@ export interface RateLimitingConfig {
 export interface SessionConfig {
   basedToken: boolean;
   expiryDays: number;
+  /**
+   * @deprecated Use `perUser: 'multiple'` instead. Kept for backwards
+   * compatibility; when set, maps to `perUser: 'multiple'` with no concurrent
+   * cap. The framework emits a one-shot deprecation warning at boot when
+   * `allowMultiple` is explicitly set.
+   */
   allowMultiple: boolean;
+  /**
+   * Whether multiple parallel logins per browser are permitted.
+   * `'single'` (default): one active login per browser; opening a second tab
+   *   and logging in elsewhere replaces the first. `'multiple'`: each tab/window
+   *   can hold its own session independently.
+   */
+  perBrowser: 'single' | 'multiple';
+  /**
+   * Whether a single user can hold multiple active sessions across devices.
+   * `'single'` (default): logging in on a new device kicks the previous one.
+   * `'multiple'`: device A and device B can both be logged in concurrently.
+   */
+  perUser: 'single' | 'multiple';
+  /**
+   * Optional cap on concurrent sessions when `perUser === 'multiple'`. Null
+   * = unlimited. When the cap is reached, the policy from `onConflict`
+   * decides whether the new login is accepted (kicking oldest) or rejected.
+   */
+  maxConcurrentPerUser: number | null;
+  /**
+   * What to do when a session limit is exceeded.
+   * `'revokeOld'` (default): kick the oldest session, accept the new login.
+   * `'rejectNew'`: refuse the new login, leave existing sessions intact.
+   */
+  onConflict: 'revokeOld' | 'rejectNew';
+  /**
+   * When `onConflict === 'revokeOld'`, whether to broadcast a short UI
+   * notification ("logged in elsewhere") to the kicked device before
+   * disconnecting it. Default true.
+   */
+  notifyOldDeviceOnRevoke: boolean;
   /**
    * Prefix used for Redis session/activeUsers keys (e.g. `${projectName}-session:<token>`).
    * Falls back to `process.env.PROJECT_NAME` then this default at config build time.
@@ -91,14 +128,27 @@ export interface CorsConfig {
    * permits the `SERVER_IP:SERVER_PORT` it binds to. Set `allowLocalhost`
    * to true to also accept any `localhost` origin (useful for dev).
    * Origins are normalized (scheme + host + port) before comparison.
+   *
+   * Static list mode: pass a `string[]`. Origins are matched exactly.
+   * Dynamic mode: pass a synchronous function `(origin) => boolean` for
+   * per-tenant / per-time-window allow-listing. Async resolvers are NOT
+   * supported here because Socket.io's CORS check is synchronous; use a
+   * pre-computed in-memory cache that the function can read from.
    */
-  allowedOrigins: string[];
+  allowedOrigins: string[] | ((origin: string) => boolean);
   /**
    * Accept any origin matching `localhost` (any port). Convenient for local
    * development; should be `false` in production. Defaults to `false` so
    * production deployments fail closed.
    */
   allowLocalhost: boolean;
+  /**
+   * Optional per-route override hook. When a `_api/*` file exports
+   * `export const cors = { allowedOrigins, allowedHeaders, ... }` the
+   * framework merges that on top of the global config for THAT route only.
+   * Implemented in the api handler — this field is documentation-only.
+   */
+  // Note: per-route override is wired in `packages/api/src/handleHttpApiRequest.ts`.
 }
 
 export interface HttpConfig {
@@ -126,13 +176,48 @@ export interface HttpConfig {
   cors: CorsConfig;
 }
 
+export interface PasswordPolicyConfig {
+  /** Minimum total length. Default 8. */
+  minLength: number;
+  /** Maximum total length. Default 191 (DB column-friendly). */
+  maxLength: number;
+  /** Require at least one uppercase letter (A-Z). Default false. */
+  requireUppercase: boolean;
+  /** Require at least one lowercase letter (a-z). Default false. */
+  requireLowercase: boolean;
+  /** Require at least one digit (0-9). Default false. */
+  requireNumber: boolean;
+  /** Require at least one non-alphanumeric character. Default false. */
+  requireSpecial: boolean;
+  /**
+   * Reject the 10k most common passwords (built-in list shipped with
+   * `@luckystack/login`). Default true. Set to false in tests or when
+   * onboarding from a legacy system that allowed weak passwords.
+   */
+  forbidCommon: boolean;
+  /**
+   * Optional consumer-supplied predicate. Return null when the password is
+   * acceptable, or a string describing why it isn't (the string is used as
+   * the i18n errorCode-style key surfaced to the client).
+   */
+  customValidator?: (password: string) => string | null;
+}
+
 export interface AuthConfig {
   /** TTL for OAuth state tokens stored in Redis. */
   oauthStateTtlSeconds: number;
-  /** Minimum password length for credentials auth. */
+  /**
+   * @deprecated Read `passwordPolicy.minLength`. Kept as a top-level field
+   * for older consumer code; new code should use the structured policy.
+   */
   passwordMinLength: number;
-  /** Maximum password length for credentials auth. */
+  /**
+   * @deprecated Read `passwordPolicy.maxLength`. Kept as a top-level field
+   * for older consumer code; new code should use the structured policy.
+   */
   passwordMaxLength: number;
+  /** Full credentials password policy. Replaces the deprecated min/max-length pair. */
+  passwordPolicy: PasswordPolicyConfig;
   /** Maximum email length for credentials auth. */
   emailMaxLength: number;
   /** Maximum display-name length for credentials auth. */
@@ -309,6 +394,11 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     basedToken: false,
     expiryDays: 7,
     allowMultiple: false,
+    perBrowser: 'single',
+    perUser: 'single',
+    maxConcurrentPerUser: null,
+    onConflict: 'revokeOld',
+    notifyOldDeviceOnRevoke: true,
     //? Empty default — `getProjectName()` reads `process.env.PROJECT_NAME` at
     //? call time and falls back to `'luckystack'`. Avoids capturing env at
     //? module-load before dotenv runs.
@@ -347,6 +437,15 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     oauthStateTtlSeconds: 60 * 10,
     passwordMinLength: 8,
     passwordMaxLength: 191,
+    passwordPolicy: {
+      minLength: 8,
+      maxLength: 191,
+      requireUppercase: false,
+      requireLowercase: false,
+      requireNumber: false,
+      requireSpecial: false,
+      forbidCommon: true,
+    },
     emailMaxLength: 191,
     nameMaxLength: 191,
     bcryptRounds: 10,

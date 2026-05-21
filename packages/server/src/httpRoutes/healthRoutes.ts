@@ -9,15 +9,37 @@ import {
 } from '@luckystack/core';
 import type { HttpRouteHandler } from './types';
 
-//? Narrow shapes for the methods this route uses. Avoids broad `as any`
-//? casts — same single-boundary type-erasure pattern used for the other
-//? Redis/Prisma touch points (testResetRoute, defaultPrismaUserAdapter).
-interface RedisPing {
-  ping: () => Promise<string>;
+//? Cross-provider connectivity ping. Prisma's generated TypeScript surface
+//? differs per provider: SQL providers expose `$queryRaw`, MongoDB exposes
+//? `$runCommandRaw`. The framework can't know which one the consumer's schema
+//? uses, so this single seam asserts both as optional and probes at runtime.
+//? Detecting the provider via `_engineConfig.activeProvider` is private API
+//? and has drifted between Prisma major versions — runtime probing is more
+//? robust.
+interface PrismaPingShape {
+  $queryRaw?: (template: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+  $runCommandRaw?: (command: Record<string, unknown>) => Promise<unknown>;
 }
-interface PrismaQueryRaw {
-  $queryRaw: (template: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
-}
+
+const pingPrisma = async (): Promise<boolean> => {
+  const client = prisma as unknown as PrismaPingShape;
+  //? Capture each function into a local before calling so the typeof
+  //? narrow holds without `!`. The shape `PrismaPingShape` declares both
+  //? methods optional because Prisma's generated types include one or the
+  //? other depending on active provider — capturing into a local also
+  //? removes the assertion-style cast that the strict-typing policy disallows.
+  const queryRaw = client.$queryRaw;
+  if (typeof queryRaw === 'function') {
+    const [sqlError] = await tryCatch(() => queryRaw`SELECT 1`);
+    if (!sqlError) return true;
+  }
+  const runCommandRaw = client.$runCommandRaw;
+  if (typeof runCommandRaw === 'function') {
+    const [mongoError] = await tryCatch(() => runCommandRaw({ ping: 1 }));
+    return !mongoError;
+  }
+  return false;
+};
 
 export const handleLivezRoute: HttpRouteHandler = async ({ res, routePath }) => {
   if (routePath !== getProjectConfig().http.liveEndpoint) return false;
@@ -32,13 +54,10 @@ export const handleReadyzRoute: HttpRouteHandler = async ({ res, routePath }) =>
 
   const bootUuid = await readBootUuid();
 
-  const redisDelegate = redis as unknown as RedisPing;
-  const [redisError, pong] = await tryCatch(() => redisDelegate.ping());
+  const [redisError, pong] = await tryCatch(() => redis.ping());
   const redisOk = !redisError && (pong === 'PONG' || pong === 'pong' || Boolean(pong));
 
-  const prismaDelegate = prisma as unknown as PrismaQueryRaw;
-  const [prismaError] = await tryCatch(() => prismaDelegate.$queryRaw`SELECT 1`);
-  const prismaOk = !prismaError;
+  const prismaOk = await pingPrisma();
 
   const ready = Boolean(bootUuid) && redisOk && prismaOk;
   res.statusCode = ready ? 200 : 503;

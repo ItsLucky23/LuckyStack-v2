@@ -10,6 +10,7 @@ export const socketEventNames = {
   getJoinedRooms: 'getJoinedRooms',
   updateLocation: 'updateLocation',
   updateSession: 'updateSession',
+  sessionReplaced: 'sessionReplaced',
   logout: 'logout',
 
   intentionalDisconnect: 'intentionalDisconnect',

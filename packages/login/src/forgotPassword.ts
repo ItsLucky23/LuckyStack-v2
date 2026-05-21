@@ -78,11 +78,16 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
     footer: `Sent by ${resolvedBrand}. If you have questions, reply to this email.`,
   });
 
+  //? `adapterHint: 'transactional'` lets consumers who registered separate
+  //? marketing + transactional senders via `registerEmailSenders({...})`
+  //? route this through the transactional adapter automatically. Falls
+  //? back to the default sender when only one is registered.
   const result = await sendEmail({
     to: user.email,
     subject: `Reset your ${resolvedBrand} password`,
     html,
     text,
+    adapterHint: 'transactional',
   });
 
   return result.ok ? { ok: true } : { ok: false, reason: result.reason };

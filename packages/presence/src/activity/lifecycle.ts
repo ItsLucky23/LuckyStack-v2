@@ -11,7 +11,7 @@ import {
   getDisconnectTime,
   tempDisconnectedSockets,
 } from './state';
-import { socketEventNames, getLogger } from '@luckystack/core';
+import { dispatchHook, socketEventNames, getLogger } from '@luckystack/core';
 import { getPresenceConfig } from '../presenceConfig';
 
 export const socketConnected = async ({
@@ -22,7 +22,9 @@ export const socketConnected = async ({
   io: Server
 }) => {
   const timer = disconnectTimers.get(token);
+  let isReconnect = false;
   if (timer) {
+    isReconnect = true;
     getLogger().debug(`presence: user came back`, { token });
     clearTimeout(timer);
     disconnectTimers.delete(token);
@@ -38,6 +40,18 @@ export const socketConnected = async ({
   const roomCodes = Array.isArray(session?.roomCodes)
     ? session.roomCodes.filter((room: unknown): room is string => typeof room === 'string' && room.length > 0)
     : [];
+
+  //? `postSocketReconnect` fires only on reconnect (not on initial connect)
+  //? so consumers can rehydrate state, replay missed events, or invalidate
+  //? caches. Initial-connect cases are covered by the existing
+  //? `onSocketConnect` hook from @luckystack/server.
+  if (isReconnect) {
+    void dispatchHook('postSocketReconnect', {
+      token,
+      userId,
+      roomCodes,
+    });
+  }
 
   if (roomCodes.length === 0) { return; }
   if (!userId) { return; }

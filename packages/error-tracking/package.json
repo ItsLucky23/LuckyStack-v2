@@ -41,6 +41,8 @@
   "files": [
     "dist",
     "README.md",
+    "AI_INDEX.md",
+    "docs",
     "LICENSE"
   ],
   "scripts": {
@@ -50,7 +52,19 @@
   "dependencies": {
     "@luckystack/core": "^0.1.0"
   },
+  "devDependencies": {
+    "@luckystack/login": "^0.1.0"
+  },
   "peerDependencies": {
-    "@sentry/node": "^10.48.0"
+    "@sentry/node": "^10.48.0",
+    "dd-trace": "^5.0.0",
+    "hot-shots": "^10.0.0",
+    "posthog-node": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@sentry/node": { "optional": true },
+    "dd-trace": { "optional": true },
+    "hot-shots": { "optional": true },
+    "posthog-node": { "optional": true }
   }
 }

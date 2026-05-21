@@ -52,6 +52,42 @@ export const extractRateLimit = (filePath: string): number | false | undefined =
   return undefined;
 };
 
+/**
+ * Reads the `export const validation` declaration from an API/sync source
+ * file. Supports `'strict'`, `'relaxed'`, and `{ input: 'skip' | 'strict' }`.
+ * Returns undefined when the export is absent (consumer hasn't opted out).
+ */
+export type ApiValidationMode = 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
+
+export const extractValidation = (filePath: string): ApiValidationMode | undefined => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+    const decl = findExportedConst(sourceFile, 'validation');
+
+    if (!decl?.initializer) return undefined;
+
+    if (ts.isStringLiteral(decl.initializer)) {
+      const text = decl.initializer.text;
+      if (text === 'strict' || text === 'relaxed') return text;
+    }
+
+    if (ts.isObjectLiteralExpression(decl.initializer)) {
+      for (const prop of decl.initializer.properties) {
+        if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
+        if (prop.name.text !== 'input') continue;
+        if (!ts.isStringLiteral(prop.initializer)) continue;
+        const input = prop.initializer.text;
+        if (input === 'skip' || input === 'strict') return { input };
+      }
+    }
+  } catch (error) {
+    console.error(`[TypeMapGenerator] Error extracting validation from ${filePath}:`, error);
+  }
+
+  return undefined;
+};
+
 // Reads a primitive value from an AST expression node.
 const readPrimitive = (node: ts.Expression): string | number | boolean | undefined => {
   if (ts.isStringLiteral(node)) return node.text;

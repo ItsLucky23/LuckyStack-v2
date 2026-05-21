@@ -1,8 +1,8 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
 import { config as loadEnv } from 'dotenv';
 loadEnv({ path: '.env' });
 loadEnv({ path: '.env.local', override: true });
+
+import type { Server as HttpServer } from 'node:http';
 
 import handleApiRequest from "./handleApiRequest";
 import { getSession, saveSession } from "../functions/session";
@@ -43,7 +43,17 @@ export let ioInstance: SocketIOServer | null = null;
 const shouldLogDev = logging.devLogs;
 const shouldLogSocketStartup = logging.socketStartup;
 
-const getVisibleSocketRooms = (socket: any, token: string | null): string[] => {
+//? `locationProviderEnabled` and `socketActivityBroadcaster` are narrowed to
+//? literal `false as const` in the default config. Widen here so handlers
+//? that check the flags don't trigger lint "always-truthy / always-falsy"
+//? warnings — the flags ARE meant to be toggled per consumer.
+const isLocationProviderEnabled: boolean = locationProviderEnabled;
+const isSocketActivityBroadcaster: boolean = socketActivityBroadcaster;
+
+const getVisibleSocketRooms = (
+  socket: { id: string; rooms: Set<string> | Iterable<string> },
+  token: string | null,
+): string[] => {
   return [...socket.rooms]
     .filter((room): room is string => typeof room === 'string')
     .filter((room) => room !== socket.id)
@@ -58,12 +68,25 @@ const getSessionRoomCodes = (session: BaseSessionLayout): string[] => {
   return [...new Set(roomCodes)];
 };
 
+//? Strip the deprecated `code`/`codes` legacy keys before persisting a
+//? session. Uses a typed delete instead of destructure-and-discard so the
+//? lint rule against unused destructured names doesn't fire.
 const sanitizeSessionRoomKeys = <T extends BaseSessionLayout>(session: T): T => {
-  const { code: _legacyCode, codes: _legacyCodes, ...sanitizedSession } = session as T & { code?: string; codes?: string[] };
-  return sanitizedSession as T;
+  const result: T & { code?: string; codes?: string[] } = { ...session };
+  delete result.code;
+  delete result.codes;
+  return result;
 };
 
-export default function loadSocket(httpServer: any) {
+//? Payload shapes the framework's transport guarantees on these socket
+//? events. Socket.io's `on` typing defaults to `any` — declare these so
+//? handler bodies get proper narrowing without per-line casts.
+interface JoinRoomPayload { group?: unknown; responseIndex?: unknown }
+interface LeaveRoomPayload { group?: unknown; responseIndex?: unknown }
+interface GetJoinedRoomsPayload { responseIndex?: unknown }
+interface UpdateLocationPayload { pathName?: unknown }
+
+export default function loadSocket(httpServer: HttpServer) {
 
   //? here we create the SocketIOServer instance
   const io = new SocketIOServer(httpServer, {
@@ -98,18 +121,18 @@ export default function loadSocket(httpServer: any) {
     const token = extractTokenFromSocket(socket);
 
     if (token) {
-      socketConnected({ token, io });
+      void socketConnected({ token, io });
     }
 
-    socket.on(socketEventNames.apiRequest, async (msg: apiMessage) => {
-      handleApiRequest({ msg, socket, token });
+    socket.on(socketEventNames.apiRequest, (msg: apiMessage) => {
+      void handleApiRequest({ msg, socket, token });
     });
-    socket.on(socketEventNames.sync, async (msg: syncMessage) => {
-      handleSyncRequest({ msg, socket, token });
+    socket.on(socketEventNames.sync, (msg: syncMessage) => {
+      void handleSyncRequest({ msg, socket, token });
     });
-    socket.on(socketEventNames.joinRoom, async (data) => {
-      const group = typeof data?.group === 'string' ? data.group.trim() : '';
-      const responseIndex = data?.responseIndex;
+    socket.on(socketEventNames.joinRoom, (data: JoinRoomPayload) => {
+      const group = typeof data.group === 'string' ? data.group.trim() : '';
+      const responseIndex = data.responseIndex;
       if (typeof responseIndex !== 'number') {
         return;
       }
@@ -121,7 +144,7 @@ export default function loadSocket(httpServer: any) {
         socket.emit(buildJoinRoomResponseEventName(responseIndex), { error: 'Invalid room' });
         return;
       }
-      await withSessionLock(token, async () => {
+      void withSessionLock(token, async () => {
         const session = await getSession(token);
         if (!session) {
           socket.emit(buildJoinRoomResponseEventName(responseIndex), { error: 'Session not found' });
@@ -141,9 +164,9 @@ export default function loadSocket(httpServer: any) {
       });
     });
 
-    socket.on(socketEventNames.leaveRoom, async (data) => {
-      const group = typeof data?.group === 'string' ? data.group.trim() : '';
-      const responseIndex = data?.responseIndex;
+    socket.on(socketEventNames.leaveRoom, (data: LeaveRoomPayload) => {
+      const group = typeof data.group === 'string' ? data.group.trim() : '';
+      const responseIndex = data.responseIndex;
       if (typeof responseIndex !== 'number') {
         return;
       }
@@ -158,7 +181,7 @@ export default function loadSocket(httpServer: any) {
         return;
       }
 
-      await withSessionLock(token, async () => {
+      void withSessionLock(token, async () => {
         const session = await getSession(token);
         if (!session) {
           socket.emit(buildLeaveRoomResponseEventName(responseIndex), { error: 'Session not found' });
@@ -180,8 +203,8 @@ export default function loadSocket(httpServer: any) {
       });
     });
 
-    socket.on(socketEventNames.getJoinedRooms, (data) => {
-      const responseIndex = data?.responseIndex;
+    socket.on(socketEventNames.getJoinedRooms, (data: GetJoinedRoomsPayload) => {
+      const responseIndex = data.responseIndex;
       if (typeof responseIndex !== 'number') {
         return;
       }
@@ -194,9 +217,9 @@ export default function loadSocket(httpServer: any) {
       socket.emit(buildGetJoinedRoomsResponseEventName(responseIndex), { rooms: getVisibleSocketRooms(socket, token) });
     });
 
-    socket.on(socketEventNames.disconnect, async (reason) => {
-      if (socketActivityBroadcaster && token) {
-        socketDisconnecting({ token, socket, reason });
+    socket.on(socketEventNames.disconnect, (reason: string) => {
+      if (isSocketActivityBroadcaster && token) {
+        void socketDisconnecting({ token, socket, reason });
       } else {
         if (!token) { return; }
         if (shouldLogDev) {
@@ -205,36 +228,36 @@ export default function loadSocket(httpServer: any) {
       }
     });
 
-    socket.on(socketEventNames.updateLocation, async (newLocation) => {
+    socket.on(socketEventNames.updateLocation, (newLocation: UpdateLocationPayload) => {
       if (!token) { return; }
-      if (!locationProviderEnabled) { return; }
+      if (!isLocationProviderEnabled) { return; }
+      const pathName = typeof newLocation.pathName === 'string' ? newLocation.pathName : '';
       if (shouldLogDev) {
-        console.log('updating location to:', newLocation.pathName, 'yellow');
+        console.log('updating location to:', pathName, 'yellow');
       }
 
-      await withSessionLock(token, async () => {
+      void withSessionLock(token, async () => {
         let returnedUser: BaseSessionLayout | null = null;
-        if (socketActivityBroadcaster) {
-          returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
+        if (isSocketActivityBroadcaster) {
+          returnedUser = await socketLeaveRoom({ token, socket, newPath: pathName });
         }
 
-        if (!newLocation) { return; }
-        const user = returnedUser || await getSession(token);
+        const user = returnedUser ?? await getSession(token);
         if (!user) { return; }
 
-        const extendedUser = user as SessionLayout & { location?: SessionLayout };
+        const extendedUser = user as SessionLayout & { location?: { pathName: string } };
 
-        extendedUser.location = newLocation;
+        extendedUser.location = { pathName };
         await saveSession(token, user);
       });
     });
 
-    if (socketActivityBroadcaster && token) {
+    if (isSocketActivityBroadcaster && token) {
       initActivityBroadcaster({ socket, token });
     }
 
     if (token) {
-      socket.join(token);
+      void socket.join(token);
     }
 
   });

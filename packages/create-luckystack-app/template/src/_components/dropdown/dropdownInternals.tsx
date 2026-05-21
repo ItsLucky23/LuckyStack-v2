@@ -136,7 +136,7 @@ export function useDropdownMenu({ showSearch }: UseDropdownMenuArgs): DropdownMe
   const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const closeTimeoutRef = useRef<number | null>(null);
+  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showAnimationFrameRef = useRef<number | null>(null);
 
   const updateMenuPosition = useCallback(() => {
@@ -206,14 +206,11 @@ export function useDropdownMenu({ showSearch }: UseDropdownMenuArgs): DropdownMe
       globalThis.clearTimeout(closeTimeoutRef.current);
     }
 
-    //? `globalThis.setTimeout` resolves to Node's overload (returns Timeout)
-    //? when @types/node is on the path. The ref is typed `number` to match
-    //? the DOM API the closure consumes — cast to satisfy both.
     closeTimeoutRef.current = globalThis.setTimeout(() => {
       setIsMenuMounted(false);
       setIsMenuPositionReady(false);
       closeTimeoutRef.current = null;
-    }, ANIMATION_MS) as unknown as number;
+    }, ANIMATION_MS);
   }, []);
 
   const toggleDropdown = useCallback(() => {

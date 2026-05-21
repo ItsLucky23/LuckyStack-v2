@@ -8,7 +8,7 @@ import {
   locationProviderEnabled,
   loginPageUrl,
 } from "config";
-import { i18nNotify as notify } from "@luckystack/core/client";
+import { i18nNotify as notify, clearCsrfToken } from "@luckystack/core/client";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { useEffect, useRef } from "react";
 import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
@@ -20,7 +20,6 @@ import {
   buildLeaveRoomResponseEventName,
   socketEventNames,
 } from "../../shared/socketEvents";
-import { clearCsrfToken } from "@luckystack/core/client";
 
 interface SyncEventPayload {
   cb?: string;
@@ -192,8 +191,24 @@ export function useSocket(session: SessionLayout | null) {
       flushSyncQueue(canFlushQueue, socketConnection);
     });
 
+    //? Session replaced elsewhere (single-session enforcement or
+    //? maxConcurrentPerUser cap kicking the oldest device). Server fires
+    //? this just before its standard logout emit, giving us a chance to
+    //? surface a translated toast so the user understands why they're
+    //? being logged out.
+    socketConnection.on(socketEventNames.sessionReplaced, () => {
+      notify.warning({ key: 'common.sessionReplacedElsewhere' });
+    });
+
     socketConnection.on(socketEventNames.logout, (status: "success" | "error") => {
       if (status === "success") {
+        //? Loud log so we can see in devtools exactly when the server told us
+        //? to log out — paired with the server-side `[session] logout success`
+        //? warn this lets us correlate trigger ↔ effect across the wire.
+        console.warn(
+          `[session] Server emitted logout — clearing sessionStorage and redirecting to ${loginPageUrl}. ` +
+          `If you did not click logout, check the server terminal for the corresponding "[session] logout success" stacktrace.`,
+        );
         if (sessionBasedToken) {
           sessionStorage.clear();
         }
@@ -323,13 +338,20 @@ export const joinRoom = async (group: string) => {
       const tempIndex = incrementResponseIndex();
       socket.emit(socketEventNames.joinRoom, { group, responseIndex: tempIndex });
 
-      socket.once(buildJoinRoomResponseEventName(tempIndex), (response?: { error?: string; rooms?: unknown }) => {
-        if (response?.error) {
+      socket.once(buildJoinRoomResponseEventName(tempIndex), (response?: { status?: string; errorCode?: string; message?: string; rooms?: unknown }) => {
+        //? The server emits `normalizeErrorResponse(...)` on failures, which has
+        //? shape `{status:'error', errorCode, message, ...}` — NOT `{error}`.
+        //? Treat any envelope with status:'error' or a non-empty errorCode as a
+        //? failure so the spurious "you haven't joined" warning stops firing on
+        //? auth/session errors that previously fell through the success branch.
+        const errorCode = typeof response?.errorCode === 'string' ? response.errorCode : '';
+        if (response?.status === 'error' || errorCode.length > 0) {
+          const key = errorCode || 'common.unknownError';
           if (shouldLogDev) {
-            console.error(response.error);
+            console.error(`[joinRoom] ${key}${response?.message ? `: ${response.message}` : ''}`);
           }
           if (shouldNotifyDev) {
-            notify.error({ key: response.error });
+            notify.error({ key });
           }
           resolve(null);
           return;
@@ -371,13 +393,15 @@ export const leaveRoom = async (group: string) => {
       const tempIndex = incrementResponseIndex();
       socket.emit(socketEventNames.leaveRoom, { group, responseIndex: tempIndex });
 
-      socket.once(buildLeaveRoomResponseEventName(tempIndex), (response?: { error?: string; rooms?: unknown }) => {
-        if (response?.error) {
+      socket.once(buildLeaveRoomResponseEventName(tempIndex), (response?: { status?: string; errorCode?: string; message?: string; rooms?: unknown }) => {
+        const errorCode = typeof response?.errorCode === 'string' ? response.errorCode : '';
+        if (response?.status === 'error' || errorCode.length > 0) {
+          const key = errorCode || 'common.unknownError';
           if (shouldLogDev) {
-            console.error(response.error);
+            console.error(`[leaveRoom] ${key}${response?.message ? `: ${response.message}` : ''}`);
           }
           if (shouldNotifyDev) {
-            notify.error({ key: response.error });
+            notify.error({ key });
           }
           resolve(null);
           return;
@@ -408,13 +432,15 @@ export const getJoinedRooms = async () => {
       const tempIndex = incrementResponseIndex();
       socket.emit(socketEventNames.getJoinedRooms, { responseIndex: tempIndex });
 
-      socket.once(buildGetJoinedRoomsResponseEventName(tempIndex), (response?: { error?: string; rooms?: unknown }) => {
-        if (response?.error) {
+      socket.once(buildGetJoinedRoomsResponseEventName(tempIndex), (response?: { status?: string; errorCode?: string; message?: string; rooms?: unknown }) => {
+        const errorCode = typeof response?.errorCode === 'string' ? response.errorCode : '';
+        if (response?.status === 'error' || errorCode.length > 0) {
+          const key = errorCode || 'common.unknownError';
           if (shouldLogDev) {
-            console.error(response.error);
+            console.error(`[getJoinedRooms] ${key}${response?.message ? `: ${response.message}` : ''}`);
           }
           if (shouldNotifyDev) {
-            notify.error({ key: response.error });
+            notify.error({ key });
           }
           resolve(null);
           return;

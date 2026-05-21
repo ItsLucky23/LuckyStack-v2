@@ -508,7 +508,22 @@ export const setupWatchers = () => {
     .on('change', handleFunctionChange)
     .on('unlink', handleFunctionChange);
 
-  // Generate initial type map on startup
-  generateTypeMapFile();
+  //? Generate initial type map on startup — fire-and-forget on the next
+  //? event-loop tick so server.listen() happens first. Runtime reads from
+  //? the in-memory devApis/devSyncs maps (already populated by
+  //? initializeAll() before setupWatchers runs); the on-disk type-map is
+  //? purely for IDE IntelliSense + Zod schema files. Deferring drops boot
+  //? time ~6-8s on a 54-API project. The hot-reload runner above (regel 70)
+  //? uses the same setImmediate + quiet pattern.
+  setImmediate(() => {
+    void (async () => {
+      const [err] = await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
+      if (err) {
+        console.log(`[HotReload] initial type map generation failed: ${String(err)}`, 'red');
+      } else {
+        console.log(`[HotReload] type map ready in background`, 'green');
+      }
+    })();
+  });
 };
 

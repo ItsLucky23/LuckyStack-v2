@@ -2,6 +2,7 @@
 
 import { getSession } from '@luckystack/login';
 import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
+import type { PostApiExecutePayload } from '@luckystack/core';
 import { getProjectConfig } from '@luckystack/core';
 import type { AuthProps } from '@luckystack/login';
 import { getRuntimeApiMaps as getRuntimeApiMapsFromSource } from '@luckystack/core';
@@ -16,7 +17,6 @@ import {
   dispatchHook,
   getLogger,
 } from '@luckystack/core';
-import { setSentryUser, startSpan } from '@luckystack/error-tracking';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '@luckystack/core';
 
 /**
@@ -183,10 +183,9 @@ async function runHandleHttpApiRequestInner(
 ): Promise<ApiNetworkResponse> {
 
   const normalizedName = name.startsWith('api/') ? name : `api/${name}`;
-  setSentryUser(user?.id ? {
-    id: typeof user.id === 'string' ? user.id : String(user.id),
-    email: user.email ?? undefined,
-  } : null);
+  //? Identity propagation now flows via the `preApiExecute` hook subscriber
+  //? registered by `@luckystack/error-tracking`'s `enableErrorTrackingAutoInstrumentation()`.
+  //? Direct `setSentryUser` removed from this handler — see migration doc.
 
   const buildNetworkError = ({
     response,
@@ -388,7 +387,7 @@ async function runHandleHttpApiRequestInner(
 
   // Input-type validation (post-auth so unauthenticated probes don't get input-shape leaks)
   warnIfInputTypeMissing(resolvedName, inputType);
-  await dispatchHook('preApiValidate', { routeName: resolvedName, data: requestData, user });
+  await dispatchHook('preApiValidate', { routeName: resolvedName, data: requestData, user, transport: 'http' });
 
   const inputValidation = await validateInputByType({
     typeText: inputType,
@@ -402,6 +401,7 @@ async function runHandleHttpApiRequestInner(
     data: requestData,
     user,
     validation: inputValidation,
+    transport: 'http',
   });
 
   if (inputValidation.status === 'error') {
@@ -428,11 +428,20 @@ async function runHandleHttpApiRequestInner(
     stream(payload);
   };
 
-  const preExecuteResult = await dispatchHook('preApiExecute', {
+  //? Single payload reference reused by pre/post — auto-instrumentation
+  //? subscribers in `@luckystack/error-tracking` pin spans via WeakMap on
+  //? this object. Mutating `result/error/durationMs` is safe because
+  //? handlers observe by-name (not by snapshot).
+  const executePayload: PostApiExecutePayload = {
     routeName: resolvedName,
     data: requestData,
     user,
-  });
+    transport: 'http',
+    result: undefined,
+    error: null,
+    durationMs: 0,
+  };
+  const preExecuteResult = await dispatchHook('preApiExecute', executePayload);
   if (preExecuteResult.stopped) {
     return buildNetworkError({
       response: { status: 'error', errorCode: preExecuteResult.signal.errorCode },
@@ -441,7 +450,6 @@ async function runHandleHttpApiRequestInner(
   }
 
   const executeStart = Date.now();
-  const span = startSpan(resolvedName, 'api.request.http') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
     async () => await main({ data: requestData, user, functions: functionsObject, stream: emitApiStream }),
     undefined,
@@ -452,16 +460,11 @@ async function runHandleHttpApiRequestInner(
       transport: 'http',
     },
   );
-  span?.end?.();
 
-  await dispatchHook('postApiExecute', {
-    routeName: resolvedName,
-    data: requestData,
-    user,
-    result,
-    error: error ?? null,
-    durationMs: Date.now() - executeStart,
-  });
+  executePayload.result = result;
+  executePayload.error = error ?? null;
+  executePayload.durationMs = Date.now() - executeStart;
+  await dispatchHook('postApiExecute', executePayload);
 
   if (error) {
     if (shouldLogDev()) {

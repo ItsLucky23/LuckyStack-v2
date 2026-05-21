@@ -251,8 +251,9 @@ const extractSignatureFromNode = (
     collectors,
   });
 
-  // Return type annotation
-  let returnTypeStr = isAsync ? 'Promise<any>' : 'any';
+  // Return type annotation — emitted into generated type strings. Use
+  // `unknown` (not `any`) so consumers must narrow at call sites.
+  let returnTypeStr = isAsync ? 'Promise<unknown>' : 'unknown';
   if (node.type) {
     const rawReturnType = normalizeInlineType(rawContent.slice(node.type.pos, node.type.end).trim());
     const localResolvedReturnType = (checker && programSource)

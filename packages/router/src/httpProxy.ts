@@ -2,8 +2,36 @@ import http from 'node:http';
 import https from 'node:https';
 import { URL } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { dispatchHook } from '@luckystack/core';
+
 import type { ServiceTargetResolver } from './resolveTarget';
-import { parseServiceFromPath } from './resolveTarget';
+import { resolveServiceKey } from './resolveTarget';
+import type { PostProxyResponseErrorCause } from './hookPayloads';
+
+// Node attaches `code` to system errors but the public Error type does not expose it,
+// so we narrow via a structural property check rather than a cast.
+const readErrorCode = (err: Error): string | undefined => {
+  if (!('code' in err)) return undefined;
+  const candidate: unknown = err.code;
+  return typeof candidate === 'string' ? candidate : undefined;
+};
+
+const inferErrorCause = (code: string | undefined): PostProxyResponseErrorCause => {
+  if (!code) return 'unknown';
+  if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT') return 'timeout';
+  if (
+    code === 'ECONNREFUSED' ||
+    code === 'ECONNRESET' ||
+    code === 'EHOSTUNREACH' ||
+    code === 'ENETUNREACH' ||
+    code === 'ENOTFOUND' ||
+    code === 'EAI_AGAIN' ||
+    code === 'EPIPE'
+  ) {
+    return 'network';
+  }
+  return 'upstream-throw';
+};
 
 // Headers that should not be forwarded to the upstream (they're hop-by-hop).
 const HOP_BY_HOP_HEADERS = new Set([
@@ -35,7 +63,11 @@ export interface CreateHttpProxyInput {
 export const createHttpProxy = ({ resolver, missingServiceErrorCode }: CreateHttpProxyInput) => {
   return (req: IncomingMessage, res: ServerResponse): void => {
     const pathname = req.url ?? '/';
-    const service = parseServiceFromPath(pathname);
+    const service = resolveServiceKey({
+      pathname,
+      headers: req.headers,
+      host: req.headers.host ?? '',
+    });
 
     if (!service) {
       res.statusCode = 400;
@@ -56,8 +88,19 @@ export const createHttpProxy = ({ resolver, missingServiceErrorCode }: CreateHtt
       return;
     }
 
+    const proxyStart = Date.now();
     const targetUrl = new URL(pathname, resolved.target);
     const transport = targetUrl.protocol === 'https:' ? https : http;
+
+    //? `preProxyRequest` fires before the upstream call. Consumers add
+    //? tracing IDs, redact path segments, or audit cross-env routing.
+    void dispatchHook('preProxyRequest', {
+      service,
+      pathname,
+      method: req.method ?? 'GET',
+      target: resolved.target,
+      viaFallback: resolved.viaFallback,
+    });
 
     const forwardRequest = transport.request({
       hostname: targetUrl.hostname,
@@ -80,9 +123,41 @@ export const createHttpProxy = ({ resolver, missingServiceErrorCode }: CreateHtt
         res.setHeader(key, value);
       }
       upstream.pipe(res);
+      //? On the happy path `statusCode` is always populated; the `?? 0`
+      //? sentinel is intentionally aligned with the error-path emission so
+      //? consumers can branch on `statusCode === 0` plus `payload.error`.
+      void dispatchHook('postProxyResponse', {
+        service,
+        pathname,
+        method: req.method ?? 'GET',
+        target: resolved.target,
+        viaFallback: resolved.viaFallback,
+        statusCode: upstream.statusCode ?? 0,
+        latencyMs: Date.now() - proxyStart,
+      });
     });
 
     forwardRequest.on('error', (err) => {
+      const errorCode = readErrorCode(err);
+      //? Fire `postProxyResponse` on the error path too so monitoring/tracing
+      //? consumers see failed requests. `statusCode: 0` is the network-error
+      //? indicator (no HTTP response was received), and the `error` field
+      //? carries the underlying failure detail.
+      void dispatchHook('postProxyResponse', {
+        service,
+        pathname,
+        method: req.method ?? 'GET',
+        target: resolved.target,
+        viaFallback: resolved.viaFallback,
+        statusCode: 0,
+        latencyMs: Date.now() - proxyStart,
+        error: {
+          message: err.message,
+          ...(errorCode === undefined ? {} : { code: errorCode }),
+          cause: inferErrorCause(errorCode),
+        },
+      });
+
       if (res.headersSent) {
         res.end();
         return;

@@ -25,3 +25,22 @@ export type { RunRateLimitTestsInput } from './runRateLimitTests';
 export type { FuzzCheckInput } from './fuzzCheck';
 export type { RunFuzzTestsInput } from './runFuzzTests';
 export type { ResetServerStateInput } from './resetServerState';
+
+export {
+  registerTestLayer,
+  listTestLayers,
+  registerTestFixture,
+  getTestFixture,
+  registerTestReporter,
+  getTestReporter,
+  resetTestExtensionsForTests,
+} from './extensionRegistry';
+export type {
+  TestLayer,
+  TestLayerInput,
+  TestLayerResult,
+  TestFixture,
+  TestResult,
+  TestSummary,
+  TestReporter,
+} from './extensionRegistry';

@@ -2,7 +2,7 @@
 
 This guide covers everything you need to deploy LuckyStack from development to production.
 
-> **Multi-instance deployments:** LuckyStack supports per-preset bundles selected at runtime via `LUCKYSTACK_BUNDLE`. Production deploys SHOULD set this env var explicitly — `runtimeMaps.ts` falls back to empty maps when it's unset, which serves no routes. For service-key-aware HTTP/WS routing across multiple backends, see [`@luckystack/router`](../packages/router/README.md). For the full topology model see [`docs/ARCHITECTURE_PACKAGING.md`](./ARCHITECTURE_PACKAGING.md).
+> **Multi-instance deployments:** LuckyStack supports per-preset bundles selected at runtime via the first positional argv to `server.ts` (comma-separated for multi-preset boots; see [`docs/ARCHITECTURE_PACKAGING.md`](./ARCHITECTURE_PACKAGING.md) §10.1a). Example: `node dist/server.js billing,vehicles 4001` — loads both preset maps and listens on port 4001. Production deploys SHOULD pass an explicit preset name; no argv falls back to `generatedApis.default.ts`. For service-key-aware HTTP/WS routing across multiple backends, see [`@luckystack/router`](../packages/router/README.md).
 
 > **Bootstrap pre-flight:** call `verifyBootstrap({ requireDeployConfig, requireServicesConfig, requireOAuthProviders })` from `@luckystack/server` after your overlay loads and before `server.listen()`. In production the check hard-fails when `RuntimeMapsProvider` or `LocalizedNormalizer` is unregistered (otherwise every API/sync request silently returns `notFound`, and error responses leak raw `errorCode` strings instead of i18n messages). Dev runs only warn so devkit hot-reload can keep working before the registry settles. See [`packages/server/README.md`](../packages/server/README.md#pre-flight-check--verifybootstrap) for the full requirements list.
 
@@ -151,7 +151,6 @@ SECURE=false
 PROJECT_NAME=my_project
 
 SERVER_IP=localhost
-SERVER_PORT=80
 
 DNS=http://localhost:5173
 
@@ -345,7 +344,6 @@ Update your `.env`:
 NODE_ENV=production
 SECURE=true
 SERVER_IP=127.0.0.1
-SERVER_PORT=3000
 DNS=https://your-domain.com
 
 # Use production OAuth credentials
@@ -419,10 +417,11 @@ RUN npx prisma generate
 EXPOSE 3000
 
 ENV NODE_ENV=production
-ENV SERVER_PORT=3000
 ENV SERVER_IP=0.0.0.0
 
-CMD ["node", "dist/server.js"]
+# First positional argv is the preset bundle list, second is the listen port.
+# Pass `default` (or your own preset name) plus the port that EXPOSE/k8s expects.
+CMD ["node", "dist/server.js", "default", "3000"]
 ```
 
 #### 2. Create docker-compose.yml
@@ -480,7 +479,7 @@ docker-compose up -d --build
 | `NODE_ENV`                 | Yes      | `development` | `development` or `production`            |
 | `PROJECT_NAME`             | Yes      | -             | Unique name for Redis key prefixing      |
 | `SERVER_IP`                | Yes      | `localhost`   | Server bind address                      |
-| `SERVER_PORT`              | Yes      | `80`          | Server port                              |
+| _(listen port)_            | No       | `80`          | Second positional argv (`node server.js <bundles> <port>`), not an env-var |
 | `DNS`                      | Yes      | -             | Public URL for OAuth redirects           |
 | `SECURE`                   | Yes      | `false`       | Enable HTTPS cookies                     |
 | `REDIS_HOST`               | Yes      | `127.0.0.1`   | Redis server host                        |

@@ -1,5 +1,3 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
 import { findAllApiFiles, findAllSyncClientFiles, findAllSyncServerFiles } from './typeMap/discovery';
 import { extractApiName, extractApiVersion, extractPagePath, extractSyncName, extractSyncPagePath, extractSyncVersion } from './typeMap/routeMeta';
 import { extractAuth, extractHttpMethod, extractRateLimit, HttpMethod } from './typeMap/apiMeta';
@@ -18,6 +16,7 @@ import { generateServerFunctions } from './typeMap/functionsMeta';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { getSrcDir } from '@luckystack/core';
 import { assertNoDuplicateNormalizedRouteKeys, assertValidRouteNaming } from './routeNamingValidation';
+import { getOrInit } from './internal/mapUtils';
 
 // Collect required imports for the Functions interface only.
 // API/Sync types are now fully expanded by the TypeChecker and need no imports.
@@ -48,7 +47,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   // Collect API Types
   // ═══════════════════════════════════════════════════════════════════════════
   const apiFiles = findAllApiFiles(getSrcDir());
-  const typesByPage = new Map<string, Map<string, { input: string; output: string; stream: string; method: HttpMethod; rateLimit: number | false | undefined; auth: any; version: string; description?: string }>>();
+  const typesByPage = new Map<string, Map<string, { input: string; output: string; stream: string; method: HttpMethod; rateLimit: number | false | undefined; auth: unknown; version: string; description?: string }>>();
   const unresolvedTypeAliases = new Set<string>();
 
   if (!quiet) {
@@ -82,20 +81,14 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
         console.error(`[TypeMapGenerator] Unresolved API type (${pagePath}/${apiName}/${apiVersion}): ${symbol.name}`);
         continue;
       }
-      if (!namedImports.has(symbol.importPath)) {
-        namedImports.set(symbol.importPath, new Set<string>());
-      }
-      namedImports.get(symbol.importPath)!.add(symbol.name);
+      getOrInit(namedImports, symbol.importPath, () => new Set<string>()).add(symbol.name);
     }
 
     if (!quiet) {
       console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}/${apiVersion} (${httpMethod}${rateLimit === undefined ? '' : `, rateLimit: ${rateLimit}`})`);
     }
 
-    if (!typesByPage.has(pagePath)) {
-      typesByPage.set(pagePath, new Map());
-    }
-    typesByPage.get(pagePath)!.set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, stream: streamType, method: httpMethod, rateLimit, auth, version: apiVersion });
+    getOrInit(typesByPage, pagePath, () => new Map()).set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, stream: streamType, method: httpMethod, rateLimit, auth, version: apiVersion });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -184,20 +177,14 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
         console.error(`[TypeMapGenerator] Unresolved Sync type (${pagePath}/${syncName}/${syncVersion}): ${symbol.name}`);
         continue;
       }
-      if (!namedImports.has(symbol.importPath)) {
-        namedImports.set(symbol.importPath, new Set<string>());
-      }
-      namedImports.get(symbol.importPath)!.add(symbol.name);
+      getOrInit(namedImports, symbol.importPath, () => new Set<string>()).add(symbol.name);
     }
 
     if (!quiet) {
       console.log(`[TypeMapGenerator] Sync: ${pagePath}/${syncName}/${syncVersion} (server: ${!!serverFile}, client: ${!!clientFile})`);
     }
 
-    if (!syncTypesByPage.has(pagePath)) {
-      syncTypesByPage.set(pagePath, new Map());
-    }
-    syncTypesByPage.get(pagePath)!.set(`${syncName}@${syncVersion}`, {
+    getOrInit(syncTypesByPage, pagePath, () => new Map()).set(`${syncName}@${syncVersion}`, {
       clientInput: clientInputType,
       serverOutput: serverOutputType,
       clientOutput: clientOutputType,

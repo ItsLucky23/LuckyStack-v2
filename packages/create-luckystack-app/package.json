@@ -34,8 +34,10 @@
   },
   "files": [
     "dist",
-    "template",
     "README.md",
+    "AI_INDEX.md",
+    "docs",
+    "template",
     "LICENSE"
   ],
   "scripts": {

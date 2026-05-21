@@ -33,8 +33,9 @@ const allowedOrigin = (origin: string): boolean => {
   const cors = getProjectConfig().http.cors;
 
   //? Project-supplied origins live in `ProjectConfig.http.cors.allowedOrigins`.
-  //? Consumers populate it from whatever env vars they prefer; the framework
-  //? makes no assumption about names like DNS or EXTERNAL_ORIGINS.
+  //? Two modes: static array OR synchronous resolver function. The resolver
+  //? form lets consumers do per-tenant / per-time-window allow-listing
+  //? without restarting; it must be sync because Socket.io's CORS check is sync.
   const configured = cors.allowedOrigins ?? [];
 
   //? Bind address comes from the registry (populated by `createLuckyStackServer`
@@ -53,32 +54,46 @@ const allowedOrigin = (origin: string): boolean => {
     return true;
   }
 
-  const normalizedAllowedOrigins = new Set(
-    [location, ...configured]
-      .map((value) => normalizeOrigin({ value, secure }))
-      .filter(Boolean)
-  );
+  //? Resolver-function mode: defer entirely to the consumer's logic. The
+  //? framework still keeps the same-origin bind address always-allowed.
+  if (typeof configured === 'function') {
+    if (normalizedOrigin === location) return true;
+    if (configured(origin)) return true;
+    // Fall through to the rejection path below.
+  } else {
+    const normalizedAllowedOrigins = new Set(
+      [location, ...configured]
+        .map((value) => normalizeOrigin({ value, secure }))
+        .filter(Boolean)
+    );
 
-  if (normalizedOrigin && normalizedAllowedOrigins.has(normalizedOrigin)) {
-    return true;
+    if (normalizedOrigin && normalizedAllowedOrigins.has(normalizedOrigin)) {
+      return true;
+    }
   }
 
   //? Gated behind `devLogs` to avoid amplifying CORS-rejection traffic into
   //? production logs (an attacker could spam invalid origins otherwise). The
   //? structured `corsRejected` hook is the durable signal for production —
   //? subscribe via `registerHook('corsRejected', ...)` for audit/alerting.
+  const debugAllowedOrigins = typeof configured === 'function'
+    ? ['<dynamic-resolver>', location]
+    : [location, ...configured]
+        .map((value) => normalizeOrigin({ value, secure }))
+        .filter(Boolean);
+
   if (getProjectConfig().logging.devLogs) {
     getLogger().warn('cors: origin not allowed', {
       origin,
       normalizedOrigin,
-      allowedOrigins: [...normalizedAllowedOrigins],
+      allowedOrigins: debugAllowedOrigins,
       allowLocalhost: cors.allowLocalhost,
     });
   }
   void dispatchHook('corsRejected', {
     origin,
     normalizedOrigin,
-    allowedOrigins: [...normalizedAllowedOrigins],
+    allowedOrigins: debugAllowedOrigins,
     allowLocalhost: cors.allowLocalhost,
   });
   return false;

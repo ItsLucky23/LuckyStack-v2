@@ -42,16 +42,17 @@ export const registerUserAdapter = (adapter: UserAdapter): UserAdapter => {
 export const isUserAdapterRegistered = (): boolean => registeredAdapter !== null;
 
 //? Default adapter: backed by the Prisma client exposed from `@luckystack/core`.
-//? Once Phase 1.3 lands, the `prisma` export flows through a registry so
-//? consumers can substitute their own Prisma client (TLS, Accelerate, custom
-//? logger, ...) without touching this adapter.
 //?
-//? Why the narrow `PrismaUserDelegate` shape: framework can't know the
-//? consumer's User model (column names, extra fields, etc.). We define the
-//? minimum surface this adapter actually calls and assert that the runtime
-//? `prisma.user` provides it. Consumers whose User schema diverges from the
-//? recommended one should register their own `UserAdapter` via
-//? `registerUserAdapter(...)` instead of relying on this default.
+//? The single `as unknown as PrismaUserDelegate` below is intentional and
+//? load-bearing — it is the abstraction boundary between the framework's
+//? loose `UserAdapterCreateInput` (string-typed fields) and the consumer's
+//? strict Prisma model (which may declare enums for `provider`, `language`,
+//? etc.). The framework cannot know those enum types statically, so it
+//? type-erases once at this seam and assumes the runtime `prisma.user`
+//? satisfies the documented `PrismaUserDelegate` shape. Consumers whose User
+//? schema diverges (different column names, mandatory extra fields) should
+//? register their own `UserAdapter` via `registerUserAdapter(...)` rather
+//? than relying on this default.
 interface PrismaUserDelegate {
   findFirst: (args: { where: { email: string; provider: string } }) => Promise<UserRecord | null>;
   findUnique: (args: { where: { id: string } }) => Promise<UserRecord | null>;
@@ -60,23 +61,15 @@ interface PrismaUserDelegate {
 }
 
 export const defaultPrismaUserAdapter = (): UserAdapter => {
-  //? Single, well-defined boundary: type-erase to `unknown` once, narrow back
-  //? to the documented delegate shape. Resolved at call time so a registered
-  //? `prisma` proxy still wins.
-  const userClient = (): PrismaUserDelegate => {
-    const delegate = (prisma as unknown as { user: unknown }).user;
-    return delegate as PrismaUserDelegate;
-  };
+  const user = (): PrismaUserDelegate => prisma.user as unknown as PrismaUserDelegate;
 
   return {
-    findByEmail: async ({ email, provider }) => {
-      return userClient().findFirst({ where: { email, provider } });
-    },
-    findById: async (id) => {
-      return userClient().findUnique({ where: { id } });
-    },
-    create: async (input) => {
-      return userClient().create({
+    findByEmail: async ({ email, provider }) =>
+      user().findFirst({ where: { email, provider } }),
+    findById: async (id) =>
+      user().findUnique({ where: { id } }),
+    create: async (input) =>
+      user().create({
         data: {
           email: input.email,
           provider: input.provider,
@@ -86,11 +79,9 @@ export const defaultPrismaUserAdapter = (): UserAdapter => {
           avatarFallback: input.avatarFallback,
           language: input.language,
         },
-      });
-    },
-    update: async (id, patch) => {
-      return userClient().update({ where: { id }, data: patch as Record<string, unknown> });
-    },
+      }),
+    update: async (id, patch) =>
+      user().update({ where: { id }, data: patch }),
   };
 };
 

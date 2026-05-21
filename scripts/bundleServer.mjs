@@ -21,10 +21,29 @@ const nodeBuiltins = builtinModules.flatMap((moduleName) => {
 // server. Runtime consumers (`server/server.ts`, `server/prod/runtimeMaps.ts`)
 // only reach devkit behind an `env.NODE_ENV !== 'production'` guard, so
 // leaving the import unresolved in prod is safe — the branch never executes.
+//
+// Optional peer-deps of `@luckystack/*` packages are also marked external.
+// Each adapter wraps these in a boot-time `createRequire.resolve` guard +
+// dynamic `import()`. esbuild's bundler would otherwise try to follow the
+// dynamic import and fail when the peer isn't installed in the consumer's
+// project. Listing them here keeps the build green regardless of which
+// adapters the consumer actually wires up.
+const optionalPeerDeps = [
+  // @luckystack/email
+  'nodemailer',
+  'resend',
+  // @luckystack/error-tracking
+  '@sentry/node',
+  'dd-trace',
+  'hot-shots',
+  'posthog-node',
+];
+
 const externalDeps = [
   ...new Set([
     ...dependencyNames,
     ...nodeBuiltins,
+    ...optionalPeerDeps,
     '@luckystack/devkit',
   ]),
 ];

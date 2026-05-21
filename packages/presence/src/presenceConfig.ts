@@ -39,6 +39,12 @@ export interface PresenceConfig {
    * `defaultMs`. Default: ['transport close', 'transport error'].
    */
   allowReasons: string[];
+  /**
+   * Idle time after which the built-in AFK activity event fires. Read by
+   * the activity-event registry's default `'afk'` event. Set to 0 to
+   * disable AFK detection entirely. Default: 5 minutes.
+   */
+  afkTimeoutMs: number;
 }
 
 export const DEFAULT_PRESENCE_CONFIG: PresenceConfig = {
@@ -49,6 +55,7 @@ export const DEFAULT_PRESENCE_CONFIG: PresenceConfig = {
   },
   ignoreReasons: ['ping timeout'],
   allowReasons: ['transport close', 'transport error'],
+  afkTimeoutMs: 5 * 60_000,
 };
 
 type DeepPartial<T> = {

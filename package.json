@@ -21,6 +21,7 @@
     "packages/*"
   ],
   "scripts": {
+    "ai:index": "node scripts/generateAiIndex.mjs",
     "client": "vite --host",
     "server": "npx tsx --tsconfig tsconfig.server.json server/dev/supervisor.ts",
     "server:direct": "npx tsx --tsconfig tsconfig.server.json server/server.ts",
@@ -48,7 +49,9 @@
     "prisma:db:push": "dotenv -e .env.local -- prisma db push",
     "prisma:migrate:dev": "dotenv -e .env.local -- prisma migrate dev",
     "prisma:migrate:reset": "dotenv -e .env.local -- prisma migrate reset",
-    "prisma:studio": "dotenv -e .env.local -- prisma studio"
+    "prisma:studio": "dotenv -e .env.local -- prisma studio",
+    "postinstall": "node -e \"try{require('fs').statSync('src/_sockets/apiTypes.generated.ts')}catch{require('child_process').execSync('npm run generateArtifacts',{stdio:'inherit'})}\"",
+    "prepare": "node -e \"try{require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})}catch{}\""
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
@@ -70,6 +73,7 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.14.1",
+    "resend": "^4.8.0",
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",

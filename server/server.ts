@@ -1,5 +1,10 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
+//? Argv parser MUST run before any module that reads `process.env.SERVER_PORT`
+//? at load time (notably `../config.ts`'s top-level `backendUrl`).
+//? Argv shape: npm run server -- <bundle[,bundle...]> [port]
+import '@luckystack/server/parseArgv';
+
 import { config as loadEnv } from 'dotenv';
 
 loadEnv({ path: '.env' });
@@ -44,9 +49,12 @@ registerPresenceHooks();
 registerNotificationHooks();
 
 //? Resend → SMTP → Console fallback chain. The selector reads RESEND_API_KEY,
-//? SMTP_HOST + friends, and EMAIL_FROM directly from process.env. Every
-//? project used to inline this logic; the package now ships it.
-registerEmailSender(autoSelectEmailSender());
+//? SMTP_HOST + friends from process.env. We pass `from` explicitly from the
+//? project config so that consumers who only set RESEND_API_KEY (and not
+//? EMAIL_FROM env) still get a working sender — config.ts defaults `from` to
+//? `onboarding@resend.dev` (Resend's sandbox sender) which works with any
+//? Resend account out of the box.
+registerEmailSender(autoSelectEmailSender({ from: projectConfig.email.from }));
 
 (async () => {
   //? Project-specific dev tooling. The package handles devkit + console.log init

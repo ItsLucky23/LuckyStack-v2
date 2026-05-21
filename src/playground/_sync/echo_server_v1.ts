@@ -1,4 +1,3 @@
-/* eslint-disable */
 //? Playground: simple sync echo. Whatever the originator sends fan-outs to
 //? every member of the receiver room. No streaming — just confirms
 //? room-based fan-out works across multiple browsers.

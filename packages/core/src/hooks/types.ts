@@ -57,6 +57,13 @@ export interface PreApiValidatePayload {
   routeName: string;
   data: Record<string, unknown>;
   user: HookSessionShape | null;
+  /**
+   * Optional transport tag — populated by the framework's socket/HTTP API
+   * handlers so hook subscribers can branch on it (e.g. open span with a
+   * different op name). Optional so consumer-side dispatchers don't have to
+   * set it explicitly.
+   */
+  transport?: 'socket' | 'http';
 }
 
 export interface PostApiValidatePayload extends PreApiValidatePayload {
@@ -67,6 +74,8 @@ export interface PreApiExecutePayload {
   routeName: string;
   data: Record<string, unknown>;
   user: HookSessionShape | null;
+  /** Optional transport tag — see {@link PreApiValidatePayload.transport}. */
+  transport?: 'socket' | 'http';
 }
 
 export interface PostApiExecutePayload {
@@ -76,6 +85,8 @@ export interface PostApiExecutePayload {
   result: unknown;
   error: Error | null;
   durationMs: number;
+  /** Optional transport tag — see {@link PreApiValidatePayload.transport}. */
+  transport?: 'socket' | 'http';
 }
 
 export interface ApiResponseEnvelope {
@@ -94,12 +105,27 @@ export interface PreApiRespondPayload {
   routeName: string;
   user: HookSessionShape | null;
   response: ApiResponseEnvelope;
+  /** Optional transport tag — see {@link PreApiValidatePayload.transport}. */
+  transport?: 'socket' | 'http';
 }
 
 export interface PostApiRespondPayload {
   routeName: string;
   user: HookSessionShape | null;
   response: ApiResponseEnvelope;
+  /** Optional transport tag — see {@link PreApiValidatePayload.transport}. */
+  transport?: 'socket' | 'http';
+}
+
+export interface PreSyncAuthorizePayload {
+  routeName: string;
+  /** Raw (un-validated) data payload. May be reshape-able by the consumer. */
+  data: Record<string, unknown>;
+  user: HookSessionShape | null;
+  /** Room code / receiver token — the sync's intended audience. */
+  receiver: string;
+  /** Optional transport tag — see {@link PreApiValidatePayload.transport}. */
+  transport?: 'socket' | 'http';
 }
 
 export interface PreSyncFanoutPayload {
@@ -108,10 +134,25 @@ export interface PreSyncFanoutPayload {
   user: HookSessionShape | null;
   receiver: string;
   serverOutput: unknown;
+  /** Optional transport tag — see {@link PreApiValidatePayload.transport}. */
+  transport?: 'socket' | 'http';
 }
 
 export interface PostSyncFanoutPayload extends PreSyncFanoutPayload {
   recipientCount: number;
+}
+
+export interface PreSyncStreamPayload {
+  routeName: string;
+  /** Stream chunk being sent (already serialised by the framework). */
+  chunk: unknown;
+  /** Final recipient — socket id when known, room code otherwise. */
+  recipient: string;
+}
+
+export interface PostSyncStreamPayload extends PreSyncStreamPayload {
+  /** Total chunks streamed so far in this sync invocation. */
+  chunkIndex: number;
 }
 
 // --- Error / security signals ---
@@ -210,17 +251,41 @@ export interface CsrfMismatchPayload {
   providedToken: boolean;
 }
 
+// --- HTTP request-level hook ---
+
+export interface PreHttpRequestPayload {
+  /** HTTP method (always uppercase: GET/POST/...). */
+  method: string;
+  /** Request URL (path + query). */
+  url: string;
+  /** Caller-supplied or framework-generated `X-Request-Id`. */
+  requestId: string;
+  /** Origin header value (or empty string when absent). */
+  origin: string;
+  /**
+   * Subset of headers — `authorization`, `cookie`, etc. are NOT included
+   * to keep payloads safe for logging. Use the full request object via
+   * a custom route if you need raw access.
+   */
+  headers: Record<string, string>;
+}
+
 // --- Augmentable payload map ---
 
 export interface HookPayloads {
+  preHttpRequest: PreHttpRequestPayload;
   preApiValidate: PreApiValidatePayload;
   postApiValidate: PostApiValidatePayload;
   preApiExecute: PreApiExecutePayload;
   postApiExecute: PostApiExecutePayload;
   preApiRespond: PreApiRespondPayload;
+  transformApiResponse: PreApiRespondPayload;
   postApiRespond: PostApiRespondPayload;
+  preSyncAuthorize: PreSyncAuthorizePayload;
   preSyncFanout: PreSyncFanoutPayload;
   postSyncFanout: PostSyncFanoutPayload;
+  preSyncStream: PreSyncStreamPayload;
+  postSyncStream: PostSyncStreamPayload;
   apiError: ApiErrorPayload;
   syncError: SyncErrorPayload;
   rateLimitExceeded: RateLimitExceededPayload;

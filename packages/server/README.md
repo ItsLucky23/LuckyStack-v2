@@ -145,8 +145,8 @@ Top-level `handleHttpRequest` + `dispatchRoutes(handlers, ctx)` are the only orc
 ### Security defaults that may surprise you
 
 - **CORS fail-closed.** If neither `Origin` nor `Referer` is present, only read-only methods (GET, HEAD, OPTIONS) are allowed; state-changing methods are rejected with 403. Earlier builds fell back to `Host`, which silently bypassed CORS for non-browser callers (`curl`, server-to-server). When you `curl` a write endpoint, set `-H 'Origin: https://your-allowed-origin'`.
-- **`/_test/reset` is fail-closed.** It requires both `NODE_ENV` to be exactly `development` or `test` AND a non-empty `TEST_RESET_TOKEN` env var. Any other state returns 403 (no silent allow-list). Wire `TEST_RESET_TOKEN` in your dev/test `.env.local` and pass it as `Authorization: Bearer ${TOKEN}` on the reset call. `@luckystack/test-runner`'s `resetServerState` reads the same env var.
-- **CSRF middleware.** Writes to `/api/*` and `/sync/*` require an `x-csrf-token` header that matches the cookie issued by `GET /csrf-token`. The `apiRequest` helper in `@luckystack/core/client` attaches it automatically. Rejections dispatch the `csrfMismatch` hook before returning 403; the payload contains presence-only token info, never the value.
+- **`/_test/reset` is fail-closed.** It requires both `NODE_ENV` to be exactly `development` or `test` AND a non-empty `TEST_RESET_TOKEN` env var. Any other state returns 403 (no silent allow-list). Wire `TEST_RESET_TOKEN` in your dev/test `.env.local` and pass it as the `x-test-reset-token: ${TOKEN}` header on the reset call. `@luckystack/test-runner`'s `resetServerState` reads the same env var.
+- **CSRF middleware.** Writes to `/api/*` and `/sync/*` require an `x-csrf-token` header that matches the value minted on the session record (mirrored via `GET /auth/csrf`). The `apiRequest` helper in `@luckystack/core/client` attaches it automatically. Rejections dispatch the `csrfMismatch` hook before returning 403; the payload contains presence-only token info, never the value. The header name, token length, and cookie options are customisable via `registerCsrfConfig({ headerName, tokenLength, cookieOptions })` from `@luckystack/core` — see `packages/core/docs/csrf-config.md`.
 
 ## Public API
 
@@ -167,9 +167,29 @@ Top-level `handleHttpRequest` + `dispatchRoutes(handlers, ctx)` are the only orc
   - `socket.io@^4.8.0`
 - Optional peer: `@luckystack/error-tracking`, `@luckystack/email`, `@luckystack/docs-ui` — bootstrap auto-detects them but does not require them.
 
+## Selecting bundles + port at runtime
+
+`@luckystack/server/parseArgv` is a side-effect-only entrypoint. Import it as the **first line** of your `server.ts` so positional CLI args are parsed before any module that reads `process.env.SERVER_PORT` at load time (notably your project's `config.ts`).
+
+```ts
+// server.ts
+import '@luckystack/server/parseArgv';
+// ...rest of your bootstrap
+```
+
+Argv shape: `<bundle[,bundle...]> [port]`
+
+```bash
+npm run server                              # default preset, port 80
+npm run server -- billing                   # one bundle, port 80
+npm run server -- billing,vehicles 4001     # merge bundles, listen on 4001
+```
+
+When multiple presets are passed, the framework loads each preset's generated route map and shallow-merges `apis` / `syncs` / `functions`. Key collisions across presets throw at boot (services must own exactly one preset).
+
 ## Related architecture docs
 
-- [`docs/ARCHITECTURE_PACKAGING.md`](../../docs/ARCHITECTURE_PACKAGING.md) — package split, multi-service builds, `LUCKYSTACK_BUNDLE`.
+- [`docs/ARCHITECTURE_PACKAGING.md`](../../docs/ARCHITECTURE_PACKAGING.md) — package split, multi-service builds, preset bundles.
 - [`docs/ARCHITECTURE_SOCKET.md`](../../docs/ARCHITECTURE_SOCKET.md) — Socket.io setup, Redis adapter, room model.
 - [`docs/HOSTING.md`](../../docs/HOSTING.md) — multi-instance deployment, `@luckystack/router`, health probes.
 

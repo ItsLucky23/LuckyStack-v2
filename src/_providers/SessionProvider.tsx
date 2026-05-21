@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useState, ReactNode, useEffect, useMemo } from 'react';
+import { useState, ReactNode, useEffect, useMemo, useRef } from 'react';
 
 import { apiRequest } from 'src/_sockets/apiRequest';
 import { socket, useSocket } from 'src/_sockets/socketInitializer';
@@ -37,13 +37,54 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     document.title = dev ? `[DEV] ${pageTitle}` : pageTitle;
   }, [session?.email]);
 
+  //? Resolves the initial session with retry-with-backoff. Crucial because a
+  //? single failed fetch (rate limit during HMR burst, server restart, network
+  //? blip) used to leave `sessionLoaded` permanently false, causing Middleware
+  //? to time out at 5s and bounce the user to /login even though the session
+  //? was still valid in Redis. Now: status==='success' (even with null result)
+  //? immediately marks loaded; transient errors retry with exponential backoff
+  //? up to ~7.5s total, then give up gracefully.
+  //?
+  //? `cancelledRef` (not a `let`) because TS narrows a local `let cancelled
+  //? = false` to literal `false` for the lifetime of the async closure and
+  //? the cleanup's `cancelled = true` write isn't observed by the flow
+  //? analyzer — that gave us `no-unnecessary-condition` errors on every
+  //? `if (cancelled)` check. A ref's `.current` is plain `boolean`.
+  const cancelledRef = useRef(false);
   useEffect(() => {
+    cancelledRef.current = false;
     void (async () => {
-      const response = await apiRequest({ name: 'system/session', version: 'v1' });
-      if (!response.result) return;
-      setSession(response.result);
-      setSessionLoaded(true);
+      const maxAttempts = 5;
+      //? The generated `apiRequest` return type for `system/session` only
+      //? exposes the `status: 'success'` branch (because that's all the API
+      //? handler itself declares). At runtime, framework-level errors
+      //? (rate-limit, transport, network) DO come back as
+      //? `{ status: 'error', errorCode, ... }`. Widen here so the retry
+      //? branch is reachable to the type checker.
+      type WideSessionResponse =
+        | { status: 'success'; result: SessionLayout | null }
+        | { status: 'error'; errorCode?: string };
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const rawResponse = await apiRequest({ name: 'system/session', version: 'v1' });
+        if (cancelledRef.current) return;
+        const response = rawResponse as WideSessionResponse;
+
+        if (response.status === 'success') {
+          if (response.result) setSession(response.result);
+          setSessionLoaded(true);
+          return;
+        }
+
+        if (dev) {
+          console.warn(`[session] system/session attempt ${String(attempt)}/${String(maxAttempts)} failed`, response);
+        }
+        if (attempt === maxAttempts) break;
+        const delay = Math.min(500 * 2 ** (attempt - 1), 4000);
+        await new Promise<void>((resolve) => { setTimeout(resolve, delay); });
+      }
+      if (!cancelledRef.current) setSessionLoaded(true);
     })();
+    return () => { cancelledRef.current = true; };
   }, []);
 
   useEffect(() => {

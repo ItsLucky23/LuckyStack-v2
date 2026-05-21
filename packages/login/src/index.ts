@@ -15,6 +15,8 @@ export type {
   PostSessionDeletePayload,
 } from './hookPayloads';
 export { saveSession, getSession, deleteSession, getAllSessions, revokeUserSessions, sessionKeyFor, activeUsersKeyFor } from './session';
+export { registerSessionAdapter, getSessionAdapter, redisSessionAdapter } from './sessionAdapter';
+export type { SessionAdapter } from './sessionAdapter';
 export { loginWithCredentials, loginCallback, createOAuthState, registerWithCredentials, loginWithCredentialsCore } from './login';
 export { logout } from './logout';
 
@@ -25,7 +27,9 @@ export {
   consumePasswordResetToken,
   updatePasswordHash,
   verifyPassword,
+  PasswordPolicyError,
 } from './passwordReset';
+export { validatePassword } from './passwordPolicy';
 export { sendPasswordResetEmail } from './forgotPassword';
 
 // OAuth provider registry + composable helpers.

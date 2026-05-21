@@ -3,6 +3,8 @@ import {
   faBolt,
   faBomb,
   faBroadcastTower,
+  faChevronDown,
+  faChevronUp,
   faCircleCheck,
   faCircleExclamation,
   faCircleInfo,
@@ -45,7 +47,13 @@ import { menuHandler } from 'src/_functions/menuHandler';
 import { apiRequest } from 'src/_sockets/apiRequest';
 import { syncRequest, useSyncEvents } from 'src/_sockets/syncRequest';
 import { joinRoom, leaveRoom } from 'src/_sockets/socketInitializer';
-import { providers as oauthProviderIds, backendUrl } from 'config';
+import { providers as registeredProviderIds, backendUrl, sessionBasedToken } from 'config';
+
+//? Filter out the credentials login provider — it isn't an OAuth flow (no
+//? external redirect; it's a username/password form on /login). Showing it
+//? in the OAuth provider list and POSTing to /auth/api/credentials would
+//? 404 or be confusing.
+const oauthProviderIds = registeredProviderIds.filter((id) => id !== 'credentials');
 
 export const template = 'dashboard';
 
@@ -130,7 +138,6 @@ interface LogEntry {
     | 'auth'
     | 'settings'
     | 'health'
-    | 'upload'
     | 'offline'
     | 'hook';
   message: string;
@@ -156,7 +163,9 @@ const formatPayload = (payload: unknown): string => {
   try {
     return typeof payload === 'string' ? payload : JSON.stringify(payload);
   } catch {
-    return String(payload);
+    //? JSON.stringify can throw on circular refs / BigInt. Fallback that
+    //? avoids `[object Object]` from `String(payload)` on a plain object.
+    return Object.prototype.toString.call(payload);
   }
 };
 
@@ -170,7 +179,6 @@ const channelLabel: Record<LogEntry['channel'], { label: string; tone: string }>
   'auth': { label: 'auth', tone: 'bg-primary/15 text-primary' },
   'settings': { label: 'settings', tone: 'bg-container2 text-common' },
   'health': { label: 'health', tone: 'bg-correct/15 text-correct' },
-  'upload': { label: 'upload', tone: 'bg-warning/15 text-warning' },
   'offline': { label: 'offline', tone: 'bg-wrong/15 text-wrong' },
   'hook': { label: 'hook', tone: 'bg-wrong/15 text-wrong' },
 };
@@ -224,11 +232,11 @@ export default function Playground() {
   const [mySocketId, setMySocketId] = useState<string>('');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [logExpanded, setLogExpanded] = useState<boolean>(true);
 
   //? Auxiliary state for the feature sections below the test bench.
   const [csrfTokenDisplay, setCsrfTokenDisplay] = useState<string | null>(null);
   const [forgotEmail, setForgotEmail] = useState<string>('');
-  const [avatarFileInfo, setAvatarFileInfo] = useState<string>('');
   const [offlineSimulated, setOfflineSimulated] = useState<boolean>(false);
   const [apiQueueSize, setApiQueueSize] = useState<number>(0);
   const [syncQueueSize, setSyncQueueSize] = useState<number>(0);
@@ -238,16 +246,15 @@ export default function Playground() {
   const showSyncStreamsRef = useRef(showSyncStreams);
   showSyncStreamsRef.current = showSyncStreams;
   const logScrollRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   //? Live queue-size poll while the test bench is open. Cheap — single
   //? interval reading two getters. Stops when the page unmounts.
   useEffect(() => {
-    const handle = window.setInterval(() => {
+    const handle = globalThis.setInterval(() => {
       setApiQueueSize(getApiQueueSize());
       setSyncQueueSize(getSyncQueueSize());
     }, 500);
-    return () => { window.clearInterval(handle); };
+    return () => { globalThis.clearInterval(handle); };
   }, []);
 
   const log = (
@@ -261,7 +268,7 @@ export default function Playground() {
         { id: nextLogId(), ts: formatTime(new Date()), channel, message, payload },
       ];
       //? Cap memory — playground sessions tend to spam tokens.
-      return next.length > 250 ? next.slice(next.length - 250) : next;
+      return next.length > 250 ? next.slice(- 250) : next;
     });
   };
 
@@ -281,11 +288,10 @@ export default function Playground() {
       name: 'playground/echo',
       version: 'v1',
       callback: ({ serverOutput }) => {
-        if (serverOutput.status !== 'success') return;
         log('sync', `playground/echo received`, serverOutput);
       },
     });
-    return () => { teardownEcho?.(); };
+    return () => { teardownEcho(); };
   }, [upsertSyncEventCallback]);
 
   useEffect(() => {
@@ -293,11 +299,10 @@ export default function Playground() {
       name: 'playground/streamBroadcast',
       version: 'v1',
       callback: ({ serverOutput }) => {
-        if (serverOutput.status !== 'success') return;
         log('sync', `streamBroadcast complete`, serverOutput);
       },
     });
-    return () => { teardownBroadcast?.(); };
+    return () => { teardownBroadcast(); };
   }, [upsertSyncEventCallback]);
 
   useEffect(() => {
@@ -305,11 +310,10 @@ export default function Playground() {
       name: 'playground/streamProgress',
       version: 'v1',
       callback: ({ serverOutput }) => {
-        if (serverOutput.status !== 'success') return;
         log('sync', `streamProgress complete`, serverOutput);
       },
     });
-    return () => { teardownProgress?.(); };
+    return () => { teardownProgress(); };
   }, [upsertSyncEventCallback]);
 
   //? Stream callback for the broadcast route: fires for every token received
@@ -327,7 +331,7 @@ export default function Playground() {
         }
       },
     });
-    return () => { teardown?.(); };
+    return () => { teardown(); };
   }, [upsertSyncEventStreamCallback]);
 
   //? streamTo callback: only tabs whose token / socket id was included in
@@ -346,17 +350,17 @@ export default function Playground() {
         }
       },
     });
-    return () => { teardown?.(); };
+    return () => { teardown(); };
   }, [upsertSyncEventStreamCallback]);
 
   //? Stash this tab's socket id so the streamTo demo can show "Copy socket id"
   //? — paste into another tab's target field to direct chunks at this tab.
   useEffect(() => {
-    const handle = window.setInterval(() => {
+    const handle = globalThis.setInterval(() => {
       const id = socket?.id ?? '';
       setMySocketId((prev) => (prev === id ? prev : id));
     }, 300);
-    return () => { window.clearInterval(handle); };
+    return () => { globalThis.clearInterval(handle); };
   }, []);
 
   const handleJoinRoom = async () => {
@@ -400,11 +404,7 @@ export default function Playground() {
       data: { message: echoMessage },
     });
     setBusy(null);
-    if (response.status === 'success') {
-      log('api', `← playground/echo`, response.result);
-    } else {
-      log('api', `← playground/echo error`, response);
-    }
+    log('api', `← playground/echo`, response.result);
   };
 
   const handleApiStream = async () => {
@@ -421,21 +421,20 @@ export default function Playground() {
       },
     });
     setBusy(null);
-    if (response.status === 'success') {
-      log('api', `← streamCounter complete`, response.result);
-    } else {
-      log('api', `← streamCounter error`, response);
-    }
+    log('api', `← streamCounter complete`, response.result);
   };
 
+  //? Sync requests need a room receiver. We don't pop a toast when the user
+  //? hasn't joined the typed room — the "Joined" badge next to the input is
+  //? the persistent signal (green when the current room is joined, warning
+  //? when not). The toast was firing as a false positive whenever the input
+  //? changed after join, or during the brief race between server-emit and
+  //? React state update.
   const requireRoom = (): string | null => {
     const trimmed = roomCode.trim();
     if (!trimmed) {
       toast.error('Enter + join a room first.');
       return null;
-    }
-    if (!joinedRooms.includes(trimmed)) {
-      toast.warning(`You haven't joined "${trimmed}" yet — recipients in that room (including this tab) won't receive sync events. Click Join first.`);
     }
     return trimmed;
   };
@@ -524,7 +523,7 @@ export default function Playground() {
       receiver: room,
       onStream: (chunk) => {
         if (showSyncStreamsRef.current) {
-          log('sync-stream', `progress ${String(chunk.progress)}% (${String(chunk.phase)})`);
+          log('sync-stream', `progress ${String(chunk.progress)}% (${chunk.phase})`);
         }
       },
     });
@@ -611,9 +610,41 @@ export default function Playground() {
     }
   };
 
+  //? Diagnostic counterpart to handleSendForgotPassword. The real
+  //? sendReset endpoint is anti-enumeration so it never tells you WHY
+  //? an email didn't arrive. This calls a debug endpoint that surfaces
+  //? the actual sendEmail() result + reason.
+  const handleSendTestEmail = async () => {
+    const email = forgotEmail.trim();
+    if (!email) { toast.error('Enter an email first.'); return; }
+    setBusy('testEmail');
+    log('auth', `→ playground/testEmail "${email}" (diagnostic; bypasses anti-enumeration)`);
+    const response = await apiRequest({
+      name: 'playground/testEmail',
+      version: 'v1',
+      data: { email },
+    });
+    setBusy(null);
+    if (response.status !== 'success') {
+      log('auth', `← playground/testEmail API error`, response);
+      toast.error(`Test email request failed: ${response.errorCode}`);
+      return;
+    }
+    const result = response.result;
+    log('auth', `← playground/testEmail result`, result);
+    if (result.ok) {
+      toast.success(`Sent. Provider message id: ${result.id ?? '(none)'} — check your inbox.`);
+    } else {
+      toast.error(
+        `Email NOT sent — reason: ${result.reason ?? 'unknown'}. ` +
+        `Check the server terminal for [email:<adapter>] FAILED with full context.`,
+      );
+    }
+  };
+
   const handleOauthLaunch = (providerId: string) => {
     log('auth', `Redirecting to /auth/api/${providerId}`);
-    window.location.href = `${backendUrl}/auth/api/${providerId}`;
+    globalThis.location.href = `${backendUrl}/auth/api/${providerId}`;
   };
 
   // ───────────────────────── Settings flows ─────────────────────────
@@ -650,26 +681,25 @@ export default function Playground() {
     log('settings', `← signOutEverywhere`, response);
   };
 
-  const handleUpdatePreferences = async () => {
+  const handleUpdatePreferences = async (enable: boolean) => {
     setBusy('prefs');
-    log('settings', `→ settings/updatePreferences {notifyOnNewSignIn: true}`);
+    log('settings', `→ settings/updatePreferences — ${enable ? 'enabling' : 'disabling'} sign-in + password-change email notifications`);
     const response = await apiRequest({
       name: 'settings/updatePreferences',
       version: 'v1',
-      data: { preferences: { notifyOnNewSignIn: true, notifyOnPasswordChange: true } },
+      data: { preferences: { notifyOnNewSignIn: enable, notifyOnPasswordChange: enable } },
     });
     setBusy(null);
     log('settings', `← updatePreferences`, response);
-  };
-
-  const handleChangePassword = async () => {
-    const current = await menuHandler.confirm({
-      title: 'Change password (demo)',
-      content: 'Type your current password — then a new one. This will revoke other sessions on success.',
-      input: '',
-    });
-    if (!current) return;
-    log('settings', `change-password flow opened (real form lives in /settings)`);
+    if (response.status === 'success') {
+      toast.success(
+        enable
+          ? 'Email notifications ENABLED. Next sign-in or password change will trigger an email.'
+          : 'Email notifications DISABLED. Sign-in / password-change emails will not be sent.',
+      );
+    } else {
+      toast.error(`updatePreferences failed: ${response.errorCode}`);
+    }
   };
 
   // ───────────────────────── Hooks demo ─────────────────────────
@@ -711,9 +741,14 @@ export default function Playground() {
       })),
     );
     setBusy(null);
-    const successes = responses.filter((r) => r.status === 'success').length;
-    const blocked = responses.length - successes;
-    log('hook', `← ${String(successes)} ok / ${String(blocked)} rate-limited`, responses.map((r) => r.status));
+    //? Widen the response type: the generated `playground/spam` output only
+    //? declares the success branch, but at runtime rate-limited calls return
+    //? `{status: 'error', errorCode: 'rateLimit.exceeded'}` from the framework
+    //? wrapper — that's exactly what we want to count here.
+    const widened: { status: string }[] = responses;
+    const successes = widened.filter((r) => r.status === 'success').length;
+    const blocked = widened.length - successes;
+    log('hook', `← ${String(successes)} ok / ${String(blocked)} rate-limited`, widened.map((r) => r.status));
   };
 
   // ───────────────────────── Health endpoints ─────────────────────────
@@ -727,64 +762,43 @@ export default function Playground() {
         let parsed: unknown = text;
         try { parsed = JSON.parse(text); } catch { /* keep raw */ }
         return [null, { status: res.status, body: parsed }];
-      } catch (e) {
-        return [e as Error, { status: 0, body: null }];
+      } catch (error_) {
+        return [error_ as Error, { status: 0, body: null }];
       }
     })();
     setBusy(null);
     if (error) {
       log('health', `← ${path} fetch error: ${error.message}`);
-    } else {
-      log('health', `← ${path} ${String(body.status)}`, body.body);
-    }
-  };
-
-  // ───────────────────────── Upload (avatar) ─────────────────────────
-  const fileToDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => { resolve(String(reader.result ?? '')); };
-    reader.onerror = () => { reject(new Error('file read failed')); };
-    reader.readAsDataURL(file);
-  });
-
-  const handleAvatarPicked = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setAvatarFileInfo(`${file.name} (${String(Math.round(file.size / 1024))} KB)`);
-    setBusy('upload');
-    log('upload', `→ encoding ${file.name}`);
-    let dataUrl: string;
-    try {
-      dataUrl = await fileToDataUrl(file);
-    } catch {
-      setBusy(null);
-      log('upload', `← file read failed`);
+      toast.error(`${path} → ${error.message}`);
       return;
     }
-    log('upload', `→ settings/updateUser {avatar: base64 ${String(dataUrl.length)} chars}`);
-    const response = await apiRequest({
-      name: 'settings/updateUser',
-      version: 'v1',
-      data: { avatar: dataUrl },
-    });
-    setBusy(null);
-    log('upload', `← updateUser`, response);
-    //? Force re-render so the avatar element below picks up the new URL.
-    if (response.status === 'success') {
-      window.location.reload();
-    }
-  };
+    log('health', `← ${path} ${String(body.status)}`, body.body);
 
-  const handleClearAvatar = async () => {
-    setBusy('clearAvatar');
-    log('upload', `→ settings/updateUser {avatar: null}`);
-    const response = await apiRequest({
-      name: 'settings/updateUser',
-      version: 'v1',
-      data: {},
-    });
-    setBusy(null);
-    log('upload', `← clear avatar`, response);
+    if (body.status === 200) {
+      toast.success(`${path} → 200 OK`);
+      return;
+    }
+
+    //? Surface WHICH subsystem failed so the user doesn't have to scroll up
+    //? to the log panel. /readyz returns `{checks:{bootUuid,redis,prisma}}`,
+    //? /_health returns `{status, bootUuid, ...}` — extract whichever fields
+    //? exist and render them as a one-line summary.
+    const parsedBody = body.body as Record<string, unknown> | null;
+    let detail = '';
+    if (parsedBody && typeof parsedBody === 'object') {
+      const checks = parsedBody.checks as Record<string, unknown> | undefined;
+      if (checks && typeof checks === 'object') {
+        const failing = Object.entries(checks)
+          .filter(([, ok]) => !ok)
+          .map(([name]) => name);
+        if (failing.length > 0) {
+          detail = ` — failing: ${failing.join(', ')}`;
+        }
+      } else if (path === '/_health' && parsedBody.bootUuid === null) {
+        detail = ' — bootUuid not written yet (server still booting?)';
+      }
+    }
+    toast.error(`${path} → ${String(body.status)}${detail}`);
   };
 
   // ───────────────────────── Offline queue ─────────────────────────
@@ -800,7 +814,7 @@ export default function Playground() {
     }
   };
 
-  const handleEnqueueOffline = async () => {
+  const handleEnqueueOffline = () => {
     setBusy('queueFill');
     log('offline', `→ firing 5 syncRequests while ${offlineSimulated ? 'OFFLINE' : 'online'} — watch the queue`);
     const room = requireRoom() ?? 'playground-room';
@@ -819,26 +833,38 @@ export default function Playground() {
   // ───────────────────────── Test reset ─────────────────────────
   const handleTestReset = async () => {
     const confirmed = await menuHandler.confirm({
-      title: '/_test/reset?',
-      content: 'Clears rateLimits, sessions, activeUsers. Dev/test only. Requires TEST_RESET_TOKEN if set.',
+      title: 'Wipe dev/test state?',
+      content: 'POSTs to /_test/reset which clears rate-limit counters, sessions, and active-user Redis keys. Safe in dev because the route is gated by NODE_ENV + TEST_RESET_TOKEN — production deploys will 403.',
     });
     if (!confirmed) return;
     setBusy('testReset');
     log('health', `→ POST /_test/reset`);
     const res = await httpFetch(`${backendUrl}/_test/reset`, { method: 'POST' });
-    const body = await res.json().catch(() => ({ raw: 'non-JSON' }));
+    const body: unknown = await res.json().catch(() => ({ raw: 'non-JSON' }));
     setBusy(null);
     log('health', `← ${String(res.status)}`, body);
+    if (res.status === 200) {
+      toast.success('Dev state wiped — rate limits, sessions, active users.');
+    } else {
+      toast.warning(`/_test/reset → ${String(res.status)} (gated; set NODE_ENV + TEST_RESET_TOKEN to enable)`);
+    }
   };
 
+  const lastLog = logs.length > 0 ? logs.at(-1) : null;
+  const drawerHeightClass = logExpanded ? 'h-80' : 'h-10';
+  const contentPaddingClass = logExpanded ? 'pb-[336px]' : 'pb-16';
+
   return (
-    <div className="w-full h-full overflow-y-auto bg-background">
+    <div className={`w-full h-full overflow-y-auto bg-background ${contentPaddingClass}`}>
       <div className="max-w-5xl mx-auto p-6 flex flex-col gap-5">
 
-        <header className="flex flex-col gap-1">
+        <header className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold text-title">Playground</h1>
           <p className="text-sm text-common">
-            Temporary page for testing every framework component. Delete <code className="font-mono text-xs px-1 rounded bg-container2">src/playground/</code> and the Playground entry in <code className="font-mono text-xs px-1 rounded bg-container2">Navbar.tsx</code> when finished.
+            Test bench for every framework feature against a real backend. Each section poke-tests one subsystem (sockets, auth, settings, hooks, health, queues) and writes timestamped results into the live log. Delete <code className="font-mono text-xs px-1 rounded bg-container2">src/playground/</code> and its Navbar entry when you ship.
+          </p>
+          <p className="text-xs text-muted">
+            Sections below are grouped: <strong>1.</strong> the sockets/sync test bench (multi-tab), <strong>2.</strong> auth surfaces (CSRF, OAuth, password reset), <strong>3.</strong> real settings APIs, <strong>4.</strong> lifecycle hooks, <strong>5.</strong> health probes + dev fixtures, <strong>6.</strong> offline queue, <strong>7.</strong> presence observers, then <strong>8+.</strong> UI primitive demos.
           </p>
         </header>
 
@@ -871,11 +897,27 @@ export default function Playground() {
             >
               Leave
             </button>
-            <span className="text-xs text-muted">
-              {joinedRooms.length === 0
-                ? 'Not joined to any rooms.'
-                : `Joined: ${joinedRooms.join(', ')}`}
-            </span>
+            {(() => {
+              const trimmedRoom = roomCode.trim();
+              const currentJoined = trimmedRoom.length > 0 && joinedRooms.includes(trimmedRoom);
+              return (
+                <span
+                  className={`self-center px-2 py-1 rounded-md font-mono text-xs ${
+                    currentJoined
+                      ? 'bg-correct/15 text-correct'
+                      : (joinedRooms.length > 0
+                        ? 'bg-warning/15 text-warning'
+                        : 'bg-container2 text-muted')
+                  }`}
+                >
+                  {currentJoined
+                    ? `Joined "${trimmedRoom}" ✓`
+                    : (joinedRooms.length === 0
+                      ? 'Not joined to any rooms'
+                      : `Joined: ${joinedRooms.join(', ')} (not "${trimmedRoom}")`)}
+                </span>
+              );
+            })()}
           </Row>
 
           <Row label="Echo message (used by API echo + sync echo)">
@@ -1007,61 +1049,38 @@ export default function Playground() {
             >
               <FontAwesomeIcon icon={faPaperPlane} /> Sync streamTo (target tokens)
             </button>
-            <button
-              type="button"
-              onClick={() => { setLogs([]); }}
-              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer"
-            >
-              Clear log
-            </button>
           </Row>
-
-          <Row label={`Live log (${String(logs.length)} / 250)`}>
-            <div
-              ref={logScrollRef}
-              className="w-full max-h-72 overflow-y-auto bg-container2 border border-container2-border rounded-md p-2 font-mono text-xs flex flex-col gap-1"
-            >
-              {logs.length === 0 ? (
-                <div className="text-muted p-4 text-center">
-                  Empty. Fire any button above and this panel will fill with timestamped events.
-                </div>
-              ) : (
-                logs.map((entry) => (
-                  <div key={entry.id} className="flex items-start gap-2">
-                    <span className="text-disabled flex-shrink-0">{entry.ts}</span>
-                    <span className={`flex-shrink-0 px-1.5 rounded ${channelLabel[entry.channel].tone}`}>
-                      {channelLabel[entry.channel].label}
-                    </span>
-                    <span className="text-title flex-1 break-all">
-                      {entry.message}
-                      {entry.payload !== undefined && (
-                        <span className="text-muted ml-2">{formatPayload(entry.payload)}</span>
-                      )}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </Row>
+          <p className="text-xs text-muted">
+            Every action on this page appends a line to the live log drawer pinned at the bottom of the screen — collapse it with the chevron when you need more room.
+          </p>
         </Section>
 
         <Section title="Auth & CSRF & OAuth providers">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-common">Auth token mode:</span>
+            <span className={`px-1.5 rounded font-mono ${sessionBasedToken ? 'bg-warning/15 text-warning' : 'bg-correct/15 text-correct'}`}>
+              {sessionBasedToken ? 'sessionStorage (CSRF disabled)' : 'HttpOnly cookie (CSRF active)'}
+            </span>
+            <span className="text-muted">— controlled by <code className="font-mono">config.sessionBasedToken</code></span>
+          </div>
           <p className="text-xs text-common">
-            <code className="font-mono">getCsrfToken()</code> lazily fetches <code className="font-mono">/auth/csrf</code> in cookie mode (returns <code className="font-mono">null</code> in token mode — CSRF-immune by design). <code className="font-mono">httpFetch()</code> auto-attaches the header on POST/PUT/DELETE.
+            CSRF only matters in <strong>cookie mode</strong> (the browser auto-attaches the session cookie, so we need a separate header to prove the request originated from our origin). In <strong>token mode</strong> the client reads the token from <code className="font-mono">sessionStorage</code> and attaches it to every request — there is nothing for an attacker's site to ride on, so <code className="font-mono">getCsrfToken()</code> returns <code className="font-mono">null</code>. <code className="font-mono">httpFetch()</code> handles the header automatically on POST/PUT/DELETE in cookie mode; you only call <code className="font-mono">getCsrfToken()</code> by hand for custom fetches.
           </p>
-          <Row label="CSRF token">
+          <Row label="CSRF token (cookie mode only)">
             <button
               type="button"
-              disabled={busy === 'csrf'}
+              disabled={busy === 'csrf' || sessionBasedToken}
               onClick={() => void handleFetchCsrf()}
-              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+              title={sessionBasedToken ? 'Disabled: token mode does not use CSRF' : ''}
+              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <FontAwesomeIcon icon={faShieldHalved} /> Fetch CSRF
             </button>
             <button
               type="button"
+              disabled={sessionBasedToken}
               onClick={handleClearCsrf}
-              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer"
+              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Clear cache
             </button>
@@ -1070,7 +1089,7 @@ export default function Playground() {
             </span>
           </Row>
 
-          <Row label="Forgot-password (anti-enumeration: always success)">
+          <Row label="Forgot-password + email diagnostic">
             <input
               type="email"
               value={forgotEmail}
@@ -1083,10 +1102,23 @@ export default function Playground() {
               disabled={busy === 'forgot'}
               onClick={() => void handleSendForgotPassword()}
               className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+              title="Real reset flow — anti-enumeration, always returns success"
             >
               <FontAwesomeIcon icon={faEnvelope} /> Send reset email
             </button>
+            <button
+              type="button"
+              disabled={busy === 'testEmail'}
+              onClick={() => void handleSendTestEmail()}
+              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+              title="Diagnostic: bypasses anti-enumeration, surfaces real sendEmail() result + reason"
+            >
+              <FontAwesomeIcon icon={faEnvelope} /> Send diagnostic test
+            </button>
           </Row>
+          <p className="text-xs text-muted">
+            <strong>Send reset email</strong> is the real flow — always returns success (anti-enumeration), so a missing-from / missing-API-key / unverified-recipient on the Resend side is invisible here. Use <strong>Send diagnostic test</strong> to see the actual <code className="font-mono">sendEmail()</code> result + reason in a toast.
+          </p>
 
           <Row label={`Registered OAuth providers (from config.providers — ${String(oauthProviderIds.length)} entries)`}>
             {oauthProviderIds.map((id) => (
@@ -1104,8 +1136,19 @@ export default function Playground() {
 
         <Section title="Settings flows (system/* APIs)">
           <p className="text-xs text-common">
-            These call real APIs under <code className="font-mono">src/settings/_api/</code>. Auth required — log in first or you will see <code className="font-mono">auth.notLoggedIn</code>.
+            These call real APIs under <code className="font-mono">src/settings/_api/</code>. Auth required — log in first or you'll see <code className="font-mono">auth.notLoggedIn</code>.
           </p>
+          <div className="text-xs text-common flex flex-col gap-1">
+            <div><strong className="text-title">List sessions</strong> — fetches every active session for the current user (multi-device login overview). Powers the "Active sessions" list in <code className="font-mono">/settings</code>.</div>
+            <div>
+              <strong className="text-title">Enable email notifications</strong> — flips two booleans on <code className="font-mono">User.preferences</code>:{' '}
+              <code className="font-mono">notifyOnNewSignIn</code> (fires a "new sign-in detected" email on every future login via the <code className="font-mono">postLogin</code> hook in <code className="font-mono">server/hooks/notifications.ts</code>) and{' '}
+              <code className="font-mono">notifyOnPasswordChange</code> (fires a "your password was changed" email from <code className="font-mono">settings/changePassword</code>).
+              {' '}With ConsoleSender (default, no SMTP/Resend env) the rendered email prints in the server terminal instead of being sent. Toggle these per-user in <code className="font-mono">/settings</code>.
+            </div>
+            <div><strong className="text-title">Change password</strong> — opens the real settings page. The framework password-change flow lives there because it needs the user's current password as confirmation; no playground shortcut.</div>
+            <div><strong className="text-title">Sign out everywhere</strong> — revokes ALL sessions including this one. You will be logged out after clicking.</div>
+          </div>
           <Row label="Run">
             <button
               type="button"
@@ -1118,19 +1161,25 @@ export default function Playground() {
             <button
               type="button"
               disabled={busy === 'prefs'}
-              onClick={() => void handleUpdatePreferences()}
+              onClick={() => void handleUpdatePreferences(true)}
               className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
             >
-              <FontAwesomeIcon icon={faUser} /> Update prefs (notify-on-* = true)
+              <FontAwesomeIcon icon={faUser} /> Enable email notifications
             </button>
             <button
               type="button"
-              disabled={busy === 'changePw'}
-              onClick={() => void handleChangePassword()}
+              disabled={busy === 'prefs'}
+              onClick={() => void handleUpdatePreferences(false)}
+              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faUser} /> Disable email notifications
+            </button>
+            <a
+              href="/settings"
               className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2"
             >
-              <FontAwesomeIcon icon={faKey} /> Change password (demo prompt)
-            </button>
+              <FontAwesomeIcon icon={faKey} /> Change password (use /settings)
+            </a>
             <button
               type="button"
               disabled={busy === 'signOut'}
@@ -1175,9 +1224,12 @@ export default function Playground() {
         </Section>
 
         <Section title="Health & test-reset endpoints">
-          <p className="text-xs text-common">
-            <code className="font-mono">/livez</code> is process-up (200 always); <code className="font-mono">/readyz</code> checks Redis + Prisma + boot UUID (503 if degraded); <code className="font-mono">/_health</code> exposes boot UUID + synchronized env hashes for the router handshake. <code className="font-mono">/_test/reset</code> is gated by <code className="font-mono">NODE_ENV</code> + <code className="font-mono">TEST_RESET_TOKEN</code>.
-          </p>
+          <div className="text-xs text-common flex flex-col gap-1">
+            <div><code className="font-mono">/livez</code> — <strong>liveness probe</strong>. Returns 200 as long as the Node process is up. Wire this into a K8s <code className="font-mono">livenessProbe</code> so the orchestrator restarts hung pods.</div>
+            <div><code className="font-mono">/readyz</code> — <strong>readiness probe</strong>. Returns 200 only when Redis + Prisma + the boot UUID are all healthy; 503 otherwise. Wire into <code className="font-mono">readinessProbe</code> so the load balancer stops sending traffic during a degraded boot.</div>
+            <div><code className="font-mono">/_health</code> — <strong>router handshake</strong>. Returns the boot UUID + synchronized env hashes. <code className="font-mono">@luckystack/router</code> polls this to confirm every backend shares the same Redis + env config before routing traffic.</div>
+            <div><code className="font-mono">/_test/reset</code> — <strong>dev/test fixture wipe</strong>. Clears Redis rate-limit counters, sessions, and active-user keys so end-to-end test scripts start from a known state. Fail-closed: <code className="font-mono">NODE_ENV</code> must be <code className="font-mono">development</code> or <code className="font-mono">test</code> AND the <code className="font-mono">x-test-reset-token</code> header must match <code className="font-mono">process.env.TEST_RESET_TOKEN</code>. Never wired in production.</div>
+          </div>
           <Row label="Probes">
             <button
               type="button"
@@ -1214,32 +1266,6 @@ export default function Playground() {
           </Row>
         </Section>
 
-        <Section title="File upload — avatar via processUpload">
-          <p className="text-xs text-common">
-            Encodes the picked file to base64 and submits to <code className="font-mono">system/updateUser</code>. The endpoint runs <code className="font-mono">processUpload</code> which dispatches <code className="font-mono">onUploadStart</code> / <code className="font-mono">onUploadComplete</code> hooks around the Sharp encode step. Auth required.
-          </p>
-          <Row label="Pick a file">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={(event) => void handleAvatarPicked(event)}
-              className="text-xs text-common file:mr-3 file:h-9 file:px-3 file:rounded-md file:border-0 file:bg-primary file:text-white file:cursor-pointer hover:file:bg-primary-hover"
-            />
-            <button
-              type="button"
-              disabled={busy === 'clearAvatar'}
-              onClick={() => void handleClearAvatar()}
-              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faTrash} /> Clear avatar field
-            </button>
-            <span className="text-xs text-muted self-center">
-              {avatarFileInfo || '— no file picked yet —'}
-            </span>
-          </Row>
-        </Section>
-
         <Section title="Offline queue — disconnect, enqueue, replay">
           <p className="text-xs text-common">
             <code className="font-mono">socket.disconnect()</code> makes <code className="font-mono">canSendNow()</code> return false; subsequent <code className="font-mono">syncRequest</code> / <code className="font-mono">apiRequest</code> calls drop into <code className="font-mono">offlineQueue</code> (drop policy + max-size from project config). <code className="font-mono">socket.connect()</code> auto-flushes both queues.
@@ -1267,7 +1293,7 @@ export default function Playground() {
             <button
               type="button"
               disabled={busy === 'queueFill'}
-              onClick={() => void handleEnqueueOffline()}
+              onClick={handleEnqueueOffline}
               className="h-9 px-3 rounded-md bg-warning hover:bg-warning-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
             >
               <FontAwesomeIcon icon={faBolt} /> Fire 5 syncRequests (watch queue grow)
@@ -1450,6 +1476,83 @@ export default function Playground() {
           </Row>
         </Section>
 
+      </div>
+
+      {/*
+        Fixed live-log drawer pinned to the bottom of the viewport so every
+        button on this page has visible feedback regardless of scroll position.
+        Collapses to a 40px strip showing the most recent entry + count;
+        expands to a 320px scrollable panel mirroring the previous inline log.
+      */}
+      <div
+        className={`fixed bottom-0 left-0 right-0 z-30 bg-container1 border-t border-container1-border shadow-[0_-2px_12px_rgba(0,0,0,0.18)] flex flex-col transition-[height] duration-150 ${drawerHeightClass}`}
+        role="region"
+        aria-label="Playground live log"
+      >
+        <div className="h-10 flex-shrink-0 flex items-center gap-3 px-4 border-b border-container1-border">
+          <button
+            type="button"
+            onClick={() => { setLogExpanded((prev) => !prev); }}
+            className="h-7 px-2 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-xs font-medium transition-colors cursor-pointer flex items-center gap-2"
+            aria-expanded={logExpanded}
+          >
+            <FontAwesomeIcon icon={logExpanded ? faChevronDown : faChevronUp} />
+            {logExpanded ? 'Collapse log' : 'Expand log'}
+          </button>
+          <span className="text-xs text-common font-mono">
+            {String(logs.length)} / 250 entries
+          </span>
+          {!logExpanded && lastLog && (
+            <span className="flex-1 min-w-0 flex items-center gap-2 text-xs font-mono">
+              <span className="text-disabled flex-shrink-0">{lastLog.ts}</span>
+              <span className={`flex-shrink-0 px-1.5 rounded ${channelLabel[lastLog.channel].tone}`}>
+                {channelLabel[lastLog.channel].label}
+              </span>
+              <span className="text-title truncate">
+                {lastLog.message}
+                {lastLog.payload !== undefined && (
+                  <span className="text-muted ml-2">{formatPayload(lastLog.payload)}</span>
+                )}
+              </span>
+            </span>
+          )}
+          {logExpanded && (
+            <button
+              type="button"
+              onClick={() => { setLogs([]); }}
+              className="ml-auto h-7 px-2 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-xs font-medium transition-colors cursor-pointer"
+            >
+              Clear log
+            </button>
+          )}
+        </div>
+        {logExpanded && (
+          <div
+            ref={logScrollRef}
+            className="flex-1 overflow-y-auto bg-container2 p-2 font-mono text-xs flex flex-col gap-1"
+          >
+            {logs.length === 0 ? (
+              <div className="text-muted p-4 text-center">
+                Empty. Fire any button above and this drawer will fill with timestamped events.
+              </div>
+            ) : (
+              logs.map((entry) => (
+                <div key={entry.id} className="flex items-start gap-2">
+                  <span className="text-disabled flex-shrink-0">{entry.ts}</span>
+                  <span className={`flex-shrink-0 px-1.5 rounded ${channelLabel[entry.channel].tone}`}>
+                    {channelLabel[entry.channel].label}
+                  </span>
+                  <span className="text-title flex-1 break-all">
+                    {entry.message}
+                    {entry.payload !== undefined && (
+                      <span className="text-muted ml-2">{formatPayload(entry.payload)}</span>
+                    )}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -8,14 +8,6 @@ import {
 } from '@luckystack/core';
 import type { HttpRouteHandler } from './types';
 
-//? Narrow shape for the redis methods this route needs. Avoids `(redis as any)`
-//? — ioredis' typings expose these methods but with overloads that don't
-//? always satisfy strict TS without intermediate widening.
-interface RedisScanDelete {
-  scan: (cursor: string, ...args: (string | number)[]) => Promise<[string, string[]]>;
-  del: (...keys: string[]) => Promise<number>;
-}
-
 export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePath }) => {
   if (routePath !== getProjectConfig().http.testResetEndpoint) return false;
 
@@ -49,16 +41,15 @@ export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePa
   const sessionPattern = `${projectName}-session:*`;
   const activeUsersPattern = `${projectName}-activeUsers:*`;
 
-  const redisDelegate = redis as unknown as RedisScanDelete;
   const scanAndDelete = async (pattern: string, label: string): Promise<number> => {
     const [error, deleted] = await tryCatch(async () => {
       let cursor = '0';
       let total = 0;
       do {
-        const [next, keys] = await redisDelegate.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
+        const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
         cursor = next;
         if (Array.isArray(keys) && keys.length > 0) {
-          await redisDelegate.del(...keys);
+          await redis.del(...keys);
           total += keys.length;
         }
       } while (cursor !== '0');

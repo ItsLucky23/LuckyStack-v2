@@ -19,6 +19,7 @@ import {
 } from '@luckystack/core';
 
 import { getSentryConfig } from './sentryConfig';
+import { enableErrorTrackingAutoInstrumentation } from './autoInstrumentation';
 
 /**
  * Initialize Sentry error monitoring.
@@ -93,6 +94,12 @@ export const initializeSentry = () => {
       );
     },
   });
+
+  //? Register the hook subscribers that previously lived as direct imports
+  //? in `@luckystack/api` and `@luckystack/sync`. Idempotent — calling
+  //? `initializeSentry()` twice (or alongside an explicit
+  //? `enableErrorTrackingAutoInstrumentation()`) is safe.
+  enableErrorTrackingAutoInstrumentation();
 
   getLogger().info('Sentry initialized for error monitoring');
 };

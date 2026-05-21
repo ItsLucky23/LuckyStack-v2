@@ -14,7 +14,7 @@ import { tryCatch } from '@luckystack/core';
 
 type OAuthUserData = Record<string, unknown>;
 
-const asOAuthUserData = (value: unknown): OAuthUserData => {
+export const asOAuthUserData = (value: unknown): OAuthUserData => {
   if (value && typeof value === 'object') {
     return value as OAuthUserData;
   }
@@ -34,13 +34,46 @@ export interface FullOAuthProvider {
   tokenExchangeURL: string;
   tokenExchangeMethod: 'json' | 'form';
   userInfoURL: string;
+  /**
+   * OAuth scopes requested at the authorization step. Consumers can extend
+   * a built-in provider's defaults to request additional permissions:
+   *
+   *   ```ts
+   *   const customGoogle = googleProvider({...});
+   *   customGoogle.scope.push('https://www.googleapis.com/auth/calendar.readonly');
+   *   ```
+   *
+   * Or pass `extraScopes` to the built-in factory (see `OAuthHelperInput`).
+   */
   scope: string[];
   nameKey: string;
   emailKey: string;
   avatarKey?: string;
   avatarCodeKey: string;
   getEmail?: (accessToken: string) => Promise<string | false | undefined>;
-  getAvatar?: (params: { userData: OAuthUserData; avatarId?: string }) => string | undefined | Promise<string | undefined>;
+  getAvatar?: (params: { userData: OAuthUserData; avatarId?: string; accessToken: string }) => string | undefined | Promise<string | undefined>;
+  /**
+   * Optional per-provider hook to attach extra runtime-only data to the
+   * session (NOT to the User row). Return key/value pairs that get merged
+   * into `BaseSessionLayout` before `saveSession`. To get strict typing
+   * downstream, extend `BaseSessionLayout` via module augmentation:
+   *
+   *   ```ts
+   *   declare module '@luckystack/core' {
+   *     interface BaseSessionLayout {
+   *       googleCalendarToken?: string;
+   *     }
+   *   }
+   *   ```
+   *
+   * Data lives on the session in Redis and disappears on logout — no Prisma
+   * schema change required. Don't store secrets you wouldn't want surfaced
+   * to a user inspecting their own session.
+   */
+  extraSessionFields?: (params: {
+    userData: OAuthUserData;
+    accessToken: string;
+  }) => Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 
 export type OAuthProvider = CredentialsProvider | FullOAuthProvider;
@@ -63,7 +96,24 @@ interface OAuthHelperInput {
   callbackUrl: string;
   /** Optional URL overrides for self-hosted / custom-tenant deployments. */
   endpoints?: OAuthEndpointOverrides;
+  /**
+   * Additional OAuth scopes to request alongside the built-in defaults. Use
+   * for "give me access to the user's calendar / drive / repos" flows.
+   * Merged with the helper's default scopes; duplicates are deduplicated.
+   */
+  extraScopes?: string[];
+  /**
+   * Per-provider hook for attaching runtime-only fields to the session.
+   * See `FullOAuthProvider.extraSessionFields` for usage + module-augmentation
+   * pattern.
+   */
+  extraSessionFields?: FullOAuthProvider['extraSessionFields'];
 }
+
+const mergeScopes = (defaults: string[], extra: string[] | undefined): string[] => {
+  if (!extra || extra.length === 0) return defaults;
+  return [...new Set([...defaults, ...extra])];
+};
 
 const requireString = (value: string | undefined, label: string): string => {
   if (!value || value.length === 0) {
@@ -83,14 +133,15 @@ export const googleProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? 'https://oauth2.googleapis.com/token',
   tokenExchangeMethod: 'json',
   userInfoURL: input.endpoints?.userInfoURL ?? 'https://www.googleapis.com/oauth2/v1/userinfo',
-  scope: [
+  scope: mergeScopes([
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
-  ],
+  ], input.extraScopes),
   nameKey: 'name',
   emailKey: 'email',
   avatarKey: 'picture',
   avatarCodeKey: '',
+  extraSessionFields: input.extraSessionFields,
 });
 
 export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
@@ -102,11 +153,12 @@ export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? 'https://github.com/login/oauth/access_token',
   tokenExchangeMethod: 'json',
   userInfoURL: input.endpoints?.userInfoURL ?? 'https://api.github.com/user',
-  scope: ['read:user', 'user:email'],
+  scope: mergeScopes(['read:user', 'user:email'], input.extraScopes),
   nameKey: 'login',
   emailKey: 'email',
   avatarKey: 'avatar_url',
   avatarCodeKey: '',
+  extraSessionFields: input.extraSessionFields,
   getEmail: async (accessToken) => {
     const fetchEmails = async () => {
       const response = await fetch('https://api.github.com/user/emails', {
@@ -144,10 +196,11 @@ export const discordProvider = (input: OAuthHelperInput): FullOAuthProvider => (
   tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? 'https://discord.com/api/oauth2/token',
   tokenExchangeMethod: 'form',
   userInfoURL: input.endpoints?.userInfoURL ?? 'https://discord.com/api/users/@me',
-  scope: ['identify', 'email'],
+  scope: mergeScopes(['identify', 'email'], input.extraScopes),
   nameKey: 'username',
   emailKey: 'email',
   avatarCodeKey: 'avatar',
+  extraSessionFields: input.extraSessionFields,
   getAvatar: ({ userData, avatarId }) => {
     if (!avatarId) return;
     const userId = typeof userData.id === 'string' ? userData.id : '';
@@ -173,10 +226,11 @@ export const facebookProvider = (input: FacebookProviderInput): FullOAuthProvide
   tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? `https://graph.facebook.com/${v}/oauth/access_token`,
   tokenExchangeMethod: 'form',
   userInfoURL: input.endpoints?.userInfoURL ?? 'https://graph.facebook.com/me?fields=id,name,email,picture.type(large)',
-  scope: ['public_profile', 'email'],
+  scope: mergeScopes(['public_profile', 'email'], input.extraScopes),
   nameKey: 'name',
   emailKey: 'email',
   avatarCodeKey: '',
+  extraSessionFields: input.extraSessionFields,
   getAvatar: ({ userData }) => {
     const picture = asOAuthUserData(userData.picture);
     const pictureData = asOAuthUserData(picture.data);
@@ -195,6 +249,11 @@ export interface MicrosoftProviderInput extends OAuthHelperInput {
   graphApiVersion?: string;
 }
 
+//? NOTE: Microsoft flow is implemented but has not been end-to-end verified
+//? against an Azure AD tenant as of 2026-05-14. The token-exchange URL, the
+//? Graph /me shape, and the photo data-URL pipeline are based on Microsoft
+//? docs and pattern-matching against Google/GitHub. First consumer to wire a
+//? real Azure tenant should report back so this note can be dropped.
 export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvider => {
   const tenant = input.tenant ?? 'common';
   const oauthVersion = input.apiVersion ?? 'v2.0';
@@ -208,13 +267,28 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
   tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? `https://login.microsoftonline.com/${tenant}/oauth2/${oauthVersion}/token`,
   tokenExchangeMethod: 'form',
   userInfoURL: input.endpoints?.userInfoURL ?? `https://graph.microsoft.com/${graphVersion}/me`,
-  scope: ['openid', 'profile', 'email', 'User.Read'],
+  scope: mergeScopes(['openid', 'profile', 'email', 'User.Read'], input.extraScopes),
   nameKey: 'displayName',
   emailKey: 'mail',
   avatarCodeKey: 'id',
-  getAvatar: ({ avatarId }) => {
-    if (!avatarId) return;
-    return `https://graph.microsoft.com/${graphVersion}/users/${avatarId}/photo/$value`;
+  extraSessionFields: input.extraSessionFields,
+  //? Graph's /photo/$value requires bearer auth, so we can't store the URL —
+  //? a browser <img> would 401. Fetch the bytes and inline as a data URL.
+  getAvatar: async ({ avatarId, accessToken }) => {
+    if (!avatarId) return undefined;
+    const fetchPhoto = async () => {
+      const response = await fetch(
+        `https://graph.microsoft.com/${graphVersion}/users/${avatarId}/photo/$value`,
+        { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!response.ok) return undefined;
+      const contentType = response.headers.get('content-type') ?? 'image/jpeg';
+      const buffer = Buffer.from(await response.arrayBuffer());
+      return `data:${contentType};base64,${buffer.toString('base64')}`;
+    };
+    const [error, dataUrl] = await tryCatch(fetchPhoto);
+    if (error) return undefined;
+    return dataUrl ?? undefined;
   },
   getEmail: async (accessToken) => {
     const fetchProfile = async () => {

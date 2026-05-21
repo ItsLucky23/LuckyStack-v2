@@ -1,19 +1,52 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
-import fs from 'node:fs';
+﻿import fs from 'node:fs';
 import path from 'node:path';
 import * as ts from 'typescript';
 import { getGeneratedApiDocsPath, getGeneratedApiSchemasPath, getGeneratedSocketTypesPath } from '@luckystack/core';
+
+import { mustGet } from '../internal/mapUtils';
 import { typeTextToZodSource } from './zodEmitter';
 
+//? `auth` is consumer-defined opaque â€” each project exports its own
+//? `AuthProps` shape from `config.ts`. The emitter passes the parsed value
+//? through to the generated JSON.
 export interface ApiTypeEntry {
 	input: string;
 	output: string;
 	stream: string;
 	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
 	rateLimit: number | false | undefined;
-	auth: any;
+	auth: unknown;
 	version: string;
+}
+
+interface ApiDocsEntry {
+	page: string;
+	name: string;
+	version: string;
+	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+	input: string;
+	output: string;
+	stream: string;
+	rateLimit: number | false | undefined;
+	auth: unknown;
+	path: string;
+}
+
+interface SyncDocsEntry {
+	page: string;
+	name: string;
+	version: string;
+	clientInput: string;
+	serverOutput: string;
+	clientOutput: string;
+	serverStream: string;
+	clientStream: string;
+	path: string;
+}
+
+export interface GeneratedDocsData {
+	apis: Record<string, ApiDocsEntry[]>;
+	syncs: Record<string, SyncDocsEntry[]>;
 }
 
 export interface SyncTypeEntry {
@@ -183,9 +216,9 @@ export type StreamPayload = {
 export type ApiStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
 export type SyncServerStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
 export type SyncClientStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
-//? Broadcast — fan-out to every socket in the receiver room. Auto-degrades to unicast for solo rooms.
+//? Broadcast â€” fan-out to every socket in the receiver room. Auto-degrades to unicast for solo rooms.
 export type SyncBroadcastStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void;
-//? Targeted — emit only to the listed session tokens (each token is its own room).
+//? Targeted â€” emit only to the listed session tokens (each token is its own room).
 export type SyncStreamToEmitter<T extends StreamPayload = StreamPayload> = (
 	tokens: string | string[],
 	payload?: T,
@@ -212,10 +245,10 @@ type _ProjectApiTypeMap = {
 
 	const sortedPages = [...typesByPage.keys()].sort();
 	const sortedSyncPages = [...syncTypesByPage.keys()].sort();
-	const docsData: any = { apis: {}, syncs: {} };
+	const docsData: GeneratedDocsData = { apis: {}, syncs: {} };
 
 	for (const pagePath of sortedPages) {
-		const apis = typesByPage.get(pagePath)!;
+		const apis = mustGet(typesByPage, pagePath, 'typesByPage');
 		const grouped = new Map<string, { version: string; entry: ApiTypeEntry }[]>();
 
 		docsData.apis[pagePath] = [];
@@ -223,13 +256,13 @@ type _ProjectApiTypeMap = {
 		for (const [apiKey, entry] of apis.entries()) {
 			const { name, version } = splitVersionedKey(apiKey);
 			if (!grouped.has(name)) grouped.set(name, []);
-			grouped.get(name)!.push({ version, entry });
+			mustGet(grouped, name, 'grouped').push({ version, entry });
 		}
 
 		content += `  '${pagePath}': {\n`;
 		for (const apiName of [...grouped.keys()].sort()) {
 			content += `    '${apiName}': {\n`;
-			for (const { version, entry } of grouped.get(apiName)!.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.apis[pagePath].push({
 					page: pagePath,
 					name: apiName,
@@ -278,19 +311,19 @@ export const apiMethodMap: Record<string, Record<string, Record<string, HttpMeth
 `;
 
 	for (const pagePath of sortedPages) {
-		const apis = typesByPage.get(pagePath)!;
+		const apis = mustGet(typesByPage, pagePath, 'typesByPage');
 		const grouped = new Map<string, { version: string; method: string }[]>();
 
 		for (const [apiKey, entry] of apis.entries()) {
 			const { name, version } = splitVersionedKey(apiKey);
 			if (!grouped.has(name)) grouped.set(name, []);
-			grouped.get(name)!.push({ version, method: entry.method });
+			mustGet(grouped, name, 'grouped').push({ version, method: entry.method });
 		}
 
 		content += `  '${pagePath}': {\n`;
 		for (const apiName of [...grouped.keys()].sort()) {
 			content += `    '${apiName}': {`;
-			const methods = grouped.get(apiName)!
+			const methods = mustGet(grouped, apiName, 'grouped')
 				.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
 				.map((item) => ` '${item.version}': '${item.method}'`)
 				.join(',');
@@ -315,19 +348,19 @@ export const apiMetaMap: Record<string, Record<string, Record<string, ApiMetaEnt
 `;
 
 	for (const pagePath of sortedPages) {
-		const apis = typesByPage.get(pagePath)!;
+		const apis = mustGet(typesByPage, pagePath, 'typesByPage');
 		const grouped = new Map<string, { version: string; entry: ApiTypeEntry }[]>();
 
 		for (const [apiKey, entry] of apis.entries()) {
 			const { name, version } = splitVersionedKey(apiKey);
 			if (!grouped.has(name)) grouped.set(name, []);
-			grouped.get(name)!.push({ version, entry });
+			mustGet(grouped, name, 'grouped').push({ version, entry });
 		}
 
 		content += `  '${pagePath}': {\n`;
 		for (const apiName of [...grouped.keys()].sort()) {
 			content += `    '${apiName}': {\n`;
-			for (const { version, entry } of grouped.get(apiName)!.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				const auth = entry.auth && typeof entry.auth === 'object'
 					? entry.auth as { login: boolean; additional?: Record<string, unknown>[] }
 					: { login: true };
@@ -369,20 +402,20 @@ type _ProjectSyncTypeMap = {
 `;
 
 	for (const pagePath of sortedSyncPages) {
-		const syncs = syncTypesByPage.get(pagePath)!;
+		const syncs = mustGet(syncTypesByPage, pagePath, 'syncTypesByPage');
 		const grouped = new Map<string, { version: string; entry: SyncTypeEntry }[]>();
 		docsData.syncs[pagePath] = [];
 
 		for (const [syncKey, entry] of syncs.entries()) {
 			const { name, version } = splitVersionedKey(syncKey);
 			if (!grouped.has(name)) grouped.set(name, []);
-			grouped.get(name)!.push({ version, entry });
+			mustGet(grouped, name, 'grouped').push({ version, entry });
 		}
 
 		content += `  '${pagePath}': {\n`;
 		for (const syncName of [...grouped.keys()].sort()) {
 			content += `    '${syncName}': {\n`;
-			for (const { version, entry } of grouped.get(syncName)!.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, syncName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.syncs[pagePath].push({
 					page: pagePath,
 					name: syncName,
@@ -424,7 +457,7 @@ export type SyncClientStream<P extends SyncPagePath, N extends SyncName<P>, V ex
 export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N>> = \`sync/\${P}/\${N & string}/\${V & string}\`;
 
 //
-// Type-level augmentation — merges the project's concrete ApiTypeMap / SyncTypeMap
+// Type-level augmentation â€” merges the project's concrete ApiTypeMap / SyncTypeMap
 // into @luckystack/core's stub interfaces so framework code (apiRequest / syncRequest)
 // can rely on the same shapes without deep-relative imports. Loaded as a side
 // effect on any import of this file.
@@ -454,7 +487,7 @@ const buildSchemasContent = ({
 	let body = `/* eslint-disable */
 //? Auto-generated Zod schemas for every API input. Driven by the same walk
 //? as apiTypes.generated.ts; see @luckystack/devkit/src/typeMap/zodEmitter.ts
-//? for the TS-AST → Zod converter. Types that fall outside the converter's
+//? for the TS-AST â†’ Zod converter. Types that fall outside the converter's
 //? scope emit \`z.any()\` with a TODO comment.
 
 import { z } from 'zod';
@@ -463,19 +496,19 @@ export const apiInputSchemas: Record<string, Record<string, Record<string, z.Zod
 `;
 
 	for (const pagePath of sortedPages) {
-		const apis = typesByPage.get(pagePath)!;
+		const apis = mustGet(typesByPage, pagePath, 'typesByPage');
 		const grouped = new Map<string, { version: string; entry: ApiTypeEntry }[]>();
 
 		for (const [apiKey, entry] of apis.entries()) {
 			const { name, version } = splitVersionedKey(apiKey);
 			if (!grouped.has(name)) grouped.set(name, []);
-			grouped.get(name)!.push({ version, entry });
+			mustGet(grouped, name, 'grouped').push({ version, entry });
 		}
 
 		body += `  '${pagePath}': {\n`;
 		for (const apiName of [...grouped.keys()].sort()) {
 			body += `    '${apiName}': {\n`;
-			for (const { version, entry } of grouped.get(apiName)!.sort(
+			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').sort(
 				(a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }),
 			)) {
 				const schemaSrc = typeTextToZodSource(entry.input) ?? 'z.any() /* unparseable input type */';
@@ -506,7 +539,7 @@ export const writeTypeMapArtifacts = ({
 	schemasContent,
 }: {
 	content: string;
-	docsData: any;
+	docsData: GeneratedDocsData;
 	schemasContent?: string;
 }) => {
 	try {

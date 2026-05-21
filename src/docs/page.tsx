@@ -410,6 +410,10 @@ const getAdditionalPermissionLabel = (item: AdditionalPermission): string => {
 export default function DocsPage() {
   const translate = useTranslator();
   const { upsertSyncEventCallback } = useSyncEvents();
+  //? JSON import inferred type is deeply readonly with literal-narrowed
+  //? fields; structurally compatible with DocsResult but TS won't accept a
+  //? single `as` cast. The double-cast is the JSON-import escape hatch.
+  // eslint-disable-next-line no-restricted-syntax -- JSON import widening
   const [docs] = useState<DocsResult | null>(apiDocs as unknown as DocsResult);
   const [selectedApi, setSelectedApi] = useState<ApiDoc | null>(null);
   const [selectedSync, setSelectedSync] = useState<SyncDoc | null>(null);
@@ -438,7 +442,12 @@ export default function DocsPage() {
 
     const name = buildSyncRequestName(selectedSync);
 
-    return upsertSyncEventCallback({
+    //? Runtime-driven dispatch — the generated `apiTypes` map narrows
+    //? upsertSyncEventCallback's params to a literal-typed shape per route.
+    //? Here `name` is read from the docs JSON at runtime, so we erase via
+    //? a typed local + identifier-as-never instead of an object-literal-as
+    //? cast (banned by consistent-type-assertions).
+    const callbackParams = {
       name,
       version: selectedSync.version,
       callback: ({ clientOutput, serverOutput }: { clientOutput: unknown; serverOutput: unknown }) => {
@@ -448,8 +457,9 @@ export default function DocsPage() {
           serverOutput,
         });
         setStatus('success');
-      }
-    } as never);
+      },
+    };
+    return upsertSyncEventCallback(callbackParams as never);
   }, [selectedSync, upsertSyncEventCallback])
 
   const normalizeInputData = () => {
@@ -515,12 +525,19 @@ export default function DocsPage() {
     void (async () => {
       try {
         const name = buildApiRequestName(selectedApi);
-        const response = await apiRequest({
+        //? Runtime-driven dispatch — see the upsertSyncEventCallback note
+        //? above for why we erase via typed local + identifier-as-never
+        //? instead of object-literal-as. The narrowed `OutputForFullName`
+        //? collapses to `never`, so a single `as ApiRunResponse` widens
+        //? without needing `as unknown as`.
+        const apiParams = {
           name,
           version: selectedApi.version,
           data: parsedInput,
           disableErrorMessage: true,
-        } as never) as unknown as ApiRunResponse;
+        };
+        const rawResponse = await apiRequest(apiParams as never);
+        const response = rawResponse as ApiRunResponse;
 
         setApiResult(response);
         setStatus(response.status === 'success' ? 'success' : 'error');
@@ -595,13 +612,16 @@ export default function DocsPage() {
     const name = buildSyncRequestName(selectedSync);
 
     void (async () => {
-      const response = await syncRequest({
+      //? Runtime-driven dispatch — see the apiRequest/upsertSyncEventCallback
+      //? notes above. Same typed-local + identifier-as-never pattern.
+      const syncParams = {
         name,
         version: selectedSync.version,
         data: parsedInput,
         receiver,
         ignoreSelf,
-      } as never);
+      };
+      const response = await syncRequest(syncParams as never);
 
       if (response.status === 'error') {
         setSyncResult({

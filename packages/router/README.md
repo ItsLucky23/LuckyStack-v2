@@ -97,7 +97,7 @@ Types: `StartRouterInput`, `RunningRouter`, `ResolveTargetInput`, `ResolveTarget
 
 ## Related architecture docs
 
-- [`docs/ARCHITECTURE_PACKAGING.md`](../../docs/ARCHITECTURE_PACKAGING.md) — multi-service builds, preset bundles, `LUCKYSTACK_BUNDLE`.
+- [`docs/ARCHITECTURE_PACKAGING.md`](../../docs/ARCHITECTURE_PACKAGING.md) — multi-service builds, preset bundles, runtime preset selection (positional argv).
 - [`docs/HOSTING.md`](../../docs/HOSTING.md) — deployment topology + health probes.
 
 ## License

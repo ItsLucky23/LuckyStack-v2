@@ -1,9 +1,29 @@
 import {
+  dispatchHook,
   getIoInstance,
   getLogger,
   getProjectConfig,
   socketEventNames,
 } from '@luckystack/core';
+
+//? Counter of chunks per (routeName, recipient) pair so postSyncStream
+//? consumers can index streams. Cleared on receiver-room teardown.
+const chunkCounters = new Map<string, number>();
+const counterKey = (routeName: string, recipient: string): string => `${routeName}|${recipient}`;
+const bumpChunkIndex = (routeName: string, recipient: string): number => {
+  const key = counterKey(routeName, recipient);
+  const next = (chunkCounters.get(key) ?? 0) + 1;
+  chunkCounters.set(key, next);
+  return next;
+};
+const dispatchStreamHooks = (routeName: string, recipient: string, chunk: unknown): void => {
+  //? Fire-and-forget — stream emitters are sync and consumer hooks must
+  //? not block chunk delivery. Errors inside hooks are swallowed by the
+  //? hook dispatcher's own tryCatch.
+  void dispatchHook('preSyncStream', { routeName, chunk, recipient });
+  const chunkIndex = bumpChunkIndex(routeName, recipient);
+  void dispatchHook('postSyncStream', { routeName, chunk, recipient, chunkIndex });
+};
 
 export type SyncStreamPayload = Record<string, unknown>;
 
@@ -46,6 +66,7 @@ export const buildSyncStreamEmitters = ({
     if (shouldLogStream()) {
       getLogger().debug(`${logLabel}: ${resolvedName} server stream`, { payload });
     }
+    dispatchStreamHooks(resolvedName, 'originator', payload);
     emitOriginatorChunk(payload);
   };
 
@@ -56,6 +77,8 @@ export const buildSyncStreamEmitters = ({
     if (!receiver) return;
     const io = getIoInstance();
     if (!io) return;
+
+    dispatchStreamHooks(resolvedName, receiver, payload);
 
     const frame = buildBroadcastFrame(payload);
     const roomMembers = io.sockets.adapter.rooms.get(receiver);
@@ -85,6 +108,9 @@ export const buildSyncStreamEmitters = ({
     }
     const io = getIoInstance();
     if (!io) return;
+    for (const recipient of filtered) {
+      dispatchStreamHooks(resolvedName, recipient, payload);
+    }
     const frame = buildBroadcastFrame(payload);
     io.to(filtered).emit(socketEventNames.sync, frame);
   };

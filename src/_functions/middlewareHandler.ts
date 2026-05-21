@@ -20,10 +20,10 @@ const middlewareHandler: MiddlewareHandler = ({ location, session: baseSession }
         return { success: true };
       }
       notify.error({ key: 'middleware.notAdmin' });
-      return undefined;
+      return;
     }
 
-    case '/dashboard': {
+    case '/playground': {
       if (!session) {
         return { success: false, redirect: '/login' };
       }

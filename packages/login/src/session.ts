@@ -1,19 +1,20 @@
 import type { BaseSessionLayout as SessionLayout } from "./sessionLayout";
 import { randomBytes } from 'node:crypto';
 import {
-  redis,
   socketEventNames,
   dispatchHook,
+  getCsrfConfig,
   getLogger,
   getProjectConfig,
   getProjectName,
   tryCatch,
 } from '@luckystack/core';
 
+import { getSessionAdapter } from './sessionAdapter';
+
 //? Resolved at call time so project registration order doesn't matter.
-//? `getProjectName()` is the shared helper that consults
-//? `projectConfig.session.projectName` → `process.env.PROJECT_NAME` →
-//? `'luckystack'` in order, so dotenv-after-import doesn't drop the value.
+//? Session TTL comes from projectConfig and is honoured by every adapter
+//? (Redis default, or any custom adapter the consumer registers).
 const getSessionTtl = (): number => 60 * 60 * 24 * getProjectConfig().session.expiryDays;
 
 const isSessionLayout = (value: unknown): value is SessionLayout => {
@@ -25,11 +26,8 @@ const parseSessionLayout = (value: string): SessionLayout | null => {
   return isSessionLayout(parsed) ? parsed : null;
 };
 
-const sessionKeyFor = (token: string): string => `${getProjectName()}-session:${token}`;
-const activeUsersKeyFor = (userId: string): string => `${getProjectName()}-activeUsers:${userId}`;
-
 /**
- * Save or update a user session in Redis.
+ * Save or update a user session through the active session adapter.
  *
  * @param token - The session token (unique identifier)
  * @param data - The session data to store
@@ -37,6 +35,8 @@ const activeUsersKeyFor = (userId: string): string => `${getProjectName()}-activ
  */
 const saveSession = async (token: string, data: SessionLayout, newUser?: boolean): Promise<void> => {
   const [error] = await tryCatch(async () => {
+    const adapter = getSessionAdapter();
+
     if (newUser) {
       const preSessionCreateResult = await dispatchHook('preSessionCreate', {
         token,
@@ -52,13 +52,13 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     //? Mint a CSRF token on first session write. Subsequent writes preserve
     //? the existing token so the client doesn't have to re-fetch on every
     //? session update. The token is rotated on logout via `deleteSession`.
+    //? Token length is consumer-configurable via `registerCsrfConfig({ tokenLength })`.
     if (!data.csrfToken) {
-      data.csrfToken = randomBytes(32).toString('hex');
+      data.csrfToken = randomBytes(getCsrfConfig().tokenLength).toString('hex');
     }
 
-    const sessionKey = sessionKeyFor(token);
-    await redis.set(sessionKey, JSON.stringify(data));
-    await redis.expire(sessionKey, getSessionTtl());
+    const ttl = getSessionTtl();
+    await adapter.setRaw(token, JSON.stringify(data), ttl);
 
     const { getIoInstance } = await import('@luckystack/core');
     const ioInstance = getIoInstance();
@@ -69,28 +69,52 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
 
     // Always track active tokens so server-side user/session updates can fan out in real time
     if (userId) {
-      const activeUsersKey = activeUsersKeyFor(userId);
-      await redis.sadd(activeUsersKey, token);
-      await redis.expire(activeUsersKey, getSessionTtl());
+      await adapter.trackActive(userId, token, ttl);
     }
 
-    // Handle single-session enforcement on new login
-    if (newUser && !getProjectConfig().session.allowMultiple) {
-      if (!userId) return;
+    // Handle session-limit enforcement on new login. Logic:
+    //   1. perUser = 'single' (default) OR legacy `allowMultiple: false` →
+    //      kick every prior session for this user.
+    //   2. perUser = 'multiple' with `maxConcurrentPerUser` cap reached:
+    //      `onConflict === 'revokeOld'` kicks oldest until under cap,
+    //      `onConflict === 'rejectNew'` would refuse the new login (handled
+    //      at the login API layer, not here).
+    //   3. perUser = 'multiple' with no cap → no kick.
+    if (newUser && userId) {
+      const sessionCfg = getProjectConfig().session;
+      const effectivePerUser = sessionCfg.allowMultiple ? 'multiple' : sessionCfg.perUser;
+      const cap = sessionCfg.maxConcurrentPerUser;
 
-      const activeUsersKey = activeUsersKeyFor(userId);
-      const allTokens = await redis.smembers(activeUsersKey);
+      const allTokens = await adapter.listActive(userId);
       // Exclude the current token — it was just added and has no socket room yet
       const previousTokens = allTokens.filter(t => t !== token);
 
-      if (previousTokens.length > 0) {
+      let tokensToKick: string[] = [];
+      if (effectivePerUser === 'single') {
+        tokensToKick = previousTokens;
+      } else if (effectivePerUser === 'multiple' && cap !== null && previousTokens.length + 1 > cap && sessionCfg.onConflict === 'revokeOld') {
+        // Kick oldest until under cap. Without ordering metadata in the adapter,
+        // we drop the head of the list — most adapters return insertion-order
+        // for set-like structures, but consumers needing strict LRU should
+        // implement a custom adapter that orders deterministically.
+        const excess = previousTokens.length + 1 - cap;
+        tokensToKick = previousTokens.slice(0, excess);
+      }
+
+      if (tokensToKick.length > 0) {
         const { logout } = await import('./logout');
 
-        // Kick all previous sessions for this user
-        await Promise.all(previousTokens.map(async (previousToken) => {
+        await Promise.all(tokensToKick.map(async (previousToken) => {
           const sockets = io.sockets.adapter.rooms.get(previousToken);
           if (sockets) {
             getLogger().debug(`Kicking previous session for user ${userId}`);
+            // Optional UI notification before the disconnect lands.
+            if (sessionCfg.notifyOldDeviceOnRevoke) {
+              io.to(previousToken).emit(socketEventNames.sessionReplaced, JSON.stringify({
+                reason: 'session-replaced',
+                userId,
+              }));
+            }
             for (const socketId of sockets) {
               const socket = io.sockets.sockets.get(socketId);
               if (socket) {
@@ -98,9 +122,9 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
               }
             }
           } else {
-            // No active sockets, just clean up Redis
-            await redis.del(sessionKeyFor(previousToken));
-            await redis.srem(activeUsersKey, previousToken);
+            // No active sockets, just clean up the adapter state
+            await adapter.delete(previousToken);
+            await adapter.untrackActive(userId, previousToken);
           }
         }));
       }
@@ -122,7 +146,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
 };
 
 /**
- * Retrieve a user session from Redis.
+ * Retrieve a user session through the active session adapter.
  *
  * @param token - The session token
  * @returns The session data or null if not found
@@ -131,27 +155,26 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
   if (!token) return null;
 
   const [error, value] = await tryCatch(async () => {
-    const sessionKey = sessionKeyFor(token);
-    const session = await redis.get(sessionKey);
-    if (!session) return null;
+    const adapter = getSessionAdapter();
 
-    const parsed = parseSessionLayout(session);
+    const raw = await adapter.getRaw(token);
+    if (!raw) return null;
+
+    const parsed = parseSessionLayout(raw);
     const userId = parsed?.id ?? null;
 
     // Sliding expiration: each successful authenticated access extends session lifetime.
     const newTtl = getSessionTtl();
-    const [ttlError, ttlValue] = await tryCatch(() => redis.ttl(sessionKey));
-    const oldTtl = ttlError ? null : ttlValue;
+    const oldTtl = await adapter.ttl(token);
     const preRefreshResult = await dispatchHook('preSessionRefresh', { token, userId, oldTtl, newTtl });
 
     //? A `preSessionRefresh` handler can stop the TTL extension (e.g. admin
     //? freezing a session pending review). When stopped, we skip the
-    //? `redis.expire` call and surface `applied: false` on the post payload
+    //? `adapter.expire` call and surface `applied: false` on the post payload
     //? so audit handlers see the same signal.
     let applied = false;
     if (!preRefreshResult.stopped) {
-      const expireResult = await redis.expire(sessionKey, newTtl);
-      applied = expireResult === 1;
+      applied = await adapter.expire(token, newTtl);
     }
     await dispatchHook('postSessionRefresh', {
       token,
@@ -173,18 +196,30 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
 };
 
 /**
- * Delete a user session from Redis and notify connected clients.
+ * Delete a user session through the active adapter and notify connected
+ * clients.
  *
  * @param token - The session token to delete
  * @returns true if successful
  */
 const deleteSession = async (token: string): Promise<boolean> => {
+  //? Spurious deleteSession calls cause the user to be silently kicked out.
+  //? Warn-log with stacktrace so the originating caller (logout / revokeSession
+  //? / signOutEverywhere / deleteAccount / preSessionDelete hook) is visible
+  //? in the server terminal during incidents.
+  getLogger().warn('[session] deleteSession invoked', {
+    tokenPrefix: token.slice(0, 8),
+    stack: new Error('deleteSession invoked').stack,
+  });
+
   const [error, ok] = await tryCatch(async () => {
-    const rawUser = await redis.get(sessionKeyFor(token));
+    const adapter = getSessionAdapter();
+
+    const raw = await adapter.getRaw(token);
     let resolvedUserId: string | null = null;
 
-    if (rawUser) {
-      resolvedUserId = parseSessionLayout(rawUser)?.id ?? null;
+    if (raw) {
+      resolvedUserId = parseSessionLayout(raw)?.id ?? null;
     }
 
     const preSessionDeleteResult = await dispatchHook('preSessionDelete', { token, userId: resolvedUserId });
@@ -193,8 +228,7 @@ const deleteSession = async (token: string): Promise<boolean> => {
       return false;
     }
 
-    if (rawUser && resolvedUserId) {
-      const activeUsersKey = activeUsersKeyFor(resolvedUserId);
+    if (raw && resolvedUserId) {
       const { getIoInstance } = await import('@luckystack/core');
       const ioInstance = getIoInstance();
 
@@ -218,10 +252,10 @@ const deleteSession = async (token: string): Promise<boolean> => {
         }
       }
 
-      await redis.srem(activeUsersKey, token);
+      await adapter.untrackActive(resolvedUserId, token);
     }
 
-    await redis.del(sessionKeyFor(token));
+    await adapter.delete(token);
     await dispatchHook('postSessionDelete', { token, userId: resolvedUserId });
     return true;
   }, undefined, { fn: 'deleteSession', token });
@@ -234,30 +268,23 @@ const deleteSession = async (token: string): Promise<boolean> => {
 };
 
 /**
- * Get all active sessions (admin utility).
+ * Get all active sessions (admin utility). Returns empty when the active
+ * adapter doesn't implement enumeration (signed-JWT-stateless, log-only).
  *
  * @returns Array of all session data
  */
 const getAllSessions = async (): Promise<SessionLayout[]> => {
   const [error, sessions] = await tryCatch(async () => {
-    const pattern = `${getProjectName()}-session:*`;
-    const keys: string[] = [];
-    let cursor = '0';
+    const adapter = getSessionAdapter();
+    if (!adapter.listAll) {
+      getLogger().warn(`[session] getAllSessions: adapter '${adapter.name}' does not implement listAll — returning empty`);
+      return [];
+    }
 
-    do {
-      const [nextCursor, batchKeys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
-      cursor = nextCursor;
-      if (Array.isArray(batchKeys) && batchKeys.length > 0) {
-        keys.push(...batchKeys);
-      }
-    } while (cursor !== '0');
-
-    const rawSessions = await Promise.all(keys.map((key) => redis.get(key)));
-
+    const rows = await adapter.listAll();
     const parsedSessions: SessionLayout[] = [];
-    for (const session of rawSessions) {
-      if (!session) continue;
-      const parsed = parseSessionLayout(session);
+    for (const { raw } of rows) {
+      const parsed = parseSessionLayout(raw);
       if (parsed) parsedSessions.push(parsed);
     }
     return parsedSessions;
@@ -286,12 +313,18 @@ const getAllSessions = async (): Promise<SessionLayout[]> => {
 const revokeUserSessions = async (userId: string, exceptToken?: string | null): Promise<number> => {
   if (!userId) return 0;
 
-  const activeUsersKey = activeUsersKeyFor(userId);
-  const tokens = await redis.smembers(activeUsersKey);
+  const adapter = getSessionAdapter();
+  const tokens = await adapter.listActive(userId);
   const targets = exceptToken ? tokens.filter((t) => t !== exceptToken) : tokens;
 
   await Promise.all(targets.map((token) => deleteSession(token)));
   return targets.length;
 };
+
+//? Legacy key-builders preserved as exports for downstream code that
+//? assumed a stable Redis layout (admin tooling, dev REPL scripts). New
+//? callers should use the active SessionAdapter instead.
+const sessionKeyFor = (token: string): string => `${getProjectName()}-session:${token}`;
+const activeUsersKeyFor = (userId: string): string => `${getProjectName()}-activeUsers:${userId}`;
 
 export { saveSession, getSession, deleteSession, getAllSessions, revokeUserSessions, sessionKeyFor, activeUsersKeyFor };

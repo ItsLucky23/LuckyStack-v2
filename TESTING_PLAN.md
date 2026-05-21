@@ -334,15 +334,21 @@ If `@luckystack/docs-ui` is wired into the overlay folder or registered manually
    - With `switchNewTrafficToLocalWhenHealthy: false`, traffic stays on B until you manually fail B over.
 
 5. **Per-preset routing:**
-   - Boot backend A with `LUCKYSTACK_BUNDLE=core-preset`, backend B with `LUCKYSTACK_BUNDLE=fleet-preset`.
+   - Boot backend A with `npm run server -- core-preset 4001`, backend B with `npm run server -- fleet-preset 4002`.
    - A request to `vehicles/getAll` (a fleet route) sent to the router → should forward to B.
    - A request to `core-only/route` → should forward to A.
    - A request to `system/*` (shared) → either backend, configured via `fallback`.
 
 6. **Preset bundle selection (single backend):**
-   - Boot a backend with `LUCKYSTACK_BUNDLE=fleet-preset`.
+   - Boot a backend with `npm run server -- fleet-preset`.
    - Confirm `vehicles/*` routes resolve via the loaded route map.
    - A request to `billing/getAll` (not in fleet preset) → should return `serviceNotAssigned` (or whatever the not-in-bundle error code is).
+
+7. **Multi-preset boot (single process):**
+   - Boot a backend with `npm run server -- core-preset,fleet-preset 4001`.
+   - Confirm BOTH `vehicles/*` (fleet) and `system/*` (core) routes resolve in the same process.
+   - Confirm `billing/getAll` (not in either preset) still returns `serviceNotAssigned`.
+   - Sanity-check the boot log shows `loadProdRuntimeMaps` merged maps from both presets without collision warnings.
 
 **Pass:** every step exhibits the documented behavior. Strict mode fails fast on mismatch; loose mode warns. Health-poll switches traffic within `healthPollMs`.
 

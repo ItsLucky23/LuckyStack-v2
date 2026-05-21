@@ -1,4 +1,3 @@
-/* eslint-disable */
 //? Playground: deliberately throws inside a sync handler so the framework's
 //? syncError hook fires and the originator receives a normalized error
 //? envelope. Sister demo to playground/throwError_v1.

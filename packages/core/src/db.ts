@@ -2,16 +2,19 @@ import './env';
 import { PrismaClient } from '@prisma/client';
 import { getPrismaClient, setDefaultPrismaResolver } from './clients';
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined };
+declare global {
+  // eslint-disable-next-line no-var
+  var __luckystackPrisma: PrismaClient | undefined;
+}
 
 //? Lazy default: only constructed when the proxy is first accessed AND no
 //? consumer has registered their own Prisma client. Avoids paying the
 //? PrismaClient construction cost in code paths that swap it out at boot.
 const buildDefaultPrismaClient = (): PrismaClient => {
-  if (!globalForPrisma.prisma) {
-    globalForPrisma.prisma = new PrismaClient();
+  if (!globalThis.__luckystackPrisma) {
+    globalThis.__luckystackPrisma = new PrismaClient();
   }
-  return globalForPrisma.prisma;
+  return globalThis.__luckystackPrisma;
 };
 
 setDefaultPrismaResolver(buildDefaultPrismaClient);

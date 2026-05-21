@@ -116,6 +116,23 @@ export default tseslint.config(
           message: 'Do not use double-casts on backend payloads. Use generated types from src/_sockets/apiTypes.generated.ts and discriminated unions instead.',
         },
       ],
+      //? Type-safety hardening — keeps the typed API/sync contract honest
+      //? (no `any`, no unsafe `as`, no object-literal type assertions).
+      //? `no-non-null-assertion` is intentionally a warn so legitimate `!`
+      //? uses in framework boundary code surface without breaking the build.
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'warn',
+      '@typescript-eslint/consistent-type-assertions': ['error', {
+        assertionStyle: 'as',
+        objectLiteralTypeAssertions: 'never',
+      }],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'TSAsExpression > TSAsExpression > TSUnknownKeyword',
+          message: 'Vermijd de double-cast `x as unknown as Y` — dat omzeilt de type-checker. Gebruik een runtime-guard of een typed boundary-helper (zie shared/prismaJson.ts).',
+        },
+      ]
     },
   },
   {
@@ -127,7 +144,11 @@ export default tseslint.config(
       'react-refresh/only-export-components': 'off',
       'react/jsx-no-literals': 'off',
       'import-x/default': 'off',
-      '@typescript-eslint/no-non-null-assertion': 'off',
+      //? `no-non-null-assertion: 'off'` overlay REMOVED per the strict-typing
+      //? policy — server/shared/scripts/config.ts now obey the same rule the
+      //? rest of the codebase does. Legitimate `!` uses surface as warnings
+      //? so reviewers see them; structurally-impossible cases get an inline
+      //? `// eslint-disable-next-line` with a WHY comment.
       '@typescript-eslint/restrict-template-expressions': 'off',
       '@typescript-eslint/restrict-plus-operands': 'off',
       '@typescript-eslint/ban-ts-comment': 'off',

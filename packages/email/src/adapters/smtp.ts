@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+
 import { tryCatch, type EmailSender } from '@luckystack/core';
 
 interface SmtpSenderOptions {
@@ -12,15 +14,27 @@ interface SmtpSenderOptions {
   from?: string;
 }
 
+const localRequire = createRequire(import.meta.url);
+
 //? Wraps Nodemailer. Lazy-imported so consumers who only use Resend (or only
 //? Console) don't need nodemailer installed.
+//?
+//? Boot-time guard: synchronously resolves the `nodemailer` package at factory
+//? call time. If the consumer set SMTP_HOST without installing the package,
+//? the server crashes during bootstrap instead of silently failing on the
+//? first email send.
 export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
   const { from: defaultFrom, ...smtpConfig } = options;
 
-  // One transporter per SmtpSender instance — created lazily on first send.
-  // `nodemailer` is an optional peer dep; the dynamic import has no type for
-  // it from the framework's standpoint (consumers install it themselves), so
-  // suppress the dts-time check.
+  try {
+    localRequire.resolve('nodemailer');
+  } catch {
+    throw new Error(
+      '[email:smtp] The `nodemailer` package is not installed but SmtpSender was called. ' +
+      'Run `npm install nodemailer @types/nodemailer`, or remove the SMTP_HOST env var and pick a different EmailSender adapter.',
+    );
+  }
+
   const transporterPromise = (
     // @ts-expect-error optional peer dep — types resolved at consumer install time
     import('nodemailer') as Promise<{
@@ -36,12 +50,6 @@ export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
       return factory(smtpConfig) as {
         sendMail: (input: Record<string, unknown>) => Promise<{ messageId?: string | number }>;
       };
-    })
-    .catch((cause: unknown) => {
-      throw new Error(
-        '[email:smtp] Failed to load `nodemailer` package. Install it with `npm install nodemailer @types/nodemailer`. ' +
-        (cause instanceof Error ? cause.message : String(cause)),
-      );
     });
 
   return {

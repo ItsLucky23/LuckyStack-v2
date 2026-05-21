@@ -72,9 +72,16 @@ const parseFirstSegment = (pathname: string): string | null => {
   return segment;
 };
 
+/**
+ * Default service resolver: first non-transport path segment.
+ *   /api/vehicles/getAll → 'vehicles'
+ *   /sync/billing/foo    → 'billing'
+ *   /pages/home          → 'pages'
+ *
+ * Consumers needing host-based or header-based routing register a custom
+ * resolver via `registerServiceResolver(...)`.
+ */
 export const parseServiceFromPath = (pathname: string): string | null => {
-  // Strip the `api/` or `sync/` transport prefix if present so that
-  // `api/vehicles/getAll` and `vehicles/getAll` both resolve to `vehicles`.
   const first = parseFirstSegment(pathname);
   if (!first) return null;
 
@@ -85,6 +92,52 @@ export const parseServiceFromPath = (pathname: string): string | null => {
   }
 
   return first;
+};
+
+/**
+ * Pluggable service-resolution function. The router invokes this for
+ * every incoming request to figure out which service the request maps to.
+ *
+ * Implementations receive the full request (path, headers, host) and
+ * return the service key or null. Returning null falls through to the
+ * default resolver — useful for "try custom rules first, default
+ * otherwise" flows.
+ */
+export type ServiceResolver = (input: {
+  pathname: string;
+  /** Lowercase header map; same shape Node passes via `req.headers`. */
+  headers: Record<string, string | string[] | undefined>;
+  /** Host header value (already pulled out for convenience). */
+  host: string;
+}) => string | null;
+
+let registeredResolver: ServiceResolver | null = null;
+
+/**
+ * Replace the default first-path-segment service resolver with a custom
+ * function. Common use cases:
+ *
+ *  - Host-based routing: `api.example.com` → `api`, `admin.example.com` → `admin`.
+ *  - Header-based routing: `X-Tenant-Service` header picks the service.
+ *  - Prefix rules: paths starting with `/v2/` go to a v2 service.
+ *
+ * Return null to defer to the default resolver. Pass `null` to unregister.
+ */
+export const registerServiceResolver = (resolver: ServiceResolver | null): void => {
+  registeredResolver = resolver;
+};
+
+/** Resolve a service key for an incoming request, honoring the registered resolver. */
+export const resolveServiceKey = (input: {
+  pathname: string;
+  headers: Record<string, string | string[] | undefined>;
+  host: string;
+}): string | null => {
+  if (registeredResolver) {
+    const custom = registeredResolver(input);
+    if (custom !== null) return custom;
+  }
+  return parseServiceFromPath(input.pathname);
 };
 
 export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceTargetResolver => {

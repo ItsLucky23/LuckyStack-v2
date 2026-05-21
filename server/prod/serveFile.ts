@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from 'node:url';
-import { PUBLIC_DIR } from '../utils/paths';
+import { getPublicDir } from '@luckystack/core';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +20,7 @@ const resolveExistingPath = (paths: string[]): string | null => {
 export const serveFavicon = (res: ServerResponse) => {
   //? here we get the favicon.ico file from the public folder and serve it to the client
   const publicFolder = resolveExistingPath([
-    PUBLIC_DIR,
+    getPublicDir(),
     path.join(__dirname, '../public'),
     path.join(__dirname, '../../public'),
   ]);

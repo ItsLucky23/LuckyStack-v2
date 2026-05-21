@@ -29,8 +29,9 @@ dist-ssr
 
 uploads/*
 
-# Auto-generated types (regenerated on dev server start)
+# Auto-generated types (regenerated on dev server start + postinstall)
 apiTypes.generated.ts
+apiInputSchemas.generated.ts
 apiDocs.generated.json
 server/prod/generatedApis.ts
 server/prod/generatedApis.*.ts

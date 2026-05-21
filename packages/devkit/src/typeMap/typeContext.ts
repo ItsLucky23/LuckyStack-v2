@@ -1,8 +1,8 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
 import * as ts from 'typescript';
 import path from 'node:path';
 import { getGeneratedSocketTypesPath } from '@luckystack/core';
+
+import { getOrInit } from '../internal/mapUtils';
 
 export interface FileImport {
   source: string;
@@ -138,8 +138,7 @@ export const sanitizeTypeAndCollectImports = ({
             return match;
           }
         } else {
-          if (!namedImports.has(importPath)) namedImports.set(importPath, new Set());
-          namedImports.get(importPath)!.add(importConfig.originalName || typeName);
+          getOrInit(namedImports, importPath, () => new Set<string>()).add(importConfig.originalName || typeName);
           return match;
         }
       }

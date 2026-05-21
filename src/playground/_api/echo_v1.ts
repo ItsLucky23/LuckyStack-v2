@@ -1,4 +1,3 @@
-/* eslint-disable */
 //? Playground: simple echo. Returns the message sent + the caller's session
 //? id + a server-side timestamp. Used by the playground page's "API echo"
 //? button to confirm round-trip latency and that the framework's request

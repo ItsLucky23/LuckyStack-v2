@@ -1,4 +1,3 @@
-/* eslint-disable */
 //? Playground: streams fake "AI tokens" to EVERYONE in the receiver room
 //? via `broadcastStream`. Use this from two browsers joined to the same
 //? room to confirm live cross-tab streaming works exactly like the AI
@@ -59,10 +58,10 @@ const tokenize = (text: string, maxChars = 4): string[] => {
   const out: string[] = [];
   let i = 0;
   while (i < text.length) {
-    if (/\s/.test(text[i]!)) {
+    if (/\s/.test(text[i])) {
       //? Whitespace run as its own piece — preserves natural cadence.
       let j = i;
-      while (j < text.length && /\s/.test(text[j]!)) j++;
+      while (j < text.length && /\s/.test(text[j])) j++;
       out.push(text.slice(i, j));
       i = j;
       continue;
@@ -72,7 +71,7 @@ const tokenize = (text: string, maxChars = 4): string[] => {
     const end = Math.min(i + maxChars, text.length);
     let cut = end;
     for (let k = i + 1; k < end; k++) {
-      if (/\s/.test(text[k]!)) { cut = k; break; }
+      if (/\s/.test(text[k])) { cut = k; break; }
     }
     out.push(text.slice(i, cut));
     i = cut;

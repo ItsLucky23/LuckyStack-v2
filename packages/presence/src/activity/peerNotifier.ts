@@ -15,7 +15,7 @@ export const informRoomPeers = async ({
   token: string,
   io?: Server | null,
   event: typeof socketEventNames.userAfk | typeof socketEventNames.userBack,
-  extraData?: any
+  extraData?: { ignoreSelf?: boolean; time?: number }
 }) => {
   if (!ensureIo(io)) {
     getLogger().warn('presence: no io instance found to inform room peers');

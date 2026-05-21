@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Server as SocketIOServer } from 'socket.io';
 import {
   allowedOrigin,
+  applySocketMiddlewares,
   attachSocketRedisAdapter,
   setIoInstance,
   socketEventNames,
@@ -100,6 +101,11 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
   });
 
   setIoInstance(io);
+
+  //? Apply consumer-registered Socket.io middlewares BEFORE the connect
+  //? handler is attached so they run on the handshake of every incoming
+  //? socket — same contract as a direct `io.use(...)` call.
+  applySocketMiddlewares(io);
 
   //? Redis adapter so room broadcasts fan out across instances. Required for
   //? split/fallback deployments; safe overhead in single-instance deploys.

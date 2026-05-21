@@ -1,4 +1,3 @@
-/* eslint-disable */
 //? Playground: streams progress updates to the ORIGINATOR ONLY (not the
 //? room) via the cheap unicast `stream(...)` helper. Use this when you
 //? want to confirm originator-only streaming is intact and isolated from
@@ -38,7 +37,7 @@ export const main = async ({ clientInput, stream, user }: SyncParams): Promise<S
   const intervalMs = Math.max(30, Math.min(2000, clientInput.intervalMs ?? 150));
 
   for (let i = 1; i <= steps; i++) {
-    stream({
+    void stream({
       step: i,
       total: steps,
       progress: Math.round((i / steps) * 100),

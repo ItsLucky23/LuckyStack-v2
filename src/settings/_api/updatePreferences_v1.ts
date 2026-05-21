@@ -1,5 +1,3 @@
-import type { Prisma } from '@prisma/client';
-
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
@@ -24,15 +22,15 @@ export interface ApiParams {
 
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const incoming = data.preferences;
-  // Allow-list to prevent arbitrary keys from being saved.
-  const sanitized: UserPreferences = {
-    notifyOnNewSignIn: typeof incoming.notifyOnNewSignIn === 'boolean' ? incoming.notifyOnNewSignIn : undefined,
-    notifyOnPasswordChange: typeof incoming.notifyOnPasswordChange === 'boolean' ? incoming.notifyOnPasswordChange : undefined,
-  };
+  // Allow-list to prevent arbitrary keys from being saved. Skip undefined values
+  // entirely so the Prisma JSON column never receives a non-JSON-serializable value.
+  const sanitized: Record<string, boolean> = {};
+  if (typeof incoming.notifyOnNewSignIn === 'boolean') sanitized.notifyOnNewSignIn = incoming.notifyOnNewSignIn;
+  if (typeof incoming.notifyOnPasswordChange === 'boolean') sanitized.notifyOnPasswordChange = incoming.notifyOnPasswordChange;
 
   const updated = await functions.db.prisma.user.update({
     where: { id: user.id },
-    data: { preferences: sanitized as unknown as Prisma.InputJsonValue },
+    data: { preferences: sanitized },
   }).catch(() => null);
 
   if (!updated) {

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import {
   allowedOrigin,
+  dispatchHook,
   extractTokenFromRequest,
   getLogger,
   getParams,
@@ -10,6 +11,7 @@ import {
 } from '@luckystack/core';
 import { getSession } from '@luckystack/login';
 import { sanitizeForLog } from './logSanitize';
+import { getSecurityHeadersBuilder } from './securityHeadersRegistry';
 import type { CreateLuckyStackServerOptions } from './types';
 import { enforceCsrfOnStateChangingRequest } from './httpRoutes/csrfMiddleware';
 import { handleCsrfRoute } from './httpRoutes/csrfRoute';
@@ -32,7 +34,7 @@ const buildSessionCookieOptions = (
 ): string =>
   `HttpOnly; SameSite=${http.sessionCookieSameSite}; Path=${http.sessionCookiePath}; Max-Age=${60 * 60 * 24 * sessionExpiryDays}; ${secure ? 'Secure;' : ''}`;
 
-const setSecurityHeaders = (_req: IncomingMessage, res: ServerResponse, origin: string) => {
+const setSecurityHeaders = (req: IncomingMessage, res: ServerResponse, origin: string) => {
   const { cors, securityHeaders } = getProjectConfig().http;
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', cors.allowedMethods);
@@ -45,6 +47,23 @@ const setSecurityHeaders = (_req: IncomingMessage, res: ServerResponse, origin: 
   res.setHeader('X-Frame-Options', securityHeaders.frameOptions);
   res.setHeader('X-XSS-Protection', securityHeaders.xssProtection);
   res.setHeader('X-Content-Type-Options', securityHeaders.contentTypeOptions);
+
+  //? Consumer-registered builder runs AFTER framework defaults so it can
+  //? override (CSP, HSTS, Permissions-Policy) or extend. Errors fall
+  //? through to defaults so a buggy builder can't kill response delivery.
+  const builder = getSecurityHeadersBuilder();
+  if (builder) {
+    try {
+      const custom = builder(req);
+      if (custom) {
+        for (const [name, value] of Object.entries(custom)) {
+          res.setHeader(name, value);
+        }
+      }
+    } catch (err) {
+      getLogger().warn('securityHeadersBuilder threw — falling back to defaults', { err });
+    }
+  }
 };
 
 //? Routes that run BEFORE params parsing — they don't need (and shouldn't
@@ -186,6 +205,28 @@ export const handleHttpRequest = async (
   const incomingRequestId = req.headers['x-request-id'];
   const requestId = (Array.isArray(incomingRequestId) ? incomingRequestId[0] : incomingRequestId) || randomUUID();
   res.setHeader('X-Request-Id', requestId);
+
+  //? `preHttpRequest` fires before any route dispatch. Use to instrument
+  //? requests (latency timer, audit log), enforce IP allow-lists, or stop
+  //? specific paths with a custom error. Header subset excludes auth/cookie.
+  const safeHeaders: Record<string, string> = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (k === 'authorization' || k === 'cookie' || k === 'set-cookie' || k === 'x-csrf-token') continue;
+    safeHeaders[k] = Array.isArray(v) ? v.join(', ') : String(v ?? '');
+  }
+  const preHttpResult = await dispatchHook('preHttpRequest', {
+    method: req.method?.toUpperCase() ?? 'GET',
+    url: req.url || '/',
+    requestId,
+    origin,
+    headers: safeHeaders,
+  });
+  if (preHttpResult.stopped) {
+    res.statusCode = preHttpResult.signal.httpStatus ?? 403;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ status: 'error', errorCode: preHttpResult.signal.errorCode }));
+    return;
+  }
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);

@@ -39,6 +39,8 @@
   "files": [
     "dist",
     "README.md",
+    "AI_INDEX.md",
+    "docs",
     "LICENSE"
   ],
   "scripts": {

@@ -1,4 +1,3 @@
-/* eslint-disable */
 //? Playground: deliberately throws so the framework's apiError hook fires
 //? and the response normalizer maps the throw into a `{ status: 'error',
 //? errorCode: 'api.internalServerError' }` envelope. Used to demonstrate

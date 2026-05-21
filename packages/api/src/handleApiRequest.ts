@@ -1,6 +1,6 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-import type { apiMessage } from '@luckystack/core';
+import type { apiMessage, PostApiExecutePayload } from '@luckystack/core';
 import { getSession, logout } from '@luckystack/login';
 import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
 import { getProjectConfig } from '@luckystack/core';
@@ -18,7 +18,6 @@ import {
   validateInputByType,
   getLogger,
 } from '@luckystack/core';
-import { setSentryUser, startSpan } from '@luckystack/error-tracking';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '@luckystack/core';
 
 interface handleApiRequestType {
@@ -58,6 +57,15 @@ interface RuntimeApiEntry {
   inputType?: string;
   inputTypeFilePath?: string;
   rateLimit?: number | false;
+  /**
+   * Per-route validation strictness.
+   * `'strict'` (default): runtime Zod validation runs, mismatched payloads
+   *   are rejected with `api.invalidInputType`.
+   * `'relaxed'` / `{ input: 'skip' }`: skip the validate step. Use for public
+   *   webhooks that receive third-party-shaped payloads you can't model in TS,
+   *   or for migration windows when input shapes are in flux.
+   */
+  validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
 }
 
 interface ApiErrorResponse {
@@ -230,17 +238,18 @@ const applyApiRateLimits = async ({ apiEntry, resolvedName, token, socket, user,
   return true;
 };
 
-const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObject, resolvedName, name, emitStream }: {
+const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObject, resolvedName, emitStream }: {
   apiEntry: RuntimeApiEntry;
   normalizedData: Record<string, unknown>;
   user: SessionLayout | null;
   functionsObject: Record<string, unknown>;
   resolvedName: string;
-  name: string;
   emitStream: (payload?: ApiStreamPayload) => void;
 }): Promise<{ error: Error | null; result: RuntimeApiResponse | undefined; durationMs: number }> => {
+  //? Span open/close + identity propagation moved to hook subscribers in
+  //? `@luckystack/error-tracking` (preApiExecute / postApiExecute). This
+  //? handler is now transport-agnostic instrumentation-wise.
   const executeStart = Date.now();
-  const span = startSpan(name, 'api.request') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
     async () => await apiEntry.main({ data: normalizedData, user, functions: functionsObject, stream: emitStream }),
     undefined,
@@ -251,7 +260,6 @@ const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObje
       transport: 'socket',
     },
   );
-  span?.end?.();
   return { error: error ?? null, result: result ?? undefined, durationMs: Date.now() - executeStart };
 };
 
@@ -363,9 +371,18 @@ const emitApiResult = async ({
       }) }
     : preRespond.response;
 
-  socket.emit(buildApiResponseEventName(responseIndex), finalResponse);
+  //? `transformApiResponse` fires AFTER preApiRespond and BEFORE socket emit.
+  //? Designed for response mutation — header injection, body transformation,
+  //? response signing — that's awkward inside preApiRespond. Handlers mutate
+  //? `payload.response` in place (same shape as preApiRespond.response).
+  const transformPayload = { routeName: resolvedName, user, response: finalResponse };
+  await dispatchHook('transformApiResponse', transformPayload);
 
-  await dispatchHook('postApiRespond', { routeName: resolvedName, user, response: finalResponse });
+  socket.emit(buildApiResponseEventName(responseIndex), transformPayload.response);
+
+  //? `postApiRespond` is observation-only — the response is already on the
+  //? wire. Use it for audit logging, metrics, dual-write replication.
+  await dispatchHook('postApiRespond', { routeName: resolvedName, user, response: transformPayload.response });
 };
 
 export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
@@ -381,10 +398,9 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   const { responseIndex } = msg;
   const user = await getSession(token);
-  setSentryUser(user?.id ? {
-    id: user.id,
-    email: user.email || undefined,
-  } : null);
+  //? Identity propagation now flows via the `preApiExecute` hook subscriber
+  //? registered by `@luckystack/error-tracking`'s `enableErrorTrackingAutoInstrumentation()`.
+  //? Direct `setSentryUser` removed from this handler — see migration doc.
   const preferredLocale =
     extractLanguageFromHeader(socket.handshake.headers['x-language'])
     || extractLanguageFromHeader(socket.handshake.headers['accept-language'])
@@ -463,39 +479,73 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const rateLimitOk = await applyApiRateLimits({ apiEntry, resolvedName, token, socket, user, emitApiError });
   if (!rateLimitOk) return;
 
-  warnIfInputTypeMissing(resolvedName, apiEntry.inputType);
-  await dispatchHook('preApiValidate', { routeName: resolvedName, data: normalizedData, user });
+  //? Per-route validation toggle. `'relaxed'` or `{ input: 'skip' }` skips
+  //? runtime input validation entirely — useful for public webhooks (Stripe,
+  //? Slack, GitHub) where the third party's payload shape isn't reasonable
+  //? to model in TypeScript. Default `'strict'`.
+  const validationMode = (() => {
+    const v = apiEntry.validation;
+    if (!v) return 'strict';
+    if (typeof v === 'string') return v;
+    return v.input === 'skip' ? 'relaxed' : 'strict';
+  })();
 
-  const inputValidation = await validateInputByType({
-    typeText: apiEntry.inputType,
-    value: normalizedData,
-    rootKey: 'data',
-    filePath: apiEntry.inputTypeFilePath,
-  });
+  if (validationMode === 'strict') {
+    warnIfInputTypeMissing(resolvedName, apiEntry.inputType);
+  }
+  await dispatchHook('preApiValidate', { routeName: resolvedName, data: normalizedData, user, transport: 'socket' });
 
-  await dispatchHook('postApiValidate', {
-    routeName: resolvedName,
-    data: normalizedData,
-    user,
-    validation: inputValidation,
-  });
+  if (validationMode === 'strict') {
+    const inputValidation = await validateInputByType({
+      typeText: apiEntry.inputType,
+      value: normalizedData,
+      rootKey: 'data',
+      filePath: apiEntry.inputTypeFilePath,
+    });
 
-  if (inputValidation.status === 'error') {
-    return emitApiError({
-      response: {
-        status: 'error',
-        errorCode: 'api.invalidInputType',
-        errorParams: [{ key: 'message', value: inputValidation.message }],
-      },
-      fallbackHttpStatus: 400,
+    await dispatchHook('postApiValidate', {
+      routeName: resolvedName,
+      data: normalizedData,
+      user,
+      validation: inputValidation,
+      transport: 'socket',
+    });
+
+    if (inputValidation.status === 'error') {
+      return emitApiError({
+        response: {
+          status: 'error',
+          errorCode: 'api.invalidInputType',
+          errorParams: [{ key: 'message', value: inputValidation.message }],
+        },
+        fallbackHttpStatus: 400,
+      });
+    }
+  } else {
+    //? Relaxed: surface the skip via postApiValidate so audit handlers see it.
+    await dispatchHook('postApiValidate', {
+      routeName: resolvedName,
+      data: normalizedData,
+      user,
+      validation: { status: 'success' },
+      transport: 'socket',
     });
   }
 
-  const preExecuteResult = await dispatchHook('preApiExecute', {
+  //? Single payload reference reused by pre/post — auto-instrumentation
+  //? subscribers in `@luckystack/error-tracking` pin spans via WeakMap on
+  //? this object. Mutating `result/error/durationMs` is safe because
+  //? handlers observe by-name (not by snapshot).
+  const executePayload: PostApiExecutePayload = {
     routeName: resolvedName,
     data: normalizedData,
     user,
-  });
+    transport: 'socket',
+    result: undefined,
+    error: null,
+    durationMs: 0,
+  };
+  const preExecuteResult = await dispatchHook('preApiExecute', executePayload);
   if (preExecuteResult.stopped) {
     return emitApiError({
       response: { status: 'error', errorCode: preExecuteResult.signal.errorCode },
@@ -509,18 +559,13 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
     user,
     functionsObject,
     resolvedName,
-    name,
     emitStream,
   });
 
-  await dispatchHook('postApiExecute', {
-    routeName: resolvedName,
-    data: normalizedData,
-    user,
-    result,
-    error: error ?? null,
-    durationMs,
-  });
+  executePayload.result = result;
+  executePayload.error = error ?? null;
+  executePayload.durationMs = durationMs;
+  await dispatchHook('postApiExecute', executePayload);
 
   await emitApiResult({ socket, responseIndex, resolvedName, error, result, preferredLocale, user });
 }

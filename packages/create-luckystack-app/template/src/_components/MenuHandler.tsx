@@ -81,7 +81,7 @@ function MenuItemFrame({ entry, position, background }: MenuItemFrameProps) {
 
 export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   const [stack, setStack] = useState<MenuEntry[]>([]);
-  const closeTimeoutsRef = useRef(new Map<string, number>());
+  const closeTimeoutsRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const backdropPressedRef = useRef(false);
 
   const submitTopFormFromEnter = useCallback(() => {
@@ -128,9 +128,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
         setStack((current) => current.filter((entry) => entry.id !== top.id));
       }, MENU_ANIMATION_MS);
 
-      //? Cast: `globalThis.setTimeout` picks up Node's overload (Timeout)
-      //? when @types/node is in scope. The Map stores DOM-typed `number`s.
-      closeTimeoutsRef.current.set(top.id, timeoutId as unknown as number);
+      closeTimeoutsRef.current.set(top.id, timeoutId);
       return next;
     });
   }, []);

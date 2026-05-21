@@ -2,7 +2,7 @@
 
 > File-based routing for pages, APIs, and real-time sync events.
 
-> **Where the code lives (post-package-split):** route discovery, version-token validation, and the dev-mode loaders are in `@luckystack/devkit` (`packages/devkit/src/`). Production route maps are emitted into `server/prod/generatedApis.<preset>.ts` and selected at runtime via `LUCKYSTACK_BUNDLE`. The matching logic that turns an inbound request into a handler lives in `@luckystack/api` (`packages/api/src/handleApiRequest.ts`) and `@luckystack/sync` (`packages/sync/src/handleSyncRequest.ts`). HTTP-fallback dispatch is split across `packages/server/src/httpRoutes/*` (one handler per concern: csrf, health, /_test/reset, favicon, uploads, auth, api, sync, custom routes, static fallback) — see [`packages/server/README.md`](../packages/server/README.md#http-route-handler-layout) for the table.
+> **Where the code lives (post-package-split):** route discovery, version-token validation, and the dev-mode loaders are in `@luckystack/devkit` (`packages/devkit/src/`). Production route maps are emitted into `server/prod/generatedApis.<preset>.ts` and selected at runtime via the first positional argv to `server.ts` (parsed by `@luckystack/server/parseArgv`; comma-separated for multi-preset boots). The matching logic that turns an inbound request into a handler lives in `@luckystack/api` (`packages/api/src/handleApiRequest.ts`) and `@luckystack/sync` (`packages/sync/src/handleSyncRequest.ts`). HTTP-fallback dispatch is split across `packages/server/src/httpRoutes/*` (one handler per concern: csrf, health, /_test/reset, favicon, uploads, auth, api, sync, custom routes, static fallback) — see [`packages/server/README.md`](../packages/server/README.md#http-route-handler-layout) for the table.
 
 > **Framework `system/logout` is exact-match.** Earlier builds short-circuited any API whose final path segment was `logout` (so `admin/logout/v1` would silently invoke the framework logout instead of the consumer's handler). The framework now matches the full normalized route name (`system/logout`); consumer routes that happen to end in `logout` reach their own handler unchanged.
 
@@ -86,7 +86,7 @@ src/{page}/_api/{name}_v1.ts  -->  accessible as api/{page}/{name}/v1
 **Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_api/` as API handlers.
 After initial load, the dev watcher performs incremental in-memory updates for changed `_api` files instead of rebuilding the entire API map on every save.
 
-**Production:** The `scripts/generateServerRequests.ts` build script statically generates one route map per preset, emitted as `server/prod/generatedApis.{presetName}.ts`. At runtime the `LUCKYSTACK_BUNDLE` env var selects which file is loaded (unset falls back to `generatedApis.default.ts`). Preset definitions live in `services.config.ts`.
+**Production:** The `scripts/generateServerRequests.ts` build script statically generates one route map per preset, emitted as `server/prod/generatedApis.{presetName}.ts`. At runtime the **first positional argv** to `server.ts` (parsed by `@luckystack/server/parseArgv`) selects which file(s) are loaded — comma-separated for multi-preset boots; no argv falls back to `generatedApis.default.ts`. Preset definitions live in `services.config.ts`.
 
 ### Name Resolution
 

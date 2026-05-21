@@ -3,7 +3,7 @@ import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated
 import sharp from 'sharp';
 import path from 'node:path';
 import { mkdir, stat } from 'node:fs/promises';
-import { UPLOADS_DIR, processUpload } from '@luckystack/core';
+import { getUploadsDir, processUpload } from '@luckystack/core';
 
 export const rateLimit: number | false = 20;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -36,7 +36,8 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     const contentType = matches[1];
     const buffer = Buffer.from(matches[2], "base64");
     const fileName = `${user.id}.webp`;
-    const filePath = path.join(UPLOADS_DIR, fileName);
+    const uploadsDir = getUploadsDir();
+    const filePath = path.join(uploadsDir, fileName);
 
     //? `processUpload` handles the onUploadStart / onUploadComplete hooks
     //? around our sharp encode-and-save callback. The framework owns the
@@ -48,7 +49,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       uploadKind: 'avatar',
       fileName,
       encodeAndSave: async (raw) => {
-        await mkdir(UPLOADS_DIR, { recursive: true });
+        await mkdir(uploadsDir, { recursive: true });
         await sharp(raw).webp({ quality: 80 }).toFile(filePath);
         const savedStat = await stat(filePath).catch(() => null);
         return savedStat?.size ?? raw.byteLength;

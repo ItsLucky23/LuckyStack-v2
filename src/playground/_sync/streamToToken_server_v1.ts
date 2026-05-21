@@ -1,4 +1,3 @@
-/* eslint-disable */
 //? Playground: token-targeted streaming. Demonstrates `streamTo(tokens, payload)`
 //? — the third streaming primitive alongside `stream` (originator-only) and
 //? `broadcastStream` (whole room). Useful for AI chatbot scenarios where you
@@ -65,7 +64,7 @@ export const main = async ({ clientInput, streamTo, user }: SyncParams): Promise
   }
 
   const intervalMs = Math.max(20, Math.min(2000, clientInput.intervalMs ?? 80));
-  const text = clientInput.text || 'Hello — this is a targeted stream.';
+  const text = clientInput.text ?? 'Hello — this is a targeted stream.';
   //? Chunk by words so the demo reads naturally; reuses no helpers since
   //? `streamBroadcast`'s tokenizer is split-on-char (faster, less readable
   //? for visual demo purposes).

@@ -11,6 +11,7 @@ import {
   syncMarkerSegment,
   getRoutingRules,
 } from './routingRules';
+import { getOrInit } from './internal/mapUtils';
 
 export interface RouteNamingIssue {
   kind: 'api' | 'sync';
@@ -221,10 +222,7 @@ export const collectDuplicateNormalizedRouteKeyIssues = (srcDir: string): Duplic
         continue;
       }
 
-      if (!routeKeyToFilePaths.has(routeKey)) {
-        routeKeyToFilePaths.set(routeKey, []);
-      }
-      routeKeyToFilePaths.get(routeKey)!.push(normalizedFilePath);
+      getOrInit(routeKeyToFilePaths, routeKey, () => []).push(normalizedFilePath);
       routeKeyKinds.set(routeKey, 'api');
       continue;
     }
@@ -235,10 +233,7 @@ export const collectDuplicateNormalizedRouteKeyIssues = (srcDir: string): Duplic
         continue;
       }
 
-      if (!routeKeyToFilePaths.has(routeKey)) {
-        routeKeyToFilePaths.set(routeKey, []);
-      }
-      routeKeyToFilePaths.get(routeKey)!.push(normalizedFilePath);
+      getOrInit(routeKeyToFilePaths, routeKey, () => []).push(normalizedFilePath);
       routeKeyKinds.set(routeKey, 'sync');
     }
   }

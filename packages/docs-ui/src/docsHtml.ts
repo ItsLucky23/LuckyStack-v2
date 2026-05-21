@@ -4,7 +4,32 @@
 //? (background / container / muted / common) loosely so it doesn't look
 //? wildly out of place in projects that haven't customized them.
 
-export const renderDocsHtml = (jsonPath: string, pageTitle: string): string => {
+export interface RenderDocsHtmlOptions {
+  branding?: {
+    logoUrl?: string;
+    brandColor?: string;
+    fontFamily?: string;
+  };
+  /**
+   * When true, the renderer injects an inline "try-it-out" form per
+   * endpoint. The form calls `apiRequest` from `@luckystack/core` against
+   * the live server. Disabled by default (requires a logged-in session).
+   */
+  enableTryItOut?: boolean;
+}
+
+export const renderDocsHtml = (
+  jsonPath: string,
+  pageTitle: string,
+  options: RenderDocsHtmlOptions = {},
+): string => {
+  const branding = options.branding ?? {};
+  const accent = branding.brandColor ?? '#58a6ff';
+  const fontFamily = branding.fontFamily ?? `system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+  const logoMarkup = branding.logoUrl
+    ? `<img src="${escapeHtml(branding.logoUrl)}" alt="logo" style="height:32px;width:auto;margin-right:12px;" />`
+    : '';
+  const tryItOutData = options.enableTryItOut ? 'true' : 'false';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -20,9 +45,10 @@ export const renderDocsHtml = (jsonPath: string, pageTitle: string): string => {
     --title: #e6edf3;
     --common: #c9d1d9;
     --muted: #8b949e;
-    --accent: #58a6ff;
+    --accent: ${accent};
+    --font-family: ${fontFamily};
     --get: #3fb950;
-    --post: #58a6ff;
+    --post: ${accent};
     --put: #d29922;
     --delete: #f85149;
   }
@@ -40,10 +66,15 @@ export const renderDocsHtml = (jsonPath: string, pageTitle: string): string => {
   * { box-sizing: border-box; }
   body {
     margin: 0; padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--font-family);
     background: var(--bg); color: var(--common);
     line-height: 1.5;
   }
+  .brand-row { display: flex; align-items: center; }
+  .try-it-out { margin-top: 12px; padding: 12px; background: var(--container-hover); border: 1px solid var(--border); border-radius: 6px; }
+  .try-it-out textarea { width: 100%; min-height: 80px; background: var(--bg); color: var(--common); border: 1px solid var(--border); padding: 6px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .try-it-out button { margin-top: 6px; padding: 6px 12px; background: var(--accent); color: white; border: 0; border-radius: 4px; cursor: pointer; }
+  .try-it-out pre.result { margin-top: 8px; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; max-height: 240px; overflow: auto; font-size: 12px; }
   .layout {
     max-width: 1200px;
     margin: 0 auto;
@@ -169,7 +200,7 @@ export const renderDocsHtml = (jsonPath: string, pageTitle: string): string => {
 </head>
 <body>
 <div class="layout">
-  <h1>${escapeHtml(pageTitle)}</h1>
+  <div class="brand-row">${logoMarkup}<h1>${escapeHtml(pageTitle)}</h1></div>
   <p class="lead">Generated from <code>apiDocs.generated.json</code>. Raw JSON: <a class="json-link" href="${escapeHtml(jsonPath)}">${escapeHtml(jsonPath)}</a></p>
   <div class="summary" id="summary"></div>
   <div class="filter-bar">
@@ -179,7 +210,53 @@ export const renderDocsHtml = (jsonPath: string, pageTitle: string): string => {
 </div>
 <script>
   const JSON_PATH = ${JSON.stringify(jsonPath)};
+  const ENABLE_TRY_IT_OUT = ${tryItOutData};
   const stateByKey = new Map();
+
+  //? Inline runner: hits the live server using the same fetch transport
+  //? that the framework apiRequest helper uses. Auth comes from the
+  //? browser's existing session cookie or sessionStorage; no token prompt.
+  const runEndpoint = async (button, route, version, dataField) => {
+    let parsed;
+    try {
+      parsed = dataField.value.trim().length === 0 ? {} : JSON.parse(dataField.value);
+    } catch (err) {
+      const resultEl = button.parentElement.querySelector('pre.result');
+      resultEl.textContent = 'JSON parse error: ' + err.message;
+      return;
+    }
+    button.disabled = true;
+    const resultEl = button.parentElement.querySelector('pre.result');
+    resultEl.textContent = 'Sending...';
+    try {
+      const response = await fetch('/' + route + '?stream=false', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(parsed),
+      });
+      const text = await response.text();
+      try {
+        resultEl.textContent = JSON.stringify(JSON.parse(text), null, 2);
+      } catch {
+        resultEl.textContent = text;
+      }
+    } catch (err) {
+      resultEl.textContent = 'Network error: ' + err.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  const renderTryItOut = (route, version) => {
+    if (!ENABLE_TRY_IT_OUT) return '';
+    return '<div class="try-it-out">' +
+      '<div style="font-weight:600;font-size:12px;margin-bottom:4px;">Try it out (live request)</div>' +
+      '<textarea placeholder=\\'{"key":"value"}\\'>{}</textarea>' +
+      '<button onclick="runEndpoint(this,\\'' + route + '\\',\\'' + version + '\\',this.previousElementSibling)">Send</button>' +
+      '<pre class="result"></pre>' +
+      '</div>';
+  };
 
   const escapeHtml = (str) => String(str).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -231,6 +308,25 @@ export const renderDocsHtml = (jsonPath: string, pageTitle: string): string => {
               <pre>\${escapeHtml(meta.stream)}</pre>
             </div>
           \` : ''}
+          \${meta.owner ? \`
+            <div class="detail-section">
+              <div class="detail-label">owner</div>
+              <div>\${escapeHtml(meta.owner)}</div>
+            </div>
+          \` : ''}
+          \${meta.tags && meta.tags.length ? \`
+            <div class="detail-section">
+              <div class="detail-label">tags</div>
+              <div>\${meta.tags.map(t => '<span class="badge">' + escapeHtml(String(t)) + '</span>').join(' ')}</div>
+            </div>
+          \` : ''}
+          \${meta.deprecated ? \`
+            <div class="detail-section">
+              <div class="detail-label">deprecated</div>
+              <div style="color:var(--delete);">\${escapeHtml(String(meta.deprecated))}</div>
+            </div>
+          \` : ''}
+          \${renderTryItOut(page + '/' + name + '/' + version, version)}
         </div>
       </div>
     \`;

@@ -122,6 +122,13 @@ type SyncParamsForFullName<
     receiver: string;
     ignoreSelf?: boolean;
     onStream?: SyncRequestStreamCallbackForFullName<F, V>;
+    /**
+     * Per-request override of `projectConfig.offlineQueue.dropPolicy`. Lets a
+     * specific sync ("editor cursor move") pick `'drop-oldest'` while the
+     * app default stays `'reject'` for safer sends. When omitted, falls back
+     * to the global config.
+     */
+    offlineDropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
   }
   : {
     name: F;
@@ -130,6 +137,8 @@ type SyncParamsForFullName<
     receiver: string;
     ignoreSelf?: boolean;
     onStream?: SyncRequestStreamCallbackForFullName<F, V>;
+    /** Per-request override (see typed branch). */
+    offlineDropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
   };
 
 interface RuntimeSyncParams {
@@ -139,6 +148,7 @@ interface RuntimeSyncParams {
   receiver?: string;
   ignoreSelf?: boolean;
   onStream?: SyncRequestStreamCallback;
+  offlineDropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
 }
 
 interface SyncErrorParam { key: string; value: string | number | boolean };
@@ -276,7 +286,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
   params: SyncRequestParamsWithOptions<F, V>
 ): Promise<Prettify<SyncRequestResponseForFullName<F, V>>> => {
   const runtimeParams = params as RuntimeSyncParams;
-  const { name, version, receiver, ignoreSelf, onStream } = runtimeParams;
+  const { name, version, receiver, ignoreSelf, onStream, offlineDropPolicy } = runtimeParams;
   const payloadData = runtimeParams.data;
 
   type RequestOutput = Prettify<SyncRequestResponseForFullName<F, V>>;
@@ -382,6 +392,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
               runRequest(s);
             },
             createdAt: Date.now(),
+            dropPolicy: offlineDropPolicy,
           });
           if (!enqueued) {
             resolve(normalizeSyncError({

@@ -26,6 +26,7 @@ export type {
   SecurityHeadersConfig,
   CorsConfig,
   AuthConfig,
+  PasswordPolicyConfig,
   SocketConfig,
   SyncConfig,
   SyncStreamThrottleConfig,
@@ -58,10 +59,13 @@ export {
 export type { Notifier, NotifyInput, NotifyParam } from './notifier';
 export {
   registerEmailSender,
+  registerEmailSenders,
   getEmailSender,
+  getEmailSenderByName,
+  listEmailSenderNames,
   isEmailSenderRegistered,
 } from './emailRegistry';
-export type { EmailSender, EmailMessage, EmailResult } from './emailRegistry';
+export type { EmailSender, EmailMessage, EmailResult, EmailSenderRegistry } from './emailRegistry';
 export {
   registerDeployConfig,
   getDeployConfig,
@@ -92,6 +96,23 @@ export type { LocaleReloader } from './localeReloader';
 export type { statusContent, SOCKETSTATUS } from './socketStatusTypes';
 export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionTypes';
 export * from './sentrySetup';
+export {
+  registerErrorTracker,
+  registerErrorTrackers,
+  getActiveErrorTrackers,
+  captureExceptionAcrossTrackers,
+  captureMessageAcrossTrackers,
+  setErrorTrackerUser,
+  recordMetricAcrossTrackers,
+  startSpanAcrossTrackers,
+} from './errorTrackerRegistry';
+export type {
+  ErrorTracker,
+  ErrorTrackerContext,
+  ErrorTrackerUser,
+  ErrorTrackerEvent,
+  SpanResult,
+} from './errorTrackerRegistry';
 export * from './env';
 export * from './db';
 export { redis, getRedisConnectionOptions } from './redis';
@@ -129,6 +150,20 @@ export {
 export * from './cookies';
 export * from './httpApiUtils';
 export * from './paths';
+export {
+  registerSocketMiddleware,
+  getSocketMiddlewares,
+  clearSocketMiddlewares,
+  applySocketMiddlewares,
+} from './socketMiddlewareRegistry';
+export type { SocketMiddleware } from './socketMiddlewareRegistry';
+export {
+  registerCsrfConfig,
+  getCsrfConfig,
+  resetCsrfConfigForTests,
+  DEFAULT_CSRF_CONFIG,
+} from './csrfConfig';
+export type { CsrfConfig, CsrfCookieOptions } from './csrfConfig';
 export { serveAvatar } from './serveAvatars';
 export { processUpload } from './processUpload';
 export type { ProcessUploadInput, ProcessUploadResult } from './processUpload';
@@ -144,7 +179,16 @@ export { extractTokenFromSocket } from './extractToken';
 export { extractTokenFromRequest } from './extractTokenFromRequest';
 export { validateRequest, isFalsy } from './validateRequest';
 export type { ValidationResult } from './validateRequest';
-export { checkRateLimit, getRateLimitStatus, clearRateLimit, clearAllRateLimits } from './rateLimiter';
+export {
+  checkRateLimit,
+  getRateLimitStatus,
+  clearRateLimit,
+  clearAllRateLimits,
+  registerRateLimitStrategy,
+  getRateLimitStrategy,
+  defaultRateLimitStrategy,
+} from './rateLimiter';
+export type { RateLimitStrategy, CheckRateLimitParams, RateLimitResult } from './rateLimiter';
 export { validateInputByType } from './runtimeTypeValidation';
 export { default as allowedOrigin } from './checkOrigin';
 export {
@@ -180,6 +224,7 @@ export type {
   PreApiRespondPayload,
   PostApiRespondPayload,
   ApiResponseEnvelope,
+  PreSyncAuthorizePayload,
   PreSyncFanoutPayload,
   PostSyncFanoutPayload,
   ApiErrorPayload,

@@ -24,7 +24,8 @@
       "Bash(grep -n \"^const\\\\|^function\\\\|^if \\(pathname\\\\|^export\\\\|=> {$\\\\|server.listen\" server/server.ts)",
       "Bash(del *)",
       "Bash(git stash *)",
-      "Bash(git grep *)"
+      "Bash(git grep *)",
+      "Bash(npm --workspace packages/devkit run build)"
     ]
   }
 }

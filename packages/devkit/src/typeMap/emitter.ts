@@ -1,16 +1,46 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
-import fs from 'node:fs';
+﻿import fs from 'node:fs';
 import path from 'node:path';
 import { getGeneratedApiDocsPath, getGeneratedSocketTypesPath } from '@luckystack/core';
 
+import { mustGet } from '../internal/mapUtils';
+
+//? `auth` is consumer-defined â€” each project exports its own `AuthProps`
+//? shape from `config.ts`. The emitter just passes the parsed value through
+//? to the generated JSON; treat as opaque.
 export interface ApiTypeEntry {
 	input: string;
 	output: string;
 	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
 	rateLimit: number | false | undefined;
-	auth: any;
+	auth: unknown;
 	version: string;
+}
+
+interface ApiDocsEntry {
+	page: string;
+	name: string;
+	version: string;
+	method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+	input: string;
+	output: string;
+	rateLimit: number | false | undefined;
+	auth: unknown;
+	path: string;
+}
+
+interface SyncDocsEntry {
+	page: string;
+	name: string;
+	version: string;
+	clientInput: string;
+	serverOutput: string;
+	clientOutput: string;
+	path: string;
+}
+
+export interface GeneratedDocsData {
+	apis: Record<string, ApiDocsEntry[]>;
+	syncs: Record<string, SyncDocsEntry[]>;
 }
 
 export interface SyncTypeEntry {
@@ -90,10 +120,10 @@ export interface ApiTypeMap {
 
 	const sortedPages = [...typesByPage.keys()].sort();
 	const sortedSyncPages = [...syncTypesByPage.keys()].sort();
-	const docsData: any = { apis: {}, syncs: {} };
+	const docsData: GeneratedDocsData = { apis: {}, syncs: {} };
 
 	for (const pagePath of sortedPages) {
-		const apis = typesByPage.get(pagePath)!;
+		const apis = mustGet(typesByPage, pagePath, 'typesByPage');
 		const grouped = new Map<string, { version: string; entry: ApiTypeEntry }[]>();
 
 		docsData.apis[pagePath] = [];
@@ -101,13 +131,13 @@ export interface ApiTypeMap {
 		for (const [apiKey, entry] of apis.entries()) {
 			const { name, version } = splitVersionedKey(apiKey);
 			if (!grouped.has(name)) grouped.set(name, []);
-			grouped.get(name)!.push({ version, entry });
+			mustGet(grouped, name, 'grouped').push({ version, entry });
 		}
 
 		content += `  '${pagePath}': {\n`;
 		for (const apiName of [...grouped.keys()].sort()) {
 			content += `    '${apiName}': {\n`;
-			for (const { version, entry } of grouped.get(apiName)!.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.apis[pagePath].push({
 					page: pagePath,
 					name: apiName,
@@ -151,19 +181,19 @@ export const apiMethodMap: Record<string, Record<string, Record<string, HttpMeth
 `;
 
 	for (const pagePath of sortedPages) {
-		const apis = typesByPage.get(pagePath)!;
+		const apis = mustGet(typesByPage, pagePath, 'typesByPage');
 		const grouped = new Map<string, { version: string; method: string }[]>();
 
 		for (const [apiKey, entry] of apis.entries()) {
 			const { name, version } = splitVersionedKey(apiKey);
 			if (!grouped.has(name)) grouped.set(name, []);
-			grouped.get(name)!.push({ version, method: entry.method });
+			mustGet(grouped, name, 'grouped').push({ version, method: entry.method });
 		}
 
 		content += `  '${pagePath}': {\n`;
 		for (const apiName of [...grouped.keys()].sort()) {
 			content += `    '${apiName}': {`;
-			const methods = grouped.get(apiName)!
+			const methods = mustGet(grouped, apiName, 'grouped')
 				.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
 				.map((item) => ` '${item.version}': '${item.method}'`)
 				.join(',');
@@ -197,20 +227,20 @@ export interface SyncTypeMap {
 `;
 
 	for (const pagePath of sortedSyncPages) {
-		const syncs = syncTypesByPage.get(pagePath)!;
+		const syncs = mustGet(syncTypesByPage, pagePath, 'syncTypesByPage');
 		const grouped = new Map<string, { version: string; entry: SyncTypeEntry }[]>();
 		docsData.syncs[pagePath] = [];
 
 		for (const [syncKey, entry] of syncs.entries()) {
 			const { name, version } = splitVersionedKey(syncKey);
 			if (!grouped.has(name)) grouped.set(name, []);
-			grouped.get(name)!.push({ version, entry });
+			mustGet(grouped, name, 'grouped').push({ version, entry });
 		}
 
 		content += `  '${pagePath}': {\n`;
 		for (const syncName of [...grouped.keys()].sort()) {
 			content += `    '${syncName}': {\n`;
-			for (const { version, entry } of grouped.get(syncName)!.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, syncName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.syncs[pagePath].push({
 					page: pagePath,
 					name: syncName,
@@ -252,7 +282,7 @@ export const writeTypeMapArtifacts = ({
 	docsData,
 }: {
 	content: string;
-	docsData: any;
+	docsData: GeneratedDocsData;
 }) => {
 	try {
 		const outputPath = getGeneratedSocketTypesPath();

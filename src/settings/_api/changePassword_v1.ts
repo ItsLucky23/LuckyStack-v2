@@ -19,16 +19,16 @@ export interface ApiParams {
 }
 
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
-  const { passwordMinLength, passwordMaxLength } = getProjectConfig().auth;
+  const { passwordPolicy } = getProjectConfig().auth;
   const { currentPassword, newPassword, confirmPassword } = data;
 
   if (!currentPassword || !newPassword || !confirmPassword) {
     return { status: 'error', errorCode: 'login.empty' };
   }
-  if (newPassword.length < passwordMinLength) {
+  if (newPassword.length < passwordPolicy.minLength) {
     return { status: 'error', errorCode: 'login.passwordCharacterMinimum' };
   }
-  if (newPassword.length > passwordMaxLength) {
+  if (newPassword.length > passwordPolicy.maxLength) {
     return { status: 'error', errorCode: 'login.passwordCharacterLimit' };
   }
   if (newPassword !== confirmPassword) {

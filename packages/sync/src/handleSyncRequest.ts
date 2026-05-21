@@ -1,6 +1,6 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-import type { syncMessage } from "@luckystack/core";
+import type { syncMessage, PostSyncFanoutPayload } from "@luckystack/core";
 import { Socket } from "socket.io";
 import { getSession } from "@luckystack/login";
 import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
@@ -22,7 +22,6 @@ import {
   getLogger,
 } from "@luckystack/core";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
-import { setSentryUser } from '@luckystack/error-tracking';
 import { buildSyncStreamEmitters } from './_shared/streamEmitters';
 
 type SyncStreamPayload = Record<string, unknown>;
@@ -315,10 +314,9 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   }
 
   const user = await getSession(token);
-  setSentryUser(user?.id ? {
-    id: user.id,
-    email: user.email || undefined,
-  } : null);
+  //? Identity propagation now flows via the `preSyncAuthorize` hook subscriber
+  //? registered by `@luckystack/error-tracking`'s `enableErrorTrackingAutoInstrumentation()`.
+  //? Direct `setSentryUser` removed from this handler — see migration doc.
   const { syncObject, functionsObject } = await getRuntimeSyncMaps();
 
   //? we check if there is a client file or/and a server file, if they both dont exist we abort
@@ -377,6 +375,33 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         userLanguage: user?.language,
       }));
     }
+  }
+
+  //? Custom authorization hook. Fires after basic auth + AuthProps check
+  //? pass, before rate-limit + input validation. Consumers use this to
+  //? enforce room-membership rules ("user X may only emit sync to room
+  //? Y"), per-tenant policies, or audit trails. Stop with a specific
+  //? errorCode to reject without revealing input shape.
+  const preAuthorizeResult = await dispatchHook('preSyncAuthorize', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+    receiver,
+    transport: 'socket',
+  });
+  if (preAuthorizeResult.stopped) {
+    if (shouldLogDev()) {
+      getLogger().warn(`sync: preSyncAuthorize stopped ${resolvedName}`, { sync: resolvedName, errorCode: preAuthorizeResult.signal.errorCode });
+    }
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: {
+        status: 'error',
+        errorCode: preAuthorizeResult.signal.errorCode,
+        httpStatus: preAuthorizeResult.signal.httpStatus,
+      },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    }));
   }
 
   //? Rate limit check: per-sync bucket fallback + global per-IP cap
@@ -487,13 +512,19 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }));
   }
 
-  const preFanoutResult = await dispatchHook('preSyncFanout', {
+  //? Single payload reference reused by pre/post — span pinning in
+  //? `@luckystack/error-tracking` uses WeakMap on this object. `recipientCount`
+  //? is mutated in place after fanout completes.
+  const fanoutPayload: PostSyncFanoutPayload = {
     routeName: resolvedName,
     data: normalizedData,
     user,
     receiver,
     serverOutput,
-  });
+    transport: 'socket',
+    recipientCount: 0,
+  };
+  const preFanoutResult = await dispatchHook('preSyncFanout', fanoutPayload);
   if (preFanoutResult.stopped) {
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: {
@@ -629,14 +660,8 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
   }
 
-  await dispatchHook('postSyncFanout', {
-    routeName: resolvedName,
-    data: normalizedData,
-    user,
-    receiver,
-    serverOutput,
-    recipientCount,
-  });
+  fanoutPayload.recipientCount = recipientCount;
+  await dispatchHook('postSyncFanout', fanoutPayload);
 
   return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), {
     status: 'success',
