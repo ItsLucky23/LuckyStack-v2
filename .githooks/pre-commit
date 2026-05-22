@@ -1,9 +1,16 @@
 #!/bin/sh
-#? Regenerates docs/AI_QUICK_INDEX.md so it stays in sync with whatever this
-#? commit touches (per-package AI_INDEX.md, docs/*.md, slash commands, skills,
-#? new packages). The generator is deterministic (no timestamps), so when
-#? nothing relevant changed the resulting file is byte-identical and the
-#? `git add` below is a no-op for the working tree.
+#? Regenerates the two AI-facing snapshot files so they stay in sync with
+#? whatever this commit touches:
+#?   - docs/AI_QUICK_INDEX.md   (per-package AI_INDEX.md, docs/*.md,
+#?                               slash commands, skills, new packages)
+#?   - docs/AI_CAPABILITIES.md  (installed @luckystack/* packages, the
+#?                               injection map from
+#?                               src/_sockets/apiTypes.generated.ts, plus
+#?                               local helpers/components/shared)
+#?
+#? Both generators are deterministic (no timestamps), so when nothing
+#? relevant changed the resulting files are byte-identical and the
+#? `git add` lines below are no-ops for the working tree.
 #?
 #? Active via `git config core.hooksPath .githooks` (set by the root
 #? `prepare` script at install time).
@@ -11,11 +18,14 @@
 set -e
 
 if ! command -v npm >/dev/null 2>&1; then
-  echo "[pre-commit] npm not on PATH — skipping ai:index regeneration."
+  echo "[pre-commit] npm not on PATH — skipping AI snapshot regeneration."
   exit 0
 fi
 
 echo "[pre-commit] Regenerating docs/AI_QUICK_INDEX.md..."
 npm run ai:index --silent
 
-git add docs/AI_QUICK_INDEX.md
+echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
+npm run ai:capabilities --silent
+
+git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md

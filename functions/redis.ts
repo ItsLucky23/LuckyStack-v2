@@ -10,7 +10,9 @@
 //?
 //? For framework-wide Redis backend override: build a custom Redis adapter
 //? in `luckystack/core/clients.ts` before bootstrap.
-import { redis } from '@luckystack/core';
-
-export { redis };
-export default redis;
+//? Re-export via module-specifier (`export … from`) so the codegen can
+//? resolve the real type at compile time. The locally-bound
+//? `import { redis }; export { redis }` form falls back to `any` because
+//? the resolver can't trace the underlying module from a named export
+//? alone.
+export { redis, redis as default } from '@luckystack/core';

@@ -22,6 +22,9 @@
   ],
   "scripts": {
     "ai:index": "node scripts/generateAiIndex.mjs",
+    "ai:capabilities": "node scripts/generateAiCapabilities.mjs",
+    "test": "tsx --tsconfig tsconfig.server.json scripts/testAll.ts",
+    "scaffold:test": "node scripts/scaffoldRouteTest.mjs",
     "client": "vite --host",
     "server": "npx tsx --tsconfig tsconfig.server.json server/dev/supervisor.ts",
     "server:direct": "npx tsx --tsconfig tsconfig.server.json server/server.ts",

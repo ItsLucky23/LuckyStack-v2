@@ -1,3 +1,11 @@
+/* eslint-disable luckystack/no-raw-try-catch, luckystack/no-raw-fetch-in-src --
+   This file is the LuckyStack API Explorer UI: a Swagger-like browser that lets
+   users (a) test framework `/api/*` and `/sync/*` endpoints over both socket AND
+   raw HTTP transports, and (b) inspect runtime JSON payloads. Both raw `fetch`
+   to typed routes and inline `try { JSON.parse } catch { fallback }` are
+   intentional here — the helpers (`apiRequest`, `tryCatch`) would defeat the
+   "show the consumer the wire-level details" purpose. Do NOT propagate this
+   disable to consumer code; it lives only inside this docs-viewer file. */
 import { useEffect, useMemo, useState } from 'react';
 
 import { backendUrl, rateLimiting } from 'config';

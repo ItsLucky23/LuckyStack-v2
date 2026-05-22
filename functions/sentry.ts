@@ -12,13 +12,14 @@
 //? For framework-wide error-tracker override: use `registerErrorTracker()` or
 //? `registerErrorTrackers([])` from @luckystack/error-tracking. That registry is
 //? consumed by the auto-instrumentation and any custom `captureException` calls.
-import sentryDefault, {
+//? Re-export via module-specifier (`export … from`) so the codegen can
+//? resolve real types at compile time. See `functions/redis.ts` for the
+//? rationale.
+export {
   initializeSentry,
   captureException,
   captureMessage,
   setSentryUser,
   startSpan,
 } from '@luckystack/error-tracking';
-
-export { initializeSentry, captureException, captureMessage, setSentryUser, startSpan };
-export default sentryDefault;
+export { default } from '@luckystack/error-tracking';

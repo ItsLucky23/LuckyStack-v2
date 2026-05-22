@@ -43,7 +43,7 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 
 ### Autonomy & Commands (8-10) — HYBRID
 
-8. **Autonomous (no permission needed)**: `npm run lint`, `npm run build`, `npm run ai:index`, all git read-commands (`status`, `diff`, `log`, `branch`), `git add` + `git commit`, all Grep / Glob / Read.
+8. **Autonomous (no permission needed)**: `npm run lint`, `npm run build`, `npm run ai:index`, `npm run ai:capabilities`, `npm run scaffold:test`, all git read-commands (`status`, `diff`, `log`, `branch`), `git add` + `git commit`, all Grep / Glob / Read.
    **NOT autonomous (always ask)**: `npm install`, `prisma migrate`, server start, `rm`, force-pushes, branch-deletes. Server start is always a developer action.
 9. **No ad-hoc string-replacement scripts or regex mutations** outside the Edit / Write tools. Use the proper file-editing tools.
 10. **No loose `.md` / `.txt` in repo root.** Documentation lives in `docs/` (which ships via `create-luckystack-app`).
@@ -51,16 +51,16 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 ### Code Quality & Framework Rules (11-21)
 
 11. **After every code change: `npm run lint && npm run build` autonomously.** Zero warnings, zero errors before delivery.
-12. **Reuse existing helpers in `src/_functions` and components in `src/_components`.** Check before building.
+12. **Reuse existing helpers in `src/_functions` and components in `src/_components`.** Check `docs/AI_CAPABILITIES.md` (the auto-generated capability snapshot) BEFORE authoring any new helper, util, or cross-cutting module. If a capability already exists there — use it. If it lives in a not-yet-installed `@luckystack/*` package (see `docs/PACKAGE_OVERVIEW.md`), propose the install instead of reimplementing. After adding ANY new export to `functions/`, `shared/`, `src/_functions/`, `src/_components/`, or after installing/upgrading a `@luckystack/*` package, run `npm run ai:capabilities` autonomously to refresh the snapshot. The `.githooks/pre-commit` hook re-runs it at commit time as a safety net, but the AI should not rely on the hook — refresh in-session so subsequent work in the same session sees the new capability.
 13. **i18n is mandatory for user-facing text** via the `useTranslator` pattern from `src/_functions/translator`.
 14. **Tailwind colors come ONLY from `src/index.css` `@theme` block.** Never arbitrary hex values.
-15. **Update documentation immediately after code changes.** After significant doc updates, mention running `npm run ai:index` to regenerate `docs/AI_QUICK_INDEX.md`.
+15. **Update documentation immediately after code changes.** After significant doc updates (new doc file, slash command, skill, package), run `npm run ai:index` autonomously to regenerate `docs/AI_QUICK_INDEX.md`. The `.githooks/pre-commit` hook re-runs it at commit time as a safety net; refresh in-session anyway so the new index is visible to subsequent work.
 16. **At session start: read `config.ts` and `.env`. NEVER read `.env.local`** (contains real secrets).
 17. **Update `.env_template` and `.env.local_template` when new env vars are added.** The user updates their own `.env.local`.
 18. **Suggest extracting repeating patterns** into a helper, component, or skill.
 19. **Security is top priority** unless the user explicitly says otherwise for a given task.
 20. **Critical self-review on larger implementations** — re-read your own diff before declaring done.
-21. **Respect type generation and template injection.** NEVER write `{} as unknown as TYPE` or `{} as any`. No `unsafe*` wrappers around `apiRequest` / `syncRequest` / `upsertSyncEventCallback`. Treat `src/_sockets/apiTypes.generated.ts` as the source of truth.
+21. **Respect type generation and template injection.** NEVER write `{} as unknown as TYPE` or `{} as any`. No `unsafe*` wrappers around `apiRequest` / `syncRequest` / `upsertSyncEventCallback`. Treat `src/_sockets/apiTypes.generated.ts` as the source of truth. In API + sync handlers, prefer `functions.tryCatch.tryCatch(...)` and `functions.sleep.sleep(...)` (auto-injected from `shared/`) plus the consumer shims in `functions/` (db, redis, sentry, session, …) over direct package imports. Spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`.
 
 ### Prompt Development (22)
 
@@ -78,6 +78,8 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 ## Branch Log Protocol
 
 AI MUST append an entry to `branch-logs/<sanitized-branch>.md` after every prompt that produces **real code or architecture changes**. Skip for lint-only fixes, typo fixes, or translation-string-only edits. **When in doubt, log.**
+
+**INDEX is mandatory**: every append to a `branch-logs/<branch>.md` file MUST be followed by an update to the corresponding row in `branch-logs/INDEX.md` (`Last updated` timestamp, `Entries` count, and `Status` if changed). Add a new row if none exists. See `docs/BRANCH_LOG_PROTOCOL.md` Section 6.5 for the full rule.
 
 Format spec lives in `docs/BRANCH_LOG_PROTOCOL.md`. Logs are NOT gitignored — the `/review_branch` slash command reads them to compare AI-reported progress against the actual diff.
 
@@ -161,8 +163,8 @@ When a Prisma model type is needed in app code, create `src/_types/{ModelName}.t
 
 Always use the custom `tryCatch`:
 
-- **Client**: `import tryCatch from 'shared/tryCatch'` — returns `[error, result]` tuple.
-- **Server**: `import { tryCatch } from 'server/functions/tryCatch'` — returns `[error, result]` with automatic Sentry capture. In API and sync handlers, `tryCatch` is injected via the `functions` parameter.
+- **In API / sync handlers**: use the injected `functions.tryCatch.tryCatch(...)` (sourced from `shared/tryCatch.ts` via the function-injection system — spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`).
+- **Elsewhere (client components, server utilities, scripts)**: `import { tryCatch } from '@luckystack/core'`. Same `[error, result]` tuple shape; the server-side path captures to Sentry via the registered error-tracker.
 - Check the first value; if truthy, there's an error. Never use raw `try/catch`.
 
 ---
@@ -177,9 +179,16 @@ When analysis surfaces potential mistakes, unhandled errors, or improvement oppo
 
 Before implementing, check that the code flow matches what `docs/ARCHITECTURE_*.md` describes. If they agree: implement. If they disagree after a careful second read: tell the user so the docs can be corrected — otherwise follow the docs.
 
-### No Test Files
+### Testing
 
-Do not create test files to verify backend functionality. Instead, explain to the user how to test the feature (browser console, curl, the examples page) and why that approach is sufficient.
+Two layers, both run by `npm run test` (which invokes the `@luckystack/test-runner` CLI):
+
+- **Auto-sweep** — contract / auth-enforcement / rate-limit / fuzz checks against every endpoint. Walks `apiMethodMap` automatically; no per-route file required.
+- **Per-route business-logic tests** — `src/<page>/_api/<name>_v<N>.tests.ts` (and `_sync/<name>_server_v<N>.tests.ts`). Created via `npm run scaffold:test <page>/<name>/<version>` — the stub lists common scenarios as TODO checklist comments. Use these when the sweep can't reach the assertion: post-conditions on hooks, integration with other features, edge-case business logic.
+
+After creating any new API or sync route, run `npm run scaffold:test <route>` autonomously and fill in at least one happy-path test case before declaring done. The auto-sweep already covers basic crash-resistance; your per-route cases should target assertions the sweep can't infer.
+
+Full spec: `docs/ARCHITECTURE_TESTING.md`.
 
 ---
 

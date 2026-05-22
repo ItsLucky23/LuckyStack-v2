@@ -12,6 +12,7 @@ import {
   createLocalizedNormalizer,
   registerLocalizedNormalizer,
   registerLocaleReloader,
+  tryCatch,
 } from '@luckystack/core';
 import { SRC_DIR } from './paths';
 
@@ -32,19 +33,20 @@ const localePaths: Record<LanguageCode, string> = {
   fr: path.join(SRC_DIR, '_locales', 'fr.json'),
 };
 
-export const reloadLocaleTranslations = () => {
+export const reloadLocaleTranslations = async () => {
   const nextTranslations: Record<LanguageCode, TranslationRecord> = { ...translationsByLanguage };
 
   for (const language of Object.keys(localePaths) as LanguageCode[]) {
-    try {
+    const [error, parsed] = await tryCatch(() => {
       const filePath = localePaths[language];
       const rawJson = fs.readFileSync(filePath, 'utf8');
-      const parsed = JSON.parse(rawJson) as TranslationRecord;
-
-      nextTranslations[language] = parsed;
-    } catch (error) {
+      return JSON.parse(rawJson) as TranslationRecord;
+    });
+    if (error || !parsed) {
       console.log(`Failed to reload locale ${language}:`, error, 'yellow');
+      continue;
     }
+    nextTranslations[language] = parsed;
   }
 
   translationsByLanguage = nextTranslations;

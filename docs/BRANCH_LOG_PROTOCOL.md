@@ -139,6 +139,31 @@ Used by a reviewer (human or AI) to summarize a branch before merge. The command
 
 If the branch log is missing, `/review_branch` falls back to diff-only review and notes the absence.
 
+## 6.5. INDEX maintenance (mandatory)
+
+Every time you create or append to a `branch-logs/<branch>.md` file you MUST also update the corresponding row in `branch-logs/INDEX.md`. This rule applies whether the log update was autonomous, triggered by `/log_progress`, or done by hand. The index is what makes sprint-end audits ("review tickets DEV-120..DEV-140") tractable without listing the directory.
+
+### What to update
+
+1. **Find the row** matching the current branch in `branch-logs/INDEX.md`. If no row exists, add one in alphabetical order by branch name.
+2. **`Last updated`** — set to the timestamp of the new entry's `## ` heading (same `YYYY-MM-DD` or `YYYY-MM-DD HH:MM` format).
+3. **`Entries`** — increment by 1 for each new entry added (or set to the new total if you are unsure).
+4. **`Status`** — flip to `merged YYYY-MM-DD` if the branch has just landed in master; flip to `abandoned` if the branch is being discarded. Leave as `active` otherwise.
+5. **`Ticket(s)`** — when adding a new row, extract by matching `[A-Z]{2,}-\d+` against the branch name (`DEV-120`, `PROJ-42`, etc.). Use `(none)` if the branch name carries no ticket prefix.
+
+### Examples
+
+| Operation | INDEX.md action |
+|---|---|
+| First entry on a new branch | Add a new row with `Entries: 1`, `Status: active`, `Last updated` = entry header timestamp |
+| Appending entry N+1 to an existing branch | Update existing row: `Entries: N+1`, `Last updated` = new entry's timestamp |
+| Observing the branch was merged to master | Flip `Status` to `merged YYYY-MM-DD` on the existing row |
+| Discovering a row is out of sync with the file | Fix it in the same edit pass |
+
+### Drift repair (deferred)
+
+A `npm run ai:index-branchlogs` script that regenerates INDEX.md from disk by scanning `branch-logs/*.md` headings is reserved as a drift-repair tool. It is NOT the primary maintenance path — manual updates by the writing agent stay the source of truth.
+
 ## 7. Sample log
 
 This is what a healthy branch log looks like after a week of work:

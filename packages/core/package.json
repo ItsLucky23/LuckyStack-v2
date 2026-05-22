@@ -43,6 +43,10 @@
     "./client": {
       "types": "./dist/client.d.ts",
       "import": "./dist/client.js"
+    },
+    "./eslint": {
+      "types": "./dist/eslint/index.d.ts",
+      "import": "./dist/eslint/index.js"
     }
   },
   "files": [
@@ -62,6 +66,7 @@
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",
+    "eslint": "^9.0.0",
     "ioredis": "^5.10.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -72,6 +77,7 @@
     "zod": "^3.25.0"
   },
   "peerDependenciesMeta": {
+    "eslint": { "optional": true },
     "react": { "optional": true },
     "react-dom": { "optional": true },
     "react-router-dom": { "optional": true },

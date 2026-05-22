@@ -2,7 +2,7 @@ import * as ts from 'typescript';
 import fs from 'node:fs';
 import path from 'node:path';
 import { FileImport, ImportCollectors, parseFileTypeContext, sanitizeTypeAndCollectImports } from './typeContext';
-import { getGeneratedSocketTypesPath, getServerFunctionsDir } from '@luckystack/core';
+import { getGeneratedSocketTypesPath, getServerFunctionDirs } from '@luckystack/core';
 import { expandType, getServerProgram } from './tsProgram';
 
 // Strips default parameter values from argument lists so the generated interface
@@ -311,38 +311,40 @@ const findSignatureForExport = (
   return 'any';
 };
 
-const generateFunctionsForDir = (dir: string, collectors: ImportCollectors, indent = '\t'): string => {
-  if (!fs.existsSync(dir)) return '';
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  let output = '';
+//? IR node shapes used by the multi-directory merge. Each root directory
+//? produces an `IRDirNode` tree; multiple trees are merged with conflict
+//? detection before final serialization to a TypeScript interface body.
+type IRFileNode = {
+  kind: 'file';
+  exports: Map<string, string>;
+  defaultExportName: string | null;
+  //? Set when the file contains `export * from '<module>'` (wildcard
+  //? re-export). When present and no other exports exist, the file is
+  //? emitted as a single `name: typeof import('<module>')` so consumers
+  //? get the full module shape on `functions.<name>.<...>`.
+  wildcardReExport: string | null;
+  sourcePath: string;
+};
 
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
+type IRDirNode = {
+  kind: 'dir';
+  children: Map<string, IRFileNode | IRDirNode>;
+  sourcePath: string;
+};
 
-    if (entry.isDirectory()) {
-      const subOutput = generateFunctionsForDir(fullPath, collectors, `${indent}  `);
-      if (subOutput.trim()) {
-        output += `${indent}${entry.name}: {\n${subOutput}${indent}};\n`;
-      }
-      continue;
-    }
+const parseFunctionFile = (fullPath: string, collectors: ImportCollectors): IRFileNode | null => {
+  try {
+    const rawContent = fs.readFileSync(fullPath, 'utf8');
+    const sourceFile = ts.createSourceFile(fullPath, rawContent, ts.ScriptTarget.Latest, true);
+    const { availableExports, fileImports } = parseFileTypeContext(rawContent);
+    const program = getServerProgram();
+    const checker = program.getTypeChecker();
+    const programSource = program.getSourceFile(fullPath);
+    const exports = new Map<string, string>();
+    let defaultExportName: string | null = null;
+    let wildcardReExport: string | null = null;
 
-    if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
-
-    const fileName = entry.name.replace('.ts', '');
-    let fileOutput = '';
-
-    try {
-      const rawContent = fs.readFileSync(fullPath, 'utf8');
-      const sourceFile = ts.createSourceFile(fullPath, rawContent, ts.ScriptTarget.Latest, true);
-      const { availableExports, fileImports } = parseFileTypeContext(rawContent);
-      const program = getServerProgram();
-      const checker = program.getTypeChecker();
-      const programSource = program.getSourceFile(fullPath);
-      const exports = new Map<string, string>();
-      let defaultExportName: string | null = null;
-
-      for (const statement of sourceFile.statements) {
+    for (const statement of sourceFile.statements) {
         const hasExport = (statement as ts.HasModifiers).modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
 
         if (ts.isVariableStatement(statement) && hasExport) {
@@ -431,31 +433,149 @@ const generateFunctionsForDir = (dir: string, collectors: ImportCollectors, inde
         if (ts.isExportAssignment(statement) && !statement.isExportEquals && ts.isIdentifier(statement.expression)) {
           defaultExportName = statement.expression.text;
         }
+
+        // export * from 'module' — wildcard re-export. Stash the resolved
+        // module specifier; serialization decides whether to emit it.
+        if (
+          ts.isExportDeclaration(statement)
+          && !statement.exportClause
+          && statement.moduleSpecifier
+          && ts.isStringLiteral(statement.moduleSpecifier)
+        ) {
+          wildcardReExport = relativizeModuleSpecifier(statement.moduleSpecifier.text, fullPath);
+        }
       }
 
-      const defaultSig = defaultExportName ? exports.get(defaultExportName) : undefined;
-      if (defaultSig) exports.delete(defaultExportName!);
+    return { kind: 'file', exports, defaultExportName, wildcardReExport, sourcePath: fullPath };
+  } catch (error) {
+    console.error(`[TypeMapGenerator] Error parsing functions file ${fullPath}:`, error);
+    return null;
+  }
+};
 
-      for (const [exportName, sig] of exports) {
-        fileOutput += `${indent}  ${exportName}: ${sig};\n`;
-      }
+const walkDirToIR = (dir: string, collectors: ImportCollectors): IRDirNode | null => {
+  if (!fs.existsSync(dir)) return null;
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const children = new Map<string, IRFileNode | IRDirNode>();
 
-      if (defaultSig && !fileOutput.trim()) {
-        fileOutput += `${indent}  ${fileName}: ${defaultSig};\n`;
-      }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
 
-      if (fileOutput) {
-        output += `${indent}${fileName}: {\n${fileOutput}${indent}};\n`;
+    if (entry.isDirectory()) {
+      const subDir = walkDirToIR(fullPath, collectors);
+      if (subDir && subDir.children.size > 0) {
+        children.set(entry.name, subDir);
       }
-    } catch (error) {
-      console.error(`[TypeMapGenerator] Error parsing functions file ${fullPath}:`, error);
+      continue;
+    }
+
+    if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+
+    const fileName = entry.name.replace('.ts', '');
+    const parsed = parseFunctionFile(fullPath, collectors);
+    if (parsed && (parsed.exports.size > 0 || parsed.defaultExportName !== null || parsed.wildcardReExport !== null)) {
+      children.set(fileName, parsed);
     }
   }
 
+  return { kind: 'dir', children, sourcePath: dir };
+};
+
+const formatConflict = (keyPath: string[], a: IRFileNode | IRDirNode, b: IRFileNode | IRDirNode): string => {
+  const dottedKey = keyPath.join('.');
+  return (
+    `[function-injection] Conflict at \`functions.${dottedKey}\`: ` +
+    `defined in both \`${a.sourcePath}\` and \`${b.sourcePath}\`. ` +
+    `Delete one — \`shared/\` is the canonical location for framework re-exports.`
+  );
+};
+
+//? Merge `source` INTO `target` in place, throwing on conflicts. A "conflict"
+//? is one of:
+//?   - same key path mapped to a file in both roots
+//?   - same key path mapped to a file in one root and a directory in another
+//? Two directories with the same name merge recursively without warning so
+//? that `functions/admin/users.ts` + `shared/admin/roles.ts` produce
+//? `functions.admin.{users, roles}` cleanly.
+const mergeIR = (target: IRDirNode, source: IRDirNode, prefix: string[] = []): void => {
+  for (const [name, sourceChild] of source.children) {
+    const targetChild = target.children.get(name);
+    if (!targetChild) {
+      target.children.set(name, sourceChild);
+      continue;
+    }
+    const keyPath = [...prefix, name];
+    if (targetChild.kind !== sourceChild.kind) {
+      throw new Error(formatConflict(keyPath, targetChild, sourceChild));
+    }
+    if (targetChild.kind === 'file' || sourceChild.kind === 'file') {
+      throw new Error(formatConflict(keyPath, targetChild, sourceChild));
+    }
+    mergeIR(targetChild, sourceChild, keyPath);
+  }
+};
+
+const serializeIRDir = (dir: IRDirNode, indent: string): string => {
+  let output = '';
+  for (const [name, child] of dir.children) {
+    if (child.kind === 'dir') {
+      const subOutput = serializeIRDir(child, `${indent}  `);
+      if (subOutput.trim()) {
+        output += `${indent}${name}: {\n${subOutput}${indent}};\n`;
+      }
+      continue;
+    }
+
+    const exportsCopy = new Map(child.exports);
+    const defaultSig = child.defaultExportName ? exportsCopy.get(child.defaultExportName) : undefined;
+    if (defaultSig) exportsCopy.delete(child.defaultExportName!);
+
+    //? Wildcard re-export (`export * from '<module>'`) — emit the file as a
+    //? single `name: typeof import('<module>')` so the full module surface
+    //? becomes typed under `functions.<name>.<exportFromSource>`. When the
+    //? file ALSO has named/default exports, the wildcard is dropped (this
+    //? combined form is rare; the named exports take precedence to avoid an
+    //? awkward intersection type).
+    if (child.wildcardReExport && exportsCopy.size === 0 && !defaultSig) {
+      output += `${indent}${name}: typeof import('${child.wildcardReExport}');\n`;
+      continue;
+    }
+
+    //? Default-only re-exports (`export { default } from '...'`) end up as a
+    //? single 'default' key with no `export default <identifier>` statement.
+    //? Alias it to the filename so consumers can call `functions.<name>.<name>()`
+    //? instead of the awkward `functions.<name>.default()`.
+    if (!defaultSig && exportsCopy.size === 1 && exportsCopy.has('default')) {
+      const reExportSig = exportsCopy.get('default')!;
+      exportsCopy.delete('default');
+      exportsCopy.set(name, reExportSig);
+    }
+
+    let fileOutput = '';
+    for (const [exportName, sig] of exportsCopy) {
+      fileOutput += `${indent}  ${exportName}: ${sig};\n`;
+    }
+    if (defaultSig && !fileOutput.trim()) {
+      fileOutput += `${indent}  ${name}: ${defaultSig};\n`;
+    }
+    if (fileOutput) {
+      output += `${indent}${name}: {\n${fileOutput}${indent}};\n`;
+    }
+  }
   return output;
 };
 
 export const generateServerFunctions = (collectors: ImportCollectors): string => {
-  return generateFunctionsForDir(getServerFunctionsDir(), collectors, '\t');
+  const dirs = getServerFunctionDirs();
+  if (dirs.length === 0) return '';
+
+  const merged: IRDirNode = { kind: 'dir', children: new Map(), sourcePath: '<merged>' };
+  for (const dir of dirs) {
+    const ir = walkDirToIR(dir, collectors);
+    if (!ir) continue;
+    mergeIR(merged, ir);
+  }
+
+  return serializeIRDir(merged, '\t');
 };
 

@@ -48,8 +48,34 @@ export const getServerDir = (): string => resolveAgainstRoot(getProjectConfig().
 export const getSharedDir = (): string => resolveAgainstRoot(getProjectConfig().paths.sharedDir);
 export const getUploadsDir = (): string => resolveAgainstRoot(getProjectConfig().paths.uploadsDir);
 export const getPublicDir = (): string => resolveAgainstRoot(getProjectConfig().paths.publicDir);
-export const getServerFunctionsDir = (): string =>
-	resolveAgainstRoot(getProjectConfig().paths.serverFunctionsDir);
+//? Returns the list of directories the function-injection system walks
+//? at codegen + runtime. Default `['functions', 'shared']`. Consumers can
+//? override via `registerProjectConfig({ paths: { serverFunctionDirs: [...] } })`.
+//?
+//? Backwards-compat: if a consumer still sets the deprecated singular
+//? `serverFunctionsDir: string`, we honor it as a single-entry list. Once
+//? both are set, `serverFunctionDirs` wins.
+export const getServerFunctionDirs = (): string[] => {
+	const paths = getProjectConfig().paths;
+	const arrayConfig = paths.serverFunctionDirs;
+	if (Array.isArray(arrayConfig) && arrayConfig.length > 0) {
+		return arrayConfig.map(resolveAgainstRoot);
+	}
+	if (typeof paths.serverFunctionsDir === 'string' && paths.serverFunctionsDir.length > 0) {
+		return [resolveAgainstRoot(paths.serverFunctionsDir)];
+	}
+	return [];
+};
+
+/**
+ * @deprecated Use `getServerFunctionDirs()` instead. Returns the first
+ * directory from the array, or `'functions'` resolved against the workspace
+ * root when no directories are configured.
+ */
+export const getServerFunctionsDir = (): string => {
+	const dirs = getServerFunctionDirs();
+	return dirs[0] ?? resolveAgainstRoot('functions');
+};
 
 export const getGeneratedSocketTypesPath = (): string =>
 	resolveAgainstRoot(getProjectConfig().paths.generatedSocketTypes);

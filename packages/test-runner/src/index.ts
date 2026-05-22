@@ -27,6 +27,22 @@ export type { RunFuzzTestsInput } from './runFuzzTests';
 export type { ResetServerStateInput } from './resetServerState';
 
 export {
+  runCustomTests,
+  discoverCustomTestFiles,
+} from './customTests';
+export type {
+  CustomTestCase,
+  TestContext,
+  TestExpect,
+  CustomTestResult,
+  RunCustomTestsInput,
+  RunCustomTestsSummary,
+} from './customTests';
+
+export { runAllTests, logRunAllSummary } from './runAllTests';
+export type { RunAllTestsInput, RunAllTestsSummary } from './runAllTests';
+
+export {
   registerTestLayer,
   listTestLayers,
   registerTestFixture,

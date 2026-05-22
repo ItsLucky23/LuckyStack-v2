@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from 'node:url';
-import { getPublicDir } from '@luckystack/core';
+import { getPublicDir, tryCatch } from '@luckystack/core';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -122,18 +122,19 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
     return res.end("Not Found");
   }
 
-  try {
-    //? attempt to read the file and serve it to the client
-    const content = await fs.promises.readFile(filePath);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.writeHead(200, { 'Content-Type': contentType });
-    res.end(content);
-  } catch {
+  //? Attempt to read the file and serve it; on failure return the
+  //? build-prompt for index.html or a 404 for any other asset.
+  const [readError, content] = await tryCatch(() => fs.promises.readFile(filePath));
+  if (readError || !content) {
     if (url == 'index.html') {
       res.end("-_- you have to run the 'npm run build' command first -_-")
     } else {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not Found");
     }
+    return;
   }
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.writeHead(200, { 'Content-Type': contentType });
+  res.end(content);
 };

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT_DIR, getServerFunctionsDir, getSharedDir, getSrcDir } from '@luckystack/core';
+import { ROOT_DIR, getServerFunctionDirs, getSharedDir, getSrcDir } from '@luckystack/core';
 
 import { getOrInit } from './internal/mapUtils';
 
@@ -170,7 +170,9 @@ const collectScopedFiles = (): Set<string> => {
   const files = new Set<string>();
   collectScriptFiles(getSrcDir(), files);
   collectScriptFiles(getSharedDir(), files);
-  collectScriptFiles(getServerFunctionsDir(), files);
+  for (const dir of getServerFunctionDirs()) {
+    collectScriptFiles(dir, files);
+  }
 
   const configFile = tryResolveWithExtensions(path.join(ROOT_DIR, 'config'));
   if (configFile) {

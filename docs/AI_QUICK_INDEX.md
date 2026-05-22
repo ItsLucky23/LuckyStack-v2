@@ -31,12 +31,14 @@
 | ARCHITECTURE_AUTH.md | --- | docs/ARCHITECTURE_AUTH.md |
 | ARCHITECTURE_EMAIL.md | LuckyStack treats transactional email as a **plug-in**: framework code never depends on a specific provider. Adapters are registered at server boot via a registry in `@luckystack/core`, mirroring how the project handles `notify`, the Sentry adapter, and `projectConfig`. | docs/ARCHITECTURE_EMAIL.md |
 | ARCHITECTURE_EXTENSION_POINTS.md | The framework's design rule is **per-package config + composable adapter | docs/ARCHITECTURE_EXTENSION_POINTS.md |
+| ARCHITECTURE_FUNCTION_INJECTION.md | Every API handler at `src/{page}/_api/{name}_v{N}.ts` and every sync handler at `src/{page}/_sync/{name}_server_v{N}.ts` receives a `functions` parameter alongside `data`, `user`, etc.: | docs/ARCHITECTURE_FUNCTION_INJECTION.md |
 | ARCHITECTURE_LOGGING.md | --- | docs/ARCHITECTURE_LOGGING.md |
 | ARCHITECTURE_PACKAGING.md | Last updated: 2026-05-13 | docs/ARCHITECTURE_PACKAGING.md |
 | ARCHITECTURE_ROUTING.md | --- | docs/ARCHITECTURE_ROUTING.md |
 | ARCHITECTURE_SESSION.md | --- | docs/ARCHITECTURE_SESSION.md |
 | ARCHITECTURE_SOCKET.md | --- | docs/ARCHITECTURE_SOCKET.md |
 | ARCHITECTURE_SYNC.md | --- | docs/ARCHITECTURE_SYNC.md |
+| ARCHITECTURE_TESTING.md | ``` | docs/ARCHITECTURE_TESTING.md |
 
 ## Function inventory across packages
 
@@ -585,6 +587,7 @@
 | /log_progress | Manually append a branch-log entry for the current branch summarizing the most recent prompt's work. |
 | /parallel_review | Spawn four parallel sub-agent reviewers (security, performance, conventions, type-safety) over the current branch diff and consolidate their findings. |
 | /review_branch | Full audit of the current branch — compares git history against branch-log and SESSION_STATE, flags discrepancies, suggests a commit message and review focus areas. |
+| /review_memory | Audit the session's persistent memory store — list every memory by type with mtime, accept user flags for keep/update/delete, apply edits. |
 | /save_handoff | Write a session handoff file (solo or parallel-agent mode) capturing done/in-progress/blockers/next-steps/open-questions/files-touched. |
 
 ## Skills

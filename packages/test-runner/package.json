@@ -54,6 +54,10 @@
     "@luckystack/core": "^0.1.0"
   },
   "peerDependencies": {
+    "@luckystack/login": "^0.1.0",
     "zod": "^3.25.0"
+  },
+  "peerDependenciesMeta": {
+    "@luckystack/login": { "optional": true }
   }
 }

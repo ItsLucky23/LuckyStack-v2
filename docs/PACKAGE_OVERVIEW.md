@@ -7,7 +7,7 @@
 
 | Package | Use case | Required peers | Optional peers |
 |---|---|---|---|
-| `@luckystack/core` | Foundation: socket-first transport contracts, DI registries (config, prisma, redis, notifier, email, error-tracker, logger, runtime maps), hooks bus, and cross-cutting primitives (`tryCatch`, rate limiter, CORS, validateRequest, offline queue, CSRF). | `@prisma/client@^6.19.0`, `ioredis@^5.10.0`, `socket.io@^4.8.0`, `socket.io-client@^4.8.0`, `zod@^3.25.0` | `react@^19.0.0`, `react-dom@^19.0.0`, `react-router-dom@^7.0.0`, `sonner@^2.0.0` |
+| `@luckystack/core` | Foundation: socket-first transport contracts, DI registries (config, prisma, redis, notifier, email, error-tracker, logger, runtime maps), hooks bus, cross-cutting primitives (`tryCatch`, rate limiter, CORS, validateRequest, offline queue, CSRF), AND the LuckyStack eslint contract via the `@luckystack/core/eslint` subpath. | `@prisma/client@^6.19.0`, `ioredis@^5.10.0`, `socket.io@^4.8.0`, `socket.io-client@^4.8.0`, `zod@^3.25.0` | `react@^19.0.0`, `react-dom@^19.0.0`, `react-router-dom@^7.0.0`, `sonner@^2.0.0`, `eslint@^9.0.0` (only `/eslint` subpath) |
 | `@luckystack/server` | One-call server bootstrap that wires raw Node HTTP, Socket.io (+ Redis adapter), framework routes (`/api/*`, `/sync/*`, `/_health`, `/livez`, `/readyz`, `/_test/reset`, `/auth/*`), CSRF, CORS, security headers, and dev hot reload. | `@prisma/client@^6.19.0` (via core), `socket.io@^4.8.0` | `@luckystack/error-tracking`, `@luckystack/email`, `@luckystack/docs-ui`, `@luckystack/devkit` (dev-only) |
 | `@luckystack/api` | Transport-agnostic API request layer for file-based `_api/` routes — handles auth, rate limit, Zod validation, hook dispatch, and response normalization for both socket and HTTP transports. | `@prisma/client@^6.19.0` (via core), `socket.io@^4.8.0` | none |
 | `@luckystack/sync` | Real-time room-based fanout over Socket.io (+ HTTP/SSE fallback) for file-based `_sync/` routes with streaming primitives and an offline-replay queue. | `@prisma/client@^6.19.0` (via core), `socket.io@^4.8.0`, `socket.io-client@^4.8.0` | `react@^19.2.0` (only `/client` subpath) |
@@ -41,7 +41,7 @@
 
 | Package | Use case | Required peers | Optional peers |
 |---|---|---|---|
-| `@luckystack/devkit` | Dev-time file-based route discovery, hot reload, TypeScript-program-backed type-map + Zod schema emission, supervisor process restart, and `luckystack-validate-deploy` CLI. | `typescript@~5.7.3`, `zod@^3.25.0`, `@prisma/client@^6.19.0` | `tsx` (supervisor child process) |
+| `@luckystack/devkit` | Dev-time file-based route discovery, hot reload, TypeScript-program-backed type-map + Zod schema emission (including the multi-directory function-injection map — spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`), supervisor process restart, and `luckystack-validate-deploy` CLI. | `typescript@~5.7.3`, `zod@^3.25.0`, `@prisma/client@^6.19.0` | `tsx` (supervisor child process) |
 | `@luckystack/test-runner` | Generated-type-driven sweep that walks every API endpoint and runs four progressive layers: contract smoke, auth enforcement, rate-limit, and crash-resistance fuzz. | `zod@^3.25.0` | none |
 | `@luckystack/docs-ui` | Dev-only Swagger-style browser at `/_docs` that renders `apiDocs.generated.json` with method, auth, rate limit, input/output shape, and optional inline try-it-out. | none (composes with `@luckystack/server` `customRoutes`) | none |
 

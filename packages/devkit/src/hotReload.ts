@@ -50,7 +50,14 @@ export const setupWatchers = () => {
   const pathsCfg = getProjectConfig().paths;
   const srcSegment = `/${pathsCfg.srcDir.replaceAll('\\', '/')}/`;
   const sharedSegment = `/${pathsCfg.sharedDir.replaceAll('\\', '/')}/`;
-  const serverFunctionsSegment = `/${pathsCfg.serverFunctionsDir.replaceAll('\\', '/')}/`;
+  //? Multi-directory function-injection roots. Falls back to the legacy
+  //? singular `serverFunctionsDir` for consumer configs that haven't
+  //? migrated to the array form.
+  const serverFunctionsSegments = (pathsCfg.serverFunctionDirs ?? [pathsCfg.serverFunctionsDir]).map(
+    (dir) => `/${dir.replaceAll('\\', '/')}/`,
+  );
+  const isInServerFunctionsDir = (normalizedPath: string): boolean =>
+    serverFunctionsSegments.some((segment) => normalizedPath.includes(segment));
   const localesSegment = `${srcSegment}_locales/`;
   const reloadTimers = new Map<'api' | 'sync' | 'functions' | 'typemap' | 'locales', NodeJS.Timeout>();
   const pendingApiUpserts = new Set<string>();
@@ -116,8 +123,9 @@ export const setupWatchers = () => {
   };
 
   const isSharedDependencyFile = (normalizedPath: string): boolean => {
-    return (normalizedPath.includes(sharedSegment) || normalizedPath.includes(serverFunctionsSegment))
-      && (normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'));
+    if (!(normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'))) return false;
+    if (normalizedPath.includes(sharedSegment)) return true;
+    return isInServerFunctionsDir(normalizedPath);
   };
 
   const enqueueAffectedRoutesFromDependency = (changedPath: string) => {
@@ -496,13 +504,26 @@ export const setupWatchers = () => {
     .on('change', handleChange)
     .on('unlink', handleDelete);
 
-  // Watch functions separately
-  watch(pathsConfig.serverFunctionsDir, { ignoreInitial: true })
-    .on('add', handleFunctionChange)
-    .on('change', handleFunctionChange)
-    .on('unlink', handleFunctionChange);
+  // Watch every configured server-function directory (the multi-dir
+  // injection roots). Falls back to the legacy singular path for projects
+  // that haven't migrated their config yet.
+  const serverFunctionDirsToWatch =
+    pathsConfig.serverFunctionDirs && pathsConfig.serverFunctionDirs.length > 0
+      ? pathsConfig.serverFunctionDirs
+      : [pathsConfig.serverFunctionsDir];
+  for (const dir of serverFunctionDirsToWatch) {
+    watch(dir, { ignoreInitial: true })
+      .on('add', handleFunctionChange)
+      .on('change', handleFunctionChange)
+      .on('unlink', handleFunctionChange);
+  }
 
-  // Watch shared functions separately
+  // Watch shared modules separately (changes here cascade to dependent
+  // routes via the import-dependency graph). NOTE: `shared/` is also one
+  // of the default function-injection roots, so the watcher above already
+  // covers it — but consumers can override `serverFunctionDirs` without
+  // dropping `shared/`, so we keep this explicit watcher for the cascade
+  // behavior. Duplicate add/change events are coalesced downstream.
   watch(pathsConfig.sharedDir, { ignoreInitial: true })
     .on('add', handleFunctionChange)
     .on('change', handleFunctionChange)

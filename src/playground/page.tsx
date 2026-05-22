@@ -1,4 +1,7 @@
-/* eslint-disable react/jsx-no-literals -- temporary playground page; delete this file when done. */
+/* eslint-disable react/jsx-no-literals, luckystack/no-raw-try-catch, luckystack/no-raw-fetch-in-src --
+   Temporary playground page; delete when done. Uses raw fetch + try/catch
+   deliberately to demonstrate fallback patterns and exercise transports
+   side-by-side. Do NOT propagate these disables to consumer feature code. */
 import {
   faBolt,
   faBomb,

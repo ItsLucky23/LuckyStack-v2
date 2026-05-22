@@ -329,8 +329,28 @@ export interface PathsConfig {
   uploadsDir: string;
   /** Public static assets served as-is. */
   publicDir: string;
-  /** Server-side function modules consumed by API/sync handlers. */
+  /**
+   * @deprecated Use `serverFunctionDirs` instead. Kept for backwards
+   * compatibility with projects that set the singular form before the
+   * function-injection system grew multi-directory support. When both are
+   * present, `serverFunctionDirs` wins.
+   */
   serverFunctionsDir: string;
+  /**
+   * Server-side function modules consumed by API/sync handlers. The
+   * codegen and runtime walk every listed directory in order and merge the
+   * results into one `Functions` interface / object. Duplicate keys
+   * (same `<dirname>.<filename>.<export>` path produced by two roots)
+   * fail the build — `shared/` is canonical, so the conflict tells the
+   * consumer to delete the override.
+   *
+   * Default: `['functions', 'shared']`.
+   *
+   * Nested subdirectories work transparently — `functions/test/helper.ts`
+   * with `export const foo = …` shows up as
+   * `functions.test.helper.foo` on the injected `functions` parameter.
+   */
+  serverFunctionDirs: string[];
   /** Generated socket types output path (relative to project root). */
   generatedSocketTypes: string;
   /** Generated API input schemas output path. */
@@ -484,6 +504,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     uploadsDir: 'uploads',
     publicDir: 'public',
     serverFunctionsDir: 'server/functions',
+    serverFunctionDirs: ['functions', 'shared'],
     generatedSocketTypes: 'src/_sockets/apiTypes.generated.ts',
     generatedApiSchemas: 'src/_sockets/apiInputSchemas.generated.ts',
     generatedApiDocs: 'src/docs/apiDocs.generated.json',
