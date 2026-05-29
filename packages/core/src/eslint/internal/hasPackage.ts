@@ -9,13 +9,15 @@
 
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import path from 'node:path';
 
 const localRequire = createRequire(import.meta.url);
 
 const checkOnDisk = (name: string): boolean => {
-  const segments = name.startsWith('@') ? name.split('/').slice(0, 2) : [name.split('/')[0]!];
-  return existsSync(join(process.cwd(), 'node_modules', ...segments, 'package.json'));
+  const segments = name.startsWith('@')
+    ? name.split('/').slice(0, 2)
+    : [name.split('/')[0] ?? name];
+  return existsSync(path.join(process.cwd(), 'node_modules', ...segments, 'package.json'));
 };
 
 export const hasPackage = (name: string): boolean => {

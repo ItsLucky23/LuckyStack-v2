@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getGeneratedSocketTypesPath } from '@luckystack/core';
+import { getGeneratedSocketTypesPath, getSrcDir, validatePagePath } from '@luckystack/core';
 import {
   ROUTE_NAMING_EXAMPLES,
   ROUTE_NAMING_RULES,
@@ -12,6 +12,8 @@ import {
   isVersionedSyncFileName,
   isVersionedSyncServerFileName,
 } from './routeConventions';
+import { getRoutingRules, isRouteTestFile } from './routingRules';
+import { getRegisteredTemplate, type TemplateKind } from './templateRegistry';
 
 /**
  * Template Injector
@@ -48,12 +50,18 @@ const isCommentOnlyFile = (filePath: string): boolean => {
 
 export const isInApiFolder = (filePath: string): boolean => {
   const normalized = filePath.replaceAll('\\', '/');
-  return normalized.includes('/_api/') && filePath.endsWith('.ts');
+  return normalized.includes('/_api/') && filePath.endsWith('.ts') && !isRouteTestFile(filePath);
 };
 
 export const isInSyncFolder = (filePath: string): boolean => {
   const normalized = filePath.replaceAll('\\', '/');
-  return normalized.includes('/_sync/') && filePath.endsWith('.ts');
+  return normalized.includes('/_sync/') && filePath.endsWith('.ts') && !isRouteTestFile(filePath);
+};
+
+export const isPageFile = (filePath: string): boolean => {
+  const normalized = filePath.replaceAll('\\', '/');
+  const filename = normalized.split('/').pop() ?? '';
+  return filename === 'page.tsx' || filename === 'page.jsx';
 };
 
 export const isSyncServerFile = (filePath: string): boolean => {
@@ -164,6 +172,53 @@ const getInvalidVersionMessage = (filePath: string): string => {
   return `// ${validationMessage}\n`;
 };
 
+//? Compute the validator-friendly path (relative to `src/`, forward slashes)
+//? for a page file. Returns `null` if the file is outside `getSrcDir()`.
+const computeSrcRelativePath = (filePath: string): string | null => {
+  try {
+    const srcDir = getSrcDir();
+    const absolute = path.resolve(filePath);
+    const normalizedSrc = srcDir.replaceAll('\\', '/');
+    const normalizedAbs = absolute.replaceAll('\\', '/');
+    if (!normalizedAbs.startsWith(`${normalizedSrc}/`)) return null;
+    return normalizedAbs.slice(normalizedSrc.length + 1);
+  } catch {
+    return null;
+  }
+};
+
+//? Mirror of `getInvalidVersionMessage` for page.tsx files placed in
+//? locations the framework router will silently skip. Instead of writing
+//? the plain/dashboard template (which would render fine but never get
+//? routed), we write a commented diagnostic block so the developer
+//? immediately sees WHY their page isn't appearing.
+const getInvalidPagePlacementMessage = (_filePath: string, reason: string, srcRelative: string): string => {
+  const lines = [
+    '//? --- LUCKYSTACK PLACEMENT WARNING ---',
+    '//? This page.tsx is in a location the file-based router will not route.',
+    `//? Reason: ${reason}`,
+    `//? Path:   ${srcRelative}`,
+    '//?',
+    '//? Common fixes:',
+    "//?   - Move the file up so a visible (non-underscore) folder segment remains:",
+    "//?     e.g. src/_marketing/page.tsx  ->  src/_marketing/landing/page.tsx",
+    "//?         (the new file routes at /landing — `_marketing` stays invisible).",
+    "//?   - Or move the file OUT of a reserved framework folder (_api, _sync,",
+    "//?     _components, _functions, _shared, _providers, _locales, _sockets, _server).",
+    '//?',
+    '//? Delete the file or move it to fix; the dev server will re-inject a',
+    '//? real page template once the placement is valid.',
+    '',
+    //? Named export instead of `export {};` so the file satisfies
+    //? `unicorn/require-module-specifiers` (and stays a valid ES module
+    //? without dragging in side-effect-only semantics). Reads back as a
+    //? cheap runtime tag for tooling that wants to detect the warning.
+    "export const __luckystackPlacementWarning = true;",
+    '',
+  ];
+  return lines.join('\n');
+};
+
 /**
  * Get the paired sync file path (server -> client or client -> server)
  */
@@ -193,7 +248,7 @@ export const hasPairedFile = (filePath: string): boolean => {
 export const extractSyncPagePath = (filePath: string): string => {
   const normalized = filePath.replaceAll('\\', '/');
   const match = /src\/(.+?)\/_sync\//.exec(normalized);
-  return match ? match[1] : '';
+  return match?.[1] ?? '';
 };
 
 /**
@@ -207,7 +262,7 @@ export const extractSyncName = (filePath: string): string => {
     return basename.replace(/_server_v\d+$/, '').replace(/_client_v\d+$/, '');
   }
 
-  return match[1].replace(/_server_v\d+$/, '').replace(/_client_v\d+$/, '');
+  return (match[1] ?? '').replace(/_server_v\d+$/, '').replace(/_client_v\d+$/, '');
 };
 
 /**
@@ -338,42 +393,103 @@ export const calculateRelativePath = (filePath: string): string => {
 };
 
 const getTemplate = (filePath: string): string | null => {
-  let templateFile: string;
+  let templateKind: TemplateKind | null = null;
   let pagePath = '';
   let syncName = '';
 
   if (isInApiFolder(filePath)) {
-    templateFile = path.join(templatesDir, 'api.template.ts');
+    templateKind = 'api';
   } else if (isInSyncFolder(filePath)) {
     if (isSyncServerFile(filePath)) {
-      templateFile = path.join(templatesDir, 'sync_server.template.ts');
+      templateKind = 'sync_server';
     } else if (isSyncClientFile(filePath)) {
       // Check if _server.ts exists - use paired template if so
       if (hasPairedFile(filePath)) {
-        templateFile = path.join(templatesDir, 'sync_client_paired.template.ts');
+        templateKind = 'sync_client_paired';
         pagePath = extractSyncPagePath(filePath);
         syncName = extractSyncName(filePath);
       } else {
-        templateFile = path.join(templatesDir, 'sync_client_standalone.template.ts');
+        templateKind = 'sync_client_standalone';
       }
     } else {
       console.log(`[TemplateInjector] Unknown sync file type: ${filePath}`);
       return null;
     }
+  } else if (isPageFile(filePath)) {
+    //? Validate placement BEFORE picking a template. If the page is inside
+    //? a reserved framework folder (`_api`, `_sync`, `_components`, ...) or
+    //? has no URL segment left after stripping invisible-parent folders, the
+    //? router will silently skip it — so writing the plain/dashboard skeleton
+    //? would just create dead code. Instead we emit a commented diagnostic
+    //? block so the developer sees the placement issue immediately. Same
+    //? UX precedent as `getInvalidVersionMessage` for api/sync filenames.
+    const srcRelative = computeSrcRelativePath(filePath);
+    if (srcRelative !== null) {
+      const placement = validatePagePath(srcRelative);
+      if (!placement.valid) {
+        return getInvalidPagePlacementMessage(filePath, placement.reason ?? 'invalid placement', srcRelative);
+      }
+    }
+
+    //? Heuristic template flavor: when the page path includes an "admin",
+    //? "dashboard", "settings", "billing", or similar admin-shaped segment,
+    //? default to the dashboard template (sidebar layout + login guard).
+    //? Everything else gets the plain template. Consumers can edit after
+    //? injection — this is a one-shot scaffold, not enforced at runtime.
+    const normalized = filePath.replaceAll('\\', '/').toLowerCase();
+    const looksLikeDashboard = /\/(admin|dashboard|settings|billing|account|profile)(\/|$)/.test(normalized);
+    templateKind = looksLikeDashboard ? 'page_dashboard' : 'page_plain';
   } else {
     return null;
   }
 
+  //? Consumer override registry check FIRST — if `registerTemplate(kind,
+  //? content)` was called from an overlay (e.g. `luckystack/devkit/
+  //? templates.ts`), use that content instead of the bundled disk file.
+  //? Same placeholder substitution rules apply to consumer templates so
+  //? `{{REL_PATH}}`, `{{PAGE_PATH}}`, `{{SYNC_NAME}}` work uniformly.
+  const overrideContent = getRegisteredTemplate(templateKind);
+  const templateFileName: Record<TemplateKind, string> = {
+    api: 'api.template.ts',
+    sync_server: 'sync_server.template.ts',
+    sync_client_paired: 'sync_client_paired.template.ts',
+    sync_client_standalone: 'sync_client_standalone.template.ts',
+    //? Page templates are `.tsx` (not `.ts`) because they contain JSX —
+    //? naming them `.ts` makes the TypeScript program build fail with
+    //? unterminated-regex / expected-`>` errors. The injector still reads
+    //? them as plain text via `fs.readFileSync`, so the extension is
+    //? cosmetic to the runtime but load-bearing for `tsc -b`.
+    page_plain: 'page_plain.template.tsx',
+    page_dashboard: 'page_dashboard.template.tsx',
+  };
+  const templateFile = path.join(templatesDir, templateFileName[templateKind]);
+
   try {
-    let content = fs.readFileSync(templateFile, 'utf8');
+    let content: string;
+    if (overrideContent !== null) {
+      content = overrideContent;
+    } else {
+      content = fs.readFileSync(templateFile, 'utf8');
+    }
 
-    // Replace path placeholders with computed relative paths
+    // Replace path placeholders with computed relative paths.
+    //? Matches BOTH `//@ts-ignore` and `// @ts-expect-error` pragma lines
+    //? (templates historically used the latter; new page templates use the
+    //? former, hence the union). The pragma + the import line's
+    //? `{{REL_PATH}}` placeholder are replaced in one go so the resulting
+    //? file is valid TS without the pragma.
     const relPath = calculateRelativePath(filePath);
-    const pattern = /\/\/\s*@ts-expect-error.*(?:\r?\n)(.*)(?:\{\{REL_PATH\}\})/g;
+    const pragmaPattern = /\/\/\s*@ts-(?:ignore|expect-error).*\r?\n(.*)\{\{REL_PATH\}\}/g;
 
-    content = content.replaceAll(pattern, (_, prefix) => {
+    content = content.replaceAll(pragmaPattern, (_, prefix) => {
       return `${prefix}${relPath}`;
     });
+
+    //? Defensive: any leftover `{{REL_PATH}}` (e.g. a custom consumer
+    //? template that omits the pragma comment) gets a literal substitution
+    //? too — the pragma-strip is a polish step, the substitution itself is
+    //? load-bearing for the import path to resolve.
+    content = content.replaceAll('{{REL_PATH}}', relPath);
 
     // Replace page path and sync name placeholders for paired templates
     if (pagePath && syncName) {
@@ -412,7 +528,16 @@ export const injectTemplate = async (filePath: string): Promise<boolean> => {
 };
 
 export const shouldInjectTemplate = (filePath: string): boolean => {
-  if (!(isInApiFolder(filePath) || isInSyncFolder(filePath))) {
+  //? Consumer disable hook — if `registerRoutingRules({ disableTemplateInjection })`
+  //? was called with a predicate that returns true for this path, skip the
+  //? injection entirely. Useful for files the consumer manages by hand
+  //? (e.g. a generated migrations tree).
+  const { disableTemplateInjection } = getRoutingRules();
+  if (disableTemplateInjection && disableTemplateInjection(filePath)) {
+    return false;
+  }
+
+  if (!(isInApiFolder(filePath) || isInSyncFolder(filePath) || isPageFile(filePath))) {
     return false;
   }
 
@@ -564,11 +689,13 @@ export const injectServerTemplateWithClientInput = async (
     const templateFile = path.join(templatesDir, 'sync_server.template.ts');
     let content = fs.readFileSync(templateFile, 'utf8');
 
-    // Replace placeholders
-    const pattern = /\/\/\s*@ts-expect-error.*(?:\r?\n)(.*)(?:\{\{REL_PATH\}\})/g;
-    content = content.replaceAll(pattern, (_, prefix) => {
+    //? Replace placeholders — same pragma union + literal-fallback pattern
+    //? as `getTemplate` above. Keep these two regexes in sync.
+    const pragmaPattern = /\/\/\s*@ts-(?:ignore|expect-error).*\r?\n(.*)\{\{REL_PATH\}\}/g;
+    content = content.replaceAll(pragmaPattern, (_, prefix) => {
       return `${prefix}${relPath}`;
     });
+    content = content.replaceAll('{{REL_PATH}}', relPath);
 
     // Replace the empty clientInput with the provided types
     content = content.replace(

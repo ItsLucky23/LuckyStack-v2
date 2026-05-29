@@ -272,7 +272,83 @@ For a 1000-token LLM response (~4000 chars), at `flushAtChars: 32` you emit ~125
 
 ---
 
-## 8. Related
+## 8. Cancellation (`abortSignal`) and backpressure (`flushPressure`)
+
+Both helpers are injected into every `_server_v{N}.ts` handler alongside `stream` / `broadcastStream` / `streamTo`. Older handlers that do not destructure them still work — destructuring an extra key from a JS function param is a no-op, so the change is fully backwards compatible.
+
+### `abortSignal: AbortSignal`
+
+Aborts when **either** the originating client emits `syncCancel` (e.g. consumer wrote `syncRequest({ ..., signal })` and called `controller.abort()`) **or** the originator's socket disconnects.
+
+Effects:
+
+- Every emit through the framework's `stream` / `broadcastStream` / `streamTo` callbacks is short-circuited automatically once the signal aborts. Already-on-the-wire chunks are not unsent — there's no way to do that in Socket.io — but no new chunks will be queued.
+- `flushPressure()` resolves immediately when the signal is aborted.
+- The handler itself should check `abortSignal.aborted` inside long-running loops (LLM generation, DB cursor walks, file streaming) and break out — only the *emit* gate is wired automatically; the handler's own CPU work keeps going until you read the flag.
+
+```ts
+export const main = async ({ broadcastStream, abortSignal, flushPressure }: SyncParams) => {
+  for await (const piece of yourLlmStream(prompt)) {
+    if (abortSignal.aborted) break;        // bail on client cancel
+    broadcastStream({ chunk: piece.text });
+  }
+  return { status: 'success' };
+};
+```
+
+On the client side:
+
+```ts
+const controller = new AbortController();
+const promise = syncRequest({
+  name: 'chat/sendMessage',
+  version: 'v1',
+  data: { prompt: '...' },
+  receiver: roomCode,
+  signal: controller.signal,    // ← optional opt-in
+});
+
+// later — user clicked Stop:
+controller.abort();
+// `promise` resolves with { status: 'error', errorCode: 'request.aborted' }.
+```
+
+Same opt-in surface exists for `apiRequest({ signal })`.
+
+### `flushPressure({ thresholdBytes? })`
+
+Awaitable. Resolves when the worst-case Socket.io write buffer across the sockets you're streaming to drops below the threshold (default `1 MB`). Use it between large batches of small chunks so the Node.js write buffer doesn't balloon.
+
+```ts
+export const main = async ({ broadcastStream, flushPressure, abortSignal }: SyncParams) => {
+  let i = 0;
+  for await (const piece of yourLlmStream(prompt)) {
+    if (abortSignal.aborted) break;
+    broadcastStream({ chunk: piece.text });
+    i++;
+    //? Every 64 chunks, pause if the room is backed up. 1 MB default.
+    //? Pass `thresholdBytes` to tighten or loosen the watermark.
+    if (i % 64 === 0) await flushPressure();
+  }
+  return { status: 'success' };
+};
+
+// Tuning the threshold:
+await flushPressure({ thresholdBytes: 256 * 1024 });   // pause if >= 256 KB pending
+```
+
+Notes:
+
+- For `broadcastStream` / `streamTo`, `flushPressure` samples up to the first **32** sockets in the affected room and waits on the worst-case writer. Rooms larger than 32 trade fairness for O(1) cost.
+- For originator-only `stream(payload)`, `flushPressure` polls the originator socket's engine.io write buffer. HTTP/SSE transport has no equivalent — `flushPressure` is a no-op on HTTP, since SSE backpressure is the caller's responsibility (Node's `res.write` returns `false` when full).
+- Polling interval is ~10 ms; no busy-loop, no `drain` event (engine.io doesn't expose one in the public Socket.io API).
+- Resolves immediately if `abortSignal` is aborted.
+
+The same `flushPressure({ thresholdBytes? })` is also injected into `_api/<name>_v{N}.ts` handler params. There it always measures the originator socket only.
+
+---
+
+## 9. Related
 
 - Originator API + `onStream`: [`./sync-request.md`](./sync-request.md)
 - Recipient subscription: [`./callback-registration.md`](./callback-registration.md)

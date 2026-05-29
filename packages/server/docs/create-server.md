@@ -285,7 +285,7 @@ export type CustomRouteHandler = (
 
 ## Related
 
-- Function INDEX: `packages/server/AI_INDEX.md`
+- Function INDEX: `packages/server/CLAUDE.md`
 - README (consumer quickstart): `packages/server/README.md`
 - Argv parsing: `packages/server/docs/argv-parsing.md`
 - Runtime maps: `packages/server/docs/runtime-maps.md`

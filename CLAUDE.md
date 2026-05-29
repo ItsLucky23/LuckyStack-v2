@@ -29,21 +29,25 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 
 ---
 
-## Core Rules (26)
+## Core Rules (28)
 
 ### Workflow & Communication (1-7)
 
 1. **Plan first for medium/high difficulty work.** Use tables or bullets, not wall-of-text. Skip planning only for trivial single-file changes.
+   - **1a. Transform tasks into verifiable goals.** "Add validation" → "tests for invalid inputs exist + pass". "Fix the bug" → "regression test exists + passes". Plans for multi-step work list verification steps per item, not just steps.
 2. **Keep responses short.** No giant recap summaries. A TL;DR is always acceptable as the entire reply.
 3. **Ask focused questions when unsure.** Inline in plans when the user is away (use `OPEN VRAAG` sections instead of popups).
+   - **3a. When multiple valid interpretations exist, present them — don't pick silently.** Use `AskUserQuestion` when the user is present, or inline `OPEN VRAAG` sections in plans when the user is away. Silently picking one path is the most common AI failure mode.
 4. **Suggest `/compact`, new chat, or a recap at appropriate moments** when context is getting heavy.
 5. **After an update, spell out the developer actions required** (what to run, what to restart, what to verify).
 6. **Tell the user what to test and what observable differences to expect** after a change.
-7. **Code generic, SOLID, future-proof.** Keep terminal output and explanations brief.
+7. **Code style depends on which side of the framework boundary you're on:**
+   - **7a. In `packages/*` framework code: generic, SOLID, future-proof.** Framework code is reused by every consumer; abstractions earn their keep.
+   - **7b. In consumer `src/`, `server/`, `config.ts`: minimum code, nothing speculative.** No features beyond what was asked. No abstractions for single-use code. No "flexibility" or "configurability" that wasn't requested. No error handling for impossible scenarios. If you wrote 200 lines and it could be 50, rewrite it. Senior-engineer sanity check: "would they say this is overcomplicated?"
 
 ### Autonomy & Commands (8-10) — HYBRID
 
-8. **Autonomous (no permission needed)**: `npm run lint`, `npm run build`, `npm run ai:index`, `npm run ai:capabilities`, `npm run scaffold:test`, all git read-commands (`status`, `diff`, `log`, `branch`), `git add` + `git commit`, all Grep / Glob / Read.
+8. **Autonomous (no permission needed)**: `npm run lint`, `npm run build`, `npm run ai:index`, `npm run ai:capabilities`, `npm run ai:project-index`, `npm run scaffold:test`, all git read-commands (`status`, `diff`, `log`, `branch`), `git add` + `git commit`, all Grep / Glob / Read.
    **NOT autonomous (always ask)**: `npm install`, `prisma migrate`, server start, `rm`, force-pushes, branch-deletes. Server start is always a developer action.
 9. **No ad-hoc string-replacement scripts or regex mutations** outside the Edit / Write tools. Use the proper file-editing tools.
 10. **No loose `.md` / `.txt` in repo root.** Documentation lives in `docs/` (which ships via `create-luckystack-app`).
@@ -51,16 +55,17 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 ### Code Quality & Framework Rules (11-21)
 
 11. **After every code change: `npm run lint && npm run build` autonomously.** Zero warnings, zero errors before delivery.
-12. **Reuse existing helpers in `src/_functions` and components in `src/_components`.** Check `docs/AI_CAPABILITIES.md` (the auto-generated capability snapshot) BEFORE authoring any new helper, util, or cross-cutting module. If a capability already exists there — use it. If it lives in a not-yet-installed `@luckystack/*` package (see `docs/PACKAGE_OVERVIEW.md`), propose the install instead of reimplementing. After adding ANY new export to `functions/`, `shared/`, `src/_functions/`, `src/_components/`, or after installing/upgrading a `@luckystack/*` package, run `npm run ai:capabilities` autonomously to refresh the snapshot. The `.githooks/pre-commit` hook re-runs it at commit time as a safety net, but the AI should not rely on the hook — refresh in-session so subsequent work in the same session sees the new capability.
+12. **Reuse existing helpers in `src/_functions` and components in `src/_components`.** Check `docs/AI_CAPABILITIES.md` (the auto-generated capability snapshot) BEFORE authoring any new helper, util, or cross-cutting module. Check `docs/AI_PROJECT_INDEX.md` (the consumer-project snapshot — routes, pages, helpers, components, cross-refs) BEFORE creating a new route or page, AND when you need to know which existing helpers/components a similar route already imports. If a capability already exists there — use it. If it lives in a not-yet-installed `@luckystack/*` package (see `docs/PACKAGE_OVERVIEW.md`), propose the install instead of reimplementing. After adding ANY new export to `functions/`, `shared/`, `src/_functions/`, `src/_components/`, or after installing/upgrading a `@luckystack/*` package, run `npm run ai:capabilities` autonomously to refresh the snapshot. After adding/removing/renaming a route (`_api/`, `_sync/`), page, helper, or component, also run `npm run ai:project-index` autonomously. The `.githooks/pre-commit` hook re-runs both at commit time as a safety net, but the AI should not rely on the hook — refresh in-session so subsequent work in the same session sees the new state.
 13. **i18n is mandatory for user-facing text** via the `useTranslator` pattern from `src/_functions/translator`.
 14. **Tailwind colors come ONLY from `src/index.css` `@theme` block.** Never arbitrary hex values.
-15. **Update documentation immediately after code changes.** After significant doc updates (new doc file, slash command, skill, package), run `npm run ai:index` autonomously to regenerate `docs/AI_QUICK_INDEX.md`. The `.githooks/pre-commit` hook re-runs it at commit time as a safety net; refresh in-session anyway so the new index is visible to subsequent work.
+15. **Update documentation immediately after code changes.** After significant doc updates (new doc file, slash command, skill, package), run `npm run ai:index` autonomously to regenerate `docs/AI_QUICK_INDEX.md`. For route/page/helper/component changes, rule 12 covers the in-session regen of `ai:capabilities` + `ai:project-index`. The `.githooks/pre-commit` hook re-runs all three at commit time as a safety net; refresh in-session anyway so the new state is visible to subsequent work.
 16. **At session start: read `config.ts` and `.env`. NEVER read `.env.local`** (contains real secrets).
 17. **Update `.env_template` and `.env.local_template` when new env vars are added.** The user updates their own `.env.local`.
 18. **Suggest extracting repeating patterns** into a helper, component, or skill.
 19. **Security is top priority** unless the user explicitly says otherwise for a given task.
 20. **Critical self-review on larger implementations** — re-read your own diff before declaring done.
 21. **Respect type generation and template injection.** NEVER write `{} as unknown as TYPE` or `{} as any`. No `unsafe*` wrappers around `apiRequest` / `syncRequest` / `upsertSyncEventCallback`. Treat `src/_sockets/apiTypes.generated.ts` as the source of truth. In API + sync handlers, prefer `functions.tryCatch.tryCatch(...)` and `functions.sleep.sleep(...)` (auto-injected from `shared/`) plus the consumer shims in `functions/` (db, redis, sentry, session, …) over direct package imports. Spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`.
+   - **NEVER-cast escalation**: when `apiRequest` / `syncRequest` / `upsertSyncEventCallback` typing fails, FIRST run `npm run generateArtifacts`. NEVER cast with `as unknown as TYPE` or `as any`. If the generator output is itself wrong, fix the generator — don't cast around it.
 
 ### Prompt Development (22)
 
@@ -68,10 +73,21 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 
 ### Parallel Agents & Handoff (23-26)
 
-23. **Token cost is not a constraint.** Spawn parallel agents whenever useful — user actively sponsors aggressive parallelism.
+23. **Aggressive parallelism is the default.** When two or more research/exploration paths are independent, spawn parallel Agent calls in waves (single message, multiple tool calls). Token cost is not a constraint. Sequential delegation when work is parallel-safe is the failure mode — not over-spawning. See `docs/AGENT_TEAM_PLAYBOOK.md` for orchestration patterns.
 24. **Skills folder has two halves**: `skills/official/` (Anthropic-provided) and `skills/custom/` (framework-specific).
 25. **Parallel agent playbook lives in `docs/AGENT_TEAM_PLAYBOOK.md`.** Activation happens via slash commands in `.claude/commands/`.
 26. **Daily handoff uses `/save_handoff`** (see `.claude/commands/save_handoff.md`). Do not hand-write handoff files — invoke the slash command.
+
+### Surgical Changes & Session Continuity (27-28)
+
+27. **Surgical changes — every changed line traces to the user's request.** Don't "improve" adjacent code, comments, or formatting. Don't refactor things that aren't broken. Match existing style even if you'd do it differently. Mention unrelated dead code — don't delete it (Rule "Report Without Auto-Fixing" covers issues; this rule extends it to code-style drive-bys). Clean up imports/variables your changes orphaned, nothing more.
+28. **Session start sequence.** Read in order:
+    1. `CLAUDE.md` (this file).
+    2. Current branch's `branch-logs/<sanitized>.md` if it exists.
+    3. If (2) is empty: `branch-logs/INDEX.md` → most recent previous branch's log. Mark its contents as **"previous context, may not apply here"** and verify before acting on any assumption.
+    4. Framework + project context: `docs/PROJECT_CONTEXT.md` (if exists), `docs/ROADMAP.md`, `docs/HOSTING.md`, `docs/PACKAGE_OVERVIEW.md`, `docs/AGENT_TEAM_PLAYBOOK.md`.
+    5. `config.ts` + `.env` (NEVER `.env.local`).
+    6. Auto-generated indexes: `docs/AI_QUICK_INDEX.md`, `docs/AI_CAPABILITIES.md`, `docs/AI_PROJECT_INDEX.md`.
 
 ---
 
@@ -101,7 +117,7 @@ Before building any UI primitive, check this table. Extend the existing componen
 | `Avatar` (`./Avatar.tsx`) | User avatar with image + first-letter fallback. Reads image-load status from `AvatarProvider`. |
 | `Navbar` (`./Navbar.tsx`) | Dashboard sidebar. Pass `items` prop (`NavbarItem[]`, `icon` is a FontAwesome `IconDefinition`) — do not edit the file. |
 | `ErrorPage` (`./ErrorPage.tsx`) | React Router error-boundary fallback. Already wired; extend rather than replace. |
-| `Middleware` (`./Middleware.tsx`) | Wraps protected pages and runs `middlewareHandler`. Part of the `dashboard` template. |
+| `Middleware` (`./Middleware.tsx`) | Wraps protected pages. Runs the per-page `export const middleware` (from `page.tsx`) first, then falls back to a globally registered handler from `registerMiddlewareHandler`. Per-page is canonical; no central `_functions/middlewareHandler.ts` file is required. Part of the `dashboard` template. |
 | `TemplateProvider` (`./TemplateProvider.tsx`) | Selects a template (`'plain'` / `'dashboard'`) per page from its exported `template` const. Add new templates here and to the `Template` union. |
 
 ### Tailwind Color Tokens (from `src/index.css`)
@@ -263,7 +279,10 @@ SocketStatusProvider > SessionProvider > TranslationProvider > AvatarProvider > 
 | `docs/PACKAGE_OVERVIEW.md` | Per-package use-case + peer-deps table |
 | `docs/AGENT_TEAM_PLAYBOOK.md` | Multi-agent workflow |
 | `docs/BRANCH_LOG_PROTOCOL.md` | Branch-log entry format |
-| `docs/AI_QUICK_INDEX.md` | Auto-generated cross-repo index |
+| `docs/AI_QUICK_INDEX.md` | Auto-generated cross-repo index (framework surfaces) |
+| `docs/AI_PROJECT_INDEX.md` | Auto-generated inventory of the consumer project's own code (routes, pages, helpers, components, cross-refs) |
+| `docs/AI_BOOST_OVERVIEW.md` | One-page catalog of every AI-tooling surface in LuckyStack |
+| `docs/GRAPHIFY_INTEGRATION.md` | Opt-in graphify integration — upgrade path beyond `AI_PROJECT_INDEX.md` for call-graph + community detection + MCP |
 
 ---
 

@@ -140,9 +140,9 @@ const parseObjectType = (typeText: string): ParsedObjectField[] => {
     const match = /^(\w+)(\?)?\s*:\s*(.+)$/.exec(row);
     if (!match) continue;
     result.push({
-      key: match[1],
+      key: match[1] ?? '',
       optional: Boolean(match[2]),
-      type: match[3].trim(),
+      type: (match[3] ?? '').trim(),
     });
   }
 
@@ -236,6 +236,7 @@ const formatTypeText = (text: string): string => {
 
   for (let index = 0; index < clean.length; index += 1) {
     const char = clean[index];
+    if (char === undefined) continue;
     const previous = clean[index - 1];
 
     if (char === "'" && !inDoubleQuote && previous !== '\\') {

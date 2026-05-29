@@ -57,7 +57,7 @@ export const registerCsrfConfig = (input: Partial<CsrfConfig>): void => {
   active = {
     ...active,
     ...input,
-    cookieOptions: { ...active.cookieOptions, ...(input.cookieOptions ?? {}) },
+    cookieOptions: { ...active.cookieOptions, ...input.cookieOptions },
   };
 };
 

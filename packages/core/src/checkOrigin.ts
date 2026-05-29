@@ -36,7 +36,7 @@ const allowedOrigin = (origin: string): boolean => {
   //? Two modes: static array OR synchronous resolver function. The resolver
   //? form lets consumers do per-tenant / per-time-window allow-listing
   //? without restarting; it must be sync because Socket.io's CORS check is sync.
-  const configured = cors.allowedOrigins ?? [];
+  const configured = cors.allowedOrigins;
 
   //? Bind address comes from the registry (populated by `createLuckyStackServer`
   //? from `options.ip`/`options.port`). Falls back to `SERVER_IP`/`SERVER_PORT`

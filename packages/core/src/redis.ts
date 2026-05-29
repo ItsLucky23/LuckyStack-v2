@@ -56,11 +56,15 @@ export const getRedisConnectionOptions = (): RedisConnectionOptions => ({
 
 //? Proxy: same pattern as `prisma`. Defers resolution until call time so
 //? `registerRedisClient(...)` can still win after this module is loaded.
+// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Proxy target placeholder
 const redisProxy = new Proxy({} as RedisClient, {
   get: (_target, prop, receiver) => {
     const real = getRedisClient() as object;
-    const value = Reflect.get(real, prop, receiver);
-    return typeof value === 'function' ? (value as Function).bind(real) : value;
+    const value: unknown = Reflect.get(real, prop, receiver);
+    if (typeof value === 'function') {
+      return (value as (...args: unknown[]) => unknown).bind(real);
+    }
+    return value;
   },
   has: (_target, prop) => Reflect.has(getRedisClient() as object, prop),
 });

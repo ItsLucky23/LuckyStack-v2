@@ -168,7 +168,7 @@ registerErrorTracker(stdoutAdapter);
 
 ## Related
 
-- Function INDEX: `packages/core/AI_INDEX.md`
+- Function INDEX: `packages/core/CLAUDE.md`
 - Architecture: `docs/ARCHITECTURE_EXTENSION_POINTS.md`
 - README: `packages/core/README.md`, `packages/error-tracking/README.md`
 - Source: `packages/core/src/errorTrackerRegistry.ts`, `sentrySetup.ts`

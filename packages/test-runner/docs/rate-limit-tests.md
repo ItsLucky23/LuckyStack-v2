@@ -164,7 +164,7 @@ import {
   logContractSummary,
 } from '@luckystack/test-runner';
 
-const baseUrl = 'http://127.0.0.1:80';
+const baseUrl = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80';
 const resetToken = process.env.TEST_RESET_TOKEN;
 
 await resetServerState({ baseUrl, token: resetToken });
@@ -187,7 +187,7 @@ logContractSummary(summary);
 await runRateLimitTests({
   apiMethodMap,
   apiMetaMap,
-  baseUrl: 'http://127.0.0.1:80',
+  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
   // No resetBetweenEndpoints — fine if all endpoints have separate limiter keys.
 });
 ```
@@ -207,7 +207,7 @@ const result = await runRateLimitCheck({
     method: 'POST',
     fullPath: 'api/auth/login/v1',
   },
-  baseUrl: 'http://127.0.0.1:80',
+  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
   rateLimit: 5, // matches the value in src/auth/_api/login_v1.ts
   inputFor: () => ({ email: 'test@example.com', password: 'wrong' }),
 });

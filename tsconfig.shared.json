@@ -20,6 +20,7 @@
     "strict": true, /* Enable all strict type-checking options. */
     "noUnusedLocals": true, /* Enable error reporting when a local variables aren't read. */
     "noUnusedParameters": true, /* Raise an error when a function parameter isn't read. */
-    "noFallthroughCasesInSwitch": true /* Enable error reporting for fallthrough cases in switch statements. */
+    "noFallthroughCasesInSwitch": true, /* Enable error reporting for fallthrough cases in switch statements. */
+    "noUncheckedIndexedAccess": true /* Index signatures + dynamic key lookups return `T | undefined` so defensive `?.`/`??` patterns reflect runtime. */
   }
 }

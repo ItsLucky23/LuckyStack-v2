@@ -22,13 +22,18 @@ const runtimeWindow = globalThis as typeof globalThis & { window?: Window };
 const env = (key: string): string | undefined =>
   typeof process === 'undefined' ? undefined : process.env[key];
 
+//? Default environment used both as the localhost entry AND as the fallback
+//? when the detected DNS isn't in the map. Pulled out so the fallback path is
+//? guaranteed non-undefined under `noUncheckedIndexedAccess`.
+const fallbackEnvironment: AppEnvironmentConfig = {
+  backendUrl: "http://localhost:80",
+  dev: true,
+  sessionBasedToken: true,
+  allowMultipleSessions: true,
+};
+
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
-  "http://localhost:5173": {
-    backendUrl: "http://localhost:80",
-    dev: true,
-    sessionBasedToken: true,
-    allowMultipleSessions: true
-  },
+  "http://localhost:5173": fallbackEnvironment,
   "http://localhost:5174": {
     backendUrl: "http://localhost:81",
     dev: true,
@@ -54,8 +59,8 @@ const detectedDns = normalizeDns(
   runtimeWindow.window?.location.origin ?? (env('DNS') ?? "http://localhost:5173"),
 );
 
-const resolvedEnvironment =
-  dnsEnvironmentMap[detectedDns] ?? dnsEnvironmentMap["http://localhost:5173"];
+const resolvedEnvironment: AppEnvironmentConfig =
+  dnsEnvironmentMap[detectedDns] ?? fallbackEnvironment;
 
 const config = {
   /** The URL of the backend server. Update for production. */

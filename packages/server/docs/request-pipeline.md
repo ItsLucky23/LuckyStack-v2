@@ -190,7 +190,7 @@ export const loadSocket = (
 
 ## Related
 
-- Function INDEX: `packages/server/AI_INDEX.md`
+- Function INDEX: `packages/server/CLAUDE.md`
 - HTTP routes: `packages/server/docs/http-routes.md`
 - Security defaults: `packages/server/docs/security-defaults.md`
 - Create server: `packages/server/docs/create-server.md`

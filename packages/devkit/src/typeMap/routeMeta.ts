@@ -30,14 +30,14 @@ export const extractPagePath = (filePath: string): string => {
 export const extractApiName = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/');
   const match = normalized.match(/_api\/(.+)\.ts$/);
-  const rawName = match ? match[1] : path.basename(filePath, '.ts');
+  const rawName = match?.[1] ?? path.basename(filePath, '.ts');
   return stripVersionSuffix(rawName);
 };
 
 export const extractApiVersion = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/');
   const match = normalized.match(/_api\/(.+)\.ts$/);
-  const rawName = match ? match[1] : path.basename(filePath, '.ts');
+  const rawName = match?.[1] ?? path.basename(filePath, '.ts');
   return extractVersionFromName(rawName) || 'v1';
 };
 
@@ -63,7 +63,7 @@ export const extractSyncName = (filePath: string): string => {
     return rawName;
   }
 
-  const rawName = match[1]
+  const rawName = (match[1] ?? '')
     .replace(SYNC_VERSION_TOKEN_REGEX, '');
 
   return rawName;
@@ -75,9 +75,9 @@ export const extractSyncVersion = (filePath: string): string => {
   if (!match) {
     const basename = path.basename(filePath, '.ts');
     const versionMatch = basename.match(SYNC_VERSION_TOKEN_REGEX);
-    return versionMatch ? `v${versionMatch[2]}` : 'v1';
+    return versionMatch ? `v${versionMatch[2] ?? '1'}` : 'v1';
   }
 
-  const versionMatch = match[1].match(SYNC_VERSION_TOKEN_REGEX);
-  return versionMatch ? `v${versionMatch[2]}` : 'v1';
+  const versionMatch = (match[1] ?? '').match(SYNC_VERSION_TOKEN_REGEX);
+  return versionMatch ? `v${versionMatch[2] ?? '1'}` : 'v1';
 };

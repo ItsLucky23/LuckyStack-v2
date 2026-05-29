@@ -8,9 +8,7 @@
 //? every event fans out to all of them. Per-adapter errors are swallowed
 //? so one buggy tracker can't break the chain.
 
-export interface ErrorTrackerContext {
-  [key: string]: unknown;
-}
+export type ErrorTrackerContext = Record<string, unknown>;
 
 export interface ErrorTrackerUser {
   id?: string;
@@ -121,5 +119,5 @@ export const startSpanAcrossTrackers = <T>(name: string, op: string, fn: () => T
   //? want to instrument). When no tracker supports spans, run the fn directly.
   const first = activeTrackers.find((t) => t.startSpan);
   if (!first?.startSpan) return fn();
-  return first.startSpan(name, op, fn) as T;
+  return first.startSpan(name, op, fn);
 };

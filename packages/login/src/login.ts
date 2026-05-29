@@ -521,11 +521,12 @@ const loginCallback = async (
   options: { defaultRedirectUrl?: string } = {},
 ): Promise<OAuthCallbackResult | false> => {
   const providerName = pathname.split('/')[3]; // google/github/etc.
+  if (!providerName) return false;
   const provider = getOAuthProviders().find(p => p.name === providerName);
   if (!provider || !req.url) return false;
   if (!isFullOAuthProvider(provider)) return false;
 
-  const queryString = req.url.split('?')[1];
+  const queryString = req.url.split('?')[1] ?? '';
   const params = new URLSearchParams(queryString);
   const code = params.get('code');
   const state = params.get('state');

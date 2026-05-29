@@ -30,7 +30,7 @@ export const runAuthEnforcementCheck = async (
   const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
   const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const timeoutHandle = setTimeout(() => { controller.abort(); }, requestTimeoutMs);
 
   const [fetchError, response] = await tryCatch(() => fetch(url, {
     method: endpoint.method,

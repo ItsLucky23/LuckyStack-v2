@@ -15,8 +15,9 @@ const getAvatarStatusKey = (avatar: string | undefined, fallbackName: string): s
   if (!avatar) return `fallback:${fallbackName}`;
 
   const url = resolveAvatarUrl(avatar);
-  const [path, query = ''] = url.split('?');
-  const fileName = path.split('/').pop() ?? path;
+  const [pathPart, query = ''] = url.split('?');
+  const safePath = pathPart ?? '';
+  const fileName = safePath.split('/').pop() ?? safePath;
   const id = fileName.replace(/\.[^/.]+$/, '') || fileName;
   const refresh = new URLSearchParams(query).get('v') ?? '';
 
@@ -40,7 +41,7 @@ export default function Avatar({ user, textSize = 'text-lg' }: AvatarProps) {
         className={`rounded-full aspect-square text-white flex items-center justify-center w-full h-full select-none ${textSize}`}
         style={{ backgroundColor: user.avatarFallback ?? '#9ca3af' }}
       >
-        {user.name ? user.name[0].toUpperCase() : null}
+        {user.name ? (user.name[0] ?? '').toUpperCase() : null}
       </div>
     );
   }

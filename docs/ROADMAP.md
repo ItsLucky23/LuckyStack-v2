@@ -90,7 +90,7 @@ Items that surfaced before the publishability sweep and are tracked in `docs/_ar
 
 ### Tooling
 
-- **JSDoc-based `AI_INDEX.md` Function INDEX regenerator** — currently hand-curated. Worth building (~100-line Node script reusing `packages/devkit/src/typeMap/extractors.ts`) when drift between source signatures and the INDEX table becomes a recurring chore. Until then, the periodic-review approach is fine.
+- **JSDoc-based `CLAUDE.md` Function INDEX regenerator** — currently hand-curated. Worth building (~100-line Node script reusing `packages/devkit/src/typeMap/extractors.ts`) when drift between source signatures and the INDEX table becomes a recurring chore. Until then, the periodic-review approach is fine.
 - **Optional runtime warning in `registerCsrfConfig()`** when `cookieOptions.httpOnly === true` is set (since that would break client-side reads once cookie-issued CSRF mode lands).
 - **error-tracking build wave reorder**: `error-tracking` now sits in its own wave after `login` because of a type-only import. Total build time grew ~5 s. Acceptable, but if the wave count keeps growing, switch the build script to a topological scheduler that respects declared dependencies instead of hand-maintained waves.
 

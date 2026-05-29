@@ -1,7 +1,7 @@
 import { tryCatch } from '@luckystack/core';
 import type { ContractCheckResult, EndpointDescriptor } from './types';
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const EXPECTED_ERROR_CODE = 'api.rateLimitExceeded';
 
 export interface RateLimitCheckInput {
@@ -31,7 +31,7 @@ export const runRateLimitCheck = async (input: RateLimitCheckInput): Promise<Con
 
   const send = async (): Promise<Response | null> => {
     const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), requestTimeoutMs);
+    const timeoutHandle = setTimeout(() => { controller.abort(); }, requestTimeoutMs);
     const [error, response] = await tryCatch(() => fetch(url, {
       method: endpoint.method,
       headers: {

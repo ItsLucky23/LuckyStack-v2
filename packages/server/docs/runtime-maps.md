@@ -199,7 +199,7 @@ The dynamic import to `'@luckystack/devkit'` is intentionally written as `import
 
 ## Related
 
-- Function INDEX: `packages/server/AI_INDEX.md`
+- Function INDEX: `packages/server/CLAUDE.md`
 - Argv parsing: `packages/server/docs/argv-parsing.md`
 - Create server: `packages/server/docs/create-server.md`
 - Architecture: `docs/ARCHITECTURE_PACKAGING.md` (§10 preset bundles + multi-service builds)

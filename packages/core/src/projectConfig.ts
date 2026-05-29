@@ -255,6 +255,8 @@ export interface AuthConfig {
    * override this to their own brand.
    */
   passwordResetBrand?: string;
+  /** Email-change confirmation-token TTL in seconds. Default 3600 (1 hour). */
+  emailChangeTtlSeconds: number;
 }
 
 export interface OfflineQueueConfig {
@@ -472,6 +474,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     providerAccountStrategy: 'per-provider',
     forgotPassword: 'disabled',
     passwordResetTtlSeconds: 60 * 60,
+    emailChangeTtlSeconds: 60 * 60,
   },
   socket: {
     maxHttpBufferSize: 5 * 1024 * 1024,
@@ -533,11 +536,7 @@ const deepMerge = <T>(base: T, override: DeepPartial<T> | undefined): T => {
   for (const [key, overrideValue] of Object.entries(override as Record<string, unknown>)) {
     if (overrideValue === undefined) continue;
     const baseValue = (base as Record<string, unknown>)[key];
-    if (isPlainObject(baseValue) && isPlainObject(overrideValue)) {
-      result[key] = deepMerge(baseValue, overrideValue as DeepPartial<unknown>);
-    } else {
-      result[key] = overrideValue;
-    }
+    result[key] = isPlainObject(baseValue) && isPlainObject(overrideValue) ? deepMerge(baseValue, overrideValue as DeepPartial<unknown>) : overrideValue;
   }
   return result as T;
 };

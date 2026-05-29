@@ -360,7 +360,7 @@ Returns `true` when the request method matches the allowed method or is `'OPTION
 
 ## Related
 
-- Function INDEX: `packages/core/AI_INDEX.md`
+- Function INDEX: `packages/core/CLAUDE.md`
 - Architecture: `docs/ARCHITECTURE_SOCKET.md`, `docs/ARCHITECTURE_API.md`, `docs/ARCHITECTURE_SYNC.md`, `docs/ARCHITECTURE_AUTH.md`
 - README: `packages/core/README.md`
 - Source: `packages/core/src/socketTypes.ts`, `socketState.ts`, `socketEvents.ts`, `extractToken.ts`, `extractTokenFromRequest.ts`, `checkOrigin.ts`, `offlineQueue.ts`, `csrf.ts`, `cookies.ts`, `httpApiUtils.ts`, `serviceRoute.ts`

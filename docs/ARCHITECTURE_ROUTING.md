@@ -35,10 +35,28 @@ src/page.tsx         -->  renders at /
 
 ### Rules
 
-- Only files named `page.tsx` become routes
-- Folders starting with `_` are skipped (private folders for components, utilities, etc.)
-- Each page can export a `template` constant to control its layout wrapper
-- If no template is exported, defaults to `'plain'`
+- Only files named `page.tsx` (or `page.jsx`) become routes
+- Folders starting with `_` are **invisible-parent** — they group files structurally but are NOT part of the URL. Children of an `_<folder>` still route from their visible siblings onward.
+- A `page.tsx` placed directly inside an `_<folder>` is **invalid** (no URL segment left after stripping the invisible parent). Dev console logs a warning; the page is skipped.
+- A `page.tsx` placed inside a reserved framework folder (`_api`, `_sync`, `_function(s)`, `_component(s)`, `_provider(s)`, `_locale(s)`, `_socket(s)`, `_shared`, `_server`) is **invalid** — those folders are framework-internal.
+- Each page can export a `template` constant to control its layout wrapper.
+- If no template is exported, defaults to `'plain'`.
+
+### Invisible-parent examples
+
+```
+src/admin/page.tsx                  -> /admin              OK
+src/_housing/renting/page.tsx       -> /renting            OK    (_housing invisible)
+src/_marketing/landing/page.tsx     -> /landing            OK    (group marketing pages without URL prefix)
+src/page.tsx                        -> /                   OK
+src/_housing/page.tsx               -> INVALID (no URL segment left after stripping underscore folders)
+src/_api/playground/page.tsx        -> INVALID (cannot live inside reserved folder _api)
+src/_housing/_drafts/page.tsx       -> INVALID (every folder is invisible; no URL left)
+```
+
+### Reusing the validator
+
+The same rules power the scaffold CLI and dev-time warnings. The validator is exported as `validatePagePath` from `@luckystack/core` (consumer + devkit side) — pass a `src`-relative path and it returns `{ valid, route?, reason? }`. Override `privateFolderPrefix` or extend `scaffoldIgnoredFolders` via `registerRoutingRules(...)` in `@luckystack/devkit` if your project uses a different folder convention.
 
 ### Templates
 
@@ -59,6 +77,67 @@ Available templates:
 | `dashboard` | Side navigation bar with main content area.                         |
 
 The `dashboard` template includes `Middleware` for route authentication guards.
+
+### Page Guards (per-page middleware)
+
+Routes that require auth or role checks declare their guard **on the page itself** via an `export const middleware`. The framework's `<Middleware>` component (and the programmatic-navigation `useRouter` hook) auto-runs the per-page middleware before painting the page; if no per-page middleware is registered, the framework allows the route by default.
+
+```typescript
+// src/admin/page.tsx
+import type { PageMiddleware } from '@luckystack/core/client';
+import { i18nNotify as notify } from '@luckystack/core/client';
+import type { SessionLayout } from 'config';
+
+export const template = 'dashboard';
+
+//? Logged-out users → /login. Logged-in non-admins → toast + history-back.
+export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
+  if (!session) return { success: false, redirect: '/login' };
+  if (session.admin) return { success: true };
+  notify.error({ key: 'middleware.notAdmin' });
+  return; // navigate(-1)
+};
+
+export default function AdminPage() { /* ... */ }
+```
+
+**Return contract:**
+
+| Return value | Effect |
+|---|---|
+| `{ success: true }` | Page renders. |
+| `{ success: false, redirect: '/some-path' }` | `navigate('/some-path')`. |
+| `undefined` (or no return) | `navigate(-1)` (browser history back). Pair with `notify.error(...)` for user feedback. |
+
+**Resolution order** (per route hit):
+
+1. Per-page middleware (`export const middleware`) registered via `getRoutes()` auto-discovery.
+2. Global handler registered via `registerMiddlewareHandler(...)` — optional escape-hatch for cross-cutting hooks (telemetry, server-reachability check, maintenance banner).
+3. Framework default: allow.
+
+There is **no central `src/_functions/middlewareHandler.ts` file** in the canonical pattern. Pages own their guards; the global handler is reserved for cross-cutting concerns (rarely needed). To add a global hook, import `registerMiddlewareHandler` from `@luckystack/core/client` and call it from `src/main.tsx` directly.
+
+The validator helper `validatePagePath` (also from `@luckystack/core`) and the scaffold CLI (`npm run scaffold:page <path>`) enforce the invisible-parent rules above when creating new pages.
+
+### Auto-injection of new page.tsx files
+
+When the dev server is running, creating an **empty** `page.tsx` anywhere under `src/` triggers `@luckystack/devkit`'s template injector — same mechanism as for new `_api/*_v<N>.ts` and `_sync/*_(server|client)_v<N>.ts` files. The injector picks a template based on the path:
+
+- Paths containing `admin`, `dashboard`, `settings`, `billing`, `account`, or `profile` → dashboard template (sidebar layout + login guard skeleton).
+- Everything else → plain template (no chrome, middleware export commented out).
+- **Invalid placement** (page directly inside an `_<folder>`, or inside a reserved framework folder) → a commented diagnostic block explaining the placement issue and a suggested fix, **not** the plain/dashboard template. Move/rename the file to fix and the dev server will re-inject a real template.
+
+### Duplicate-route detection
+
+Because the invisible-parent rule strips `_<folder>` segments, two `page.tsx` files in different folder trees can compute the **same URL**. Example: `src/_test/admin/page.tsx` and `src/admin/page.tsx` both resolve to `/admin`. The framework catches this at three points:
+
+- **Dev startup** (`initializeAll` in `@luckystack/devkit/loader.ts`): logs a soft warning listing every colliding route + the files involved. Does NOT block startup.
+- **Build time** (`generateTypeMapFile` in `@luckystack/devkit/typeMapGenerator.ts`): throws via `assertNoDuplicatePageRoutes`, blocking the build. Move or rename one of the files to ship.
+- **Runtime** (`src/main.tsx` `getRoutes()`): when two modules register the same `finalPath`, `console.error` prints both file paths and the second registration is skipped (React Router would otherwise silently keep one).
+
+### Consumer overrides for scaffold templates
+
+The bundled scaffold templates (`api`, `sync_server`, `sync_client_paired`, `sync_client_standalone`, `page_plain`, `page_dashboard`) can be replaced via `registerTemplate(kind, content)` from `@luckystack/devkit`. Plus `registerRoutingRules({ disableTemplateInjection })` lets consumers opt sections of the tree out of injection entirely. See `docs/ARCHITECTURE_EXTENSION_POINTS.md` for the full code example.
 
 ### Route Resolution Logic
 

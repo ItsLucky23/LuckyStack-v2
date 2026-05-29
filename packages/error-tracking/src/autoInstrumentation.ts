@@ -42,7 +42,7 @@ import { setSentryUser, startSpan } from './sentry';
 //? reference through both pre/post dispatches. If a future handler ever
 //? clones the payload between the two, the span would leak — verify by
 //? running the existing manual smoke tests in `packages/server/docs/`.
-type SpanHandle = { end?: () => void };
+interface SpanHandle { end?: () => void }
 const apiSpans = new WeakMap<PreApiExecutePayload, SpanHandle>();
 const syncSpans = new WeakMap<PreSyncFanoutPayload, SpanHandle>();
 
@@ -71,7 +71,7 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
       email: payload.user.email ?? undefined,
       username: payload.user.name ?? undefined,
     } : null);
-    return undefined;
+    return;
   });
 
   //? Open a performance span around the handler. WeakMap keyed on the payload
@@ -80,13 +80,13 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
     const op = payload.transport === 'http' ? 'api.request.http' : 'api.request';
     const span = startSpan(payload.routeName, op);
     if (isSpanHandle(span)) apiSpans.set(payload, span);
-    return undefined;
+    return;
   });
 
   registerHook('postApiExecute', (payload: PostApiExecutePayload) => {
     const span = apiSpans.get(payload);
     span?.end?.();
-    return undefined;
+    return;
   });
 
   //? Sync identity propagation. `preSyncAuthorize` is the first sync hook
@@ -97,23 +97,23 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
       email: payload.user.email ?? undefined,
       username: payload.user.name ?? undefined,
     } : null);
-    return undefined;
+    return;
   });
 
   //? Span lifecycle for sync. Socket fanout currently has no span op tag in
   //? the legacy implementation; HTTP fanout was `sync.request.http`. Preserve
   //? both behaviors — only open a span when transport is `http`.
   registerHook('preSyncFanout', (payload: PreSyncFanoutPayload) => {
-    if (payload.transport !== 'http') return undefined;
+    if (payload.transport !== 'http') return;
     const span = startSpan(payload.routeName, 'sync.request.http');
     if (isSpanHandle(span)) syncSpans.set(payload, span);
-    return undefined;
+    return;
   });
 
   registerHook('postSyncFanout', (payload: PostSyncFanoutPayload) => {
     const span = syncSpans.get(payload);
     span?.end?.();
-    return undefined;
+    return;
   });
 
   //? Clear identity immediately on logout. Without this the next anonymous
@@ -122,6 +122,6 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
   //? it). One round-trip earlier is worth the small type-only import cost.
   registerHook('postLogout', (_payload: PostLogoutPayload) => {
     setSentryUser(null);
-    return undefined;
+    return;
   });
 };

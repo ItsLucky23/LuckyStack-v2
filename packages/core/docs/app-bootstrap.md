@@ -413,7 +413,7 @@ registerBindAddress({ ip: '0.0.0.0', port: 8080 });
 
 ## Related
 
-- Function INDEX: `packages/core/AI_INDEX.md`
+- Function INDEX: `packages/core/CLAUDE.md`
 - Architecture: `docs/ARCHITECTURE_PACKAGING.md`, `docs/ARCHITECTURE_ROUTING.md`, `docs/HOSTING.md`, `docs/ARCHITECTURE_EXTENSION_POINTS.md`
 - README: `packages/core/README.md`
 - Source: `packages/core/src/bindAddress.ts`, `runtimeMapsRegistry.ts`, `apiMethodMapRegistry.ts`, `clients.ts`, `db.ts`, `redis.ts`, `notifier.ts`, `emailRegistry.ts`, `loggerRegistry.ts`, `redactedLogKeys.ts`, `consoleLog.ts`, `localeReloader.ts`, `bootUuid.ts`, `synchronizedEnvHashes.ts`, `tryCatch.ts`, `sleep.ts`, `getParams.ts`, `serveAvatars.ts`

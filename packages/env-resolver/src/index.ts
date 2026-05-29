@@ -65,17 +65,12 @@ const applyValues = (values: Record<string, string>): void => {
     //? Do not overwrite a key that was set explicitly via .env or shell.
     //? Local overrides win — this lets developers shadow individual remote
     //? values during debugging without affecting their team.
-    if (process.env[key] === undefined) {
-      process.env[key] = value;
-    }
+    process.env[key] ??= value;
   }
 };
 
 const fetchRemoteEnv = async (opts: RemoteEnvOptions): Promise<Record<string, string>> => {
   const fetchFn = opts.fetchImpl ?? globalThis.fetch;
-  if (!fetchFn) {
-    throw new Error('[env-resolver] No fetch implementation available. Pass `fetchImpl` or run on Node 20+.');
-  }
 
   const endpoint = `${opts.url.replace(/\/+$/, '')}/projects/${encodeURIComponent(opts.project)}/environments/${encodeURIComponent(opts.environment)}`;
   const response = await fetchFn(endpoint, {
@@ -134,14 +129,14 @@ export const initEnvResolver = async (options: InitEnvResolverOptions): Promise<
     const values = await fetchRemoteEnv(resolvedOpts);
     cachedResolution = { fetchedAt: now, values };
     applyValues(values);
-  } catch (err) {
+  } catch (error) {
     if (options.fallback === 'local' || options.source === 'hybrid') {
       //? Soft failure — fall back to whatever the existing process.env
       //? already contains. Log so the operator sees a hybrid degradation.
-      console.warn('[env-resolver] Remote fetch failed, falling back to local env:', err);
+      console.warn('[env-resolver] Remote fetch failed, falling back to local env:', error);
       return;
     }
-    throw err;
+    throw error;
   }
 };
 

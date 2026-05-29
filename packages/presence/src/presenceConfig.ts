@@ -81,11 +81,7 @@ const deepMerge = <T>(base: T, override: DeepPartial<T> | undefined): T => {
   for (const [key, value] of Object.entries(override as Record<string, unknown>)) {
     if (value === undefined) continue;
     const baseValue = (base as Record<string, unknown>)[key];
-    if (isPlainObject(baseValue) && isPlainObject(value)) {
-      out[key] = deepMerge(baseValue, value as DeepPartial<unknown>);
-    } else {
-      out[key] = value;
-    }
+    out[key] = isPlainObject(baseValue) && isPlainObject(value) ? deepMerge(baseValue, value as DeepPartial<unknown>) : value;
   }
   return out as T;
 };

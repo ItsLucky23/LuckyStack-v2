@@ -11,9 +11,7 @@ declare global {
 //? consumer has registered their own Prisma client. Avoids paying the
 //? PrismaClient construction cost in code paths that swap it out at boot.
 const buildDefaultPrismaClient = (): PrismaClient => {
-  if (!globalThis.__luckystackPrisma) {
-    globalThis.__luckystackPrisma = new PrismaClient();
-  }
+  globalThis.__luckystackPrisma ??= new PrismaClient();
   return globalThis.__luckystackPrisma;
 };
 
@@ -26,11 +24,14 @@ if (process.env.NODE_ENV !== 'production') {
 
 //? Proxy forwards every read/call to whichever client is active *at access
 //? time*, so a `registerPrismaClient(...)` performed after this module is
-//? imported still wins.
+//? imported still wins. The empty-object Proxy target needs an `as` cast
+//? because the target is never read directly — every access is intercepted.
+// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Proxy target placeholder
 export const prisma = new Proxy({} as PrismaClient, {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- Reflect.get must forward `unknown`/`any` through to satisfy the Proxy handler contract
   get: (_target, prop, receiver) => Reflect.get(getPrismaClient() as object, prop, receiver),
   has: (_target, prop) => Reflect.has(getPrismaClient() as object, prop),
   ownKeys: () => Reflect.ownKeys(getPrismaClient() as object),
   getOwnPropertyDescriptor: (_target, prop) =>
     Reflect.getOwnPropertyDescriptor(getPrismaClient() as object, prop),
-}) as PrismaClient;
+});

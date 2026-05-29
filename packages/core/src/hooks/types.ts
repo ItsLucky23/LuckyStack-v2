@@ -46,8 +46,14 @@ export interface HookStopSignal {
   httpStatus?: number;
 }
 
-/** Handlers return undefined to continue, or a stop signal to abort the main flow. */
-export type HookResult = undefined | HookStopSignal;
+/** Handlers return undefined / void to continue, or a stop signal to abort the main flow. */
+//? Include `void` so handlers declared as `(payload) => { ... }` (no return)
+//? are assignable without TypeScript complaining that "void is not undefined".
+//? `void` and `undefined` are distinct in strict mode — `() => void` accepts
+//? any return shape (effectively ignored), `() => undefined` requires an
+//? explicit `return undefined`. Hook handlers want the looser shape.
+// eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- intentional, see comment above
+export type HookResult = void | undefined | HookStopSignal;
 
 export type HookHandler<TPayload> = (payload: TPayload) => Promise<HookResult> | HookResult;
 
@@ -123,6 +129,21 @@ export interface PreSyncAuthorizePayload {
   data: Record<string, unknown>;
   user: HookSessionShape | null;
   /** Room code / receiver token — the sync's intended audience. */
+  receiver: string;
+  /** Optional transport tag — see {@link PreApiValidatePayload.transport}. */
+  transport?: 'socket' | 'http';
+}
+
+//? Fires AFTER `preSyncAuthorize` resolves without a stop signal — i.e.
+//? the request is past auth + custom-policy checks, and is about to go
+//? through rate-limit + input validation. Observational only (handlers
+//? that return a stop signal are ignored). Use this to audit successful
+//? authorizations per recipient / per route without forking the dispatch
+//? loop.
+export interface PostSyncAuthorizePayload {
+  routeName: string;
+  data: Record<string, unknown>;
+  user: HookSessionShape | null;
   receiver: string;
   /** Optional transport tag — see {@link PreApiValidatePayload.transport}. */
   transport?: 'socket' | 'http';
@@ -228,6 +249,9 @@ export interface OnUploadStartPayload {
   userId: string;
   contentType: string;
   sizeBytes: number;
+  //? `'avatar'` is the framework-owned upload kind; any other string is a
+  //? project-defined kind. The union documents the convention for autocomplete.
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents -- intentional autocomplete hint
   uploadKind: 'avatar' | string;
 }
 
@@ -235,6 +259,7 @@ export interface OnUploadCompletePayload {
   userId: string;
   fileName: string;
   sizeBytes: number;
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents -- intentional autocomplete hint
   uploadKind: 'avatar' | string;
 }
 
@@ -282,6 +307,7 @@ export interface HookPayloads {
   transformApiResponse: PreApiRespondPayload;
   postApiRespond: PostApiRespondPayload;
   preSyncAuthorize: PreSyncAuthorizePayload;
+  postSyncAuthorize: PostSyncAuthorizePayload;
   preSyncFanout: PreSyncFanoutPayload;
   postSyncFanout: PostSyncFanoutPayload;
   preSyncStream: PreSyncStreamPayload;

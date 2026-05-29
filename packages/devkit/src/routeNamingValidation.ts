@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT_DIR } from '@luckystack/core';
+import { ROOT_DIR, validatePagePath } from '@luckystack/core';
 import {
   isVersionedApiFileName,
   isVersionedSyncFileName,
@@ -10,6 +10,7 @@ import {
   apiMarkerSegment,
   syncMarkerSegment,
   getRoutingRules,
+  isRouteTestFile,
 } from './routingRules';
 import { getOrInit } from './internal/mapUtils';
 
@@ -30,13 +31,14 @@ const normalizePath = (value: string): string => {
   return value.replaceAll('\\', '/');
 };
 
+const toRel = (absolute: string): string =>
+  path.relative(ROOT_DIR, absolute).replaceAll('\\', '/');
+
 const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   const apiSeg = apiMarkerSegment();
   const syncSeg = syncMarkerSegment();
   const { ignore } = getRoutingRules();
-  const toRel = (absolute: string): string =>
-    path.relative(ROOT_DIR, absolute).replaceAll('\\', '/');
 
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
@@ -54,6 +56,10 @@ const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
     }
 
     if (!entry.isFile() || !entry.name.endsWith('.ts')) {
+      continue;
+    }
+
+    if (isRouteTestFile(entry.name)) {
       continue;
     }
 
@@ -319,4 +325,101 @@ export const assertNoDuplicateNormalizedRouteKeys = ({
   }
 
   throw new Error(formatDuplicateRouteKeyIssues({ issues, context }));
+};
+
+//? --- Duplicate-page-route detection ----------------------------------------
+//? `validatePagePath` in @luckystack/core normalizes a `page.tsx` path into a
+//? URL route by stripping invisible-parent folders (`_<name>`). Two files in
+//? DIFFERENT folder trees can therefore compute the SAME route — e.g.
+//? `src/_test/admin/page.tsx` AND `src/admin/page.tsx` both yield `/admin`.
+//? React Router silently keeps the first registration; the second page is
+//? lost without an error. This validator catches the collision at startup
+//? + build time.
+
+export interface DuplicatePageRouteIssue {
+  /** Computed route after invisible-parent stripping (e.g. `/admin`). */
+  route: string;
+  /** All page.tsx files that resolve to this same route. */
+  filePaths: string[];
+}
+
+const walkPageFiles = (dir: string, results: string[] = []): string[] => {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+      walkPageFiles(fullPath, results);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (entry.name === 'page.tsx' || entry.name === 'page.jsx') {
+      results.push(fullPath);
+    }
+  }
+  return results;
+};
+
+export const collectDuplicatePageRoutes = (srcDir: string): DuplicatePageRouteIssue[] => {
+  //? `validatePagePath` is a pure function (no registry side-effects) so
+  //? top-level importing it is safe and doesn't drag any boot ordering.
+  //? Previously this was a lazy `require()` call which crashed under ESM
+  //? (`ReferenceError: require is not defined`); the import-at-the-top
+  //? form works in both runtimes the package targets.
+  const pageFiles = walkPageFiles(srcDir);
+  const routeToFiles = new Map<string, string[]>();
+
+  for (const absoluteFilePath of pageFiles) {
+    const relative = normalizePath(path.relative(srcDir, absoluteFilePath));
+    const result = validatePagePath(relative);
+    if (!result.valid || !result.route) continue;
+    const list = routeToFiles.get(result.route) ?? [];
+    list.push(normalizePath(path.relative(ROOT_DIR, absoluteFilePath)));
+    routeToFiles.set(result.route, list);
+  }
+
+  const issues: DuplicatePageRouteIssue[] = [];
+  for (const [route, filePaths] of routeToFiles) {
+    if (filePaths.length > 1) {
+      issues.push({ route, filePaths });
+    }
+  }
+  return issues;
+};
+
+export const formatDuplicatePageRouteIssues = ({
+  issues,
+  context,
+}: {
+  issues: DuplicatePageRouteIssue[];
+  context: string;
+}): string => {
+  const plural = issues.length === 1 ? '' : 's';
+  const header = `[RouteNaming] Found ${issues.length} duplicate page route${plural} while ${context}.`;
+  const details = issues
+    .map((issue, index) => {
+      const fileList = issue.filePaths.map((filePath) => `   - ${filePath}`).join('\n');
+      return `${index + 1}. ${issue.route}\n   files:\n${fileList}\n   fix: rename or move one of the files so only one page.tsx resolves to "${issue.route}". Remember that "_<folder>" segments are stripped from the URL (invisible-parent rule).`;
+    })
+    .join('\n');
+
+  return `${header}\n${details}`;
+};
+
+export const assertNoDuplicatePageRoutes = ({
+  srcDir,
+  context,
+}: {
+  srcDir: string;
+  context: string;
+}): void => {
+  const issues = collectDuplicatePageRoutes(srcDir);
+  if (issues.length === 0) return;
+  throw new Error(formatDuplicatePageRouteIssues({ issues, context }));
 };

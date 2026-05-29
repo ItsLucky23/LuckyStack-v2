@@ -118,6 +118,17 @@ Boolean prompt helper. Behaviour:
 - Blank input -> returns `defaultValue`.
 - Lowercase compare: `y` / `yes` -> `true`. Anything else -> `false`. Note: this means typing `n`, `no`, or even `maybe` all map to `false`.
 
+### Self-contained `npm run test` in the scaffold
+
+The bundled `template/` tree includes the artifact-generation scripts and preset loader that `npm run test` depends on so a fresh checkout is testable without any extra wiring:
+
+- `template/scripts/generateTypeMaps.ts` — emits `apiTypes.generated.ts` + `apiInputSchemas.generated.ts` + `apiDocs.generated.json` via `@luckystack/devkit`.
+- `template/scripts/generateServerRequests.ts` — emits the server-request typings the test runner consumes.
+- `template/server/config/presetLoader.ts` — loads the project's preset config so the runtime maps line up with what the test runner expects.
+- `template/package.json` declares a `generateArtifacts` script that runs both generators, and the `test` script chains `generateArtifacts` before invoking `@luckystack/test-runner`. Without this chain, `testAll.ts` imports `apiInputSchemas.generated` / `apiTypes.generated` files that don't exist on first checkout and `npm run test` errors before any layer starts.
+
+`copyTree` carries these files into the scaffolded project unchanged. Consumers who customize the artifact pipeline should edit the scripts in `<scaffold>/scripts/` rather than removing them.
+
 ### `copyTree(src, dest, vars)` (src/index.ts:241)
 
 Recursive directory copier. For every entry under `src`:

@@ -35,12 +35,14 @@ if (!arg) {
 }
 
 const parts = arg.split('/');
-if (parts.length < 3) {
-  fail(`Invalid route path "${arg}". Expected format: <page>/<name>/<version> (e.g. settings/revokeSession/v1). Nested pages are supported: admin/users/list/v1`);
+if (parts.length < 2) {
+  fail(`Invalid route path "${arg}". Expected format: <page>/<name>/<version> (e.g. settings/revokeSession/v1). Nested pages are supported: admin/users/list/v1. Root-level routes (no page folder) use <name>/<version>, e.g. logout/v1.`);
 }
 
 const version = parts.at(-1);
 const name = parts.at(-2);
+//? Empty `page` is intentional for root-level routes that live at
+//? `src/_api/<name>_v<n>.ts` instead of `src/<page>/_api/...`.
 const page = parts.slice(0, -2).join('/');
 const versionMatch = /^v(\d+)$/.exec(version);
 if (!versionMatch) fail(`Version "${version}" should look like "v1", "v2", …`);

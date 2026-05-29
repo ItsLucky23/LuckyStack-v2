@@ -2,7 +2,7 @@
 
 > Dev-only. `setupWatchers()` is a no-op when `process.env.NODE_ENV === 'production'`. Production servers read the generated runtime maps on disk and never run chokidar.
 
-`setupWatchers()` is the single dev-time entry point that turns the project source tree into a live, hot-reloadable route registry. It boots three chokidar watchers (source / server-functions / shared), coalesces file events into a few coarse buckets, and schedules background type-map regeneration without blocking the Socket.io thread.
+`setupWatchers()` is the single dev-time entry point that turns the project source tree into a live, hot-reloadable route registry. It boots one chokidar watcher for the source tree, one watcher per configured `serverFunctionDirs` root (legacy singular `serverFunctionsDir` still honored when set), and one for `sharedDir`. It coalesces file events into a few coarse buckets, and schedules background type-map regeneration without blocking the Socket.io thread.
 
 It must be called AFTER `initializeAll()` so the initial `devApis`/`devSyncs`/`devFunctions` maps are populated before the first hot-reload event has a chance to mutate them.
 
@@ -21,7 +21,11 @@ const syncMarkerNoLead = `${getRoutingRules().syncMarker}/`;
 const pathsCfg = getProjectConfig().paths;
 const srcSegment = `/${pathsCfg.srcDir.replaceAll('\\', '/')}/`;
 const sharedSegment = `/${pathsCfg.sharedDir.replaceAll('\\', '/')}/`;
-const serverFunctionsSegment = `/${pathsCfg.serverFunctionsDir.replaceAll('\\', '/')}/`;
+// One segment per configured root in `pathsCfg.serverFunctionDirs` (the legacy
+// singular `pathsCfg.serverFunctionsDir` is folded into the array at config load):
+const serverFunctionsSegments = pathsCfg.serverFunctionDirs.map(
+  (dir) => `/${dir.replaceAll('\\', '/')}/`,
+);
 const localesSegment = `${srcSegment}_locales/`;
 ```
 
@@ -121,7 +125,8 @@ const isRouteDependencyFile = (n: string): boolean => {
 };
 
 const isSharedDependencyFile = (n: string): boolean => {
-  // .ts / .tsx inside sharedDir OR serverFunctionsDir
+  // .ts / .tsx inside sharedDir OR any configured serverFunctionDirs root
+  // (legacy singular serverFunctionsDir still honored when set)
 };
 
 const isTypeMapRelevantFile = (n: string): boolean => {
@@ -146,10 +151,14 @@ watch(pathsConfig.srcDir, { ignoreInitial: true, awaitWriteFinish: { ... } })
   .on('change', handleChange)
   .on('unlink', handleDelete);
 
-watch(pathsConfig.serverFunctionsDir, { ignoreInitial: true })
-  .on('add', handleFunctionChange)
-  .on('change', handleFunctionChange)
-  .on('unlink', handleFunctionChange);
+// One watcher per configured root in `pathsConfig.serverFunctionDirs`
+// (legacy singular `pathsConfig.serverFunctionsDir` is folded into the array at config load):
+for (const serverFunctionsDir of pathsConfig.serverFunctionDirs) {
+  watch(serverFunctionsDir, { ignoreInitial: true })
+    .on('add', handleFunctionChange)
+    .on('change', handleFunctionChange)
+    .on('unlink', handleFunctionChange);
+}
 
 watch(pathsConfig.sharedDir, { ignoreInitial: true })
   .on('add', handleFunctionChange)
@@ -207,7 +216,7 @@ Triggered by both the server-functions watcher and the shared watcher.
 
 - Invalidate the dependency graph for the changed file.
 - Schedule the `functions` reload: re-run `initializeFunctions()` AND request a type-map regeneration (server functions are part of the generated `Functions` interface).
-- If the file is a shared-dependency file, ALSO call `enqueueAffectedRoutesFromDependency` so routes that import from `<sharedDir>` or `<serverFunctionsDir>` reload.
+- If the file is a shared-dependency file, ALSO call `enqueueAffectedRoutesFromDependency` so routes that import from `<sharedDir>` or any configured `<serverFunctionDirs>` root (legacy singular `<serverFunctionsDir>` still honored when set) reload.
 
 ---
 

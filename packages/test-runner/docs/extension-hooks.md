@@ -281,7 +281,7 @@ import { registerTestLayer } from '@luckystack/test-runner';
 registerTestLayer({
   name: 'cors',
   run: async ({ endpoint }) => {
-    const response = await fetch(`http://127.0.0.1:80/${endpoint}`, {
+    const response = await fetch(`${process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80'}/${endpoint}`, {
       method: 'OPTIONS',
       headers: {
         Origin: 'https://evil.example.com',
@@ -324,7 +324,7 @@ registerTestLayer({
     if (!fixture || fixture.invalid.length === 0) return { passed: true };
 
     const probe = fixture.invalid[0];
-    const response = await fetch(`http://127.0.0.1:80/${endpoint}`, {
+    const response = await fetch(`${process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80'}/${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

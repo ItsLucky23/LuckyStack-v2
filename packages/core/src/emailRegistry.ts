@@ -48,7 +48,7 @@ export interface EmailSender {
  * Custom slot names ('billing', 'support', etc.) are allowed; consumers
  * resolve them explicitly via `sendEmail({ adapter: 'billing', ... })`.
  */
-export type EmailSenderRegistry = Record<string, EmailSender>;
+export type EmailSenderRegistry = Partial<Record<string, EmailSender>>;
 
 let activeSender: EmailSender | null = null;
 let registry: EmailSenderRegistry = {};

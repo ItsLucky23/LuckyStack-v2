@@ -30,7 +30,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   if (avatar) {
     const matches = /^data:(.+);base64,(.+)$/.exec(avatar);
-    if (!matches) {
+    if (!matches?.[1] || !matches[2]) {
       return { status: "error", errorCode: 'avatar.invalidFormat' };
     }
     const contentType = matches[1];

@@ -33,28 +33,33 @@ const parseArgs = (argv: readonly string[]): CliArgs => {
 
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
-    const next = argv[i + 1];
+    const next: string | undefined = i + 1 < argv.length ? argv[i + 1] : undefined;
     switch (flag) {
       case '--deploy':
-      case '-d':
+      case '-d': {
         args.deploy = next ?? null;
         i++;
         break;
+      }
       case '--services':
-      case '-s':
+      case '-s': {
         args.services = next ?? null;
         i++;
         break;
-      case '--strict':
+      }
+      case '--strict': {
         args.failOnWarning = true;
         break;
+      }
       case '--help':
-      case '-h':
+      case '-h': {
         printHelp();
         process.exit(0);
         break;
-      default:
+      }
+      default: {
         break;
+      }
     }
   }
 
@@ -168,7 +173,7 @@ const main = async (): Promise<void> => {
   process.exit(0);
 };
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   const message = error instanceof Error ? error.stack ?? error.message : String(error);
   process.stderr.write(`[luckystack-validate-deploy] fatal: ${message}\n`);
   process.exit(1);

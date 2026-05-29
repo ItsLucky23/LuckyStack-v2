@@ -12,7 +12,7 @@
 //?
 //? For framework-wide overrides (session storage, error tracking, auth, etc.)
 //? prefer `register<X>Adapter()` calls or hooks — see
-//? `node_modules/@luckystack/core/AI_INDEX.md` and
+//? `node_modules/@luckystack/core/CLAUDE.md` and
 //? `docs/luckystack/ARCHITECTURE_EXTENSION_POINTS.md`. Edits in this folder only
 //? affect your own handlers via the injected `functions` parameter.
 export const getServerTime = (): string => new Date().toISOString();

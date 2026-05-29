@@ -129,6 +129,12 @@ type SyncParamsForFullName<
      * to the global config.
      */
     offlineDropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
+    /**
+     * Optional AbortSignal. When aborted the client emits `syncCancel { cb }`
+     * to the server and resolves locally with
+     * `{ status: 'error', errorCode: 'request.aborted' }`.
+     */
+    signal?: AbortSignal;
   }
   : {
     name: F;
@@ -139,6 +145,8 @@ type SyncParamsForFullName<
     onStream?: SyncRequestStreamCallbackForFullName<F, V>;
     /** Per-request override (see typed branch). */
     offlineDropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
+    /** Optional AbortSignal — see typed branch. */
+    signal?: AbortSignal;
   };
 
 interface RuntimeSyncParams {
@@ -149,6 +157,7 @@ interface RuntimeSyncParams {
   ignoreSelf?: boolean;
   onStream?: SyncRequestStreamCallback;
   offlineDropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
+  signal?: AbortSignal;
 }
 
 interface SyncErrorParam { key: string; value: string | number | boolean };
@@ -286,13 +295,22 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
   params: SyncRequestParamsWithOptions<F, V>
 ): Promise<Prettify<SyncRequestResponseForFullName<F, V>>> => {
   const runtimeParams = params as RuntimeSyncParams;
-  const { name, version, receiver, ignoreSelf, onStream, offlineDropPolicy } = runtimeParams;
+  const { name, version, receiver, ignoreSelf, onStream, offlineDropPolicy, signal: externalSignal } = runtimeParams;
   const payloadData = runtimeParams.data;
 
   type RequestOutput = Prettify<SyncRequestResponseForFullName<F, V>>;
 
   return new Promise<RequestOutput>((resolve) => {
     void (async () => {
+      //? B1 — if the consumer-supplied signal is already aborted at call
+      //? time, short-circuit before we even touch the socket.
+      if (externalSignal?.aborted) {
+        resolve(normalizeSyncError({
+          response: { status: 'error', errorCode: 'request.aborted' },
+          fallbackErrorCode: 'request.aborted',
+        }) as RequestOutput);
+        return;
+      }
       if (!name || typeof name !== "string") {
         if (shouldLogDev()) {
           getLogger().error("Invalid name for syncRequest");
@@ -427,10 +445,36 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
           };
         }
 
-        socketInstance.emit(socketEventNames.sync, { name: fullName, data, cb: `${sanitizedName}/${version}`, receiver: normalizedReceiver, responseIndex: tempIndex, ignoreSelf });
+        const syncCb = `${sanitizedName}/${version}`;
+        socketInstance.emit(socketEventNames.sync, { name: fullName, data, cb: syncCb, receiver: normalizedReceiver, responseIndex: tempIndex, ignoreSelf });
+
+        //? B1 — bridge the consumer's AbortSignal to the server. When the
+        //? signal fires we emit `syncCancel { cb }` so the server-side
+        //? handler stops emitting new chunks. We also resolve locally with
+        //? `request.aborted` so the awaiting caller settles.
+        let cleanupExternalAbort: (() => void) | null = null;
+        if (externalSignal) {
+          const externalAbortHandler = () => {
+            socketInstance.emit(socketEventNames.syncCancel, { cb: syncCb });
+            cleanupProgressListener?.();
+            cleanupProgressListener = null;
+            cleanupExternalAbort?.();
+            cleanupExternalAbort = null;
+            resolve(normalizeSyncError({
+              response: { status: 'error', errorCode: 'request.aborted' },
+              fallbackErrorCode: 'request.aborted',
+            }) as RequestOutput);
+          };
+          externalSignal.addEventListener('abort', externalAbortHandler);
+          cleanupExternalAbort = () => {
+            externalSignal.removeEventListener('abort', externalAbortHandler);
+          };
+        }
 
         socketInstance.once(buildSyncResponseEventName(tempIndex), (responseData: SyncAckResponse) => {
           cleanupProgressListener?.();
+          cleanupExternalAbort?.();
+          cleanupExternalAbort = null;
 
           if (responseData.status === "error") {
             const normalizedError = normalizeSyncError({
@@ -466,6 +510,12 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
             ? responseData.result
             : {};
 
+          //? `RequestOutput.result` is a generic `Record<string, never>` shape
+          //? that the runtime response can't structurally satisfy from the
+          //? untyped `responseData.result` (server-side typing lives on the
+          //? other side of the socket). The cast is the documented socket
+          //? response boundary.
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- socket response boundary
           resolve({
             status: 'success',
             message: typeof responseData.message === 'string' && responseData.message.trim().length > 0
@@ -539,7 +589,7 @@ export const useSyncEvents = () => {
       return noop;
     }
 
-    const routeName = String(params.name);
+    const routeName = params.name;
     const parsedRoute = parseServiceRouteName(routeName);
     if (parsedRoute.status === 'error') {
       if (shouldLogDev()) {
@@ -552,7 +602,7 @@ export const useSyncEvents = () => {
     }
     const sanitizedName = parsedRoute.normalizedRouteName;
 
-    const routeVersion = String(params.version);
+    const routeVersion = params.version;
     const fullName = `sync/${sanitizedName}/${routeVersion}`;
     const callback: SyncEventCallback = ({ clientOutput, serverOutput }) => {
       params.callback({
@@ -625,7 +675,7 @@ export const useSyncEvents = () => {
       return noop;
     }
 
-    const routeName = String(params.name);
+    const routeName = params.name;
     const parsedRoute = parseServiceRouteName(routeName);
     if (parsedRoute.status === 'error') {
       if (shouldLogDev()) {
@@ -638,7 +688,7 @@ export const useSyncEvents = () => {
     }
     const sanitizedName = parsedRoute.normalizedRouteName;
 
-    const routeVersion = String(params.version);
+    const routeVersion = params.version;
     const fullName = `sync/${sanitizedName}/${routeVersion}`;
     //? Combined union: both `serverStream` (from `broadcastStream` /
     //? `streamTo`) and `clientStream` (from `_client_v{n}.ts`) flow through

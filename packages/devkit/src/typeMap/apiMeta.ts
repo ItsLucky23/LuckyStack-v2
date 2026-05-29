@@ -109,6 +109,92 @@ const parseAdditionalItem = (objectLiteral: ts.ObjectLiteralExpression): Record<
   return item.key ? item : null;
 };
 
+/**
+ * AST-extracted JSDoc `@docs` metadata for a route file. Parsed from JSDoc
+ * blocks attached to top-level statements (typically the `main` export).
+ *
+ * Convention (matches docs-ui renderer in `packages/docs-ui/src/docsHtml.ts`):
+ *
+ *   /\*\*
+ *    * Description sentence.
+ *    * @docs owner @mathijs
+ *    * @docs tags admin, internal, deprecated-soon
+ *    * @docs deprecated use api/billing/getInvoice/v2 instead
+ *    *\/
+ *   export const main = async (...) => {...};
+ *
+ * `@docs deprecated` without a reason -> `true` (renders as red "deprecated"
+ * badge without explanation). With a reason -> `string` (renders the
+ * explanation). `@docs tags` is comma-split + trimmed. Unknown sub-keys are
+ * silently ignored so future tags don't break the parser.
+ */
+export interface DocsMeta {
+  owner?: string;
+  tags?: string[];
+  deprecated?: string | true;
+}
+
+export const extractDocsMeta = (filePath: string): DocsMeta | undefined => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+
+    const result: DocsMeta = {};
+
+    const commentToString = (commentValue: unknown): string => {
+      if (typeof commentValue === 'string') return commentValue;
+      if (Array.isArray(commentValue)) {
+        return commentValue
+          .map((part) => {
+            if (part && typeof part === 'object' && 'text' in part && typeof (part as { text: unknown }).text === 'string') {
+              return (part as { text: string }).text;
+            }
+            return '';
+          })
+          .join('');
+      }
+      return '';
+    };
+
+    const consumeTag = (tag: ts.JSDocTag): void => {
+      if (tag.tagName.text !== 'docs') return;
+      const commentText = commentToString(tag.comment).trim();
+      if (commentText.length === 0) return;
+
+      const spaceIdx = commentText.search(/\s/);
+      const subkey = (spaceIdx === -1 ? commentText : commentText.slice(0, spaceIdx)).toLowerCase();
+      const value = spaceIdx === -1 ? '' : commentText.slice(spaceIdx + 1).trim();
+
+      if (subkey === 'owner' && value.length > 0) {
+        result.owner = value;
+      } else if (subkey === 'tags' && value.length > 0) {
+        const tags = value.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+        if (tags.length > 0) result.tags = tags;
+      } else if (subkey === 'deprecated') {
+        result.deprecated = value.length > 0 ? value : true;
+      }
+      //? unknown sub-keys: ignore (forward-compat for future @docs <key> tags)
+    };
+
+    //? Walk every top-level statement and collect JSDoc tags. This catches
+    //? JSDoc on the `main` export, on the `auth`/`rateLimit` consts, or on
+    //? any other top-level declaration — wherever the author wrote it.
+    for (const statement of sourceFile.statements) {
+      for (const tag of ts.getJSDocTags(statement)) {
+        consumeTag(tag);
+      }
+    }
+
+    if (result.owner === undefined && result.tags === undefined && result.deprecated === undefined) {
+      return undefined;
+    }
+    return result;
+  } catch (error) {
+    console.error(`[TypeMapGenerator] Error extracting @docs metadata from ${filePath}:`, error);
+    return undefined;
+  }
+};
+
 export const extractAuth = (filePath: string): { login: boolean; additional?: Record<string, unknown>[] } => {
   try {
     const content = fs.readFileSync(filePath, 'utf8');

@@ -46,44 +46,52 @@ const parseArgs = (argv: readonly string[]): CliArgs => {
 
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
-    const next = argv[i + 1];
+    const next: string | undefined = i + 1 < argv.length ? argv[i + 1] : undefined;
     switch (flag) {
       case '--deploy':
-      case '-d':
+      case '-d': {
         args.deploy = next ?? null;
         i++;
         break;
+      }
       case '--services':
-      case '-s':
+      case '-s': {
         args.services = next ?? null;
         i++;
         break;
+      }
       case '--env':
-      case '-e':
+      case '-e': {
         args.env = next ?? args.env;
         i++;
         break;
+      }
       case '--preset':
-      case '-p':
+      case '-p': {
         args.preset = next ?? null;
         i++;
         break;
-      case '--port':
+      }
+      case '--port': {
         args.port = next ? Number(next) : null;
         i++;
         break;
-      case '--no-shared-health':
+      }
+      case '--no-shared-health': {
         args.sharedHealth = false;
         break;
+      }
       case '--help':
-      case '-h':
+      case '-h': {
         printHelp();
         process.exit(0);
         break;
-      default:
+      }
+      default: {
         // Ignore unknown flags so consumers can wrap the CLI without
         // tripping on harmless extras (e.g. shell sigils).
         break;
+      }
     }
   }
 
@@ -155,7 +163,7 @@ const main = async (): Promise<void> => {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 };
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   const message = error instanceof Error ? error.stack ?? error.message : String(error);
   process.stderr.write(`[luckystack-router] fatal: ${message}\n`);
   process.exit(1);

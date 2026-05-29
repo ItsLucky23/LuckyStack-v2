@@ -12,9 +12,9 @@ const JUNK_PAYLOADS: unknown[] = [
   [],
   [1, 2, 3],
   'string-instead-of-object',
-  1234567890,
+  1_234_567_890,
   true,
-  { nested: { deeply: { nested: { value: 'x'.repeat(10000) } } } },
+  { nested: { deeply: { nested: { value: 'x'.repeat(10_000) } } } },
   { __proto__: { polluted: true } },
   { key: null, other: undefined, third: Number.NaN },
 ];
@@ -36,7 +36,7 @@ const probe = async (
 ): Promise<{ httpStatus: number; parsed: { status?: unknown; errorCode?: unknown } | null } | null> => {
   const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}`;
   const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const timeoutHandle = setTimeout(() => { controller.abort(); }, requestTimeoutMs);
   const [fetchError, response] = await tryCatch(() => fetch(url, {
     method: endpoint.method,
     headers: { 'Content-Type': 'application/json', ...headers },

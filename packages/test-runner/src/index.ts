@@ -39,6 +39,13 @@ export type {
   RunCustomTestsSummary,
 } from './customTests';
 
+export { openStreamWatcher } from './streamWatcher';
+export type {
+  StreamWatcher,
+  StreamChunkFrame,
+  OpenStreamWatcherInput,
+} from './streamWatcher';
+
 export { runAllTests, logRunAllSummary } from './runAllTests';
 export type { RunAllTestsInput, RunAllTestsSummary } from './runAllTests';
 

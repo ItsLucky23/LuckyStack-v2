@@ -118,7 +118,7 @@ import {
 const summary = await runAuthEnforcementTests({
   apiMethodMap,
   apiMetaMap,
-  baseUrl: 'http://127.0.0.1:80',
+  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
   onResult: logContractResult,
 });
 
@@ -143,7 +143,7 @@ const result = await runAuthEnforcementCheck({
     method: 'POST',
     fullPath: 'api/billing/cancelSubscription/v1',
   },
-  baseUrl: 'http://127.0.0.1:80',
+  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
 });
 
 logContractResult(result);

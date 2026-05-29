@@ -83,6 +83,6 @@ Test-only helper. Restore defaults between scenarios. Not part of the runtime co
 
 ## Related
 
-- Function INDEX: `packages/core/AI_INDEX.md`
+- Function INDEX: `packages/core/CLAUDE.md`
 - Source: `packages/core/src/csrfConfig.ts`, `packages/core/src/csrf.ts`, `packages/server/src/httpRoutes/csrfMiddleware.ts`, `packages/login/src/session.ts`
 - Architecture: `docs/ARCHITECTURE_EXTENSION_POINTS.md`, `packages/server/docs/security-defaults.md`

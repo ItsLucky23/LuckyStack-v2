@@ -130,11 +130,11 @@
 
 | File | What's stale |
 |---|---|
-| `packages/devkit/AI_INDEX.md` | Still references `serverFunctionsDir` (singular). Should mention multi-dir scan. |
+| `packages/devkit/CLAUDE.md` | Still references `serverFunctionsDir` (singular). Should mention multi-dir scan. |
 | `packages/devkit/docs/loader-pipeline.md` | Same — still mentions the old singular config. |
 | `packages/devkit/docs/hot-reload.md` | Same. |
 | `packages/devkit/docs/type-map-generation.md` | Same. |
-| `packages/test-runner/AI_INDEX.md` | Doesn't list `runAllTests`, `runCustomTests`, `TestContext`, `CustomTestCase`, `discoverCustomTestFiles`, `logRunAllSummary`. |
+| `packages/test-runner/CLAUDE.md` | Doesn't list `runAllTests`, `runCustomTests`, `TestContext`, `CustomTestCase`, `discoverCustomTestFiles`, `logRunAllSummary`. |
 | `packages/test-runner/docs/*` | Doesn't cover the new Layer 5 (per-route business-logic tests). |
 | CLAUDE.md "Core Rules (26)" header | Count is misleading now — function-injection contract + testing layer added. Rename or renumber. |
 
@@ -164,7 +164,7 @@
 
 | Item | Why | Effort |
 |---|---|---|
-| `shared/` wildcard re-exports still use relative paths | 4 files (`responseNormalizer.ts`, `sentrySetup.ts`, `serviceRoute.ts`, `socketEvents.ts`) do `export * from '../packages/core/src/X'`. Flipping to `@luckystack/core` would silently change the exposed surface (broader/narrower than the internal module). Needs audit. | ~30 min |
+| ~~`shared/` wildcard re-exports still use relative paths~~ | **DONE** — audited 2026-05-28. The 4 files (`responseNormalizer.ts`, `sentrySetup.ts`, `serviceRoute.ts`, `socketEvents.ts`) keep their relative paths intentionally: barrel-route would pull `bootUuid` -> `node:crypto` into the Vite client bundle. Rationale comments added inline. Same deliberate pattern as `shared/sleep.ts` + `shared/tryCatch.ts`. | (closed) |
 | AI_CAPABILITIES signature regex truncates on nested parens | `(cb: () => void, opts: { retries?: number }) => bar` truncates at first `)`. ~10% of signatures. Fix: TS-Program-backed extraction via `packages/devkit/src/typeMap/tsProgram.ts`. | +200 lines + devkit dep |
 | Scaffold script falls back to "(shape not detected)" if `generateArtifacts` hasn't run | The stub gets a placeholder comment instead of the real input shape. Fix: have the scaffold script run `generateArtifacts` first when missing. | ~10 min |
 | Pre-commit hook regenerates `ai:capabilities` but `apiTypes.generated.ts` might be stale | If consumer commits without `generateArtifacts`, the snapshot reflects stale routes. Options: add a CLAUDE.md note, or have the hook run `generateArtifacts` too (~10s slower). | ~5 min or ~10s/commit |

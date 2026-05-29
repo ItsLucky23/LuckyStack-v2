@@ -2,12 +2,12 @@ import { walkEndpoints } from './walkEndpoints';
 import { runAuthEnforcementCheck } from './authEnforcementCheck';
 import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
-type ApiMethodMap = Record<string, Record<string, Record<string, string>>>;
-type ApiMetaMap = Record<string, Record<string, Record<string, {
+type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
+type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, {
   method: string;
   auth: { login: boolean; additional?: Record<string, unknown>[] };
   rateLimit?: number | false;
-}>>>;
+}>>>>>>;
 
 export interface RunAuthEnforcementTestsInput {
   apiMethodMap: ApiMethodMap;
@@ -27,7 +27,7 @@ const shouldSkip = (endpoint: EndpointDescriptor, skip: string[]): boolean => {
 
 const requiresLogin = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): boolean => {
   const meta = apiMetaMap[endpoint.page]?.[endpoint.name]?.[endpoint.version];
-  return meta?.auth.login === true;
+  return meta?.auth.login ?? false;
 };
 
 export const runAuthEnforcementTests = async (

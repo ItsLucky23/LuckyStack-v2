@@ -2,13 +2,13 @@
 
 > Dev-only. `@luckystack/devkit` is published as a `devDependency`. Nothing in this document runs in a production bundle — the prod runtime maps loader in `@luckystack/server` reads from in-memory `devApis`/`devSyncs`/`devFunctions` only when `NODE_ENV !== 'production'`, and from the on-disk generated maps otherwise.
 
-The loader pipeline is the dev-time mirror of the production route registry. It walks the configured `srcDir` (from `getProjectConfig().paths`) and `serverFunctionsDir`, evaluates each route file via dynamic `import()`, and populates three in-memory maps:
+The loader pipeline is the dev-time mirror of the production route registry. It walks the configured `srcDir` (from `getProjectConfig().paths`) and each `serverFunctionDirs` root (legacy singular `serverFunctionsDir` still honored when set), evaluates each route file via dynamic `import()`, and populates three in-memory maps:
 
 | Map | Shape | Mirror of |
 |---|---|---|
 | `devApis` | `Record<string, { main, auth, rateLimit, httpMethod, schema, inputType, inputTypeFilePath }>` keyed by `api/<page-location\|'system'>/<name>/v<n>` | every `_api/<name>_v<n>.ts` |
 | `devSyncs` | `Record<string, { main, auth, inputType, inputTypeFilePath } \| Function>` keyed by `sync/<page-location>/<name>/v<n>_<server\|client>` | every `_sync/<name>_(server\|client)_v<n>.ts` |
-| `devFunctions` | nested `Record<string, unknown>` mirror of the on-disk tree, leaves are merged named + default exports per file | every `<serverFunctionsDir>/**/*.ts` |
+| `devFunctions` | nested `Record<string, unknown>` mirror of the on-disk tree, leaves are merged named + default exports per file | every `<root>/**/*.ts` under each `serverFunctionDirs` root (legacy singular `serverFunctionsDir` still honored when set) |
 
 All three maps are mutated in place. Consumers (the dev server boot path, the prod runtime maps loader's dev branch) hold a stable reference to the exported objects and read them on every request.
 
@@ -110,14 +110,17 @@ Like `initializeApis()`, the boot path skips `invalidateProgramCache()` and only
 export const initializeFunctions = async () => {
   for (const key of Object.keys(devFunctions)) delete devFunctions[key];
 
-  const serverFunctionsDir = getServerFunctionsDir();
-  if (fs.existsSync(serverFunctionsDir)) {
-    await scanFunctionsFolder(serverFunctionsDir);
+  for (const serverFunctionsDir of getServerFunctionDirs()) {
+    if (fs.existsSync(serverFunctionsDir)) {
+      await scanFunctionsFolder(serverFunctionsDir);
+    }
   }
 };
 ```
 
-Walks `serverFunctionsDir` recursively. Per `.ts` file:
+> `getServerFunctionDirs()` returns the array from `projectConfig.paths.serverFunctionDirs`. The legacy singular `serverFunctionsDir` form is still honored — when set it is merged into the array at config load.
+
+Walks every configured root recursively. Per `.ts` file:
 
 1. Import via `importFile()` (see below).
 2. Run `resolveFunctionModule(module, fileName)`:

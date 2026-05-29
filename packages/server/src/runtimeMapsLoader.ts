@@ -91,7 +91,7 @@ const resolvePresets = (options: ProdRuntimeMapsLoaderOptions): string[] => {
     return [fromOptions];
   }
   if (Array.isArray(fromOptions) && fromOptions.length > 0) {
-    return Array.from(new Set(fromOptions));
+    return [...new Set(fromOptions)];
   }
   const fromArgv = getParsedBundles();
   if (fromArgv.length > 0) {
@@ -130,6 +130,8 @@ const mergeInto = (
  * `registerProdRuntimeMapsProvider(...)` (this module) to do both in one
  * step.
  */
+const isProduction = (): boolean => process.env.NODE_ENV === 'production';
+
 export const createProdRuntimeMapsProvider = (
   options: ProdRuntimeMapsLoaderOptions,
 ): RuntimeMapsProvider => {
@@ -140,8 +142,6 @@ export const createProdRuntimeMapsProvider = (
     devkitModulePromise ??= import('@luckystack/devkit') as Promise<DevkitRuntimeMaps>;
     return await devkitModulePromise;
   };
-
-  const isProduction = (): boolean => process.env.NODE_ENV === 'production';
 
   const loadProdRuntimeMaps = async (): Promise<LoadedRuntimeMaps> => {
     if (prodMapsPromise) return await prodMapsPromise;

@@ -299,7 +299,7 @@ Lifecycle in `handleApiRoute` / `handleSyncRoute`:
 
 ## Related
 
-- Function INDEX: `packages/server/AI_INDEX.md`
+- Function INDEX: `packages/server/CLAUDE.md`
 - Request pipeline: `packages/server/docs/request-pipeline.md`
 - Security defaults: `packages/server/docs/security-defaults.md`
 - API delegate: `docs/ARCHITECTURE_API.md`

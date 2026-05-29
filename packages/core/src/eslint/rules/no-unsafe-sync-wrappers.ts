@@ -7,6 +7,11 @@
 //? exists as a distinct identity so the sync-only rule can be disabled
 //? independently when a consumer uses api but not sync.
 
+//? Double-cast + any-spread disabled file-wide: bridges `Rule.Node` to specific
+//? AST shapes; the spread iterates over `Object.entries(node)` whose values are
+//? typed as `any` because eslint's AST shape varies by node kind.
+/* eslint-disable no-restricted-syntax, @typescript-eslint/no-unsafe-argument */
+
 import type { EslintRule } from '../internal/ruleTypes.js';
 
 const SUSPECT_PARAM_NAMES = new Set(['name', 'version', 'route', 'syncName']);
@@ -43,7 +48,7 @@ const containsSuspectCall = (body: unknown): boolean => {
 };
 
 const isSuspect = (node: {
-  params?: Array<{ type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }>;
+  params?: { type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }[];
   body?: unknown;
 }): boolean => {
   if (!node.params || node.params.length === 0) return false;
@@ -71,12 +76,12 @@ const rule: EslintRule = {
   create(context) {
     return {
       FunctionDeclaration(node) {
-        if (isSuspect(node as unknown as { params?: Array<{ type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }>; body?: unknown })) {
+        if (isSuspect(node as unknown as { params?: { type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }[]; body?: unknown })) {
           context.report({ node, messageId: 'unsafeSyncWrapper' });
         }
       },
       ArrowFunctionExpression(node) {
-        if (isSuspect(node as unknown as { params?: Array<{ type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }>; body?: unknown })) {
+        if (isSuspect(node as unknown as { params?: { type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }[]; body?: unknown })) {
           context.report({ node, messageId: 'unsafeSyncWrapper' });
         }
       },

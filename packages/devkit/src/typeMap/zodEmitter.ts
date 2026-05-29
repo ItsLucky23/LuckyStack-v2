@@ -61,10 +61,11 @@ const convertTypeNode = (node: ts.TypeNode): string => {
 
     if (nonUndef.length === 0) return 'z.undefined()';
 
+    const firstNonUndef = nonUndef[0];
     const innerSchema =
-      nonUndef.length === 1
-        ? convertTypeNode(nonUndef[0])
-        : `z.union([${nonUndef.map(convertTypeNode).join(', ')}])`;
+      nonUndef.length === 1 && firstNonUndef
+        ? convertTypeNode(firstNonUndef)
+        : `z.union([${nonUndef.map((m) => convertTypeNode(m)).join(', ')}])`;
 
     return hasUndefined ? wrapOptional(innerSchema) : innerSchema;
   }
@@ -77,8 +78,10 @@ const convertTypeNode = (node: ts.TypeNode): string => {
     switch (name) {
       case 'Record': {
         //? Record<string, T> → z.record(z.string(), convert(T))
-        if (args.length === 2) {
-          return `z.record(${convertTypeNode(args[0])}, ${convertTypeNode(args[1])})`;
+        const arg0 = args[0];
+        const arg1 = args[1];
+        if (args.length === 2 && arg0 && arg1) {
+          return `z.record(${convertTypeNode(arg0)}, ${convertTypeNode(arg1)})`;
         }
         return anyFallback('Record with unexpected arity');
       }
@@ -86,25 +89,30 @@ const convertTypeNode = (node: ts.TypeNode): string => {
         //? Partial<{...}> flattens into making each property optional. Without
         //? resolving the referenced type we emit a best-effort record — the
         //? runtime validator on the server still enforces full correctness.
-        return args.length === 1
-          ? `${convertTypeNode(args[0])}.partial()`
+        const arg0 = args[0];
+        return args.length === 1 && arg0
+          ? `${convertTypeNode(arg0)}.partial()`
           : anyFallback('Partial without type arg');
       }
-      case 'Array':
-        return args.length === 1
-          ? `z.array(${convertTypeNode(args[0])})`
+      case 'Array': {
+        const arg0 = args[0];
+        return args.length === 1 && arg0
+          ? `z.array(${convertTypeNode(arg0)})`
           : anyFallback('Array without element type');
-      case 'Date':
+      }
+      case 'Date': {
         return 'z.date()';
-      default:
+      }
+      default: {
         return anyFallback(`unresolved TypeReference '${name}'`);
+      }
     }
   }
 
   // Object literal type: { key: T; key2?: T2; [k: string]: T3 }
   if (ts.isTypeLiteralNode(node)) {
-    const indexSignatures = node.members.filter(ts.isIndexSignatureDeclaration);
-    const propertySignatures = node.members.filter(ts.isPropertySignature);
+    const indexSignatures = node.members.filter((m) => ts.isIndexSignatureDeclaration(m));
+    const propertySignatures = node.members.filter((m) => ts.isPropertySignature(m));
 
     //? LuckyStack's "no input" convention: `{ [key: string]: never }` → empty
     //? object schema. Zod's `.passthrough()` isn't right because we actually
@@ -112,7 +120,7 @@ const convertTypeNode = (node: ts.TypeNode): string => {
     if (
       indexSignatures.length === 1
       && propertySignatures.length === 0
-      && indexSignatures[0].type?.kind === ts.SyntaxKind.NeverKeyword
+      && indexSignatures[0]?.type.kind === ts.SyntaxKind.NeverKeyword
     ) {
       return 'z.object({}).strict()';
     }
@@ -120,16 +128,16 @@ const convertTypeNode = (node: ts.TypeNode): string => {
     if (indexSignatures.length > 0 && propertySignatures.length === 0) {
       //? Pure index signature → z.record(keyType, valueType).
       const sig = indexSignatures[0];
-      const keyType = sig.parameters[0]?.type;
-      const valueType = sig.type;
-      if (keyType && valueType) {
+      const keyType = sig?.parameters[0]?.type;
+      const valueType = sig?.type;
+      if (sig && keyType && valueType) {
         return `z.record(${convertTypeNode(keyType)}, ${convertTypeNode(valueType)})`;
       }
     }
 
     //? Regular object with property signatures.
     const entries = propertySignatures.map((prop) => {
-      if (!prop.name || !ts.isIdentifier(prop.name)) return null;
+      if (!ts.isIdentifier(prop.name)) return null;
       if (!prop.type) return null;
 
       const name = prop.name.text;

@@ -11,6 +11,7 @@ import {
   useTranslator,
   useUpdateLanguage,
 } from "@luckystack/core/client";
+import type { PageMiddleware } from "@luckystack/core/client";
 import { menuHandler } from "src/_functions/menuHandler";
 import { apiRequest } from "src/_sockets/apiRequest";
 
@@ -40,6 +41,14 @@ interface ActiveSession {
 
 export const template = 'dashboard';
 
+//? Per-page route guard. `/settings` shows the user's avatar, language,
+//? theme, and active sessions — all of which require a logged-in session.
+//? Logged-out visitors bounce to `/login`.
+export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
+  if (!session) return { success: false, redirect: '/login' };
+  return { success: true };
+};
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="bg-container1 border border-container1-border rounded-xl p-5 flex flex-col gap-3">
@@ -65,10 +74,36 @@ export default function Home() {
   const [newLanguage, setNewLanguage] = useState<Language>((session?.language ?? 'en') as Language);
   const [newName, setNewName] = useState<string>(session?.name ?? '');
   const [newTheme, setNewTheme] = useState<Theme>(session?.theme ?? 'dark');
+  const [newEmail, setNewEmail] = useState<string>(session?.email ?? '');
+  const [emailChangePending, setEmailChangePending] = useState<boolean>(false);
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const [preferences, setPreferences] = useState<UserPreferences>(
     (session?.preferences as UserPreferences | undefined) ?? {},
   );
+
+  //? Email change is a separate flow from `saveProfile` — it routes through a
+  //? confirmation email + token rather than being applied directly. We POST
+  //? to `settings/requestEmailChange`, and the actual write happens on the
+  //? user clicking the link sent to the new address.
+  const handleRequestEmailChange = useCallback(async () => {
+    if (!session) return;
+    const trimmed = newEmail.trim();
+    if (!trimmed || trimmed.toLowerCase() === session.email.toLowerCase()) return;
+
+    setEmailChangePending(true);
+    const response = await apiRequest({
+      name: 'settings/requestEmailChange',
+      version: 'v1',
+      data: { newEmail: trimmed },
+    });
+    setEmailChangePending(false);
+
+    if (response.status === 'success') {
+      notify.info({ key: 'settings.emailChange.checkInbox' });
+    } else {
+      notify.error({ key: response.errorCode });
+    }
+  }, [newEmail, session]);
 
   const saveProfile = useCallback(async (newAvatar?: string) => {
     if (!session) return;
@@ -301,9 +336,26 @@ export default function Home() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium">{translate({ key: 'settings.email' })}</label>
-            <input className={`${inputClass} cursor-not-allowed opacity-70`} value={session.email} disabled />
-            <p className="text-xs text-common">{translate({ key: 'settings.emailReadOnly' })}</p>
+            <label htmlFor="settings-email" className="text-xs font-medium">{translate({ key: 'settings.email' })}</label>
+            <div className="flex gap-2">
+              <input
+                id="settings-email"
+                type="email"
+                className={inputClass}
+                value={newEmail}
+                onChange={(e) => { setNewEmail(e.target.value); }}
+                disabled={emailChangePending}
+              />
+              <button
+                type="button"
+                onClick={() => void handleRequestEmailChange()}
+                disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === session.email.toLowerCase()}
+                className="h-9 px-3 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
+              >
+                {translate({ key: 'settings.emailChange.button' })}
+              </button>
+            </div>
+            <p className="text-xs text-common">{translate({ key: 'settings.emailChange.label' })}</p>
           </div>
 
           <div className="flex flex-col gap-1">

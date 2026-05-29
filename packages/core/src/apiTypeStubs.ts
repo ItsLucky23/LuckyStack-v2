@@ -10,9 +10,12 @@
 //? Consumers who want a concrete shape (project code, tests) can still
 //? import `ApiTypeMap` / `SyncTypeMap` from the generated file directly.
 
+//? Both stubs are intentionally empty — the generator fills them in via
+//? `declare module` augmentation at build time. The lint rule normally
+//? warns because empty interfaces accept anything; that's the point here.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- declaration-merge stub
 export interface ApiTypeMap {}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- declaration-merge stub
 export interface SyncTypeMap {}
 
-export type StreamPayload = {
-  [key: string]: unknown;
-};
+export type StreamPayload = Record<string, unknown>;

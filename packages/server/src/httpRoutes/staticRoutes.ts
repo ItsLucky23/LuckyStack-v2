@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { StaticFileHandler } from '../types';
 import type { HttpRouteHandler } from './types';
 
-const KNOWN_STATIC_FILE_REGEX = /^\/(assets\/[a-zA-Z0-9_\-/]+|[a-zA-Z0-9_\-]+)\.(png|jpg|jpeg|gif|svg|html|css|js)$/;
+const KNOWN_STATIC_FILE_REGEX = /^\/(assets\/[a-zA-Z0-9_/-]+|[a-zA-Z0-9_-]+)\.(png|jpg|jpeg|gif|svg|html|css|js)$/;
 
 //? `serveFile` consumers (Vite middleware, custom static handlers) read
 //? `req.url`, so we need to swap it for the rewritten asset path. We swap

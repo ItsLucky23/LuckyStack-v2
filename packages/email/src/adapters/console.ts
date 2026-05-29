@@ -10,7 +10,7 @@ interface ConsoleSenderOptions {
 //? no text fallback). Returns a deterministic fake id.
 export const ConsoleSender = (_options: ConsoleSenderOptions = {}): EmailSender => ({
   name: 'console',
-  send: async (message) => {
+  send: (message) => {
     const recipients = Array.isArray(message.to) ? message.to.join(', ') : message.to;
     const body = message.text ?? message.html.replaceAll(/<[^>]+>/g, '').trim().slice(0, 400);
 
@@ -26,6 +26,6 @@ export const ConsoleSender = (_options: ConsoleSenderOptions = {}): EmailSender 
       ].join('\n'),
     );
 
-    return { ok: true, id: `console-${String(Date.now())}` };
+    return Promise.resolve({ ok: true, id: `console-${String(Date.now())}` });
   },
 });

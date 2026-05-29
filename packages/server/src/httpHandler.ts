@@ -60,8 +60,8 @@ const setSecurityHeaders = (req: IncomingMessage, res: ServerResponse, origin: s
           res.setHeader(name, value);
         }
       }
-    } catch (err) {
-      getLogger().warn('securityHeadersBuilder threw — falling back to defaults', { err });
+    } catch (error) {
+      getLogger().warn('securityHeadersBuilder threw — falling back to defaults', { err: error });
     }
   }
 };
@@ -203,7 +203,7 @@ export const handleHttpRequest = async (
   //? generate a fresh UUID. Echo back as a response header so client-side
   //? logs and Sentry can correlate.
   const incomingRequestId = req.headers['x-request-id'];
-  const requestId = (Array.isArray(incomingRequestId) ? incomingRequestId[0] : incomingRequestId) || randomUUID();
+  const requestId = (Array.isArray(incomingRequestId) ? incomingRequestId[0] : incomingRequestId) ?? randomUUID();
   res.setHeader('X-Request-Id', requestId);
 
   //? `preHttpRequest` fires before any route dispatch. Use to instrument
@@ -212,11 +212,11 @@ export const handleHttpRequest = async (
   const safeHeaders: Record<string, string> = {};
   for (const [k, v] of Object.entries(req.headers)) {
     if (k === 'authorization' || k === 'cookie' || k === 'set-cookie' || k === 'x-csrf-token') continue;
-    safeHeaders[k] = Array.isArray(v) ? v.join(', ') : String(v ?? '');
+    safeHeaders[k] = Array.isArray(v) ? v.join(', ') : (v ?? '');
   }
   const preHttpResult = await dispatchHook('preHttpRequest', {
     method: req.method?.toUpperCase() ?? 'GET',
-    url: req.url || '/',
+    url: req.url ?? '/',
     requestId,
     origin,
     headers: safeHeaders,
@@ -235,8 +235,10 @@ export const handleHttpRequest = async (
   }
 
   const method = req.method;
-  const url = req.url || '/';
-  const [routePath, queryString] = url.split('?');
+  const url = req.url ?? '/';
+  const [routePathRaw, queryStringRaw] = url.split('?');
+  const routePath = routePathRaw ?? '/';
+  const queryString = queryStringRaw ?? '';
 
   if (method !== 'GET' && method !== 'POST' && method !== 'PUT' && method !== 'DELETE') {
     res.statusCode = 404;

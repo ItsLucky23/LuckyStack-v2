@@ -68,7 +68,15 @@ export default tseslint.config(
       'eslint-comments/no-unused-disable': 'error',
       'react-refresh/only-export-components': [
         'warn',
-        { allowConstantExport: true },
+        {
+          allowConstantExport: true,
+          //? Framework convention: `page.tsx` co-exports `template` and
+          //? `middleware` alongside the default component. Both are static
+          //? config consumed by `TemplateProvider` + `<Middleware>` — they
+          //? do not break Fast Refresh in practice. Whitelist the names
+          //? so the per-page pattern doesn't generate noise.
+          allowExportNames: ['template', 'middleware'],
+        },
       ],
       'unicorn/filename-case': "off",
       'unicorn/prevent-abbreviations': 'off',
@@ -135,10 +143,39 @@ export default tseslint.config(
         assertionStyle: 'as',
         objectLiteralTypeAssertions: 'never',
       }],
+      //? `_`-prefixed names are the well-known convention for "intentionally
+      //? unused" identifiers. Without these ignore patterns, every signature
+      //? that documents an unused param via a leading underscore trips the
+      //? rule.
+      '@typescript-eslint/no-unused-vars': ['error', {
+        args: 'after-used',
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        destructuredArrayIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+        ignoreRestSiblings: true,
+      }],
     },
   },
+  //? Server-side overlay. Applies to first-party server/shared/scripts/config
+  //? AND to framework packages under `packages/*/src/` so server-only
+  //? relaxations (template-expression flex, ts-comment escape hatch) flow
+  //? to handler code regardless of where it lives.
+  //?
+  //? Critical async-correctness rules (`@typescript-eslint/no-floating-promises`,
+  //? `@typescript-eslint/no-misused-promises`) come from
+  //? `tseslint.configs.strictTypeChecked` in the global `**/*.{ts,tsx}` block
+  //? above — they ARE active for server code without needing to repeat them
+  //? here. Don't add `eslint-plugin-n` without an `npm install` discussion;
+  //? per CLAUDE.md rule 8 installs require explicit approval.
   {
-    files: ['server/**/*.ts', 'shared/**/*.ts', 'scripts/**/*.ts', 'config.ts'],
+    files: [
+      'server/**/*.ts',
+      'shared/**/*.ts',
+      'scripts/**/*.ts',
+      'config.ts',
+      'packages/*/src/**/*.ts',
+    ],
     languageOptions: {
       globals: globals.node,
     },

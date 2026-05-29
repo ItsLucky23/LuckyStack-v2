@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { getDeployConfig } from './deployConfigRegistry';
-import { resolveEnvKey } from './bootUuid';
+
 
 //? Cross-env consistency check: when env A declares `fallback: B`, any env
 //? vars listed under `synchronizedEnvKeys` on their shared resource must hold
@@ -23,7 +23,7 @@ export const collectSynchronizedEnvKeys = (): string[] => {
       keys.add(key);
     }
   }
-  return [...keys].sort();
+  return [...keys].toSorted();
 };
 
 export const computeSynchronizedEnvHashes = (): Record<string, string | null> => {
@@ -42,4 +42,6 @@ export const computeSynchronizedEnvHashes = (): Record<string, string | null> =>
 //? opens a Redis connection).
 export const hashSynchronizedValue = (value: string): string => hashValue(value);
 
-export { resolveEnvKey };
+
+
+export {resolveEnvKey} from './bootUuid';

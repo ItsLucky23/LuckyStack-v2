@@ -10,6 +10,13 @@
 export { apiRequest } from './apiRequest';
 export type { ApiStreamEvent } from './apiRequest';
 
+//? Browser-safe helpers also re-used by server handlers via the
+//? function-injection system. Exposed on `/client` so `shared/sleep.ts`
+//? and `shared/tryCatch.ts` can resolve them without dragging the
+//? server-only `bootUuid` / `redis` modules into a Vite client bundle.
+export { default as sleep } from './sleep';
+export { default as tryCatch } from './tryCatch';
+
 export {
   getProjectConfig,
   registerProjectConfig,
@@ -98,12 +105,49 @@ export type { LocalesMap, LanguageSource } from './localesRegistry';
 export {
   registerMiddlewareHandler,
   getMiddlewareHandler,
+  registerPageMiddleware,
+  getPageMiddleware,
+  hasPageMiddleware,
 } from './middlewareRegistry';
 export type {
   MiddlewareInput,
   MiddlewareResult,
   MiddlewareHandler,
+  PageMiddleware,
 } from './middlewareRegistry';
+
+//? Client-side hook bus. Subscribe to login / logout transitions detected
+//? by the framework's session context. Counterpart to the server-side
+//? `registerHook` system. See `clientHookBus.ts` for the full payload map.
+//? `dispatchVetoableClientHook` + `proposeLogin` (re-exported from
+//? `react/sessionContext`) give consumers stop-signal semantics matching
+//? the server-side hook bus.
+export {
+  registerClientHook,
+  dispatchClientHook,
+  dispatchVetoableClientHook,
+} from './clientHookBus';
+export type {
+  ClientHookName,
+  ClientHookHandler,
+  ClientHookPayloadMap,
+  ClientHookStopSignal,
+  ClientHookResult,
+  ClientDispatchResult,
+} from './clientHookBus';
+
+//? Pure page-route validator. Consumers' main.tsx auto-discovery uses this
+//? to decide whether a discovered page.tsx becomes a route (and what URL),
+//? and the same helper is used by the devkit scaffold CLI + hot-reload
+//? warning. See `pageRouteValidation.ts` for the full convention.
+export {
+  validatePagePath,
+  DEFAULT_PAGE_ROUTE_RULES,
+} from './pageRouteValidation';
+export type {
+  PageRouteRules,
+  PagePathValidationResult,
+} from './pageRouteValidation';
 
 //? Framework-React surface. Provider + hooks consumers compose into
 //? their app entry. Hooks (useSession, useTranslation, useTheme,
@@ -114,6 +158,7 @@ export {
   useSession,
   setLatestSession,
   getCurrentSession,
+  proposeLogin,
 } from './react/sessionContext';
 export type { SessionContextValue } from './react/sessionContext';
 

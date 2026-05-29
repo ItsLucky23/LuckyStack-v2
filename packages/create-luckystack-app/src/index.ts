@@ -47,10 +47,21 @@ const parseArgs = (argv: string[]): CliArgs => {
   let prompt = true;
   let help = false;
   for (const arg of argv) {
-    if (arg === '--no-install') install = false;
-    else if (arg === '--no-prompt') prompt = false;
-    else if (arg === '--help' || arg === '-h') help = true;
-    else if (arg.startsWith('-')) {
+    switch (arg) {
+    case '--no-install': {
+    install = false;
+    break;
+    }
+    case '--no-prompt': {
+    prompt = false;
+    break;
+    }
+    case '--help': 
+    case '-h': {
+    help = true;
+    break;
+    }
+    default: { if (arg.startsWith('-')) {
       //? Fail-fast on unknown flags. Silently ignoring them previously
       //? meant a typo like `--ni-install` would be swallowed and the
       //? scaffold would proceed with default behavior. Exit 2 matches
@@ -61,6 +72,8 @@ const parseArgs = (argv: string[]): CliArgs => {
       process.exit(2);
     } else {
       projectName ||= arg;
+    }
+    }
     }
   }
   return { projectName, install, prompt, help };
@@ -97,11 +110,12 @@ const pickFromList = async <T extends string>(
   defaultValue: T,
 ): Promise<T> => {
   const numbered = options.map((opt, idx) => `  ${String(idx + 1)}) ${opt}${opt === defaultValue ? ' (default)' : ''}`).join('\n');
-  const answer = (await rl.question(`\n${label}\n${numbered}\n> `)).trim();
+  const raw = await rl.question(`\n${label}\n${numbered}\n> `);
+  const answer = raw.trim();
   if (!answer) return defaultValue;
   const asNumber = Number(answer);
   if (Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= options.length) {
-    return options[asNumber - 1];
+    return options[asNumber - 1] ?? defaultValue;
   }
   const lower = answer.toLowerCase();
   const match = options.find((opt) => opt.toLowerCase() === lower);
@@ -114,14 +128,16 @@ const pickMulti = async <T extends string>(
   options: readonly T[],
 ): Promise<T[]> => {
   const numbered = options.map((opt, idx) => `  ${String(idx + 1)}) ${opt}`).join('\n');
-  const answer = (await rl.question(`\n${label} (comma-separated, blank = none)\n${numbered}\n> `)).trim();
+  const raw = await rl.question(`\n${label} (comma-separated, blank = none)\n${numbered}\n> `);
+  const answer = raw.trim();
   if (!answer) return [];
   const picks = new Set<T>();
   for (const part of answer.split(',').map((p) => p.trim())) {
     if (!part) continue;
     const asNumber = Number(part);
     if (Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= options.length) {
-      picks.add(options[asNumber - 1]);
+      const option = options[asNumber - 1];
+      if (option !== undefined) picks.add(option);
       continue;
     }
     const match = options.find((opt) => opt.toLowerCase() === part.toLowerCase());
@@ -132,7 +148,8 @@ const pickMulti = async <T extends string>(
 
 const askYesNo = async (rl: readline.Interface, label: string, defaultValue: boolean): Promise<boolean> => {
   const hint = defaultValue ? 'Y/n' : 'y/N';
-  const answer = (await rl.question(`\n${label} (${hint}) > `)).trim().toLowerCase();
+  const raw = await rl.question(`\n${label} (${hint}) > `);
+  const answer = raw.trim().toLowerCase();
   if (!answer) return defaultValue;
   return answer === 'y' || answer === 'yes';
 };
@@ -201,8 +218,8 @@ const slugify = (raw: string): string =>
   raw
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replaceAll(/[^a-z0-9]+/g, '-')
+    .replaceAll(/^-+|-+$/g, '');
 
 const titleCase = (raw: string): string =>
   raw
@@ -240,8 +257,8 @@ const replacePlaceholders = (
   content: string,
   vars: Record<string, string>,
 ): string => {
-  return content.replace(/{{(\w+)}}/g, (match, key: string) => {
-    return Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match;
+  return content.replaceAll(/{{(\w+)}}/g, (match, key: string) => {
+    return Object.prototype.hasOwnProperty.call(vars, key) ? (vars[key] ?? match) : match;
   });
 };
 
@@ -351,7 +368,7 @@ const main = async (): Promise<void> => {
   //? Only branch-logs/README.md is copied (not the framework's own log entries) —
   //? the consumer's first session initializes their own branch-log file.
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
-  const docsCopies: Array<[string, string, boolean]> = [
+  const docsCopies: [string, string, boolean][] = [
     // [source, dest, isDirectory]
     [path.join(repoRoot, 'CLAUDE.md'),                path.join(targetDir, 'CLAUDE.md'),                  false],
     [path.join(repoRoot, 'docs'),                     path.join(targetDir, 'docs', 'luckystack'),         true],
@@ -397,7 +414,7 @@ Done — scaffold complete.
 
 Choices:
   database:    ${choices.dbProvider}
-  auth:        ${choices.authMode}${choices.oauthProviders.length ? ' (' + choices.oauthProviders.join(', ') + ')' : ''}
+  auth:        ${choices.authMode}${choices.oauthProviders.length > 0 ? ' (' + choices.oauthProviders.join(', ') + ')' : ''}
   email:       ${choices.emailProvider}
   monitoring:  ${choices.monitoringProvider}
   i18n:        ${choices.i18n ? 'on' : 'off'}

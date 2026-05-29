@@ -174,7 +174,7 @@ export const validateInputByType = async ({
 
 ## Related
 
-- Function INDEX: `packages/core/AI_INDEX.md`
+- Function INDEX: `packages/core/CLAUDE.md`
 - Architecture: `docs/ARCHITECTURE_SESSION.md`, `docs/ARCHITECTURE_AUTH.md`, `docs/ARCHITECTURE_API.md`
 - README: `packages/core/README.md`
 - Source: `packages/core/src/sessionTypes.ts`, `validateRequest.ts`, `runtimeTypeValidation.ts`

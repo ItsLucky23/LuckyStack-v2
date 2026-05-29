@@ -124,6 +124,8 @@ export const validateDeploy = ({ services, deploy, env = process.env }: Validate
 | 1 | Every service is assigned to exactly one preset | `service-unassigned`, `service-in-multiple-presets` | error |
 | 2 | Every preset references services that exist | `preset-references-unknown-service` | error |
 | 3 | Every environment binding's service matches an actual service | `binding-references-unknown-service` | error |
+| 3a | Every environment binding URL parses as a valid URL | `binding-invalid-url` | error |
+| 3b | Every environment binding URL declares an explicit port | `binding-missing-port` | error |
 | 4 | Every environment's redis/mongo resource keys exist | `unknown-redis-resource`, `unknown-mongo-resource` | error |
 | 5 | Fallback envs must share the same redis/mongo resource keys (shared-resource invariant) | `unknown-fallback-env`, `fallback-redis-mismatch`, `fallback-mongo-mismatch` | error |
 | 6 | `urlEnvKey` values resolve at config time | `missing-resource-env-var` | warning |
@@ -212,6 +214,8 @@ The CLI is sugar; library consumers should reach for `validateDeploy` directly a
 | `... did not call registerDeployConfig — nothing to validate` | Import succeeded but the consumer forgot the registration call | 2 |
 | `ERROR [service-unassigned] ...` | A service in `services.services` isn't in any preset | 1 |
 | `ERROR [preset-references-unknown-service] ...` | A preset references a service that doesn't exist | 1 |
+| `ERROR [binding-invalid-url] ...` | A binding URL in `deploy.config.ts > environments.<env>.bindings.<service>` doesn't parse as a valid URL | 1 |
+| `ERROR [binding-missing-port] ...` | A binding URL in `deploy.config.ts > environments.<env>.bindings.<service>` is missing an explicit port — the router requires one to disambiguate per-preset backends | 1 |
 | `ERROR [fallback-redis-mismatch] ...` | Two envs in a fallback chain reference different redis resource keys | 1 |
 | `WARN [missing-resource-env-var] ...` | A resource's `urlEnvKey` is unset at config time (boot may still succeed if env is set at runtime) | 0 (1 with `--strict`) |
 | `FAILED — N error(s)` | Run had at least one error finding | 1 |

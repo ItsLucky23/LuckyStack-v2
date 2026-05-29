@@ -60,16 +60,22 @@ interface PrismaUserDelegate {
   update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<UserRecord>;
 }
 
-export const defaultPrismaUserAdapter = (): UserAdapter => {
-  const user = (): PrismaUserDelegate => prisma.user as unknown as PrismaUserDelegate;
+//? Bridge between Prisma's generated client surface and the adapter contract.
+//? Structural cast required because Prisma's auto-generated delegate types
+//? don't structurally match our trimmed `PrismaUserDelegate` shape; this is a
+//? known framework boundary (see /docs/ARCHITECTURE_AUTH.md).
+const getPrismaUser = (): PrismaUserDelegate =>
+  // eslint-disable-next-line no-restricted-syntax -- structural Prisma boundary
+  prisma.user as unknown as PrismaUserDelegate;
 
+export const defaultPrismaUserAdapter = (): UserAdapter => {
   return {
     findByEmail: async ({ email, provider }) =>
-      user().findFirst({ where: { email, provider } }),
+      getPrismaUser().findFirst({ where: { email, provider } }),
     findById: async (id) =>
-      user().findUnique({ where: { id } }),
+      getPrismaUser().findUnique({ where: { id } }),
     create: async (input) =>
-      user().create({
+      getPrismaUser().create({
         data: {
           email: input.email,
           provider: input.provider,
@@ -81,7 +87,7 @@ export const defaultPrismaUserAdapter = (): UserAdapter => {
         },
       }),
     update: async (id, patch) =>
-      user().update({ where: { id }, data: patch }),
+      getPrismaUser().update({ where: { id }, data: patch }),
   };
 };
 
@@ -89,8 +95,6 @@ let cachedDefaultAdapter: UserAdapter | null = null;
 
 export const getUserAdapter = (): UserAdapter => {
   if (registeredAdapter) return registeredAdapter;
-  if (!cachedDefaultAdapter) {
-    cachedDefaultAdapter = defaultPrismaUserAdapter();
-  }
+  cachedDefaultAdapter ??= defaultPrismaUserAdapter();
   return cachedDefaultAdapter;
 };

@@ -96,7 +96,7 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
         tags: {
           'error.type': error instanceof Error ? error.name : typeof error,
           'error.msg': error instanceof Error ? error.message : String(error),
-          ...(context ?? {}),
+          ...context,
         },
       });
       span.setTag('error', true);
@@ -118,7 +118,7 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
         tags: {
           'message.text': message,
           'message.level': level,
-          ...(context ?? {}),
+          ...context,
         },
       });
       span.finish();

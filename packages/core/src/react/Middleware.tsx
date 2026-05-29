@@ -6,7 +6,7 @@
 
 import { ReactNode, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getMiddlewareHandler } from '../middlewareRegistry';
+import { getMiddlewareHandler, getPageMiddleware } from '../middlewareRegistry';
 import { useSession } from './sessionContext';
 
 const LOADER_DELAY_MS = 200;
@@ -62,7 +62,13 @@ export default function Middleware({ children }: { children: ReactNode }) {
         if (count > 500) break;
       }
 
-      const handler = getMiddlewareHandler();
+      //? Per-page middleware first (declared in each page.tsx via
+      //? `export const middleware`), then the global fallback handler
+      //? registered via `registerMiddlewareHandler`. This lets pages own
+      //? their own guards while keeping a central catch-all for
+      //? cross-cutting cases (server-reachability checks, analytics).
+      const pageMw = getPageMiddleware(location.pathname);
+      const handler = pageMw ?? getMiddlewareHandler();
       const result = await handler({
         location: location.pathname,
         searchParams: queryObject,

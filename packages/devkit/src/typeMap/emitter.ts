@@ -69,7 +69,7 @@ const buildImportStatements = ({
 
 const splitVersionedKey = (value: string): { name: string; version: string } => {
 	const [name, version] = value.split('@');
-	return { name, version: version || 'v1' };
+	return { name: name ?? '', version: version ?? 'v1' };
 };
 
 export const buildTypeMapArtifacts = ({
@@ -118,8 +118,8 @@ export type ApiNetworkResponse<T = any> =
 export interface ApiTypeMap {
 `;
 
-	const sortedPages = [...typesByPage.keys()].sort();
-	const sortedSyncPages = [...syncTypesByPage.keys()].sort();
+	const sortedPages = [...typesByPage.keys()].toSorted();
+	const sortedSyncPages = [...syncTypesByPage.keys()].toSorted();
 	const docsData: GeneratedDocsData = { apis: {}, syncs: {} };
 
 	for (const pagePath of sortedPages) {
@@ -135,9 +135,9 @@ export interface ApiTypeMap {
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const apiName of [...grouped.keys()].sort()) {
+		for (const apiName of [...grouped.keys()].toSorted()) {
 			content += `    '${apiName}': {\n`;
-			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').toSorted((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.apis[pagePath].push({
 					page: pagePath,
 					name: apiName,
@@ -191,10 +191,10 @@ export const apiMethodMap: Record<string, Record<string, Record<string, HttpMeth
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const apiName of [...grouped.keys()].sort()) {
+		for (const apiName of [...grouped.keys()].toSorted()) {
 			content += `    '${apiName}': {`;
 			const methods = mustGet(grouped, apiName, 'grouped')
-				.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
+				.toSorted((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
 				.map((item) => ` '${item.version}': '${item.method}'`)
 				.join(',');
 			content += `${methods} },\n`;
@@ -238,9 +238,9 @@ export interface SyncTypeMap {
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const syncName of [...grouped.keys()].sort()) {
+		for (const syncName of [...grouped.keys()].toSorted()) {
 			content += `    '${syncName}': {\n`;
-			for (const { version, entry } of mustGet(grouped, syncName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, syncName, 'grouped').toSorted((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.syncs[pagePath].push({
 					page: pagePath,
 					name: syncName,
@@ -286,7 +286,7 @@ export const writeTypeMapArtifacts = ({
 }) => {
 	try {
 		const outputPath = getGeneratedSocketTypesPath();
-		fs.writeFileSync(outputPath, content, 'utf-8');
+		fs.writeFileSync(outputPath, content, 'utf8');
 		console.log('[TypeMapGenerator] Generated apiTypes.generated.ts');
 
 		const docsPath = getGeneratedApiDocsPath();
@@ -294,7 +294,7 @@ export const writeTypeMapArtifacts = ({
 		if (!fs.existsSync(docsDir)) {
 			fs.mkdirSync(docsDir, { recursive: true });
 		}
-		fs.writeFileSync(docsPath, JSON.stringify(docsData, null, 2), 'utf-8');
+		fs.writeFileSync(docsPath, JSON.stringify(docsData, null, 2), 'utf8');
 		console.log('[TypeMapGenerator] Generated apiDocs.generated.json');
 	} catch (error) {
 		console.error('[TypeMapGenerator] Error writing type map or docs:', error);

@@ -22,6 +22,11 @@ interface PrismaPingShape {
 }
 
 const pingPrisma = async (): Promise<boolean> => {
+  //? Prisma's generated client typings don't expose `$queryRaw` /
+  //? `$runCommandRaw` uniformly (depends on the active datasource). The
+  //? `PrismaPingShape` is our minimal local probe interface; the boundary
+  //? cast is the structural exception the strict-typing policy allows.
+  // eslint-disable-next-line no-restricted-syntax -- Prisma datasource-conditional shape
   const client = prisma as unknown as PrismaPingShape;
   //? Capture each function into a local before calling so the typeof
   //? narrow holds without `!`. The shape `PrismaPingShape` declares both
@@ -41,12 +46,12 @@ const pingPrisma = async (): Promise<boolean> => {
   return false;
 };
 
-export const handleLivezRoute: HttpRouteHandler = async ({ res, routePath }) => {
-  if (routePath !== getProjectConfig().http.liveEndpoint) return false;
+export const handleLivezRoute: HttpRouteHandler = ({ res, routePath }) => {
+  if (routePath !== getProjectConfig().http.liveEndpoint) return Promise.resolve(false);
   res.statusCode = 200;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ status: 'live' }));
-  return true;
+  return Promise.resolve(true);
 };
 
 export const handleReadyzRoute: HttpRouteHandler = async ({ res, routePath }) => {
@@ -55,7 +60,7 @@ export const handleReadyzRoute: HttpRouteHandler = async ({ res, routePath }) =>
   const bootUuid = await readBootUuid();
 
   const [redisError, pong] = await tryCatch(() => redis.ping());
-  const redisOk = !redisError && (pong === 'PONG' || pong === 'pong' || Boolean(pong));
+  const redisOk = !redisError && (pong === 'PONG' || Boolean(pong));
 
   const prismaOk = await pingPrisma();
 

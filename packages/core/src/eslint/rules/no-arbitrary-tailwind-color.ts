@@ -3,6 +3,13 @@
 //? mandates colors from `src/index.css` `@theme` block (rule 14). Arbitrary
 //? colors break dark-mode auto-switching.
 
+//? Double-cast disabled file-wide: this rule operates on AST nodes that span
+//? two type universes (eslint's `Rule.Node` vs the JSX-extended shape from
+//? eslint-plugin-react). Bridging them needs `as unknown as`; runtime
+//? guards happen via explicit `.type === 'JSXIdentifier'` checks above each
+//? cast.
+/* eslint-disable no-restricted-syntax */
+
 import type { Rule } from 'eslint';
 
 import type { EslintRule } from '../internal/ruleTypes.js';
@@ -21,13 +28,13 @@ type ClassNameValueShape =
 
 type ExpressionShape =
   | { type: 'Literal'; value: unknown }
-  | { type: 'TemplateLiteral'; quasis: ReadonlyArray<{ value: { cooked?: string; raw: string } }> }
+  | { type: 'TemplateLiteral'; quasis: readonly { value: { cooked?: string; raw: string } }[] }
   | { type: string };
 
-type JsxAttributeShape = {
+interface JsxAttributeShape {
   name: { type: string; name?: string };
   value?: ClassNameValueShape | null;
-};
+}
 
 const reportIfArbitrary = (
   context: Rule.RuleContext,
@@ -65,7 +72,7 @@ const rule: EslintRule = {
         if (value.type === 'JSXExpressionContainer') {
           const expression = (value as { expression: ExpressionShape }).expression;
           if (expression.type === 'TemplateLiteral') {
-            const quasis = (expression as { quasis: ReadonlyArray<{ value: { cooked?: string; raw: string } }> }).quasis;
+            const quasis = (expression as { quasis: readonly { value: { cooked?: string; raw: string } }[] }).quasis;
             for (const quasi of quasis) {
               reportIfArbitrary(
                 context,

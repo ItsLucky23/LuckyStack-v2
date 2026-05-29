@@ -5,7 +5,7 @@ loadEnv({ path: '.env.local', override: true });
 import type { Server as HttpServer } from 'node:http';
 
 import handleApiRequest from "./handleApiRequest";
-import { getSession, saveSession } from "../functions/session";
+import { getSession, saveSession } from "../../functions/session";
 import { Server as SocketIOServer } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
 import { allowedOrigin, attachSocketRedisAdapter, setIoInstance } from '@luckystack/core';

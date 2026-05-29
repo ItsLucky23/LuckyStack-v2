@@ -228,6 +228,38 @@ node dist/server.js
 
 ---
 
+## Running on Bun
+
+LuckyStack also runs on [Bun](https://bun.sh) ≥ 1.1 alongside the default Node ≥ 20 target. Bun is opt-in — there's no flag to flip, you just invoke the entry with `bun` instead of `node`.
+
+**Validate compatibility first:**
+
+```bash
+npm run bun:check         # runs under Node — baseline check
+bun run scripts/checkBunCompat.mjs   # runs under Bun — parity check
+```
+
+`bun:check` probes the modules LuckyStack reaches at boot (`node:crypto`, `node:fs`, `node:path`, `node:url`, `@prisma/client`, `socket.io`, `ioredis`, `@luckystack/core`, `@luckystack/server`). It does NOT boot the server — that requires a populated `.env.local`.
+
+**Dev / prod entry points:**
+
+```bash
+# Dev: run the server directly under Bun (Bun has native TS support, no tsx needed)
+npm run bun:server
+
+# Prod: serve the compiled bundle under Bun
+npm run bun:prod
+```
+
+**Known caveats:**
+
+- **Prisma 6.x** has experimental Bun support. The default Prisma engine works for standard query patterns; edge runtimes / Accelerate may behave differently. Smoke-test your hot queries before flipping a production deploy.
+- **Socket.io HTTP fallback** (`packages/sync/src/handleHttpSyncRequest.ts`) uses the standard Node HTTP interface, which Bun emulates. Long polling has been validated; if you depend on exotic headers or `Transfer-Encoding`, test under load.
+- The supervisor (`server/dev/supervisor.ts`) spawns a child via `tsx`. To use Bun's native TS instead, swap the spawn target in supervisor.ts or just bypass the supervisor with `bun:server` for dev (no hot-reload of `config.ts` though).
+- If a specific path hits a real Bun blocker, document it inline rather than fighting the runtime; the canonical Node path stays the supported default.
+
+---
+
 ## Deployment Options
 
 ### VPS Deployment with nginx

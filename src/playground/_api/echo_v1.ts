@@ -6,6 +6,11 @@
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse, MaybePromise } from '../../_sockets/apiTypes.generated';
 
+/**
+ * @docs owner mathijs
+ * @docs tags playground, smoke-test
+ * @docs deprecated kept as a 1d JSDoc-parser smoke target; safe to remove after the next release
+ */
 export const rateLimit: number | false = 60;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
 

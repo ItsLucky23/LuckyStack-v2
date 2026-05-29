@@ -145,6 +145,6 @@ Both paths converge on the same `startRouter()` call, so behavior is identical p
 
 - `packages/router/src/cli.ts` — CLI implementation.
 - `packages/router/src/startRouter.ts` — what the CLI delegates to.
-- `packages/router/AI_INDEX.md` — package contract and full function index.
+- `packages/router/CLAUDE.md` — package contract and full function index.
 - `packages/router/README.md` — public-facing usage examples.
 - `docs/HOSTING.md` — deployment topology and environment sync.

@@ -106,6 +106,46 @@ export interface PasswordChangedPayload {
   revokedOtherSessions: boolean;
 }
 
+//? Vetoable pre-hooks. Fire BEFORE the password mutation actually runs.
+//? Handlers may return a HookStopSignal to abort (2FA gate not satisfied,
+//? compliance hold, account flagged for review). The companion `post*`
+//? events stay observational so existing audit subscribers still work.
+
+export interface PrePasswordResetCompletedPayload {
+  /** User whose password is about to be reset via the forgot-password flow. */
+  userId: string;
+}
+
+export interface PrePasswordChangedPayload {
+  /** User whose password is about to be changed via the in-session flow. */
+  userId: string;
+  /** True if the user verified their current password successfully. */
+  verifiedCurrent: boolean;
+}
+
+//? Email-change lifecycle. `preEmailChange` fires before a confirmation token
+//? is minted/emailed (vetoable — e.g. tenant-policy blocks email changes).
+//? `postEmailChangeRequested` fires after the confirmation email is dispatched
+//? (observational). `postEmailChanged` fires after the new email is persisted
+//? and all sessions are revoked (audit hook for "email rotated" alerts).
+
+export interface PreEmailChangePayload {
+  userId: string;
+  currentEmail: string;
+  newEmail: string;
+}
+
+export interface PostEmailChangeRequestedPayload {
+  userId: string;
+  newEmail: string;
+}
+
+export interface PostEmailChangedPayload {
+  userId: string;
+  oldEmail: string;
+  newEmail: string;
+}
+
 declare module '@luckystack/core' {
   interface HookPayloads {
     preLogin: PreLoginPayload;
@@ -119,7 +159,12 @@ declare module '@luckystack/core' {
     preSessionDelete: PreSessionDeletePayload;
     postSessionDelete: PostSessionDeletePayload;
     passwordResetRequested: PasswordResetRequestedPayload;
+    prePasswordResetCompleted: PrePasswordResetCompletedPayload;
     passwordResetCompleted: PasswordResetCompletedPayload;
+    prePasswordChanged: PrePasswordChangedPayload;
     passwordChanged: PasswordChangedPayload;
+    preEmailChange: PreEmailChangePayload;
+    postEmailChangeRequested: PostEmailChangeRequestedPayload;
+    postEmailChanged: PostEmailChangedPayload;
   }
 }

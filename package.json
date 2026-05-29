@@ -15,7 +15,8 @@
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.0.0",
+    "bun": ">=1.1.0"
   },
   "workspaces": [
     "packages/*"
@@ -23,8 +24,10 @@
   "scripts": {
     "ai:index": "node scripts/generateAiIndex.mjs",
     "ai:capabilities": "node scripts/generateAiCapabilities.mjs",
+    "ai:project-index": "node scripts/generateProjectIndex.mjs",
     "test": "tsx --tsconfig tsconfig.server.json scripts/testAll.ts",
     "scaffold:test": "node scripts/scaffoldRouteTest.mjs",
+    "scaffold:page": "node scripts/scaffoldPage.mjs",
     "client": "vite --host",
     "server": "npx tsx --tsconfig tsconfig.server.json server/dev/supervisor.ts",
     "server:direct": "npx tsx --tsconfig tsconfig.server.json server/server.ts",
@@ -37,6 +40,7 @@
     "lint:client": "eslint \"src/**/*.{ts,tsx}\" --cache --cache-location .eslintcache --ignore-pattern \"**/*.generated.*\"",
     "lint:server": "eslint \"server/**/*.ts\" \"shared/**/*.ts\" \"config.ts\" --cache --cache-location .eslintcache --ignore-pattern \"**/*.generated.*\" --ignore-pattern \"server/prod/generatedApis.ts\" --ignore-pattern \"server/prod/generatedApis.*.ts\"",
     "lint:all": "npm run lint:client && npm run lint:server",
+    "lint:packages": "eslint \"packages/*/src/**/*.ts\" --cache --cache-location .eslintcache --ignore-pattern \"**/*.generated.*\" --ignore-pattern \"packages/devkit/src/templates/page_*.template.ts\"",
     "generateArtifacts": "tsx --tsconfig tsconfig.server.json scripts/generateTypeMaps.ts && tsx --tsconfig tsconfig.server.json scripts/generateServerRequests.ts",
     "buildClient": "tsx --tsconfig tsconfig.server.json scripts/generateTypeMaps.ts && tsc -b && vite build",
     "buildServer": "npm run generateArtifacts && node scripts/bundleServer.mjs",
@@ -45,6 +49,9 @@
     "pack:dry": "node scripts/buildPackages.mjs --pack-dry-run",
     "prod": "node dist/server.js",
     "production": "node dist/server.js",
+    "bun:check": "node scripts/checkBunCompat.mjs",
+    "bun:server": "bun --bun server/server.ts",
+    "bun:prod": "bun --bun dist/server.js",
     "prisma:format": "prisma format",
     "prisma:validate": "dotenv -e .env.local -- prisma validate",
     "prisma:generate": "dotenv -e .env.local -- prisma generate",

@@ -229,7 +229,7 @@ registerErrorFormatter((error, ctx) => ({
 
 ## Related
 
-- Function INDEX: `packages/server/AI_INDEX.md`
+- Function INDEX: `packages/server/CLAUDE.md`
 - Request pipeline: `packages/server/docs/request-pipeline.md`
 - HTTP routes: `packages/server/docs/http-routes.md`
 - Architecture: `docs/ARCHITECTURE_API.md`, `docs/ARCHITECTURE_AUTH.md`

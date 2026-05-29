@@ -88,6 +88,9 @@
     "packages/router/src/**/*",
     "packages/server/src/**/*",
     "packages/test-runner/src/**/*",
+    "packages/create-luckystack-app/src/**/*",
+    "packages/docs-ui/src/**/*",
+    "packages/env-resolver/src/**/*",
     "src/**/_api/**/*",
     "src/**/_sync/**/*",
     "src/**/_server/**/*",
@@ -102,6 +105,7 @@
     "packages/core/src/react/**/*",
     "packages/sync/src/syncRequest.ts",
     "packages/sync/src/client.ts",
-    "packages/presence/src/client/**/*"
+    "packages/presence/src/client/**/*",
+    "packages/devkit/src/templates/page_*.template.tsx"
   ]
 }

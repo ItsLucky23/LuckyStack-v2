@@ -98,15 +98,37 @@ export const validateDeploy = ({
   const resourceNames = new Set(Object.keys(deploy.resources));
 
   for (const [envKey, envDef] of Object.entries(environments)) {
-    if (!envDef) continue;
-
-    for (const bindingService of Object.keys(envDef.bindings)) {
+    for (const [bindingService, bindingUrl] of Object.entries(envDef.bindings)) {
       if (!serviceNames.has(bindingService)) {
         findings.push({
           severity: 'error',
           code: 'binding-references-unknown-service',
           message: `Environment "${envKey}" binds unknown service "${bindingService}". Either add it to services.services or remove the binding.`,
           location: `deploy.config.ts > environments.${envKey}.bindings`,
+        });
+      }
+
+      //? Every binding MUST declare an explicit port. The URL-spec default
+      //? (80/443) is almost never what a multi-instance deploy wants — a
+      //? missing port is far more likely a typo than a deliberate "route to
+      //? port 80". The router enforces this at boot too (resolveTarget.ts).
+      let parsed: URL | null = null;
+      try {
+        parsed = new URL(bindingUrl);
+      } catch {
+        findings.push({
+          severity: 'error',
+          code: 'binding-invalid-url',
+          message: `Environment "${envKey}" service "${bindingService}" binding is not a valid URL: "${bindingUrl}".`,
+          location: `deploy.config.ts > environments.${envKey}.bindings.${bindingService}`,
+        });
+      }
+      if (parsed && !parsed.port) {
+        findings.push({
+          severity: 'error',
+          code: 'binding-missing-port',
+          message: `Environment "${envKey}" service "${bindingService}" binding "${bindingUrl}" is missing an explicit port. Set one to avoid the URL-spec default (80/443) silently winning.`,
+          location: `deploy.config.ts > environments.${envKey}.bindings.${bindingService}`,
         });
       }
     }
@@ -130,14 +152,12 @@ export const validateDeploy = ({
 
     if (envDef.fallback) {
       const fallbackEnv = environments[envDef.fallback];
-      if (!fallbackEnv) {
-        findings.push({
-          severity: 'error',
-          code: 'unknown-fallback-env',
-          message: `Environment "${envKey}" has fallback "${envDef.fallback}" which does not exist in deploy.environments.`,
-          location: `deploy.config.ts > environments.${envKey}.fallback`,
-        });
-      } else {
+      //? `fallbackEnv` reads from `environments[key]` — TS treats this as
+      //? always-defined (Record lookup), but the runtime can return undefined
+      //? when the user names a fallback env that doesn't exist. The else
+      //? branch reports that error.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record lookup can return undefined at runtime
+      if (fallbackEnv) {
         if (fallbackEnv.redis !== envDef.redis) {
           findings.push({
             severity: 'error',
@@ -154,6 +174,13 @@ export const validateDeploy = ({
             location: `deploy.config.ts > environments.${envKey}.fallback`,
           });
         }
+      } else {
+        findings.push({
+          severity: 'error',
+          code: 'unknown-fallback-env',
+          message: `Environment "${envKey}" has fallback "${envDef.fallback}" which does not exist in deploy.environments.`,
+          location: `deploy.config.ts > environments.${envKey}.fallback`,
+        });
       }
     }
   }
@@ -187,7 +214,7 @@ export const validateDeploy = ({
   //? environment will never receive traffic. Warning, not error — that's a
   //? valid intermediate state during a rollout.
   for (const service of serviceNames) {
-    const boundIn = Object.entries(environments).filter(([, env]) => env && service in env.bindings);
+    const boundIn = Object.entries(environments).filter(([, env]) => service in env.bindings);
     if (boundIn.length === 0) {
       findings.push({
         severity: 'warning',

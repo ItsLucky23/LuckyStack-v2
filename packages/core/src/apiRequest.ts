@@ -133,8 +133,8 @@ type ApiParamsForFullName<
   F extends ApiFullName,
   V extends VersionsForFullName<F>
 > = DataRequired<InputForFullName<F, V>> extends true
-  ? { name: F; version: V; data: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; }
-  : { name: F; version: V; data?: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; };
+  ? { name: F; version: V; data: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; signal?: AbortSignal; }
+  : { name: F; version: V; data?: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; signal?: AbortSignal; };
 
 interface RuntimeApiParams {
   name?: string;
@@ -143,6 +143,7 @@ interface RuntimeApiParams {
   abortable?: boolean;
   disableErrorMessage?: boolean;
   onStream?: (event: ApiStreamEvent) => void;
+  signal?: AbortSignal;
 }
 
 interface ApiErrorResponse {
@@ -209,11 +210,21 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
 ): Promise<Prettify<OutputForFullName<F, V>>> {
   type RequestOutput = Prettify<OutputForFullName<F, V> & ApiResponse>;
   const runtimeParams = params as RuntimeApiParams;
-  const { name, version, disableErrorMessage = false, onStream } = runtimeParams;
+  const { name, version, disableErrorMessage = false, onStream, signal: externalSignal } = runtimeParams;
   const payloadData = runtimeParams.data;
 
   return new Promise<RequestOutput>((resolve, reject) => {
     void (async () => {
+      //? B1 — if the consumer-supplied signal is already aborted at call
+      //? time, short-circuit before we even touch the socket. Mirrors the
+      //? `fetch(url, { signal })` contract.
+      if (externalSignal?.aborted) {
+        resolve(normalizeApiError({
+          response: { status: 'error', errorCode: 'request.aborted' },
+          fallbackErrorCode: 'request.aborted',
+        }) as RequestOutput);
+        return;
+      }
       if (!name || typeof name !== "string") {
         if (shouldLogDev()) {
           getLogger().error("apiRequest: Invalid name");
@@ -361,6 +372,31 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         const tempIndex = incrementResponseIndex();
         socketInstance.emit(socketEventNames.apiRequest, { name: fullName, data, responseIndex: tempIndex });
 
+        //? B1 — bridge the consumer's AbortSignal to the server. When the
+        //? signal fires we emit `apiCancel { responseIndex }` so the server
+        //? handler stops emitting new chunks. We also resolve locally with
+        //? `request.aborted` so the awaiting caller settles (vs awaiting
+        //? a response that will never arrive because we cancelled it).
+        let cleanupExternalAbort: (() => void) | null = null;
+        if (externalSignal) {
+          const externalAbortHandler = () => {
+            socketInstance.emit(socketEventNames.apiCancel, { responseIndex: tempIndex });
+            cleanupStreamListener?.();
+            cleanupStreamListener = null;
+            cleanupAbortController();
+            cleanupExternalAbort?.();
+            cleanupExternalAbort = null;
+            resolve(normalizeApiError({
+              response: { status: 'error', errorCode: 'request.aborted' },
+              fallbackErrorCode: 'request.aborted',
+            }) as RequestOutput);
+          };
+          externalSignal.addEventListener('abort', externalAbortHandler);
+          cleanupExternalAbort = () => {
+            externalSignal.removeEventListener('abort', externalAbortHandler);
+          };
+        }
+
         if (typeof onStream === 'function') {
           const streamEventName = buildApiStreamEventName(tempIndex);
           const streamListener = (streamPayload: ApiStreamEvent) => {
@@ -394,11 +430,15 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         //? here keeps the body type-safe in both cases.
         socketInstance.once(buildApiResponseEventName(tempIndex), (response: ApiResponse) => {
           if (signal?.aborted) {
+            cleanupExternalAbort?.();
+            cleanupExternalAbort = null;
             return;
           }
 
           cleanupStreamListener?.();
           cleanupStreamListener = null;
+          cleanupExternalAbort?.();
+          cleanupExternalAbort = null;
 
           const status = response.status;
 

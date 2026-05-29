@@ -12,9 +12,7 @@
 //? Read at call-time via `getLogger()` so registration order does not matter
 //? — same contract as `getProjectConfig()` and friends.
 
-export interface LoggerContext {
-  [key: string]: unknown;
-}
+export type LoggerContext = Record<string, unknown>;
 
 export interface Logger {
   debug: (message: string, context?: LoggerContext) => void;
@@ -25,22 +23,22 @@ export interface Logger {
 
 const defaultLogger: Logger = {
   debug: (message, context) => {
-    if (context !== undefined) console.debug(message, context);
-    else console.debug(message);
+    if (context === undefined) {console.debug(message);}
+    else {console.debug(message, context);}
   },
   info: (message, context) => {
-    if (context !== undefined) console.info(message, context);
-    else console.info(message);
+    if (context === undefined) {console.info(message);}
+    else {console.info(message, context);}
   },
   warn: (message, context) => {
-    if (context !== undefined) console.warn(message, context);
-    else console.warn(message);
+    if (context === undefined) {console.warn(message);}
+    else {console.warn(message, context);}
   },
   error: (message, error, context) => {
     if (error !== undefined && context !== undefined) console.error(message, error, context);
     else if (error !== undefined) console.error(message, error);
-    else if (context !== undefined) console.error(message, context);
-    else console.error(message);
+    else if (context === undefined) {console.error(message);}
+    else {console.error(message, context);}
   },
 };
 
@@ -52,22 +50,22 @@ const defaultLogger: Logger = {
 //? text. Use the default logger when running in production or unsure.
 export const createDevLogger = (): Logger => ({
   debug: (message, context) => {
-    if (context !== undefined) console.log(message, context, 'cyan');
-    else console.log(message, 'cyan');
+    if (context === undefined) {console.log(message, 'cyan');}
+    else {console.log(message, context, 'cyan');}
   },
   info: (message, context) => {
-    if (context !== undefined) console.log(message, context);
-    else console.log(message);
+    if (context === undefined) {console.log(message);}
+    else {console.log(message, context);}
   },
   warn: (message, context) => {
-    if (context !== undefined) console.log(message, context, 'yellow');
-    else console.log(message, 'yellow');
+    if (context === undefined) {console.log(message, 'yellow');}
+    else {console.log(message, context, 'yellow');}
   },
   error: (message, error, context) => {
     if (error !== undefined && context !== undefined) console.log(message, error, context, 'red');
     else if (error !== undefined) console.log(message, error, 'red');
-    else if (context !== undefined) console.log(message, context, 'red');
-    else console.log(message, 'red');
+    else if (context === undefined) {console.log(message, 'red');}
+    else {console.log(message, context, 'red');}
   },
 });
 

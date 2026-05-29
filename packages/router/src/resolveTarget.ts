@@ -140,6 +140,26 @@ export const resolveServiceKey = (input: {
   return parseServiceFromPath(input.pathname);
 };
 
+const assertBindingsHaveExplicitPorts = (env: EnvironmentDefinition, envKey: string): void => {
+  for (const [service, target] of Object.entries(env.bindings)) {
+    let url: URL;
+    try {
+      url = new URL(target);
+    } catch {
+      throw new Error(
+        `[router] Binding for service "${service}" in env "${envKey}" is not a valid URL: "${target}".`,
+      );
+    }
+    if (!url.port) {
+      throw new Error(
+        `[router] Binding for service "${service}" in env "${envKey}" is missing an explicit port: "${target}". ` +
+        `Port-less URLs silently fall through to the protocol default (80/443) which is rarely what a multi-instance deploy wants. ` +
+        `Set an explicit port in deploy.config.ts → environments.${envKey}.bindings.${service}.`,
+      );
+    }
+  }
+};
+
 export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceTargetResolver => {
   const { deploy, services, currentEnvKey, localPresetKey, healthStore } = input;
 
@@ -155,6 +175,16 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
     : undefined;
   if (fallbackEnvKey && !fallbackEnv) {
     throw new Error(`[router] Current environment '${currentEnvKey}' declares fallback '${fallbackEnvKey}' which is not defined.`);
+  }
+
+  //? Every binding MUST declare an explicit port. The RFC default for `http://`
+  //? URLs without a port is 80 (HTTPS: 443), but in a multi-instance LuckyStack
+  //? deploy that "default" almost always means "wrong service" — the user
+  //? forgot to specify which backend handles this preset. Fail fast at boot so
+  //? a missing port shows up before any request reaches a stranger.
+  assertBindingsHaveExplicitPorts(currentEnv, currentEnvKey);
+  if (fallbackEnv && fallbackEnvKey) {
+    assertBindingsHaveExplicitPorts(fallbackEnv, fallbackEnvKey);
   }
 
   // Services owned by the local bundle. When a preset is passed, only those
@@ -204,8 +234,8 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
     //? the new value, so local reads stay fast; sibling routers get notified
     //? via pub/sub in the next event loop tick.
     if (healthStore) {
-      void healthStore.set(service, healthy).catch((err: unknown) => {
-        console.error('[router] failed to publish health change:', err);
+      void healthStore.set(service, healthy).catch((error: unknown) => {
+        console.error('[router] failed to publish health change:', error);
       });
     }
   };

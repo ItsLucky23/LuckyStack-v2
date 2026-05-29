@@ -45,6 +45,17 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'error', errorCode: 'login.wrongPassword' };
   }
 
+  //? Vetoable pre-hook. Lets 2FA / compliance / approval-flow add-ons
+  //? abort the change with their own errorCode before any password write.
+  //? `dispatchHook` itself isolates per-handler throws, so a raw await is safe.
+  const preChange = await dispatchHook('prePasswordChanged', {
+    userId: user.id,
+    verifiedCurrent: true,
+  });
+  if (preChange.stopped) {
+    return { status: 'error', errorCode: preChange.signal.errorCode };
+  }
+
   await updatePasswordHash(user.id, newPassword);
 
   // Sign out every OTHER device — the credential they were using is no

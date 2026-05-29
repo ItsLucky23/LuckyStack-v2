@@ -4,7 +4,9 @@ const withIndex = (prefix: string, responseIndex: number | string): string => {
 
 export const socketEventNames = {
   apiRequest: 'apiRequest',
+  apiCancel: 'apiCancel',
   sync: 'sync',
+  syncCancel: 'syncCancel',
   joinRoom: 'joinRoom',
   leaveRoom: 'leaveRoom',
   getJoinedRooms: 'getJoinedRooms',

@@ -17,40 +17,50 @@ const sampleForDef = (def: unknown): unknown => {
 
   switch (name) {
     case 'ZodString':
-    case 'string':
+    case 'string': {
       return 'test';
+    }
     case 'ZodNumber':
-    case 'number':
+    case 'number': {
       return 0;
+    }
     case 'ZodBoolean':
-    case 'boolean':
+    case 'boolean': {
       return false;
+    }
     case 'ZodNull':
-    case 'null':
+    case 'null': {
       return null;
+    }
     case 'ZodUndefined':
-    case 'undefined':
+    case 'undefined': {
       return undefined;
+    }
     case 'ZodAny':
     case 'any':
     case 'ZodUnknown':
-    case 'unknown':
+    case 'unknown': {
       return null;
+    }
     case 'ZodLiteral':
-    case 'literal':
+    case 'literal': {
       return d.value;
+    }
     case 'ZodOptional':
     case 'optional':
     case 'ZodNullable':
-    case 'nullable':
+    case 'nullable': {
       //? Omitting optional fields is the most conservative valid input.
       return undefined;
+    }
     case 'ZodUnion':
-    case 'union':
-      return d.options && d.options.length > 0 ? sampleForDef(d.options[0]._def) : null;
+    case 'union': {
+      return d.options && d.options.length > 0 && d.options[0] ? sampleForDef(d.options[0]._def) : null;
+    }
     case 'ZodArray':
-    case 'array':
+    case 'array': {
       return [];
+    }
     case 'ZodObject':
     case 'object': {
       const out: Record<string, unknown> = {};
@@ -62,13 +72,16 @@ const sampleForDef = (def: unknown): unknown => {
       return out;
     }
     case 'ZodRecord':
-    case 'record':
+    case 'record': {
       return {};
+    }
     case 'ZodDate':
-    case 'date':
+    case 'date': {
       return new Date().toISOString();
-    default:
+    }
+    default: {
       return null;
+    }
   }
 };
 

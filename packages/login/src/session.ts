@@ -53,9 +53,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     //? the existing token so the client doesn't have to re-fetch on every
     //? session update. The token is rotated on logout via `deleteSession`.
     //? Token length is consumer-configurable via `registerCsrfConfig({ tokenLength })`.
-    if (!data.csrfToken) {
-      data.csrfToken = randomBytes(getCsrfConfig().tokenLength).toString('hex');
-    }
+    data.csrfToken ??= randomBytes(getCsrfConfig().tokenLength).toString('hex');
 
     const ttl = getSessionTtl();
     await adapter.setRaw(token, JSON.stringify(data), ttl);
@@ -82,6 +80,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     //   3. perUser = 'multiple' with no cap → no kick.
     if (newUser && userId) {
       const sessionCfg = getProjectConfig().session;
+      // eslint-disable-next-line @typescript-eslint/no-deprecated -- BC shim: legacy `allowMultiple` still honored when set
       const effectivePerUser = sessionCfg.allowMultiple ? 'multiple' : sessionCfg.perUser;
       const cap = sessionCfg.maxConcurrentPerUser;
 
@@ -92,7 +91,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
       let tokensToKick: string[] = [];
       if (effectivePerUser === 'single') {
         tokensToKick = previousTokens;
-      } else if (effectivePerUser === 'multiple' && cap !== null && previousTokens.length + 1 > cap && sessionCfg.onConflict === 'revokeOld') {
+      } else if (cap !== null && previousTokens.length + 1 > cap && sessionCfg.onConflict === 'revokeOld') {
         // Kick oldest until under cap. Without ordering metadata in the adapter,
         // we drop the head of the list — most adapters return insertion-order
         // for set-like structures, but consumers needing strict LRU should
@@ -185,7 +184,8 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
     });
 
     if (!parsed) return null;
-    return { ...parsed, token } as SessionLayout;
+    const merged: SessionLayout = { ...parsed, token };
+    return merged;
   }, undefined, { fn: 'getSession', token });
 
   if (error) {

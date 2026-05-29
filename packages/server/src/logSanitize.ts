@@ -17,11 +17,7 @@ export const sanitizeForLog = (value: unknown): unknown => {
 
   const out: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-    if (isRedactedKey(key)) {
-      out[key] = REDACTED_PLACEHOLDER;
-    } else {
-      out[key] = sanitizeForLog(val);
-    }
+    out[key] = isRedactedKey(key) ? REDACTED_PLACEHOLDER : sanitizeForLog(val);
   }
   return out;
 };

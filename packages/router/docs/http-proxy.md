@@ -14,6 +14,8 @@ Source: `packages/router/src/httpProxy.ts`, `packages/router/src/wsProxy.ts`.
    - `/sync/<service>/<name>/v<n>` → `<service>`
    - `/<service>/...` → `<service>`
 3. **Look up the target.** `resolver.resolve(service)` returns `{ target, viaFallback, resolvedEnvKey }` or `null`. Resolution order: local binding if owned and healthy → fallback env binding → null. See `resolveTarget.ts` for the precise rules.
+
+   **Boot-time guard: explicit ports required.** `createServiceTargetResolver` validates every binding URL in `deploy.config.ts > environments.<envKey>.bindings.<service>` at startup. A binding URL without an explicit port (e.g. `https://api.example.com` instead of `https://api.example.com:443`) throws and aborts the router boot. The error message names the offending service + env so the misconfigured slot is obvious. Rationale: the router relies on per-preset port pinning to keep multi-instance backends distinct — falling back on the protocol-default port (80 / 443) silently collapses two presets onto the same upstream target.
 4. **Choose transport.** `https.request` when the target URL starts with `https:`, otherwise `http.request`. The default port is `443` for https and `80` for http when the URL omits an explicit port.
 5. **Build the upstream request.** Strip hop-by-hop headers, inject forwarding headers, and call `transport.request(options, onUpstream)`.
 6. **Dispatch `preProxyRequest`.** Hook fires fire-and-forget before the upstream call lands.

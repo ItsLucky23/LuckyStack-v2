@@ -110,7 +110,7 @@ export const sanitizeTypeAndCollectImports = ({
 }): string => {
   const { namedImports, defaultImports } = collectors;
 
-  return type.replaceAll(/\b([A-Z][a-zA-Z0-9_]*)(<[^>]+>)?(\[\])?\b/g, (match, typeName, _generics, isArray) => {
+  return type.replaceAll(/\b([A-Z][a-zA-Z0-9_]*)(<[^>]+>)?(\[\])?\b/g, (match: string, typeName: string, _generics: string | undefined, isArray: string | undefined) => {
     const builtins = ['Promise', 'Date', 'Function', 'Array', 'Record', 'Partial', 'Pick', 'Omit', 'Error', 'Map', 'Set', 'Buffer', 'Uint8Array', 'Object'];
     const existingImports = ['SessionLayout'];
 
@@ -118,8 +118,8 @@ export const sanitizeTypeAndCollectImports = ({
       return match;
     }
 
-    if (fileImports.has(typeName)) {
-      const importConfig = fileImports.get(typeName)!;
+    const importConfig = fileImports.get(typeName);
+    if (importConfig) {
 
       // If the import is from a package (not relative and not an internal alias), we can keep it
       // Internal aliases often start with 'src/' or 'shared/' or '@/'
@@ -138,7 +138,7 @@ export const sanitizeTypeAndCollectImports = ({
             return match;
           }
         } else {
-          getOrInit(namedImports, importPath, () => new Set<string>()).add(importConfig.originalName || typeName);
+          getOrInit(namedImports, importPath, () => new Set<string>()).add(importConfig.originalName ?? typeName);
           return match;
         }
       }
@@ -153,6 +153,7 @@ export const sanitizeTypeAndCollectImports = ({
       // For now, mapping non-npm imports to `any` (the fallback below) handles the prompt.
     }
 
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- `isArray` is `'[]' | false`; false must coerce to empty string
     return `any${isArray || ''}`;
   });
 };

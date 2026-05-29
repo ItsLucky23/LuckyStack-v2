@@ -83,68 +83,57 @@ const splitTopLevel = (value: string, splitter: '|' | '&' | ','): string[] => {
   return items;
 };
 
+// Parses a type-expression string into a `ts.TypeNode` by wrapping it in a
+// synthetic `type __X = <expr>;` alias and inspecting the parsed declaration.
+// Returns `null` when the input does not parse as a type alias.
+const parseTypeNode = (typeText: string): ts.TypeNode | null => {
+  const synthetic = `type __RT = ${typeText};`;
+  const source = ts.createSourceFile('__runtime_type.ts', synthetic, ts.ScriptTarget.Latest, true);
+  const statement = source.statements[0];
+  if (!statement || !ts.isTypeAliasDeclaration(statement)) return null;
+  return statement.type;
+};
+
 const parseObjectFields = (typeText: string): { fields: ObjectField[]; indexSignatures: ObjectIndexSignature[] } => {
   const clean = typeText.trim();
   if (!clean.startsWith('{') || !clean.endsWith('}')) {
     return { fields: [], indexSignatures: [] };
   }
 
-  const inner = clean.slice(1, -1);
+  const typeNode = parseTypeNode(clean);
+  if (!typeNode || !ts.isTypeLiteralNode(typeNode)) {
+    return { fields: [], indexSignatures: [] };
+  }
+
   const fields: ObjectField[] = [];
   const indexSignatures: ObjectIndexSignature[] = [];
-  let part = '';
-  let depth = 0;
 
-  for (const char of inner) {
-    if (char === '{' || char === '[' || char === '(' || char === '<') depth += 1;
-    if (char === '}' || char === ']' || char === ')' || char === '>') depth -= 1;
-
-    if (char === ';' && depth === 0) {
-      const trimmed = part.trim();
-      if (trimmed) {
-        const fieldMatch = /^("']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/.exec(trimmed);
-        if (fieldMatch) {
-          fields.push({
-            key: fieldMatch[1].replaceAll(/^['"]|['"]$/g, ''),
-            optional: Boolean(fieldMatch[2]),
-            type: fieldMatch[3].trim(),
-          });
-        } else {
-          const indexMatch = /^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/.exec(trimmed);
-          if (indexMatch) {
-            indexSignatures.push({
-              keyName: indexMatch[1].trim(),
-              keyType: indexMatch[2].trim(),
-              type: indexMatch[3].trim(),
-            });
-          }
-        }
+  for (const member of typeNode.members) {
+    if (ts.isPropertySignature(member) && member.type) {
+      let key: string | null = null;
+      if (ts.isIdentifier(member.name)) {
+        key = member.name.text;
+      } else if (ts.isStringLiteral(member.name)) {
+        key = member.name.text;
       }
-      part = '';
+      if (key === null) continue;
+
+      fields.push({
+        key,
+        optional: Boolean(member.questionToken),
+        type: member.type.getText().trim(),
+      });
       continue;
     }
 
-    part += char;
-  }
-
-  const final = part.trim();
-  if (final) {
-    const fieldMatch = /^("']?[A-Za-z_][A-Za-z0-9_]*["']?)(\?)?\s*:\s*([\s\S]+)$/.exec(final);
-    if (fieldMatch) {
-      fields.push({
-        key: fieldMatch[1].replaceAll(/^['"]|['"]$/g, ''),
-        optional: Boolean(fieldMatch[2]),
-        type: fieldMatch[3].trim(),
+    if (ts.isIndexSignatureDeclaration(member)) {
+      const param = member.parameters[0];
+      if (!param || !ts.isIdentifier(param.name) || !param.type) continue;
+      indexSignatures.push({
+        keyName: param.name.text,
+        keyType: param.type.getText().trim(),
+        type: member.type.getText().trim(),
       });
-    } else {
-      const indexMatch = /^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/.exec(final);
-      if (indexMatch) {
-        indexSignatures.push({
-          keyName: indexMatch[1].trim(),
-          keyType: indexMatch[2].trim(),
-          type: indexMatch[3].trim(),
-        });
-      }
     }
   }
 
@@ -172,18 +161,32 @@ const serializeObjectFields = ({
   return `{ ${segments.join('; ')} }`;
 };
 
-const parseLiteralUnionKeys = (value: string): string[] | null => {
-  const parts = splitTopLevel(value, '|');
-  if (parts.length === 0) return null;
+const extractStringLiteralKey = (node: ts.TypeNode): string | null => {
+  if (!ts.isLiteralTypeNode(node)) return null;
+  const literal = node.literal;
+  if (!ts.isStringLiteral(literal)) return null;
+  return literal.text;
+};
 
-  const keys: string[] = [];
-  for (const part of parts) {
-    const literalMatch = /^['"](.+)['"]$/.exec(part.trim());
-    if (!literalMatch) return null;
-    keys.push(literalMatch[1]);
+const parseLiteralUnionKeys = (value: string): string[] | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const typeNode = parseTypeNode(trimmed);
+  if (!typeNode) return null;
+
+  if (ts.isUnionTypeNode(typeNode)) {
+    const keys: string[] = [];
+    for (const member of typeNode.types) {
+      const key = extractStringLiteralKey(member);
+      if (key === null) return null;
+      keys.push(key);
+    }
+    return keys.length > 0 ? keys : null;
   }
 
-  return keys;
+  const singleKey = extractStringLiteralKey(typeNode);
+  return singleKey === null ? null : [singleKey];
 };
 
 // ─── TypeChecker-based identifier resolution ──────────────────────────────────
@@ -265,12 +268,13 @@ const applyUtilityType = ({
   state: ResolveState;
 }): string => {
   if (utilityName === 'Partial' || utilityName === 'Required') {
-    if (utilityArgs.length !== 1) return toUnresolved(`unresolved utility ${utilityName}<...>`);
-    const target = resolveExpression(utilityArgs[0], filePath, depth + 1, state);
+    const arg0 = utilityArgs[0];
+    if (utilityArgs.length !== 1 || arg0 === undefined) return toUnresolved(`unresolved utility ${utilityName}<...>`);
+    const target = resolveExpression(arg0, filePath, depth + 1, state);
     if (isUnresolvedTypeMarker(target)) return target;
     const parsed = parseObjectFields(target);
     const fields = parsed.fields;
-    if (fields.length === 0) return toUnresolved(`unresolved utility ${utilityName}<${utilityArgs[0]}>`);
+    if (fields.length === 0) return toUnresolved(`unresolved utility ${utilityName}<${arg0}>`);
     return serializeObjectFields({
       fields: fields.map((f) => ({ ...f, optional: utilityName === 'Partial' })),
       indexSignatures: parsed.indexSignatures,
@@ -278,10 +282,12 @@ const applyUtilityType = ({
   }
 
   if (utilityName === 'Pick' || utilityName === 'Omit') {
-    if (utilityArgs.length !== 2) return toUnresolved(`unresolved utility ${utilityName}<...>`);
-    const target = resolveExpression(utilityArgs[0], filePath, depth + 1, state);
+    const arg0 = utilityArgs[0];
+    const arg1 = utilityArgs[1];
+    if (utilityArgs.length !== 2 || arg0 === undefined || arg1 === undefined) return toUnresolved(`unresolved utility ${utilityName}<...>`);
+    const target = resolveExpression(arg0, filePath, depth + 1, state);
     if (isUnresolvedTypeMarker(target)) return target;
-    const keys = parseLiteralUnionKeys(utilityArgs[1]);
+    const keys = parseLiteralUnionKeys(arg1);
     if (!keys) return toUnresolved(`unresolved utility ${utilityName}<${utilityArgs.join(', ')}>`);
     const parsed = parseObjectFields(target);
     const fields = parsed.fields;
@@ -292,9 +298,11 @@ const applyUtilityType = ({
   }
 
   if (utilityName === 'Record') {
-    if (utilityArgs.length !== 2) return toUnresolved('unresolved utility Record<...>');
-    const resolvedKey = resolveExpression(utilityArgs[0], filePath, depth + 1, state);
-    const resolvedValue = resolveExpression(utilityArgs[1], filePath, depth + 1, state);
+    const arg0 = utilityArgs[0];
+    const arg1 = utilityArgs[1];
+    if (utilityArgs.length !== 2 || arg0 === undefined || arg1 === undefined) return toUnresolved('unresolved utility Record<...>');
+    const resolvedKey = resolveExpression(arg0, filePath, depth + 1, state);
+    const resolvedValue = resolveExpression(arg1, filePath, depth + 1, state);
     if (isUnresolvedTypeMarker(resolvedKey)) return resolvedKey;
     if (isUnresolvedTypeMarker(resolvedValue)) return resolvedValue;
     const keys = parseLiteralUnionKeys(resolvedKey);
@@ -381,13 +389,18 @@ const resolveExpression = (typeText: string, filePath: string, depth: number, st
           indexSignatures: resolvedIndexSignatures,
         });
       } else {
-        const genericMatch = /^([A-Za-z_][A-Za-z0-9_]*)<(.+)>$/.exec(type);
-        if (genericMatch) {
-          const [, genericName, argsStr] = genericMatch;
-          const args = splitTopLevel(argsStr, ',');
+        const typeNode = parseTypeNode(type);
+        const referenceInfo = typeNode && ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
+          ? { name: typeNode.typeName.text, args: typeNode.typeArguments }
+          : null;
 
-          if (genericName === 'Array' && args.length === 1) {
-            const inner = resolveExpression(args[0], filePath, depth + 1, state);
+        if (referenceInfo?.args && referenceInfo.args.length > 0) {
+          const { name: genericName, args: argNodes } = referenceInfo;
+          const args = argNodes.map((arg) => arg.getText().trim());
+          const firstArg = args[0];
+
+          if (genericName === 'Array' && args.length === 1 && firstArg !== undefined) {
+            const inner = resolveExpression(firstArg, filePath, depth + 1, state);
             result = isUnresolvedTypeMarker(inner) ? inner : `${inner}[]`;
           } else if (['Partial', 'Required', 'Pick', 'Omit', 'Record'].includes(genericName)) {
             result = applyUtilityType({ utilityName: genericName, utilityArgs: args, filePath, depth, state });
@@ -396,8 +409,8 @@ const resolveExpression = (typeText: string, filePath: string, depth: number, st
             const unresolved = resolvedArgs.find((item) => isUnresolvedTypeMarker(item));
             result = unresolved ?? `${genericName}<${resolvedArgs.join(', ')}>`;
           }
-        } else if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(type)) {
-          result = resolveIdentifier(type, filePath);
+        } else if (referenceInfo && (!referenceInfo.args || referenceInfo.args.length === 0)) {
+          result = resolveIdentifier(referenceInfo.name, filePath);
         } else {
           result = type;
         }

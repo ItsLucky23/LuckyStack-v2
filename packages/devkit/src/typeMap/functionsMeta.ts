@@ -314,7 +314,7 @@ const findSignatureForExport = (
 //? IR node shapes used by the multi-directory merge. Each root directory
 //? produces an `IRDirNode` tree; multiple trees are merged with conflict
 //? detection before final serialization to a TypeScript interface body.
-type IRFileNode = {
+interface IRFileNode {
   kind: 'file';
   exports: Map<string, string>;
   defaultExportName: string | null;
@@ -324,13 +324,13 @@ type IRFileNode = {
   //? get the full module shape on `functions.<name>.<...>`.
   wildcardReExport: string | null;
   sourcePath: string;
-};
+}
 
-type IRDirNode = {
+interface IRDirNode {
   kind: 'dir';
   children: Map<string, IRFileNode | IRDirNode>;
   sourcePath: string;
-};
+}
 
 const parseFunctionFile = (fullPath: string, collectors: ImportCollectors): IRFileNode | null => {
   try {
@@ -527,8 +527,9 @@ const serializeIRDir = (dir: IRDirNode, indent: string): string => {
     }
 
     const exportsCopy = new Map(child.exports);
-    const defaultSig = child.defaultExportName ? exportsCopy.get(child.defaultExportName) : undefined;
-    if (defaultSig) exportsCopy.delete(child.defaultExportName!);
+    const defaultExportName = child.defaultExportName;
+    const defaultSig = defaultExportName ? exportsCopy.get(defaultExportName) : undefined;
+    if (defaultSig && defaultExportName) exportsCopy.delete(defaultExportName);
 
     //? Wildcard re-export (`export * from '<module>'`) — emit the file as a
     //? single `name: typeof import('<module>')` so the full module surface
@@ -546,9 +547,11 @@ const serializeIRDir = (dir: IRDirNode, indent: string): string => {
     //? Alias it to the filename so consumers can call `functions.<name>.<name>()`
     //? instead of the awkward `functions.<name>.default()`.
     if (!defaultSig && exportsCopy.size === 1 && exportsCopy.has('default')) {
-      const reExportSig = exportsCopy.get('default')!;
-      exportsCopy.delete('default');
-      exportsCopy.set(name, reExportSig);
+      const reExportSig = exportsCopy.get('default');
+      if (reExportSig) {
+        exportsCopy.delete('default');
+        exportsCopy.set(name, reExportSig);
+      }
     }
 
     let fileOutput = '';

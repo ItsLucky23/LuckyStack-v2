@@ -3,7 +3,7 @@
 // Regenerates docs/AI_QUICK_INDEX.md by scanning a curated set of sources:
 //   - CLAUDE.md (root)
 //   - docs/ARCHITECTURE_*.md
-//   - packages/*/AI_INDEX.md
+//   - packages/*/CLAUDE.md
 //   - packages/*/docs/*.md
 //   - .claude/commands/*.md
 //   - skills/custom/*/SKILL.md
@@ -87,7 +87,13 @@ const extractTitle = (content) => {
   return null;
 };
 
+const isHorizontalRule = (line) => /^(?:-{3,}|\*{3,}|_{3,})$/.test(line);
+
 const extractFirstParagraph = (content) => {
+  // Returns the first real content line after the `# Title` heading.
+  // Order: blank lines, headings, and horizontal rules are skipped. Blockquote
+  // lines are accepted (stripped of the leading `> `) so docs that style their
+  // summary as a callout still surface a meaningful first line.
   const lines = splitLines(content);
   let sawTitle = false;
   for (const rawLine of lines) {
@@ -97,8 +103,10 @@ const extractFirstParagraph = (content) => {
       sawTitle = true;
       continue;
     }
-    if (sawTitle && line.startsWith(">")) continue; // skip blockquote callouts
-    if (sawTitle) return line;
+    if (!sawTitle) continue;
+    if (isHorizontalRule(line)) continue;
+    if (line.startsWith(">")) return line.replace(/^>\s*/, "").trim();
+    return line;
   }
   return null;
 };
@@ -201,7 +209,7 @@ const scanPackages = async () => {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const pkgDir = path.join(pkgRoot, entry.name);
-    const aiIndexPath = path.join(pkgDir, "AI_INDEX.md");
+    const aiIndexPath = path.join(pkgDir, "CLAUDE.md");
     const docsDir = path.join(pkgDir, "docs");
 
     let aiIndexData = null;
@@ -214,7 +222,7 @@ const scanPackages = async () => {
         };
       }
     } else {
-      console.warn(`[ai:index] note: packages/${entry.name}/AI_INDEX.md not present (skipped)`);
+      console.warn(`[ai:index] note: packages/${entry.name}/CLAUDE.md not present (skipped)`);
     }
 
     const subDocs = [];
@@ -328,7 +336,7 @@ const renderFunctionInventory = (packages) => {
   for (const pkg of packages) {
     blocks.push(`### \`${pkg.name}\``);
     if (!pkg.aiIndex) {
-      blocks.push("- _(no `AI_INDEX.md` yet)_");
+      blocks.push("- _(no `CLAUDE.md` yet)_");
       blocks.push("");
       continue;
     }

@@ -164,7 +164,7 @@ registerRateLimitStrategy(noopStrategy);
 
 ## Related
 
-- Function INDEX: `packages/core/AI_INDEX.md`
+- Function INDEX: `packages/core/CLAUDE.md`
 - Architecture: `docs/ARCHITECTURE_EXTENSION_POINTS.md`, `docs/ARCHITECTURE_API.md`
 - README: `packages/core/README.md`
 - Source: `packages/core/src/rateLimiter.ts`

@@ -404,11 +404,13 @@ export const renderDocsHtml = (
 </html>`;
 };
 
+const HTML_ESCAPE_MAP: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+
 const escapeHtml = (str: string): string =>
-  String(str).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  } as Record<string, string>)[c] ?? c);
+  str.replaceAll(/[&<>"']/g, (c) => HTML_ESCAPE_MAP[c] ?? c);

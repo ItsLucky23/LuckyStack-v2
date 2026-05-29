@@ -59,10 +59,12 @@ export const getServerFunctionDirs = (): string[] => {
 	const paths = getProjectConfig().paths;
 	const arrayConfig = paths.serverFunctionDirs;
 	if (Array.isArray(arrayConfig) && arrayConfig.length > 0) {
-		return arrayConfig.map(resolveAgainstRoot);
+		return arrayConfig.map((p) => resolveAgainstRoot(p));
 	}
-	if (typeof paths.serverFunctionsDir === 'string' && paths.serverFunctionsDir.length > 0) {
-		return [resolveAgainstRoot(paths.serverFunctionsDir)];
+	// eslint-disable-next-line @typescript-eslint/no-deprecated -- BC shim: the legacy singular field is still honored when set
+	const legacySingular = paths.serverFunctionsDir;
+	if (typeof legacySingular === 'string' && legacySingular.length > 0) {
+		return [resolveAgainstRoot(legacySingular)];
 	}
 	return [];
 };
@@ -99,6 +101,7 @@ export const UPLOADS_DIR = path.join(ROOT_DIR, 'uploads');
 /** @deprecated use `getPublicDir()` instead. */
 export const PUBLIC_DIR = path.join(ROOT_DIR, 'public');
 /** @deprecated use `getServerFunctionsDir()` instead. */
+// eslint-disable-next-line @typescript-eslint/no-deprecated -- BC export: depends on the deprecated SERVER_DIR
 export const SERVER_FUNCTIONS_DIR = path.join(SERVER_DIR, 'functions');
 
 /** @deprecated use `getGeneratedSocketTypesPath()` instead. */

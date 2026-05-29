@@ -182,7 +182,7 @@ import {
 
 const summary = await runContractTests({
   apiMethodMap,
-  baseUrl: 'http://127.0.0.1:80',
+  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
   onResult: logContractResult,
 });
 
@@ -226,7 +226,7 @@ const result = await runContractCheck({
     method: 'POST',
     fullPath: 'api/billing/getInvoice/v1',
   },
-  baseUrl: 'http://127.0.0.1:80',
+  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
   inputFor: () => ({ invoiceId: 'inv_1' }),
   headers: { Cookie: 'session=abc' },
   requestTimeoutMs: 15000, // bump for slow endpoints

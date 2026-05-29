@@ -1,5 +1,7 @@
 # Agent Team Playbook
 
+> **Activated by Core Rule 23** — see `CLAUDE.md`. Aggressive parallelism is the default; this file is the orchestration manual for how to actually do it well.
+
 > How to read this file: this is an operating manual for Claude when acting as **Team Lead** of an agent team working on the LuckyStack framework or a LuckyStack-powered app. The human will reference this file (directly, or implicitly via a slash command) at the start of a session along with whatever they want to accomplish. Read this first, then orchestrate accordingly.
 
 ---
@@ -225,10 +227,10 @@ The human has issued an explicit instruction that overrides your reasoning. ("Sp
 
 You decide team composition. The defaults:
 
-- **Start small.** For most tasks, 1-2 agents plus you. Add more only when the work genuinely parallelizes.
+- **Scale to the work.** Per Core Rule 23, aggressive parallelism is the default — when two or more research/exploration paths are independent, spawn them in parallel waves (single message, multiple tool calls). Sequential delegation when work is parallel-safe is the failure mode. Match agent count to genuinely independent work streams, not to caution.
 - **Reassess often.** If an agent is idle for more than a few minutes and there is no upcoming work for it, shut it down or reassign it.
 - **Announce changes.** "Spawning a Reviewer to look at Executor 1's changes." "Scanner is done — shutting it down and reassigning context budget to a new Executor." "Switching Executor 2 to a Refactorer role for this next chunk."
-- **Token awareness.** Each agent burns tokens independently. If the human is on a constrained plan, prefer fewer agents working sequentially over many in parallel.
+- **Token cost is not a constraint** for users on this project (per Core Rule 23). Do not throttle parallelism out of caution. The only reasons to run sequentially are (a) genuine task dependencies, (b) shared-file write conflicts, or (c) explicit user override.
 - **Hand off before shutting down.** Before shutting down any agent — whether work is done, the agent has hit a stable checkpoint, or context is bloating — have it write a handoff file (see "Context and Token Management" for format and location). The handoff is the team's institutional memory and lets the next agent pick up cheaply.
 
 ---
@@ -367,7 +369,8 @@ Long sessions burn through context. The Team Lead is responsible for keeping the
 
 **Cost awareness:**
 
-- More agents = more tokens. If the human is on a constrained plan, prefer fewer agents working harder over more agents in parallel.
+- Default position per Core Rule 23: token cost is not a constraint. Parallelize aggressively when work is independent.
+- The exception is if the human explicitly says they're on a constrained plan — then prefer fewer agents working harder over many in parallel.
 - Higher-effort tasks burn more tokens per turn. Reserve `xhigh` for genuinely hard problems.
 - Long agent lifetimes (without rotation) are quadratic in cost as context grows. A fresh agent with a good summary is often cheaper than a long-lived one.
 
@@ -405,9 +408,9 @@ These decisions were made deliberately and should not be reopened in a new sessi
 - Source comments here use `//?` inline annotations, not `/** ... */` JSDoc blocks — so a JSDoc extractor would mostly find empty descriptions.
 - Maintenance overhead of a code-gen tool outweighs the marginal benefit when humans review and refine the docs anyway.
 
-### Function INDEX in `AI_INDEX.md` is hand-curated for now
+### Function INDEX in `CLAUDE.md` is hand-curated for now
 
-The `## Function Index` table inside each `packages/<name>/AI_INDEX.md` is also written by hand. Drift between table entries and the actual source signatures is the real risk here. Mitigation today:
+The `## Function Index` table inside each `packages/<name>/CLAUDE.md` is also written by hand. Drift between table entries and the actual source signatures is the real risk here. Mitigation today:
 
 - During any source-level refactor that adds/removes/renames exports, the same change is expected to touch the Function INDEX table.
 - Periodic sweeps (every few weeks) compare source `export` declarations to the table.

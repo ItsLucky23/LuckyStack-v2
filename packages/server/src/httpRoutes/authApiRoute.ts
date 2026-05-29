@@ -53,7 +53,7 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
 
     const clientId = encodeURIComponent(provider.clientID);
     const callbackUrl = encodeURIComponent(provider.callbackURL);
-    const scope = encodeURIComponent((provider.scope as string[]).join(' '));
+    const scope = encodeURIComponent((provider.scope).join(' '));
     const state = encodeURIComponent(oauthState);
 
     res.writeHead(302, {
@@ -99,7 +99,7 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
     session: unknown;
   } | undefined;
 
-  if (!result || !result.status) {
+  if (!result?.status) {
     const reasonKey =
       typeof result?.reason === 'string' && result.reason.length > 0
         ? result.reason
@@ -117,10 +117,10 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
 
     if (shouldLogDev) getLogger().debug('http: setting cookie with new token');
 
-    if (!useSessionBasedToken) {
-      res.setHeader('Set-Cookie', `${sessionCookieName}=${result.newToken}; ${sessionCookieOptions}`);
-    } else {
+    if (useSessionBasedToken) {
       res.setHeader('X-Session-Token', result.newToken);
+    } else {
+      res.setHeader('Set-Cookie', `${sessionCookieName}=${result.newToken}; ${sessionCookieOptions}`);
     }
   }
 

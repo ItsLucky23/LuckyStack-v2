@@ -70,7 +70,7 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
       });
 
       if (error) {
-        return { ok: false, reason: error.message || 'resend-error', cause: error };
+        return { ok: false, reason: error.message || 'resend-error', cause: error }; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- empty `message` should fall back too
       }
       if (!data) {
         return { ok: false, reason: 'no-response-data' };

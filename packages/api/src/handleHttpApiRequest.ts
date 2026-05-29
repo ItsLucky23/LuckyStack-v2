@@ -1,12 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing */
 
 import { getSession } from '@luckystack/login';
-import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
-import type { PostApiExecutePayload } from '@luckystack/core';
-import { getProjectConfig } from '@luckystack/core';
-import type { AuthProps } from '@luckystack/login';
-import { getRuntimeApiMaps as getRuntimeApiMapsFromSource } from '@luckystack/core';
-import {
+import type { BaseSessionLayout as SessionLayout, AuthProps  } from '@luckystack/login';
+import type { PostApiExecutePayload, ErrorFormatter  } from '@luckystack/core';
+import { getProjectConfig, getRuntimeApiMaps as getRuntimeApiMapsFromSource ,
   validateRequest,
   checkRateLimit,
   inferHttpMethod,
@@ -15,9 +12,12 @@ import {
   parseTransportRouteName,
   validateInputByType,
   dispatchHook,
-  getLogger,
-} from '@luckystack/core';
-import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '@luckystack/core';
+  getLogger, defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse, applyErrorFormatter  } from '@luckystack/core';
+
+
+
+
+
 
 /**
  * HTTP API Request Handler
@@ -55,6 +55,12 @@ interface HttpApiRequestParams {
   /** HTTP method from the request */
   method?: HttpMethod;
   stream?: (payload: ApiHttpStreamEvent) => void;
+  /**
+   * Optional AbortSignal. The HTTP server (`@luckystack/server`) wires this
+   * to `req.on('close', ...)` so a closed SSE/HTTP connection aborts in-flight
+   * stream emits. Handlers receive it as `abortSignal` in params.
+   */
+  abortSignal?: AbortSignal;
 }
 
 type ApiNetworkResponse<T = Record<string, unknown>> =
@@ -72,6 +78,20 @@ type ApiNetworkResponse<T = Record<string, unknown>> =
 
 type ApiStreamPayload = Record<string, unknown>;
 
+//? B2 — backpressure helper for HTTP API handlers. SSE has no socket
+//? write-buffer, so this is a no-op for HTTP transport — but the shape
+//? matches the socket variant so handlers don't branch by transport.
+export interface HttpApiFlushPressureOptions {
+  thresholdBytes?: number;
+}
+
+//? No-op shared at module scope so per-request allocation stays cheap and
+//? the consistent-function-scoping lint rule doesn't trip.
+const httpApiFlushPressureNoop: HttpApiFlushPressure = async () => {
+  /* SSE backpressure is the caller's responsibility (res.write returns bool) */
+};
+export type HttpApiFlushPressure = (options?: HttpApiFlushPressureOptions) => Promise<void>;
+
 interface RuntimeApiRoute {
   auth: AuthProps;
   main: (params: {
@@ -79,11 +99,15 @@ interface RuntimeApiRoute {
     user: SessionLayout | null;
     functions: Record<string, unknown>;
     stream: (payload?: ApiStreamPayload) => void;
+    abortSignal: AbortSignal;
+    flushPressure: HttpApiFlushPressure;
   }) => Promise<RuntimeApiResult> | RuntimeApiResult;
   inputType?: string;
   inputTypeFilePath?: string;
   rateLimit?: number | false;
   httpMethod?: HttpMethod;
+  validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
+  errorFormatter?: ErrorFormatter;
 }
 
 type RuntimeApiResult =
@@ -126,7 +150,7 @@ const warnIfInputTypeMissing = (resolvedName: string, inputType: string | undefi
 export type ApiHttpStreamEvent = ApiStreamPayload;
 
 export async function handleHttpApiRequest(params: HttpApiRequestParams): Promise<ApiNetworkResponse> {
-  const { response, user, preferredLocale } = await runHandleHttpApiRequest(params);
+  const { response, user, preferredLocale, perRouteFormatter } = await runHandleHttpApiRequest(params);
 
   //? `name` may not parse to a valid route — pass the original raw name as
   //? routeName so hook handlers can still correlate the rejection.
@@ -147,15 +171,33 @@ export async function handleHttpApiRequest(params: HttpApiRequestParams): Promis
       }) as ApiNetworkResponse
     : preRespond.response as ApiNetworkResponse;
 
-  await dispatchHook('postApiRespond', { routeName: routeNameForHook, user, response: finalResponse });
+  //? Per-route → global → identity error formatter chain. Mirrors the socket
+  //? handler so HTTP + WebSocket responses honor the same `errorFormatter`
+  //? export on each route. No-op on success envelopes.
+  //? `ApiNetworkResponse` is a discriminated union; `applyErrorFormatter`
+  //? accepts the wider `Record<string, unknown> & { status?: string }` shape
+  //? that union doesn't structurally satisfy. The double-cast is the
+  //? documented framework boundary between the union and the formatter input.
+  // eslint-disable-next-line no-restricted-syntax -- formatter boundary cast
+  const formatterInput = finalResponse as unknown as Record<string, unknown> & { status?: string };
+  const formattedResponse = applyErrorFormatter({
+    response: formatterInput,
+    routeName: routeNameForHook,
+    transport: 'http',
+    userId: user?.id,
+    perRouteFormatter,
+  }) as ApiNetworkResponse;
 
-  return finalResponse;
+  await dispatchHook('postApiRespond', { routeName: routeNameForHook, user, response: formattedResponse });
+
+  return formattedResponse;
 }
 
 interface RunHandleHttpApiRequestResult {
   response: ApiNetworkResponse;
   user: SessionLayout | null;
   preferredLocale: string | null | undefined;
+  perRouteFormatter?: ErrorFormatter;
 }
 
 async function runHandleHttpApiRequest(params: HttpApiRequestParams): Promise<RunHandleHttpApiRequestResult> {
@@ -163,8 +205,9 @@ async function runHandleHttpApiRequest(params: HttpApiRequestParams): Promise<Ru
     extractLanguageFromHeader(params.xLanguageHeader)
     ?? extractLanguageFromHeader(params.acceptLanguageHeader);
   const user = await getSession(params.token);
-  const response = await runHandleHttpApiRequestInner(params, user, preferredLocale);
-  return { response, user, preferredLocale };
+  const formatterHolder: { current?: ErrorFormatter } = {};
+  const response = await runHandleHttpApiRequestInner(params, user, preferredLocale, formatterHolder);
+  return { response, user, preferredLocale, perRouteFormatter: formatterHolder.current };
 }
 
 async function runHandleHttpApiRequestInner(
@@ -177,10 +220,20 @@ async function runHandleHttpApiRequestInner(
     acceptLanguageHeader: _acceptLanguageHeader,
     method = 'POST',
     stream,
+    abortSignal,
   }: HttpApiRequestParams,
   user: SessionLayout | null,
   preferredLocale: string | null | undefined,
+  formatterHolder: { current?: ErrorFormatter },
 ): Promise<ApiNetworkResponse> {
+  //? B1 — HTTP/SSE transport. The caller (typically `@luckystack/server`'s
+  //? SSE bridge) wires `req.on('close', ...)` to a controller and passes its
+  //? signal in. If no signal was provided we synthesize a never-aborting one
+  //? so the handler param shape stays consistent.
+  const effectiveAbortSignal = abortSignal ?? new AbortController().signal;
+  //? SSE has no socket write-buffer to measure — `flushPressure` is a no-op
+  //? on HTTP transport. Kept for handler-shape parity with the socket path.
+  const flushPressure = httpApiFlushPressureNoop;
 
   const normalizedName = name.startsWith('api/') ? name : `api/${name}`;
   //? Identity propagation now flows via the `preApiExecute` hook subscriber
@@ -252,6 +305,7 @@ async function runHandleHttpApiRequestInner(
   }
 
   const runtimeApiRoute = apisObject[resolvedName] as RuntimeApiRoute;
+  formatterHolder.current = runtimeApiRoute.errorFormatter;
   const { auth, main, httpMethod: declaredMethod } = runtimeApiRoute;
   const inputType = runtimeApiRoute.inputType;
   const inputTypeFilePath = runtimeApiRoute.inputTypeFilePath;
@@ -420,6 +474,12 @@ async function runHandleHttpApiRequestInner(
     if (!stream) {
       return;
     }
+    if (effectiveAbortSignal.aborted) {
+      if (shouldLogStream()) {
+        getLogger().debug(`http api: ${resolvedName} stream skipped — request aborted`);
+      }
+      return;
+    }
 
     if (shouldLogStream()) {
       getLogger().debug(`http api: ${resolvedName} stream`, { payload });
@@ -451,7 +511,14 @@ async function runHandleHttpApiRequestInner(
 
   const executeStart = Date.now();
   const [error, result] = await tryCatch(
-    async () => await main({ data: requestData, user, functions: functionsObject, stream: emitApiStream }),
+    async () => await main({
+      data: requestData,
+      user,
+      functions: functionsObject,
+      stream: emitApiStream,
+      abortSignal: effectiveAbortSignal,
+      flushPressure,
+    }),
     undefined,
     {
       handler: 'handleHttpApiRequest',
@@ -493,14 +560,15 @@ async function runHandleHttpApiRequestInner(
         });
       }
 
-      return {
+      const successEnvelope: ApiNetworkResponse = {
         ...result,
         status: 'success',
         httpStatus: defaultHttpStatusForResponse({
           status: 'success',
           explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
         }),
-      } as ApiNetworkResponse;
+      };
+      return successEnvelope;
     }
 
     return buildNetworkError({

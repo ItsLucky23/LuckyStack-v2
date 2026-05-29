@@ -43,6 +43,16 @@ export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
     return { status: 'error', errorCode: 'login.resetInvalidToken' };
   }
 
+  //? Vetoable pre-hook. Lets compliance / fraud-detection add-ons abort
+  //? the reset with their own errorCode before any password write. Note
+  //? the reset token has already been consumed; a stop here invalidates
+  //? the user's link without resetting the password, which is the
+  //? intended behavior (they must request a new reset link).
+  const preReset = await dispatchHook('prePasswordResetCompleted', { userId });
+  if (preReset.stopped) {
+    return { status: 'error', errorCode: preReset.signal.errorCode };
+  }
+
   await updatePasswordHash(userId, password);
 
   //? After a forgot-password reset we don't have a "current session" to keep;

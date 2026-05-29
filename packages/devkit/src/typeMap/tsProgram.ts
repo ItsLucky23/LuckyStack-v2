@@ -296,8 +296,9 @@ export const expandTypeDetailed = (
       // Array<T> / ReadonlyArray<T>  T[]
       if (targetName === 'Array' || targetName === 'ReadonlyArray') {
         const typeArgs = checker.getTypeArguments(refType);
-        if (typeArgs.length > 0) {
-          const expanded = expandTypeDetailed(typeArgs[0], checker, depth + 1, expandState);
+        const firstArg = typeArgs[0];
+        if (firstArg) {
+          const expanded = expandTypeDetailed(firstArg, checker, depth + 1, expandState);
           const elementType = /\s[|&]\s/.test(expanded.text)
             ? `(${expanded.text})`
             : expanded.text;

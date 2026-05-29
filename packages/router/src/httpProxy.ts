@@ -104,7 +104,10 @@ export const createHttpProxy = ({ resolver, missingServiceErrorCode }: CreateHtt
 
     const forwardRequest = transport.request({
       hostname: targetUrl.hostname,
-      port: targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80),
+      //? Boot-time guard in `resolveTarget.ts` ensures every binding URL has
+      //? an explicit port — port-less URLs were rejected at startup. So
+      //? `targetUrl.port` is always a non-empty numeric string here.
+      port: Number(targetUrl.port),
       path: targetUrl.pathname + targetUrl.search,
       method: req.method,
       headers: {

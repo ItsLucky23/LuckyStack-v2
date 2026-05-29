@@ -213,7 +213,7 @@ This package does not read any auth-specific config. `@luckystack/login` owns se
 - `auth.passwordPolicy.*` (credentials register / change paths).
 - `auth.forgotPassword` (framework vs custom vs disabled).
 
-Read those in `@luckystack/login/AI_INDEX.md`.
+Read those in `@luckystack/login/CLAUDE.md`.
 
 ## Edge cases
 

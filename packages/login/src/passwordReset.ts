@@ -7,7 +7,9 @@
 //? Storage: `<projectName>-pwreset:<token> → userId` with a configurable TTL
 //? (`auth.passwordResetTtlSeconds`, default 3600 = 1 hour).
 
+// eslint-disable-next-line import-x/no-named-as-default -- bcryptjs ships both a default and namespace export; using the default mirrors its README
 import bcrypt from 'bcryptjs';
+/* eslint-disable import-x/no-named-as-default-member -- accessing genSalt/hash/compare via the default import is the documented pattern */
 import { randomBytes } from 'node:crypto';
 
 import { getProjectConfig, getProjectName, redis } from '@luckystack/core';
@@ -42,8 +44,10 @@ export const consumePasswordResetToken = async (token: string): Promise<string |
   if (!token || typeof token !== 'string') return null;
   const key = tokenKey(token);
   const txResult = await redis.multi().get(key).del(key).exec();
-  if (!txResult || txResult.length < 1) return null;
-  const [getErr, value] = txResult[0];
+  if (!txResult || txResult.length === 0) return null;
+  const first = txResult[0];
+  if (!first) return null;
+  const [getErr, value] = first;
   if (getErr) return null;
   return typeof value === 'string' && value.length > 0 ? value : null;
 };
@@ -63,7 +67,8 @@ export const updatePasswordHash = async (userId: string, plaintext: string): Pro
   }
   const salt = await bcrypt.genSalt(getProjectConfig().auth.bcryptRounds);
   const hashedPassword = await bcrypt.hash(plaintext, salt);
-  await getUserAdapter().update(userId, { password: hashedPassword } as never);
+  const patch: Record<string, unknown> = { password: hashedPassword };
+  await getUserAdapter().update(userId, patch);
 };
 
 /**

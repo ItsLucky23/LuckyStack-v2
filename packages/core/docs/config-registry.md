@@ -344,7 +344,7 @@ See `packages/core/src/projectConfig.ts` for the full type definitions of `Loggi
 
 ## Related
 
-- Function INDEX: `packages/core/AI_INDEX.md`
+- Function INDEX: `packages/core/CLAUDE.md`
 - Architecture: `docs/ARCHITECTURE_PACKAGING.md`, `docs/ARCHITECTURE_ROUTING.md`
 - README: `packages/core/README.md`
 - Source: `packages/core/src/projectConfig.ts`, `deployConfigRegistry.ts`, `servicesConfigRegistry.ts`, `avatarConfig.ts`, `paths.ts`

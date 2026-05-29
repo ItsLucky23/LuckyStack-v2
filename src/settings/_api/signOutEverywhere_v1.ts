@@ -17,7 +17,10 @@ export interface ApiParams {
 }
 
 export const main = async ({ user }: ApiParams): Promise<ApiResponse> => {
-  const revokedCount = await revokeUserSessions(user.id).catch(() => null);
+  //? Keep the caller's session alive — "sign out everywhere" in the UI means
+  //? "sign out other devices, stay logged in here." The framework's
+  //? `revokeUserSessions` accepts `exceptToken` for exactly this case.
+  const revokedCount = await revokeUserSessions(user.id, user.token).catch(() => null);
   if (revokedCount === null) {
     return { status: 'error', errorCode: 'common.500' };
   }

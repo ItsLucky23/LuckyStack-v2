@@ -82,5 +82,8 @@ export const startSpan = (name: string, op: string): unknown => {
   if (sentry?.startInactiveSpan) {
     return sentry.startInactiveSpan({ name, op });
   }
-  return startSpanAcrossTrackers(name, op, () => undefined);
+  //? No-op span body is intentional — this is the legacy inactive-span shape
+  //? consumers built against; the real span lifecycle is managed elsewhere.
+  // eslint-disable-next-line @typescript-eslint/no-empty-function -- legacy inactive-span shape
+  startSpanAcrossTrackers(name, op, () => {});
 };

@@ -99,6 +99,7 @@
     "src/**/*_server.ts",
     "src/**/*_server.tsx",
     "src/**/*_server.js",
-    "src/**/*_server.jsx"
+    "src/**/*_server.jsx",
+    "packages/devkit/src/templates/page_*.template.tsx"
   ]
 }

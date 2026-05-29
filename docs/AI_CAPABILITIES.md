@@ -10,22 +10,22 @@
 
 ### Installed `@luckystack/*` packages
 
-Each row links to that package's AI_INDEX.md (the canonical function INDEX) if it ships one. Consult the INDEX **before** writing any helper that touches that package's surface area.
+Each row links to that package's CLAUDE.md (the canonical function INDEX) if it ships one. Consult the INDEX **before** writing any helper that touches that package's surface area.
 
 | Package | Version | One-liner | INDEX |
 | --- | --- | --- | --- |
-| `@luckystack/api` | 0.1.0 | Type-safe API request handlers for LuckyStack. WebSocket-first via socket.io, with HTTP fallback. File-based routing, generated route map, integrated rate limiting, validation, hooks, and error-tracking tracing. | [AI_INDEX](../node_modules/@luckystack/api/AI_INDEX.md) |
-| `@luckystack/core` | 0.1.0 | LuckyStack core: socket-first transport contracts, Redis adapter, project-config registry, hooks registry, response normalization, rate limiting, and shared session types. Foundation for every other @luckystack/* package. | [AI_INDEX](../node_modules/@luckystack/core/AI_INDEX.md) |
-| `@luckystack/devkit` | 0.1.0 | Dev-time tooling for LuckyStack: hot reload, route discovery, generated type-map emitter, Zod schema emitter, deploy-config validator CLI. Install as a devDependency in projects that build LuckyStack apps locally. | [AI_INDEX](../node_modules/@luckystack/devkit/AI_INDEX.md) |
-| `@luckystack/docs-ui` | 0.1.0 | Dev-only API docs UI for LuckyStack. Mounts a Swagger-style page at /_docs that reads `apiDocs.generated.json` and renders every API route, its inputs/outputs, auth, and rate-limit metadata. | [AI_INDEX](../node_modules/@luckystack/docs-ui/AI_INDEX.md) |
-| `@luckystack/email` | 0.1.0 | Pluggable transactional email for LuckyStack: Console (dev), Resend, and SMTP adapters with a registry-based plug-in pattern. Optional dep — install only when forgotPassword='framework' or you want to send transactional mail. | [AI_INDEX](../node_modules/@luckystack/email/AI_INDEX.md) |
-| `@luckystack/error-tracking` | 0.1.0 | Optional error-tracking integration for LuckyStack (currently Sentry-backed). Auto-wires error/performance capture into the framework's hook surface and request transports. No-op when DSN is missing. | [AI_INDEX](../node_modules/@luckystack/error-tracking/AI_INDEX.md) |
-| `@luckystack/login` | 0.1.0 | Authentication for LuckyStack: credentials + OAuth (Google/GitHub/Facebook/Discord), Redis-backed sessions, single-session enforcement, lifecycle hooks. Pairs with @luckystack/core. | [AI_INDEX](../node_modules/@luckystack/login/AI_INDEX.md) |
-| `@luckystack/presence` | 0.1.0 | Presence and activity awareness for LuckyStack: AFK detection, room-peer notifications, lifecycle (connect / disconnect / reconnect), single-session enforcement integration. For multiplayer and collaborative apps. | [AI_INDEX](../node_modules/@luckystack/presence/AI_INDEX.md) |
-| `@luckystack/router` | 0.1.0 | Standalone HTTP + WebSocket load-balancer for multi-instance LuckyStack deployments. Redis-backed health, boot-UUID handshake, service-key-aware routing, optional dev->staging fallback. Optional package — only needed for horizontal scale or split-environment dev. | [AI_INDEX](../node_modules/@luckystack/router/AI_INDEX.md) |
-| `@luckystack/server` | 0.1.0 | One-call server bootstrap for LuckyStack: HTTP + Socket.io + framework routes (api, sync, _health, /auth, uploads) wired together. Consumer's server.ts shrinks to ~20 lines. | [AI_INDEX](../node_modules/@luckystack/server/AI_INDEX.md) |
-| `@luckystack/sync` | 0.1.0 | Real-time sync transport for LuckyStack: type-safe room-based fanout, server + per-client validation, streaming, optimistic offline queue. Server entry plus a browser-safe ./client subpath. | [AI_INDEX](../node_modules/@luckystack/sync/AI_INDEX.md) |
-| `@luckystack/test-runner` | 0.1.0 | Generated-type-driven test layers for LuckyStack: contract smoke (Zod-valid input), auth enforcement, rate-limit, and crash-resistance fuzz. Walks every endpoint via the generated apiMethodMap. | [AI_INDEX](../node_modules/@luckystack/test-runner/AI_INDEX.md) |
+| `@luckystack/api` | 0.1.0 | Type-safe API request handlers for LuckyStack. WebSocket-first via socket.io, with HTTP fallback. File-based routing, generated route map, integrated rate limiting, validation, hooks, and error-tracking tracing. | [CLAUDE.md](../node_modules/@luckystack/api/CLAUDE.md) |
+| `@luckystack/core` | 0.1.0 | LuckyStack core: socket-first transport contracts, Redis adapter, project-config registry, hooks registry, response normalization, rate limiting, and shared session types. Foundation for every other @luckystack/* package. | [CLAUDE.md](../node_modules/@luckystack/core/CLAUDE.md) |
+| `@luckystack/devkit` | 0.1.0 | Dev-time tooling for LuckyStack: hot reload, route discovery, generated type-map emitter, Zod schema emitter, deploy-config validator CLI. Install as a devDependency in projects that build LuckyStack apps locally. | [CLAUDE.md](../node_modules/@luckystack/devkit/CLAUDE.md) |
+| `@luckystack/docs-ui` | 0.1.0 | Dev-only API docs UI for LuckyStack. Mounts a Swagger-style page at /_docs that reads `apiDocs.generated.json` and renders every API route, its inputs/outputs, auth, and rate-limit metadata. | [CLAUDE.md](../node_modules/@luckystack/docs-ui/CLAUDE.md) |
+| `@luckystack/email` | 0.1.0 | Pluggable transactional email for LuckyStack: Console (dev), Resend, and SMTP adapters with a registry-based plug-in pattern. Optional dep — install only when forgotPassword='framework' or you want to send transactional mail. | [CLAUDE.md](../node_modules/@luckystack/email/CLAUDE.md) |
+| `@luckystack/error-tracking` | 0.1.0 | Optional error-tracking integration for LuckyStack (currently Sentry-backed). Auto-wires error/performance capture into the framework's hook surface and request transports. No-op when DSN is missing. | [CLAUDE.md](../node_modules/@luckystack/error-tracking/CLAUDE.md) |
+| `@luckystack/login` | 0.1.0 | Authentication for LuckyStack: credentials + OAuth (Google/GitHub/Facebook/Discord), Redis-backed sessions, single-session enforcement, lifecycle hooks. Pairs with @luckystack/core. | [CLAUDE.md](../node_modules/@luckystack/login/CLAUDE.md) |
+| `@luckystack/presence` | 0.1.0 | Presence and activity awareness for LuckyStack: AFK detection, room-peer notifications, lifecycle (connect / disconnect / reconnect), single-session enforcement integration. For multiplayer and collaborative apps. | [CLAUDE.md](../node_modules/@luckystack/presence/CLAUDE.md) |
+| `@luckystack/router` | 0.1.0 | Standalone HTTP + WebSocket load-balancer for multi-instance LuckyStack deployments. Redis-backed health, boot-UUID handshake, service-key-aware routing, optional dev->staging fallback. Optional package — only needed for horizontal scale or split-environment dev. | [CLAUDE.md](../node_modules/@luckystack/router/CLAUDE.md) |
+| `@luckystack/server` | 0.1.0 | One-call server bootstrap for LuckyStack: HTTP + Socket.io + framework routes (api, sync, _health, /auth, uploads) wired together. Consumer's server.ts shrinks to ~20 lines. | [CLAUDE.md](../node_modules/@luckystack/server/CLAUDE.md) |
+| `@luckystack/sync` | 0.1.0 | Real-time sync transport for LuckyStack: type-safe room-based fanout, server + per-client validation, streaming, optimistic offline queue. Server entry plus a browser-safe ./client subpath. | [CLAUDE.md](../node_modules/@luckystack/sync/CLAUDE.md) |
+| `@luckystack/test-runner` | 0.1.0 | Generated-type-driven test layers for LuckyStack: contract smoke (Zod-valid input), auth enforcement, rate-limit, and crash-resistance fuzz. Walks every endpoint via the generated apiMethodMap. | [CLAUDE.md](../node_modules/@luckystack/test-runner/CLAUDE.md) |
 
 ### API routes (`_api/`)
 
@@ -38,15 +38,17 @@ Every typed API route in this project. Sourced from `_ProjectApiTypeMap` in `src
 | `playground/streamCounter/v1` | POST | 30 | yes | — |
 | `playground/testEmail/v1` | POST | 3 | — | — |
 | `playground/throwError/v1` | POST | 60 | — | — |
-| `reset-password/confirmReset/v1` | POST | 5 | — | — |
-| `reset-password/sendReset/v1` | POST | 5 | — | — |
-| `settings/changePassword/v1` | POST | 10 | — | — |
-| `settings/deleteAccount/v1` | POST | 3 | — | — |
+| `reset-password/confirmReset/v1` | POST | 5 | — | ✓ |
+| `reset-password/sendReset/v1` | POST | 5 | — | ✓ |
+| `settings/changePassword/v1` | POST | 10 | — | ✓ |
+| `settings/confirmEmailChange/v1` | POST | 10 | — | — |
+| `settings/deleteAccount/v1` | POST | 3 | — | ✓ |
 | `settings/listSessions/v1` | POST | 30 | — | — |
+| `settings/requestEmailChange/v1` | POST | 5 | — | — |
 | `settings/revokeSession/v1` | POST | 20 | — | ✓ |
-| `settings/signOutEverywhere/v1` | POST | 5 | — | — |
-| `settings/updatePreferences/v1` | POST | 30 | — | — |
-| `settings/updateUser/v1` | POST | 20 | — | — |
+| `settings/signOutEverywhere/v1` | POST | 5 | — | ✓ |
+| `settings/updatePreferences/v1` | POST | 30 | — | ✓ |
+| `settings/updateUser/v1` | POST | 20 | — | ✓ |
 | `system/logout/v1` | POST | ? | — | — |
 | `system/session/v1` | POST | ? | — | — |
 
@@ -57,9 +59,9 @@ Every typed sync route in this project. Sourced from `_ProjectSyncTypeMap` in `s
 | Route | Server stream | Client stream | Tests |
 | --- | --- | --- | --- |
 | `playground/echo/v1` | — | — | — |
-| `playground/streamBroadcast/v1` | yes | — | — |
-| `playground/streamProgress/v1` | yes | — | — |
-| `playground/streamToToken/v1` | yes | — | — |
+| `playground/streamBroadcast/v1` | yes | — | ✓ |
+| `playground/streamProgress/v1` | yes | — | ✓ |
+| `playground/streamToToken/v1` | yes | — | ✓ |
 | `playground/throwSync/v1` | — | — | — |
 
 ### Server-injected `functions.*` map
@@ -85,9 +87,9 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 | `functions.responseNormalizer` | `typeof import("../../packages/core/src/responseNormalizer")` |
 | `functions.sentrySetup` | `typeof import("../../packages/core/src/sentrySetup")` |
 | `functions.serviceRoute` | `typeof import("../../packages/core/src/serviceRoute")` |
-| `functions.sleep.sleep` | `(typeof import("@luckystack/core"))["sleep"]` |
+| `functions.sleep.sleep` | `(typeof import("../../packages/core/src/sleep"))["default"]` |
 | `functions.socketEvents` | `typeof import("../../packages/core/src/socketEvents")` |
-| `functions.tryCatch.tryCatch` | `(typeof import("@luckystack/core"))["tryCatch"]` |
+| `functions.tryCatch.tryCatch` | `(typeof import("../../packages/core/src/tryCatch"))["default"]` |
 
 ### Server-function shims in `functions/` (source for the injection map)
 
@@ -105,9 +107,9 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 | `shared/responseNormalizer.ts` | `re-export * from ../packages/core/src/responseNormalizer` |
 | `shared/sentrySetup.ts` | `re-export * from ../packages/core/src/sentrySetup` |
 | `shared/serviceRoute.ts` | `re-export * from ../packages/core/src/serviceRoute` |
-| `shared/sleep.ts` | `default: re-export of @luckystack/core` |
+| `shared/sleep.ts` | `default: re-export of ../packages/core/src/sleep` |
 | `shared/socketEvents.ts` | `re-export * from ../packages/core/src/socketEvents` |
-| `shared/tryCatch.ts` | `default: re-export of @luckystack/core` |
+| `shared/tryCatch.ts` | `default: re-export of ../packages/core/src/tryCatch` |
 
 ### Client helpers in `src/_functions/`
 
@@ -116,7 +118,6 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 | `src/_functions/confetti.ts` | `default: launchConfetti` |
 | `src/_functions/icon.ts` | `re-export * from @fortawesome/free-solid-svg-icons` — `FontAwesomeIcon` |
 | `src/_functions/menuHandler.ts` | `menuHandler: object`, `setMenuHandlerRef(ref: MenuHandlerRef)` |
-| `src/_functions/middlewareHandler.ts` | `default: (anonymous)` |
 | `src/_functions/sentry.ts` | `re-export * from ../../shared/sentrySetup` — `default: (anonymous)` — `SentryErrorBoundary`, `initializeSentry()`, `withSentryProfiler` |
 
 ### Local components in `src/_components/`

@@ -10,7 +10,37 @@
 
 import luckystack from '@luckystack/core/eslint';
 
-export default luckystack;
+export default [
+  ...luckystack,
+  //? Framework-internal overlay. `packages/*/src/` is the IMPLEMENTATION of
+  //? the framework primitives (tryCatch itself, raw HTTP parsers, hook
+  //? dispatch hot paths) — applying the consumer-app safety rules to the
+  //? framework's own source would force pointless workarounds. This override
+  //? lives in the luckystack tier (not the official tier) so it's spread
+  //? last and actually wins.
+  {
+    files: ['packages/*/src/**/*.ts'],
+    rules: {
+      //? `luckystack/no-raw-try-catch` exists to push consumer code toward
+      //? the framework helper. Inside the framework the helper IS the code,
+      //? and several hot paths (csrf parse, cookies parse, hook dispatch)
+      //? deliberately bypass Sentry capture.
+      'luckystack/no-raw-try-catch': 'off',
+    },
+  },
+  //? CLI / supervisor tools legitimately call `process.exit()` — the unicorn
+  //? rule's own message says "Only use `process.exit()` in CLI apps", so the
+  //? rule needs to be turned off where the apps actually live.
+  {
+    files: [
+      'packages/create-luckystack-app/src/**/*.ts',
+      'packages/devkit/src/supervisor.ts',
+    ],
+    rules: {
+      'unicorn/no-process-exit': 'off',
+    },
+  },
+];
 
 //? ─────────────────────────────────────────────────────────────────────
 //? Customizing rules

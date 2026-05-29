@@ -29,8 +29,8 @@ const emptyApi: RuntimeApiMapsResult = { apisObject: {}, functionsObject: {} };
 const emptySync: RuntimeSyncMapsResult = { syncObject: {}, functionsObject: {} };
 
 let activeProvider: RuntimeMapsProvider = {
-  getRuntimeApiMaps: async () => emptyApi,
-  getRuntimeSyncMaps: async () => emptySync,
+  getRuntimeApiMaps: () => Promise.resolve(emptyApi),
+  getRuntimeSyncMaps: () => Promise.resolve(emptySync),
 };
 let providerRegistered = false;
 

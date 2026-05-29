@@ -1,28 +1,40 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
-export default defineConfig({
-  plugins: [
-    react(),
-    tsconfigPaths({ projects: ['tsconfig.json'] }),
-  ],
-  server: {
-    port: 5173,
-    host: true,
-    proxy: {
-      // Forward API + sync + auth + uploads + the framework's own dev endpoints
-      // to the backend running on SERVER_PORT (default 80). Adjust `target`
-      // if you bind the server to a non-default port.
-      '/api': 'http://localhost:80',
-      '/sync': 'http://localhost:80',
-      '/auth': 'http://localhost:80',
-      '/uploads': 'http://localhost:80',
-      '/_health': 'http://localhost:80',
-      '/livez': 'http://localhost:80',
-      '/readyz': 'http://localhost:80',
-      '/_docs': 'http://localhost:80',
-      '/socket.io': { target: 'ws://localhost:80', ws: true },
+//? Backend proxy targets are derived from `SERVER_IP` + `SERVER_PORT` in the
+//? consumer's `.env` so a non-default port doesn't need a parallel edit here.
+//? `loadEnv` reads `.env`, `.env.local`, `.env.[mode]`, `.env.[mode].local`
+//? in that order — same precedence the framework uses elsewhere. Ships with
+//? Vite; no extra dep.
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const ip = env.SERVER_IP || '127.0.0.1';
+  const port = env.SERVER_PORT || '80';
+  const httpTarget = `http://${ip}:${port}`;
+  const wsTarget = `ws://${ip}:${port}`;
+
+  return {
+    plugins: [
+      react(),
+      tsconfigPaths({ projects: ['tsconfig.json'] }),
+    ],
+    server: {
+      port: 5173,
+      host: true,
+      proxy: {
+        // Forward API + sync + auth + uploads + framework dev endpoints
+        // to the backend declared by SERVER_IP/SERVER_PORT.
+        '/api': httpTarget,
+        '/sync': httpTarget,
+        '/auth': httpTarget,
+        '/uploads': httpTarget,
+        '/_health': httpTarget,
+        '/livez': httpTarget,
+        '/readyz': httpTarget,
+        '/_docs': httpTarget,
+        '/socket.io': { target: wsTarget, ws: true },
+      },
     },
-  },
+  };
 });

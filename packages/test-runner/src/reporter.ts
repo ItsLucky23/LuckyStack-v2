@@ -2,9 +2,12 @@ import type { ContractCheckResult, RunContractSummary } from './types';
 
 const statusIcon = (status: ContractCheckResult['status']): string => {
   switch (status) {
-    case 'pass': return '[PASS]';
-    case 'fail': return '[FAIL]';
-    case 'skipped': return '[SKIP]';
+    case 'pass': { return '[PASS]';
+    }
+    case 'fail': { return '[FAIL]';
+    }
+    case 'skipped': { return '[SKIP]';
+    }
   }
 };
 

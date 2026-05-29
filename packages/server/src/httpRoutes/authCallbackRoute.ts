@@ -23,6 +23,7 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
   //? `process.env.DNS` is coerced to '' by the env layer when unset, so `??`
   //? would treat empty as set and shadow `app.publicUrl`. Use `||` so an empty
   //? DNS falls through to `app.publicUrl`, then `/` as last resort.
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- see comment above
   const baseLocation = (process.env.DNS || config.app.publicUrl) || '/';
   const callbackResult = await loginCallback(routePath, req, res, {
     defaultRedirectUrl: baseLocation,

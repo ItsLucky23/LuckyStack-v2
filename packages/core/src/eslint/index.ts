@@ -61,7 +61,7 @@ const luckystackConfig: Linter.Config[] = [
   {
     files: ['**/*.{ts,tsx,js,jsx,mjs,cjs}'],
     plugins: {
-      luckystack: { rules: allRules as Record<string, EslintRule> },
+      luckystack: { rules: allRules },
     },
     rules: ruleSeverities,
   },
@@ -72,4 +72,6 @@ export default luckystackConfig;
 //? Named exports for advanced consumers who want to assemble their own
 //? config or selectively re-enable individual rules.
 export { allRules as rules };
-export { hasPackage };
+
+
+export {hasPackage} from './internal/hasPackage.js';

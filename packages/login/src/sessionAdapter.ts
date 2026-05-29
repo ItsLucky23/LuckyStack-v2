@@ -8,7 +8,7 @@
 //? (CSRF minting, hook dispatch, socket emission, single-session
 //? enforcement) stay in session.ts and call the adapter to read/write.
 
-import { redis, tryCatch } from '@luckystack/core';
+import { redis, tryCatch, getProjectName } from '@luckystack/core';
 
 export interface SessionAdapter {
   /** Human-readable identifier (used in logs/diagnostics). */
@@ -63,7 +63,6 @@ export interface SessionAdapter {
  * + prefix are resolved at call time so projectConfig changes take
  * effect without reloading this module.
  */
-import { getProjectName } from '@luckystack/core';
 
 const sessionKey = (token: string): string => `${getProjectName()}-session:${token}`;
 const activeUsersKey = (userId: string): string => `${getProjectName()}-activeUsers:${userId}`;
@@ -123,14 +122,14 @@ export const redisSessionAdapter: SessionAdapter = {
       const [scanError, scanResponse] = await tryCatch(
         async () => await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100),
       );
-      if (scanError || !scanResponse || scanResponse.length < 2) break;
+      if (scanError || !scanResponse) break;
 
       cursor = scanResponse[0];
       const keys = scanResponse[1];
 
       if (Array.isArray(keys) && keys.length > 0) {
         const values = await Promise.all(keys.map((k) => redis.get(k)));
-        keys.forEach((k, idx) => {
+        for (const [idx, k] of keys.entries()) {
           const raw = values[idx];
           if (raw) {
             collected.push({
@@ -138,7 +137,7 @@ export const redisSessionAdapter: SessionAdapter = {
               raw,
             });
           }
-        });
+        }
       }
     } while (cursor !== '0');
 

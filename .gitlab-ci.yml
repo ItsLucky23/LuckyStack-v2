@@ -2,6 +2,7 @@ stages:
   - prepare
   - lint
   - build
+  - test
   - deploy
 
 variables:
@@ -147,6 +148,59 @@ build:
       when: never
     - when: on_success
 #    - if: $CI_COMMIT_BRANCH == "main"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. TEST STAGE
+#    Runs the test-runner sweep (contract / auth / rate-limit / fuzz / per-route)
+#    against the freshly built artifacts. The E2E job runs only when
+#    @vercel-labs/agent-browser is installed (the /agent-browser skill adds it).
+# ─────────────────────────────────────────────────────────────────────────────
+test:sweep:
+  stage: test
+  image: $NODE_IMAGE
+  needs:
+    - job: build
+      artifacts: true
+  dependencies:
+    - build
+  cache:
+    - key:
+        files:
+          - package-lock.json
+      paths:
+        - node_modules/
+        - .npm/
+  script:
+    - npm ci --prefer-offline
+    - npm run test
+  rules:
+    - if: $DEPLOY_TEST == "true"
+      when: never
+    - when: on_success
+
+test:e2e:
+  stage: test
+  image: $NODE_IMAGE
+  needs:
+    - job: build
+      artifacts: true
+  dependencies:
+    - build
+  cache:
+    - key:
+        files:
+          - package-lock.json
+      paths:
+        - node_modules/
+        - .npm/
+  script:
+    - npm ci --prefer-offline
+    - if [ -f "node_modules/@vercel-labs/agent-browser/package.json" ]; then npm run test:e2e; else echo "Skipping e2e — @vercel-labs/agent-browser not installed."; fi
+  allow_failure: true
+  rules:
+    - if: $DEPLOY_TEST == "true"
+      when: never
+    - when: on_success
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SSH TEMPLATE

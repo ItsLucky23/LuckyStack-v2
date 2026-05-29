@@ -7,8 +7,8 @@ import { tryCatch, getServerFunctionDirs, getSrcDir } from '@luckystack/core';
 import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
-import { getRoutingRules } from './routingRules';
-import { assertValidRouteNaming } from './routeNamingValidation';
+import { getRoutingRules, isRouteTestFile } from './routingRules';
+import { assertValidRouteNaming, collectDuplicatePageRoutes, formatDuplicatePageRouteIssues } from './routeNamingValidation';
 
 export const devApis: Record<string, unknown> = {};
 export const devSyncs: Record<string, unknown> = {};
@@ -102,6 +102,19 @@ export const initializeAll = async () => {
     context: 'starting dev server (npm run server)',
   });
 
+  //? Soft-warn on duplicate page routes — DON'T throw on startup so a
+  //? misplaced page.tsx doesn't block the entire dev server. The build
+  //? path (typeMapGenerator + scripts/generateServerRequests) DOES throw,
+  //? so collisions still block release. Same dev-vs-build escalation as
+  //? page-placement warnings in `src/main.tsx getRoutes()`.
+  const pageRouteIssues = collectDuplicatePageRoutes(getSrcDir());
+  if (pageRouteIssues.length > 0) {
+    console.warn(formatDuplicatePageRouteIssues({
+      issues: pageRouteIssues,
+      context: 'starting dev server (npm run server)',
+    }));
+  }
+
   await Promise.all([initializeApis(), initializeSyncs(), initializeFunctions()]);
 };
 
@@ -121,7 +134,7 @@ const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
     const relPath = relativeTo ? `${relativeTo}/${entry}` : entry;
     if (fs.statSync(entryPath).isDirectory()) {
       results.push(...collectTsFiles(entryPath, relPath));
-    } else if (entry.endsWith(".ts")) {
+    } else if (entry.endsWith(".ts") && !isRouteTestFile(entry)) {
       results.push(relPath);
     }
   }
@@ -174,7 +187,7 @@ export const upsertApiFromFile = async (filePath: string): Promise<void> => {
   const routeMeta = resolveApiRouteMetaFromPath(filePath);
   if (!routeMeta) {
     const normalized = normalizePath(path.resolve(filePath));
-    if (normalized.includes('/_api/') && normalized.endsWith('.ts')) {
+    if (normalized.includes('/_api/') && normalized.endsWith('.ts') && !isRouteTestFile(normalized)) {
       console.log(
         `[loader][api] invalid filename: ${normalized}. Expected <name>_v<number>.ts. File will not be loaded.`,
         'red'
@@ -193,7 +206,7 @@ export const upsertApiFromFile = async (filePath: string): Promise<void> => {
   }
 
   const resolvedModule = module?.default ? { ...module.default, ...module } : module;
-  const { auth = {}, main, rateLimit, httpMethod, schema } = resolvedModule;
+  const { auth = {}, main, rateLimit, httpMethod, schema, validation, errorFormatter } = resolvedModule;
 
   if (!main || typeof main !== 'function') {
     delete devApis[routeMeta.routeKey];
@@ -213,6 +226,8 @@ export const upsertApiFromFile = async (filePath: string): Promise<void> => {
     schema,
     inputType,
     inputTypeFilePath: routeMeta.absolutePath,
+    validation,
+    errorFormatter,
   };
 };
 
@@ -267,7 +282,7 @@ const scanApiFolder = async (file: string, basePath = "") => {
     }
 
     const resolvedModule = module?.default ? { ...module.default, ...module } : module;
-    const { auth = {}, main, rateLimit, httpMethod, schema } = resolvedModule;
+    const { auth = {}, main, rateLimit, httpMethod, schema, validation, errorFormatter } = resolvedModule;
     if (!main || typeof main !== "function") continue;
     const inputType = getInputTypeFromFile(modulePath);
 
@@ -282,6 +297,8 @@ const scanApiFolder = async (file: string, basePath = "") => {
       schema,
       inputType,
       inputTypeFilePath: modulePath,
+      validation,
+      errorFormatter,
     };
   }
 };
@@ -303,7 +320,7 @@ export const upsertSyncFromFile = async (filePath: string): Promise<void> => {
   const routeMeta = resolveSyncRouteMetaFromPath(filePath);
   if (!routeMeta) {
     const normalized = normalizePath(path.resolve(filePath));
-    if (normalized.includes(`/${getRoutingRules().syncMarker}/`) && normalized.endsWith('.ts')) {
+    if (normalized.includes(`/${getRoutingRules().syncMarker}/`) && normalized.endsWith('.ts') && !isRouteTestFile(normalized)) {
       console.log(
         `[loader][sync] invalid filename: ${normalized}. Expected <name>_server_v<number>.ts or <name>_client_v<number>.ts. File will not be loaded.`,
         'red'

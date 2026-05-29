@@ -22,11 +22,11 @@
 
 import type { EslintRule } from '../internal/ruleTypes.js';
 
-type AstNodeShape = {
+interface AstNodeShape {
   type?: string;
   value?: unknown;
-  quasis?: Array<{ value?: { raw?: string; cooked?: string } }>;
-};
+  quasis?: { value?: { raw?: string; cooked?: string } }[];
+}
 
 const extractStaticUrlText = (urlNode: unknown): string | null => {
   if (!urlNode || typeof urlNode !== 'object') return null;
@@ -79,7 +79,7 @@ const rule: EslintRule = {
         const url = node.arguments[0];
         if (!targetsFrameworkRoute(url)) return;
         const text = extractStaticUrlText(url) ?? '';
-        const messageId = /\/sync\//.test(text) ? 'useSyncRequest' : 'useApiRequest';
+        const messageId = text.includes('/sync/') ? 'useSyncRequest' : 'useApiRequest';
         context.report({ node, messageId });
       },
     };

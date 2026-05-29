@@ -2,7 +2,7 @@ import { walkEndpoints } from './walkEndpoints';
 import { runFuzzCheck } from './fuzzCheck';
 import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
-type ApiMethodMap = Record<string, Record<string, Record<string, string>>>;
+type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
 
 export interface RunFuzzTestsInput {
   apiMethodMap: ApiMethodMap;

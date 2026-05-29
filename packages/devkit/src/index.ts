@@ -26,6 +26,17 @@ export {
 } from './routingRules';
 export type { RoutingRules } from './routingRules';
 
+// Consumer template override registry — `registerTemplate('page_plain', ...)`
+// lets a project ship its own scaffold templates without forking devkit.
+// See `docs/ARCHITECTURE_EXTENSION_POINTS.md` for the consumer usage pattern.
+export {
+  registerTemplate,
+  getRegisteredTemplate,
+  clearTemplateOverrides,
+  listRegisteredTemplateKinds,
+} from './templateRegistry';
+export type { TemplateKind } from './templateRegistry';
+
 // Runtime dev loaders (consumed by server/prod/runtimeMaps.ts when NODE_ENV !== 'production')
 export {
   devApis,

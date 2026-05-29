@@ -21,8 +21,13 @@ import {
   validateInputByType,
   getLogger,
 } from "@luckystack/core";
-import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
-import { buildSyncStreamEmitters } from './_shared/streamEmitters';
+import { extractLanguageFromHeader, normalizeErrorResponse, applyErrorFormatter } from "@luckystack/core";
+import type { ErrorFormatter } from "@luckystack/core";
+import { buildSyncStreamEmitters, type FlushPressure } from './_shared/streamEmitters';
+import {
+  registerSyncAbortController,
+  unregisterSyncAbortController,
+} from '@luckystack/core';
 
 type SyncStreamPayload = Record<string, unknown>;
 
@@ -77,9 +82,25 @@ interface RuntimeSyncServerEntry {
     stream: (payload?: SyncStreamPayload) => void;
     broadcastStream: SyncBroadcastStream;
     streamTo: SyncStreamTo;
+    //? B1 — per-request AbortSignal. Aborts on client-side cancel
+    //? (`syncCancel`) or socket disconnect. Handlers that don't destructure
+    //? these still work unchanged (extra params are dropped).
+    abortSignal: AbortSignal;
+    //? B2 — backpressure helper. Awaitable; resolves when the worst-case
+    //? Socket.io write-buffer across the affected sockets drops below the
+    //? configured threshold (default 1 MB).
+    flushPressure: FlushPressure;
   }) => Promise<RuntimeSyncResponse>;
   inputType?: string;
   inputTypeFilePath?: string;
+  validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
+  /**
+   * Per-route error response formatter. Falls back to the global formatter
+   * from `registerErrorFormatter(...)`, then to the framework default
+   * `normalizeErrorResponse`. Same contract as the API handler — both
+   * transports honor the same `errorFormatter` export.
+   */
+  errorFormatter?: ErrorFormatter;
 }
 
 type RuntimeSyncClientHandler = (params: {
@@ -234,6 +255,13 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     extractLanguageFromHeader(socket.handshake.headers['x-language'])
     || extractLanguageFromHeader(socket.handshake.headers['accept-language']);
 
+  //? Per-route formatter ref + resolved-name ref — both undefined until the
+  //? sync entry is looked up. Pre-lookup errors (invalid message, unknown
+  //? route) emit with global formatter only because there's no syncEntry yet.
+  let currentRouteName: string | undefined;
+  let currentPerRouteFormatter: ErrorFormatter | undefined;
+  let currentUserId: string | undefined;
+
   const buildSyncError = ({
     response,
     preferred,
@@ -249,13 +277,24 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       userLanguage,
     });
 
-    return {
+    const baseEnvelope = {
       status: normalized.status,
       message: normalized.message,
       errorCode: normalized.errorCode,
       errorParams: normalized.errorParams,
       httpStatus: normalized.httpStatus,
     };
+
+    //? Per-route → global → identity formatter chain. The cast is sound
+    //? because applyErrorFormatter only mutates the shape when status is
+    //? 'error' — and we always pass an error envelope here.
+    return applyErrorFormatter({
+      response: baseEnvelope as unknown as Record<string, unknown> & { status?: string },
+      routeName: currentRouteName ?? 'sync/unknown',
+      transport: 'socket',
+      userId: currentUserId,
+      perRouteFormatter: currentPerRouteFormatter,
+    }) as unknown as RuntimeErrorResponse;
   };
 
   const ensureSyncErrorShape = (response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[]; httpStatus?: number }) => {
@@ -291,6 +330,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   }
 
   const resolvedName = parsedRoute.normalizedFullName;
+  currentRouteName = resolvedName;
 
   if (!cb || typeof cb != 'string') {
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
@@ -314,16 +354,38 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   }
 
   const user = await getSession(token);
+  currentUserId = user?.id;
   //? Identity propagation now flows via the `preSyncAuthorize` hook subscriber
   //? registered by `@luckystack/error-tracking`'s `enableErrorTrackingAutoInstrumentation()`.
   //? Direct `setSentryUser` removed from this handler — see migration doc.
   const { syncObject, functionsObject } = await getRuntimeSyncMaps();
+
+  //? B1 — per-request AbortController. The controller drives three things:
+  //?   1. Aborts when the client emits `syncCancel { cb }` (registered in cancelRegistry).
+  //?   2. Aborts when the originator socket disconnects (listener below).
+  //?   3. Gates further chunk emits via the signal handed to streamEmitters.
+  //? `cb` is the stable per-request key the client already knows; we register
+  //? under `${socket.id}:${cb}` so cancel lookups are deterministic.
+  const abortController = new AbortController();
+  const abortKey = registerSyncAbortController(socket.id, cb, abortController);
+  const onSocketDisconnect = () => {
+    abortController.abort();
+  };
+  socket.once(socketEventNames.disconnect, onSocketDisconnect);
+  let cleanupDone = false;
+  const cleanupRequest = () => {
+    if (cleanupDone) return;
+    cleanupDone = true;
+    socket.off(socketEventNames.disconnect, onSocketDisconnect);
+    unregisterSyncAbortController(abortKey);
+  };
 
   //? we check if there is a client file or/and a server file, if they both dont exist we abort
   if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
     if (shouldLogDev()) {
       getLogger().warn(`sync: ${name} has no _client or _server file`, { sync: name });
     }
+    cleanupRequest();
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.notFound' },
       preferred: preferredLocale,
@@ -331,12 +393,14 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }));
   }
 
-  const { emitServerSyncStream, emitBroadcastSyncStream, emitStreamToTokens } =
+  const { emitServerSyncStream, emitBroadcastSyncStream, emitStreamToTokens, flushPressure } =
     buildSyncStreamEmitters({
       cb,
       receiver,
       resolvedName,
       logLabel: 'sync',
+      signal: abortController.signal,
+      originatorSocket: socket,
       emitOriginatorChunk: (payload) => {
         if (typeof responseIndex !== 'number') return;
         socket.emit(buildSyncProgressEventName(responseIndex), payload);
@@ -347,12 +411,14 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   //? Auth runs first so unauthenticated probes can't consume rate-limit budget
   //? or learn input shape from `inputValidation.message`. Mirrors api handlers.
   const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry | undefined;
+  currentPerRouteFormatter = serverSyncEntry?.errorFormatter;
   if (serverSyncEntry) {
     const { auth } = serverSyncEntry;
     if (auth.login && !user?.id) {
       if (shouldLogDev()) {
         getLogger().warn(`sync: ${resolvedName} requires login`, { sync: resolvedName });
       }
+      cleanupRequest();
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: { status: 'error', errorCode: 'auth.required' },
         preferred: preferredLocale,
@@ -364,6 +430,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       if (shouldLogDev()) {
         getLogger().warn(`sync: auth failed for ${resolvedName}`, { sync: resolvedName, errorCode: validationResult.errorCode });
       }
+      cleanupRequest();
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: {
           status: 'error',
@@ -393,6 +460,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     if (shouldLogDev()) {
       getLogger().warn(`sync: preSyncAuthorize stopped ${resolvedName}`, { sync: resolvedName, errorCode: preAuthorizeResult.signal.errorCode });
     }
+    cleanupRequest();
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: {
         status: 'error',
@@ -404,6 +472,18 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }));
   }
 
+  //? Observational mirror of `preSyncAuthorize`. Fires after the request
+  //? passes auth + custom policy; lets audit-log / metrics subscribers
+  //? record successful authorizations without forking the dispatch path.
+  //? Stop signals from handlers are ignored (this is post-decision).
+  void dispatchHook('postSyncAuthorize', {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+    receiver,
+    transport: 'socket',
+  });
+
   //? Rate limit check: per-sync bucket fallback + global per-IP cap
   const rateLimitOk = await applySyncRateLimits({
     resolvedName,
@@ -414,7 +494,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     buildSyncError,
     preferredLocale,
   });
-  if (!rateLimitOk) return;
+  if (!rateLimitOk) { cleanupRequest(); return; }
 
   let serverOutput = {};
   if (serverSyncEntry) {
@@ -427,6 +507,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       filePath: inputTypeFilePath,
     });
     if (inputValidation.status === 'error') {
+      cleanupRequest();
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: {
           status: 'error',
@@ -448,6 +529,8 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         stream: emitServerSyncStream,
         broadcastStream: emitBroadcastSyncStream,
         streamTo: emitStreamToTokens,
+        abortSignal: abortController.signal,
+        flushPressure,
       }),
       undefined,
       {
@@ -463,6 +546,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       if (shouldLogDev()) {
         getLogger().error(`sync: server execution failed for ${resolvedName}`, serverSyncError, { sync: resolvedName });
       }
+      cleanupRequest();
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
         preferred: preferredLocale,
@@ -477,12 +561,14 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       if (shouldLogDev()) {
         getLogger().warn(`sync: server returned error for ${resolvedName}`, { sync: resolvedName, message: normalizedServerError.message });
       }
+      cleanupRequest();
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), normalizedServerError);
     } else if (serverSyncResult?.status !== 'success') {
       //? badReturn means it doesnt include a status key with the value 'success' || 'error'
       if (shouldLogDev()) {
         getLogger().warn(`sync: ${resolvedName}_server returned invalid response`, { sync: resolvedName });
       }
+      cleanupRequest();
       return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
         response: { status: 'error', errorCode: 'sync.invalidServerResponse' },
         preferred: preferredLocale,
@@ -505,6 +591,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     if (shouldLogDev()) {
       getLogger().warn('sync: no sockets found for receiver', { receiver, sync: resolvedName });
     }
+    cleanupRequest();
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.noReceiversFound' },
       preferred: preferredLocale,
@@ -526,6 +613,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   };
   const preFanoutResult = await dispatchHook('preSyncFanout', fanoutPayload);
   if (preFanoutResult.stopped) {
+    cleanupRequest();
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: {
         status: 'error',
@@ -663,6 +751,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   fanoutPayload.recipientCount = recipientCount;
   await dispatchHook('postSyncFanout', fanoutPayload);
 
+  cleanupRequest();
   return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), {
     status: 'success',
     message: `sync ${resolvedName} success`,

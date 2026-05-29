@@ -25,7 +25,9 @@
       "Bash(del *)",
       "Bash(git stash *)",
       "Bash(git grep *)",
-      "Bash(npm --workspace packages/devkit run build)"
+      "Bash(npm --workspace packages/devkit run build)",
+      "Bash(npx vite *)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

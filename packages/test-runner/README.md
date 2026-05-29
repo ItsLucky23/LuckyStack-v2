@@ -25,7 +25,8 @@ import {
 
 const endpoints = await walkEndpoints();
 
-const contract = await runContractTests({ endpoints, baseUrl: 'http://127.0.0.1:80' });
+const baseUrl = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80';
+const contract = await runContractTests({ endpoints, baseUrl });
 logContractSummary(contract);
 
 const auth = await runAuthEnforcementTests({ endpoints, baseUrl });

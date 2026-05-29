@@ -5,7 +5,7 @@
 > - Templates: `packages/email/docs/templates.md`
 > - Architecture (auth side): `docs/ARCHITECTURE_AUTH.md`
 > - Architecture (email side): `docs/ARCHITECTURE_EMAIL.md`
-> - Login package contract: `packages/login/AI_INDEX.md`
+> - Login package contract: `packages/login/CLAUDE.md`
 
 `@luckystack/login` does not depend on `@luckystack/email` directly. It lists email as an **optional peer**, lazy-imports it from the forgot-password orchestrator, and gracefully no-ops the entire flow if the consumer chose `auth.forgotPassword !== 'framework'`. This doc explains how the two packages handshake, what slots the email package fills, and what an installer has to wire to make it work.
 
@@ -360,4 +360,4 @@ Password-reset goes through Resend (`'transactional'` slot, via `adapterHint`). 
 - `packages/login/src/passwordReset.ts` — `createPasswordResetToken`, `consumePasswordResetToken`, `updatePasswordHash`.
 - `packages/email/src/sendEmail.ts` — adapter + template resolution.
 - `packages/email/src/renderEmailLayout.ts` — the layout helper the inline render uses.
-- `packages/login/AI_INDEX.md` — login package contract (modes, config keys).
+- `packages/login/CLAUDE.md` — login package contract (modes, config keys).

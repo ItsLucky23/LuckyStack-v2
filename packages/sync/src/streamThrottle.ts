@@ -106,7 +106,7 @@ export const createStreamThrottle = (
         }, flushEveryMs);
         //? Allow process exit even if the throttle has a pending flush.
         //? Prevents tests + short scripts from hanging waiting on a timer.
-        if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+        if (typeof timer === 'object' && 'unref' in timer) {
           (timer as { unref: () => void }).unref();
         }
       }

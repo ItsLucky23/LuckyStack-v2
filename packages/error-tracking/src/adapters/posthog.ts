@@ -77,7 +77,7 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
         'error.type': error instanceof Error ? error.name : typeof error,
         'error.message': error instanceof Error ? error.message : String(error),
         'error.stack': error instanceof Error ? error.stack : undefined,
-        ...(context ?? {}),
+        ...context,
       };
       //? Prefer the dedicated `captureException` API when the installed
       //? posthog-node version supports it; fall back to a custom
@@ -103,12 +103,12 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
       options.client.capture({
         distinctId: currentDistinctId,
         event: 'log_message',
-        properties: { message, level, ...(context ?? {}) },
+        properties: { message, level, ...context },
       });
     },
 
     setUser(user) {
-      if (!user || !user.id) {
+      if (!user?.id) {
         currentDistinctId = options.anonymousDistinctId ?? 'anonymous';
         return;
       }
@@ -128,7 +128,7 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
       options.client.capture({
         distinctId: currentDistinctId,
         event: `metric_${name}`,
-        properties: { value, ...(tags ?? {}) },
+        properties: { value, ...tags },
       });
     },
 

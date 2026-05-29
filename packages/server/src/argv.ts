@@ -31,18 +31,19 @@ export const parseServerArgv = (argv: string[]): ParsedServerArgv => {
   }
 
   const bundles = argv[0] && argv[0].length > 0
-    ? Array.from(new Set(argv[0].split(',').map((s) => s.trim()).filter(Boolean)))
+    ? [...new Set(argv[0].split(',').map((s) => s.trim()).filter(Boolean))]
     : [];
 
   let port: number | null = null;
-  if (argv[1] !== undefined) {
-    if (!PORT_PATTERN.test(argv[1])) {
+  const portArg = argv[1];
+  if (portArg !== undefined) {
+    if (!PORT_PATTERN.test(portArg)) {
       throw new Error(
-        `[luckystack:argv] port argument must be numeric, got: "${argv[1]}". ` +
+        `[luckystack:argv] port argument must be numeric, got: "${portArg}". ` +
         `Usage: npm run server -- <bundle[,bundle...]> [port]`,
       );
     }
-    port = Number.parseInt(argv[1], 10);
+    port = Number.parseInt(portArg, 10);
   }
 
   return { bundles, port };

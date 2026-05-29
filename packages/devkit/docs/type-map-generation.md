@@ -184,7 +184,7 @@ Each `*TypeDetailsFromFile` returns `{ text, unresolvedSymbols }`; the symbols a
 const functionsInterface = generateServerFunctions({ namedImports, defaultImports });
 ```
 
-`generateServerFunctions` walks `serverFunctionsDir` recursively and emits a nested-interface block representing every exported function or value. Per file:
+`generateServerFunctions` walks every configured `serverFunctionDirs` root recursively (legacy singular `serverFunctionsDir` still honored when set) and emits a nested-interface block representing every exported function or value. Per file:
 
 1. Parse the source via the TypeScript Program (reuses the same cached `ts.Program` — see `ts-program-cache.md`).
 2. For every `export const <name> = (...)` arrow or function expression, extract a signature string with `extractSignatureFromNode`. Default values are stripped from parameters; generic clauses are preserved; `Promise<unknown>` is the return-type fallback for async functions without annotations.

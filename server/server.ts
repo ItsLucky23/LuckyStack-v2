@@ -20,7 +20,7 @@ import '../deploy.config';
 import '../services.config';
 import './utils/responseNormalizer';
 
-import { initializeSentry } from './functions/sentry';
+import { initializeSentry } from '../functions/sentry';
 import { registerSentryConfig } from '@luckystack/error-tracking';
 import { registerPresenceHooks } from '@luckystack/presence';
 import { bootstrapLuckyStack } from '@luckystack/server';

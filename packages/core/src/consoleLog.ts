@@ -20,7 +20,7 @@ const extractFrameLabel = (frame: string): string => {
   let lineInfo = frame.slice(frame.indexOf("(") + 1, frame.lastIndexOf(")"));
   if (lineInfo === "") lineInfo = frame;
   const match = FILE_NAME_REGEX.exec(lineInfo);
-  const fileName = match ? match[1] : lineInfo;
+  const fileName = match?.[1] ?? lineInfo;
   return fileName.replace(/:\d+(?::\d+)?$/, "");
 };
 

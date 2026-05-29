@@ -40,8 +40,8 @@ export const getNotifier = (): Notifier => activeNotifier;
 //? Delegating wrapper matching the project's existing `notify` shape so the
 //? switchover inside framework packages is a one-line import change.
 export const notify: Notifier = {
-  success: (input) => activeNotifier.success(input),
-  error: (input) => activeNotifier.error(input),
-  info: (input) => activeNotifier.info(input),
-  warning: (input) => activeNotifier.warning(input),
+  success: (input) => { activeNotifier.success(input); },
+  error: (input) => { activeNotifier.error(input); },
+  info: (input) => { activeNotifier.info(input); },
+  warning: (input) => { activeNotifier.warning(input); },
 };

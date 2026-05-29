@@ -36,7 +36,7 @@ Naming conventions:
   "files": [
     "dist",
     "README.md",
-    "AI_INDEX.md",
+    "CLAUDE.md",
     "docs",
     "LICENSE"
   ],
@@ -90,7 +90,7 @@ Audience: a developer who has never seen LuckyStack. Cover:
 - Quickstart: smallest possible working example.
 - Link to the per-package `docs/` folder for deep dives.
 
-### 6. Write `AI_INDEX.md` (AI summary + function INDEX)
+### 6. Write `CLAUDE.md` (AI summary + function INDEX)
 
 Audience: a future AI assistant. Cover:
 

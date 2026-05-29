@@ -20,10 +20,19 @@ export type MiddlewareResult =
 
 export type MiddlewareHandler = (input: MiddlewareInput) => MiddlewareResult | Promise<MiddlewareResult>;
 
-//? Default handler: deny by default with no redirect. Sends the user back
-//? in browser history via the framework's caller. Consumers MUST register
-//? their own handler for any non-public route.
-const DEFAULT_HANDLER: MiddlewareHandler = () => undefined;
+//? Default handler: allow by default. Per-page `middleware` exports on each
+//? `page.tsx` are the canonical route-guard path (see `registerPageMiddleware`
+//? below); the global handler is only consulted as a fallback for pages
+//? that don't declare their own guard. Allowing-by-default keeps public
+//? routes (`/`, `/login`, `/register`, ...) working without forcing every
+//? consumer to ship a `src/_functions/middlewareHandler.ts` boilerplate
+//? file just to opt-in to "let the user through".
+//?
+//? Consumers who need a cross-cutting global guard (telemetry, server-
+//? reachability check, maintenance banner gate) call
+//? `registerMiddlewareHandler(...)` directly from `main.tsx` with their own
+//? function — no separate file required.
+const DEFAULT_HANDLER: MiddlewareHandler = () => ({ success: true });
 
 let activeHandler: MiddlewareHandler = DEFAULT_HANDLER;
 
@@ -32,3 +41,34 @@ export const registerMiddlewareHandler = (handler: MiddlewareHandler): void => {
 };
 
 export const getMiddlewareHandler = (): MiddlewareHandler => activeHandler;
+
+//? Per-page middleware registry. Counterpart to `registerMiddlewareHandler`
+//? for the common case where each page declares its own guard locally
+//? (`export const middleware = ({ session }) => {...}` from page.tsx).
+//? The framework's `<Middleware>` component checks this map FIRST and only
+//? falls back to the global handler when no per-page entry is registered.
+//?
+//? `PageMiddleware<TSession>` matches the existing `MiddlewareHandler`
+//? signature so any handler shape is reusable on either side. The generic
+//? is purely ergonomic for consumer-side type narrowing — module
+//? augmentation of `BaseSessionLayout` flows through.
+
+export type PageMiddleware<TSession extends BaseSessionLayout = BaseSessionLayout> = (
+  input: { location: string; searchParams: Record<string, string>; session: TSession | null },
+) => MiddlewareResult | Promise<MiddlewareResult>;
+
+const pageMiddlewares = new Map<string, PageMiddleware>();
+
+export const registerPageMiddleware = (path: string, middleware: PageMiddleware): void => {
+  pageMiddlewares.set(path, middleware);
+};
+
+export const getPageMiddleware = (path: string): PageMiddleware | undefined =>
+  pageMiddlewares.get(path);
+
+export const hasPageMiddleware = (path: string): boolean => pageMiddlewares.has(path);
+
+/** Test helper — drop every registered per-page middleware. */
+export const clearPageMiddlewaresForTests = (): void => {
+  pageMiddlewares.clear();
+};

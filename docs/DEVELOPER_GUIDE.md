@@ -129,6 +129,36 @@ luckystack/
 
 ## Common Patterns
 
+### Route Guards (per-page middleware)
+
+Restrict who can see a page by exporting a `middleware` function from `page.tsx`. The framework auto-registers it against the page's URL and runs it on every navigation (and on programmatic `useRouter` navigations too).
+
+```typescript
+// src/billing/page.tsx
+import type { PageMiddleware } from '@luckystack/core/client';
+import { i18nNotify as notify } from '@luckystack/core/client';
+import type { SessionLayout } from 'config';
+
+export const template = 'dashboard';
+
+export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
+  if (!session) return { success: false, redirect: '/login' };
+  if (!session.paidTier) {
+    notify.error({ key: 'billing.upgradeRequired' });
+    return; // navigate(-1) — sends the user back in history
+  }
+  return { success: true };
+};
+
+export default function BillingPage() { /* ... */ }
+```
+
+Returns: `{ success: true }` to render, `{ success: false, redirect: '/path' }` to redirect, or `undefined` to go back. No `success: false` without a `redirect` — use `undefined` for that case.
+
+Pages without a `middleware` export are public by default. For a cross-cutting global hook (telemetry, server-reachability), call `registerMiddlewareHandler(...)` from `src/main.tsx` once; per-page middleware always takes precedence.
+
+Deep dive: [`docs/ARCHITECTURE_ROUTING.md` § Page Guards](./ARCHITECTURE_ROUTING.md).
+
 ### Page with API and Sync
 
 ```

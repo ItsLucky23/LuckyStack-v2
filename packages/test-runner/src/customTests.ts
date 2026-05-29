@@ -9,6 +9,12 @@ import { pathToFileURL } from 'node:url';
 
 import { getPrismaClient, getSrcDir, tryCatch } from '@luckystack/core';
 
+import {
+  openStreamWatcher,
+  type StreamChunkFrame,
+  type StreamWatcher,
+} from './streamWatcher';
+
 const API_TEST_FILE_PATTERN = /_v(\d+)\.tests\.ts$/;
 const SYNC_SERVER_TEST_FILE_PATTERN = /_server_v(\d+)\.tests\.ts$/;
 
@@ -60,7 +66,8 @@ export const discoverCustomTestFiles = (srcDir: string = getSrcDir()): Discovere
   const found: DiscoveredTestFile[] = [];
   const stack: string[] = [srcDir];
   while (stack.length > 0) {
-    const current = stack.pop()!;
+    const current = stack.pop();
+    if (current === undefined) break;
     const entries = fs.readdirSync(current, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(current, entry.name);
@@ -85,7 +92,7 @@ export const discoverCustomTestFiles = (srcDir: string = getSrcDir()): Discovere
       });
     }
   }
-  return found.sort((a, b) => a.filePath.localeCompare(b.filePath));
+  return found.toSorted((a, b) => a.filePath.localeCompare(b.filePath));
 };
 
 //? Test fixture shapes. The TestContext is built per route — each per-route
@@ -93,8 +100,25 @@ export const discoverCustomTestFiles = (srcDir: string = getSrcDir()): Discovere
 //? route the file lives next to, so authors don't repeat `page/name/version`.
 export interface TestContext {
   /** Invoke the route under test. Page / name / version are baked in. */
+  //? Two type parameters by design — `TInput` lets callers document the
+  //? typed shape they're sending even though we don't validate against it
+  //? here (the route's own runtime validation does). The ESLint rule
+  //? otherwise flags it as "used once"; the documentation value is real.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- callsite-documentation use
   callApi: <TInput = unknown, TOutput = unknown>(input: TInput) => Promise<TOutput>;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- callsite-documentation use
   callSync: <TInput = unknown, TOutput = unknown>(input: TInput, opts?: { receiver?: string }) => Promise<TOutput>;
+  /**
+   * Open a second socket connection that joins `roomCode` as a pure
+   * subscriber and exposes the incoming chunk stream for assertions.
+   *
+   * The route is auto-derived from the test file location, so a watcher
+   * only surfaces chunks for the route this test belongs to. Multiple
+   * watchers per test are allowed; all are auto-closed when the test
+   * case finishes (whether it passes or throws).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- callsite-documentation use
+  watchStream: <TChunk extends StreamChunkFrame = StreamChunkFrame>(roomCode: string) => Promise<StreamWatcher<TChunk>>;
   session: {
     login: (user?: { email?: string; id?: string; name?: string }) => Promise<{ token: string; userId: string }>;
     logout: () => Promise<void>;
@@ -107,7 +131,7 @@ export interface TestContext {
 export interface TestExpect {
   eq: <T>(actual: T, expected: T, message?: string) => void;
   ok: (value: unknown, message?: string) => void;
-  throws: (fn: () => unknown | Promise<unknown>, message?: string) => Promise<Error>;
+  throws: (fn: () => Promise<unknown>, message?: string) => Promise<Error>;
   matches: (value: string, pattern: RegExp, message?: string) => void;
 }
 
@@ -131,7 +155,7 @@ const buildExpect = (): TestExpect => ({
     if (!value) throw new AssertionError(message ?? `expected truthy value, got ${JSON.stringify(value)}`);
   },
   throws: async (fn, message) => {
-    const [err] = await tryCatch(async () => fn());
+    const [err] = await tryCatch(fn);
     if (!err) throw new AssertionError(message ?? 'expected fn to throw, but it did not');
     return err;
   },
@@ -194,7 +218,7 @@ const buildCallApi = (
   return async (input) => {
     const url = `${baseUrl.replace(/\/$/, '')}/api/${routePath}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (state.token) headers['Cookie'] = `${cookieName}=${state.token}`;
+    if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
     const response = await fetch(url, {
       method: 'POST',
       headers,
@@ -213,7 +237,7 @@ const buildCallSync = (
   return async (input, opts) => {
     const url = `${baseUrl.replace(/\/$/, '')}/sync/${routePath}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (state.token) headers['Cookie'] = `${cookieName}=${state.token}`;
+    if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
     const body = { data: input ?? {}, receiver: opts?.receiver };
     const response = await fetch(url, {
       method: 'POST',
@@ -224,21 +248,63 @@ const buildCallSync = (
   };
 };
 
+interface BuiltContext {
+  ctx: TestContext;
+  /** Close every watcher opened during the case. Called by `runCustomTests` after each case. */
+  closeAllWatchers: () => Promise<void>;
+}
+
 const buildContext = (
   discovery: DiscoveredTestFile,
   input: RunCustomTestsInput,
-): TestContext => {
+): BuiltContext => {
   const cookieName = input.sessionCookieName ?? 'luckystack_token';
   const routePath = `${discovery.route.page}/${discovery.route.name}/${discovery.route.version}`;
+  const routeFullName = `sync/${routePath}`;
   const state: TestSessionState = { token: null, userId: null };
   const prisma = getPrismaClient();
-  return {
+
+  //? Watchers are tracked per case so a missing explicit `close()` can't
+  //? leak socket B between tests.
+  const watchers: StreamWatcher[] = [];
+  const watchStream = async <TChunk extends StreamChunkFrame = StreamChunkFrame>(
+    roomCode: string,
+  ): Promise<StreamWatcher<TChunk>> => {
+    const watcher = await openStreamWatcher<TChunk>({
+      baseUrl: input.baseUrl,
+      roomCode,
+      token: state.token,
+      routeFullName,
+    });
+    //? Track watchers under the base `StreamChunkFrame` shape; the
+    //? returned reference keeps the caller-supplied generic.
+    watchers.push(watcher as StreamWatcher);
+    return watcher;
+  };
+
+  const closeAllWatchers = async (): Promise<void> => {
+    while (watchers.length > 0) {
+      const watcher = watchers.pop();
+      if (!watcher) continue;
+      const [closeError] = await tryCatch(() => watcher.close());
+      if (closeError) {
+        //? Swallow — closing in cleanup must never mask the original test
+        //? failure. Surface via logger if a project wires one up.
+        //? (Intentionally not using getLogger here to avoid an extra import.)
+      }
+    }
+  };
+
+  const ctx: TestContext = {
     callApi: buildCallApi(input.baseUrl, routePath, state, cookieName),
     callSync: buildCallSync(input.baseUrl, routePath, state, cookieName),
+    watchStream,
     session: buildSessionHelpers(state),
     prisma,
     expect: buildExpect(),
   };
+
+  return { ctx, closeAllWatchers };
 };
 
 export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCustomTestsSummary> => {
@@ -249,7 +315,9 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
     const routePath = `${discovery.route.page}/${discovery.route.name}/${discovery.route.version}`;
     if (input.filter && !routePath.includes(input.filter)) continue;
 
-    const [importError, mod] = await tryCatch(async () => import(pathToFileURL(discovery.filePath).href));
+    const [importError, mod] = await tryCatch(
+      () => import(pathToFileURL(discovery.filePath).href) as Promise<Record<string, unknown>>,
+    );
     if (importError || !mod) {
       const r: CustomTestResult = {
         routePath, caseName: '(import)', status: 'fail', durationMs: 0,
@@ -268,10 +336,14 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
 
     for (const rawCase of exported) {
       const c = rawCase as CustomTestCase;
-      if (typeof c?.name !== 'string' || typeof c?.run !== 'function') continue;
-      const ctx = buildContext(discovery, input);
+      if (typeof c.name !== 'string' || typeof c.run !== 'function') continue;
+      const built = buildContext(discovery, input);
       const started = Date.now();
-      const [runError] = await tryCatch(async () => c.run(ctx));
+      const [runError] = await tryCatch(async () => c.run(built.ctx));
+      //? Always close watchers regardless of pass/fail so the next case
+      //? starts clean. tryCatch on the cleanup itself prevents a teardown
+      //? throw from masking the original failure.
+      await tryCatch(() => built.closeAllWatchers());
       const durationMs = Date.now() - started;
       const r: CustomTestResult = runError
         ? { routePath, caseName: c.name, status: 'fail', durationMs, reason: runError.message }

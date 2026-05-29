@@ -265,7 +265,7 @@ const buildPackagesSection = async () => {
     return `### Installed \`@luckystack/*\` packages\n\nNone detected in \`node_modules/@luckystack/\`. Either you are outside an installed project, or no framework packages are installed yet.\n`;
   }
   const lines = [`### Installed \`@luckystack/*\` packages`, ""];
-  lines.push("Each row links to that package's AI_INDEX.md (the canonical function INDEX) if it ships one. Consult the INDEX **before** writing any helper that touches that package's surface area.");
+  lines.push("Each row links to that package's CLAUDE.md (the canonical function INDEX) if it ships one. Consult the INDEX **before** writing any helper that touches that package's surface area.");
   lines.push("");
   lines.push("| Package | Version | One-liner | INDEX |");
   lines.push("| --- | --- | --- | --- |");
@@ -274,9 +274,9 @@ const buildPackagesSection = async () => {
     const pkg = await readJsonFile(path.join(packageDir, "package.json"));
     const version = pkg?.version ?? "?";
     const description = (pkg?.description ?? "").replaceAll("|", "\\|").trim() || "_(no description)_";
-    const aiIndexPath = path.join(packageDir, "AI_INDEX.md");
+    const aiIndexPath = path.join(packageDir, "CLAUDE.md");
     const indexLink = (await fileExists(aiIndexPath))
-      ? `[AI_INDEX](../node_modules/@luckystack/${name}/AI_INDEX.md)`
+      ? `[CLAUDE.md](../node_modules/@luckystack/${name}/CLAUDE.md)`
       : "—";
     lines.push(`| \`@luckystack/${name}\` | ${version} | ${description} | ${indexLink} |`);
   }

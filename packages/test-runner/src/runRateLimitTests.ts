@@ -3,12 +3,12 @@ import { runRateLimitCheck } from './rateLimitCheck';
 import { resetServerState } from './resetServerState';
 import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
-type ApiMethodMap = Record<string, Record<string, Record<string, string>>>;
-type ApiMetaMap = Record<string, Record<string, Record<string, {
+type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
+type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, {
   method: string;
   auth: { login: boolean; additional?: Record<string, unknown>[] };
   rateLimit?: number | false;
-}>>>;
+}>>>>>>;
 
 export interface RunRateLimitTestsInput {
   apiMethodMap: ApiMethodMap;

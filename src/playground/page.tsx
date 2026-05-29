@@ -60,6 +60,18 @@ const oauthProviderIds = registeredProviderIds.filter((id) => id !== 'credential
 
 export const template = 'dashboard';
 
+//? Per-page route guard. Replaces the `/playground` case in
+//? `src/_functions/middlewareHandler.ts`: any logged-out visitor is bounced
+//? to `/login`; logged-in users pass through. Defined as an explicit
+//? `PageMiddleware` so the framework's auto-discovery wires it up.
+import type { PageMiddleware } from '@luckystack/core/client';
+import type { SessionLayout } from 'config';
+
+export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
+  if (!session) return { success: false, redirect: '/login' };
+  return { success: true };
+};
+
 //? TEMPORARY playground page for visually testing framework components.
 //? Delete this folder + the matching nav item in `Navbar.tsx` when done.
 

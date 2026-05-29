@@ -7,6 +7,7 @@ import { setSentryUser } from 'src/_functions/sentry';
 import {
   SessionContext,
   setLatestSession,
+  proposeLogin,
   getCurrentSession as coreGetCurrentSession,
   socketEventNames,
 } from '@luckystack/core/client';
@@ -18,8 +19,31 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   useSocket(session); //? starts the socket connection
 
+  //? Commit session transitions through the vetoable `proposeLogin` entry
+  //? point so any registered `preLogin` client hook can abort (suspended
+  //? account, feature-flag gate, geo block). On veto we roll local React
+  //? state back to `null` so the UI doesn't render half-logged-in. The
+  //? null → null and session → null branches stay on plain `setLatestSession`
+  //? since logout isn't gated.
+  //?
+  //? `proposeRef` (not a `let cancelled`) for the same flow-analyzer
+  //? narrowing reason documented around `cancelledRef` further down.
+  const proposeRef = useRef(false);
   useEffect(() => {
-    setLatestSession(session);
+    if (session === null) {
+      setLatestSession(null);
+      return;
+    }
+    proposeRef.current = false;
+    void (async () => {
+      const result = await proposeLogin(session);
+      if (proposeRef.current) return;
+      if (!result.committed) {
+        if (dev) console.warn('[session] preLogin hook vetoed transition', result.signal);
+        setSession(null);
+      }
+    })();
+    return () => { proposeRef.current = true; };
   }, [session]);
 
   useEffect(() => {

@@ -4,6 +4,20 @@ export * from './serviceRoute';
 export * from './socketEvents';
 export * from './responseNormalizer';
 export * from './localizedNormalizer';
+export {
+  registerErrorFormatter,
+  getErrorFormatter,
+  applyErrorFormatter,
+} from './errorFormatterRegistry';
+export type { ErrorFormatter, ErrorFormatterContext } from './errorFormatterRegistry';
+export {
+  validatePagePath,
+  DEFAULT_PAGE_ROUTE_RULES,
+} from './pageRouteValidation';
+export type {
+  PageRouteRules,
+  PagePathValidationResult,
+} from './pageRouteValidation';
 export type { ApiTypeMap, SyncTypeMap, StreamPayload } from './apiTypeStubs';
 export type { apiMessage, syncMessage } from './socketTypes';
 export { setIoInstance, getIoInstance } from './socketTypes';
@@ -204,6 +218,15 @@ export {
   getSyncQueueSize,
 } from './offlineQueue';
 export { socket, setSocket, incrementResponseIndex, waitForSocket } from './socketState';
+export {
+  registerSyncAbortController,
+  unregisterSyncAbortController,
+  abortSyncByCb,
+  registerApiAbortController,
+  unregisterApiAbortController,
+  abortApiByResponseIndex,
+  abortAllForSocket,
+} from './cancelRegistry';
 export { getCsrfToken, clearCsrfToken, httpFetch } from './csrf';
 // `apiRequest` is exported from `./client.ts` — it imports React-coupled
 // project code (notify → TranslationProvider.tsx) that must not be pulled

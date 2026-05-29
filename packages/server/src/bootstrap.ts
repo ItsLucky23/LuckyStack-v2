@@ -80,7 +80,7 @@ const loadOverlayFolder = async (overlayRoot: string): Promise<void> => {
       await importIfExists(path.join(packageDir, candidate));
     }
 
-    const entries = fs.readdirSync(packageDir).sort();
+    const entries = fs.readdirSync(packageDir).toSorted();
     for (const entry of entries) {
       if (indexCandidates.includes(entry)) continue;
       if (!entry.endsWith('.ts') && !entry.endsWith('.js')) continue;

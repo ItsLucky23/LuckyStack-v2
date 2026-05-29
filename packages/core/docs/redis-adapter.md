@@ -105,7 +105,7 @@ setIoInstance(io);
 
 ## Related
 
-- Function INDEX: `packages/core/AI_INDEX.md`
+- Function INDEX: `packages/core/CLAUDE.md`
 - Architecture: `docs/ARCHITECTURE_SOCKET.md`, `docs/HOSTING.md`
 - README: `packages/core/README.md`
 - Source: `packages/core/src/redis.ts`, `socketRedisAdapter.ts`, `clients.ts`

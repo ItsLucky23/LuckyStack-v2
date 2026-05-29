@@ -27,6 +27,15 @@ export interface SyncParams {
   stream: SyncServerStreamEmitter;
   broadcastStream: SyncBroadcastStreamEmitter;
   streamTo: SyncStreamToEmitter;
+  //? Aborts on client-side cancel (`syncRequest({ signal })`) or socket
+  //? disconnect. Check `abortSignal.aborted` in long-running loops and bail
+  //? out — already-emitted chunks are not unsent, but new ones are
+  //? short-circuited automatically by the stream emitters.
+  abortSignal: AbortSignal;
+  //? Awaitable backpressure helper. Resolves once the worst-case write
+  //? buffer across affected sockets drops below the threshold (default 1 MB).
+  //? Use opt-in between batches of stream chunks to keep memory bounded.
+  flushPressure: (options?: { thresholdBytes?: number }) => Promise<void>;
 }
 
 export const main = ({  }: SyncParams): MaybePromise<SyncServerResponse> => {

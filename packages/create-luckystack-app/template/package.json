@@ -13,8 +13,11 @@
     "prod": "node dist/server.js",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"server/**/*.ts\" --cache --cache-location .eslintcache --ignore-pattern \"**/*.generated.*\"",
     "ai:capabilities": "node scripts/generateAiCapabilities.mjs",
-    "test": "tsx --tsconfig tsconfig.server.json scripts/testAll.ts",
+    "ai:project-index": "node scripts/generateProjectIndex.mjs",
+    "generateArtifacts": "tsx --tsconfig tsconfig.server.json scripts/generateTypeMaps.ts && tsx --tsconfig tsconfig.server.json scripts/generateServerRequests.ts",
+    "test": "npm run generateArtifacts && tsx --tsconfig tsconfig.server.json scripts/testAll.ts",
     "scaffold:test": "node scripts/scaffoldRouteTest.mjs",
+    "scaffold:page": "node scripts/scaffoldPage.mjs",
     "prisma:generate": "dotenv -e .env.local -- prisma generate",
     "prisma:migrate:dev": "dotenv -e .env.local -- prisma migrate dev",
     "prisma:studio": "dotenv -e .env.local -- prisma studio"

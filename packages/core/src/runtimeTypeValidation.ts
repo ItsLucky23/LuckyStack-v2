@@ -71,15 +71,15 @@ const parseObjectFields = (typeText: string): {
           fields.push({
             key: rawKey.replaceAll(/^['"]|['"]$/g, ''),
             optional: Boolean(fieldMatch[3]),
-            type: fieldMatch[4].trim(),
+            type: (fieldMatch[4] ?? '').trim(),
           });
         } else {
           const indexMatch = /^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/.exec(trimmed);
           if (indexMatch) {
             indexSignatures.push({
-              keyName: indexMatch[1].trim(),
-              keyType: indexMatch[2].trim(),
-              type: indexMatch[3].trim(),
+              keyName: (indexMatch[1] ?? '').trim(),
+              keyType: (indexMatch[2] ?? '').trim(),
+              type: (indexMatch[3] ?? '').trim(),
             });
           }
         }
@@ -100,15 +100,15 @@ const parseObjectFields = (typeText: string): {
       fields.push({
         key: rawKey.replaceAll(/^['"]|['"]$/g, ''),
         optional: Boolean(fieldMatch[3]),
-        type: fieldMatch[4].trim(),
+        type: (fieldMatch[4] ?? '').trim(),
       });
     } else {
       const indexMatch = /^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/.exec(final);
       if (indexMatch) {
         indexSignatures.push({
-          keyName: indexMatch[1].trim(),
-          keyType: indexMatch[2].trim(),
-          type: indexMatch[3].trim(),
+          keyName: (indexMatch[1] ?? '').trim(),
+          keyType: (indexMatch[2] ?? '').trim(),
+          type: (indexMatch[3] ?? '').trim(),
         });
       }
     }
@@ -315,7 +315,7 @@ export const validateInputByType = async ({
   // Indirect module ID (string variable, not literal) so tsc doesn't try to
   // type-resolve devkit at build time. Devkit depends on core, so a literal
   // type-resolved import would be a build-time circular dep.
-  const devkitModuleId: string = '@luckystack/devkit';
+  const devkitModuleId = '@luckystack/devkit';
   const devkit = (await import(devkitModuleId)) as DevkitTypeResolverModule;
   const resolvedType = devkit.resolveRuntimeTypeText({ typeText, filePath });
   if (resolvedType.status === 'error') {

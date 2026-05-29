@@ -170,9 +170,9 @@ export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
         },
       });
       if (!response.ok) return false;
-      const emails = await response.json();
+      const emails: unknown = await response.json();
       if (!Array.isArray(emails)) return false;
-      return emails;
+      return emails as { primary?: boolean; email?: string }[];
     };
 
     const [error, emails] = await tryCatch(fetchEmails);
@@ -180,9 +180,9 @@ export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
 
     let mainEmail: string | undefined;
     for (const entry of emails) {
-      if (entry.primary) mainEmail = entry.email;
+      if (entry.primary && typeof entry.email === 'string') mainEmail = entry.email;
     }
-    if (!mainEmail) mainEmail = emails[0]?.email;
+    mainEmail ??= emails[0]?.email;
     return mainEmail;
   },
 });
@@ -275,19 +275,19 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
   //? Graph's /photo/$value requires bearer auth, so we can't store the URL —
   //? a browser <img> would 401. Fetch the bytes and inline as a data URL.
   getAvatar: async ({ avatarId, accessToken }) => {
-    if (!avatarId) return undefined;
+    if (!avatarId) return;
     const fetchPhoto = async () => {
       const response = await fetch(
         `https://graph.microsoft.com/${graphVersion}/users/${avatarId}/photo/$value`,
         { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
       );
-      if (!response.ok) return undefined;
+      if (!response.ok) return;
       const contentType = response.headers.get('content-type') ?? 'image/jpeg';
       const buffer = Buffer.from(await response.arrayBuffer());
       return `data:${contentType};base64,${buffer.toString('base64')}`;
     };
     const [error, dataUrl] = await tryCatch(fetchPhoto);
-    if (error) return undefined;
+    if (error) return;
     return dataUrl ?? undefined;
   },
   getEmail: async (accessToken) => {
@@ -300,9 +300,9 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
         },
       });
       if (!response.ok) return false;
-      const data = await response.json();
-      if (!data) return false;
-      return data;
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object') return false;
+      return data as Record<string, unknown>;
     };
 
     const [error, profile] = await tryCatch(fetchProfile);

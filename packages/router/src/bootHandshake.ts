@@ -52,7 +52,7 @@ interface FallbackHealthResponse {
 
 const probeFallbackHealth = async (baseUrl: string): Promise<FallbackHealthResponse | null> => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), getHealthProbeTimeoutMs());
+  const timeout = setTimeout(() => { controller.abort(); }, getHealthProbeTimeoutMs());
   const [error, payload] = await tryCatch<FallbackHealthResponse | null, undefined>(async () => {
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/_health`, {
       signal: controller.signal,
@@ -150,14 +150,14 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
 
   if (compareError) {
     reportIssue(`boot handshake: Redis compare failed: ${compareError.message}`);
-  } else if (localReadOfFallbackKey !== fallbackHealth.bootUuid) {
+  } else if (localReadOfFallbackKey === fallbackHealth.bootUuid) {
+    getLogger().info(`[router] boot handshake: shared Redis verified with fallback env '${input.fallbackEnvKey}'`);
+  } else {
     reportIssue(
       `boot handshake MISMATCH: fallback env '${input.fallbackEnvKey}' is connected to a different Redis than this router. ` +
       `Expected key ${BOOT_KEY_PREFIX}${input.fallbackEnvKey} to equal '${fallbackHealth.bootUuid}' but got '${localReadOfFallbackKey ?? 'null'}'.`,
     );
     return;
-  } else {
-    getLogger().info(`[router] boot handshake: shared Redis verified with fallback env '${input.fallbackEnvKey}'`);
   }
 
   //? Once shared Redis is verified, also check that synchronized env vars
@@ -165,6 +165,6 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   //? envs. Mismatch means sessions minted by one side can't be decrypted
   //? by the other — a subtle failure mode worth catching at boot.
   compareSynchronizedHashes(fallbackHealth.synchronizedHashes, (msg) =>
-    reportIssue(msg),
+    { reportIssue(msg); },
   );
 };

@@ -14,8 +14,10 @@ import {
   TranslationProvider,
   registerLocales,
   registerLanguageSource,
-  registerMiddlewareHandler,
+  registerPageMiddleware,
+  validatePagePath,
 } from '@luckystack/core/client'
+import type { PageMiddleware } from '@luckystack/core/client'
 import enJson from "src/_locales/en.json"
 import nlJson from "src/_locales/nl.json"
 import deJson from "src/_locales/de.json"
@@ -27,7 +29,6 @@ import TemplateProvider from './_components/TemplateProvider'
 import { initializeSentry, SentryErrorBoundary } from './_functions/sentry'
 import { SessionProvider, getCurrentSession } from './_providers/SessionProvider'
 import { SocketStatusProvider } from './_providers/socketStatusProvider'
-import middlewareHandler from './_functions/middlewareHandler'
 
 import type { Template } from './_components/TemplateProvider'
 
@@ -39,9 +40,13 @@ initializeSentry();
 registerLocales({ en: enJson, nl: nlJson, de: deJson, fr: frJson });
 registerLanguageSource(() => getCurrentSession()?.language ?? null);
 
-//? Wire the project's auth/redirect rules into the framework's <Middleware />
-//? and useRouter — both consume the active handler via getMiddlewareHandler().
-registerMiddlewareHandler(middlewareHandler);
+//? Per-page route guards live on each `page.tsx` via `export const middleware`
+//? and are auto-registered below in `getRoutes()`. The framework's default
+//? handler allows-by-default for unprotected routes — no central
+//? `middlewareHandler.ts` is needed. To add a CROSS-CUTTING global hook
+//? (telemetry, server-reachability check, maintenance banner), import
+//? `registerMiddlewareHandler` from '@luckystack/core/client' and call it
+//? here with your own function.
 
 interface PageProps {
   params: Record<string, string | undefined>;
@@ -51,6 +56,7 @@ interface PageProps {
 interface PageModule {
   default: React.ComponentType<PageProps>;
   template?: Template;
+  middleware?: PageMiddleware;
 }
 
 // Wrapper to inject Next.js-style params and searchParams as props
@@ -64,24 +70,57 @@ const PageWrapper = ({ Page }: { Page: React.ComponentType<PageProps> }) => {
 
 const getRoutes = (pages: Record<string, PageModule>) => {
   const routes = [];
+  //? Track which final URL each registered page resolves to, so we can
+  //? log an error when two different files compute the same route (e.g.
+  //? `src/_test/admin/page.tsx` + `src/admin/page.tsx` both → `/admin`
+  //? because `_test` is invisible-parent). Devkit's
+  //? `assertNoDuplicatePageRoutes` blocks this at build time; this
+  //? runtime guard prints a visible warning during dev too.
+  const seenRoutes = new Map<string, string>();
   for (const path in pages) {
     const module = pages[path];
+    if (!module) continue;
 
-    const pathSegments = path.split('/');
-    if (pathSegments.some(segment => segment.startsWith('_'))) continue;
+    //? Only `page.tsx` files become routes. Filename is the last segment;
+    //? skip everything else (component files, helpers, etc.).
+    const result = validatePagePath(path);
+    if (!result.valid || !result.route) {
+      //? Surface invalid placements (e.g. `_housing/page.tsx`, or a page
+      //? inside a reserved framework folder) as a dev console warning so
+      //? developers don't silently lose a route. Filter "not a page file"
+      //? to keep noise down — that's the common case for component files.
+      if (import.meta.env.DEV && result.reason && !result.reason.startsWith('not a page file')) {
+        console.warn(`[luckystack] page route skipped for ${path}: ${result.reason}`);
+      }
+      continue;
+    }
 
-    const normalizedPath = path.replace(/^\.\//, '').replace(/\.tsx$/, '').toLowerCase();
-    const routePath = normalizedPath === '' ? '/' : normalizedPath;
-    const subPath = routePath.endsWith('/page')
-      ? routePath.slice(0, -5)
-      : (routePath.endsWith('page')
-        ? '/'
-        : false);
-    if (!subPath) continue;
-
-    // Convert [param] to :param for React Router v6+
+    //? Lowercase + dynamic-param syntax conversion. validatePagePath uses
+    //? case-preserving segments; React Router routes match case-insensitively
+    //? by convention so we lowercase here. `[param]` -> `:param`.
     // eslint-disable-next-line unicorn/prefer-string-replace-all
-    const finalPath = subPath.replace(/\[([^\]]+)\]/g, ':$1');
+    const finalPath = result.route.toLowerCase().replace(/\[([^\]]+)\]/g, ':$1');
+
+    //? Collision check: if another page already claimed this finalPath,
+    //? log a loud error pointing at both files and skip the second
+    //? registration (first-wins, same as React Router's default).
+    const previousFile = seenRoutes.get(finalPath);
+    if (previousFile !== undefined) {
+      console.error(
+        `[luckystack] duplicate page route "${finalPath}": ${previousFile} AND ${path} both resolve here. ` +
+        `Keeping the first; the second will not render. ` +
+        `Remember that "_<folder>" segments are stripped from the URL (invisible-parent rule).`,
+      );
+      continue;
+    }
+    seenRoutes.set(finalPath, path);
+
+    //? Per-page middleware: when the page module exports one, register it
+    //? against its route path. Framework's `<Middleware>` + `useRouter`
+    //? prefer this over the global handler.
+    if (module.middleware) {
+      registerPageMiddleware(finalPath, module.middleware);
+    }
 
     const template = module.template ?? 'plain';
     const Page = module.default;
@@ -89,7 +128,7 @@ const getRoutes = (pages: Record<string, PageModule>) => {
     routes.push({
       path: finalPath,
       element: (
-        <TemplateProvider key={`${template}-${subPath}`} initialTemplate={template}>
+        <TemplateProvider key={`${template}-${finalPath}`} initialTemplate={template}>
           <PageWrapper Page={Page} />
         </TemplateProvider>
       ),

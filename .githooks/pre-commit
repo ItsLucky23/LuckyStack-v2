@@ -1,12 +1,14 @@
 #!/bin/sh
-#? Regenerates the two AI-facing snapshot files so they stay in sync with
+#? Regenerates the AI-facing snapshot files so they stay in sync with
 #? whatever this commit touches:
-#?   - docs/AI_QUICK_INDEX.md   (per-package AI_INDEX.md, docs/*.md,
-#?                               slash commands, skills, new packages)
-#?   - docs/AI_CAPABILITIES.md  (installed @luckystack/* packages, the
-#?                               injection map from
-#?                               src/_sockets/apiTypes.generated.ts, plus
-#?                               local helpers/components/shared)
+#?   - docs/AI_QUICK_INDEX.md     (per-package CLAUDE.md, docs/*.md,
+#?                                 slash commands, skills, new packages)
+#?   - docs/AI_CAPABILITIES.md    (installed @luckystack/* packages, the
+#?                                 injection map from
+#?                                 src/_sockets/apiTypes.generated.ts, plus
+#?                                 local helpers/components/shared)
+#?   - docs/AI_PROJECT_INDEX.md   (consumer's own src/ — routes, pages,
+#?                                 helpers, components, cross-refs)
 #?
 #? Both generators are deterministic (no timestamps), so when nothing
 #? relevant changed the resulting files are byte-identical and the
@@ -28,4 +30,7 @@ npm run ai:index --silent
 echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
 npm run ai:capabilities --silent
 
-git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md
+echo "[pre-commit] Regenerating docs/AI_PROJECT_INDEX.md..."
+npm run ai:project-index --silent
+
+git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md

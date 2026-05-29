@@ -1,6 +1,6 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-import { deleteSession, getAllSessions, getSession } from "../functions/session"
+import { deleteSession, getAllSessions, getSession } from "../../functions/session"
 import repl from 'node:repl';
 import { getRuntimeReplMaps } from "../prod/runtimeMaps";
 

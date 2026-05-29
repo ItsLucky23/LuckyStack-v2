@@ -9,6 +9,14 @@ import { typeTextToZodSource } from './zodEmitter';
 //? `auth` is consumer-defined opaque â€” each project exports its own
 //? `AuthProps` shape from `config.ts`. The emitter passes the parsed value
 //? through to the generated JSON.
+//? Forward declaration mirrored from `apiMeta.ts:DocsMeta`. Kept local to
+//? avoid a circular import between the type-map collectors and the emitter.
+export interface DocsMetaSnapshot {
+	owner?: string;
+	tags?: string[];
+	deprecated?: string | true;
+}
+
 export interface ApiTypeEntry {
 	input: string;
 	output: string;
@@ -17,6 +25,10 @@ export interface ApiTypeEntry {
 	rateLimit: number | false | undefined;
 	auth: unknown;
 	version: string;
+	//? Optional `@docs owner/tags/deprecated` metadata. Set when the route
+	//? file declares any of these JSDoc sub-keys. Surfaced in
+	//? `apiDocs.generated.json` so `@luckystack/docs-ui` can render it.
+	meta?: DocsMetaSnapshot;
 }
 
 interface ApiDocsEntry {
@@ -30,6 +42,7 @@ interface ApiDocsEntry {
 	rateLimit: number | false | undefined;
 	auth: unknown;
 	path: string;
+	meta?: DocsMetaSnapshot;
 }
 
 interface SyncDocsEntry {
@@ -42,6 +55,7 @@ interface SyncDocsEntry {
 	serverStream: string;
 	clientStream: string;
 	path: string;
+	meta?: DocsMetaSnapshot;
 }
 
 export interface GeneratedDocsData {
@@ -56,6 +70,7 @@ export interface SyncTypeEntry {
 	serverStream: string;
 	clientStream: string;
 	version: string;
+	meta?: DocsMetaSnapshot;
 }
 
 const buildImportStatements = ({
@@ -77,7 +92,7 @@ const buildImportStatements = ({
 
 const splitVersionedKey = (value: string): { name: string; version: string } => {
 	const [name, version] = value.split('@');
-	return { name, version: version || 'v1' };
+	return { name: name ?? '', version: version ?? 'v1' };
 };
 
 const writeFileIfChanged = (filePath: string, content: string): boolean => {
@@ -88,7 +103,7 @@ const writeFileIfChanged = (filePath: string, content: string): boolean => {
 		}
 	}
 
-	fs.writeFileSync(filePath, content, 'utf-8');
+	fs.writeFileSync(filePath, content, 'utf8');
 	return true;
 };
 
@@ -127,7 +142,7 @@ const validateGeneratedTypeIdentifiers = (content: string): void => {
 			knownSymbols.add(node.typeParameter.name.text);
 		}
 
-		if (ts.isMappedTypeNode(node) && node.typeParameter?.name) {
+		if (ts.isMappedTypeNode(node)) {
 			knownSymbols.add(node.typeParameter.name.text);
 		}
 
@@ -166,7 +181,7 @@ const validateGeneratedTypeIdentifiers = (content: string): void => {
 
 	const unknown = [...referencedSymbols]
 		.filter((name) => !knownSymbols.has(name) && !builtIns.has(name))
-		.sort();
+		.toSorted();
 
 	if (unknown.length > 0) {
 		throw new Error(`[TypeMapGenerator] Generated type map has unresolved type identifiers: ${unknown.join(', ')}`);
@@ -243,8 +258,8 @@ export type ApiNetworkResponse<T = unknown> =
 type _ProjectApiTypeMap = {
 `;
 
-	const sortedPages = [...typesByPage.keys()].sort();
-	const sortedSyncPages = [...syncTypesByPage.keys()].sort();
+	const sortedPages = [...typesByPage.keys()].toSorted();
+	const sortedSyncPages = [...syncTypesByPage.keys()].toSorted();
 	const docsData: GeneratedDocsData = { apis: {}, syncs: {} };
 
 	for (const pagePath of sortedPages) {
@@ -260,9 +275,9 @@ type _ProjectApiTypeMap = {
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const apiName of [...grouped.keys()].sort()) {
+		for (const apiName of [...grouped.keys()].toSorted()) {
 			content += `    '${apiName}': {\n`;
-			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').toSorted((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.apis[pagePath].push({
 					page: pagePath,
 					name: apiName,
@@ -274,6 +289,7 @@ type _ProjectApiTypeMap = {
 					rateLimit: entry.rateLimit,
 					auth: entry.auth,
 					path: pagePath === 'root' ? `api/${apiName}/${version}` : `api/${pagePath}/${apiName}/${version}`,
+					...(entry.meta ? { meta: entry.meta } : {}),
 				});
 
 				content += `      '${version}': {\n`;
@@ -321,10 +337,10 @@ export const apiMethodMap: Record<string, Record<string, Record<string, HttpMeth
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const apiName of [...grouped.keys()].sort()) {
+		for (const apiName of [...grouped.keys()].toSorted()) {
 			content += `    '${apiName}': {`;
 			const methods = mustGet(grouped, apiName, 'grouped')
-				.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
+				.toSorted((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))
 				.map((item) => ` '${item.version}': '${item.method}'`)
 				.join(',');
 			content += `${methods} },\n`;
@@ -358,9 +374,9 @@ export const apiMetaMap: Record<string, Record<string, Record<string, ApiMetaEnt
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const apiName of [...grouped.keys()].sort()) {
+		for (const apiName of [...grouped.keys()].toSorted()) {
 			content += `    '${apiName}': {\n`;
-			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').toSorted((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				const auth = entry.auth && typeof entry.auth === 'object'
 					? entry.auth as { login: boolean; additional?: Record<string, unknown>[] }
 					: { login: true };
@@ -370,7 +386,7 @@ export const apiMetaMap: Record<string, Record<string, Record<string, ApiMetaEnt
 				const additionalPart = auth.additional && auth.additional.length > 0
 					? `, additional: ${JSON.stringify(auth.additional)}`
 					: '';
-				content += `      '${version}': { method: '${entry.method}', auth: { login: ${auth.login === false ? 'false' : 'true'}${additionalPart} }${rateLimitPart} },\n`;
+				content += `      '${version}': { method: '${entry.method}', auth: { login: ${auth.login ? 'true' : 'false'}${additionalPart} }${rateLimitPart} },\n`;
 			}
 			content += `    },\n`;
 		}
@@ -413,9 +429,9 @@ type _ProjectSyncTypeMap = {
 		}
 
 		content += `  '${pagePath}': {\n`;
-		for (const syncName of [...grouped.keys()].sort()) {
+		for (const syncName of [...grouped.keys()].toSorted()) {
 			content += `    '${syncName}': {\n`;
-			for (const { version, entry } of mustGet(grouped, syncName, 'grouped').sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
+			for (const { version, entry } of mustGet(grouped, syncName, 'grouped').toSorted((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				docsData.syncs[pagePath].push({
 					page: pagePath,
 					name: syncName,
@@ -426,6 +442,7 @@ type _ProjectSyncTypeMap = {
 					serverStream: entry.serverStream,
 					clientStream: entry.clientStream,
 					path: pagePath === 'root' ? `sync/${syncName}/${version}` : `sync/${pagePath}/${syncName}/${version}`,
+					...(entry.meta ? { meta: entry.meta } : {}),
 				});
 
 				content += `      '${version}': {\n`;
@@ -482,7 +499,7 @@ const buildSchemasContent = ({
 }: {
 	typesByPage: Map<string, Map<string, ApiTypeEntry>>;
 }): string => {
-	const sortedPages = [...typesByPage.keys()].sort();
+	const sortedPages = [...typesByPage.keys()].toSorted();
 
 	let body = `/* eslint-disable */
 //? Auto-generated Zod schemas for every API input. Driven by the same walk
@@ -506,9 +523,9 @@ export const apiInputSchemas: Record<string, Record<string, Record<string, z.Zod
 		}
 
 		body += `  '${pagePath}': {\n`;
-		for (const apiName of [...grouped.keys()].sort()) {
+		for (const apiName of [...grouped.keys()].toSorted()) {
 			body += `    '${apiName}': {\n`;
-			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').sort(
+			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').toSorted(
 				(a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }),
 			)) {
 				const schemaSrc = typeTextToZodSource(entry.input) ?? 'z.any() /* unparseable input type */';

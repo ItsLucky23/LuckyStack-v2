@@ -38,8 +38,7 @@ const walkSrcFiles = (dir: string, results: string[] = []) => {
 
     if (stat.isDirectory()) {
       walkSrcFiles(fullPath, results);
-    } else if (file.endsWith(".ts") && (fullPath.includes("_api") || fullPath.includes("_sync"))) {
-      // if (file.endsWith("_client.ts")) continue; // skip client stubs
+    } else if (file.endsWith(".ts") && !file.endsWith(".tests.ts") && (fullPath.includes("_api") || fullPath.includes("_sync"))) {
       results.push(fullPath);
     }
   }
@@ -116,8 +115,8 @@ for (const presetName of targetPresets) {
   //? handler signature is unique — the framework dispatcher narrows at the
   //? call site after auth + input validation. `auth` is loosely typed because
   //? consumers can extend `AuthProps` via module augmentation.
-  let apiMap = "export const apis: Record<string, { auth: Record<string, unknown>, main: (...args: unknown[]) => unknown, rateLimit?: number | false, httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE', inputType?: string, inputTypeFilePath?: string }> = {\n";
-  let syncMap = "export const syncs: Record<string, { main: (...args: unknown[]) => unknown, auth: Record<string, unknown>, inputType?: string, inputTypeFilePath?: string }> = {\n";
+  let apiMap = "export const apis: Record<string, { auth: Record<string, unknown>, main: (...args: unknown[]) => unknown, rateLimit?: number | false, httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE', inputType?: string, inputTypeFilePath?: string, validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' }, errorFormatter?: (...args: unknown[]) => unknown }> = {\n";
+  let syncMap = "export const syncs: Record<string, { main: (...args: unknown[]) => unknown, auth: Record<string, unknown>, inputType?: string, inputTypeFilePath?: string, validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' }, errorFormatter?: (...args: unknown[]) => unknown }> = {\n";
   let functionsMap = "export const functions: Record<string, Record<string, unknown>> = {\n";
 
   let apiCount = 0;
@@ -148,7 +147,7 @@ for (const presetName of targetPresets) {
       const apiName = apiNameWithVersion.replace(API_VERSION_TOKEN_REGEX, '');
       const routeKey = `api/${mapApiPagePath(pagePath)}/${apiName}/${version}`;
 
-      apiMap += `  "${routeKey}": (() => {\n    const mod = ${varName} as Record<string, unknown>;\n    return {\n      auth: ("auth" in mod ? mod.auth : {}) as Record<string, unknown>,\n      main: mod.main as (...args: unknown[]) => unknown,\n      rateLimit: mod.rateLimit as number | false | undefined,\n      httpMethod: mod.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined,\n      inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n      inputTypeFilePath: ${JSON.stringify(workspaceRelativePath)},\n    };\n  })(),\n`;
+      apiMap += `  "${routeKey}": (() => {\n    const mod = ${varName} as Record<string, unknown>;\n    return {\n      auth: ("auth" in mod ? mod.auth : {}) as Record<string, unknown>,\n      main: mod.main as (...args: unknown[]) => unknown,\n      rateLimit: mod.rateLimit as number | false | undefined,\n      httpMethod: mod.httpMethod as 'GET' | 'POST' | 'PUT' | 'DELETE' | undefined,\n      inputType: ${JSON.stringify(getInputTypeFromFile(normalized))},\n      inputTypeFilePath: ${JSON.stringify(workspaceRelativePath)},\n      validation: mod.validation as 'strict' | 'relaxed' | { input: 'skip' | 'strict' } | undefined,\n      errorFormatter: mod.errorFormatter as ((...args: unknown[]) => unknown) | undefined,\n    };\n  })(),\n`;
     }
 
     // Sync
@@ -174,7 +173,7 @@ for (const presetName of targetPresets) {
         const varName = `syncServer${syncCount++}`;
         syncImports.push(`import * as ${varName} from '${importPath}';`);
         const inputType = getSyncClientDataType(normalized);
-        syncMap += `  "${routeKey}_server": { auth: (("auth" in ${varName} ? ${varName}.auth : {}) as Record<string, unknown>), main: ${varName}.main as (...args: unknown[]) => unknown, inputType: ${JSON.stringify(inputType)}, inputTypeFilePath: ${JSON.stringify(workspaceRelativePath)} },\n`;
+        syncMap += `  "${routeKey}_server": (() => {\n    const mod = ${varName} as Record<string, unknown>;\n    return {\n      auth: (("auth" in mod ? mod.auth : {}) as Record<string, unknown>),\n      main: mod.main as (...args: unknown[]) => unknown,\n      inputType: ${JSON.stringify(inputType)},\n      inputTypeFilePath: ${JSON.stringify(workspaceRelativePath)},\n      validation: mod.validation as 'strict' | 'relaxed' | { input: 'skip' | 'strict' } | undefined,\n      errorFormatter: mod.errorFormatter as ((...args: unknown[]) => unknown) | undefined,\n    };\n  })(),\n`;
       }
     }
   });

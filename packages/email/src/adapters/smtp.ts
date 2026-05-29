@@ -37,6 +37,7 @@ export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
 
   const transporterPromise = (
     // @ts-expect-error optional peer dep — types resolved at consumer install time
+    // eslint-disable-next-line import-x/no-unresolved -- optional peer; consumer installs `nodemailer` when wiring SMTP
     import('nodemailer') as Promise<{
       default?: { createTransport: (config: unknown) => unknown };
       createTransport?: (config: unknown) => unknown;

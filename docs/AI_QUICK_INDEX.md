@@ -13,7 +13,7 @@
 | --- | --- |
 | Quick Links | \| Topic \| Framework dev path \| Consumer (post-install) path \| |
 | Project Snapshot | LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 5.7, Vite, Redis. The repo publishes as 14 `@luckystack/*` packages — see `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map. |
-| Core Rules (26) | 1. **Plan first for medium/high difficulty work.** Use tables or bullets, not wall-of-text. Skip planning only for trivial single-file changes. |
+| Core Rules (28) | 1. **Plan first for medium/high difficulty work.** Use tables or bullets, not wall-of-text. Skip planning only for trivial single-file changes. |
 | Branch Log Protocol | AI MUST append an entry to `branch-logs/<sanitized-branch>.md` after every prompt that produces **real code or architecture changes**. Skip for lint-only fixes, typo fixes, or translation-string-only edits. **When in doubt, log.** |
 | Inherited Patterns (from old `.claude/CLAUDE.md`, user-confirmed) | Before building any UI primitive, check this table. Extend the existing component or add a prop — never roll a parallel implementation. |
 | Inherited Rules (user-confirmed) | When analysis surfaces potential mistakes, unhandled errors, or improvement opportunities OUTSIDE the current task scope, **report them — do not fix them**. The user decides what to act on. |
@@ -27,18 +27,19 @@
 
 | Doc file | Summary | Location |
 | --- | --- | --- |
-| ARCHITECTURE_API.md | --- | docs/ARCHITECTURE_API.md |
-| ARCHITECTURE_AUTH.md | --- | docs/ARCHITECTURE_AUTH.md |
-| ARCHITECTURE_EMAIL.md | LuckyStack treats transactional email as a **plug-in**: framework code never depends on a specific provider. Adapters are registered at server boot via a registry in `@luckystack/core`, mirroring how the project handles `notify`, the Sentry adapter, and `projectConfig`. | docs/ARCHITECTURE_EMAIL.md |
-| ARCHITECTURE_EXTENSION_POINTS.md | The framework's design rule is **per-package config + composable adapter | docs/ARCHITECTURE_EXTENSION_POINTS.md |
-| ARCHITECTURE_FUNCTION_INJECTION.md | Every API handler at `src/{page}/_api/{name}_v{N}.ts` and every sync handler at `src/{page}/_sync/{name}_server_v{N}.ts` receives a `functions` parameter alongside `data`, `user`, etc.: | docs/ARCHITECTURE_FUNCTION_INJECTION.md |
-| ARCHITECTURE_LOGGING.md | --- | docs/ARCHITECTURE_LOGGING.md |
-| ARCHITECTURE_PACKAGING.md | Last updated: 2026-05-13 | docs/ARCHITECTURE_PACKAGING.md |
-| ARCHITECTURE_ROUTING.md | --- | docs/ARCHITECTURE_ROUTING.md |
-| ARCHITECTURE_SESSION.md | --- | docs/ARCHITECTURE_SESSION.md |
-| ARCHITECTURE_SOCKET.md | --- | docs/ARCHITECTURE_SOCKET.md |
-| ARCHITECTURE_SYNC.md | --- | docs/ARCHITECTURE_SYNC.md |
-| ARCHITECTURE_TESTING.md | ``` | docs/ARCHITECTURE_TESTING.md |
+| ARCHITECTURE_API.md | Type-safe API request system with WebSocket-first architecture and HTTP fallback. | docs/ARCHITECTURE_API.md |
+| ARCHITECTURE_AUTH.md | OAuth and credentials-based authentication system. | docs/ARCHITECTURE_AUTH.md |
+| ARCHITECTURE_EMAIL.md | See also: [`packages/email/README.md`](../packages/email/README.md) for the full public API and adapter setup. | docs/ARCHITECTURE_EMAIL.md |
+| ARCHITECTURE_EXTENSION_POINTS.md | Every registry, adapter slot, and hook a consumer can use to customise | docs/ARCHITECTURE_EXTENSION_POINTS.md |
+| ARCHITECTURE_FUNCTION_INJECTION.md | How the `functions.X` parameter on every API + sync handler gets built. Spec last updated 2026-05-22. | docs/ARCHITECTURE_FUNCTION_INJECTION.md |
+| ARCHITECTURE_LOGGING.md | Logger DI surface and the redacted-keys registry that keeps sensitive | docs/ARCHITECTURE_LOGGING.md |
+| ARCHITECTURE_PACKAGING.md | Single source of truth for LuckyStack package extraction strategy. | docs/ARCHITECTURE_PACKAGING.md |
+| ARCHITECTURE_ROUTING.md | File-based routing for pages, APIs, and real-time sync events. | docs/ARCHITECTURE_ROUTING.md |
+| ARCHITECTURE_SECRETS.md | **STATUS: Design only — `@luckystack/secrets` is not yet implemented as of 2026-05-29. Implementation tracked separately.** | docs/ARCHITECTURE_SECRETS.md |
+| ARCHITECTURE_SESSION.md | Session management using Redis with OAuth provider support. | docs/ARCHITECTURE_SESSION.md |
+| ARCHITECTURE_SOCKET.md | Socket.io-based real-time communication layer. | docs/ARCHITECTURE_SOCKET.md |
+| ARCHITECTURE_SYNC.md | Real-time event broadcasting between clients using rooms. | docs/ARCHITECTURE_SYNC.md |
+| ARCHITECTURE_TESTING.md | Spec for the two test layers shipped with `@luckystack/test-runner`. Last updated 2026-05-22. | docs/ARCHITECTURE_TESTING.md |
 
 ## Function inventory across packages
 
@@ -146,6 +147,14 @@
 | `getRateLimitStrategy(): RateLimitStrategy` | Read the currently active strategy. | -> docs/rate-limit-strategy.md |
 | `defaultRateLimitStrategy: RateLimitStrategy` | Built-in memory-or-redis backend. | -> docs/rate-limit-strategy.md |
 | `registerHook<TName>(name, handler): void` | Subscribe an async handler to a lifecycle event. | -> docs/hooks.md |
+| `registerMiddlewareHandler(handler: MiddlewareHandler): void` | Register the GLOBAL route-guard fallback. Called by `<Middleware>` / `useRouter` only when no per-page middleware is registered for the visited route. Optional — framework default allows by-default. | -> docs/hooks.md |
+| `getMiddlewareHandler(): MiddlewareHandler` | Read the active global handler. | -> docs/hooks.md |
+| `registerPageMiddleware(path: string, fn: PageMiddleware): void` | Register a per-page route guard. Auto-called by `src/main.tsx`'s `getRoutes()` for every page that exports `middleware`. Per-page takes precedence over the global handler. | -> docs/hooks.md |
+| `getPageMiddleware(path: string): PageMiddleware \| undefined` | Lookup the per-page guard for a given route. Framework-internal. | -> docs/hooks.md |
+| `hasPageMiddleware(path: string): boolean` | Existence check. | -> docs/hooks.md |
+| `MiddlewareInput`, `MiddlewareResult`, `MiddlewareHandler`, `PageMiddleware` (types) | Route-guard contract types. Both handler shapes share the same signature. | -> docs/hooks.md |
+| `validatePagePath(srcRelativePath, rules?): PagePathValidationResult` | Pure validator for the invisible-parent folder convention used by `src/main.tsx`'s page auto-discovery AND the `scaffold:page` CLI. Returns `{ valid, route?, reason? }`. | -> docs/hooks.md |
+| `DEFAULT_PAGE_ROUTE_RULES: PageRouteRules` | Default config (private-folder prefix `'_'` + reserved framework folders). | -> docs/hooks.md |
 | `dispatchHook<TName>(name, payload): Promise<DispatchResult>` | Internal: framework code invokes registered handlers in order; first stop signal aborts. | -> docs/hooks.md |
 | `clearAllHooks(): void` | Test-only — drop every registered handler (sync + async). | -> docs/hooks.md |
 | `registerSyncHook<TName>(name, handler): void` | Subscribe a synchronous mutator to a hot-path hook (e.g. error normalization). | -> docs/hooks.md |
@@ -210,7 +219,7 @@
 | `initializeAll()` | Runs route-naming validation, then `initializeApis` + `initializeSyncs` + `initializeFunctions` in parallel. | -> docs/loader-pipeline.md |
 | `initializeApis()` | Clears `devApis`, walks the configured `srcDir`, loads every `_api/<name>_v<n>.ts` via dynamic `import()` with a cachebust query, and populates the dev-side route registry. | -> docs/loader-pipeline.md |
 | `initializeSyncs()` | Clears `devSyncs`, walks the configured `srcDir`, loads every `_sync/<name>_server_v<n>.ts` and `<name>_client_v<n>.ts`, and populates the dev-side route registry. | -> docs/loader-pipeline.md |
-| `initializeFunctions()` | Clears `devFunctions`, walks the configured `serverFunctionsDir`, builds a nested `Record<string, unknown>` mirror of the on-disk tree, and merges named + default exports per file. | -> docs/loader-pipeline.md |
+| `initializeFunctions()` | Clears `devFunctions`, walks every configured `serverFunctionDirs` root (legacy singular `serverFunctionsDir` still honored when set), builds a nested `Record<string, unknown>` mirror of the on-disk tree, and merges named + default exports per file. | -> docs/loader-pipeline.md |
 | `upsertApiFromFile(filePath)` | Hot-reload single API: invalidates the TS Program cache + runtime type resolver cache, re-imports the file with a fresh cachebust, and replaces the matching entry in `devApis`. | -> docs/loader-pipeline.md |
 | `removeApiFromFile(filePath)` | Hot-reload delete: invalidates caches and deletes the matching entry from `devApis`. | -> docs/loader-pipeline.md |
 | `upsertSyncFromFile(filePath)` | Hot-reload single sync: handles both `_server_v<n>` and `_client_v<n>` kinds, invalidates caches, re-imports, replaces the matching entry in `devSyncs`. | -> docs/loader-pipeline.md |
@@ -218,7 +227,7 @@
 | `devApis` | In-memory map of `route key -> { main, auth, rateLimit, httpMethod, schema, inputType, inputTypeFilePath }`. Mirrored by the prod runtime maps loader in dev. | -> docs/loader-pipeline.md |
 | `devSyncs` | In-memory map of `route key (with _server / _client suffix) -> server entry record or client callback function`. | -> docs/loader-pipeline.md |
 | `devFunctions` | Nested mirror of `serverFunctionsDir`. Each leaf is a module's named + default exports, with later folder scans merging onto existing nodes. | -> docs/loader-pipeline.md |
-| `setupWatchers()` | Boots the chokidar watchers for `srcDir` / `serverFunctionsDir` / `sharedDir`, coalesces hot-reload + type-map regenerations, fires initial background type-map generation. No-op when `NODE_ENV === 'production'`. | -> docs/hot-reload.md |
+| `setupWatchers()` | Boots the chokidar watchers for `srcDir` / each `serverFunctionDirs` root / `sharedDir` (legacy singular `serverFunctionsDir` still honored when set), coalesces hot-reload + type-map regenerations, fires initial background type-map generation. No-op when `NODE_ENV === 'production'`. | -> docs/hot-reload.md |
 | `generateTypeMapFile(options?)` | Discovers all `_api/` and `_sync/` files, runs the TypeChecker-backed extractors, emits `apiTypes.generated.ts`, `apiInputSchemas.generated.ts`, and `apiDocs.generated.json`. Aborts if any unresolved type symbol is found. | -> docs/type-map-generation.md |
 | `getInputTypeFromFile(filePath)` | Public extractor: returns the inline-expanded `data` input type text for one API file. Consumed by the dev loader to drive `runtimeTypeValidation`. | -> docs/type-map-generation.md |
 | `getSyncClientDataType(filePath)` | Public extractor: returns the inline-expanded `clientInput` (sync server) or client data (sync client) type text. | -> docs/type-map-generation.md |
@@ -226,14 +235,19 @@
 | `SYNC_VERSION_TOKEN_REGEX` | Canonical `_(server\|client)_v<number>` regex used to parse sync filenames. | -> docs/loader-pipeline.md |
 | `assertValidRouteNaming({ srcDir, context })` | Throws if any `_api/` or `_sync/` file fails naming rules. Called by `initializeAll` and `generateTypeMapFile`. | -> docs/loader-pipeline.md |
 | `assertNoDuplicateNormalizedRouteKeys({ srcDir, context })` | Throws on collisions between two files that normalize to the same route key. Called by `generateTypeMapFile`. | -> docs/loader-pipeline.md |
-| `registerRoutingRules(rules)` | Override the marker segments (`_api`, `_sync`) and version regexes used by discovery + loaders. | -> docs/loader-pipeline.md |
+| `registerRoutingRules(rules)` | Override the marker segments (`_api`, `_sync`), version regexes, `privateFolderPrefix`, `scaffoldIgnoredFolders`, and the optional `disableTemplateInjection: (filePath) => boolean` predicate for opting parts of the tree out of scaffold injection. | -> docs/loader-pipeline.md |
 | `getRoutingRules()` | Read the current rules (defaults shipped by the package). | -> docs/loader-pipeline.md |
+| `registerTemplate(kind, content)` | Override one of the six bundled scaffold templates: `api`, `sync_server`, `sync_client_paired`, `sync_client_standalone`, `page_plain`, `page_dashboard`. Replaces the bundled disk template; `{{REL_PATH}}` / `{{PAGE_PATH}}` / `{{SYNC_NAME}}` placeholders still apply to consumer content. | -> docs/hot-reload.md |
+| `getRegisteredTemplate(kind)` / `clearTemplateOverrides()` / `listRegisteredTemplateKinds()` | Lookup, test-reset, and diagnostic helpers for the template override registry. | -> docs/hot-reload.md |
+| `assertNoDuplicatePageRoutes({ srcDir, context })` | Build-time validator that throws when two `page.tsx` files compute the same URL after invisible-parent stripping. Called by `generateTypeMapFile`. | -> docs/loader-pipeline.md |
+| `collectDuplicatePageRoutes(srcDir)` / `formatDuplicatePageRouteIssues({...})` | Non-throwing pair behind the assert. `initializeAll()` uses these to soft-warn at dev startup. | -> docs/loader-pipeline.md |
+| Type: `TemplateKind`, `DuplicatePageRouteIssue` | Public types for the new registry + duplicate-detector. | -> docs/hot-reload.md |
 | `apiMarkerSegment` / `syncMarkerSegment` | Resolved marker strings (default `_api` / `_sync`). | -> docs/loader-pipeline.md |
 | `isApiFileName(name)` / `isSyncFileName(name)` / `isSyncServerFileName(name)` / `isSyncClientFileName(name)` | Filename predicates that respect `getRoutingRules()`. | -> docs/loader-pipeline.md |
 | `Type: RoutingRules` | Shape of the overrideable rules registry. | -> docs/loader-pipeline.md |
 | `resolveRuntimeTypeText(typeText)` | Recursively expand a stored TypeScript type text into fully inlined form using the cached server program. Used by `@luckystack/core`'s dev-only runtime validator. | -> docs/runtime-type-resolver.md |
 | `clearRuntimeTypeResolverCache()` | Drop the resolver's memoization map. Called on every hot-reload upsert / delete. | -> docs/runtime-type-resolver.md |
-| `validateDeploy(input)` | Library form of the deploy validator. Returns a list of `ValidationFinding` records (severity + message + slot). | -> docs/cli.md |
+| `validateDeploy(input)` | Library form of the deploy validator. Returns a list of `ValidationFinding` records (severity + message + slot). Finding codes include `service-unassigned`, `service-in-multiple-presets`, `preset-references-unknown-service`, `binding-references-unknown-service`, `binding-invalid-url` (error — binding URL doesn't parse), `binding-missing-port` (error — binding URL has no explicit port), `unknown-redis-resource`, `unknown-mongo-resource`, `unknown-fallback-env`, `fallback-redis-mismatch`, `fallback-mongo-mismatch`, `missing-resource-env-var` (warning), `missing-synchronized-env-var` (warning), `service-bound-in-no-environment` (warning). | -> docs/cli.md |
 | `Types: ValidateDeployInput`, `ValidateDeployResult`, `ValidationFinding`, `ValidationSeverity` | Public typing for the validator. | -> docs/cli.md |
 | `luckystack-validate-deploy` (`bin`) | CLI wrapper that imports the consumer's compiled `services.config.js` + `deploy.config.js`, runs `validateDeploy`, prints findings, exits non-zero on errors (and on warnings under `--strict`). | -> docs/cli.md |
 | Supervisor entry (`supervisor.ts`) | Standalone Node entry: watches `config.ts`, `.env`, `.env.local`, `server/server.ts`, `server/bootstrap/**`, `server/auth/**`, `server/sockets/socket.ts`, and key `server/functions/*.ts` files; debounces restarts; respawns crashed children with a delay; honors SIGINT / SIGTERM. | -> docs/supervisor.md |
@@ -248,7 +262,7 @@
 | `typeMap/functionsMeta.ts` | Builds the `Functions` interface text emitted into `apiTypes.generated.ts`. | -> docs/type-map-generation.md |
 | `typeMap/emitter.ts` + `emitterArtifacts.ts` | Renders generated files to disk via `@luckystack/core`-resolved paths. | -> docs/type-map-generation.md |
 | `typeMap/zodEmitter.ts` | Generates the runtime Zod schemas for API inputs. | -> docs/type-map-generation.md |
-| `templateInjector.ts` + `templates/*.ts` | Detects empty API / sync files and injects starter content; pairs server + client sync templates. | -> docs/hot-reload.md |
+| `templateInjector.ts` + `templates/*.ts` | Detects empty `_api/`, `_sync/`, AND `page.tsx` files and injects starter content. Sync server/client pairing is auto-resolved. Page files get the `dashboard` template when the path contains `admin\|dashboard\|settings\|billing\|account\|profile`, else the `plain` template. Pages in invalid placements (inside a reserved framework folder, or directly inside an `_<folder>` with no URL segment left) get a commented diagnostic block instead of a usable template so the placement issue is visible at creation time. | -> docs/hot-reload.md |
 | `importDependencyGraph.ts` | Tracks which `_api/` / `_sync/` files depend on each shared module so hot reload can fan out. | -> docs/hot-reload.md |
 | `runtimeTypeResolver.ts` | Cached recursive expander built on top of `tsProgram`. | -> docs/runtime-type-resolver.md |
 
@@ -392,8 +406,15 @@
 - `PasswordPolicyError` — Thrown by `updatePasswordHash`; carries `errorCode` matching the i18n reason keys used by the rest of the login flow.
 - `validatePassword(plaintext)` — Returns `null` when the policy passes, or a reason key when it fails (length, complexity, common-list, custom validator).
 - `sendPasswordResetEmail({ email, brand? })` — Framework-mode orchestrator. Looks up the user (credentials provider only), mints a token, lazy-imports `@luckystack/email`, and sends a transactional reset email. Always resolves "ok" when the email is not found (anti-enumeration). No-op when `auth.forgotPassword !== 'framework'`.
+- `createEmailChangeToken(userId, newEmail)` — Mint a 1-hour one-shot token bound to `userId` + `newEmail`. Stored in Redis at `${projectName}-email-change:<token>` with TTL from `auth.emailChangeTtlSeconds`.
+- `consumeEmailChangeToken(token)` — Atomic get + del redemption. Returns `{ userId, newEmail }` on success, `null` on miss / malformed payload / expired entry.
+- `sendEmailChangeConfirmation({ userId, newEmail, userName?, brand? })` — Lazy-imports `@luckystack/email`, renders the confirmation template via `renderEmailLayout`, and sends to the NEW address with `adapterHint: 'transactional'`. Returns `{ ok, reason?, token }` — `token` is the minted email-change token so the caller can build the confirmation URL.
 - ### Hook payloads (`./src/hookPayloads.ts`)
-- Type-only module that augments `@luckystack/core`'s `HookPayloads` interface. Exported payload types: `PreLoginPayload`, `PostLoginPayload`, `PreRegisterPayload`, `PostRegisterPayload`, `PreLogoutPayload`, `PostLogoutPayload`, `PreSessionCreatePayload`, `PostSessionCreatePayload`, `PreSessionDeletePayload`, `PostSessionDeletePayload`, `PasswordResetRequestedPayload`, `PasswordResetCompletedPayload`, `PasswordChangedPayload`.
+- Type-only module that augments `@luckystack/core`'s `HookPayloads` interface. Exported payload types: `PreLoginPayload`, `PostLoginPayload`, `PreRegisterPayload`, `PostRegisterPayload`, `PreLogoutPayload`, `PostLogoutPayload`, `PreSessionCreatePayload`, `PostSessionCreatePayload`, `PreSessionDeletePayload`, `PostSessionDeletePayload`, `PasswordResetRequestedPayload`, `PasswordResetCompletedPayload`, `PasswordChangedPayload`, `PreEmailChangePayload`, `PostEmailChangeRequestedPayload`, `PostEmailChangedPayload`.
+- Email-change hook payloads (new):
+- `PreEmailChangePayload` — `{ userId, currentEmail, newEmail }`. Vetoable; returning a stop-signal from a handler aborts the change before any token is minted.
+- `PostEmailChangeRequestedPayload` — `{ userId, newEmail }`. Observational. Fires after the confirmation token is minted and the email has been queued to the new address.
+- `PostEmailChangedPayload` — `{ userId, oldEmail, newEmail }`. Observational. Fires after the user's address is persisted via the `UserAdapter` AND all of the user's sessions have been revoked (forced re-login on the next request).
 ---
 
 ### `presence`
@@ -525,6 +546,10 @@
 ### `test-runner`
 | Function / Export | 1-regel | Deep doc |
 |---|---|---|
+| `runAllTests({ apiMethodMap, apiMetaMap, apiInputSchemas, baseUrl, ... })` | Orchestrator: draait contract + auth + rate-limit + fuzz + custom (Layer 5) in volgorde, levert een `RunAllTestsSummary`. | → docs/contract-tests.md |
+| `runCustomTests(input)` | Layer 5: draait per-route `<name>_v<N>.tests.ts` files naast de `_api/` / `_sync/` sources, levert een `RunCustomTestsSummary`. | → docs/contract-tests.md |
+| `discoverCustomTestFiles(srcDir?)` | Walker die elke `<name>_v<N>.tests.ts` onder de configured src dir yields. | → docs/contract-tests.md |
+| `logRunAllSummary(summary)` | Pretty-print één `RunAllTestsSummary`. | → docs/extension-hooks.md |
 | `walkEndpoints(apiMethodMap)` | Genereert `EndpointDescriptor[]` uit de generated map | → docs/contract-tests.md |
 | `runContractCheck({ endpoint, baseUrl, inputFor?, headers? })` | Single-endpoint contract smoke | → docs/contract-tests.md |
 | `runContractTests({ apiMethodMap, baseUrl, skip?, inputFor?, headers?, onResult? })` | Full sweep contract layer | → docs/contract-tests.md |
@@ -558,6 +583,15 @@
 | Type: `RunRateLimitTestsInput` / `RateLimitCheckInput` | Inputs voor rate-limit layer | → docs/rate-limit-tests.md |
 | Type: `RunFuzzTestsInput` / `FuzzCheckInput` | Inputs voor fuzz layer | → docs/fuzz-tests.md |
 | Type: `ResetServerStateInput` | Input voor `resetServerState` | → docs/rate-limit-tests.md |
+| Type: `TestContext` | `{ callApi, callSync, watchStream, session, prisma, expect }` — handed naar elke Layer-5 custom-tests case. | → docs/contract-tests.md |
+| `ctx.watchStream(roomCode)` | Open een second-socket (socket B) joined aan `roomCode` om de chunk stream van `broadcastStream`/`streamTo`/`_client_v{N}` te observeren. Returnt `StreamWatcher<TChunk>` met `.chunks[]`, `.stopAt(predicate, timeoutMs?)`, `.waitForCount(n, timeoutMs?)`, `.close()`. Watchers worden auto-closed na elke case. | → docs/contract-tests.md |
+| `openStreamWatcher(input)` | Lower-level factory voor `watchStream` — direct bruikbaar buiten een `TestContext` (custom layers, ad-hoc harness scripts). | → docs/contract-tests.md |
+| Type: `StreamWatcher<TChunk>` | `{ readonly chunks, stopAt, waitForCount, close }` — observable chunk stream voor één route. | → docs/contract-tests.md |
+| Type: `StreamChunkFrame` | Wire-shape van een sync chunk frame (`{ cb, fullName, status: 'stream', ...payload }`). Default chunk type voor `StreamWatcher`. | → docs/contract-tests.md |
+| Type: `OpenStreamWatcherInput` | `{ baseUrl, roomCode, token, routeFullName, defaultTimeoutMs? }` voor `openStreamWatcher`. | → docs/contract-tests.md |
+| Type: `CustomTestCase` | `{ name, run(ctx) }` — shape die consumers exporteren uit `<name>_v<N>.tests.ts`. | → docs/contract-tests.md |
+| Type: `RunAllTestsSummary` | Aggregate result shape voor `runAllTests` (per-layer summaries + totals). | → docs/contract-tests.md |
+| Type: `RunCustomTestsSummary` | Aggregate result shape voor `runCustomTests` (per-file resultaten + totals). | → docs/contract-tests.md |
 
 ## Documentation completion status
 
@@ -594,9 +628,21 @@
 
 | Skill | Purpose |
 | --- | --- |
+| a11y-audit | Spin up the dev server, run `@axe-core/cli` against every page route from `docs/AI_PROJECT_INDEX.md`, and report WCAG violations grouped by severity. Also cross-references Tailwind color tokens in `src/index.css` and flags any token combination that fails WCAG AA contrast. |
 | add-new-api | Add a new API endpoint to a LuckyStack page under `src/{page}/_api/`. |
 | add-new-package | Scaffold a new `@luckystack/*` package in the monorepo under `packages/<name>/`. |
+| agent-browser | Generate per-route E2E tests under `e2e/<route>.test.ts` using [`@vercel-labs/agent-browser`](https://github.com/vercel-labs/agent-browser). One test per page route discovered via `docs/AI_PROJECT_INDEX.md`. Tests run headless in CI. |
+| audit-api-rate-limits | Scan every `src/**/_api/*_v*.ts` and flag rate-limit configurations that look suspect: missing entirely, set to `false` (unlimited) on a write endpoint, or set to an unusually-high number on an auth/billing surface. |
+| audit-error-code-coverage | Cross-check every `errorCode` returned from `src/**/_api/*.ts` and `src/**/_sync/*.ts` against the locale JSON files under `src/_locales/`. Flag missing translation keys — those produce ugly fallback strings (or the raw code) in the user's notify toasts. |
+| audit-invalid-page-locations | Scan every `src/**/page.tsx` and flag files that aren't routeable under LuckyStack's invisible-parent folder convention. |
+| audit-page-middleware-coverage | Scan every `src/**/page.tsx` and flag pages that probably need a per-page `middleware` export but don't have one — or have one that's missing an expected check (e.g. `/admin` pages with no role gate). |
+| audit-sync-pairing | Scan every `src/**/_sync/` folder and flag orphaned sync files — a `_client_v<N>.ts` without a paired `_server_v<N>.ts` (or vice versa where the server's `clientOutput` field expects per-client filtering). |
 | daily-handoff | Produce a structured handoff document at the end of a working session, so another AI assistant (or the same human the next day) can resume without context loss. |
+| ideas | Walk the repo's AI snapshots + recent git history, then produce a markdown report of feature gaps, refactor opportunities, and quick wins — grouped by category and effort bucket. **No code is changed.** The output is a proposal list the user can pick from. |
+| lighthouse | Run the Lighthouse CLI against either the dev server or the built `dist/`, parse the `unused-javascript` and `bootup-time` audits, cross-reference the `rollup-plugin-visualizer` JSON, and output a ranked list of `React.lazy()` candidates with file:line and expected bundle-size reduction. |
+| perf-budget | Bundle-size regression guard. First run captures baseline `dist/*.js` sizes to `perf-budget.json` at repo root. Subsequent runs diff the current build against the baseline and fail if any chunk exceeds the configured threshold (default 5%, configurable in the JSON). |
+| security-audit | Single-shot security sweep. Runs `npm audit`, scans for hardcoded secrets, checks route auth coverage, and inspects the server bootstrap for missing security headers. Output is a prioritized findings list (CRITICAL / HIGH / MEDIUM / LOW) with file:line and remediation. |
+| upgrade-deps | Smart semver-aware dependency updater. Runs `npm outdated --json`, groups by major / minor / patch, bumps patch+minor in one pass (running lint+build+test between bumps), and surfaces majors as individual per-package proposals with changelog snippets. |
 
 ---
 

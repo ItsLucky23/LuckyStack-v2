@@ -41,12 +41,13 @@ export const isOnline = () => {
   return navigator.onLine;
 };
 
-const evictExpired = (queue: Array<{ createdAt: number }>): void => {
+const evictExpired = (queue: { createdAt: number }[]): void => {
   const maxAgeMs = getProjectConfig().offlineQueue.maxAgeMs;
   if (maxAgeMs <= 0) return;
   const cutoff = Date.now() - maxAgeMs;
   for (let i = queue.length - 1; i >= 0; i -= 1) {
-    if (queue[i].createdAt < cutoff) {
+    const item = queue[i];
+    if (item && item.createdAt < cutoff) {
       queue.splice(i, 1);
     }
   }
@@ -103,7 +104,7 @@ export const removeSyncQueueItem = (id: string) => {
 
 export const removeApiQueueItemsByKey = (key: string) => {
   for (let i = apiQueue.length - 1; i >= 0; i -= 1) {
-    if (apiQueue[i].key === key) {
+    if (apiQueue[i]?.key === key) {
       apiQueue.splice(i, 1);
     }
   }

@@ -62,7 +62,15 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'eslint-comments/no-unused-disable': 'error',
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      'react-refresh/only-export-components': [
+        'warn',
+        {
+          allowConstantExport: true,
+          //? Framework convention: page.tsx co-exports `template` +
+          //? `middleware` alongside the default component. Whitelist both.
+          allowExportNames: ['template', 'middleware'],
+        },
+      ],
       'unicorn/filename-case': 'off',
       'unicorn/prevent-abbreviations': 'off',
       'unicorn/no-null': 'off',

@@ -292,7 +292,7 @@ export { /* ... */ };
 
 ## Related
 
-- Function INDEX: `packages/core/AI_INDEX.md`
+- Function INDEX: `packages/core/CLAUDE.md`
 - Architecture: `docs/ARCHITECTURE_EXTENSION_POINTS.md`, `docs/ARCHITECTURE_API.md`, `docs/ARCHITECTURE_SYNC.md`
 - README: `packages/core/README.md`
 - Source: `packages/core/src/hooks/registry.ts`, `hooks/types.ts`, `processUpload.ts`, `responseNormalizer.ts`

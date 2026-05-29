@@ -17,9 +17,10 @@ import {
   dispatchHook,
   getLogger,
 } from "@luckystack/core";
-import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
+import { extractLanguageFromHeader, normalizeErrorResponse, applyErrorFormatter } from "@luckystack/core";
+import type { ErrorFormatter } from "@luckystack/core";
 import type { PostSyncFanoutPayload } from '@luckystack/core';
-import { buildSyncStreamEmitters } from './_shared/streamEmitters';
+import { buildSyncStreamEmitters, type FlushPressure } from './_shared/streamEmitters';
 
 interface HttpSyncRequestParams {
   name: string;
@@ -32,6 +33,12 @@ interface HttpSyncRequestParams {
   xLanguageHeader?: string | string[];
   acceptLanguageHeader?: string | string[];
   stream?: (payload: HttpSyncStreamEvent) => void;
+  /**
+   * Optional AbortSignal. The HTTP server (`@luckystack/server`) wires this
+   * to `req.on('close', ...)` so a closed SSE connection aborts in-flight
+   * stream emits. Sync handlers receive it as `abortSignal` in params.
+   */
+  abortSignal?: AbortSignal;
 }
 
 interface HttpSyncResponse {
@@ -78,9 +85,13 @@ interface RuntimeSyncServerEntry {
     stream: (payload?: SyncStreamPayload) => void;
     broadcastStream: SyncBroadcastStream;
     streamTo: SyncStreamTo;
+    abortSignal: AbortSignal;
+    flushPressure: FlushPressure;
   }) => Promise<RuntimeSyncResponse>;
   inputType?: string;
   inputTypeFilePath?: string;
+  validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
+  errorFormatter?: ErrorFormatter;
 }
 
 type RuntimeSyncClientHandler = (params: {
@@ -201,10 +212,19 @@ export default async function handleHttpSyncRequest({
   xLanguageHeader,
   acceptLanguageHeader,
   stream,
+  abortSignal,
 }: HttpSyncRequestParams): Promise<HttpSyncResponse> {
   if (shouldLogDev()) {
     getLogger().debug(`http sync: ${name} called`);
   }
+
+  //? B1 — HTTP/SSE transport. The caller (typically `@luckystack/server`'s
+  //? SSE bridge) wires `req.on('close', ...)` to a controller and passes its
+  //? signal in. If no signal was provided we build a dummy controller so
+  //? `signal` is always defined for handler param shape. The dummy never
+  //? aborts on its own, which preserves current behavior for callers that
+  //? don't opt in.
+  const effectiveAbortSignal = abortSignal ?? new AbortController().signal;
 
   const normalizedReceiver = typeof receiver === 'string' ? receiver.trim() : '';
   const preferredLocale =
@@ -216,6 +236,12 @@ export default async function handleHttpSyncRequest({
   //? registered by `@luckystack/error-tracking`'s
   //? `enableErrorTrackingAutoInstrumentation()`. Direct `setSentryUser` +
   //? `startSpan` removed from this handler — see migration doc.
+
+  //? Per-route formatter ref. Mirrors the socket-sync + API handler pattern —
+  //? set after the syncEntry lookup; pre-lookup errors fall through to global
+  //? formatter only because there's no entry yet to read from.
+  let currentRouteName: string | undefined;
+  let currentPerRouteFormatter: ErrorFormatter | undefined;
 
   const buildSyncError = ({
     response,
@@ -232,13 +258,21 @@ export default async function handleHttpSyncRequest({
       userLanguage,
     });
 
-    return {
+    const baseEnvelope = {
       status: normalized.status,
       message: normalized.message,
       errorCode: normalized.errorCode,
       errorParams: normalized.errorParams,
       httpStatus: normalized.httpStatus,
     };
+
+    return applyErrorFormatter({
+      response: baseEnvelope as unknown as Record<string, unknown> & { status?: string },
+      routeName: currentRouteName ?? 'sync/unknown',
+      transport: 'http',
+      userId: user?.id,
+      perRouteFormatter: currentPerRouteFormatter,
+    }) as unknown as HttpSyncResponse;
   };
 
   const ensureSyncErrorShape = (response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[]; httpStatus?: number }) => {
@@ -288,6 +322,7 @@ export default async function handleHttpSyncRequest({
     }
 
     const resolvedName = parsedRoute.normalizedFullName;
+    currentRouteName = resolvedName;
     const callbackName = typeof cb === 'string' && cb.trim().length > 0
       ? cb.trim()
       : `${parsedRoute.serviceRoute.normalizedRouteName}/${parsedRoute.version}`;
@@ -314,6 +349,7 @@ export default async function handleHttpSyncRequest({
     //? Auth runs first so unauthenticated probes can't consume rate-limit budget
     //? or learn input shape from `inputValidation.message`. Mirrors api handlers.
     const serverSyncEntry = syncObject[`${resolvedName}_server`] as RuntimeSyncServerEntry | undefined;
+    currentPerRouteFormatter = serverSyncEntry?.errorFormatter;
     if (serverSyncEntry) {
       const { auth } = serverSyncEntry;
       if (auth.login && !user?.id) {
@@ -374,12 +410,16 @@ export default async function handleHttpSyncRequest({
     let serverOutput = {};
     if (serverSyncEntry) {
       const { main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
-      const { emitServerSyncStream, emitBroadcastSyncStream, emitStreamToTokens } =
+      const { emitServerSyncStream, emitBroadcastSyncStream, emitStreamToTokens, flushPressure } =
         buildSyncStreamEmitters({
           cb,
           receiver: normalizedReceiver,
           resolvedName,
           logLabel: 'http sync',
+          signal: effectiveAbortSignal,
+          //? No originatorSocket for HTTP/SSE — `flushPressure` falls back
+          //? to room-socket measurement only. SSE backpressure is the
+          //? caller's responsibility (Node's `res.write` returns a bool).
           //? Originator chunks travel back via SSE; broadcast / targeted
           //? chunks still flow over Socket.io to recipients in the receiver room.
           emitOriginatorChunk: (payload) => {
@@ -414,6 +454,8 @@ export default async function handleHttpSyncRequest({
           stream: emitServerSyncStream,
           broadcastStream: emitBroadcastSyncStream,
           streamTo: emitStreamToTokens,
+          abortSignal: effectiveAbortSignal,
+          flushPressure,
         }),
         undefined,
         {

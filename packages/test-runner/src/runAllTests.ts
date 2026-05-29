@@ -13,13 +13,13 @@ import type { RunCustomTestsSummary } from './customTests';
 import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 import type { ZodTypeAny } from 'zod';
 
-type ApiMethodMap = Record<string, Record<string, Record<string, string>>>;
-type ApiMetaMap = Record<string, Record<string, Record<string, {
+type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
+type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, {
   method: string;
   auth: { login: boolean; additional?: Record<string, unknown>[] };
   rateLimit?: number | false;
-}>>>;
-type ApiInputSchemas = Record<string, Record<string, Record<string, ZodTypeAny | undefined>>>;
+}>>>>>>;
+type ApiInputSchemas = Partial<Record<string, Partial<Record<string, Partial<Record<string, ZodTypeAny | undefined>>>>>>;
 
 export interface RunAllTestsInput {
   apiMethodMap: ApiMethodMap;
@@ -82,7 +82,7 @@ export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsS
   const headers: Record<string, string> = {};
   if (input.authToken) {
     const cookieName = input.sessionCookieName ?? 'luckystack_token';
-    headers['Cookie'] = `${cookieName}=${input.authToken}`;
+    headers.Cookie = `${cookieName}=${input.authToken}`;
   }
   const inputFor = inputForEndpoint(input.apiInputSchemas);
 
@@ -151,19 +151,20 @@ export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsS
   return summary;
 };
 
+const formatSummaryLine = (label: string, s: RunContractSummary | RunCustomTestsSummary | undefined): string => {
+  if (!s) return `  - ${label.padEnd(20)} (skipped)`;
+  const skipped = 'skipped' in s ? s.skipped : 0;
+  const mark = s.failed === 0 ? '✓' : '✗';
+  return `  ${mark} ${label.padEnd(20)} ${s.passed}/${s.total} pass${skipped ? `, ${skipped} skipped` : ''}`;
+};
+
 export const logRunAllSummary = (summary: RunAllTestsSummary): void => {
-  const line = (label: string, s: RunContractSummary | RunCustomTestsSummary | undefined): string => {
-    if (!s) return `  - ${label.padEnd(20)} (skipped)`;
-    const skipped = 'skipped' in s ? s.skipped : 0;
-    const mark = s.failed === 0 ? '✓' : '✗';
-    return `  ${mark} ${label.padEnd(20)} ${s.passed}/${s.total} pass${skipped ? `, ${skipped} skipped` : ''}`;
-  };
   console.log('');
-  console.log(line('contract', summary.contract));
-  console.log(line('auth-enforcement', summary.auth));
-  console.log(line('rate-limit', summary.rateLimit));
-  console.log(line('fuzz', summary.fuzz));
-  console.log(line('custom', summary.custom));
+  console.log(formatSummaryLine('contract', summary.contract));
+  console.log(formatSummaryLine('auth-enforcement', summary.auth));
+  console.log(formatSummaryLine('rate-limit', summary.rateLimit));
+  console.log(formatSummaryLine('fuzz', summary.fuzz));
+  console.log(formatSummaryLine('custom', summary.custom));
   console.log('');
   console.log(`Summary: ${summary.totalPassed} passed, ${summary.totalFailed} failed`);
 };

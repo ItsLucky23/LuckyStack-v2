@@ -8,8 +8,10 @@ import {
   AvatarProvider,
   Middleware,
   TranslationProvider,
-  registerMiddlewareHandler,
+  registerPageMiddleware,
+  validatePagePath,
 } from '@luckystack/core/client';
+import type { PageMiddleware } from '@luckystack/core/client';
 import { LocationProvider } from '@luckystack/presence/client';
 
 import ErrorPage from 'src/_components/ErrorPage';
@@ -23,10 +25,11 @@ import { SocketStatusProvider } from 'src/_providers/socketStatusProvider';
 //? auto-registers via the @luckystack/core/client barrel above.
 import 'luckystack/i18n/locales';
 
-//? Register the project's middleware handler so framework's <Middleware />
-//? + useRouter consult it on every route guard check.
-import middlewareHandler from 'src/_functions/middlewareHandler';
-registerMiddlewareHandler(middlewareHandler);
+//? Per-page route guards live on each `page.tsx` via `export const middleware`
+//? and are auto-registered below in `getRoutes()`. The framework allows-by-
+//? default for routes without a guard. If you need a cross-cutting global
+//? hook, import `registerMiddlewareHandler` from '@luckystack/core/client'
+//? and call it here with your own function.
 
 import type { Template } from 'src/_components/templates/TemplateProvider';
 
@@ -38,6 +41,7 @@ interface PageProps {
 interface PageModule {
   default: React.ComponentType<PageProps>;
   template?: Template;
+  middleware?: PageMiddleware;
 }
 
 //? Wrapper to inject Next.js-style params and searchParams as props.
@@ -50,20 +54,45 @@ const PageWrapper = ({ Page }: { Page: React.ComponentType<PageProps> }) => {
 
 const getRoutes = (pages: Record<string, PageModule>) => {
   const routes = [];
+  //? Collision detection — two page.tsx files in different folder trees
+  //? can compute the SAME route after invisible-parent stripping. First
+  //? wins; second is skipped with a loud console.error.
+  const seenRoutes = new Map<string, string>();
   for (const path in pages) {
     const module = pages[path];
-    const pathSegments = path.split('/');
-    if (pathSegments.some(segment => segment.startsWith('_'))) continue;
 
-    const normalizedPath = path.replace(/^\.\//, '').replace(/\.tsx$/, '').toLowerCase();
-    const routePath = normalizedPath === '' ? '/' : normalizedPath;
-    const subPath = routePath.endsWith('/page')
-      ? routePath.slice(0, -5)
-      : (routePath.endsWith('page') ? '/' : false);
-    if (!subPath) continue;
+    //? Apply the framework's invisible-parent rule: `_<folder>` segments
+    //? are stripped from the URL; pages directly inside an `_<folder>` are
+    //? invalid; pages inside reserved framework folders (_api, _sync, ...)
+    //? are invalid. The validator returns the computed route or a reason.
+    const result = validatePagePath(path);
+    if (!result.valid || !result.route) {
+      if (import.meta.env.DEV && result.reason && !result.reason.startsWith('not a page file')) {
+        console.warn(`[luckystack] page route skipped for ${path}: ${result.reason}`);
+      }
+      continue;
+    }
 
     // eslint-disable-next-line unicorn/prefer-string-replace-all
-    const finalPath = subPath.replace(/\[([^\]]+)\]/g, ':$1');
+    const finalPath = result.route.toLowerCase().replace(/\[([^\]]+)\]/g, ':$1');
+
+    const previousFile = seenRoutes.get(finalPath);
+    if (previousFile !== undefined) {
+      console.error(
+        `[luckystack] duplicate page route "${finalPath}": ${previousFile} AND ${path} both resolve here. ` +
+        `Keeping the first; the second will not render. ` +
+        `Remember that "_<folder>" segments are stripped from the URL (invisible-parent rule).`,
+      );
+      continue;
+    }
+    seenRoutes.set(finalPath, path);
+
+    //? Auto-register the page's `export const middleware` (if any) against
+    //? its route. Framework's <Middleware> + useRouter prefer this over the
+    //? global handler.
+    if (module.middleware) {
+      registerPageMiddleware(finalPath, module.middleware);
+    }
 
     const template = module.template ?? 'plain';
     const Page = module.default;
@@ -71,7 +100,7 @@ const getRoutes = (pages: Record<string, PageModule>) => {
     routes.push({
       path: finalPath,
       element: (
-        <TemplateProvider key={`${template}-${subPath}`} initialTemplate={template}>
+        <TemplateProvider key={`${template}-${finalPath}`} initialTemplate={template}>
           <PageWrapper Page={Page} />
         </TemplateProvider>
       ),

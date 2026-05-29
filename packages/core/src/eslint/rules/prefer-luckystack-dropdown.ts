@@ -10,9 +10,9 @@ import type { EslintRule } from '../internal/ruleTypes.js';
 //? JSX AST nodes are extended at runtime by eslint-plugin-react, but
 //? eslint's stock `Rule.RuleListener` type does not know about them. We
 //? describe the shapes we read inline.
-type JsxOpeningElementShape = {
+interface JsxOpeningElementShape {
   name: { type: string; name?: string };
-};
+}
 
 const rule: EslintRule = {
   meta: {

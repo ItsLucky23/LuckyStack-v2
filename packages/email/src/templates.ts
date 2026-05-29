@@ -53,7 +53,7 @@ export const registerEmailTemplate = <TData = Record<string, unknown>>(
 export const getEmailTemplate = (name: string): EmailTemplate | undefined => registry.get(name);
 
 /** List every registered template name (alphabetical). */
-export const listEmailTemplates = (): string[] => [...registry.keys()].sort();
+export const listEmailTemplates = (): string[] => [...registry.keys()].toSorted();
 
 /** Test-only: clear the registry. */
 export const resetEmailTemplatesForTests = (): void => {

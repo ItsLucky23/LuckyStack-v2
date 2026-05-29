@@ -26,6 +26,15 @@ export interface ApiParams {
   user: SessionLayout;
   functions: Functions;
   stream: ApiStreamEmitter;
+  //? Aborts on client-side cancel (`apiRequest({ signal })`) or socket
+  //? disconnect. Check `abortSignal.aborted` in long-running loops and
+  //? bail out — already-emitted chunks are not unsent, but new ones are
+  //? short-circuited automatically.
+  abortSignal: AbortSignal;
+  //? Awaitable backpressure helper. Resolves once the originator socket's
+  //? pending write-buffer drops below the threshold (default 1 MB). Opt-in;
+  //? handlers that don't stream can ignore it.
+  flushPressure: (options?: { thresholdBytes?: number }) => Promise<void>;
 }
 
 export const main = ({  }: ApiParams): MaybePromise<ApiResponse> => {

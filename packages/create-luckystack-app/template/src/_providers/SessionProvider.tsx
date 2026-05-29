@@ -14,6 +14,7 @@ import { socket, useSocket } from 'src/_sockets/socketInitializer';
 import {
   SessionContext,
   setLatestSession,
+  proposeLogin,
   getCurrentSession as coreGetCurrentSession,
   socketEventNames,
 } from '@luckystack/core/client';
@@ -25,8 +26,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   useSocket(session); //? starts the socket connection
 
+  //? Commit through the vetoable `proposeLogin` entry point so any
+  //? registered `preLogin` client hook can abort (suspended account,
+  //? feature-flag gate, geo block). Roll local state back to `null` on
+  //? veto so the UI doesn't render half-logged-in.
   useEffect(() => {
-    setLatestSession(session);
+    if (session === null) {
+      setLatestSession(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const result = await proposeLogin(session);
+      if (cancelled) return;
+      if (!result.committed) {
+        if (dev) console.warn('[session] preLogin hook vetoed transition', result.signal);
+        setSession(null);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [session]);
 
   //? Hook in client-side error-tracking user context here if you want

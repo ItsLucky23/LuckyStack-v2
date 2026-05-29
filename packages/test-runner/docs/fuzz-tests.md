@@ -165,7 +165,7 @@ import {
 
 const summary = await runFuzzTests({
   apiMethodMap,
-  baseUrl: 'http://127.0.0.1:80',
+  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
   onResult: logContractResult,
 });
 
@@ -183,7 +183,7 @@ The fuzz layer does not strip credentials the way the auth layer does. Pass a se
 ```ts
 await runFuzzTests({
   apiMethodMap,
-  baseUrl: 'http://127.0.0.1:80',
+  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
   headers: {
     Cookie: 'session=<test-session-cookie>',
   },
@@ -204,7 +204,7 @@ const result = await runFuzzCheck({
     method: 'POST',
     fullPath: 'api/organization-settings/sendInvite/v1',
   },
-  baseUrl: 'http://127.0.0.1:80',
+  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
   headers: { Cookie: 'session=<test-session>' },
   requestTimeoutMs: 8000,
 });

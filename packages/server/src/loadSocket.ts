@@ -1,6 +1,9 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server as SocketIOServer } from 'socket.io';
 import {
+  abortAllForSocket,
+  abortApiByResponseIndex,
+  abortSyncByCb,
   allowedOrigin,
   applySocketMiddlewares,
   attachSocketRedisAdapter,
@@ -121,13 +124,17 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     //? config on every event.
     const activityBroadcasterEnabled = config.socketActivityBroadcaster ?? false;
     const locationProviderEnabled = config.locationProviderEnabled ?? false;
+    //? `extractLanguageFromHeader` can return an empty string for unparseable
+    //? headers — those should fall through to the next source, so keep `||`.
+    /* eslint-disable @typescript-eslint/prefer-nullish-coalescing -- see comment above */
     const preferredLocale =
       extractLanguageFromHeader(socket.handshake.headers['x-language'])
       || extractLanguageFromHeader(socket.handshake.headers['accept-language'])
       || undefined;
+    /* eslint-enable @typescript-eslint/prefer-nullish-coalescing */
 
     if (token) {
-      socketConnected({ token, io });
+      void socketConnected({ token, io });
     }
 
     void dispatchHook('onSocketConnect', {
@@ -144,9 +151,25 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       void handleSyncRequest({ msg, socket, token });
     });
 
+    //? B1 — cancellation events. Client emits `{ cb }` (sync) or
+    //? `{ responseIndex }` (api) on the matching cancel channel; we look up
+    //? the in-flight AbortController by `${socket.id}:<key>` and abort it.
+    //? Server-side handler chains gate further chunk emits on the signal
+    //? and exit early via the cleanup paths registered in each handler.
+    socket.on(socketEventNames.syncCancel, (data: { cb?: string }) => {
+      const cb = typeof data.cb === 'string' ? data.cb : null;
+      if (!cb) return;
+      abortSyncByCb(socket.id, cb);
+    });
+    socket.on(socketEventNames.apiCancel, (data: { responseIndex?: number | string }) => {
+      const responseIndex = data.responseIndex;
+      if (typeof responseIndex !== 'number' && typeof responseIndex !== 'string') return;
+      abortApiByResponseIndex(socket.id, responseIndex);
+    });
+
     socket.on(socketEventNames.joinRoom, (data: { group?: string; responseIndex?: number }) => {
-      const group = typeof data?.group === 'string' ? data.group.trim() : '';
-      const responseIndex = data?.responseIndex;
+      const group = typeof data.group === 'string' ? data.group.trim() : '';
+      const responseIndex = data.responseIndex;
       if (typeof responseIndex !== 'number') return;
 
       if (!token) {
@@ -205,8 +228,8 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     });
 
     socket.on(socketEventNames.leaveRoom, (data: { group?: string; responseIndex?: number }) => {
-      const group = typeof data?.group === 'string' ? data.group.trim() : '';
-      const responseIndex = data?.responseIndex;
+      const group = typeof data.group === 'string' ? data.group.trim() : '';
+      const responseIndex = data.responseIndex;
       if (typeof responseIndex !== 'number') return;
 
       if (!token) {
@@ -265,7 +288,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     });
 
     socket.on(socketEventNames.getJoinedRooms, (data: { responseIndex?: number }) => {
-      const responseIndex = data?.responseIndex;
+      const responseIndex = data.responseIndex;
       if (typeof responseIndex !== 'number') return;
 
       if (!token) {
@@ -285,10 +308,15 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     });
 
     socket.on(socketEventNames.disconnect, (reason: string) => {
+      //? B1 — safety-net sweep. Per-request handlers also register their
+      //? own `socket.once(disconnect, ...)` listeners that abort + clean up,
+      //? but `abortAllForSocket` covers anything that slipped through (e.g.
+      //? handler crashed before registering its disconnect listener).
+      abortAllForSocket(socket.id);
       void dispatchHook('onSocketDisconnect', { socketId: socket.id, token, reason });
 
       if (activityBroadcasterEnabled && token) {
-        socketDisconnecting({ token, socket, reason });
+        void socketDisconnecting({ token, socket, reason });
       } else {
         if (!token) return;
         if (shouldLogDev) {
@@ -312,8 +340,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
             returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
           }
 
-          if (!newLocation) return;
-          const user = returnedUser || (await getSession(token));
+          const user = returnedUser ?? (await getSession(token));
           if (!user) return;
 
           const extendedUser = user as BaseSessionLayout & { location?: typeof newLocation };

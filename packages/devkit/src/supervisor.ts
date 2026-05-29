@@ -162,8 +162,8 @@ if (env.NODE_ENV === 'production') {
     });
   };
 
-  process.on('SIGINT', () => handleSignal('SIGINT'));
-  process.on('SIGTERM', () => handleSignal('SIGTERM'));
+  process.on('SIGINT', () => { handleSignal('SIGINT'); });
+  process.on('SIGTERM', () => { handleSignal('SIGTERM'); });
 
   startChild();
 }

@@ -51,7 +51,7 @@ export const handleApiRoute: HttpRouteHandler = async ({
       return true;
     }
 
-    const apiData = params && typeof params === 'object'
+    const apiData = typeof params === 'object'
       ? { ...(params as Record<string, unknown>) }
       : {};
     delete (apiData as Record<string, unknown>).stream;

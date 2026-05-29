@@ -231,4 +231,4 @@ Hook handlers run inline with the request — the proxy fires `dispatchHook` syn
 - `packages/router/src/httpProxy.ts` — dispatch sites and timing.
 - `packages/core` — `dispatchHook`, `HookPayloads`, registration API.
 - `packages/router/docs/http-proxy.md` — full request lifecycle and where the hooks sit in it.
-- `packages/router/AI_INDEX.md` — package-level hook contract.
+- `packages/router/CLAUDE.md` — package-level hook contract.

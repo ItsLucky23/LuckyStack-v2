@@ -1,6 +1,6 @@
 import { findAllApiFiles, findAllSyncClientFiles, findAllSyncServerFiles } from './typeMap/discovery';
 import { extractApiName, extractApiVersion, extractPagePath, extractSyncName, extractSyncPagePath, extractSyncVersion } from './typeMap/routeMeta';
-import { extractAuth, extractHttpMethod, extractRateLimit, HttpMethod } from './typeMap/apiMeta';
+import { extractAuth, extractDocsMeta, extractHttpMethod, extractRateLimit, HttpMethod } from './typeMap/apiMeta';
 import { buildTypeMapArtifacts, writeTypeMapArtifacts } from './typeMap/emitterArtifacts';
 import {
   getApiStreamPayloadTypeDetailsFromFile,
@@ -15,7 +15,7 @@ import {
 import { generateServerFunctions } from './typeMap/functionsMeta';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { getSrcDir } from '@luckystack/core';
-import { assertNoDuplicateNormalizedRouteKeys, assertValidRouteNaming } from './routeNamingValidation';
+import { assertNoDuplicateNormalizedRouteKeys, assertNoDuplicatePageRoutes, assertValidRouteNaming } from './routeNamingValidation';
 import { getOrInit } from './internal/mapUtils';
 
 // Collect required imports for the Functions interface only.
@@ -37,6 +37,13 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     srcDir: getSrcDir(),
     context: 'generating API/sync type maps',
   });
+  //? Hard-fail on duplicate page routes at build time. Dev startup only
+  //? warns (so a misplaced file doesn't block the entire dev server);
+  //? builds throw so collisions can never ship to production.
+  assertNoDuplicatePageRoutes({
+    srcDir: getSrcDir(),
+    context: 'generating API/sync type maps',
+  });
 
   // Rebuild the TypeScript Program on each generation to pick up file changes.
   invalidateProgramCache();
@@ -47,7 +54,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   // Collect API Types
   // ═══════════════════════════════════════════════════════════════════════════
   const apiFiles = findAllApiFiles(getSrcDir());
-  const typesByPage = new Map<string, Map<string, { input: string; output: string; stream: string; method: HttpMethod; rateLimit: number | false | undefined; auth: unknown; version: string; description?: string }>>();
+  const typesByPage = new Map<string, Map<string, { input: string; output: string; stream: string; method: HttpMethod; rateLimit: number | false | undefined; auth: unknown; version: string; description?: string; meta?: { owner?: string; tags?: string[]; deprecated?: string | true } }>>();
   const unresolvedTypeAliases = new Set<string>();
 
   if (!quiet) {
@@ -74,6 +81,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     const httpMethod = extractHttpMethod(filePath, apiName);
     const rateLimit = extractRateLimit(filePath);
     const auth = extractAuth(filePath);
+    const meta = extractDocsMeta(filePath);
 
     for (const symbol of [...inputTypeResult.unresolvedSymbols, ...outputTypeResult.unresolvedSymbols, ...streamTypeResult.unresolvedSymbols]) {
       if (!symbol.importPath) {
@@ -88,7 +96,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
       console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}/${apiVersion} (${httpMethod}${rateLimit === undefined ? '' : `, rateLimit: ${rateLimit}`})`);
     }
 
-    getOrInit(typesByPage, pagePath, () => new Map()).set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, stream: streamType, method: httpMethod, rateLimit, auth, version: apiVersion });
+    getOrInit(typesByPage, pagePath, () => new Map()).set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, stream: streamType, method: httpMethod, rateLimit, auth, version: apiVersion, ...(meta ? { meta } : {}) });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -96,7 +104,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   // ═══════════════════════════════════════════════════════════════════════════
   const syncServerFiles = findAllSyncServerFiles(getSrcDir());
   const syncClientFiles = findAllSyncClientFiles(getSrcDir());
-  const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverOutput: string; clientOutput: string; serverStream: string; clientStream: string; version: string }>>();
+  const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverOutput: string; clientOutput: string; serverStream: string; clientStream: string; version: string; meta?: { owner?: string; tags?: string[]; deprecated?: string | true } }>>();
 
   if (!quiet) {
     console.log(' ═══════════════════════════════════════════════════════════════════════════');
@@ -118,7 +126,7 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     if (!pagePath || !syncName) continue;
 
     const key = `${pagePath}/${syncName}/${syncVersion}`;
-    const existing = allSyncs.get(key) || { pagePath, syncName };
+    const existing = allSyncs.get(key) ?? { pagePath, syncName };
     existing.serverFile = serverFile;
     allSyncs.set(key, existing);
   }
@@ -130,13 +138,13 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     if (!pagePath || !syncName) continue;
 
     const key = `${pagePath}/${syncName}/${syncVersion}`;
-    const existing = allSyncs.get(key) || { pagePath, syncName };
+    const existing = allSyncs.get(key) ?? { pagePath, syncName };
     existing.clientFile = clientFile;
     allSyncs.set(key, existing);
   }
 
   for (const [, { pagePath, syncName, serverFile, clientFile }] of allSyncs) {
-    const syncVersion = extractSyncVersion(serverFile || clientFile || '');
+    const syncVersion = extractSyncVersion(serverFile ?? clientFile ?? '');
 
     const clientInputTypeResult = serverFile
       ? getSyncClientDataTypeDetailsFromFile(serverFile)
@@ -184,6 +192,10 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
       console.log(`[TypeMapGenerator] Sync: ${pagePath}/${syncName}/${syncVersion} (server: ${!!serverFile}, client: ${!!clientFile})`);
     }
 
+    //? Prefer @docs metadata from the server file; fall back to client file.
+    //? Server is the canonical "owns the route" file when both exist.
+    const syncMeta = serverFile ? extractDocsMeta(serverFile) : (clientFile ? extractDocsMeta(clientFile) : undefined);
+
     getOrInit(syncTypesByPage, pagePath, () => new Map()).set(`${syncName}@${syncVersion}`, {
       clientInput: clientInputType,
       serverOutput: serverOutputType,
@@ -191,13 +203,14 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
       serverStream: serverStreamType,
       clientStream: clientStreamType,
       version: syncVersion,
+      ...(syncMeta ? { meta: syncMeta } : {}),
     });
   }
 
   const functionsInterface = generateServerFunctions({ namedImports, defaultImports });
 
   if (unresolvedTypeAliases.size > 0) {
-    const unresolvedList = [...unresolvedTypeAliases].sort().join(', ');
+    const unresolvedList = [...unresolvedTypeAliases].toSorted().join(', ');
     throw new Error(`[TypeMapGenerator] Aborting generation because unresolved type symbols were found: ${unresolvedList}`);
   }
 

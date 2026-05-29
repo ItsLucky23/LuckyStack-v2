@@ -13,6 +13,9 @@ export type {
   PostSessionCreatePayload,
   PreSessionDeletePayload,
   PostSessionDeletePayload,
+  PreEmailChangePayload,
+  PostEmailChangeRequestedPayload,
+  PostEmailChangedPayload,
 } from './hookPayloads';
 export { saveSession, getSession, deleteSession, getAllSessions, revokeUserSessions, sessionKeyFor, activeUsersKeyFor } from './session';
 export { registerSessionAdapter, getSessionAdapter, redisSessionAdapter } from './sessionAdapter';
@@ -31,6 +34,16 @@ export {
 } from './passwordReset';
 export { validatePassword } from './passwordPolicy';
 export { sendPasswordResetEmail } from './forgotPassword';
+
+// Email-change primitives. Used by the framework's settings flow to confirm
+// a new email address before applying it (token mailed to NEW address proves
+// ownership of the new mailbox).
+export {
+  createEmailChangeToken,
+  consumeEmailChangeToken,
+} from './emailChange';
+export type { EmailChangePayload } from './emailChange';
+export { sendEmailChangeConfirmation } from './emailChangeNotification';
 
 // OAuth provider registry + composable helpers.
 export {

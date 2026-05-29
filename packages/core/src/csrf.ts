@@ -17,8 +17,12 @@ const resolveBackendUrl = (): string => {
   // The browser's location is the most reliable backend URL when the app
   // is served same-origin. Server-side callers should not invoke this
   // helper — they have direct access to the session.
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
+  //? Both checks here look redundant to TS (globals are always typed as set)
+  //? but at runtime in Node `globalThis.window` is undefined; the defensive
+  //? guard is what keeps SSR from crashing.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- SSR runtime guard
+  if (globalThis.window !== undefined && globalThis.location?.origin) {
+    return globalThis.location.origin;
   }
   return '';
 };

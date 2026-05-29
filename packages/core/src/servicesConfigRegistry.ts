@@ -9,6 +9,7 @@
 
 export interface ServiceDefinition {
   /** 'root' -> reserved for the system service. Otherwise a folder name under srcDir. */
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents -- 'root' is documented as the reserved value; the union surfaces it in autocomplete
   source: 'root' | string;
 }
 

@@ -155,7 +155,7 @@ Today the same effect is achievable by swapping `fetchImpl` with a function that
 
 - Concept overview (wiring + external env-server): `./architecture.md`.
 - Source: `packages/env-resolver/src/index.ts` — `initEnvResolver`, `refreshEnvResolver`, `applyValues`, `fetchRemoteEnv`, `buildOptionsFromEnv`, `getCachedResolution`, `resetEnvResolverForTests`.
-- Function index: `packages/env-resolver/AI_INDEX.md`.
+- Function index: `packages/env-resolver/CLAUDE.md`.
 - Consumer quickstart: `packages/env-resolver/README.md`.
 - Env-key contract: `./env-key-validation.md`.
 - Boot-time guard behaviour: `./bootstrap-validation.md`.

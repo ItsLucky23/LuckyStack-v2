@@ -249,7 +249,7 @@ npm run server -- billing 4001 oops
 
 ## Related
 
-- Function INDEX: `packages/server/AI_INDEX.md`
+- Function INDEX: `packages/server/CLAUDE.md`
 - Runtime maps: `packages/server/docs/runtime-maps.md`
 - Create server: `packages/server/docs/create-server.md`
 - Architecture: `docs/ARCHITECTURE_PACKAGING.md` (preset bundles, multi-service builds)

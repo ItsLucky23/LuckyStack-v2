@@ -167,7 +167,7 @@ const getRateLimitStatusInRedis = async (key: string, limit: number): Promise<Ra
 
   const getResult = txResponse[0];
   const ttlResult = txResponse[1];
-  if (!getResult || getResult[0] || !ttlResult || ttlResult[0]) return null;
+  if (!getResult || !ttlResult || getResult[0] || ttlResult[0]) return null;
 
   const currentCount = Number(getResult[1] ?? 0);
   const ttlMs = Number(ttlResult[1] ?? 0);
@@ -238,7 +238,7 @@ export const defaultRateLimitStrategy: RateLimitStrategy = {
           async () => await redis.scan(cursor, 'MATCH', `${getRedisPrefix()}:*`, 'COUNT', 100),
         );
 
-        if (scanError || !scanResponse || scanResponse.length < 2) break;
+        if (scanError || !scanResponse) break;
 
         cursor = scanResponse[0];
         const keys = scanResponse[1];

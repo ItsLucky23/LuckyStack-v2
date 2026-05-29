@@ -53,7 +53,10 @@ export const createWsProxy = ({ resolver, wsTargetService }: CreateWsProxyInput)
 
     const upstreamRequest = transport.request({
       hostname: targetUrl.hostname,
-      port: targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80),
+      //? Boot-time guard in `resolveTarget.ts` ensures every binding URL has
+      //? an explicit port. `targetUrl.port` is always a non-empty numeric
+      //? string at this point.
+      port: Number(targetUrl.port),
       path: targetUrl.pathname + targetUrl.search,
       method: req.method,
       headers: {
@@ -78,7 +81,7 @@ export const createWsProxy = ({ resolver, wsTargetService }: CreateWsProxyInput)
         if (Array.isArray(value)) {
           for (const v of value) headerLines.push(`${key}: ${v}`);
         } else {
-          headerLines.push(`${key}: ${value as string}`);
+          headerLines.push(`${key}: ${value}`);
         }
       }
       clientSocket.write(`${headerLines.join('\r\n')}\r\n\r\n`);

@@ -72,7 +72,7 @@ const extractImportSpecifiers = (filePath: string): string[] => {
   }
 
   const cached = specifiersCache.get(filePath);
-  if (cached && cached.mtimeMs === mtimeMs) {
+  if (cached?.mtimeMs === mtimeMs) {
     return cached.specifiers;
   }
 
@@ -207,7 +207,8 @@ export const findDependentRouteFiles = (changedFilePath: string): Set<string> =>
   const queue: string[] = [changedAbsolutePath];
 
   while (queue.length > 0) {
-    const current = queue.shift()!;
+    const current = queue.shift();
+    if (current === undefined) break;
     if (visited.has(current)) {
       continue;
     }
