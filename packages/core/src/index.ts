@@ -132,12 +132,28 @@ export * from './db';
 export { redis, getRedisConnectionOptions } from './redis';
 export type { RedisConnectionOptions } from './redis';
 export {
+  registerRedisKeyFormatter,
+  getRedisKeyFormatter,
+  resetRedisKeyFormatterForTests,
+  defaultRedisKeyFormatter,
+  formatKey,
+  applyStrayKeyPrefix,
+} from './redisKeyFormatter';
+export type { RedisKeyFormatter } from './redisKeyFormatter';
+export { acquireLease, renewLease, releaseLease } from './lease';
+export {
+  DEFAULT_CLIENT_KEY,
   registerPrismaClient,
   registerRedisClient,
   getPrismaClient,
   getRedisClient,
+  getPrismaClientFor,
+  getRedisClientFor,
+  getPrismaClientKeys,
+  getRedisClientKeys,
   isPrismaClientRegistered,
   isRedisClientRegistered,
+  resetClientsForTests,
 } from './clients';
 export { attachSocketRedisAdapter } from './socketRedisAdapter';
 export { writeBootUuid, readBootUuid, resolveEnvKey, BOOT_KEY_PREFIX } from './bootUuid';

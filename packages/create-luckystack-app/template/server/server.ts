@@ -13,9 +13,8 @@
 
 import '@luckystack/server/parseArgv';
 
-import { config as loadEnv } from 'dotenv';
-loadEnv({ path: '.env' });
-loadEnv({ path: '.env.local', override: true });
+import { loadEnvFiles } from '@luckystack/core';
+loadEnvFiles();
 
 //? Side-effect imports — these populate registries that everything below
 //? reads from. Order matters: project config first, then deploy/services.
@@ -27,6 +26,18 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { bootstrapLuckyStack } from '@luckystack/server';
 
 (async () => {
+  //? Optional @luckystack/secret-manager (opt-in). Resolve `.env` pointers
+  //? (NAME=BASE_V<n>) against an external secret server before any framework
+  //? code reads a secret. To enable:
+  //?   1. npm i @luckystack/secret-manager
+  //?   2. uncomment the `secretManager` slot in config.ts + set LUCKYSTACK_SECRET_MANAGER_URL
+  //?   3. uncomment below. See docs/luckystack/ARCHITECTURE_SECRET_MANAGER.md.
+  // const projectConfig = (await import('../config')).default;
+  // if (projectConfig.secretManager?.url) {
+  //   const sm = await import('@luckystack/secret-manager');
+  //   await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
+  // }
+
   //? Minimal static-file fallbacks. Most apps will swap these out for
   //? Vite-built static handlers in production; the server just needs SOME
   //? handler if you serve any static asset alongside `/api` and `/sync`.

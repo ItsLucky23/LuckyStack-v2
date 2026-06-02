@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
-import tsconfigPaths from 'vite-tsconfig-paths'
 
 const normalizeFilePath = (value: string) => value.replace(/\\/g, '/');
 
@@ -24,9 +23,6 @@ export default defineConfig(({ command }) => {
     cacheDir: '.cache/vite',
     plugins: [
       react(),
-      tsconfigPaths({
-        projects: ['tsconfig.client.json', 'tsconfig.server.json'],
-      }),
     ],
     build: {
       rollupOptions: {
@@ -38,7 +34,9 @@ export default defineConfig(({ command }) => {
       },
       target: 'esnext',
     },
-    resolve: {},
+    resolve: {
+      tsconfigPaths: true,
+    },
     // Define a global constant so your main.tsx knows if it's building for prod
     define: {
       __IS_PROD__: isProduction,

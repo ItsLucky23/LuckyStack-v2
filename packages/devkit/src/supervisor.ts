@@ -2,15 +2,14 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { watch } from 'chokidar';
-import { env } from '@luckystack/core';
+import { env, getEnvFiles } from '@luckystack/core';
 
 const RESTART_DEBOUNCE_MS = 150;
 const CRASH_RESTART_DELAY_MS = 300;
 
 const CORE_WATCH_GLOBS = [
   'config.ts',
-  '.env',
-  '.env.local',
+  ...getEnvFiles(),
   'server/server.ts',
   'server/bootstrap/**/*.ts',
   'server/auth/**/*.ts',

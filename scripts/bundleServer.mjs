@@ -37,6 +37,10 @@ const optionalPeerDeps = [
   'dd-trace',
   'hot-shots',
   'posthog-node',
+  // @luckystack/secret-manager (optional — dynamically imported behind a URL guard
+  // in server/bootstrap/initSecrets.ts; left external so a project that doesn't use
+  // it bundles + boots without the package installed).
+  '@luckystack/secret-manager',
 ];
 
 const externalDeps = [

@@ -21,3 +21,14 @@ PROJECT_NAME={{PROJECT_NAME}}
 # Redis connection (the framework defaults match these values).
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
+
+# Override which env files the framework loads, in order ("later overrides earlier").
+# Default ".env,.env.local". Set as a REAL environment variable (shell / process
+# manager), NOT here — these files are only read after the list is resolved.
+# LUCKYSTACK_ENV_FILES=.env,.env.local
+
+# Optional @luckystack/secret-manager (opt-in): commit POINTERS instead of secrets.
+# A value of the shape <BASE>_V<n> is resolved at boot against the server at
+# LUCKYSTACK_SECRET_MANAGER_URL. See config.ts + server.ts opt-in + the docs.
+# LUCKYSTACK_SECRET_MANAGER_URL=
+# OPENAI_KEY=OPENAI_AUTHORIZATION_KEY_V1

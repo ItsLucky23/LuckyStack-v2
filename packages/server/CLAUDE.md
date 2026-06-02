@@ -35,9 +35,12 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 | `@luckystack/server/parseArgv` (side-effect import) | First-line import that runs `applyServerArgv()` before any module reads `process.env.SERVER_PORT` (notably `config.ts`). | -> docs/argv-parsing.md |
 | `createProdRuntimeMapsProvider(options)` | Build a `RuntimeMapsProvider` that loads generated maps in prod and delegates to devkit discovery in dev. Returns the provider without registering. | -> docs/runtime-maps.md |
 | `registerProdRuntimeMapsProvider(options)` | Convenience wrapper: builds the provider AND calls `registerRuntimeMapsProvider`. Most consumers want this. | -> docs/runtime-maps.md |
-| `registerCustomRoute(handler)` | Append a custom HTTP route handler to the global registry. Composed before the static fallback. | -> docs/http-routes.md |
-| `getCustomRoutes()` | Read the current registry snapshot. | -> docs/http-routes.md |
-| `clearCustomRoutes()` | Clear the registry (used by test resets). | -> docs/http-routes.md |
+| `registerCustomRoute(handler, options?)` | Append a custom HTTP route handler. `options.phase`: `'post-params'` (default, runs after body parse) or `'pre-params'` (runs before `getParams`, raw `req` stream intact — webhooks + streaming uploads). | -> /docs/ARCHITECTURE_HTTP.md |
+| `getCustomRoutes()` | Read the `'post-params'` registry snapshot (the default phase). | -> /docs/ARCHITECTURE_HTTP.md |
+| `getPreParamsCustomRoutes()` | Read the `'pre-params'` registry snapshot. | -> /docs/ARCHITECTURE_HTTP.md |
+| `clearCustomRoutes()` | Clear both phases (used by test resets). | -> /docs/ARCHITECTURE_HTTP.md |
+| `registerOriginExemptPath({ pathPrefix })` | Exempt a path prefix from the browser origin gate so a server-to-server webhook (no `Origin`/`Referer`) reaches its handler. Empty/fail-closed by default. **Exemption ≠ auth** — the handler MUST verify a signature/secret. | -> /docs/ARCHITECTURE_HTTP.md |
+| `getOriginExemptPaths()` / `clearOriginExemptPaths()` / `isOriginExemptPath(routePath)` | Read / clear / test the exempt-path registry. | -> /docs/ARCHITECTURE_HTTP.md |
 | `registerSecurityHeaders(builder)` | Override / extend the security-headers builder applied to every HTTP response. | -> docs/security-defaults.md |
 | `getSecurityHeadersBuilder()` | Read the currently registered builder (defaults to framework headers when no override set). | -> docs/security-defaults.md |
 | `registerErrorFormatter(formatter)` | Override the JSON error shape returned by framework error responses. | -> docs/security-defaults.md |

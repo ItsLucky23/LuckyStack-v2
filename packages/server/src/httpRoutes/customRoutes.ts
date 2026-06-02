@@ -1,7 +1,7 @@
 import { captureException, getLogger, tryCatch } from '@luckystack/core';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { CustomRouteHandler, RouteContext } from '../types';
-import { getCustomRoutes } from '../customRoutesRegistry';
+import { getCustomRoutes, getPreParamsCustomRoutes } from '../customRoutesRegistry';
 import type { HttpRouteHandler } from './types';
 
 const runHandler = async (
@@ -26,6 +26,27 @@ const runHandler = async (
     return true;
   }
   return Boolean(handled) || res.writableEnded;
+};
+
+//? PRE-PARAMS phase: consumer routes registered with `{ phase: 'pre-params' }`,
+//? dispatched BEFORE the body is parsed so the handler can read the raw `req`
+//? stream (webhook HMAC verification, streaming/multipart uploads). A handler
+//? that returns `false` without consuming the body falls through to the normal
+//? pipeline. Runs after the framework's own pre-params fast-paths.
+export const handlePreParamsCustomRoutes: HttpRouteHandler = async ({
+  req,
+  res,
+  routePath,
+  queryString,
+  method,
+  token,
+}) => {
+  const ctx: RouteContext = { routePath, method, queryString, token };
+  for (const handler of getPreParamsCustomRoutes()) {
+    const handled = await runHandler(handler, req, res, ctx, 'preParamsCustomRoute');
+    if (handled) return true;
+  }
+  return false;
 };
 
 export const handleCustomRoutes: HttpRouteHandler = async ({

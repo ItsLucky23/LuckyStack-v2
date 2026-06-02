@@ -76,7 +76,7 @@ Presence and activity awareness layer for LuckyStack: AFK detection, disconnect 
 
 - **Required runtime**: `@luckystack/core`, `@luckystack/login` (session lookup + token extraction + hook registry).
 - **Peer (server entry)**: `socket.io@^4.8.0`.
-- **Peer (client entry only, optional)**: `react@^19.2.0`, `react-router-dom` (consumed indirectly via `LocationProvider`).
+- **Peer (client entry only, optional)**: `react@^19.2.0`, `react-router-dom@^7.0.0` (imported by `LocationProvider` — `useLocation` / `Outlet`).
 - Wired automatically by `@luckystack/server` — manual `initActivityBroadcaster` only needed for non-standard hosts.
 
 ## Related

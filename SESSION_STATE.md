@@ -1,126 +1,66 @@
 # SESSION_STATE
 
-> **Agent**: AI 3
 > **Branch**: `chore/package-split-prep`
-> **Date**: 2026-05-27
+> **Date**: 2026-06-02
 
 ## Session Summary
 
-Full hardening pass driven by a 7-question codebase audit (hooks, dynamic imports, Bun support, backend linting, client-side sync `auth` staleness, streaming coverage, test infrastructure). User approved the largest scope: A1+A2+B1+B2+E+F. Three parallel agents handled the heavy lifting (streaming cancel/backpressure end-to-end, settings tests, reset-password + auth tests); I drove the hooks, lint config, Bun support, scaffolding, side-fixes, and finalization. Final state: lint clean, full build green, AI snapshots refreshed, branch-log + INDEX updated.
+Wired `@luckystack/secret-manager` into server boot and then cleared the entire pre-publish backlog (WS1–WS6) plus two finishing touches. The secret-manager now resolves `.env` pointers against an external server when configured, and falls through to plain local env (no crash) when the URL is unset or the package isn't installed — a deliberate fail-OPEN exception to the peer-dep-guard policy that the user confirmed. Everything is gated green (lint/tsc/vitest 711 · build:packages 14/14 · pack:dry 14/14 · live integration `npm run test` 113/0/11 on port `:81`). Nothing is committed.
 
 ## Completed Tasks
 
-- **A1 — 3 missing hooks**
-  - `preLogin` client hook in `packages/core/src/clientHookBus.ts` + `ClientHookStopSignal` / `dispatchVetoableClientHook` / `ClientDispatchResult` types.
-  - New `proposeLogin(session)` in `packages/core/src/react/sessionContext.ts`; `SessionProvider.tsx` + template switched to it; uses `useRef` to dodge TS flow-analyzer narrowing.
-  - `postSyncAuthorize` payload + dispatch added to `packages/core/src/hooks/types.ts` and `packages/sync/src/handleSyncRequest.ts`.
-  - `prePasswordChanged` + `prePasswordResetCompleted` payload types in `packages/login/src/hookPayloads.ts`. Dispatch wired into `src/settings/_api/changePassword_v1.ts` + `src/reset-password/_api/confirmReset_v1.ts` (+ template mirrors).
-- **A2 — backend lint hardening** (conservative — audit finding was partially wrong)
-  - Discovered `no-floating-promises` already on via `tseslint.configs.strictTypeChecked`.
-  - Added documentation overlay in `eslint.official.config.js` for `packages/*/src/**/*.ts`.
-  - New opt-in `lint:packages` script in `package.json` (default `lint:all` glob unchanged).
-  - Side-fix: `templateInjector.ts` placement-warning template now emits `export const __luckystackPlacementWarning = true` instead of `export {};`.
-- **B1 — Stream cancellation via AbortController** (delegated agent, end-to-end socket + HTTP for api + sync)
-  - New `packages/core/src/cancelRegistry.ts` (per-`(socketId,key)` map + `abortAllForSocket`).
-  - New `apiCancel` + `syncCancel` socket event names.
-  - Per-request `AbortController` in both `handleSyncRequest.ts` and `handleApiRequest.ts`; `socket.once('disconnect', abort)` + cleanup; HTTP listens to `req.on('close', abort)`.
-  - Stream emitters short-circuit on `signal.aborted`.
-  - Client `apiRequest({ signal? })` + `syncRequest({ signal? })` emit cancel events on abort.
-  - Templates updated (`sync_server.template.ts`, `api.template.ts`) so handlers see `abortSignal`.
-- **B2 — Backpressure via `flushPressure`** (same agent)
-  - `flushPressure({ thresholdBytes? })` method on `SyncStreamEmitters`; default 1 MB (~1024 packets via ~1 KB estimate). Worst-case across up to 32 sockets for broadcast/streamTo.
-  - HTTP API variant documented no-op.
-  - Section 8 added to `packages/sync/docs/streaming.md` with LLM-token opt-in example.
-- **E — Bun runtime support**
-  - `engines.bun: ">=1.1.0"` added; new scripts `bun:check`, `bun:server`, `bun:prod`.
-  - New `scripts/checkBunCompat.mjs` — 8-probe smoke (node:crypto, fs/path, url, @prisma/client, socket.io, ioredis, @luckystack/core, @luckystack/server). 8/8 pass under Node v24.
-  - New "Running on Bun" section in `docs/HOSTING.md`.
-- **F — 12 per-route business-logic tests** (parallel agents, 29 cases total)
-  - Settings (5): `changePassword_v1.tests.ts` (4), `deleteAccount_v1.tests.ts` (3), `signOutEverywhere_v1.tests.ts` (2), `updatePreferences_v1.tests.ts` (3), `updateUser_v1.tests.ts` (3).
-  - Reset-password (2): `sendReset_v1.tests.ts` (2), `confirmReset_v1.tests.ts` (4).
-  - Auth lifecycle (2): `_api/logout_v1.tests.ts` (2), `_api/session_v1.tests.ts` (3).
-  - Streaming (3): `streamBroadcast_server_v1.tests.ts` (2), `streamProgress_server_v1.tests.ts` (2), `streamToToken_server_v1.tests.ts` (2).
-  - `scripts/scaffoldRouteTest.mjs` extended to accept root-level routes (`logout/v1` instead of requiring `<page>/<name>/<version>`).
-- **Side-fixes**
-  - `packages/devkit/src/routeNamingValidation.ts:374` — replaced CJS `require('@luckystack/core')` with top-level static import (ESM bug was blocking `generateArtifacts`).
-  - `packages/devkit/src/templates/page_dashboard.template.ts` + `page_plain.template.ts` renamed to `.tsx` (JSX-in-`.ts` was failing `tsc -b`). Lookup table in `templateInjector.ts` updated.
-  - Deleted stray untracked `src/_tet/` folder (user-confirmed) — was colliding with `src/admin/page.tsx` on the duplicate-page-route check.
-- **Finalization**
-  - `npm run lint` → exit 0.
-  - `npm run build` → exit 0.
-  - `npm run ai:capabilities` + `npm run ai:index` → refreshed (14 packages, 7 commands, 8 skills).
-  - `branch-logs/chore--package-split-prep.md` — full session entry appended.
-  - `branch-logs/INDEX.md` — row bumped to 28 entries.
-  - New memory: `feedback_tight_time_estimates.md` (user pushes back on padded effort estimates; default to realistic lower bound).
+- **WS1 — secret-manager wired into boot**
+  - `server/bootstrap/initSecrets.ts` (NEW) — `resolveSecretsIfConfigured(config, importer?)`: url empty → skip; url set + package absent → warn + skip (no crash); url set + package present → `initSecretManager({ url, token, source: 'remote', dev })` (fail-fast). Injectable `importer` = test seam.
+  - `server/bootstrap/initSecrets.test.ts` (NEW) — 5 vitest cases (skip / absent-warn / remote-init / dev-passthrough / fail propagation).
+  - `config.ts` — added `secretManager` slot (`{ url, token, dev }`) on the exported config object (NOT `registerProjectConfig`).
+  - `server/server.ts` — top-level `await resolveSecretsIfConfigured(projectConfig.secretManager)` after env load, before secret consumers.
+  - `tsconfig.server.json` — alias `@luckystack/secret-manager`; `scripts/bundleServer.mjs` — marked it external; `vitest.config.ts` — added `server/**/*.test.ts`.
+  - Docs: `.env_template` + `docs/ARCHITECTURE_SECRET_MANAGER.md` rewritten to match the real wiring (config slot + boot seam + remote/local-fallthrough).
+- **WS2 — configurable envFiles (default unchanged)**
+  - `packages/core/src/env.ts` — `DEFAULT_ENV_FILES` / `getEnvFiles()` / `loadEnvFiles()` (single source of truth, ambient override `LUCKYSTACK_ENV_FILES`); `bootstrapEnv()` uses `loadEnvFiles()`. `+ env.test.ts` (3 cases).
+  - Rewired all hardcoded load/watch points to use it: `server/server.ts`, `server/sockets/socket.ts`, `luckystack/login/oauthProviders.ts`, `packages/devkit/src/supervisor.ts` (watch globs).
+- **WS3 — peer-dep fixes** (verified against real imports): core `react`/`react-dom` `^19.2.0`; sync `react` → optional; presence `react-router-dom@^7.0.0` optional peer (LocationProvider); test-runner `socket.io-client@^4.8.0` peer (streamWatcher).
+- **WS4 — per-route tests**: verified **already complete** — 63/63 custom business-logic tests pass live. The recon's "TODO stubs" claim was outdated; nothing to write.
+- **WS5 — manifest/doc-drift**: `devkit/package.json` `homepage`+`bugs`; CLAUDE peer sections (test-runner zod^4 + socket.io-client; presence react-router-dom; core `LUCKYSTACK_ENV_FILES`); **5 README signature fixes** (api, router, presence, test-runner, error-tracking) via a 5-agent workflow (source-verified, surgical).
+- **WS6 — publish contract**: `docs/PACKAGE_OVERVIEW.md` peer tables (zod 4 / ts 6 / react 19.2 / test-runner socket.io-client + "four→five layers"); `pack:dry` 14/14.
+- **Finishing touch A — rotation poll**: `config.ts` `secretManager.dev = { watch: false, pollIntervalMs: 30_000 }` (poll-only; file-watch off because the supervisor already restarts on `.env` change); `initSecrets.ts` forwards `dev`.
+- **Finishing touch B — scaffold-template parity**: `template/server/server.ts` uses `loadEnvFiles()` + a commented secret-manager opt-in; `template/config.ts` commented `secretManager` slot; `template/_dot_env_template` notes for `LUCKYSTACK_ENV_FILES` + secret-manager.
+- **Zod-4 deprecation cleanup** (re-triggered by edits, blocked lint): `core/env.ts` `.passthrough()→.loose()`; `test-runner/src/runAllTests.ts` `ZodTypeAny→ZodType`.
+- Memory added: `feedback_secret_manager_failopen.md` (fail-OPEN exception). Branch-log entries #45–#48 + INDEX updated; AI snapshots regenerated.
 
 ## Pending Logic / Known Bugs
 
-**Reported but deliberately NOT auto-fixed** (per CLAUDE.md "report without auto-fixing"):
-
-- `src/settings/_api/signOutEverywhere_v1.ts:20` — calls `revokeUserSessions(user.id)` without `user.token` as `exceptToken`. The code signs out the caller's own session too. If the intent is "sign out OTHER devices only", pass `user.token` as the second arg. The test asserts current behavior with a `//? TODO: verify intent` marker.
-- `src/_api/session_v1.ts` — stray `console.log(user)` in the active route body.
-- `src/settings/_api/updateUser_v1.ts` — typed input has no `email` field; audit's "email collision" scenario isn't reachable through this route as-written. Test replaced with avatar-format assertion instead.
-- ~250 cosmetic lint errors in `packages/*/src/**/*.ts` (mostly `unicorn/switch-case-braces` + `no-unnecessary-condition`). Surface via `npm run lint:packages`. Cleanup is its own session.
-- `.prisma/client/index-browser` Vite warning — cosmetic, harmless.
-
-**Test cases TODO'd in-file pending live exercise**:
-
-- Streaming sync tests (`streamBroadcast_server_v1.tests.ts`, `streamProgress_server_v1.tests.ts`, `streamToToken_server_v1.tests.ts`) have envelope-shape coverage only. Cancellation + backpressure tests are TODO'd because `ctx.callSync` doesn't observe individual stream chunks cross-process. To test B1/B2 end-to-end, boot the server and use a real socket client.
-- `sendReset_v1.tests.ts` hook-observation uses Redis-key delta assertion instead of `registerHook` listener (cross-process limitation).
+- **Secret-manager "met" path + rotation poll NOT live-tested** — needs the external secret server on `localhost:4000`. Only the URL-unset ("zonder") path is live-verified (113/0/11 green).
+- **Port gotcha**: a second project (`C:\youcomm\matchrix`) runs on port `:80`; LuckyStack-v2 is on `:81`. `npm run test` defaults to `:80` → tests the wrong server. Always run with `TEST_BASE_URL=http://localhost:81`.
+- **Stale `node_modules/@luckystack/env-resolver` symlink** — causes the `[ai:index] note: env-resolver ... skipped` line (15 vs 14 packages). Clears on `npm install`.
+- **Orphan `packages/devkit/src/templates/sync_client.template.ts`** — unused (registry only uses `_paired`/`_standalone`). NOT removed (`rm` is ask-first).
+- **Template excluded from main tsc/lint globs** — the `template/` edits are not gate-validated here; only the scaffold smoke (pre-publish) exercises them.
 
 ## Exact Next Step
 
-Boot the server (`npm run server`) and run the new test suite for one route end-to-end against a live process:
-
-```
-npm run test -- --filter settings/changePassword/v1
-```
-
-If it passes, sweep:
-
-```
-npm run test
-```
-
-Then exercise the new `preLogin` client hook manually — open the app, register a one-line `registerClientHook('preLogin', () => ({ stop: true, errorCode: 'login.suspended' }))` somewhere in `main.tsx`, attempt to log in, and confirm the local React state rolls back to null (no half-logged-in render). Remove the test handler afterwards.
+Run the secret-manager **"met" + rotation** live test (secret server on `localhost:4000`, secrets `TEST_V1..TEST_V5`): add `LUCKYSTACK_SECRET_MANAGER_URL=http://localhost:4000`, a `.secret-manager-token` file, and a pointer `MY_SECRET=TEST_V1` to `.env`; restart the server; via the dev-REPL confirm `process.env.MY_SECRET` resolved to the real value. Then publish a new server-side version for that key and confirm `process.env.MY_SECRET` updates **within ~30s without a restart** (the dev poll). Reminder: the running suite must target `:81` (`TEST_BASE_URL=http://localhost:81 npm run test`).
 
 ## Technical State
 
-**Files modified this session** (one-line notes; full diff in git):
+**Files modified this session** (new = NEW):
+- `server/bootstrap/initSecrets.ts` (NEW), `server/bootstrap/initSecrets.test.ts` (NEW), `packages/core/src/env.test.ts` (NEW) — secret-manager seam + envFiles tests.
+- `config.ts` — `secretManager` slot (`url`, `token`, `dev` rotation poll).
+- `server/server.ts` — `loadEnvFiles()` + `await resolveSecretsIfConfigured(...)`.
+- `server/sockets/socket.ts`, `luckystack/login/oauthProviders.ts` — env load via `loadEnvFiles()`.
+- `packages/core/src/env.ts` — `DEFAULT_ENV_FILES`/`getEnvFiles`/`loadEnvFiles` + `.loose()`.
+- `packages/devkit/src/supervisor.ts` — watch globs via `getEnvFiles()`.
+- `packages/test-runner/src/runAllTests.ts` — `ZodType` (was `ZodTypeAny`).
+- `packages/{core,sync,presence,test-runner,devkit}/package.json` — peer/manifest fixes.
+- `tsconfig.server.json`, `scripts/bundleServer.mjs`, `vitest.config.ts`, `.env_template` — secret-manager plumbing + docs.
+- Docs: `docs/ARCHITECTURE_SECRET_MANAGER.md`, `docs/PACKAGE_OVERVIEW.md`, `packages/{core,presence,test-runner}/CLAUDE.md`, `packages/{api,error-tracking,presence,router,test-runner}/README.md`.
+- Template: `packages/create-luckystack-app/template/{server/server.ts, config.ts, _dot_env_template}` (parity).
+- Auto-regenerated (do not hand-edit): `docs/AI_QUICK_INDEX.md`, `docs/AI_CAPABILITIES.md`, `docs/AI_PROJECT_INDEX.md`, `src/_sockets/*.generated.ts`, `server/prod/generatedApis.*-preset.ts`, `package-lock.json` (npm auto-synced after peer edits).
 
-- **A1 hooks**:
-  - `packages/core/src/clientHookBus.ts` — added `preLogin` + `dispatchVetoableClientHook` + types.
-  - `packages/core/src/react/sessionContext.ts` — added `proposeLogin`.
-  - `packages/core/src/client.ts` — exported new symbols.
-  - `packages/core/src/hooks/types.ts` — added `PostSyncAuthorizePayload` + map entry.
-  - `packages/sync/src/handleSyncRequest.ts` — `postSyncAuthorize` dispatch.
-  - `packages/login/src/hookPayloads.ts` — added pre-hook types + augmentations.
-  - `src/_providers/SessionProvider.tsx` + `packages/create-luckystack-app/template/src/_providers/SessionProvider.tsx` — use `proposeLogin`.
-  - `src/settings/_api/changePassword_v1.ts` + template mirror — vetoable pre-hook dispatch.
-  - `src/reset-password/_api/confirmReset_v1.ts` + template mirror — vetoable pre-hook dispatch.
-- **A2 lint**: `eslint.official.config.js`, `package.json` (lint:packages script), `packages/devkit/src/templateInjector.ts` (placement-warning export shape).
-- **B1+B2 streaming**: `packages/core/src/cancelRegistry.ts` (NEW), `packages/core/src/index.ts`, `packages/core/src/socketEvents.ts`, `packages/core/src/apiRequest.ts`, `packages/sync/src/syncRequest.ts`, `packages/sync/src/_shared/streamEmitters.ts`, `packages/sync/src/handleSyncRequest.ts`, `packages/sync/src/handleHttpSyncRequest.ts`, `packages/api/src/handleApiRequest.ts`, `packages/api/src/handleHttpApiRequest.ts`, `packages/server/src/loadSocket.ts`, `packages/devkit/src/templates/sync_server.template.ts`, `packages/devkit/src/templates/api.template.ts`, `packages/sync/docs/streaming.md` (new section 8).
-- **E Bun**: `package.json` (engines + 3 scripts), `scripts/checkBunCompat.mjs` (NEW), `docs/HOSTING.md` (new section).
-- **F tests**: 12× new `*.tests.ts` files under `src/`, `scripts/scaffoldRouteTest.mjs` (root-level route support).
-- **Side-fixes**: `packages/devkit/src/routeNamingValidation.ts` (ESM require), `packages/devkit/src/templates/page_dashboard.template.tsx` (RENAMED from `.ts`), `packages/devkit/src/templates/page_plain.template.tsx` (RENAMED), `packages/devkit/src/templateInjector.ts` (lookup table). `src/_tet/` deleted.
-- **Earlier session work** (pre-audit, also on this branch):
-  - `packages/devkit/src/routingRules.ts` + `routeNamingValidation.ts` + `loader.ts` + `templateInjector.ts` — `isRouteTestFile` helper to exclude `.tests.ts` from route walkers.
-  - `server/server.ts` + `server/sockets/socket.ts` + `server/utils/repl.ts` — fixed stale `./functions/*` imports after the `server/functions/*` → root `functions/*` move.
-  - `shared/sleep.ts` + `shared/tryCatch.ts` — direct file-path imports (not `@luckystack/core` barrel) to avoid bootUuid → node:crypto leak into Vite client bundle.
-  - `packages/core/src/client.ts` — added `sleep` + `tryCatch` to the browser-safe surface.
-  - `packages/create-luckystack-app/template/shared/sleep.ts` — pointed at `@luckystack/core/client`.
-
-**Auto-regenerated** (do not hand-edit):
-
-- `docs/AI_CAPABILITIES.md`, `docs/AI_QUICK_INDEX.md`, `src/_sockets/apiTypes.generated.ts`, `server/prod/generatedApis.*-preset.ts`.
-
-**Temporary / dev-only changes to revert before shipping**: None. Every change is production-intended.
+**Temporary / dev-only changes to revert before shipping**: None. The `secretManager.dev` poll is intended (dev-only, no-op in prod and when URL unset).
 
 **Environment**:
+- Servers running: LuckyStack-v2 on `:81` (supervisor + tsx `server/server.ts`), matchrix on `:80`, plus Redis + MongoDB. The `:81` server was auto-restarted by the supervisor after the `config.ts`/`server.ts` edits and boots clean.
+- Git: branch `chore/package-split-prep`, all changes unstaged, **nothing committed** (user controls commit cadence). Master is the PR base.
+- Pending: `npm install` (env-resolver symlink + lockfile), full `npm run build` (vite client) before the real publish, and `npm org create luckystack` before first publish.
 
-- Server NOT running (no dev process started this session).
-- Git: branch `chore/package-split-prep`, all changes unstaged. No commits made this session — user controls commit cadence.
-- No pending package installs. `eslint-plugin-n` was considered for A2 but deliberately skipped (would have required non-autonomous `npm install`).
-- Three background subagents completed (streaming, settings tests, reset-password+auth tests). No agents still running.
-
-**Plan reference**: `C:\Users\MathijsYouComm\.claude\plans\reflective-shimmying-starfish.md`.
+**Plan reference**: `C:\Users\MathijsYouComm\.claude\plans\wat-is-nou-het-humming-sonnet.md`.

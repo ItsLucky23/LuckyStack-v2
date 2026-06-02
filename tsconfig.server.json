@@ -64,6 +64,9 @@
       ],
       "@luckystack/server": [
         "./packages/server/src/index.ts"
+      ],
+      "@luckystack/secret-manager": [
+        "./packages/secret-manager/src/index.ts"
       ]
     },
     "lib": [

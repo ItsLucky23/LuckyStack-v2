@@ -4,7 +4,6 @@ import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 
 import { Toaster } from 'sonner'
 import 'src/index.css'
 import 'src/scrollbar.css'
-import VConsole from 'vconsole'
 
 import { mobileConsole } from 'config'
 import { LocationProvider } from '@luckystack/presence/client'
@@ -180,7 +179,13 @@ const router = createBrowserRouter([{
   children: routes
 }])
 
-if (mobileConsole) { new VConsole(); }
+//? Lazy-load the mobile debug console only when the toggle is on, so vconsole
+//? lands in its own chunk (not the main bundle) and is never downloaded by
+//? users who don't enable it.
+if (mobileConsole) {
+  const { default: VConsole } = await import('vconsole');
+  new VConsole();
+}
 
 const ErrorFallback = () => {
   const title = enJson.common['404'];

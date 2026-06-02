@@ -19,6 +19,19 @@ export type CustomRouteHandler = (
   ctx: RouteContext
 ) => Promise<boolean> | boolean;
 
+//? Phase a custom route runs in:
+//?  - `'post-params'` (default): runs after the request body is parsed by the
+//?    framework. Back-compat default for every existing registration.
+//?  - `'pre-params'`: runs BEFORE the body is read, so the handler receives the
+//?    raw, undrained `req` stream. Use for server-to-server webhooks that must
+//?    verify an HMAC over the raw body (the body is gone by post-params), or
+//?    streaming / multipart uploads that bypass the JSON body cap. Pair with
+//?    `registerOriginExemptPath` for header-less webhooks. CONTRACT: a
+//?    pre-params handler that starts reading the body MUST send its own
+//?    response; returning `false` WITHOUT consuming the body falls through to
+//?    the normal pipeline.
+export type CustomRoutePhase = 'pre-params' | 'post-params';
+
 export interface CreateLuckyStackServerOptions {
   /**
    * Port the HTTP server listens on. Resolution order:

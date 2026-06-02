@@ -243,6 +243,28 @@ const config = {
       },
     },
   },
+
+  /**
+   * Optional @luckystack/secret-manager wiring. When `url` is set AND the package
+   * is installed, server boot resolves `.env` pointers (`NAME=BASE_V<n>`) against
+   * the external secret-manager server and overwrites `process.env` with the real
+   * values in remote mode — an unresolved pointer or an unreachable server is a
+   * HARD boot failure. When `url` is empty, or the package isn't installed, boot
+   * falls through to the plain local env files: no resolution, no crash.
+   *
+   * The shared bearer token is NOT an env var — it lives in a gitignored
+   * single-line file referenced via `{ fromFile }`. See
+   * `docs/ARCHITECTURE_SECRET_MANAGER.md`.
+   */
+  secretManager: {
+    url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
+    token: { fromFile: '.secret-manager-token' },
+    //? Dev-only: poll the server every 30s for secret rotations (a new version
+    //? published server-side WITHOUT a local file change). `watch: false` because
+    //? the dev supervisor already restarts on `.env` changes. No-op in production
+    //? and when `url` is empty (init is skipped entirely).
+    dev: { watch: false, pollIntervalMs: 30_000 },
+  },
 };
  
 // ============================================

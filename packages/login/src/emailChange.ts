@@ -10,9 +10,9 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { getProjectConfig, getProjectName, redis } from '@luckystack/core';
+import { getProjectConfig, formatKey, redis } from '@luckystack/core';
 
-const tokenKey = (token: string): string => `${getProjectName()}-email-change:${token}`;
+const tokenKey = (token: string): string => formatKey('-email-change', token);
 
 export interface EmailChangePayload {
   userId: string;

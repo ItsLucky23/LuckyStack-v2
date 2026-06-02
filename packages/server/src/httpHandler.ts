@@ -23,8 +23,9 @@ import { handleAuthApiRoute } from './httpRoutes/authApiRoute';
 import { handleAuthCallbackRoute } from './httpRoutes/authCallbackRoute';
 import { handleApiRoute } from './httpRoutes/apiRoute';
 import { handleSyncRoute } from './httpRoutes/syncRoute';
-import { handleCustomRoutes } from './httpRoutes/customRoutes';
+import { handleCustomRoutes, handlePreParamsCustomRoutes } from './httpRoutes/customRoutes';
 import { handleStaticAndSpaFallback } from './httpRoutes/staticRoutes';
+import { isOriginExemptPath } from './originExemptRegistry';
 import type { HttpRouteContext, HttpRouteHandler } from './httpRoutes/types';
 
 const buildSessionCookieOptions = (
@@ -67,7 +68,9 @@ const setSecurityHeaders = (req: IncomingMessage, res: ServerResponse, origin: s
 };
 
 //? Routes that run BEFORE params parsing — they don't need (and shouldn't
-//? consume) the request body.
+//? consume) the request body. The framework fast-paths run first; consumer
+//? `'pre-params'` custom routes (webhooks / streaming uploads) run last, after
+//? the probes but before `getParams` drains the body.
 const PRE_PARAMS_ROUTES: HttpRouteHandler[] = [
   handleCsrfRoute,
   handleFaviconRoute,
@@ -75,6 +78,7 @@ const PRE_PARAMS_ROUTES: HttpRouteHandler[] = [
   handleReadyzRoute,
   handleHealthRoute,
   handleTestResetRoute,
+  handlePreParamsCustomRoutes,
 ];
 
 //? Routes that run AFTER params parsing.
@@ -96,12 +100,24 @@ const dispatchRoutes = async (handlers: HttpRouteHandler[], ctx: HttpRouteContex
   return false;
 };
 
-const enforceOriginPolicy = (req: IncomingMessage, res: ServerResponse): { origin: string; rejected: boolean } => {
+const enforceOriginPolicy = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  routePath: string,
+): { origin: string; rejected: boolean } => {
   //? Do NOT fall back to `req.headers.host` — host always equals the bound
   //? origin so non-browser callers (curl, native apps) would silently bypass
   //? `allowedOrigin()`. Only browsers attach Origin/Referer.
   const origin = req.headers.origin ?? req.headers.referer ?? '';
   const isStateChangingMethod = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+
+  //? Registered webhook / server-to-server prefixes opt out of the browser
+  //? origin gate — they authenticate via signature/HMAC in the handler, not via
+  //? Origin (which they never send). Empty by default; opt-in only. The handler
+  //? is still responsible for verifying the caller. See originExemptRegistry.
+  if (isOriginExemptPath(routePath)) {
+    return { origin, rejected: false };
+  }
 
   if (!origin) {
     //? No browser-attributable origin: fail-close on state-changing methods,
@@ -194,7 +210,15 @@ export const handleHttpRequest = async (
     config.http,
   );
 
-  const { origin, rejected } = enforceOriginPolicy(req, res);
+  //? Parse the path up-front so the origin gate can consult the exempt-path
+  //? registry (registered webhooks) before it would otherwise 403 a
+  //? header-less, state-changing request.
+  const url = req.url ?? '/';
+  const [routePathRaw, queryStringRaw] = url.split('?');
+  const routePath = routePathRaw ?? '/';
+  const queryString = queryStringRaw ?? '';
+
+  const { origin, rejected } = enforceOriginPolicy(req, res, routePath);
   if (rejected) return;
 
   setSecurityHeaders(req, res, origin);
@@ -235,10 +259,6 @@ export const handleHttpRequest = async (
   }
 
   const method = req.method;
-  const url = req.url ?? '/';
-  const [routePathRaw, queryStringRaw] = url.split('?');
-  const routePath = routePathRaw ?? '/';
-  const queryString = queryStringRaw ?? '';
 
   if (method !== 'GET' && method !== 'POST' && method !== 'PUT' && method !== 'DELETE') {
     res.statusCode = 404;

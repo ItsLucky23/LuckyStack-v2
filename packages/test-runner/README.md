@@ -14,7 +14,6 @@ Run all four layers against a running server:
 
 ```ts
 import {
-  walkEndpoints,
   runContractTests,
   runAuthEnforcementTests,
   runRateLimitTests,
@@ -22,16 +21,16 @@ import {
   resetServerState,
   logContractSummary,
 } from '@luckystack/test-runner';
-
-const endpoints = await walkEndpoints();
+import { apiMethodMap } from './src/_sockets/apiMethodMap.generated';
+import { apiMetaMap } from './src/_sockets/apiMetaMap.generated';
 
 const baseUrl = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80';
-const contract = await runContractTests({ endpoints, baseUrl });
+const contract = await runContractTests({ apiMethodMap, baseUrl });
 logContractSummary(contract);
 
-const auth = await runAuthEnforcementTests({ endpoints, baseUrl });
-const rate = await runRateLimitTests({ endpoints, baseUrl });
-const fuzz = await runFuzzTests({ endpoints, baseUrl });
+const auth = await runAuthEnforcementTests({ apiMethodMap, apiMetaMap, baseUrl });
+const rate = await runRateLimitTests({ apiMethodMap, apiMetaMap, baseUrl });
+const fuzz = await runFuzzTests({ apiMethodMap, baseUrl });
 
 await resetServerState({ baseUrl });
 ```
@@ -58,7 +57,7 @@ The fuzz layer is intentionally exhaustive and slow — wire it into nightly CI 
 
 | Export | Purpose |
 | --- | --- |
-| `walkEndpoints()` | Returns `EndpointDescriptor[]` from the generated map. |
+| `walkEndpoints(apiMethodMap)` | Returns `EndpointDescriptor[]` from the generated map. |
 | `runContractCheck(input)` / `runContractTests(input)` | Single endpoint / full sweep. |
 | `runAuthEnforcementCheck(input)` / `runAuthEnforcementTests(input)` | Auth layer. |
 | `runRateLimitCheck(input)` / `runRateLimitTests(input)` | Rate-limit layer. |

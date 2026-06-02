@@ -30,8 +30,17 @@ export type { ParsedServerArgv } from './argv';
 export {
   registerCustomRoute,
   getCustomRoutes,
+  getPreParamsCustomRoutes,
   clearCustomRoutes,
 } from './customRoutesRegistry';
+export type { RegisterCustomRouteOptions } from './customRoutesRegistry';
+export {
+  registerOriginExemptPath,
+  getOriginExemptPaths,
+  clearOriginExemptPaths,
+  isOriginExemptPath,
+} from './originExemptRegistry';
+export type { OriginExemptMatcher } from './originExemptRegistry';
 export {
   registerSecurityHeaders,
   getSecurityHeadersBuilder,
@@ -49,4 +58,5 @@ export type {
   StaticFileHandler,
   FaviconHandler,
   CustomRouteHandler,
+  CustomRoutePhase,
 } from './types';

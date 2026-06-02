@@ -50,14 +50,26 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `registerApiMethodMap(map: ApiMethodMap): void` | Register generated `apiMethodMap` so `apiRequest` can look up real HTTP methods. | -> docs/app-bootstrap.md |
 | `getRegisteredApiMethod(pagePath: string, apiName: string, version: string): HttpMethodLiteral \| undefined` | Lookup helper used by `isGetMethod`. | -> docs/app-bootstrap.md |
 | `isApiMethodMapRegistered(): boolean` | Detect whether the prefix-heuristic fallback is active. | -> docs/app-bootstrap.md |
-| `registerPrismaClient(client: PrismaClient): PrismaClient` | Swap the framework's default Prisma client (TLS, Accelerate, logger, ...). | -> docs/app-bootstrap.md |
-| `registerRedisClient(client: RedisClient): RedisClient` | Swap the framework's default ioredis client. | -> docs/app-bootstrap.md |
-| `getPrismaClient(): PrismaClient` | Read registered client or fall back to the lazy default resolver. | -> docs/app-bootstrap.md |
-| `getRedisClient(): RedisClient` | Read registered client or fall back to the lazy default resolver. | -> docs/app-bootstrap.md |
-| `isPrismaClientRegistered(): boolean` | Boot guard. | -> docs/app-bootstrap.md |
-| `isRedisClientRegistered(): boolean` | Boot guard. | -> docs/app-bootstrap.md |
-| `redis` | Proxy that forwards every call to the currently registered ioredis client. | -> docs/redis-adapter.md |
+| `registerPrismaClient(client: PrismaClient, key?: string): PrismaClient` | Register a Prisma client into a slot (default `'default'`). Pass a `key` for graded credentials (e.g. `'ro'`/`'rw'`) or per-tenant clients. | -> docs/app-bootstrap.md |
+| `registerRedisClient(client: RedisClient, key?: string): RedisClient` | Register an ioredis client into a slot (default `'default'`). | -> docs/app-bootstrap.md |
+| `getPrismaClient(): PrismaClient` | Read the `'default'` slot (registered client or lazy default resolver). | -> docs/app-bootstrap.md |
+| `getRedisClient(): RedisClient` | Read the `'default'` slot (registered client or lazy default resolver). | -> docs/app-bootstrap.md |
+| `getPrismaClientFor(key?: string): PrismaClient` | Read a specific slot. `'default'` falls back to the resolver; any other unregistered slot throws (never silently returns the privileged default). | -> docs/app-bootstrap.md |
+| `getRedisClientFor(key?: string): RedisClient` | Read a specific Redis slot (same semantics as `getPrismaClientFor`). | -> docs/app-bootstrap.md |
+| `getPrismaClientKeys(): string[]` / `getRedisClientKeys(): string[]` | Diagnostic — which slots have an explicitly-registered client. | -> docs/app-bootstrap.md |
+| `DEFAULT_CLIENT_KEY: 'default'` | The reserved slot backing every framework internal + the `prisma`/`redis` proxies. | -> docs/app-bootstrap.md |
+| `isPrismaClientRegistered(): boolean` | Boot guard — true when the `'default'` slot is registered. | -> docs/app-bootstrap.md |
+| `isRedisClientRegistered(): boolean` | Boot guard — true when the `'default'` slot is registered. | -> docs/app-bootstrap.md |
+| `resetClientsForTests(): void` | Test-only — drop every registered slot (default resolvers stay set). | -> docs/app-bootstrap.md |
+| `redis` | Proxy that forwards every call to the currently registered ioredis client. Applies `applyStrayKeyPrefix` to single-key commands as a best-effort namespace net (keys containing `:` pass through untouched). | -> docs/redis-adapter.md |
 | `getRedisConnectionOptions(): RedisConnectionOptions` | Single source of truth for `{ host, port, username?, password? }` (router reuses for cross-env probes). | -> docs/redis-adapter.md |
+| `formatKey(namespace: string, suffix?: string): string` | Build a namespaced Redis key through the active formatter. The single authority every framework key-site routes through (`-session`, `-activeUsers`, `-pwreset`, `-email-change`, `-oauth-state`, `:rate-limit`). Default reproduces historical key bytes (zero migration). | -> docs/redis-adapter.md |
+| `registerRedisKeyFormatter(fn: RedisKeyFormatter): void` | Override how every framework Redis key is namespaced (multi-tenant per-tenant prefixing). Must preserve the `<namespace-root>:<suffix>` join so `SCAN` enumeration still works. | -> docs/redis-adapter.md |
+| `getRedisKeyFormatter(): RedisKeyFormatter` / `defaultRedisKeyFormatter` / `resetRedisKeyFormatterForTests()` | Read the active formatter / the built-in default / test reset. | -> docs/redis-adapter.md |
+| `applyStrayKeyPrefix(key: string): string` | Project-prefix an un-namespaced (colon-free) key; pass-through for already-namespaced keys. Used by the `redis` proxy net. | -> docs/redis-adapter.md |
+| `acquireLease(name, ttlMs): Promise<string \| null>` | Acquire an exclusive Redis lease (`SET NX PX`). Returns an owner token, or null if held. Single-Redis best-effort (not Redlock) — the lease is a primitive; the renew loop is app code. | -> docs/redis-adapter.md |
+| `renewLease(name, token, ttlMs): Promise<boolean>` | Owner-checked compare-and-pexpire (Lua); extends only if `token` still holds the lease. | -> docs/redis-adapter.md |
+| `releaseLease(name, token): Promise<boolean>` | Owner-checked compare-and-delete (Lua); releasing another owner's lease is a no-op. | -> docs/redis-adapter.md |
 | `attachSocketRedisAdapter(io: SocketIOServer): void` | Wire `@socket.io/redis-adapter` with duplicated pub/sub clients so room broadcasts span instances. | -> docs/redis-adapter.md |
 | `setIoInstance(io: SocketIOServer \| null): void` | Module-level slot for the running Socket.io server. | -> docs/socket-bootstrap.md |
 | `getIoInstance(): SocketIOServer \| null` | Read the slot from framework code that needs to broadcast. | -> docs/socket-bootstrap.md |
@@ -168,6 +180,7 @@ Env vars read directly by core (via `env.ts` and call-time helpers):
 | `REDIS_PASSWORD` | (unset) | Optional ioredis auth. |
 | `PROJECT_NAME` | `'luckystack'` | Redis-prefix fallback in `getProjectName()`. |
 | `LUCKYSTACK_ENV` | (unset) | `resolveEnvKey()` first preference (boot UUID, router handshake). |
+| `LUCKYSTACK_ENV_FILES` | `.env,.env.local` | Ambient override for `getEnvFiles()` / `loadEnvFiles()` — comma-separated list of env files to load, "later overrides earlier". |
 
 `registerProjectConfig` slots (see `ProjectConfig` for full surface): `app.publicUrl`, `logging.*`, `rateLimiting.{enabled, store, redisKeyPrefix, defaultApiLimit, defaultIpLimit, windowMs, cleanupIntervalMs}`, `session.{basedToken, expiryDays, perBrowser, perUser, maxConcurrentPerUser, onConflict, notifyOldDeviceOnRevoke, projectName}`, `http.{sessionCookie*, requestBodyMaxBytes, healthEndpoint, liveEndpoint, readyEndpoint, testResetEndpoint, stream, securityHeaders, cors}`, `auth.{passwordPolicy, emailMaxLength, nameMaxLength, bcryptRounds, providerAccountStrategy, forgotPassword, passwordResetTtlSeconds, passwordResetBrand}`, `socket.{maxHttpBufferSize, pingTimeout, pingInterval}`, `sync.{streamThrottle, fanoutYieldEvery, fanoutYieldMs}`, `offlineQueue.{maxSize, maxAgeMs, dropPolicy}`, `dev.{hotReloadDebounceMs, watcherStabilityThresholdMs, watcherPollIntervalMs, warnOnMissingInputType}`, `paths.*`, `defaultLanguage`, `defaultTheme`, `socketActivityBroadcaster`, `socketStatusIndicator`, `locationProviderEnabled`, `loginRedirectUrl`.
 

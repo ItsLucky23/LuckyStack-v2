@@ -63,10 +63,14 @@
   },
   "peerDependencies": {
     "socket.io": "^4.8.0",
-    "react": "^19.2.0"
+    "react": "^19.2.0",
+    "react-router-dom": "^7.0.0"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "react-router-dom": {
       "optional": true
     },
     "socket.io": {

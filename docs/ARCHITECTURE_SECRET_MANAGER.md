@@ -30,38 +30,46 @@ Rotating a secret = publishing a NEW version on the server (`..._V6`), never edi
 
 ## Consumer wiring
 
-Two touch-points. First, `config.ts` registers the wiring config:
+Two touch-points, both wired in this repo. First, `config.ts` exposes a `secretManager` slot on the exported config object (NOT `registerProjectConfig` — this is consumer boot glue, not framework config):
 
 ```ts
-import { registerProjectConfig } from '@luckystack/core';
-
-registerProjectConfig({
+const config = {
+  // ...
   secretManager: {
-    url: process.env.LUCKYSTACK_SECRET_MANAGER_URL!,
+    url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
     token: { fromFile: '.secret-manager-token' },
-    source: 'hybrid',
   },
-});
+};
 ```
 
-Second, `server.ts` calls `initSecretManager` as its **first line**, before any framework code reads `process.env`:
+Second, `server.ts` resolves it through the boot seam in `server/bootstrap/initSecrets.ts`, right after the `.env` files load and before any secret is read (the email sender reads `RESEND_API_KEY`, Sentry reads `SENTRY_DSN`, Prisma/Redis/JWT read theirs lazily):
 
 ```ts
-import { initSecretManager } from '@luckystack/secret-manager';
+import { resolveSecretsIfConfigured } from './bootstrap/initSecrets';
 import projectConfig from '../config';
 
-await initSecretManager(projectConfig.secretManager);
+await resolveSecretsIfConfigured(projectConfig.secretManager);
 
-// ... rest of server bootstrap
+// ... registerEmailConfig / initializeSentry / bootstrapLuckyStack
 ```
 
-> `initSecretManager` must run before `bootstrapLuckyStack` / `@luckystack/core` config reads, because resolved secrets need to be in `process.env` by the time those run.
+The seam decides remote-vs-local for you, so a project without the package — or with the URL unset — boots unchanged:
+
+| Situation | Behavior |
+| --- | --- |
+| `url` empty | Skip resolution — boot on the plain local env files. |
+| `url` set, package **not** installed | Warn + skip — boot on local env files (no crash). |
+| `url` set, package installed | `initSecretManager` in `'remote'` mode — **fail-fast**: an unresolved pointer or an unreachable server throws and stops the boot. |
+
+> A top-level `await` in `server.ts` is fine — it is an ESM entry and the prod bundle emits `format: esm`. Resolution finishes before `bootstrapLuckyStack` / any `process.env` secret read. `@luckystack/secret-manager` is marked external in `scripts/bundleServer.mjs`, so the prod bundle builds and boots whether or not the package is installed.
 
 ## Modes
 
+The boot seam pins `source: 'remote'` (fail-fast) and treats an empty `url` as "off" (plain local env) — the recommended setup. The package itself supports three modes; call `initSecretManager` directly if you need `'local'` / `'hybrid'`:
+
 | `source` | Behavior |
 | --- | --- |
-| `'remote'` (default) | Resolve from the server. A missing pointer or an unreachable server **throws** — production hard-stop. |
+| `'remote'` (default, used by the seam) | Resolve from the server. A missing pointer or an unreachable server **throws** — production hard-stop. |
 | `'local'` | No network. Pointers untouched. Tests + offline dev. |
 | `'hybrid'` | Try the server; on failure warn and keep whatever `process.env` already holds. |
 

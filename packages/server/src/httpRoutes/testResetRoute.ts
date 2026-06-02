@@ -2,7 +2,7 @@ import {
   clearAllHooks,
   clearAllRateLimits,
   getProjectConfig,
-  getProjectName,
+  formatKey,
   redis,
   tryCatch,
 } from '@luckystack/core';
@@ -35,11 +35,11 @@ export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePa
   cleared.push('rateLimits');
 
   //? Flush sessions + activeUsers Redis keys so integration tests start from
-  //? a clean slate. Project name comes from the shared `getProjectName()`
-  //? helper — single source of truth (see also session.ts, rateLimiter.ts).
-  const projectName = getProjectName();
-  const sessionPattern = `${projectName}-session:*`;
-  const activeUsersPattern = `${projectName}-activeUsers:*`;
+  //? a clean slate. Patterns are derived through the shared `formatKey(...)`
+  //? authority so they track any registered key formatter (see also
+  //? session.ts, sessionAdapter.ts, rateLimiter.ts).
+  const sessionPattern = `${formatKey('-session', '')}:*`;
+  const activeUsersPattern = `${formatKey('-activeUsers', '')}:*`;
 
   const scanAndDelete = async (pattern: string, label: string): Promise<number> => {
     const [error, deleted] = await tryCatch(async () => {

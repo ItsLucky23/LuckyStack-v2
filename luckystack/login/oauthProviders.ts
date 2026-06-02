@@ -5,7 +5,7 @@
 //? OAuthProvider object. For a custom provider (Okta, Apple, X, ...) drop a
 //? raw object into the array — see `OAuthProvider` type for the shape.
 
-import { config as loadEnv } from 'dotenv';
+import { loadEnvFiles } from '@luckystack/core';
 import {
   registerOAuthProviders,
   credentialsProvider,
@@ -17,8 +17,7 @@ import {
   type OAuthProvider,
 } from '@luckystack/login';
 
-loadEnv({ path: '.env' });
-loadEnv({ path: '.env.local', override: true });
+loadEnvFiles();
 
 const prod = process.env.NODE_ENV !== 'development';
 const secure = process.env.SECURE === 'true';

@@ -10,11 +10,35 @@ const EnvSchema = z.object({
   REDIS_HOST: z.string().min(1).default('127.0.0.1'),
   REDIS_PORT: z.string().regex(/^\d+$/).default('6379'),
   PROJECT_NAME: z.string().min(1).default('luckystack'),
-}).passthrough();
+}).loose();
 
 export type RuntimeEnv = z.infer<typeof EnvSchema>;
 
 let cachedEnv: RuntimeEnv | null = null;
+
+//? Single source of truth for which env files the framework loads, in order
+//? ("later overrides earlier"). Default `['.env', '.env.local']`. Override at
+//? runtime with the AMBIENT env var `LUCKYSTACK_ENV_FILES` (comma-separated) — it
+//? must be a real environment variable, not a key inside one of the .env files
+//? (those are only read AFTER this list is resolved).
+export const DEFAULT_ENV_FILES = ['.env', '.env.local'];
+
+export const getEnvFiles = (): string[] => {
+  const override = process.env.LUCKYSTACK_ENV_FILES;
+  if (override) {
+    const list = override.split(',').map((entry) => entry.trim()).filter(Boolean);
+    if (list.length > 0) return list;
+  }
+  return DEFAULT_ENV_FILES;
+};
+
+export const loadEnvFiles = (): void => {
+  //? First file is non-override (a real ambient env var wins); each later file
+  //? overrides earlier ones, matching the historical `.env` -> `.env.local` order.
+  for (const [index, file] of getEnvFiles().entries()) {
+    loadDotenv({ path: file, override: index > 0 });
+  }
+};
 
 const applyResolvedDefaultsToProcessEnv = (resolvedEnv: RuntimeEnv) => {
   process.env.NODE_ENV = process.env.NODE_ENV ?? resolvedEnv.NODE_ENV;
@@ -32,8 +56,7 @@ export const bootstrapEnv = (): RuntimeEnv => {
     return cachedEnv;
   }
 
-  loadDotenv({ path: '.env' });
-  loadDotenv({ path: '.env.local', override: true });
+  loadEnvFiles();
 
   const parsed = EnvSchema.safeParse(process.env);
   if (!parsed.success) {

@@ -85,7 +85,7 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 
 ## Peer dependencies
 
-- **Required**: `zod@^3.25.0` (peer), `@luckystack/core@^0.1.0` (dependency — leest `getApiMethodMapPath()` voor de default map-locatie).
+- **Required**: `zod@^4.0.0` (peer), `socket.io-client@^4.8.0` (peer — `streamWatcher.ts` opent een tweede socket voor `ctx.watchStream`), `@luckystack/core@^0.1.0` (dependency — leest `getApiMethodMapPath()` voor de default map-locatie).
 - **Required server-side**: `@luckystack/server` met `/_test/reset` endpoint gemount (default ingebouwd, gated op `NODE_ENV !== 'production'`).
 - **Required generated artefact**: `apiMethodMap.generated.ts` (en `apiMetaMap.generated.ts` voor de auth/rate-limit layers), geproduceerd door `@luckystack/devkit`.
 - **Optional**: geen — fixtures, reporters en custom layers zijn pure-JS opt-in.

@@ -40,11 +40,14 @@ import handleApiRequest from '@luckystack/api';
 import { handleHttpApiRequest } from '@luckystack/api';
 
 io.on('connection', socket => {
-  socket.on('apiRequest', (msg, ack) => handleApiRequest(socket, msg, ack));
+  socket.on('apiRequest', msg => handleApiRequest({ msg, socket, token }));
 });
 
-httpServer.on('request', (req, res) => {
-  if (req.url?.startsWith('/api/')) return handleHttpApiRequest(req, res);
+httpServer.on('request', async (req, res) => {
+  if (req.url?.startsWith('/api/')) {
+    const result = await handleHttpApiRequest({ name: body.name, data: body.data, token });
+    res.end(JSON.stringify(result));
+  }
 });
 ```
 
@@ -82,8 +85,8 @@ Do not wrap `apiRequest` in `unknown` / `any` shims (see `.claude/CLAUDE.md` rul
 
 | Export | Purpose |
 | --- | --- |
-| `handleApiRequest(socket, msg, ack)` | Socket.io request handler (default export). |
-| `handleHttpApiRequest(req, res)` | HTTP fallback for `/api/*` routes; supports SSE streaming. |
+| `handleApiRequest({ msg, socket, token })` | Socket.io request handler (default export). |
+| `handleHttpApiRequest({ name, data, token, ... })` | HTTP fallback for `/api/*` routes; returns `Promise<ApiNetworkResponse>` and supports SSE streaming via a `stream` callback. |
 | Type: `ApiHttpStreamEvent` | SSE event shape emitted by streaming endpoints. |
 
 ## Related architecture docs

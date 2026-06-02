@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 //? Target: the pure Redis key-builders `sessionKeyFor` / `activeUsersKeyFor`.
-//? They depend only on `getProjectName()` from @luckystack/core. The rest of
+//? They route through `formatKey(...)` from @luckystack/core. The rest of
 //? session.ts (saveSession/getSession/...) drives sockets/redis/hooks and is
 //? out of scope for a no-infrastructure unit test. We mock the entire core
 //? surface session.ts imports at load time so importing the module is safe.
+//? The mocked `formatKey` reproduces the real default formatter so the asserted
+//? key bytes match production (proving the zero-migration default shape).
 const getProjectNameMock = vi.fn<() => string>();
 
 vi.mock("@luckystack/core", () => ({
@@ -14,6 +16,10 @@ vi.mock("@luckystack/core", () => ({
   getLogger: vi.fn(() => ({ warn: vi.fn(), error: vi.fn(), debug: vi.fn(), info: vi.fn() })),
   getProjectConfig: vi.fn(() => ({ session: { expiryDays: 1 } })),
   getProjectName: () => getProjectNameMock(),
+  formatKey: (namespace: string, suffix = "") => {
+    const root = /^[-:]/.test(namespace) ? `${getProjectNameMock()}${namespace}` : `${getProjectNameMock()}:${namespace}`;
+    return suffix === "" ? root : `${root}:${suffix}`;
+  },
   tryCatch: vi.fn(),
   redis: {},
 }));

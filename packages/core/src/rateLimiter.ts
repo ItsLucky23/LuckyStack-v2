@@ -9,9 +9,10 @@
  * implementing the `RateLimitStrategy` interface.
  */
 
-import { getProjectConfig, getProjectName } from './projectConfig';
+import { getProjectConfig } from './projectConfig';
 import tryCatch from './tryCatch';
 import { redis } from './redis';
+import { formatKey } from './redisKeyFormatter';
 import { getLogger } from './loggerRegistry';
 
 export interface CheckRateLimitParams {
@@ -61,7 +62,7 @@ const rateLimitStore = new Map<string, RateLimitEntry>();
 //? module is imported. If the project never registers, the defaults from
 //? projectConfig.ts take effect (memory store, 'rate-limit' prefix).
 const getRedisPrefix = (): string =>
-  `${getProjectName()}:${getProjectConfig().rateLimiting.redisKeyPrefix}`;
+  formatKey(`:${getProjectConfig().rateLimiting.redisKeyPrefix}`, '');
 
 const isRedisMode = (): boolean => getProjectConfig().rateLimiting.store === 'redis';
 const isRateLimitingEnabled = (): boolean => getProjectConfig().rateLimiting.enabled;

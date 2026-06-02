@@ -73,8 +73,8 @@ await running.stop();
 
 | Export | Purpose |
 | --- | --- |
-| `startRouter(input)` | Boot the router. Returns `{ httpServer, stop }`. |
-| `createServiceTargetResolver(input)` / `parseServiceFromPath(url)` | Map a request URL to a target backend by service key. |
+| `startRouter(input)` | Boot the router. Returns `{ port, resolver, healthPoller, healthStore, stop }`. |
+| `createServiceTargetResolver(input)` / `parseServiceFromPath(pathname)` | Map a request URL to a target backend by service key. |
 | `startHealthPoller(input)` | Begin polling every backend's `/livez` (or configured probe path) and write to Redis. |
 | `createHttpProxy(input)` | Low-level HTTP proxy with retry + timeout. |
 | `createWsProxy(input)` | Low-level WebSocket upgrade proxy. |

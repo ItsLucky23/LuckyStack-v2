@@ -5,10 +5,9 @@
 //? Argv shape: npm run server -- <bundle[,bundle...]> [port]
 import '@luckystack/server/parseArgv';
 
-import { config as loadEnv } from 'dotenv';
+import { loadEnvFiles } from '@luckystack/core';
 
-loadEnv({ path: '.env' });
-loadEnv({ path: '.env.local', override: true });
+loadEnvFiles();
 
 //? Side-effect imports — these must run before the framework boots so that
 //? `getProjectConfig`, `getDeployConfig`, `getServicesConfig`, `getRuntimeMaps`,
@@ -31,12 +30,22 @@ import {
 } from '@luckystack/email';
 import { serveFile, serveFavicon } from './prod/serveFile';
 import { registerNotificationHooks } from './hooks/notifications';
+import { resolveSecretsIfConfigured } from './bootstrap/initSecrets';
 import projectConfig, { sentry as sentryConfigInput } from '../config';
 
 //? @luckystack/email and @luckystack/error-tracking each own their config registry
 //? (split out of core in 0.1.0). Register the slices from `config.ts` here on
 //? the server side so the server-only adapters never get dragged into the
 //? Vite client bundle.
+//?
+//? But first: resolve @luckystack/secret-manager pointers (NAME=BASE_V<n>) into
+//? process.env. The email sender reads RESEND_API_KEY and Sentry reads SENTRY_DSN
+//? just below; Prisma/Redis/JWT read theirs lazily at call time. A top-level await
+//? is fine here (ESM entry, esbuild emits `format: esm`) and runs before these
+//? registrations. No-op when the URL is unset or the package isn't installed —
+//? boot then continues on the local env files.
+await resolveSecretsIfConfigured(projectConfig.secretManager);
+
 registerEmailConfig({
   from: projectConfig.email.from,
   required: projectConfig.email.required,

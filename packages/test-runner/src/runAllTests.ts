@@ -13,7 +13,7 @@ import { runFuzzTests } from './runFuzzTests';
 import { runCustomTests } from './customTests';
 import type { CustomTestResult, RunCustomTestsSummary } from './customTests';
 import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
-import type { ZodTypeAny } from 'zod';
+import type { ZodType } from 'zod';
 
 type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
 type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, {
@@ -21,7 +21,7 @@ type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<s
   auth: { login: boolean; additional?: Record<string, unknown>[] };
   rateLimit?: number | false;
 }>>>>>>;
-type ApiInputSchemas = Partial<Record<string, Partial<Record<string, Partial<Record<string, ZodTypeAny | undefined>>>>>>;
+type ApiInputSchemas = Partial<Record<string, Partial<Record<string, Partial<Record<string, ZodType | undefined>>>>>>;
 
 export interface RunAllTestsInput {
   apiMethodMap: ApiMethodMap;

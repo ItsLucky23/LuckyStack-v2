@@ -1275,3 +1275,115 @@ Recommendation: do NOT chase these via speculative API surface. Instead ship a p
 **Files touched**: package.json (zod ^4; prisma terug ^6 in 4b); packages/{core,devkit,test-runner}/package.json (zod peer ^4); packages/test-runner/src/schemaSampleInput.ts; package-lock.json; regenerated src/_sockets/apiTypes.generated.ts + apiInputSchemas.generated.ts (gitignored).
 
 **Notes / next**: Stage 4 klaar binnen wat het ecosysteem toelaat — **TS 6 ✅, Vite 8 ✅, Zod 4 ✅; ESLint 10 + react-x/dom GEHOUDEN (upstream), Prisma 7 GEHOUDEN (officieel geen Mongo-support)**. Rest = Stage 5 (peer-tabellen in PACKAGE_OVERVIEW bijwerken, volledige `npm run build` + `pack:dry`, AI-indexen). Gepauzeerd. Nothing committed.
+
+## 2026-06-02 10:49 — Secret-manager in de boot geWIRED (WS1) + met/zonder-fallback
+
+**User prompt (summary)**: Verschil unit- vs normale test? Draaien die tegen de packages of tegen de voorbeeldmappen (playground/settings)? Aanbevelingen? En vooral: secret-manager met ÉN zonder de package "geïnstalled" goed kunnen testen zodat de boot beide kanten blijft werken. Scope = volledige pre-publish backlog; dev-modus = remote (fail-fast) MAAR alleen als de package geïnstalleerd is + de URL in config staat; anders gewoon de lokale env-files pakken (geen crash).
+
+**What I did (WS1 — secret-manager wiren)**:
+- **Boot-seam** `server/bootstrap/initSecrets.ts` (+ unit-test `initSecrets.test.ts`, 4 cases): `resolveSecretsIfConfigured(config, importer?)`. URL leeg → skip (lokale env). URL gezet + package afwezig (dynamic import faalt) → warn + skip (lokale env, GEEN crash). URL gezet + package aanwezig → `initSecretManager({ url, token, source: 'remote' })` = fail-fast op een onopgeloste pointer / onbereikbare server. De injecteerbare `importer` is de testnaad. Bewuste, door de gebruiker bevestigde afwijking van het peer-dep-guard-beleid (secret-manager faalt-OPEN bij afwezigheid).
+- **config.ts**: `secretManager`-slot op het geëxporteerde config-object (`url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? ''`, `token: { fromFile: '.secret-manager-token' }`). Bewust NIET in registerProjectConfig (consumer-boot-glue, geen framework-config).
+- **server/server.ts**: top-level `await resolveSecretsIfConfigured(projectConfig.secretManager)` ná de twee loadEnv-regels en vóór de eerste secret-consumer (registerEmailSender leest RESEND_API_KEY, initializeSentry leest SENTRY_DSN; Prisma/Redis/JWT lazy op call-time). Correct: secrets worden call-time gelezen en `.env`-loads zijn non-override, dus opgeloste waarden blijven staan.
+- **Plumbing**: tsconfig.server.json alias `@luckystack/secret-manager → packages/secret-manager/src/index.ts`; `scripts/bundleServer.mjs` markeert de package external (dynamic import achter de URL-guard; prod-bundel bouwt + boot ook zónder de package); `vitest.config.ts` include uitgebreid met `server/**/*.test.ts` zodat de seam-test meedraait.
+- **Docs gelijkgetrokken met de werkelijkheid** (audit-blocker): `.env_template` secret-manager-sectie herschreven (+ echte `LUCKYSTACK_SECRET_MANAGER_URL=` key) en `docs/ARCHITECTURE_SECRET_MANAGER.md` Consumer-wiring + Modes herschreven (config-slot + boot-seam + remote/lokale-fallback i.p.v. de niet-bestaande registerProjectConfig/hybrid-variant).
+
+**Verificatie**: `lint`/`lint:server` 0 · `tsc -b` 0 · `vitest` **48 files / 707 tests** (4 nieuwe seam-tests, was 47/703) · `build:packages` 14/14 · `buildServer` (esbuild esm + node22, top-level await + external secret-manager) OK; bundel bevat `import("@luckystack/secret-manager")` ongebundeld + de top-level await behouden. AI-snapshots geregenereerd. De LIVE met/zonder-matrix (localhost:4000, TEST_V1..V5) is een developer-actie (server start) en is aan de gebruiker overgedragen.
+
+**Files touched**: server/bootstrap/initSecrets.ts (nieuw); server/bootstrap/initSecrets.test.ts (nieuw); config.ts; server/server.ts; tsconfig.server.json; scripts/bundleServer.mjs; vitest.config.ts; .env_template; docs/ARCHITECTURE_SECRET_MANAGER.md; docs/AI_QUICK_INDEX.md + AI_CAPABILITIES.md + AI_PROJECT_INDEX.md (geregenereerd).
+
+**Notes / next**: Template-wiring (create-luckystack-app) bewust NIET geforceerd → open vraag of scaffolds secret-manager standaard meekrijgen (een NodeNext-consumer kan niet type-`import`-en tegen een optioneel-niet-geïnstalleerde package). Resterende backlog: WS2 envFiles (open vraag default), WS3 peer-deps, WS4 per-route tests (open vraag scope), WS5 manifest/doc-drift (o.a. `scripts/generateAiIndex.mjs` noemt nog het verwijderde env-resolver), WS6 Stage 5 + `pack:dry`. Nothing committed.
+
+## 2026-06-02 11:11 — WS2 envFiles + WS3 peer-deps + WS5/WS6-pack (vervolg, zelfde prompt)
+
+Na de drie gebruikers-beslissingen: envFiles-default ONGEWIJZIGD, scaffold-wiring opt-in documenteren, alle 21 route-tests deze ronde.
+
+**WS3 — peer-deps (geverifieerd tegen de échte imports, niet blind op de audit)**:
+- core: react/react-dom floor `^19.0.0 → ^19.2.0` (gelijk aan sync/presence + de package-docs).
+- sync: `react` nu **optional** (alleen `/client` gebruikt 'm) via nieuwe `peerDependenciesMeta`.
+- presence: `react-router-dom ^7.0.0` als **optional** peer toegevoegd — `client/LocationProvider.tsx` importeert `useLocation`/`Outlet` (geverifieerd).
+- test-runner: `socket.io-client ^4.8.0` peer toegevoegd — `streamWatcher.ts` importeert `io` (geverifieerd).
+- `@prisma/client`-peers bewust gehouden waar de package prisma direct gebruikt (expliciet = duidelijker contract; geen churn).
+
+**WS2 — configureerbare envFiles (default ONGEWIJZIGD `['.env','.env.local']`)**:
+- `@luckystack/core` `env.ts`: nieuw `DEFAULT_ENV_FILES` / `getEnvFiles()` / `loadEnvFiles()` (single source of truth, "later overrides earlier"); ambient override via `LUCKYSTACK_ENV_FILES` (comma-separated). `bootstrapEnv()` gebruikt nu `loadEnvFiles()`.
+- Alle hardgecodeerde load/watch-punten omgezet: `server/server.ts`, `server/sockets/socket.ts`, `luckystack/login/oauthProviders.ts` (nu `loadEnvFiles()` via core), `devkit/supervisor.ts` watch-globs (`...getEnvFiles()`).
+- `core/env.test.ts` (3 cases). Default-gedrag onveranderd.
+- Zod-4 deprecatie-leftovers opgeruimd die mijn edits in de eslint-cache her-triggerden: `core/env.ts` `.passthrough()→.loose()`, `test-runner/runAllTests.ts` `ZodTypeAny→ZodType` (afronding Stage 4c).
+
+**WS5 (deels) + WS6 (pack)**:
+- `devkit/package.json`: `homepage` + `bugs` toegevoegd (enige pakket zonder — consistency-gate).
+- `.env_template`: `LUCKYSTACK_ENV_FILES` gedocumenteerd (ambient override).
+- `npm run pack:dry` → **14/14 OK** (alle peer-/manifest-wijzigingen publish-clean).
+
+**Verificatie**: `lint`+`lint:server` 0 · `lint:packages` 0 · `tsc -b` 0 · `vitest` **49 files / 710 tests** (+ `core/env.test`) · `build:packages` 14/14 · `pack:dry` 14/14. AI-snapshots geregenereerd.
+
+**Files touched**: packages/{core,sync,presence,test-runner,devkit}/package.json; packages/core/src/env.ts (+ env.test.ts); packages/test-runner/src/runAllTests.ts; server/server.ts; server/sockets/socket.ts; luckystack/login/oauthProviders.ts; packages/devkit/src/supervisor.ts; .env_template; docs/AI_*.md (geregenereerd).
+
+**Notes / next (open backlog)**: **WS4** = alle 21 per-route business-logic tests (gebruiker koos "alle 21 nu") — vereist een DRAAIENDE server (`npm run test`) om écht te valideren; autonoom kan ik ze alleen compile-gaten. Beste pad: server up → schrijven + live verifiëren. **WS5-rest**: `core/CLAUDE.md` env-exports documenteren, test-runner/presence CLAUDE peer-secties bijwerken, 5 stale README-signatures, secret-manager scaffold opt-in-note in de template. **WS6-rest**: `PACKAGE_OVERVIEW.md` peer-tabellen (zod 4 / ts 6 / react 19.2). Stale `node_modules/@luckystack/env-resolver` symlink → `npm install` ruimt de ai:index skip-note op. Nothing committed.
+
+## 2026-06-02 11:42 — WS5/WS6 afgerond + live integration-verificatie (113/0/11)
+
+**Live verificatie (valideert WS1+WS2 end-to-end)**: `npm run test` tegen de DRAAIENDE LuckyStack-v2 server → **113 passed / 0 failed / 11 skipped** (contract 18/18 · auth 9/9 · rate-limit 5/16 +11 skip · fuzz 18/18 · custom 63/63). De server draait mijn gewijzigde code (secret-manager-await, `loadEnvFiles`) → WS1 "zonder"-pad + WS2 env-loading zijn dus live bewezen.
+- **WS4 bleek al klaar**: de 63 custom (per-route business-logic) tests bestaan volledig en slagen allemaal; de "TODO-stub"-claim uit het publish-audit was verouderd. Niets te schrijven.
+- **Port-valkuil**: een TWEEDE project (`C:\youcomm\matchrix`) draait gelijktijdig en pakte poort `:80`; LuckyStack-v2 zit op **`:81`**. De default `TEST_BASE_URL=:80` testte dus matchrix → 73 false-failures (élke route `api.notFound`, ook `echo`). Met `TEST_BASE_URL=http://localhost:81` → groen. Geen code-issue (git diff raakt geen routing-code).
+
+**WS5 — manifest/doc-drift**:
+- CLAUDE peer-secties bijgewerkt: test-runner (`zod ^3.25→^4` + `socket.io-client ^4.8` peer), presence (`react-router-dom ^7.0.0` als gedeclareerde optional peer i.p.v. "indirect"), core (`LUCKYSTACK_ENV_FILES` env-var rij).
+- **5 README-signatures** gefixt via 5-agent workflow (alleen feitelijke drift, source-geverifieerd, geen prose-churn): api (`handleApiRequest`/`handleHttpApiRequest` → object-param), router (`RunningRouter` shape, `parseServiceFromPath(pathname)`), presence (4 lifecycle-signaturen + `clientSwitchedTab` = Set), test-runner (`walkEndpoints(apiMethodMap)` + `apiMetaMap` in run*Tests), error-tracking (`startSpan(name, op)`).
+- Orphan `packages/devkit/src/templates/sync_client.template.ts` (registry gebruikt alleen `_paired`/`_standalone`) → **NIET verwijderd** (`rm` is ask-first); ter beoordeling gemeld.
+
+**WS6 — Stage 5 publish-contract**:
+- `PACKAGE_OVERVIEW.md` peer-tabellen bijgewerkt: core `zod ^4` + `react/react-dom ^19.2`, devkit `typescript ^6` + `zod ^4`, test-runner `zod ^4` + `socket.io-client ^4.8` (+ "four→five layers" gecorrigeerd).
+
+**Verificatie**: `lint`/`lint:packages` 0 · `tsc -b` 0 · `vitest` 49 files/710 · `build:packages` 14/14 · `pack:dry` 14/14 · **live `npm run test` 113/0/11 (poort :81)**. AI-snapshots geregenereerd. Git status: alleen `.md` gewijzigd door de README-workflow (geen code-drift).
+
+**Files touched**: packages/{api,error-tracking,presence,router,test-runner}/README.md; packages/{core,presence,test-runner}/CLAUDE.md; docs/PACKAGE_OVERVIEW.md; docs/AI_*.md (geregenereerd).
+
+**Notes / next**: Volledige pre-publish backlog (WS1-WS6) rond + groen. Open developer-acties: secret-manager "met"-test (URL→localhost:4000), `npm install` (env-resolver symlink + lock-sync), optioneel de orphan `sync_client.template.ts` verwijderen, volledige `npm run build` (vite client) vóór de echte publish. Nothing committed.
+
+## 2026-06-02 13:42 — Finishing touches: secret-manager rotatie-poll + scaffold-template pariteit
+
+Na gebruikers-keuze: dev-reload = alleen rotatie-**poll** (file-watch uit, want supervisor herstart al op `.env`-change); scaffold-template gelijktrekken.
+
+**A. Secret-manager rotatie-poll (main repo)**:
+- `server/bootstrap/initSecrets.ts`: `SecretManagerBootConfig` uitgebreid met optionele `dev` (= `SecretManagerConfig['dev']`), doorgegeven aan `initSecretManager({ url, token, source: 'remote', dev })`.
+- `config.ts`: secretManager-slot krijgt `dev: { watch: false, pollIntervalMs: 30_000 }` — poll-only. No-op in productie én wanneer `url` leeg is (init wordt dan niet aangeroepen, dus geen netwerk).
+- `initSecrets.test.ts`: +1 case (`dev` wordt doorgegeven); bestaande remote-case bijgewerkt met `dev: undefined`.
+
+**B. Scaffold-template pariteit** (`packages/create-luckystack-app/template/`):
+- `server/server.ts`: de twee hardcoded `loadEnv`-regels → `loadEnvFiles()` uit `@luckystack/core` (nieuwe projecten krijgen configureerbare envFiles) + een **commented** secret-manager opt-in-blok in de IIFE.
+- `config.ts`: commented `secretManager`-slot-voorbeeld.
+- `_dot_env_template`: secties voor `LUCKYSTACK_ENV_FILES` + secret-manager pointer/opt-in.
+
+**Verificatie**: `lint`/`lint:server` 0 · `lint:packages` 0 · `tsc -b` 0 · `vitest` **49 files / 711 tests** (+dev-passthrough) · `build:packages` 14/14 · **live `npm run test` 113/0/11 (poort :81)** — de supervisor herstartte de :81-server met de nieuwe config en boot schoon (poll inert want URL leeg). AI-snapshots geregenereerd. De template valt buiten de main tsc/lint-globs (gevalideerd per inspectie; scaffold-smoke = pre-publish developer-actie).
+
+**Files touched**: server/bootstrap/initSecrets.ts (+ .test.ts); config.ts; packages/create-luckystack-app/template/{server/server.ts, config.ts, _dot_env_template}; docs/AI_*.md (geregenereerd).
+
+**Notes / next**: secret-manager "met"+rotatie-test (developer-actie, secret-server `localhost:4000`): zet URL + pointer, bump server-side een nieuwe versie → `process.env` update binnen ~30s zónder restart (via dev-REPL). Verder ongewijzigd open: orphan `sync_client.template.ts` (rm ask-first), volledige `npm run build` (vite client) + commit/push (gebruiker). Nothing committed.
+
+## 2026-06-02 15:50 — Framework-first remediation R1–R5 + D-MT (pre-publish)
+
+Feasibility-analyse (ultracode: 6 read-only agents + eigen lezing van `httpHandler`/`getParams`/`clients`/`csrfMiddleware`) bevestigde alle 5 sparring-gaps (`sparring/FRAMEWORK_REMEDIATION.md`) als echt + oplosbaar binnen de extension-point-filosofie; geen cast, geen nieuwe runtime-dep, geen breaking change (alles additief). Gebruiker koos: **alle 5 vóór publish**; R3 = **formatKey-autoriteit + proxy-net** (na verificatie dat transparante full-proxy fragiel is — keys staan bij scan/eval/variadic-del/multi níét op arg-0, en een statische proxy draagt geen tenant-context).
+
+**R2 — keyed client-registry** (`@luckystack/core`): `clients.ts` → Map-keyed slots; `registerPrismaClient(client, key?)` + `getPrismaClientFor(key?)` (+ Redis), `getXClientKeys()`, `resetClientsForTests()`, `DEFAULT_CLIENT_KEY`. `getPrismaClient()`/proxies = default-slot (framework-internals onveranderd). Niet-default unregistered slot throwt (nooit silent privileged fallback). +`clients.test.ts` (10).
+
+**R3 — registerRedisKeyFormatter + proxy-net** (`@luckystack/core`): nieuw `redisKeyFormatter.ts` (`formatKey(ns, suffix)`, `registerRedisKeyFormatter`, default reproduceert legacy key-bytes EXACT → zero migration). redis-proxy wrapt single-key-commando's met `applyStrayKeyPrefix` (skip bij `:` → álle framework-keys + bootUuid onaangeroerd). 9 key-sites omgezet naar `formatKey` (session/sessionAdapter/passwordReset/emailChange/login-oauth/rateLimiter/testReset). +`redisKeyFormatter.test.ts` (9); `session.test.ts` mock bijgewerkt (formatKey).
+
+**R5 — lease-primitive** (`@luckystack/core`): nieuw `lease.ts` (`acquireLease` SET NX PX, `renewLease`/`releaseLease` owner-checked Lua), keys via `formatKey('lease',…)`, single-Redis best-effort (geen Redlock, gedocumenteerd). +`lease.test.ts` (8).
+
+**R1+R4 — pre-params webhook/upload-seam** (`@luckystack/server`): R1 en R4 = dezelfde seam (getParams draint body vóór custom routes; PRE_PARAMS-fase bestond al). `registerCustomRoute(handler, {phase:'pre-params'|'post-params'})` → pre-params krijgt ruwe `req`; nieuw `originExemptRegistry` (`registerOriginExemptPath`, fail-closed default) geconsulteerd in `enforceOriginPolicy` (routePath nu vóór origin-check geparset). +`originExemptRegistry.test.ts` (5) + phase-tests (5). Security-doc `docs/ARCHITECTURE_HTTP.md` (threat-model exemptie≠auth + GitLab-HMAC + streaming-upload worked examples) = harde publish-voorwaarde.
+
+**D-MT — multi-tenant-doc**: `docs/ARCHITECTURE_MULTI_TENANCY.md` (tenant=Workspace: Prisma `$extends` where-injection + R2 keyed clients + R3 formatter + per-workspace secrets; RBAC blijft app-domein).
+
+**Verificatie (autonoom, groen)**: `lint:packages` 0 · `tsc -b` 0 · `vitest` **53 files / 748 tests** (+37: clients 10, redisKeyFormatter 9, lease 8, originExempt 5, phase 5) · `build:packages` 14/14 · `pack:dry` 14/14. CLAUDE.md (core+server) function-indexen + root docs-tabel bijgewerkt; `ai:index` geregenereerd.
+
+**Files touched**: packages/core/src/{clients.ts, redisKeyFormatter.ts(new), redis.ts, rateLimiter.ts, lease.ts(new), index.ts} + 3 nieuwe `.test.ts`; packages/login/src/{session.ts, sessionAdapter.ts, passwordReset.ts, emailChange.ts, login.ts, session.test.ts}; packages/server/src/{httpHandler.ts, customRoutesRegistry.ts(+test), originExemptRegistry.ts(new+test), types.ts, index.ts, httpRoutes/{customRoutes.ts, testResetRoute.ts}}; packages/{core,server}/CLAUDE.md; docs/{ARCHITECTURE_HTTP.md(new), ARCHITECTURE_MULTI_TENANCY.md(new), AI_QUICK_INDEX.md}; CLAUDE.md.
+
+**Notes / next**: **LIVE SWEEP nog te draaien (developer-actie)** — vereist herstart van de `:81`-server (tsx pakt `packages/*/src` via tsconfig-paths; de supervisor herstart NIET op package-src-changes). Na restart: `TEST_BASE_URL=http://localhost:81 npm run test` → verwacht ≥113/0/11 (R3 byte-preservation + R1/R4 origin/CSRF-regressie). Webhook/upload-integratie-acceptatie = handmatig via de recipe in `ARCHITECTURE_HTTP.md`. `npm install` nog nodig vóór schone publish (env-resolver symlink). Nothing committed (solo, gebruiker commit aan einde).
+
+## 2026-06-02 16:28 — Client build-warnings opgeruimd (vite-tsconfig-paths native + vconsole lazy)
+
+- `vite.config.ts`: `vite-tsconfig-paths`-plugin vervangen door Vite 8's native `resolve.tsconfigPaths: true` (deprecation-warning weg; native volgt de references-only root-tsconfig — build geverifieerd: 488 modules, alle `@luckystack/*`/`config`/`src/*`-paths resolven). De plugin-dep is nu ongebruikt in `package.json` (`npm uninstall vite-tsconfig-paths` optioneel — niet gedaan, install is ask-first).
+- `src/main.tsx`: vconsole van statische import → **dynamische import** achter de `mobileConsole`-toggle (top-level await). vconsole zit nu in een eigen lazy chunk (`vconsole.min-*.js` ~281 kB) i.p.v. de hoofdbundle → wordt alleen gedownload als de toggle aan staat.
+- Resterende build-warnings zijn onschadelijk + buiten scope: de `[EVAL]`-warning komt uit vconsole's eigen geminificeerde code (trusted); de >500 kB chunk is de **hoofd-app-bundle** (1.2 MB / 355 kB gzip), niet vconsole — desgewenst later op te lossen met route-code-splitting of `build.chunkSizeWarningLimit`.
+- **Verificatie**: `npm run lint` 0 · `npm run build` OK. Alleen consumer-files (`src/main.tsx`, `vite.config.ts`) — buiten de package-gates. Nothing committed.

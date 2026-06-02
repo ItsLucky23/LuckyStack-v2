@@ -9,17 +9,40 @@
 //?
 //? The original `customRoutes` option on `CreateLuckyStackServerOptions`
 //? still works — it's appended to the registry at boot and runs last.
+//?
+//? Two phases (see `CustomRoutePhase`): `'post-params'` (default — runs after
+//? the body is parsed) and `'pre-params'` (runs before the body is read, so
+//? the handler gets the raw `req` stream — webhooks + streaming uploads).
 
-import type { CustomRouteHandler } from './types';
+import type { CustomRouteHandler, CustomRoutePhase } from './types';
 
+export interface RegisterCustomRouteOptions {
+  /** Pipeline phase the handler runs in. Defaults to `'post-params'`. */
+  phase?: CustomRoutePhase;
+}
+
+//? `handlers` backs the default `'post-params'` phase. `getCustomRoutes()`
+//? returns this array by reference (callers + tests rely on the clear-in-place
+//? semantics), so keep it as the post-params store.
 const handlers: CustomRouteHandler[] = [];
+const preParamsHandlers: CustomRouteHandler[] = [];
 
-export const registerCustomRoute = (handler: CustomRouteHandler): void => {
+export const registerCustomRoute = (
+  handler: CustomRouteHandler,
+  options: RegisterCustomRouteOptions = {},
+): void => {
+  if (options.phase === 'pre-params') {
+    preParamsHandlers.push(handler);
+    return;
+  }
   handlers.push(handler);
 };
 
 export const getCustomRoutes = (): readonly CustomRouteHandler[] => handlers;
 
+export const getPreParamsCustomRoutes = (): readonly CustomRouteHandler[] => preParamsHandlers;
+
 export const clearCustomRoutes = (): void => {
   handlers.length = 0;
+  preParamsHandlers.length = 0;
 };

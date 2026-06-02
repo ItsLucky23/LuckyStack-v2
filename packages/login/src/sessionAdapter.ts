@@ -8,7 +8,7 @@
 //? (CSRF minting, hook dispatch, socket emission, single-session
 //? enforcement) stay in session.ts and call the adapter to read/write.
 
-import { redis, tryCatch, getProjectName } from '@luckystack/core';
+import { redis, tryCatch, formatKey } from '@luckystack/core';
 
 export interface SessionAdapter {
   /** Human-readable identifier (used in logs/diagnostics). */
@@ -64,8 +64,8 @@ export interface SessionAdapter {
  * effect without reloading this module.
  */
 
-const sessionKey = (token: string): string => `${getProjectName()}-session:${token}`;
-const activeUsersKey = (userId: string): string => `${getProjectName()}-activeUsers:${userId}`;
+const sessionKey = (token: string): string => formatKey('-session', token);
+const activeUsersKey = (userId: string): string => formatKey('-activeUsers', userId);
 
 export const redisSessionAdapter: SessionAdapter = {
   name: 'redis',
@@ -114,7 +114,7 @@ export const redisSessionAdapter: SessionAdapter = {
   },
 
   async listAll() {
-    const pattern = `${getProjectName()}-session:*`;
+    const pattern = `${formatKey('-session', '')}:*`;
     const collected: { token: string; raw: string }[] = [];
     let cursor = '0';
 
@@ -133,7 +133,7 @@ export const redisSessionAdapter: SessionAdapter = {
           const raw = values[idx];
           if (raw) {
             collected.push({
-              token: k.replace(`${getProjectName()}-session:`, ''),
+              token: k.replace(`${formatKey('-session', '')}:`, ''),
               raw,
             });
           }

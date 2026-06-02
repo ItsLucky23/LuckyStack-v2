@@ -14,6 +14,10 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/devkit"
   },
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/devkit#readme",
+  "bugs": {
+    "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
+  },
   "keywords": [
     "luckystack",
     "dev-tools",

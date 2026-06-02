@@ -6,7 +6,7 @@ import {
   getCsrfConfig,
   getLogger,
   getProjectConfig,
-  getProjectName,
+  formatKey,
   tryCatch,
 } from '@luckystack/core';
 
@@ -334,7 +334,7 @@ const revokeUserSessions = async (userId: string, exceptToken?: string | null): 
 //? Legacy key-builders preserved as exports for downstream code that
 //? assumed a stable Redis layout (admin tooling, dev REPL scripts). New
 //? callers should use the active SessionAdapter instead.
-const sessionKeyFor = (token: string): string => `${getProjectName()}-session:${token}`;
-const activeUsersKeyFor = (userId: string): string => `${getProjectName()}-activeUsers:${userId}`;
+const sessionKeyFor = (token: string): string => formatKey('-session', token);
+const activeUsersKeyFor = (userId: string): string => formatKey('-activeUsers', userId);
 
 export { saveSession, getSession, deleteSession, getAllSessions, revokeUserSessions, sessionKeyFor, activeUsersKeyFor };

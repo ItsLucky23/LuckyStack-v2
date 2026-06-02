@@ -12,7 +12,7 @@ import bcrypt from 'bcryptjs';
 /* eslint-disable import-x/no-named-as-default-member -- accessing genSalt/hash/compare via the default import is the documented pattern */
 import { randomBytes } from 'node:crypto';
 
-import { getProjectConfig, getProjectName, redis } from '@luckystack/core';
+import { getProjectConfig, formatKey, redis } from '@luckystack/core';
 
 import { validatePassword } from './passwordPolicy';
 import { getUserAdapter } from './userAdapter';
@@ -21,7 +21,7 @@ import { getUserAdapter } from './userAdapter';
 //? source of truth — see also session.ts, rateLimiter.ts, login.ts). Avoids
 //? the module-load capture bug where dotenv timing could put tokens under
 //? the wrong namespace.
-const tokenKey = (token: string): string => `${getProjectName()}-pwreset:${token}`;
+const tokenKey = (token: string): string => formatKey('-pwreset', token);
 
 /**
  * Create a one-time password-reset token bound to a user id. Stored in Redis

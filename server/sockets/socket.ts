@@ -1,14 +1,10 @@
-import { config as loadEnv } from 'dotenv';
-loadEnv({ path: '.env' });
-loadEnv({ path: '.env.local', override: true });
-
 import type { Server as HttpServer } from 'node:http';
 
 import handleApiRequest from "./handleApiRequest";
 import { getSession, saveSession } from "../../functions/session";
 import { Server as SocketIOServer } from 'socket.io';
 import handleSyncRequest from "./handleSyncRequest";
-import { allowedOrigin, attachSocketRedisAdapter, setIoInstance } from '@luckystack/core';
+import { allowedOrigin, attachSocketRedisAdapter, loadEnvFiles, setIoInstance } from '@luckystack/core';
 import type { apiMessage, syncMessage, BaseSessionLayout } from '@luckystack/core';
 import { initActivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from '@luckystack/presence';
 import { locationProviderEnabled, logging, SessionLayout, socketActivityBroadcaster } from '../../config';
@@ -19,6 +15,10 @@ import {
   buildLeaveRoomResponseEventName,
   socketEventNames,
 } from '../../shared/socketEvents';
+
+//? Defensive re-load through the shared env-file list (idempotent; the boot entry
+//? already loaded these, but this keeps the module self-sufficient if imported alone).
+loadEnvFiles();
 
 //? Per-token lock to serialize session mutations (prevents read-modify-write races)
 const sessionLocks = new Map<string, Promise<void>>();

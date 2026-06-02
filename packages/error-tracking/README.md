@@ -34,7 +34,7 @@ Set `SENTRY_DSN` in your environment to enable. Without it, every export is a sa
 | `captureException(error, context?)` | Forward to Sentry; called by `tryCatch` automatically. |
 | `captureMessage(msg, level?, context?)` | Manual breadcrumb-style logging. |
 | `setSentryUser(user \| null)` | Attach session identity (called by `@luckystack/login` on login/logout). |
-| `startSpan(opts, fn)` | Performance tracing wrapper — used by API/sync request handlers. |
+| `startSpan(name, op)` | Performance tracing wrapper — used by API/sync request handlers. |
 | `registerSentryConfig(input)` / `getSentryConfig()` | Per-package config registry. Owned by this package; not part of `@luckystack/core`'s `ProjectConfig`. |
 
 ## What gets auto-instrumented

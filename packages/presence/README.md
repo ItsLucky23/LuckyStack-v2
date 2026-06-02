@@ -73,10 +73,10 @@ Payloads (augmented onto `HookPayloads` via `packages/presence/src/hookPayloads.
 | Export | Purpose |
 | --- | --- |
 | `registerPresenceHooks()` | One-shot wiring at server boot. |
-| `socketLeaveRoom(socket, roomCode)` | Programmatic room leave with peer notification. |
-| `initActivityBroadcaster(io)` | Manual init for the broadcaster (wired automatically by `@luckystack/server`). |
-| `socketConnected(socket)` / `socketDisconnecting(socket, reason)` | Lifecycle helpers. |
-| `clientSwitchedTab(socket, tab)` | Mark a client as backgrounded without disconnecting. |
+| `socketLeaveRoom({ token, socket, newPath })` | Programmatic room leave with peer notification. |
+| `initActivityBroadcaster({ token, socket })` | Manual init for the broadcaster (wired automatically by `@luckystack/server`). |
+| `socketConnected({ token, io })` / `socketDisconnecting({ token, reason, socket })` | Lifecycle helpers. |
+| `clientSwitchedTab` (`Set<string>`) | Token-set of clients backgrounded without disconnecting. |
 | State maps: `disconnectTimers`, `tempDisconnectedSockets` | Inspect reconnect timer state. The `disconnectReasonsWeIgnore` / `disconnectReasonsWeAllow` exports were removed in pass-2 (2026-05-07); configure those via `registerPresenceConfig({ ignoreReasons, allowReasons })` instead. |
 | `registerPresenceConfig(input)` / `getPresenceConfig()` / `DEFAULT_PRESENCE_CONFIG` | Presence-specific config registry. Types: `PresenceConfig`, `PresenceConfigInput`, `DisconnectTimers`. |
 

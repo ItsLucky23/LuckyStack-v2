@@ -4,7 +4,7 @@ import { asOAuthUserData, getOAuthProviders, isFullOAuthProvider, type FullOAuth
 import { getPostLoginRedirect } from './redirectResolver';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { URLSearchParams } from 'node:url';
-import { tryCatch, redis as redisClient, getUploadsDir, dispatchHook, getLogger, getProjectName } from '@luckystack/core';
+import { tryCatch, redis as redisClient, getUploadsDir, dispatchHook, getLogger, formatKey } from '@luckystack/core';
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { saveSession } from "./session"
@@ -38,7 +38,7 @@ const { escape, isEmail } = validator;
 //? `auth.oauthStateProjectNameFallback` config field which could silently
 //? drift from `session.projectName`.
 const getOAuthStateKey = (providerName: string, state: string): string => {
-  return `${getProjectName()}-oauth-state:${providerName}:${state}`;
+  return formatKey('-oauth-state', `${providerName}:${state}`);
 };
 
 export const createOAuthState = async (providerName: string): Promise<string | null> => {
