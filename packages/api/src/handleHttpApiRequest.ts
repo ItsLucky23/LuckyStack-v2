@@ -325,15 +325,18 @@ async function runHandleHttpApiRequestInner(
       });
     }
 
-  if (!user) {
-    return buildNetworkError({
-      response: { status: 'error', errorCode: 'auth.forbidden' },
-      fallbackHttpStatus: 403,
-    });
-  }
-
-  // Auth validation: check additional requirements
-  const authResult = validateRequest({ auth, user });
+  //? NO bare `if (!user) -> auth.forbidden` here. Public routes
+  //? (auth.login: false) must be callable without a session — exactly like the
+  //? socket API handler (handleApiRequest) and both sync handlers.
+  //? `validateRequest` is the single source of truth for `additional` auth
+  //? predicates. (This handler previously forbade ALL anonymous HTTP calls,
+  //? diverging from the other three transports and making public routes
+  //? unreachable over HTTP — e.g. the test-runner contract/rate-limit sweeps.)
+  //? `user` may be null on a public route; validateRequest tolerates it (and
+  //? only the login/additional predicates read it). Same `user!` shape the
+  //? socket API handler and both sync handlers use.
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const authResult = validateRequest({ auth, user: user! });
   if (authResult.status === 'error') {
     if (shouldLogDev()) {
       getLogger().warn(`http-api: auth failed for ${name}`, { route: name, errorCode: authResult.errorCode, transport: 'http' });
@@ -392,7 +395,15 @@ async function runHandleHttpApiRequestInner(
 
   // Global per-IP bucket across all APIs
   const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
-  if (defaultIpLimit !== false && defaultIpLimit > 0) {
+  //? Skip the global per-IP ABUSE limit for loopback traffic in non-production.
+  //? A developer (and the test suite) hammering localhost should not rate-limit
+  //? itself — this keeps the test runner scalable to any number of cases. Note
+  //? this only skips the cross-route `:api:all` bucket; PER-ROUTE limits still
+  //? apply, and production (NODE_ENV=production) is unaffected.
+  const requesterIsLoopback = process.env.NODE_ENV !== 'production'
+    && (requesterIp === '127.0.0.1' || requesterIp === '::1' || requesterIp === '::ffff:127.0.0.1'
+      || (typeof requesterIp === 'string' && requesterIp.startsWith('127.')));
+  if (!requesterIsLoopback && defaultIpLimit !== false && defaultIpLimit > 0) {
     const ipBucket = requesterIp ?? 'unknown';
     const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${ipBucket}:api:all`,

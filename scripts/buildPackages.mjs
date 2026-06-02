@@ -26,7 +26,7 @@ import process from 'node:process';
 
 const WAVES = [
   ['core'],
-  ['email', 'login', 'devkit', 'router', 'test-runner', 'create-luckystack-app', 'docs-ui', 'env-resolver'],
+  ['email', 'login', 'devkit', 'router', 'test-runner', 'create-luckystack-app', 'docs-ui', 'secret-manager'],
   // error-tracking depends on @luckystack/login for the postLogout hook
   // payload augmentation (auto-instrumentation type-checks 'postLogout' as
   // a keyof HookPayloads, which is only populated when login is in scope).

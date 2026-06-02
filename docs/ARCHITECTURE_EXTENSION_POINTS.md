@@ -333,20 +333,23 @@ Post-scaffold runs `npm install` + `npx prisma generate`. We do NOT run
 
 ---
 
-## `@luckystack/env-resolver` (new)
+## `@luckystack/secret-manager` (new)
 
 | Symbol | Purpose |
 |---|---|
-| `initEnvResolver({ source: 'remote'|'local'|'hybrid', remote, fallback })` | Boot-time call that fetches env from a central server. |
-| `refreshEnvResolver(...)` | Hot reload — re-fetches, bypassing cache. |
-| `getCachedResolution()` | Inspect the in-memory cache. |
+| `initSecretManager({ url, token, source?, pointerPattern?, fetchImpl?, dev? })` | Boot-time call. Resolves committed `.env` pointers against the central server and overwrites `process.env` with the real values. |
+| `refreshSecretManager()` | Hot reload — re-resolves the captured pointers (used by dev watch/poll). |
+| `getCachedResolution()` | Inspect the in-memory cache (pointer -> value). |
 
-Required local keys when using remote: `LUCKYSTACK_ENV_URL`,
-`LUCKYSTACK_ENV_TOKEN`, `LUCKYSTACK_ENV_PROJECT`,
-`LUCKYSTACK_ENV_ENVIRONMENT`. Remote values only fill `undefined`
-process.env keys — explicit local overrides always win.
+Commit pointers, not secrets: `OPENAI_KEY=OPENAI_AUTHORIZATION_KEY_V5` in `.env`
+is resolved to the real `sk-...` value. The shared bearer token lives in a
+gitignored single-line file (`token: { fromFile: '.secret-manager-token' }`).
+A value that is not pointer-shaped (`<BASE>_V<n>`) is treated as a literal and
+left untouched — local overrides win for free.
 
-Server-side of the remote env system is out of scope (separate SaaS).
+Server-side of the secret-manager system lives in a separate, running repo
+(`luckystack-secret-manager`); its `POST /resolve` wire contract is summarized in
+`docs/ARCHITECTURE_SECRET_MANAGER.md`.
 
 ---
 

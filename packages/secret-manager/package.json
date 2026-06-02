@@ -1,0 +1,54 @@
+{
+  "name": "@luckystack/secret-manager",
+  "version": "0.1.0",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "description": "Rotation-aware secret resolver client for LuckyStack. Commit `.env` pointers (e.g. OPENAI_KEY=OPENAI_AUTHORIZATION_KEY_V5) instead of real secrets; at boot this client resolves them against an external append-only secret-manager server and writes the real values into process.env. Supports local / remote / hybrid modes + opt-in dev hot reload.",
+  "license": "MIT",
+  "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
+    "directory": "packages/secret-manager"
+  },
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/secret-manager#readme",
+  "bugs": {
+    "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
+  },
+  "keywords": [
+    "luckystack",
+    "secrets",
+    "secret-manager",
+    "env",
+    "dotenv",
+    "rotation",
+    "versioning"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CLAUDE.md",
+    "docs",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch",
+    "test": "vitest run"
+  }
+}

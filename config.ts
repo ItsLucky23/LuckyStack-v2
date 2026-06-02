@@ -170,8 +170,10 @@ const config = {
 
   /**
    * Rate limiting configuration for API requests.
-   * Uses in-memory storage (suitable for single-server deployments).
-   * 
+   * Uses Redis-backed storage so counters are shared across processes and
+   * instances (correct for multi-instance deploys behind the router). Switch
+   * `store` to 'memory' only for a single-process deployment.
+   *
    * @example Per-API override:
    * ```typescript
    * // In any _api/*.ts file
@@ -181,7 +183,7 @@ const config = {
    */
   rateLimiting: {
     /** Storage backend used for rate limiting counters. Use 'redis' for multi-instance consistency. */
-    store: 'memory' as 'memory' | 'redis',
+    store: 'redis' as 'memory' | 'redis',
     /** Redis key namespace suffix used when store is set to 'redis'. */
     redisKeyPrefix: 'rate-limit',
     /** Fallback requests per minute for any API that does not export its own rateLimit. */

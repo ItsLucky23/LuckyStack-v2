@@ -49,7 +49,7 @@
 
 | Package | Use case | Required peers | Optional peers |
 |---|---|---|---|
-| `@luckystack/env-resolver` | Wiring client (not a secret manager) that populates `process.env` at boot from an external env-server using committed V-references (e.g. `OPENAITOKEN=OPENAITOKEN_V4`); supports `local` / `remote` / `hybrid` modes. The external secret-manager server itself lives in a separate, project-independent git repository (not yet implemented). | none (uses global `fetch`, requires Node >= 20) | any `fetch` polyfill (e.g. `undici`) for non-Node-20 hosts |
+| `@luckystack/secret-manager` | Rotation-aware secret resolver client. Commit `.env` pointers (e.g. `OPENAI_KEY=OPENAI_AUTHORIZATION_KEY_V5`) instead of real secrets; at boot it resolves them against an external append-only secret-manager server and writes the real values into `process.env`. Supports `local` / `remote` / `hybrid` modes + opt-in dev hot reload. The companion server lives in a separate, project-independent git repo (`luckystack-secret-manager`). | none (uses global `fetch`, requires Node >= 20) | any `fetch` polyfill (e.g. `undici`) for non-Node-20 hosts |
 
 ## Scaffolding
 
@@ -73,7 +73,7 @@ Quick lookup: feature -> which package(s) to suggest.
 | Bootstrap a new project | `npx create-luckystack-app` |
 | Run integration tests | `@luckystack/test-runner` |
 | Browse generated docs in dev | `@luckystack/docs-ui` |
-| Resolve env vars from remote source | `@luckystack/env-resolver` |
+| Resolve secrets from a central server (committed pointers) | `@luckystack/secret-manager` |
 | Hot-reload + type-map gen in dev | `@luckystack/devkit` |
 
 ## Decision Matrix

@@ -8,7 +8,7 @@
 
 1. **Origin policy.** No `Host` fallback — non-browser callers cannot silently bypass CORS on state-changing methods.
 2. **Security headers.** Framework defaults are emitted for every response. A consumer-registered builder may override or extend.
-3. **CSRF middleware.** Cookie-mode state-changing requests to `/api/*`, `/sync/*`, and `/auth/api/*` require an `x-csrf-token` header matching the session-bound token; mismatches return 403 and dispatch the `csrfMismatch` hook.
+3. **CSRF middleware.** Cookie-mode state-changing requests to `/api/*`, `/sync/*`, and `/auth/api/*` require a CSRF header (default `x-csrf-token`, renamable via `registerCsrfConfig({ headerName })` from `@luckystack/core`) matching the session-bound token; mismatches return 403 and dispatch the `csrfMismatch` hook.
 4. **`/_test/reset` fail-closed.** Requires `NODE_ENV` to be exactly `development` or `test` AND a non-empty `TEST_RESET_TOKEN` env var. An unset token does NOT mean "no auth"; it means the route is permanently 403.
 
 Plus two extension seams:
@@ -91,7 +91,7 @@ Lives in `enforceCsrfOnStateChangingRequest` (`csrfMiddleware.ts`). Runs after o
 When the predicate is true:
 
 1. `getSession(token)` resolves the session. If no session, skip middleware (downstream auth check rejects).
-2. Read `x-csrf-token` header (first value when array).
+2. Read the configured CSRF header (`getCsrfConfig().headerName`, default `x-csrf-token`; first value when array).
 3. If provided and equal to `session.csrfToken`, allow.
 4. Otherwise: dispatch the `csrfMismatch` hook with `{ route, method, requestId, userId, providedToken: Boolean(provided) }` (note: presence-only, never the value), then respond `403 application/json { status: 'error', errorCode: 'auth.csrfMismatch', message: 'CSRF token missing or invalid. Fetch /auth/csrf first.' }`.
 

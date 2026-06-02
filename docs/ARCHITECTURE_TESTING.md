@@ -1,16 +1,119 @@
 # Architecture — Testing
 
-> Spec for the two test layers shipped with `@luckystack/test-runner`. Last updated 2026-05-22.
+> Spec for LuckyStack's two test systems: vitest **unit tests** (package internals) and the `@luckystack/test-runner` **integration** layers. Last updated 2026-06-02.
 
 ## TL;DR
 
+LuckyStack has **two independent test systems**:
+
 ```
-npm run test                                # both layers
-npm run scaffold:test <page>/<name>/<v>     # create a per-route stub
+npx vitest run                              # UNIT tests — framework/package internals, no server, ~1s
+npm run test                                # INTEGRATION tests — your API/sync routes, needs a live server
+npm run scaffold:test <page>/<name>/<v>     # create a per-route integration-test stub
 ```
 
-- **Auto-sweep** runs against every endpoint automatically. You write nothing.
-- **Per-route business-logic tests** live next to the route source. You write one file per route covering the assertions the sweep can't reach.
+- **Unit tests (vitest)** — fast, no infrastructure. Test pure functions / building blocks inside the `@luckystack/*` packages (and your own helpers).
+- **Integration auto-sweep (`@luckystack/test-runner`)** — runs against every endpoint automatically. You write nothing.
+- **Integration per-route tests** — live next to the route source. You write one file per route for the business-logic the sweep can't reach.
+
+See "Two test systems" below for when to use which.
+
+---
+
+## Two test systems
+
+| | Unit tests (vitest) | Integration tests (`@luckystack/test-runner`) |
+|---|---|---|
+| **What it tests** | Pure functions / building blocks: *"does `validatePassword('abc')` return the right reason key?"* | Whole routes end-to-end: *"does `POST /api/settings/updateUser` behave correctly?"* |
+| **Needs a server?** | No — Node sandbox, mocks DB/Redis/socket. | Yes — `npm run server` + real Redis + Prisma. |
+| **How to run** | `npx vitest run` (~1s) | `npm run test` (after booting the server) |
+| **File suffix / location** | `*.test.ts` next to the code (`packages/*/src/**`, your `src/_functions/**`). | `*.tests.ts` next to the route (`src/<page>/_api/<name>_v<N>.tests.ts`). |
+| **Who writes them** | You / the AI, for non-trivial logic. | Auto-sweep is free; you write per-route `.tests.ts` for business logic. |
+
+Rule of thumb: **unit = does this function compute the right value?** · **integration = does this route behave correctly when wired to everything?**
+
+> Note the suffix: vitest unit files end in **`.test.ts`**; integration per-route files end in **`.tests.ts`** (plural). The two runners discover different suffixes, so they never collide.
+
+---
+
+## Unit tests (vitest)
+
+Unit tests verify a single function in isolation — no server, DB, or network. The framework packages are built around DI registries (`registerPrismaClient`, `registerRedisClient`, `registerLogger`, `getProjectConfig`, …) precisely so their logic can be tested by swapping those seams for mocks.
+
+### Running
+
+```
+npx vitest run        # run once (CI / pre-commit)
+npx vitest            # watch mode while developing
+```
+
+Config lives in the root `vitest.config.ts` (Node environment, includes `packages/*/src/**/*.test.ts`). Unit-test files are excluded from `lint:packages`, so test-only patterns don't trip the framework lint rules.
+
+### Anatomy of a unit test
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { tryCatch } from './tryCatch';
+
+describe('tryCatch', () => {
+  it('returns [null, result] when the function resolves', async () => {
+    const [error, result] = await tryCatch(async () => 42);
+    expect(error).toBeNull();
+    expect(result).toBe(42);
+  });
+
+  it('returns [error, null] when the function throws', async () => {
+    const boom = new Error('boom');
+    const [error, result] = await tryCatch(async () => { throw boom; });
+    expect(error).toBe(boom);
+    expect(result).toBeNull();
+  });
+});
+```
+
+`describe` groups related cases; `it` is one case; `expect(...)` asserts. That is the whole model.
+
+### Mocking a dependency
+
+When the code under test imports a sibling module, replace it with `vi.mock` so the test stays pure. Example — testing the default user adapter with no real database:
+
+```ts
+import { describe, it, expect, vi } from 'vitest';
+
+//? Replace @luckystack/core's `prisma` proxy with a fake delegate of spies.
+const prismaUser = vi.hoisted(() => ({ findUnique: vi.fn() }));
+vi.mock('@luckystack/core', () => ({ prisma: { user: prismaUser } }));
+
+import { defaultPrismaUserAdapter } from './userAdapter';
+
+describe('defaultPrismaUserAdapter', () => {
+  it('findById delegates to prisma.user.findUnique', async () => {
+    prismaUser.findUnique.mockResolvedValue({ id: 'u1', token: 't', email: 'a@b.test' });
+    const result = await defaultPrismaUserAdapter().findById('u1');
+    expect(result?.id).toBe('u1');
+    expect(prismaUser.findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
+  });
+});
+```
+
+`vi.fn()` is a spy you can assert on; `vi.mock(module, factory)` swaps a whole import; `vi.hoisted(...)` lets the spy exist both inside the hoisted mock and in the test body; `vi.useFakeTimers()` controls timers.
+
+### What to unit-test (and what NOT to)
+
+- **Do**: pure functions (parsers, validators, formatters, key-builders, math), registry add/read/clear, branch coverage of policy logic, DI-injected logic with the seam mocked.
+- **Don't**: anything needing a live socket / Redis / Prisma / HTTP — that belongs in the integration layer. If a test needs real infrastructure to pass, write it as a per-route `.tests.ts` instead.
+
+### Adding tests in the future
+
+- **New framework-package function** → add a `<name>.test.ts` next to it → `npx vitest run`.
+- **New helper in your app** (`src/_functions/*`) → same: a `*.test.ts` next to it.
+- The AI can author these for you — it reads the real exports/signatures and writes the cases. Just ask.
+
+---
+
+## Integration tests (`@luckystack/test-runner`)
+
+The two layers below run against a **live server** (`npm run test`).
 
 ---
 
@@ -125,10 +228,30 @@ export interface TestContext {
 export interface CustomTestCase {
   name: string;
   run: (ctx: TestContext) => Promise<void>;
+  /**
+   * Optional. Marks this case as a KNOWN, accepted failure (a documented bug
+   * not yet fixed, or a scenario the implementation can't satisfy yet). The
+   * string is the reason shown in the report.
+   *   • marked + throws  → reported as `xfail` (expected — NOT a red failure)
+   *   • marked + passes  → reported as `xpass` (remove the stale marker)
+   */
+  expectedToFail?: string;
 }
 ```
 
-Throw from `run` to fail the case. The thrown error's message is included in the output. The runner catches; one failing case does not stop the others.
+Throw from `run` to fail the case. The thrown error's message — plus the server's actual `errorCode` from the last `callApi`/`callSync` response — is included in the output. The runner catches; one failing case does not stop the others.
+
+A negative test (one that asserts *that* something fails) is **green** when the expected error occurs — use `ctx.expect.throws(...)` or assert `result.status === 'error'`. Do NOT mark such a case `expectedToFail`: that marker is only for *acknowledged real bugs*, never for "this test verifies a rejection".
+
+---
+
+## Coverage notes — what isn't per-route tested (and why)
+
+A few surfaces have no `*.tests.ts` **by design** — not an oversight:
+
+- **Credentials login (`/auth/api/credentials`)** — login is a *server-wired* route owned by `@luckystack/server`, **not** a file-based `_api` route, so the per-route harness (which discovers `src/**/_api/*.tests.ts`) cannot target it and there is no `login_v1.tests.ts`. The auth surface IS covered indirectly: the **auth-enforcement sweep** proves every `auth.login: true` route rejects anonymous callers; the **session** (`system/session/v1`) and **logout** (`system/logout/v1`) per-route tests cover session read + teardown shape; and `@luckystack/login`'s vitest unit tests cover `validatePassword` / session key-builders / oauth guards in isolation. The actual credentials round-trip (and OAuth) is an integration/developer concern — boot the server and exercise it manually, exactly like Microsoft OAuth.
+- **Pages (`page.tsx`)** — React route components are not exercised by this server-side harness; use a browser/E2E tool for page-level coverage.
+- **`playground/throwError`** — a deliberate-error diagnostic route (its `main` always throws). The fuzz layer now accepts its controlled `500` error envelope (a caught throw is graceful handling, not a crash), so it passes; it is not a meaningful business-logic target.
 
 ---
 
@@ -178,21 +301,49 @@ The framework ships an `extensionRegistry` so consumers can add their own sweep 
 
 ---
 
-## Failure output
+## Reading the output (failures, expected-failures, skips)
+
+The runner prints a **colored**, list-based report. Per layer you get a green `X/Y passed` headline (red `Z/Y failed` when something broke), followed by up to four sections and a one-line summary:
 
 ```
-[luckystack-test] Running auto-sweep (4 layers) + custom tests (3 routes)…
+  ✓ contract           28/28 passed
+  ✓ auth-enforcement   19/19 passed
+  ✓ rate-limit          6/6 passed   · 11 skipped
+  ✓ fuzz               18/18 passed
+  ✗ custom             62/63 passed  1/63 failed   · 1 expected-fail
 
-  ✓ contract                       28/28
-  ✓ auth-enforcement               19/19
-  ✓ rate-limit                     28/28
-  ✓ fuzz                           28/28
-  ✗ custom (settings/updateUser/v1)
-    ✗ cannot update another user
-      AssertionError: expected 'error' got 'success'
-        at run (src/settings/_api/updateUser_v1.tests.ts:31:18)
+Failed — must be fixed (real bugs / wrong tests) (1)
+  ✗ settings/updateUser/v1 :: cannot update another user
+      expected "error" but got "success" (server: —)
 
-Summary: 102 passed, 1 failed in 4.2s
+Expected failures — known issues, allowed to fail (1)
+  ⚠ billing/refund/v1 :: full refund path
+      not-yet-implemented refund gateway (tracked in #412)
+
+Skipped — not run (with reason) (11)
+  – rate-limit: settings/updateUser/v1
+      login-required route — set TEST_AUTH_TOKEN to rate-limit-test it
+
+Summary: 90 passed  ·  1 failed  ·  1 expected-fail  ·  11 skipped
+  legend: ✗ red = must fix · ⚠ yellow = known/allowed · – skipped (not run)
 ```
 
-The route path + test case name + line number are always in the output so you can jump straight to the failing assertion.
+How to read it — the colour tells you whether you need to act:
+
+| Bucket | Colour | Meaning | Action |
+|---|---|---|---|
+| **passed** | green | Did what the test asserts (including negative tests where the asserted error occurred). | none |
+| **Failed — must be fixed** | red ✗ | A real bug *or* a wrong test. **Red never means "supposed to be red".** | fix the route, or fix the test |
+| **Expected failures** | yellow ⚠ | Case marked `expectedToFail` and failed as expected — a tracked, accepted known issue. | fix when you get to it; not a regression |
+| **Unexpectedly passed** | yellow ? | Case marked `expectedToFail` but passed. | remove the stale marker |
+| **Skipped** | dim – | Not run in this mode, with the reason (login-gated without `TEST_AUTH_TOKEN`, `rateLimit` above `maxRateLimitToTest`, explicitly skipped). | none, unless you want the coverage |
+
+Each failed item shows `<route> :: <case>`, the assertion message, and the **server's actual `errorCode`** in parentheses (e.g. `(server: api.rateLimitExceeded)`) when the failure came from a rejected request — so you see *why* the server said no, not just the failed expectation. The colour is auto-disabled when stdout isn't a TTY (piped to a file / CI) or when `NO_COLOR` is set; force it with `FORCE_COLOR=1`.
+
+> "Tests that fail but are supposed to fail" → those are either **negative tests** (which are GREEN — the rejection is the pass condition) or **`expectedToFail` known-issues** (which appear yellow in their own section). A test in the red **Failed** bucket is always something to act on.
+
+### Machine-readable output
+
+The full `RunAllTestsSummary` (every layer, every result with `status` / `reason` / `errorCode`, plus `xfailed` / `xpassed` counts on the custom layer) is written to `test-results.json` (override with `TEST_OUTPUT_FILE`, gitignored). Parse that instead of scraping the terminal.
+
+The route path + test case name are always in the output so you can jump straight to the failing assertion.

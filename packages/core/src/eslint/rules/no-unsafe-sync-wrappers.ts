@@ -76,12 +76,12 @@ const rule: EslintRule = {
   create(context) {
     return {
       FunctionDeclaration(node) {
-        if (isSuspect(node as unknown as { params?: { type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }[]; body?: unknown })) {
+        if (isSuspect(node)) {
           context.report({ node, messageId: 'unsafeSyncWrapper' });
         }
       },
       ArrowFunctionExpression(node) {
-        if (isSuspect(node as unknown as { params?: { type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }[]; body?: unknown })) {
+        if (isSuspect(node)) {
           context.report({ node, messageId: 'unsafeSyncWrapper' });
         }
       },

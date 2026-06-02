@@ -14,6 +14,13 @@
 //?   TEST_ONLY_CUSTOM=1     — alias for TEST_NO_SWEEP
 //?   TEST_NO_CUSTOM=1       — skip per-route custom tests
 
+import fs from 'node:fs';
+
+//? Register the PROJECT config (same as server.ts does) so the test process
+//? shares the server's projectName, rate-limit key prefix, and session cookie
+//? name. Without this, getProjectConfig() falls back to defaults and helpers
+//? like clearAllRateLimits()/getSession() target the wrong Redis namespace.
+import '../config';
 import { logRunAllSummary, runAllTests } from '../packages/test-runner/src';
 import { apiInputSchemas } from '../src/_sockets/apiInputSchemas.generated';
 import { apiMetaMap, apiMethodMap } from '../src/_sockets/apiTypes.generated';
@@ -45,6 +52,13 @@ const summary = await runAllTests({
 });
 
 logRunAllSummary(summary);
+
+//? Machine-readable results — so an AI agent or CI can parse pass/fail +
+//? per-test reasons without scraping the terminal. Override path via
+//? TEST_OUTPUT_FILE. Gitignored by default.
+const outPath = process.env.TEST_OUTPUT_FILE ?? 'test-results.json';
+fs.writeFileSync(outPath, JSON.stringify(summary, null, 2), 'utf8');
+console.log(`[luckystack-test] full results written to ${outPath}`);
 
 if (summary.totalFailed > 0) {
   process.exit(1);

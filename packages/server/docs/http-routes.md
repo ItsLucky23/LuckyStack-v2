@@ -45,6 +45,8 @@ A custom-route registry sits in front of the static fallback. Both the legacy `c
 | `/assets/*`, `*.{png,jpg,jpeg,gif,svg,html,css,js}` | GET | `handleStaticAndSpaFallback` | Whatever `options.serveFile` writes (URL temporarily rewritten) | `404` when no `serveFile` is wired |
 | Any other extension-less path | GET | `handleStaticAndSpaFallback` | SPA fallback (rewrite URL to `/`, call `serveFile`) | `404` when no `serveFile` |
 
+> The CSRF header name clients must send (for the `/auth/csrf` route above) is configurable: it comes from `getCsrfConfig().headerName` (default `x-csrf-token`), renamable via `registerCsrfConfig({ headerName })` from `@luckystack/core`.
+
 ## API Reference — handlers
 
 All handlers conform to:

@@ -308,7 +308,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         resolve(normalizeSyncError({
           response: { status: 'error', errorCode: 'request.aborted' },
           fallbackErrorCode: 'request.aborted',
-        }) as RequestOutput);
+        }));
         return;
       }
       if (!name || typeof name !== "string") {
@@ -321,7 +321,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         resolve(normalizeSyncError({
           response: { status: 'error', errorCode: 'sync.invalidName' },
           fallbackErrorCode: 'sync.invalidName',
-        }) as RequestOutput);
+        }));
         return;
       }
 
@@ -340,7 +340,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
             errorParams: [{ key: 'name', value: name }],
           },
           fallbackErrorCode: 'routing.invalidServiceRouteName',
-        }) as RequestOutput);
+        }));
         return;
       }
 
@@ -358,7 +358,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         resolve(normalizeSyncError({
           response: { status: 'error', errorCode: 'sync.invalidVersion' },
           fallbackErrorCode: 'sync.invalidVersion',
-        }) as RequestOutput);
+        }));
         return;
       }
 
@@ -374,7 +374,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         resolve(normalizeSyncError({
           response: { status: 'error', errorCode: 'sync.missingReceiver' },
           fallbackErrorCode: 'sync.missingReceiver',
-        }) as RequestOutput);
+        }));
         return;
       }
 
@@ -382,14 +382,14 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         resolve(normalizeSyncError({
           response: { status: 'error', errorCode: 'sync.ioUnavailable' },
           fallbackErrorCode: 'sync.ioUnavailable',
-        }) as RequestOutput);
+        }));
         return;
       }
       if (!socket) {
         resolve(normalizeSyncError({
           response: { status: 'error', errorCode: 'sync.ioUnavailable' },
           fallbackErrorCode: 'sync.ioUnavailable',
-        }) as RequestOutput);
+        }));
         return;
       }
 
@@ -416,7 +416,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
             resolve(normalizeSyncError({
               response: { status: 'error', errorCode: 'offline.queueFull' },
               fallbackErrorCode: 'offline.queueFull',
-            }) as RequestOutput);
+            }));
           }
           return;
         }
@@ -463,7 +463,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
             resolve(normalizeSyncError({
               response: { status: 'error', errorCode: 'request.aborted' },
               fallbackErrorCode: 'request.aborted',
-            }) as RequestOutput);
+            }));
           };
           externalSignal.addEventListener('abort', externalAbortHandler);
           cleanupExternalAbort = () => {
@@ -502,7 +502,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
             resolve(normalizeSyncError({
               response: responseData,
               fallbackErrorCode: 'sync.invalidServerResponse',
-            }) as RequestOutput);
+            }));
             return;
           }
 

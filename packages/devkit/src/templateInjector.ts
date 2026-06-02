@@ -2,8 +2,8 @@
 /* eslint-disable */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { getGeneratedSocketTypesPath, getSrcDir, validatePagePath } from '@luckystack/core';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ROOT_DIR, getGeneratedSocketTypesPath, getSrcDir, validatePagePath } from '@luckystack/core';
 import {
   ROUTE_NAMING_EXAMPLES,
   ROUTE_NAMING_RULES,
@@ -13,7 +13,14 @@ import {
   isVersionedSyncServerFileName,
 } from './routeConventions';
 import { getRoutingRules, isRouteTestFile } from './routingRules';
-import { getRegisteredTemplate, type TemplateKind } from './templateRegistry';
+import {
+  BUILT_IN_TEMPLATE_FILENAMES,
+  getRegisteredTemplate,
+  resolveTemplateKind,
+  type BuiltInTemplateKind,
+  type TemplateKind,
+  type TemplateMatchContext,
+} from './templateRegistry';
 
 /**
  * Template Injector
@@ -27,6 +34,76 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const templatesDir = path.join(__dirname, 'templates');
+
+//? Consumer-side template overrides + selection rules live here (created by the
+//? scaffold). Resolved relative to the project root so it is stable regardless
+//? of the srcDir layout.
+const getConsumerTemplatesDir = (): string => path.join(ROOT_DIR, '.luckystack', 'templates');
+
+//? Candidate content filenames for a kind: built-ins have a fixed name; custom
+//? kinds resolve to `<kind>.template.tsx` then `<kind>.template.ts`.
+const templateContentFilenames = (kind: TemplateKind): string[] => {
+  const builtIn = BUILT_IN_TEMPLATE_FILENAMES[kind as BuiltInTemplateKind];
+  if (builtIn) return [builtIn];
+  return [`${kind}.template.tsx`, `${kind}.template.ts`];
+};
+
+//? Resolve raw template content for a kind. Order: consumer file (editable,
+//? shipped to `.luckystack/templates/`) -> registered string override ->
+//? bundled dist template (built-in kinds only). Returns null when nothing
+//? resolves (e.g. a custom kind with no content provided).
+const resolveTemplateContent = (kind: TemplateKind): string | null => {
+  const consumerDir = getConsumerTemplatesDir();
+  for (const fileName of templateContentFilenames(kind)) {
+    const consumerFile = path.join(consumerDir, fileName);
+    if (fs.existsSync(consumerFile)) {
+      try {
+        return fs.readFileSync(consumerFile, 'utf8');
+      } catch (error) {
+        console.error(`[TemplateInjector] Could not read consumer template: ${consumerFile}`, error);
+      }
+    }
+  }
+
+  const override = getRegisteredTemplate(kind);
+  if (override !== null) return override;
+
+  const builtInName = BUILT_IN_TEMPLATE_FILENAMES[kind as BuiltInTemplateKind];
+  if (builtInName) {
+    const bundled = path.join(templatesDir, builtInName);
+    try {
+      return fs.readFileSync(bundled, 'utf8');
+    } catch (error) {
+      console.error(`[TemplateInjector] Could not read bundled template: ${bundled}`, error);
+      return null;
+    }
+  }
+
+  console.warn(`[TemplateInjector] No content for custom template kind "${kind}" — add .luckystack/templates/${kind}.template.tsx or call registerTemplate('${kind}', ...).`);
+  return null;
+};
+
+//? Dev-only: load the consumer's `.luckystack/templates/templateRules.ts` once,
+//? so their register* calls configure the injector before the first injection.
+//? Absent file => built-in defaults apply. Never imported in prod (devkit is a
+//? devDependency, and this only runs from the dev watcher path).
+let consumerTemplateConfig: Promise<void> | null = null;
+const ensureConsumerTemplateConfigLoaded = (): Promise<void> => {
+  consumerTemplateConfig ??= (async () => {
+    const dir = getConsumerTemplatesDir();
+    for (const fileName of ['templateRules.ts', 'templateRules.mjs', 'templateRules.js']) {
+      const rulesFile = path.join(dir, fileName);
+      if (!fs.existsSync(rulesFile)) continue;
+      try {
+        await import(pathToFileURL(rulesFile).href);
+      } catch (error) {
+        console.error(`[TemplateInjector] Failed to load consumer template rules: ${rulesFile}`, error);
+      }
+      return;
+    }
+  })();
+  return consumerTemplateConfig;
+};
 
 export const isEmptyFile = (filePath: string): boolean => {
   try {
@@ -393,118 +470,77 @@ export const calculateRelativePath = (filePath: string): string => {
 };
 
 const getTemplate = (filePath: string): string | null => {
-  let templateKind: TemplateKind | null = null;
-  let pagePath = '';
-  let syncName = '';
+  //? Classify the file structurally; the registered selection RULES then decide
+  //? the kind (consumer-editable via `.luckystack/templates/templateRules.ts`).
+  let fileKind: TemplateMatchContext['fileKind'];
+  let hasPairedServer = false;
+  let srcRelativePath: string | null = null;
 
   if (isInApiFolder(filePath)) {
-    templateKind = 'api';
+    fileKind = 'api';
   } else if (isInSyncFolder(filePath)) {
     if (isSyncServerFile(filePath)) {
-      templateKind = 'sync_server';
+      fileKind = 'sync_server';
     } else if (isSyncClientFile(filePath)) {
-      // Check if _server.ts exists - use paired template if so
-      if (hasPairedFile(filePath)) {
-        templateKind = 'sync_client_paired';
-        pagePath = extractSyncPagePath(filePath);
-        syncName = extractSyncName(filePath);
-      } else {
-        templateKind = 'sync_client_standalone';
-      }
+      fileKind = 'sync_client';
+      hasPairedServer = hasPairedFile(filePath);
     } else {
       console.log(`[TemplateInjector] Unknown sync file type: ${filePath}`);
       return null;
     }
   } else if (isPageFile(filePath)) {
-    //? Validate placement BEFORE picking a template. If the page is inside
-    //? a reserved framework folder (`_api`, `_sync`, `_components`, ...) or
-    //? has no URL segment left after stripping invisible-parent folders, the
-    //? router will silently skip it — so writing the plain/dashboard skeleton
-    //? would just create dead code. Instead we emit a commented diagnostic
-    //? block so the developer sees the placement issue immediately. Same
-    //? UX precedent as `getInvalidVersionMessage` for api/sync filenames.
-    const srcRelative = computeSrcRelativePath(filePath);
-    if (srcRelative !== null) {
-      const placement = validatePagePath(srcRelative);
+    fileKind = 'page';
+    //? Validate placement BEFORE rule selection. A page inside a reserved
+    //? framework folder (`_api`, `_sync`, ...) or with no URL segment left
+    //? after stripping invisible-parent folders is silently un-routed — so we
+    //? emit a commented diagnostic instead of a dead plain/dashboard skeleton.
+    srcRelativePath = computeSrcRelativePath(filePath);
+    if (srcRelativePath !== null) {
+      const placement = validatePagePath(srcRelativePath);
       if (!placement.valid) {
-        return getInvalidPagePlacementMessage(filePath, placement.reason ?? 'invalid placement', srcRelative);
+        return getInvalidPagePlacementMessage(filePath, placement.reason ?? 'invalid placement', srcRelativePath);
       }
     }
-
-    //? Heuristic template flavor: when the page path includes an "admin",
-    //? "dashboard", "settings", "billing", or similar admin-shaped segment,
-    //? default to the dashboard template (sidebar layout + login guard).
-    //? Everything else gets the plain template. Consumers can edit after
-    //? injection — this is a one-shot scaffold, not enforced at runtime.
-    const normalized = filePath.replaceAll('\\', '/').toLowerCase();
-    const looksLikeDashboard = /\/(admin|dashboard|settings|billing|account|profile)(\/|$)/.test(normalized);
-    templateKind = looksLikeDashboard ? 'page_dashboard' : 'page_plain';
   } else {
     return null;
   }
 
-  //? Consumer override registry check FIRST — if `registerTemplate(kind,
-  //? content)` was called from an overlay (e.g. `luckystack/devkit/
-  //? templates.ts`), use that content instead of the bundled disk file.
-  //? Same placeholder substitution rules apply to consumer templates so
-  //? `{{REL_PATH}}`, `{{PAGE_PATH}}`, `{{SYNC_NAME}}` work uniformly.
-  const overrideContent = getRegisteredTemplate(templateKind);
-  const templateFileName: Record<TemplateKind, string> = {
-    api: 'api.template.ts',
-    sync_server: 'sync_server.template.ts',
-    sync_client_paired: 'sync_client_paired.template.ts',
-    sync_client_standalone: 'sync_client_standalone.template.ts',
-    //? Page templates are `.tsx` (not `.ts`) because they contain JSX —
-    //? naming them `.ts` makes the TypeScript program build fail with
-    //? unterminated-regex / expected-`>` errors. The injector still reads
-    //? them as plain text via `fs.readFileSync`, so the extension is
-    //? cosmetic to the runtime but load-bearing for `tsc -b`.
-    page_plain: 'page_plain.template.tsx',
-    page_dashboard: 'page_dashboard.template.tsx',
-  };
-  const templateFile = path.join(templatesDir, templateFileName[templateKind]);
-
-  try {
-    let content: string;
-    if (overrideContent !== null) {
-      content = overrideContent;
-    } else {
-      content = fs.readFileSync(templateFile, 'utf8');
-    }
-
-    // Replace path placeholders with computed relative paths.
-    //? Matches BOTH `//@ts-ignore` and `// @ts-expect-error` pragma lines
-    //? (templates historically used the latter; new page templates use the
-    //? former, hence the union). The pragma + the import line's
-    //? `{{REL_PATH}}` placeholder are replaced in one go so the resulting
-    //? file is valid TS without the pragma.
-    const relPath = calculateRelativePath(filePath);
-    const pragmaPattern = /\/\/\s*@ts-(?:ignore|expect-error).*\r?\n(.*)\{\{REL_PATH\}\}/g;
-
-    content = content.replaceAll(pragmaPattern, (_, prefix) => {
-      return `${prefix}${relPath}`;
-    });
-
-    //? Defensive: any leftover `{{REL_PATH}}` (e.g. a custom consumer
-    //? template that omits the pragma comment) gets a literal substitution
-    //? too — the pragma-strip is a polish step, the substitution itself is
-    //? load-bearing for the import path to resolve.
-    content = content.replaceAll('{{REL_PATH}}', relPath);
-
-    // Replace page path and sync name placeholders for paired templates
-    if (pagePath && syncName) {
-      content = content.replaceAll('{{PAGE_PATH}}', pagePath);
-      content = content.replaceAll('{{SYNC_NAME}}', syncName);
-    }
-
-    return content;
-  } catch (error) {
-    console.error(`[TemplateInjector] Could not read template: ${templateFile}`, error);
+  const ctx: TemplateMatchContext = { filePath, fileKind, hasPairedServer, srcRelativePath };
+  const templateKind = resolveTemplateKind(ctx);
+  if (!templateKind) {
+    console.log(`[TemplateInjector] No template rule matched for ${filePath} (fileKind=${fileKind})`);
     return null;
   }
+
+  let content = resolveTemplateContent(templateKind);
+  if (content === null) return null;
+
+  //? Replace path placeholders. Matches BOTH `//@ts-ignore` and
+  //? `// @ts-expect-error` pragma lines (templates use either); the pragma + the
+  //? import line's `{{REL_PATH}}` are replaced together so the result is valid
+  //? TS without the pragma. A literal fallback covers consumer templates that
+  //? omit the pragma.
+  const relPath = calculateRelativePath(filePath);
+  const pragmaPattern = /\/\/\s*@ts-(?:ignore|expect-error).*\r?\n(.*)\{\{REL_PATH\}\}/g;
+  content = content.replaceAll(pragmaPattern, (_, prefix) => `${prefix}${relPath}`);
+  content = content.replaceAll('{{REL_PATH}}', relPath);
+
+  //? Sync templates may carry PAGE_PATH / SYNC_NAME placeholders (paired client
+  //? + server). Substitute for any sync file — a no-op when the placeholders
+  //? are absent (e.g. standalone client).
+  if (fileKind === 'sync_client' || fileKind === 'sync_server') {
+    const pagePath = extractSyncPagePath(filePath);
+    const syncName = extractSyncName(filePath);
+    content = content.replaceAll('{{PAGE_PATH}}', pagePath);
+    content = content.replaceAll('{{SYNC_NAME}}', syncName);
+  }
+
+  return content;
 };
 
 export const injectTemplate = async (filePath: string): Promise<boolean> => {
+  await ensureConsumerTemplateConfigLoaded();
+
   if (getRouteFilenameValidationMessage(filePath)) {
     fs.writeFileSync(filePath, getInvalidVersionMessage(filePath), 'utf-8');
     console.log(`[TemplateInjector] Invalid route filename, injected guidance: ${filePath}`);
@@ -684,10 +720,16 @@ export const injectServerTemplateWithClientInput = async (
   clientInputTypes: string
 ): Promise<boolean> => {
   try {
+    await ensureConsumerTemplateConfigLoaded();
     const relPath = calculateRelativePath(serverFilePath);
 
-    const templateFile = path.join(templatesDir, 'sync_server.template.ts');
-    let content = fs.readFileSync(templateFile, 'utf8');
+    //? Honor consumer overrides for the sync_server kind here too (consumer
+    //? file -> registered override -> bundled), then fill in the clientInput.
+    let content = resolveTemplateContent('sync_server');
+    if (content === null) {
+      console.error(`[TemplateInjector] No sync_server template content available for: ${serverFilePath}`);
+      return false;
+    }
 
     //? Replace placeholders — same pragma union + literal-fallback pattern
     //? as `getTemplate` above. Keep these two regexes in sync.

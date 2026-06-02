@@ -93,7 +93,7 @@ export const listTestLayers = (): TestLayer[] => [...layers.values()];
  * payloads probe the validator's error responses.
  */
 export const registerTestFixture = <TPayload = unknown>(typeKey: string, fixture: TestFixture<TPayload>): void => {
-  fixtures.set(typeKey, fixture as TestFixture);
+  fixtures.set(typeKey, fixture);
 };
 
 export const getTestFixture = (typeKey: string): TestFixture | undefined => fixtures.get(typeKey);

@@ -90,7 +90,7 @@
     "packages/test-runner/src/**/*",
     "packages/create-luckystack-app/src/**/*",
     "packages/docs-ui/src/**/*",
-    "packages/env-resolver/src/**/*",
+    "packages/secret-manager/src/**/*",
     "src/**/_api/**/*",
     "src/**/_sync/**/*",
     "src/**/_server/**/*",

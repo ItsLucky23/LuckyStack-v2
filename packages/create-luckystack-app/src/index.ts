@@ -29,7 +29,7 @@ const __dirname = path.dirname(__filename);
 
 const TEMPLATE_DIR = path.resolve(__dirname, '..', 'template');
 
-interface CliArgs {
+export interface CliArgs {
   projectName: string;
   install: boolean;
   prompt: boolean;
@@ -39,9 +39,9 @@ interface CliArgs {
 //? Single source of truth for recognised flag tokens. Used both by the
 //? parser (to reject unknown flags) and the help banner (so the list stays
 //? in sync with what `parseArgs` actually accepts).
-const VALID_FLAGS = ['--no-install', '--no-prompt', '--help', '-h'] as const;
+export const VALID_FLAGS = ['--no-install', '--no-prompt', '--help', '-h'] as const;
 
-const parseArgs = (argv: string[]): CliArgs => {
+export const parseArgs = (argv: string[]): CliArgs => {
   let projectName = '';
   let install = true;
   let prompt = true;
@@ -214,21 +214,21 @@ Example:
 `);
 };
 
-const slugify = (raw: string): string =>
+export const slugify = (raw: string): string =>
   raw
     .toLowerCase()
     .trim()
     .replaceAll(/[^a-z0-9]+/g, '-')
     .replaceAll(/^-+|-+$/g, '');
 
-const titleCase = (raw: string): string =>
+export const titleCase = (raw: string): string =>
   raw
     .split(/[\s\-_]+/)
     .filter(Boolean)
     .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
     .join(' ') || 'My LuckyStack App';
 
-const readSelfVersion = (): string => {
+export const readSelfVersion = (): string => {
   //? Fail loudly if the scaffolder can't read its own version — silently
   //? falling back to '0.0.1' would lock every newly-scaffolded project to
   //? a stale dependency set, which is almost always worse than aborting.
@@ -251,9 +251,9 @@ const readSelfVersion = (): string => {
 //?   _dot_gitignore               -> .gitignore
 //?   _dot_env_template            -> .env_template
 //?   _dot_env_dot_local_template  -> .env.local_template
-const renameDotFile = (name: string): string => name.replaceAll('_dot_', '.');
+export const renameDotFile = (name: string): string => name.replaceAll('_dot_', '.');
 
-const replacePlaceholders = (
+export const replacePlaceholders = (
   content: string,
   vars: Record<string, string>,
 ): string => {
@@ -262,7 +262,7 @@ const replacePlaceholders = (
   });
 };
 
-const isTextFile = (filePath: string): boolean => {
+export const isTextFile = (filePath: string): boolean => {
   const textExts = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.css', '.html', '.prisma'];
   if (textExts.includes(path.extname(filePath))) return true;
   // Files without extensions but starting with a dot (e.g. .env_template) are text.
@@ -433,7 +433,23 @@ Docs:
 `);
 };
 
-main().catch((error: unknown) => {
-  console.error('\n[create-luckystack-app] unexpected error:', error);
-  process.exit(1);
-});
+//? Only run the scaffold when this file is the process entry point (i.e. the
+//? installed `create-luckystack-app` bin). Importing it as a module — e.g. the
+//? unit tests that exercise the pure helpers — must NOT trigger the
+//? filesystem copy / `npm install` / prompts side-effects of `main()`.
+const isCliEntry = (): boolean => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return path.resolve(entry) === path.resolve(__filename);
+  } catch {
+    return false;
+  }
+};
+
+if (isCliEntry()) {
+  main().catch((error: unknown) => {
+    console.error('\n[create-luckystack-app] unexpected error:', error);
+    process.exit(1);
+  });
+}

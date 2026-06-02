@@ -33,9 +33,12 @@ const SocketStatusContext = createContext<SocketStatusContextType | undefined>(
 );
 
 export function SocketStatusProvider({ children }: { children: ReactNode }) {
-  const [socketStatus, setSocketStatus] = useState({
+  const [socketStatus, setSocketStatus] = useState<{
+    self: statusContent;
+    [userId: string]: statusContent;
+  }>({
     self: {
-      status: "STARTUP" as SOCKETSTATUS,
+      status: "STARTUP",
     },
   });
 

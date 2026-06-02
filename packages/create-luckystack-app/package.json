@@ -38,10 +38,12 @@
     "CLAUDE.md",
     "docs",
     "template",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup",
-    "build:watch": "tsup --watch"
+    "build:watch": "tsup --watch",
+    "test": "vitest run"
   }
 }

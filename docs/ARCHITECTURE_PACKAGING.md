@@ -5,7 +5,7 @@
 Last updated: 2026-05-13
 Status: Tier-A across the board; awaiting first publish
 
-> **Current state (2026-05-13):** all 13 workspaces in `packages/` build clean and are flagged `"private": false` + `publishConfig.access: "public"`. Every package targets Tier-A — `@luckystack/devkit` was promoted on 2026-05-13 (was Tier-B), `@luckystack/router` was promoted on 2026-05-11, all others were Tier-A by design. `@luckystack/login` is no longer Prisma-coupled (DI'd through `registerUserAdapter` / `defaultPrismaUserAdapter`). All Tier-A packages have READMEs and are wired into `bootstrapLuckyStack` / `createLuckyStackServer`. Remaining publish steps: register the `@luckystack` npm scope and run `npm pack --dry-run` per package to validate tarball contents. See `scan-1.md` and `scan-2.md` for the verification pass behind this status. Per-package READMEs under `packages/<name>/README.md` are the source of truth for public API.
+> **Current state (2026-05-13):** all 14 workspaces in `packages/` build clean and are flagged `"private": false` + `publishConfig.access: "public"`. Every package targets Tier-A — `@luckystack/devkit` was promoted on 2026-05-13 (was Tier-B), `@luckystack/router` was promoted on 2026-05-11, all others were Tier-A by design. `@luckystack/login` is no longer Prisma-coupled (DI'd through `registerUserAdapter` / `defaultPrismaUserAdapter`). All Tier-A packages have READMEs and are wired into `bootstrapLuckyStack` / `createLuckyStackServer`. Remaining publish steps: register the `@luckystack` npm scope and run `npm pack --dry-run` per package to validate tarball contents. Per-package READMEs under `packages/<name>/README.md` are the source of truth for public API.
 
 ---
 

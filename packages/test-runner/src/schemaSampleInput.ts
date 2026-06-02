@@ -11,7 +11,7 @@ import type { z } from 'zod';
 const sampleForDef = (def: unknown): unknown => {
   //? Zod stores its runtime shape on `_def.type` (v3) or `_def.typeName`.
   //? Access is untyped because `def` can be any of dozens of internal shapes.
-  const d = def as { typeName?: string; type?: string; innerType?: { _def: unknown }; values?: unknown[]; value?: unknown; options?: { _def: unknown }[]; shape?: () => Record<string, { _def: unknown }>; valueType?: { _def: unknown }; element?: { _def: unknown } };
+  const d = def as { typeName?: string; type?: string; innerType?: { _def: unknown }; values?: unknown[]; value?: unknown; options?: { _def: unknown }[]; shape?: (() => Record<string, { _def: unknown }>) | Record<string, { _def: unknown }>; valueType?: { _def: unknown }; element?: { _def: unknown } };
 
   const name = d.typeName ?? d.type;
 
@@ -44,7 +44,8 @@ const sampleForDef = (def: unknown): unknown => {
     }
     case 'ZodLiteral':
     case 'literal': {
-      return d.value;
+      //? zod 3 stores the literal on `_def.value`; zod 4 stores `_def.values` (array).
+      return d.value ?? d.values?.[0];
     }
     case 'ZodOptional':
     case 'optional':
@@ -64,7 +65,8 @@ const sampleForDef = (def: unknown): unknown => {
     case 'ZodObject':
     case 'object': {
       const out: Record<string, unknown> = {};
-      const shape = d.shape?.() ?? {};
+      //? zod 3 exposes `_def.shape` as a function; zod 4 as a plain object.
+      const shape = typeof d.shape === 'function' ? d.shape() : (d.shape ?? {});
       for (const [key, valueSchema] of Object.entries(shape)) {
         const sample = sampleForDef(valueSchema._def);
         if (sample !== undefined) out[key] = sample;
@@ -85,6 +87,7 @@ const sampleForDef = (def: unknown): unknown => {
   }
 };
 
-export const sampleSchemaInput = (schema: z.ZodTypeAny): unknown => {
-  return sampleForDef(schema._def);
+export const sampleSchemaInput = (schema: z.ZodType): unknown => {
+  //? zod 4 renamed the public def accessor from `._def` to `.def`.
+  return sampleForDef(schema.def);
 };

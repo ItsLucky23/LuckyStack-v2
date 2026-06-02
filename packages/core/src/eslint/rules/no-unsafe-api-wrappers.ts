@@ -81,13 +81,13 @@ const rule: EslintRule = {
   create(context) {
     return {
       FunctionDeclaration(node) {
-        if (isSuspectFunction(node as unknown as { params?: { type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }[]; body?: unknown })) {
+        if (isSuspectFunction(node)) {
           const suspect = (node.params as { name?: string }[]).find((p) => p.name && SUSPECT_PARAM_NAMES.has(p.name));
           context.report({ node, messageId: 'unsafeWrapper', data: { paramName: suspect?.name ?? 'name' } });
         }
       },
       ArrowFunctionExpression(node) {
-        if (isSuspectFunction(node as unknown as { params?: { type?: string; name?: string; typeAnnotation?: { typeAnnotation?: { type?: string } } }[]; body?: unknown })) {
+        if (isSuspectFunction(node)) {
           const suspect = (node.params as { name?: string }[]).find((p) => p.name && SUSPECT_PARAM_NAMES.has(p.name));
           context.report({ node, messageId: 'unsafeWrapper', data: { paramName: suspect?.name ?? 'name' } });
         }

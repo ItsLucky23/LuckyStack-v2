@@ -43,11 +43,13 @@
     "README.md",
     "CLAUDE.md",
     "docs",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup",
-    "build:watch": "tsup --watch"
+    "build:watch": "tsup --watch",
+    "test": "vitest run"
   },
   "dependencies": {
     "@luckystack/core": "^0.1.0"

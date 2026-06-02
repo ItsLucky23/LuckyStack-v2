@@ -7,7 +7,8 @@
  * @see https://docs.sentry.io/platforms/node/
  */
 
-import * as Sentry from '@sentry/node';
+import { createRequire } from 'node:module';
+
 import {
   getLogger,
   getProjectName,
@@ -20,6 +21,33 @@ import {
 
 import { getSentryConfig } from './sentryConfig';
 import { enableErrorTrackingAutoInstrumentation } from './autoInstrumentation';
+
+const localRequire = createRequire(import.meta.url);
+
+//? `@sentry/node` is an OPTIONAL peer. Importing it at module top-level would
+//? make `import '@luckystack/error-tracking'` throw ERR_MODULE_NOT_FOUND for
+//? consumers on the adapter-only / Datadog / PostHog path who never installed
+//? Sentry. Load it lazily (mirroring the Datadog/PostHog/Sentry adapters) so
+//? the package stays import-safe and only touches @sentry/node when Sentry is
+//? actually initialized or the default export is accessed.
+type SentryModule = typeof import('@sentry/node');
+
+let cachedSentry: SentryModule | null = null;
+
+const loadSentry = (): SentryModule => {
+  if (cachedSentry) return cachedSentry;
+  try {
+    localRequire.resolve('@sentry/node');
+  } catch {
+    throw new Error(
+      '[error-tracking:sentry] The `@sentry/node` package is not installed but Sentry was used. ' +
+      'Run `npm install @sentry/node`, or use the adapter API / another tracker instead.',
+    );
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  cachedSentry = localRequire('@sentry/node') as SentryModule;
+  return cachedSentry;
+};
 
 /**
  * Initialize Sentry error monitoring.
@@ -37,6 +65,10 @@ export const initializeSentry = () => {
     }
     return;
   }
+
+  //? dsn is set ⇒ the consumer opted into Sentry, so the optional peer must be
+  //? present. Resolve it lazily here (module top-level stays import-safe).
+  const Sentry = loadSentry();
 
   const sentryConfig = getSentryConfig().server;
   const tracesSampleRate = isProduction
@@ -131,4 +163,17 @@ export const startSpan = (name: string, op: string): unknown => {
   return sharedStartSpan(name, op);
 };
 
-export default Sentry;
+//? Lazy default export: forwards property access to the real `@sentry/node`
+//? SDK on first use, so `import Sentry from '@luckystack/error-tracking'` stays
+//? import-safe when the optional peer is absent and only resolves it when
+//? actually touched. Functions are bound to the module so call-site `this` is
+//? correct.
+const sentryProxy = new Proxy({}, {
+  get: (_target, prop) => {
+    const mod = loadSentry();
+    const value: unknown = Reflect.get(mod, prop);
+    return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(mod) : value;
+  },
+}) as SentryModule;
+
+export default sentryProxy;

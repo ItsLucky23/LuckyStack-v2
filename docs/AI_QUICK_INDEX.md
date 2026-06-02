@@ -35,11 +35,11 @@
 | ARCHITECTURE_LOGGING.md | Logger DI surface and the redacted-keys registry that keeps sensitive | docs/ARCHITECTURE_LOGGING.md |
 | ARCHITECTURE_PACKAGING.md | Single source of truth for LuckyStack package extraction strategy. | docs/ARCHITECTURE_PACKAGING.md |
 | ARCHITECTURE_ROUTING.md | File-based routing for pages, APIs, and real-time sync events. | docs/ARCHITECTURE_ROUTING.md |
-| ARCHITECTURE_SECRETS.md | **STATUS: Design only — `@luckystack/secrets` is not yet implemented as of 2026-05-29. Implementation tracked separately.** | docs/ARCHITECTURE_SECRETS.md |
+| ARCHITECTURE_SECRET_MANAGER.md | Replaces the older `ARCHITECTURE_SECRETS.md` design. The client (`@luckystack/secret-manager`) is implemented; the companion server lives in a separate repo (`luckystack-secret-manager`) and only its wire contract is captured here. | docs/ARCHITECTURE_SECRET_MANAGER.md |
 | ARCHITECTURE_SESSION.md | Session management using Redis with OAuth provider support. | docs/ARCHITECTURE_SESSION.md |
 | ARCHITECTURE_SOCKET.md | Socket.io-based real-time communication layer. | docs/ARCHITECTURE_SOCKET.md |
 | ARCHITECTURE_SYNC.md | Real-time event broadcasting between clients using rooms. | docs/ARCHITECTURE_SYNC.md |
-| ARCHITECTURE_TESTING.md | Spec for the two test layers shipped with `@luckystack/test-runner`. Last updated 2026-05-22. | docs/ARCHITECTURE_TESTING.md |
+| ARCHITECTURE_TESTING.md | Spec for LuckyStack's two test systems: vitest **unit tests** (package internals) and the `@luckystack/test-runner` **integration** layers. Last updated 2026-06-02. | docs/ARCHITECTURE_TESTING.md |
 
 ## Function inventory across packages
 
@@ -207,7 +207,7 @@
 | `copyTree(src, dest, vars)` | Recursive directory copier. For each entry: rewrites the destination filename via `renameDotFile`, recurses into directories, runs `replacePlaceholders` on text files, falls back to `fs.copyFileSync` for binaries. | -> docs/scaffold-flow.md |
 | `runNpmInstall(cwd)` | Spawns `npm install` (`npm.cmd` on Windows) in the scaffolded directory with inherited stdio. Logs a manual-fallback hint if it exits non-zero. | -> docs/post-scaffold-suggestions.md |
 | `runPrismaGenerate(cwd)` | Spawns `npx prisma generate` after `npm install` so first-build types resolve. Does NOT run `prisma db push` or `prisma migrate` — those require a populated `DATABASE_URL`. | -> docs/post-scaffold-suggestions.md |
-| Framework-docs copy block (inside `main`, scheduled for Fase E.2) | After the template copy, recursively copies root `CLAUDE.md`, `docs/` (-> `docs/luckystack/` in the scaffold), `skills/`, and `.claude/commands/` from the repo root into the target. Each source is optional — missing sources are skipped silently. | -> docs/framework-docs-copy.md |
+| Framework-docs copy block (inside `main`) | After the template copy, recursively copies root `CLAUDE.md`, `docs/` (-> `docs/luckystack/` in the scaffold), `skills/`, `.claude/commands/`, and `branch-logs/README.md` from the repo root into the target. Each source is optional — missing sources are skipped silently. | -> docs/framework-docs-copy.md |
 | Type: `CliArgs` | `{ projectName: string; install: boolean; prompt: boolean; help: boolean }`. Output of `parseArgs`. | -> docs/cli-flags.md |
 | Type: `ScaffoldChoices` | `{ dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n }`. Output of `runPrompts` / `DEFAULT_CHOICES`. | -> docs/scaffold-flow.md |
 | Constant: `DEFAULT_CHOICES` | Sane defaults used when `--no-prompt` is passed (Mongo + credentials + console email + no monitoring + i18n on). | -> docs/scaffold-flow.md |
@@ -237,8 +237,13 @@
 | `assertNoDuplicateNormalizedRouteKeys({ srcDir, context })` | Throws on collisions between two files that normalize to the same route key. Called by `generateTypeMapFile`. | -> docs/loader-pipeline.md |
 | `registerRoutingRules(rules)` | Override the marker segments (`_api`, `_sync`), version regexes, `privateFolderPrefix`, `scaffoldIgnoredFolders`, and the optional `disableTemplateInjection: (filePath) => boolean` predicate for opting parts of the tree out of scaffold injection. | -> docs/loader-pipeline.md |
 | `getRoutingRules()` | Read the current rules (defaults shipped by the package). | -> docs/loader-pipeline.md |
-| `registerTemplate(kind, content)` | Override one of the six bundled scaffold templates: `api`, `sync_server`, `sync_client_paired`, `sync_client_standalone`, `page_plain`, `page_dashboard`. Replaces the bundled disk template; `{{REL_PATH}}` / `{{PAGE_PATH}}` / `{{SYNC_NAME}}` placeholders still apply to consumer content. | -> docs/hot-reload.md |
-| `getRegisteredTemplate(kind)` / `clearTemplateOverrides()` / `listRegisteredTemplateKinds()` | Lookup, test-reset, and diagnostic helpers for the template override registry. | -> docs/hot-reload.md |
+| `registerTemplate(kind, content)` | Override the BODY of a template kind with a string. Content resolution order at injection: consumer file (`.luckystack/templates/<kind>.template.ts(x)`) -> this string override -> bundled disk template. `{{REL_PATH}}` / `{{PAGE_PATH}}` / `{{SYNC_NAME}}` placeholders still apply. | -> docs/template-customization.md |
+| `getRegisteredTemplate(kind)` / `clearTemplateOverrides()` / `listRegisteredTemplateKinds()` | Lookup, test-reset, and diagnostic helpers for the content-override registry. | -> docs/template-customization.md |
+| `registerTemplateRule({ kind, match, priority? })` | Add a SELECTION rule — decides which kind a classified file gets. Rules evaluate by descending `priority` (ties: newest first); first match wins. `match(ctx)` receives `{ filePath, fileKind: 'api'\|'sync_server'\|'sync_client'\|'page', hasPairedServer, srcRelativePath }`. | -> docs/template-customization.md |
+| `registerTemplateKind(kind, { match, content?, priority? })` | Register a brand-new template kind (predicate + optional inline content) in one call. Default priority 100 so custom kinds beat the built-ins. | -> docs/template-customization.md |
+| `resolveTemplateKind(ctx)` / `getTemplateRules()` / `clearTemplateRules()` / `registerDefaultTemplateRules()` | Evaluate rules to a kind, read the active rule set, drop all rules (consumer replace), and (re)arm the built-in defaults. | -> docs/template-customization.md |
+| `BUILT_IN_TEMPLATE_KINDS` / `BUILT_IN_TEMPLATE_FILENAMES` / `DEFAULT_DASHBOARD_PATH_PATTERN` | The 6 built-in kinds, their bundled filenames, and the page-dashboard heuristic regex (reused by the scaffolded consumer rules file). | -> docs/template-customization.md |
+| Consumer overlay: `.luckystack/templates/` | devkit auto-loads `.luckystack/templates/templateRules.ts` in DEV (once, before the first injection) so consumers can edit/remove/add selection rules + kinds as code. Per-kind `*.template.ts(x)` files in the same folder override content. Shipped by `create-luckystack-app`. | -> docs/template-customization.md |
 | `assertNoDuplicatePageRoutes({ srcDir, context })` | Build-time validator that throws when two `page.tsx` files compute the same URL after invisible-parent stripping. Called by `generateTypeMapFile`. | -> docs/loader-pipeline.md |
 | `collectDuplicatePageRoutes(srcDir)` / `formatDuplicatePageRouteIssues({...})` | Non-throwing pair behind the assert. `initializeAll()` uses these to soft-warn at dev startup. | -> docs/loader-pipeline.md |
 | Type: `TemplateKind`, `DuplicatePageRouteIssue` | Public types for the new registry + duplicate-detector. | -> docs/hot-reload.md |
@@ -315,23 +320,6 @@
 | `AutoSelectEmailSenderOptions` | `./autoSelect` | `{ from?, force? }`. |
 | `EmailSender`, `EmailMessage`, `EmailResult`, `EmailSenderRegistry` | Re-exported from `@luckystack/core` | Adapter contract + result tuple. |
 | `PreEmailSendPayload`, `PostEmailSendPayload` | `./hookPayloads` | Hook payload shapes (also augmented onto `HookPayloads`). |
-
-### `env-resolver`
-| Function / Export | One-liner | Deep doc |
-| --- | --- | --- |
-| `initEnvResolver(options)` | Boot-time entry point. Reads `LUCKYSTACK_ENV_URL` / `_TOKEN` / `_PROJECT` / `_ENVIRONMENT` (or `options.remote`), fetches the resolved map, writes missing keys into `process.env`. Idempotent within `cacheTtlMs`. | -> docs/resolution-modes.md |
-| `refreshEnvResolver(options)` | Clears the in-memory cache and re-runs `initEnvResolver`. Use when env-server admins push a hot change to a long-running process. | -> docs/resolution-modes.md |
-| `getCachedResolution()` | Returns the last `{ fetchedAt, values }` resolution, or `null` when source is `'local'` or `initEnvResolver` has not yet succeeded. Read-only diagnostic accessor. | -> docs/resolution-modes.md |
-| `resetEnvResolverForTests()` | Test-only helper that clears the module-level cache so integration tests can re-init with different options. | -> docs/resolution-modes.md |
-| Type: `InitEnvResolverOptions` | `{ source: 'remote' \| 'local' \| 'hybrid'; remote?: RemoteEnvOptions; fallback?: 'local' \| 'throw' }`. | -> docs/env-key-validation.md |
-| Type: `RemoteEnvOptions` | `{ url; authToken; project; environment; cacheTtlMs?; fetchImpl? }`. | -> docs/env-key-validation.md |
-- ### Internal helpers (not exported, listed for AI context)
-| Helper | Role |
-| --- | --- |
-| `buildOptionsFromEnv` | Reads `LUCKYSTACK_ENV_URL` / `_TOKEN` / `_PROJECT` / `_ENVIRONMENT`; returns `null` if any are missing so the caller can decide fallback vs throw. |
-| `applyValues` | Writes each `[key, value]` from the resolved map into `process.env`, but only when the key is currently `undefined` (local overrides win). |
-| `fetchRemoteEnv` | GET `${url}/projects/{project}/environments/{environment}` with `Authorization: Bearer ${authToken}`. Throws on non-2xx or missing `values` object. Honors injected `fetchImpl` for tests / non-Node-20 hosts. |
-| `readEnv` | Single-call wrapper around `process.env[key]` to keep direct env reads centralized. |
 
 ### `error-tracking`
 | Function / Export | One-liner | Deep doc |
@@ -477,6 +465,27 @@
 - `preProxyRequest: PreProxyRequestPayload` — `{ service, pathname, method, target, viaFallback }`.
 - `postProxyResponse: PostProxyResponsePayload` — adds `{ statusCode, latencyMs }`.
 
+### `secret-manager`
+| Function / Export | One-liner | Deep doc |
+| --- | --- | --- |
+| `initSecretManager(config)` | Boot-time entry. Scans `process.env` for pointer-shaped values, `POST /resolve`s them, overwrites `process.env` with real values. No-op in `'local'`. Starts dev hot reload when `config.dev` is set. | -> docs/architecture.md |
+| `refreshSecretManager()` | Re-resolve the captured pointers against the server (the dev **poll** channel). Call manually after an admin rotates a secret on a long-running process. | -> docs/architecture.md |
+| `reloadSecretManagerFromFiles()` | Re-parse the configured env files (`dev.envFiles`, default `.env` + `.env.local`) and apply them: plain values injected into `process.env` (live config reload), pointer-shaped values re-resolved. The dev **file-watch** channel; callable manually. | -> docs/architecture.md |
+| `getCachedResolution()` | Returns the last `{ fetchedAt, values }` (pointer -> value) for diagnostics, or `null`. | -> docs/architecture.md |
+| `resetSecretManagerForTests()` | Test-only — clears module state and tears down dev watchers / timers. | -> docs/architecture.md |
+| Type `SecretManagerConfig` | `{ url; token; source?; pointerPattern?; fetchImpl?; dev? }` where `dev` is `{ watch?; pollIntervalMs?; envFiles? }`. | -> docs/architecture.md |
+| Type `SecretManagerToken` | `string \| { fromFile: string }`. | -> docs/architecture.md |
+| Type `CachedResolution` | `{ fetchedAt: number; values: Record<string, string> }`. | -> docs/architecture.md |
+- ### Internal helpers (not exported, listed for AI context)
+| Helper | Role |
+| --- | --- |
+| `capturePointers(pattern)` | Scan `process.env` once, return `{ envName -> pointer }` for every value matching the pointer pattern. Captured once because the first resolve overwrites the value with the real secret (no longer pointer-shaped). |
+| `resolveToken(token)` | Return the literal token, or read+trim the `{ fromFile }` file (read at resolve time so file rotation is picked up). |
+| `fetchResolve(config, pointers)` | `POST ${url}/resolve` with `{ keys: pointers }` and `Authorization: Bearer <token>`. Throws on non-2xx or a missing `values` object. Honors `fetchImpl`. |
+| `applyResolved(map, values, source)` | Overwrite `process.env[envName]` with the resolved value. In `'remote'` mode, fail fast (throw) if any pointer is unresolved BEFORE mutating; in `'hybrid'` warn per missing pointer and leave it as-is. |
+| `parseEnvFile(content)` | In-package minimal `.env` parser (KEY=VALUE, full-line + inline comments, quoted values). Keeps the package dependency-free; used by the file-reload path. |
+| `startDevReload(config)` | Opt-in (`config.dev` set) + non-production. Starts a debounced `fs.watch` on `dev.envFiles` (-> `reloadSecretManagerFromFiles`) and/or an interval poll (-> `refreshSecretManager`). Both channels swallow + warn on error so a transient failure never crashes dev. |
+
 ### `server`
 | Function / Export | One-liner | Deep doc |
 |---|---|---|
@@ -600,14 +609,14 @@
 | api | 6 | 6 | 0 |
 | core | 9 | 9 | 0 |
 | create-luckystack-app | 5 | 5 | 0 |
-| devkit | 7 | 7 | 0 |
+| devkit | 8 | 8 | 0 |
 | docs-ui | 4 | 4 | 0 |
 | email | 5 | 5 | 0 |
-| env-resolver | 4 | 4 | 0 |
 | error-tracking | 4 | 4 | 0 |
 | login | 8 | 8 | 0 |
 | presence | 6 | 6 | 0 |
 | router | 5 | 5 | 0 |
+| secret-manager | 1 | 1 | 0 |
 | server | 6 | 6 | 0 |
 | sync | 8 | 8 | 0 |
 | test-runner | 5 | 5 | 0 |

@@ -18,14 +18,33 @@ const findExportedConst = (sourceFile: ts.SourceFile, name: string): ts.Variable
   return null;
 };
 
+//? Unwrap `as const` / `as T` / `satisfies T` / parenthesized wrappers so an
+//? initializer like `'DELETE' as const` is read as its underlying literal.
+//? The TS AST wraps these in AsExpression / SatisfiesExpression /
+//? ParenthesizedExpression nodes that the literal-type guards below would
+//? otherwise skip — silently dropping the authored value and falling back to
+//? an inferred default. Solving the wrapper class once covers every extractor.
+const unwrapExpression = (node: ts.Expression): ts.Expression => {
+  let current = node;
+  while (
+    ts.isAsExpression(current)
+    || ts.isSatisfiesExpression(current)
+    || ts.isParenthesizedExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+};
+
 export const extractHttpMethod = (filePath: string, apiName: string): HttpMethod => {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'httpMethod');
 
-    if (decl?.initializer && ts.isStringLiteral(decl.initializer)) {
-      const method = decl.initializer.text.toUpperCase() as HttpMethod;
+    const initializer = decl?.initializer ? unwrapExpression(decl.initializer) : undefined;
+    if (initializer && ts.isStringLiteral(initializer)) {
+      const method = initializer.text.toUpperCase() as HttpMethod;
       if (['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return method;
     }
   } catch (error) {
@@ -42,8 +61,9 @@ export const extractRateLimit = (filePath: string): number | false | undefined =
     const decl = findExportedConst(sourceFile, 'rateLimit');
 
     if (decl?.initializer) {
-      if (decl.initializer.kind === ts.SyntaxKind.FalseKeyword) return false;
-      if (ts.isNumericLiteral(decl.initializer)) return Number(decl.initializer.text);
+      const initializer = unwrapExpression(decl.initializer);
+      if (initializer.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (ts.isNumericLiteral(initializer)) return Number(initializer.text);
     }
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting rateLimit from ${filePath}:`, error);
@@ -66,18 +86,20 @@ export const extractValidation = (filePath: string): ApiValidationMode | undefin
     const decl = findExportedConst(sourceFile, 'validation');
 
     if (!decl?.initializer) return undefined;
+    const initializer = unwrapExpression(decl.initializer);
 
-    if (ts.isStringLiteral(decl.initializer)) {
-      const text = decl.initializer.text;
+    if (ts.isStringLiteral(initializer)) {
+      const text = initializer.text;
       if (text === 'strict' || text === 'relaxed') return text;
     }
 
-    if (ts.isObjectLiteralExpression(decl.initializer)) {
-      for (const prop of decl.initializer.properties) {
+    if (ts.isObjectLiteralExpression(initializer)) {
+      for (const prop of initializer.properties) {
         if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
         if (prop.name.text !== 'input') continue;
-        if (!ts.isStringLiteral(prop.initializer)) continue;
-        const input = prop.initializer.text;
+        const propInit = unwrapExpression(prop.initializer);
+        if (!ts.isStringLiteral(propInit)) continue;
+        const input = propInit.text;
         if (input === 'skip' || input === 'strict') return { input };
       }
     }
@@ -89,7 +111,8 @@ export const extractValidation = (filePath: string): ApiValidationMode | undefin
 };
 
 // Reads a primitive value from an AST expression node.
-const readPrimitive = (node: ts.Expression): string | number | boolean | undefined => {
+const readPrimitive = (rawNode: ts.Expression): string | number | boolean | undefined => {
+  const node = unwrapExpression(rawNode);
   if (ts.isStringLiteral(node)) return node.text;
   if (ts.isNumericLiteral(node)) return Number(node.text);
   if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
@@ -200,21 +223,23 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
     const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'auth');
-    if (!decl?.initializer || !ts.isObjectLiteralExpression(decl.initializer)) return { login: true };
+    const authInitializer = decl?.initializer ? unwrapExpression(decl.initializer) : undefined;
+    if (!authInitializer || !ts.isObjectLiteralExpression(authInitializer)) return { login: true };
 
     let login = true;
     let additional: Record<string, unknown>[] | undefined;
 
-    for (const prop of decl.initializer.properties) {
+    for (const prop of authInitializer.properties) {
       if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
+      const propInit = unwrapExpression(prop.initializer);
 
       if (prop.name.text === 'login') {
-        login = prop.initializer.kind === ts.SyntaxKind.TrueKeyword;
+        login = propInit.kind === ts.SyntaxKind.TrueKeyword;
       }
 
-      if (prop.name.text === 'additional' && ts.isArrayLiteralExpression(prop.initializer)) {
+      if (prop.name.text === 'additional' && ts.isArrayLiteralExpression(propInit)) {
         additional = [];
-        for (const element of prop.initializer.elements) {
+        for (const element of propInit.elements) {
           if (!ts.isObjectLiteralExpression(element)) continue;
           const item = parseAdditionalItem(element);
           if (item) additional.push(item);

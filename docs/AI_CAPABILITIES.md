@@ -23,6 +23,7 @@ Each row links to that package's CLAUDE.md (the canonical function INDEX) if it 
 | `@luckystack/login` | 0.1.0 | Authentication for LuckyStack: credentials + OAuth (Google/GitHub/Facebook/Discord), Redis-backed sessions, single-session enforcement, lifecycle hooks. Pairs with @luckystack/core. | [CLAUDE.md](../node_modules/@luckystack/login/CLAUDE.md) |
 | `@luckystack/presence` | 0.1.0 | Presence and activity awareness for LuckyStack: AFK detection, room-peer notifications, lifecycle (connect / disconnect / reconnect), single-session enforcement integration. For multiplayer and collaborative apps. | [CLAUDE.md](../node_modules/@luckystack/presence/CLAUDE.md) |
 | `@luckystack/router` | 0.1.0 | Standalone HTTP + WebSocket load-balancer for multi-instance LuckyStack deployments. Redis-backed health, boot-UUID handshake, service-key-aware routing, optional dev->staging fallback. Optional package — only needed for horizontal scale or split-environment dev. | [CLAUDE.md](../node_modules/@luckystack/router/CLAUDE.md) |
+| `@luckystack/secret-manager` | 0.1.0 | Rotation-aware secret resolver client for LuckyStack. Commit `.env` pointers (e.g. OPENAI_KEY=OPENAI_AUTHORIZATION_KEY_V5) instead of real secrets; at boot this client resolves them against an external append-only secret-manager server and writes the real values into process.env. Supports local / remote / hybrid modes + opt-in dev hot reload. | [CLAUDE.md](../node_modules/@luckystack/secret-manager/CLAUDE.md) |
 | `@luckystack/server` | 0.1.0 | One-call server bootstrap for LuckyStack: HTTP + Socket.io + framework routes (api, sync, _health, /auth, uploads) wired together. Consumer's server.ts shrinks to ~20 lines. | [CLAUDE.md](../node_modules/@luckystack/server/CLAUDE.md) |
 | `@luckystack/sync` | 0.1.0 | Real-time sync transport for LuckyStack: type-safe room-based fanout, server + per-client validation, streaming, optimistic offline queue. Server entry plus a browser-safe ./client subpath. | [CLAUDE.md](../node_modules/@luckystack/sync/CLAUDE.md) |
 | `@luckystack/test-runner` | 0.1.0 | Generated-type-driven test layers for LuckyStack: contract smoke (Zod-valid input), auth enforcement, rate-limit, and crash-resistance fuzz. Walks every endpoint via the generated apiMethodMap. | [CLAUDE.md](../node_modules/@luckystack/test-runner/CLAUDE.md) |
@@ -33,23 +34,23 @@ Every typed API route in this project. Sourced from `_ProjectApiTypeMap` in `src
 
 | Route | Method | Rate limit | Has stream | Tests |
 | --- | --- | --- | --- | --- |
-| `playground/echo/v1` | POST | 60 | — | — |
-| `playground/spam/v1` | POST | 3 | — | — |
-| `playground/streamCounter/v1` | POST | 30 | yes | — |
-| `playground/testEmail/v1` | POST | 3 | — | — |
-| `playground/throwError/v1` | POST | 60 | — | — |
+| `playground/echo/v1` | POST | 60 | — | ✓ |
+| `playground/spam/v1` | POST | 3 | — | ✓ |
+| `playground/streamCounter/v1` | POST | 30 | yes | ✓ |
+| `playground/testEmail/v1` | POST | 3 | — | ✓ |
+| `playground/throwError/v1` | POST | 60 | — | ✓ |
 | `reset-password/confirmReset/v1` | POST | 5 | — | ✓ |
 | `reset-password/sendReset/v1` | POST | 5 | — | ✓ |
 | `settings/changePassword/v1` | POST | 10 | — | ✓ |
-| `settings/confirmEmailChange/v1` | POST | 10 | — | — |
+| `settings/confirmEmailChange/v1` | POST | 10 | — | ✓ |
 | `settings/deleteAccount/v1` | POST | 3 | — | ✓ |
-| `settings/listSessions/v1` | POST | 30 | — | — |
-| `settings/requestEmailChange/v1` | POST | 5 | — | — |
+| `settings/listSessions/v1` | POST | 30 | — | ✓ |
+| `settings/requestEmailChange/v1` | POST | 5 | — | ✓ |
 | `settings/revokeSession/v1` | POST | 20 | — | ✓ |
 | `settings/signOutEverywhere/v1` | POST | 5 | — | ✓ |
 | `settings/updatePreferences/v1` | POST | 30 | — | ✓ |
 | `settings/updateUser/v1` | POST | 20 | — | ✓ |
-| `system/logout/v1` | POST | ? | — | — |
+| `system/logout/v1` | DELETE | ? | — | — |
 | `system/session/v1` | POST | ? | — | — |
 
 ### Sync routes (`_sync/`)
@@ -58,11 +59,11 @@ Every typed sync route in this project. Sourced from `_ProjectSyncTypeMap` in `s
 
 | Route | Server stream | Client stream | Tests |
 | --- | --- | --- | --- |
-| `playground/echo/v1` | — | — | — |
+| `playground/echo/v1` | — | — | ✓ |
 | `playground/streamBroadcast/v1` | yes | — | ✓ |
 | `playground/streamProgress/v1` | yes | — | ✓ |
 | `playground/streamToToken/v1` | yes | — | ✓ |
-| `playground/throwSync/v1` | — | — | — |
+| `playground/throwSync/v1` | — | — | ✓ |
 
 ### Server-injected `functions.*` map
 

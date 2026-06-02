@@ -166,7 +166,13 @@ const applyHttpSyncRateLimits = async ({
   }
 
   const defaultIpLimit = config.rateLimiting.defaultIpLimit;
-  if (defaultIpLimit !== false && defaultIpLimit > 0) {
+  //? Mirror handleHttpApiRequest: skip the global per-IP abuse limit for
+  //? loopback traffic in non-production (dev + the scalable test suite).
+  //? Per-route limits still apply; production is unaffected.
+  const requesterIsLoopback = process.env.NODE_ENV !== 'production'
+    && (requesterIp === '127.0.0.1' || requesterIp === '::1' || requesterIp === '::ffff:127.0.0.1'
+      || (typeof requesterIp === 'string' && requesterIp.startsWith('127.')));
+  if (!requesterIsLoopback && defaultIpLimit !== false && defaultIpLimit > 0) {
     const ipBucket = requesterIp ?? 'unknown';
     const ipKey = `ip:${ipBucket}:sync:all`;
     const { allowed, resetIn } = await checkRateLimit({
@@ -507,17 +513,14 @@ export default async function handleHttpSyncRequest({
     };
     await dispatchHook('preSyncFanout', fanoutPayload);
 
-    const sockets = receiver === 'all'
+    //? Over the HTTP/SSE fallback the caller IS the originator, so a receiver
+    //? room with no connected sockets (no peers online, or the originator used
+    //? HTTP instead of a websocket) is normal — NOT an error. Fall back to an
+    //? empty set so the fanout loop simply runs zero times; the server handler
+    //? already ran and its `serverOutput` is the meaningful result returned below.
+    const sockets = (receiver === 'all'
       ? ioInstance.sockets.sockets
-      : ioInstance.sockets.adapter.rooms.get(normalizedReceiver);
-
-    if (!sockets) {
-      return buildSyncError({
-        response: { status: 'error', errorCode: 'sync.noReceiversFound' },
-        preferred: preferredLocale,
-        userLanguage: user?.language,
-      });
-    }
+      : ioInstance.sockets.adapter.rooms.get(normalizedReceiver)) ?? new Set<string>();
 
     let recipientCount = 0;
     for (const socketEntry of sockets) {
@@ -627,7 +630,19 @@ export default async function handleHttpSyncRequest({
       getLogger().debug(`http sync: ${resolvedName} completed`);
     }
 
-    return { status: 'success' as const, message: `sync ${resolvedName} success` };
+    //? Flatten the server handler's `serverOutput` into the HTTP success
+    //? envelope (mirroring how `handleHttpApiRequest` spreads `result`), so
+    //? callers over HTTP/SSE receive the route's own fields (tokenCount,
+    //? completedSteps, message, …) — not just a generic success line.
+    //? `serverOutput` is statically `{}` here (its real shape is route-defined),
+    //? so guarantee HttpSyncResponse's required `message` while still preferring
+    //? the route's own message when it supplied one.
+    const serverMessage = (serverOutput as { message?: unknown }).message;
+    return {
+      ...serverOutput,
+      status: 'success' as const,
+      message: typeof serverMessage === 'string' ? serverMessage : `${resolvedName} sync success`,
+    };
   });
   if (bodyError) {
     getLogger().error(`http sync: ${name} threw`, bodyError, { sync: name });

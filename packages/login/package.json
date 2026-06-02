@@ -45,16 +45,18 @@
     "README.md",
     "CLAUDE.md",
     "docs",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup",
-    "build:watch": "tsup --watch"
+    "build:watch": "tsup --watch",
+    "test": "vitest run"
   },
   "dependencies": {
     "@luckystack/core": "^0.1.0",
-    "bcryptjs": "^2.4.3",
-    "dotenv": "^16.6.1",
+    "bcryptjs": "^3.0.0",
+    "dotenv": "^17.0.0",
     "validator": "^13.15.35"
   },
   "peerDependencies": {

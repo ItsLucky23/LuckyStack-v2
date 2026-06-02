@@ -20,10 +20,10 @@ type LanguageCode = 'nl' | 'en' | 'de' | 'fr';
 type TranslationRecord = Record<string, string | Record<string, unknown>>;
 
 let translationsByLanguage: Record<LanguageCode, TranslationRecord> = {
-  nl: nlJson as TranslationRecord,
-  en: enJson as TranslationRecord,
-  de: deJson as TranslationRecord,
-  fr: frJson as TranslationRecord,
+  nl: nlJson,
+  en: enJson,
+  de: deJson,
+  fr: frJson,
 };
 
 const localePaths: Record<LanguageCode, string> = {

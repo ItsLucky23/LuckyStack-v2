@@ -44,18 +44,20 @@
     "README.md",
     "CLAUDE.md",
     "docs",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup",
-    "build:watch": "tsup --watch"
+    "build:watch": "tsup --watch",
+    "test": "vitest run"
   },
   "dependencies": {
     "@luckystack/core": "^0.1.0"
   },
   "peerDependencies": {
     "@luckystack/login": "^0.1.0",
-    "zod": "^3.25.0"
+    "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "@luckystack/login": { "optional": true }

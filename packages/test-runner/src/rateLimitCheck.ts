@@ -36,6 +36,7 @@ export const runRateLimitCheck = async (input: RateLimitCheckInput): Promise<Con
       method: endpoint.method,
       headers: {
         'Content-Type': 'application/json',
+        'Origin': new URL(baseUrl).origin,
         ...input.headers,
       },
       body: endpoint.method === 'GET' ? undefined : JSON.stringify(body),

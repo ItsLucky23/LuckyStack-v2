@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { getPrismaClient, getSrcDir, tryCatch } from '@luckystack/core';
+import { getCsrfConfig, getPrismaClient, getProjectConfig, getSrcDir, tryCatch } from '@luckystack/core';
 
 import {
   openStreamWatcher,
@@ -18,32 +18,59 @@ import {
 const API_TEST_FILE_PATTERN = /_v(\d+)\.tests\.ts$/;
 const SYNC_SERVER_TEST_FILE_PATTERN = /_server_v(\d+)\.tests\.ts$/;
 
+//? Mirror of the generated `apiMethodMap` shape (page → name → version →
+//? method). Kept local so the test-runner has no import-time coupling to the
+//? consumer's generated artifact.
+type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
+
 export interface CustomTestCase {
   name: string;
   run: (ctx: TestContext) => Promise<void>;
+  /**
+   * Mark this case as a KNOWN, accepted failure (e.g. a documented bug not
+   * yet fixed, or a scenario the current implementation cannot satisfy). The
+   * string is the reason shown in the report. A case marked `expectedToFail`
+   * that throws is reported as `xfail` — counted separately, NOT a red
+   * failure. If it unexpectedly PASSES it is reported as `xpass` so the stale
+   * marker can be removed. Leave undefined for normal cases.
+   */
+  expectedToFail?: string;
 }
 
 export interface CustomTestResult {
   routePath: string;
   caseName: string;
-  status: 'pass' | 'fail';
+  //? `xfail` = marked expectedToFail and failed as expected (known issue).
+  //? `xpass` = marked expectedToFail but passed (remove the marker).
+  status: 'pass' | 'fail' | 'xfail' | 'xpass';
   durationMs: number;
   reason?: string;
+  /** Documented reason when the case carried an `expectedToFail` marker. */
+  expectedToFail?: string;
 }
 
 export interface RunCustomTestsSummary {
   total: number;
   passed: number;
   failed: number;
+  /** Cases marked `expectedToFail` that failed as expected (known issues). */
+  xfailed: number;
+  /** Cases marked `expectedToFail` that unexpectedly passed (remove the marker). */
+  xpassed: number;
   results: CustomTestResult[];
 }
 
 export interface RunCustomTestsInput {
   baseUrl: string;
-  /** Optional cookie name for the session token. Defaults to `luckystack_token`. */
+  /** Optional cookie name for the session token. Defaults to the project's configured cookie. */
   sessionCookieName?: string;
   /** Filter to a subset of routes — substring match against `<page>/<name>/<version>`. */
   filter?: string;
+  /**
+   * Generated `apiMethodMap` so the harness sends each API route its declared
+   * HTTP method (e.g. logout is DELETE). Falls back to POST when absent.
+   */
+  apiMethodMap?: ApiMethodMap;
   onResult?: (result: CustomTestResult) => void;
 }
 
@@ -84,7 +111,10 @@ export const discoverCustomTestFiles = (srcDir: string = getSrcDir()): Discovere
       const version = `v${versionMatch[1]}`;
       const namePart = entry.name.replace(parentDir === '_api' ? /_v\d+\.tests\.ts$/ : /_server_v\d+\.tests\.ts$/, '');
       const pageDir = path.dirname(current);
-      const relativePage = path.relative(srcDir, pageDir).replaceAll('\\', '/');
+      //? Top-level `src/_api/` (no page folder) routes under the framework's
+      //? `system` page — mirror that, otherwise an empty page produces the
+      //? malformed URL `/api//logout/v1` and the call 404s.
+      const relativePage = path.relative(srcDir, pageDir).replaceAll('\\', '/') || 'system';
       found.push({
         filePath: fullPath,
         kind: parentDir === '_api' ? 'api' : 'sync',
@@ -170,7 +200,25 @@ const buildExpect = (): TestExpect => ({
 interface TestSessionState {
   token: string | null;
   userId: string | null;
+  //? CSRF token minted by saveSession on login. Sent on authenticated
+  //? state-changing requests so the server's CSRF middleware doesn't 403.
+  csrfToken: string | null;
+  //? Raw JSON body of the most recent callApi / callSync response. Surfaced in
+  //? a failed case's reason so the report shows the server's actual errorCode
+  //? (e.g. `api.rateLimitExceeded`) instead of only the assertion text.
+  lastResponse: unknown;
 }
+
+//? Pull the server's errorCode (or non-success status) out of the last HTTP
+//? response so a failure's reason shows WHY the server rejected the call, not
+//? just the assertion text. Returns undefined for success / non-envelope bodies.
+const extractErrorCode = (response: unknown): string | undefined => {
+  if (!response || typeof response !== 'object') return undefined;
+  const r = response as { errorCode?: unknown; status?: unknown };
+  if (typeof r.errorCode === 'string' && r.errorCode.length > 0) return r.errorCode;
+  if (typeof r.status === 'string' && r.status !== 'success') return r.status;
+  return undefined;
+};
 
 //? Minimal session login: mints a session in Redis via the consumer's
 //? registered SessionAdapter (from `@luckystack/login`). Deliberately does
@@ -181,7 +229,7 @@ interface TestSessionState {
 const buildSessionHelpers = (state: TestSessionState): TestContext['session'] => {
   return {
     login: async (user) => {
-      const { saveSession } = await import('@luckystack/login');
+      const { saveSession, getSession } = await import('@luckystack/login');
       const userId = user?.id ?? `test-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const email = user?.email ?? `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
       const name = user?.name ?? 'Test User';
@@ -193,9 +241,13 @@ const buildSessionHelpers = (state: TestSessionState): TestContext['session'] =>
         token,
         provider: 'credentials' as const,
       };
-      await saveSession(token, sessionData as never, true);
+      await saveSession(token, sessionData, true);
       state.token = token;
       state.userId = userId;
+      //? Read back the CSRF token saveSession minted so authenticated
+      //? state-changing requests can pass the server's CSRF middleware.
+      const persisted = await getSession(token);
+      state.csrfToken = persisted?.csrfToken ?? null;
       return { token, userId };
     },
     logout: async () => {
@@ -204,6 +256,7 @@ const buildSessionHelpers = (state: TestSessionState): TestContext['session'] =>
       await deleteSession(state.token);
       state.token = null;
       state.userId = null;
+      state.csrfToken = null;
     },
     current: () => ({ token: state.token, userId: state.userId }),
   };
@@ -214,17 +267,24 @@ const buildCallApi = (
   routePath: string,
   state: TestSessionState,
   cookieName: string,
+  //? The route's declared HTTP method (from the generated apiMethodMap). The
+  //? server validates the method, so DELETE/PUT routes (e.g. logout) 405 if we
+  //? always sent POST.
+  method: string,
 ): TestContext['callApi'] => {
   return async (input) => {
     const url = `${baseUrl.replace(/\/$/, '')}/api/${routePath}`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(input ?? {}),
-    });
-    return (await response.json()) as never;
+    if (state.csrfToken) headers[getCsrfConfig().headerName] = state.csrfToken;
+    const init: RequestInit = { method, headers };
+    //? GET / HEAD requests cannot carry a body (fetch throws). Every other
+    //? method sends the JSON payload.
+    if (method !== 'GET' && method !== 'HEAD') init.body = JSON.stringify(input ?? {});
+    const response = await fetch(url, init);
+    const json = (await response.json()) as never;
+    state.lastResponse = json;
+    return json;
   };
 };
 
@@ -236,15 +296,18 @@ const buildCallSync = (
 ): TestContext['callSync'] => {
   return async (input, opts) => {
     const url = `${baseUrl.replace(/\/$/, '')}/sync/${routePath}`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
+    if (state.csrfToken) headers[getCsrfConfig().headerName] = state.csrfToken;
     const body = { data: input ?? {}, receiver: opts?.receiver };
     const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
     });
-    return (await response.json()) as never;
+    const json = (await response.json()) as never;
+    state.lastResponse = json;
+    return json;
   };
 };
 
@@ -252,16 +315,25 @@ interface BuiltContext {
   ctx: TestContext;
   /** Close every watcher opened during the case. Called by `runCustomTests` after each case. */
   closeAllWatchers: () => Promise<void>;
+  /** Per-case session state — read after the run to surface the last response's errorCode. */
+  state: TestSessionState;
 }
 
 const buildContext = (
   discovery: DiscoveredTestFile,
   input: RunCustomTestsInput,
 ): BuiltContext => {
-  const cookieName = input.sessionCookieName ?? 'luckystack_token';
+  //? Default to the PROJECT's configured session cookie name (the server reads
+  //? the token from this cookie). Hardcoding a name silently breaks every
+  //? authenticated custom test when the project uses a different name.
+  const cookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
   const routePath = `${discovery.route.page}/${discovery.route.name}/${discovery.route.version}`;
   const routeFullName = `sync/${routePath}`;
-  const state: TestSessionState = { token: null, userId: null };
+  //? API routes are invoked with their declared HTTP method; sync routes always
+  //? POST. Default to POST when the map lacks the route (e.g. sync, or a map
+  //? wasn't threaded through).
+  const apiMethod = input.apiMethodMap?.[discovery.route.page]?.[discovery.route.name]?.[discovery.route.version] ?? 'POST';
+  const state: TestSessionState = { token: null, userId: null, csrfToken: null, lastResponse: null };
   const prisma = getPrismaClient();
 
   //? Watchers are tracked per case so a missing explicit `close()` can't
@@ -278,7 +350,7 @@ const buildContext = (
     });
     //? Track watchers under the base `StreamChunkFrame` shape; the
     //? returned reference keeps the caller-supplied generic.
-    watchers.push(watcher as StreamWatcher);
+    watchers.push(watcher);
     return watcher;
   };
 
@@ -296,7 +368,7 @@ const buildContext = (
   };
 
   const ctx: TestContext = {
-    callApi: buildCallApi(input.baseUrl, routePath, state, cookieName),
+    callApi: buildCallApi(input.baseUrl, routePath, state, cookieName, apiMethod),
     callSync: buildCallSync(input.baseUrl, routePath, state, cookieName),
     watchStream,
     session: buildSessionHelpers(state),
@@ -304,7 +376,7 @@ const buildContext = (
     expect: buildExpect(),
   };
 
-  return { ctx, closeAllWatchers };
+  return { ctx, closeAllWatchers, state };
 };
 
 export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCustomTestsSummary> => {
@@ -337,6 +409,7 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
     for (const rawCase of exported) {
       const c = rawCase as CustomTestCase;
       if (typeof c.name !== 'string' || typeof c.run !== 'function') continue;
+      const expectedToFail = typeof c.expectedToFail === 'string' ? c.expectedToFail : undefined;
       const built = buildContext(discovery, input);
       const started = Date.now();
       const [runError] = await tryCatch(async () => c.run(built.ctx));
@@ -345,9 +418,25 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
       //? throw from masking the original failure.
       await tryCatch(() => built.closeAllWatchers());
       const durationMs = Date.now() - started;
-      const r: CustomTestResult = runError
-        ? { routePath, caseName: c.name, status: 'fail', durationMs, reason: runError.message }
-        : { routePath, caseName: c.name, status: 'pass', durationMs };
+
+      let r: CustomTestResult;
+      if (runError) {
+        //? Augment the assertion message with the server's actual errorCode so
+        //? the report explains the rejection, not just the failed expectation.
+        const errorCode = extractErrorCode(built.state.lastResponse);
+        const reason = errorCode ? `${runError.message} (server: ${errorCode})` : runError.message;
+        r = expectedToFail
+          ? { routePath, caseName: c.name, status: 'xfail', durationMs, reason, expectedToFail }
+          : { routePath, caseName: c.name, status: 'fail', durationMs, reason };
+      } else {
+        r = expectedToFail
+          ? {
+              routePath, caseName: c.name, status: 'xpass', durationMs,
+              reason: `marked expectedToFail ("${expectedToFail}") but passed — remove the marker`,
+              expectedToFail,
+            }
+          : { routePath, caseName: c.name, status: 'pass', durationMs };
+      }
       results.push(r);
       input.onResult?.(r);
     }
@@ -357,6 +446,8 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
     total: results.length,
     passed: results.filter(r => r.status === 'pass').length,
     failed: results.filter(r => r.status === 'fail').length,
+    xfailed: results.filter(r => r.status === 'xfail').length,
+    xpassed: results.filter(r => r.status === 'xpass').length,
     results,
   };
 };

@@ -12,7 +12,6 @@ import { i18nNotify as notify, clearCsrfToken } from "@luckystack/core/client";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { useEffect, useRef } from "react";
 import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
-import type { SyncRouteStreamEvent } from "./syncRequest";
 import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
 import {
   buildGetJoinedRoomsResponseEventName,
@@ -245,7 +244,7 @@ export function useSocket(session: SessionLayout | null) {
         }
 
         for (const routeKey of routeKeys) {
-          triggerSyncStreamEvent(routeKey, streamPayload as SyncRouteStreamEvent);
+          triggerSyncStreamEvent(routeKey, streamPayload);
         }
         return;
       }

@@ -92,7 +92,7 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
     }
   }
 
-  const result = (await loginWithCredentials(params as Record<string, string>)) as {
+  const result = (await loginWithCredentials(params)) as {
     status: boolean;
     reason: string;
     newToken: string | null;

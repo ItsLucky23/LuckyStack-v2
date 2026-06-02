@@ -66,7 +66,7 @@ const redisProxy = new Proxy({} as RedisClient, {
     }
     return value;
   },
-  has: (_target, prop) => Reflect.has(getRedisClient() as object, prop),
+  has: (_target, prop) => Reflect.has(getRedisClient(), prop),
 });
 
 export const redis = redisProxy;

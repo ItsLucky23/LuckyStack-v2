@@ -45,6 +45,10 @@ export const runContractCheck = async (input: ContractCheckInput): Promise<Contr
     method: endpoint.method,
     headers: {
       'Content-Type': 'application/json',
+      //? Browsers attach Origin on state-changing requests; the server's origin
+      //? policy fail-closes POST/PUT/DELETE without one. Send the same-origin
+      //? value so the request reaches the API pipeline (consumers can override).
+      'Origin': new URL(baseUrl).origin,
       ...input.headers,
     },
     body: endpoint.method === 'GET' ? undefined : JSON.stringify(body),

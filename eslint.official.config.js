@@ -9,7 +9,11 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
-import reactX from 'eslint-plugin-react-x'
+//? eslint-plugin-react-x / -react-dom temporarily removed: their eslint-9 line
+//? (1.x/2.x) caps `typescript` at 5.x and is incompatible with TypeScript 6,
+//? while the TS-6-compatible line (3.x+) requires ESLint 10 — which is itself
+//? blocked upstream (eslint-plugin-react + jsx-a11y have no eslint-10 release).
+//? Re-add `eslint-plugin-react-x@^5` (+ `react-dom`) once ESLint 10 is unblocked.
 import eslintPluginUnicorn from 'eslint-plugin-unicorn'
 import eslintPluginImportX from 'eslint-plugin-import-x'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
@@ -29,7 +33,6 @@ export default tseslint.config(
       ...tseslint.configs.stylisticTypeChecked,
       js.configs.recommended,
       tseslint.configs.recommended,
-      reactX.configs.recommended,
       eslintPluginUnicorn.configs['flat/recommended'],
       eslintPluginImportX.flatConfigs.recommended,
       eslintPluginImportX.flatConfigs.typescript,
@@ -64,7 +67,14 @@ export default tseslint.config(
       'eslint-comments': eslintPluginComments
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      //? react-hooks 7's `recommended` preset now bundles the new React-Compiler-
+      //? adjacent rules (e.g. `react-hooks/set-state-in-effect`) which flag ~25
+      //? existing effect sites. Adopting those is a deliberate refactor, not a
+      //? dep-bump side effect — pin to the classic pair for now. Drop these two
+      //? lines back to `...reactHooks.configs.recommended.rules` when you want to
+      //? take on the React-Compiler lint migration.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       'eslint-comments/no-unused-disable': 'error',
       'react-refresh/only-export-components': [
         'warn',

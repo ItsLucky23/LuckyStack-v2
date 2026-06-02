@@ -34,8 +34,23 @@ export {
   getRegisteredTemplate,
   clearTemplateOverrides,
   listRegisteredTemplateKinds,
+  registerTemplateRule,
+  registerTemplateKind,
+  clearTemplateRules,
+  getTemplateRules,
+  resolveTemplateKind,
+  registerDefaultTemplateRules,
+  BUILT_IN_TEMPLATE_KINDS,
+  BUILT_IN_TEMPLATE_FILENAMES,
+  DEFAULT_DASHBOARD_PATH_PATTERN,
 } from './templateRegistry';
-export type { TemplateKind } from './templateRegistry';
+export type {
+  TemplateKind,
+  BuiltInTemplateKind,
+  TemplateRule,
+  TemplateMatchContext,
+  RegisterTemplateKindOptions,
+} from './templateRegistry';
 
 // Runtime dev loaders (consumed by server/prod/runtimeMaps.ts when NODE_ENV !== 'production')
 export {

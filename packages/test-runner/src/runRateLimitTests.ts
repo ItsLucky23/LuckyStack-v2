@@ -43,6 +43,11 @@ const getRateLimit = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): num
   return meta.rateLimit;
 };
 
+const requiresLogin = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): boolean => {
+  const meta = apiMetaMap[endpoint.page]?.[endpoint.name]?.[endpoint.version];
+  return meta?.auth.login ?? false;
+};
+
 const shouldSkip = (endpoint: EndpointDescriptor, skip: string[]): boolean => {
   if (skip.length === 0) return false;
   const versioned = `${endpoint.page}/${endpoint.name}/${endpoint.version}`;
@@ -56,11 +61,29 @@ export const runRateLimitTests = async (
   const endpoints = walkEndpoints(input.apiMethodMap);
   const skip = input.skip ?? [];
   const maxRateLimit = input.maxRateLimitToTest ?? 50;
+  //? A login-required route returns `auth.required` BEFORE the rate limiter
+  //? runs, so it can only be rate-limit-tested with a session. A Cookie header
+  //? means an authenticated sweep. We deliberately do NOT auto-authenticate the
+  //? sweep — that would execute real mutations (delete/update) with junk input.
+  //? Set TEST_AUTH_TOKEN to opt in and cover login-gated routes.
+  const isAuthenticatedSweep = Boolean(input.headers?.Cookie);
   const results: ContractCheckResult[] = [];
 
   for (const endpoint of endpoints) {
     const rateLimit = getRateLimit(input.apiMetaMap, endpoint);
     if (rateLimit === null) continue;
+
+    if (!isAuthenticatedSweep && requiresLogin(input.apiMetaMap, endpoint)) {
+      const skipped: ContractCheckResult = {
+        endpoint,
+        status: 'skipped',
+        durationMs: 0,
+        reason: 'login-required route — set TEST_AUTH_TOKEN to rate-limit-test it (unauthenticated calls hit auth.required before the limiter)',
+      };
+      results.push(skipped);
+      input.onResult?.(skipped);
+      continue;
+    }
 
     if (rateLimit > maxRateLimit) {
       const skipped: ContractCheckResult = {

@@ -71,7 +71,7 @@ export default function Home() {
   const translate = useTranslator();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [newLanguage, setNewLanguage] = useState<Language>((session?.language ?? 'en') as Language);
+  const [newLanguage, setNewLanguage] = useState<Language>((session?.language ?? 'en'));
   const [newName, setNewName] = useState<string>(session?.name ?? '');
   const [newTheme, setNewTheme] = useState<Theme>(session?.theme ?? 'dark');
   const [newEmail, setNewEmail] = useState<string>(session?.email ?? '');
@@ -169,7 +169,7 @@ export default function Home() {
       data: {},
     });
     if (response.status === 'success') {
-      setActiveSessions(response.result.sessions as ActiveSession[]);
+      setActiveSessions(response.result.sessions);
     }
   }, []);
 

@@ -43,7 +43,7 @@ Beyond the bare template copy, the CLI also copies the framework's AI-facing doc
 | `copyTree(src, dest, vars)` | Recursive directory copier. For each entry: rewrites the destination filename via `renameDotFile`, recurses into directories, runs `replacePlaceholders` on text files, falls back to `fs.copyFileSync` for binaries. | -> docs/scaffold-flow.md |
 | `runNpmInstall(cwd)` | Spawns `npm install` (`npm.cmd` on Windows) in the scaffolded directory with inherited stdio. Logs a manual-fallback hint if it exits non-zero. | -> docs/post-scaffold-suggestions.md |
 | `runPrismaGenerate(cwd)` | Spawns `npx prisma generate` after `npm install` so first-build types resolve. Does NOT run `prisma db push` or `prisma migrate` — those require a populated `DATABASE_URL`. | -> docs/post-scaffold-suggestions.md |
-| Framework-docs copy block (inside `main`, scheduled for Fase E.2) | After the template copy, recursively copies root `CLAUDE.md`, `docs/` (-> `docs/luckystack/` in the scaffold), `skills/`, and `.claude/commands/` from the repo root into the target. Each source is optional — missing sources are skipped silently. | -> docs/framework-docs-copy.md |
+| Framework-docs copy block (inside `main`) | After the template copy, recursively copies root `CLAUDE.md`, `docs/` (-> `docs/luckystack/` in the scaffold), `skills/`, `.claude/commands/`, and `branch-logs/README.md` from the repo root into the target. Each source is optional — missing sources are skipped silently. | -> docs/framework-docs-copy.md |
 | Type: `CliArgs` | `{ projectName: string; install: boolean; prompt: boolean; help: boolean }`. Output of `parseArgs`. | -> docs/cli-flags.md |
 | Type: `ScaffoldChoices` | `{ dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n }`. Output of `runPrompts` / `DEFAULT_CHOICES`. | -> docs/scaffold-flow.md |
 | Constant: `DEFAULT_CHOICES` | Sane defaults used when `--no-prompt` is passed (Mongo + credentials + console email + no monitoring + i18n on). | -> docs/scaffold-flow.md |
@@ -83,4 +83,3 @@ Template variables substituted into every text file by `replacePlaceholders`:
 - Consumer quickstart: `./README.md`.
 - Architecture doc shipped with the scaffold: `/docs/ARCHITECTURE_PACKAGING.md` (overlay folder convention + `bootstrapLuckyStack`).
 - Developer guide referenced from the final "next steps" block: `/docs/DEVELOPER_GUIDE.md`.
-- Plan reference for the framework-docs copy step: Fase E.2 in `fix-import-conflict-en-quiet-cocoa.md`.

@@ -1,4 +1,9 @@
-import { isEmail } from 'validator';
+//? `validator` is CommonJS; its .d.ts does not declare a default export but
+//? Node's CJS interop provides one at runtime. ESM named-import trips the
+//? runtime ESM loader. Using namespace-access on the default import is the
+//? canonical CJS-interop pattern that lint-rules also accept.
+// eslint-disable-next-line import-x/default
+import validator from 'validator';
 import { dispatchHook } from '@luckystack/core';
 import { sendEmailChangeConfirmation } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
@@ -21,7 +26,8 @@ export interface ApiParams {
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const newEmail = data.newEmail.trim().toLowerCase();
 
-  if (!newEmail || !isEmail(newEmail)) {
+  // eslint-disable-next-line import-x/no-named-as-default-member
+  if (!newEmail || !validator.isEmail(newEmail)) {
     return { status: 'error', errorCode: 'auth.invalidEmail' };
   }
   if (newEmail === user.email.toLowerCase()) {

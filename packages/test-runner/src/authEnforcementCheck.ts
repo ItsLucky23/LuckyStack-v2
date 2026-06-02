@@ -34,8 +34,9 @@ export const runAuthEnforcementCheck = async (
 
   const [fetchError, response] = await tryCatch(() => fetch(url, {
     method: endpoint.method,
-    //? No session cookie, no auth header — deliberately.
-    headers: { 'Content-Type': 'application/json' },
+    //? No session cookie, no auth header — deliberately. Origin IS sent so the
+    //? server's origin policy doesn't 403 before the auth check can run.
+    headers: { 'Content-Type': 'application/json', 'Origin': new URL(baseUrl).origin },
     body: endpoint.method === 'GET' ? undefined : JSON.stringify(body),
     signal: controller.signal,
   }));

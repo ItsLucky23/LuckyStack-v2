@@ -4,7 +4,7 @@
 
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
-| chore/package-split-prep | (none) | 2026-05-29 | active | 30 |
+| chore/package-split-prep | (none) | 2026-06-02 07:55 | active | 44 |
 
 ## Columns
 

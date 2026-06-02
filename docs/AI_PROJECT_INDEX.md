@@ -22,7 +22,7 @@
 | `api/settings/confirmEmailChange/v1` | POST | public | 10 | — | — | — |
 | `api/settings/deleteAccount/v1` | POST | login | 3 | — | — | — |
 | `api/settings/listSessions/v1` | POST | login | 30 | — | — | — |
-| `api/settings/requestEmailChange/v1` | POST | login | 5 | — | — | — |
+| `api/settings/requestEmailChange/v1` | POST | login | 5 | — | — | `validator` is CommonJS; its .d.ts does not declare a default export but |
 | `api/settings/revokeSession/v1` | POST | login | 20 | — | — | — |
 | `api/settings/signOutEverywhere/v1` | POST | login | 5 | — | — | — |
 | `api/settings/updatePreferences/v1` | POST | login | 30 | — | — | — |

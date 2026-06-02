@@ -41,6 +41,7 @@ A starter project pre-configured with:
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--no-install` | (install runs) | Skip the `npm install` after copying. |
+| `--no-prompt` | (prompts run) | Skip the interactive prompts and use defaults (Mongo + credentials). |
 | `--help`, `-h` | — | Show help. |
 
 ## Related architecture docs

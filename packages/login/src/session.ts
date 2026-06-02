@@ -58,17 +58,23 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     const ttl = getSessionTtl();
     await adapter.setRaw(token, JSON.stringify(data), ttl);
 
-    const { getIoInstance } = await import('@luckystack/core');
-    const ioInstance = getIoInstance();
-    const io = ioInstance;
-    if (!io) return;
-
     const userId = data.id;
 
-    // Always track active tokens so server-side user/session updates can fan out in real time
+    //? Always track active tokens BEFORE the io check — `trackActive` is a
+    //? Redis-only write, independent of any live socket. Gating it behind a
+    //? live io meant processes without a Socket.io instance (the test harness,
+    //? background workers, CLI tasks) persisted the session but never populated
+    //? the active-tokens set, so `listSessions` / `revokeUserSessions` saw
+    //? nothing for that user.
     if (userId) {
       await adapter.trackActive(userId, token, ttl);
     }
+
+    const { getIoInstance } = await import('@luckystack/core');
+    const io = getIoInstance();
+    //? Socket fanout + single-session enforcement below need a live io; skip
+    //? them when there isn't one. The session is already persisted + tracked.
+    if (!io) return;
 
     // Handle session-limit enforcement on new login. Logic:
     //   1. perUser = 'single' (default) OR legacy `allowMultiple: false` →
@@ -203,14 +209,18 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
  * @returns true if successful
  */
 const deleteSession = async (token: string): Promise<boolean> => {
-  //? Spurious deleteSession calls cause the user to be silently kicked out.
-  //? Warn-log with stacktrace so the originating caller (logout / revokeSession
-  //? / signOutEverywhere / deleteAccount / preSessionDelete hook) is visible
-  //? in the server terminal during incidents.
-  getLogger().warn('[session] deleteSession invoked', {
-    tokenPrefix: token.slice(0, 8),
-    stack: new Error('deleteSession invoked').stack,
-  });
+  //? Opt-in spurious-delete tracing. `deleteSession` runs on EVERY legitimate
+  //? logout / revokeSession / signOutEverywhere / deleteAccount, so an
+  //? unconditional warn+stacktrace drowns the signal it's meant to surface and
+  //? spams dev/test output with stacktrace-shaped lines that read like errors.
+  //? Set LUCKYSTACK_TRACE_SESSION_DELETES=1 when hunting a "why was I logged
+  //? out?" bug to print the originating caller's stack; silent otherwise.
+  if (process.env.LUCKYSTACK_TRACE_SESSION_DELETES === '1') {
+    getLogger().warn('[session] deleteSession invoked', {
+      tokenPrefix: token.slice(0, 8),
+      stack: new Error('deleteSession invoked').stack,
+    });
+  }
 
   const [error, ok] = await tryCatch(async () => {
     const adapter = getSessionAdapter();

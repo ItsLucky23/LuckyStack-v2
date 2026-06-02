@@ -8,6 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 .env
+# @luckystack/secret-manager shared bearer token (single-line file, never commit)
+.secret-manager-token
 node_modules
 dist
 dist-ssr
@@ -15,6 +17,7 @@ dist-ssr
 .venv
 .cache/
 .eslintcache
+.lint-unnecessary.out
 
 # Editor directories and files
 .vscode/*
@@ -41,3 +44,6 @@ repomix-output.xml
 
 # TypeScript Build Artifacts
 *.tsbuildinfo
+
+# Test runner machine-readable output (npm run test)
+test-results.json

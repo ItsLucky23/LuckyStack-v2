@@ -50,16 +50,19 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
       socket.emit(socketEventNames.logout, "error");
     }
   } else if (result && socket) {
-    //? Spurious logouts are always a bug — log loudly so the originating
-    //? caller is identifiable from the stacktrace. The client receives this
-    //? success-emit and clears sessionStorage + redirects to /login, so any
-    //? unexpected occurrence here is the smoking gun.
-    getLogger().warn('[session] logout success — emitting logout to socket', {
-      tokenPrefix: token ? token.slice(0, 8) : null,
-      userId,
-      socketId: socket.id,
-      stack: new Error('logout invoked').stack,
-    });
+    //? Opt-in logout tracing. This fires on EVERY successful logout, so an
+    //? unconditional warn+stacktrace spams the server log. Set
+    //? LUCKYSTACK_TRACE_SESSION_DELETES=1 when hunting a "why was I logged out?"
+    //? bug to print the originating caller's stack; silent otherwise. The
+    //? client still receives the success-emit and clears its session regardless.
+    if (process.env.LUCKYSTACK_TRACE_SESSION_DELETES === '1') {
+      getLogger().warn('[session] logout success — emitting logout to socket', {
+        tokenPrefix: token ? token.slice(0, 8) : null,
+        userId,
+        socketId: socket.id,
+        stack: new Error('logout invoked').stack,
+      });
+    }
     socket.emit(socketEventNames.logout, "success");
   }
 }

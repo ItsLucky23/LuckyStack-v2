@@ -8,6 +8,10 @@
     "sourceMap": true,
     "noEmit": false,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    //? TS 6 no longer auto-includes every visible `@types/*` the way 5.7 did, so
+    //? declare the ambient type packages the package builds rely on: `node` for
+    //? the server-side built-ins and `react`/`react-dom` for the `/client` subpaths.
+    "types": ["node", "react", "react-dom"]
   }
 }

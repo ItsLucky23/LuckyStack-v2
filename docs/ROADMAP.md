@@ -8,12 +8,12 @@
 
 These live (or will live) outside the framework monorepo. The framework ships thin adapters or concept docs; the heavy lifting happens in dedicated repos.
 
-### `@luckystack/env-resolver` server-side
+### `luckystack-secret-manager` server
 
-- **What**: Standalone HTTP service that resolves env-reference values such as `OPENAITOKEN=OPENAITOKEN_V4` to the actual secret. Append-only versioning so older branches keep working when checked out. Auth via bearer token.
-- **Where**: Separate git repo (not yet created). Project-agnostic — reusable outside LuckyStack.
-- **Status**: Concept documented in `packages/env-resolver/docs/architecture.md`. Client side (`@luckystack/env-resolver`) is built and ready to talk to this server once it exists.
-- **Why deferred**: The framework can ship without it; consumers use plain `.env` for now and switch to the resolver when the server is online.
+- **What**: Standalone Node.js server + simple admin webpage that stores secrets as append-only versioned entries and resolves committed `.env` pointers (e.g. `OPENAI_KEY=OPENAI_AUTHORIZATION_KEY_V5`) to the real value via one `POST /resolve` endpoint. Append-only versioning so older branches keep working when checked out. One shared bearer token.
+- **Where**: Separate git repo (`luckystack-secret-manager`), built and running. Project-agnostic — reusable outside LuckyStack.
+- **Status**: Built and running. Client side (`@luckystack/secret-manager`) talks to it; the `POST /resolve` wire contract is documented in `docs/ARCHITECTURE_SECRET_MANAGER.md`.
+- **Why separate**: Project-agnostic and reusable beyond LuckyStack, and it releases on its own cadence. Consumers can still run plain `.env` and only point at the server when they want centralized secrets.
 
 ### `@luckystack/monitoring`
 
@@ -39,10 +39,7 @@ These live (or will live) outside the framework monorepo. The framework ships th
 
 Must-do before the first public release.
 
-- **Flip `private: true` → `false`** on every publishable `@luckystack/*` package. Some packages still ship with `private: true` from the pre-split era. Audit:
-  ```bash
-  grep -l '"private": true' packages/*/package.json
-  ```
+- **~~Flip `private: true` → `false`~~ DONE** — all 14 publishable packages already declare `"private": false` + `publishConfig.access: "public"`. Audit `grep -l '"private": true' packages/*/package.json` returns zero (only the consumer scaffold `packages/create-luckystack-app/template/package.json` stays private by design).
 - **Register the `@luckystack` npm scope**: `npm org create luckystack` (per memory `[[project_npm_scope_registration]]`). Owner is required before any scoped publish.
 - **Staging publish smoke**: `npm publish --dry-run` per package, then scaffold a consumer in `/tmp`, install from a scoped staging registry (Verdaccio or similar), and verify end-to-end install + boot.
 

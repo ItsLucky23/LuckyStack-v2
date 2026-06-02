@@ -164,14 +164,14 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
   const { deploy, services, currentEnvKey, localPresetKey, healthStore } = input;
 
   const environments = deploy.environments ?? {};
-  const currentEnv = environments[currentEnvKey] as EnvironmentDefinition | undefined;
+  const currentEnv = environments[currentEnvKey];
   if (!currentEnv) {
     throw new Error(`[router] Current environment '${currentEnvKey}' not found in deploy.config.ts`);
   }
 
   const fallbackEnvKey = currentEnv.fallback;
   const fallbackEnv = fallbackEnvKey
-    ? (environments[fallbackEnvKey] as EnvironmentDefinition | undefined)
+    ? (environments[fallbackEnvKey])
     : undefined;
   if (fallbackEnvKey && !fallbackEnv) {
     throw new Error(`[router] Current environment '${currentEnvKey}' declares fallback '${fallbackEnvKey}' which is not defined.`);

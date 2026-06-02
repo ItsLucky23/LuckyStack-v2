@@ -132,7 +132,7 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
       //? captureException call.
       if (user && options.tracer.setUser) {
         const span = options.tracer.startSpan('luckystack.user');
-        options.tracer.setUser(span, user as Record<string, unknown>);
+        options.tracer.setUser(span, user);
         span.finish();
       }
     },
