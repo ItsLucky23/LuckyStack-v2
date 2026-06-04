@@ -68,13 +68,13 @@ const segmentedClass = (active: boolean) =>
       : 'bg-container2 border-container2-border text-common hover:bg-container2-hover hover:text-title'}`;
 
 export default function Home() {
-  const { session } = useSession();
+  const { session } = useSession<SessionLayout>();
   const { setTheme: updateTheme } = useTheme();
   const setLanguage = useUpdateLanguage();
   const translate = useTranslator();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [newLanguage, setNewLanguage] = useState<Language>((session?.language ?? 'en') as Language);
+  const [newLanguage, setNewLanguage] = useState<Language>(session?.language ?? 'en');
   const [newName, setNewName] = useState<string>(session?.name ?? '');
   const [newTheme, setNewTheme] = useState<Theme>(session?.theme ?? 'dark');
   const [newEmail, setNewEmail] = useState<string>(session?.email ?? '');
@@ -90,7 +90,7 @@ export default function Home() {
   const handleRequestEmailChange = useCallback(async () => {
     if (!session) return;
     const trimmed = newEmail.trim();
-    if (!trimmed || trimmed.toLowerCase() === (session.email ?? '').toLowerCase()) return;
+    if (!trimmed || trimmed.toLowerCase() === session.email.toLowerCase()) return;
 
     setEmailChangePending(true);
     const response = await apiRequest({
@@ -171,7 +171,7 @@ export default function Home() {
       data: {},
     });
     if (response.status === 'success') {
-      setActiveSessions(response.result.sessions as ActiveSession[]);
+      setActiveSessions(response.result.sessions);
     }
   }, []);
 
@@ -307,7 +307,7 @@ export default function Home() {
           <div className="flex gap-4 items-center">
             <div className="rounded-xl w-20 h-20 aspect-square select-none">
               <Avatar
-                user={{ name: session.name, avatar: displayUrl, avatarFallback: session.avatarFallback }}
+                user={{ name: session.name ?? '', avatar: displayUrl, avatarFallback: session.avatarFallback }}
                 textSize="text-2xl"
               />
             </div>
@@ -351,7 +351,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => void handleRequestEmailChange()}
-                disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === (session.email ?? '').toLowerCase()}
+                disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === session.email.toLowerCase()}
                 className="h-9 px-3 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
               >
                 {translate({ key: 'settings.emailChange.button' })}

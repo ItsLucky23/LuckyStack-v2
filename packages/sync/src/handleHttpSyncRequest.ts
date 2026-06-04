@@ -518,18 +518,16 @@ export default async function handleHttpSyncRequest({
     //? HTTP instead of a websocket) is normal — NOT an error. Fall back to an
     //? empty set so the fanout loop simply runs zero times; the server handler
     //? already ran and its `serverOutput` is the meaningful result returned below.
-    const sockets = (receiver === 'all'
-      ? ioInstance.sockets.sockets
-      : ioInstance.sockets.adapter.rooms.get(normalizedReceiver)) ?? new Set<string>();
+    //? Cross-instance recipient list (RemoteSocket[]) spanning every backend on
+    //? the shared Redis adapter, so an HTTP-triggered sync still fans out to room
+    //? members on other instances. Empty array = no peers online, which is normal
+    //? over the HTTP fallback (the loop just runs zero times).
+    const sockets = receiver === 'all'
+      ? await ioInstance.fetchSockets()
+      : await ioInstance.in(normalizedReceiver).fetchSockets();
 
     let recipientCount = 0;
-    for (const socketEntry of sockets) {
-      const tempSocket = receiver === 'all'
-        ? (socketEntry as [string, any])[1]
-        : ioInstance.sockets.sockets.get(socketEntry as string);
-
-      if (!tempSocket) continue;
-
+    for (const tempSocket of sockets) {
       const tempToken = extractTokenFromSocket(tempSocket);
 
       if (ignoreSelf && token && token === tempToken) {

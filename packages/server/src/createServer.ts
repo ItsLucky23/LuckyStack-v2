@@ -1,5 +1,5 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig } from '@luckystack/core';
+import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
@@ -107,8 +107,20 @@ export const createLuckyStackServer = async (
   }
 
   //? Boot UUID must be written before /_health can answer truthfully. Router
-  //? boot handshake consumes /_health to verify shared-Redis topology.
-  await writeBootUuid();
+  //? boot handshake consumes /_health to verify shared-Redis topology. A
+  //? failure here is almost always Redis being unreachable or misconfigured
+  //? (bad credentials, wrong host); throw a clear, actionable error so boot
+  //? halts on THIS message instead of the raw ioredis `ReplyError` dump that
+  //? confused operators before. Library code must not `process.exit()`; the
+  //? throw propagates to the boot entry and the dev supervisor respawns.
+  //? `tryCatch` already captured the underlying error to the error tracker.
+  const [bootUuidError] = await tryCatch(() => writeBootUuid());
+  if (bootUuidError) {
+    throw new Error(
+      'Failed to write the boot UUID to Redis. Check REDIS_HOST / REDIS_PORT / REDIS_USERNAME / REDIS_PASSWORD and that Redis is reachable.',
+      { cause: bootUuidError },
+    );
+  }
 
   const httpServer: HttpServer = http.createServer((req, res) => {
     void handleHttpRequest(req, res, options);

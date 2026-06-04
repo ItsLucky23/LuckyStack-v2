@@ -1,3 +1,6 @@
+//? MUST stay first: captures the clean shell env before the `@luckystack/core`
+//? import below triggers `bootstrapEnv()` and merges `.env` into `process.env`.
+import { ambientEnv } from './ambientEnvSnapshot';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
@@ -13,7 +16,6 @@ const CORE_WATCH_GLOBS = [
   'server/server.ts',
   'server/bootstrap/**/*.ts',
   'server/auth/**/*.ts',
-  'server/sockets/socket.ts',
   'server/functions/db.ts',
   'server/functions/redis.ts',
   'server/functions/sentry.ts',
@@ -34,8 +36,11 @@ const startChild = () => {
   childBootStartedAt = performance.now();
   childProcess = spawn(process.execPath, childArgs, {
     stdio: 'inherit',
+    //? Pass the clean shell env (NOT this supervisor's `.env`-polluted
+    //? `process.env`) so the child loads `.env` fresh on every restart and
+    //? picks up edited values — mirroring a cold `npm run server` boot.
     env: {
-      ...process.env,
+      ...ambientEnv,
       LUCKYSTACK_CORE_SUPERVISED: 'true',
     },
   });

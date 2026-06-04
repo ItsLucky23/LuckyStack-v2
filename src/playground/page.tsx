@@ -1,7 +1,8 @@
 /* eslint-disable react/jsx-no-literals, luckystack/no-raw-try-catch, luckystack/no-raw-fetch-in-src --
-   Temporary playground page; delete when done. Uses raw fetch + try/catch
-   deliberately to demonstrate fallback patterns and exercise transports
-   side-by-side. Do NOT propagate these disables to consumer feature code. */
+   In-repo dev playground for exercising the framework's own core features. It
+   uses raw fetch + try/catch deliberately to demonstrate fallback patterns and
+   exercise transports side-by-side. Do NOT propagate these disables to consumer
+   feature code. */
 import {
   faBolt,
   faBomb,
@@ -31,6 +32,7 @@ import {
   faWifi,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import { toast } from 'sonner';
 import { useEffect, useRef, useState } from 'react';
 
@@ -41,6 +43,7 @@ import {
   socket,
   getApiQueueSize,
   getSyncQueueSize,
+  useSession,
 } from '@luckystack/core/client';
 
 import Avatar from 'src/_components/Avatar';
@@ -72,8 +75,10 @@ export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
   return { success: true };
 };
 
-//? TEMPORARY playground page for visually testing framework components.
-//? Delete this folder + the matching nav item in `Navbar.tsx` when done.
+//? In-repo dev playground for visually testing the framework's own core
+//? features (API/sync/auth/email/health/offline/presence + UI primitives).
+//? Kept as a developer tool — it is NEVER shipped to consumers (not in any
+//? package tarball nor the create-luckystack-app template).
 
 const COUNTRIES: DropdownItem[] = [
   { id: 'nl', value: 'nl', placeholder: 'Netherlands' },
@@ -137,6 +142,136 @@ function Row({ children, label }: { children: React.ReactNode; label?: string })
       {label && <div className="text-xs text-common">{label}</div>}
       <div className="flex flex-wrap items-start gap-3">{children}</div>
     </div>
+  );
+}
+
+//? Showcase layout primitives. A page is a stack of CardGroups; each group is an
+//? icon + intro + a responsive grid of DemoCards. A DemoCard pairs ONE action
+//? with its own controls + a plain-language "what it does" + "what you'll see",
+//? so nothing is a mystery button anymore.
+function CardGroup({
+  icon,
+  title,
+  intro,
+  children,
+  cols = 2,
+}: {
+  icon: IconDefinition;
+  title: string;
+  intro?: React.ReactNode;
+  children: React.ReactNode;
+  cols?: 1 | 2;
+}) {
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-lg font-semibold text-title flex items-center gap-2">
+          <FontAwesomeIcon icon={icon} className="text-primary" /> {title}
+        </h2>
+        {intro && <p className="text-sm text-common max-w-3xl leading-relaxed">{intro}</p>}
+      </div>
+      <div className={`grid gap-4 items-start ${cols === 2 ? 'lg:grid-cols-2' : ''}`}>{children}</div>
+    </section>
+  );
+}
+
+const cardTone: Record<'default' | 'api' | 'sync' | 'danger', string> = {
+  default: 'border-container1-border',
+  api: 'border-primary/30',
+  sync: 'border-correct/30',
+  danger: 'border-wrong/30',
+};
+
+function DemoCard({
+  title,
+  what,
+  expect,
+  tone = 'default',
+  full,
+  children,
+}: {
+  title: string;
+  what?: React.ReactNode;
+  expect?: React.ReactNode;
+  tone?: 'default' | 'api' | 'sync' | 'danger';
+  full?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className={`flex flex-col gap-3 bg-container1 border rounded-xl p-4 ${cardTone[tone]} ${full ? 'lg:col-span-2' : ''}`}>
+      <div className="flex flex-col gap-1">
+        <h3 className="text-sm font-semibold text-title">{title}</h3>
+        {what && <p className="text-xs text-common leading-relaxed">{what}</p>}
+        {expect && (
+          <p className="text-xs text-muted leading-relaxed">
+            <span className="text-correct font-semibold">→ </span>{expect}
+          </p>
+        )}
+      </div>
+      {children && <div className="flex flex-wrap items-center gap-2 mt-auto pt-1">{children}</div>}
+    </div>
+  );
+}
+
+const btnVariant: Record<'primary' | 'correct' | 'ghost' | 'danger' | 'warning', string> = {
+  primary: 'bg-primary hover:bg-primary-hover text-white',
+  correct: 'bg-correct hover:bg-correct-hover text-white',
+  ghost: 'bg-container2 border border-container2-border hover:bg-container2-hover text-title',
+  danger: 'bg-wrong hover:bg-wrong-hover text-white',
+  warning: 'bg-warning hover:bg-warning-hover text-white',
+};
+
+function Btn({
+  onClick,
+  icon,
+  children,
+  variant = 'primary',
+  disabled,
+  title,
+}: {
+  onClick?: () => void;
+  icon?: IconDefinition;
+  children: React.ReactNode;
+  variant?: keyof typeof btnVariant;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`h-9 px-3 rounded-md text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${btnVariant[variant]}`}
+    >
+      {icon && <FontAwesomeIcon icon={icon} />} {children}
+    </button>
+  );
+}
+
+function TextInput({
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+  className = '',
+  mono,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: string;
+  className?: string;
+  mono?: boolean;
+}) {
+  return (
+    <input
+      type={type}
+      value={value}
+      placeholder={placeholder}
+      onChange={(event) => { onChange(event.target.value); }}
+      className={`h-9 px-3 rounded-md border border-container1-border bg-container1 text-title text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors ${mono ? 'font-mono' : ''} ${className}`}
+    />
   );
 }
 
@@ -231,6 +366,11 @@ export default function Playground() {
   //? same room code in both and click "Join", then fire the sync buttons
   //? to confirm cross-browser fan-out + streaming.
   const [roomCode, setRoomCode] = useState<string>('playground-room');
+  //? `session.roomCodes` is the authoritative, server-persisted room list (it
+  //? survives a page reload). We mirror it into local state and seed/re-sync from
+  //? the session whenever it changes (login, reload, server push). Join/Leave then
+  //? update it optimistically from their response for instant feedback.
+  const { session } = useSession();
   const [joinedRooms, setJoinedRooms] = useState<string[]>([]);
   const [echoMessage, setEchoMessage] = useState<string>('hello world');
   const [streamText, setStreamText] = useState<string>(
@@ -271,6 +411,13 @@ export default function Playground() {
     }, 500);
     return () => { globalThis.clearInterval(handle); };
   }, []);
+
+  //? Seed + re-sync the joined-room badge from the persisted session. This is
+  //? what makes the badge correct after a reload (the previous local-only state
+  //? reset to empty on refresh even though the server session still had the room).
+  useEffect(() => {
+    setJoinedRooms(session?.roomCodes ?? []);
+  }, [session?.roomCodes]);
 
   const log = (
     channel: LogEntry['channel'],
@@ -873,45 +1020,47 @@ export default function Playground() {
     <div className={`w-full h-full overflow-y-auto bg-background ${contentPaddingClass}`}>
       <div className="max-w-5xl mx-auto p-6 flex flex-col gap-5">
 
-        <header className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold text-title">Playground</h1>
-          <p className="text-sm text-common">
-            Test bench for every framework feature against a real backend. Each section poke-tests one subsystem (sockets, auth, settings, hooks, health, queues) and writes timestamped results into the live log. Delete <code className="font-mono text-xs px-1 rounded bg-container2">src/playground/</code> and its Navbar entry when you ship.
-          </p>
-          <p className="text-xs text-muted">
-            Sections below are grouped: <strong>1.</strong> the sockets/sync test bench (multi-tab), <strong>2.</strong> auth surfaces (CSRF, OAuth, password reset), <strong>3.</strong> real settings APIs, <strong>4.</strong> lifecycle hooks, <strong>5.</strong> health probes + dev fixtures, <strong>6.</strong> offline queue, <strong>7.</strong> presence observers, then <strong>8+.</strong> UI primitive demos.
-          </p>
+        <header className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold text-title">Playground</h1>
+            <p className="text-sm text-common max-w-3xl leading-relaxed">
+              A live showcase of every LuckyStack feature against a real backend. Each card pairs one action
+              with <strong>what it does</strong> and <strong>what you&apos;ll see</strong>, next to its own controls — fire it
+              and watch the result land in the log drawer pinned at the bottom of the screen.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="px-2 py-1 rounded-md bg-container2 text-common font-mono">
+              backend: {backendUrl.replace(/^https?:\/\//, '')}
+            </span>
+            <span className={`px-2 py-1 rounded-md font-mono ${sessionBasedToken ? 'bg-warning/15 text-warning' : 'bg-correct/15 text-correct'}`}>
+              auth: {sessionBasedToken ? 'sessionStorage token' : 'HttpOnly cookie + CSRF'}
+            </span>
+            <span className="px-2 py-1 rounded-md bg-container2 text-muted">
+              dev tool — <code className="font-mono">src/playground/</code> (not shipped to consumers)
+            </span>
+          </div>
         </header>
 
-        <Section title="Test bench — API + sync + rooms (multi-browser)">
-          <p className="text-xs text-common">
-            Open this page in two browsers. Type the same room code in both, click <strong>Join</strong> in each, then fire any sync button. The log below shows what each tab receives — you should see the same broadcast chunks land in both windows.
-          </p>
-
-          <Row label="Room">
-            <input
-              type="text"
-              value={roomCode}
-              onChange={(event) => { setRoomCode(event.target.value); }}
-              placeholder="room-code"
-              className="h-9 w-56 px-3 rounded-md border border-container1-border bg-container1 text-title text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors"
-            />
-            <button
-              type="button"
-              disabled={busy === 'join'}
-              onClick={() => void handleJoinRoom()}
-              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-wait"
-            >
-              <FontAwesomeIcon icon={faDoorOpen} /> Join
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'leave'}
-              onClick={() => void handleLeaveRoom()}
-              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer disabled:opacity-50"
-            >
-              Leave
-            </button>
+        <CardGroup
+          icon={faBolt}
+          title="Real-time — API vs Sync"
+          intro={<>
+            <strong>API</strong> is a direct request → reply (the answer comes back to <em>you</em>).
+            <strong> Sync</strong> runs once on the server and fans out to <em>every</em> tab in a room.
+            To see the difference, open this page in two tabs and join the same room in both.
+          </>}
+          cols={1}
+        >
+          <DemoCard
+            full
+            title="Setup — join a room"
+            what="Every Sync action below broadcasts to a room. Join the same room in two tabs (or two browsers) to watch messages cross between them."
+            expect="The badge turns green when this tab is in the typed room."
+          >
+            <TextInput value={roomCode} onChange={setRoomCode} placeholder="room-code" className="w-56" />
+            <Btn icon={faDoorOpen} disabled={busy === 'join'} onClick={() => void handleJoinRoom()}>Join</Btn>
+            <Btn variant="ghost" disabled={busy === 'leave'} onClick={() => void handleLeaveRoom()}>Leave</Btn>
             {(() => {
               const trimmedRoom = roomCode.trim();
               const currentJoined = trimmedRoom.length > 0 && joinedRooms.includes(trimmedRoom);
@@ -933,52 +1082,64 @@ export default function Playground() {
                 </span>
               );
             })()}
-          </Row>
+          </DemoCard>
+        </CardGroup>
 
-          <Row label="Echo message (used by API echo + sync echo)">
-            <input
-              type="text"
-              value={echoMessage}
-              onChange={(event) => { setEchoMessage(event.target.value); }}
-              className="h-9 w-96 px-3 rounded-md border border-container1-border bg-container1 text-title text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors"
-            />
-          </Row>
+        <CardGroup
+          icon={faPaperPlane}
+          title="API — request → reply"
+          intro={<><code className="font-mono">apiRequest</code> calls a server route and resolves with its result. No room needed — the response (and any stream) comes back to the caller only. Streaming is opt-in via the <code className="font-mono">onStream</code> key on the same call.</>}
+        >
+          <DemoCard
+            tone="api"
+            title="API echo"
+            what="Sends your message to playground/echo; the server returns it."
+            expect="The reply lands in YOUR log only — no other tab sees it."
+          >
+            <TextInput value={echoMessage} onChange={setEchoMessage} className="w-full" />
+            <Btn icon={faPaperPlane} disabled={busy === 'apiEcho'} onClick={() => void handleApiEcho()}>Run API echo</Btn>
+          </DemoCard>
 
-          <Row label="Stream text (used by broadcast stream — pretend AI output)">
+          <DemoCard
+            tone="api"
+            title="API stream (counter)"
+            what="The server streams 10 ticks back through the onStream callback."
+            expect="Ten 'tick N/10' lines appear in YOUR log; other tabs see nothing."
+          >
+            <label className="flex items-center gap-2 text-xs text-common">
+              <input type="checkbox" checked={showApiStreams} onChange={(event) => { setShowApiStreams(event.target.checked); }} />
+              Log stream chunks
+            </label>
+            <Btn icon={faWaveSquare} variant="primary" disabled={busy === 'apiStream'} onClick={() => void handleApiStream()}>Run API stream</Btn>
+          </DemoCard>
+        </CardGroup>
+
+        <CardGroup
+          icon={faBroadcastTower}
+          title="Sync — realtime, room-based, cross-tab"
+          intro={<>One <code className="font-mono">syncRequest</code> reaches every tab in the room (across server instances). The three streaming emitters pick the audience: the whole room (<code className="font-mono">broadcastStream</code>), only the sender (originator <code className="font-mono">stream</code>), or specific sockets (<code className="font-mono">streamTo</code>).</>}
+        >
+          <DemoCard
+            full
+            tone="sync"
+            title="Shared stream settings"
+            what="Used by the broadcast + streamTo cards below."
+          >
             <textarea
               value={streamText}
               onChange={(event) => { setStreamText(event.target.value); }}
               rows={2}
               className="w-full p-3 rounded-md border border-container1-border bg-container1 text-title text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors font-mono"
             />
-          </Row>
-
-          <Row label="Stream options">
-            <label className="flex items-center gap-2 text-sm text-common">
-              <input
-                type="checkbox"
-                checked={showApiStreams}
-                onChange={(event) => { setShowApiStreams(event.target.checked); }}
-              />
-              Log API stream chunks
-            </label>
-            <label className="flex items-center gap-2 text-sm text-common">
-              <input
-                type="checkbox"
-                checked={showSyncStreams}
-                onChange={(event) => { setShowSyncStreams(event.target.checked); }}
-              />
+            <label className="flex items-center gap-2 text-xs text-common">
+              <input type="checkbox" checked={showSyncStreams} onChange={(event) => { setShowSyncStreams(event.target.checked); }} />
               Log sync stream chunks
             </label>
-            <label className="flex items-center gap-2 text-sm text-common">
-              <input
-                type="checkbox"
-                checked={useThrottle}
-                onChange={(event) => { setUseThrottle(event.target.checked); }}
-              />
-              Use <code className="font-mono text-xs">createStreamThrottle</code> on broadcast
+            <label className="flex items-center gap-2 text-xs text-common">
+              <input type="checkbox" checked={useThrottle} onChange={(event) => { setUseThrottle(event.target.checked); }} />
+              Use <code className="font-mono">createStreamThrottle</code>
             </label>
-            <label className="flex items-center gap-2 text-sm text-common" title="Throttle window is 50ms / 16 chars. Set this BELOW 50 to actually see batching.">
+            <label className="flex items-center gap-2 text-xs text-common" title="Throttle window is 50ms / 16 chars. Set BELOW 50 to see batching.">
               Interval (ms):
               <input
                 type="number"
@@ -989,350 +1150,246 @@ export default function Playground() {
                 className="h-7 w-20 px-2 rounded border border-container1-border bg-container1 text-title text-sm"
               />
             </label>
-          </Row>
+            <p className="text-xs text-muted w-full">
+              Throttle only batches when tokens arrive <strong>faster</strong> than the 50ms / 16-char flush window — try interval <strong>≤ 20ms</strong> to watch tokens coalesce.
+            </p>
+          </DemoCard>
 
-          <p className="text-xs text-muted">
-            Throttle tip: the throttle's flush window is <code className="font-mono">50ms / 16 chars</code>. If your interval is <strong>≥ 50ms</strong> the timer fires before the next token arrives — you'll see one chunk per token even with throttle on. Try <strong>20ms or below</strong> to watch tokens batch.
-          </p>
+          <DemoCard
+            tone="sync"
+            title="Sync echo"
+            what="Broadcasts your message to everyone in the room."
+            expect="Every joined tab logs 'playground/echo received' — including other browsers."
+          >
+            <TextInput value={echoMessage} onChange={setEchoMessage} className="w-full" />
+            <Btn icon={faPaperPlane} variant="correct" disabled={busy === 'syncEcho'} onClick={() => void handleSyncEcho()}>Run sync echo</Btn>
+          </DemoCard>
 
-          <Row label="streamTo (token-targeted — paste another tab's socket id here)">
-            <span className="text-xs text-common self-center font-mono">
+          <DemoCard
+            tone="sync"
+            title="Broadcast stream"
+            what="Streams the shared text token-by-token to the whole room, live."
+            expect="Both tabs see 'broadcast chunk' lines as they arrive."
+          >
+            <Btn icon={faBroadcastTower} variant="correct" disabled={busy === 'syncBroadcast'} onClick={() => void handleSyncBroadcast()}>Run broadcastStream</Btn>
+          </DemoCard>
+
+          <DemoCard
+            tone="sync"
+            title="Originator-only stream"
+            what="Streams progress back to ONLY you (the sender), not the room."
+            expect="Only this tab logs 'progress N%'; other tabs see just the final summary."
+          >
+            <Btn icon={faWaveSquare} variant="correct" disabled={busy === 'syncProgress'} onClick={() => void handleSyncProgress()}>Run originator stream</Btn>
+          </DemoCard>
+
+          <DemoCard
+            tone="sync"
+            title="streamTo (targeted)"
+            what="Streams ONLY to the socket ids you paste — even other tabs in the same room get nothing. Copy this tab's id, paste it into another tab here."
+            expect="Only the targeted tab logs 'streamTo chunk'."
+          >
+            <span className="text-xs text-common self-center font-mono w-full">
               My socket id: {mySocketId || '— not connected —'}
             </span>
-            <button
-              type="button"
-              onClick={() => void handleCopySocketId()}
-              className="h-7 px-2 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-xs font-medium transition-colors cursor-pointer"
-            >
-              Copy
-            </button>
-            <input
-              type="text"
-              value={streamToTargets}
-              placeholder="Comma-separated target tokens / socket ids"
-              onChange={(event) => { setStreamToTargets(event.target.value); }}
-              className="h-9 w-96 px-3 rounded-md border border-container1-border bg-container1 text-title text-xs font-mono focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors"
-            />
-          </Row>
+            <Btn variant="ghost" onClick={() => void handleCopySocketId()}>Copy my id</Btn>
+            <TextInput value={streamToTargets} onChange={setStreamToTargets} placeholder="Comma-separated target socket ids" mono className="w-full" />
+            <Btn icon={faPaperPlane} variant="correct" disabled={busy === 'syncStreamTo'} onClick={() => void handleSyncStreamTo()}>Run streamTo</Btn>
+          </DemoCard>
+        </CardGroup>
 
-          <Row label="Fire">
-            <button
-              type="button"
-              disabled={busy === 'apiEcho'}
-              onClick={() => void handleApiEcho()}
-              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faPaperPlane} /> API echo
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'apiStream'}
-              onClick={() => void handleApiStream()}
-              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faWaveSquare} /> API stream (counter)
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'syncEcho'}
-              onClick={() => void handleSyncEcho()}
-              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faPaperPlane} /> Sync echo
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'syncBroadcast'}
-              onClick={() => void handleSyncBroadcast()}
-              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faBroadcastTower} /> Sync broadcastStream
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'syncProgress'}
-              onClick={() => void handleSyncProgress()}
-              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faWaveSquare} /> Sync stream (originator-only)
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'syncStreamTo'}
-              onClick={() => void handleSyncStreamTo()}
-              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faPaperPlane} /> Sync streamTo (target tokens)
-            </button>
-          </Row>
-          <p className="text-xs text-muted">
-            Every action on this page appends a line to the live log drawer pinned at the bottom of the screen — collapse it with the chevron when you need more room.
-          </p>
-        </Section>
-
-        <Section title="Auth & CSRF & OAuth providers">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-common">Auth token mode:</span>
-            <span className={`px-1.5 rounded font-mono ${sessionBasedToken ? 'bg-warning/15 text-warning' : 'bg-correct/15 text-correct'}`}>
-              {sessionBasedToken ? 'sessionStorage (CSRF disabled)' : 'HttpOnly cookie (CSRF active)'}
-            </span>
-            <span className="text-muted">— controlled by <code className="font-mono">config.sessionBasedToken</code></span>
-          </div>
-          <p className="text-xs text-common">
-            CSRF only matters in <strong>cookie mode</strong> (the browser auto-attaches the session cookie, so we need a separate header to prove the request originated from our origin). In <strong>token mode</strong> the client reads the token from <code className="font-mono">sessionStorage</code> and attaches it to every request — there is nothing for an attacker's site to ride on, so <code className="font-mono">getCsrfToken()</code> returns <code className="font-mono">null</code>. <code className="font-mono">httpFetch()</code> handles the header automatically on POST/PUT/DELETE in cookie mode; you only call <code className="font-mono">getCsrfToken()</code> by hand for custom fetches.
-          </p>
-          <Row label="CSRF token (cookie mode only)">
-            <button
-              type="button"
-              disabled={busy === 'csrf' || sessionBasedToken}
-              onClick={() => void handleFetchCsrf()}
-              title={sessionBasedToken ? 'Disabled: token mode does not use CSRF' : ''}
-              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <FontAwesomeIcon icon={faShieldHalved} /> Fetch CSRF
-            </button>
-            <button
-              type="button"
-              disabled={sessionBasedToken}
-              onClick={handleClearCsrf}
-              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Clear cache
-            </button>
+        <CardGroup
+          icon={faShieldHalved}
+          title="Auth, CSRF & OAuth"
+          intro={<>Token mode is <code className="font-mono">{sessionBasedToken ? 'sessionStorage token' : 'HttpOnly cookie + CSRF'}</code> (set by <code className="font-mono">config.sessionBasedToken</code>). CSRF only applies in cookie mode — in token mode there&apos;s no cookie to ride on, so <code className="font-mono">getCsrfToken()</code> returns null.</>}
+        >
+          <DemoCard
+            title="CSRF token"
+            tone={sessionBasedToken ? 'default' : 'default'}
+            what="Fetches the CSRF token (cookie mode only). httpFetch() attaches it automatically on writes; you only fetch it by hand for custom requests."
+            expect={sessionBasedToken ? 'Disabled — token mode does not use CSRF.' : 'A 64-char hex token; cleared cache forces a re-fetch on next use.'}
+          >
+            <Btn icon={faShieldHalved} disabled={busy === 'csrf' || sessionBasedToken} onClick={() => void handleFetchCsrf()} title={sessionBasedToken ? 'Disabled: token mode does not use CSRF' : ''}>Fetch CSRF</Btn>
+            <Btn variant="ghost" disabled={sessionBasedToken} onClick={handleClearCsrf}>Clear cache</Btn>
             <span className="text-xs text-muted self-center font-mono">
               {csrfTokenDisplay === null ? '— not fetched —' : `${csrfTokenDisplay.slice(0, 24)}…`}
             </span>
-          </Row>
+          </DemoCard>
 
-          <Row label="Forgot-password + email diagnostic">
-            <input
-              type="email"
-              value={forgotEmail}
-              placeholder="user@example.com"
-              onChange={(event) => { setForgotEmail(event.target.value); }}
-              className="h-9 w-64 px-3 rounded-md border border-container1-border bg-container1 text-title text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors"
-            />
-            <button
-              type="button"
-              disabled={busy === 'forgot'}
-              onClick={() => void handleSendForgotPassword()}
-              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-              title="Real reset flow — anti-enumeration, always returns success"
-            >
-              <FontAwesomeIcon icon={faEnvelope} /> Send reset email
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'testEmail'}
-              onClick={() => void handleSendTestEmail()}
-              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-              title="Diagnostic: bypasses anti-enumeration, surfaces real sendEmail() result + reason"
-            >
-              <FontAwesomeIcon icon={faEnvelope} /> Send diagnostic test
-            </button>
-          </Row>
-          <p className="text-xs text-muted">
-            <strong>Send reset email</strong> is the real flow — always returns success (anti-enumeration), so a missing-from / missing-API-key / unverified-recipient on the Resend side is invisible here. Use <strong>Send diagnostic test</strong> to see the actual <code className="font-mono">sendEmail()</code> result + reason in a toast.
-          </p>
+          <DemoCard
+            title="Forgot password + email diagnostic"
+            what="'Send reset email' is the real anti-enumeration flow (always succeeds, hides why an email failed). 'Diagnostic' bypasses that and surfaces the real sendEmail() result."
+            expect="With ConsoleSender the email prints in the server terminal; the diagnostic toast shows the provider result + reason."
+          >
+            <TextInput type="email" value={forgotEmail} onChange={setForgotEmail} placeholder="user@example.com" className="w-full" />
+            <Btn icon={faEnvelope} disabled={busy === 'forgot'} onClick={() => void handleSendForgotPassword()} title="Real reset flow — anti-enumeration, always returns success">Send reset email</Btn>
+            <Btn icon={faEnvelope} variant="ghost" disabled={busy === 'testEmail'} onClick={() => void handleSendTestEmail()} title="Diagnostic: surfaces real sendEmail() result + reason">Send diagnostic test</Btn>
+          </DemoCard>
 
-          <Row label={`Registered OAuth providers (from config.providers — ${String(oauthProviderIds.length)} entries)`}>
-            {oauthProviderIds.map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => { handleOauthLaunch(id); }}
-                className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2"
-              >
-                <FontAwesomeIcon icon={faLink} /> {id}
-              </button>
-            ))}
-          </Row>
-        </Section>
+          <DemoCard
+            full
+            title={`OAuth providers (${String(oauthProviderIds.length)} from config.providers)`}
+            what="Each button redirects to /auth/api/<provider> to start the OAuth dance (needs the provider's env creds configured)."
+            expect="Browser redirects to the provider; on callback you land back logged in."
+          >
+            {oauthProviderIds.length === 0
+              ? <span className="text-xs text-muted">No OAuth providers registered — add one in <code className="font-mono">config.providers</code>.</span>
+              : oauthProviderIds.map((id) => (
+                <Btn key={id} variant="ghost" icon={faLink} onClick={() => { handleOauthLaunch(id); }}>{id}</Btn>
+              ))}
+          </DemoCard>
+        </CardGroup>
 
-        <Section title="Settings flows (system/* APIs)">
-          <p className="text-xs text-common">
-            These call real APIs under <code className="font-mono">src/settings/_api/</code>. Auth required — log in first or you'll see <code className="font-mono">auth.notLoggedIn</code>.
-          </p>
-          <div className="text-xs text-common flex flex-col gap-1">
-            <div><strong className="text-title">List sessions</strong> — fetches every active session for the current user (multi-device login overview). Powers the "Active sessions" list in <code className="font-mono">/settings</code>.</div>
-            <div>
-              <strong className="text-title">Enable email notifications</strong> — flips two booleans on <code className="font-mono">User.preferences</code>:{' '}
-              <code className="font-mono">notifyOnNewSignIn</code> (fires a "new sign-in detected" email on every future login via the <code className="font-mono">postLogin</code> hook in <code className="font-mono">server/hooks/notifications.ts</code>) and{' '}
-              <code className="font-mono">notifyOnPasswordChange</code> (fires a "your password was changed" email from <code className="font-mono">settings/changePassword</code>).
-              {' '}With ConsoleSender (default, no SMTP/Resend env) the rendered email prints in the server terminal instead of being sent. Toggle these per-user in <code className="font-mono">/settings</code>.
-            </div>
-            <div><strong className="text-title">Change password</strong> — opens the real settings page. The framework password-change flow lives there because it needs the user's current password as confirmation; no playground shortcut.</div>
-            <div><strong className="text-title">Sign out everywhere</strong> — revokes ALL sessions including this one. You will be logged out after clicking.</div>
-          </div>
-          <Row label="Run">
-            <button
-              type="button"
-              disabled={busy === 'listSessions'}
-              onClick={() => void handleListSessions()}
-              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faList} /> List sessions
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'prefs'}
-              onClick={() => void handleUpdatePreferences(true)}
-              className="h-9 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faUser} /> Enable email notifications
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'prefs'}
-              onClick={() => void handleUpdatePreferences(false)}
-              className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faUser} /> Disable email notifications
-            </button>
+        <CardGroup
+          icon={faList}
+          title="Settings APIs"
+          intro={<>Real APIs under <code className="font-mono">src/settings/_api/</code>. Auth required — log in first or you&apos;ll get <code className="font-mono">auth.notLoggedIn</code>.</>}
+        >
+          <DemoCard
+            title="List sessions"
+            what="Fetches every active session for the current user (the multi-device overview that powers /settings)."
+            expect="Your log shows the session array with expiry info."
+          >
+            <Btn icon={faList} disabled={busy === 'listSessions'} onClick={() => void handleListSessions()}>List sessions</Btn>
+          </DemoCard>
+
+          <DemoCard
+            title="Email notifications"
+            what="Flips notifyOnNewSignIn + notifyOnPasswordChange on the user. With ConsoleSender (default) the email prints in the server terminal."
+            expect="A toast confirms; future sign-ins / password changes then trigger the emails."
+          >
+            <Btn icon={faUser} disabled={busy === 'prefs'} onClick={() => void handleUpdatePreferences(true)}>Enable</Btn>
+            <Btn icon={faUser} variant="ghost" disabled={busy === 'prefs'} onClick={() => void handleUpdatePreferences(false)}>Disable</Btn>
+          </DemoCard>
+
+          <DemoCard
+            full
+            tone="danger"
+            title="Account — password & sessions"
+            what="Password change lives on the real /settings page (it needs your current password). 'Sign out everywhere' revokes ALL sessions including this one."
+            expect="Sign-out-everywhere logs you out on the next request."
+          >
             <a
               href="/settings"
               className="h-9 px-3 rounded-md bg-container2 border border-container2-border hover:bg-container2-hover text-title text-sm font-medium transition-colors cursor-pointer flex items-center gap-2"
             >
-              <FontAwesomeIcon icon={faKey} /> Change password (use /settings)
+              <FontAwesomeIcon icon={faKey} /> Change password (/settings)
             </a>
-            <button
-              type="button"
-              disabled={busy === 'signOut'}
-              onClick={() => void handleSignOutEverywhere()}
-              className="h-9 px-3 rounded-md bg-wrong hover:bg-wrong-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faSignOutAlt} /> Sign out everywhere
-            </button>
-          </Row>
-        </Section>
+            <Btn icon={faSignOutAlt} variant="danger" disabled={busy === 'signOut'} onClick={() => void handleSignOutEverywhere()}>Sign out everywhere</Btn>
+          </DemoCard>
+        </CardGroup>
 
-        <Section title="Hooks demo — trigger framework lifecycle hooks">
-          <p className="text-xs text-common">
-            Each button forces a server-side hook to fire. The hook handlers themselves live in <code className="font-mono">server/hooks/</code> (notifications, Sentry capture, etc.). What lands in this log is the normalized client response — the hook payload itself is server-only. Check the server console + Sentry to see the dispatched payloads.
-          </p>
-          <Row label="Triggers">
-            <button
-              type="button"
-              disabled={busy === 'throwError'}
-              onClick={() => void handleTriggerApiError()}
-              className="h-9 px-3 rounded-md bg-wrong hover:bg-wrong-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faBomb} /> apiError (throw inside API)
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'throwSync'}
-              onClick={() => void handleTriggerSyncError()}
-              className="h-9 px-3 rounded-md bg-wrong hover:bg-wrong-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faBomb} /> syncError (throw inside sync)
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'spam'}
-              onClick={() => void handleRateLimitSpam()}
-              className="h-9 px-3 rounded-md bg-warning hover:bg-warning-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faStopwatch} /> rateLimitExceeded (spam playground/spam ×10)
-            </button>
-          </Row>
-        </Section>
+        <CardGroup
+          icon={faBomb}
+          title="Lifecycle hooks"
+          intro={<>Each button forces a server-side hook to fire. Handlers live in <code className="font-mono">server/hooks/</code>; the payload is server-only (check the server console + Sentry). What lands in the log here is the normalized client response.</>}
+        >
+          <DemoCard
+            tone="danger"
+            title="apiError"
+            what="Throws inside an API route, firing the apiError hook server-side."
+            expect="Server logs the apiError hook; your log shows a normalized error envelope."
+          >
+            <Btn icon={faBomb} variant="danger" disabled={busy === 'throwError'} onClick={() => void handleTriggerApiError()}>Trigger apiError</Btn>
+          </DemoCard>
 
-        <Section title="Health & test-reset endpoints">
-          <div className="text-xs text-common flex flex-col gap-1">
-            <div><code className="font-mono">/livez</code> — <strong>liveness probe</strong>. Returns 200 as long as the Node process is up. Wire this into a K8s <code className="font-mono">livenessProbe</code> so the orchestrator restarts hung pods.</div>
-            <div><code className="font-mono">/readyz</code> — <strong>readiness probe</strong>. Returns 200 only when Redis + Prisma + the boot UUID are all healthy; 503 otherwise. Wire into <code className="font-mono">readinessProbe</code> so the load balancer stops sending traffic during a degraded boot.</div>
-            <div><code className="font-mono">/_health</code> — <strong>router handshake</strong>. Returns the boot UUID + synchronized env hashes. <code className="font-mono">@luckystack/router</code> polls this to confirm every backend shares the same Redis + env config before routing traffic.</div>
-            <div><code className="font-mono">/_test/reset</code> — <strong>dev/test fixture wipe</strong>. Clears Redis rate-limit counters, sessions, and active-user keys so end-to-end test scripts start from a known state. Fail-closed: <code className="font-mono">NODE_ENV</code> must be <code className="font-mono">development</code> or <code className="font-mono">test</code> AND the <code className="font-mono">x-test-reset-token</code> header must match <code className="font-mono">process.env.TEST_RESET_TOKEN</code>. Never wired in production.</div>
-          </div>
-          <Row label="Probes">
-            <button
-              type="button"
-              disabled={busy === 'health:/livez'}
-              onClick={() => void handleHealthFetch('/livez')}
-              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faHeartPulse} /> /livez
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'health:/readyz'}
-              onClick={() => void handleHealthFetch('/readyz')}
-              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faHeartPulse} /> /readyz
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'health:/_health'}
-              onClick={() => void handleHealthFetch('/_health')}
-              className="h-9 px-3 rounded-md bg-correct hover:bg-correct-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faHeartPulse} /> /_health
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'testReset'}
-              onClick={() => void handleTestReset()}
-              className="h-9 px-3 rounded-md bg-warning hover:bg-warning-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faRotateRight} /> POST /_test/reset
-            </button>
-          </Row>
-        </Section>
+          <DemoCard
+            tone="danger"
+            title="syncError"
+            what="Throws inside a sync handler (needs a joined room), firing the syncError hook."
+            expect="Server logs syncError; your log shows the normalized error."
+          >
+            <Btn icon={faBomb} variant="danger" disabled={busy === 'throwSync'} onClick={() => void handleTriggerSyncError()}>Trigger syncError</Btn>
+          </DemoCard>
 
-        <Section title="Offline queue — disconnect, enqueue, replay">
-          <p className="text-xs text-common">
-            <code className="font-mono">socket.disconnect()</code> makes <code className="font-mono">canSendNow()</code> return false; subsequent <code className="font-mono">syncRequest</code> / <code className="font-mono">apiRequest</code> calls drop into <code className="font-mono">offlineQueue</code> (drop policy + max-size from project config). <code className="font-mono">socket.connect()</code> auto-flushes both queues.
-          </p>
-          <Row label="State">
-            <span className="text-xs text-common self-center">
-              Simulated offline: <strong>{offlineSimulated ? 'YES' : 'no'}</strong>
-            </span>
-            <span className="text-xs text-common self-center">
-              API queue: <strong>{String(apiQueueSize)}</strong>
-            </span>
-            <span className="text-xs text-common self-center">
-              Sync queue: <strong>{String(syncQueueSize)}</strong>
-            </span>
-          </Row>
-          <Row label="Actions">
-            <button
-              type="button"
-              onClick={handleToggleOffline}
-              className={`h-9 px-3 rounded-md text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 ${offlineSimulated ? 'bg-correct hover:bg-correct-hover' : 'bg-wrong hover:bg-wrong-hover'}`}
-            >
-              <FontAwesomeIcon icon={offlineSimulated ? faWifi : faPlugCircleXmark} />
-              {offlineSimulated ? 'Reconnect (auto-flush queue)' : 'Disconnect (start queueing)'}
-            </button>
-            <button
-              type="button"
-              disabled={busy === 'queueFill'}
-              onClick={handleEnqueueOffline}
-              className="h-9 px-3 rounded-md bg-warning hover:bg-warning-hover text-white text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <FontAwesomeIcon icon={faBolt} /> Fire 5 syncRequests (watch queue grow)
-            </button>
-          </Row>
-        </Section>
+          <DemoCard
+            tone="danger"
+            title="rateLimitExceeded"
+            what="Fires playground/spam (rateLimit 3) ten times in parallel."
+            expect="First 3 succeed, the other 7 return rateLimit.exceeded — the hook fires per rejection."
+          >
+            <Btn icon={faStopwatch} variant="warning" disabled={busy === 'spam'} onClick={() => void handleRateLimitSpam()}>Spam ×10</Btn>
+          </DemoCard>
+        </CardGroup>
 
-        <Section title="Presence & session — read-only observers">
-          <p className="text-xs text-common">
-            <code className="font-mono">@luckystack/presence</code> tracks socket connect / disconnect / AFK at the server. The <code className="font-mono">SocketStatusIndicator</code> component is the public client surface. Hooks: <code className="font-mono">prePresenceUpdate</code> / <code className="font-mono">postPresenceUpdate</code> fire on AFK transitions; <code className="font-mono">onSocketConnect</code> / <code className="font-mono">onSocketDisconnect</code> fire at the transport layer. The room list below mirrors what this tab has joined this session.
-          </p>
-          <Row label="Joined rooms">
+        <CardGroup
+          icon={faHeartPulse}
+          title="Health & ops endpoints"
+          intro="The operator-facing probes a load balancer / Kubernetes hits, plus the dev fixture wipe."
+        >
+          <DemoCard
+            full
+            tone="default"
+            title="Probes — /livez, /readyz, /_health"
+            what={<><code className="font-mono">/livez</code> = process up (200 always). <code className="font-mono">/readyz</code> = Redis + Prisma + boot UUID all healthy (else 503). <code className="font-mono">/_health</code> = boot UUID + env hashes the router polls.</>}
+            expect="200 when healthy; the toast names the failing subsystem on /readyz."
+          >
+            <Btn icon={faHeartPulse} variant="correct" disabled={busy === 'health:/livez'} onClick={() => void handleHealthFetch('/livez')}>/livez</Btn>
+            <Btn icon={faHeartPulse} variant="correct" disabled={busy === 'health:/readyz'} onClick={() => void handleHealthFetch('/readyz')}>/readyz</Btn>
+            <Btn icon={faHeartPulse} variant="correct" disabled={busy === 'health:/_health'} onClick={() => void handleHealthFetch('/_health')}>/_health</Btn>
+          </DemoCard>
+
+          <DemoCard
+            full
+            tone="danger"
+            title="/_test/reset — dev fixture wipe"
+            what="Clears Redis rate-limit counters, sessions and active-user keys so e2e scripts start clean. Fail-closed: needs NODE_ENV dev/test + a matching x-test-reset-token. 403 in production."
+            expect="200 + 'cleared' in dev; 403 when the gate isn't satisfied."
+          >
+            <Btn icon={faRotateRight} variant="warning" disabled={busy === 'testReset'} onClick={() => void handleTestReset()}>POST /_test/reset</Btn>
+          </DemoCard>
+        </CardGroup>
+
+        <CardGroup
+          icon={faPlugCircleXmark}
+          title="Offline queue"
+          intro={<>While the socket is down, <code className="font-mono">syncRequest</code> / <code className="font-mono">apiRequest</code> calls park in the offline queue (drop policy + max size from project config). Reconnecting auto-flushes both queues in order.</>}
+          cols={1}
+        >
+          <DemoCard
+            full
+            title="Disconnect → enqueue → replay"
+            what="Disconnect the socket, fire 5 syncs (they queue instead of sending), then reconnect to watch them replay."
+            expect="The queue counters climb while offline, then drain to 0 on reconnect."
+          >
+            <span className="text-xs text-common self-center">Offline: <strong>{offlineSimulated ? 'YES' : 'no'}</strong></span>
+            <span className="text-xs text-common self-center">API queue: <strong>{String(apiQueueSize)}</strong></span>
+            <span className="text-xs text-common self-center">Sync queue: <strong>{String(syncQueueSize)}</strong></span>
+            <span className="w-full" />
+            <Btn icon={offlineSimulated ? faWifi : faPlugCircleXmark} variant={offlineSimulated ? 'correct' : 'danger'} onClick={handleToggleOffline}>
+              {offlineSimulated ? 'Reconnect (flush queue)' : 'Disconnect (start queueing)'}
+            </Btn>
+            <Btn icon={faBolt} variant="warning" disabled={busy === 'queueFill'} onClick={handleEnqueueOffline}>Fire 5 syncRequests</Btn>
+          </DemoCard>
+        </CardGroup>
+
+        <CardGroup
+          icon={faWifi}
+          title="Presence & session"
+          intro={<><code className="font-mono">@luckystack/presence</code> tracks connect / disconnect / AFK at the server; the <code className="font-mono">SocketStatusIndicator</code> is the client surface. Read-only here.</>}
+          cols={1}
+        >
+          <DemoCard
+            full
+            title="Joined rooms (this tab)"
+            what="Open this page in two tabs, Join in both, then close one. The other tab's SocketStatusIndicator flips to a degraded state within the presence disconnectGraceMs window."
+            expect="The room list below mirrors what this tab joined this session."
+          >
             <span className="text-xs text-common self-center font-mono">
               {joinedRooms.length === 0 ? '— none —' : joinedRooms.join(', ')}
             </span>
-          </Row>
-          <Row label="Tip">
-            <span className="text-xs text-muted">
-              Open this page in two tabs, click <strong>Join</strong> in both, then close one tab. The other tab's
-              SocketStatusIndicator should flip to a degraded state within the presence package's
-              <code className="font-mono"> disconnectGraceMs</code> window.
-            </span>
-          </Row>
-        </Section>
+          </DemoCard>
+        </CardGroup>
+
+        <div className="flex flex-col gap-1 pt-2">
+          <h2 className="text-lg font-semibold text-title flex items-center gap-2">
+            <FontAwesomeIcon icon={faPlus} className="text-primary" /> UI components &amp; primitives
+          </h2>
+          <p className="text-sm text-common max-w-3xl leading-relaxed">
+            The reusable building blocks shipped in <code className="font-mono">src/_components/</code> — buttons, inputs,
+            avatars, dropdowns, dialogs, toasts, the spinner, and the live theme tokens. Pure visual demos (no backend).
+          </p>
+        </div>
 
         <Section title="Buttons">
           <Row label="Variants">

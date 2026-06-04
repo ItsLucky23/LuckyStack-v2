@@ -542,6 +542,7 @@ When you run more than one backend process (horizontal scaling, preset-split ser
 2. **Split/fallback mode hard-fails without Redis.** When `environment.fallback` is set in `deploy.config.ts`, the router refuses to start if Redis is unreachable. This is deliberate — `disableSharedHealthState` is ignored in that mode.
 3. **`/_health` contract.** Each backend writes a boot UUID to `luckystack:boot:<envKey>` on startup and exposes it via `GET /_health`. The router's boot handshake cross-checks this to detect the "two Redis URLs that both respond" failure mode. Your edge proxy should let `/_health` through unauthenticated (it already skips auth in the default server config).
 4. **WebSocket upgrades.** The router forwards `/socket.io/?...` upgrades to the `system` service by convention. Make sure at least one backend in your deployment owns the `system` service.
+5. **Sync fan-out reaches across instances.** Regular `syncRequest` fan-out uses `io.in(room).fetchSockets()` (cross-instance enumeration + per-recipient `RemoteSocket.emit()`), and the streaming emitters (`broadcastStream` / `streamTo`) use `io.to().emit()` — both span every `system` instance on the shared Redis, so spreading a room's members across instances is fine (no sticky routing needed). Each sync fan-out costs one `fetchSockets()` round-trip (single-instance short-circuits). Full model + costs: **`docs/ARCHITECTURE_MULTI_INSTANCE.md`**.
 
 ### Socket.io Connection Fails
 

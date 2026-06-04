@@ -1,6 +1,0 @@
-
-C:\youcomm\LuckyStack-v2\packages\devkit\src\typeMap\zodEmitter.ts
-  135:11  warning  Unnecessary conditional, value is always falsy  @typescript-eslint/no-unnecessary-condition
-
-✖ 1 problem (0 errors, 1 warning)
-

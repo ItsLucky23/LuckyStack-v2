@@ -3,7 +3,7 @@ import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated
 import sharp from 'sharp';
 import path from 'node:path';
 import { mkdir, stat } from 'node:fs/promises';
-import { UPLOADS_DIR, processUpload } from '@luckystack/core';
+import { getUploadsDir, processUpload } from '@luckystack/core';
 
 export const rateLimit: number | false = 20;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -27,6 +27,7 @@ export interface ApiParams {
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
 
   const { avatar, name, theme, language } = data;
+  const UPLOADS_DIR = getUploadsDir();
 
   if (avatar) {
     const matches = /^data:(.+);base64,(.+)$/.exec(avatar);

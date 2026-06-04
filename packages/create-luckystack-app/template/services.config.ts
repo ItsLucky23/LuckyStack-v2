@@ -4,9 +4,25 @@
 
 import { registerServicesConfig } from '@luckystack/core';
 
-const servicesConfig = {
+export interface ServiceDefinition {
+  /** 'root' -> src/_api, src/_sync (reserved for `system`). Otherwise a folder name under src/. */
+  source: 'root' | string;
+}
+
+export interface PresetDefinition {
+  description?: string;
+  /** Services that are bundled together into one backend artifact. */
+  services: string[];
+}
+
+export interface ServicesConfig {
+  services: Record<string, ServiceDefinition>;
+  presets: Record<string, PresetDefinition>;
+}
+
+const servicesConfig: ServicesConfig = {
   services: {
-    system: { source: 'root' as const },
+    system: { source: 'root' },
   },
   presets: {
     'core-preset': {

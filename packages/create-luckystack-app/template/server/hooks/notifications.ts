@@ -17,15 +17,15 @@ const isPreferences = (value: unknown): value is UserPreferencesShape =>
   typeof value === 'object' && value !== null;
 
 const lazyEmail = async () => {
-  // Lazy import — keeps email package optional at the type-graph level.
-  const mod = await (
-    // @ts-expect-error optional peer dep
-    import('@luckystack/email') as Promise<{
-      sendEmail: (input: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }>;
-      renderEmailLayout: (input: Record<string, unknown>) => { html: string; text: string };
-    }>
-  );
-  return mod;
+  //? Optional peer — resolved at runtime only when @luckystack/email is
+  //? installed (forgotPassword: 'framework'). The specifier lives in a
+  //? variable so the linter/bundler doesn't treat the optional peer as an
+  //? unresolved static import.
+  const emailModule = '@luckystack/email';
+  return import(emailModule) as Promise<{
+    sendEmail: (input: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }>;
+    renderEmailLayout: (input: Record<string, unknown>) => { html: string; text: string };
+  }>;
 };
 
 export const registerNotificationHooks = (): void => {

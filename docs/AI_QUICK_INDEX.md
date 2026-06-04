@@ -34,6 +34,7 @@
 | ARCHITECTURE_FUNCTION_INJECTION.md | How the `functions.X` parameter on every API + sync handler gets built. Spec last updated 2026-05-22. | docs/ARCHITECTURE_FUNCTION_INJECTION.md |
 | ARCHITECTURE_HTTP.md | How `@luckystack/server` dispatches a raw Node HTTP request, the two | docs/ARCHITECTURE_HTTP.md |
 | ARCHITECTURE_LOGGING.md | Logger DI surface and the redacted-keys registry that keeps sensitive | docs/ARCHITECTURE_LOGGING.md |
+| ARCHITECTURE_MULTI_INSTANCE.md | **Read this before building anything that assumes more than one backend instance.** | docs/ARCHITECTURE_MULTI_INSTANCE.md |
 | ARCHITECTURE_MULTI_TENANCY.md | How to build a multi-tenant product on LuckyStack where **each tenant is a | docs/ARCHITECTURE_MULTI_TENANCY.md |
 | ARCHITECTURE_PACKAGING.md | Single source of truth for LuckyStack package extraction strategy. | docs/ARCHITECTURE_PACKAGING.md |
 | ARCHITECTURE_ROUTING.md | File-based routing for pages, APIs, and real-time sync events. | docs/ARCHITECTURE_ROUTING.md |
@@ -269,7 +270,7 @@
 | `validateDeploy(input)` | Library form of the deploy validator. Returns a list of `ValidationFinding` records (severity + message + slot). Finding codes include `service-unassigned`, `service-in-multiple-presets`, `preset-references-unknown-service`, `binding-references-unknown-service`, `binding-invalid-url` (error — binding URL doesn't parse), `binding-missing-port` (error — binding URL has no explicit port), `unknown-redis-resource`, `unknown-mongo-resource`, `unknown-fallback-env`, `fallback-redis-mismatch`, `fallback-mongo-mismatch`, `missing-resource-env-var` (warning), `missing-synchronized-env-var` (warning), `service-bound-in-no-environment` (warning). | -> docs/cli.md |
 | `Types: ValidateDeployInput`, `ValidateDeployResult`, `ValidationFinding`, `ValidationSeverity` | Public typing for the validator. | -> docs/cli.md |
 | `luckystack-validate-deploy` (`bin`) | CLI wrapper that imports the consumer's compiled `services.config.js` + `deploy.config.js`, runs `validateDeploy`, prints findings, exits non-zero on errors (and on warnings under `--strict`). | -> docs/cli.md |
-| Supervisor entry (`supervisor.ts`) | Standalone Node entry: watches `config.ts`, `.env`, `.env.local`, `server/server.ts`, `server/bootstrap/**`, `server/auth/**`, `server/sockets/socket.ts`, and key `server/functions/*.ts` files; debounces restarts; respawns crashed children with a delay; honors SIGINT / SIGTERM. | -> docs/supervisor.md |
+| Supervisor entry (`supervisor.ts`) | Standalone Node entry: watches `config.ts`, `.env`, `.env.local`, `server/server.ts`, `server/bootstrap/**`, `server/auth/**`, and key `server/functions/*.ts` files; debounces restarts; respawns crashed children with a delay; honors SIGINT / SIGTERM. | -> docs/supervisor.md |
 - Internal modules (not exported from `index.ts`, but live in this package):
 | Module | Role | Deep doc |
 |---|---|---|
@@ -334,9 +335,6 @@
 | `AutoSelectEmailSenderOptions` | `./autoSelect` | `{ from?, force? }`. |
 | `EmailSender`, `EmailMessage`, `EmailResult`, `EmailSenderRegistry` | Re-exported from `@luckystack/core` | Adapter contract + result tuple. |
 | `PreEmailSendPayload`, `PostEmailSendPayload` | `./hookPayloads` | Hook payload shapes (also augmented onto `HookPayloads`). |
-
-### `env-resolver`
-- _(no `CLAUDE.md` yet)_
 
 ### `error-tracking`
 | Function / Export | One-liner | Deep doc |
@@ -561,7 +559,7 @@
 | Primitive | Audience | Deep doc |
 |---|---|---|
 | `stream(payload)` | Originator socket only (cheapest). | → `docs/streaming.md` |
-| `broadcastStream(payload)` | Every socket in `roomCode`; auto-degrades to unicast for solo rooms. | → `docs/streaming.md` |
+| `broadcastStream(payload)` | Every socket in `roomCode`, across all instances (`io.to(room).emit` via the Redis adapter). | → `docs/streaming.md` |
 | `streamTo(tokens, payload)` | Selective fanout to specific session tokens. | → `docs/streaming.md` |
 | `stream(payload)` in `_client_v{N}.ts` | Per-recipient, runs after `_server` finishes. | → `docs/streaming.md` |
 - ### Hooks dispatched by the server handler
@@ -632,7 +630,6 @@
 | devkit | 8 | 8 | 0 |
 | docs-ui | 4 | 4 | 0 |
 | email | 5 | 5 | 0 |
-| env-resolver | 0 | 0 | 0 |
 | error-tracking | 4 | 4 | 0 |
 | login | 8 | 8 | 0 |
 | presence | 6 | 6 | 0 |

@@ -28,8 +28,22 @@ if (process.env.NODE_ENV !== 'production') {
 //? because the target is never read directly — every access is intercepted.
 // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Proxy target placeholder
 export const prisma = new Proxy({} as PrismaClient, {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- Reflect.get must forward `unknown`/`any` through to satisfy the Proxy handler contract
-  get: (_target, prop, receiver) => Reflect.get(getPrismaClient(), prop, receiver),
+  //? Bind methods to the real client so a CAPTURED method keeps its `this`.
+  //? Without binding, a detached call (`const q = prisma.$queryRaw; q(...)`)
+  //? runs with `this === undefined` and Prisma's internal `this`-access throws
+  //? — exactly how the `/readyz` prisma ping silently failed (it captures
+  //? `$runCommandRaw` / `$queryRaw` into a local before calling, so the ping
+  //? always threw → `prisma: false` → 503, even with the DB reachable).
+  //? Mirrors the `redis` proxy. Non-function reads (model delegates like
+  //? `prisma.user`) pass through untouched, so their methods bind to the
+  //? delegate as before.
+  get: (_target, prop, receiver) => {
+    const real = getPrismaClient() as object;
+    const value: unknown = Reflect.get(real, prop, receiver);
+    if (typeof value !== 'function') return value;
+    const fn = value as (...args: unknown[]) => unknown;
+    return fn.bind(real);
+  },
   has: (_target, prop) => Reflect.has(getPrismaClient(), prop),
   ownKeys: () => Reflect.ownKeys(getPrismaClient()),
   getOwnPropertyDescriptor: (_target, prop) =>

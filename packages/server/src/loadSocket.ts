@@ -358,7 +358,33 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     }
 
     if (token) {
-      void socket.join(token);
+      //? Rebuild this session's room membership on (re)connect. Socket.io rooms
+      //? are per-connection + in-memory, so a page refresh (brand-new socket) or
+      //? a server restart drops them while `session.roomCodes` (persisted in
+      //? Redis) still lists them. Without replaying them here the reconnected
+      //? socket only sits in its private token room, so a `syncRequest` fan-out
+      //? (`io.in(room).fetchSockets()`) finds zero members and returns
+      //? `sync.noReceiversFound`. Sequenced (await) so membership is restored
+      //? ASAP, and logged so a failed/empty rejoin is visible. Idempotent —
+      //? re-joining an already-joined room is a no-op.
+      void (async () => {
+        const [rejoinError, codes] = await tryCatch(async () => {
+          await socket.join(token);
+          const session = await getSession(token);
+          const roomCodes = session ? getSessionRoomCodes(session) : [];
+          for (const roomCode of roomCodes) {
+            await socket.join(roomCode);
+          }
+          return roomCodes;
+        });
+        if (rejoinError) {
+          getLogger().warn(`socket room rejoin failed for ${socket.id}`, { error: rejoinError.message });
+          return;
+        }
+        if (shouldLogDev) {
+          getLogger().debug(`socket ${socket.id} (re)joined rooms: ${(codes ?? []).join(', ') || '(none)'}`);
+        }
+      })();
     }
   });
 

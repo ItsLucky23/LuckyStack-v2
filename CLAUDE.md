@@ -276,6 +276,7 @@ SocketStatusProvider > SessionProvider > TranslationProvider > AvatarProvider > 
 | `docs/ARCHITECTURE_EMAIL.md` | `@luckystack/email` + login forgot-password |
 | `docs/ARCHITECTURE_SECRET_MANAGER.md` | `@luckystack/secret-manager` client + external server contract |
 | `docs/ARCHITECTURE_MULTI_TENANCY.md` | Multi-tenant pattern (tenant = Workspace): Prisma `$extends` row isolation + keyed clients + Redis key formatter + per-workspace secrets |
+| `docs/ARCHITECTURE_MULTI_INSTANCE.md` | Multi-instance/router model + pitfalls: WS pins to `system`, Redis-adapter cross-instance fan-out, regular `syncRequest` also crosses instances via `io.in(room).fetchSockets()` + `RemoteSocket.emit()` (streaming via `io.to().emit()`), shared-Redis footgun. Symptom→cause→fix table + local test recipe |
 | `docs/ARCHITECTURE_PACKAGING.md` | Package split strategy |
 | `docs/DEVELOPER_GUIDE.md` | Getting started |
 | `docs/HOSTING.md` | Deployment |

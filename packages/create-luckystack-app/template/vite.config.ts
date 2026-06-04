@@ -19,6 +19,19 @@ export default defineConfig(({ mode }) => {
       react(),
       tsconfigPaths({ projects: ['tsconfig.json'] }),
     ],
+    resolve: {
+      //? Client build only: `config.ts` is shared by client + server and pulls
+      //? `registerProjectConfig` from the bare `@luckystack/core` server barrel,
+      //? which statically imports Node `crypto` (randomBytes) and can't be
+      //? bundled for the browser. The browser-safe `/client` entry exports the
+      //? same `registerProjectConfig`, so redirect the bare specifier to it for
+      //? Vite only — the Node server still imports the real barrel, so each
+      //? runtime keeps a single, consistent project-config registry. Exact-match
+      //? regex so `@luckystack/core/client` itself is left untouched.
+      alias: [
+        { find: /^@luckystack\/core$/, replacement: '@luckystack/core/client' },
+      ],
+    },
     server: {
       port: 5173,
       host: true,

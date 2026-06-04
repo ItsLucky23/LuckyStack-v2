@@ -9,8 +9,7 @@ import {
   useMemo,
 } from "react";
 
-import type { statusContent, SOCKETSTATUS } from "@luckystack/core/client";
-export type { statusContent, SOCKETSTATUS };
+import type { statusContent } from "@luckystack/core/client";
 
 interface SocketStatusContextType {
   socketStatus: {
@@ -30,9 +29,12 @@ const SocketStatusContext = createContext<SocketStatusContextType | undefined>(
 );
 
 export function SocketStatusProvider({ children }: { children: ReactNode }) {
-  const [socketStatus, setSocketStatus] = useState({
+  const [socketStatus, setSocketStatus] = useState<{
+    self: statusContent;
+    [userId: string]: statusContent;
+  }>({
     self: {
-      status: "STARTUP" as SOCKETSTATUS,
+      status: "STARTUP",
     },
   });
 

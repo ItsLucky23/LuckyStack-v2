@@ -244,6 +244,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
+    "description": "This is the dashboard page. It maps to /dashboard via the framework's file-based router.",
     "welcome": "Welcome back, {{name}}",
     "welcomeSubtitle": "Here's a quick overview of your workspace.",
     "lastSignIn": "Last sign-in {{when}}",
@@ -262,6 +263,10 @@
     "statusDisconnected": "Disconnected",
     "recentActivity": "Recent activity",
     "recentActivityEmpty": "No recent activity yet."
+  },
+  "home": {
+    "settings": "Settings",
+    "signOut": "Sign out"
   },
   "errorPage": {
     "goBack": "← Go Back",

@@ -194,7 +194,7 @@ Required:
 - `ioredis@^5.10.0` — Redis client proxied through `getRedisClient()`; backs the rate limiter, session store, boot-UUID, and offline-queue.
 - `socket.io@^4.8.0` — server-side `SocketIOServer` consumed by `setIoInstance` and `attachSocketRedisAdapter`.
 - `socket.io-client@^4.8.0` — client-side socket types used by the offline queue.
-- `zod@^3.25.0` — `env.ts` schema parsing.
+- `zod@^4.0.0` — `env.ts` schema parsing.
 
 Optional (mark in `peerDependenciesMeta`):
 
@@ -206,5 +206,5 @@ Runtime (bundled): `@socket.io/redis-adapter`, `dotenv`.
 ## Related
 
 - README: `packages/core/README.md`
-- Architecture deep-dives: `docs/ARCHITECTURE_EXTENSION_POINTS.md`, `docs/ARCHITECTURE_PACKAGING.md`, `docs/ARCHITECTURE_SOCKET.md`, `docs/ARCHITECTURE_API.md`, `docs/ARCHITECTURE_SYNC.md`, `docs/ARCHITECTURE_SESSION.md`, `docs/ARCHITECTURE_AUTH.md`, `docs/ARCHITECTURE_ROUTING.md`
+- Architecture deep-dives: `docs/ARCHITECTURE_EXTENSION_POINTS.md`, `docs/ARCHITECTURE_PACKAGING.md`, `docs/ARCHITECTURE_SOCKET.md`, `docs/ARCHITECTURE_MULTI_INSTANCE.md`, `docs/ARCHITECTURE_API.md`, `docs/ARCHITECTURE_SYNC.md`, `docs/ARCHITECTURE_SESSION.md`, `docs/ARCHITECTURE_AUTH.md`, `docs/ARCHITECTURE_ROUTING.md`
 - Project-side glue: `config.ts`, `server/server.ts`, `server/prod/runtimeMaps.ts`, `src/_sockets/socketInitializer.ts`

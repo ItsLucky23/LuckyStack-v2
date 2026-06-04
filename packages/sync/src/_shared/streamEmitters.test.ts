@@ -137,7 +137,7 @@ describe("buildSyncStreamEmitters", () => {
   });
 
   describe("emitBroadcastSyncStream — room fanout math", () => {
-    it("degrades to a single unicast emit when the room has exactly one member", () => {
+    it("broadcasts via io.to(room) even when only one member is connected locally", () => {
       const io = getIo();
       const onlySocket = makeSocket();
       io.sockets.adapter.rooms.set("room-A", new Set(["sock-1"]));
@@ -146,15 +146,19 @@ describe("buildSyncStreamEmitters", () => {
       const { emitBroadcastSyncStream } = buildSyncStreamEmitters(makeBaseArgs());
       emitBroadcastSyncStream({ text: "solo" });
 
-      expect(onlySocket.emit).toHaveBeenCalledTimes(1);
-      expect(onlySocket.emit).toHaveBeenCalledWith("sync", {
+      //? No local "solo-degrade": the local `adapter.rooms` view only sees
+      //? sockets on THIS instance, so unicasting to the lone local socket would
+      //? drop members connected to other instances. Always broadcast via
+      //? io.to(room) so the Redis adapter fans out cluster-wide.
+      expect(io.to).toHaveBeenCalledTimes(1);
+      expect(io.to).toHaveBeenCalledWith("room-A");
+      expect(io.roomEmit).toHaveBeenCalledWith("sync", {
         text: "solo",
         cb: "cb-1",
         fullName: "sync/chat/sendMessage/v1",
         status: "stream",
       });
-      //? Solo path must NOT use the room broadcast (io.to(...)).
-      expect(io.to).not.toHaveBeenCalled();
+      expect(onlySocket.emit).not.toHaveBeenCalled();
     });
 
     it("uses io.to(room).emit for a multi-member room", () => {
@@ -174,22 +178,27 @@ describe("buildSyncStreamEmitters", () => {
       });
     });
 
-    it("emits nothing when the room is empty", () => {
+    it("still broadcasts via io.to(room) when the room is empty in the LOCAL adapter view", () => {
       const io = getIo();
       io.sockets.adapter.rooms.set("room-A", new Set());
 
       const { emitBroadcastSyncStream } = buildSyncStreamEmitters(makeBaseArgs());
       emitBroadcastSyncStream({ text: "noone" });
 
-      expect(io.to).not.toHaveBeenCalled();
+      //? A locally-empty room can still have members on other instances; the
+      //? Redis adapter resolves the real recipients. Gating on the local view
+      //? here is exactly what broke cross-instance broadcastStream.
+      expect(io.to).toHaveBeenCalledTimes(1);
+      expect(io.to).toHaveBeenCalledWith("room-A");
     });
 
-    it("emits nothing when the room does not exist", () => {
+    it("still broadcasts via io.to(room) when the room is unknown to the LOCAL adapter", () => {
       const io = getIo();
       const { emitBroadcastSyncStream } = buildSyncStreamEmitters(makeBaseArgs());
       emitBroadcastSyncStream({ text: "ghost" });
 
-      expect(io.to).not.toHaveBeenCalled();
+      expect(io.to).toHaveBeenCalledTimes(1);
+      expect(io.to).toHaveBeenCalledWith("room-A");
     });
 
     it("returns early when receiver is empty (no room to target)", () => {

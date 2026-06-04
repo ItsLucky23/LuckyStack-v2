@@ -19,7 +19,9 @@ export interface ApiParams {
 }
 
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
-  const { passwordMinLength, passwordMaxLength } = getProjectConfig().auth;
+  const { passwordPolicy } = getProjectConfig().auth;
+  const passwordMinLength = passwordPolicy.minLength;
+  const passwordMaxLength = passwordPolicy.maxLength;
   const { currentPassword, newPassword, confirmPassword } = data;
 
   if (!currentPassword || !newPassword || !confirmPassword) {

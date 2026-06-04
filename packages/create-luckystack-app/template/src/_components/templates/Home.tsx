@@ -4,23 +4,24 @@
 //? where the project's signed-in shell lives.
 
 import { Link } from 'react-router-dom';
-import { Middleware, useSession } from '@luckystack/core/client';
+import { Middleware, useSession, useTranslator } from '@luckystack/core/client';
 
 export default function Home({ children }: { children: React.ReactNode }) {
   const { session } = useSession();
+  const translate = useTranslator();
 
   return (
     <div className="w-full h-full flex flex-col bg-background text-title">
       <header className="flex items-center justify-between gap-4 px-6 h-14 border-b border-container1-border bg-container1">
         <Link to="/" className="text-base font-semibold text-title hover:text-primary transition-colors">
-          {String(session?.name ?? 'home')}
+          {session?.name ?? 'home'}
         </Link>
         <div className="flex items-center gap-3">
           <Link to="/settings" className="text-sm text-common hover:text-primary transition-colors">
-            Settings
+            {translate({ key: 'home.settings' })}
           </Link>
           <Link to="/logout" className="text-sm text-common hover:text-primary transition-colors">
-            Sign out
+            {translate({ key: 'home.signOut' })}
           </Link>
         </div>
       </header>

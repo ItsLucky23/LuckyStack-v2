@@ -78,6 +78,18 @@
 
   --color-wrong: oklch(63.7% 0.237 25.331);
   --color-wrong-hover: oklch(57.7% 0.245 27.325);
+
+  /* Terminal surface — fixed dark in BOTH themes (terminals stay dark in light
+   * mode). Same values duplicated in .dark so the tokens resolve identically. */
+  --color-terminal-bg: #0C1018;
+  --color-terminal-surface: #11161F;
+  --color-terminal-text: #C9D4E3;
+  --color-terminal-muted: #6B7688;
+  --color-terminal-green: #3FB950;
+  --color-terminal-blue: #58A6FF;
+  --color-terminal-amber: #D29922;
+  --color-terminal-red: #F85149;
+  --color-terminal-cyan: #39C5CF;
 }
 
 /*
@@ -131,6 +143,17 @@
 
   --color-wrong: oklch(63.7% 0.237 25.331);
   --color-wrong-hover: oklch(57.7% 0.245 27.325);
+
+  /* Terminal surface — fixed dark, identical to the light @theme values. */
+  --color-terminal-bg: #0C1018;
+  --color-terminal-surface: #11161F;
+  --color-terminal-text: #C9D4E3;
+  --color-terminal-muted: #6B7688;
+  --color-terminal-green: #3FB950;
+  --color-terminal-blue: #58A6FF;
+  --color-terminal-amber: #D29922;
+  --color-terminal-red: #F85149;
+  --color-terminal-cyan: #39C5CF;
 }
 
 :root {

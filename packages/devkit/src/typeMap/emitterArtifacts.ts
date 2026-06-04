@@ -231,7 +231,7 @@ export type StreamPayload = {
 export type ApiStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
 export type SyncServerStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
 export type SyncClientStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
-//? Broadcast â€” fan-out to every socket in the receiver room. Auto-degrades to unicast for solo rooms.
+//? Broadcast â€” fan-out to every socket in the receiver room (cross-instance via the Redis adapter).
 export type SyncBroadcastStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void;
 //? Targeted â€” emit only to the listed session tokens (each token is its own room).
 export type SyncStreamToEmitter<T extends StreamPayload = StreamPayload> = (
@@ -475,11 +475,12 @@ export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>, V extend
 
 //
 // Type-level augmentation â€” merges the project's concrete ApiTypeMap / SyncTypeMap
-// into @luckystack/core's stub interfaces so framework code (apiRequest / syncRequest)
-// can rely on the same shapes without deep-relative imports. Loaded as a side
-// effect on any import of this file.
+// into the @luckystack/core/typemap stub-declaration module so framework code
+// (apiRequest / syncRequest) sees the project routes without deep-relative
+// imports. Augmenting the module that DECLARES the stubs (not the re-exporting
+// barrel) is what makes the merge land for consumers installing the built dist.
 //
-declare module '@luckystack/core' {
+declare module '@luckystack/core/typemap' {
 	interface ApiTypeMap extends _ProjectApiTypeMap {}
 	interface SyncTypeMap extends _ProjectSyncTypeMap {}
 }

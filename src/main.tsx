@@ -56,6 +56,12 @@ interface PageModule {
   default: React.ComponentType<PageProps>;
   template?: Template;
   middleware?: PageMiddleware;
+  //? Opt-in: register this page as a splat (`<route>/*`) so it owns all of its
+  //? sub-paths. Use for a self-contained sub-app that keeps a persistent shell
+  //? mounted and drives its own views/URLs from `useLocation` (e.g. the
+  //? Workspaces app at `/workspaces/*`). Without this a page matches its exact
+  //? route only.
+  splat?: boolean;
 }
 
 // Wrapper to inject Next.js-style params and searchParams as props
@@ -124,8 +130,15 @@ const getRoutes = (pages: Record<string, PageModule>) => {
     const template = module.template ?? 'plain';
     const Page = module.default;
 
+    //? Splat pages own their whole sub-tree (`/workspaces/*`). The exact root
+    //? still maps via the same finalPath, so the page mounts for `/workspaces`
+    //? and every descendant — letting it keep one persistent shell + route its
+    //? own views from the URL. The `'/'` root can't be a splat (would swallow
+    //? every route), so it's ignored there.
+    const routePath = module.splat && finalPath !== '/' ? `${finalPath}/*` : finalPath;
+
     routes.push({
-      path: finalPath,
+      path: routePath,
       element: (
         <TemplateProvider key={`${template}-${finalPath}`} initialTemplate={template}>
           <PageWrapper Page={Page} />

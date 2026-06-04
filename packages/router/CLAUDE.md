@@ -137,3 +137,4 @@ Register handlers via `@luckystack/core`'s hook bus on the consumer side. Consum
 - `docs/ARCHITECTURE_PACKAGING.md` §9.6 — packaging & router responsibilities.
 - `docs/ARCHITECTURE_ROUTING.md` — file-based routing conventions (consumer side).
 - `docs/HOSTING.md` — deployment topology, health probes, environment sync.
+- `docs/ARCHITECTURE_MULTI_INSTANCE.md` — multi-instance mental model + pitfalls (WS pins to `system`, cross-instance socket fan-out, shared-Redis footgun, single-binding-per-service scaling).

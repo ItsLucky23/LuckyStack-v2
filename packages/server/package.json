@@ -64,6 +64,16 @@
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",
-    "socket.io": "^4.8.0"
+    "socket.io": "^4.8.0",
+    "@luckystack/devkit": "^0.1.0",
+    "@luckystack/docs-ui": "^0.1.0",
+    "@luckystack/email": "^0.1.0",
+    "@luckystack/error-tracking": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@luckystack/devkit": { "optional": true },
+    "@luckystack/docs-ui": { "optional": true },
+    "@luckystack/email": { "optional": true },
+    "@luckystack/error-tracking": { "optional": true }
   }
 }

@@ -66,15 +66,17 @@ Three read-only agents + manual verification against `docs/PUBLISH_READINESS_AUD
 
 ## 3. Repo cleanup — confirmed TODO (NOT executed this turn)
 
-You confirmed removing these **loose/random** session `.md` files. **All folders stay — especially `handoff/` (do NOT delete).** Run when ready:
+> **Status update 2026-06-02 — executed selectively after a reference check.** Three of the six were still actively referenced, which contradicts "safe to remove", so they were KEPT. Removed only the genuinely loose/unreferenced ones. A future cleanup that wants the kept files gone must FIRST repoint the references below.
 
-**Remove (6):**
-- `SESSION_STATE.md` (root)
-- `TESTING_PLAN.md` (root)
-- `docs/HANDOFF-R1-R5.md` (superseded by this file)
-- `docs/_archive/MIGRATION_HOOK_BASED_ERROR_TRACKING.md`
-- `docs/_archive/PROJECT_CONTEXT.md`
-- `docs/_archive/SESSION_STATE_2026-05-20.md`  *(→ `docs/_archive/` becomes empty; remove the dir too)*
+You confirmed removing these **loose/random** session `.md` files. **All folders stay — especially `handoff/` (do NOT delete).**
+
+**Outcome (was "Remove (6)"):**
+- ✅ `SESSION_STATE.md` (root) — **removed**
+- ✅ `TESTING_PLAN.md` (root) — **removed**
+- ❌ `docs/HANDOFF-R1-R5.md` — **KEPT**: treated as a deliberately-shipped framework doc by `handoff/` + `sparring/` (HANDOFF.md: "komt mee bij npm install").
+- ❌ `docs/_archive/MIGRATION_HOOK_BASED_ERROR_TRACKING.md` — **KEPT**: linked from the shipped `packages/error-tracking/docs/auto-instrumentation.md` (×2). NB: that link mis-points at `/docs/…` instead of `/docs/_archive/…` — fix the path before any removal.
+- ✅ `docs/_archive/PROJECT_CONTEXT.md` — **removed** (unreferenced).
+- ❌ `docs/_archive/SESSION_STATE_2026-05-20.md` — **KEPT**: linked from `docs/ROADMAP.md` (×2). (`docs/_archive/` therefore stays, with 2 files.)
 
 **Keep (do NOT touch):** ⛔ `handoff/` (still needed) · `handoffs/2026-06-02/` · `sparring/` · `branch-logs/` · `docs/PUBLISH_READINESS_AUDIT.md` · `docs/STREAMING_RECONSTRUCTION.md` · all `docs/ARCHITECTURE_*.md` + canonical docs · root `README.md`/`CLAUDE.md`/`CONTRIBUTING.md` · all `packages/**`.
 

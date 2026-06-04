@@ -62,9 +62,38 @@ const detectedDns = normalizeDns(
 const resolvedEnvironment: AppEnvironmentConfig =
   dnsEnvironmentMap[detectedDns] ?? fallbackEnvironment;
 
+//? Dev-only convenience for local multi-instance testing: point a SINGLE local
+//? frontend at a specific backend instance via `?backend=<port>` (e.g.
+//? http://localhost:5173/?backend=4101). Restricted to `localhost:<port>` and to
+//? dev environments, so a production build can never be redirected to another host.
+//?
+//? The chosen port is PERSISTED in per-tab sessionStorage: it's read from the URL
+//? when present, otherwise from storage. That way the choice survives the
+//? post-login full-page redirect (`LoginForm` does `location.href = loginRedirectUrl`,
+//? which drops the query string) and any other navigation that loses the query —
+//? without it the backend would reset to the default after login. Per-tab storage
+//? keeps two tabs pinned to their own instance.
+const resolveBackendUrl = (): string => {
+  const base = resolvedEnvironment.backendUrl;
+  if (!resolvedEnvironment.dev) return base;
+  const win = runtimeWindow.window;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!win) return base;
+  const fromUrl = new URLSearchParams(win.location.search).get("backend");
+  const stored = win.sessionStorage.getItem("ls-dev-backend");
+  const port = fromUrl && /^\d+$/.test(fromUrl) ? fromUrl : stored;
+  if (!port || !/^\d+$/.test(port)) return base;
+  win.sessionStorage.setItem("ls-dev-backend", port);
+  const url = `http://localhost:${port}`;
+  //? Make the override visible — otherwise "why is it on :4100 without a param?"
+  //? is confusing. It's the per-tab sessionStorage remembering the last choice.
+  console.log(`[dev] backend override → ${url} (from ${fromUrl ? "?backend= URL param" : "sessionStorage — last ?backend= in this tab"})`);
+  return url;
+};
+
 const config = {
   /** The URL of the backend server. Update for production. */
-  backendUrl: resolvedEnvironment.backendUrl,
+  backendUrl: resolveBackendUrl(),
  
   /** Enable extra console logs for debugging */
   dev: resolvedEnvironment.dev,

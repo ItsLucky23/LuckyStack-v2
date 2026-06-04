@@ -349,11 +349,29 @@ const main = async (): Promise<void> => {
   //? them and uses sane defaults (Mongo + credentials + console email).
   const choices: ScaffoldChoices = args.prompt ? await runPrompts() : DEFAULT_CHOICES;
 
+  //? Provider-specific Prisma + DATABASE_URL bits. MongoDB needs an ObjectId
+  //? `_id` mapping; the SQL providers use a cuid string id. The example URL is
+  //? pre-filled for the chosen provider (the others stay as commented hints).
+  const USER_ID_ATTRS_BY_PROVIDER: Record<string, string> = {
+    mongodb: '@id @default(auto()) @map("_id") @db.ObjectId',
+    postgresql: '@id @default(cuid())',
+    mysql: '@id @default(cuid())',
+    sqlite: '@id @default(cuid())',
+  };
+  const DATABASE_URL_BY_PROVIDER: Record<string, string> = {
+    mongodb: `mongodb://localhost:27017/${slug}`,
+    postgresql: `postgresql://user:password@localhost:5432/${slug}`,
+    mysql: `mysql://user:password@localhost:3306/${slug}`,
+    sqlite: 'file:./dev.db',
+  };
+
   const vars: Record<string, string> = {
     PROJECT_NAME: slug,
     PROJECT_TITLE: titleCase(args.projectName),
     LUCKYSTACK_VERSION: readSelfVersion(),
     DB_PROVIDER: choices.dbProvider,
+    USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '@id @default(cuid())',
+    DATABASE_URL: DATABASE_URL_BY_PROVIDER[choices.dbProvider] ?? `postgresql://user:password@localhost:5432/${slug}`,
     AUTH_MODE: choices.authMode,
     OAUTH_PROVIDERS: choices.oauthProviders.join(','),
     EMAIL_PROVIDER: choices.emailProvider,

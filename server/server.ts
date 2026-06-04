@@ -30,6 +30,7 @@ import {
 } from '@luckystack/email';
 import { serveFile, serveFavicon } from './prod/serveFile';
 import { registerNotificationHooks } from './hooks/notifications';
+import { registerWorkspacesTerminalHooks } from './hooks/workspacesTerminal';
 import { resolveSecretsIfConfigured } from './bootstrap/initSecrets';
 import projectConfig, { sentry as sentryConfigInput } from '../config';
 
@@ -56,6 +57,7 @@ registerSentryConfig(sentryConfigInput);
 initializeSentry();
 registerPresenceHooks();
 registerNotificationHooks();
+registerWorkspacesTerminalHooks();
 
 //? Resend → SMTP → Console fallback chain. The selector reads RESEND_API_KEY,
 //? SMTP_HOST + friends from process.env. We pass `from` explicitly from the

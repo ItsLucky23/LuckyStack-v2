@@ -50,7 +50,7 @@ Real-time sync transport for LuckyStack. Provides type-safe, room-based fanout o
 | Primitive | Audience | Deep doc |
 |---|---|---|
 | `stream(payload)` | Originator socket only (cheapest). | → `docs/streaming.md` |
-| `broadcastStream(payload)` | Every socket in `roomCode`; auto-degrades to unicast for solo rooms. | → `docs/streaming.md` |
+| `broadcastStream(payload)` | Every socket in `roomCode`, across all instances (`io.to(room).emit` via the Redis adapter). | → `docs/streaming.md` |
 | `streamTo(tokens, payload)` | Selective fanout to specific session tokens. | → `docs/streaming.md` |
 | `stream(payload)` in `_client_v{N}.ts` | Per-recipient, runs after `_server` finishes. | → `docs/streaming.md` |
 
@@ -97,6 +97,7 @@ None directly. Inherits socket transport config from `@luckystack/server` and Re
 
 - Architecture deep-dive: `/docs/ARCHITECTURE_SYNC.md`
 - Socket setup + Redis adapter: `/docs/ARCHITECTURE_SOCKET.md`
+- Multi-instance model + pitfalls (regular `syncRequest` fan-out reaches across instances via `io.in(room).fetchSockets()` + `RemoteSocket.emit()`; streaming via `broadcastStream`/`streamTo`): `/docs/ARCHITECTURE_MULTI_INSTANCE.md`
 - File-based `_sync/` routing: `/docs/ARCHITECTURE_ROUTING.md`
 - Streaming page reconstruction: `/docs/STREAMING_RECONSTRUCTION.md`
 - README (consumer quickstart): `./README.md`

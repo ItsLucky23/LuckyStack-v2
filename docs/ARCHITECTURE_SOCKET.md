@@ -283,7 +283,7 @@ When the browser tab regains focus (`document.visibilitychange`), the client pro
 
 When you run more than one backend instance behind a load balancer (including the built-in `@luckystack/router`), a room broadcast fired from instance A must still reach clients connected to instance B. Socket.io solves this with an adapter.
 
-LuckyStack attaches `@socket.io/redis-adapter` automatically on every backend via `attachSocketRedisAdapter(io)` in `server/sockets/socket.ts`. The adapter:
+LuckyStack attaches `@socket.io/redis-adapter` automatically on every backend via `attachSocketRedisAdapter(io)` in `@luckystack/server`'s `loadSocket` (`packages/server/src/loadSocket.ts`). The adapter:
 
 - Reuses the `redis` handle from `@luckystack/core` (no extra config).
 - Creates two `redis.duplicate()` connections — one for publish, one for subscribe. A subscribe-mode Redis connection cannot issue other commands, so duplicating is required.
@@ -293,6 +293,8 @@ Without this adapter, `io.to(roomCode).emit('sync', ...)` only reaches sockets c
 
 The router's WebSocket proxy routes socket.io upgrades to the `system` service by convention. Because the adapter fans broadcasts out across instances, a client doesn't need to be on the "right" service's socket.io — any instance sharing the Redis will receive and re-emit room events.
 
+> **How sync reaches across instances.** Two mechanisms ride on the adapter: the streaming emitters (`broadcastStream` / `streamTo`) use `io.to(room).emit(...)`; the **regular `syncRequest` fan-out** uses `io.in(room).fetchSockets()` to enumerate the room's members on **all** instances and then delivers per-recipient (preserving per-recipient `_client` payloads) via `RemoteSocket.emit()`. Both reach every instance sharing the Redis. Full model, costs + pitfalls table: **`docs/ARCHITECTURE_MULTI_INSTANCE.md`**.
+
 ---
 
 ## Runtime Function Reference
@@ -300,7 +302,7 @@ The router's WebSocket proxy routes socket.io upgrades to the `system` service b
 | File | Function | Purpose |
 | ---- | -------- | ------- |
 | `shared/socketEvents.ts` | `socketEventNames` + builders | Canonical socket event names and indexed response/progress event helpers shared across client/server. |
-| `server/sockets/socket.ts` | `loadSocket` | Initializes Socket.io server, registers all socket event handlers. |
+| `packages/server/src/loadSocket.ts` | `loadSocket` | Initializes Socket.io server, registers all socket event handlers (incl. rejoining `session.roomCodes` on (re)connect). |
 | `packages/core/src/socketRedisAdapter.ts` | `attachSocketRedisAdapter` | Wires `@socket.io/redis-adapter` onto the Socket.io server so room fanout works across instances. |
 | `packages/core/src/socketState.ts` | `setIoInstance` / `getIoInstance` | Module-level slot for the running Socket.io server; framework code broadcasts via this. |
 | `packages/core/src/socketMiddleware.ts` | `registerSocketMiddleware` / `getSocketMiddlewares` / `clearSocketMiddlewares` / `applySocketMiddlewares` | Composable `io.use(...)` registry. `applySocketMiddlewares` is framework-internal. |

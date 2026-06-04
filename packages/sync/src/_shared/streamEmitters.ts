@@ -201,20 +201,16 @@ export const buildSyncStreamEmitters = ({
 
     dispatchStreamHooks(resolvedName, receiver, payload);
 
-    const frame = buildBroadcastFrame(payload);
-    const roomMembers = io.sockets.adapter.rooms.get(receiver);
-    if (!roomMembers || roomMembers.size === 0) return;
-
-    if (roomMembers.size <= 1) {
-      const onlyId = roomMembers.values().next().value;
-      const onlySocket = onlyId ? io.sockets.sockets.get(onlyId) : undefined;
-      if (onlySocket) {
-        onlySocket.emit(socketEventNames.sync, frame);
-      }
-      return;
-    }
-
-    io.to(receiver).emit(socketEventNames.sync, frame);
+    //? `io.to(room).emit` fans the chunk out across EVERY server instance via
+    //? the Redis adapter, so room members connected to a different instance get
+    //? it too. Do NOT gate on `adapter.rooms.get(receiver)` — that is the
+    //? per-process room view; in a multi-instance cluster it only sees locally
+    //? connected members, so the previous "size <= 1 ⇒ unicast to the lone
+    //? socket" optimization mis-fired whenever the other room members lived on
+    //? another instance and collapsed broadcastStream into an originator-only
+    //? stream. `streamTo` always used `io.to(...).emit` and never had this bug;
+    //? this aligns broadcastStream with it.
+    io.to(receiver).emit(socketEventNames.sync, buildBroadcastFrame(payload));
   };
 
   const emitStreamToTokens = (

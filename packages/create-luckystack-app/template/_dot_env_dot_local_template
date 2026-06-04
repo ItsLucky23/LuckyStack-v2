@@ -1,8 +1,12 @@
 # Local secrets. NOT checked into git. Copy this to `.env.local` and fill in.
 
-# Database connection used by Prisma. Pick the format that matches your
-# `prisma/schema.prisma` provider.
-DATABASE_URL="postgresql://user:password@localhost:5432/{{PROJECT_NAME}}"
+# Database connection used by Prisma. This is pre-filled for the provider you
+# chose at scaffold time; the other formats are shown for when you switch.
+DATABASE_URL="{{DATABASE_URL}}"
+#   mongodb:    mongodb://localhost:27017/{{PROJECT_NAME}}   (or a mongodb+srv Atlas URI; needs a replica set)
+#   postgresql: postgresql://user:password@localhost:5432/{{PROJECT_NAME}}
+#   mysql:      mysql://user:password@localhost:3306/{{PROJECT_NAME}}
+#   sqlite:     file:./dev.db
 
 # Redis credentials (only required when your Redis instance has auth).
 REDIS_USERNAME=

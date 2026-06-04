@@ -207,7 +207,9 @@ for (const presetName of targetPresets) {
   const output = `${importStatements}\n\n${apiMap}\n${syncMap}\n${functionsMap}`;
 
   const outFileName = `generatedApis.${presetName}.ts`;
-  fs.writeFileSync(path.join(getServerDir(), 'prod', outFileName), output);
+  const outDir = path.join(getServerDir(), 'prod');
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, outFileName), output);
   console.log(`✅ server/prod/${outFileName} created for preset '${presetName}'`);
 }
 

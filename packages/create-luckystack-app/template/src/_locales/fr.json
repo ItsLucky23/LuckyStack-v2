@@ -243,6 +243,7 @@
   },
   "dashboard": {
     "title": "Tableau de bord",
+    "description": "Ceci est la page du tableau de bord. Elle est mappée sur /dashboard via le routeur basé sur les fichiers du framework.",
     "welcome": "Bon retour, {{name}}",
     "welcomeSubtitle": "Voici un aperçu rapide de votre espace de travail.",
     "lastSignIn": "Dernière connexion {{when}}",
@@ -261,6 +262,10 @@
     "statusDisconnected": "Déconnecté",
     "recentActivity": "Activité récente",
     "recentActivityEmpty": "Pas d'activité récente."
+  },
+  "home": {
+    "settings": "Paramètres",
+    "signOut": "Se déconnecter"
   },
   "errorPage": {
     "goBack": "← Retour",

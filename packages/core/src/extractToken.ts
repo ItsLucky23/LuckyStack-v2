@@ -14,7 +14,10 @@ import { getCookieValue } from './cookies';
  * @param socket - The Socket.io socket instance
  * @returns The token string or null if not found
  */
-export const extractTokenFromSocket = (socket: Socket): string | null => {
+//? `Pick<Socket, 'handshake'>` (not `Socket`) so this also accepts a
+//? `RemoteSocket` from `io.fetchSockets()` — the cross-instance fan-out path
+//? only has RemoteSockets, which expose `handshake` but not the full Socket API.
+export const extractTokenFromSocket = (socket: Pick<Socket, 'handshake'>): string | null => {
   const cookie = socket.handshake.headers.cookie;
   const sessionToken = typeof socket.handshake.auth?.token === 'string'
     ? socket.handshake.auth.token

@@ -1,4 +1,4 @@
-import validator from 'validator';
+import { isEmail } from 'validator';
 
 import { getProjectConfig } from '@luckystack/core';
 import { sendPasswordResetEmail } from '@luckystack/login';
@@ -25,7 +25,7 @@ export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
   }
 
   const email = data.email.trim().toLowerCase();
-  if (!email || !validator.isEmail(email)) {
+  if (!email || !isEmail(email)) {
     return { status: 'error', errorCode: 'login.invalidEmailFormat' };
   }
 

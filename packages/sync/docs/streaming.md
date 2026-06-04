@@ -14,7 +14,7 @@ For the originator-side `onStream` callback see [`./sync-request.md`](./sync-req
                             stream(payload)       Originator's socket only        cheapest
                             broadcastStream(p)    Every socket in `roomCode`      medium
 _server_v{N}.ts param:      streamTo(tokens, p)   Selected session tokens         medium
-                            (auto-degrades to unicast when room size <= 1)
+                            (broadcastStream + streamTo fan out across ALL instances via the Redis adapter)
 
 _client_v{N}.ts param:      stream(payload)       Per-recipient (one in the loop) cheapest per-target
 ```
@@ -27,11 +27,7 @@ Use for **per-user progress that nobody else cares about**: upload progress, sea
 
 ### `broadcastStream(payload)`
 
-Fanout to every socket currently in `roomCode`. Auto-degrades:
-
-- Room size 0 -> no-op (warn-suppressed; emitter silently returns).
-- Room size 1 -> unicast `socket.emit` to the single member.
-- Room size > 1 -> `io.to(roomCode).emit(...)` (Socket.io's batched fanout).
+Fanout to every socket in `roomCode`, **across all server instances** — always `io.to(roomCode).emit(...)`, which the Socket.io Redis adapter fans out cluster-wide. It does NOT inspect the local room size: the per-process room view only sees sockets on the current instance, so degrading to a per-socket unicast would silently drop members connected to other instances (see the multi-instance note below).
 
 Use for **the entire room sees the same stream**: live AI chat tokens to a group, collab-editor diffs, multiplayer game ticks. Recipients consume via `upsertSyncEventStreamCallback`.
 
@@ -232,18 +228,13 @@ Important: `broadcastStream` and `streamTo` chunks still flow over **Socket.io**
 
 ## 6. Performance notes
 
-### `broadcastStream` auto-degrades
+### `broadcastStream` is always a cross-instance room emit
 
 ```ts
-if (roomMembers.size <= 1) {
-  const onlyId = roomMembers.values().next().value;
-  io.sockets.sockets.get(onlyId)?.emit(socketEventNames.sync, frame);
-  return;
-}
 io.to(receiver).emit(socketEventNames.sync, frame);
 ```
 
-A solo room is the common case for "I'm streaming an LLM response only to myself in my own private chat room". The unicast path avoids Socket.io's per-emit room lookup overhead. Zero-recipient rooms early-return without touching the wire.
+`broadcastStream` does NOT inspect local room membership. A previous "if room size <= 1, unicast to the lone socket" optimization was removed: the per-process room view only sees sockets on the LOCAL instance, so in a multi-instance cluster it dropped members connected to other instances. `io.to(room).emit(...)` lets the Redis adapter resolve the real recipients cluster-wide; `streamTo` uses the same `io.to(tokens).emit(...)` path.
 
 ### Stream-hook fire-and-forget
 

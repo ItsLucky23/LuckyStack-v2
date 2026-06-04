@@ -13,6 +13,7 @@ import { useLocation } from 'react-router-dom';
 import { SocketStatusIndicator } from '@luckystack/presence/client';
 import { useTheme, useSession, useTranslator } from '@luckystack/core/client';
 
+import type { SessionLayout } from 'config';
 import { useSocketStatus } from 'src/_providers/socketStatusProvider';
 import Home from './Home';
 
@@ -41,7 +42,7 @@ export default function TemplateProvider({
   const [template] = useState<Template>(initialTemplate);
   const TemplateComponent = Templates[template];
 
-  const { session } = useSession();
+  const { session } = useSession<SessionLayout>();
   const reactLocation = useLocation();
   const { setTheme } = useTheme();
   const { socketStatus } = useSocketStatus();

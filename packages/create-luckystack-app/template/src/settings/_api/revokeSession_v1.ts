@@ -19,7 +19,7 @@ export interface ApiParams {
 
 const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
 
-export const main = async ({ data, user }: ApiParams): Promise<ApiResponse> => {
+export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const targetToken = data.token;
   if (!targetToken || targetToken === user.token) {
     // Refuse to revoke the current session — the user must log out instead.
@@ -32,14 +32,10 @@ export const main = async ({ data, user }: ApiParams): Promise<ApiResponse> => {
     return { status: 'error', errorCode: 'session.invalid' };
   }
 
-  let owned = false;
-  try {
-    const parsed = JSON.parse(sessionRaw) as { id?: string };
-    owned = parsed.id === user.id;
-  } catch {
-    owned = false;
-  }
-  if (!owned) {
+  const [parseError, parsed] = await functions.tryCatch.tryCatch(
+    () => JSON.parse(sessionRaw) as { id?: string },
+  );
+  if (parseError || parsed?.id !== user.id) {
     return { status: 'error', errorCode: 'auth.forbidden' };
   }
 

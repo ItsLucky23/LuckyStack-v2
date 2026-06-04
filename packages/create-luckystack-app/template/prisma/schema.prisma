@@ -35,7 +35,7 @@ enum PROVIDERS {
 }
 
 model User {
-  id              String    @id @default(cuid())
+  id              String    {{USER_ID_ATTRS}}
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -44,12 +44,16 @@ model User {
   provider        PROVIDERS @default(credentials)
 
   name            String?
-  avatar          String?
-  avatarFallback  String?
+  avatar          String    @default("")
+  avatarFallback  String    @default("")
   admin           Boolean   @default(false)
 
   language        LANGUAGE  @default(en)
   theme           THEME     @default(light)
+
+  //? Free-form per-user settings (notification opt-ins, etc.). Read/written by
+  //? the settings/updatePreferences route and surfaced on the session.
+  preferences     Json?
 
   @@unique([email, provider])
 }

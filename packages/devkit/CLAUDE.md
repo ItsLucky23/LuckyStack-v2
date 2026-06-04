@@ -65,7 +65,7 @@ Dev-time tooling for LuckyStack projects: file-based route discovery + in-memory
 | `validateDeploy(input)` | Library form of the deploy validator. Returns a list of `ValidationFinding` records (severity + message + slot). Finding codes include `service-unassigned`, `service-in-multiple-presets`, `preset-references-unknown-service`, `binding-references-unknown-service`, `binding-invalid-url` (error — binding URL doesn't parse), `binding-missing-port` (error — binding URL has no explicit port), `unknown-redis-resource`, `unknown-mongo-resource`, `unknown-fallback-env`, `fallback-redis-mismatch`, `fallback-mongo-mismatch`, `missing-resource-env-var` (warning), `missing-synchronized-env-var` (warning), `service-bound-in-no-environment` (warning). | -> docs/cli.md |
 | `Types: ValidateDeployInput`, `ValidateDeployResult`, `ValidationFinding`, `ValidationSeverity` | Public typing for the validator. | -> docs/cli.md |
 | `luckystack-validate-deploy` (`bin`) | CLI wrapper that imports the consumer's compiled `services.config.js` + `deploy.config.js`, runs `validateDeploy`, prints findings, exits non-zero on errors (and on warnings under `--strict`). | -> docs/cli.md |
-| Supervisor entry (`supervisor.ts`) | Standalone Node entry: watches `config.ts`, `.env`, `.env.local`, `server/server.ts`, `server/bootstrap/**`, `server/auth/**`, `server/sockets/socket.ts`, and key `server/functions/*.ts` files; debounces restarts; respawns crashed children with a delay; honors SIGINT / SIGTERM. | -> docs/supervisor.md |
+| Supervisor entry (`supervisor.ts`) | Standalone Node entry: watches `config.ts`, `.env`, `.env.local`, `server/server.ts`, `server/bootstrap/**`, `server/auth/**`, and key `server/functions/*.ts` files; debounces restarts; respawns crashed children with a delay; honors SIGINT / SIGTERM. | -> docs/supervisor.md |
 
 Internal modules (not exported from `index.ts`, but live in this package):
 
@@ -98,7 +98,7 @@ Internal modules (not exported from `index.ts`, but live in this package):
 ## Peer dependencies
 
 - **Required peer (runtime)**: `typescript@~5.7.3` — the type-map emitter and runtime type resolver call into the TypeScript Compiler API. No optional fallback; if the consumer's `typescript` version drifts out of the supported range the emitter may produce different inlined output. Treat as a hard peer.
-- **Required peer**: `zod@^3.25.0` — the Zod schema emitter compiles consumer input types into runtime schemas via `zodEmitter.ts`.
+- **Required peer**: `zod@^4.0.0` — the Zod schema emitter compiles consumer input types into runtime schemas via `zodEmitter.ts`.
 - **Required peer**: `@prisma/client@^6.19.0` — type expansion may surface Prisma model types into emitted artifacts; missing the client breaks generation.
 - **Direct dependency**: `chokidar@^4.0.3` (the file watcher used by both `hotReload.ts` and `supervisor.ts`).
 - **Direct dependency**: `@luckystack/core` (project config, root dir, generated artifact paths, `tryCatch`, locale reloader hook).

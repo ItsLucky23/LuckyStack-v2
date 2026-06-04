@@ -17,7 +17,9 @@ export interface ApiParams {
 }
 
 export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
-  const { forgotPassword, passwordMinLength, passwordMaxLength } = getProjectConfig().auth;
+  const { forgotPassword, passwordPolicy } = getProjectConfig().auth;
+  const passwordMinLength = passwordPolicy.minLength;
+  const passwordMaxLength = passwordPolicy.maxLength;
   if (forgotPassword !== 'framework') {
     return { status: 'error', errorCode: 'login.forgotPasswordDisabled' };
   }

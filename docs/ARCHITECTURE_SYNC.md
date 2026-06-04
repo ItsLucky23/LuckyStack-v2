@@ -271,7 +271,7 @@ Sync exposes four streaming primitives, each picking a different audience and co
 | `streamTo(tokens, payload)` | Specific session tokens only | Targeted fan-out | Selective subscribers (admin viewers, "active reader" markers, low-priority audit logs) |
 | `_client_v{n}.ts` stream | Per-recipient (after `_server` finishes) | One run per recipient | Per-target customization (filtering, translating, branding the payload differently per receiver) |
 
-`broadcastStream` automatically degrades to a unicast emit when the receiver room contains a single socket — solo rooms cost the same as `stream()`. Free optimization.
+`broadcastStream` always emits via `io.to(roomCode).emit(...)`, which the Redis adapter fans out to every instance sharing the room. It deliberately does NOT inspect the local room size — a per-process "solo" view would miss members connected to other instances.
 
 `streamTo` targets recipients by their session token. Every authenticated socket joins a room named after its own token at connect time, so emitting to a token-room reaches every device/tab signed in as that user.
 
@@ -295,7 +295,7 @@ Does only the originator need to see chunks live?
   → use `stream(payload)`            (cheapest)
 
 Does every viewer in the room need to see chunks live?
-  → use `broadcastStream(payload)`   (room fan-out, auto-degrades for solo)
+  → use `broadcastStream(payload)`   (room fan-out across all instances)
 
 Do only specific subscribers need to see chunks?
   → use `streamTo(tokens, payload)`  (targeted)
@@ -591,7 +591,7 @@ AI self-check before finalizing changes:
 | `server/sockets/handleHttpSyncRequest.ts` | `default export` | HTTP-triggered sync entrypoint (`POST /sync/...`) that still delivers via Socket.io. |
 | `server/utils/runtimeTypeValidation.ts` | `validateInputByType` | Validates sync `clientInput` payloads against extracted runtime types and returns path-first diagnostics. |
 | `server/utils/runtimeTypeResolver.ts` | `resolveRuntimeTypeText` | Resolves local/imported/re-exported input type aliases and supported utility wrappers before sync validation. |
-| `server/sockets/socket.ts` | `socket.on('sync', ...)` | Wires incoming sync events to the sync handler. |
+| `packages/server/src/loadSocket.ts` | `socket.on('sync', ...)` | Wires incoming sync events to the sync handler. |
 | `src/_sockets/syncRequest.ts` | `syncRequest` | Typed client sender for sync events. |
 | `src/_sockets/syncRequest.ts` | `useSyncEvents().upsertSyncEventCallback` | Typed callback registry for incoming sync events. |
 | `src/_sockets/syncRequest.ts` | `useSyncEvents().upsertSyncEventStreamCallback` | Callback registry for route-level stream updates emitted during sync execution. |

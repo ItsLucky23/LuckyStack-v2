@@ -6,6 +6,7 @@
 #   npm run server -- billing,vehicles 4001     (merge bundles, listen on 4001)
 NODE_ENV=development
 SERVER_IP=127.0.0.1
+SERVER_PORT=80
 SECURE=false
 
 # Public app URL — used by OAuth callbacks and the email-link generator.

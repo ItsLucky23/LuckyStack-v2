@@ -11,7 +11,7 @@
 
 | Path | Method | Auth | Rate limit | Owner | Tags | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
-| `api/playground/echo/v1` | POST | public | 60 | mathijs | playground, smoke-test | **deprecated** — Playground: simple echo. Returns the message sent + the caller's session |
+| `api/playground/echo/v1` | POST | public | 60 | mathijs | playground, smoke-test | Playground: simple echo. Returns the message sent + the caller's session |
 | `api/playground/spam/v1` | POST | public | 3 | — | — | Playground: low rate-limit endpoint for demoing the rate-limiter. Hit it |
 | `api/playground/streamCounter/v1` | POST | public | 30 | — | — | Playground: streams a fake counter to the originator over a configurable |
 | `api/playground/testEmail/v1` | POST | login | 3 | — | — | Playground-only diagnostic. The framework's password-reset flow is |
@@ -38,7 +38,7 @@
 | `sync/playground/streamToToken/v1` | yes | — | public | — | — | Playground: token-targeted streaming. Demonstrates `streamTo(tokens, payload)` |
 | `sync/playground/throwSync/v1` | yes | — | public | — | — | Playground: deliberately throws inside a sync handler so the framework's |
 
-## Pages (9)
+## Pages (10)
 
 | Route | Template | Per-page middleware | File | Summary |
 | --- | --- | --- | --- | --- |
@@ -51,6 +51,7 @@
 | `/reset-password` | plain | — | `reset-password/page.tsx` | — |
 | `/settings` | dashboard | yes | `settings/page.tsx` | — |
 | `/settings/confirm-email` | plain | — | `settings/confirm-email/page.tsx` | — |
+| `/workspaces` | plain | — | `workspaces/page.tsx` | Workspaces — SPA root, registered as a splat route (`/workspaces/*`, via |
 
 ## Helpers — `src/_functions/` (7 exports across 3 files)
 

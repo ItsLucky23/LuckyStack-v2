@@ -8,7 +8,7 @@ import {
   locationProviderEnabled,
   loginPageUrl,
 } from "config";
-import { i18nNotify as notify, clearCsrfToken } from "@luckystack/core/client";
+import { i18nNotify as notify, clearCsrfToken, socket, setSocket, incrementResponseIndex, waitForSocket } from "@luckystack/core/client";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { useEffect, useRef } from "react";
 import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
@@ -89,7 +89,6 @@ const shouldLogStream = logging.stream;
 // place that assigns the socket via `setSocket(io(...))`. Re-exported below
 // so existing callers that still import these symbols from this file keep
 // working.
-import { socket, setSocket, incrementResponseIndex, waitForSocket } from '../../packages/core/src/socketState';
 // eslint-disable-next-line unicorn/prefer-export-from
 export { socket, incrementResponseIndex, waitForSocket };
 

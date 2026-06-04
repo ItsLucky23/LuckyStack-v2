@@ -9,6 +9,14 @@ import { applyStrayKeyPrefix } from './redisKeyFormatter';
 
 let cachedDefault: RedisClient | null = null;
 
+//? Stop reconnecting after this many consecutive failures so a permanently
+//? unreachable / misconfigured Redis (bad creds, wrong host) doesn't hammer
+//? forever. With the capped backoff below this is ~1 minute of attempts —
+//? long enough to ride out a transient blip, short enough to surface a real
+//? outage. A process manager / the dev supervisor restarts the process, which
+//? re-resolves a corrected `.env`. Raise it for longer outage tolerance.
+const MAX_REDIS_RECONNECT_ATTEMPTS = 50;
+
 const buildDefaultRedisClient = (): RedisClient => {
   if (cachedDefault) return cachedDefault;
 
@@ -19,11 +27,20 @@ const buildDefaultRedisClient = (): RedisClient => {
     ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
 
     retryStrategy(times) {
+      if (times > MAX_REDIS_RECONNECT_ATTEMPTS) {
+        getLogger().error(
+          `Redis unreachable after ${String(MAX_REDIS_RECONNECT_ATTEMPTS)} reconnect attempts; giving up. Check REDIS_HOST / REDIS_PORT / credentials and that Redis is reachable.`,
+        );
+        return null;
+      }
       return Math.min(times * 50, 2000);
     },
   });
 
-  cachedDefault.on('connect', async () => {
+  //? `ready` (not `connect`): `connect` fires on TCP connect BEFORE the AUTH
+  //? handshake, so logging there reports success even when credentials are
+  //? wrong. `ready` fires only after AUTH succeeds.
+  cachedDefault.on('ready', async () => {
     getLogger().info('Connected to Redis');
   });
 

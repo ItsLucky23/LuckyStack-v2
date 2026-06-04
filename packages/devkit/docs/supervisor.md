@@ -60,7 +60,6 @@ const CORE_WATCH_GLOBS = [
   'server/server.ts',
   'server/bootstrap/**/*.ts',
   'server/auth/**/*.ts',
-  'server/sockets/socket.ts',
   'server/functions/db.ts',
   'server/functions/redis.ts',
   'server/functions/sentry.ts',

@@ -243,6 +243,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
+    "description": "Dit is de dashboardpagina. Hij wordt via de bestandsgebaseerde router van het framework gekoppeld aan /dashboard.",
     "welcome": "Welkom terug, {{name}}",
     "welcomeSubtitle": "Hier is een snel overzicht van je workspace.",
     "lastSignIn": "Laatste aanmelding {{when}}",
@@ -261,6 +262,10 @@
     "statusDisconnected": "Verbinding verbroken",
     "recentActivity": "Recente activiteit",
     "recentActivityEmpty": "Nog geen recente activiteit."
+  },
+  "home": {
+    "settings": "Instellingen",
+    "signOut": "Uitloggen"
   },
   "errorPage": {
     "goBack": "← Ga terug",

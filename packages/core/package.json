@@ -47,6 +47,9 @@
     "./eslint": {
       "types": "./dist/eslint/index.d.ts",
       "import": "./dist/eslint/index.js"
+    },
+    "./typemap": {
+      "types": "./dist/apiTypeStubs.d.ts"
     }
   },
   "files": [

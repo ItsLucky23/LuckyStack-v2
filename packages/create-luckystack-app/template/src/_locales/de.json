@@ -243,6 +243,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
+    "description": "Dies ist die Dashboard-Seite. Sie wird über den dateibasierten Router des Frameworks auf /dashboard abgebildet.",
     "welcome": "Willkommen zurück, {{name}}",
     "welcomeSubtitle": "Hier ist eine kurze Übersicht über deinen Arbeitsbereich.",
     "lastSignIn": "Letzte Anmeldung {{when}}",
@@ -261,6 +262,10 @@
     "statusDisconnected": "Verbindung getrennt",
     "recentActivity": "Letzte Aktivität",
     "recentActivityEmpty": "Noch keine Aktivität."
+  },
+  "home": {
+    "settings": "Einstellungen",
+    "signOut": "Abmelden"
   },
   "errorPage": {
     "goBack": "← Zurück",

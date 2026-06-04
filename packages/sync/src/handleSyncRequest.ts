@@ -54,12 +54,12 @@ type RuntimeSyncResponse = RuntimeSuccessResponse | RuntimeErrorResponse;
 //?   - `stream(payload)`           — unicast back to the originator socket
 //?                                   only. Cheapest. Use for per-user progress
 //?                                   that nobody else cares about.
-//?   - `broadcastStream(payload)`  — fan-out to every socket currently in
-//?                                   the receiver room. Use for live AI chat
-//?                                   tokens, collab-editor diffs, anything
-//?                                   the whole room should see in real time.
-//?                                   Auto-degrades to a unicast emit when the
-//?                                   room contains a single socket.
+//?   - `broadcastStream(payload)`  — fan-out to every socket in the receiver
+//?                                   room, ACROSS all server instances (via the
+//?                                   Redis adapter's `io.to(room).emit`). Use
+//?                                   for live AI chat tokens, collab-editor
+//?                                   diffs, anything the whole room should see
+//?                                   in real time.
 //?   - `streamTo(tokens, payload)` — selective fanout to only the given
 //?                                   session tokens (each is its own room
 //?                                   because every socket joins a room named
@@ -581,13 +581,17 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
   //? from here on we can assume that we have either called a server sync and got a proper result of we didnt call a server sync
 
-  //? get the desired sockets based on the receiver key
+  //? Cross-instance recipient list. `fetchSockets()` (via the Redis adapter)
+  //? returns RemoteSocket objects spanning EVERY backend sharing the adapter —
+  //? not just this process's room view — so a normal sync fan-out reaches room
+  //? members connected to other instances. `remoteSocket.emit()` routes to the
+  //? owning instance. (Per-sync Redis round-trip; see docs/ARCHITECTURE_MULTI_INSTANCE.md.)
   const sockets = receiver === 'all'
-    ? ioInstance.sockets.sockets //? all connected sockets (Map)
-    : ioInstance.sockets.adapter.rooms.get(receiver) //? Set of socket IDs in room
+    ? await ioInstance.fetchSockets()
+    : await ioInstance.in(receiver).fetchSockets();
 
   //? now we check if we found any sockets
-  if (!sockets) {
+  if (sockets.length === 0) {
     if (shouldLogDev()) {
       getLogger().warn('sync: no sockets found for receiver', { receiver, sync: resolvedName });
     }
@@ -631,15 +635,9 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   const { fanoutYieldEvery, fanoutYieldMs } = getProjectConfig().sync;
   let recipientCount = 0;
   let tempCount = 1;
-  for (const socketEntry of sockets) {
+  for (const tempSocket of sockets) {
     tempCount++;
     if (tempCount % fanoutYieldEvery === 0) { await new Promise(resolve => setTimeout(resolve, fanoutYieldMs)); }
-
-    const tempSocket = receiver === 'all'
-      ? (socketEntry as [string, Socket])[1] //? Map entry
-      : ioInstance.sockets.sockets.get(socketEntry as string); //? socket ID from Set
-
-    if (!tempSocket) { continue; }
 
     //? check if they have a token stored in their cookie or session based on the settings
     const tempToken = extractTokenFromSocket(tempSocket);

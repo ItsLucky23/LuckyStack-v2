@@ -1,3 +1,6 @@
+# Scaffold smoke-test scratch dir (throwaway: packs + installs the 14 packages into a fresh create-luckystack-app)
+.smoke-test/
+
 # Logs
 logs
 *.log
@@ -18,6 +21,9 @@ dist-ssr
 .cache/
 .eslintcache
 .lint-unnecessary.out
+.lint-packages.out
+.ts-errors.out
+*.backup
 
 # Editor directories and files
 .vscode/*

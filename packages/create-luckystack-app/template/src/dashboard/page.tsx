@@ -1,15 +1,19 @@
 //? Sample page. The framework's file-based router maps this to `/dashboard`.
 //? Add APIs in `_api/` and sync events in `_sync/` next to this file.
 
+import { useTranslator } from '@luckystack/core/client';
 import type { PageMiddleware } from '@luckystack/core/client';
 import type { SessionLayout } from '../../config';
 
-const Dashboard = (): JSX.Element => (
-  <main>
-    <h2>Dashboard</h2>
-    <p>This is the dashboard page. It maps to `/dashboard` via the framework's file-based router.</p>
-  </main>
-);
+const Dashboard = () => {
+  const translate = useTranslator();
+  return (
+    <main>
+      <h2>{translate({ key: 'dashboard.title' })}</h2>
+      <p>{translate({ key: 'dashboard.description' })}</p>
+    </main>
+  );
+};
 
 export const template = 'plain' as const;
 

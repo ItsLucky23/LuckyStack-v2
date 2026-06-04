@@ -64,6 +64,9 @@ export {
   buildApiStreamEventName,
   buildSyncProgressEventName,
   buildSyncResponseEventName,
+  buildJoinRoomResponseEventName,
+  buildLeaveRoomResponseEventName,
+  buildGetJoinedRoomsResponseEventName,
   socketEventNames,
 } from './socketEvents';
 

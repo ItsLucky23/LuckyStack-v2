@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/no-abusive-eslint-disable -- server entry: argv/env side-effect imports + boot IIFE legitimately trip many rules; mirrors the framework's server/server.ts. */
 /* eslint-disable */
 //? Server entry. Parses positional argv first (so `config.ts` sees the
 //? port), loads env, runs side-effect imports for the major config

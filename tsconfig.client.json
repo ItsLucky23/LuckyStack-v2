@@ -38,6 +38,9 @@
       "@luckystack/core/client": [
         "./packages/core/src/client.ts"
       ],
+      "@luckystack/core/typemap": [
+        "./packages/core/src/apiTypeStubs.ts"
+      ],
       "@luckystack/sync/client": [
         "./packages/sync/src/client.ts"
       ],

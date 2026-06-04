@@ -74,7 +74,7 @@ Sync handlers receive **four** stream primitives in their `_server` params, each
 | Primitive | Audience | Use when |
 | --- | --- | --- |
 | `stream(payload)` | Originator only (cheapest) | Per-user progress nobody else cares about |
-| `broadcastStream(payload)` | Everyone in `roomCode` (auto-degrades for solo) | Live AI chat tokens, collab editor diffs |
+| `broadcastStream(payload)` | Everyone in `roomCode`, across all instances (Redis adapter) | Live AI chat tokens, collab editor diffs |
 | `streamTo(tokens, payload)` | Specific session tokens | Selective subscribers (admin viewers, etc.) |
 | `_client_v{N}.ts` `stream(...)` | Per-recipient (after `_server` finishes) | Per-target customization (filter / translate / brand) |
 

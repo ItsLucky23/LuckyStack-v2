@@ -12,8 +12,34 @@ const stripDefaultValues = (params: string): string => {
   return params.replaceAll(/\s*=(?!>)[^,)]+/g, '');
 };
 
-const normalizeInlineType = (value: string): string => {
-  return value.replaceAll(/\s+/g, ' ').trim();
+// Strips `//` line comments from a raw type fragment while leaving string and
+// template literals (which can legitimately contain `//`, e.g. a URL literal
+// type) intact. Uses the TS scanner so `'https://x'` is never mistaken for a
+// comment — a plain regex strip can't tell the two apart.
+export const stripLineComments = (value: string): string => {
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    /* skipTrivia */ false,
+    ts.LanguageVariant.Standard,
+    value,
+  );
+  let result = '';
+  let token = scanner.scan();
+  while (token !== ts.SyntaxKind.EndOfFileToken) {
+    // Replace `//` comments with a space so neighbouring tokens don't glue
+    // together; keep everything else verbatim, including block comments.
+    result += token === ts.SyntaxKind.SingleLineCommentTrivia ? ' ' : scanner.getTokenText();
+    token = scanner.scan();
+  }
+  return result;
+};
+
+// Collapses a multi-line type fragment to a single clean line. Inline `//`
+// comments MUST be stripped first: once the newlines are gone a surviving `//`
+// would comment out the rest of the line and produce malformed generated
+// TypeScript (later caught by validateGeneratedTypeIdentifiers).
+export const normalizeInlineType = (value: string): string => {
+  return stripLineComments(value).replaceAll(/\s+/g, ' ').trim();
 };
 
 const simplifyInferredType = (value: string): string => {
@@ -225,7 +251,7 @@ const extractSignatureFromNode = (
 
   // Generic clause text (<T, U extends string>)
   const genericsClause = node.typeParameters
-    ? `<${rawContent.slice(node.typeParameters.pos, node.typeParameters.end).trim()}>`
+    ? `<${normalizeInlineType(rawContent.slice(node.typeParameters.pos, node.typeParameters.end))}>`
     : '';
 
   // Parameter list text with default values removed

@@ -1387,3 +1387,658 @@ Feasibility-analyse (ultracode: 6 read-only agents + eigen lezing van `httpHandl
 - `src/main.tsx`: vconsole van statische import → **dynamische import** achter de `mobileConsole`-toggle (top-level await). vconsole zit nu in een eigen lazy chunk (`vconsole.min-*.js` ~281 kB) i.p.v. de hoofdbundle → wordt alleen gedownload als de toggle aan staat.
 - Resterende build-warnings zijn onschadelijk + buiten scope: de `[EVAL]`-warning komt uit vconsole's eigen geminificeerde code (trusted); de >500 kB chunk is de **hoofd-app-bundle** (1.2 MB / 355 kB gzip), niet vconsole — desgewenst later op te lossen met route-code-splitting of `build.chunkSizeWarningLimit`.
 - **Verificatie**: `npm run lint` 0 · `npm run build` OK. Alleen consumer-files (`src/main.tsx`, `vite.config.ts`) — buiten de package-gates. Nothing committed.
+
+## 2026-06-02 22:14 — .env-reload fix (supervisor) + Redis 'ready'-log + boot-UUID guard + root-cleanup
+
+Symptoom (gebruiker): `.env`-edit → supervisor herstart, maar de child gebruikt nog de oude creds ("Connected to Redis" met oude waarden); pas een volledige `npm run server` pakt de nieuwe `.env` op (→ `WRONGPASS`). Root-cause keten bevestigd via 2 Explore-agents + bronlezing.
+
+**Fix 1 — supervisor relaadt `.env` vers per (her)start** (`@luckystack/devkit`): supervisor importeerde `@luckystack/core` → import-side-effect `bootstrapEnv()`→`loadEnvFiles()` laadde `.env` **één keer** in supervisor-`process.env`; de child kreeg die bevroren snapshot mee (`env: {...process.env}`) en `loadEnvFiles()` in de child overschrijft de eerste file (`.env`) níét (`override:false`) → oude waarden bleven op elke restart staan. Nieuw `packages/devkit/src/ambientEnvSnapshot.ts` legt de schone shell-env vast op module-eval **vóór** de core-import (ESM evalueert imports in bronvolgorde); `supervisor.ts` zet die import als eerste regel en spawnt de child met `env: {...ambientEnv, LUCKYSTACK_CORE_SUPERVISED}`. De child laadt `.env` nu vers op elke (her)start — identiek aan een koude boot, met behoud van de "ambient > .env, .env.local > alles" semantiek.
+
+**Fix 2 — "Connected to Redis" pas na AUTH** (`@luckystack/core`): `redis.ts` logde op ioredis `'connect'` (TCP-connect, vóór AUTH) → misleidend bij foute creds. Nu `'ready'` (alleen na geslaagde AUTH).
+
+**Fix 3 — geguarde boot-UUID write** (`@luckystack/server`): `createServer.ts` deed `await writeBootUuid()` ongeguard → bij foute Redis-creds een uncaught rejection → proces-crash + supervisor-respawn-loop met stack-dump. Nu `tryCatch(() => writeBootUuid())` + één nette fatale logregel + `process.exit(1)`.
+
+**Root-cleanup** (regel 10): `git rm SESSION_STATE.md TESTING_PLAN.md` (beide stonden al op de bevestigde verwijder-checklist in `docs/FINAL_SWEEP.md §3`).
+
+**Verificatie**: `npm run lint` 0 · **`npm run build` groen** (build:packages 14/14 · generateArtifacts · `tsc -b` 0 · vite · server-bundle). `npm run test:unit` (vitest) **kan niet starten** — pre-existing: `vitest.config.ts` importeert nog `vite-tsconfig-paths`, dat bij de 16:28-migratie uit `vite.config.ts` verdween en nu weg is uit `node_modules`/`package.json`. NIET gefixt (buiten scope). Live `npm run test` + env-reload-verificatie = developer-actie (vereist server-herstart; de supervisor herstart niet op package-src-changes).
+
+**Files touched**: packages/devkit/src/ambientEnvSnapshot.ts (new) + supervisor.ts; packages/core/src/redis.ts; packages/server/src/createServer.ts; root: SESSION_STATE.md + TESTING_PLAN.md (verwijderd via git rm). `npm run build` herschreef de gegenereerde artifacts (`src/_sockets/apiTypes.generated.ts`, `server/prod/generatedApis.*-preset.ts`) — auto, pre-commit hook dekt af.
+
+**Notes / next**: Sluit aan op de secret-manager "met"+rotatie-test — restart pakt nu verse `.env`. Open (gerapporteerd, niet gefixt): (1) `vitest.config.ts` → native `resolve.tsconfigPaths` mirroren zoals `vite.config.ts` (deblokkeert de unit-suite); (2) `docs/FINAL_SWEEP.md §3` noemt nog 4 bevestigde verwijder-bestanden in `docs/`; (3) `socketRedisAdapter.ts` gebruikt `console.error` i.p.v. `getLogger`; (4) ioredis `retryStrategy` heeft geen max-cap. Nothing committed.
+
+## 2026-06-02 22:58 — Reported-items fixes: vitest deblock + logger + reconnect-cap + working-tree/docs cleanup
+
+Follow-up op de 22:14-entry: de daar gerapporteerde open punten gefixt.
+
+**Vitest gedeblokkeerd** (root config): `vitest.config.ts` importeerde nog `vite-tsconfig-paths` (bij de 16:28-migratie weg uit `vite.config.ts` + node_modules/package.json) → suite startte niet. Vervangen door Vite 8's native `resolve.tsconfigPaths: true` (gespiegeld aan `vite.config.ts`). Suite draait weer: **53 files / 748 tests**.
+
+**Logger-consistentie** (`@luckystack/core`): `socketRedisAdapter.ts` pub/sub-clienterrors via `getLogger().error(...)` i.p.v. `console.error` (+ import).
+
+**Redis reconnect-cap** (`@luckystack/core`): `redis.ts` `retryStrategy` stopt na `MAX_REDIS_RECONNECT_ATTEMPTS = 50` (~1 min met de capped backoff) met een nette fatale logregel i.p.v. eeuwig reconnecten op een onbereikbare/misgeconfigureerde Redis. Trade-off (outage > cap → restart nodig) bewust; supervisor/process-manager herstart en re-resolvet een gecorrigeerde `.env`.
+
+**Working-tree opgeschoond**: `.gitignore` uitgebreid (`.lint-packages.out`, `.ts-errors.out`, `*.backup`); die 3 tracked artefacten ge-untrackt (`git rm --cached`); incidentele `package-lock.json`- (emnapi-transitives) en één-malige `template/tsconfig.json`-drift (`baseUrl` verwijderd door een eerdere volledige `npm run build`) teruggedraaid. Geverifieerd dat vitest die template-drift NIET veroorzaakt (re-run = schoon).
+
+**Docs-cleanup (FINAL_SWEEP §3) — selectief na referentie-check**: alleen `docs/_archive/PROJECT_CONTEXT.md` verwijderd (ongerefereerd). De andere 3 BEHOUDEN want nog actief gelinkt (`HANDOFF-R1-R5.md` = bewust shipped framework-doc via handoff/+sparring/; `_archive/SESSION_STATE_2026-05-20.md` ← ROADMAP; `_archive/MIGRATION_…md` ← shipped error-tracking-doc). `FINAL_SWEEP §3` gemarkeerd als verouderd met de werkelijke uitkomst.
+
+**Verificatie**: `lint` 0 · `build:packages` 14/14 · `vitest` **53 files / 748 tests** · `ai:index` 14 packages (geen phantom 15e meer). Volledige `npm run build` bewust niet herdraaid (niets client-side gewijzigd; die run dirtyt incidenteel `template/tsconfig.json`).
+
+**Files touched**: vitest.config.ts; packages/core/src/{redis.ts, socketRedisAdapter.ts}; .gitignore; docs/{FINAL_SWEEP.md, AI_QUICK_INDEX.md(regen)}; verwijderd: docs/_archive/PROJECT_CONTEXT.md + ge-untrackt .lint-packages.out/.ts-errors.out/tsconfig.shared.json.backup.
+
+**Notes / next**: open (rapport): fout-pad MIGRATION-link in `packages/error-tracking/docs/auto-instrumentation.md` (`/docs/` → `/docs/_archive/`). Richting publish: `npm install` (lockfile + env-resolver symlink, ask-first), live full sweep op :81, commit + PR, `npm org create luckystack` + publish 14 pkgs. Nothing committed.
+
+## 2026-06-02 23:42 — Multi-instance/router pitfalls gedocumenteerd + lokaal testbaar (+ latente lint-fix)
+
+Gebruiker vertrouwde het multi-server/router-pad niet (nooit E2E gedraaid) en begreep de socket/Redis-laag niet. Bron-geverifieerd onderzoek (3 Explore-agents + eigen reads).
+
+**Kernvondst (bevestigd in bron)**: de gewone `syncRequest`-broadcast fan-out is **lokaal-instance-only** — `handleSyncRequest.ts:585-748` itereert `ioInstance.sockets.adapter.rooms.get(receiver)` (lokale room-view) + per-socket `tempSocket.emit`, gebruikt nooit `io.to().emit()`. Alleen `broadcastStream`/`streamTo` (`streamEmitters.ts:217,237`) gaan cross-instance via de Redis-adapter. Reden dat de gewone weg bestaat: per-recipient `_client`-maatwerk kan niet via één gedeelde broadcast. WS pint naar `system` (`wsProxy.ts:13`); bindings = 1 URL per service (geen round-robin). `vehicles`/`billing` in `services.config.ts` zijn placeholders (geen `src/`-folders).
+
+**Doc (primair)**: NIEUW `docs/ARCHITECTURE_MULTI_INSTANCE.md` — mentaal model + sync-primitives-cross-instance-tabel + schalen-caveat + gedeelde-Redis-footgun + **symptoom→oorzaak→fix-tabel** (AI-bruikbaar) + "verifieer lokaal"-recept. Cross-links: root `CLAUDE.md` docs-tabel + `packages/{router,sync,core}/CLAUDE.md` Related. Correcties: `ARCHITECTURE_SOCKET.md` + `HOSTING.md` nuanceren hun te-brede "broadcasts fan out across instances"-claim met de lokaal-only beperking + link.
+
+**Automatische test**: NIEUW `packages/core/src/socketRedisAdapter.integration.test.ts` — twee echte socket.io-servers + `@socket.io/redis-adapter` op de échte Redis; asserts (a) `ioB.to(room).emit()` bereikt een client op server A (cross-instance ✅), (b) elke instance's lokale room-view = 1, (c) directe per-socket emit op A bereikt B níét. Skip-on-no-redis. NIEUW `vitest.integration.config.ts` + `test:integration`-script; `vitest.config.ts` sluit `*.integration.test.ts` uit van de unit-run. **3/3 passed tegen de live :81-Redis.**
+
+**Lokaal draaibaar**: NIEUW `scripts/cluster.ts` + `cluster`-script — `npm run cluster -- <port>` boot een 2e backend direct (poort via argv → `getParsedPort()` wint over `.env.local`). Recipe in de doc: 2 instances + playground `streamBroadcast` (cross) vs `echo` (lokaal-only), beide `auth:login:false`.
+
+**Latente lint-fix**: `createServer.ts` `process.exit(1)` (Fix 3, 22:14-entry) trip'te `unicorn/no-process-exit` — ontdekt nu omdat `lint:packages` niet in de `lint`-gate zit en vorige turn niet gedraaid was. Vervangen door beschrijvende `throw new Error(..., { cause })` (library-correct; signal-handler-exits 105-106 blijven toegestaan). Zelfde doel: heldere fatale melding i.p.v. rauwe `ReplyError`-dump.
+
+**Verificatie**: `lint`+`lint:packages` 0 · `build:packages` 14/14 · `test:unit` 53/748 (integratie uitgesloten) · `test:integration` 3/3 (live Redis) · `ai:index` 14 pkgs.
+
+**Files touched**: docs/ARCHITECTURE_MULTI_INSTANCE.md(new), docs/{ARCHITECTURE_SOCKET.md, HOSTING.md, AI_QUICK_INDEX.md(regen)}; packages/core/src/socketRedisAdapter.integration.test.ts(new); packages/server/src/createServer.ts; scripts/cluster.ts(new); vitest.integration.config.ts(new); vitest.config.ts; package.json; CLAUDE.md; packages/{router,sync,core}/CLAUDE.md.
+
+**Notes / next**: gerapporteerd, niet gefixt — (1) gewone `syncRequest` cross-instance maken = aparte grote framework-beslissing (doc legt limiet+workaround vast); (2) `services.config.ts` placeholders `vehicles`/`billing` reconciliëren (ask-first); (3) fout-pad MIGRATION-link in error-tracking-doc. Handmatige cluster-verificatie = developer-actie. Nothing committed.
+
+## 2026-06-03 09:49 — Gewone syncRequest weer cross-instance (fetchSockets-aanpak)
+
+Gebruiker wilde de sync-beperking opgelost (regular `syncRequest` werkte alleen lokaal sinds de service-split; vóór = monoliet = werkte gewoon). Eerst de streaming-API geverifieerd: streaming zit al opt-in ín `apiRequest`/`syncRequest` via de `onStream`-key + server-side `stream`/`broadcastStream`/`streamTo`-emitters — daar niets aan veranderd (mijn eerdere "aparte functies"-framing was misleidend; gecorrigeerd in de docs). Na keuze gebruiker: **kleinste wijziging** (`fetchSockets`, niet de serverSideEmit-variant).
+
+**Fix**: de fanout in beide sync-transports somde room-leden op via de per-proces `io.sockets.adapter.rooms.get(receiver)` → alleen lokale sockets. Vervangen door `io.in(receiver).fetchSockets()` (`io.fetchSockets()` voor `'all'`) — socket.io's cross-instance enumeratie via de Redis-adapter (RemoteSocket[] over álle servers); per-ontvanger emit routet via `RemoteSocket.emit()`. `_server` draait nog één keer op de origin; hooks (`preSyncFanout`/`postSyncFanout`) + `recipientCount` ongewijzigd (fetchSockets geeft het echte totaal). Loop vereenvoudigd (geen Map/Set-branching, geen `.get()`-lookup, geen `as any`-cast meer).
+
+- `packages/core/src/extractToken.ts`: `extractTokenFromSocket`-param verbreed van `Socket` naar `Pick<Socket,'handshake'>` (structureel; `RemoteSocket` voldoet; geen cast, backward-compatible).
+- `packages/sync/src/handleSyncRequest.ts` + `handleHttpSyncRequest.ts`: enumeratie → `fetchSockets()`; loop itereert `RemoteSocket[]` direct.
+- `packages/core/src/socketRedisAdapter.integration.test.ts`: +2 tests — `io.in(room).fetchSockets()` ziet beide servers, en `RemoteSocket.emit()` van A bereikt een client op B.
+- Docs (de zojuist gedocumenteerde "local-only" beperking is nu OPGELOST): `ARCHITECTURE_MULTI_INSTANCE.md` (tabel → ✅, "why two ways" herschreven naar streaming-is-opt-in-key, limitation-callout → kosten-noot, pitfalls + verify bijgewerkt), `ARCHITECTURE_SOCKET.md`, `HOSTING.md`, `packages/sync/CLAUDE.md`.
+
+**Verificatie**: `lint`+`lint:packages` 0 · `build:packages` 14/14 · `test:unit` 53/748 (gedrag identiek) · `test:integration` **5/5** (was 3; +fetchSockets/RemoteSocket.emit cross-instance, live Redis) · `ai:index` 14 pkgs.
+
+**Kosten (gedocumenteerd)**: elke sync-fanout doet nu één `fetchSockets()` (Redis round-trip; single-instance short-circuit't) + bij grote rooms O(remote-ontvangers) emits. Toekomstige optimalisatie (zonder API-wijziging): `io.serverSideEmit()`-fanout (O(instances)).
+
+**Files touched**: packages/core/src/{extractToken.ts, socketRedisAdapter.integration.test.ts}; packages/sync/src/{handleSyncRequest.ts, handleHttpSyncRequest.ts}; packages/sync/CLAUDE.md; docs/{ARCHITECTURE_MULTI_INSTANCE.md, ARCHITECTURE_SOCKET.md, HOSTING.md, AI_QUICK_INDEX.md(regen)}.
+
+**Notes / next**: handmatige cluster-verificatie (`npm run cluster -- 4100/4101`, `playground/echo` cross-instance) = developer-actie (vereist :81-server-herstart). Open ongewijzigd: `services.config.ts` placeholders, fout-pad MIGRATION-link. Nothing committed.
+
+## 2026-06-03 10:03 — Cluster browser-test setup (client→backend mapping)
+
+Gebruiker kon met `npm run cluster -- 4100/4101` + `npm run client` niet inloggen/playground bereiken. Oorzaak: de browser-client kiest zijn backend via `config.ts` `dnsEnvironmentMap` op basis van de eigen origin (`:5173`→`:80`, `:5174`→`:81`) — géén mapping naar de cluster-poorten `:4100/:4101`, dus de client praatte met `:80` i.p.v. de cluster. Plus: de browser praat met één backend, dus cross-instance in de browser vereist twee origins → twee backends.
+
+Fix: `config.ts` +2 origins (`:5180`→`:4100`, `:5181`→`:4101`; dev/sessionBasedToken/allowMultipleSessions). `package.json` +`client:a` (vite :5180) / `client:b` (vite :5181, `--strictPort`). Cluster-recipe in `ARCHITECTURE_MULTI_INSTANCE.md` herschreven (4 terminals; open `:5180`/`:5181` in 2 tabs → 2 instances). `sessionBasedToken: true` → per-origin sessionStorage → 2 onafhankelijke logins; gedeelde Redis/Mongo via `.env`.
+
+Verificatie: `npx eslint config.ts` clean. **`npm run lint` faalt enkel op pre-existing `src/workspaces/**` (untracked WIP van de gebruiker, buiten scope — gerapporteerd, niet gefixt).** `ai:index` schoon.
+
+Files: config.ts, package.json, docs/{ARCHITECTURE_MULTI_INSTANCE.md, AI_QUICK_INDEX.md}. Nothing committed.
+
+## 2026-06-03 10:30 — Workspaces UI prototype: fundament + Board
+
+Gebruiker start het **Workspaces**-project (de app uit `handoff/`) als in-repo UI-prototype, vóór de npm-publish/nieuwe-repo. Aanpak: één SPA-route `src/workspaces/page.tsx` (`template='plain'`) met interne view-switching (zoals het prototype `App.jsx`) i.p.v. per-view file-based routes, zodat tab-state (open tickets) over views heen blijft leven. Dummy data, geen server, hergebruik van interne `_components` waar mogelijk.
+
+**Gebouwd (fundament + 1e pagina):**
+- `_data/types.ts` + `_data/seed.ts` — TS-types 1-op-1 op `handoff/DATAMODEL.md` (Prisma) zodat latere migratie triviaal is; seed = YouComm Core / youcomm-app / 7-stage pipeline / 12 tickets / 5 members (consistent met prototype `data.js`).
+- `_components/Icon.tsx` — naam→FA-object map op onze echte FontAwesome-setup (geen CDN-`<i>`).
+- `_components/primitives.tsx` — StatusPill, LabelChip, AvatarBubble/Stack (wrapt bestaande `Avatar`), WsButton, IconButton, Tabs, Toggle, Segmented, SectionCard, EmptyState, PopMenu, `useClickAway`. Tailwind + alleen `index.css`-tokens (labels→semantische tokens i.p.v. de rgba's uit het prototype).
+- `_shell/` — `WorkspacesContext` (view/tabs/suggestions + nav), `Shell` (NavRail, TopBar met ws/project-switcher + bell + theme + avatarmenu, TabBar, AIPanel, MobileBottomBar), `MobileChrome` (mobiele header + slide-in drawer).
+- `_screens/Board.tsx` — volledig kanban-bord (desktop kolommen + mobiel stage-segments, kaarten met status/labels/viewers/cost/terminal-dot/⋯-menu, WIP-warning, empty-states), licht+donker, animaties. `Placeholder.tsx` + `TicketDetail.tsx` (stub) zodat navigatie end-to-end werkt.
+- `workspaces.css` — geïsoleerde keyframes (pop/sheet/drawer/fade) + `prefers-reduced-motion`-reset; geen edits aan gedeelde `index.css`.
+- Theme via `useTheme` uit `@luckystack/core/client`; confirms via bestaande `menuHandler.confirm` (archive/pause-all).
+
+**Bewuste prototype-afwijkingen van CLAUDE.md** (gemeld aan gebruiker): i18n (rule 13) uitgesteld — hardcoded Engelse design-copy; geen `_api`/tests (puur UI + dummy). Scoped ESLint-override toegevoegd in `eslint.config.js` voor `src/workspaces/**` die i18n-enforcement (`react/jsx-no-literals`) + puur-stilistische regels uitzet (void-expression, nested-ternary, global-this, function-scoping, empty-function, non-null-assertion, react-refresh); rest van de repo blijft strikt. Re-enablen + `useTranslator` bij graduatie naar eigen repo.
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓ (eval/chunk-warnings = pre-existing vconsole/bundle, niet van deze change).
+
+**Files touched**: src/workspaces/** (nieuw: page.tsx, workspaces.css, _data/{types,seed}.ts, _components/{Icon,primitives}.tsx, _shell/{Shell,MobileChrome,WorkspacesContext}.tsx, _screens/{Board,Placeholder,TicketDetail}.tsx); eslint.config.js (+scoped override).
+
+**Notes / next**: page-by-page workflow — wacht op review van Board, dan de "verbeterpunten" (overlays: create/edit-ticket, quickview, filter, command palette, notification center) en daarna pagina-voor-pagina (Ticket detail → Terminals → Pipeline → Backlog → Sources → Activity → Workspace-AI → Settings → Usage → Auth/onboarding). `ai:project-index`/`ai:capabilities` niet in-session geregenereerd (pre-commit hook = backstop; bewust diff schoon gehouden voor review). Nothing committed.
+
+## 2026-06-03 10:31 — Cluster browser-test: 2 vite-scripts → één frontend + ?backend-param
+
+Vervangt de 10:03-scaffold na gebruikersvraag (productie draait nooit meerdere frontends; de 2 vite-clients waren verwarrend en niet productie-representatief). Gekozen: één frontend, backend per tab via een dev-only query-param.
+
+- `config.ts`: de 2 cluster-origins (`:5180`/`:5181`) verwijderd; `resolveBackendUrl()` toegevoegd — leest `?backend=<port>` uit `window.location.search`, **alleen in dev**, geeft alleen `http://localhost:<port>` terug (een prod-build kan nooit naar een andere host omgeleid worden). Het `backendUrl`-veld gebruikt het.
+- `package.json`: `client:a`/`client:b` verwijderd (terug naar enkel `client`).
+- `docs/ARCHITECTURE_MULTI_INSTANCE.md`: recipe herschreven — 3 terminals (2× `cluster` + 1× `client`), open `localhost:5173/?backend=4100` en `?backend=4101` in 2 tabs (eigen `sessionStorage` per tab → onafhankelijke logins). + duidelijke "dit is dev-only, niet productie"-noot (prod = één gebouwde frontend achter een reverse proxy/LB).
+
+**Verificatie**: `npx eslint config.ts` clean (zelfde `@typescript-eslint/no-unnecessary-condition`-disable als regel 58 voor `runtimeWindow.window?.`).
+
+**Files touched**: config.ts, package.json, docs/ARCHITECTURE_MULTI_INSTANCE.md. Nothing committed.
+
+## 2026-06-03 10:45 — Workspaces: motion (Framer Motion) animatie-laag + Board-retrofit
+
+Gebruiker koos voor `motion` (Framer Motion, huidige pakket) als langetermijn-animatielaag voor de premium mobile+desktop feel, i.p.v. losse CSS-keyframes. `npm install motion` (v12.40.0; door gebruiker geautoriseerd). Board + shell meteen mee omgezet (gebruikerskeuze).
+
+- `_components/motion.tsx` (nieuw) — spring-presets (`SPRING_POP`/`SPRING_SHEET`/`SPRING_SOFT`) + herbruikbare surfaces: `Popover` (fade+scale vanaf top-edge, met `AnimatePresence` exit), `Backdrop`, `Sheet` (right-desktop / bottom-mobile, voor komende overlays). Consumers importeren `motion`/`AnimatePresence` rechtstreeks uit `motion/react`; deze module bezit alleen presets + surfaces.
+- `page.tsx`: `<MotionConfig reducedMotion="user">` om de hele app (één plek voor toegankelijkheid) + `AnimatePresence` rond het AI-paneel (slide-out bij sluiten).
+- `primitives.tsx`: PopMenu → `Popover` (echte enter/exit). Tabs-underline → gliding `layoutId="wsTabsUnderline"`.
+- `Shell.tsx`: workspace-switcher / avatar-menu / tab-"+"-menu → `Popover`. Actieve tab-highlight → gliding `layoutId="wsActiveTab"` (Board↔ticket-tabs). AIPanel → `motion.aside` slide-in.
+- `MobileChrome.tsx`: drawer → `AnimatePresence` + `motion.div` (slide van links, mét exit). `Board.tsx`: kaarten → `motion.div` `whileHover y:-2` + `whileTap scale:0.99` (transition beperkt tot border/shadow zodat 't niet vecht met de transform).
+- `workspaces.css`: alle `@keyframes`/`ws-anim-*` verwijderd (nu motion); alleen `ws-no-scrollbar` blijft. Reduced-motion nu via MotionConfig i.p.v. de CSS-mediaquery.
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓ (903 modules; bundle gzip 372k→416k, ~+40k = motion, bewust geaccepteerd voor de feel). dnd-kit blijft de keuze voor de kanban-drag-logica (komt later) — motion doet de transities/gestures eromheen.
+
+**Files touched**: src/workspaces/{page.tsx, workspaces.css, _components/{motion.tsx(nieuw), primitives.tsx, Icon.tsx?nee}, _shell/{Shell,MobileChrome}.tsx, _screens/Board.tsx}; package.json + package-lock.json (motion). Nothing committed.
+
+## 2026-06-03 10:46 — Fix: `?backend=` dev-override verloor backend-connectie na login
+
+Gebruiker verloor na login de backend-connectie (en de `?backend=`-param). **Oorzaak**: `src/_components/LoginForm.tsx:105` doet `globalThis.location.href = loginRedirectUrl` — een **harde redirect + volledige page-reload** die de query-string dropt; `config.ts` re-resolvet `backendUrl` dan zonder `?backend=` → terug naar de default-backend (:80). De custom `useRouter` (`packages/core/src/react/Router.tsx`) is NIET de boosdoener: die navigeert correct naar het meegegeven pad, en SPA-navigatie verbreekt de socket sowieso niet (`backendUrl` is module-constant).
+
+**Fix**: `config.ts` `resolveBackendUrl()` bewaart de gekozen poort nu **per-tab in sessionStorage** (gelezen uit de URL indien aanwezig, anders uit storage; URL wint + persisteert in storage). Zo overleeft de keuze de login-reload + elke navigatie die de query dropt; per-tab → twee tabs blijven op hun eigen instance. Nog steeds dev-only + alleen `localhost:<port>`.
+
+**Niet gewijzigd (bewust)**: de `useRouter` preserveert geen query bij bare-path navigatie — dat is correct gedrag (page-params horen niet tussen pagina's te lekken). Globale dev-state hoort in sessionStorage, niet in de URL. Aangeboden om `useRouter` query-preservatie te geven als de gebruiker een concrete case heeft.
+
+**Verificatie**: `npx eslint config.ts` clean. **Files touched**: config.ts. Nothing committed.
+
+## 2026-06-03 11:10 — Workspaces: URL-routing, drag-and-drop, AI-panel-resize fixes
+
+Vier UI-punten van de gebruiker op het Board + de shell.
+
+1. **AI-panel resize-jank** — het paneel schoof als translate naar binnen terwijl het z'n flex-breedte direct claimde → leeg gat tijdens slide + sprong bij sluiten. Nu animeert het paneel z'n **breedte** (0↔320, no-bounce spring) met vaste-breedte (`w-80`) inhoud + `overflow-hidden`; de board-flexruimte resize't nu synchroon. Geen gat, geen sprong.
+2. **Trailing space** — laatste pipeline-stage zat tegen de AI-panel/rand. Trailing spacer (`w-2 shrink-0`) toegevoegd aan het einde van de kolommen-flexrow (padding-right op een overflow-scroller wordt niet betrouwbaar gerespecteerd bij scroll-end).
+3. **Grip-icoon weg + drag-logica** — het 6-dots grip-icoon verwijderd (de 3-dots ⋯-menu blijft de opties). **dnd-kit** toegevoegd: de **hele kaart** is de drag-handle (hold + ≥6px beweging via `PointerSensor` activation-distance; een gewone klik opent nog steeds de ticket), reorder binnen een kolom + verplaatsen tussen kolommen (`onDragOver` cross-container move + `onDragEnd` `arrayMove`), `DragOverlay` voor het zwevende kaartje, droppable kolommen (incl. lege, met `bg-primary/5` drop-highlight). Status/⋯-controls `stopPropagation` op pointerdown zodat ze geen drag starten. Tickets nu in lokale `columns`-state (dummy). Mobiel board nog zonder drag (segments).
+4. **Echte URL-routing per pagina + ticket-in-URL** — i.p.v. de single-route-SPA nu een **splat-route** `/workspaces/*`. Generieke opt-in toegevoegd aan `src/main.tsx`: een page-module met `export const splat = true` registreert als `<route>/*` (anders exact). `src/workspaces/page.tsx` is nu de persistente shell die de view + open ticket uit de URL afleidt (`/workspaces/board`, `/workspaces/backlog`, `/workspaces/board/DEV-1240`); `navigate()` (react-router) duwt de URL, browser back/forward werkt, shell + tabs + AI-panel blijven leven (geen remount). Keuze t.o.v. losse per-view `page.tsx`-bestanden: die zouden de shell remounten → flikkering + verlies van tab-state + de smooth AI-resize onmogelijk. Gemeld aan gebruiker.
+
+**Packages puur voor workspaces** (te verwijderen bij vertrek uit de repo): `motion`, `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities`.
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓ (907 modules; gzip 432k, dnd-kit ~+16k).
+
+**Files touched**: src/main.tsx (+`splat` opt-in, generiek); src/workspaces/{page.tsx (URL-routing), _screens/Board.tsx (dnd-kit + spacer + grip weg), _shell/Shell.tsx (AI-panel width-animatie)}; package.json + package-lock.json (@dnd-kit/*). Nothing committed.
+
+## 2026-06-03 11:11 — Playground herontworpen naar card-per-actie showcase
+
+Gebruiker vond de playground onduidelijk (waslijst inputs + 6 gemengde mystery-knoppen) en wilde de hele pagina als nette demo/showcase. Alle handlers/logica intact; alleen de presentatie herbouwd.
+
+- Nieuw kaart-systeem (`CardGroup` + `DemoCard` + `Btn` + `TextInput`): elke actie = een kaart met titel · *wat doet het* · *wat zie je* · eigen controls. `Section`/`Row` blijven (alleen nog voor de UI-component-gallery).
+- Header: titel + subtitle + pill-row met **backend-indicator** (`backend: localhost:4100`) + token-modus + "temporary dev page"-noot.
+- Test bench gesplitst in 3 groepen: **Setup** (room joinen), **API** (request→reply, 2 kaarten), **Sync** (realtime room-based, 5 kaarten: gedeelde stream-settings + echo/broadcast/originator/streamTo) — API (primary) vs Sync (correct) visueel gescheiden.
+- Auth/CSRF/OAuth, Settings, Hooks, Health/ops, Offline queue, Presence → elk een `CardGroup` met `DemoCard`s (wat/verwacht per actie).
+- UI-component-demo's gegroepeerd onder één "UI components & primitives"-kop, behouden als visuele Section-demo's (geen verwarrende acties).
+- `config.ts`: dev-only `console.log` die de gekozen backend + bron (URL-param vs sessionStorage) toont → lost de "waarom :4100 zonder param"-verwarring op + backend-pill in de playground-header.
+
+**Verificatie**: `npx eslint src/playground/page.tsx` clean · `tsc --noEmit -p tsconfig.client.json` exit 0. (Volledige `npm run lint` faalt nog op pre-existing `src/workspaces/**`-WIP, buiten scope.)
+
+**Files touched**: src/playground/page.tsx (herontwerp); config.ts (backend-log). Nothing committed.
+
+## 2026-06-03 11:20 — Fix: playground room-badge gebruikt nu session.roomCodes
+
+Gebruiker: na Join "refresht de pagina" en toont de badge "not joined to any rooms" terwijl `session.roomCodes` de room wél bevat — de UI gebruikte lokale `joinedRooms`-state die bij een reload leeg raakt.
+
+Onderzoek: `joinRoom` (`socketInitializer.ts:314`) reloadt niet; de server persisteert de room in de sessie (`server/sockets/socket.ts:159` `saveSession(... roomCodes)`); `session.roomCodes` zit op de `SessionLayout` (`config.ts:309`) en `SessionProvider` merget `updateSession` live in `session` + het overleeft een reload (re-fetch via `system/session`). De **bron van de page-reload bij Join is niet in het join-pad te vinden** (gerapporteerd aan gebruiker; vraag om console/network-bevestiging) — maar de badge moet sowieso uit de sessie komen.
+
+Fix (`src/playground/page.tsx`): `useSession()` toegevoegd; nieuwe effect `setJoinedRooms(session?.roomCodes ?? [])` op `[session?.roomCodes]` seedt + her-synct de badge uit de persistente sessie (correct ná elke reload). `handleJoinRoom`/`handleLeaveRoom` blijven `joinedRooms` optimistisch updaten uit hun response voor directe feedback zonder reload. Server-roomCodes is autoritatief, dus de re-sync overschrijft nooit met een verkeerde waarde.
+
+**Verificatie**: `eslint src/playground/page.tsx` clean · `tsc -p tsconfig.client.json`: mijn bestand 0 fouten (de enige tsc-error zit in `src/workspaces/_screens/Board.tsx` — parallelle Workspaces-WIP, buiten scope).
+
+**Files touched**: src/playground/page.tsx. Nothing committed.
+
+## 2026-06-03 11:25 — Workspaces: AI-only board moves + Ticket detail-pagina
+
+Twee dingen: drag-correctie + de eerste van de drie gevraagde pagina's (ticket-detail). Gebruiker bevestigde **desktop-first** tenzij mobiel expliciet genoemd.
+
+- **Board: user-drag eruit, AI-gestuurd + animatie behouden.** Stage-overgangen zijn AI-geautomatiseerd → de gebruiker mag tickets niet zelf slepen. **dnd-kit verwijderd** (`npm uninstall @dnd-kit/*`). Kaarten dragen nu motion `layout` + `layoutId` binnen een `LayoutGroup`, zodat AI-moves (straks via de Workspace-AI-chat) vloeiend animeren. Grip-icoon was al weg; kaart blijft klik-om-te-openen. Kolommen-state is voorlopig `useMemo` (AI-mutatie + chat komen later).
+- **Ticket detail** (`_screens/TicketDetail.tsx`, stub vervangen): header (id/issue/status-pill + status-`Dropdown`, branch/MR/cost/preview-chip, viewers, Open terminal/GitLab), needs-input-banner (met reply-veld), done-banner (Promote to next stage → confirm met carry-over). Tabs (gliding `layoutId`-underline): **Overview** (description, carry-over, stage-config, Teardown → type-to-confirm), **Terminal** (embedded `TerminalView` + "Open in Terminals"), **Files & refs** (diff-lijst +add/−del), **Activity** (event-log gefilterd op ticket), **Links** (related + AI-suggested badge), **Stage history** (timeline).
+- **Nieuw herbruikbaar**: `_components/TerminalView.tsx` (fixed-dark mono terminal-render) + **terminal-tokens in `src/index.css`** (`--color-terminal-*`: bg/surface/text/muted + ansi green/blue/amber/red/cyan, identiek in @theme én .dark — terminals blijven donker in light mode). Seed uitgebreid: `EVENTS` (activity) + `TERMINALS` (per-ticket regels) + types `ActivityEvent`/`Terminal`/`TerminalLine`.
+
+**Packages puur voor workspaces** (te strippen bij vertrek): **`motion`** (dnd-kit is weer verwijderd).
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓ (904 modules).
+
+**Files touched**: src/index.css (+terminal-tokens); src/workspaces/{_screens/{Board.tsx, TicketDetail.tsx}, _components/TerminalView.tsx(nieuw), _data/{types.ts, seed.ts}}; package.json + package-lock.json (−@dnd-kit/*).
+
+**Notes / next**: één-voor-één nog te doen: **Terminals**-pagina (gebruikt `TerminalView` + tokens), **Sources**-pagina, en de **chat in het Workspace-AI-paneel** (acties zoals ticket-moves triggeren → animeren via de bestaande layout-setup). Nothing committed.
+
+## 2026-06-03 11:45 — Workspaces: client-controle inperken, board-klik-fix, Terminals + Sources
+
+Sweep met 4 gebruikerspunten (desktop-first bevestigd).
+
+1. **Client minder controle — status read-only.** Ticket-detail status-`Dropdown` verwijderd; status is AI-owned (anders kun je "needs input" naar "busy" flippen — fout). Pill alleen-lezen; de hefboom van de user is *antwoorden* (reply-veld), niet de status zetten.
+2. **Board-klik-fix.** Kaart-klik opent de ticket alleen bij een **bewuste snelle klik**: niet na tekstselectie (`pointerdown`→`click` > 350ms, of niet-lege `window.getSelection()`), en niet wanneer de klik eigenlijk de open ⋯-popover sluit (PopMenu kreeg `onOpenChange`; kaart onthoudt `menuClosedAt` en negeert een klik binnen 250ms ná sluiten). Geen valse navigaties meer bij selecteren/menu-dismiss.
+3. **Terminals-pagina** (`_screens/Terminals.tsx`): SSH-unlock-gate (locked → "Unlock with SSH key" → verifying → live; terminals = container-shell-toegang), **grid/tabs**-layout (`Segmented`), per-terminal-panel (status-pill, process-sub-tabs, ⋯-menu Restart/Clear/Rename/Copy/Kill-confirm, cwd/exit-footer) op `TerminalView` (fixed-dark), reply-bar bij `needs-input`/`stuck`. Empty-state.
+4. **Sources-pagina** (`_screens/Sources.tsx`): index-health-banner (RAG behind main → Reindex), tabs **Context docs** (cards: source-badge generated/git/uploaded, updated, frozen@commit, Preview/Regenerate, Upload spec) + **Skills/MCP** (RAG/graphify/symbol/route/git/test/deps/cross — frozen/live-badge, status/model, Details/Reindex, per-skill `Toggle` met lokale state). Seed + types uitgebreid: `InfoDoc`/`SkillEntry` + `DOCS`/`SKILLS`.
+
+Beide nieuwe views in `page.tsx` gerouteerd (`/workspaces/terminals`, `/workspaces/sources`), uit de placeholders gehaald. Per-ticket terminal-preview + links zaten al in de ticket-detail-tabs (Terminal/Files & refs/Links).
+
+**Packages puur voor workspaces**: `motion`. (Geen nieuwe deze sweep.)
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓ (906 modules).
+
+**Files touched**: src/workspaces/{page.tsx, _screens/{Terminals.tsx(nieuw), Sources.tsx(nieuw), TicketDetail.tsx, Board.tsx}, _components/primitives.tsx (PopMenu onOpenChange), _data/{types.ts, seed.ts}}. Nothing committed.
+
+**Notes / next**: nog open — **chat in het Workspace-AI-paneel** (acties als ticket-moves triggeren → animeren via de layout-setup), Backlog/Activity/Pipeline/Usage/Settings-pagina's, reference-picker-overlay, create/edit-ticket + quickview + ⌘K + notification-center overlays. Nothing committed.
+
+## 2026-06-03 11:46 — Fix: pagina remountte ("refresh") op élke session-change → brak join + sync
+
+Gebruiker: bij Join/Leave "refresht" de pagina (lokale state weg) + alle 4 sync-buttons doen niks (~5s disabled, geen log); net vóór de refresh komt een `updateSession` binnen (`SessionProvider.tsx:118`).
+
+**Root cause (framework)**: `<Middleware>` (`packages/core/src/react/Middleware.tsx`) had `session` in z'n effect-deps en deed bij **elke** re-run `setAllowed(false); setChecking(true)` → dat unmount de pagina (loader) en remount 'm. Keten: room-join → server `saveSession(...roomCodes)` broadcast `updateSession` op élke save (`packages/login/src/session.ts:139-141`, buiten `if(newUser)`) → client `setSession` (avatar cache-bust = nieuwe sessie-ref elke keer) → Middleware re-runt → **pagina remount** = de "refresh" + state-verlies + sync-disruptie.
+
+**Fix**: Middleware her-evalueert de guard bij een **sessie-wijziging zonder de pagina te unmounten** — `setChecking(true)`/`setAllowed(false)` alleen nog bij een echte **route-wijziging** (`guardedRouteRef` + `routeKey`). Een bare session-change (avatar/roomCodes/prefs via `updateSession`) checkt in de achtergrond en navigeert alleen weg als de nieuwe sessie niet meer toegelaten is. Dat maakt de `updateSession`-broadcast onschadelijk én houdt de 11:20-badge-fix (live `session.roomCodes`) werkend. Tevens een pre-existing redundante conditie opgeruimd (`!result.success`; `.tsx` viel buiten `lint:packages`).
+
+**Verificatie**: `eslint Middleware.tsx` clean · `build:packages` 14/14. **Developer-actie**: client herstarten zodat de herbouwde `@luckystack/core` geladen wordt; daarna re-testen of de refresh weg is + sync werkt.
+
+**Files touched**: packages/core/src/react/Middleware.tsx. Nothing committed.
+
+## 2026-06-03 12:10 — Workspaces: SSH-login, Account/Org settings, Sources/Terminals/Ticket-detail verdieping
+
+Grote sweep (desktop-first). 7 gebruikerspunten.
+
+1. **Dummy SSH-login (app-gate).** `page.tsx` toont `SshLogin` tot er een `ws-user` in localStorage staat. Geplakte public-key-waarde (of een gedropte `~/.ssh/config` die 'm bevat) bepaalt identiteit: `123`→test, `456`→mathijs, anders "We couldn't find a private key for the given public key." `SSH_KEY_TO_USER` in seed; `test`-member toegevoegd. App-brede `ctx.currentUser` + `ctx.signOut` vervangen de hardcoded ME in NavRail/TopBar/MobileHeader; avatar-menu "Sign out" werkt. Drag-drop leest de file en matcht.
+2. **Account-pagina** (`AccountSettings.tsx`): profiel (avatar/naam/email, theme-segmented, taal), connections (GitLab/GitHub), **SSH-keys** (lijst + remove + add-form met verify via dezelfde mapping), sessions (+ revoke / revoke-all-others-confirm), web-push-toggle, data-export.
+3. **Org/workspace-pagina** (`WorkspaceSettings.tsx`): tabs Members (rol-chip + ⋯ → promote/downgrade/remove-confirm), **Permissions-matrix** (RBAC owner/admin/member), Invites (+ Invite), Integrations (GitLab base-url + token + Verify), **Danger zone** (transfer/delete = type-to-confirm op de slug).
+4. **Sources-verdieping**: generated docs tonen "branch X, Y not yet processed in this file" (`pendingBranches`); **Details** werkt voor docs én skills (rechter `Sheet`: what-it-does, loaded/enabled-by-stages, frozen/live, last index); **file-preview** bij klik (read-only `<pre>` van de doc-content). Editor (VS Code) komt later — bewust nu alleen preview.
+5. **Terminals**: `Terminal` herstructureerd naar **meerdere processen** per ticket; sub-tabs (claude/server/client) **wisselen nu echt** de zichtbare instance (status/lines/cwd/exit per proces). Stage kan meerdere terminals starten (configureerbaar later).
+6. **Changed files**: klik op een file opent een **GitLab-MR-stijl inline diff** (`DiffView`, nieuw) in een `Sheet` — nette opmaak met old/new-gutters + groen/rood, geen terminal. Dummy diff-data op DEV-1240.
+7. **Links-tab**: AI-links krijgen een **`?`-icoon** → hover-popover met de **reden** waarom de AI de link voorstelde (`TicketLink.reason`).
+
+**Packages puur voor workspaces**: `motion` (geen nieuwe).
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓ (910 modules).
+
+**Files touched**: src/workspaces/{page.tsx, _data/{types.ts, seed.ts}, _components/{DiffView.tsx(nieuw), TerminalView.tsx, primitives.tsx?n.v.t.}, _shell/{WorkspacesContext.tsx, Shell.tsx, MobileChrome.tsx}, _screens/{SshLogin.tsx, AccountSettings.tsx, WorkspaceSettings.tsx (nieuw), Sources.tsx, Terminals.tsx, TicketDetail.tsx}}. Nothing committed.
+
+**Notes / next**: open — Workspace-AI-**chat** (acties triggeren), Backlog/Activity/Pipeline/Usage-pagina's, overlays (create/edit-ticket, quickview, filter, ⌘K, notification-center, reference-picker, invite-modal). Nothing committed.
+
+## 2026-06-03 12:17 — Fix: dode sync-buttons (source/dist socket-split-brain) + avatar-flash bij elke session-update
+
+Gebruiker: alle 4 playground sync-buttons doen letterlijk niks (geen server- of client-log, button ~5s disabled), bij 2 clients die elk op hun eigen cluster-backend (`?backend=4100` / `4101`) in dezelfde room zitten. Plus: avatar flasht bij élke session-update.
+
+**Sync — echte root cause (module-duplicatie door de package-split).** De Middleware-fix van 11:46 was niet de oorzaak. De 4 transport-shims in `src/_sockets/*` importeerden core via **relatieve source-paden** (`../../packages/core/src/socketState` enz.), terwijl `@luckystack/core/client` via de package-`exports` naar **`dist/client.js`** resolvet — een aparte bundle met een **eigen** `let socket`. Gevolg: `setSocket(io(...))` (socketInitializer, source) schrijft socket #1; `syncRequest` (via `@luckystack/sync/client` → `@luckystack/core/client` → dist) leest socket #2 = **altijd `null`** → `waitForSocket` loopt 500×10ms = **exact 5s** leeg → `sync.ioUnavailable`. `apiRequest` wérkte omdat z'n hele keten source was (zelfde instance als `setSocket`). De rest van `src/` (20+ files) gebruikt al `@luckystack/core/client`; de 4 shims waren de anomalie — én `../../packages/*` bestaat sowieso niet in een gepublishte consumer. **Fix**: de 4 shims op package-paden gezet (`@luckystack/core/client` / `@luckystack/sync/client`) → alles convergeert op één (dist-)instance → `setSocket` en `syncRequest` delen weer dezelfde `socket`. Dubbele `@luckystack/core/client`-import in socketInitializer samengevoegd (`import-x/no-duplicates`).
+
+**Avatar-flash.** `SessionProvider.tsx:125` re-stampt `?v=${Date.now()}` op élke `updateSession` (ook als de avatar niet wijzigde) → `Avatar`'s `statusKey` (mét `?v=`) veranderde → `<img key>` remount + refetch = flash. **Fix** (consumer, zoals gevraagd): `src/_components/Avatar.tsx` gebruikt nu een **off-screen probe** (`new Image()`); het zichtbare `<img>` wijzigt alleen als de **load-state/identiteit** (fileId zónder `?v=`) echt verschilt van wat al getoond wordt — anders niks (geen remount/refetch/flash); probe wordt na afloop weggegooid; error terwijl al op fallback = no-op. `AvatarProvider`/`useAvatarContext` niet meer geconsumeerd door Avatar (provider intact gelaten, niet verwijderd — staat nog in `main.tsx`-tree).
+
+**Verificatie**: `build:packages` 14/14 · `lint` (client+server) 0/0 · `tsc -b tsconfig.client.json` 0 errors buiten `src/workspaces/**`. **Developer-actie**: `npm run client` herstarten (vite HMR't geen packages/dist-wijziging) en in cluster-opstelling re-testen: sync-buttons geven nu server- + client-log, geen 5s-hang; avatar flasht niet meer bij join/leave/prefs.
+
+**Files touched**: src/_sockets/{apiRequest.ts, syncRequest.ts, offlineQueue.ts, socketInitializer.ts}, src/_components/Avatar.tsx. Nothing committed.
+
+**Note (report-only, niet gefixt)**: `src/_providers/socketStatusProvider.tsx:14` importeert nog `../../packages/core/src/socketStatusTypes` (type-only → geen runtime-instance, dus onschadelijk, maar breekt wél in een gepublishte consumer; zelfde behandeling als de 4 shims aanbevolen vóór publish). Ook de root-cause `?v=`-restamp in SessionProvider is bewust níét aangepast — de probe lost de flash visueel op; een guard daar (alleen bumpen als avatar wijzigt) zou de overbodige off-screen refetch per update wegnemen.
+
+## 2026-06-03 12:35 — Workspaces: editbare RBAC, GitLab-diff-viewer, SSH-rework, Backlog + Usage
+
+Grote sweep, 7 gebruikerspunten (desktop-first).
+
+1. **RBAC per organization editbaar** — `WorkspaceSettings` Permissions-tab is nu een **editbare matrix**: per rol per capability togglen (Owner blijft locked op all-allowed) + **nieuwe rollen toevoegen** (kolom met all-deny, editbaar). Defaults = de bestaande matrix. Lokale state (zou per-workspace persisten in echt).
+2. **Changed-files diff = GitLab-MR-stijl** — nieuwe `FileDiffViewer`: links een **file-balk** (naam + groen/rood counts, klik = scroll), rechts per file een **in/uitklapbare** sectie met de inline `DiffView`. Vervangt de losse sheet. Diffs toegevoegd aan alle 3 DEV-1240-files; ticket-detail Files-tab nu breder (`max-w-5xl`).
+3. **SSH ontkoppeld van page-load** — **geen login-gate meer** (`SshLogin`-screen verwijderd). App laadt direct als account (mathijs). SSH-keys leven op de account (`ctx.sshKeys`/`addSshKey`/`removeSshKey`); de **Terminals**-lock-kaart blijft, maar "Unlock with SSH key" **navigeert naar Account → SSH keys**. Geen prompt bij load.
+4. **Terminal toont SSH-user** — actieve SSH-identiteit (`ctx.sshUserId`, = laatst gelinkte key) bepaalt de ssh-user: `123`→test, `456`→mathijs. Getoond in de Terminals-header (`ssh: <name>`), per-panel chip + prompt-regel (`<user>@dev-…`). Account toont "Terminal SSH user: <name>" / "locked".
+5. **Sources Details via menuHandler** — Details (docs + skills) opent nu een **gecentreerde** `menuHandler`-overlay (size md) i.p.v. de grote zijbalk; file-**preview** blijft een rechter sheet (meer content).
+6. **Backlog-pagina** (`Backlog.tsx`): desktop-tabel / mobiel row-cards, search, quick-filter-segments (All/Unrefined/Needs input/Done), sorteerbare Stage/Status-kolommen, **bulk-select** + sticky action-bar (Move/Status/Assign/Sprint/Archive-confirm).
+7. **Usage-pagina** (`Usage.tsx`): budget-bar (alert ≥80%), 7-daagse spend-chart, breakdown-tabel (ticket·tokens·cost·time), budget-settings (cap/alert/auto-pause), cap-reached-flow. Seed: `USAGE_ROWS`, `SPEND_7D`.
+
+Account-keys-card gebruikt nu ctx; drag-drop config verhuisd van het oude login-screen naar de **AddKeyForm** in Account. Avatar-menu "Sign out" is nu een no-op (geen login meer).
+
+**Packages puur voor workspaces**: `motion` (geen nieuwe).
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓ (912 modules).
+
+**Files touched**: src/workspaces/{page.tsx, _data/{types.ts, seed.ts}, _components/{FileDiffViewer.tsx(nieuw), DiffView.tsx, TerminalView.tsx}, _shell/{WorkspacesContext.tsx, Shell.tsx}, _screens/{Backlog.tsx(nieuw), Usage.tsx(nieuw), AccountSettings.tsx, WorkspaceSettings.tsx, Sources.tsx, Terminals.tsx, TicketDetail.tsx}}; src/workspaces/_screens/SshLogin.tsx (verwijderd). Nothing committed.
+
+**Notes / next**: open — Workspace-AI-**chat** (acties triggeren → board-moves animeren), Activity- + Pipeline-pagina, overlays (create/edit-ticket, quickview, filter, ⌘K, notification-center, invite-modal, reference-picker). Nothing committed.
+
+## 2026-06-03 12:55 — Fix: dode sync = Vite source/dist module-split op `@luckystack/core/client` (ultracode-onderzoek)
+
+Sync bleef dood ná de 12:17-fix (geen enkele log, ~5s disable; api + joinRoom werkten wél). Multi-agent (ultracode) onderzoek + een read-only **Vite-resolver-probe** leverde de bewezen root cause.
+
+**Root cause (gemeten, niet gegokt).** Vite's `resolve.tsconfigPaths: true` past de `@luckystack/*`→**source**-`paths` uit `tsconfig.client.json` alleen toe op importers **onder `src/`**. Een bestand in **`packages/<pkg>/src/`** valt onder z'n eigen package-tsconfig (zonder die paths) → daar resolvet `@luckystack/core/client` via node_modules naar **`packages/core/dist/client.js`**. Probe-bewijs: `@luckystack/core/client` vanuit `src/_sockets/socketInitializer.ts` + `apiRequest.ts` → `core/src/client.ts` (SOURCE), maar vanuit `packages/sync/src/syncRequest.ts` → `core/dist/client.js` (DIST). Dus **twee `socketState`-modules**: `setSocket` (src→source) schrijft socket #1; `syncRequest` (src→`@luckystack/sync/client`=source→nested `@luckystack/core/client`=**dist**) leest socket #2 = altijd `null` → `waitForSocket` 500×10ms = 5s leeg → `sync.ioUnavailable`, geen emit, nergens log. `apiRequest`/`joinRoom` werkten omdat hun hele keten src→source bleef (socket #1). De vorige package-paden-fix kón niet helpen — de split zit in Víte's resolutie, niet in de import-stijl. Zelfde split trof `projectConfig` (config.ts registreert source-`activeConfig`, dist-`syncRequest` las default `devLogs:false` → secundair: stille interne logs).
+
+**Fix (1 bestand, geen dependency).** `vite.config.ts`: `resolve.alias` toegevoegd die de `@luckystack/*/client`-browser-entries globaal (vóór alle resolutie, voor élke importer) naar **source** mappt: `@luckystack/core/client`→`packages/core/src/client.ts`, idem `sync/client` en `presence/client`. Daarmee één `socketState`/`projectConfig`-instance voor src/ én packages/*/src. Bare server-barrels bewust niet gealiasd (client-runtime importeert die niet; zou node-only code in de client-scan trekken). Dev-only: de `create-luckystack-app`-template heeft een eigen `vite.config` (vite-tsconfig-paths-plugin) en een echte consumer heeft geen `packages/`-map → geen split, geen impact bij publish.
+
+**Verificatie**: resolver-probe → `@luckystack/core/client` resolvet nu vanuit álle importers (incl. `packages/sync/src`) naar `core/src/client.ts` = **1 instance (UNIFIED)** · `lint` (client+server) 0/0 · `build:packages` 14/14 · `tsc -b tsconfig.client.json` 0 errors buiten `src/workspaces/**`. **Developer-actie**: `npm run client` herstarten + `.cache/vite` legen; voor cross-tab (4100↔4101) ook de cluster-backends herstarten (laden de zojuist herbouwde sync-dist met `fetchSockets`-fanout).
+
+**Files touched**: vite.config.ts. Nothing committed.
+
+**Report-only**: `config.ts:6` (`registerProjectConfig` via relatief source-pad) + `src/_providers/socketStatusProvider.tsx:14` (type-only `../../packages/...`) zijn dev-only paden die bij publish via package-specifiers moeten; `socketInitializer.ts:81` leest `logging.devLogs` op module-load i.p.v. via `getProjectConfig()`. Geen van deze is oorzaak van deze bug.
+
+## 2026-06-03 13:05 — Workspaces: UI-polish (details/layout/backlog/usage) + SESSION_STATE
+
+Correctie-sweep, 7 punten, desktop-first.
+
+1. **Sources Details breedte** — menuHandler md = 512px maar content was 416px → witruimte. Detail-content nu `w-full`. **+ Summary** toegevoegd: `InfoDoc.summary` (één-liner per doc, want filename is niet altijd duidelijk) getoond in DocDetail; skill-detail heeft al `description`.
+2. **Sources grid-layout** — docs-grid nu `md:2 / lg:3 / 2xl:4` over de **volle breedte** (max-w cap weg); skills-lijst `lg:grid-cols-2`. Geen halve-scherm-witruimte meer.
+3. **Backlog = sprint-secties** — tickets gegroepeerd per sprint, elke sprint **in/uitklapbaar** (Sprint 24 / 23 / Backlog), met search + quick-filters + **per-persoon-filter** (creator OF assignee). Checkboxes **verborgen tot Select-mode** (knop); bulk-bar alleen dan. Rij-layout i.p.v. tabel (responsive).
+4. **Linked users = creator + assignee** — `creatorId`/`assigneeId` op `Ticket` (optioneel; fallback op `viewers`-volgorde) + helpers `ticketCreator`/`ticketAssignee`/`ticketLinkedMembers`. Eerste avatar = creator, tweede = assignee. Gebruikt op Board, Backlog, Ticket-detail. Backlog filtert erop.
+5. **Usage herzien** — **geen budget/cap/alert/cost** (we draaien Claude via Pro Max CLI, geen metered API). Activity-chart (token-volume), by-ticket (tokens in/out + time, géén cost), **by-person breakdown met counters** (wie welke tickets behandelt). Layout over volle breedte (2-col grid).
+6. **Layout-fix** — Usage + Sources gebruikten `max-w-*` links-uitgelijnd → volle-breedte responsive grids.
+7. **`src/workspaces/SESSION_STATE.md`** geschreven — self-contained samenvatting (project, info-locaties, architectuur, wat gebouwd is, packages, te-testen changes, next steps) zodat de gebruiker kan compacten en hervatten.
+
+**Packages puur voor workspaces**: `motion` (geen nieuwe).
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓ (911 modules).
+
+**Files touched**: src/workspaces/{SESSION_STATE.md(nieuw), _data/{types.ts, seed.ts}, _screens/{Sources.tsx, Backlog.tsx, Usage.tsx, Board.tsx, TicketDetail.tsx}}. Nothing committed.
+
+**Notes / next**: Workspace-AI-chat, Activity + Pipeline screens, overlays. Zie SESSION_STATE.md §7. Nothing committed.
+
+## 2026-06-03 14:27 — Fix: `broadcastStream` cross-instance + room-rejoin op (re)connect
+
+Na de Vite-alias-fix werken sync echo, originator-stream en streamTo. Twee resterende bugs gemeld + gefixt.
+
+**Bug 1 — `broadcastStream` degradeerde naar originator-only.** `emitBroadcastSyncStream` (`packages/sync/src/_shared/streamEmitters.ts`) las de **per-proces** room-view (`io.sockets.adapter.rooms.get(receiver)`) en deed bij `size <= 1` een unicast naar de enige lokale socket. In een 2-instance cluster ziet de instance van de afzender alleen zichzelf lokaal → "solo" → unicast → alleen de klikker kreeg de chunks; anderen kregen enkel het final event (via de cross-instance `fetchSockets`-fanout). `streamTo` had dit nooit (gebruikt altijd `io.to(...).emit`). **Fix**: lokale room-inspectie + solo-degrade verwijderd; altijd `io.to(receiver).emit(socketEventNames.sync, frame)` → fan-out over álle instances via de Redis-adapter (gelijkgetrokken met `streamTo`). Doc-comments bijgewerkt (`handleSyncRequest.ts`, `packages/sync/CLAUDE.md`).
+
+**Bug 2 — rooms weg na server-restart ("niemand in de room").** De connect-handler (`server/sockets/socket.ts`) deed bij (re)connect alleen `socket.join(token)`, nooit een rejoin van `session.roomCodes`. Socket.io-rooms zijn per-connection + in-memory → een server-restart (of reconnect) dropt ze, terwijl `session.roomCodes` (in Redis) ze nog vermeldt → client toont "joined" maar de server-room is leeg → `fetchSockets(room)` leeg → "no receivers". **Fix**: in de connect-handler na `socket.join(token)` de persisted `getSessionRoomCodes(await getSession(token))` opnieuw joinen (idempotent; bron van waarheid = de Redis-sessie).
+
+**Verificatie**: `lint` (client+server) 0/0 · `lint:packages` 0 · `build:packages` 14/14 · `tsc -b tsconfig.server.json` 0 errors. **Developer-actie**: cluster-backends + `npm run client` herstarten (server laadt de herbouwde sync-dist; rebuild dekt zowel source- als dist-resolutie). Test: na restart eerst joined blijven → sync echo vindt receivers; `broadcastStream` chunks komen nu in álle tabs (ook cross-instance), niet enkel bij de afzender.
+
+**Files touched**: packages/sync/src/_shared/streamEmitters.ts, server/sockets/socket.ts, packages/sync/src/handleSyncRequest.ts (comment), packages/sync/CLAUDE.md (comment). Nothing committed.
+
+## 2026-06-03 15:10 — Workspaces: backlog-fix, back-stack, RBAC-persist, workspace-model, AI-chat, Pipeline
+
+Grote UI-sweep op `src/workspaces/` (6 onderdelen in één keer).
+
+1. **Backlog** — lijst-container `overflow-auto` + inner `min-w-[44rem]` zodat rijen + de in/uitklap-toggles niet meer comprimeren (horizontaal scrollen i.p.v.). Sprint-header: chevron via `motion` (rotate 0↔-90), badges/meta `shrink-0`. Open/dicht nu **geanimeerd** (`AnimatePresence` + `height: auto` spring).
+2. **Globale back-arrow + nav-stack** — `navStack` in `page.tsx`; `ctx.navigate`/`openTicket` pushen de huidige view, `goBack`/`canGoBack` lopen terug (echte stack p1→p2→p3→terug). Pijl links-boven in `TopBar` (disabled als stack leeg). Pointers door de hele app voeden de stack.
+3. **Permissions + members persist** — RBAC-matrix (`permRoles` + `togglePerm`/`addRole`) en `memberRoles` (+`setMemberRole`) naar app-context → overleven tab/route-wissel. `RBAC_CAPABILITIES`/`DEFAULT_PERM_ROLES`/`ROLE_DISPLAY` naar `seed.ts`, `PermRole` naar `types.ts`. Members-tab: **Dropdown met search** per user voor de rol (Owner = locked chip; transfer via danger-zone).
+4. **Workspace-model vereenvoudigd** — 2e (project)-dropdown weg. **1 project = 1 workspace.** Switcher = `ctx.workspaces` met active-switch (check-mark) + **Create workspace**-form (klein, via `menuHandler`, buiten provider dus prop-callback). `activeWorkspace` in ctx; Board-subtitle + WorkspaceSettings-titel + mobiele header gebruiken het.
+5. **Workspace-AI overal + chat** — `showAi = aiOpen` (alle views, niet enkel board/ticket). Nav-rail + mobile-bottom 'ai' **toggelen** het paneel i.p.v. routen. AI-paneel: tabs **Chat** + Suggestions; chat (`ctx.chat`/`sendChat`, session-persist) met dummy AI. `move DEV-1240 to review` zet een **stage-override** en het board **animeert** de kaart (via bestaande `layoutId`).
+6. **Pipeline-scherm** (`_screens/Pipeline.tsx`, nieuw) — stage-flow strip + per-stage config (AI-toggle, WIP-limit, processen). Vervangt de placeholder; 'pipeline'/'ai' uit `PLACEHOLDERS`.
+
+`ChatMessage`/`PermRole` types + `INITIAL_CHAT` seed toegevoegd. Iconen `arrow-left` + `paper-plane` toegevoegd.
+
+**Packages puur voor workspaces**: `motion` (geen nieuwe).
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓.
+
+**Files touched**: src/workspaces/{page.tsx, _data/{types.ts,seed.ts}, _components/Icon.tsx, _shell/{WorkspacesContext.tsx,Shell.tsx,MobileChrome.tsx}, _screens/{Backlog.tsx,Board.tsx,WorkspaceSettings.tsx,Pipeline.tsx(nieuw)}}. Nothing committed.
+
+**Notes / next**: Activity-screen + overlays (create/edit-ticket, quickview, ⌘K, notification center, invite, reference picker) resteren. Chat→move is dummy (alleen `move … to …`).
+
+## 2026-06-03 15:20 — Diag/fix: reset-password "geen email" (anti-enumeration, niet-credentials) + room-rejoin awaited+logged
+
+Twee meldingen onderzocht (ultracode, read-only workflow + Vite/tsx-resolver-probes).
+
+**Bug 1 — reset-password mailt niet, testEmail wél.** GEEN code-flow-bug. Bewezen via probes: (a) `sendEmail` met `adapterHint:'transactional'` valt correct terug op de `default`-sender (`sendEmail.ts:52-56`), dus de sender werkt (zoals testEmail). (b) **Geen server-side projectConfig-split** — een tsx-probe (`tsconfig.server.json`) toonde dat `packages/login/src` dezelfde geregistreerde config leest als `config.ts` (tsx past de paths globaal toe, anders dan Vite per-file), dus de `forgotPassword==='framework'`-gate slaagt. (c) register/login/reset normaliseren e-mail consistent (lowercase + `provider:'credentials'`, `login.ts:117/173/202`). ⇒ Resterende oorzaak: `findByEmail({email, provider:'credentials'})` geeft `null` → anti-enumeration slaat de send stil over. Kortom: het geteste adres is **geen credentials-account** (OAuth-signup / onbekend / typefout hebben geen password-row). Dat is by-design, maar volledig onzichtbaar. **Fix (diagnostiek):** `packages/login/src/forgotPassword.ts` logt nu dev-side de reden — `getLogger().debug('[forgotPassword] no credentials account …')` bij no-match, en `debug`/`warn` met send-resultaat na de send. Zo is de stille flow in dev verklaarbaar.
+
+**Bug 2 — socket-room weg na page-refresh.** Geen module-split (tsx globaal, zie boven). `socketLeaveRoom` (presence `leaveRoom.ts`) is een no-op voor rooms; met `socketActivityBroadcaster:false` doet de disconnect-handler niets ⇒ sessie + `roomCodes` blijven intact (klopt met wat de gebruiker ziet). De rejoin-on-connect (vorige fix) was echter **fire-and-forget + zonder logging**: timing/volgorde + fouten waren onzichtbaar. **Fix:** `server/sockets/socket.ts` rejoin nu gesequencet (`await socket.join(token)` → `getSession` → `await socket.join(roomCode)` per code) via `tryCatch` (geen raw try/catch — lint-regel), met dev-log `socket <id> (re)joined rooms: <codes>` of een `yellow` faallog. Maakt het deterministischer én diagnoseerbaar: na een volledige restart toont de serverlog of de rejoin draait, welke `roomCodes` hij ziet en of de join slaagt.
+
+**Verificatie**: `lint:server` 0/0 · `lint:packages` 0/0 · `build:packages` 14/14 · `tsc -b tsconfig.server.json` 0 errors. (`lint:client` faalt enkel op `src/workspaces/**` — parallelle sessie, niet van mij.) **Developer-actie**: cluster-backends **volledig** herstarten; reset-flow opnieuw testen met een echt email+password-account en de serverlog checken; bij refresh letten op de `(re)joined rooms`-log. Als die de room toont maar sync nog faalt → vervolgonderzoek (fetchSockets/adapter); toont 'none' → sessie mist roomCodes; geen log → token niet geëxtraheerd op reconnect.
+
+**Files touched**: server/sockets/socket.ts, packages/login/src/forgotPassword.ts. Nothing committed.
+
+## 2026-06-03 15:35 — Workspaces: back-arrow-in-container, search palette, AI resize+typing, Pipeline editor (deep)
+
+Tweede grote UI-sweep op `src/workspaces/` (6 onderdelen).
+
+1. **Back-arrow verplaatst** — uit de topbar → een slanke, geanimeerde bar **boven de page-content** (in `page.tsx`), alleen zichtbaar bij `canGoBack`, toont "Back to {prev}".
+2. **`+`-knop weg** achter de tabs (2e navbar).
+3. **Search palette** (`_components/SearchPalette.tsx`, nieuw) — ⌘K/Ctrl-K of de zoekknop. Quick actions + **recent geopende tickets** (`ctx.recent`) + basis id/title/source-filter; gecentreerde motion-overlay, Esc sluit. Semantic-search-placeholder voor later.
+4. **Back-stack = alleen references** — `ctx.navigate` (chrome: rails/tabs/switcher) pusht NIET; nieuwe `ctx.pushTo` + `openTicket` (references vanuit content) pushen wél. `backLabel` toegevoegd. Card-menu "Open terminal" → `pushTo`.
+5. **AI-paneel** — **sleepbaar** (drag-handle op de linkerrand, 300–560px, breedte onthouden via module-var zodat open/dicht 'm bewaart; spring uit tijdens drag voor 1:1-tracking) + **typewriter-animatie** op AI-antwoorden (per-message één keer, met knipperende cursor; `whitespace-pre-wrap`).
+6. **Pipeline-editor herbouwd** (de kern) — stage-flow strip (selecteerbaar, AI/no-AI-badge, reorder, add/delete) + per-stage **config-tabs**: General (custom instructions + status-chips), Context & Skills (docs + skills toggles), Commands (allow/ask/deny), Tool Access (off/ro/rw per tool), Visibility, Process (terminals×commands), Carry-over (`{{chips}}`), Model & Effort (model/effort/max-turns/budget/extended-thinking), Sandbox (egress-domeinen), Hooks. **"Validate with AI"** → niet-blokkerende findings-banners. Gegrond in `handoff/DATAMODEL.md §2` + `CLAUDE_SETTINGS_MAP.md`.
+
+Datalaag: `PipelineStageCfg`/`StageWarning` + sub-types in `types.ts`; `STAGE_CONFIGS` + `HOOK_CATALOG`/`TOOL_CATALOG`/`CARRY_CHIPS`/`MODEL`/`EFFORT`-catalogs in `seed.ts`. Iconen toegevoegd: `arrow-left`, `paper-plane`, `ban`, `bolt`, `code-branch`, `database`, `shield-halved`, `sliders`, `trash`, `wand-magic-sparkles`.
+
+**Packages puur voor workspaces**: `motion` (geen nieuwe).
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓.
+
+**Files touched**: src/workspaces/{page.tsx, _data/{types.ts,seed.ts}, _components/{Icon.tsx,SearchPalette.tsx(nieuw)}, _shell/{WorkspacesContext.tsx,Shell.tsx}, _screens/{Board.tsx,Pipeline.tsx(herschreven)}}. Nothing committed.
+
+**Notes / next**: refine de Pipeline-tabs daarna; Activity-screen + overige overlays resteren. Search = nog basis-filter (semantic later).
+
+## 2026-06-03 15:56 — FIX (echte root cause): rejoin-on-connect zat in DODE code; nu in de live `@luckystack/server` handler
+
+**De gemelde bug bleef bestaan** (room weg na page-refresh/server-restart, `sync.noReceiversFound` terwijl `session.roomCodes` de room nog toont) ondanks meerdere rejoin-fixes. 8-agent ultracode-onderzoek (opus, read-only) + directe verificatie gaf de **definitieve** oorzaak met `certain` confidence:
+
+**Root cause:** al mijn rejoin-fixes stonden in **`server/sockets/socket.ts`** — maar dat bestand is **dode code** (nul runtime-importers). Sinds de package-split boot de server via `server/server.ts` → `bootstrapLuckyStack` (`@luckystack/server`) → `packages/server/src/createServer.ts:129` → **`packages/server/src/loadSocket.ts`**. Dáár was de hele connect-tijd room-logica: `if (token) { void socket.join(token); }` (regel 360-362) — alléén de token-room, nooit `session.roomCodes`. Dus: verse `joinRoom` werkt (loadSocket.ts:217 `socket.join(group)`), maar na refresh/restart krijgt de nieuwe socket enkel de token-room → `io.in(room).fetchSockets()` leeg → `noReceiversFound`. Alles eromheen uitgesloten: Redis-adapter (default channel, één cluster), token-extractie op reconnect, `getSession`/`getSessionRoomCodes` (roomCodes intact in Redis), disconnect-handler (room-no-op). De `session.roomCodes` die de gebruiker zag is een cosmetische badge-mirror (`playground/page.tsx:415-417`), geen echte membership. **Waarom de fixes "overleefden":** ze landden op een niet-geladen bestand (de devkit-supervisor wátchtte `server/sockets/socket.ts` wel → edit triggerde een zichtbare restart = vals signaal "fix is live").
+
+**Fix:**
+1. **`packages/server/src/loadSocket.ts`** (de ECHTE handler): connect-tail `void socket.join(token)` vervangen door een `tryCatch`-omhulde, gesequencete, dev-gelogde rejoin die token + `getSessionRoomCodes(await getSession(token))` joint. Self-contained (`tryCatch`/`getSession`/`getSessionRoomCodes` al aanwezig). Idempotent.
+2. **`server/sockets/socket.ts` verwijderd** (dode pre-split-orphan; `create-luckystack-app`-template levert dit bestand niet en gebruikt `bootstrapLuckyStack`). Plus de stale watch-glob-entry ervoor uit `packages/devkit/src/supervisor.ts` (`CORE_WATCH_GLOBS`) gehaald.
+
+**Waarom het nu wél werkt:** `tsconfig.server.json` mapt `@luckystack/server`→`packages/server/src` + tsx past paths globaal toe; `createServer.ts` importeert `./loadSocket` relatief → de cluster draait deze source. Plus `build:packages` voor de dist.
+
+**Verificatie**: `lint:packages` 0 · `build:packages` 14/14 · `tsc -b tsconfig.server.json` 0 errors · `lint:server` 0 (deletie brak niets → bevestigt dood). **Developer-actie**: cluster-backends volledig herstarten; na refresh/restart toont de serverlog `socket <id> (re)joined rooms: playground-room` en sync werkt zonder opnieuw te joinen.
+
+## 2026-06-03 16:10 — Workspaces: Pipeline-builder refine (stack-agnostisch) + layout/scroll-sweep
+
+Refine-sweep op de Pipeline-builder + globale layout-fix.
+
+1. **Commands** — vrije-tekst-rij vervangen door een **gecategoriseerde Claude-command-catalogus** (`COMMAND_CATALOG`: package managers, build/run, testing, VCS, filesystem, containers, DB-CLIs, network/dangerous). Per command een 4-way Off/Allow/Ask/Deny + custom-toevoeging. Veel duidelijker.
+2. **Bottom-container weg** — de "How a ticket moves"-kaart die op elke subtab stond is verwijderd; de uitleg (incl. structured-output flow) staat nu in de Carry-over-tab.
+3. **Status `stopped`** toegevoegd als base-status (gezet door "stop alle AIs" / subscription-limit) — in `baseStatuses()` + `blankStage`.
+4. **Skills/MCP** tonen nu hun **description** (zoals docs), niet enkel status.
+5. **Tool Access → Integrations** — generiek: lijst van services met read/write-tier + verwijderen; **Add integration** via catalogus (`INTEGRATION_CATALOG`: Mongo/Postgres/MySQL/Redis/Kafka/RabbitMQ/S3/Elasticsearch/HTTP) **of custom naam**. Werkt op elke stack.
+6. **Process** — gestructureerd: per proces **naam + working dir (cwd) + env-vars (key/value) + geordende commands** (toevoegen/verwijderen). Stack-agnostisch (npm/dotnet/go/make).
+7. **Carry-over** — herontworpen met **visuele flow** (prev stage emits → injected → this stage emits), **incoming variabelen** met uitleg + insert-chips, template, en de **outgoing JSON-schema** die deze stage moet emitten.
+8. **Model & Effort** — **escalatie-editor** (switch-case): toggle "let the agent pick", een default-keuze, en **score-bands** (`score ≥ N → model/effort/turns`, hoogste match wint; AI rate 1–10 + self-escalate). **Max budget weg**; max-turns nu per band.
+9. **Sandbox → Network** — mode-toggle **Allow-only-these (whitelist) / Block-these (blacklist)**, **category-presets** (`NETWORK_CATEGORIES`) + **hosts/prefixes** (`*.github.com`).
+10. **Hooks** — veel breder/duidelijker: gegroepeerd (Lifecycle / Events & status / Gating), per hook **matcher + wat het voedt + uitleg** (PreToolUse, Worktree-hooks toegevoegd).
+11. **Layout/scroll-sweep** — settings + ticket-detail max-width-containers **gecentreerd** (`mx-auto w-full`) i.p.v. links-uitgelijnd met rechter-whitespace (Account, WorkspaceSettings × tabs, TicketDetail); `Placeholder` krijgt `min-h-0`; Sources health-banner `flex-wrap` + `min-w-0` tegen horizontale overflow.
+
+Datalaag: `StageToolCfg` (generiek), `StageProcessCfg` (cwd+env+commands), `StageModelCfg`/`ModelRule` (escalatie), `StageNetworkCfg` in `types.ts`; catalogs + herziene `STAGE_CONFIGS` in `seed.ts`.
+
+**Packages puur voor workspaces**: `motion` (geen nieuwe).
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓.
+
+**Files touched**: src/workspaces/{_data/{types.ts,seed.ts}, _screens/{Pipeline.tsx(herschreven),Placeholder.tsx,AccountSettings.tsx,TicketDetail.tsx,WorkspaceSettings.tsx,Sources.tsx}}. Nothing committed.
+
+**Notes / next**: model-escalatie is bewust een band/switch-editor (user vroeg om alternatief); kan verder. Activity-screen + semantic search resteren.
+
+**Report-only (niet aangeraakt)**: `server/sockets/` bevat nog meer pre-split-debris (`handleApiRequest.ts`, `handleSyncRequest.ts`, `handleHttp*Request.ts`, `utils/`) — gedupliceerd door `@luckystack/api`/`@luckystack/sync` (de live versies). Aanrader: hele `server/sockets/`-map opschonen in een aparte cleanup.
+
+**Files touched**: packages/server/src/loadSocket.ts, packages/devkit/src/supervisor.ts; verwijderd: server/sockets/socket.ts. Nothing committed.
+
+## 2026-06-03 16:23 — Fix: `/readyz` 503 = `prisma`-proxy bond `this` niet (captured detached call) + diagnose reset-mail
+
+Sync werkt nu na restart (vorige fix bevestigd). Twee resterende punten: `/readyz` 503 (terwijl `/livez` + `/_health` 200), en reset-mail verzendt niet (testEmail wél).
+
+**`/readyz` 503 — bewezen root cause (DB-vrije runtime-probe).** De `prisma`-proxy (`packages/core/src/db.ts`) bond `this` níét bij method-access (`get: Reflect.get(getPrismaClient(), prop, receiver)`), in tegenstelling tot de `redis`-proxy die wél `fn.bind(real)` doet (`redis.ts:110`). `pingPrisma` (`packages/server/src/httpRoutes/healthRoutes.ts`) **capturet** de method en roept 'm los aan: `const runCommandRaw = client.$runCommandRaw; runCommandRaw({ping:1})` → `this===undefined` → Prisma's interne `this`-toegang gooit → `tryCatch` vangt → `prismaOk=false` → 503 (ongeacht of Mongo bereikbaar is). Probe bevestigd: captured call gaf `THIS-LOST(undefined)`, na de fix `THIS-OK`. `/_health` werkt want die raakt Prisma niet (alleen boot-UUID + Redis). Provider = MongoDB; `pingPrisma` valt correct terug op `$runCommandRaw({ping:1})` — die werd alleen nooit met juiste `this` aangeroepen. `findByEmail` (`prisma.user.findFirst`) is een delegate-call → niet getroffen → reset-mail staat hier los van.
+
+**Fix:** `db.ts` prisma-proxy bindt nu functions aan de echte client (gespiegeld aan de `redis`-proxy); non-function reads (model-delegates als `prisma.user`) gaan ongewijzigd door. Generiek — fixt élke captured-detached prisma-call, niet alleen `pingPrisma`. De stale solo-degrade unit-tests van de broadcastStream-fix (`packages/sync/src/_shared/streamEmitters.test.ts`) bijgewerkt naar het nieuwe altijd-`io.to(room)`-gedrag (cross-instance).
+
+**Verificatie**: probe `THIS-OK` · `lint:packages` 0 · `build:packages` 14/14 · `test:unit` 748/748 (3 stale broadcastStream-tests herschreven). **Developer-actie**: cluster-backends herstarten; `/readyz` geeft nu de echte status. Body toont `checks:{bootUuid,redis,prisma}` — `prisma:true` ⇒ Mongo bereikbaar (503 was puur de binding-bug); `prisma:false` ⇒ Mongo écht onbereikbaar (env/infra).
+
+**Reset-mail (geen code-bug):** anti-enumeration — `sendPasswordResetEmail` mailt alleen een **geregistreerd credentials-account** (email+wachtwoord); `findByEmail` geeft `null` voor OAuth-only/onbekende adressen → stil overgeslagen. De dev-log uit de vorige beurt (`[forgotPassword] no credentials account…` / `reset email dispatched`) toont de reden in de serverlog. NB: als `/readyz` ná deze fix `prisma:false` toont, is Mongo onbereikbaar en faalt `findByEmail` daardóór — dan is dat (env/DB) de oorzaak van beide.
+
+## 2026-06-03 16:40 — Workspaces: Pipeline commands-rebuild + model default-band + Activity page
+
+Vervolg-refine + nieuw scherm.
+
+1. **Commands** — elke rij heeft nu een **`?`-info-popover** (hover, via nieuwe `InfoDot` in primitives; catalogus-commands kregen een `desc`). Toevoegen via een **gestructureerd formulier**: categorie kiezen (Dropdown) **of nieuwe categorie aanmaken**, titel, optionele omschrijving, command. Custom commands groeperen per categorie en zijn **verwijderbaar** (trash). `StageCommandCfg` kreeg `title?/desc?/category?`.
+2. **Model & Effort** — de **default-keuze staat nu onderaan** als een vaste band `score ≥ 0` (input disabled, `(Default)`-badge, niet verwijderbaar); escalatie-bands erboven, hoogste match wint.
+3. **Activity-pagina** (`_screens/Activity.tsx`, nieuw) — workspace-brede chronologische TicketEvent-feed met actor-avatar/glyph, type-chip, ticket-link, tijd; filter All/AI/People/Merges; live-badge. Gewired in `page.tsx` (`activity` → Activity; `PLACEHOLDERS` nu leeg).
+
+**Open (gevraagd aan user, nog te bouwen):** echte werkende terminal (lokale exec — backend + security-keuze + evt. install) en het integrations-koppelingsmodel (MCP / connection / env per integration).
+
+**Packages puur voor workspaces**: `motion` (geen nieuwe).
+
+**Verificatie**: `lint:client` 0/0 · `tsc --noEmit -p tsconfig.client.json` schoon · `vite build` ✓.
+
+**Files touched**: src/workspaces/{_data/{types.ts,seed.ts}, _components/primitives.tsx (InfoDot), _screens/{Pipeline.tsx,Activity.tsx(nieuw)}, page.tsx}. Nothing committed.
+
+**Files touched**: packages/core/src/db.ts, packages/sync/src/_shared/streamEmitters.test.ts. Nothing committed.
+
+## 2026-06-03 16:46 — Reset-mail: zichtbare stap-voor-stap logging + import-`.catch` (gespiegeld aan testEmail)
+
+Reset-mail bleef voor de gebruiker "niet werken" terwijl testEmail wél werkt. Statische analyse zegt: gate slaagt (`config.ts:366-368` registreert `auth.forgotPassword:'framework'`, geverifieerd), sender werkt (testEmail bewijst het, en `adapterHint:'transactional'` valt terug op `default` — `sendEmail.ts:52-56`), dus de enige resterende verklaring is `findByEmail({email,provider:'credentials'})` → `null` (adres is geen credentials-account → anti-enumeration slaat stil over). Maar i.p.v. nóg een keer gokken: het pad **volledig zichtbaar instrumenteren** zodat één testrun de oorzaak pinpoint (gebruiker vroeg hier expliciet om).
+
+**Wijziging (`packages/login/src/forgotPassword.ts`):** mijn eerdere `getLogger().debug`-regels vervangen door **info/warn** (zichtbaar) + extra stappen, en de dynamische `import('@luckystack/email')` voorzien van `.catch` (net als testEmail — de enige echte robuustheidsverschil). Loglijnen nu:
+- `[forgotPassword] start { email, forgotPasswordMode }` — bevestigt aanroep + gate-waarde.
+- `[forgotPassword] failed to load @luckystack/email …` — als de lazy import faalt (geeft nu `{ok:false,reason:'email-module-load-failed'}` i.p.v. throw).
+- `[forgotPassword] credentials user lookup { email, found, userId }` — de cruciale: vindt findByEmail de user?
+- `[forgotPassword] no credentials account … ` (warn) / `reset email dispatched` (info) / `reset email send FAILED` (warn, met reason).
+
+Consumer `sendReset_v1.ts` bewust niet aangeraakt (minimal; de framework-orchestrator logt alle takken). 
+
+## 2026-06-03 17:05 — Workspaces: ECHTE terminal (xterm.js + node-pty) — backend PTY-bridge + frontend
+
+Op verzoek + na install-akkoord: de mock-terminals vervangen door een echt werkende terminal die commands draait op de **lokaal draaiende backend**.
+
+**Waarom xterm + node-pty (niet eigen HTML):** een eigen HTML-blokken-terminal toont alleen regel-output; de Claude Code CLI (en `vim`/`htop`/…) zijn full-screen TUI's die ANSI/VT100-escapes + een echte PTY nodig hebben. xterm.js is de VT-emulator, node-pty levert de PTY (ConPTY op Windows → cross-platform, niet Linux-only). Daarom dat duo.
+
+**Install (akkoord gebruiker):** `@xterm/xterm`, `@xterm/addon-fit`, `node-pty` (native build geslaagd op Windows, 0 vulnerabilities). → strip-lijst voor workspaces.
+
+**Backend (`server/hooks/workspacesTerminal.ts`, nieuw):** dev-only (`NODE_ENV!=='production'`) Socket.io ⇄ node-pty bridge via `registerSocketMiddleware` (geeft de echte socket; `onSocketConnect`-hook geeft enkel `{socketId,token,ip}`, geen socket-instance). Per terminal-`id` één `pty.spawn` (powershell op win / `$SHELL` elders), streamt `ws-term:out`, ontvangt `ws-term:input`/`:resize`/`:kill`, ruimt op bij disconnect. Gewired in `server/server.ts` (`registerWorkspacesTerminalHooks()`). **Security:** browser→shell = RCE-oppervlak → hard gated op non-production; rijdt op de framework-geauthenticeerde socket.
+
+**Frontend (`src/workspaces/_components/XtermTerminal.tsx`, nieuw):** xterm.js + fit-addon, fixed-dark theme (matcht `--color-terminal-*`), connect via `waitForSocket()` uit `@luckystack/core/client`, emit/listen op de `ws-term:*`-events, ResizeObserver → fit + resize, cleanup disposeert + kill. (NB: `socket` is in de client-build als `null` getypeerd → awaited waarde als `unknown` genarrowd + naar een lokale `LiveSocket`-shape geassert.) `TerminalView` (mock) vervangen in **Terminals** (grid + tabs, sessie = `ticketId:proc`) en **TicketDetail** terminal-tab. ReplyBar verwijderd.
+
+**Integrations (volgende stap, ontwerp vastgelegd met user):** workspace-settings krijgt een **Env**-tab + **Integration tools**-setup (type, velden→workspace-env-vars via search-dropdown, MCP), en de Pipeline **selecteert** uit die opgezette tools. Nog te bouwen.
+
+**Verificatie**: `lint:client` 0/0 · `tsc -p tsconfig.client.json` schoon · `vite build` ✓ · `lint:server` 0/0 · `tsc -b tsconfig.server.json` 0 errors.
+
+**Developer-actie:** cluster-/backend volledig **herstarten** (laadt de nieuwe socket-middleware) → open Workspaces → Account → SSH-key `123`/`456` → Terminals: je krijgt een echte shell op de lokale backend (typ `ls`/`dir`, `npm test`, etc.). Werkt alleen in dev.
+
+**Files touched**: server/{server.ts, hooks/workspacesTerminal.ts(nieuw)}, src/workspaces/_components/XtermTerminal.tsx(nieuw), src/workspaces/_screens/{Terminals.tsx,TicketDetail.tsx}, package.json (deps). Nothing committed.
+
+**Verificatie**: `lint:packages` 0 · `build:packages` 14/14 · `test:unit` 748/748. **Developer-actie**: cluster herstarten, reset-mail opnieuw triggeren, en de `[forgotPassword]`-regels in de serverlog delen. Verwachting: `found:false` ⇒ het geteste adres is geen email+wachtwoord-account (verwacht; test met dat account). `found:true` + `send FAILED` ⇒ echte send-fout (reason staat erbij). Geen `[forgotPassword] start` ⇒ outer-gate/route-probleem. (En als `/readyz` `prisma:false` toont, is Mongo onbereikbaar → `findByEmail` faalt daardóór.)
+
+**Files touched**: packages/login/src/forgotPassword.ts. Nothing committed.
+
+## 2026-06-03 17:30 — Workspaces: terminal-persistence + Pipeline fixes + integrations-rework (Env/tools/select)
+
+Vier fixes + de integrations-rework.
+
+1. **Commands `?`-popover** opende naar links en ging offscreen bij de linkerrand → `InfoDot align="left"` (opent naar rechts) in de command-rijen.
+2. **Model fallback-band** — hernoemd van "Default" naar **"Fallback"** + niet meer gehighlight (dashed neutrale border i.p.v. primary-fill), voelde alsof hij geselecteerd was.
+3. **Terminal dev-only uitgelegd + opt-in** — browser→shell = RCE-oppervlak dus default uit in productie; de echte vorm target per-ticket-containers. Nieuwe env `WORKSPACES_TERMINAL_ENABLED=1` om bewust buiten dev aan te zetten.
+4. **Terminal-sessies persisteren** — bug: bij tab/pagina-wissel unmountte de component → killde de PTY + verloor de buffer. Nu houdt `XtermTerminal` de xterm-instance **+ DOM-element module-level in leven** (registry per `sessionId`) en killt de PTY **niet** bij unmount; bij terugkeren wordt dezelfde sessie her-aangehecht (scrollback + live shell intact). Eén globale socket-router schrijft output naar de juiste sessie. Backend houdt PTY's per socket-verbinding al levend.
+5. **Integrations-rework** (zoals besproken):
+   - **Workspace-settings → Env-tab**: workspace-env-vars beheren (key/value, secret-mask/reveal, toevoegen/verwijderen) — `ctx.envVars` + `saveEnvVar`/`removeEnvVar`.
+   - **Workspace-settings → Integrations-tab**: integration-tools opzetten — type kiezen (`INTEGRATION_TYPES`-catalogus met default-velden + MCP-command), naam, **config-velden koppelen aan workspace-env-vars via search-dropdown**, MCP toggle + command. `ctx.integrationTools` + `saveIntegrationTool`/`removeIntegrationTool`. Bestaande GitLab-tab hernoemd naar "GitLab".
+   - **Pipeline → Integrations-tab**: **selecteert** nu uit de opgezette workspace-tools (toggle + read/write-tier) i.p.v. ad-hoc namen. Lege staat linkt naar Workspace-settings. `StageToolCfg` = `{toolId, tier}`; `STAGE_CONFIGS` verwijst naar tool-ids.
+
+Datalaag: `EnvVar`/`IntegrationField`/`IntegrationTool` + nieuwe `StageToolCfg` in `types.ts`; `ENV_VARS`/`INTEGRATION_TYPES`/`INTEGRATION_TOOLS` in `seed.ts` (`INTEGRATION_CATALOG` verwijderd).
+
+**Packages puur voor workspaces**: motion + `@xterm/xterm`/`@xterm/addon-fit`/`node-pty` (geen nieuwe deze ronde).
+
+**Verificatie**: `lint:client` 0/0 · `tsc -p tsconfig.client.json` schoon · `vite build` ✓ · `lint:server` 0/0 · `tsc -b tsconfig.server.json` 0 errors.
+
+**Files touched**: src/workspaces/{_data/{types.ts,seed.ts}, _shell/WorkspacesContext.tsx, page.tsx, _components/XtermTerminal.tsx, _screens/{Pipeline.tsx,Terminals.tsx,TicketDetail.tsx?,WorkspaceSettings.tsx}}, server/hooks/workspacesTerminal.ts. Nothing committed.
+
+**Notes / next**: integratie-credentials/MCP zijn UI-model (geen echte connectie). Terminal-tab-switch herstart de shell niet meer; reconnect (page refresh) verliest 'm wel (backend-sessies zijn per socket-verbinding).
+
+## 2026-06-03 17:48 — Publish-readiness: alle MUST + SHOULD-FIX uit de audit doorgevoerd
+
+Vervolg op de 7-agent publish-audit (verdict: not-ready; blockers vooral in de `create-luckystack-app`-template + version-peers; de 14 packages zelf schoon). Alles uitgevoerd in één pass (workspaces + handoff genegeerd).
+
+**Template version-conflicten** (`packages/create-luckystack-app/template/package.json`): zod `^3.25.76`→`^4.0.0` (framework draait 4.4.3), bcryptjs `^2.4.3`→`^3.0.0` + `@types/bcryptjs` verwijderd (3.x bundelt types), `@luckystack/devkit` toegevoegd aan devDependencies, `prisma:db:push`-script toegevoegd.
+
+**Template src/ reconciliatie** (was een stale pre-split snapshot — compileerde niet): `src/_sockets/{apiRequest,syncRequest,offlineQueue,socketInitializer}.ts` toegevoegd (uit dev-repo; socketInitializer's `../../shared/socketEvents`-import → `@luckystack/core/client`); `config.ts` herschreven zodat het alle door componenten+_sockets verwachte symbolen exporteert (`backendUrl, dev, sessionBasedToken, providers, socketActivityBroadcaster, locationProviderEnabled, logging`, + registreert `app.publicUrl` + `auth.forgotPassword:'framework'`); `Avatar.tsx` vervangen door de verbeterde self-contained (flash-vrije) versie (geen `./AvatarProvider` meer); `LoginForm.tsx` `../_functions/{notify,translator}` → `@luckystack/core/client`. Generator-ENOENT gefixt: `generateServerRequests.ts` `mkdirSync(server/prod)` vóór de write (en `src/_sockets/` bestaat nu, dus de type-emitter ENOENT't ook niet meer). Prisma `id` provider-aware gemaakt via nieuwe `{{USER_ID_ATTRS}}`-placeholder (mongo: `@id @default(auto()) @map("_id") @db.ObjectId`); env-templates: `SERVER_PORT=80` + provider-correcte `{{DATABASE_URL}}` (mongo default). CLI (`src/index.ts`) substitueert beide nieuwe placeholders per `dbProvider`.
+
+**Package-manifests**: `@luckystack/core/client` exporteert nu ook `buildJoinRoom/LeaveRoom/GetJoinedRoomsResponseEventName` (nodig voor de template-socketInitializer). `@luckystack/devkit` typescript-peer `^6.0.0`→`~5.7.3`. `@luckystack/server` `peerDependenciesMeta` toegevoegd voor de optionele dynamisch-geïmporteerde peers (devkit/docs-ui/email/error-tracking). `secret-manager/tsup.config.ts` `external:[/^@luckystack\//]` + `skipNodeModulesBundle`.
+
+**Publish-mechaniek**: `scripts/publishPackages.mjs` (wave-geordend, bouwt eerst schoon, dan `npm publish --access public` per package; `--dry-run`) + npm-scripts `publish:dry` / `publish:packages`. Prereqs gedocumenteerd in het script (npm login, `@luckystack`-org).
+
+**Docs** (stale claims die de code tegenspraken, shipten in tarballs/AI-context): broadcastStream "auto-degrades to unicast for solo" verwijderd (+ het verzonnen snippet) in `sync/docs/streaming.md`, `sync/README.md`, `ARCHITECTURE_SYNC.md`; root `CLAUDE.md` "regular syncRequest local-only" → cross-instance; verwijderde `server/sockets/socket.ts`-refs in `ARCHITECTURE_SOCKET.md`/`ARCHITECTURE_SYNC.md` → `packages/server/src/loadSocket.ts`; `CORE_WATCH_GLOBS`-socket.ts uit `devkit/docs/supervisor.md` + `devkit/CLAUDE.md`; zod `^3.25.0`→`^4.0.0` in `core/CLAUDE.md` + `devkit/CLAUDE.md`. AI-indexen geregenereerd (`ai:index`/`ai:capabilities`/`ai:project-index`).
+
+**Verificatie (alle gates)**: `lint` (client+server) + `lint:packages` 0 (buiten `src/workspaces/**`) · `build:packages` 14/14 · `pack:dry` 14/14 (tarballs correct; template incl. `src/_sockets/*` ship mee) · `tsc -b tsconfig.server.json` + `tsconfig.client.json` 0 errors buiten workspaces · `test:unit` 748/748 · `test:integration` 5/5 (live Redis). Statische template-import-check: alle `_functions`/`shared`/`config`-imports resolven.
+
+**Bewust NIET gedaan**: (1) `server/sockets/` + `src/playground/` verwijderen — dev-only debris (shipt niet), de `rm` werd geblokkeerd door de tool-policy; handmatige cleanup aanbevolen. (2) `server/hooks/workspacesTerminal.ts` tsc-fout — workspaces/parallelle sessie, genegeerd zoals gevraagd. (3) per-package `prepack` — het publish-script bouwt eerst schoon, dus dist kan niet stale zijn. (4) niets gecommit (jij commit zelf).
+
+**Laatste echte gate vóór publish (kan lokaal niet zonder publish/pack-install): een scaffold-smoke-test** — `npm run publish:dry`, dan een vers `create-luckystack-app`-project bouwen tegen de getarballde packages (`npm install` + `generateArtifacts` + `build` + `test`, mongodb-default). Statisch is de template nu volledig consistent, maar dit is de definitieve bevestiging.
+
+**Files touched**: packages/create-luckystack-app/{template/package.json, template/config.ts, template/src/_sockets/*(nieuw), template/src/_components/{Avatar.tsx,LoginForm.tsx}, template/scripts/generateServerRequests.ts, template/prisma/schema.prisma, template/_dot_env_template, template/_dot_env_dot_local_template, src/index.ts}, packages/core/src/client.ts, packages/devkit/package.json, packages/server/package.json, packages/secret-manager/tsup.config.ts, scripts/publishPackages.mjs(nieuw), package.json, + docs (CLAUDE.md, sync/README.md, sync/docs/streaming.md, devkit/CLAUDE.md, core/CLAUDE.md, devkit/docs/supervisor.md, docs/ARCHITECTURE_{SYNC,SOCKET}.md, regen AI-indexen). Nothing committed.
+
+## 2026-06-03 19:12 — Correctie: playground BLIJFT (docs gefixt) + server/sockets/ verwijderd
+
+Gebruiker: de playground niet weghalen — die is nu een handige dev-tool om core-features te testen, dus elke doc/comment die zegt dat 'ie weg moet is fout. `server/sockets/` mag wél weg. `workspacesTerminal.ts` negeren.
+
+**Playground = permanent.** Een 2-agent read-only sweep vond alle "temporary/delete before publish"-claims. Gecorrigeerd zodat de playground als blijvende dev-tool leest (en nergens shipt): `src/playground/page.tsx` (top eslint-disable-comment, de `//? TEMPORARY … Delete this folder + Navbar item`-JSDoc, en de zichtbare header-pill "temporary dev page — delete … before publish"); `src/playground/_api/echo_v1.ts` `@docs deprecated … safe to remove` → `@docs summary` (dit propageerde de **deprecated**-marker in `AI_PROJECT_INDEX.md` — nu weg na regen); `docs/DEVELOPER_GUIDE.md:231` ontward de conflatie streaming-demo vs playground. Bevestigd: playground shipt in géén tarball/template (packages `files:[dist,README,CLAUDE.md,docs,LICENSE,CHANGELOG]`; create-luckystack-app `files:[…,template]` zonder playground).
+
+**`server/sockets/` verwijderd** (gebruiker akkoord). Sweep bevestigde: alle resterende files (`handle{,Http}{Api,Sync}Request.ts` + `utils/**`) zijn pre-split één-regel re-export-shims naar `@luckystack/{api,sync,presence,login}`; **nul live importers** in code (boot loopt via `bootstrapLuckyStack` → `@luckystack/server`'s `loadSocket`). De rest van `server/` blijft load-bearing (server.ts importeert `server/{prod,hooks,bootstrap,utils}`, `server/dev/` = dev-runtime, `server/config/presetLoader.ts` door generateServerRequests) — daarom is enkel `server/sockets/` dood. (Aside, niet aangeraakt: de sweep meldde dat `server/auth/` óók pure shims zonder importers is — mogelijke vervolg-cleanup, buiten scope.)
+
+**Verificatie**: `lint:client` + `lint:server` 0 (server/sockets-deletie brak niets → bevestigt dood) · `tsc -b` server + client 0 errors buiten workspaces · AI-indexen geregenereerd (echo niet meer "deprecated"). Niets gecommit.
+
+**Files touched**: src/playground/{page.tsx, _api/echo_v1.ts}, docs/DEVELOPER_GUIDE.md, regen AI-indexen; verwijderd: server/sockets/. Nothing committed.
+
+## 2026-06-03 21:00 — Workspace-AI: volledige orchestratie-architectuur uitgewerkt → AI-handoff docs (`src/workspaces/_docs/`)
+
+De Workspace-AI-rol is bewust véél groter gemaakt dan de oude B-23-schets: de actieve **middle-man** die ~90% doet (vage tickets refinen → vragenlijst, flow A→B dragen op goedkeuring, "hoe staat ticket X?" beantwoorden, vastgelopen agents verwerken tot status+notificatie, pipeline mee opzetten, gegenereerde docs op commando/cron verversen, always-on zodat tickets doorlopen terwijl de user weg is). Onderzoek + ontwerp via een ultracode-workflow (7 agents: 4 explore — handoff-spec, UI-shapes, framework-runtime, Claude-Code-facts — + een 3-lens design-panel: engine / protocol-data / automation-scale).
+
+**Doorslaggevende vondst (stuurt alles):** **vanaf 2026-06-15 trekt headless `claude -p`/Agent-SDK uit een aparte gemeterde credit-pool, NIET de Max-subscription** — alleen **interactieve PTY**-sessies blijven op de subscription. Daarmee vervalt de oude `CLAUDE_SETTINGS_MAP`-aanpak (autonome `--print --output-format stream-json`-runs) voor het subscription-pad, én de eerder geplande "PTY + ANSI sentinel-parsing".
+
+**Vastgelegde beslissingen (met de user):** (1) **subscription-only = interactieve PTY overal**; (2) **containers alleen voor code-stages** (Refine/Plan = lichte reasoning-sessies, `AgentRole.needsWorkspace`); (3) workspace is **real-time multi-client** (gedeelde state + Brain-contentie via geserialiseerd chat-kanaal + deterministische fast-path + cap/queue); (4) **cross-platform** (Win via WSL2 + Linux) & **stack-agnostisch** (.NET/Go/elke stack, één base-image + per-project); (5) **niet vastpinnen op MCP** — integraties zijn doel-gedefinieerd ("AI gebruikt third-party tools zoals de DB om data te zien"), mechanisme open (v1 = whitelisted CLI-client via Bash; MCP optioneel — de per-tool JS-servers bestaan nog niet).
+
+**Kernarchitectuur (gedocumenteerd):** 3 actoren — **Stage-Agent** (worker, PTY in container voor code) · **Brain** (1 per workspace, reasoning/voorstellen, **geen write-verbs**) · **Conductor** (deterministische Node — de enige schrijver van board/git/status). Dit dwingt **B-23** structureel af. Gestructureerd kanaal = Claude **hooks (`type:http`)** voor lifecycle + een **transport-flexibele verb-set** (`emit_carryover`/`request_input`/… ). Nieuwe entiteiten: **`QuestionSet`** (phone-from-the-beach), **`CarryOver`** (B-O2-envelope), **`WorkspaceTrigger`** (when→then + cron, minimale leased scheduler), pluggable **`AgentRole`** (`roleKey`, default `code`) + `ArtifactViewer`/`OrchestratorCommand`-registries = de stabiele "waist". "Built-in Claude Design" = nieuwe role + skill-bundle + viewer, **nul core-changes** (walkthrough in de docs).
+
+**Geleverd (docs-only — géén code, chat blijft dummy):** `src/workspaces/_docs/` — `README.md` + `01_ARCHITECTURE.md` (engine/billing, topologie, 3 actoren, sessie-lifecycle, real-time multi-client, cross-platform, security) + `02_PROTOCOL_AND_FLOW.md` (ws-ai:*-events, verb-set, hooks, ticket-state-machine, carry-over, QuestionSet, signals/suggestions, RBAC) + `03_AUTOMATION_AND_PLUGINS.md` (triggers/cron, refresh-docs, AgentRole-plugin, integraties, Design-walkthrough) + `04_DATA_MODEL.md` (Prisma ↔ prototype-`types.ts`) + `05_BUILD_PLAN.md` (parallellisme-geoptimaliseerde fasen P0–P5+ voor agent-teams/ultracode; eerste build = de thin Brain PoC, chat-only). Pointers bijgewerkt: `SESSION_STATE.md` §2 + §7 (§7-schets gemarkeerd als superseded met de 8 deltas), `CLAUDE.md` doc-tabel.
+
+**Volgende stap (na user-vragen):** P1 = de thin Brain PoC (`server/hooks/workspacesBrain.ts` — 1 interactieve `claude`-PTY per workspace over de bestaande socket-bridge, dev-gated `WORKSPACE_AI_ENABLED=1`, dummy `sendChat` vervangen, stream in de chatbubbles, Compact-knop).
+
+**Verificatie**: docs-only, geen lint/build deze stap (de PoC-gates gelden bij P1). `_docs/` (README+01–05) compleet + cross-linked; SESSION_STATE + CLAUDE.md verwijzen ernaar.
+
+**Files touched**: src/workspaces/_docs/{README,01_ARCHITECTURE,02_PROTOCOL_AND_FLOW,03_AUTOMATION_AND_PLUGINS,04_DATA_MODEL,05_BUILD_PLAN}.md (nieuw), src/workspaces/SESSION_STATE.md. Nothing committed. (Correctie in de 21:40-entry: CLAUDE.md is NIET aangeraakt; SESSION_STATE-edits later teruggedraaid.)
+
+## 2026-06-03 21:40 — Workspace-AI docs: R1 (per-user Assistant + on-demand Coordinator) + R2 (token-optimalisatie; SESSION_STATE eruit)
+
+Q&A-ronde met de user op de `_docs/` → twee verfijningen doorgevoerd in de docs.
+
+**R1 — sessie-topologie: 3 actoren → 4 rollen.** De single per-workspace 'Brain' is gesplitst in **Assistant** (interactieve PTY, **1 per actieve user per workspace**, suspend-on-disconnect — haalt chat-contentie weg, houdt context lean, draagt die user's RBAC) + **Coordinator** (interactieve PTY, **≤1 per workspace, on-demand** door de Conductor gespawned voor achtergrond-reasoning wanneer geen user verbonden is: signal→suggestion, vastgelopen agent verwoorden, scheduled jobs — niet warm gehouden). Stage-Agent + Conductor (deterministisch, enige schrijver) ongewijzigd. Beide AI's hebben **geen write-verbs** → B-23 structureel. Consistentie via de DB (Conductor), niet via gedeelde chat-historie. Ticket-agents koppelen terug via **structured signals in de append-only log** (`emit_signal` = "de API"), niet via directe AI→AI-chat; de Conductor voert de log serieel aan de Coordinator; synchrone uitzondering = `query_context`.
+
+**R2 — token-optimalisatie via self-handoff** (custom, controleerbaar; idee van de user). Context-budget **per stage** (`contextBudgetTokens`) + **per workspace-AI**. Na elke turn checkt de orchestrator de lopende token-schatting (ziet alle PTY-bytes; co-opt evt. de `PreCompact`-hook). Boven de cap: stuur de **bewerkbare handoff-instructie** → AI schrijft een gedetailleerde handoff (incl. doorgegeven vorige-stage-context) via `emit_handoff` → **`/clear`** (of `/compact`) → laad de handoff terug = verse lean state. Generaliseert carry-over naar binnen-sessie. Nieuw: `Handoff`-model + `emit_handoff`-verb + doc **`06_TOKEN_OPTIMIZATION.md`**.
+
+**SESSION_STATE.md** wordt door de user verwijderd → de pointers die ik er in had gezet (§2 + §7) zijn **teruggedraaid** (bestand weer origineel); alle `SESSION_STATE.md`-referenties uit `_docs/` + memory gescrubbed (handoff = `src/workspaces/_docs/` + `handoff/` + `CLAUDE.md`). **CLAUDE.md bewust NIET aangeraakt** (shipt met het framework; `_docs/` is tijdelijk-prototype).
+
+**Verificatie**: docs-only, geen lint/build. `_docs/` = README + 01–06, intern consistent, 4-rollen-model overal; SESSION_STATE terug in originele staat. Niets gecommit.
+
+**Files touched**: src/workspaces/_docs/{README,01_ARCHITECTURE,02_PROTOCOL_AND_FLOW,04_DATA_MODEL,05_BUILD_PLAN}.md (herzien), src/workspaces/_docs/06_TOKEN_OPTIMIZATION.md (nieuw), src/workspaces/SESSION_STATE.md (pointers teruggedraaid). Nothing committed.
+
+## 2026-06-03 22:10 — Workspace-AI docs R3: standing Coordinator geschrapt (3 rollen) + SESSION_STATE verwijderd
+
+Vervolg-Q&A: de user vroeg waarom er een extra per-workspace CLI ('Coordinator') nodig is náást de per-user Assistants, aangezien ticket-agents via JSON naar een deterministische controller (Conductor) communiceren. Terecht — coördinatie heeft geen LLM nodig.
+
+**R3 — Coordinator als staande rol geschrapt → 3 rollen:** **Assistant** (per actieve user/workspace) · **Stage-Agent** (worker) · **Conductor** (deterministisch — álle coördinatie + enige schrijver). Audit van de oude Coordinator-taken: comms/coördinatie = Conductor (geen LLM); simpele suggesties = deterministische Conductor-regels; **vastgelopen agent verwoordt zijn eigen vraag** vóór hij stopt (hij is zelf een LLM, leeft op beslis-moment) via `request_input`/`emit_signal('stopped',{userQuestion})`, hard-crash = deterministische notificatie; zware reasoning-suggesties = een verbonden user's Assistant. De énige resterende reden voor een niet-Assistant-LLM = proactieve reasoning terwijl GEEN user verbonden is (scheduled briefings) → een **optionele, toekomstige, ephemere one-shot reasoner** die de Conductor per cron/trigger spawned (= de `invoke-workspace-ai`-actie), géén staande instance, niet in v1. Tickets lopen toch door: Stage-Agents zijn de workers, de Conductor is de always-on plumbing.
+
+**SESSION_STATE.md verwijderd** (user-akkoord).
+
+**Docs bijgewerkt:** README + 01–06 herzien naar het 3-rollen-model (actor-tabel/diagram, SessionManager-keys `assistant:ws:user` + `worker:ticket:stage` (+ toekomstige `reasoner:…`), signal-log → Conductor, `AgentSession.kind = 'assistant'|'worker'` (+ optioneel `'reasoner'`), RBAC-tabel, token-opt budgets). Memory (`project_workspace_ai_architecture.md` + `MEMORY.md`) bijgewerkt naar 3 rollen.
+
+**Verificatie**: docs-only. Geen 'Coordinator' als rol meer in de docs behalve de expliciete "no standing Coordinator"-noten + de optionele-reasoner-sectie (01 §3.x). Niets gecommit.
+
+**Files touched**: src/workspaces/_docs/{README,01_ARCHITECTURE,02_PROTOCOL_AND_FLOW,03_AUTOMATION_AND_PLUGINS,04_DATA_MODEL,05_BUILD_PLAN,06_TOKEN_OPTIMIZATION}.md; verwijderd: src/workspaces/SESSION_STATE.md. Nothing committed.
+
+## 2026-06-03 22:40 — Workspace-AI: gedetailleerde feature-doc set (`_docs/features/` INDEX + 11 docs)
+
+De user wil ALLE features gedetailleerd gedocumenteerd vóór er code komt, cohesief met de gelockte architectuur (01–06), uitvoerbaar via parallelle agents/ultracode. Aanpak: een ultracode-inventarisatie (handoff/ + src/workspaces/ + _docs/) → feature-map + open beslissingen → 4 user-Q&A-keuzes gelockt → een schrijf-workflow (spine → 6 parallelle lanes → cohesie-pass).
+
+**Gelockte keuzes (Q&A):** D1 presets 3/5/7 capability-gedifferentieerd (simple=3, advanced=5, professional=7 incl. Reviewer1+2); D2 system-prompts gelaagd (AgentRole base → preset-override → user-edit); integraties **CLI-client-first** (MCP alleen waar 't moet); D4 token/tijd-schatting = self-estimate + rolling SpendRecord-gemiddelde (range + per-model pricing); D5 voice volledig gedocumenteerd, **build uitgesteld**; D7 **volledige VSCode-achtige editor** als target via **UI-Builder**; D3 **UI-Builder is extern, nog niet in de repo — user voegt 't later toe als in-repo folder**; docs definiëren het mount/props-contract (openFile/revealRange/setChangedFiles/setBaselineCommit) + FileDiffViewer als interim; D9 copy-from-workspace = deep-duplicate; D10 diff-baseline beide, default whole-ticket; D6 multi-instance/DR blijft 05 P4; D8 veel kleine docs.
+
+**Geleverd:** `src/workspaces/_docs/features/` — `INDEX.md` (spine: nav + de single new-fields/models delta-tabel [14 rijen] + no-new-verbs-assertie + dependency-graph + glossary + D1–D10 + 47 open beslissingen gebundeld + ops/DR→05 P4 pointer) + 11 feature-docs (01_WORKSPACE_SETUP, 02_PIPELINE_PRESETS, 03_BUILD_PHASE, 04_INTEGRATION_TOOLS, 05_PER_SESSION_INFO, 06_VOICE_INPUT, 07_CODE_CHANGES_REVIEW, 08_CODEBASE_VIEWER, 09_QUESTIONS_IN_TICKETS, 10_AUTOMATIONS_SCREEN, 11_WORKSPACE_AI_PANEL). Elke doc volgt 1 skeleton (Scope/User-flow/Data/Verbs/UI/Extends/Open-questions), citeert 01–06, voegt **0 nieuwe structured-channel-verbs** toe. README "Document map" kreeg 1 pointer-regel naar features/INDEX.md.
+
+**Cohesie-pass (8e agent):** delta-tabel herschreven (3 dedupes + 1 naming-collision opgelost: avgTokensPerTurn → PipelineStage i.p.v. AgentSession), no-new-verbs PASS (54 verb-refs → 13 gelockte verbs; ws-ai:* = socket-events, UI-Builder mount-props ≠ verbs), cross-links 05→02 + 08→03 toegevoegd, alle open-questions gebundeld in INDEX. Geen contradicties met de gelockte architectuur.
+
+**Residu voor de user (open beslissingen, géén fouten):** o.a. 02.q3 (systemPrompt vs customInstructions evt. 1 veld), 08.q1 (waar de UI-Builder-folder landt), en 06 draait whisper.cpp als allow-listed run-command in de container-sandbox (consistent, maar de enige non-Claude binary — bevestiging waard).
+
+**Verificatie**: docs-only, geen lint/build. 12/12 files aanwezig; INDEX + 08 handmatig gereviewd (hoge kwaliteit, UI-Builder-eis correct vastgelegd). Niets gecommit.
+
+**Files touched**: src/workspaces/_docs/features/{INDEX,01_WORKSPACE_SETUP,02_PIPELINE_PRESETS,03_BUILD_PHASE,04_INTEGRATION_TOOLS,05_PER_SESSION_INFO,06_VOICE_INPUT,07_CODE_CHANGES_REVIEW,08_CODEBASE_VIEWER,09_QUESTIONS_IN_TICKETS,10_AUTOMATIONS_SCREEN,11_WORKSPACE_AI_PANEL}.md (nieuw), src/workspaces/_docs/README.md (pointer). Nothing committed.
+
+## 2026-06-03 23:10 — Feature-docs: 47 open beslissingen opgelost + verwerkt + gap-rapport
+
+Q&A met de user: alle 47 open beslissingen in `_docs/features/INDEX.md` doc-voor-doc doorlopen (met voorstellen). Meeste = voorgestelde defaults bevestigd; **4 deviaties**: (01.q1) slug-uniekheid **per-owner**; (01.q2) **één project per workspace** (geen project-switcher; seed's 2e project = legacy); (03.q3) GENERATE'd docs **gecommit naar `docs/luckystack/`** → build-fase heeft **git write/commit** (+ nieuw veld `Project.generatedDocsPath`); (07.q3 / 09.q2) **Reject heropent de stage** (agent `--resume`'t met de reject-note, done→busy; vervangt 'hold at done'). Plus: (01.q4) zichtbare "indexeert nog op de achtergrond"-indicator (per-source chips), (03.q2) opt-in `stage.on_complete→ai:refresh-docs`-trigger, (11.q4) compact = auto-bij-budget + handmatige 'Optimize now'.
+
+**Verwerkt** via een workflow (8 agents: 6 doc-lanes parallel + INDEX-lane + cohesie-pass): elke feature-doc z'n `## Open questions` → `## Resolved` met het gekozen antwoord; INDEX "Open Decisions" → "Resolved decisions" D11–D60 (de 4 deviaties met ⚑) + `Project.generatedDocsPath`-rij in de delta-tabel (nu 15 rijen). **Cohesie-pass: alle 7 checks PASS** (geen open questions meer; 07↔09 reject consistent; 01/03/11 substantieel verwerkt; geen nieuwe structured-channel-verbs). Minor residu (niet-blokkerend, gelaten): INDEX nav-blurb van doc 05 noemt `durationEstimate` niet (wel correct in de delta-tabel + doc 05 zelf).
+
+**Gap-rapport (op verzoek — features zonder detail-doc):** A) bestaande schermen: Board/kanban (+quickview/context-menu/create-edit/filter), Backlog+Sprints, Terminals-UX (grid/tabs/split/SSH-unlock/states), Sources-beheer, Members/RBAC-editor, Account, Notifications-center, Usage/Spend&Budget-scherm, Activity/event-log+rewind, Search/⌘K; B) flows: Auth (login+SSH-link+accept-invite), GitLab-board-sync, per-ticket preview-deployment, pause/kill-controls; C) infra (orchestrator: Docker/worktree/Caddy/GitLab-webhook/RAG-indexer — eerder als architectuur behandeld). Voorstel: een 2e `features/`-batch voor tier A (+ tier-B flows), zelfde spine/skeleton/parallel-lane-methode, op commando van de user.
+
+**Verificatie**: docs-only, geen lint/build. INDEX zonder open beslissingen (D11–D60 resolved); 12/12 docs consistent; cohesie-pass groen. Niets gecommit.
+
+**Files touched**: src/workspaces/_docs/features/{INDEX,01_WORKSPACE_SETUP,02_PIPELINE_PRESETS,03_BUILD_PHASE,04_INTEGRATION_TOOLS,05_PER_SESSION_INFO,06_VOICE_INPUT,07_CODE_CHANGES_REVIEW,08_CODEBASE_VIEWER,09_QUESTIONS_IN_TICKETS,10_AUTOMATIONS_SCREEN,11_WORKSPACE_AI_PANEL}.md (herzien). Nothing committed.
+
+## 2026-06-03 22:55 — Final 3 pre-publish items: scaffold i18n + devkit `//`-strip hardening + fresh smoke test GREEN
+
+Closed the last 3 items before publishing the 14 `@luckystack/*` packages @ 0.1.0 (continuation of the create-luckystack-app type-safety work). All three verified end-to-end; nothing committed.
+
+**Item 3 — cleared the 4 `jsx-no-literals` demo warnings (proper i18n, no eslint-disable).** Routed the scaffold's last bare-JSX strings through `useTranslator`: `template/src/_components/templates/Home.tsx` ("Settings"/"Sign out" → `home.settings`/`home.signOut`) and `template/src/dashboard/page.tsx` (converted the arrow-component to a hook body; "Dashboard" → reuses existing `dashboard.title`, description → new `dashboard.description`). Added the new keys to all 4 locale files `template/src/_locales/{en,nl,de,fr}.json` (new `home` namespace + `dashboard.description`); JSON validated parseable in every language.
+
+**Item 4 — devkit type-map: keystone `//`-comment hardening (`functionsMeta.ts`).** The generator collapses an extracted function-type signature to one line; an inline `//` then commented out the remainder → malformed generated TS (`validateGeneratedTypeIdentifiers: unresolved type identifiers [""]`; previously worked around only in `tryCatch.ts`). Added `stripLineComments()` built on `ts.createScanner` (skipTrivia:false) — it drops `SingleLineCommentTrivia` only, so `//` inside string/template literals (e.g. `'https://x'`) and block comments survive; a naive regex strip would corrupt those. Fed it into `normalizeInlineType()` (covers params/return/inferred-type) AND routed the generics clause through it (it bypassed normalize via a raw `.trim()` slice and was also vulnerable — `.trim()` drops the newline that terminated a `//` in a constraint, pulling `>` into the comment). New `functionsMeta.test.ts` (8 cases: comment strip, URL-literal preservation, block-comment preservation, keystone collapse). **25/25 devkit unit tests pass; `lint:packages` clean.**
+
+**Item 5 — fresh-from-tarball smoke test = the pre-publish gate.** Added `.smoke-test/run.mjs` (gitignored): packs all 14 built packages → scaffolds a fresh app → rewrites its 9 direct `@luckystack/*` deps to `file:` tarballs + a 13-lib `overrides` block (resolves transitive unpublished deps offline) → `npm install` → `prisma generate` (mongodb) → `generateArtifacts` → `typecheck` → `build` → `lint`. Rebuilt all 14 packages first (`build:packages` 14/14).
+
+**Verification (all green):** `build:packages` 14/14 · devkit unit tests 25/25 · `lint:packages` 0. **Smoke test: pack 14/14, scaffold/install/prisma/generateArtifacts ✅, `tsc --noEmit` = 0 errors, `vite build` PASS, `lint` = 0 errors / 0 warnings** (lint.log is the npm echo only — the 4 jsx warnings are gone). The framework is publish-ready; publish itself (npm login + `@luckystack` org + `publish:packages`) is a user-gated action, not done here.
+
+**Files touched**: packages/devkit/src/typeMap/functionsMeta.ts, packages/devkit/src/typeMap/functionsMeta.test.ts (new), packages/create-luckystack-app/template/src/_components/templates/Home.tsx, packages/create-luckystack-app/template/src/dashboard/page.tsx, packages/create-luckystack-app/template/src/_locales/{en,nl,de,fr}.json, .smoke-test/run.mjs (new, gitignored). Nothing committed.
+
+## 2026-06-03 23:40 — Workspaces: operator setup/prerequisites-doc (`_docs/SETUP_AND_PREREQUISITES.md`)
+
+User vroeg of het hele project nu in detail gedocumenteerd is (antwoord: nee — architectuur 01–06 + de 11 feature-docs wél; ~10 bestaande schermen + flows + orchestrator-infra nog niet, zie het gap-rapport van 23:10) en of er een nette lijst is van wat hij zelf moet opzetten (er was géén geconsolideerde operator-checklist; items stonden verspreid).
+
+**Geleverd:** `src/workspaces/_docs/SETUP_AND_PREREQUISITES.md` — één **build-fase-getagde** operator-checklist (prototype-now ≈ alleen `claude login`; daarna P1–P5): host & Claude-auth (Max-subscription, **géén** `ANTHROPIC_API_KEY`, `~/.claude` mounten), container-image (base met git/Claude-CLI/node-pty + clients psql/mysql/mongosh/redis-cli/curl/git/gh; per-project Dockerfile voor .NET/Go + extra clients), data-infra (Mongo + **Atlas Local** voor `$vectorSearch`, Redis, self-hosted embeddings), GitLab (OAuth-app + per-workspace token + webhook), networking (Caddy + wildcard-DNS/TLS), **per CLI-integratie** (client in image → twee DB-users ro/rw → workspace Env + Integration-tool + per-stage select+tier; MCP alleen waar 't moet), notifications/SSH/voice (VAPID, SSH-pubkey per user, whisper.cpp deferred), UI-Builder (folder later in `src/workspaces/_uibuilder/`), framework-prereqs (R1–R5 grotendeels geland), + de echte `.env`-vars. Elk item geciteerd naar z'n B-/G-bron + feature-doc. Gegrond op een read-only sweep van `handoff/FRAMEWORK_GAPS.md` + BESLISSINGEN + CLAUDE_SETTINGS_MAP + `.env_template`. Pointers toegevoegd vanuit `_docs/README.md` + `features/INDEX.md`.
+
+**Verificatie**: docs-only, geen lint/build. Niets gecommit.
+
+**Files touched**: src/workspaces/_docs/SETUP_AND_PREREQUISITES.md (nieuw), src/workspaces/_docs/README.md (pointer), src/workspaces/_docs/features/INDEX.md (pointer). Nothing committed.

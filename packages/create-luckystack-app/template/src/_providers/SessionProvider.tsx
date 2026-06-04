@@ -35,16 +35,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setLatestSession(null);
       return;
     }
-    let cancelled = false;
+    const run = { cancelled: false };
     void (async () => {
       const result = await proposeLogin(session);
-      if (cancelled) return;
+      if (run.cancelled) return;
       if (!result.committed) {
         if (dev) console.warn('[session] preLogin hook vetoed transition', result.signal);
         setSession(null);
       }
     })();
-    return () => { cancelled = true; };
+    return () => { run.cancelled = true; };
   }, [session]);
 
   //? Hook in client-side error-tracking user context here if you want

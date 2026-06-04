@@ -3,7 +3,7 @@
 //? `@luckystack/email` lazily so the login package doesn't list it as a
 //? hard dep — `'custom'` and `'disabled'` modes never reach this code.
 
-import { getProjectConfig, dispatchHook } from '@luckystack/core';
+import { getProjectConfig, dispatchHook, getLogger } from '@luckystack/core';
 
 import { createPasswordResetToken } from './passwordReset';
 import { getUserAdapter } from './userAdapter';
@@ -27,7 +27,9 @@ interface SendResetEmailArgs {
  */
 export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArgs): Promise<{ ok: boolean; reason?: string }> => {
   const config = getProjectConfig();
+  getLogger().info('[forgotPassword] start', { email, forgotPasswordMode: config.auth.forgotPassword });
   if (config.auth.forgotPassword !== 'framework') {
+    getLogger().warn('[forgotPassword] auth.forgotPassword is not "framework" — nothing sent', { mode: config.auth.forgotPassword });
     return { ok: false, reason: 'forgotPassword-not-framework' };
   }
 
@@ -39,16 +41,33 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
     sendEmail: (input: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }>;
     renderEmailLayout: (input: Record<string, unknown>) => { html: string; text: string };
   }
-  const { sendEmail, renderEmailLayout } = await (
+  //? Mirror testEmail's robustness: catch a failed dynamic import instead of
+  //? throwing (an uncaught throw here would bubble out of the anti-enumeration
+  //? wrapper as a generic 500). Surfaces the real reason in the server log.
+  const emailModule = await (
     // @ts-expect-error optional peer dep — installed only when forgotPassword === 'framework'
     import('@luckystack/email') as Promise<EmailModule>
-  );
+  ).catch((error: unknown) => {
+    getLogger().warn('[forgotPassword] failed to load @luckystack/email — is it installed?', { error: String(error) });
+    return null;
+  });
+  if (!emailModule) {
+    return { ok: false, reason: 'email-module-load-failed' };
+  }
+  const { sendEmail, renderEmailLayout } = emailModule;
 
   const userAdapter = getUserAdapter();
   const user = await userAdapter.findByEmail({ email, provider: 'credentials' });
+  getLogger().info('[forgotPassword] credentials user lookup', { email, found: Boolean(user), userId: user?.id ?? null });
 
   // Anti-enumeration: always pretend it succeeded if the email isn't found.
   if (!user) {
+    //? The client always gets "success" (anti-enumeration). This server-side
+    //? line is the ONLY signal that the address simply isn't a credentials
+    //? (email+password) account — by far the most common reason a reset email
+    //? never arrives (OAuth-only signups and unknown/typo'd addresses have no
+    //? credentials row, so there is nothing to reset).
+    getLogger().warn('[forgotPassword] no credentials account for this email — nothing sent. Use the email+password account you registered with.', { email });
     void dispatchHook('passwordResetRequested', {
       email,
       matched: false,
@@ -89,6 +108,12 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
     text,
     adapterHint: 'transactional',
   });
+
+  if (result.ok) {
+    getLogger().info('[forgotPassword] reset email dispatched', { userId: user.id, to: user.email });
+  } else {
+    getLogger().warn('[forgotPassword] reset email send FAILED', { userId: user.id, reason: result.reason });
+  }
 
   return result.ok ? { ok: true } : { ok: false, reason: result.reason };
 };

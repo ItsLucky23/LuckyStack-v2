@@ -228,7 +228,7 @@ Strict stream typing note:
 - If a route does not call `stream(...)`, its generated stream type is `never`.
 - For those routes, TypeScript disallows `onStream`/stream callback registration.
 
-This repository no longer ships a permanent streaming playground route.
+This repository no longer ships the standalone `src/streaming` demo route. (The kept `src/playground` dev tool is unrelated — it is an in-repo surface for testing core features and is never shipped to consumers.)
 
 To recreate the exact previous demo route and handlers, use:
 
