@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/error-tracking",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -52,10 +52,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.1.0"
+    "@luckystack/core": "^0.1.2"
   },
   "devDependencies": {
-    "@luckystack/login": "^0.1.0"
+    "@luckystack/login": "^0.1.2"
   },
   "peerDependencies": {
     "@sentry/node": "^10.48.0",
@@ -64,9 +64,17 @@
     "posthog-node": "^4.0.0"
   },
   "peerDependenciesMeta": {
-    "@sentry/node": { "optional": true },
-    "dd-trace": { "optional": true },
-    "hot-shots": { "optional": true },
-    "posthog-node": { "optional": true }
+    "@sentry/node": {
+      "optional": true
+    },
+    "dd-trace": {
+      "optional": true
+    },
+    "hot-shots": {
+      "optional": true
+    },
+    "posthog-node": {
+      "optional": true
+    }
   }
 }

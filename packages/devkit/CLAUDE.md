@@ -97,7 +97,7 @@ Internal modules (not exported from `index.ts`, but live in this package):
 
 ## Peer dependencies
 
-- **Required peer (runtime)**: `typescript@~5.7.3` — the type-map emitter and runtime type resolver call into the TypeScript Compiler API. No optional fallback; if the consumer's `typescript` version drifts out of the supported range the emitter may produce different inlined output. Treat as a hard peer.
+- **Required peer (runtime)**: `typescript@>=5.7.3 <7.0.0` — the type-map emitter and runtime type resolver call into the TypeScript Compiler API. No optional fallback. The emitter's `checker.typeToString` output was verified byte-identical between TS 5.7.3 and 6.0.3, so both are supported; TS 7 (native port) is excluded until re-verified. Consumers on the React-eslint stack typically stay on 5.7.x (eslint-plugin-react / jsx-a11y have no ESLint-10 release yet, and ESLint 10 is what TS6-capable react-x requires); the framework itself builds on TS 6. If a consumer's `typescript` version drifts outside this range the emitter may produce different inlined output. Treat as a hard peer.
 - **Required peer**: `zod@^4.0.0` — the Zod schema emitter compiles consumer input types into runtime schemas via `zodEmitter.ts`.
 - **Required peer**: `@prisma/client@^6.19.0` — type expansion may surface Prisma model types into emitted artifacts; missing the client breaks generation.
 - **Direct dependency**: `chokidar@^4.0.3` (the file watcher used by both `hotReload.ts` and `supervisor.ts`).

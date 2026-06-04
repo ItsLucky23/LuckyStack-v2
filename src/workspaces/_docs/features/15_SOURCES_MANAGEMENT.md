@@ -110,7 +110,7 @@ No new persisted model. The screen renders the existing **`InfoDoc`** (`{ id, na
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D74–D75)
 
-1. **15.q1 — Upload formats:** which file types are accepted for an uploaded spec (md/txt only, or also pdf/docx with extraction)? (Assumed: md/txt/plain text in v1; richer formats deferred.)
-2. **15.q2 — Regenerate confirmation:** does Regenerate on a `generated` doc need a confirm (it overwrites the committed `docs/luckystack/` file, [03] D21), or fire immediately? (Assumed: immediate; it's append/overwrite into the repo and reversible via git.)
+1. **15.q1 — Upload formats → D74:** **md/txt/plain text only in v1.** Richer formats (pdf/docx with extraction) are deferred.
+2. **15.q2 — Regenerate confirmation → D75:** **Fire immediately, no confirm.** It overwrites the committed `docs/luckystack/` file ([03] D21) but is reversible via git.

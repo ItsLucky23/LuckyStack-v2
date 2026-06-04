@@ -66,6 +66,21 @@ Ticket-agents **report via structured JSON into an append-only signal log** (not
 
 ## Document map
 
+### ▶ V1 setup — START HERE (the drag-and-drop build package, 2026-06-04)
+
+> A fresh AI pointed at this folder should read **`BUILD_HANDOFF.md` first**, then `V1_SCOPE.md`, then `BUILD_ORDER.md`. **Precedence:** `V1_SCOPE` wins on *what* ships; the build-docs win on *how* each piece works; `00_SPEC_RECONCILIATION.md` resolves any handoff/-vs-_docs conflict.
+
+| Doc | Role | Read when |
+|---|---|---|
+| **[BUILD_HANDOFF.md](./BUILD_HANDOFF.md)** | **The single front door.** What Workspaces is, what V1 ships, the reading order, the 4-AI spin-up protocol, the standing constraints, the "where do I start?" prompt. | FIRST — every builder, every lane, before any code. |
+| **[V1_SCOPE.md](./V1_SCOPE.md)** | **Ground truth on WHAT ships.** IN/OUT table, the 7 concrete V1 flows, the deferred list, the precedence rule, the 4 lanes + Phase 0. | SECOND — the authority every other doc defers to on scope. |
+| **[BUILD_ORDER.md](./BUILD_ORDER.md)** | **The sequenced build plan.** Phase 0 (P0.5 spike gate + frozen contracts), the 4 non-overlapping lanes (A/B/C/D) with per-lane dirs/docs/milestones, the dependency graph, the non-overlap protocol, checkpoints CP0–CP5. | THIRD — once you know your lane. |
+| **[CODE_EDITOR.md](./CODE_EDITOR.md)** | **The Lane-D editor build-doc.** openvscode-server in-container (1:1 VS Code, account extensions, multi-language LSP, native git diff), the per-ticket Caddy route, the edit-lock/pause/resume orchestration, push-on-approval ride-along, the ui-builder Monaco demotion. | When building Lane D (editor / changes page). |
+| **[REPO_CLAUDE.template.md](./REPO_CLAUDE.template.md)** | **Template for the new repo's root `CLAUDE.md`.** Copy to repo root (do not edit in place). | Once, at repo bootstrap (Phase 0). |
+| **[PORT_MANIFEST.md](./PORT_MANIFEST.md)** | **The copy-list.** Exactly which non-framework files to bring into the fresh repo (the folder + `server/hooks/workspacesTerminal.ts` + the one wiring line + the `ui-builder/` reference + deps), and what NOT to copy (it's the framework). | At repo bootstrap, when copying files in. |
+
+### Architecture (the locked spine)
+
 | Doc | Covers | Read when… |
 |---|---|---|
 | **[01_ARCHITECTURE.md](./01_ARCHITECTURE.md)** | engine + billing, two-system topology, the 3 roles, session lifecycle, real-time multi-client + contention, cross-platform & stack-agnostic containers, security | you need the *why* and the runtime shape |
@@ -77,6 +92,48 @@ Ticket-agents **report via structured JSON into an append-only signal log** (not
 | **[07_ORCHESTRATOR.md](./07_ORCHESTRATOR.md)** | the single-instance **orchestrator runtime mechanics** the Conductor drives — §A ticket launch/teardown, §B Caddy subdomain proxy, §C GitLab-webhook ingest + board sync, §D RAG delta-indexer + vector store. Architecture-layer companion to 01 (not a feature doc); feature docs cite it as `[07 §A]`…`[07 §D]` | you need the deterministic runtime sequence behind a feature (containers, Caddy routes, webhooks, RAG) |
 | **[features/INDEX.md](./features/INDEX.md)** | the **detailed per-feature layer** — now **24 docs** (setup, presets, build phase, integrations, per-session info, voice, code review, codebase editor, questions, automations, AI panel, board, backlog/sprints, terminals, sources, members/RBAC, account/auth, notifications, usage/budget, activity, search, GitLab sync, preview, pause/kill) — extends 01–07, never contradicts | you're designing or building a specific feature |
 | **[SETUP_AND_PREREQUISITES.md](./SETUP_AND_PREREQUISITES.md)** | the **operator/human to-do list** — accounts, infra, container image, per-CLI-integration credentials, env vars (each tagged with the build phase it's needed for) | you're about to actually run it |
+
+### Build-doc set (added 2026-06-04 — from the deep review; read `REVIEW_AND_OPEN_QUESTIONS.md` for the decisions behind them)
+
+> **Reconciliation / reference layer** (read first — the rest cite these):
+
+| Doc | Covers | Read when… |
+|---|---|---|
+| **[REVIEW_AND_OPEN_QUESTIONS.md](./REVIEW_AND_OPEN_QUESTIONS.md)** | the 26-agent deep review: container & multi-provider deep-dives, 13 recommendations, 12 anti-recommendations, the 68 resolved open questions (each with its `→ Keuze`) | you want the *why* behind any build-doc decision |
+| **[00_SPEC_RECONCILIATION.md](./00_SPEC_RECONCILIATION.md)** | the precedence carve-out + ERRATA (E1–E8): which layer governs which decision class; supersedes README's blanket "specs win" for engine/billing/role-topology/verb-surface | you hit a `handoff/` claim that seems to conflict with the `_docs` — read FIRST |
+| **[REFERENCE_CODES.md](./REFERENCE_CODES.md)** | binding inlined definitions of every cited G#/B#/DH code + the B-xx→owning-doc coverage matrix; frees the build-docs from the frozen `handoff/` folder | you see a `B-23`/`G6`/`DH5` citation and need its real definition |
+| **[CONTROL_API.md](./CONTROL_API.md)** | the formal `[control-API]` spec: an authenticated `_api` route family → `preApiExecute` RBAC → enqueue a Conductor action (never a direct writer); the op-catalogue, ControlAck, merge-on-`seq` | you're building any user-initiated WRITE (pause/kill/bulk/role/budget/preview) |
+| **[04b_DATA_MODEL_ADDENDA.md](./04b_DATA_MODEL_ADDENDA.md)** | the §6–§11 model bodies docs 16–24 cite, the ONE canonical `AgentSession`, multi-cap `WorkspaceBudget`, the 5-value `WorkspaceSuggestion`, typed `StageKind`, the field sweep + `types.ts` backfill | you're touching persistence beyond what `04` spells out |
+
+> **Runtime / protocol & operational subsystems:**
+
+| Doc | Covers | Read when… |
+|---|---|---|
+| **[02b_PROTOCOL_ADDENDA.md](./02b_PROTOCOL_ADDENDA.md)** | the PTY-engine machine contract: the Stop-hook forced-reconciliation loop, per-session token lifecycle, the executable `VERB_REGISTRY` + conformance test, fenced-block parsing, the `emit_output→emit_carryover` collapse | you're wiring the deterministic backstop behind the interactive-PTY engine |
+| **[07b_CONTAINER_RUNTIME.md](./07b_CONTAINER_RUNTIME.md)** | the build-grade container layer: three-layer images, managed-token-projection auth, per-ticket/per-stage isolation, clone-into-volume, dial-by-name networking, egress forward-proxy, hardening table, CapacityManager, pty-agent | you're building or operating the container runtime |
+| **[GOLDEN_PLAN_STAGE.md](./GOLDEN_PLAN_STAGE.md)** | one fully-rendered stage (professional-preset PLAN) to literal `.claude/settings.json`/`.mcp.json`/`CLAUDE.md`/launch-command — the config-renderer's first regression fixture | you're building the config renderer (diff its output against this) |
+| **[P0_CLI_SPIKE.md](./P0_CLI_SPIKE.md)** | the P0.5 gating spike: subscription-billing, interactive `type:http` hooks, `/clear`-vs-`/compact`, per-turn usage, `--resume`-after-crash, managed-token-projection — blocks P1 lanes B/C/F until green | BEFORE starting P1 lanes B (SessionManager), C (channel), or F (containers) |
+| **[08_DEPLOYMENT.md](./08_DEPLOYMENT.md)** | the run model: N stateless web-app replicas + the single supervised orchestrator that takes `lease:orchestrator` and runs `resumeAll()`; boot-order graph; the explicit SPOF + P4 warm-standby | you're deploying or supervising the two systems |
+| **[OBSERVABILITY.md](./OBSERVABILITY.md)** | structured-logging contract, the minimal metrics set, per-leased-loop liveness, the alerting baseline, and the thin `@luckystack/monitoring` adapter; operator-vs-product stream boundary | you need to see/alert the orchestrator running |
+| **[DR_RUNBOOK.md](./DR_RUNBOOK.md)** | P4 backup/restore: mongodump + Redis AOF/RDB, the append-only event-log as restore-priority-1 + replay, RPO/RTO board, what is acceptably lost, the ordered restore procedure | you're setting up backups or recovering from a host loss |
+| **[TESTING_STRATEGY.md](./TESTING_STRATEGY.md)** | the test tier the auto-sweep can't reach: deterministic-Conductor unit tests, the fake/replay `EngineDriver`, the event-log subscribe-before-fetch race (FIRST slice), `VERB_REGISTRY` conformance + drift script | you're writing tests for the orchestrator/Conductor/event-log |
+| **[MIGRATION.md](./MIGRATION.md)** | prototype→real-repo port: the fresh `@luckystack`-consuming target, `types.ts→Prisma` step list, the `useWorkspaceData()` data-seam refactor, first-run bootstrapping, the `runInTenant` background-worker checklist | you're porting the UI prototype onto the real backend |
+| **[MULTI_PROVIDER_SEAM.md](./MULTI_PROVIDER_SEAM.md)** | PARKED-for-v1 seam: build only the single-spawn wrapper now; the 3-point conformance bar, the two hard forward-compat constraints, per-driver billing, the report-only prose de-conflicts | you're tempted to abstract the engine over a second AI backend (don't, beyond the wrapper) |
+
+### All-in-one layer (added 2026-06-04 — pluggable forge + the build-quality/operability gaps; decisions in `REVIEW_AND_OPEN_QUESTIONS_2_ALLINONE.md`)
+
+| Doc | Covers | Read when… |
+|---|---|---|
+| **[REVIEW_AND_OPEN_QUESTIONS_2_ALLINONE.md](./REVIEW_AND_OPEN_QUESTIONS_2_ALLINONE.md)** | the all-in-one round: cohesion verdict + the 5 decide-first forks + 50 consolidated open questions (each with a `→ Keuze`) | you want the *why/decisions* behind the all-in-one docs |
+| **[FORGE_ABSTRACTION.md](./FORGE_ABSTRACTION.md)** | the pluggable `ForgeProvider` seam (6 capabilities) — GitLabForge (today, SoT) / GitHubForge (design-now) / BuiltinForge (own repo+MR+CI); per-workspace `forgeMode`, Source-of-Truth per mode | you're touching anything git-host-related (board sync, repo, MR, CI, webhooks) |
+| **[BUILTIN_MR_REVIEW.md](./BUILTIN_MR_REVIEW.md)** | the per-ticket changes page expanded into a full MR experience: diff + review threads + approvals + merge; built-in-owns vs external-federates | you're building the merge-request / code-review surface |
+| **[BUILTIN_CI_PIPELINES.md](./BUILTIN_CI_PIPELINES.md)** | lightweight CI = container jobs on the existing orchestrator; the pluggable `PipelineRunner` (built-in / forge-native / external engine); `.workspaces/ci.yml` | you're building CI/pipelines |
+| **[GIT_STRATEGY.md](./GIT_STRATEGY.md)** | branch/rebase/merge/conflict/rollback across parallel tickets, serial Conductor-only merges, per forge mode | you're building the git/merge mechanics |
+| **[AI_QUALITY_AND_EVALS.md](./AI_QUALITY_AND_EVALS.md)** | the per-role system prompts + the golden-tickets eval harness + prompt versioning/A-B + the human-reject→few-shot feedback loop | you care whether the pipeline produces *good* output |
+| **[CLIENT_AND_PUSH.md](./CLIENT_AND_PUSH.md)** | PWA-first phone client + web-push (VAPID, service worker, redacted-payload-then-in-app per the D80 reversal), approve-from-lockscreen ergonomics | you're building the phone/PWA client or push |
+| **[SELF_HOST_INSTALLER.md](./SELF_HOST_INSTALLER.md)** | the one-command docker-compose stack + bootstrap; minimal (external-forge) vs full (built-in git+CI) profile | you're packaging the self-host install |
+| **[TRUST_SAFETY_UX.md](./TRUST_SAFETY_UX.md)** | shadow/gate-every-stage autonomy, forward-revert rollback, the immutable `AuditEntry`, per-workspace autonomy levels | you're building the trust/control surface |
+| **[PRODUCT_ANALYTICS.md](./PRODUCT_ANALYTICS.md)** | cycle-time/throughput/stuck-detection/cost-per-type from the event log (distinct from operator OBSERVABILITY) | you're building product-level insight dashboards |
 
 ---
 

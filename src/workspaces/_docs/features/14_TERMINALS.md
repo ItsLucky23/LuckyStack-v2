@@ -110,7 +110,7 @@ The reconnect scrollback is the orchestrator-side **ring-buffer** on `ManagedSes
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D72–D73)
 
-1. **14.q1 — Restart granularity:** does "Restart" re-run only the selected `StageProcess`'s command, or the whole container's process set? (Assumed: the selected process only; container-level reactivation is the ticket-level lever in `TicketDetail`.)
-2. **14.q2 — Copy-buffer scope:** copy the visible viewport or the full ring-buffer scrollback? (Assumed: full scrollback, capped at the ring-buffer length.)
+1. **14.q1 — Restart granularity → D72:** "Restart" re-runs **only the selected `StageProcess`'s command**. Container-level reactivation stays the ticket-level lever in `TicketDetail`.
+2. **14.q2 — Copy-buffer scope → D73:** **Copy the full ring-buffer scrollback** (capped at the ring-buffer length), not just the visible viewport.

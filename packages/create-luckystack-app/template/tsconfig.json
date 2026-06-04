@@ -12,12 +12,12 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    "baseUrl": ".",
     "paths": {
-      "src/*": ["src/*"],
-      "server/*": ["server/*"],
-      "shared/*": ["shared/*"],
-      "config": ["config.ts"]
+      "src/*": ["./src/*"],
+      "server/*": ["./server/*"],
+      "shared/*": ["./shared/*"],
+      "luckystack/*": ["./luckystack/*"],
+      "config": ["./config.ts"]
     }
   },
   "include": ["src", "server", "config.ts", "deploy.config.ts", "services.config.ts", "luckystack"]

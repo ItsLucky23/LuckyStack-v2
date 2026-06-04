@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/core",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -67,7 +67,7 @@
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
-    "dotenv": "^16.6.1"
+    "dotenv": "^17.0.0"
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",
@@ -82,10 +82,20 @@
     "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
-    "eslint": { "optional": true },
-    "react": { "optional": true },
-    "react-dom": { "optional": true },
-    "react-router-dom": { "optional": true },
-    "sonner": { "optional": true }
+    "eslint": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "react-router-dom": {
+      "optional": true
+    },
+    "sonner": {
+      "optional": true
+    }
   }
 }

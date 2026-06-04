@@ -56,9 +56,11 @@
 
 > **The single place new persistence is aggregated.** No feature doc edits `../04_DATA_MODEL.md`; each declares its additions on its `**INDEX delta:**` line and they roll up here. **Finalized by the cohesion pass** — built by reading every doc's `**INDEX delta:**` line, deduping shared fields, and resolving naming collisions (canonical name picked + noted). All fields are *additive* to the existing prototype types / Prisma models; entities already in 04 (`Handoff`, `QuestionSet`/`Question`, `WorkspaceTrigger`, `CarryOver`, `AgentSession`) are NOT re-introduced here — only deltas on top of them.
 >
-> **Net-new persisted fields/models: 11** — the batch-1 ten (`Workspace.presetKey`, `WorkspacePreset`, `Project.gitUrl`, `Project.linkedFiles[]`, `Project.generatedDocsPath`, `PipelineStageCfg.systemPrompt`, `AgentSession.durationEstimate`, `PipelineStage.avgTokensPerTurn`, `TicketEvent.metadata.voiceTranscript?`, `ChatMessage.questionSetId`) **+ `PreviewDeployment`** (the single batch-2 net-new persisted entity, owner 23) — plus **7 ui-only types** (`DiffBaseline`, `EditorMode`, `CodeRange`, `CodebaseEditorHandle`, `CodebaseEditorProps` from batch-1; **`BoardFilter`** owner 12, **`TicketSort`** owner 13 from batch-2) = **18 delta rows** total, **+ 1 already-in-04 surfaced field** (`AgentSession.tokenEstimate`). Docs 04, 10, 11, 14, 16, 17, 18, 19, 20, 21, 22, 24 introduce **no** new persistence (verified — their `INDEX delta:` lines are `(none)`).
+> **Net-new persisted fields/models: 14** — the batch-1 ten (`Workspace.presetKey`, `WorkspacePreset`, `Project.gitUrl`, `Project.linkedFiles[]`, `Project.generatedDocsPath`, `PipelineStageCfg.systemPrompt`, `AgentSession.durationEstimate`, `PipelineStage.avgTokensPerTurn`, `TicketEvent.metadata.voiceTranscript?`, `ChatMessage.questionSetId`) **+ `PreviewDeployment`** (owner 23) **+ the final-sweep three** (`WorkspaceBudget.enforcement` + `WorkspaceBudget.periodWindow` owner 19 / D81–D82; `Workspace.previewConcurrencyCap` owner 23 / D86) — plus **7 ui-only types** (`DiffBaseline`, `EditorMode`, `CodeRange`, `CodebaseEditorHandle`, `CodebaseEditorProps` from batch-1; **`BoardFilter`** owner 12, **`TicketSort`** owner 13 from batch-2) = **21 delta rows** total, **+ 1 already-in-04 surfaced field** (`AgentSession.tokenEstimate`). Docs 04, 10, 11, 14, 16, 17, 18, 20, 21, 22, 24 introduce **no** new persistence (verified — their `INDEX delta:` lines are `(none)`).
 >
-> **Most batch-2 (12–24) entities ALREADY exist** in `../../_data/types.ts` / DATAMODEL and are *surfaced, not introduced* — do not re-add: `Member` / `PermRole` / `Role` / `InviteEntry` (16/17), `SshKeyEntry` / `SessionEntry` / `PushSubscription` / `OAuthAccount` (17), `NotificationItem` / `Notification` (18), `UsageRow` / `WorkspaceBudget` / `SpendRecord` (19), `TicketEvent` / `ActivityEvent` / `TicketFile` (20), `Sprint` (13, edited not added), `Terminal` / `TerminalProcess` / `TerminalLine` (14), `InfoDoc` / `SkillEntry` (15), the GitLab linkage on `Project` / `Ticket` (22). The only genuinely-new batch-2 rows are the three below.
+> **⚠ POST-REVIEW (2026-06-04): this headline is pre-sweep.** The deep review's data-model fixes (`../04b_DATA_MODEL_ADDENDA.md`) add a Resolved-decision **field sweep** + `WorkspaceRole` + the multi-cap `WorkspaceBudget` reshape + the §6–§11 model bodies docs 16–24 cite. **`04b §16` is the authoritative recomputed total** (~1 net-new model + ~19 net-new fields above this 14). Treat `04b` as the schema source of truth; this row is historical until folded.
+>
+> **Most batch-2 (12–24) entities ALREADY exist** in `../../_data/types.ts` / DATAMODEL and are *surfaced, not introduced* — do not re-add: `Member` / `PermRole` / `Role` / `InviteEntry` (16/17), `SshKeyEntry` / `SessionEntry` / `PushSubscription` / `OAuthAccount` (17), `NotificationItem` / `Notification` (18), `UsageRow` / `WorkspaceBudget` / `SpendRecord` (19), `TicketEvent` / `ActivityEvent` / `TicketFile` (20), `Sprint` (13, edited not added), `Terminal` / `TerminalProcess` / `TerminalLine` (14), `InfoDoc` / `SkillEntry` (15), the GitLab linkage on `Project` / `Ticket` (22). The genuinely-new batch-2 rows are: `PreviewDeployment`, `BoardFilter`, `TicketSort` (batch-2 docs) **+ the final-sweep three** persisted fields (`WorkspaceBudget.enforcement`, `WorkspaceBudget.periodWindow`, `Workspace.previewConcurrencyCap`) — all below.
 
 | New field / model | Type | On / extends | Owning doc | Notes |
 |---|---|---|---|---|
@@ -80,6 +82,9 @@
 | `PreviewDeployment` | `{ ticketId, url, status:'building'\|'live'\|'down', startedAt, port, ttlExpiresAt }` | new (server/ui) | **23** | the per-ticket live-preview projection (D68). One active row per `ticketId`; the container/route lifecycle is [07 §A]/[07 §B], this row is what the badge renders. `ttlExpiresAt` = `startedAt + 30m`, bumped on every open (D67). The **only** batch-2 net-new persisted entity. |
 | `BoardFilter` | `{ labels[], assigneeId, statuses[], sprintId, hasRunningTerminal, needsInput }` | new (ui-only) | **12** | session-only board/backlog filter state for the D61 full filter popover; pure client predicate over `TICKETS`. Reused (not re-declared) by 13's search/person/quick-filter. Not persisted. |
 | `TicketSort` | `{ key:'id'\|'updated'\|'status'\|'stage', dir:'asc'\|'desc' }` | new (ui-only) | **13** | session-only column-sort state for the backlog list; defaults `{ key:'updated', dir:'desc' }`; pure client comparator within each sprint group. Not persisted. |
+| `WorkspaceBudget.enforcement` | `'pauseNew' \| 'pauseAll'` | `WorkspaceBudget` (now multi-row) | **19** | per-cap auto-pause mode (D81): `pauseNew` blocks new sessions / lets in-flight finish; `pauseAll` pauses all active sessions to `stopped` immediately. A workspace may hold several `WorkspaceBudget` caps. Persisted. |
+| `WorkspaceBudget.periodWindow` | `'calendar-month' \| { rolling: '5h' \| '30d' \| … }` (default `'calendar-month'`, workspace tz) | `WorkspaceBudget` | **19** | per-cap reset window (D82); default calendar-month in the workspace tz (D55); can express provider-native windows (e.g. Claude 5h). Persisted. See "Parked for later" (multi-provider). |
+| `Workspace.previewConcurrencyCap` | `Int` (safe default; hard-capped ~20) | `Workspace` | **23** | max concurrent preview PROD containers before "Open preview" queues (D86); backs the queue chip + live-preview manager. Persisted. |
 
 **Already in 04 — surfaced, not introduced** (counted separately so it isn't double-counted as net-new): `AgentSession.tokenEstimate` `Int @default(0)` — defined in 04 §2; doc 05 *surfaces* it as the chip's `actual-so-far` source.
 
@@ -282,7 +287,60 @@ All feature-doc open questions are now resolved.
 **(scope) — the batch-2 split**
 - **D71 (batch-2 scope)** Expand the detailed feature layer from 11 to **24 small docs** (12–24), mirroring **D8** (many small docs): board, backlog/sprints, terminals, sources, members/RBAC, account/auth, notifications, usage/budget, activity, search, GitLab sync, preview, pause/kill. Same skeleton + cite-up + no-new-verbs contract as 01–11; orchestrator runtime mechanics extracted into the architecture-layer `../07_ORCHESTRATOR.md` (cited like 01–06, not a feature doc).
 
-All batch-2 (12–24) open questions and decisions are now resolved and baked in.
+The batch-2 **headline** decisions (D61–D71) are baked in. The **secondary** per-doc open questions that docs 14–24 still carried were resolved in the final sweep below (D72–D87).
+
+---
+
+## Resolved decisions — final micro-decisions sweep (D72–D87) (2026-06-04 — baked in, do not re-open)
+
+> The last residual `## Open questions` from docs 14–24, resolved with the user. ⚑ marks answers that **deviate from the earlier proposed default** or **expand scope** beyond the minimal doc. Each owning doc's `## Open questions` section is now a `## Resolved` section citing these.
+
+**14 — Terminals**
+- **D72 (14.q1)** "Restart" re-runs **only the selected `StageProcess`'s command**; container-level reactivation stays the ticket-level lever in `TicketDetail`.
+- **D73 (14.q2)** "Copy" copies the **full ring-buffer scrollback** (capped at ring-buffer length).
+
+**15 — Sources**
+- **D74 (15.q1)** Uploads accept **md/txt/plain text only in v1**; pdf/docx-with-extraction deferred.
+- **D75 (15.q2)** Regenerate on a `generated` doc **fires immediately, no confirm** (reversible via git).
+
+**16 — Members & RBAC**
+- ⚑ **D76 (16.q1)** Custom `PermRole` is **fully configurable** — the matrix may grant *any* capability, **including** admin-management/ownership-transfer/delete rows. No rows hard-locked to built-ins. (Deviates from the proposed hard-lock.) The single-Owner invariant is held by D77, not by locking rows.
+- **D77 (16.q2)** **Block self-demotion**: an Owner cannot remove/downgrade themselves without first transferring ownership; ownership only moves via transfer.
+
+**17 — Account & Auth**
+- ⚑ **D78 (17.q1)** SSH key add runs a **one-time proof-of-possession challenge at add-time** (sign a server nonce before the key is stored). (Deviates from the proposed trust-on-add.) The per-open `/pty` challenge still gates each session.
+- **D79 (17.q2)** The user's OAuth provider is **identity-only**; the workspace token (B-07) does the board sync. No per-provider workspace gating.
+
+**18 — Notifications**
+- **D80 (18.q1)** Push payload is **redacted by default** (title + "open to view"); the full body is fetched in-app behind auth; full-body push is a per-user opt-in. (**REVISED 2026-06-04** via `REVIEW_AND_OPEN_QUESTIONS.md` Q-SEC-NOTIF-PUSH — reverses the earlier full-body default after the security review, rule 19.)
+
+**19 — Usage & Budget**
+- ⚑ **D81 (19.q2)** **Multiple budget caps**, each with an **enforcement mode**: `pauseNew` (block new sessions, let in-flight finish) **or** `pauseAll` (pause all active sessions immediately). (Expanded — `WorkspaceBudget` becomes multi-row with `enforcement`.)
+- ⚑ **D82 (19.q3)** Budget reset period is a **per-cap configurable window** (`WorkspaceBudget.periodWindow`), default **calendar month in the workspace tz** (D55), able to express provider-native windows (e.g. Claude's 5-hour quota). (Expanded.) See "Parked for later" — the multi-provider AI abstraction.
+- **(19.q1)** *Report-only, confirmed:* framing = advisory budget + auto-pause, hard limit = plan quota. The `Usage.tsx` "no monetary budget" comment is a **build-time code cleanup** (flag, do not auto-fix).
+
+**20 — Activity & event log**
+- **D83 (20.q1)** Workspace-feed catch-up = **bounded recent window + lazy-load older**; per-ticket `seq` dedupes within a ticket.
+
+**21 — Search & command palette**
+- **D84 (21.q1)** Keep v1 caps (tickets 8, docs 5) and group order Tickets → Sources → Actions **even in semantic mode**; semantic re-ranks within groups, never collapses them.
+
+**22 — GitLab board sync**
+- ⚑ **D85 (22.q1)** Pipeline **stage state is NOT synced outbound** — it stays **board-local**. (Deviates from the proposed `stage::*` label-encoding.) Outbound = GitLab-native only (issue open/close, ordinary labels).
+
+**23 — Preview deployment**
+- ⚑ **D86 (23.q1)** Concurrent-preview limit = a **workspace setting** (`Workspace.previewConcurrencyCap`) with a safe default, bounded by a **hard cap (~20)**. Over-cap requests **queue** (chip: "queued — N previews live") with explanatory copy; a **live-preview manager** lists live preview containers with a per-preview **stop** control. (Expanded.)
+
+**24 — Pause & kill**
+- **D87 (24.q1)** A paused ticket **keeps its container** for `--resume`, but it is **reclaimed after a generous, configurable idle window** with a **pre-reclaim notification**; post-reclaim resume needs full reactivation.
+
+All feature-doc open questions (01–24) are now resolved and baked in.
+
+---
+
+## Parked for later (NOT v1 — explicitly deferred, revisit before the engine layer is built)
+
+- **Multi-provider AI abstraction.** Today the engine targets **Claude CLI in a PTY** (the load-bearing billing decision). The user wants the engine to later abstract over **other AI backends** — e.g. Codex, or raw provider APIs (DeepSeek, etc.). Open design surface to revisit: (a) **billing/limit accounting** — syncing a subscription-style quota window vs. metered per-API-call cost (ties into D82's configurable `periodWindow`); (b) **per-provider capability registries** — models, effort levels, custom commands/skills, and feature flags (e.g. ingesting a new provider feature like Claude's ultracode/Workflow) declared per backend; (c) the **engine seam** that keeps "interactive PTY only" for Claude while allowing an API-transport backend for providers that bill per call. **Do not build in v1; surface this before P-engine work starts.** Tracked in memory: `project_workspace_multi_provider_ai`.
 
 ---
 

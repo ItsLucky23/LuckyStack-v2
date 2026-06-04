@@ -62,7 +62,7 @@ A new ui-only/server entity (D68):
 
 Validation: `status` ∈ the three values; `ttlExpiresAt > now` while live; `port` > 0. One active `PreviewDeployment` per `ticketId` (a new build reuses/replaces the row). The container/route lifecycle is [07 §A]/[07 §B]; this row is the projection the UI renders.
 
-**INDEX delta:** `PreviewDeployment`
+**INDEX delta:** `PreviewDeployment`, `Workspace.previewConcurrencyCap` (net-new persisted, from D86 — the queue/live-preview-manager cap; bounded by a hard cap ~20)
 
 ---
 
@@ -106,6 +106,6 @@ Validation: `status` ∈ the three values; `ttlExpiresAt > now` while live; `por
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D86)
 
-1. **23.q1 — concurrent preview cap.** With ~20 live PTYs already on the single-instance orchestrator, how many concurrent preview PROD containers are allowed before "Open preview" queues/refuses? Default proposed: a small workspace-level cap (e.g. 3) with the chip showing "queued — N previews live" rather than failing; reuses the orchestrator resource-limit posture (B-26).
+1. **23.q1 — concurrent preview cap → ⚑ D86 (expanded):** the concurrent-preview limit is a **workspace setting with a safe default** (`Workspace.previewConcurrencyCap`), bounded by a **hard cap (e.g. 20)** matching the orchestrator's PTY budget. When the cap is hit, new "Open preview" requests **queue** (the chip shows "queued — N previews live") rather than failing, with **explanatory copy** about why items queue when too many PROD environments are live. A **live-preview manager** surface lists every live preview container with a per-preview **stop (turn off) control** so the user can free a slot, plus an explanation of the queue. Reuses the orchestrator resource-limit posture (B-26).

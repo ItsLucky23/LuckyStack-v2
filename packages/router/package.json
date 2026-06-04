@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/router",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -55,7 +55,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.1.0"
+    "@luckystack/core": "^0.1.2"
   },
   "peerDependencies": {
     "ioredis": "^5.10.0"

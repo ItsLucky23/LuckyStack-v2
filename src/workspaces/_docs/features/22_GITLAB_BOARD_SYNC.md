@@ -110,6 +110,6 @@ The webhook secret (`WS_GITLAB_HOOK_SECRET`) and the reconcile queue/cron are or
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D85)
 
-1. **22.q1 — outbound mapping breadth.** v1 writes back only board changes that map to **GitLab-native** concepts (labels, issue open/close). Pipeline stages with no GitLab equivalent are represented as **labels** (e.g. `stage::coding`) vs not synced outbound at all. Confirm label-encoding of stage vs. board-local-only stage state (GitLab still wins on the fields it owns).
+1. **22.q1 — outbound mapping breadth → ⚑ D85 (deviates from the proposed label-encoding):** pipeline **stage state is NOT synced outbound** — it stays **board-local**. Outbound write-back is limited to GitLab-native concepts (issue open/close, ordinary labels); GitLab still wins on the fields it owns. **No `stage::*` labels are pushed.**

@@ -136,7 +136,7 @@ All additive over existing prototype types in `_data/types.ts`; nothing edits `0
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D78–D79)
 
-1. **SSH key add — verify-now vs trust-on-add.** Does adding a public key run a one-time proof-of-possession challenge at add-time (sign a nonce before the key is accepted), or is the key trusted on paste and only exercised on the first terminal open? (Proposed: trust on add; the real verification is the per-open `/pty` challenge, so a bad key simply never unlocks a terminal.)
-2. **GitHub-only login + GitLab-SoT workspaces.** If a user logs in via GitHub but a workspace's board syncs from GitLab (**B-29**), is a GitLab OAuth link *required* to use that workspace, or only the workspace's stored token (**B-07**) matters? (Proposed: the workspace token does the board sync; the user's OAuth provider is identity-only — no per-provider workspace gating.)
+1. **SSH key add → ⚑ D78 (deviates from the proposed trust-on-add):** adding a public key runs a **one-time proof-of-possession challenge at add-time** — the user signs a server-issued nonce before the key is accepted and stored. (The per-open `/pty` challenge still gates each terminal session; add-time PoP is an additional up-front check that a bad key never enters the store.)
+2. **GitHub-login + GitLab-SoT workspaces → D79:** the user's OAuth provider is **identity-only** — the workspace's stored token (**B-07**) does the board sync. No per-provider workspace gating; a GitHub login can use a GitLab-synced workspace.

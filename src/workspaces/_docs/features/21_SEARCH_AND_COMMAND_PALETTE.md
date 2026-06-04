@@ -119,6 +119,6 @@ Semantic results (deferred) are **not persisted** — they are a live `query_con
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D84)
 
-1. **21.q1 — result cap + ordering across groups.** v1 caps tickets at 8 and docs at 5 (as `SearchPalette` does today) and orders groups Tickets → Sources → Actions. Confirm the cap/order survives the semantic upgrade (where relevance might interleave types) or whether semantic mode collapses the groups into one ranked list.
+1. **21.q1 — result cap + ordering → D84:** **keep the v1 caps (tickets 8, docs 5) and the group order Tickets → Sources → Actions, even after the semantic upgrade.** Semantic mode re-ranks *within* groups; it does not collapse the groups into one interleaved list.

@@ -127,7 +127,7 @@ All additive over existing prototype types in `_data/types.ts`; nothing edits `0
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D76–D77)
 
-1. **Custom-role grant ceiling.** May a custom `PermRole` be granted the admin-management capabilities ("Promote a member to Admin", "Transfer ownership / delete workspace"), or are those rows hard-locked to the built-in `Owner`/`Admin` tiers regardless of the matrix? (Proposed: hard-lock the ownership/delete + admin-promotion rows to built-ins; custom roles may only span the work/config capabilities.)
-2. **Last-Owner / self-demotion guard.** Confirm the rule that an Owner cannot remove themselves or downgrade their own role without first transferring ownership (so a workspace always has exactly one Owner). (Proposed: yes — block self-demotion; ownership only moves via transfer.)
+1. **Custom-role grant ceiling → ⚑ D76 (deviates from the proposed hard-lock):** a custom `PermRole` is **fully configurable** — the matrix may grant *any* capability, including the admin-management rows ("Promote a member to Admin", "Transfer ownership / delete workspace"). **No** rows are hard-locked to the built-in tiers. The single-Owner invariant is preserved separately by **D77**: ownership only ever moves via an explicit transfer, regardless of which roles hold the "transfer ownership" capability.
+2. **Last-Owner / self-demotion guard → D77:** an Owner **cannot** remove themselves or downgrade their own role without first transferring ownership; self-demotion is blocked, so a workspace always has exactly one Owner.

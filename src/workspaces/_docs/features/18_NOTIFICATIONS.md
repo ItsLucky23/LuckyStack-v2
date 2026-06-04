@@ -123,6 +123,6 @@ UI-only state: the active type-filter and the push-banner dismissed flag (panel-
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D80)
 
-1. **18.q1 — push payload privacy.** Should the push payload carry the notification body (visible on a locked screen) or only a generic "you have an alert, open the app"? Default proposed: title-only payload, body fetched in-app on open (avoids leaking secret-related `needs-input` text on a lock screen). Confirm.
+1. **18.q1 — push payload privacy → D80 (REVISED 2026-06-04 via `../REVIEW_AND_OPEN_QUESTIONS.md` Q-SEC-NOTIF-PUSH):** the push payload is **redacted by default** — title + "open to view"; the full notification body is fetched **in-app behind auth** on open. Full-body push is a **per-user opt-in**. This reverses the earlier full-body default after the security review (rule 19: needs-input text routinely references secrets).

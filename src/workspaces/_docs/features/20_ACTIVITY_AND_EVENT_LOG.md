@@ -115,6 +115,6 @@ No new persisted model. The screen renders the existing **`ActivityEvent`** (`{ 
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D83)
 
-1. **20.q1 — Workspace-feed catch-up window:** the per-ticket merge keys on `seq`; the workspace-wide feed spans many tickets — does catch-up snapshot a bounded recent window (e.g. last N hours / M events) and lazy-load older, or merge per-ticket seqs into one global cursor? (Assumed: bounded recent window + lazy-load older, per-ticket `seq` for dedupe within a ticket.)
+1. **20.q1 — Workspace-feed catch-up window → D83:** catch-up snapshots a **bounded recent window** (e.g. last N hours / M events) and **lazy-loads older**; per-ticket `seq` dedupes within a ticket.

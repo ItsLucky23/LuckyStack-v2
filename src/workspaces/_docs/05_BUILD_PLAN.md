@@ -1,6 +1,8 @@
 # 05 — Build plan (optimized for parallel agent teams / ultracode)
 
 > The roadmap, structured so each phase fans out into **independent workstreams** you can hand to parallel agents (or an ultracode workflow) and integrate at a milestone. Prereqs: [01](./01_ARCHITECTURE.md)–[04](./04_DATA_MODEL.md). Status: **nothing built yet**; P0 (these docs) done. First build = the **thin Brain PoC** in P1.
+>
+> **⚑ SUPERSEDED for V1 by [BUILD_ORDER.md].** 05’s A–F lane scheme + P0–P4 phasing is the design-horizon record; the V1 build is the 4-lane map (A/B/C/D) in [BUILD_ORDER.md] + [V1_SCOPE.md] §6. The "thin Brain PoC" line below is pre-V1-scope. Read [V1_SCOPE.md] + [BUILD_ORDER.md] first.
 
 ---
 

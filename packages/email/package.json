@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/email",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -51,14 +51,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.1.0"
+    "@luckystack/core": "^0.1.2"
   },
   "peerDependencies": {
     "resend": "^6.0.0",
     "nodemailer": "^6.9.0"
   },
   "peerDependenciesMeta": {
-    "resend": { "optional": true },
-    "nodemailer": { "optional": true }
+    "resend": {
+      "optional": true
+    },
+    "nodemailer": {
+      "optional": true
+    }
   }
 }

@@ -73,6 +73,8 @@ Per-session token (maps token→ticket/stage/ws/user, so a worker can't spoof an
 
 Claude `type:http` hooks POST to an orchestrator endpoint (`registerCustomRoute`, `pre-params` phase, origin-exempt, `X-WS-Hook-Token`-gated). They give events without scraping stdout, and they fire in **interactive** sessions too. (Mapping per `handoff/CLAUDE_SETTINGS_MAP.md` §3.)
 
+> **Forward-compat note (report-only):** the `type:http` hook set is the **Claude realization** of a provider-neutral lifecycle contract — an API backend would synthesize the same normalized lifecycle events from a raw stream. See [MULTI_PROVIDER_SEAM](./MULTI_PROVIDER_SEAM.md).
+
 | Hook | Use |
 |---|---|
 | `SessionStart` | register the `AgentSession`; inject carry-over |

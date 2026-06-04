@@ -104,6 +104,6 @@ Pause keeps the container (session resumable); kill sets it disposable ([07 §A]
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D87)
 
-1. **24.q1 — paused-session resource hold.** A paused ticket keeps its container (for `--resume`) — on the single-instance orchestrator (~20 live PTYs) should a long-paused session (e.g. > N hours) auto-downgrade to a kill (container reclaimed, resumable only by full reactivation) to free resources? Default proposed: keep paused containers but reclaim after a generous idle window (configurable), surfaced as a notification before reclaim.
+1. **24.q1 — paused-session resource hold → D87:** a paused ticket **keeps its container** for `--resume`, but the container is **reclaimed after a generous, configurable idle window**, with a **notification sent before reclaim**. After reclaim the session is resumable only via full reactivation.

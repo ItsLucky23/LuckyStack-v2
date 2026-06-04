@@ -182,7 +182,7 @@ The two modules also share an invalidation contract: any code path that calls `i
 ## Failure modes
 
 - **Missing `tsconfig.server.json`.** `getServerProgram()` throws synchronously. Boot fails loudly; there is no fallback.
-- **TypeScript version drift.** `typescript` is a required peer dependency at `~5.7.3`. A consumer with a different `typescript` version may produce different inlined output (`checker.typeToString` formatting drifts across TS versions). Treat this as a hard peer.
+- **TypeScript version drift.** `typescript` is a required peer dependency at `>=5.7.3 <7.0.0`. The `checker.typeToString` output was verified byte-identical between TS 5.7.3 and 6.0.3, so both are supported (TS 7 excluded until re-verified); a consumer with a `typescript` version outside this range may produce different inlined output. Treat this as a hard peer.
 - **Depth limit hit.** `expandTypeDetailed` returns `checker.typeToString(type)` and records the type's symbol as unresolved. The emitter logs the offending route (`[TypeMapGenerator] Unresolved API type (page/name/version): SymbolName`) and aborts the whole generation if any unresolved symbol cannot be imported.
 - **Cyclic type.** Same as depth-limit hit — short-circuit to the type's string form and record the symbol.
 - **Symbol with no source file.** The fallback returns `{ name }` without `sourceFile` or `importPath`. The emitter treats this as a hard unresolved alias and aborts generation.

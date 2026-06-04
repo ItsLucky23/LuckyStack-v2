@@ -18,6 +18,8 @@ Caveat to respect: if `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `apiKeyHelp
 
 **Consequence:** the spec's older `CLAUDE_SETTINGS_MAP.md` plan (autonomous stages via `claude -p --output-format stream-json --json-schema`) is **superseded** for the subscription-only path. We keep its *hooks* design (which works in interactive mode too) and its stage-config→`.claude` mapping; we drop headless. Headless/API remains a documented *optional* burst path only (see 03 integrations / 05 P4), never the default.
 
+> **Forward-compat note (report-only):** the no-headless / no-SDK ban is specifically the **Claude-subscription billing-path** rule — it protects subscription economics, not "headless" as a category. A future metered-API backend (parked) may legitimately be headless. See [MULTI_PROVIDER_SEAM](./MULTI_PROVIDER_SEAM.md).
+
 ---
 
 ## 2. Two-system topology (spec B-01)

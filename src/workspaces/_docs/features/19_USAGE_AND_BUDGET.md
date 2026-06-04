@@ -73,7 +73,7 @@ All additive over existing prototype types in `_data/types.ts`; nothing edits `0
 - **`CostEstimate`** (feature `05`, ui-only derived) — reused for the projected column + chip; defined and owned by `05`, not re-introduced here.
 - **Pause-all state** — paused/active is `AgentSession.status` (`'stopped'`/`'paused'`, **DATAMODEL §5**); "Pause all agents" is a bulk control-API operation over those sessions, not a new field.
 
-**INDEX delta:** (none) — `WorkspaceBudget`, `UsageRow` already exist in `_data/types.ts`; `SpendRecord`/`WorkspaceBudget` already exist in DATAMODEL §8; `CostEstimate` is owned by feature `05`. This doc surfaces them. (If the prototype `WorkspaceBudget` ui-type needs the `autoPause` boolean to drive the settings toggle, that is a ui-only field, not a persisted addition — the persisted `autoPause` already exists on the DATAMODEL §8 model.)
+**INDEX delta:** `WorkspaceBudget.enforcement`, `WorkspaceBudget.periodWindow` (both net-new persisted, from D81/D82 — `WorkspaceBudget` becomes a multi-row collection of caps). `UsageRow`, `SpendRecord`, `CostEstimate` are surfaced-not-introduced (`CostEstimate` owned by `05`; the rest already in `_data/types.ts` / DATAMODEL §8). The ui-only `autoPause` boolean on the prototype shape is not a persisted addition (the persisted `autoPause` already exists on the DATAMODEL §8 model).
 
 ---
 
@@ -125,8 +125,10 @@ All additive over existing prototype types in `_data/types.ts`; nothing edits `0
 
 ---
 
-## Open questions
+## Resolved (final micro-decisions sweep, 2026-06-04 — INDEX D81–D82)
 
-1. **Advisory vs the "no monetary budget" Usage comment.** `Usage.tsx`'s header comment currently asserts "No monetary budget/cap/alert (we run Claude via the Pro Max CLI subscription, not a metered API)", which is in tension with **B-35** + the `WorkspaceBudget` seed + this doc. The architecture (`[01 §6]`, feature `05`) reconciles this as **advisory cost** (priced via the editable per-model `PRICING` table from `05`, zeroable to tokens-only) with **quota** as the hard limit. **Flag, do not auto-fix:** the `Usage.tsx` comment should be updated to "advisory budget + auto-pause; the hard limit is plan quota" so code and docs agree. Confirm this framing before the budget bar ships.
-2. **Auto-pause scope at the cap.** When `autoPause` fires, does it pause **all** active sessions workspace-wide, or only newly-starting sessions (let in-flight stages finish)? (Proposed: pause all active sessions to `stopped` immediately — consistent with the cap-reached modal showing "N agents paused" — with Resume restarting them.)
-3. **Budget period boundary.** `periodCapCost` is "per month" (DATAMODEL §8) — does `spentCost` reset on a fixed calendar month, on the workspace's billing anchor, or on a rolling 30-day window, and in which timezone (the workspace tz from **D55**)? (Proposed: calendar month in the workspace timezone.)
+1. **Advisory vs the "no monetary budget" Usage comment → confirmed (report-only):** framing confirmed — **advisory budget + auto-pause, with plan quota as the hard limit**. The `Usage.tsx` header comment is a **build-time code cleanup** (flag, do not auto-fix): change it to "advisory budget + auto-pause; the hard limit is plan quota" so code and docs agree.
+2. **Auto-pause scope → ⚑ D81 (expanded beyond a single default):** a workspace supports **multiple budget caps**, each with its own **enforcement mode** — `pauseNew` (block newly-starting sessions, let in-flight stages finish) **or** `pauseAll` (pause all active sessions to `stopped` immediately). The cap-reached modal reports which cap + mode fired and how many agents paused. Persistence: `WorkspaceBudget` becomes **multi-row** with `enforcement: 'pauseNew' \| 'pauseAll'` (see the `## Data` INDEX delta).
+3. **Budget period → ⚑ D82 (expanded — user-configurable):** the reset period is a **per-cap configurable window** (`WorkspaceBudget.periodWindow`), defaulting to **calendar month in the workspace timezone** (D55), but able to express provider-native windows (e.g. Claude's rolling 5-hour quota window). **Parked — revisit:** aligning these windows with a future **multi-provider AI abstraction** (see INDEX "Parked for later").
+
+> **Forward-compat note (report-only):** advisory + auto-pause is the subscription billing mode; a future **metered-API backend** inverts "advisory" into a hard **pre-flight gate**, and `D82 periodWindow` needs a meter **UNIT** before it can enforce a metered cap — parked, do not pre-shape the field now (see [MULTI_PROVIDER_SEAM](../MULTI_PROVIDER_SEAM.md) Q-MP-BILLING / Q-MP-CAPREG).
