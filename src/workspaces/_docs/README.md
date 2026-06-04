@@ -1,6 +1,6 @@
 # Workspace-AI — architecture docs (AI handoff)
 
-> **Purpose.** These docs let any AI (or a parallel agent team / ultracode workflow) pick up the **Workspace-AI** build cold. They turn the settled design into an actionable spec. Read this README first, then the numbered docs. Last updated: 2026-06-03.
+> **Purpose.** These docs let any AI (or a parallel agent team / ultracode workflow) pick up the **Workspace-AI** build cold. They turn the settled design into an actionable spec. Read this README first, then the numbered docs. Last updated: 2026-06-04.
 
 ---
 
@@ -74,7 +74,8 @@ Ticket-agents **report via structured JSON into an append-only signal log** (not
 | **[04_DATA_MODEL.md](./04_DATA_MODEL.md)** | Prisma models (real repo) ↔ prototype `types.ts` mapping, exact new entity fields | you're touching persistence |
 | **[05_BUILD_PLAN.md](./05_BUILD_PLAN.md)** | the parallelism-optimized phased roadmap + per-phase fan-out + verification | you're about to build |
 | **[06_TOKEN_OPTIMIZATION.md](./06_TOKEN_OPTIMIZATION.md)** | the context-budget + self-handoff cycle that keeps long-lived sessions lean | you're worried about long sessions filling context |
-| **[features/INDEX.md](./features/INDEX.md)** | the **detailed per-feature layer** (setup, presets, build phase, integrations, per-session info, voice, code review, codebase editor, questions, automations, AI panel) — extends 01–06, never contradicts | you're designing or building a specific feature |
+| **[07_ORCHESTRATOR.md](./07_ORCHESTRATOR.md)** | the single-instance **orchestrator runtime mechanics** the Conductor drives — §A ticket launch/teardown, §B Caddy subdomain proxy, §C GitLab-webhook ingest + board sync, §D RAG delta-indexer + vector store. Architecture-layer companion to 01 (not a feature doc); feature docs cite it as `[07 §A]`…`[07 §D]` | you need the deterministic runtime sequence behind a feature (containers, Caddy routes, webhooks, RAG) |
+| **[features/INDEX.md](./features/INDEX.md)** | the **detailed per-feature layer** — now **24 docs** (setup, presets, build phase, integrations, per-session info, voice, code review, codebase editor, questions, automations, AI panel, board, backlog/sprints, terminals, sources, members/RBAC, account/auth, notifications, usage/budget, activity, search, GitLab sync, preview, pause/kill) — extends 01–07, never contradicts | you're designing or building a specific feature |
 | **[SETUP_AND_PREREQUISITES.md](./SETUP_AND_PREREQUISITES.md)** | the **operator/human to-do list** — accounts, infra, container image, per-CLI-integration credentials, env vars (each tagged with the build phase it's needed for) | you're about to actually run it |
 
 ---

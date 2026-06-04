@@ -2042,3 +2042,17 @@ User vroeg of het hele project nu in detail gedocumenteerd is (antwoord: nee —
 **Verificatie**: docs-only, geen lint/build. Niets gecommit.
 
 **Files touched**: src/workspaces/_docs/SETUP_AND_PREREQUISITES.md (nieuw), src/workspaces/_docs/README.md (pointer), src/workspaces/_docs/features/INDEX.md (pointer). Nothing committed.
+
+## 2026-06-04 10:00 — Workspaces: batch-2 feature-docs (ALLES gedocumenteerd) — 07_ORCHESTRATOR + features/12–24
+
+De user wilde ALLE resterende features (de gap) volledig gedocumenteerd vóór er code komt. Aanpak: ultracode-inventarisatie van elk gap-scherm/-flow/-infra → de genuine open beslissingen gescheiden van wat de specs al vastleggen → 9 user-Q&A-keuzes (+ defaults) gelockt (D61–D71) → schrijf-workflow (07 eerst → 4 parallelle lanes → cohesie-pass).
+
+**Gelockte keuzes (D61–D71):** D61 board-filter full set; D62 quick-add + in-UI expand-toggle; D63 mobiel NU (board = read-only stage-segments, backlog = single-column); D64 rewind = event-replay + carry-over commitHash-snapshots (geen nieuwe opslag); D65 in-app `navigate()` nu + URL-routes als future; D66 ÉÉN globale search over tickets ÉN Sources/docs (top-bar + ⌘K; "summary"→project-summary-doc→Enter navigeert; semantic build-deferred); D67 preview on-demand + non-blocking + 30-min TTL reset-on-open + auto-teardown; D68 nieuwe `PreviewDeployment`-entity; D69 pause/resume = work-tickets, kill + pause-all = Admin+; D70 Account+Auth gemerged (doc 17); D71 orchestrator-infra = top-level architectuur-doc 07 (geen feature-doc).
+
+**Geleverd:** nieuw top-level **`07_ORCHESTRATOR.md`** (architectuur-doc: §A launch/teardown 7-stappen + pseudocode, §B Caddy-subdomein-proxy, §C GitLab-webhook-ingest + board-sync, §D RAG-delta-indexer + vector-store; checklists; expliciete "no new verbs") + **13 feature-docs `features/12–24`** (Board/Kanban, Backlog+Sprints, Terminals, Sources, Members/RBAC, Account+Auth, Notifications, Usage/Budget, Activity+rewind, Search/⌘K, GitLab-sync, Preview, Pause/Kill). Elke feature-doc volgt het skelet, citeert 01–07/batch-1, **0 nieuwe structured-channel-verbs** (levers = control-API), nieuwe persistentie via de INDEX-delta-tabel.
+
+**Cohesie-pass (workflow = 6 agents; totaal incl. inventaris ~11):** INDEX bijgewerkt (24-feature-docs nav, delta-tabel +`PreviewDeployment`/`BoardFilter`/`TicketSort` = 18 rijen, D61–D71 toegevoegd met ⚑ op D62/D66/D67, dependency-graph uitgebreid, 07-pointer, counts 11→24); README doc-map +07-rij (01–06→01–07). 2 verkeerde cross-refs gefixt (doc 22 "doc 12"→01; doc 21 "feature 15"→12). Geen verb-violations, geen contradicties. 07 + INDEX zelf gereviewd (hoge kwaliteit).
+
+**Status:** het HELE project is nu in detail gedocumenteerd — architectuur **01–07** + SETUP + **features/01–24**. Resterend = per-doc kleine open-questions (bewust gedocumenteerd in elke `## Open questions`, niet geblokkeerd) + doc-19 meldt (report-don't-fix) dat een bestaande `Usage.tsx`-comment "No monetary budget" B-35 tegenspreekt → voor de user in code. Niets gecommit.
+
+**Files touched**: src/workspaces/_docs/07_ORCHESTRATOR.md (nieuw), src/workspaces/_docs/features/{12_BOARD_AND_KANBAN,13_BACKLOG_AND_SPRINTS,14_TERMINALS,15_SOURCES_MANAGEMENT,16_MEMBERS_AND_RBAC,17_ACCOUNT_AND_AUTH,18_NOTIFICATIONS,19_USAGE_AND_BUDGET,20_ACTIVITY_AND_EVENT_LOG,21_SEARCH_AND_COMMAND_PALETTE,22_GITLAB_BOARD_SYNC,23_PREVIEW_DEPLOYMENT,24_PAUSE_AND_KILL_CONTROLS}.md (nieuw), src/workspaces/_docs/features/INDEX.md + src/workspaces/_docs/README.md (cohesie). Nothing committed.

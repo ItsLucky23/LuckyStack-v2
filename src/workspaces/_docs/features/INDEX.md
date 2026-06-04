@@ -1,6 +1,6 @@
 # Features — detailed feature layer (INDEX / spine)
 
-> This folder is the **DETAILED feature layer** that sits on top of the locked architecture docs `../README.md` + `../01_ARCHITECTURE.md`…`../06_TOKEN_OPTIMIZATION.md`. The 01–06 docs are the **authoritative, locked architecture** (engine, roles, verbs, data model, build plan, token budget). The 11 docs here zoom into one user-facing feature each and say exactly how it is built **on top of** that architecture — UI, flow, additive data, which existing verbs/triggers it reuses. Last updated: 2026-06-03.
+> This folder is the **DETAILED feature layer** that sits on top of the locked architecture docs `../README.md` + `../01_ARCHITECTURE.md`…`../06_TOKEN_OPTIMIZATION.md` + the orchestrator-runtime companion `../07_ORCHESTRATOR.md`. The 01–06 docs are the **authoritative, locked architecture** (engine, roles, verbs, data model, build plan, token budget); 07 is the architecture-layer **orchestrator runtime mechanics** doc (launch/teardown, Caddy, webhook ingest, RAG delta-indexer) — cite it like 01–06 (e.g. `[07 §A]`). The 24 docs here zoom into one user-facing feature each and say exactly how it is built **on top of** that architecture — UI, flow, additive data, which existing verbs/triggers it reuses. Last updated: 2026-06-04.
 >
 > **Operator setup** — the non-code things a human must provide to actually run these features (accounts, infra, container image, per-CLI-integration credentials, env vars, build-phase-tagged) lives in [`../SETUP_AND_PREREQUISITES.md`](../SETUP_AND_PREREQUISITES.md).
 
@@ -8,7 +8,7 @@
 
 ## How to read this
 
-1. Read `../README.md` + 01–06 first (the locked spine). This INDEX assumes you know the 3 roles (Assistant / Stage-Agent / Conductor), the verb surface (02 §2), the carry-over envelope (02 §4), and the data model (04).
+1. Read `../README.md` + 01–06 first (the locked spine). This INDEX assumes you know the 3 roles (Assistant / Stage-Agent / Conductor), the verb surface (02 §2), the carry-over envelope (02 §4), and the data model (04). **Orchestrator runtime mechanics live in `../07_ORCHESTRATOR.md`** (architecture doc, not a feature) — its four sections (§A launch/teardown · §B Caddy proxy · §C GitLab-webhook ingest · §D RAG delta-indexer) are what feature docs cite as `[07 §A]`…`[07 §D]`; cite 07 the same way you cite 01–06.
 2. Each feature doc here is self-contained (~2–4 dense pages) and uses one **identical section skeleton** (Scope → User flow → Data → Verbs/Events/Hooks → UI → Extends → Open questions). The exact skeleton + locked blocks every lane must copy verbatim are reproduced at the bottom of this file.
 3. When a feature doc needs something from the architecture, it **cites up** by section (e.g. `[02 §5]`, `[03 §3.2]`) — it never restates or contradicts 01–06. If a doc seems to contradict the architecture, the architecture wins; flag it.
 
@@ -21,7 +21,7 @@
 
 ---
 
-## Navigation — the 11 feature docs
+## Navigation — the 24 feature docs
 
 | Doc | Scope (one paragraph) |
 |---|---|
@@ -36,6 +36,19 @@
 | **09_QUESTIONS_IN_TICKETS.md** | The phone-from-the-beach question/approval UI: rendering a `QuestionSet` as mobile cards (choice = one tap, approve = Approve/Reject, free = short text) inline in chat and on the board banner. Adds `ChatMessage.questionSetId` so a bubble renders a question card. Pure UI over 02 §5 (QuestionSet/Question already in 04) — `request_input` / `draft_questionset` verbs only. Voice (06) is a free-text fallback into here. |
 | **10_AUTOMATIONS_SCREEN.md** | The two authoring surfaces for `WorkspaceTrigger` (03 §1): the **stage-scoped "Automation" sub-tab** inside the Pipeline editor and the **workspace-level Automation screen** (cron + workspace-lifecycle). One model, two editors. Pure UI + config over the existing trigger engine — `when → then` rules, `run-command` allow-list, cron strings. No engine change. |
 | **11_WORKSPACE_AI_PANEL.md** | The per-user **Assistant** chat panel (the real `AIPanel` in `_shell/Shell.tsx`, replacing dummy `sendChat`): streaming replies, proposing-only, question-card rendering, Compact/Clear controls, suggestion surfacing. Pure UI over the Assistant role (01 §3.2) + Assistant verbs (02 §2) + `ws-ai:*` events (05 P1 contract). The chat home for 09 (question cards) and config-review proposals (03 §4). |
+| **12_BOARD_AND_KANBAN.md** | The scrum board: kanban columns derived from the live pipeline, **AI-driven (no-drag) moves** ([02 §6]), status pills + WIP warnings, card context-menu + quickview, cost chip + terminal/preview badges, sprint picker, the **full filter popover** (D61), **quick-add + expand** (D62), and live merge-on-seq fan-out. Owns `BoardFilter` (ui-only) + the `QuickAddSheet`. Mobile = read-only stage-segments (D63). |
+| **13_BACKLOG_AND_SPRINTS.md** | The backlog list (search + quick-filter + person filter), collapsible sprint sections, select-mode + the **bulk action bar** (batched control-API run serially by the Conductor, B-30), column sort (`TicketSort`, ui-only), and the **sprint manager** (create/edit with date pickers, workspace-tz D55). Reuses 12's `BoardFilter` machinery. Mobile single-column select-mode (D63). |
+| **14_TERMINALS.md** | The multi-terminal workspace: grid/tabs over every live PTY, per-process sub-tabs (`claude`/`server`/`client`), the **SSH-unlock** capability gate (B-05 nonce + `crypto.verify`), the `connecting→live→exited→locked` panel state, ring-buffer reattach, and the `term.`/pty-agent production bridge (B-31). Attaches to PTYs spawned in [07 §A]/[07 §B]; engine unchanged. |
+| **15_SOURCES_MANAGEMENT.md** | The Sources screen: managing **context docs** (generated/git/uploaded `InfoDoc`) + **skills/MCP** (frozen-vs-live `SkillEntry`), the reindex banner + live progress wired to the **[07 §D]** RAG delta-indexer, upload-spec sheet, and read-only preview. Extends 03 (seeds the set) + 04 (CLI-client-first / MCP exception). Surfaces freezing, never restates it. |
+| **16_MEMBERS_AND_RBAC.md** | The Members + Permissions + Invites + Danger-zone tabs of `WorkspaceSettings.tsx`: the editable RBAC matrix (`PermRole` × `RBAC_CAPABILITIES`, B-28), email invites (B-06), role-change/transfer/delete confirms. Enforcement lives in the `preApiExecute` membership check (DATAMODEL §1) — every lever is a control-API request, not a verb. |
+| **17_ACCOUNT_AND_AUTH.md** | The user's `AccountSettings.tsx` **plus** the auth flows (merged per **D70**): OAuth login (identity, B-05), the **SSH-key terminal-capability gate** (`/pty` nonce + `crypto.verify`, runs against [07 §A]), accept-invite (B-06), sessions, web-push opt-in (B-34), data export (B-39). The user/account side; 16 is the workspace side. |
+| **18_NOTIFICATIONS.md** | The cross-surface alert layer: the `TopBar` bell + unread badge, a grouped notification center (desktop dropdown / mobile sheet), and PWA web-push (B-34). A read-projection of the `Notification` model (DATAMODEL §9) — four types (`needs-input`/`merge`/`ai-suggestion`/`container-failure`) sourced from existing verbs/hooks + the [07 §C]/[07 §A] events; deep-links via D65. |
+| **19_USAGE_AND_BUDGET.md** | The `Usage.tsx` screen extended with the **budget** surfaces (B-35): a spent/cap bar + alert threshold, budget settings (cap/alert-%/auto-pause), a cap-reached modal (raise-cap + resume, reused from 05), the per-ticket cost chip, and the workspace-wide **Pause all agents** (Admin+, D69). Surfaces `WorkspaceBudget`/`SpendRecord` (DATAMODEL §8). |
+| **20_ACTIVITY_AND_EVENT_LOG.md** | The workspace-wide + per-ticket **append-only event feed** over `TicketEvent` (DATAMODEL §6): actor/type chips, deep-links (D65), LIVE badge + reconnect catch-up (B-22 subscribe-first → snapshot → merge-on-`seq`), click-to-expand diffs, and a **rewind scrubber** (D64: event-replay over carry-over `commitHash` snapshots, no new storage). Sourced from [02 §3] hooks; client never writes. |
+| **21_SEARCH_AND_COMMAND_PALETTE.md** | **One** global search over **tickets AND Sources/docs** wiring the dead `TopBar` search bar + the ⌘K palette into the same UI (D66): fuzzy id/title/name v1, quick-actions, recent, quick-create (→ 12's quick-add). Semantic ranking is **documented now, build-deferred** (reuses the [07 §D] frozen-per-commit `$vectorSearch` slice via `query_context`). Navigation = D65 deep-link. |
+| **22_GITLAB_BOARD_SYNC.md** | The board as a **projection of GitLab** (B-29): tickets ⇄ issues, bidirectional, **GitLab wins on conflict**, a reconcile-cron that heals missed webhooks, and the GitLab settings tab (base URL + encrypted token B-07 + Verify + sync-health). The webhook ingest + serial reconcile **engine is [07 §C]** — cited, not restated. The Conductor is the only projection writer ([01 §3.3]). |
+| **23_PREVIEW_DEPLOYMENT.md** | The per-ticket live-app preview: an **"Open preview"** badge (**building / live / down**) served from a PROD container on `dev-<ticketId>.<domain>` ([07 §B], PROD single-port B-13). On-demand + non-blocking, **30-min TTL reset-on-open** + auto-teardown (D67); optional auto-per-stage trigger. Introduces the **`PreviewDeployment`** entity (D68). Reuses [07 §A] launch/teardown. |
+| **24_PAUSE_AND_KILL_CONTROLS.md** | The lifecycle levers over running agents: **per-ticket pause/resume** (session parked, container kept for `--resume`), **kill** (teardown, branch + events retained, [07 §A]), workspace **pause-all**, and the runaway → `stuck` → `needs-input` auto-escalation (B-35). Every lever is a control-API request the Conductor executes — never a verb ([02 §1]). RBAC per D69 (kill + pause-all = Admin+). |
 
 ---
 
@@ -43,7 +56,9 @@
 
 > **The single place new persistence is aggregated.** No feature doc edits `../04_DATA_MODEL.md`; each declares its additions on its `**INDEX delta:**` line and they roll up here. **Finalized by the cohesion pass** — built by reading every doc's `**INDEX delta:**` line, deduping shared fields, and resolving naming collisions (canonical name picked + noted). All fields are *additive* to the existing prototype types / Prisma models; entities already in 04 (`Handoff`, `QuestionSet`/`Question`, `WorkspaceTrigger`, `CarryOver`, `AgentSession`) are NOT re-introduced here — only deltas on top of them.
 >
-> **Net-new persisted fields/models: 10** (`Workspace.presetKey`, `WorkspacePreset`, `Project.gitUrl`, `Project.linkedFiles[]`, `Project.generatedDocsPath`, `PipelineStageCfg.systemPrompt`, `AgentSession.durationEstimate`, `PipelineStage.avgTokensPerTurn`, `TicketEvent.metadata.voiceTranscript?`, `ChatMessage.questionSetId`) plus **5 ui-only types** (`DiffBaseline`, `EditorMode`, `CodeRange`, `CodebaseEditorHandle`, `CodebaseEditorProps`) = **15 delta rows** total, **+ 1 already-in-04 surfaced field** (`AgentSession.tokenEstimate`). Docs 04, 10, 11 introduce **no** new persistence (verified — their `INDEX delta:` lines are `(none)`).
+> **Net-new persisted fields/models: 11** — the batch-1 ten (`Workspace.presetKey`, `WorkspacePreset`, `Project.gitUrl`, `Project.linkedFiles[]`, `Project.generatedDocsPath`, `PipelineStageCfg.systemPrompt`, `AgentSession.durationEstimate`, `PipelineStage.avgTokensPerTurn`, `TicketEvent.metadata.voiceTranscript?`, `ChatMessage.questionSetId`) **+ `PreviewDeployment`** (the single batch-2 net-new persisted entity, owner 23) — plus **7 ui-only types** (`DiffBaseline`, `EditorMode`, `CodeRange`, `CodebaseEditorHandle`, `CodebaseEditorProps` from batch-1; **`BoardFilter`** owner 12, **`TicketSort`** owner 13 from batch-2) = **18 delta rows** total, **+ 1 already-in-04 surfaced field** (`AgentSession.tokenEstimate`). Docs 04, 10, 11, 14, 16, 17, 18, 19, 20, 21, 22, 24 introduce **no** new persistence (verified — their `INDEX delta:` lines are `(none)`).
+>
+> **Most batch-2 (12–24) entities ALREADY exist** in `../../_data/types.ts` / DATAMODEL and are *surfaced, not introduced* — do not re-add: `Member` / `PermRole` / `Role` / `InviteEntry` (16/17), `SshKeyEntry` / `SessionEntry` / `PushSubscription` / `OAuthAccount` (17), `NotificationItem` / `Notification` (18), `UsageRow` / `WorkspaceBudget` / `SpendRecord` (19), `TicketEvent` / `ActivityEvent` / `TicketFile` (20), `Sprint` (13, edited not added), `Terminal` / `TerminalProcess` / `TerminalLine` (14), `InfoDoc` / `SkillEntry` (15), the GitLab linkage on `Project` / `Ticket` (22). The only genuinely-new batch-2 rows are the three below.
 
 | New field / model | Type | On / extends | Owning doc | Notes |
 |---|---|---|---|---|
@@ -62,6 +77,9 @@
 | `CodeRange` | `{ startLine; startCol?; endLine?; endCol? }` | new (ui-only) | 08 | reveal-range arg for the editor contract; not persisted |
 | `CodebaseEditorHandle` | imperative handle (`openFile`/`revealRange`/`setChangedFiles`/`setBaselineCommit`) | new (ui-only) | 08 | host→editor contract captured via `onReady`; shared with 07; not persisted |
 | `CodebaseEditorProps` | mount props (see 08 §Data) | new (ui-only) | 08 | UI-Builder mount props; not persisted |
+| `PreviewDeployment` | `{ ticketId, url, status:'building'\|'live'\|'down', startedAt, port, ttlExpiresAt }` | new (server/ui) | **23** | the per-ticket live-preview projection (D68). One active row per `ticketId`; the container/route lifecycle is [07 §A]/[07 §B], this row is what the badge renders. `ttlExpiresAt` = `startedAt + 30m`, bumped on every open (D67). The **only** batch-2 net-new persisted entity. |
+| `BoardFilter` | `{ labels[], assigneeId, statuses[], sprintId, hasRunningTerminal, needsInput }` | new (ui-only) | **12** | session-only board/backlog filter state for the D61 full filter popover; pure client predicate over `TICKETS`. Reused (not re-declared) by 13's search/person/quick-filter. Not persisted. |
+| `TicketSort` | `{ key:'id'\|'updated'\|'status'\|'stage', dir:'asc'\|'desc' }` | new (ui-only) | **13** | session-only column-sort state for the backlog list; defaults `{ key:'updated', dir:'desc' }`; pure client comparator within each sprint group. Not persisted. |
 
 **Already in 04 — surfaced, not introduced** (counted separately so it isn't double-counted as net-new): `AgentSession.tokenEstimate` `Int @default(0)` — defined in 04 §2; doc 05 *surfaces* it as the chip's `actual-so-far` source.
 
@@ -104,6 +122,19 @@ No LLM has a write verb (B-23 enforced structurally: AI proposes → user accept
 
 09_QUESTIONS_IN_TICKETS ◀──question cards rendered in──── 11_WORKSPACE_AI_PANEL
 04_INTEGRATION_TOOLS ──per-stage tool select──▶ 03_BUILD_PHASE
+
+── batch-2 (12–24) ──────────────────────────────────────────────────
+12_BOARD_AND_KANBAN ◀──shared filter / row + card chrome──▶ 13_BACKLOG_AND_SPRINTS
+        (BoardFilter owned by 12, reused by 13; 21's ⌘K opens 12's quick-add)
+
+14_TERMINALS ─────────attaches PTYs spawned by───────▶ 07 §A/§B
+15_SOURCES_MANAGEMENT ─reindex job──▶ 07 §D ─seeds/links docs──▶ 03 ─CLI-client/MCP rule──▶ 04
+18_NOTIFICATIONS ─merge/container events─▶ 07 §C/§A    ─ai-suggestion deep-links into─▶ 11
+20_ACTIVITY_AND_EVENT_LOG ──the append-only event feed (rewind over carry-over commitHash, D64); source = 02 §3 hooks
+21_SEARCH_AND_COMMAND_PALETTE ─searches Sources──▶ 15   ─deferred semantic slice──▶ 07 §D
+22_GITLAB_BOARD_SYNC ──surface of the ingest engine──▶ 07 §C   ──projects onto the board──▶ 12
+23_PREVIEW_DEPLOYMENT ──launch/teardown + Caddy──▶ 07 §A/§B   ──builds from the worktree──▶ 03
+24_PAUSE_AND_KILL_CONTROLS ──kill reuses teardown──▶ 07 §A   ◀──TicketControlBar proposes the same levers── 11
 ```
 
 ---
@@ -215,6 +246,46 @@ All feature-doc open questions are now resolved.
 
 ---
 
+## Resolved decisions — batch-2 feature docs (12–24) (this session — baked in, do not re-open)
+
+> The batch-2 decision set, grouped by owning doc, `NN.q` numbering preserved where it maps to a doc's open question. ⚑ marks the three answers that are **spec'd-extras** (beyond the minimal doc scope — added deliberately): **D62** quick-add + expand, **D66** global-search-over-tickets-AND-docs, **D67** preview TTL reset-on-open + auto-teardown. These cross-cut several docs (12–24); each owning doc cites the `D##` rather than restating it.
+
+**12 — Board & Kanban**
+- **D61 (12.q-filter)** Board filter = a **FULL popover**: labels + assignee + status + sprint + has-running-terminal + needs-input. UI-only, session-only `BoardFilter`; reused by 13. (Not a thin search box.)
+- ⚑ **D62 (12.q-add)** Quick-add = a **title-first sheet with an in-UI "+ more options" expander** revealing description + labels + assignee + sprint in the same sheet (not a separate full form). Submit is a **proposal** the Conductor materialises (B-23). Owned by 12 (`QuickAddSheet`); reused by 21's ⌘K "New ticket".
+
+**12 / 13 — Board + Backlog (mobile)**
+- **D63 (12.q-mobile / 13.q-mobile)** Mobile board = **read-only stage-segments + tap-to-open** (no drag, no hover menu); mobile backlog = **single-column select-mode** with a bottom-docked bulk bar. Filters/quick-add open as bottom sheets.
+
+**13 — Backlog & Sprints**
+- **D-bulk (13, = B-30)** Bulk ops (Move / Status / Assign / Sprint / Archive) = a **single batched control-API request the Conductor runs serially** (B-30) — no optimistic client mutation; the bar shows "requested…" and reflects the merge-on-seq result. `TicketSort` is ui-only/session-only. Sprint dates anchored to the workspace tz (D55).
+
+**20 — Activity & event log**
+- **D64 (20.q-rewind)** Rewind = **event-replay over the carry-over `commitHash` snapshots** (show the frozen file-set at each stage commit, replay the `TicketEvent`s between consecutive commits) — **NO new storage**, only a client cursor into the existing ordered log + `CarryOver` snapshots.
+
+**18 / 20 / 21 — cross-cutting navigation**
+- **D65 (deep-link)** In-app navigation is the existing **`navigate({ view, ticketId?, tab?, terminalId? })`** deep-link now (backs Notifications, Activity, ⌘K, search); the matching real URL routes (`/ws/:id/ticket/:tid?tab=…`) are documented as a **future extension** layered on the same call, not built v1.
+
+**21 — Search & command palette**
+- ⚑ **D66 (21.q-scope)** **ONE global search over tickets AND Sources/docs** (one input, two entry points: `TopBar` bar + ⌘K palette). v1 = **fuzzy** id/title/name client-side; **semantic ranking is documented but BUILD-DEFERRED**, reusing the [07 §D] frozen-per-commit `$vectorSearch` slice via `query_context` (no new verb, no new entry point). Keyboard = arrow + Enter.
+
+**23 — Preview deployment**
+- ⚑ **D67 (23.q-ttl)** Preview = **on-demand + non-blocking** (navigate away while it builds) with a **30-minute TTL that resets on every open** and **auto-teardown** on expiry/close ([07 §A]/[07 §B] PROD single-port, B-13). An *optional, off-by-default* `stage.on_complete → preview-up` `WorkspaceTrigger` pre-warms per stage.
+- **D68 (23.q-entity)** Introduce the **`PreviewDeployment`** entity `{ ticketId, url, status:'building'\|'live'\|'down', startedAt, port, ttlExpiresAt }` — one active row per ticket; the container/route lifecycle stays in [07 §A]/[07 §B], this row is the UI projection.
+
+**24 / 12 / 19 — Pause & kill RBAC**
+- **D69 (24.q-rbac)** Lifecycle-lever RBAC: **ticket-scoped pause/resume = "work on tickets"** (Owner/Admin/Member); **kill + workspace pause-all = Admin+**. Reuses the B-28 tiers (**no matrix change**); every lever is a **control-API request the Conductor executes, never a structured-channel verb** ([02 §1]).
+
+**17 — Account & Auth**
+- **D70 (17.q-merge)** **Merge Account + Auth into one doc** (17): the user's `AccountSettings.tsx` screen plus the auth flows (OAuth login, the SSH `/pty` capability gate, accept-invite) live together; the *workspace* view of membership stays in 16.
+
+**(scope) — the batch-2 split**
+- **D71 (batch-2 scope)** Expand the detailed feature layer from 11 to **24 small docs** (12–24), mirroring **D8** (many small docs): board, backlog/sprints, terminals, sources, members/RBAC, account/auth, notifications, usage/budget, activity, search, GitLab sync, preview, pause/kill. Same skeleton + cite-up + no-new-verbs contract as 01–11; orchestrator runtime mechanics extracted into the architecture-layer `../07_ORCHESTRATOR.md` (cited like 01–06, not a feature doc).
+
+All batch-2 (12–24) open questions and decisions are now resolved and baked in.
+
+---
+
 ## Ops / DR pointer
 
 **Multi-instance and disaster-recovery are NOT a feature doc** (D6). They live in `../05_BUILD_PLAN.md` **P4 (Hardening)**: resume-after-crash (`resumeAll()`), the multi-instance lease (`acquireLease('ws-engine:<wsId>')`), rate-limit → `stopped` + backoff, spend/budget accounting + auto-pause, and presence/catch-up polish. Treat anything operational/recovery-related as an extension of P4, cited up — do not spawn a feature doc for it.
@@ -223,7 +294,7 @@ All feature-doc open questions are now resolved.
 
 # Drafting contract (copy verbatim into every feature doc)
 
-> The drafting lanes MUST use the identical skeleton + locked blocks below. Reproduced here verbatim so all 11 docs share one contract.
+> The drafting lanes MUST use the identical skeleton + locked blocks below. Reproduced here verbatim so all 24 docs share one contract.
 
 ## LOCKED ARCHITECTURE (authoritative — cite, never restate or contradict)
 
