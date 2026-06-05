@@ -1,6 +1,6 @@
 import { faRightToBracket, faUserPlus } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { backendUrl, loginRedirectUrl, loginPageUrl, providers, SessionLayout, sessionBasedToken } from "config";
@@ -22,6 +22,25 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
 
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [loading, setLoading] = useState(false);
+
+  //? OAuth buttons are driven by the server's env-based registry (a provider is
+  //? active only when its credentials env vars are set). We ask the server which
+  //? providers are enabled — secrets never reach the browser. `credentials` is
+  //? filtered out here; the email/password form is gated by config instead.
+  const [oauthProviders, setOauthProviders] = useState<string[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      const [error, response] = await tryCatch(() =>
+        fetch(`${backendUrl}/auth/providers`, { signal: controller.signal }),
+      );
+      if (error || !response?.ok) return;
+      const [parseError, body] = await tryCatch(() => response.json() as Promise<{ providers?: string[] }>);
+      if (parseError || !Array.isArray(body?.providers)) return;
+      setOauthProviders(body.providers.filter((name) => name !== "credentials"));
+    })();
+    return () => { controller.abort(); };
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
@@ -194,16 +213,17 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
               </button>
             </div>
 
-            <div className="flex items-center w-full text-common text-xs before:flex-1 before:border-t before:border-container1-border before:content-[''] after:flex-1 after:border-t after:border-container1-border after:content-['']">
-              <span className="px-3">{translate({ key: 'login.orContinueWith' })}</span>
-            </div>
+            {oauthProviders.length > 0 && (
+              <div className="flex items-center w-full text-common text-xs before:flex-1 before:border-t before:border-container1-border before:content-[''] after:flex-1 after:border-t after:border-container1-border after:content-['']">
+                <span className="px-3">{translate({ key: 'login.orContinueWith' })}</span>
+              </div>
+            )}
           </>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
-          {providers
-            .filter((p) => p !== "credentials")
-            .map((provider) => (
+        {oauthProviders.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            {oauthProviders.map((provider) => (
               <button
                 type="button"
                 key={provider}
@@ -214,7 +234,8 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 <span>{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
               </button>
             ))}
-        </div>
+          </div>
+        )}
     </form>
   );
 }

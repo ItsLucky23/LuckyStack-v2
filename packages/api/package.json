@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/api",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -55,9 +55,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.1.3",
-    "@luckystack/login": "^0.1.3",
-    "@luckystack/error-tracking": "^0.1.3"
+    "@luckystack/core": "^0.1.4",
+    "@luckystack/login": "^0.1.4",
+    "@luckystack/error-tracking": "^0.1.4"
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",

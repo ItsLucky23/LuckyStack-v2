@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/email",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -51,7 +51,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.1.3"
+    "@luckystack/core": "^0.1.4"
   },
   "peerDependencies": {
     "resend": "^6.0.0",

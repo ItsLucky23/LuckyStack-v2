@@ -2198,3 +2198,23 @@ Device-switch + a real fresh `npx create-luckystack-app` install surfaced more b
 **Note:** the smoke gate is compile/lint only — it did NOT catch #1/#2/#8 (all runtime). Design doc §8 proposes adding a runtime boot smoke.
 
 **Files touched**: packages/core/src/redis.ts, packages/server/src/createServer.ts, packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/template/{config.ts, _dot_env_template, _dot_env_dot_local_template, src/reset-password/_api/sendReset_v1.ts, _dot_luckystack/templates/page_dashboard.template.tsx}, .env_template (root), packages/core/{docs/redis-adapter.md, docs/app-bootstrap.md, CLAUDE.md}, docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md (new), docs/AI_QUICK_INDEX.md (regen). Versions still 0.1.2 (bump to 0.1.3 pending). Nothing committed.
+
+## 2026-06-05 — Fresh-install round 3: 6 template/scaffold fixes (→ 0.1.4) + installer UX
+
+After publishing 0.1.3, a real install surfaced 8 more issues. 6 fixed for 0.1.4; the 7th (package opt-out) stays the separate ~0.2.0 refactor, the 8th (monitoring/email scaffold choices fully unwired) reported for a follow-up.
+
+**Fixed (build 14/14 · lint 0/0 · template smoke typecheck+build+lint GREEN · new server unit test):**
+- **A — CORS dev localhost** — `template/config.ts` never set `cors.allowLocalhost`, so the prod-default `false` rejected the Vite dev frontend at `:5173`. Now `allowLocalhost: dev` → all localhost ports work in dev automatically; `EXTERNAL_ORIGINS` documented as the comma-separated extra-host knob.
+- **B+H — env-driven OAuth buttons** — `config.ts` hardcoded `providers:['credentials']` + server `oauthProviders.ts` only had commented examples, so selected OAuth providers never showed. New framework endpoint **`GET /auth/providers`** (`packages/server/src/httpRoutes/authProvidersRoute.ts` + pre-params dispatch in `httpHandler.ts`) surfaces the registry; template `oauthProviders.ts` now registers EVERY built-in by env presence (`DEV_*` dev / unprefixed prod); `LoginForm.tsx` fetches the list (no secrets to the browser). Unit test added.
+- **F — transparent template rules** — `templateRules.ts` replaced the opaque imported `DEFAULT_DASHBOARD_PATH_PATTERN` with the inlined regex + worked path examples so consumers can see/edit which paths get the dashboard layout.
+- **G — enable-later** — added `template/luckystack/sentry/init.ts` overlay (auto-loaded `sentry` slot) calling the already-env-driven `initializeSentry()`; `.env.local` + `buildOAuthEnvVars` comments rewritten to the true "set env + restart, no code edit" flow.
+- **C — arrow-key installer** — replaced the numbered-prompt helpers with a zero-dep arrow-key wizard (up/down move, Enter select, Space toggle, Left back) built on `readline` keypress + ANSI; falls back to the numbered flow on non-TTY. `packages/create-luckystack-app/src/index.ts`.
+- **E — opt-in AI instructions** — new `aiInstructions` choice (default on) gates the framework-docs copy AND installs a consumer pre-commit hook (`.githooks/pre-commit` regenerating `docs/AI_CAPABILITIES.md` + `docs/AI_PROJECT_INDEX.md`) + a `prepare` hooksPath script. Off = clean project, no AI tooling.
+
+**Reported, NOT fixed:** `{{MONITORING_PROVIDER}}`/`{{EMAIL_PROVIDER}}` scaffold choices are still unwired beyond Sentry-via-env, and `@sentry/node` isn't in template deps — wiring those *selections* (conditional deps + adapter registration) is a separate follow-up.
+
+**Version bump:** all 14 `packages/*/package.json` → **0.1.4** (versions + internal `^0.1.4` refs). `publish:dry` validates 14/14.
+
+**D (package opt-out)** = still the `refactor/optional-server-packages` ~0.2.0 effort per `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md`; user chose plan-first when started. Not begun.
+
+**Files touched**: packages/server/src/{httpHandler.ts, httpRoutes/authProvidersRoute.ts (new), httpRoutes/authProvidersRoute.test.ts (new)}, packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/template/{config.ts, _dot_env_dot_local_template, _dot_luckystack/templates/templateRules.ts, luckystack/login/oauthProviders.ts, luckystack/sentry/init.ts (new), src/_components/LoginForm.tsx}, all 14 packages/*/package.json (to 0.1.4). Pending commit + `v0.1.4` tag; publish is user-driven.

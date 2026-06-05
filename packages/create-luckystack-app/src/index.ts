@@ -20,6 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
+import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -92,6 +93,13 @@ interface ScaffoldChoices {
   monitoringProvider: 'none' | 'sentry' | 'datadog' | 'posthog';
   /** Enable @luckystack/i18n integration. */
   i18n: boolean;
+  /**
+   * Copy LuckyStack's AI dev-context into the project (root `CLAUDE.md`, the
+   * `docs/luckystack/` deep-dives, `skills/`, `.claude/commands/`, the
+   * `branch-logs/` protocol) AND install a pre-commit git hook that keeps the
+   * AI snapshot files fresh. Off = a clean project with no AI tooling.
+   */
+  aiInstructions: boolean;
 }
 
 const DEFAULT_CHOICES: ScaffoldChoices = {
@@ -101,6 +109,7 @@ const DEFAULT_CHOICES: ScaffoldChoices = {
   emailProvider: 'console',
   monitoringProvider: 'none',
   i18n: true,
+  aiInstructions: true,
 };
 
 const pickFromList = async <T extends string>(
@@ -154,7 +163,10 @@ const askYesNo = async (rl: readline.Interface, label: string, defaultValue: boo
   return answer === 'y' || answer === 'yes';
 };
 
-const runPrompts = async (): Promise<ScaffoldChoices> => {
+//? Non-interactive fallback (pipes / CI / no-TTY): the numbered-prompt flow.
+//? Used automatically when stdin/stdout isn't a terminal, so the arrow-key
+//? wizard below never breaks an automated run.
+const runPromptsFallback = async (): Promise<ScaffoldChoices> => {
   const rl = readline.createInterface({ input, output });
   try {
     const dbProvider = await pickFromList(
@@ -190,10 +202,184 @@ const runPrompts = async (): Promise<ScaffoldChoices> => {
       'none',
     );
     const i18n = await askYesNo(rl, 'Enable i18n (translations + locale switching)?', true);
-    return { dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n };
+    const aiInstructions = await askYesNo(
+      rl,
+      'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?',
+      true,
+    );
+    return { dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n, aiInstructions };
   } finally {
     rl.close();
   }
+};
+
+//? ───────── Arrow-key wizard (interactive TTY only) ─────────
+//? ↑/↓ move · Enter select · Space toggles in multi-select · ← goes back a step.
+//? Zero deps: built on Node's `readline` keypress stream + ANSI escapes.
+const ANSI = {
+  reset: '[0m', bold: '[1m', dim: '[2m',
+  cyan: '[36m', green: '[32m',
+} as const;
+
+interface WizardStep {
+  key: string;
+  type: 'select' | 'multi';
+  label: string;
+  options: readonly string[];
+  defaultValue?: string;
+  /** Hide this step when the predicate returns true (e.g. OAuth unless oauth mode). */
+  skip?: (answers: Record<string, string | string[]>) => boolean;
+}
+
+interface KeyEvent { name?: string; ctrl?: boolean }
+
+//? Resolve an answer back to one of its options without a type assertion — the
+//? value always originates from `step.options`, but `find` keeps the union type.
+const asOption = <T extends string>(value: string | string[] | undefined, options: readonly T[], fallback: T): T => {
+  const single = Array.isArray(value) ? '' : (value ?? '');
+  return options.find((option) => option === single) ?? fallback;
+};
+
+const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string | string[]>> =>
+  new Promise((resolve) => {
+    const answers: Record<string, string | string[]> = {};
+    const cursors = steps.map((step) => Math.max(0, step.options.indexOf(step.defaultValue ?? '')));
+    const selections = steps.map(() => new Set<string>());
+    const visibleSteps = (): number[] => steps.map((_, i) => i).filter((i) => steps[i]?.skip?.(answers) !== true);
+
+    let pointer = 0;
+    let prevLines = 0;
+
+    const buildBlock = (): string => {
+      const order = visibleSteps();
+      const lines: string[] = [''];
+      for (const [p, i] of order.entries()) {
+        const step = steps[i];
+        if (!step) continue;
+        if (p < pointer) {
+          const answer = answers[step.key];
+          const shown = Array.isArray(answer) ? (answer.length > 0 ? answer.join(', ') : 'none') : (answer ?? '');
+          lines.push(`${ANSI.green}✔${ANSI.reset} ${step.label} ${ANSI.cyan}${shown}${ANSI.reset}`);
+          continue;
+        }
+        if (p > pointer) continue;
+        lines.push(`${ANSI.bold}${step.label}${ANSI.reset}`);
+        const cursor = cursors[i] ?? 0;
+        for (const [oi, option] of step.options.entries()) {
+          const active = oi === cursor;
+          const box = step.type === 'multi' ? `${selections[i]?.has(option) === true ? '◉' : '◯'} ` : '';
+          const arrow = active ? `${ANSI.cyan}❯${ANSI.reset} ` : '  ';
+          const text = active ? `${ANSI.cyan}${box}${option}${ANSI.reset}` : `${box}${option}`;
+          lines.push(`${arrow}${text}`);
+        }
+        const hint = step.type === 'multi'
+          ? '↑/↓ move · space toggle · enter confirm'
+          : '↑/↓ move · enter select';
+        lines.push(`${ANSI.dim}${hint}${pointer > 0 ? ' · ← back' : ''}${ANSI.reset}`);
+      }
+      return `${lines.join('\n')}\n`;
+    };
+
+    const paint = (): void => {
+      if (prevLines > 0) output.write(`[${String(prevLines)}A[0J`);
+      const block = buildBlock();
+      output.write(block);
+      prevLines = (block.match(/\n/g) ?? []).length;
+    };
+
+    const restoreTerminal = (): void => {
+      input.off('keypress', onKey);
+      if (input.isTTY) input.setRawMode(false);
+      input.pause();
+      output.write(`${ANSI.reset}[?25h`);
+    };
+
+    function onKey(_str: string, key: KeyEvent): void {
+      const order = visibleSteps();
+      const i = order[pointer];
+      const step = i === undefined ? undefined : steps[i];
+      if (i === undefined || !step) return;
+
+      if (key.ctrl === true && key.name === 'c') {
+        restoreTerminal();
+        output.write('\n');
+        process.exit(130);
+      }
+
+      if (key.name === 'up') {
+        cursors[i] = ((cursors[i] ?? 0) - 1 + step.options.length) % step.options.length;
+        paint();
+        return;
+      }
+      if (key.name === 'down') {
+        cursors[i] = ((cursors[i] ?? 0) + 1) % step.options.length;
+        paint();
+        return;
+      }
+      if (key.name === 'left' && pointer > 0) {
+        pointer -= 1;
+        paint();
+        return;
+      }
+      if (step.type === 'multi' && key.name === 'space') {
+        const option = step.options[cursors[i] ?? 0];
+        const set = selections[i];
+        if (option !== undefined && set) {
+          if (set.has(option)) set.delete(option);
+          else set.add(option);
+        }
+        paint();
+        return;
+      }
+      if (key.name === 'return') {
+        answers[step.key] = step.type === 'multi'
+          ? step.options.filter((option) => selections[i]?.has(option) === true)
+          : asOption(step.options[cursors[i] ?? 0], step.options, step.defaultValue ?? step.options[0] ?? '');
+        const nextOrder = visibleSteps();
+        pointer += 1;
+        paint();
+        if (pointer >= nextOrder.length) {
+          restoreTerminal();
+          resolve(answers);
+        }
+      }
+    }
+
+    emitKeypressEvents(input);
+    if (input.isTTY) input.setRawMode(true);
+    input.resume();
+    output.write('[?25l');
+    input.on('keypress', onKey);
+    paint();
+  });
+
+const runPrompts = async (): Promise<ScaffoldChoices> => {
+  if (!input.isTTY || !output.isTTY) return runPromptsFallback();
+
+  const answers = await runWizard([
+    { key: 'dbProvider', type: 'select', label: 'Which database provider?', options: ['mongodb', 'postgresql', 'mysql', 'sqlite'], defaultValue: 'mongodb' },
+    { key: 'authMode', type: 'select', label: 'Authentication mode?', options: ['none', 'credentials', 'credentials+oauth'], defaultValue: 'credentials' },
+    { key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire?', options: ['google', 'github', 'discord', 'facebook', 'microsoft'], skip: (a) => a.authMode !== 'credentials+oauth' },
+    { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', options: ['none', 'console', 'resend', 'smtp'], defaultValue: 'console' },
+    { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', options: ['none', 'sentry', 'datadog', 'posthog'], defaultValue: 'none' },
+    { key: 'i18n', type: 'select', label: 'Enable i18n (translations + locale switching)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
+    { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
+  ]);
+
+  const authMode = asOption(answers.authMode, ['none', 'credentials', 'credentials+oauth'] as const, 'credentials');
+  const oauthAll = ['google', 'github', 'discord', 'facebook', 'microsoft'] as const;
+  const rawOauth = answers.oauthProviders;
+  const oauthPicked = Array.isArray(rawOauth) ? rawOauth : [];
+
+  return {
+    dbProvider: asOption(answers.dbProvider, ['mongodb', 'postgresql', 'mysql', 'sqlite'] as const, 'mongodb'),
+    authMode,
+    oauthProviders: authMode === 'credentials+oauth' ? oauthAll.filter((provider) => oauthPicked.includes(provider)) : [],
+    emailProvider: asOption(answers.emailProvider, ['none', 'console', 'resend', 'smtp'] as const, 'console'),
+    monitoringProvider: asOption(answers.monitoringProvider, ['none', 'sentry', 'datadog', 'posthog'] as const, 'none'),
+    i18n: answers.i18n === 'Yes',
+    aiInstructions: answers.aiInstructions !== 'No',
+  };
 };
 
 const printHelp = (): void => {
@@ -254,16 +440,18 @@ export const readSelfVersion = (): string => {
 export const renameDotFile = (name: string): string => name.replaceAll('_dot_', '.');
 
 //? Per selected OAuth provider, emit BOTH a `DEV_*` pair (read when NODE_ENV !==
-//? production) and an unprefixed pair (read in production) — matching
-//? `env(prodKey, devKey)` in `luckystack/login/oauthProviders.ts`. Left
-//? uncommented with empty values so the developer only fills them in; an empty
-//? value keeps that provider disabled until populated.
+//? production) and an unprefixed pair (read in production) — matching the
+//? env-driven registry in `luckystack/login/oauthProviders.ts`. Left uncommented
+//? with empty values so the developer only fills them in; the provider stays
+//? disabled (no login button, no /auth route) until BOTH its id and secret are
+//? set — no code edit required to enable it.
 export const buildOAuthEnvVars = (providers: readonly string[]): string => {
   if (providers.length === 0) {
     return [
-      '# No OAuth providers were selected at scaffold time. To add one later, set',
-      '# its DEV_<PROVIDER>_CLIENT_ID / _SECRET (dev) and <PROVIDER>_CLIENT_ID /',
-      '# _SECRET (prod) here, then enable it in luckystack/login/oauthProviders.ts.',
+      '# No OAuth providers were selected at scaffold time. To add one later, just',
+      '# set its DEV_<PROVIDER>_CLIENT_ID / _SECRET (dev) and <PROVIDER>_CLIENT_ID /',
+      '# _SECRET (prod) below and restart — oauthProviders.ts already wires every',
+      '# built-in provider (google, github, discord, facebook, microsoft) by env.',
     ].join('\n');
   }
   return providers
@@ -338,6 +526,45 @@ const runPrismaGenerate = (cwd: string): void => {
   if (result.status !== 0) {
     console.error('\n[create-luckystack-app] `npx prisma generate` failed. Run it manually after setting DATABASE_URL.');
   }
+};
+
+//? Pre-commit hook that regenerates the consumer's AI snapshot files
+//? (docs/AI_CAPABILITIES.md + docs/AI_PROJECT_INDEX.md) and stages them, so they
+//? never drift from the code. Mirrors the framework repo's own hook. Wired via a
+//? `prepare` script setting `core.hooksPath` at install time (no-op when the
+//? project isn't a git repo yet — the hook activates after `git init`).
+const AI_INDEX_HOOK = `#!/bin/sh
+#? Auto-installed by create-luckystack-app. Regenerates LuckyStack's AI snapshot
+#? files so they stay in sync with this commit, then stages them. The generators
+#? are deterministic (no timestamps), so a no-op commit leaves them unchanged.
+set -e
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[pre-commit] npm not on PATH — skipping AI snapshot regeneration."
+  exit 0
+fi
+echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
+npm run ai:capabilities --silent
+echo "[pre-commit] Regenerating docs/AI_PROJECT_INDEX.md..."
+npm run ai:project-index --silent
+git add docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md
+`;
+
+const installAiIndexHook = (targetDir: string): void => {
+  const hooksDir = path.join(targetDir, '.githooks');
+  fs.mkdirSync(hooksDir, { recursive: true });
+  const hookPath = path.join(hooksDir, 'pre-commit');
+  fs.writeFileSync(hookPath, AI_INDEX_HOOK);
+  //? rwxr-xr-x so git can execute it on POSIX. No-op semantics on Windows.
+  fs.chmodSync(hookPath, 0o755);
+
+  //? Add a `prepare` script that points git at .githooks on install. Wrapped so
+  //? it never fails the install when the directory isn't a git repo yet.
+  const pkgPath = path.join(targetDir, 'package.json');
+  if (!fs.existsSync(pkgPath)) return;
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { scripts?: Record<string, string | undefined> };
+  pkg.scripts ??= {};
+  pkg.scripts.prepare ??= "node -e \"try{require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})}catch{}\"";
+  fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 
 const main = async (): Promise<void> => {
@@ -430,40 +657,48 @@ const main = async (): Promise<void> => {
   console.log(`\nScaffolding ${slug} into ${targetDir}\n`);
   copyTree(TEMPLATE_DIR, targetDir, vars);
 
-  //? Copy framework AI documentation so consumer's AI agents have full context.
-  //? Only branch-logs/README.md is copied (not the framework's own log entries) —
-  //? the consumer's first session initializes their own branch-log file.
-  const repoRoot = path.resolve(__dirname, '..', '..', '..');
-  const docsCopies: [string, string, boolean][] = [
-    // [source, dest, isDirectory]
-    [path.join(repoRoot, 'CLAUDE.md'),                path.join(targetDir, 'CLAUDE.md'),                  false],
-    [path.join(repoRoot, 'docs'),                     path.join(targetDir, 'docs', 'luckystack'),         true],
-    [path.join(repoRoot, 'skills'),                   path.join(targetDir, 'skills'),                     true],
-    [path.join(repoRoot, '.claude', 'commands'),      path.join(targetDir, '.claude', 'commands'),        true],
-    [path.join(repoRoot, 'branch-logs', 'README.md'), path.join(targetDir, 'branch-logs', 'README.md'),   false],
-  ];
-  let copiedCount = 0;
-  for (const [src, dst, isDir] of docsCopies) {
-    if (!fs.existsSync(src)) continue;
-    if (isDir) {
-      copyTree(src, dst, vars);
-    } else {
-      fs.mkdirSync(path.dirname(dst), { recursive: true });
-      //? Route text-file copies through `replacePlaceholders` so framework-doc
-      //? files that adopt `{{PROJECT_NAME}}`-style tokens later get rendered
-      //? consistently with the template tree. Binary files fall back to a raw
-      //? byte copy.
-      if (isTextFile(src)) {
-        const rendered = replacePlaceholders(fs.readFileSync(src, 'utf8'), vars);
-        fs.writeFileSync(dst, rendered);
+  //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
+  //? the framework's AI docs so the consumer's AI agents inherit full context,
+  //? and install a pre-commit hook that keeps the AI snapshot files fresh. When
+  //? disabled the project ships clean — no CLAUDE.md, no docs/luckystack, no hook.
+  if (choices.aiInstructions) {
+    //? Only branch-logs/README.md is copied (not the framework's own log
+    //? entries) — the consumer's first session initializes their own log file.
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    const docsCopies: [string, string, boolean][] = [
+      // [source, dest, isDirectory]
+      [path.join(repoRoot, 'CLAUDE.md'),                path.join(targetDir, 'CLAUDE.md'),                  false],
+      [path.join(repoRoot, 'docs'),                     path.join(targetDir, 'docs', 'luckystack'),         true],
+      [path.join(repoRoot, 'skills'),                   path.join(targetDir, 'skills'),                     true],
+      [path.join(repoRoot, '.claude', 'commands'),      path.join(targetDir, '.claude', 'commands'),        true],
+      [path.join(repoRoot, 'branch-logs', 'README.md'), path.join(targetDir, 'branch-logs', 'README.md'),   false],
+    ];
+    let copiedCount = 0;
+    for (const [src, dst, isDir] of docsCopies) {
+      if (!fs.existsSync(src)) continue;
+      if (isDir) {
+        copyTree(src, dst, vars);
       } else {
-        fs.copyFileSync(src, dst);
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        //? Route text-file copies through `replacePlaceholders` so framework-doc
+        //? files that adopt `{{PROJECT_NAME}}`-style tokens later get rendered
+        //? consistently with the template tree. Binary files fall back to a raw
+        //? byte copy.
+        if (isTextFile(src)) {
+          const rendered = replacePlaceholders(fs.readFileSync(src, 'utf8'), vars);
+          fs.writeFileSync(dst, rendered);
+        } else {
+          fs.copyFileSync(src, dst);
+        }
       }
+      copiedCount++;
     }
-    copiedCount++;
-  }
-  if (copiedCount > 0) {
-    console.log(`Framework AI documentation copied (${copiedCount} source(s) merged into target).`);
+
+    installAiIndexHook(targetDir);
+
+    if (copiedCount > 0) {
+      console.log(`Framework AI documentation copied (${copiedCount} source(s) merged into target) + pre-commit AI-index hook installed.`);
+    }
   }
 
   console.log('Files written.');
@@ -484,6 +719,7 @@ Choices:
   email:       ${choices.emailProvider}
   monitoring:  ${choices.monitoringProvider}
   i18n:        ${choices.i18n ? 'on' : 'off'}
+  ai-docs:     ${choices.aiInstructions ? 'included (+ pre-commit AI-index hook)' : 'skipped'}
 
 Next steps:
   cd ${args.projectName}

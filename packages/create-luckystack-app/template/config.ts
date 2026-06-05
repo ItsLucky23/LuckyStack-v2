@@ -64,7 +64,15 @@ registerProjectConfig({
   },
   http: {
     cors: {
+      //? The backend's own origin is always allowed. Add extra hosts (a separate
+      //? frontend domain, OAuth provider origins, …) to EXTERNAL_ORIGINS in
+      //? `.env`, comma-separated — e.g. EXTERNAL_ORIGINS=https://app.example.com,https://accounts.google.com
       allowedOrigins: [backendUrl, ...(env('EXTERNAL_ORIGINS') || '').split(',').map((s) => s.trim()).filter(Boolean)],
+      //? In dev (NODE_ENV !== 'production') accept ANY localhost origin, so the
+      //? Vite dev server on http://localhost:5173 (and :5174, :5175, … when the
+      //? port is taken) can talk to the backend without listing each port. Stays
+      //? false in production so deployments fail closed.
+      allowLocalhost: dev,
     },
   },
   defaultLanguage: config.defaultLanguage,

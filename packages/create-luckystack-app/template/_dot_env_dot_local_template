@@ -13,13 +13,22 @@ DATABASE_URL="{{DATABASE_URL}}"
 REDIS_USER=
 REDIS_PASSWORD=
 
-# OAuth client secrets. Fill these in, then enable the provider in
-# `luckystack/login/oauthProviders.ts`. DEV_* are read when NODE_ENV is not
-# 'production'; the unprefixed pair is read in production.
+# OAuth client secrets. Just fill in a provider's id + secret and restart — the
+# button appears on the login form automatically and its /auth/callback route
+# works. No code edit needed: luckystack/login/oauthProviders.ts already wires
+# every built-in provider by env. DEV_* are read when NODE_ENV is not
+# 'production'; the unprefixed pair is read in production. Also set the OAuth
+# app's redirect URL to <DNS>/auth/callback/<provider> in its dev console and
+# add the provider's origin to EXTERNAL_ORIGINS in `.env`.
 {{OAUTH_ENV_VARS}}
 
-# Sentry — optional. Leave blank to disable error reporting.
+# Sentry — optional. To turn on error reporting later: `npm i @sentry/node`,
+# paste your DSN here, and restart. The luckystack/sentry/init.ts overlay calls
+# initializeSentry() at boot, which reads this var and wires error capture
+# (no-op while blank). By default Sentry only sends in production; set
+# SENTRY_ENABLED=true to capture in dev too.
 SENTRY_DSN=
+# SENTRY_ENABLED=
 
 # Test-only — protects /_test/reset in dev. Set this if you run integration tests.
 TEST_RESET_TOKEN=

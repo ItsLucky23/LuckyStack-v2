@@ -20,6 +20,7 @@ import { handleHealthRoute, handleLivezRoute, handleReadyzRoute } from './httpRo
 import { handleTestResetRoute } from './httpRoutes/testResetRoute';
 import { handleUploadsRoute } from './httpRoutes/uploadsRoute';
 import { handleAuthApiRoute } from './httpRoutes/authApiRoute';
+import { handleAuthProvidersRoute } from './httpRoutes/authProvidersRoute';
 import { handleAuthCallbackRoute } from './httpRoutes/authCallbackRoute';
 import { handleApiRoute } from './httpRoutes/apiRoute';
 import { handleSyncRoute } from './httpRoutes/syncRoute';
@@ -78,6 +79,7 @@ const PRE_PARAMS_ROUTES: HttpRouteHandler[] = [
   handleReadyzRoute,
   handleHealthRoute,
   handleTestResetRoute,
+  handleAuthProvidersRoute,
   handlePreParamsCustomRoutes,
 ];
 
