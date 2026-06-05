@@ -28,7 +28,9 @@
       "Bash(npm --workspace packages/devkit run build)",
       "Bash(npx vite *)",
       "WebFetch(domain:github.com)",
-      "Read(//c/Users/mathi/.claude/**)"
+      "Read(//c/Users/mathi/.claude/**)",
+      "Bash(npm whoami *)",
+      "Bash(npm config *)"
     ]
   }
 }

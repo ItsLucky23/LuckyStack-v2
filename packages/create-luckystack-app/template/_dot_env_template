@@ -13,8 +13,11 @@ SECURE=false
 DNS=http://localhost:80
 
 # Comma-separated list of additional origins permitted by the CORS layer.
-# (DNS is auto-included; you usually don't need to set EXTERNAL_ORIGINS.)
-EXTERNAL_ORIGINS=
+# DNS is auto-included. OAuth callbacks arrive with the provider's origin as
+# Referer, so every enabled provider's origin must be listed here — the scaffold
+# pre-fills the providers you selected. Add more hosts (e.g. a separate frontend
+# domain) comma-separated.
+EXTERNAL_ORIGINS={{EXTERNAL_ORIGINS}}
 
 # Project namespace — used as the prefix for Redis session/active-user keys.
 PROJECT_NAME={{PROJECT_NAME}}

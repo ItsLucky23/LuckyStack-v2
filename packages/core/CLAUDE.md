@@ -176,7 +176,7 @@ Env vars read directly by core (via `env.ts` and call-time helpers):
 | `DNS` | `''` | Reserved for downstream packages. |
 | `REDIS_HOST` | `'127.0.0.1'` | `redis.ts` default client + `getRedisConnectionOptions`. |
 | `REDIS_PORT` | `'6379'` | Same. |
-| `REDIS_USERNAME` | (unset) | Optional ioredis auth. |
+| `REDIS_USER` | (unset) | Optional ioredis auth. |
 | `REDIS_PASSWORD` | (unset) | Optional ioredis auth. |
 | `PROJECT_NAME` | `'luckystack'` | Redis-prefix fallback in `getProjectName()`. |
 | `LUCKYSTACK_ENV` | (unset) | `resolveEnvKey()` first preference (boot UUID, router handshake). |

@@ -117,7 +117,7 @@ export const createLuckyStackServer = async (
   const [bootUuidError] = await tryCatch(() => writeBootUuid());
   if (bootUuidError) {
     throw new Error(
-      'Failed to write the boot UUID to Redis. Check REDIS_HOST / REDIS_PORT / REDIS_USERNAME / REDIS_PASSWORD and that Redis is reachable.',
+      'Failed to write the boot UUID to Redis. Check REDIS_HOST / REDIS_PORT / REDIS_USER / REDIS_PASSWORD and that Redis is reachable.',
       { cause: bootUuidError },
     );
   }

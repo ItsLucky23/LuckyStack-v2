@@ -1,69 +1,52 @@
 # SESSION_STATE
 
 > Branch: `chore/package-split-prep` · Base: `master`
-> **Pick up here at home: publish `@luckystack/* 0.1.2` and verify a fresh `npx create-luckystack-app` install works.**
+> **Pick up here: publish `@luckystack/* 0.1.3` (fixes a fresh-install-broken 0.1.2), runtime-test, commit+tag — then keep working through the remaining build-output problems.**
 
-## Session Summary
+## Session summary
 
-This session started as a device-2 "can't build" fix and turned into a full publish + hardening cycle for the 14 `@luckystack/*` packages. We: (1) unblocked the local build, (2) published **0.1.0** to npm, (3) did a TypeScript-6 migration and republished **0.1.1**, then (4) used a real `npx create-luckystack-app` fresh-install test to discover that **0.1.1's scaffold is broken on a fresh machine** — two TS6-fallout bugs. We fixed both (reverting the *consumer template* to TS 5.7.3 while keeping the framework repo + libs on TS6), bumped everything to **0.1.2**, and verified a fresh scaffold is fully green via the `.smoke-test/run.mjs` gate. **0.1.2 is ready but NOT yet published.** The currently-published `@latest` is the broken **0.1.1**.
+Continued the publish cycle on a new device. A real fresh `npx create-luckystack-app` install surfaced more bugs the compile/lint smoke gate misses (all RUNTIME). User triaged 8 issues; **7 fixed → 0.1.3**, the 8th (package opt-out) scoped out as a separate refactor with a design doc.
 
-## Completed Tasks
+**Fixed this session (all verified: build 14/14 · lint 0/0 · `.smoke-test` GREEN):**
+- **#1 validator ESM** — `packages/create-luckystack-app/template/src/reset-password/_api/sendReset_v1.ts:1` used `import { isEmail } from 'validator'` (CJS → named ESM import throws at server start). Now default-import + `validator.isEmail()` (mirrors `settings/_api/requestEmailChange_v1.ts`).
+- **#2 `process is not defined`** — `packages/create-luckystack-app/template/config.ts:7` read `process.env` top-level (+ `EXTERNAL_ORIGINS` at line ~54); Vite bundles it to the browser with no `process` shim → client crash. Added browser-safe `env()` guard + `window.location.origin` for client `backendUrl`.
+- **#3 MongoDB URL** — `packages/create-luckystack-app/src/index.ts` `DATABASE_URL_BY_PROVIDER.mongodb` now emits `?replicaSet=rs0&directConnection=true` (bare URL fails with Prisma). env.local comment shows the richer auth+rs form.
+- **#4 OAuth env DEV+PROD** — new `buildOAuthEnvVars()` in `index.ts` emits uncommented `DEV_*` + unprefixed pairs per SELECTED provider (matches `env(prodKey, devKey)` in `luckystack/login/oauthProviders.ts`). New `{{OAUTH_ENV_VARS}}` placeholder in `_dot_env_dot_local_template`.
+- **#5 EXTERNAL_ORIGINS** — new `OAUTH_PROVIDER_ORIGINS` map + `{{EXTERNAL_ORIGINS}}` placeholder in `_dot_env_template`; auto-filled from selected providers (OAuth callback Referer must pass the origin gate).
+- **#6 `REDIS_USERNAME` → `REDIS_USER`** — `packages/core/src/redis.ts` (×3), `packages/server/src/createServer.ts:120` errmsg, root `.env_template`, template `_dot_env_dot_local_template`, docs (`packages/core/docs/redis-adapter.md`, `app-bootstrap.md:378`, `CLAUDE.md`).
+- **#8 page_dashboard runtime crash** — `packages/create-luckystack-app/template/_dot_luckystack/templates/page_dashboard.template.tsx:14` injected `template = 'dashboard'`, but `TemplateProvider.tsx:20` only knows `'home' | 'plain'` → `Templates['dashboard']` undefined → crash. Aligned injected value to `'home'`.
 
-- **Device-2 build unblock**: root `package.json` TS was fought between `^6.0.0`/`~5.7.3`; final resolution landed via the devkit peer (see below). `tsconfig.shared.json` `ignoreDeprecations` is `"6.0"` (repo is on TS6).
-- **Published 0.1.0** (all 14) and **0.1.1** (TS6 migration) to npm under the `@luckystack` org (publisher npm user `lucky23m`). Both are immutable/live.
-- **dotenv** unified to `^17.0.0` across all packages (was 16 in core, 17 in login) — zero external-dep drift.
-- **TS6 emitter de-risk**: proved devkit's `checker.typeToString` output is **byte-identical** between TS 5.7.3 and 6.0.3 (generated `apiTypes.generated.ts` + `apiInputSchemas.generated.ts` diff = 0). This justified the broad peer.
-- **Found via fresh `npx` test — 2 bugs in the published 0.1.1 template, both now fixed locally:**
-  - **Bug 1 (baseUrl)**: `template/tsconfig.json` had `baseUrl: "."` → TS6 hard error (TS5101). Fixed: removed `baseUrl`, `./`-prefixed the paths, **added `"luckystack/*": ["./luckystack/*"]`** (the bare-root import `import 'luckystack/i18n/locales'` in `src/main.tsx` relied on baseUrl and broke vite/import-x even though tsc passed).
-  - **Bug 2 (eslint-plugin-react-x)**: `react-x@1.x` peer caps at TS `^4.9.5 || ^5.3.3`; template's `typescript: ^6.0.0` → ERESOLVE on fresh install. Investigated whole eslint stack: react-x TS6 support starts at 3.x which needs **ESLint 10**, and `eslint-plugin-react` + `jsx-a11y` have **no ESLint-10 release at all**. So keeping the template on TS6 is currently impossible without dropping plugins.
-- **Decision = Pad B** (revert template to TS5, broaden devkit peer): `devkit` peer `^6.0.0` → **`>=5.7.3 <7.0.0`**; template `typescript` → **`~5.7.3`**. Repo + libs stay TS6. devkit docs (`CLAUDE.md`, `docs/ts-program-cache.md`) updated to match.
-- **Bumped all 14 → 0.1.2**, internal `@luckystack/*` refs → `^0.1.2`. Final audit: all 14 @ 0.1.2, zero drift, internal refs `^0.1.2`, devkit peer broad, template TS `~5.7.3`.
-- **Fresh-scaffold smoke test GREEN** (`.smoke-test/run.mjs`): pack 14/14 → scaffold → install ✅ → prisma ✅ → generateArtifacts ✅ → **typecheck 0 · build PASS · lint 0/0**. The fixed scaffold installs `typescript@5.7.3 + eslint-plugin-react-x@1.53.1` side-by-side with no ERESOLVE.
-- Branch-log + INDEX kept current (entries → 103). Memory `project_npm_scope_registration.md` updated (0.1.0 + 0.1.1 published).
+**Version bump:** all 14 `packages/*/package.json` → **0.1.3** (versions + internal `^0.1.3` refs). Re-ran build+smoke = GREEN.
 
-## Pending Logic / Known Bugs
+**Housekeeping:** `docs/AI_QUICK_INDEX.md` regenerated; branch-log entry added (entries → 104) + `branch-logs/INDEX.md` updated.
 
-- **`@latest` on npm = the broken 0.1.1.** Every `npx create-luckystack-app@latest` currently produces a scaffold whose `npm install` fails (Bug 2). Publishing 0.1.2 fixes this.
-- **0.1.2 is NOT published** — only built + smoke-tested locally.
-- **Residual unverified gap**: the smoke test uses local `@luckystack/*` tarballs + an `overrides` block (because 0.1.2 isn't on the registry yet). The react-x/TS conflict resolution there is identical to a real install (TS + eslint come from the real registry), but the **real-registry resolution of `@luckystack/*@0.1.2` itself** can only be tested after publishing.
-- **Nothing is committed.** The entire session's work sits in the working tree (uncommitted). No `v0.1.x` tag exists.
+## Current state
 
-## Exact Next Step
+- **0.1.2 is the live `@latest`** and is itself broken on fresh install (#1/#2/#8 are runtime bugs present in 0.1.2 too). Publishing 0.1.3 fixes this.
+- **0.1.3 is built + smoke-GREEN locally but NOT published.** `npm run publish:dry` will now validate (it failed earlier only because versions were still 0.1.2).
+- **Nothing is committed.** No `v0.1.3` tag.
+- **#7 (package opt-out) is NOT implemented** — blocked by `@luckystack/server` hard-depending on login/presence/sync and importing them statically (incl. CSRF↔session↔login coupling). Full design written in `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md` (own branch `refactor/optional-server-packages`, security review, ~0.2.0).
+- **`.smoke-test/` gate is compile/lint only** — it did NOT catch #1/#2/#8 (all runtime). Design doc §8 proposes adding a runtime boot smoke.
+- Uncommitted parallel work in `src/workspaces/**` (~29 files) is NOT ours — keep it out of any 0.1.3 commit.
+- `package-lock.json` + `docs/AI_CAPABILITIES.md` still show 0.1.2 (refresh with `npm install`; not needed for publish).
 
-**Publish 0.1.2, then verify a fresh install at home.** Recommended (safe, staged) route since the fresh-install scaffold broke twice already:
+## Next steps
 
-1. Make sure npm 2FA is on **"Authorization only"** (npmjs.com → Account → 2FA), else publish demands an OTP per package.
-2. **Staged publish** under the `next` dist-tag (keeps `@latest` = 0.1.1 until proven): the publish script (`scripts/publishPackages.mjs`) currently hardcodes `--tag latest` — **add a `--tag next` option first** (small change), OR publish manually per package with `npm publish --tag next`. Then:
-   ```
-   npx create-luckystack-app@0.1.2 testfix
-   cd testfix && npm i && npm run build && npm run lint
-   ```
-3. Green? Promote: `npm dist-tag add create-luckystack-app@0.1.2 latest` (and ideally the same for the scoped packages if you tagged them `next` too).
-4. Or **direct route** (trust the smoke test): just `npm run publish:packages` → 0.1.2 becomes `@latest` and fixes the live-broken scaffold immediately.
-5. After it's live + verified: **commit everything + tag `v0.1.2`** (still pending).
-6. Optional: `npm deprecate create-luckystack-app@0.1.1 "broken scaffold on fresh install; use >=0.1.2"`.
+1. **Publish 0.1.3** (user-driven, see User action). After publish, the broken-on-install 0.1.2 `@latest` is superseded.
+2. **Fresh runtime test**: `npx create-luckystack-app@0.1.3 testfix && cd testfix && npm i && npm run server` — confirm server starts WITHOUT the validator error, client loads WITHOUT `process is not defined`, and a page under `src/admin/...` uses the sidebar (`home`) layout without crashing.
+3. **Commit everything + tag `v0.1.3`** (exclude `src/workspaces/**`). Optionally `npm deprecate "create-luckystack-app@0.1.2" "broken scaffold on fresh install; use >=0.1.3"`.
+4. **Continue triaging the remaining build-output problems** (the user has MORE to tackle next session — gather them from a fresh `npx create-luckystack-app@0.1.3` install + `npm run build`/`npm run server` output). Same pattern: the smoke gate misses runtime issues, so drive from the real install.
+5. Later / separate branch: implement `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md` (#7) — make login/presence/sync optional peers + lazy wiring + double-submit-CSRF fallback.
 
-## Technical State
+## User action required
 
-**Files modified this session (uncommitted):**
-- `SESSION_STATE.md` — this handoff (the earlier publish-handoff one was deleted mid-session; this is new).
-- `package.json` (root) — TS back to `^6.0.0` (round-tripped; net vs committed may be clean) — repo stays TS6.
-- `tsconfig.shared.json` — `ignoreDeprecations: "6.0"` (round-tripped to committed value).
-- `packages/*/package.json` (all 14) — `version: 0.1.2` + internal `@luckystack/*` refs `^0.1.2`.
-- `packages/core/package.json` — `dotenv ^17.0.0`.
-- `packages/devkit/package.json` — peer `typescript: ">=5.7.3 <7.0.0"`.
-- `packages/devkit/CLAUDE.md` + `packages/devkit/docs/ts-program-cache.md` — peer wording → broad range + verified-identical note.
-- `packages/create-luckystack-app/template/package.json` — `typescript: ~5.7.3`.
-- `packages/create-luckystack-app/template/tsconfig.json` — removed `baseUrl`, `./`-prefixed paths, **added `luckystack/*` path** (the actual fix).
-- `package-lock.json`.
-- `branch-logs/chore--package-split-prep.md` + `branch-logs/INDEX.md` (entries → 103).
-- **Not ours** (parallel `src/workspaces/**` session, ~29 files): leave out of any commit.
-
-**Dev-only / cleanup:**
-- `.smoke-test/` — gitignored fresh-scaffold gate (`run.mjs` recreated this session; `app/`, `tarballs/`, `logs/` are throwaway). Re-run with `npm run build:packages && node .smoke-test/run.mjs`. Expect: typecheck 0 · build PASS · lint 0/0.
-- A `C:\youcomm\test123` + `C:\youcomm\testfix`(?) scaffold may exist from manual `npx` runs — disposable.
-
-**Environment:**
-- Repo + all 14 libs build/run on **TS 6.0.3**; consumer template ships **TS 5.7.3** (intentional — its eslint stack isn't TS6-ready).
-- Nothing committed; no tag. npm publisher = `lucky23m`. Org `@luckystack` is live.
-- Verify gates (all green this session): `npm run build` · `npm run lint` (0/0) · `npm run lint:packages` (0) · `npm run test:unit` (754/754) · `npm run build:packages` (14/14) · `.smoke-test/run.mjs` (GREEN).
+- **Publish (only you can — login + OTP):**
+  ```
+  npm login            # as lucky23m; set 2FA to "Authorization only" to avoid per-package OTP
+  npm whoami           # -> lucky23m
+  npm run publish:dry  # expect 14/14 validated
+  npm run publish:packages
+  ```
+- **Runtime-test the fresh 0.1.3 install** (step 2 above) — this is the real verification of #1/#2/#8, which the smoke gate cannot catch.
+- **Decide** whether to commit+tag `v0.1.3` now or after the runtime test passes.
+- For next session: collect the remaining build-output errors from the fresh install so we can triage them.

@@ -4,8 +4,21 @@
 
 import { registerProjectConfig } from '@luckystack/core';
 
-export const dev = process.env.NODE_ENV !== 'production';
-export const backendUrl = process.env.DNS || `http://${process.env.SERVER_IP ?? '127.0.0.1'}:${process.env.SERVER_PORT ?? '80'}`;
+//? This file is imported by BOTH the Node server and the Vite browser bundle.
+//? `process` is a Node global — referencing `process.env.X` directly in the
+//? client bundle throws `ReferenceError: process is not defined`. Always read
+//? env vars through `env(...)`, which returns undefined when `process` is absent.
+const env = (key: string): string | undefined =>
+  typeof process === 'undefined' ? undefined : process.env[key];
+
+//? In the browser the app is same-origin with the backend — the Vite dev proxy
+//? forwards /api, /sync, /socket.io, … to SERVER_IP:SERVER_PORT, and in prod the
+//? frontend is served from the backend origin. On the server we read env vars.
+const browserOrigin = typeof window === 'undefined' ? undefined : window.location.origin;
+
+export const dev = env('NODE_ENV') !== 'production';
+export const backendUrl =
+  browserOrigin ?? env('DNS') ?? `http://${env('SERVER_IP') ?? '127.0.0.1'}:${env('SERVER_PORT') ?? '80'}`;
 
 const config = {
   pageTitle: '{{PROJECT_TITLE}}',
@@ -51,7 +64,7 @@ registerProjectConfig({
   },
   http: {
     cors: {
-      allowedOrigins: [backendUrl, ...(process.env.EXTERNAL_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean)],
+      allowedOrigins: [backendUrl, ...(env('EXTERNAL_ORIGINS') || '').split(',').map((s) => s.trim()).filter(Boolean)],
     },
   },
   defaultLanguage: config.defaultLanguage,

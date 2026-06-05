@@ -23,7 +23,7 @@ export default redis
 **Behavior:**
 - Every method/property access is forwarded to whatever `getRedisClient()` currently returns.
 - When the consumer has called `registerRedisClient(...)`, that client wins.
-- Otherwise the proxy lazily constructs a default ioredis instance from `env.REDIS_HOST` / `env.REDIS_PORT` (plus optional `REDIS_USERNAME` / `REDIS_PASSWORD`) on first access.
+- Otherwise the proxy lazily constructs a default ioredis instance from `env.REDIS_HOST` / `env.REDIS_PORT` (plus optional `REDIS_USER` / `REDIS_PASSWORD`) on first access.
 - The default client installs a `connect` listener that logs `"Connected to Redis"` via `getLogger().info` and an `error` listener that routes to `getLogger().error`.
 - The default client uses an exponential `retryStrategy(times => Math.min(times * 50, 2000))`.
 
@@ -55,7 +55,7 @@ export const getRedisConnectionOptions = (): RedisConnectionOptions
 
 **Behavior:**
 - Reads `env.REDIS_HOST` and parses `env.REDIS_PORT` to a number.
-- Includes `username` only when `process.env.REDIS_USERNAME` is non-empty.
+- Includes `username` only when `process.env.REDIS_USER` is non-empty.
 - Includes `password` only when `process.env.REDIS_PASSWORD` is non-empty.
 - Read at call time so dotenv timing doesn't capture stale values.
 
@@ -100,7 +100,7 @@ setIoInstance(io);
 |---|---|---|
 | `REDIS_HOST` | `'127.0.0.1'` | Default client + `getRedisConnectionOptions`. |
 | `REDIS_PORT` | `'6379'` | Same. |
-| `REDIS_USERNAME` | (unset) | Optional ioredis auth. |
+| `REDIS_USER` | (unset) | Optional ioredis auth. |
 | `REDIS_PASSWORD` | (unset) | Optional ioredis auth. |
 
 ## Related

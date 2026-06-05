@@ -3,21 +3,20 @@
 # Database connection used by Prisma. This is pre-filled for the provider you
 # chose at scaffold time; the other formats are shown for when you switch.
 DATABASE_URL="{{DATABASE_URL}}"
-#   mongodb:    mongodb://localhost:27017/{{PROJECT_NAME}}   (or a mongodb+srv Atlas URI; needs a replica set)
+#   mongodb:    mongodb://root:PASSWORD@127.0.0.1:27017/{{PROJECT_NAME}}?authSource=admin&directConnection=true&replicaSet=rs0
+#               (Prisma needs a replica set — `rs0` here; for Atlas use the mongodb+srv URI it gives you)
 #   postgresql: postgresql://user:password@localhost:5432/{{PROJECT_NAME}}
 #   mysql:      mysql://user:password@localhost:3306/{{PROJECT_NAME}}
 #   sqlite:     file:./dev.db
 
 # Redis credentials (only required when your Redis instance has auth).
-REDIS_USERNAME=
+REDIS_USER=
 REDIS_PASSWORD=
 
-# OAuth client secrets — uncomment a provider in
-# `luckystack/login/oauthProviders.ts` AFTER you populate the matching pair here.
-# DEV_GOOGLE_CLIENT_ID=
-# DEV_GOOGLE_CLIENT_SECRET=
-# DEV_GITHUB_CLIENT_ID=
-# DEV_GITHUB_CLIENT_SECRET=
+# OAuth client secrets. Fill these in, then enable the provider in
+# `luckystack/login/oauthProviders.ts`. DEV_* are read when NODE_ENV is not
+# 'production'; the unprefixed pair is read in production.
+{{OAUTH_ENV_VARS}}
 
 # Sentry — optional. Leave blank to disable error reporting.
 SENTRY_DSN=

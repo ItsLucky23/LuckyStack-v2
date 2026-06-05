@@ -1,17 +1,17 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
 
-//? Dashboard page template — wrapped in the `'dashboard'` template
-//? (sidebar + main content). Includes a login-required middleware as a
-//? sane default — adjust the role check or remove the middleware if this
-//? page is public.
+//? Dashboard page template — wrapped in the `'home'` template (sidebar + main
+//? content; registered in `src/_components/templates/TemplateProvider.tsx`).
+//? Includes a login-required middleware as a sane default — adjust the role
+//? check or remove the middleware if this page is public.
 
 //@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
 import type { PageMiddleware } from '@luckystack/core/client';
 //@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
 import type { SessionLayout } from '{{REL_PATH}}config';
 
-export const template = 'dashboard';
+export const template = 'home';
 
 //? Default: require login. Customize for role checks
 //? (e.g. `if (!session.admin) return undefined;` to bounce non-admins back).

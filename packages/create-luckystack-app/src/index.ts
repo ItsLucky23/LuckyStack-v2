@@ -253,6 +253,33 @@ export const readSelfVersion = (): string => {
 //?   _dot_env_dot_local_template  -> .env.local_template
 export const renameDotFile = (name: string): string => name.replaceAll('_dot_', '.');
 
+//? Per selected OAuth provider, emit BOTH a `DEV_*` pair (read when NODE_ENV !==
+//? production) and an unprefixed pair (read in production) — matching
+//? `env(prodKey, devKey)` in `luckystack/login/oauthProviders.ts`. Left
+//? uncommented with empty values so the developer only fills them in; an empty
+//? value keeps that provider disabled until populated.
+export const buildOAuthEnvVars = (providers: readonly string[]): string => {
+  if (providers.length === 0) {
+    return [
+      '# No OAuth providers were selected at scaffold time. To add one later, set',
+      '# its DEV_<PROVIDER>_CLIENT_ID / _SECRET (dev) and <PROVIDER>_CLIENT_ID /',
+      '# _SECRET (prod) here, then enable it in luckystack/login/oauthProviders.ts.',
+    ].join('\n');
+  }
+  return providers
+    .map((provider) => {
+      const upper = provider.toUpperCase();
+      return [
+        `# ${provider}`,
+        `DEV_${upper}_CLIENT_ID=`,
+        `DEV_${upper}_CLIENT_SECRET=`,
+        `${upper}_CLIENT_ID=`,
+        `${upper}_CLIENT_SECRET=`,
+      ].join('\n');
+    })
+    .join('\n\n');
+};
+
 export const replacePlaceholders = (
   content: string,
   vars: Record<string, string>,
@@ -359,11 +386,30 @@ const main = async (): Promise<void> => {
     sqlite: '@id @default(cuid())',
   };
   const DATABASE_URL_BY_PROVIDER: Record<string, string> = {
-    mongodb: `mongodb://localhost:27017/${slug}`,
+    //? Prisma + MongoDB REQUIRES a replica set (it uses transactions); a bare
+    //? `mongodb://host/db` URL fails at runtime. `replicaSet=rs0` +
+    //? `directConnection=true` is the canonical single-node dev replica-set shape.
+    mongodb: `mongodb://localhost:27017/${slug}?replicaSet=rs0&directConnection=true`,
     postgresql: `postgresql://user:password@localhost:5432/${slug}`,
     mysql: `mysql://user:password@localhost:3306/${slug}`,
     sqlite: 'file:./dev.db',
   };
+
+  //? OAuth provider -> the browser origin its login redirect/callback arrives
+  //? from. The callback hits your app with the provider's origin as `Referer`,
+  //? so each enabled provider's origin must be in the CORS allow-list
+  //? (EXTERNAL_ORIGINS) or the framework's origin gate rejects the callback.
+  const OAUTH_PROVIDER_ORIGINS: Record<string, string> = {
+    google: 'https://accounts.google.com',
+    github: 'https://github.com',
+    facebook: 'https://www.facebook.com',
+    discord: 'https://discord.com',
+    microsoft: 'https://login.microsoftonline.com',
+  };
+  const externalOrigins = choices.oauthProviders
+    .map((provider) => OAUTH_PROVIDER_ORIGINS[provider])
+    .filter(Boolean)
+    .join(',');
 
   const vars: Record<string, string> = {
     PROJECT_NAME: slug,
@@ -374,6 +420,8 @@ const main = async (): Promise<void> => {
     DATABASE_URL: DATABASE_URL_BY_PROVIDER[choices.dbProvider] ?? `postgresql://user:password@localhost:5432/${slug}`,
     AUTH_MODE: choices.authMode,
     OAUTH_PROVIDERS: choices.oauthProviders.join(','),
+    OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders),
+    EXTERNAL_ORIGINS: externalOrigins,
     EMAIL_PROVIDER: choices.emailProvider,
     MONITORING_PROVIDER: choices.monitoringProvider,
     I18N_ENABLED: choices.i18n ? 'true' : 'false',

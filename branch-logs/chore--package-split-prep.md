@@ -2179,3 +2179,22 @@ User ran `npx create-luckystack-app@latest` (the real end-to-end test) and hit a
 **Status:** ready to republish 0.1.2 (supersedes the scaffold-broken 0.1.1). Not yet published; nothing committed.
 
 **Files touched**: packages/devkit/{package.json,CLAUDE.md,docs/ts-program-cache.md}, packages/create-luckystack-app/{package.json,template/package.json,template/tsconfig.json}, all 14 packages/*/package.json (version 0.1.2 + internal refs ^0.1.2), package-lock.json, .smoke-test/run.mjs (gitignored). Nothing committed.
+
+## 2026-06-04 — Fresh-install round 2: 7 template/framework bugfixes (→ 0.1.3) + optional-pkg design
+
+Device-switch + a real fresh `npx create-luckystack-app` install surfaced more bugs the compile/lint smoke gate misses (all RUNTIME). User triaged 8 issues; 7 fixed for 0.1.3, the 8th (package opt-out) scoped out as a separate refactor.
+
+**Fixed (verified build 14/14 + lint 0/0 + smoke GREEN):**
+- **#1 validator ESM** — `template/.../reset-password/_api/sendReset_v1.ts` used `import { isEmail } from 'validator'` (CJS → named ESM import throws at server start). Switched to default-import + `validator.isEmail()` (mirrors the already-correct `settings/_api/requestEmailChange_v1.ts`).
+- **#2 `process is not defined`** — `template/config.ts` read `process.env` at top-level (lines 7-8 + `EXTERNAL_ORIGINS` line 54); Vite bundles it to the browser with no `process` shim → client crash. Added browser-safe `env()` guard + `window.location.origin` for client backendUrl (mirrors repo-root config.ts).
+- **#3 MongoDB URL** — generated `mongodb://localhost:27017/<slug>` doesn't work with Prisma (needs a replica set). Now generates `?replicaSet=rs0&directConnection=true`; env.local comment shows the richer auth+rs form.
+- **#4 OAuth env DEV+PROD** — `.env.local` OAuth section was static (always google+github, commented, DEV_ only). Now `buildOAuthEnvVars()` emits uncommented DEV_+unprefixed pairs per SELECTED provider (matches `env(prodKey, devKey)` in oauthProviders.ts). New `{{OAUTH_ENV_VARS}}` placeholder.
+- **#5 EXTERNAL_ORIGINS** — was empty; OAuth callbacks arrive with provider origin as Referer and must pass the origin gate. Now auto-filled from selected providers via `OAUTH_PROVIDER_ORIGINS` map. New `{{EXTERNAL_ORIGINS}}` placeholder + comment.
+- **#6 `REDIS_USERNAME` → `REDIS_USER`** — 9 sites: core/redis.ts (×3), server/createServer.ts errmsg, root .env_template, template .env.local, 3 docs.
+- **#8 page_dashboard runtime crash** — devkit's `page_dashboard.template.tsx` injected `export const template = 'dashboard'`, but TemplateProvider's map only knows `'home' | 'plain'` → `Templates['dashboard']` undefined → crash. Aligned injected value to `'home'` (the existing sidebar layout key).
+
+**#7 Package opt-out — scoped OUT of 0.1.3 (user chose full server-refactor).** Blocker found: `@luckystack/server` declares login/presence/sync as HARD `dependencies` AND imports them statically across httpHandler/loadSocket/auth routes/**csrfMiddleware** (CSRF reads `getSession` from login). Real opt-out = move them to optional peers + lazy/conditional wiring + a double-submit-cookie CSRF fallback when login absent. Designed in **`docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md`** (own branch `refactor/optional-server-packages`, security review, likely a 0.2.0 minor). NOT implemented.
+
+**Note:** the smoke gate is compile/lint only — it did NOT catch #1/#2/#8 (all runtime). Design doc §8 proposes adding a runtime boot smoke.
+
+**Files touched**: packages/core/src/redis.ts, packages/server/src/createServer.ts, packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/template/{config.ts, _dot_env_template, _dot_env_dot_local_template, src/reset-password/_api/sendReset_v1.ts, _dot_luckystack/templates/page_dashboard.template.tsx}, .env_template (root), packages/core/{docs/redis-adapter.md, docs/app-bootstrap.md, CLAUDE.md}, docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md (new), docs/AI_QUICK_INDEX.md (regen). Versions still 0.1.2 (bump to 0.1.3 pending). Nothing committed.

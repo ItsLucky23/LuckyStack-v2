@@ -23,7 +23,7 @@ const buildDefaultRedisClient = (): RedisClient => {
   cachedDefault = new Redis({
     host: env.REDIS_HOST,
     port: Number.parseInt(env.REDIS_PORT, 10),
-    ...(process.env.REDIS_USERNAME && { username: process.env.REDIS_USERNAME }),
+    ...(process.env.REDIS_USER && { username: process.env.REDIS_USER }),
     ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
 
     retryStrategy(times) {
@@ -68,7 +68,7 @@ export interface RedisConnectionOptions {
 export const getRedisConnectionOptions = (): RedisConnectionOptions => ({
   host: env.REDIS_HOST,
   port: Number.parseInt(env.REDIS_PORT, 10),
-  ...(process.env.REDIS_USERNAME ? { username: process.env.REDIS_USERNAME } : {}),
+  ...(process.env.REDIS_USER ? { username: process.env.REDIS_USER } : {}),
   ...(process.env.REDIS_PASSWORD ? { password: process.env.REDIS_PASSWORD } : {}),
 });
 
