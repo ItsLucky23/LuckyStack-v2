@@ -30,7 +30,10 @@
       "WebFetch(domain:github.com)",
       "Read(//c/Users/mathi/.claude/**)",
       "Bash(npm whoami *)",
-      "Bash(npm config *)"
+      "Bash(npm config *)",
+      "Bash(xargs grep -n \"DEFAULT_DASHBOARD_PATH_PATTERN\\\\|export const DEFAULT\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\youcomm\\\\LuckyStack-v2\\\\packages\\\\create-luckystack-app\" -Recurse -Depth 2)",
+      "Bash(Select-Object FullName)"
     ]
   }
 }
