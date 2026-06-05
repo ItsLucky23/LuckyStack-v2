@@ -1,52 +1,78 @@
 # SESSION_STATE
 
 > Branch: `chore/package-split-prep` · Base: `master`
-> **Pick up here: publish `@luckystack/* 0.1.3` (fixes a fresh-install-broken 0.1.2), runtime-test, commit+tag — then keep working through the remaining build-output problems.**
+> **Pick up here: publish 0.1.4 (blocked only by an npm 2FA setting), runtime-test per the checklist, THEN start the 0.2.0 work — point D below.**
 
-## Session summary
+## Session Summary
 
-Continued the publish cycle on a new device. A real fresh `npx create-luckystack-app` install surfaced more bugs the compile/lint smoke gate misses (all RUNTIME). User triaged 8 issues; **7 fixed → 0.1.3**, the 8th (package opt-out) scoped out as a separate refactor with a design doc.
+Continued hardening the `npx create-luckystack-app` first-run experience on top of the already-published 0.1.3. A real fresh install surfaced 8 issues; 6 were fixed and committed as **0.1.4**, plus a follow-up that made **every optional feature opt-in / enable-later**. All work is committed on `chore/package-split-prep` (two commits) and validated (875 tests pass, fresh-scaffold smoke GREEN, `publish:dry` 14/14). **0.1.4 is NOT published yet** — the publish run failed purely on an npm auth/2FA setting, not on code. The next big phase (0.2.0) is making packages genuinely optional (point **D**).
 
-**Fixed this session (all verified: build 14/14 · lint 0/0 · `.smoke-test` GREEN):**
-- **#1 validator ESM** — `packages/create-luckystack-app/template/src/reset-password/_api/sendReset_v1.ts:1` used `import { isEmail } from 'validator'` (CJS → named ESM import throws at server start). Now default-import + `validator.isEmail()` (mirrors `settings/_api/requestEmailChange_v1.ts`).
-- **#2 `process is not defined`** — `packages/create-luckystack-app/template/config.ts:7` read `process.env` top-level (+ `EXTERNAL_ORIGINS` at line ~54); Vite bundles it to the browser with no `process` shim → client crash. Added browser-safe `env()` guard + `window.location.origin` for client `backendUrl`.
-- **#3 MongoDB URL** — `packages/create-luckystack-app/src/index.ts` `DATABASE_URL_BY_PROVIDER.mongodb` now emits `?replicaSet=rs0&directConnection=true` (bare URL fails with Prisma). env.local comment shows the richer auth+rs form.
-- **#4 OAuth env DEV+PROD** — new `buildOAuthEnvVars()` in `index.ts` emits uncommented `DEV_*` + unprefixed pairs per SELECTED provider (matches `env(prodKey, devKey)` in `luckystack/login/oauthProviders.ts`). New `{{OAUTH_ENV_VARS}}` placeholder in `_dot_env_dot_local_template`.
-- **#5 EXTERNAL_ORIGINS** — new `OAUTH_PROVIDER_ORIGINS` map + `{{EXTERNAL_ORIGINS}}` placeholder in `_dot_env_template`; auto-filled from selected providers (OAuth callback Referer must pass the origin gate).
-- **#6 `REDIS_USERNAME` → `REDIS_USER`** — `packages/core/src/redis.ts` (×3), `packages/server/src/createServer.ts:120` errmsg, root `.env_template`, template `_dot_env_dot_local_template`, docs (`packages/core/docs/redis-adapter.md`, `app-bootstrap.md:378`, `CLAUDE.md`).
-- **#8 page_dashboard runtime crash** — `packages/create-luckystack-app/template/_dot_luckystack/templates/page_dashboard.template.tsx:14` injected `template = 'dashboard'`, but `TemplateProvider.tsx:20` only knows `'home' | 'plain'` → `Templates['dashboard']` undefined → crash. Aligned injected value to `'home'`.
+## Completed Tasks
 
-**Version bump:** all 14 `packages/*/package.json` → **0.1.3** (versions + internal `^0.1.3` refs). Re-ran build+smoke = GREEN.
+**Commit `120bb7a` — 6 fixes + 0.1.4 bump:**
+- **A — CORS dev localhost**: `packages/create-luckystack-app/template/config.ts` now sets `cors.allowLocalhost: dev`, so the Vite dev frontend on `localhost:5173` (and any port) reaches the backend.
+- **B+H — env-driven OAuth buttons**: new framework endpoint `GET /auth/providers` (`packages/server/src/httpRoutes/authProvidersRoute.ts` + wired into `httpHandler.ts` pre-params dispatch, + unit test `authProvidersRoute.test.ts`); template `luckystack/login/oauthProviders.ts` registers EVERY built-in by env presence; `template/src/_components/LoginForm.tsx` fetches the list and renders buttons (no secrets to the browser).
+- **F — transparent template rules**: `template/_dot_luckystack/templates/templateRules.ts` inlines the dashboard regex + worked examples instead of the hidden `DEFAULT_DASHBOARD_PATH_PATTERN` import.
+- **G — enable-later Sentry**: `template/luckystack/sentry/init.ts` overlay calls the env-driven `initializeSentry()`.
+- **C — arrow-key installer**: zero-dep wizard in `packages/create-luckystack-app/src/index.ts` (↑/↓ move · Enter select · Space toggle · ← back), numbered fallback on non-TTY.
+- **E — opt-in AI instructions**: new `aiInstructions` scaffold choice gates the framework-docs copy + installs a consumer pre-commit AI-index hook (`installAiIndexHook`) + `prepare` hooksPath script.
+- All 14 `packages/*/package.json` bumped to **0.1.4** (versions + internal `^0.1.4` refs).
 
-**Housekeeping:** `docs/AI_QUICK_INDEX.md` regenerated; branch-log entry added (entries → 104) + `branch-logs/INDEX.md` updated.
+**Commit `39c9f0a` — every optional feature is enable-later:**
+- Framework: added `'email'` to `OVERLAY_ORDER` in `packages/server/src/bootstrap.ts`.
+- `template/luckystack/email/init.ts` (new): registers `autoSelectEmailSender()` when `@luckystack/email` is installed (Resend/SMTP/Console by env); silent no-op when absent.
+- `template/luckystack/sentry/posthog.ts` (new): registers PostHog adapter when `POSTHOG_KEY` set (lazy `posthog-node`).
+- `template/server/server.ts`: commented `dd-trace` first-import block + adapter registration (Datadog must load first, can't overlay).
+- `template/_dot_env_dot_local_template`: `{{EMAIL_ENV_VARS}}` + `{{MONITORING_ENV_VARS}}` with full commented enable-later sections.
+- `packages/create-luckystack-app/src/index.ts`: `buildMonitoringEnvVars` / `buildEmailEnvVars` (env-block generators) + `injectOptionalDeps` (adds the SELECTED provider's npm deps before install — `@sentry/node` / `posthog-node` / `dd-trace`+`hot-shots` / `@luckystack/email`+`resend`/`nodemailer`).
 
-## Current state
+**Verification done this session:**
+- `npm run test:unit` → 757/757 · `npm run test:integration` → 5/5 · live sweep (`TEST_BASE_URL=http://localhost:4100 npm run test`) → 113 passed / 0 failed / 11 skipped (skips are login-required-route rate-limits needing `TEST_AUTH_TOKEN`, + 2 routes over the cap). **Total 875 passed, 0 failed.**
+- `.smoke-test/run.mjs` → SMOKE GREEN (typecheck + build + lint). `npm run publish:dry` → validated 14/14 at 0.1.4.
 
-- **0.1.2 is the live `@latest`** and is itself broken on fresh install (#1/#2/#8 are runtime bugs present in 0.1.2 too). Publishing 0.1.3 fixes this.
-- **0.1.3 is built + smoke-GREEN locally but NOT published.** `npm run publish:dry` will now validate (it failed earlier only because versions were still 0.1.2).
-- **Nothing is committed.** No `v0.1.3` tag.
-- **#7 (package opt-out) is NOT implemented** — blocked by `@luckystack/server` hard-depending on login/presence/sync and importing them statically (incl. CSRF↔session↔login coupling). Full design written in `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md` (own branch `refactor/optional-server-packages`, security review, ~0.2.0).
-- **`.smoke-test/` gate is compile/lint only** — it did NOT catch #1/#2/#8 (all runtime). Design doc §8 proposes adding a runtime boot smoke.
-- Uncommitted parallel work in `src/workspaces/**` (~29 files) is NOT ours — keep it out of any 0.1.3 commit.
-- `package-lock.json` + `docs/AI_CAPABILITIES.md` still show 0.1.2 (refresh with `npm install`; not needed for publish).
+## Pending Logic / Known Bugs
 
-## Next steps
+- **PUBLISH BLOCKED (not code):** `npm run publish:packages` fails with a 404 on `/-/v1/done?authId=...`. Root cause: `npm whoami` = `lucky23m` (logged in, token present in `C:\Users\MathijsYouComm\.npmrc`), but `auth-type=web` (npm 11) + 2FA likely on **"Authorization and writes"** → npm wants a per-publish 2FA via a browser flow that doesn't complete. **Nothing was published in the failed runs** ("Already done this run: (none)"; the 404 confirms `@luckystack/core@0.1.4` isn't on npm), so re-running after the fix is safe.
+- **Reported but intentionally NOT auto-fixed earlier, now DONE** in `39c9f0a` (monitoring/email scaffold choices were dead) — no longer pending.
+- 11 rate-limit sweep cases stay skipped without a `TEST_AUTH_TOKEN` (login-required routes) and a cap override for 2 routes (`playground/echo`, `playground/throwError`, rateLimit 60 > default 50). Not failures.
 
-1. **Publish 0.1.3** (user-driven, see User action). After publish, the broken-on-install 0.1.2 `@latest` is superseded.
-2. **Fresh runtime test**: `npx create-luckystack-app@0.1.3 testfix && cd testfix && npm i && npm run server` — confirm server starts WITHOUT the validator error, client loads WITHOUT `process is not defined`, and a page under `src/admin/...` uses the sidebar (`home`) layout without crashing.
-3. **Commit everything + tag `v0.1.3`** (exclude `src/workspaces/**`). Optionally `npm deprecate "create-luckystack-app@0.1.2" "broken scaffold on fresh install; use >=0.1.3"`.
-4. **Continue triaging the remaining build-output problems** (the user has MORE to tackle next session — gather them from a fresh `npx create-luckystack-app@0.1.3` install + `npm run build`/`npm run server` output). Same pattern: the smoke gate misses runtime issues, so drive from the real install.
-5. Later / separate branch: implement `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md` (#7) — make login/presence/sync optional peers + lazy wiring + double-submit-CSRF fallback.
+## Exact Next Step
 
-## User action required
+**Publish 0.1.4:** on npmjs.com set Two-Factor Auth to **"Authorization only"** (Account → Two-Factor Authentication), then run `npm run publish:packages`. You're already logged in as `lucky23m`; this builds + publishes all 14 at 0.1.4 in dependency order without per-package OTP. (Fallback if you keep 2FA-on-writes: `npm config set auth-type legacy` then publish, entering the OTP in the terminal.) After publish, runtime-test a fresh `npx create-luckystack-app@0.1.4` per the checklist below.
 
-- **Publish (only you can — login + OTP):**
-  ```
-  npm login            # as lucky23m; set 2FA to "Authorization only" to avoid per-package OTP
-  npm whoami           # -> lucky23m
-  npm run publish:dry  # expect 14/14 validated
-  npm run publish:packages
-  ```
-- **Runtime-test the fresh 0.1.3 install** (step 2 above) — this is the real verification of #1/#2/#8, which the smoke gate cannot catch.
-- **Decide** whether to commit+tag `v0.1.3` now or after the runtime test passes.
-- For next session: collect the remaining build-output errors from the fresh install so we can triage them.
+## Technical State
+
+**Files modified this session (all committed):**
+- `packages/server/src/httpHandler.ts` — wired `handleAuthProvidersRoute` into pre-params routes.
+- `packages/server/src/httpRoutes/authProvidersRoute.ts` (new) + `.test.ts` (new) — `GET /auth/providers`.
+- `packages/server/src/bootstrap.ts` — `'email'` added to `OVERLAY_ORDER`.
+- `packages/create-luckystack-app/src/index.ts` — arrow-key wizard, `aiInstructions` choice, `installAiIndexHook`, `buildMonitoringEnvVars`/`buildEmailEnvVars`, `injectOptionalDeps`.
+- `template/config.ts` (allowLocalhost), `template/src/_components/LoginForm.tsx` (fetch providers), `template/_dot_luckystack/templates/templateRules.ts` (inlined regex), `template/_dot_env_dot_local_template` (email+monitoring blocks), `template/server/server.ts` (dd-trace block), `template/luckystack/login/oauthProviders.ts` (env-driven), `template/luckystack/sentry/init.ts` (new), `template/luckystack/sentry/posthog.ts` (new), `template/luckystack/email/init.ts` (new).
+- All 14 `packages/*/package.json` → 0.1.4. `branch-logs/chore--package-split-prep.md` + `INDEX.md` (entries → 106).
+
+**Dev-only / cleanup:** none in shipped code. `.claude/settings.local.json` is modified locally but intentionally NOT committed. Leftover `.smoke-test/app*` dirs (gitignored) and a `test-results.json` from the sweep — harmless.
+
+**Environment:** working tree clean except `.claude/settings.local.json`. User has a dev server on `http://localhost:4100` (TEST_BASE_URL=http://localhost:4100). NOTE: continuing from a DIFFERENT device (home) — repo + branch are pushed-or-local; pull the branch first.
+
+---
+
+## ⭐ Point D — the 0.2.0 vision (user explicitly asked to remember this)
+
+**Make `@luckystack/*` packages genuinely OPTIONAL** so LuckyStack can be used either like Python **FastAPI** (lean — spin up APIs fast) OR like **Django** (all-in-one — 90% of what you need already there). The `create-luckystack-app` installer becomes the dial between those two modes.
+
+Concretely for 0.2.0:
+1. **D — optional server packages refactor**: `@luckystack/server` currently hard-imports `login`/`presence`/`sync` as `dependencies` AND statically across `httpHandler`/`loadSocket`/auth routes/`csrfMiddleware` (CSRF reads `getSession` from login). Real opt-out = move them to optional peers + lazy/conditional wiring + a **double-submit-cookie CSRF fallback** when login is absent. Full design already written: **`docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md`**. Own branch **`refactor/optional-server-packages`**, needs a **security review**.
+2. **Per-package selection in the installer**: let the user select EACH `@luckystack` package individually, each with a description + "you can also install it later" info.
+
+**User's chosen approach for D: PLAN FIRST.** At the start of the 0.2.0 work, re-read `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md` and produce a concrete step-by-step plan + security-review checklist for approval BEFORE writing code. (Also captured in memory: `project_luckystack_0_1_4_deferred.md`.)
+
+## 0.1.4 manual-test checklist (after publish)
+
+1. **Installer UX**: arrow-keys ↑/↓, Enter, Space (OAuth multi-select), ← back; answered steps collapse to `✔`.
+2. **CORS**: Vite frontend at `localhost:5173` loads, no `cors: origin not allowed`.
+3. **OAuth buttons**: scaffold with google+github → fill `DEV_*_CLIENT_ID/SECRET` → buttons appear; `GET /auth/providers` returns the list.
+4. **AI instructions**: Yes → CLAUDE.md/docs/luckystack/skills/.claude/commands/branch-logs/README + `.githooks/pre-commit` + `prepare` script; No → clean project.
+5. **Scaffold pre-activation**: pick monitoring=sentry + email=resend → `package.json` has `@sentry/node`+`@luckystack/email`+`resend`; chosen keys uncommented in `.env.local`, others commented.
+6. **Enable-later**: Console email → mail in terminal; Sentry/PostHog/Datadog per the `.env.local` comments.
+7. **Template rules**: empty `src/admin/page.tsx` → dashboard template; `src/about/page.tsx` → plain.
+8. **Regression**: `npm run server` starts clean (no validator/`process` errors); `src/admin` page uses sidebar layout; `npm run build` passes.
