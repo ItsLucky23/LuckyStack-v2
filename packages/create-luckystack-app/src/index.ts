@@ -468,6 +468,76 @@ export const buildOAuthEnvVars = (providers: readonly string[]): string => {
     .join('\n\n');
 };
 
+//? Observability env block for `.env.local`. Each provider is enable-later: the
+//? SELECTED one gets uncommented (empty) keys to fill, the others stay commented
+//? with their `npm i` + restart steps. Sentry/PostHog wire from the `luckystack/`
+//? overlays by env; Datadog also needs the dd-trace block in server/server.ts.
+export const buildMonitoringEnvVars = (provider: string): string => {
+  const pick = (target: string, active: string[], inactive: string[]): string =>
+    (provider === target ? active : inactive).join('\n');
+
+  const sentry = pick('sentry',
+    ['# Sentry (active) — set the DSN + restart. Requires `npm i @sentry/node`.',
+      '# Sends only in production by default; SENTRY_ENABLED=true forces dev capture.',
+      'SENTRY_DSN=', '# SENTRY_ENABLED=true'],
+    ['# Sentry (enable later): npm i @sentry/node, then set SENTRY_DSN + restart.',
+      '# SENTRY_DSN=', '# SENTRY_ENABLED=true']);
+
+  const posthog = pick('posthog',
+    ['# PostHog (active) — set the key + restart. Requires `npm i posthog-node`.',
+      'POSTHOG_KEY=', 'POSTHOG_HOST=https://us.i.posthog.com'],
+    ['# PostHog (enable later): npm i posthog-node, then set POSTHOG_KEY + restart.',
+      '# POSTHOG_KEY=', '# POSTHOG_HOST=https://us.i.posthog.com']);
+
+  const datadog = pick('datadog',
+    ['# Datadog (active) — set the keys AND uncomment the dd-trace block at the top',
+      '# of server/server.ts (dd-trace must load first). Requires `npm i dd-trace hot-shots`.',
+      'DD_API_KEY=', 'DD_SITE=datadoghq.com', '# DD_TRACE_AGENT_URL='],
+    ['# Datadog (enable later): npm i dd-trace hot-shots, uncomment the dd-trace block',
+      '# in server/server.ts, then set DD_API_KEY (+ DD_SITE).',
+      '# DD_API_KEY=', '# DD_SITE=datadoghq.com']);
+
+  return [sentry, posthog, datadog].join('\n\n');
+};
+
+//? Email env block for `.env.local`. Email turns on as soon as @luckystack/email
+//? is installed (luckystack/email/init.ts auto-registers the sender). The chosen
+//? adapter's keys are uncommented; the alternatives stay commented enable-later.
+export const buildEmailEnvVars = (provider: string): string => {
+  const resendActive = provider === 'resend';
+  const smtpActive = provider === 'smtp';
+  const anyActive = resendActive || smtpActive || provider === 'console';
+  const rp = resendActive ? '' : '# ';
+  const sp = smtpActive ? '' : '# ';
+
+  let intro: string[] = [];
+  if (provider === 'console') {
+    intro = ['# Console sender (dev) is active — emails are logged to the terminal because',
+      '# @luckystack/email is installed. Set Resend or SMTP below for real delivery.'];
+  } else if (provider === 'none') {
+    intro = ['# Email is OFF. Enable it: npm i @luckystack/email (+ `resend` or `nodemailer`),',
+      '# set the keys below, and restart — luckystack/email/init.ts then registers the',
+      '# sender (Resend if RESEND_API_KEY set, else SMTP if SMTP_HOST set, else Console).'];
+  }
+
+  return [
+    ...intro,
+    '',
+    resendActive
+      ? '# Resend (active) — set your API key. Requires `npm i resend`.'
+      : '# Resend (enable later): npm i resend, then set RESEND_API_KEY.',
+    `${rp}RESEND_API_KEY=`,
+    '',
+    smtpActive
+      ? '# SMTP (active) — set host + credentials. Requires `npm i nodemailer`.'
+      : '# SMTP (enable later): npm i nodemailer, then set SMTP_HOST (+ user/pass).',
+    `${sp}SMTP_HOST=`, `${sp}SMTP_PORT=587`, `${sp}SMTP_SECURE=false`, `${sp}SMTP_USER=`, `${sp}SMTP_PASS=`,
+    '',
+    '# Default From address for outgoing mail.',
+    `${anyActive ? '' : '# '}EMAIL_FROM=noreply@example.com`,
+  ].join('\n');
+};
+
 export const replacePlaceholders = (
   content: string,
   vars: Record<string, string>,
@@ -567,6 +637,45 @@ const installAiIndexHook = (targetDir: string): void => {
   fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 
+//? Add the npm deps the SELECTED monitoring + email providers need, so the chosen
+//? integration is installed and ready to use (the developer only fills in env).
+//? Non-selected providers stay enable-later behind a single `npm i` documented in
+//? the `.env.local` comments. No-op when both choices are 'none'.
+const MONITORING_DEPS: Record<string, Record<string, string>> = {
+  sentry: { '@sentry/node': '^10.48.0' },
+  posthog: { 'posthog-node': '^4.0.0' },
+  datadog: { 'dd-trace': '^5.0.0', 'hot-shots': '^10.0.0' },
+  none: {},
+};
+
+const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckystackVersion: string): void => {
+  const deps: Record<string, string> = { ...MONITORING_DEPS[choices.monitoringProvider] };
+  const devDeps: Record<string, string> = {};
+
+  if (choices.emailProvider !== 'none') {
+    deps['@luckystack/email'] = `^${luckystackVersion}`;
+    if (choices.emailProvider === 'resend') deps.resend = '^6.0.0';
+    if (choices.emailProvider === 'smtp') {
+      deps.nodemailer = '^6.9.0';
+      devDeps['@types/nodemailer'] = '^6.4.0';
+    }
+  }
+
+  if (Object.keys(deps).length === 0 && Object.keys(devDeps).length === 0) return;
+
+  const pkgPath = path.join(targetDir, 'package.json');
+  if (!fs.existsSync(pkgPath)) return;
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  pkg.dependencies = { ...pkg.dependencies, ...deps };
+  if (Object.keys(devDeps).length > 0) {
+    pkg.devDependencies = { ...pkg.devDependencies, ...devDeps };
+  }
+  fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+};
+
 const main = async (): Promise<void> => {
   const args = parseArgs(process.argv.slice(2));
 
@@ -638,10 +747,11 @@ const main = async (): Promise<void> => {
     .filter(Boolean)
     .join(',');
 
+  const luckystackVersion = readSelfVersion();
   const vars: Record<string, string> = {
     PROJECT_NAME: slug,
     PROJECT_TITLE: titleCase(args.projectName),
-    LUCKYSTACK_VERSION: readSelfVersion(),
+    LUCKYSTACK_VERSION: luckystackVersion,
     DB_PROVIDER: choices.dbProvider,
     USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '@id @default(cuid())',
     DATABASE_URL: DATABASE_URL_BY_PROVIDER[choices.dbProvider] ?? `postgresql://user:password@localhost:5432/${slug}`,
@@ -650,12 +760,18 @@ const main = async (): Promise<void> => {
     OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders),
     EXTERNAL_ORIGINS: externalOrigins,
     EMAIL_PROVIDER: choices.emailProvider,
+    EMAIL_ENV_VARS: buildEmailEnvVars(choices.emailProvider),
     MONITORING_PROVIDER: choices.monitoringProvider,
+    MONITORING_ENV_VARS: buildMonitoringEnvVars(choices.monitoringProvider),
     I18N_ENABLED: choices.i18n ? 'true' : 'false',
   };
 
   console.log(`\nScaffolding ${slug} into ${targetDir}\n`);
   copyTree(TEMPLATE_DIR, targetDir, vars);
+
+  //? Install the npm deps the selected monitoring/email providers need (before
+  //? npm install runs), so the chosen integration is ready to use.
+  injectOptionalDeps(targetDir, choices, luckystackVersion);
 
   //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
   //? the framework's AI docs so the consumer's AI agents inherit full context,

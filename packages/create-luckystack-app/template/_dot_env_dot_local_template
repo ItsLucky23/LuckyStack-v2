@@ -22,13 +22,15 @@ REDIS_PASSWORD=
 # add the provider's origin to EXTERNAL_ORIGINS in `.env`.
 {{OAUTH_ENV_VARS}}
 
-# Sentry — optional. To turn on error reporting later: `npm i @sentry/node`,
-# paste your DSN here, and restart. The luckystack/sentry/init.ts overlay calls
-# initializeSentry() at boot, which reads this var and wires error capture
-# (no-op while blank). By default Sentry only sends in production; set
-# SENTRY_ENABLED=true to capture in dev too.
-SENTRY_DSN=
-# SENTRY_ENABLED=
+# ─────────────────────────── Transactional email ───────────────────────────
+# Every provider is enable-later: install the package(s), set the keys, restart.
+# The chosen adapter's keys are uncommented below; alternatives stay commented.
+{{EMAIL_ENV_VARS}}
+
+# ──────────────────────── Observability / error tracking ────────────────────
+# Sentry + PostHog auto-wire from env at boot; Datadog needs the dd-trace block
+# in server/server.ts uncommented (it must load before everything).
+{{MONITORING_ENV_VARS}}
 
 # Test-only — protects /_test/reset in dev. Set this if you run integration tests.
 TEST_RESET_TOKEN=

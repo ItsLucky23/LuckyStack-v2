@@ -12,6 +12,17 @@
 //?   npm run server -- billing                   (one bundle, port 80)
 //?   npm run server -- billing,vehicles 4001     (two bundles merged, port 4001)
 
+//? ───────── Datadog APM (optional, enable-later) ─────────
+//? Unlike Sentry / PostHog (wired from `luckystack/` overlays), Datadog can't be
+//? overlay-loaded: `dd-trace` MUST be the FIRST import in the process — before
+//? parseArgv and every framework module — because it patches Node core to
+//? instrument I/O. So you enable it by uncommenting here. To enable:
+//?   1. npm i dd-trace hot-shots
+//?   2. set DD_API_KEY (+ DD_SITE, DD_TRACE_AGENT_URL) in `.env.local`
+//?   3. uncomment the two lines below AND the registration block in the boot IIFE.
+// import tracer from 'dd-trace';
+// tracer.init();
+
 import '@luckystack/server/parseArgv';
 
 import { loadEnvFiles } from '@luckystack/core';
@@ -38,6 +49,12 @@ import { bootstrapLuckyStack } from '@luckystack/server';
   //   const sm = await import('@luckystack/secret-manager');
   //   await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
   // }
+
+  //? Datadog adapter registration — uncomment together with the dd-trace block
+  //? at the top of this file. `tracer` is the dd-trace instance from there.
+  // const { createDatadogAdapter, registerErrorTracker } = await import('@luckystack/error-tracking');
+  // const StatsD = (await import('hot-shots')).default;
+  // registerErrorTracker(createDatadogAdapter({ tracer, statsd: new StatsD() }));
 
   //? Minimal static-file fallbacks. Most apps will swap these out for
   //? Vite-built static handlers in production; the server just needs SOME

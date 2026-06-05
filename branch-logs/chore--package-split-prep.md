@@ -2218,3 +2218,18 @@ After publishing 0.1.3, a real install surfaced 8 more issues. 6 fixed for 0.1.4
 **D (package opt-out)** = still the `refactor/optional-server-packages` ~0.2.0 effort per `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md`; user chose plan-first when started. Not begun.
 
 **Files touched**: packages/server/src/{httpHandler.ts, httpRoutes/authProvidersRoute.ts (new), httpRoutes/authProvidersRoute.test.ts (new)}, packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/template/{config.ts, _dot_env_dot_local_template, _dot_luckystack/templates/templateRules.ts, luckystack/login/oauthProviders.ts, luckystack/sentry/init.ts (new), src/_components/LoginForm.tsx}, all 14 packages/*/package.json (to 0.1.4). Pending commit + `v0.1.4` tag; publish is user-driven.
+
+## 2026-06-05 — Round 3b: every optional feature is now enable-later (still 0.1.4)
+
+Closed the reported gap from round 3: monitoring + email scaffold choices were dead. Now every optional feature is opt-in / enable-later via env + comments, and the scaffold SELECTION pre-activates the chosen provider (adds its npm dep + uncomments its env keys), per user decision.
+
+- **Framework**: added `'email'` to `OVERLAY_ORDER` (`packages/server/src/bootstrap.ts`) so `luckystack/email/*` auto-loads at boot.
+- **Email** (new `template/luckystack/email/init.ts`): when `@luckystack/email` is installed, registers `autoSelectEmailSender()` (Resend if RESEND_API_KEY, else SMTP if SMTP_HOST, else dev Console). Silent no-op when the package is absent (string-var lazy import, mirrors `server/hooks/notifications.ts`).
+- **PostHog** (new `template/luckystack/sentry/posthog.ts`): when `POSTHOG_KEY` set, lazy-imports `posthog-node`, registers `createPostHogAdapter`. Runs alongside Sentry. Logs a clear error if key set but SDK missing.
+- **Datadog**: can't overlay (dd-trace must be first import) → commented dd-trace block at top of `template/server/server.ts` + commented adapter registration in the boot IIFE + env docs.
+- **Env** (`_dot_env_dot_local_template`): replaced the lone SENTRY_DSN with `{{EMAIL_ENV_VARS}}` + `{{MONITORING_ENV_VARS}}` — full commented enable-later sections for resend/smtp/console + sentry/posthog/datadog; the selected provider's keys are uncommented.
+- **Scaffold** (`packages/create-luckystack-app/src/index.ts`): new `buildMonitoringEnvVars` / `buildEmailEnvVars` (env-block generators) + `injectOptionalDeps` (adds `@sentry/node`/`posthog-node`/`dd-trace`+`hot-shots`/`@luckystack/email`+`resend`/`nodemailer` for the selected providers before npm install).
+
+**Verified**: lint 0/0 · build 14/14 · fresh-scaffold smoke (default = console email) GREEN — exercises the email overlay + `@luckystack/email` dep injection + install + typecheck + build + lint. Env rendering + dep injection spot-checked.
+
+**Files touched**: packages/server/src/bootstrap.ts, packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/template/{server/server.ts, _dot_env_dot_local_template, luckystack/email/init.ts (new), luckystack/sentry/posthog.ts (new)}. Still 0.1.4 (0.1.4 not yet published, so no re-bump). Pending commit; publish user-driven.

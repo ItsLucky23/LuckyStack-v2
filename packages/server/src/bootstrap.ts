@@ -43,6 +43,8 @@ const OVERLAY_ORDER = [
   'deploy',
   // Auth — OAuth providers + user adapter sit on top of core.
   'login',
+  // Transactional email sender registration (optional @luckystack/email).
+  'email',
   // Sentry / docs-ui / presence sit on top of core but don't block boot.
   'sentry',
   'presence',
