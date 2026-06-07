@@ -2259,6 +2259,10 @@ User runtime-tested a scaffolded project and reported 4 issues; all fixed at the
 
 **Files touched**: packages/create-luckystack-app/template/{src/index.css, src/_components/LoginForm.tsx, src/login/page.tsx, src/page.tsx (new), _dot_env_template, public/*.png+favicon.ico (new)}, packages/create-luckystack-app/CHANGELOG.md. Still **0.1.5** (unpublished — folded in, no re-bump). Pending commit + publish (user-authorized).
 
+### Follow-up: installer multi-select "Next" row (Claude-CLI-style)
+
+User asked for the OAuth multi-select to confirm via a dedicated action row instead of Enter-anywhere. Reworked the wizard (`src/index.ts` `runWizard`): in multi-select, BOTH Space and Enter toggle the highlighted provider; a non-toggleable **"Next"** row is appended after the providers (cursor index === options.length), and Space/Enter there confirms the step. ↑/↓ now wraps over `options.length + 1` for multi (single-select unchanged). Verified via node-pty: Space toggled google, Enter toggled github (no longer confirms), Space-on-Next confirmed → `.env.local` got google+github, not discord. lint:packages 0/0, tsup build OK.
+
 ### Follow-up (same 0.1.5): register-page guard + OAuth redirect-URI doc
 
 User retest surfaced two more: **(1) register → `csrfMismatch`** — same root cause as 1a (logged-in user POSTing the credentials endpoint with no CSRF token); my LoginForm fix made the error *visible* (was a false success), and the real fix is the same authenticated-guard, now added to `register/page.tsx` too. **(2) Google login → `Error 400: redirect_uri_mismatch`** — NOT a code bug: the `redirect_uri` the app sends (`<DNS>/auth/callback/<provider>`, now `http://localhost:5173/auth/callback/google` after the DNS=:5173 fix) must be registered EXACTLY in the provider's console; the user still had the old `:80` URI. Spelled out the exact dev URL + the character-for-character requirement in `_dot_env_dot_local_template`'s OAuth section. Re-ran `.smoke-test/run.mjs` → GREEN. Files: template/src/register/page.tsx, template/_dot_env_dot_local_template, CHANGELOG.md.

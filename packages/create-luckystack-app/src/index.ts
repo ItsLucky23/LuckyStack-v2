@@ -272,8 +272,18 @@ const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string 
           const text = active ? `${ANSI.cyan}${box}${option}${ANSI.reset}` : `${box}${option}`;
           lines.push(`${arrow}${text}`);
         }
+        //? Multi-select gets a trailing, non-toggleable "Next" action row (cursor
+        //? index === options.length). Space/Enter there confirms the whole step,
+        //? so Space/Enter on a provider can mean "toggle" without also confirming.
+        //? Two leading spaces align the label past the ◉/◯ checkbox column.
+        if (step.type === 'multi') {
+          const active = cursor === step.options.length;
+          const arrow = active ? `${ANSI.cyan}❯${ANSI.reset} ` : '  ';
+          const label = active ? `${ANSI.cyan}${ANSI.bold}Next${ANSI.reset}` : `${ANSI.dim}Next${ANSI.reset}`;
+          lines.push(`${arrow}  ${label}`);
+        }
         const hint = step.type === 'multi'
-          ? '↑/↓ move · space toggle · enter confirm'
+          ? '↑/↓ move · space/enter toggle · select Next to continue'
           : '↑/↓ move · enter select';
         lines.push(`${ANSI.dim}${hint}${pointer > 0 ? ' · ← back' : ''}${ANSI.reset}`);
       }
@@ -306,13 +316,17 @@ const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string 
         process.exit(130);
       }
 
+      //? Multi-select has one extra navigable row (the trailing "Next" action),
+      //? so the cursor wraps over options.length + 1; single-select over the
+      //? options alone.
+      const navCount = step.type === 'multi' ? step.options.length + 1 : step.options.length;
       if (key.name === 'up') {
-        cursors[i] = ((cursors[i] ?? 0) - 1 + step.options.length) % step.options.length;
+        cursors[i] = ((cursors[i] ?? 0) - 1 + navCount) % navCount;
         paint();
         return;
       }
       if (key.name === 'down') {
-        cursors[i] = ((cursors[i] ?? 0) + 1) % step.options.length;
+        cursors[i] = ((cursors[i] ?? 0) + 1) % navCount;
         paint();
         return;
       }
@@ -321,12 +335,17 @@ const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string 
         paint();
         return;
       }
-      //? Toggle on EITHER signal: most terminals report the spacebar as
-      //? `key.name === 'space'`, but some Windows consoles deliver it only as the
-      //? raw ' ' string with no parsed name — checking `_str` too makes the
-      //? multi-select toggle work regardless of how the console reports space.
-      if (step.type === 'multi' && (key.name === 'space' || _str === ' ')) {
-        const option = step.options[cursors[i] ?? 0];
+      //? Space/Enter semantics. We accept the spacebar as EITHER `key.name ===
+      //? 'space'` or the raw ' ' string — some Windows consoles only send the
+      //? latter. In multi-select, the cursor on a PROVIDER row toggles it; on the
+      //? trailing "Next" row it confirms the step. In single-select, Enter picks
+      //? the highlighted option (Space is ignored).
+      const cursorPos = cursors[i] ?? 0;
+      const spacePressed = key.name === 'space' || _str === ' ';
+      const onNextRow = step.type === 'multi' && cursorPos === step.options.length;
+
+      if (step.type === 'multi' && !onNextRow && (spacePressed || key.name === 'return')) {
+        const option = step.options[cursorPos];
         const set = selections[i];
         if (option !== undefined && set) {
           if (set.has(option)) set.delete(option);
@@ -335,10 +354,12 @@ const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string 
         paint();
         return;
       }
-      if (key.name === 'return') {
+
+      const confirmPressed = key.name === 'return' || (onNextRow && spacePressed);
+      if (confirmPressed) {
         answers[step.key] = step.type === 'multi'
           ? step.options.filter((option) => selections[i]?.has(option) === true)
-          : asOption(step.options[cursors[i] ?? 0], step.options, step.defaultValue ?? step.options[0] ?? '');
+          : asOption(step.options[cursorPos], step.options, step.defaultValue ?? step.options[0] ?? '');
         const nextOrder = visibleSteps();
         pointer += 1;
         paint();

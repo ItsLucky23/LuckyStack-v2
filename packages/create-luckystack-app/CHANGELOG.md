@@ -16,9 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were copied from the monorepo root, which is absent in a published install — so
   selecting "include AI instructions" silently copied nothing. They are now
   bundled into the package at build time (`framework-docs/`) and copied from there.
-- **OAuth multi-select toggle on Windows.** The spacebar now toggles a provider
-  whether the console reports it as `key.name === 'space'` or only as the raw
-  `' '` string (some Windows consoles do the latter), so providers can be selected.
+- **OAuth multi-select toggle on Windows + clearer confirm flow.** The spacebar
+  now toggles a provider whether the console reports it as `key.name === 'space'`
+  or only as the raw `' '` string (some Windows consoles do the latter). Both
+  Space AND Enter now toggle the highlighted provider, and a dedicated **"Next"**
+  row at the bottom of the list confirms the step (Space/Enter on it continues) —
+  so Enter can't accidentally confirm before you've finished selecting.
 - **Credentials login no longer shows a false "success" when a session already
   exists.** Re-submitting the login form while signed in trips the CSRF guard,
   which replies with `{ status: 'error' }` — a truthy string the form misread as
