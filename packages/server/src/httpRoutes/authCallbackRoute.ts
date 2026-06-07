@@ -15,16 +15,14 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
   const sessionCookieName = config.http.sessionCookieName;
   const shouldLogDev = config.logging.devLogs;
 
-  //? Fallback redirect target when no `postLoginRedirect` resolver returns a
-  //? URL. Prefer `projectConfig.app.publicUrl` (the public origin also used
-  //? in transactional email links). The legacy `DNS` env var is kept as an
-  //? override-on-top so existing deployments don't break, but new installs
-  //? should set `app.publicUrl`.
-  //? `process.env.DNS` is coerced to '' by the env layer when unset, so `??`
-  //? would treat empty as set and shadow `app.publicUrl`. Use `||` so an empty
-  //? DNS falls through to `app.publicUrl`, then `/` as last resort.
-  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- see comment above
-  const baseLocation = (process.env.DNS || config.app.publicUrl) || '/';
+  //? Fallback redirect target when no `postLoginRedirect` resolver returns a URL.
+  //? `projectConfig.app.publicUrl` is the public origin where users browse (also
+  //? used for transactional email links) — dev: the frontend dev server, prod:
+  //? your domain. After an OAuth callback (handled on the BACKEND origin) we must
+  //? send the browser back to this public origin, not the backend. `||` so an
+  //? empty publicUrl falls through to '/'.
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- empty string must fall through
+  const baseLocation = config.app.publicUrl || '/';
   const callbackResult = await loginCallback(routePath, req, res, {
     defaultRedirectUrl: baseLocation,
   });

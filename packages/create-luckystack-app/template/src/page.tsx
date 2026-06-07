@@ -1,6 +1,6 @@
 //? Root route (`/`). Sends visitors to the app's main surface — the dashboard
-//? when signed in, the login page otherwise. This is also where OAuth logins and
-//? the public app URL (DNS) land after the callback; without it, `/` would fall
+//? when signed in, the login page otherwise. This is also where OAuth logins land
+//? after the callback redirects to the public origin; without it, `/` would fall
 //? through to the catch-all ErrorPage.
 
 import type { PageMiddleware } from "@luckystack/core/client";

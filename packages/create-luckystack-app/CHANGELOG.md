@@ -30,11 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CSRF block on the credentials bootstrap endpoint is lifted in `@luckystack/server`
   0.1.5, so re-login / register while signed in now just works (no false success,
   no `csrfMismatch`).
-- **OAuth redirect now stays on the dev frontend.** The scaffold's `DNS` defaulted
-  to the backend port, so after an OAuth login the browser landed on the backend
-  origin instead of the Vite frontend. `DNS` now defaults to the dev frontend origin
-  (`http://localhost:5173`), and a new root `/` page routes visitors to the
-  dashboard (or login) instead of falling through to the catch-all error page.
+- **OAuth origins untangled — `DNS` removed.** The single `DNS` env var conflated
+  two different origins: the **backend** origin (where the `/auth/callback`
+  redirect_uri must point — that's a backend route) and the **public** origin
+  (where users browse / land / receive email links). In dev these are different
+  ports (backend :80, Vite :5173), so `DNS` could only ever be right for one,
+  causing `redirect_uri_mismatch`. `config.ts` now derives the **backend origin**
+  from `SERVER_IP`/`SERVER_PORT` (OAuth redirect_uri → register
+  `http://localhost:80/auth/callback/<provider>` in dev) and a **public origin**
+  (`app.publicUrl`, dev `http://localhost:5173`, prod `PUBLIC_URL`) for landings,
+  email, and CORS. A new root `/` page routes visitors to the dashboard (or login)
+  instead of falling through to the catch-all error page. `DNS` is gone from the
+  env template and `@luckystack/core`'s env schema.
 - **Dashboard (and other unstyled pages) are readable.** `index.css` carried the
   leftover Vite default of white text on a white background; the `:root` defaults
   now derive from the theme tokens (and adapt to dark mode).

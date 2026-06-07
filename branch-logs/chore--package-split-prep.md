@@ -2259,6 +2259,20 @@ User runtime-tested a scaffolded project and reported 4 issues; all fixed at the
 
 **Files touched**: packages/create-luckystack-app/template/{src/index.css, src/_components/LoginForm.tsx, src/login/page.tsx, src/page.tsx (new), _dot_env_template, public/*.png+favicon.ico (new)}, packages/create-luckystack-app/CHANGELOG.md. Still **0.1.5** (unpublished — folded in, no re-bump). Pending commit + publish (user-authorized).
 
+### Follow-up: remove `DNS`, split backend vs public origin (user-driven architecture fix)
+
+User correctly diagnosed that `DNS` conflated two origins: the **backend** origin (where the `/auth/callback/<provider>` route — a backend handler — must be registered as the OAuth redirect_uri) and the **public** origin (where users browse / land / get email links). In dev these are different ports (backend :80, Vite :5173), so a single `DNS` could only be right for one → `redirect_uri_mismatch`. User chose (via AskUserQuestion) to home the public origin in `config.ts` `app.publicUrl`.
+
+Implemented:
+- `template/config.ts`: derive `backendOrigin = http://localhost:${SERVER_PORT}` (localhost host so the OAuth-callback cookie is shared with the frontend on localhost — NOT SERVER_IP=127.0.0.1, which would be a different cookie host), and `publicUrl = dev ? http://localhost:5173 : (PUBLIC_URL ?? backendOrigin)`. Exports `oauthCallbackBase = dev ? backendOrigin : publicUrl`. Registers `app.publicUrl = publicUrl`; CORS allowedOrigins = [publicUrl, backendOrigin, …EXTERNAL_ORIGINS].
+- `template/luckystack/login/oauthProviders.ts`: import `oauthCallbackBase` from config; callback = `${oauthCallbackBase}/auth/callback/<name>`. (Dev redirect_uri → `http://localhost:80/auth/callback/google`, the backend — register THAT in the provider console.)
+- `packages/server/src/httpRoutes/authCallbackRoute.ts`: post-login `baseLocation = config.app.publicUrl` (dropped `process.env.DNS ||`).
+- `packages/core/src/env.ts`: removed `DNS` from the env schema + apply line (loose() tolerates leftover `DNS=` in old .envs).
+- `_dot_env_template`: removed `DNS`, documented `PUBLIC_URL` (prod-only) + the backend redirect-URI host. `_dot_env_dot_local_template`: redirect-URI guidance now the backend origin (:80). `src/page.tsx`: comment.
+- CHANGELOGs: create-luckystack-app (rewrote the DNS bullet), server (post-login redirect), core (DNS removed from schema).
+
+Verified: build 14/14, unit 757/757, `.smoke-test/run.mjs` GREEN, runtime derivation check (dev callback = http://localhost:80/auth/callback/google + publicUrl :5173; prod both = PUBLIC_URL domain). **Docs sweep (login README/docs/oauth-providers.md, CLAUDE.md DNS rows, ARCHITECTURE_AUTH.md, server http-routes.md still showing `${process.env.DNS}`) follows in a separate commit.**
+
 ### Follow-up: CSRF exempt on credentials bootstrap (user chose "allow re-login while signed in")
 
 csrfMismatch on login/register persisted for the user because they were testing with a valid session cookie (the form sends no CSRF token → `csrfMiddleware` 403s the re-POST). Presented two options; user chose to **allow re-login while signed in**. Implemented:

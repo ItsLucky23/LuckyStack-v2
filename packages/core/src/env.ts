@@ -6,7 +6,6 @@ const EnvSchema = z.object({
   SERVER_IP: z.string().min(1).default('127.0.0.1'),
   SERVER_PORT: z.string().regex(/^\d+$/).default('80'),
   SECURE: z.enum(['true', 'false']).default('false'),
-  DNS: z.string().default(''),
   REDIS_HOST: z.string().min(1).default('127.0.0.1'),
   REDIS_PORT: z.string().regex(/^\d+$/).default('6379'),
   PROJECT_NAME: z.string().min(1).default('luckystack'),
@@ -45,7 +44,6 @@ const applyResolvedDefaultsToProcessEnv = (resolvedEnv: RuntimeEnv) => {
   process.env.SERVER_IP = process.env.SERVER_IP ?? resolvedEnv.SERVER_IP;
   process.env.SERVER_PORT = process.env.SERVER_PORT ?? resolvedEnv.SERVER_PORT;
   process.env.SECURE = process.env.SECURE ?? resolvedEnv.SECURE;
-  process.env.DNS = process.env.DNS ?? resolvedEnv.DNS;
   process.env.REDIS_HOST = process.env.REDIS_HOST ?? resolvedEnv.REDIS_HOST;
   process.env.REDIS_PORT = process.env.REDIS_PORT ?? resolvedEnv.REDIS_PORT;
   process.env.PROJECT_NAME = process.env.PROJECT_NAME ?? resolvedEnv.PROJECT_NAME;

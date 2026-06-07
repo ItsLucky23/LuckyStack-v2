@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.5]
 
+### Changed
+
+- **OAuth post-login redirect no longer reads the `DNS` env var.** `authCallbackRoute`
+  now redirects to `projectConfig.app.publicUrl` (the public origin where users
+  browse) after a callback, instead of `process.env.DNS || app.publicUrl`. The
+  callback is handled on the backend origin but must send the browser back to the
+  public origin. Set `app.publicUrl` in your `config.ts` (the scaffold does this).
+
 ### Fixed
 
 - **CSRF no longer blocks credentials login/register when a session cookie already

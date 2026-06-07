@@ -8,8 +8,10 @@
 //?
 //? The login form learns which providers are active from `GET /auth/providers`
 //? — client secrets never reach the browser. Each provider also needs its OAuth
-//? app's redirect URL set to `<DNS>/auth/callback/<name>` in the provider's
-//? developer console, and its origin added to EXTERNAL_ORIGINS in `.env`.
+//? app's redirect URL registered in the provider's developer console to match
+//? `oauthCallbackBase` + `/auth/callback/<name>` (the BACKEND origin — in dev
+//? that's http://localhost:80/auth/callback/<name>), and its origin added to
+//? EXTERNAL_ORIGINS in `.env`. See config.ts for how that origin is resolved.
 
 import {
   registerOAuthProviders,
@@ -22,10 +24,9 @@ import {
   type OAuthProvider,
 } from '@luckystack/login';
 
-const backendUrl =
-  process.env.DNS || `http://${process.env.SERVER_IP ?? '127.0.0.1'}:${process.env.SERVER_PORT ?? '80'}`;
+import { oauthCallbackBase } from '../../config';
 
-const callback = (name: string): string => `${backendUrl}/auth/callback/${name}`;
+const callback = (name: string): string => `${oauthCallbackBase}/auth/callback/${name}`;
 const dev = process.env.NODE_ENV !== 'production';
 
 //? Reads DEV_<key> in dev, the unprefixed <key> in prod. Empty string when unset.
