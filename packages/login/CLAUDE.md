@@ -138,7 +138,7 @@ All config keys live on `ProjectConfig` (from `@luckystack/core`). Resolved at c
 | `FACEBOOK_CLIENT_ID` / `FACEBOOK_CLIENT_SECRET` | `facebookProvider` | OAuth app credentials. |
 | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | `microsoftProvider` | OAuth app credentials. |
 | `MICROSOFT_TENANT_ID` | `microsoftProvider` (optional) | Single-tenant Azure AD. Defaults to `'common'`. |
-| `DNS` | All OAuth `callbackUrl` builders | Base URL prepended to `/auth/callback/<provider>`. |
+| (callback origin) | All OAuth `callbackUrl` builders | The `callbackUrl` is the BACKEND origin + `/auth/callback/<provider>`. The scaffold derives it in `config.ts` (`oauthCallbackBase`: dev `http://localhost:80`, prod the public domain). No `DNS` env var — that was removed in 0.1.5. |
 | `BCRYPT_ROUNDS` | `auth.bcryptRounds` | Surfaced through project config; salt rounds for credentials hashing. |
 
 > Env-key set without the matching package installed = hard boot crash (see peer-dep guard policy). `@luckystack/email` is the optional case — login lazy-imports it and gracefully fails when `forgotPassword !== 'framework'`.

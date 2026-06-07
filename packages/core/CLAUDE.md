@@ -173,7 +173,6 @@ Env vars read directly by core (via `env.ts` and call-time helpers):
 | `SERVER_IP` | `'127.0.0.1'` | `getBindAddress()` fallback. |
 | `SERVER_PORT` | `'80'` | `getBindAddress()` fallback. |
 | `SECURE` | `'false'` | `allowedOrigin` scheme selection. |
-| `DNS` | `''` | Reserved for downstream packages. |
 | `REDIS_HOST` | `'127.0.0.1'` | `redis.ts` default client + `getRedisConnectionOptions`. |
 | `REDIS_PORT` | `'6379'` | Same. |
 | `REDIS_USER` | (unset) | Optional ioredis auth. |

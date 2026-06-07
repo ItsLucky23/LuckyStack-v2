@@ -42,12 +42,12 @@ registerOAuthProviders([
   googleProvider({
     clientId: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackUrl: `${process.env.DNS}/auth/callback/google`,
+    callbackUrl: `http://localhost:80/auth/callback/google`,
   }),
   githubProvider({
     clientId: process.env.GITHUB_CLIENT_ID,
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
-    callbackUrl: `${process.env.DNS}/auth/callback/github`,
+    callbackUrl: `http://localhost:80/auth/callback/github`,
   }),
 ]);
 ```
@@ -138,7 +138,7 @@ export const isFullOAuthProvider = (provider: OAuthProvider): provider is FullOA
 | `name`                | URL slug used in `/auth/callback/<name>` and stored on `User.provider`.                                   |
 | `clientID`            | OAuth app client id.                                                                                      |
 | `clientSecret`        | OAuth app secret.                                                                                         |
-| `callbackURL`         | Must match the URL registered with the provider, normally `${DNS}/auth/callback/<name>`.                  |
+| `callbackURL`         | Must match the URL registered with the provider — your BACKEND origin + `/auth/callback/<name>` (dev `http://localhost:80/...`, prod your domain). |
 | `authorizationURL`    | Where to redirect the user to authorize (start of the flow).                                              |
 | `tokenExchangeURL`    | POST endpoint for exchanging `code` → `access_token`.                                                     |
 | `tokenExchangeMethod` | `'json'` (Google) or `'form'` (Discord, Facebook, Microsoft). GitHub accepts either; we use `'json'`.     |
@@ -392,7 +392,7 @@ registerOAuthProviders([
   oktaProvider({
     clientId: process.env.OKTA_CLIENT_ID,
     clientSecret: process.env.OKTA_CLIENT_SECRET,
-    callbackUrl: `${process.env.DNS}/auth/callback/okta`,
+    callbackUrl: `http://localhost:80/auth/callback/okta`,
     domain: 'acme.okta.com',
   }),
 ]);
@@ -411,7 +411,7 @@ For self-hosted GitHub Enterprise / GitLab / Gitea, use the `endpoints?.*` overr
 githubProvider({
   clientId: process.env.GITHUB_CLIENT_ID,
   clientSecret: process.env.GITHUB_CLIENT_SECRET,
-  callbackUrl: `${process.env.DNS}/auth/callback/github`,
+  callbackUrl: `http://localhost:80/auth/callback/github`,
   endpoints: {
     authorizationURL: 'https://github.acme.example/login/oauth/authorize',
     tokenExchangeURL: 'https://github.acme.example/login/oauth/access_token',

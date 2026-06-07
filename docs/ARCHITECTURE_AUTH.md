@@ -45,8 +45,11 @@ const response = await fetch("/auth/api/credentials", {
 
 ```bash
 # .env
-DNS=http://localhost:5173                    # Frontend URL
-EXTERNAL_ORIGINS=https://myapp.com           # Allowed origins (comma-separated)
+# Public origin (where users browse) is derived in config.ts — dev defaults to the
+# Vite dev server, prod reads PUBLIC_URL. The OAuth callback uses the BACKEND origin
+# (dev http://localhost:80, derived from SERVER_IP/SERVER_PORT).
+# PUBLIC_URL=https://myapp.com                # production only
+EXTERNAL_ORIGINS=https://myapp.com           # Extra allowed origins (comma-separated)
 
 # OAuth Providers
 GOOGLE_CLIENT_ID=...
@@ -72,12 +75,12 @@ registerOAuthProviders([
   googleProvider({
     clientId: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackUrl: `${process.env.DNS}/auth/callback/google`,
+    callbackUrl: `http://localhost:80/auth/callback/google`,
   }),
   microsoftProvider({
     clientId: process.env.MICROSOFT_CLIENT_ID,
     clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
-    callbackUrl: `${process.env.DNS}/auth/callback/microsoft`,
+    callbackUrl: `http://localhost:80/auth/callback/microsoft`,
     tenant: process.env.MICROSOFT_TENANT_ID,
   }),
 ]);
@@ -247,7 +250,7 @@ switch (location) {
 ## Security Considerations
 
 1. **OAuth state** - One-time state is generated/validated to mitigate OAuth login CSRF
-2. **CORS (fail-closed)** - Only `DNS` and `EXTERNAL_ORIGINS` are allowed. As of 2026-05-06, requests where neither `Origin` nor `Referer` is present are now allowed only for read-only methods (GET, HEAD, OPTIONS); state-changing methods (POST, PUT, PATCH, DELETE) are rejected with 403. This closes the previous `host`-fallback bypass for non-browser clients (`curl`, server-to-server).
+2. **CORS (fail-closed)** - Only the configured origins (the public origin + backend origin from `config.ts`) and `EXTERNAL_ORIGINS` are allowed. As of 2026-05-06, requests where neither `Origin` nor `Referer` is present are now allowed only for read-only methods (GET, HEAD, OPTIONS); state-changing methods (POST, PUT, PATCH, DELETE) are rejected with 403. This closes the previous `host`-fallback bypass for non-browser clients (`curl`, server-to-server).
 3. **`csrfMismatch` hook** - The CSRF middleware dispatches `csrfMismatch` before returning 403, with `{ route, method?, requestId?, userId?, providedToken: boolean }`. The token *value* is never included in the payload — only its presence — so audit-log handlers cannot accidentally leak it.
 4. **Framework `system/logout` is exact-match** - Earlier builds short-circuited any API whose final path segment was `logout`. The framework now matches the full normalized route name (`system/logout`), so consumer routes like `admin/logout/v1` reach their own handler.
 5. **Token delivery by mode** - `sessionBasedToken=false` uses HttpOnly cookies; `sessionBasedToken=true` uses session-token delivery for development workflows

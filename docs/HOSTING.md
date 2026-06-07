@@ -152,7 +152,9 @@ PROJECT_NAME=my_project
 
 SERVER_IP=localhost
 
-DNS=http://localhost:5173
+# Public origin (post-login landing, email links, CORS) is derived automatically
+# in dev as the Vite dev server. Only set PUBLIC_URL in production (your domain).
+# The OAuth callback uses the backend origin — dev: http://localhost:80.
 
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
@@ -376,7 +378,7 @@ Update your `.env`:
 NODE_ENV=production
 SECURE=true
 SERVER_IP=127.0.0.1
-DNS=https://your-domain.com
+PUBLIC_URL=https://your-domain.com
 
 # Use production OAuth credentials
 GOOGLE_CLIENT_ID=your_prod_id
@@ -512,7 +514,7 @@ docker-compose up -d --build
 | `PROJECT_NAME`             | Yes      | -             | Unique name for Redis key prefixing      |
 | `SERVER_IP`                | Yes      | `localhost`   | Server bind address                      |
 | _(listen port)_            | No       | `80`          | Second positional argv (`node server.js <bundles> <port>`), not an env-var |
-| `DNS`                      | Yes      | -             | Public URL for OAuth redirects           |
+| `PUBLIC_URL`               | Prod     | (dev: auto)   | Public origin — post-login landing, email links, CORS. Dev derives the Vite origin; set to your domain in prod. OAuth callback uses the backend origin (SERVER_IP/SERVER_PORT). |
 | `SECURE`                   | Yes      | `false`       | Enable HTTPS cookies                     |
 | `REDIS_HOST`               | Yes      | `127.0.0.1`   | Redis server host                        |
 | `REDIS_PORT`               | Yes      | `6379`        | Redis server port                        |
@@ -550,7 +552,7 @@ When you run more than one backend process (horizontal scaling, preset-split ser
 
 **Solutions:**
 1. Ensure nginx/Caddy is configured for WebSocket upgrades
-2. Check `DNS` env variable matches your actual domain
+2. Check `PUBLIC_URL` matches your actual domain
 3. Verify `EXTERNAL_ORIGINS` includes your domain
 
 ### OAuth Redirect Fails
@@ -562,7 +564,7 @@ When you run more than one backend process (horizontal scaling, preset-split ser
    - Google: `https://your-domain.com/auth/callback/google`
    - GitHub: `https://your-domain.com/auth/callback/github`
    - etc.
-2. Ensure `DNS` env variable is correctly set
+2. Ensure `PUBLIC_URL` is set to your domain (prod) so the callback redirects back correctly
 3. Use production OAuth credentials (not DEV_ prefixed ones)
 
 ### Redis Connection Errors

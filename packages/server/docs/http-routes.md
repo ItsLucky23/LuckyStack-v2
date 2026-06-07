@@ -147,7 +147,7 @@ A handler returns `true` (or simply ends `res`) to short-circuit dispatch; retur
 **Behavior:**
 
 - Matches `routePath` starting with `/auth/callback`.
-- Computes `baseLocation = process.env.DNS || projectConfig.app.publicUrl || '/'` (the `||` is intentional — empty `DNS` falls through; `??` would shadow `app.publicUrl`).
+- Computes `baseLocation = projectConfig.app.publicUrl || '/'` (the public origin where users browse; the OAuth callback is handled on the backend origin but redirects the browser back here). `||` so an empty `publicUrl` falls through to `/`.
 - Delegates to `loginCallback(routePath, req, res, { defaultRedirectUrl })` from `@luckystack/login`.
 - On failure: `401 'Login failed'`.
 - On success: delete existing session, then redirect (`302`). With `projectConfig.session.basedToken: true` the token rides as `?token=...` in the query; otherwise it's emitted as a session cookie.
@@ -296,7 +296,7 @@ Lifecycle in `handleApiRoute` / `handleSyncRoute`:
 | config | `projectConfig.http.sessionCookieName` | Cookie name written by `/auth/api` / `/auth/callback`. |
 | config | `projectConfig.session.basedToken` | Cookie vs header token transport. |
 | config | `projectConfig.rateLimiting.defaultApiLimit` / `windowMs` | Credentials login rate limit. |
-| env | `DNS` | Legacy public origin override for callback redirect. |
+| config | `projectConfig.app.publicUrl` | Public origin the OAuth callback redirects the browser back to. |
 | env | `TEST_RESET_TOKEN` | Consumed by `/_test/reset` — see `security-defaults.md`. |
 
 ## Related

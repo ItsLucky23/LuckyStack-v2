@@ -222,7 +222,7 @@ await syncRequest({
 See [`.env_template`](./.env_template) for all available options:
 
 - `NODE_ENV` - development or production
-- `DNS` - Public URL for OAuth redirects
+- `PUBLIC_URL` - Public origin (prod only; dev auto-derives the Vite origin). OAuth callbacks use the backend origin from `SERVER_IP`/`SERVER_PORT`.
 - `REDIS_HOST` / `REDIS_PASSWORD` / `REDIS_PORT` - Redis connection
 - `DATABASE_URL` - MongoDB connection string
 - `SENTRY_DSN` / `VITE_SENTRY_DSN` - Error monitoring DSNs (server/client)

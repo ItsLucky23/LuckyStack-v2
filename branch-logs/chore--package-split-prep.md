@@ -2271,7 +2271,9 @@ Implemented:
 - `_dot_env_template`: removed `DNS`, documented `PUBLIC_URL` (prod-only) + the backend redirect-URI host. `_dot_env_dot_local_template`: redirect-URI guidance now the backend origin (:80). `src/page.tsx`: comment.
 - CHANGELOGs: create-luckystack-app (rewrote the DNS bullet), server (post-login redirect), core (DNS removed from schema).
 
-Verified: build 14/14, unit 757/757, `.smoke-test/run.mjs` GREEN, runtime derivation check (dev callback = http://localhost:80/auth/callback/google + publicUrl :5173; prod both = PUBLIC_URL domain). **Docs sweep (login README/docs/oauth-providers.md, CLAUDE.md DNS rows, ARCHITECTURE_AUTH.md, server http-routes.md still showing `${process.env.DNS}`) follows in a separate commit.**
+Verified: build 14/14, unit 757/757, `.smoke-test/run.mjs` GREEN, runtime derivation check (dev callback = http://localhost:80/auth/callback/google + publicUrl :5173; prod both = PUBLIC_URL domain).
+
+**Docs sweep (separate commit):** updated DNS → new model in login README + docs/oauth-providers.md (callbackUrl examples → backend origin), login/core CLAUDE.md + core docs/app-bootstrap.md (DNS rows removed), docs/ARCHITECTURE_AUTH.md, server docs/http-routes.md (baseLocation = app.publicUrl), docs/HOSTING.md (DNS → PUBLIC_URL across the deploy examples + env table + troubleshooting), root README.md. **Left as-is (out of scope):** the framework's OWN reference app (`config.ts` multi-instance `dnsEnvironmentMap`, `luckystack/login/oauthProviders.ts` — already uses backend origin in dev, only prod reads DNS; still works since core env is `loose()`), and separate projects (`ui-builder/`, `src/workspaces/` prototype, `handoff/`, `sparring/`).
 
 ### Follow-up: CSRF exempt on credentials bootstrap (user chose "allow re-login while signed in")
 

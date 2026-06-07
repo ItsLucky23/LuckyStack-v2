@@ -372,7 +372,6 @@ Resolves after `setTimeout(ms)`. Used in fanout-yield loops and dev-mode hot rel
 | `SERVER_IP` | `'127.0.0.1'` | `getBindAddress` fallback. |
 | `SERVER_PORT` | `'80'` | `getBindAddress` fallback. |
 | `SECURE` | `'false'` | `allowedOrigin` scheme selection. |
-| `DNS` | `''` | Reserved. |
 | `REDIS_HOST` | `'127.0.0.1'` | Default redis client. |
 | `REDIS_PORT` | `'6379'` | Same. |
 | `REDIS_USER` | (unset) | Optional ioredis auth. |

@@ -57,12 +57,12 @@ registerOAuthProviders([
   googleProvider({
     clientId: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackUrl: `${process.env.DNS}/auth/callback/google`,
+    callbackUrl: `http://localhost:80/auth/callback/google`,
   }),
   githubProvider({
     clientId: process.env.GITHUB_CLIENT_ID,
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
-    callbackUrl: `${process.env.DNS}/auth/callback/github`,
+    callbackUrl: `http://localhost:80/auth/callback/github`,
   }),
 ]);
 ```
@@ -77,7 +77,7 @@ Every helper accepts the base shape plus optional overrides for self-hosted inst
 | --- | --- | --- | --- |
 | `clientId` | all | — | Required. The OAuth app's client identifier. |
 | `clientSecret` | all | — | Required. The OAuth app's client secret. |
-| `callbackUrl` | all | — | Required. Must match the URL registered with the provider, normally `${DNS}/auth/callback/<name>`. |
+| `callbackUrl` | all | — | Required. Must match the URL registered with the provider — your BACKEND origin + `/auth/callback/<name>` (dev `http://localhost:80/auth/callback/<name>`, prod `https://your-domain.com/auth/callback/<name>`). |
 | `endpoints?.authorizationURL` | all | provider-default | GitHub Enterprise host, Microsoft custom-tenant authorize URL, internal auth proxy, etc. |
 | `endpoints?.tokenExchangeURL` | all | provider-default | Same use cases as `authorizationURL`. |
 | `endpoints?.userInfoURL` | all | provider-default | Self-hosted GitHub Enterprise / Microsoft Graph mirror, etc. |
@@ -91,7 +91,7 @@ Example — self-hosted GitHub Enterprise:
 githubProvider({
   clientId: process.env.GITHUB_CLIENT_ID,
   clientSecret: process.env.GITHUB_CLIENT_SECRET,
-  callbackUrl: `${process.env.DNS}/auth/callback/github`,
+  callbackUrl: `http://localhost:80/auth/callback/github`,
   endpoints: {
     authorizationURL: 'https://github.acme.example/login/oauth/authorize',
     tokenExchangeURL: 'https://github.acme.example/login/oauth/access_token',
@@ -106,7 +106,7 @@ Example — single-tenant Microsoft Entra ID:
 microsoftProvider({
   clientId: process.env.MICROSOFT_CLIENT_ID,
   clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
-  callbackUrl: `${process.env.DNS}/auth/callback/microsoft`,
+  callbackUrl: `http://localhost:80/auth/callback/microsoft`,
   tenant: process.env.MICROSOFT_TENANT_ID, // 'common' for any tenant; UUID for a single tenant.
   apiVersion: 'v2.0',                       // OAuth endpoint version
   graphApiVersion: 'v1.0',                  // Graph endpoint version
