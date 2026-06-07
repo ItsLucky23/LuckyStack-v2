@@ -2259,6 +2259,13 @@ User runtime-tested a scaffolded project and reported 4 issues; all fixed at the
 
 **Files touched**: packages/create-luckystack-app/template/{src/index.css, src/_components/LoginForm.tsx, src/login/page.tsx, src/page.tsx (new), _dot_env_template, public/*.png+favicon.ico (new)}, packages/create-luckystack-app/CHANGELOG.md. Still **0.1.5** (unpublished — folded in, no re-bump). Pending commit + publish (user-authorized).
 
+### Follow-up: CSRF exempt on credentials bootstrap (user chose "allow re-login while signed in")
+
+csrfMismatch on login/register persisted for the user because they were testing with a valid session cookie (the form sends no CSRF token → `csrfMiddleware` 403s the re-POST). Presented two options; user chose to **allow re-login while signed in**. Implemented:
+- **Framework** (`packages/server/src/httpRoutes/csrfMiddleware.ts`): exempt `routePath === '/auth/api/credentials'` from CSRF enforcement. Safe because the session cookie is `SameSite=Strict` (`projectConfig.ts:431`) — a cross-site POST never carries it, so `token` is absent and the guard wouldn't fire anyway; the check only ever blocked legitimate same-site re-login. All other `/auth/api/*`, `/api/*`, `/sync/*` state-changing routes stay protected.
+- **Template**: REMOVED the login + register page guards added in the prior follow-up — they redirected signed-in users away from the form, which contradicts "allow re-login while signed in." Kept the LoginForm `status === true` fix and the root `/` page.
+- Net: a signed-in user can now re-login / switch accounts / register straight from the form; no false success, no csrfMismatch. Verified: build 14/14, unit 757/757, `.smoke-test/run.mjs` GREEN. (server CHANGELOG → 0.1.5.)
+
 ### Follow-up: installer multi-select "Next" row (Claude-CLI-style)
 
 User asked for the OAuth multi-select to confirm via a dedicated action row instead of Enter-anywhere. Reworked the wizard (`src/index.ts` `runWizard`): in multi-select, BOTH Space and Enter toggle the highlighted provider; a non-toggleable **"Next"** row is appended after the providers (cursor index === options.length), and Space/Enter there confirms the step. ↑/↓ now wraps over `options.length + 1` for multi (single-select unchanged). Verified via node-pty: Space toggled google, Enter toggled github (no longer confirms), Space-on-Next confirmed → `.env.local` got google+github, not discord. lint:packages 0/0, tsup build OK.

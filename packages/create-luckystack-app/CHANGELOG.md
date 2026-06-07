@@ -26,9 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exists.** Re-submitting the login form while signed in trips the CSRF guard,
   which replies with `{ status: 'error' }` — a truthy string the form misread as
   success (empty green toast + bounce to /login). The form now treats only a
-  literal `status === true` as success and surfaces `errorCode`. The login AND
-  register pages also redirect already-signed-in visitors to the app instead of
-  showing the form (re-POSTing credentials while signed in is what tripped CSRF).
+  literal `status === true` as success and surfaces `errorCode`. The underlying
+  CSRF block on the credentials bootstrap endpoint is lifted in `@luckystack/server`
+  0.1.5, so re-login / register while signed in now just works (no false success,
+  no `csrfMismatch`).
 - **OAuth redirect now stays on the dev frontend.** The scaffold's `DNS` defaulted
   to the backend port, so after an OAuth login the browser landed on the backend
   origin instead of the Vite frontend. `DNS` now defaults to the dev frontend origin

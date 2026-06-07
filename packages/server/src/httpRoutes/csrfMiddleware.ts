@@ -21,10 +21,17 @@ export const enforceCsrfOnStateChangingRequest = async ({
   const isCookieMode = !config.session.basedToken;
   const isStateChanging = req.method !== 'GET' && req.method !== 'OPTIONS';
   const isCallbackPath = routePath.startsWith('/auth/callback');
+  //? The credentials login/register endpoint is the session BOOTSTRAP. Requiring a
+  //? pre-existing session's CSRF token to authenticate is circular, and it blocks
+  //? legitimate same-site re-login / register while a (stale) session cookie is
+  //? present. Cross-site abuse is already prevented by the SameSite=Strict session
+  //? cookie — a cross-site POST never carries it, so `token` would be absent here
+  //? and this guard wouldn't fire anyway. Exempting it removes no real protection.
+  const isAuthBootstrap = routePath === '/auth/api/credentials';
   const looksLikeFrameworkRoute =
     routePath.startsWith('/api/')
     || routePath.startsWith('/sync/')
-    || routePath.startsWith('/auth/api/');
+    || (routePath.startsWith('/auth/api/') && !isAuthBootstrap);
 
   if (!(isCookieMode && isStateChanging && looksLikeFrameworkRoute && !isCallbackPath && token)) {
     return false;
