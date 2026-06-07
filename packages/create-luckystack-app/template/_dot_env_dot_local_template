@@ -17,9 +17,16 @@ REDIS_PASSWORD=
 # button appears on the login form automatically and its /auth/callback route
 # works. No code edit needed: luckystack/login/oauthProviders.ts already wires
 # every built-in provider by env. DEV_* are read when NODE_ENV is not
-# 'production'; the unprefixed pair is read in production. Also set the OAuth
-# app's redirect URL to <DNS>/auth/callback/<provider> in its dev console and
-# add the provider's origin to EXTERNAL_ORIGINS in `.env`.
+# 'production'; the unprefixed pair is read in production.
+#
+# IMPORTANT — Authorized redirect URI (fixes "Error 400: redirect_uri_mismatch"):
+# In the provider's developer console (Google Cloud, GitHub OAuth App, …) add the
+# redirect/callback URL  <DNS>/auth/callback/<provider>  EXACTLY. With the dev
+# default DNS=http://localhost:5173 that is, for example:
+#     http://localhost:5173/auth/callback/google
+# It must match DNS character-for-character (scheme, host, port). For production,
+# register the same path on your real domain. Also add the provider's origin to
+# EXTERNAL_ORIGINS in `.env`.
 {{OAUTH_ENV_VARS}}
 
 # ─────────────────────────── Transactional email ───────────────────────────
