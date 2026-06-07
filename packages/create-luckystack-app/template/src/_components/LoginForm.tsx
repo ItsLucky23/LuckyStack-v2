@@ -86,10 +86,15 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
         credentials: "include",
       });
       const sessionToken = res.headers.get("x-session-token");
+      //? `status` is a BOOLEAN on the auth handler's own responses, but framework
+      //? guards (CSRF, rate-limit) reply with the generic error envelope
+      //? `{ status: 'error', errorCode }` — a truthy STRING. Type it as the union
+      //? so the success check below can't be fooled into treating an error as a win.
       const body = (await res.json()) as {
-        status: boolean;
-        reason: string;
-        session: SessionLayout | undefined;
+        status: boolean | string;
+        reason?: string;
+        errorCode?: string;
+        session?: SessionLayout;
         authenticated?: boolean;
       };
 
@@ -107,16 +112,20 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
       setLoading(false); return;
     }
 
-    if (!response.status) {
-      const reasonKey = typeof response.reason === 'string' && response.reason.length > 0
-        ? response.reason
-        : 'api.internalServerError';
+    //? Success is ONLY a literal boolean `true`. Anything else — `false`, or the
+    //? framework error envelope's `'error'` string — is a failure. (Without the
+    //? strict `=== true`, a 403 CSRF reply `{ status: 'error' }` slipped through
+    //? as success: empty green toast + bounce back to /login.)
+    if (response.status !== true) {
+      const reasonKey = [response.reason, response.errorCode].find(
+        (key): key is string => typeof key === 'string' && key.length > 0,
+      ) ?? 'api.internalServerError';
       notify.error({ key: reasonKey });
       setLoading(false);
       return;
     }
 
-    notify.success({ key: response.reason });
+    notify.success({ key: response.reason ?? 'login.loggedIn' });
     setTimeout(() => {
       if (response.sessionToken && sessionBasedToken) {
         sessionStorage.setItem("token", response.sessionToken);

@@ -9,8 +9,13 @@ SERVER_IP=127.0.0.1
 SERVER_PORT=80
 SECURE=false
 
-# Public app URL — used by OAuth callbacks and the email-link generator.
-DNS=http://localhost:80
+# Public app URL — the origin the BROWSER uses to reach the app. Used by OAuth
+# callbacks and the email-link generator, so it must point at the frontend the
+# user actually visits. In dev that's the Vite dev server (port 5173) — it proxies
+# /auth, /api, /sync, … to the backend (SERVER_PORT), so the whole OAuth round-trip
+# stays on this origin and lands back on the frontend. In production, set this to
+# your real domain (where frontend + backend share an origin).
+DNS=http://localhost:5173
 
 # Comma-separated list of additional origins permitted by the CORS layer.
 # DNS is auto-included. OAuth callbacks arrive with the provider's origin as

@@ -131,8 +131,13 @@
   font-weight: 400;
 
   color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: white;
+  /* Default text/background pull from the theme tokens above so any page that
+     doesn't set its own colors (e.g. a bare `plain` page) is readable. The
+     `.dark` block overrides these same vars, so this adapts to dark mode too.
+     (Replaces the leftover Vite default of white-on-white, which rendered
+     unstyled pages — like the dashboard — as invisible text.) */
+  color: var(--color-common);
+  background-color: var(--color-background);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
