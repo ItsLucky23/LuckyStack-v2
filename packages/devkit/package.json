@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/devkit",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -54,7 +54,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.1.4",
+    "@luckystack/core": "^0.1.5",
     "chokidar": "^5.0.0"
   },
   "peerDependencies": {

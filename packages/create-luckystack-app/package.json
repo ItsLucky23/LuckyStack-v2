@@ -1,6 +1,6 @@
 {
   "name": "create-luckystack-app",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": false,
   "publishConfig": {
     "access": "public"
@@ -37,12 +37,13 @@
     "README.md",
     "CLAUDE.md",
     "docs",
+    "framework-docs",
     "template",
     "LICENSE",
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "node scripts/bundleFrameworkDocs.mjs && tsup",
     "build:watch": "tsup --watch",
     "test": "vitest run"
   }

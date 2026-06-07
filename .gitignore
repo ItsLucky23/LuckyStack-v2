@@ -1,6 +1,9 @@
 # Scaffold smoke-test scratch dir (throwaway: packs + installs the 14 packages into a fresh create-luckystack-app)
 .smoke-test/
 
+# Framework AI docs bundled INTO create-luckystack-app at build time (generated copy of repo-root CLAUDE.md/docs/skills/.claude/commands — ships in the tarball, never committed)
+packages/create-luckystack-app/framework-docs/
+
 # Logs
 logs
 *.log

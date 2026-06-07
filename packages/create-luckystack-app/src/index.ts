@@ -321,7 +321,11 @@ const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string 
         paint();
         return;
       }
-      if (step.type === 'multi' && key.name === 'space') {
+      //? Toggle on EITHER signal: most terminals report the spacebar as
+      //? `key.name === 'space'`, but some Windows consoles deliver it only as the
+      //? raw ' ' string with no parsed name — checking `_str` too makes the
+      //? multi-select toggle work regardless of how the console reports space.
+      if (step.type === 'multi' && (key.name === 'space' || _str === ' ')) {
         const option = step.options[cursors[i] ?? 0];
         const set = selections[i];
         if (option !== undefined && set) {
@@ -778,16 +782,25 @@ const main = async (): Promise<void> => {
   //? and install a pre-commit hook that keeps the AI snapshot files fresh. When
   //? disabled the project ships clean — no CLAUDE.md, no docs/luckystack, no hook.
   if (choices.aiInstructions) {
+    //? Source of the framework AI docs. In a published install they ship INSIDE
+    //? this package under `framework-docs/` (bundled at build time by
+    //? scripts/bundleFrameworkDocs.mjs) — the repo root is NOT in the tarball, so
+    //? without this bundle the copy silently no-ops. In the monorepo (no bundle)
+    //? we fall back to the repo-root originals so `scaffold:test` keeps working.
+    //? The bundle flattens the two nested/dot sources (.claude/commands,
+    //? branch-logs/README.md) to non-dot names so npm reliably ships them.
+    const bundledDir = path.resolve(__dirname, '..', 'framework-docs');
+    const fromBundle = fs.existsSync(bundledDir);
+    const base = fromBundle ? bundledDir : path.resolve(__dirname, '..', '..', '..');
     //? Only branch-logs/README.md is copied (not the framework's own log
     //? entries) — the consumer's first session initializes their own log file.
-    const repoRoot = path.resolve(__dirname, '..', '..', '..');
     const docsCopies: [string, string, boolean][] = [
       // [source, dest, isDirectory]
-      [path.join(repoRoot, 'CLAUDE.md'),                path.join(targetDir, 'CLAUDE.md'),                  false],
-      [path.join(repoRoot, 'docs'),                     path.join(targetDir, 'docs', 'luckystack'),         true],
-      [path.join(repoRoot, 'skills'),                   path.join(targetDir, 'skills'),                     true],
-      [path.join(repoRoot, '.claude', 'commands'),      path.join(targetDir, '.claude', 'commands'),        true],
-      [path.join(repoRoot, 'branch-logs', 'README.md'), path.join(targetDir, 'branch-logs', 'README.md'),   false],
+      [path.join(base, 'CLAUDE.md'),                                                 path.join(targetDir, 'CLAUDE.md'),                  false],
+      [path.join(base, 'docs'),                                                      path.join(targetDir, 'docs', 'luckystack'),         true],
+      [path.join(base, 'skills'),                                                    path.join(targetDir, 'skills'),                     true],
+      [fromBundle ? path.join(base, 'claude-commands') : path.join(base, '.claude', 'commands'),   path.join(targetDir, '.claude', 'commands'),        true],
+      [fromBundle ? path.join(base, 'branch-logs-README.md') : path.join(base, 'branch-logs', 'README.md'), path.join(targetDir, 'branch-logs', 'README.md'), false],
     ];
     let copiedCount = 0;
     for (const [src, dst, isDir] of docsCopies) {
