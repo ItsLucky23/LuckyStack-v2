@@ -4,8 +4,9 @@ import { handleAuthProvidersRoute } from './authProvidersRoute';
 import type { HttpRouteContext } from './types';
 
 const providersList: { name: string }[] = [{ name: 'credentials' }];
-vi.mock('@luckystack/login', () => ({
-  getOAuthProviders: () => providersList,
+//? 0.2.0: the route reads providers via the capability layer (login optional).
+vi.mock('../capabilities', () => ({
+  getLogin: () => Promise.resolve({ getOAuthProviders: () => providersList }),
 }));
 
 const makeCtx = (method: string, routePath: string): { ctx: HttpRouteContext; ended: () => string | undefined } => {

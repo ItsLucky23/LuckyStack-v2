@@ -1,9 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing */
 
-import { getSession } from '@luckystack/login';
-import type { BaseSessionLayout as SessionLayout, AuthProps  } from '@luckystack/login';
-import type { PostApiExecutePayload, ErrorFormatter  } from '@luckystack/core';
-import { getProjectConfig, getRuntimeApiMaps as getRuntimeApiMapsFromSource ,
+import type { BaseSessionLayout as SessionLayout, AuthProps, PostApiExecutePayload, ErrorFormatter  } from '@luckystack/core';
+import { getProjectConfig, readSession, getRuntimeApiMaps as getRuntimeApiMapsFromSource ,
   validateRequest,
   checkRateLimit,
   inferHttpMethod,
@@ -204,7 +202,7 @@ async function runHandleHttpApiRequest(params: HttpApiRequestParams): Promise<Ru
   const preferredLocale =
     extractLanguageFromHeader(params.xLanguageHeader)
     ?? extractLanguageFromHeader(params.acceptLanguageHeader);
-  const user = await getSession(params.token);
+  const user = await readSession(params.token);
   const formatterHolder: { current?: ErrorFormatter } = {};
   const response = await runHandleHttpApiRequestInner(params, user, preferredLocale, formatterHolder);
   return { response, user, preferredLocale, perRouteFormatter: formatterHolder.current };

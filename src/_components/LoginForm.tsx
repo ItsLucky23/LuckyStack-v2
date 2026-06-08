@@ -57,12 +57,21 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     const confirmPassword = getValue("confirmPassword");
 
     const fetchUser = async () => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Session-Based-Token": String(sessionBasedToken),
+      };
+      //? In sessionStorage mode there is no auth cookie, so the server can't see
+      //? our CURRENT session token on this POST. Send it as a Bearer token so a
+      //? re-login while already signed in SUPERSEDES (instead of kicking) this
+      //? browser's own session. No-op when signed out or in cookie mode.
+      if (sessionBasedToken) {
+        const existingToken = sessionStorage.getItem("token");
+        if (existingToken) headers.Authorization = `Bearer ${existingToken}`;
+      }
       const res = await fetch(`${backendUrl}/auth/api/credentials`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Session-Based-Token": String(sessionBasedToken),
-        },
+        headers,
         body: JSON.stringify({ name, email, password, confirmPassword, provider }),
         credentials: "include",
       });

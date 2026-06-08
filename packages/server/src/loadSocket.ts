@@ -18,20 +18,18 @@ import {
   getProjectConfig,
   dispatchHook,
   normalizeErrorResponse,
+  readSession,
+  writeSession,
   tryCatch,
   type apiMessage,
   type syncMessage,
   type BaseSessionLayout,
 } from '@luckystack/core';
 import { handleApiRequest } from '@luckystack/api';
-import { handleSyncRequest } from '@luckystack/sync';
-import { getSession, saveSession } from '@luckystack/login';
-import {
-  initActivityBroadcaster,
-  socketConnected,
-  socketDisconnecting,
-  socketLeaveRoom,
-} from '@luckystack/presence';
+//? login / presence / sync are OPTIONAL peers — resolved + lazy-loaded through
+//? the capability layer so the server boots + runs without them. Session reads
+//? use core's `readSession`/`writeSession` (login populates the provider).
+import { capabilities, getPresence, getSync } from './capabilities';
 
 //? Per-token lock to serialize session mutations (prevents read-modify-write races
 //? when multiple room joins/leaves arrive in quick succession from the same socket).
@@ -133,8 +131,11 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       || undefined;
     /* eslint-enable @typescript-eslint/prefer-nullish-coalescing */
 
-    if (token) {
-      void socketConnected({ token, io });
+    if (token && capabilities.presence) {
+      void (async () => {
+        const presence = await getPresence();
+        if (presence) await presence.socketConnected({ token, io });
+      })();
     }
 
     void dispatchHook('onSocketConnect', {
@@ -147,9 +148,17 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       void handleApiRequest({ msg, socket, token });
     });
 
-    socket.on(socketEventNames.sync, (msg: syncMessage) => {
-      void handleSyncRequest({ msg, socket, token });
-    });
+    //? Only wire the sync listener when @luckystack/sync is installed. Absent =>
+    //? clients that emit `sync` get no handler (their request times out / the
+    //? HTTP fallback returns `sync.disabled`). Lazy-loaded once on first event.
+    if (capabilities.sync) {
+      socket.on(socketEventNames.sync, (msg: syncMessage) => {
+        void (async () => {
+          const sync = await getSync();
+          if (sync) await sync.handleSyncRequest({ msg, socket, token });
+        })();
+      });
+    }
 
     //? B1 — cancellation events. Client emits `{ cb }` (sync) or
     //? `{ responseIndex }` (api) on the matching cancel channel; we look up
@@ -188,7 +197,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       }
 
       void withSessionLock(token, async () => {
-        const session = await getSession(token);
+        const session = await readSession(token);
         if (!session) {
           socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
             response: { status: 'error', errorCode: 'session.notFound' },
@@ -216,7 +225,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
 
         await socket.join(group);
         const sanitizedSession = sanitizeSessionRoomKeys(session);
-        await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
+        await writeSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
         const visibleRooms = getVisibleSocketRooms(socket, token);
         socket.emit(buildJoinRoomResponseEventName(responseIndex), { rooms: visibleRooms });
         if (shouldLogDev) {
@@ -248,7 +257,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       }
 
       void withSessionLock(token, async () => {
-        const session = await getSession(token);
+        const session = await readSession(token);
         if (!session) {
           socket.emit(buildLeaveRoomResponseEventName(responseIndex), normalizeErrorResponse({
             response: { status: 'error', errorCode: 'session.notFound' },
@@ -275,7 +284,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
 
         await socket.leave(group);
         const sanitizedSession = sanitizeSessionRoomKeys(session);
-        await saveSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
+        await writeSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
 
         const visibleRooms = getVisibleSocketRooms(socket, token);
         socket.emit(buildLeaveRoomResponseEventName(responseIndex), { rooms: visibleRooms });
@@ -316,7 +325,10 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       void dispatchHook('onSocketDisconnect', { socketId: socket.id, token, reason });
 
       if (activityBroadcasterEnabled && token) {
-        void socketDisconnecting({ token, socket, reason });
+        void (async () => {
+          const presence = await getPresence();
+          if (presence) await presence.socketDisconnecting({ token, socket, reason });
+        })();
       } else {
         if (!token) return;
         if (shouldLogDev) {
@@ -337,16 +349,19 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
         void withSessionLock(token, async () => {
           let returnedUser: BaseSessionLayout | null = null;
           if (activityBroadcasterEnabled) {
-            returnedUser = await socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
+            const presence = await getPresence();
+            if (presence) {
+              returnedUser = await presence.socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
+            }
           }
 
-          const user = returnedUser ?? (await getSession(token));
+          const user = returnedUser ?? (await readSession(token));
           if (!user) return;
 
           const extendedUser = user as BaseSessionLayout & { location?: typeof newLocation };
           const oldLocation = extendedUser.location;
           extendedUser.location = newLocation;
-          await saveSession(token, user);
+          await writeSession(token, user);
 
           void dispatchHook('onLocationUpdate', { token, oldLocation, newLocation });
         });
@@ -354,7 +369,10 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     );
 
     if (activityBroadcasterEnabled && token) {
-      initActivityBroadcaster({ socket, token });
+      void (async () => {
+        const presence = await getPresence();
+        if (presence) presence.initActivityBroadcaster({ socket, token });
+      })();
     }
 
     if (token) {
@@ -370,7 +388,7 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       void (async () => {
         const [rejoinError, codes] = await tryCatch(async () => {
           await socket.join(token);
-          const session = await getSession(token);
+          const session = await readSession(token);
           const roomCodes = session ? getSessionRoomCodes(session) : [];
           for (const roomCode of roomCodes) {
             await socket.join(roomCode);

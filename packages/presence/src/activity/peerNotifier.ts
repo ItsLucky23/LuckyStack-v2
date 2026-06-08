@@ -2,8 +2,7 @@
 
 import { Server } from 'socket.io';
 
-import { dispatchHook, extractTokenFromSocket, getIoInstance, getLogger, socketEventNames } from '@luckystack/core';
-import { getSession } from '@luckystack/login';
+import { dispatchHook, extractTokenFromSocket, getIoInstance, getLogger, socketEventNames, readSession } from '@luckystack/core';
 import { ensureIo } from './state';
 
 export const informRoomPeers = async ({
@@ -22,7 +21,7 @@ export const informRoomPeers = async ({
     return;
   }
 
-  const session = await getSession(token);
+  const session = await readSession(token);
   const roomCodes = Array.isArray(session?.roomCodes)
     ? session.roomCodes.filter((room: unknown): room is string => typeof room === 'string' && room.length > 0)
     : [];

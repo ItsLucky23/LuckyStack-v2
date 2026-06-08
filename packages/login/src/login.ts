@@ -191,7 +191,10 @@ const registerWithCredentials = async ({
   };
 };
 
-const loginWithCredentialsCore = async ({ email, password }: { email: string; password: string }) => {
+const loginWithCredentialsCore = async (
+  { email, password }: { email: string; password: string },
+  options?: { supersedeToken?: string },
+) => {
   const preLoginResult = await dispatchHook('preLogin', { email, provider: 'credentials' });
   if (preLoginResult.stopped) {
     return { status: false, reason: preLoginResult.signal.errorCode };
@@ -236,7 +239,13 @@ const loginWithCredentialsCore = async ({ email, password }: { email: string; pa
     newUser.avatar = `${newUser.id}.webp`;
   }
 
-  await saveSession(newToken, newUser, true);
+  const saved = await saveSession(newToken, newUser, true, { supersedeToken: options?.supersedeToken });
+  if (!saved.ok) {
+    //? Session never persisted (adapter blip / preSessionCreate veto). Fail the
+    //? login so the route does NOT set a cookie or delete the prior session for
+    //? a token that getSession() can't resolve.
+    return { status: false, reason: saved.errorCode };
+  }
   await dispatchHook('postLogin', { userId: newUser.id, provider: 'credentials', isNewUser: false, token: newToken });
   if (isDevMode()) {
     getLogger().debug(`credentials login success for user ${newUser.id}`);
@@ -248,7 +257,7 @@ const loginWithCredentialsCore = async ({ email, password }: { email: string; pa
 //? to the dedicated register / login functions. `name && confirmPassword`
 //? present in the body means the client is registering; otherwise it's a
 //? login.
-const loginWithCredentials = async (params: paramsType) => {
+const loginWithCredentials = async (params: paramsType, options?: { supersedeToken?: string }) => {
   const creds = normalizeCredentials(params);
 
   if (isDevMode()) {
@@ -266,7 +275,7 @@ const loginWithCredentials = async (params: paramsType) => {
       confirmPassword: creds.confirmPassword,
     });
   }
-  return loginWithCredentialsCore({ email: creds.email, password: creds.password });
+  return loginWithCredentialsCore({ email: creds.email, password: creds.password }, options);
 };
 
 export interface OAuthCallbackResult {
@@ -518,7 +527,7 @@ const loginCallback = async (
   pathname: string,
   req: IncomingMessage,
   _res: ServerResponse,
-  options: { defaultRedirectUrl?: string } = {},
+  options: { defaultRedirectUrl?: string; supersedeToken?: string } = {},
 ): Promise<OAuthCallbackResult | false> => {
   const providerName = pathname.split('/')[3]; // google/github/etc.
   if (!providerName) return false;
@@ -571,7 +580,13 @@ const loginCallback = async (
     }
   }
 
-  await saveSession(newToken, resolved.user, true);
+  const saved = await saveSession(newToken, resolved.user, true, { supersedeToken: options.supersedeToken });
+  if (!saved.ok) {
+    //? Session never persisted — abort the OAuth callback so authCallbackRoute
+    //? returns "Login failed" instead of redirecting with a dead token.
+    getLogger().error(`[oauth:${providerName}] saveSession failed — aborting callback`, { errorCode: saved.errorCode });
+    return false;
+  }
 
   if (resolved.isNewUser) {
     await dispatchHook('postRegister', { userId: resolved.user.id, provider: providerName });

@@ -15,6 +15,7 @@ import {
   isProjectConfigRegistered,
   isRuntimeMapsProviderRegistered,
 } from '@luckystack/core';
+import { getLogin } from './capabilities';
 
 export interface BootstrapRequirements {
   /**
@@ -59,8 +60,12 @@ export const verifyBootstrap = async (requirements: BootstrapRequirements = {}):
   }
 
   if (requirements.requireOAuthProviders) {
-    const { getOAuthProviders } = await import('@luckystack/login');
-    if (getOAuthProviders().length <= 1) {
+    const login = await getLogin();
+    if (!login) {
+      missing.push(
+        'OAuth providers required (`requireOAuthProviders`) but `@luckystack/login` is not installed. Install it, or drop the requirement if this app has no auth.'
+      );
+    } else if (login.getOAuthProviders().length <= 1) {
       // Default registry is `[{ name: 'credentials' }]` — anything ≤1 means
       // the consumer never registered providers.
       missing.push(

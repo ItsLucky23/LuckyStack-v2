@@ -60,6 +60,8 @@ vi.mock('@luckystack/login', () => ({
 
 vi.mock('@luckystack/core', () => ({
   getProjectConfig: () => seam.projectConfig,
+  //? 0.2.0: session reads moved to core's null-safe accessor (login optional).
+  readSession: (token: string | null) => getSessionMock(token),
   getRuntimeApiMaps: () => Promise.resolve({ apisObject: seam.apisObject, functionsObject: seam.functionsObject }),
   validateRequest: (args: unknown) => validateRequestMock(args),
   checkRateLimit: (args: unknown) => checkRateLimitMock(args),

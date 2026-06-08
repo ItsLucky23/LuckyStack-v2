@@ -131,16 +131,56 @@ export const createLuckyStackServer = async (
   });
 
   const listen = (callback?: () => void): Promise<HttpServer> =>
-    new Promise<HttpServer>((resolve) => {
-      const portValue = typeof port === 'string' ? Number.parseInt(port, 10) : port;
-      httpServer.listen(portValue, ip, () => {
-        const config = getProjectConfig();
-        if (config.logging.socketStartup || config.logging.devLogs) {
-          getLogger().info(`Server is running on http://${ip}:${String(port)}/`);
-        }
-        callback?.();
-        resolve(httpServer);
-      });
+    new Promise<HttpServer>((resolve, reject) => {
+      const startPort = typeof port === 'string' ? Number.parseInt(port, 10) : port;
+      //? Opt-in: only auto-pick the next free port when explicitly enabled.
+      //? Off by default because `SERVER_PORT` also drives `config.ts`'s
+      //? `backendOrigin` / OAuth callback base and the Vite dev proxy target —
+      //? silently moving the listen port would leave the frontend talking to the
+      //? old one. Safe to enable for standalone / `npm run cluster` use where
+      //? nothing else hardcodes the port.
+      const autoIncrement = ['1', 'true'].includes(
+        (process.env.SERVER_PORT_AUTO_INCREMENT ?? '').toLowerCase(),
+      );
+
+      const tryListen = (attemptPort: number): void => {
+        const onError = (err: NodeJS.ErrnoException): void => {
+          if (err.code !== 'EADDRINUSE') {
+            reject(err);
+            return;
+          }
+          if (autoIncrement) {
+            getLogger().warn(
+              `Port ${String(attemptPort)} is in use — trying ${String(attemptPort + 1)} (SERVER_PORT_AUTO_INCREMENT=1)`,
+            );
+            tryListen(attemptPort + 1);
+            return;
+          }
+          //? Truthful failure. The old code unconditionally logged "running on
+          //? :<port>" inside the listen callback even when the bind never
+          //? succeeded, so an in-use port looked like a healthy boot. Surface
+          //? the real problem and the two ways out instead.
+          getLogger().error(
+            `Port ${String(attemptPort)} is already in use — the server did NOT start. ` +
+              `Another \`npm run server\` is probably still running (stop it), or set ` +
+              `SERVER_PORT to a free port, or set SERVER_PORT_AUTO_INCREMENT=1 to auto-pick the next free port.`,
+          );
+          reject(err);
+        };
+
+        httpServer.once('error', onError);
+        httpServer.listen(attemptPort, ip, () => {
+          httpServer.off('error', onError);
+          const config = getProjectConfig();
+          if (config.logging.socketStartup || config.logging.devLogs) {
+            getLogger().info(`Server is running on http://${ip}:${String(attemptPort)}/`);
+          }
+          callback?.();
+          resolve(httpServer);
+        });
+      };
+
+      tryListen(startPort);
     });
 
   return { httpServer, ioServer, listen };

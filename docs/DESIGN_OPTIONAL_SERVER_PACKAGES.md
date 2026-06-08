@@ -1,10 +1,29 @@
 # Design — Optional `login` / `presence` / `sync` in `@luckystack/server`
 
-> Status: **PROPOSAL / not yet implemented.** Recommended implementation branch:
-> `refactor/optional-server-packages`. This is a security-sensitive framework
-> refactor — it MUST land on its own branch with a dedicated security review,
-> NOT in the 0.1.3 publish (which only carries the install-blocking template
-> fixes). Last updated: 2026-06-04.
+> Status: **ARCHITECTURE IMPLEMENTED in 0.2.0 (2026-06-08), uncommitted/unpublished.**
+> The decouple landed via a **core session-provider registry** (chosen over the
+> per-package resolve-guard) — see §4-note below. Login/presence/sync are now
+> genuine OPTIONAL peers; the server degrades gracefully (`auth.disabled` /
+> `sync.disabled`, presence skipped) and CSRF falls back to stateless
+> double-submit when login is absent. §6 scaffold-CLI: **PRESENCE opt-out DONE**
+> (installer prompt + `--no-presence`; `pruneOptionalPackages` drops the dep +
+> rewrites main.tsx/TemplateProvider; verified by the smoke MATRIX which runs
+> `full` + `no-presence` combos). **sync + login opt-out STILL TODO** (sync:
+> `initSyncRequest` is called from the presence/activity path in
+> `socketInitializer.ts` → decouple the socket client layer first; login: a no-auth
+> template, ~17 files — config type swap is ready since core now exports
+> `BaseSessionLayout`/`AuthProps`). Originally proposed 2026-06-04.
+>
+> **Implementation note (supersedes §4's server-local capabilities-only plan):**
+> session reads/writes were decoupled at the CORE level. `@luckystack/core` owns a
+> session-provider registry (`registerSessionProvider` + null-safe `readSession`/
+> `writeSession`/`removeSession`/`performLogout`); `@luckystack/login` registers
+> its implementation at module load; `api`/`sync`/`presence`/`server` call core's
+> accessors instead of importing login. login was dropped from api/sync deps
+> entirely and made an optional peer of presence (type-only import for the
+> `postLogout` augmentation) and server. The server `capabilities.ts` resolve-guard
+> remains for the ROUTE/SOCKET wiring (auth routes, sync listener, presence
+> lifecycle). All other sections below stand.
 
 ---
 
@@ -179,10 +198,10 @@ so that when login is absent they hit a **no-op/Redis-only stub** (stores
 - Scaffold matrix via `.smoke-test/run.mjs`, extended to several combos: full, no-login, no-presence, no-sync, no-presence+no-sync, minimal. Each must reach `typecheck 0 · build PASS · lint 0/0`, AND a runtime boot smoke (server starts, `/livez` 200, an authenticated `/api` round-trip where login is present, a 404 on `/auth/api` where login is absent).
 - Add a runtime boot check to the smoke test — the current gate is compile/lint only and would NOT have caught the validator/`process`/page_dashboard runtime bugs.
 
-### OPEN VRAAG (decide before implementation)
-- **Granularity:** independent opt-out of login / presence / sync, or bundle presence+sync as one "real-time" toggle? (presence+sync are usually co-used.)
-- **No-login CSRF default:** double-submit ON by default for login-less apps, or leave CSRF off and document it (since the app is unauthenticated anyway)?
-- **Sync HTTP-fallback absent:** 404 vs `{ errorCode:'sync.disabled' }` — pick one error contract.
+### RESOLVED (user decisions, 2026-06-08)
+- **Granularity → independent opt-out.** login / presence / sync are each selectable on their own (alongside the already-optional email / error-tracking / docs-ui). No "real-time" bundle. Drives the FastAPI↔Django dial + per-package installer selection. The smoke matrix (§8) must cover the independent combos.
+- **No-login CSRF → stateless double-submit, ON by default.** Login-present path stays byte-for-byte session-bound (§3); login-absent path uses the double-submit cookie (cookie value vs `x-csrf-token` header, no session read). CSRF protection is never silently dropped.
+- **Sync absent → error envelope.** `/sync/*` returns `{ status:'error', errorCode:'sync.disabled' }` (NOT a bare 404); the socket `'sync'` listener is simply never registered. Client already handles `errorCode`. Apply the same `*.disabled` errorCode convention to login-absent `/auth/api/*` (`auth.disabled`).
 
 ---
 
@@ -192,3 +211,28 @@ so that when login is absent they hit a **no-op/Redis-only stub** (stores
 2. Security review of §7 (esp. CSRF) before merge.
 3. Publish as a **minor** bump (new capability), not a patch — likely `0.2.0`, since server's dependency shape changes for consumers.
 4. Only then extend the scaffold CLI (§6) + smoke matrix (§8).
+
+---
+
+## 10. Install-anything-anytime architecture (2026-06-08 design, NOT yet implemented)
+
+> Goal: install a BASE set, then later `npm i @luckystack/<pkg>` (or `npx luckystack
+> add <feature>`) + env + restart → works with ZERO manual wiring. Full actionable
+> plan + sequence lives in the repo-root `SESSION_STATE.md` §4–§8. Produced by the
+> `.claude/workflows/install-anytime-design.mjs` research workflow (7 agents).
+
+### Decisions (locked)
+- **Login UI** → `npx luckystack add login` generator (npm i wires the backend; editable pages copied into `src/`). NOT a package-mounted page.
+- **Add command** → new dedicated CLI `npx luckystack add <feature>` (`@luckystack/cli`), the inverse of the scaffold pruner. It WRAPS `npm i` + injects `src/` assets; it does not replace `npm i` (backend-only features need only `npm i`).
+- **BASE set** = core + api + server + error-tracking (+ peers prisma, socket.io). login/presence/sync/email/docs-ui = à-la-carte.
+- **Optional-package list** = hardcoded `OPTIONAL_PACKAGES` constant in `@luckystack/server` (not a dir scan).
+- **Override precedence** = last-writer-wins; auto-detect `./register` runs BEFORE the consumer overlay folder so the overlay overrides.
+- **Auto-detect** = server-side + targeted client conditional dynamic-imports (sync bridge); no generic client registry.
+
+### Three layers
+1. **Package self-wiring** — each optional package ships a side-effect `@luckystack/<pkg>/register` subpath that does its env-driven default wiring idempotently (logic moves OUT of the consumer `luckystack/<pkg>/*` overlay INTO the package). login's OAuth env-scan reads `callbackUrl` from `getProjectConfig()` (new `oauthCallbackBase` slot), not the consumer `config`.
+2. **Boot auto-detect** — `bootstrapLuckyStack` iterates `OPTIONAL_PACKAGES`, resolve-guarded, `await import('@luckystack/<pkg>/register')` BEFORE `loadOverlayFolder`. → `npm i` + env = server wiring lights up.
+3. **Client** — sync receive-bridge → `@luckystack/sync/client` `attachSyncReceiver`, conditionally dynamic-imported by `socketInitializer`. presence mounts + login pages → NOT pure npm-i (Vite + file-routing) → `luckystack add`.
+
+### Pure-`npm i` matrix
+yes: error-tracking, email, oauth-provider (env), sync (after bridge), docs-ui, login-backend, presence-server. no: login pages, presence client mounts, Datadog (`--import` preload). See `SESSION_STATE.md` §5/§8 for the file-level sequence.

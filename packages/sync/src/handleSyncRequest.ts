@@ -2,10 +2,10 @@
 /* eslint-disable */
 import type { syncMessage, PostSyncFanoutPayload } from "@luckystack/core";
 import { Socket } from "socket.io";
-import { getSession } from "@luckystack/login";
-import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
+import { readSession } from "@luckystack/core";
+import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
 import { getProjectConfig } from '@luckystack/core';
-import type { AuthProps } from '@luckystack/login';
+import type { AuthProps } from '@luckystack/core';
 import { getRuntimeSyncMaps } from '@luckystack/core';
 import {
   validateRequest,
@@ -353,7 +353,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     getLogger().debug(`sync: ${resolvedName} called`, { sync: resolvedName });
   }
 
-  const user = await getSession(token);
+  const user = await readSession(token);
   currentUserId = user?.id;
   //? Identity propagation now flows via the `preSyncAuthorize` hook subscriber
   //? registered by `@luckystack/error-tracking`'s `enableErrorTrackingAutoInstrumentation()`.

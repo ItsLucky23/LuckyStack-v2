@@ -207,6 +207,17 @@ export type { AvatarConfig, AvatarConfigInput } from './avatarConfig';
 export { default as getParams } from './getParams';
 export { extractTokenFromSocket } from './extractToken';
 export { extractTokenFromRequest } from './extractTokenFromRequest';
+export {
+  registerSessionProvider,
+  getRegisteredSessionProvider,
+  isSessionProviderRegistered,
+  resetSessionProviderForTests,
+  readSession,
+  writeSession,
+  removeSession,
+  performLogout,
+} from './sessionProviderRegistry';
+export type { SessionProvider, SessionSaveResult, SessionLogoutInput } from './sessionProviderRegistry';
 export { validateRequest, isFalsy } from './validateRequest';
 export type { ValidationResult } from './validateRequest';
 export {

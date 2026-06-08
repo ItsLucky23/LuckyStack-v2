@@ -1,9 +1,9 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-import { getSession } from "@luckystack/login";
-import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
+import { readSession } from "@luckystack/core";
+import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
 import { getProjectConfig } from '@luckystack/core';
-import type { AuthProps } from '@luckystack/login';
+import type { AuthProps } from '@luckystack/core';
 import { getRuntimeSyncMaps as getRuntimeSyncMapsFromSource } from '@luckystack/core';
 import {
   validateRequest,
@@ -236,7 +236,7 @@ export default async function handleHttpSyncRequest({
   const preferredLocale =
     extractLanguageFromHeader(xLanguageHeader)
     || extractLanguageFromHeader(acceptLanguageHeader);
-  const user = await getSession(token);
+  const user = await readSession(token);
   //? Identity propagation + span lifecycle now flow via the
   //? `preSyncAuthorize` / `preSyncFanout` / `postSyncFanout` hook subscribers
   //? registered by `@luckystack/error-tracking`'s

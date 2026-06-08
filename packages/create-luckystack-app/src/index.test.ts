@@ -14,6 +14,7 @@ import {
   isTextFile,
   parseArgs,
   readSelfVersion,
+  buildOAuthEnvVars,
   VALID_FLAGS,
 } from "./index";
 
@@ -228,6 +229,7 @@ describe("parseArgs", () => {
       install: true,
       prompt: true,
       help: false,
+      noPresence: false,
     });
   });
 
@@ -237,6 +239,7 @@ describe("parseArgs", () => {
       install: true,
       prompt: true,
       help: false,
+      noPresence: false,
     });
   });
 
@@ -257,12 +260,18 @@ describe("parseArgs", () => {
     expect(result.install).toBe(true);
   });
 
+  it("sets noPresence for --no-presence (default false)", () => {
+    expect(parseArgs(["my-app"]).noPresence).toBe(false);
+    expect(parseArgs(["my-app", "--no-presence"]).noPresence).toBe(true);
+  });
+
   it("combines --no-install and --no-prompt in any order", () => {
     expect(parseArgs(["--no-prompt", "my-app", "--no-install"])).toEqual({
       projectName: "my-app",
       install: false,
       prompt: false,
       help: false,
+      noPresence: false,
     });
   });
 
@@ -306,5 +315,43 @@ describe("readSelfVersion", () => {
     //? while still proving the read + format guard pass on real data.
     const version = readSelfVersion();
     expect(version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+describe("buildOAuthEnvVars", () => {
+  const ALL = ["google", "github", "discord", "facebook", "microsoft"] as const;
+
+  it("emits a block for EVERY built-in provider even when none are selected", () => {
+    const out = buildOAuthEnvVars([]);
+    for (const p of ALL) {
+      expect(out).toContain(`# ${p} (enable later)`);
+    }
+  });
+
+  it("leaves selected providers uncommented and comments out the rest", () => {
+    const out = buildOAuthEnvVars(["google"]);
+    //? Selected: active header + uncommented key lines.
+    expect(out).toContain("# google (active)");
+    expect(out).toContain("\nDEV_GOOGLE_CLIENT_ID=");
+    expect(out).toContain("\nGOOGLE_CLIENT_SECRET=");
+    //? Unselected: enable-later header + commented key lines.
+    expect(out).toContain("# github (enable later)");
+    expect(out).toContain("# DEV_GITHUB_CLIENT_ID=");
+    expect(out).toContain("# GITHUB_CLIENT_SECRET=");
+    //? An unselected provider must NOT appear uncommented.
+    expect(out).not.toContain("\nDEV_GITHUB_CLIENT_ID=");
+  });
+
+  it("includes a MICROSOFT_TENANT_ID line, commented when microsoft is not selected", () => {
+    expect(buildOAuthEnvVars([])).toContain("# MICROSOFT_TENANT_ID=common");
+    expect(buildOAuthEnvVars(["microsoft"])).toContain("\nMICROSOFT_TENANT_ID=common");
+  });
+
+  it("emits exactly the four credential keys per provider (dev + prod pair)", () => {
+    const out = buildOAuthEnvVars(["discord"]);
+    expect(out).toContain("DEV_DISCORD_CLIENT_ID=");
+    expect(out).toContain("DEV_DISCORD_CLIENT_SECRET=");
+    expect(out).toContain("DISCORD_CLIENT_ID=");
+    expect(out).toContain("DISCORD_CLIENT_SECRET=");
   });
 });

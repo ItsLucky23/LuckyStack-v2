@@ -1,7 +1,6 @@
 import { Socket } from 'socket.io';
 
-import { getLogger } from '@luckystack/core';
-import { getSession } from '@luckystack/login';
+import { getLogger, readSession } from '@luckystack/core';
 
 // Return type inferred from `getSession`, which is currently typed to the
 // project-level `SessionLayout` (extends Prisma `User`) via the login
@@ -18,7 +17,7 @@ export const socketLeaveRoom = async ({ token }: {
     return null;
   }
 
-  const user = await getSession(token);
+  const user = await readSession(token);
   if (!user?.id) {
     getLogger().warn('presence: no session data for given token', { token });
     return null;

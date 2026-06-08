@@ -2,7 +2,6 @@
 
 import { Server, Socket } from 'socket.io';
 
-import { deleteSession, getSession } from '@luckystack/login';
 import { informRoomPeers } from './peerNotifier';
 import { socketLeaveRoom } from './leaveRoom';
 import {
@@ -11,7 +10,7 @@ import {
   getDisconnectTime,
   tempDisconnectedSockets,
 } from './state';
-import { dispatchHook, socketEventNames, getLogger } from '@luckystack/core';
+import { dispatchHook, socketEventNames, getLogger, readSession, removeSession } from '@luckystack/core';
 import { getPresenceConfig } from '../presenceConfig';
 
 export const socketConnected = async ({
@@ -35,7 +34,7 @@ export const socketConnected = async ({
     }
   }
 
-  const session = await getSession(token);
+  const session = await readSession(token);
   const userId = session?.id || null;
   const roomCodes = Array.isArray(session?.roomCodes)
     ? session.roomCodes.filter((room: unknown): room is string => typeof room === 'string' && room.length > 0)
@@ -103,7 +102,7 @@ export const socketDisconnecting = async ({
     await socketLeaveRoom({ token, socket, newPath: null });
 
     if (deleteSessionOnDisconnect) {
-      await deleteSession(token);
+      await removeSession(token);
     }
 
     getLogger().debug(`presence: user fully disconnected`, { reason, timerSeconds: time / 1000, deleteSessionOnDisconnect });

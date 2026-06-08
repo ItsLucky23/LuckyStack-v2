@@ -26,6 +26,9 @@ const socketLeaveRoomMock = vi.fn();
 
 vi.mock('@luckystack/core', () => ({
   dispatchHook: (...args: unknown[]) => dispatchHookMock(...args),
+  //? 0.2.0: session reads/deletes moved to core's null-safe accessors.
+  readSession: (token: string) => getSessionMock(token),
+  removeSession: (token: string) => deleteSessionMock(token),
   getLogger: () => ({
     debug: vi.fn(),
     warn: vi.fn(),

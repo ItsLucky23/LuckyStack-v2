@@ -35,18 +35,21 @@ export interface CliArgs {
   install: boolean;
   prompt: boolean;
   help: boolean;
+  /** `--no-presence`: omit @luckystack/presence (applies under --no-prompt / CI). */
+  noPresence: boolean;
 }
 
 //? Single source of truth for recognised flag tokens. Used both by the
 //? parser (to reject unknown flags) and the help banner (so the list stays
 //? in sync with what `parseArgs` actually accepts).
-export const VALID_FLAGS = ['--no-install', '--no-prompt', '--help', '-h'] as const;
+export const VALID_FLAGS = ['--no-install', '--no-prompt', '--no-presence', '--help', '-h'] as const;
 
 export const parseArgs = (argv: string[]): CliArgs => {
   let projectName = '';
   let install = true;
   let prompt = true;
   let help = false;
+  let noPresence = false;
   for (const arg of argv) {
     switch (arg) {
     case '--no-install': {
@@ -55,6 +58,10 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
     case '--no-prompt': {
     prompt = false;
+    break;
+    }
+    case '--no-presence': {
+    noPresence = true;
     break;
     }
     case '--help': 
@@ -77,7 +84,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
     }
   }
-  return { projectName, install, prompt, help };
+  return { projectName, install, prompt, help, noPresence };
 };
 
 interface ScaffoldChoices {
@@ -91,6 +98,8 @@ interface ScaffoldChoices {
   emailProvider: 'none' | 'console' | 'resend' | 'smtp';
   /** Observability backend. */
   monitoringProvider: 'none' | 'sentry' | 'datadog' | 'posthog';
+  /** Install @luckystack/presence (AFK/presence/socket-status). Optional peer. */
+  presence: boolean;
   /** Enable @luckystack/i18n integration. */
   i18n: boolean;
   /**
@@ -108,6 +117,7 @@ const DEFAULT_CHOICES: ScaffoldChoices = {
   oauthProviders: [],
   emailProvider: 'console',
   monitoringProvider: 'none',
+  presence: true,
   i18n: true,
   aiInstructions: true,
 };
@@ -201,13 +211,14 @@ const runPromptsFallback = async (): Promise<ScaffoldChoices> => {
       ['none', 'sentry', 'datadog', 'posthog'] as const,
       'none',
     );
+    const presence = await askYesNo(rl, 'Install @luckystack/presence (AFK / presence / socket-status)?', true);
     const i18n = await askYesNo(rl, 'Enable i18n (translations + locale switching)?', true);
     const aiInstructions = await askYesNo(
       rl,
       'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?',
       true,
     );
-    return { dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n, aiInstructions };
+    return { dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, presence, i18n, aiInstructions };
   } finally {
     rl.close();
   }
@@ -387,6 +398,7 @@ const runPrompts = async (): Promise<ScaffoldChoices> => {
     { key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire?', options: ['google', 'github', 'discord', 'facebook', 'microsoft'], skip: (a) => a.authMode !== 'credentials+oauth' },
     { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', options: ['none', 'console', 'resend', 'smtp'], defaultValue: 'console' },
     { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', options: ['none', 'sentry', 'datadog', 'posthog'], defaultValue: 'none' },
+    { key: 'presence', type: 'select', label: 'Install @luckystack/presence (AFK / presence / socket-status)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
     { key: 'i18n', type: 'select', label: 'Enable i18n (translations + locale switching)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
     { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
   ]);
@@ -402,6 +414,7 @@ const runPrompts = async (): Promise<ScaffoldChoices> => {
     oauthProviders: authMode === 'credentials+oauth' ? oauthAll.filter((provider) => oauthPicked.includes(provider)) : [],
     emailProvider: asOption(answers.emailProvider, ['none', 'console', 'resend', 'smtp'] as const, 'console'),
     monitoringProvider: asOption(answers.monitoringProvider, ['none', 'sentry', 'datadog', 'posthog'] as const, 'none'),
+    presence: answers.presence !== 'No',
     i18n: answers.i18n === 'Yes',
     aiInstructions: answers.aiInstructions !== 'No',
   };
@@ -417,6 +430,7 @@ Usage:
 Options:
   --no-install   Don't run \`npm install\` or \`npx prisma generate\` after copying.
   --no-prompt    Skip the interactive prompts and use defaults (Mongo + credentials).
+  --no-presence  Omit @luckystack/presence (applies with --no-prompt; the wizard asks otherwise).
   --help, -h     Show this message.
 
 Example:
@@ -470,27 +484,39 @@ export const renameDotFile = (name: string): string => name.replaceAll('_dot_', 
 //? with empty values so the developer only fills them in; the provider stays
 //? disabled (no login button, no /auth route) until BOTH its id and secret are
 //? set — no code edit required to enable it.
+//? Every built-in provider `oauthProviders.ts` wires by env. We always emit a
+//? block for each so unselected ones are visible (commented) and enable-later is
+//? a one-line uncomment — mirroring the email / monitoring blocks below.
+const OAUTH_PROVIDERS = ['google', 'github', 'discord', 'facebook', 'microsoft'] as const;
+
 export const buildOAuthEnvVars = (providers: readonly string[]): string => {
-  if (providers.length === 0) {
-    return [
-      '# No OAuth providers were selected at scaffold time. To add one later, just',
-      '# set its DEV_<PROVIDER>_CLIENT_ID / _SECRET (dev) and <PROVIDER>_CLIENT_ID /',
-      '# _SECRET (prod) below and restart — oauthProviders.ts already wires every',
-      '# built-in provider (google, github, discord, facebook, microsoft) by env.',
-    ].join('\n');
-  }
-  return providers
-    .map((provider) => {
-      const upper = provider.toUpperCase();
-      return [
-        `# ${provider}`,
-        `DEV_${upper}_CLIENT_ID=`,
-        `DEV_${upper}_CLIENT_SECRET=`,
-        `${upper}_CLIENT_ID=`,
-        `${upper}_CLIENT_SECRET=`,
-      ].join('\n');
-    })
-    .join('\n\n');
+  const selected = new Set(providers);
+  const intro = [
+    '# OAuth client credentials. Providers you picked at scaffold time are',
+    '# uncommented; the rest are commented out — fill a pair and uncomment to',
+    '# enable later (no code edit: oauthProviders.ts wires every built-in provider',
+    '# by env). DEV_* are read when NODE_ENV is not "production"; the unprefixed',
+    '# pair is read in production. A provider stays disabled until BOTH its id and',
+    '# secret are set.',
+  ].join('\n');
+
+  const blocks = OAUTH_PROVIDERS.map((provider) => {
+    const upper = provider.toUpperCase();
+    const c = selected.has(provider) ? '' : '# ';
+    const lines = [
+      selected.has(provider) ? `# ${provider} (active)` : `# ${provider} (enable later)`,
+      `${c}DEV_${upper}_CLIENT_ID=`,
+      `${c}DEV_${upper}_CLIENT_SECRET=`,
+      `${c}${upper}_CLIENT_ID=`,
+      `${c}${upper}_CLIENT_SECRET=`,
+    ];
+    //? Microsoft needs a tenant ('common' for multi-tenant). Default it so the
+    //? provider works out of the box once id + secret are filled.
+    if (provider === 'microsoft') lines.push(`${c}MICROSOFT_TENANT_ID=common`);
+    return lines.join('\n');
+  });
+
+  return [intro, ...blocks].join('\n\n');
 };
 
 //? Observability env block for `.env.local`. Each provider is enable-later: the
@@ -701,6 +727,77 @@ const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckyst
   fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 
+//? Drop an internal @luckystack/* dependency line from the scaffolded package.json.
+const dropDependency = (targetDir: string, depName: string): void => {
+  const pkgPath = path.join(targetDir, 'package.json');
+  if (!fs.existsSync(pkgPath)) return;
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { dependencies?: Record<string, string> };
+  if (pkg.dependencies && depName in pkg.dependencies) {
+    const { [depName]: _removed, ...rest } = pkg.dependencies;
+    pkg.dependencies = rest;
+    fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  }
+};
+
+//? Apply ordered string edits to a scaffolded file. Throws loudly if a `find`
+//? token is absent so template drift surfaces during the smoke scaffold instead
+//? of producing a broken project — every edit must match exactly once.
+const editScaffoldFile = (targetDir: string, relPath: string, edits: readonly [string, string][]): void => {
+  const filePath = path.join(targetDir, relPath);
+  if (!fs.existsSync(filePath)) return;
+  //? Normalize to LF so our `\n`-bearing match tokens work regardless of the
+  //? checkout's line endings (Windows copies template files as CRLF).
+  let content = fs.readFileSync(filePath, 'utf8').replaceAll('\r\n', '\n');
+  for (const [find, replace] of edits) {
+    if (!content.includes(find)) {
+      throw new Error(`[create-luckystack-app] prune edit failed — token not found in ${relPath}:\n${find}`);
+    }
+    content = content.replaceAll(find, replace);
+  }
+  fs.writeFileSync(filePath, content);
+};
+
+//? Remove OPT-OUT packages from a freshly-copied scaffold. Only handles genuinely
+//? bounded packages today (presence). login/sync are more deeply woven (login is a
+//? whole auth surface; sync's `initSyncRequest` is called from the presence/activity
+//? path in socketInitializer) — see docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md §6.
+const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): void => {
+  if (!choices.presence) {
+    dropDependency(targetDir, '@luckystack/presence');
+    //? main.tsx: the router root used <LocationProvider/> (presence) as its layout
+    //? element; swap it for a plain <Outlet/> so child routes still render.
+    editScaffoldFile(targetDir, 'src/main.tsx', [
+      [
+        "import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom';",
+        "import { createBrowserRouter, RouterProvider, useParams, useSearchParams, Outlet } from 'react-router-dom';",
+      ],
+      ["import { LocationProvider } from '@luckystack/presence/client';\n", ''],
+      ['element: <LocationProvider />,', 'element: <Outlet />,'],
+    ]);
+    //? TemplateProvider.tsx: drop the <SocketStatusIndicator/> (presence) and the
+    //? now-orphaned socket-status + translator wiring it depended on.
+    editScaffoldFile(targetDir, 'src/_components/templates/TemplateProvider.tsx', [
+      ["import { SocketStatusIndicator } from '@luckystack/presence/client';\n", ''],
+      [
+        "import { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
+        "import { useTheme, useSession } from '@luckystack/core/client';",
+      ],
+      ["import { useSocketStatus } from 'src/_providers/socketStatusProvider';\n", ''],
+      ['  const { socketStatus } = useSocketStatus();\n', ''],
+      ['  const translate = useTranslator();\n', ''],
+      [
+        `      <SocketStatusIndicator
+        status={socketStatus.self.status}
+        reconnectAttempt={socketStatus.self.reconnectAttempt}
+        label={translate({ key: 'template.socketStatus' })}
+      />
+`,
+        '',
+      ],
+    ]);
+  }
+};
+
 const main = async (): Promise<void> => {
   const args = parseArgs(process.argv.slice(2));
 
@@ -735,7 +832,9 @@ const main = async (): Promise<void> => {
 
   //? Interactive prompts gather scaffold choices. `--no-prompt` skips
   //? them and uses sane defaults (Mongo + credentials + console email).
-  const choices: ScaffoldChoices = args.prompt ? await runPrompts() : DEFAULT_CHOICES;
+  const choices: ScaffoldChoices = args.prompt
+    ? await runPrompts()
+    : { ...DEFAULT_CHOICES, presence: !args.noPresence };
 
   //? Provider-specific Prisma + DATABASE_URL bits. MongoDB needs an ObjectId
   //? `_id` mapping; the SQL providers use a cuid string id. The example URL is
@@ -797,6 +896,10 @@ const main = async (): Promise<void> => {
   //? Install the npm deps the selected monitoring/email providers need (before
   //? npm install runs), so the chosen integration is ready to use.
   injectOptionalDeps(targetDir, choices, luckystackVersion);
+
+  //? Remove opt-OUT framework packages (e.g. presence) from the scaffold — drops
+  //? the dependency AND the few files/lines that referenced it.
+  pruneOptionalPackages(targetDir, choices);
 
   //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
   //? the framework's AI docs so the consumer's AI agents inherit full context,
@@ -868,6 +971,7 @@ Choices:
   auth:        ${choices.authMode}${choices.oauthProviders.length > 0 ? ' (' + choices.oauthProviders.join(', ') + ')' : ''}
   email:       ${choices.emailProvider}
   monitoring:  ${choices.monitoringProvider}
+  presence:    ${choices.presence ? 'installed' : 'skipped'}
   i18n:        ${choices.i18n ? 'on' : 'off'}
   ai-docs:     ${choices.aiInstructions ? 'included (+ pre-commit AI-index hook)' : 'skipped'}
 

@@ -1,6 +1,24 @@
 // Registers module augmentations on @luckystack/core for auth/session hooks.
 import './hookPayloads';
 
+//? Decoupling seam (0.2.0): register this package's session implementation into
+//? @luckystack/core so api/sync/presence/server read sessions through core's
+//? null-safe accessors WITHOUT importing @luckystack/login directly. This is
+//? what makes login a genuine OPTIONAL package — when it isn't installed nothing
+//? registers and the accessors return null (unauthenticated). Side-effect at
+//? module load: any app that imports @luckystack/login (its overlay, LoginForm,
+//? config) wires this before the first request is served.
+import { registerSessionProvider } from '@luckystack/core';
+import { saveSession as _saveSession, getSession as _getSession, deleteSession as _deleteSession } from './session';
+import { logout as _logout } from './logout';
+registerSessionProvider({
+  getSession: _getSession,
+  saveSession: _saveSession,
+  deleteSession: _deleteSession,
+  logout: ({ token, socket, userId, skipSessionDelete }) =>
+    _logout({ token, socket, userId: userId ?? null, skipSessionDelete }),
+});
+
 export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionLayout';
 export type {
   PreLoginPayload,

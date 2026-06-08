@@ -8,8 +8,8 @@ import {
   getParams,
   getProjectConfig,
   hasCookie,
+  readSession,
 } from '@luckystack/core';
-import { getSession } from '@luckystack/login';
 import { sanitizeForLog } from './logSanitize';
 import { getSecurityHeadersBuilder } from './securityHeadersRegistry';
 import type { CreateLuckyStackServerOptions } from './types';
@@ -155,7 +155,7 @@ const refreshSessionCookieIfPresent = async ({
 }) => {
   const hasTokenCookie = hasCookie(req.headers.cookie, sessionCookieName);
   if (!hasTokenCookie || !token) return;
-  const currentSession = await getSession(token);
+  const currentSession = await readSession(token);
   if (currentSession?.id) {
     //? Sliding expiration in cookie mode: keep browser token lifetime
     //? aligned with Redis TTL.

@@ -4,13 +4,7 @@ import {
   getLogger,
   getProjectConfig,
 } from '@luckystack/core';
-import {
-  createOAuthState,
-  deleteSession,
-  getOAuthProviders,
-  isFullOAuthProvider,
-  loginWithCredentials,
-} from '@luckystack/login';
+import { getLogin } from '../capabilities';
 import type { HttpRouteHandler } from './types';
 
 const parseSessionBasedTokenHeader = (headerValue: string | string[] | undefined): boolean | null => {
@@ -31,20 +25,29 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
 }) => {
   if (!routePath.startsWith('/auth/api')) return false;
 
+  //? @luckystack/login is optional. Without it there is no auth surface, so every
+  //? /auth/api/* route reports the disabled contract instead of crashing.
+  const login = await getLogin();
+  if (!login) {
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ status: false, reason: 'auth.disabled' }));
+    return true;
+  }
+
   const config = getProjectConfig();
   const sessionCookieName = config.http.sessionCookieName;
   const shouldLogDev = config.logging.devLogs;
 
   const providerName = routePath.split('/')[3];
-  const provider = getOAuthProviders().find((p) => p.name === providerName);
+  const provider = login.getOAuthProviders().find((p) => p.name === providerName);
   if (!provider?.name) {
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ status: false, reason: 'login.providerNotFound' }));
     return true;
   }
 
-  if (isFullOAuthProvider(provider)) {
-    const oauthState = await createOAuthState(provider.name);
+  if (login.isFullOAuthProvider(provider)) {
+    const oauthState = await login.createOAuthState(provider.name);
     if (!oauthState) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: false, reason: 'login.oauthStateInitFailed' }));
@@ -92,7 +95,10 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
     }
   }
 
-  const result = (await loginWithCredentials(params)) as {
+  //? Pass the requester's current session token as `supersedeToken` so that, on
+  //? a re-login while already signed in, single-session enforcement does NOT kick
+  //? this same browser's old session (which would log it straight back out).
+  const result = (await login.loginWithCredentials(params, { supersedeToken: token })) as {
     status: boolean;
     reason: string;
     newToken: string | null;
@@ -110,7 +116,11 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
   }
 
   if (result.newToken) {
-    if (token) await deleteSession(token);
+    //? Old session was excluded from enforcement above (supersedeToken). Clean it
+    //? up silently — `skipSocketLogout` prevents a `logout` emit to this same
+    //? browser's live socket, which would bounce it to /login and null the new
+    //? session before the success redirect runs.
+    if (token) await login.deleteSession(token, { skipSocketLogout: true });
 
     const requestedSessionMode = parseSessionBasedTokenHeader(req.headers['x-session-based-token']);
     const useSessionBasedToken = requestedSessionMode ?? config.session.basedToken;

@@ -5,7 +5,7 @@ import { Toaster } from 'sonner'
 import 'src/index.css'
 import 'src/scrollbar.css'
 
-import { mobileConsole } from 'config'
+import { mobileConsole, sessionBasedToken } from 'config'
 import { LocationProvider } from '@luckystack/presence/client'
 import {
   AvatarProvider,
@@ -38,6 +38,24 @@ initializeSentry();
 //? locale JSON inside the package.
 registerLocales({ en: enJson, nl: nlJson, de: deJson, fr: frJson });
 registerLanguageSource(() => getCurrentSession()?.language ?? null);
+
+//? OAuth handoff for sessionStorage-token mode. The backend's /auth/callback
+//? cannot Set-Cookie a sessionStorage token, so it 302s to `...?token=<token>`.
+//? OAuth is a full-page navigation (no fetch to read an X-Session-Token header),
+//? so we capture the token from the URL HERE — synchronously, before React mounts
+//? (SessionProvider's socket connect + first `system/session` request both fire on
+//? mount and read the token from sessionStorage). Then strip it from the URL via
+//? replaceState so the long-lived token never lingers in the address bar, browser
+//? history, or a Referer header. No-op in cookie mode (no ?token= is emitted).
+if (sessionBasedToken) {
+  const url = new URL(globalThis.location.href);
+  const handoffToken = url.searchParams.get('token');
+  if (handoffToken) {
+    sessionStorage.setItem('token', handoffToken);
+    url.searchParams.delete('token');
+    globalThis.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }
+}
 
 //? Per-page route guards live on each `page.tsx` via `export const middleware`
 //? and are auto-registered below in `getRoutes()`. The framework's default

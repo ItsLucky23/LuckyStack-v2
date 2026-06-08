@@ -32,9 +32,19 @@ const parseSessionLayout = (value: string): SessionLayout | null => {
  * @param token - The session token (unique identifier)
  * @param data - The session data to store
  * @param newUser - If true, this is a new login (triggers single-session enforcement)
+ * @param options.supersedeToken - A token belonging to the SAME browser that is
+ *   being replaced by this login (e.g. re-login while already signed in). It is
+ *   excluded from single-session enforcement so the user's current device is not
+ *   kicked by its own new session. The caller is responsible for deleting it
+ *   afterwards (use `deleteSession(supersedeToken, { skipSocketLogout: true })`).
  */
-const saveSession = async (token: string, data: SessionLayout, newUser?: boolean): Promise<void> => {
-  const [error] = await tryCatch(async () => {
+const saveSession = async (
+  token: string,
+  data: SessionLayout,
+  newUser?: boolean,
+  options?: { supersedeToken?: string },
+): Promise<{ ok: true } | { ok: false; errorCode: string }> => {
+  const [error, outcome] = await tryCatch(async () => {
     const adapter = getSessionAdapter();
 
     if (newUser) {
@@ -45,7 +55,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
       });
       if (preSessionCreateResult.stopped) {
         getLogger().warn(`session create aborted by preSessionCreate hook`, { errorCode: preSessionCreateResult.signal.errorCode });
-        return;
+        return { ok: false, errorCode: preSessionCreateResult.signal.errorCode || 'api.internalServerError' } as const;
       }
     }
 
@@ -73,8 +83,9 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     const { getIoInstance } = await import('@luckystack/core');
     const io = getIoInstance();
     //? Socket fanout + single-session enforcement below need a live io; skip
-    //? them when there isn't one. The session is already persisted + tracked.
-    if (!io) return;
+    //? them when there isn't one. The session IS already persisted + tracked, so
+    //? this is a success (background workers / CLI tasks have no io).
+    if (!io) return { ok: true } as const;
 
     // Handle session-limit enforcement on new login. Logic:
     //   1. perUser = 'single' (default) OR legacy `allowMultiple: false` →
@@ -91,8 +102,13 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
       const cap = sessionCfg.maxConcurrentPerUser;
 
       const allTokens = await adapter.listActive(userId);
-      // Exclude the current token — it was just added and has no socket room yet
-      const previousTokens = allTokens.filter(t => t !== token);
+      //? Exclude the current token — it was just added and has no socket room yet.
+      //? Also exclude `supersedeToken`: when the same browser re-logs-in, its old
+      //? token is being replaced (not a separate device), so kicking it would log
+      //? the user out of the very browser performing the login.
+      const previousTokens = allTokens.filter(
+        (t) => t !== token && t !== options?.supersedeToken,
+      );
 
       let tokensToKick: string[] = [];
       if (effectivePerUser === 'single') {
@@ -143,11 +159,19 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
     if (newUser) {
       await dispatchHook('postSessionCreate', { token, user: data, persistent: !getProjectConfig().session.basedToken });
     }
+
+    return { ok: true } as const;
   }, undefined, { fn: 'saveSession', token });
 
   if (error) {
     getLogger().error('saveSession failed', error, { token });
+    //? Surface the failure instead of swallowing it. Callers (credentials/OAuth
+    //? login) MUST NOT mint a token + delete the prior session when the new
+    //? session never persisted — a transient adapter blip would otherwise log
+    //? the user out with no usable replacement.
+    return { ok: false, errorCode: 'api.internalServerError' };
   }
+  return outcome ?? { ok: false, errorCode: 'api.internalServerError' };
 };
 
 /**
@@ -206,9 +230,17 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
  * clients.
  *
  * @param token - The session token to delete
+ * @param options.skipSocketLogout - When true, the session data + active-token
+ *   tracking are cleaned up and the pre/post delete hooks still fire, but NO
+ *   `logout` is emitted to sockets in the token's room. Use this when the SAME
+ *   browser is replacing its session (re-login): emitting a logout would bounce
+ *   that browser to the login page and null its brand-new session.
  * @returns true if successful
  */
-const deleteSession = async (token: string): Promise<boolean> => {
+const deleteSession = async (
+  token: string,
+  options?: { skipSocketLogout?: boolean },
+): Promise<boolean> => {
   //? Opt-in spurious-delete tracing. `deleteSession` runs on EVERY legitimate
   //? logout / revokeSession / signOutEverywhere / deleteAccount, so an
   //? unconditional warn+stacktrace drowns the signal it's meant to surface and
@@ -243,7 +275,7 @@ const deleteSession = async (token: string): Promise<boolean> => {
       const ioInstance = getIoInstance();
 
       // Reuse the same logout flow as single-session enforcement.
-      if (ioInstance) {
+      if (ioInstance && !options?.skipSocketLogout) {
         const { logout } = await import('./logout');
         const sockets = ioInstance.sockets.adapter.rooms.get(token);
 

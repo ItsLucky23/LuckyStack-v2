@@ -5,7 +5,8 @@ import {
   getLogger,
   tryCatch,
 } from '@luckystack/core';
-import { handleHttpSyncRequest, type HttpSyncStreamEvent } from '@luckystack/sync';
+import type { HttpSyncStreamEvent } from '@luckystack/sync';
+import { capabilities, getSync } from '../capabilities';
 import { initSseResponse, sendSseEvent, shouldUseHttpStream } from '../sse';
 import type { HttpRouteHandler } from './types';
 
@@ -39,6 +40,16 @@ export const handleSyncRoute: HttpRouteHandler = async ({
   requestId,
 }) => {
   if (!routePath.startsWith('/sync/')) return false;
+
+  //? @luckystack/sync is optional. Absent => no real-time fanout; report the
+  //? disabled contract so a developer hitting /sync/* gets a clear signal.
+  const sync = capabilities.sync ? await getSync() : null;
+  if (!sync) {
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(404);
+    res.end(JSON.stringify({ status: 'error', errorCode: 'sync.disabled', message: 'sync.disabled' }));
+    return true;
+  }
 
   const useHttpStream = shouldUseHttpStream({ acceptHeader: req.headers.accept, queryString });
   let streamClosed = false;
@@ -89,7 +100,7 @@ export const handleSyncRoute: HttpRouteHandler = async ({
 
     const syncParams = normalizeHttpSyncParams(params);
 
-    const result = await handleHttpSyncRequest({
+    const result = await sync.handleHttpSyncRequest({
       name: `sync/${syncName}`,
       cb: syncParams.cb,
       data: syncParams.data,

@@ -1,4 +1,9 @@
 import { registerHook, type HookResult } from '@luckystack/core';
+//? Type-only import — surfaces `@luckystack/login`'s `postLogout` augmentation of
+//? core's `HookPayloads` so `registerHook('postLogout', …)` type-checks. Erased at
+//? runtime, so presence keeps NO runtime dependency on login (login stays an
+//? optional peer: when it's absent, `postLogout` is simply never dispatched).
+import type { PostLogoutPayload } from '@luckystack/login';
 import { disconnectTimers, tempDisconnectedSockets } from './activity/state';
 
 /**
@@ -19,7 +24,7 @@ export const registerPresenceHooks = (): void => {
   if (registered) return;
   registered = true;
 
-  registerHook('postLogout', ({ token }): HookResult => {
+  registerHook('postLogout', ({ token }: PostLogoutPayload): HookResult => {
     if (!token) return undefined;
 
     if (tempDisconnectedSockets.has(token)) {

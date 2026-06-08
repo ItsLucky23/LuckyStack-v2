@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { dispatchHook, getCsrfConfig, getProjectConfig } from '@luckystack/core';
-import { getSession } from '@luckystack/login';
+import { dispatchHook, getCookieValue, getCsrfConfig, getProjectConfig, readSession } from '@luckystack/core';
+import { capabilities } from '../capabilities';
 
 //? Returns true when the request was rejected (CSRF mismatch) and the response
 //? has been ended. Caller should bail out of the request loop.
@@ -33,12 +33,10 @@ export const enforceCsrfOnStateChangingRequest = async ({
     || routePath.startsWith('/sync/')
     || (routePath.startsWith('/auth/api/') && !isAuthBootstrap);
 
-  if (!(isCookieMode && isStateChanging && looksLikeFrameworkRoute && !isCallbackPath && token)) {
+  //? CSRF only applies to cookie-mode, state-changing framework routes.
+  if (!(isCookieMode && isStateChanging && looksLikeFrameworkRoute && !isCallbackPath)) {
     return false;
   }
-
-  const csrfSession = await getSession(token);
-  if (!csrfSession?.id) return false;
 
   //? Read the active CSRF header name from the registry so consumers
   //? can rename it (e.g. legacy `x-xsrf-token`, custom `x-app-csrf`).
@@ -46,6 +44,40 @@ export const enforceCsrfOnStateChangingRequest = async ({
   const headerKey = csrfConfig.headerName.toLowerCase();
   const headerValue = req.headers[headerKey];
   const provided = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+
+  //? Login-ABSENT path: stateless DOUBLE-SUBMIT. The session-bound token store
+  //? lives in @luckystack/login; without it we compare the csrf COOKIE value
+  //? against the x-csrf-token HEADER (both seeded by GET /auth/csrf). No session
+  //? read. A cross-site POST can't read the cookie value to forge the header.
+  if (!capabilities.login) {
+    const cookieValue = getCookieValue(req.headers.cookie, csrfConfig.cookieName);
+    if (cookieValue && provided && provided === cookieValue) return false;
+
+    void dispatchHook('csrfMismatch', {
+      route: routePath,
+      method: req.method,
+      requestId,
+      userId: null,
+      providedToken: Boolean(provided),
+    });
+
+    res.statusCode = 403;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
+      status: 'error',
+      errorCode: 'auth.csrfMismatch',
+      message: 'CSRF token missing or invalid. Fetch /auth/csrf first.',
+    }));
+    return true;
+  }
+
+  //? Login-PRESENT path: session-bound CSRF (unchanged). Requires a session
+  //? token — without one there is no session to protect, so do not enforce.
+  if (!token) return false;
+
+  const csrfSession = await readSession(token);
+  if (!csrfSession?.id) return false;
+
   if (provided && provided === csrfSession.csrfToken) return false;
 
   void dispatchHook('csrfMismatch', {

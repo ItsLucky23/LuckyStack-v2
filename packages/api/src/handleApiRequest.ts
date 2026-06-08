@@ -1,10 +1,10 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
 import type { apiMessage, PostApiExecutePayload } from '@luckystack/core';
-import { getSession, logout } from '@luckystack/login';
-import type { BaseSessionLayout as SessionLayout } from '@luckystack/login';
+import { readSession, performLogout } from '@luckystack/core';
+import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
 import { getProjectConfig } from '@luckystack/core';
-import type { AuthProps } from '@luckystack/login';
+import type { AuthProps } from '@luckystack/core';
 import { Socket } from 'socket.io';
 import { getRuntimeApiMaps } from '@luckystack/core';
 import {
@@ -441,7 +441,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   const { responseIndex } = msg;
-  const user = await getSession(token);
+  const user = await readSession(token);
   //? Identity propagation now flows via the `preApiExecute` hook subscriber
   //? registered by `@luckystack/error-tracking`'s `enableErrorTrackingAutoInstrumentation()`.
   //? Direct `setSentryUser` removed from this handler — see migration doc.
@@ -498,7 +498,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   //? Match the full normalized route to avoid hijacking consumer routes whose final
   //? segment happens to be 'logout' (e.g. 'admin/logout/vN').
   if (parsedRoute.serviceRoute.normalizedRouteName === 'system/logout') {
-    await logout({ token, socket, userId: user?.id || null });
+    await performLogout({ token, socket, userId: user?.id || null });
     return socket.emit(buildApiResponseEventName(responseIndex), {
       status: 'success',
       httpStatus: 200,
