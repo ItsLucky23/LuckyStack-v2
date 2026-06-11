@@ -129,6 +129,33 @@ registerUserAdapter({
 });
 ```
 
+## Account strategy: per-provider vs unified
+
+`auth.providerAccountStrategy` (in `registerProjectConfig`) controls how the same email address is treated across sign-in providers:
+
+| Strategy | Behavior | Schema |
+|---|---|---|
+| `'per-provider'` (default) | `sam@x.com` via Google and via GitHub are **two separate `User` rows**. Lookups are scoped to `(email, provider)`. | `@@unique([email, provider])` recommended. |
+| `'unified'` | `sam@x.com` maps to **one `User` row**; signing in via a new provider links to the existing account (credentials login, OAuth find-or-create, and register dedupe all resolve by email alone). | `email` must be `@unique`. |
+
+```ts
+registerProjectConfig({ auth: { providerAccountStrategy: 'unified' } });
+```
+
+**Migrating an existing project to `'unified'`** (the strategy reads accounts by email irrespective of provider, so the DB must enforce one row per email):
+
+1. **Dedupe existing rows.** If you previously ran `'per-provider'`, the same email may already exist under multiple providers. Merge or remove duplicates so each email appears once. (Pick the row to keep — usually the credentials account or the earliest — repoint related rows, delete the rest.)
+2. **Make `email` unique** in `prisma/schema.prisma`:
+   ```prisma
+   model User {
+     // ...
+     email    String  @unique   // was: email String  (+ optional @@unique([email, provider]))
+     provider String              // now records the ORIGINAL signup provider only
+   }
+   ```
+   Then `prisma migrate` (or `db push`). The DB constraint closes the registration race that the application-level check alone cannot.
+3. **No code change is required** beyond the config flag — the default `UserAdapter` already implements `findByEmailAnyProvider`. A **custom** `UserAdapter` must add `findByEmailAnyProvider({ email })` (resolve by email, ignoring provider); if it doesn't, the framework logs a one-time warning and falls back to provider-scoped lookup so the misconfiguration is visible rather than silent.
+
 ## Post-login redirect
 
 Compute the OAuth callback destination dynamically (per-user, per-tenant, per-provider):

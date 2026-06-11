@@ -34,7 +34,7 @@ interface UserPreferences {
 }
 
 interface ActiveSession {
-  token: string;
+  id: string;
   expiresInSeconds: number | null;
   isCurrent: boolean;
 }
@@ -215,11 +215,11 @@ export default function Home() {
   };
 
   // ------- sessions -------
-  const handleRevokeSession = async (token: string) => {
+  const handleRevokeSession = async (id: string) => {
     const response = await apiRequest({
       name: 'settings/revokeSession',
       version: 'v1',
-      data: { token },
+      data: { id },
     });
     if (response.status === 'success') {
       notify.success({ key: 'settings.sessionRevoked' });
@@ -431,10 +431,10 @@ export default function Home() {
             : (
               <ul className="flex flex-col gap-2">
                 {activeSessions.map((s) => (
-                  <li key={s.token} className="flex items-center gap-3 p-3 rounded-md border border-container1-border">
+                  <li key={s.id} className="flex items-center gap-3 p-3 rounded-md border border-container1-border">
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-title">
-                        {s.isCurrent ? translate({ key: 'settings.currentSession' }) : `…${s.token.slice(-8)}`}
+                        {s.isCurrent ? translate({ key: 'settings.currentSession' }) : `…${s.id.slice(-8)}`}
                       </div>
                       {s.expiresInSeconds !== null && (
                         <div className="text-xs text-common">
@@ -445,7 +445,7 @@ export default function Home() {
                     {!s.isCurrent && (
                       <button
                         type="button"
-                        onClick={() => void handleRevokeSession(s.token)}
+                        onClick={() => void handleRevokeSession(s.id)}
                         className="h-9 px-3 rounded-md bg-container2 hover:bg-container2-hover border border-container2-border text-title text-sm font-medium transition-colors cursor-pointer"
                       >
                         {translate({ key: 'settings.revokeSession' })}

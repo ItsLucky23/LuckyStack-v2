@@ -355,6 +355,12 @@ export const upsertSyncFromFile = async (filePath: string): Promise<void> => {
       auth: resolvedSyncModule.auth || {},
       inputType,
       inputTypeFilePath: routeMeta.absolutePath,
+      //? Forward the per-route `validation` toggle + `errorFormatter` so the dev
+      //? loader's sync entry shape matches the prod generator's. Dropping them
+      //? made `validation: { input: 'skip' }` / a per-route errorFormatter work
+      //? in prod but silently no-op in dev (QUA-013 / QUA-044).
+      validation: resolvedSyncModule.validation,
+      errorFormatter: resolvedSyncModule.errorFormatter,
     };
 
     return;
@@ -431,6 +437,10 @@ const scanSyncFolder = async (file: string, basePath = "") => {
         auth: resolvedSyncModule.auth || {},
         inputType,
         inputTypeFilePath: filePath,
+        //? Forward `validation` + `errorFormatter` so the dev loader matches the
+        //? prod generator's sync entry shape (QUA-013 / QUA-044).
+        validation: resolvedSyncModule.validation,
+        errorFormatter: resolvedSyncModule.errorFormatter,
       };
     } else {
       devSyncs[`${routeBaseKey}_client`] = resolvedSyncModule.main;

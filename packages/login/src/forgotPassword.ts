@@ -39,7 +39,6 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
   // may not be resolvable at the framework's compile time.
   interface EmailModule {
     sendEmail: (input: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }>;
-    renderEmailLayout: (input: Record<string, unknown>) => { html: string; text: string };
   }
   //? Mirror testEmail's robustness: catch a failed dynamic import instead of
   //? throwing (an uncaught throw here would bubble out of the anti-enumeration
@@ -54,7 +53,7 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
   if (!emailModule) {
     return { ok: false, reason: 'email-module-load-failed' };
   }
-  const { sendEmail, renderEmailLayout } = emailModule;
+  const { sendEmail } = emailModule;
 
   const userAdapter = getUserAdapter();
   const user = await userAdapter.findByEmail({ email, provider: 'credentials' });
@@ -87,25 +86,18 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
   const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
 
   const ttlMinutes = Math.round(config.auth.passwordResetTtlSeconds / 60);
-  const { html, text } = renderEmailLayout({
-    brand: resolvedBrand,
-    title: 'Reset your password',
-    intro: `Hi ${user.name ?? 'there'}, we received a request to reset the password on your ${resolvedBrand} account. Click the button below to choose a new one. The link expires in ${String(ttlMinutes)} minutes.`,
-    ctaLabel: 'Reset password',
-    ctaUrl: resetUrl,
-    outro: `If you didn't request this, you can safely ignore this email — your password will stay the same. The link: ${resetUrl}`,
-    footer: `Sent by ${resolvedBrand}. If you have questions, reply to this email.`,
-  });
 
-  //? `adapterHint: 'transactional'` lets consumers who registered separate
-  //? marketing + transactional senders via `registerEmailSenders({...})`
-  //? route this through the transactional adapter automatically. Falls
-  //? back to the default sender when only one is registered.
+  //? Dispatch via the `'password-reset'` template rather than building the
+  //? email inline. `@luckystack/email` ships a built-in for this name, so the
+  //? out-of-the-box copy is unchanged — but a consumer can now
+  //? `registerEmailTemplate('password-reset', …)` to translate or rebrand it
+  //? without forking this flow (CFG-05). `adapterHint: 'transactional'` routes
+  //? through a dedicated transactional sender when one is registered, else the
+  //? default sender.
   const result = await sendEmail({
     to: user.email,
-    subject: `Reset your ${resolvedBrand} password`,
-    html,
-    text,
+    template: 'password-reset',
+    data: { resetUrl, userName: user.name, brand: resolvedBrand, ttlMinutes },
     adapterHint: 'transactional',
   });
 

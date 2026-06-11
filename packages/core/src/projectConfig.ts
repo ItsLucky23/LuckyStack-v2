@@ -253,8 +253,9 @@ export interface AuthConfig {
    * `'per-provider'` (default) — same email via Google and GitHub creates
    *   two separate User rows (current behavior, no schema change).
    * `'unified'` — same email maps to a single User; subsequent sign-ins via
-   *   different providers link an Account row to the same User. Requires a
-   *   Prisma schema change documented in @luckystack/login's README.
+   *   different providers resolve to (link to) that same User row instead of
+   *   creating a duplicate. Requires `email` to be `@unique` — see the
+   *   "Account strategy" migration steps in @luckystack/login's README.
    */
   providerAccountStrategy: 'per-provider' | 'unified';
   /**

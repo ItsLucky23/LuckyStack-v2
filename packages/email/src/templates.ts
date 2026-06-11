@@ -9,8 +9,8 @@
 //?      project — last-write-wins. Use this in `luckystack/email/templates.ts`
 //?      to override built-in templates (e.g. swap the password-reset wording).
 //?   2. If a template isn't registered AND the framework has a built-in
-//?      fallback for that name (currently `'password-reset'` only), the
-//?      built-in renders with `renderEmailLayout`.
+//?      fallback for that name (`'password-reset'` and `'email-change'`, see
+//?      `builtInTemplates.ts`), the built-in renders with `renderEmailLayout`.
 //?   3. Otherwise `sendEmail` returns `{ ok: false, reason: 'no-template' }`.
 //?
 //? Templates can optionally read the recipient's session language for i18n:

@@ -1,5 +1,10 @@
 {
   "mcpServers": {
+    "luckystack": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["packages/mcp/dist/index.js"]
+    },
     "playwright": {
       "type": "stdio",
       "command": "npx",

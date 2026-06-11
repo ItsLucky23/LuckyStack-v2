@@ -27,7 +27,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 //? scaffold references is already on the registry.
 const WAVES = [
   ['core'],
-  ['email', 'login', 'devkit', 'router', 'test-runner', 'secret-manager'],
+  ['email', 'login', 'devkit', 'router', 'test-runner', 'secret-manager', 'mcp'],
   ['error-tracking'],
   ['api', 'sync', 'presence'],
   ['server'],

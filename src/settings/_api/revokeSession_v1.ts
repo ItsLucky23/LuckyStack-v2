@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { redis } from '@luckystack/core';
 import { deleteSession } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
@@ -12,31 +13,35 @@ export const auth: AuthProps = {
 };
 
 export interface ApiParams {
-  data: { token: string };
+  data: { id: string };
   user: SessionLayout;
   functions: Functions;
 }
 
 const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
 
-export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
-  const targetToken = data.token;
-  if (!targetToken || targetToken === user.token) {
+export const main = async ({ data, user }: ApiParams): Promise<ApiResponse> => {
+  const targetId = data.id;
+  if (!targetId) {
+    return { status: 'error', errorCode: 'session.invalid' };
+  }
+
+  //? Resolve the opaque SHA-256 id (from listSessions) back to a real token by
+  //? scanning THIS user's own active-session set — so ownership is guaranteed by
+  //? set membership and the raw token never has to leave the server.
+  const tokens = await redis.smembers(`${PROJECT_NAME}-activeUsers:${user.id}`).catch(() => null);
+  if (tokens === null) {
+    return { status: 'error', errorCode: 'common.500' };
+  }
+  const targetToken = tokens.find(
+    (token) => createHash('sha256').update(token).digest('hex') === targetId,
+  );
+  if (!targetToken) {
+    return { status: 'error', errorCode: 'session.invalid' };
+  }
+  if (targetToken === user.token) {
     // Refuse to revoke the current session — the user must log out instead.
     return { status: 'error', errorCode: 'session.invalid' };
-  }
-
-  // Validate the target token belongs to this user.
-  const sessionRaw = await redis.get(`${PROJECT_NAME}-session:${targetToken}`);
-  if (!sessionRaw) {
-    return { status: 'error', errorCode: 'session.invalid' };
-  }
-
-  const [parseError, parsed] = await functions.tryCatch.tryCatch(
-    () => JSON.parse(sessionRaw) as { id?: string },
-  );
-  if (parseError || parsed?.id !== user.id) {
-    return { status: 'error', errorCode: 'auth.forbidden' };
   }
 
   await deleteSession(targetToken);

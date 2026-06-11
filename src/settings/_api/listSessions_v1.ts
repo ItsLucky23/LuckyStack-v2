@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { redis } from '@luckystack/core';
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
@@ -30,7 +31,10 @@ export const main = async ({ user }: ApiParams): Promise<ApiResponse> => {
     if (!raw) return null;
     const ttl = await redis.ttl(`${PROJECT_NAME}-session:${token}`);
     return {
-      token,
+      //? Never expose the raw session token to the client — it IS the bearer
+      //? credential. Send an opaque, non-reversible SHA-256 fingerprint instead;
+      //? revokeSession resolves it back to the real token server-side.
+      id: createHash('sha256').update(token).digest('hex'),
       expiresInSeconds: ttl >= 0 ? ttl : null,
       isCurrent: token === user.token,
     };

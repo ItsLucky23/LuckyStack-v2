@@ -12,6 +12,8 @@ export {
   resetEmailTemplatesForTests,
 } from './templates';
 export type { EmailTemplate } from './templates';
+export { getBuiltInEmailTemplate, listBuiltInEmailTemplates } from './builtInTemplates';
+export type { PasswordResetTemplateData, EmailChangeTemplateData } from './builtInTemplates';
 
 export { ConsoleSender } from './adapters/console';
 export { ResendSender } from './adapters/resend';

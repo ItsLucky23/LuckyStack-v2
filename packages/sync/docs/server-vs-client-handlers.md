@@ -54,6 +54,8 @@ Key rules:
 - **`auth: AuthProps` is mandatory.** Drives the framework's auth gate (`auth.login` -> require session, `auth.additional` -> run `validateRequest` predicates). See `@luckystack/login` `AuthProps`.
 - **Return must include `status: 'success' | 'error'`.** Anything else collapses to `sync.invalidServerResponse`. The rest of the object is forwarded as `serverOutput` (after stripping `status`).
 - **Streaming primitives are received as params.** See [`./streaming.md`](./streaming.md) for the audience matrix.
+- **Optional `export const validation`** toggles runtime input validation, exactly like the API handler. `'strict'` (default, or omit the export) validates `clientInput` against the generated Zod schema; `'relaxed'` or `{ input: 'skip' }` skips validation entirely — use it for routes whose payload shape can't be modelled in TypeScript (third-party webhook fan-in, dynamic blobs). Honored identically by both the Socket.io and HTTP/SSE transports.
+- **Optional `export const errorFormatter`** overrides the error envelope for this route only (falls back to the global `registerErrorFormatter`, then the framework default). Both transports honor it.
 - **Never `try/catch` manually.** Wrap async ops in `functions.tryCatch` (or the destructured `tryCatch` from `functions`) — the framework already wraps the whole `main()` in its own `tryCatch` for Sentry capture, but per-operation `tryCatch` lets you surface targeted error codes.
 
 ---

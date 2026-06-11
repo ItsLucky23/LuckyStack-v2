@@ -1,22 +1,31 @@
+import { createHash } from 'node:crypto';
 import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 
 //? Per-route tests for `settings/revokeSession/v1`.
 //? The auto-sweep already covers: contract validation, auth enforcement,
 //? rate-limit clamp, fuzz crash-resistance. The cases below cover the
 //? cross-user ownership invariant the sweep cannot reach: a user may only
-//? revoke a token that belongs to THEM, and may never revoke their own
+//? revoke a session that belongs to THEM, and may never revoke their own
 //? current session through this route (they must log out instead).
 //?
+//? The client passes an opaque SHA-256 `id` (the fingerprint from
+//? listSessions), never the raw token. The route resolves the id back to a
+//? real token by scanning the CALLER'S own active-session set — so a foreign
+//? or unknown id simply doesn't resolve and yields `session.invalid` (no
+//? `auth.forbidden`, no existence signal that would enable enumeration).
+//?
 //? Test environment runs with `allowMultipleSessions: true` (config.ts dev/
-//? localhost env → `session.perUser: 'multiple'`, no cap), so two logins for
-//? the same user id keep BOTH session tokens live in Redis — that is how the
-//? happy-path case obtains an "other device" token to revoke.
+//? localhost env), so two logins for the same user id keep BOTH session tokens
+//? live in Redis — that is how the happy-path case obtains an "other device".
 //?
 //? Input shape (from the route source `revokeSession_v1.ts`):
-//?   { token: string }
+//?   { id: string }   // opaque SHA-256 fingerprint of the target token
 //? Output envelope:
 //?   { status: 'success', result: {} }
-//?   | { status: 'error', errorCode: 'session.invalid' | 'auth.forbidden' }
+//?   | { status: 'error', errorCode: 'session.invalid' | 'common.500' }
+
+//? Mirror of the route's opaque-id derivation.
+const idOf = (token: string): string => createHash('sha256').update(token).digest('hex');
 
 interface RevokeSuccess {
   status: 'success';
@@ -30,7 +39,7 @@ type RevokeResponse = RevokeSuccess | RevokeError;
 
 export const customTests: CustomTestCase[] = [
   {
-    name: 'happy path revokes another of the callers own sessions',
+    name: 'happy path revokes another of the callers own sessions by opaque id',
     run: async (ctx: TestContext) => {
       const { getSession } = await import('@luckystack/login');
       //? First login = the "other device" we will revoke. Capture its token.
@@ -47,7 +56,7 @@ export const customTests: CustomTestCase[] = [
       const before = await getSession(otherToken);
       ctx.expect.ok(before !== null, 'precondition: other-device session must be live');
 
-      const result = await ctx.callApi<unknown, RevokeResponse>({ token: otherToken });
+      const result = await ctx.callApi<unknown, RevokeResponse>({ id: idOf(otherToken) });
       ctx.expect.eq(result.status, 'success');
 
       //? Post-condition: the revoked token must no longer resolve to a session.
@@ -59,9 +68,9 @@ export const customTests: CustomTestCase[] = [
     name: 'refuses to revoke the callers own current session',
     run: async (ctx: TestContext) => {
       const { token } = await ctx.session.login();
-      //? Passing the caller's own token short-circuits with session.invalid
-      //? (the route tells the user to log out instead of self-revoking).
-      const result = await ctx.callApi<unknown, RevokeResponse>({ token });
+      //? Passing the fingerprint of the caller's OWN token short-circuits with
+      //? session.invalid (the route tells the user to log out instead).
+      const result = await ctx.callApi<unknown, RevokeResponse>({ id: idOf(token) });
       ctx.expect.eq(result.status, 'error');
       if (result.status === 'error') ctx.expect.eq(result.errorCode, 'session.invalid');
 
@@ -72,19 +81,21 @@ export const customTests: CustomTestCase[] = [
     },
   },
   {
-    name: 'cannot revoke another users session (cross-user ownership)',
+    name: 'cannot revoke another users session (foreign id does not resolve)',
     run: async (ctx: TestContext) => {
       //? Victim logs in as their OWN user id and keeps a live token.
       const victim = await ctx.session.login({ email: 'victim@example.com' });
       const victimToken = victim.token;
 
-      //? Attacker is a DIFFERENT user id with a live current session. Single-
-      //? session enforcement is per-user, so the victim token stays alive.
+      //? Attacker is a DIFFERENT user id with a live current session. The
+      //? victim's fingerprint is not in the attacker's active set, so it cannot
+      //? be resolved → session.invalid (NOT auth.forbidden — the route gives no
+      //? signal that the token exists for someone else).
       await ctx.session.login({ email: 'attacker@example.com' });
 
-      const result = await ctx.callApi<unknown, RevokeResponse>({ token: victimToken });
+      const result = await ctx.callApi<unknown, RevokeResponse>({ id: idOf(victimToken) });
       ctx.expect.eq(result.status, 'error');
-      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'auth.forbidden');
+      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'session.invalid');
 
       //? The victim's session must be untouched after the forbidden attempt.
       const { getSession } = await import('@luckystack/login');

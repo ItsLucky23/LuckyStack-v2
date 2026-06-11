@@ -35,9 +35,8 @@ export const sendEmailChangeConfirmation = async (
   // Lazy import — `@luckystack/email` is an optional peer dep.
   interface EmailModule {
     sendEmail: (input: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }>;
-    renderEmailLayout: (input: Record<string, unknown>) => { html: string; text: string };
   }
-  const { sendEmail, renderEmailLayout } = await (
+  const { sendEmail } = await (
     // @ts-expect-error optional peer dep — installed only when the consumer wires email sending
     import('@luckystack/email') as Promise<EmailModule>
   );
@@ -47,21 +46,13 @@ export const sendEmailChangeConfirmation = async (
   const confirmUrl = `${baseUrl}/settings/confirm-email?token=${encodeURIComponent(token)}`;
   const ttlMinutes = Math.round(config.auth.emailChangeTtlSeconds / 60);
 
-  const { html, text } = renderEmailLayout({
-    brand: resolvedBrand,
-    title: 'Confirm your new email address',
-    intro: `Hi ${userName ?? 'there'}, you (or someone using your ${resolvedBrand} account) asked to change the account email to this address. Click the button below to confirm — the link expires in ${String(ttlMinutes)} minutes. If you confirm, all of your active sessions will be signed out as a security precaution.`,
-    ctaLabel: 'Confirm new email',
-    ctaUrl: confirmUrl,
-    outro: `If you didn't request this, you can safely ignore this email — nothing will change. The link: ${confirmUrl}`,
-    footer: `Sent by ${resolvedBrand}. If you have questions, reply to this email.`,
-  });
-
+  //? Dispatch via the built-in `'email-change'` template so consumers can
+  //? override the copy with `registerEmailTemplate('email-change', …)` without
+  //? forking (CFG-05). Default copy is unchanged.
   const result = await sendEmail({
     to: newEmail,
-    subject: `Confirm your new ${resolvedBrand} email address`,
-    html,
-    text,
+    template: 'email-change',
+    data: { confirmUrl, userName, brand: resolvedBrand, ttlMinutes },
     adapterHint: 'transactional',
   });
 

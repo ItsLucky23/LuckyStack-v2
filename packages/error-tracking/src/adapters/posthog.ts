@@ -18,7 +18,7 @@ import { createRequire } from 'node:module';
 
 import { ensurePeerDepInstalled, type ErrorTracker, type ErrorTrackerEvent } from '@luckystack/core';
 
-import { runBeforeSend } from './runBeforeSend';
+import { resolveExceptionEvent, resolveMessageEvent } from './runBeforeSend';
 
 const localRequire = createRequire(import.meta.url);
 
@@ -55,23 +55,20 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
     name: 'posthog',
 
     captureException(error, context) {
-      const filtered = runBeforeSend(options.beforeSend, {
-        forwarded: true,
-        kind: 'exception',
-        payload: { error, context: context ?? null },
-      });
-      if (!filtered) return;
+      const resolved = resolveExceptionEvent(options.beforeSend, error, context);
+      if (!resolved) return;
+      const { error: fwdError, context: fwdContext } = resolved;
       const properties: Record<string, unknown> = {
-        'error.type': error instanceof Error ? error.name : typeof error,
-        'error.message': error instanceof Error ? error.message : String(error),
-        'error.stack': error instanceof Error ? error.stack : undefined,
-        ...context,
+        'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
+        'error.message': fwdError instanceof Error ? fwdError.message : String(fwdError),
+        'error.stack': fwdError instanceof Error ? fwdError.stack : undefined,
+        ...fwdContext,
       };
       //? Prefer the dedicated `captureException` API when the installed
       //? posthog-node version supports it; fall back to a custom
       //? `$exception` event for older clients.
       if (options.client.captureException) {
-        options.client.captureException(error, currentDistinctId, properties);
+        options.client.captureException(fwdError, currentDistinctId, properties);
         return;
       }
       options.client.capture({
@@ -82,16 +79,12 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
     },
 
     captureMessage(message, level, context) {
-      const filtered = runBeforeSend(options.beforeSend, {
-        forwarded: true,
-        kind: 'message',
-        payload: { message, level, context: context ?? null },
-      });
-      if (!filtered) return;
+      const resolved = resolveMessageEvent(options.beforeSend, message, level, context);
+      if (!resolved) return;
       options.client.capture({
         distinctId: currentDistinctId,
         event: 'log_message',
-        properties: { message, level, ...context },
+        properties: { message: resolved.message, level: resolved.level, ...resolved.context },
       });
     },
 

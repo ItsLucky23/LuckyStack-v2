@@ -11,7 +11,7 @@ There are two levels of templating in `@luckystack/email`:
 1. **`renderEmailLayout({...})`** — a tiny inline-styled HTML+text generator with one optional CTA button. Use it directly when you build an email at the call site (no name, no `data` payload).
 2. **The named template registry (`registerEmailTemplate` / `getEmailTemplate`)** — register an `EmailTemplate<TData>` under a short name and dispatch with `sendEmail({ template: 'name', data })`. Used by framework packages (currently `@luckystack/login`) and by application code that wants overrideable, data-driven email content.
 
-You can mix both freely. The framework's password-reset email currently builds its HTML inline with `renderEmailLayout`, but the registry lets a project override it (see `docs/password-reset-integration.md`).
+You can mix both freely. The framework's password-reset and email-change emails dispatch through the named registry (`sendEmail({ template: 'password-reset' | 'email-change', data })`); `@luckystack/email` ships built-in templates for both names, so they work out of the box, and a project can override the copy by registering its own template under the same name (see `docs/password-reset-integration.md`).
 
 ---
 
@@ -104,11 +104,12 @@ The registry is a process-local `Map`. There's no persistence — every server r
 
 When you call `sendEmail({ to, template: 'foo', data: {...} })`:
 
-1. The current `sendEmail` implementation looks up `getEmailTemplate('foo')`.
-2. If a template is registered, `subject` and `render` are called with `data ?? {}`. The result becomes the outgoing `EmailMessage`.
-3. If no template is registered for that name, `sendEmail` returns `{ ok: false, reason: 'no-template' }` and (when `logging.errors` is on) warns in the terminal.
+1. `sendEmail` looks up a consumer-registered template via `getEmailTemplate('foo')`.
+2. If none is registered, it falls back to a framework built-in via `getBuiltInEmailTemplate('foo')` (`'password-reset'` and `'email-change'` ship built-in).
+3. If a template resolves (registered or built-in), `subject` and `render` are called with `data ?? {}`. The result becomes the outgoing `EmailMessage`.
+4. If neither a registration nor a built-in exists for that name, `sendEmail` returns `{ ok: false, reason: 'no-template' }` and (when `logging.errors` is on) warns in the terminal.
 
-> **Note on built-in fallbacks.** The architecture doc mentions a future built-in fallback for `'password-reset'` that would render via `renderEmailLayout` when nothing is registered. As of this revision, no built-in is registered automatically — `@luckystack/login`'s `sendPasswordResetEmail` instead constructs the email inline using `renderEmailLayout` and posts it via `sendEmail({ to, subject, html, text, adapterHint: 'transactional' })`. Projects that want to fully control the password-reset email can register `'password-reset'` in the template registry and have their app's `_api` or boot code call `sendEmail({ template: 'password-reset', data, to })` themselves — see `docs/password-reset-integration.md`.
+> **Built-in fallbacks.** `@luckystack/email` ships built-in templates for `'password-reset'` and `'email-change'` (in `builtInTemplates.ts`), each rendered via `renderEmailLayout`. `@luckystack/login`'s `sendPasswordResetEmail` / `sendEmailChangeConfirmation` dispatch through these names (`sendEmail({ template: 'password-reset' | 'email-change', data, to, adapterHint: 'transactional' })`), so the flow works out of the box. A project that wants different copy — translation, branding, extra marketing block — just registers its own template under the same name with `registerEmailTemplate(...)` (last-write-wins); no fork of `@luckystack/login` is needed. Introspect the shipped built-ins with `listBuiltInEmailTemplates()` / `getBuiltInEmailTemplate(name)`.
 
 ### Overriding a template
 
@@ -252,7 +253,7 @@ registerEmailTemplate('password-reset', {
 });
 ```
 
-Then, in the project's reset-password API (or wherever the project orchestrates the email), call `sendEmail({ template: 'password-reset', data: { brand: 'Acme', userName, resetUrl, ttlMinutes }, to, adapterHint: 'transactional' })` instead of relying on the inline render inside `@luckystack/login`. See `docs/password-reset-integration.md` for the full integration story.
+That's all that's needed: `@luckystack/login`'s `sendPasswordResetEmail` already dispatches `sendEmail({ template: 'password-reset', data: { brand, userName, resetUrl, ttlMinutes }, adapterHint: 'transactional' })`, so registering `'password-reset'` above (at boot, before the first reset request) transparently replaces the built-in copy — no change to the login flow or a custom reset API required. See `docs/password-reset-integration.md` for the full integration story.
 
 ### B. Multi-language invite
 

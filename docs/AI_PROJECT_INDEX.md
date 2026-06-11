@@ -9,36 +9,47 @@
 
 ## API routes (16)
 
-| Path | Method | Auth | Rate limit | Owner | Tags | Summary |
-| --- | --- | --- | --- | --- | --- | --- |
-| `api/playground/echo/v1` | POST | public | 60 | mathijs | playground, smoke-test | Playground: simple echo. Returns the message sent + the caller's session |
-| `api/playground/spam/v1` | POST | public | 3 | — | — | Playground: low rate-limit endpoint for demoing the rate-limiter. Hit it |
-| `api/playground/streamCounter/v1` | POST | public | 30 | — | — | Playground: streams a fake counter to the originator over a configurable |
-| `api/playground/testEmail/v1` | POST | login | 3 | — | — | Playground-only diagnostic. The framework's password-reset flow is |
-| `api/playground/throwError/v1` | POST | public | 60 | — | — | Playground: deliberately throws so the framework's apiError hook fires |
-| `api/reset-password/confirmReset/v1` | POST | public | 5 | — | — | — |
-| `api/reset-password/sendReset/v1` | POST | public | 5 | — | — | `validator` is CommonJS; its .d.ts does not declare a default export but |
-| `api/settings/changePassword/v1` | POST | login | 10 | — | — | — |
-| `api/settings/confirmEmailChange/v1` | POST | public | 10 | — | — | — |
-| `api/settings/deleteAccount/v1` | POST | login | 3 | — | — | — |
-| `api/settings/listSessions/v1` | POST | login | 30 | — | — | — |
-| `api/settings/requestEmailChange/v1` | POST | login | 5 | — | — | `validator` is CommonJS; its .d.ts does not declare a default export but |
-| `api/settings/revokeSession/v1` | POST | login | 20 | — | — | — |
-| `api/settings/signOutEverywhere/v1` | POST | login | 5 | — | — | — |
-| `api/settings/updatePreferences/v1` | POST | login | 30 | — | — | — |
-| `api/settings/updateUser/v1` | POST | login | 20 | — | — | — |
+| Path | Method | Auth | Rate limit | Owner | Tested | Tags | Summary |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `api/playground/echo/v1` | POST | public | 60 | mathijs | yes | playground, smoke-test | Playground: simple echo. Returns the message sent + the caller's session |
+| `api/playground/spam/v1` | POST | public | 3 | — | yes | — | Playground: low rate-limit endpoint for demoing the rate-limiter. Hit it |
+| `api/playground/streamCounter/v1` | POST | public | 30 | — | yes | — | Playground: streams a fake counter to the originator over a configurable |
+| `api/playground/testEmail/v1` | POST | login | 3 | — | yes | — | Playground-only diagnostic. The framework's password-reset flow is |
+| `api/playground/throwError/v1` | POST | public | 60 | — | yes | — | Playground: deliberately throws so the framework's apiError hook fires |
+| `api/reset-password/confirmReset/v1` | POST | public | 5 | — | yes | — | — |
+| `api/reset-password/sendReset/v1` | POST | public | 5 | — | yes | — | `validator` is CommonJS; its .d.ts does not declare a default export but |
+| `api/settings/changePassword/v1` | POST | login | 10 | — | yes | — | — |
+| `api/settings/confirmEmailChange/v1` | POST | public | 10 | — | yes | — | — |
+| `api/settings/deleteAccount/v1` | POST | login | 3 | — | yes | — | — |
+| `api/settings/listSessions/v1` | POST | login | 30 | — | yes | — | — |
+| `api/settings/requestEmailChange/v1` | POST | login | 5 | — | yes | — | `validator` is CommonJS; its .d.ts does not declare a default export but |
+| `api/settings/revokeSession/v1` | POST | login | 20 | — | yes | — | — |
+| `api/settings/signOutEverywhere/v1` | POST | login | 5 | — | yes | — | — |
+| `api/settings/updatePreferences/v1` | POST | login | 30 | — | yes | — | — |
+| `api/settings/updateUser/v1` | POST | login | 20 | — | yes | — | — |
 
 ## Sync routes (5)
 
-| Path | Server | Client | Auth | Owner | Tags | Summary |
-| --- | --- | --- | --- | --- | --- | --- |
-| `sync/playground/echo/v1` | yes | — | public | — | — | Playground: simple sync echo. Whatever the originator sends fan-outs to |
-| `sync/playground/streamBroadcast/v1` | yes | — | public | — | — | Playground: streams fake "AI tokens" to EVERYONE in the receiver room |
-| `sync/playground/streamProgress/v1` | yes | — | public | — | — | Playground: streams progress updates to the ORIGINATOR ONLY (not the |
-| `sync/playground/streamToToken/v1` | yes | — | public | — | — | Playground: token-targeted streaming. Demonstrates `streamTo(tokens, payload)` |
-| `sync/playground/throwSync/v1` | yes | — | public | — | — | Playground: deliberately throws inside a sync handler so the framework's |
+| Path | Server | Client | Auth | Owner | Tested | Tags | Summary |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `sync/playground/echo/v1` | yes | — | public | — | yes | — | Playground: simple sync echo. Whatever the originator sends fan-outs to |
+| `sync/playground/streamBroadcast/v1` | yes | — | public | — | yes | — | Playground: streams fake "AI tokens" to EVERYONE in the receiver room |
+| `sync/playground/streamProgress/v1` | yes | — | public | — | yes | — | Playground: streams progress updates to the ORIGINATOR ONLY (not the |
+| `sync/playground/streamToToken/v1` | yes | — | public | — | yes | — | Playground: token-targeted streaming. Demonstrates `streamTo(tokens, payload)` |
+| `sync/playground/throwSync/v1` | yes | — | public | — | yes | — | Playground: deliberately throws inside a sync handler so the framework's |
 
-## Pages (10)
+## Ownership & coverage
+
+**By owner** (from `@docs owner` tags — set them from day one, Rule 15b):
+
+| Owner | Routes |
+| --- | --- |
+| `mathijs` | 1 |
+| _(unowned)_ | 20 |
+
+**Test coverage**: 21/21 routes have a per-route `.tests.ts`.
+
+## Pages (9)
 
 | Route | Template | Per-page middleware | File | Summary |
 | --- | --- | --- | --- | --- |
@@ -51,7 +62,6 @@
 | `/reset-password` | plain | — | `reset-password/page.tsx` | — |
 | `/settings` | dashboard | yes | `settings/page.tsx` | — |
 | `/settings/confirm-email` | plain | — | `settings/confirm-email/page.tsx` | — |
-| `/workspaces` | plain | — | `workspaces/page.tsx` | Workspaces — SPA root, registered as a splat route (`/workspaces/*`, via |
 
 ## Helpers — `src/_functions/` (7 exports across 3 files)
 

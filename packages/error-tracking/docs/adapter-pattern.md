@@ -173,8 +173,18 @@ Spans are the one exception (see `startSpanAcrossTrackers` below).
 
 `beforeSend` is a PER-ADAPTER filter. Each built-in adapter constructs an
 `ErrorTrackerEvent` describing the dispatch (`{ forwarded: true, kind, payload }`)
-and runs `options.beforeSend(event)` if provided. Returning `null` drops the
-event for THAT adapter only — other adapters in the list still receive it.
+and runs `options.beforeSend(event)` if provided. The hook can do two things,
+both of which the adapter honours:
+
+- **Drop the event** — return `null`, OR return the event with `forwarded: false`.
+  Either way the event is dropped for THAT adapter only; other adapters in the
+  list still receive it.
+- **Transform the event** — return the event with a mutated or replaced
+  `payload`. The adapter forwards the RETURNED payload, never the original, so a
+  redacting `beforeSend` actually redacts what reaches the backend. Prefer an
+  immutable copy (`{ ...event, payload: { ...event.payload, context: scrubbed } }`)
+  — mutating the shared `event` object in place would also affect any sibling
+  adapter that receives the same event.
 
 ```ts
 registerErrorTracker(
@@ -186,7 +196,12 @@ registerErrorTracker(
         event.kind === 'exception' &&
         event.payload.error instanceof ValidationError
       ) {
-        return null;
+        return null; // (or: return { ...event, forwarded: false })
+      }
+      // Redact PII from the context before it leaves the process.
+      const context = event.payload.context as Record<string, unknown> | null;
+      if (context && 'email' in context) {
+        return { ...event, payload: { ...event.payload, context: { ...context, email: '[redacted]' } } };
       }
       return event;
     },

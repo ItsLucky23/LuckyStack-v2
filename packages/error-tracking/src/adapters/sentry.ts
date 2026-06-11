@@ -15,7 +15,7 @@ import { createRequire } from 'node:module';
 
 import { loadPeer, type ErrorTracker, type ErrorTrackerEvent } from '@luckystack/core';
 
-import { runBeforeSend } from './runBeforeSend';
+import { resolveExceptionEvent, resolveMessageEvent } from './runBeforeSend';
 
 const localRequire = createRequire(import.meta.url);
 
@@ -52,30 +52,22 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
     name: 'sentry',
 
     captureException(error, context) {
-      const filtered = runBeforeSend(options.beforeSend, {
-        forwarded: true,
-        kind: 'exception',
-        payload: { error, context: context ?? null },
-      });
-      if (!filtered) return;
-      if (context) {
-        sentry.captureException(error, { extra: context });
+      const resolved = resolveExceptionEvent(options.beforeSend, error, context);
+      if (!resolved) return;
+      if (resolved.context) {
+        sentry.captureException(resolved.error, { extra: resolved.context });
       } else {
-        sentry.captureException(error);
+        sentry.captureException(resolved.error);
       }
     },
 
     captureMessage(message, level, context) {
-      const filtered = runBeforeSend(options.beforeSend, {
-        forwarded: true,
-        kind: 'message',
-        payload: { message, level, context: context ?? null },
-      });
-      if (!filtered) return;
-      if (context) {
-        sentry.captureMessage(message, { level, extra: context });
+      const resolved = resolveMessageEvent(options.beforeSend, message, level, context);
+      if (!resolved) return;
+      if (resolved.context) {
+        sentry.captureMessage(resolved.message, { level: resolved.level, extra: resolved.context });
       } else {
-        sentry.captureMessage(message, { level });
+        sentry.captureMessage(resolved.message, { level: resolved.level });
       }
     },
 

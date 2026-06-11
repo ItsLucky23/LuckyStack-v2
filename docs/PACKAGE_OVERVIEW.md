@@ -44,6 +44,7 @@
 | `@luckystack/devkit` | Dev-time file-based route discovery, hot reload, TypeScript-program-backed type-map + Zod schema emission (including the multi-directory function-injection map — spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`), supervisor process restart, and `luckystack-validate-deploy` CLI. | `typescript@^6.0.0`, `zod@^4.0.0`, `@prisma/client@^6.19.0` | `tsx` (supervisor child process) |
 | `@luckystack/test-runner` | Generated-type-driven sweep that walks every API endpoint and runs five progressive layers: contract smoke, auth enforcement, rate-limit, crash-resistance fuzz, and per-route custom tests. | `zod@^4.0.0`, `socket.io-client@^4.8.0` | none |
 | `@luckystack/docs-ui` | Dev-only Swagger-style browser at `/_docs` that renders `apiDocs.generated.json` with method, auth, rate limit, input/output shape, and optional inline try-it-out. | none (composes with `@luckystack/server` `customRoutes`) | none |
+| `@luckystack/mcp` | Read-only MCP server exposing the project's committed AI context (decisions, dependency graph, routes, runbooks, capabilities) to Claude Code as queryable tools (`blast_radius`, `who_imports`, `god_nodes`, `list_decisions`, `get_decision`, `find_route`, `get_runbook`, `get_capability`). Runs via `npx` (no app dependency); add a `luckystack` entry to `.mcp.json`. | none (uses `@modelcontextprotocol/sdk` + `zod`, bundled via `npx`) | none |
 
 ## Utilities
 
@@ -75,6 +76,7 @@ Quick lookup: feature -> which package(s) to suggest.
 | Browse generated docs in dev | `@luckystack/docs-ui` |
 | Resolve secrets from a central server (committed pointers) | `@luckystack/secret-manager` |
 | Hot-reload + type-map gen in dev | `@luckystack/devkit` |
+| Let Claude Code query the repo's AI context (blast-radius, decisions, routes) | `@luckystack/mcp` (add a `.mcp.json` entry; runs via `npx`) |
 
 ## Decision Matrix
 

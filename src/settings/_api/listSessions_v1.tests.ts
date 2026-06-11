@@ -1,11 +1,13 @@
+import { createHash } from 'node:crypto';
 import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 
 //? Per-route tests for `settings/listSessions/v1`.
 //? The auto-sweep already covers: contract validation, auth enforcement,
 //? rate-limit clamp, fuzz crash-resistance. The cases below cover the
 //? business logic the sweep cannot reach: the returned set is scoped to the
-//? caller (no other user's tokens leak), and `isCurrent` flags exactly the
-//? caller's own token.
+//? caller (no other user's session leaks), `isCurrent` flags exactly the
+//? caller's own session, and the route NEVER returns a raw bearer token —
+//? only an opaque SHA-256 fingerprint (`id`) of it.
 //?
 //? Test environment runs with `allowMultipleSessions: true`, so a user can
 //? hold several live tokens at once — that is what the multi-session case
@@ -14,12 +16,16 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? Input shape (from the route source `listSessions_v1.ts`):
 //?   {}  // no fields
 //? Output envelope:
-//?   { status: 'success', result: { sessions: Array<{ token: string;
+//?   { status: 'success', result: { sessions: Array<{ id: string;
 //?       expiresInSeconds: number | null; isCurrent: boolean }> } }
 //?   | { status: 'error', errorCode: 'common.500' }
 
+//? Mirror of the route's opaque-id derivation — the client only ever sees this,
+//? never the raw token.
+const idOf = (token: string): string => createHash('sha256').update(token).digest('hex');
+
 interface SessionEntry {
-  token: string;
+  id: string;
   expiresInSeconds: number | null;
   isCurrent: boolean;
 }
@@ -35,15 +41,19 @@ type ListResponse = ListSuccess | ListError;
 
 export const customTests: CustomTestCase[] = [
   {
-    name: 'happy path lists the callers current session flagged isCurrent',
+    name: 'happy path lists the callers current session by opaque id, flagged isCurrent',
     run: async (ctx: TestContext) => {
       const { token } = await ctx.session.login();
       const result = await ctx.callApi<unknown, ListResponse>({});
       ctx.expect.eq(result.status, 'success');
       if (result.status !== 'success') return;
 
-      const current = result.result.sessions.find((s) => s.token === token);
-      ctx.expect.ok(current !== undefined, 'caller token must appear in its own session list');
+      //? The raw token must NEVER appear; the opaque fingerprint of it must.
+      const ids = new Set(result.result.sessions.map((s) => s.id));
+      ctx.expect.ok(!ids.has(token), 'raw session token must never be returned to the client');
+
+      const current = result.result.sessions.find((s) => s.id === idOf(token));
+      ctx.expect.ok(current !== undefined, 'caller session (by opaque id) must appear in its own list');
       ctx.expect.eq(current?.isCurrent, true);
     },
   },
@@ -62,14 +72,14 @@ export const customTests: CustomTestCase[] = [
       ctx.expect.eq(result.status, 'success');
       if (result.status !== 'success') return;
 
-      const tokens = new Set(result.result.sessions.map((s) => s.token));
-      ctx.expect.ok(tokens.has(other.token), 'other-device token must be listed');
-      ctx.expect.ok(tokens.has(current.token), 'current token must be listed');
+      const ids = new Set(result.result.sessions.map((s) => s.id));
+      ctx.expect.ok(ids.has(idOf(other.token)), 'other-device session (by id) must be listed');
+      ctx.expect.ok(ids.has(idOf(current.token)), 'current session (by id) must be listed');
 
-      //? Exactly one entry — the caller's current token — is flagged isCurrent.
+      //? Exactly one entry — the caller's current session — is flagged isCurrent.
       const currentFlagged = result.result.sessions.filter((s) => s.isCurrent);
       ctx.expect.eq(currentFlagged.length, 1);
-      ctx.expect.eq(currentFlagged[0]?.token, current.token);
+      ctx.expect.eq(currentFlagged[0]?.id, idOf(current.token));
     },
   },
   {
@@ -80,15 +90,16 @@ export const customTests: CustomTestCase[] = [
       const victimToken = victim.token;
 
       //? Caller is a DIFFERENT user. Their session list is keyed by THEIR id,
-      //? so the victim token must be absent.
+      //? so neither the victim token nor its fingerprint must be present.
       await ctx.session.login({ email: 'list-caller@example.com' });
 
       const result = await ctx.callApi<unknown, ListResponse>({});
       ctx.expect.eq(result.status, 'success');
       if (result.status !== 'success') return;
 
-      const tokens = result.result.sessions.map((s) => s.token);
-      ctx.expect.ok(!tokens.includes(victimToken), 'victim token must not leak into another users list');
+      const ids = new Set(result.result.sessions.map((s) => s.id));
+      ctx.expect.ok(!ids.has(victimToken), 'victim raw token must never appear');
+      ctx.expect.ok(!ids.has(idOf(victimToken)), 'victim session must not leak into another users list');
     },
   },
 ];

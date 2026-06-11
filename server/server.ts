@@ -29,7 +29,6 @@ import {
 } from '@luckystack/email';
 import { serveFile, serveFavicon } from './prod/serveFile';
 import { registerNotificationHooks } from './hooks/notifications';
-import { registerWorkspacesTerminalHooks } from './hooks/workspacesTerminal';
 import { resolveSecretsIfConfigured } from './bootstrap/initSecrets';
 import projectConfig, { sentry as sentryConfigInput } from '../config';
 
@@ -58,7 +57,6 @@ initializeSentry();
 //? bootstrapLuckyStack's optional-package auto-detect phase (0.2.0). No manual
 //? registerPresenceHooks() call here — kills divergence from the consumer template.
 registerNotificationHooks();
-registerWorkspacesTerminalHooks();
 
 //? Resend → SMTP → Console fallback chain. The selector reads RESEND_API_KEY,
 //? SMTP_HOST + friends from process.env. We pass `from` explicitly from the

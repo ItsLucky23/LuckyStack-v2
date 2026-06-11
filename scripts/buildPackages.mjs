@@ -26,7 +26,9 @@ import process from 'node:process';
 
 const WAVES = [
   ['core'],
-  ['email', 'login', 'devkit', 'router', 'test-runner', 'create-luckystack-app', 'secret-manager'],
+  // mcp is a standalone stdio server (only deps: @modelcontextprotocol/sdk + zod);
+  // no @luckystack/* runtime imports, so its placement is free — kept here as a leaf.
+  ['email', 'login', 'devkit', 'router', 'test-runner', 'create-luckystack-app', 'secret-manager', 'mcp'],
   // error-tracking depends on @luckystack/login for the postLogout hook
   // payload augmentation (auto-instrumentation type-checks 'postLogout' as
   // a keyof HookPayloads, which is only populated when login is in scope).

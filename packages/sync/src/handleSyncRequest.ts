@@ -37,6 +37,7 @@ import type {
 import { shouldLogDev, shouldLogStream } from './_shared/logFlags';
 import { buildFormattedError } from './_shared/errorBuilders';
 import { processClientSyncForRecipient } from './_shared/clientFanout';
+import { resolveSyncValidationMode } from './_shared/validationMode';
 
 interface SyncErrorBuilder {
   (args: {
@@ -404,23 +405,28 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   if (serverSyncEntry) {
     const { main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
 
-    const inputValidation = await validateInputByType({
-      typeText: inputType,
-      value: normalizedData,
-      rootKey: 'clientInput',
-      filePath: inputTypeFilePath,
-    });
-    if (inputValidation.status === 'error') {
-      cleanupRequest();
-      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
-        response: {
-          status: 'error',
-          errorCode: 'sync.invalidInputType',
-          errorParams: [{ key: 'message', value: inputValidation.message }],
-        },
-        preferred: preferredLocale,
-        userLanguage: user?.language,
-      }));
+    //? Per-route validation toggle (mirrors the API handler). `'relaxed'` or
+    //? `{ input: 'skip' }` skips runtime input validation entirely — for routes
+    //? whose payload shape can't be modelled in TS. Default `'strict'`.
+    if (resolveSyncValidationMode(serverSyncEntry.validation) === 'strict') {
+      const inputValidation = await validateInputByType({
+        typeText: inputType,
+        value: normalizedData,
+        rootKey: 'clientInput',
+        filePath: inputTypeFilePath,
+      });
+      if (inputValidation.status === 'error') {
+        cleanupRequest();
+        return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+          response: {
+            status: 'error',
+            errorCode: 'sync.invalidInputType',
+            errorParams: [{ key: 'message', value: inputValidation.message }],
+          },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        }));
+      }
     }
 
     //? if the user has passed all the checks we call the preload sync function and return the result

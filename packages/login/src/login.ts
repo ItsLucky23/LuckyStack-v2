@@ -9,6 +9,7 @@ import { saveSession } from "./session"
 import validator from 'validator';
 import type { BaseSessionLayout as SessionLayout } from './sessionLayout';
 import { getUserAdapter } from './userAdapter';
+import { resolveUserByEmail } from './accountStrategy';
 import { validatePassword } from './passwordPolicy';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -191,7 +192,7 @@ const registerWithCredentials = async (
 
   const userAdapter = getUserAdapter();
   const [checkEmailError, checkEmailResponse] = await tryCatch(() =>
-    userAdapter.findByEmail({ email, provider: 'credentials' })
+    resolveUserByEmail(userAdapter, { email, provider: 'credentials' })
   );
   if (checkEmailError) {
     getLogger().error('login: findByEmail failed during register', checkEmailError);
@@ -260,7 +261,7 @@ const loginWithCredentialsCore = async (
 
   const userAdapter = getUserAdapter();
   const [findUserError, findUserResponse] = await tryCatch(() =>
-    userAdapter.findByEmail({ email, provider: 'credentials' })
+    resolveUserByEmail(userAdapter, { email, provider: 'credentials' })
   );
   if (findUserError) {
     getLogger().error('login: findByEmail failed', findUserError);
@@ -517,8 +518,11 @@ const findOrCreateOAuthUser = async (
   }
 
   const userAdapter = getUserAdapter();
+  //? Under `'unified'` this links to an existing account with the same email
+  //? created via ANY provider (incl. credentials); under `'per-provider'` it
+  //? stays scoped to this provider (existing behavior).
   const [findError, findResponse] = await tryCatch(() =>
-    userAdapter.findByEmail({ email, provider: provider.name })
+    resolveUserByEmail(userAdapter, { email, provider: provider.name })
   );
   if (findError) {
     getLogger().error('oauth: findByEmail failed', findError);

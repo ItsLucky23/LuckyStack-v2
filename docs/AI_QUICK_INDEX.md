@@ -12,9 +12,10 @@
 | H2 section | First line |
 | --- | --- |
 | Quick Links | \| Topic \| Framework dev path \| Consumer (post-install) path \| |
-| Project Snapshot | LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 5.7, Vite, Redis. The repo publishes as 14 `@luckystack/*` packages — see `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map. |
+| Project Snapshot | LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 5.7, Vite, Redis. The repo publishes as 15 `@luckystack/*` packages (+ `create-luckystack-app`) — see `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map. |
 | Core Rules (28) | 1. **Plan first for medium/high difficulty work.** Use tables or bullets, not wall-of-text. Skip planning only for trivial single-file changes. |
 | Branch Log Protocol | AI MUST append an entry to `branch-logs/<sanitized-branch>.md` after every prompt that produces **real code or architecture changes**. Skip for lint-only fixes, typo fixes, or translation-string-only edits. **When in doubt, log.** |
+| Decision Memory Protocol | This is **automatic AI behavior — there is no command for the user to run** (just like the branch-log protocol). The AI fills and reads the decision memory itself as a normal part of working in a session. |
 | Inherited Patterns (from old `.claude/CLAUDE.md`, user-confirmed) | Before building any UI primitive, check this table. Extend the existing component or add a prop — never roll a parallel implementation. |
 | Inherited Rules (user-confirmed) | When analysis surfaces potential mistakes, unhandled errors, or improvement opportunities OUTSIDE the current task scope, **report them — do not fix them**. The user decides what to act on. |
 | Type Generation & Template Injection Contract | Preferred direction: route literals + generated maps + inferred `serverOutput` / `clientOutput` typing. |
@@ -437,6 +438,9 @@
 - `PostEmailChangedPayload` — `{ userId, oldEmail, newEmail }`. Observational. Fires after the user's address is persisted via the `UserAdapter` AND all of the user's sessions have been revoked (forced re-login on the next request).
 ---
 
+### `mcp`
+- _(no `## Function Index` section yet)_
+
 ### `presence`
 - ### Server entry — `@luckystack/presence`
 | Function / Export | 1-regel | Deep doc |
@@ -655,6 +659,7 @@
 | env-resolver | 0 | 0 | 0 |
 | error-tracking | 4 | 4 | 0 |
 | login | 8 | 8 | 0 |
+| mcp | 0 | 0 | 0 |
 | presence | 6 | 6 | 0 |
 | router | 5 | 5 | 0 |
 | secret-manager | 1 | 1 | 0 |

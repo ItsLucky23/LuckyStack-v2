@@ -223,6 +223,19 @@ describe("parseArgs", () => {
     vi.restoreAllMocks();
   });
 
+  //? The flag fields added in CFG-01 all default to null (= "not passed →
+  //? wizard asks / default applies"). Shared so the full-shape assertions stay
+  //? readable as projectName + overrides.
+  const CFG01_NULLS = {
+    dbProvider: null,
+    authMode: null,
+    oauthProviders: null,
+    emailProvider: null,
+    monitoringProvider: null,
+    i18n: null,
+    aiInstructions: null,
+  };
+
   it("returns defaults for empty argv (install + prompt on, no help, no name)", () => {
     expect(parseArgs([])).toEqual({
       projectName: "",
@@ -231,6 +244,7 @@ describe("parseArgs", () => {
       help: false,
       noPresence: false,
       aiBrowserTooling: null,
+      ...CFG01_NULLS,
     });
   });
 
@@ -242,6 +256,7 @@ describe("parseArgs", () => {
       help: false,
       noPresence: false,
       aiBrowserTooling: null,
+      ...CFG01_NULLS,
     });
   });
 
@@ -287,7 +302,42 @@ describe("parseArgs", () => {
       help: false,
       noPresence: false,
       aiBrowserTooling: null,
+      ...CFG01_NULLS,
     });
+  });
+
+  //? ───────── CFG-01: per-choice scaffold flags ─────────
+  it("parses --db / --auth / --email / --monitoring value flags", () => {
+    expect(parseArgs(["my-app"]).dbProvider).toBeNull();
+    expect(parseArgs(["my-app", "--db=postgresql"]).dbProvider).toBe("postgresql");
+    expect(parseArgs(["my-app", "--auth=none"]).authMode).toBe("none");
+    expect(parseArgs(["my-app", "--auth=credentials+oauth"]).authMode).toBe("credentials+oauth");
+    expect(parseArgs(["my-app", "--email=resend"]).emailProvider).toBe("resend");
+    expect(parseArgs(["my-app", "--monitoring=sentry"]).monitoringProvider).toBe("sentry");
+  });
+
+  it("parses --oauth as a validated comma-separated list", () => {
+    expect(parseArgs(["my-app"]).oauthProviders).toBeNull();
+    expect(parseArgs(["my-app", "--oauth=google,github"]).oauthProviders).toEqual(["google", "github"]);
+    expect(parseArgs(["my-app", "--oauth=google, microsoft "]).oauthProviders).toEqual(["google", "microsoft"]);
+    //? Empty value → explicit empty list (distinct from null = not passed).
+    expect(parseArgs(["my-app", "--oauth="]).oauthProviders).toEqual([]);
+  });
+
+  it("parses the --i18n / --no-i18n and --ai-docs / --no-ai-docs boolean flags", () => {
+    expect(parseArgs(["my-app"]).i18n).toBeNull();
+    expect(parseArgs(["my-app", "--i18n"]).i18n).toBe(true);
+    expect(parseArgs(["my-app", "--no-i18n"]).i18n).toBe(false);
+    expect(parseArgs(["my-app"]).aiInstructions).toBeNull();
+    expect(parseArgs(["my-app", "--ai-docs"]).aiInstructions).toBe(true);
+    expect(parseArgs(["my-app", "--no-ai-docs"]).aiInstructions).toBe(false);
+  });
+
+  it("exits with code 2 on an invalid value for a choice flag", () => {
+    expect(() => parseArgs(["my-app", "--db=oracle"])).toThrow("process.exit:2");
+    expect(() => parseArgs(["my-app", "--auth=magic"])).toThrow("process.exit:2");
+    expect(() => parseArgs(["my-app", "--oauth=google,myspace"])).toThrow("process.exit:2");
+    expect(exitSpy).toHaveBeenCalledWith(2);
   });
 
   it("sets help for --help", () => {

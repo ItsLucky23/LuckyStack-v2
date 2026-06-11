@@ -13,6 +13,7 @@ import {
 
 import { getEmailConfig } from './emailConfig';
 import { getEmailTemplate } from './templates';
+import { getBuiltInEmailTemplate } from './builtInTemplates';
 
 //? Recipient addresses + subjects are PII and must never reach the EXTERNAL
 //? error tracker verbatim (a Sentry `beforeSend` strips cookies but not these
@@ -102,7 +103,11 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
 
   let message: EmailMessage;
   if (isTemplateInput(input)) {
-    const template = getEmailTemplate(input.template);
+    //? Resolution order: consumer-registered template (last-write-wins
+    //? override) → framework built-in (`password-reset` / `email-change`) →
+    //? no-template. The built-in fallback is what makes the login flow's
+    //? `registerEmailTemplate` override contract real (CFG-05 / QUA-067).
+    const template = getEmailTemplate(input.template) ?? getBuiltInEmailTemplate(input.template);
     if (!template) {
       if (config.logging.errors) {
         getLogger().warn(`[email] template '${input.template}' not registered`, { to: String(input.to) });

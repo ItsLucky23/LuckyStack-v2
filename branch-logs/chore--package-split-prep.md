@@ -2847,3 +2847,179 @@ Rewrote `SESSION_STATE.md` from scratch to capture the entire 2026-06-10 session
 **Gates after fixes:** lint 0 · full `npm run build` exit 0 · `test:unit` 782/782 (incl. the dist-removed proof run).
 
 **Still open (reported, user's call):** F10 (`listSessions_v1.ts` returns raw session tokens — consumer demo code); SESSION_STATE test-account emails don't exist in the live dev DB (the sweep self-registers; browser test registered a fresh account). Cleanup: agent-browser Chrome installed to its cache; LS-v2 :4100/:5180 processes stopped; matchrix untouched.
+
+### Session (2026-06-11, part 10): AI-boost Wave 1 — shareable decision memory + runbooks + invariant linter
+
+**User:** make the framework give an AI the best possible, team-SHAREABLE context over a repo (the local `~/.claude` mempalace isn't shareable). After a 12-agent design pass (RAG/Graphify/KV-cache/decision-memory + more), agreed the long route, minimal third-party. Build Wave 1 end-to-end.
+
+**Design artifacts:** `docs/AI_BOOST_PLAN.md` (the agreed 7-step plan: decisions → memory-sync → runbooks → linter → MCP server → native call-graph → RAG). The "defer graphify/RAG" synthesis roadmap was superseded by the long-route plan and removed.
+
+**Wave 1 shipped (all rung-1, pure-Node, zero new deps, mirrored to `template/` + auto-bundled to consumers via `framework-docs`):**
+- **Decision memory.** `docs/decisions/NNNN-slug.md` ADRs + `scripts/generateDecisionsIndex.mjs` → committed `docs/AI_DECISIONS_INDEX.md` (4th index, deterministic). `/decide` slash command (`.claude/commands/decide.md`) incl. **`--from-memory`** migration (walk local `~/.claude` memory → classify team-truth vs personal → write ADRs → stamp `synced_to:`, idempotent, works on any project). Protocol: `docs/DECISION_MEMORY_PROTOCOL.md`. Seeded ADRs 0001 (ship the log), 0002 (native TS call-graph over Python graphify — Rule 3b deviation recorded), 0003 (hold RAG as last rung).
+- **Runbooks.** `scripts/generateRunbooks.mjs` → committed `docs/AI_RUNBOOKS.md`: 6 task-shaped golden paths grounded in the project's REAL example files (5/5 grounded; cites e.g. `playground/_api/testEmail_v1.ts`).
+- **Invariant linter.** `scripts/lintInvariants.mjs` (`npm run ai:lint`) over the staged diff: `no-as-any`, `no-arbitrary-color` (Rule 14), `i18n-jsx` (Rule 13). Report-only by default via `luckystack.invariants.json` (`block`/`warn`); `// luckystack-allow <rule>: <reason>` escape hatch; `--paths` mode + `--selftest` (10 committed fixture cases, all pass). On-demand skill `skills/custom/audit-invariants/`.
+- **Wiring:** root + template `package.json` (`ai:decisions`/`ai:runbooks`/`ai:lint`); both `.githooks/pre-commit` + the scaffold's `AI_INDEX_HOOK` (regen 4 indexes + run the linter, git-add); `CLAUDE.md` (Quick Links, session-start step 6, Rule 11 +ai:lint, new "Decision Memory Protocol" section, Documentation Reference rows); `docs/AI_BOOST_OVERVIEW.md` regen-commands + lookup table.
+
+**Files touched (new):** `scripts/generateDecisionsIndex.mjs`, `scripts/generateRunbooks.mjs`, `scripts/lintInvariants.mjs`, `docs/DECISION_MEMORY_PROTOCOL.md`, `docs/AI_BOOST_PLAN.md`, `docs/decisions/0000-template.md` + `0001`–`0003`, `.claude/commands/decide.md`, `skills/custom/audit-invariants/SKILL.md`, `luckystack.invariants.json`, + byte-for-byte template mirrors of the 3 scripts + config + ADR seed. **(edited):** `package.json`, `.githooks/pre-commit`, `CLAUDE.md`, `docs/AI_BOOST_OVERVIEW.md`, `packages/create-luckystack-app/src/index.ts`, `packages/create-luckystack-app/template/package.json`.
+
+**Gates:** `ai:lint --selftest` 10/10 · all 4 generators deterministic (2nd run byte-identical) · scaffold `eslint` 0 · `create-luckystack-app` build + `bundleFrameworkDocs` (5/5) + 64/64 unit tests green · framework `ai:index` now 8 commands / 19 skills. Full `npm run build` (15 pkgs + vite) NOT re-run — no framework `src/`/`server/` TS changed (only `.mjs`, `.md`, the already-built scaffold pkg, package.json scripts).
+
+**Next (per `docs/AI_BOOST_PLAN.md`):** Wave 2 — `@luckystack/mcp` read-only server (the integration spine), then Wave 3 native call-graph, Wave 4 RAG (gated).
+
+### Session (2026-06-11, part 10b): pivot — decision memory is AUTOMATIC AI behavior, not user commands
+
+**User:** doesn't want new scripts/commands the user is expected to run; the AI should fill the memory itself during sessions, read it itself, and OFFER to backfill from existing history when the memory is empty on an established project. Pre-commit hooks are fine; custom slash commands are not.
+
+**Changed:**
+- **Removed** `.claude/commands/decide.md` (the `/decide` command) and `skills/custom/audit-invariants/` (the on-demand skill) — the two user-run surfaces.
+- **Reframed capture as automatic protocol.** `docs/DECISION_MEMORY_PROTOCOL.md` §7 rewritten: the AI writes a decision file when one is made in-session (mirrors the branch-log protocol), regenerates the index, and reads the index before answering "why" — no command. Added §8 **empty-memory backfill**: on session start, empty memory + existing project ⇒ the AI OFFERS once to seed `docs/decisions/` from `git log` / `branch-logs/` (+ optional `~/.claude` memory, classified team-truth vs personal). Renumbered §9/§10.
+- **CLAUDE.md** "Decision Memory Protocol" section rewritten to the automatic-behavior + backfill model; scrubbed `/decide` from Quick Links / Documentation Reference. Generators' emitted blurbs + `0000-template.md` + ADR 0001 + the runbooks "Record a decision" step + `AI_BOOST_OVERVIEW.md` + `AI_BOOST_PLAN.md` all rephrased to "AI auto-captures, no command". The invariant linter stays (pre-commit + AI-autonomous `npm run ai:lint`); only its on-demand *skill* was dropped.
+- Re-mirrored the two changed generators + seed to `template/`, regenerated indexes, re-bundled `framework-docs` (decide.md + audit-invariants confirmed gone).
+
+**Net Wave-1 surface now:** docs/decisions/ + 4 generated indexes + 3 pure-Node generators + invariant linter, all driven by CLAUDE.md protocols + the pre-commit hook. **Zero custom slash commands.** `ai:index` back to 7 commands / 18 skills.
+
+**Gates:** `ai:lint --selftest` 10/10 · generators deterministic · `framework-docs` 5/5 · no `/decide`/`/audit-invariants` refs remain outside this historical log.
+
+### Session (2026-06-11, part 11): AI-boost Waves 2+3 — native dependency graph + @luckystack/mcp server
+
+**User:** build the call-graph + the Claude MCP server (asked whether it merges with the existing playwright/chrome-devtools MCP — answer: no, separate entries in the same .mcp.json). Confirmed: graphify native in TS is the right idea; RAG's marginal value is low for now (held per ADR 0003).
+
+**Wave 3 — native dependency graph (file/import level):**
+- `scripts/generateGraph.mjs` (pure-Node, reuses the proven import-extraction/resolution from generateProjectIndex) → deterministic committed `docs/ai-graph.json`: nodes classified api/sync/page/helper/component/other, resolved import edges, transitive reverse-reachability (`blastRadius`), and `godNodes` by transitive-dependent count. 109 nodes / 164 edges / 25 god-nodes on this repo; Avatar.tsx correctly top god-node (21 dependents). `ai:graph` npm script + pre-commit + template mirror + scaffold hook.
+- Symbol-level call edges via the TS compiler (ADR 0002) are the documented Phase-2 increment — recorded the file-level-first sequencing as **ADR 0004**.
+
+**Wave 2 — `@luckystack/mcp` (new package, 15th @luckystack pkg):**
+- Read-only stdio MCP server (Anthropic `@modelcontextprotocol/sdk` + `zod`) exposing 8 tools over the committed artifacts: `blast_radius`, `who_imports`, `god_nodes`, `list_decisions`, `get_decision`, `find_route`, `get_runbook`, `get_capability`. `src/artifacts.ts` (zod-validated graph parse, no casts) + `src/index.ts` (registerTool API). Reads files relative to the project root (walks up to package.json). Runs via `npx` — no app dependency, not a server-boot plugin.
+- Wired: `buildPackages`/`publishPackages` WAVES (leaf, wave 2), `tsconfig.server.json` include (for typed lint), package.json/tsup/tsconfig/CLAUDE.md/README. Scaffold writes the `luckystack` `.mcp.json` entry in the `aiInstructions` block — coexists additively with the browser MCP servers (**answers the merge question**; recorded as **ADR 0005**).
+- One scoped eslint exception (`eslint.config.js`): `import-x/no-unresolved` ignores `@modelcontextprotocol/sdk/` in `packages/mcp` only — the SDK's `exports` types-wildcard (`*.d.ts`) doesn't match its `*.js` import subpaths; tsc + Node resolve it (package builds, server runs), the eslint resolver alone can't. Documented inline + in ADR 0005.
+
+**Verified:** real MCP handshake probe (spawn → initialize → tools/list → tools/call) returns all 8 tools + correct `blast_radius` (21 files) and `list_decisions` (ADRs 0002/0004). `lint:all` + `lint:packages` 0 · `@luckystack/mcp` build (ESM+DTS) green · scaffold build + 64/64 tests green · generators deterministic · `npm install` added 73 pkgs (the SDK) 0 vulnerabilities. Docs updated: PACKAGE_OVERVIEW (mcp row), CLAUDE snapshot (15 pkgs), AI_BOOST_OVERVIEW (scaling ladder rung-2 now native+shipped, surfaces table, regen cmds), AI_BOOST_PLAN (Waves 1–3 shipped). `ai:index` 17 pkgs / 7 cmds / 18 skills · 5 ADRs.
+
+**Files (new):** `scripts/generateGraph.mjs` (+template mirror), `packages/mcp/{package.json,tsconfig.json,tsup.config.ts,CLAUDE.md,README.md,src/index.ts,src/artifacts.ts}`, `docs/ai-graph.json`, `docs/decisions/0004-*`, `0005-*`. **(edited):** root+template `package.json`, `.githooks/pre-commit`, scaffold `index.ts`, `buildPackages.mjs`, `publishPackages.mjs`, `tsconfig.server.json`, `eslint.config.js`, `CLAUDE.md`, `docs/PACKAGE_OVERVIEW.md`, `docs/AI_BOOST_OVERVIEW.md`, `docs/AI_BOOST_PLAN.md`.
+
+**Next:** Wave 4 (RAG) stays gated (ADR 0003). Optional Phase-2: symbol-level call edges in devkit (ADR 0002/0004). Publish 0.2.0 includes the new `@luckystack/mcp` (added to both WAVES).
+
+### Session (2026-06-11, part 12): symbol-level call graph (TS compiler) + CLAUDE.md self-maintenance/backfill rules
+
+**User:** leave RAG; apply the TypeScript compiler to the graph so it's complete; and make sure CLAUDE.md tells Claude to update memory/graph/docs by itself + offer to load/backfill memory when it doesn't cover the codebase.
+
+**Graph — symbol level added (`scripts/generateGraph.mjs`, Phase 2 of ADR 0004):**
+- Builds a `ts.Program` from `tsconfig.server.json` via the `typescript` package directly (a consumer devDep) — recorded the placement decision (script, not devkit) as **ADR 0006**. Walks `CallExpression`/`NewExpression`, resolves callees with the `TypeChecker` (alias-aware), attributes each call to its nearest enclosing named scope (function/method/const-arrow/object-method) or a per-file `<module>` caller, and emits `symbols` + `callEdges` + `symbolBlastRadius` alongside the existing file-level fields in the same `docs/ai-graph.json` (now `version: 2`). 118 symbols / 25 call-edges on this repo; deterministic; ~4.5s (the heaviest pre-commit step) guarded by `SYMBOL_FILE_CAP` + graceful degrade-to-import-level on compiler error.
+- Honest coverage: 0 cross-file edges here is **codebase reality** — a resolution probe showed 545/616 calls go to framework packages, 56 to src (all intra-file); this demo app has no src→src cross-file calls. Documented in the graph `note`.
+- MCP server: new **`who_calls(symbol)`** tool (9 tools total) over `symbolBlastRadius`; `artifacts.ts` GraphSchema extended with optional symbol fields. Re-probed: 9 tools, `who_calls` correctly flags the ambiguous `updatePasswordHash`. ESM+DTS green (fixed a `noUncheckedIndexedAccess` strict-null on `matches[0]`).
+
+**CLAUDE.md — self-maintenance + backfill made explicit (the user's ask):**
+- Rule 12: the pre-commit hook now listed as regenerating ALL artifacts (`ai:index`/`capabilities`/`project-index`/`decisions`/`runbooks`/`graph` + `ai:lint`); added `npm run ai:graph` to the in-session autonomous-regen trigger; added the line "keeping the indexes, decision memory, runbooks, and graph current is YOUR job".
+- Session-start sequence: step 6 now includes `docs/ai-graph.json` (or query via `@luckystack/mcp`); new **step 7 = memory-coverage check** — if the decision memory is empty OR doesn't cover an already-substantial codebase, proactively tell the user + offer to backfill from history. Decision Memory Protocol §8 (+ the CLAUDE.md bullet) broadened from "empty" to "empty OR incomplete coverage".
+
+**Verified:** `lint:all` + `lint:packages` 0 · `@luckystack/mcp` ESM+DTS green · graph deterministic (2nd run byte-identical) · `ai:decisions` 6 ADRs · `ai:graph` 118 symbols/25 call-edges · re-bundled framework-docs 5/5 · MCP 9-tool probe green.
+
+**Files (new):** `docs/decisions/0006-*`. **(edited):** `scripts/generateGraph.mjs` (+template mirror), `packages/mcp/src/{index.ts,artifacts.ts}`, `CLAUDE.md`, `docs/DECISION_MEMORY_PROTOCOL.md`, `.mcp.json` (framework repo — added the `luckystack` server entry pointing at local `packages/mcp/dist/index.js`, so the AI in THIS repo can query the tools now without waiting on a published `npx @luckystack/mcp`; boots + answers `god_nodes`).
+
+**Delivery verification:** the full stack reaches BOTH (a) this repo (generators + `.githooks/pre-commit` runs all 6 + ai:lint, docs, `.mcp.json` local-dist entry) AND (b) any consumer scaffolded with AI accepted (framework-docs copy, `template/scripts` 4 generators + linter, template ai:* npm scripts, `AI_INDEX_HOOK` runs ai:lint+capabilities+project-index+decisions+runbooks+graph, `template/docs/decisions/0000-template.md`, `template/luckystack.invariants.json`, `.mcp.json` `luckystack` entry gated on `aiInstructions`). **Caveat:** consumers' MCP entry uses `npx @luckystack/mcp@latest` → only resolves once 0.2.0 is PUBLISHED; the generators/memory/graph/linter work immediately (local scripts), only the MCP query-server waits on publish.
+
+**Next:** Wave 4 (RAG) gated (ADR 0003). Optional: symbol-level cross-file edges will populate on real apps; consider moving `ai:graph` out of pre-commit to CI if the ~4.5s TS pass slows commits.
+
+## 2026-06-11 — Workspaces: consolidated drop-in build-handoff package + new-ideas round
+
+**User prompt (summary)**: Trek het Workspaces-project los van deze repo in een self-contained drop-in folder (hele frontend + alle build-context). Ga daarna in interview-modus en kom met NIEUWE ideeën (user had eigen ideeën al in de docs verwerkt); stipt elke toevoeging volledig uit.
+
+**What I did**:
+- Created `workspaces-handoff/` — a drop-in build-handoff package: portable TSX app (`src/workspaces/` minus `_docs`), the authoritative `_docs` set (newest-wins; `handoff/`+`sparring/` left untouched), `server/hooks/workspacesTerminal.ts`, top-level `README.md`.
+- 5-agent parallel digest of the full corpus → "already-decided" map + genuine white space. Interview (AskUserQuestion rounds) locked **16 new additions + 4 Tier-2 hardening buckets**.
+- Wrote **16 build-ready addition specs** (3,121 lines) via 16 parallel writers — all honor B-23 / frozen-verbs / runInTenant / PTY-billing; each *proposes* its schema/op deltas rather than inventing.
+- Wrote `_docs/additions/` synthesis: `00_INDEX.md`, `00_DECISIONS_LEDGER.md` (decisions + aggregated deltas §5), `00_TIER2_HARDENING.md` (~17 fixes).
+- Wired the additions into the COPIED `BUILD_HANDOFF.md` (§1c) + `V1_SCOPE.md` (§0b); originals in `src/workspaces/` untouched.
+
+**Files touched**: `workspaces-handoff/**` (NEW: README + 19 `additions/` docs + copied app/docs/backend; EDITED copies of `BUILD_HANDOFF.md`, `V1_SCOPE.md`). No files outside `workspaces-handoff/` changed except this log.
+
+**Notes / decisions**:
+- V1 additions: 1,2,4,5,6,7,8,9,10,13,15,16. HORIZON: 3,11,12,14. Keystone = **#9 per-stage commit** (commit-internally → squash-on-push, preserves push-on-approval flow).
+- Open items flagged for user: (1) QuestionSet-answer write path (control-API vs `ws-ai:reply` socket inconsistency); (2) #1 intake co-pilot spends a subscription turn per ticket creation — offline fallback is a `DEFAULT`.
+- `workspaces-handoff/` is a handoff artifact, not wired into the build/routing (lives outside repo `src/`). Not committed (awaiting user).
+- **Cleanup pass (same day):** salvaged the brand/design provenance that lived only in `handoff/designs/` (3 logo SVGs + `DESIGN_TOKENS.md` + `colors_and_type.css` + `SCREEN_INVENTORY.md` + `CLAUDE_DESIGN_FEATURE_COMPLETION.md`) into `workspaces-handoff/src/workspaces/_docs/design-reference/`; documented the ported hook in `workspaces-handoff/server/README.md`; then **deleted `src/workspaces/`, `handoff/`, `sparring/`** (2.7 MB) at the user's explicit request (overriding the standing keep-rule). DEFERRED: removing the now-unused `server/hooks/workspacesTerminal.ts` + its `server/server.ts:32` registration (held off — concurrent test agents are exercising the server). Did NOT run lint/build (concurrent agents using it; the deleted frontend had no external imports → build-safe; user runs lint+build once agents finish).
+- **Final cleanup (same day, user OK'd):** removed the dev terminal hook `server/hooks/workspacesTerminal.ts` + its import/call in `server/server.ts` (preserved + documented in the package); removed the now-dead `src/workspaces/**` eslint override block; **moved `ui-builder/` (9.1 MB, the Lane-D Monaco reference) into `workspaces-handoff/ui-builder/`** (excl. node_modules/dist) so the package is self-contained per its own PORT_MANIFEST. Added a global eslint ignore for `workspaces-handoff/**` and a minimal note in root `SESSION_STATE.md` (only the workspaces line — other AIs' summaries untouched). **Net: ALL workspaces code/docs/prototypes now live ONLY in `workspaces-handoff/`; nothing workspaces-related remains elsewhere in the repo except historical branch-log entries + the `review/v0.2.0/SECURITY.md` SEC-31 finding (now MOOT — the flagged RCE hook is gone).** `workspaces-handoff/` to be removed from this repo later; ignore it in scans meanwhile.
+
+## 2026-06-11 — v0.2.0 dead-knob features: build + test 4 of 5 (forwarded, sync validation, email template fallback, providerAccountStrategy)
+
+**User prompt (summary)**: From the five-axis review (`review/v0.2.0/`), BUILD + thoroughly test all five documented-but-dead config knobs instead of stripping them: providerAccountStrategy, per-sync validation, wizard answers, ErrorTrackerEvent.forwarded, email built-in template fallback. Free to write; stay on this branch.
+
+**What I did** (4 of 5 — see Next for #5):
+
+- **ErrorTrackerEvent.forwarded (QUA-072) + transformed-payload (SEC-05)** — `packages/error-tracking/src/adapters/runBeforeSend.ts` rewritten into `resolveExceptionEvent`/`resolveMessageEvent`: now honor `forwarded:false` (drop) AND forward the hook's RETURNED (possibly redacted) payload, not the original. All 3 adapters (sentry/datadog/posthog) updated to forward the resolved payload. Docs (`adapter-pattern.md`, `auto-instrumentation.md`) fixed to teach immutable redaction. Tests: `runBeforeSend.test.ts` (resolver) + `beforeSendForwarding.test.ts` (PostHog e2e via node:module mock).
+- **Per-sync `validation` (QUA-044 + QUA-013)** — new `packages/sync/src/_shared/validationMode.ts` (`resolveSyncValidationMode`, mirrors the API stage); both `handleSyncRequest`/`handleHttpSyncRequest` now skip input validation on `'relaxed'`/`{input:'skip'}`. Devkit dev-loader (`loader.ts`, both server-entry sites) now forwards `validation` + `errorFormatter` so dev matches the prod generator. Doc: `server-vs-client-handlers.md`. Test: `validationMode.test.ts`.
+- **Email built-in template fallback (QUA-067 + CFG-05)** — new `packages/email/src/builtInTemplates.ts` ships `password-reset` + `email-change` built-ins; `sendEmail` resolution now `getEmailTemplate ?? getBuiltInEmailTemplate`. `@luckystack/login` `forgotPassword`/`emailChangeNotification` now dispatch via `sendEmail({ template, data })` so `registerEmailTemplate` override is reachable (no fork for i18n/rebrand). Exports + docs (`templates.md`, `templates.ts` comment) updated. Tests: `builtInTemplates.test.ts` + `sendEmailTemplateResolution.test.ts`.
+- **providerAccountStrategy: 'unified' (CFG-04)** — `UserAdapter` gains optional `findByEmailAnyProvider` (default Prisma adapter implements it); new `packages/login/src/accountStrategy.ts` (`resolveUserByEmail`) applies the strategy; the 3 lookup sites in `login.ts` (register dedupe, credentials login, OAuth find-or-create) route through it so `'unified'` links one User per email across providers. Warns once + falls back if a custom adapter lacks the method. Migration documented in login `README.md` ("Account strategy"). `projectConfig.ts` doc comment aligned. Test: `accountStrategy.test.ts`.
+
+**Verified**: `lint:packages` 0 · `build:packages` 16/16 · `test:unit` **818/818** (was 782; +36 new).
+
+**Files touched**: error-tracking (`adapters/runBeforeSend.ts`, `adapters/{sentry,datadog,posthog}.ts`, 2 new test files, 2 docs); sync (`_shared/validationMode.ts` NEW + test, `handleSyncRequest.ts`, `handleHttpSyncRequest.ts`, `docs/server-vs-client-handlers.md`); devkit (`loader.ts`); email (`builtInTemplates.ts` NEW + 2 test files, `sendEmail.ts`, `templates.ts`, `index.ts`, `docs/templates.md`); login (`accountStrategy.ts` NEW + test, `userAdapter.ts`, `login.ts`, `forgotPassword.ts`, `emailChangeNotification.ts`, `README.md`); core (`projectConfig.ts` doc comment).
+
+**Next**: Feature #5 — wizard answers honored in `create-luckystack-app` (QUA-005), specifically `authMode: 'none'` (drop @luckystack/login dep + auth pages + `credentials:false`) and `i18n: false` (prune locales/providers). NOT done this pass: it is high-blast-radius file-deletion in the scaffolder with no test harness, and "thoroughly tested" needs a scaffold→install→build verification loop (ideally CFG-01's non-interactive flags first so authMode is reachable by CI). Flagged to user for scope/sequencing decision. Email/monitoring/oauth provider choices already take effect via their env-block + dep-injection paths (only the literal `{{…}}` placeholder was unused).
+
+## 2026-06-11 — CFG-01: every scaffold option selectable via CLI flags + wizard pre-seed (feature 3, part 1)
+
+**User prompt (summary)**: "voor de wizard flow/cli flow dat alle opties werkend zoals de user ze kiest" — make every create-luckystack-app option actually take effect as the user chooses, via both wizard and CLI.
+
+**What I did (CFG-01)** — `packages/create-luckystack-app/src/index.ts`:
+- Added a CLI value-flag for every wizard choice: `--db`, `--auth`, `--oauth=<comma list>`, `--email`, `--monitoring`, `--i18n`/`--no-i18n`, `--ai-docs`/`--no-ai-docs` (plus existing `--no-presence`, `--ai-browser=`). Each validates against `PROVIDER_OPTIONS` (exit 2 on bad value, like `--ai-browser`). `parseValueFlag` helper.
+- Flags PRE-FILL the matching wizard step (which is then skipped) when prompting, and apply over DEFAULT_CHOICES under `--no-prompt`. `runWizard`/`runPrompts`/`runPromptsFallback` now take a presets bag; the fallback was refactored to build the same answer-bag and funnel through `convertAnswersToChoices` (one validation/normalization seam). `runWizard` resolves immediately when every step is preset (no empty raw-mode prompt). `buildPresetAnswers` / `buildNoPromptChoices` / `normalizeChoices` added; help banner + examples updated.
+- Tests: extended `index.test.ts` (now 68) — new cases for `--db/--auth/--email/--monitoring`, `--oauth` list parse + per-entry validation + empty list, `--i18n/--no-i18n/--ai-docs/--no-ai-docs`, and exit-2 on bad choice values; existing full-shape assertions updated for the new (null-defaulted) fields.
+
+**Verified**: `build:packages` (create-luckystack-app) green · lint 0 · `index.test.ts` 68/68.
+
+**Status of each scaffold option now**: db ✓, presence ✓, email ✓, monitoring ✓ (env + boot auto-wire), oauth ✓ (env + auto-wire), ai-docs ✓, ai-browser ✓, authMode `credentials`/`credentials+oauth` ✓ — all selectable via wizard + flag. **Still NOT taking effect: `authMode: 'none'` and `i18n: false`** — these require invasive, choice-GATED template surgery (auth: drop @luckystack/login dep → cascade through functions/session.ts, SessionProvider, main.tsx, useSession consumers, page.tsx/dashboard redirects, delete login/register/reset-password/settings dirs + auth APIs; i18n: drop nl/de/fr locales + reduce locales.ts + remove the language picker which is entangled with settings/page.tsx's save flow). Both are gated on a non-default choice, so an imperfect prune can NEVER affect default scaffolds.
+
+**Verification path confirmed available**: `.smoke-test/run.mjs` (packs tarballs → scaffolds → file: deps → install → generateArtifacts → typecheck → build → lint); npm registry reachable. Plan for the two transforms: implement the choice-gated prunes, add `auth-none` + `no-i18n` combos to the smoke matrix, iterate to green.
+
+**Files touched**: `packages/create-luckystack-app/src/index.ts`, `packages/create-luckystack-app/src/index.test.ts`.
+
+**Next**: implement the `authMode:'none'` (full removal) + `i18n:false` template prunes with smoke verification.
+
+### addendum — `i18n: false` now implemented + verified (same prompt)
+
+- **i18n=false** is now a working choice-gated prune in `pruneOptionalPackages` (`packages/create-luckystack-app/src/index.ts`): drops `src/_locales/{nl,de,fr}.json`, reduces `luckystack/i18n/locales.ts` to `en` only, and collapses `src/settings/page.tsx` `LANGUAGES` to `['en']`. Interpretation = single-language (English) scaffold: the translator layer stays (it's in `@luckystack/core` and backs every `translate()`), so all components keep compiling; only the extra languages + the multi-language switcher options are removed. Added `removeScaffoldPath` helper (recursive rm). `editScaffoldFile` is a no-op when a target file was already removed (so the order with the future auth prune is safe).
+- **Verified**: local scaffold `--no-prompt --no-i18n` ran clean (no token-drift throw); only `en.json` remains, `locales.ts` is en-only, `LANGUAGES = ['en']`. Added a `no-i18n` combo to `.smoke-test/run.mjs` so the pre-publish gate typechecks/builds/lints it.
+- **Still TODO: `authMode: 'none'` full removal** — the one remaining genuinely-dead option. It is the largest single transform (cascade: drop @luckystack/login dep → `functions/session.ts` re-export → SessionProvider → main.tsx provider mount + OAuth handoff → useSession consumers (TemplateProvider/Home) → root `page.tsx` + `dashboard` session-redirects → socketInitializer logout → delete login/register/reset-password/settings dirs + `_api/{logout,session}_v1` + LoginForm + config.ts auth block). Must produce a COMPILING auth-less app, so it needs the `.smoke-test` build loop to iterate against. Gated on a non-default choice, so it can never affect default scaffolds. Mapped in full; to be implemented as the focused next step.
+
+### Session (2026-06-11, part 13): decision-memory backfill gains an interview-the-user mode
+
+**User:** for backfilling history the AI should also ASK the user — offer a one-time interview ("heb je even tijd om mijn vragen over de bestaande codebase te beantwoorden? eenmalig, verbetert toekomstige changes drastisch") since most rationale was never written down.
+
+**Changed (docs/behavior only, no code):**
+- `docs/DECISION_MEMORY_PROTOCOL.md` §8 split into **§8a Mine what's written down** (git log / branch-logs / ~/.claude) and **§8b Interview the user** — the richest source. §8b spells out how to run it well: prep first (scan code+git+graph to find the big UNDOCUMENTED decisions), ask targeted per-feature questions in small batches ("why X instead of the usual Y? what did you rule out?"), it's resumable, record each confirmed answer as an ADR in the user's words, never fabricate (unconfirmed → `status: proposed`).
+- `CLAUDE.md`: the Decision Memory Protocol backfill bullet + session-start step 7 now both name the interview offer alongside history-mining.
+- Re-bundled `framework-docs` (interview text confirmed in the consumer CLAUDE.md + protocol copies); `ai:index` refreshed.
+
+**Net:** on an existing codebase with thin decision memory, the AI offers to backfill from BOTH the written history AND a one-time human interview — so the "why" that only lives in the author's head gets captured once and inherited by every future session.
+
+### addendum — `authMode:'none'` now implemented + SMOKE GREEN (feature 3 complete)
+
+- **authMode='none'** is now a working choice-gated prune in `pruneOptionalPackages` (`packages/create-luckystack-app/src/index.ts`): drops the direct `@luckystack/login` dep; removes `src/{login,register,reset-password,settings}` + `src/_components/LoginForm.tsx` + `functions/session.ts` + `server/hooks/notifications.ts`; rewires `src/page.tsx` (root → `/dashboard`, no login bounce), `src/dashboard/page.tsx` (drops the logged-out→/login guard → public), `src/_components/templates/Home.tsx` (drops the settings/sign-out links + now-unused translator), `config.ts` (`credentials:false`, `forgotPassword:'disabled'`), and `luckystack/server/index.ts` (strips the `registerNotificationHooks()` + example `postLogin` logger → minimal placeholder). The framework's anonymous session plumbing (`_api/session_v1` + `SessionProvider`/`useSession`) is KEPT so everything compiles; @luckystack/login stays available transitively for framework internals.
+- **Two compile fixes found + fixed via the smoke loop**: (1) no-i18n — `settings/page.tsx` `newLanguage` state re-seeded to `'en'` (the `session.language` union didn't narrow to the single `'en'` Language); (2) auth-none — dropping @luckystack/login removed the `postLogin` hook-payload augmentation, so the overlay + notifications hook (and a cascading no-unsafe-assignment lint error) had to be stripped.
+- **VERIFIED — full `.smoke-test/run.mjs` matrix GREEN** (4 combos: full, no-presence, no-i18n, auth-none) — each: pack 14 tarballs → file: deps → `npm install` → `prisma generate` → `generateArtifacts` → `typecheck` (0 TS) → `build` → `lint` (0 errors/0 warnings). `full`/`no-presence` green confirms the earlier framework-package changes (4 dead-knob features) don't regress a scaffold.
+
+**Feature 3 (wizard answers, QUA-005) is COMPLETE.** Every create-luckystack-app option now (a) has a CLI flag (CFG-01) and (b) actually takes effect: db/presence/email/monitoring/oauth/ai-docs/ai-browser + authMode (none/credentials/credentials+oauth) + i18n (on/off). All five v0.2.0 dead-knob features from `review/v0.2.0/` are now built + tested.
+
+**Files touched (this part)**: `packages/create-luckystack-app/src/index.ts` (authMode + i18n prunes), `.smoke-test/run.mjs` (no-i18n + auth-none combos).
+
+### Session (2026-06-11, part 14): intent layer + ownership/coverage in the index + sharding toggle + 3 contract rules
+
+**User:** add an intent/product layer (kept current + backfilled on upload, like decisions); add ownership (also from day 1 on solo projects); prioritize tests + flag untested code; and asked WHERE the per-folder-vs-single-file toggle lives.
+
+**Sharding toggle — `luckystack.ai.json`** (mirrors `luckystack.invariants.json`): `docs.sharding` = `auto` (default; single file until a top-folder > `shardThreshold`) | `single` | `per-folder`. The graph + MCP server are unaffected (queried, not read whole). Template-mirrored.
+
+**Intent layer (new):**
+- `docs/PRODUCT.md` (AI-maintained app-level plain-language: what/for-whom/key-areas/glossary) + a `//? intent: <text>` convention atop each `page.tsx` + `scripts/generateProductOverview.mjs` → `docs/AI_PRODUCT_OVERVIEW.md`. **Folder-aware + sharding-toggle-aware** (verified both ways: single file ↔ 8 per-area shards in `docs/ai-product/`, stale shard dir auto-cleaned). `ai:product` script + pre-commit + scaffold `AI_INDEX_HOOK` + template mirror + a consumer `template/docs/PRODUCT.md` stub.
+
+**Ownership + coverage folded into `AI_PROJECT_INDEX.md`** (not new files): per-route **Tested** column (sibling `.tests.ts` present) + an **Ownership & coverage** section (routes per `@docs owner`, tested/total, untested list). Git authorship deliberately NOT shelled-out (slow/noisy in pre-commit); `@docs owner` is the AI-maintained primary signal.
+
+**CLAUDE.md (3 rules + wiring):** 15a (maintain `PRODUCT.md` + page `intent:` lines; backfill on existing repo like decisions, incl. interview); 15b (set `@docs owner` from day 1); a Testing-section rule (prioritize tests after new work + flag untested existing routes, don't bulk-add unasked). Added `ai:product` to the Rule-12 regen list, `AI_PRODUCT_OVERVIEW.md`/`PRODUCT.md`/`luckystack.ai.json` to the doc-reference table + session-start step 6, and `who_calls` to the MCP-tools mention. AI_BOOST_OVERVIEW: product row + `ai:product` regen cmd.
+
+**Recommendation given on the per-folder question:** NOT blanket-now; folder-aware generators with a threshold (default single), thin root + per-folder detail at scale, MCP carries the load. Schrapped earlier (user feedback): runtime-layer (already covered by error-tracking + logger registry) + hotspots (redundant with branch-logs).
+
+**Verified:** `ai:lint` clean on staged diff · `ai:product` + `ai:project-index` deterministic (consecutive-run diff identical) · sharding toggle both directions · scaffold `eslint` 0 + build + 68/68 tests · framework-docs re-bundled 5/5 · `ai:index` 17 pkgs / 7 cmds / 18 skills.
+
+**Files (new):** `luckystack.ai.json`, `scripts/generateProductOverview.mjs`, `docs/PRODUCT.md`, `docs/AI_PRODUCT_OVERVIEW.md`, `packages/create-luckystack-app/template/{docs/PRODUCT.md,luckystack.ai.json}` (+ generator mirror). **(edited):** `scripts/generateProjectIndex.mjs` (+template mirror, Tested + ownership), root+template `package.json` (`ai:product`), `.githooks/pre-commit`, scaffold `index.ts` (hook), `CLAUDE.md`, `docs/AI_BOOST_OVERVIEW.md`.
+
+**Next (parked):** RAG (ADR 0003); the larger-scale layers (cross-service graph, multi-agent coordination, eval-harness) only when the project reaches that scale — most solved by the per-folder/threshold approach now designed-in.

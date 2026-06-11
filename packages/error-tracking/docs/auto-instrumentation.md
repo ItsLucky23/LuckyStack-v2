@@ -187,13 +187,13 @@ import {
 } from '@luckystack/error-tracking';
 
 const stripSecrets = (event) => {
-  const ctx = (event.payload.context as Record<string, unknown> | undefined) ?? null;
-  if (ctx) {
-    delete ctx.password;
-    delete ctx.token;
-    delete ctx.sessionToken;
-  }
-  return event;
+  const ctx = event.payload.context as Record<string, unknown> | null;
+  if (!ctx) return event;
+  // Return an IMMUTABLE copy — the adapter forwards the returned payload, and a
+  // copy avoids leaking the mutation into the next adapter in the fan-out chain
+  // (every adapter receives the same `context` object reference).
+  const { password, token, sessionToken, ...safe } = ctx;
+  return { ...event, payload: { ...event.payload, context: safe } };
 };
 
 registerErrorTrackers([
@@ -201,6 +201,10 @@ registerErrorTrackers([
   createDatadogAdapter({ tracer, statsd, beforeSend: stripSecrets }),
 ]);
 ```
+
+> The adapters honour both the `forwarded` flag (return `{ ...event, forwarded: false }`
+> to drop) and a transformed `payload` (the redaction above) — they forward the
+> RETURNED event, never the original arguments.
 
 For BREADCRUMB key redaction (Sentry breadcrumb payloads from API/sync
 context logging), use `registerRedactedLogKeys(['password', 'token', ...])`

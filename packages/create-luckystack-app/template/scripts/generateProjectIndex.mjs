@@ -249,6 +249,7 @@ const scanApiRoutes = async () => {
       owner: meta.owner,
       tags: meta.tags,
       deprecated: meta.deprecated,
+      tested: await fileExists(abs.replace(/\.ts$/, ".tests.ts")),
       summary: extractFileSummary(src),
       imports: extractImports(src),
     });
@@ -279,6 +280,7 @@ const scanSyncRoutes = async () => {
         owner: null,
         tags: [],
         deprecated: null,
+        tested: false,
         summary: null,
         imports: [],
       });
@@ -291,6 +293,7 @@ const scanSyncRoutes = async () => {
       row.owner = meta.owner;
       row.tags = meta.tags;
       row.deprecated = meta.deprecated;
+      row.tested = await fileExists(abs.replace(/\.ts$/, ".tests.ts"));
       row.summary = extractFileSummary(src);
     } else {
       row.clientFile = rel;
@@ -424,13 +427,14 @@ const renderTable = (header, rows) => {
 
 const renderApiRoutes = (rows) =>
   renderTable(
-    ["Path", "Method", "Auth", "Rate limit", "Owner", "Tags", "Summary"],
+    ["Path", "Method", "Auth", "Rate limit", "Owner", "Tested", "Tags", "Summary"],
     rows.map((r) => [
       `\`api/${r.route}\``,
       r.method,
       r.auth,
       r.rateLimit,
       r.owner ?? "—",
+      r.tested ? "yes" : "**no**",
       r.tags.length ? r.tags.join(", ") : "—",
       (r.deprecated ? "**deprecated** — " : "") + (r.summary ?? "—"),
     ]),
@@ -438,13 +442,14 @@ const renderApiRoutes = (rows) =>
 
 const renderSyncRoutes = (rows) =>
   renderTable(
-    ["Path", "Server", "Client", "Auth", "Owner", "Tags", "Summary"],
+    ["Path", "Server", "Client", "Auth", "Owner", "Tested", "Tags", "Summary"],
     rows.map((r) => [
       `\`sync/${r.route}\``,
       r.serverFile ? "yes" : "—",
       r.clientFile ? "yes" : "—",
       r.auth,
       r.owner ?? "—",
+      r.tested ? "yes" : "**no**",
       r.tags.length ? r.tags.join(", ") : "—",
       (r.deprecated ? "**deprecated** — " : "") + (r.summary ?? "—"),
     ]),
@@ -497,6 +502,43 @@ const renderUnused = (lookup, label) => {
 // Document assembly
 // ---------------------------------------------------------------------------
 
+// Ownership (from @docs owner tags) + test-coverage summary over all routes.
+// Git authorship is intentionally NOT shelled-out here (one `git log` per file
+// is slow + noisy in pre-commit); @docs owner is the primary, AI-maintained
+// signal (CLAUDE.md Rule 15b). The "Owner" column already shows per-route owner.
+const renderOwnershipAndCoverage = (routes) => {
+  // `method` exists on API rows, `serverFile` on sync rows — use it to label kind.
+  const kindOf = (r) => ("serverFile" in r ? "sync" : "api");
+  const out = [];
+
+  // Ownership: count routes per @docs owner.
+  const counts = new Map();
+  for (const r of routes) {
+    const owner = r.owner ?? "(unowned)";
+    counts.set(owner, (counts.get(owner) ?? 0) + 1);
+  }
+  const ownerRows = [...counts.entries()]
+    .sort((a, b) => (a[0] === "(unowned)" ? 1 : b[0] === "(unowned)" ? -1 : a[0].localeCompare(b[0])))
+    .map(([owner, n]) => [owner === "(unowned)" ? "_(unowned)_" : `\`${owner}\``, String(n)]);
+  out.push("**By owner** (from `@docs owner` tags — set them from day one, Rule 15b):");
+  out.push("");
+  out.push(renderTable(["Owner", "Routes"], ownerRows));
+  out.push("");
+
+  // Coverage: routes with a sibling per-route `.tests.ts`.
+  const untested = routes.filter((r) => !r.tested);
+  const total = routes.length;
+  out.push(`**Test coverage**: ${total - untested.length}/${total} routes have a per-route \`.tests.ts\`.`);
+  if (untested.length > 0) {
+    out.push("");
+    out.push("_Untested routes — flag these to the user (Prioritize-tests rule), don't bulk-add unasked:_");
+    out.push("");
+    for (const r of untested.slice(0, 50)) out.push(`- \`${kindOf(r)}/${r.route}\``);
+    if (untested.length > 50) out.push(`- … +${untested.length - 50} more`);
+  }
+  return out.join("\n");
+};
+
 const buildDocument = (data) => {
   const parts = [];
   parts.push("# Project Index");
@@ -515,6 +557,10 @@ const buildDocument = (data) => {
   parts.push(`## Sync routes (${data.syncRoutes.length})`);
   parts.push("");
   parts.push(renderSyncRoutes(data.syncRoutes));
+  parts.push("");
+  parts.push("## Ownership & coverage");
+  parts.push("");
+  parts.push(renderOwnershipAndCoverage([...data.apiRoutes, ...data.syncRoutes]));
   parts.push("");
   parts.push(`## Pages (${data.pages.length})`);
   parts.push("");

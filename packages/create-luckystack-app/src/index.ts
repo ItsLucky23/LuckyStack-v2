@@ -39,14 +39,46 @@ export interface CliArgs {
   noPresence: boolean;
   /** `--ai-browser=<all|agent-browser|none>`: AI browser-testing tooling (null = unspecified → DEFAULT_CHOICES). */
   aiBrowserTooling: AiBrowserTooling | null;
+  //? CFG-01 — every wizard choice now has a matching CLI flag so the scaffold is
+  //? fully scriptable (CI / AI / `--no-prompt`). `null` = flag not passed → the
+  //? wizard asks (interactive) or the default applies (`--no-prompt`).
+  dbProvider: DbProvider | null;
+  authMode: AuthMode | null;
+  /** From `--oauth=google,github,...`. `null` = not passed. Only used when authMode resolves to `credentials+oauth`. */
+  oauthProviders: OAuthProvider[] | null;
+  emailProvider: EmailProvider | null;
+  monitoringProvider: MonitoringProvider | null;
+  /** `--i18n` / `--no-i18n`. `null` = not passed. */
+  i18n: boolean | null;
+  /** `--no-ai-docs` (off) / `--ai-docs` (on). `null` = not passed. */
+  aiInstructions: boolean | null;
 }
 
 //? Single source of truth for recognised flag tokens. Used both by the
 //? parser (to reject unknown flags) and the help banner (so the list stays
-//? in sync with what `parseArgs` actually accepts). `--ai-browser` is a
-//? value flag (`--ai-browser=<all|agent-browser|none>`) parsed in the
-//? default arm; it's listed here only for the help/error banner.
-export const VALID_FLAGS = ['--no-install', '--no-prompt', '--no-presence', '--ai-browser=<all|agent-browser|none>', '--help', '-h'] as const;
+//? in sync with what `parseArgs` actually accepts). The `--key=value` flags
+//? are parsed in the default arm; they're listed here for the help/error banner.
+export const VALID_FLAGS = [
+  '--no-install', '--no-prompt',
+  '--db=<mongodb|postgresql|mysql|sqlite>',
+  '--auth=<none|credentials|credentials+oauth>',
+  '--oauth=<google,github,discord,facebook,microsoft>',
+  '--email=<none|console|resend|smtp>',
+  '--monitoring=<none|sentry|datadog|posthog>',
+  '--no-presence', '--i18n', '--no-i18n', '--ai-docs', '--no-ai-docs',
+  '--ai-browser=<all|agent-browser|none>',
+  '--help', '-h',
+] as const;
+
+//? Validate a `--key=value` flag's value against its canonical option list,
+//? exiting 2 (the conventional invalid-argument code) on a bad value — same
+//? convention as `--ai-browser`. Returns the validated value typed to the list.
+const parseValueFlag = <T extends string>(flag: string, value: string, options: readonly T[]): T => {
+  if ((options as readonly string[]).includes(value)) return value as T;
+  console.error(`Invalid ${flag} value: ${value}`);
+  console.error(`Valid values: ${options.join(', ')}`);
+  process.exit(2);
+};
 
 export const parseArgs = (argv: string[]): CliArgs => {
   let projectName = '';
@@ -55,6 +87,13 @@ export const parseArgs = (argv: string[]): CliArgs => {
   let help = false;
   let noPresence = false;
   let aiBrowserTooling: AiBrowserTooling | null = null;
+  let dbProvider: DbProvider | null = null;
+  let authMode: AuthMode | null = null;
+  let oauthProviders: OAuthProvider[] | null = null;
+  let emailProvider: EmailProvider | null = null;
+  let monitoringProvider: MonitoringProvider | null = null;
+  let i18n: boolean | null = null;
+  let aiInstructions: boolean | null = null;
   for (const arg of argv) {
     switch (arg) {
     case '--no-install': {
@@ -69,23 +108,42 @@ export const parseArgs = (argv: string[]): CliArgs => {
     noPresence = true;
     break;
     }
+    case '--i18n': {
+    i18n = true;
+    break;
+    }
+    case '--no-i18n': {
+    i18n = false;
+    break;
+    }
+    case '--ai-docs': {
+    aiInstructions = true;
+    break;
+    }
+    case '--no-ai-docs': {
+    aiInstructions = false;
+    break;
+    }
     case '--help':
     case '-h': {
     help = true;
     break;
     }
     default: { if (arg.startsWith('--ai-browser=')) {
-      //? Value flag — `--ai-browser=<all|agent-browser|none>`. Validate
-      //? against the canonical option list; exit 2 on a bad value (matches
-      //? the unknown-flag convention below).
-      const value = arg.slice('--ai-browser='.length);
-      if ((PROVIDER_OPTIONS.aiBrowserTooling as readonly string[]).includes(value)) {
-        aiBrowserTooling = value as AiBrowserTooling;
-      } else {
-        console.error(`Invalid --ai-browser value: ${value}`);
-        console.error(`Valid values: ${PROVIDER_OPTIONS.aiBrowserTooling.join(', ')}`);
-        process.exit(2);
-      }
+      aiBrowserTooling = parseValueFlag('--ai-browser', arg.slice('--ai-browser='.length), PROVIDER_OPTIONS.aiBrowserTooling);
+    } else if (arg.startsWith('--db=')) {
+      dbProvider = parseValueFlag('--db', arg.slice('--db='.length), PROVIDER_OPTIONS.dbProvider);
+    } else if (arg.startsWith('--auth=')) {
+      authMode = parseValueFlag('--auth', arg.slice('--auth='.length), PROVIDER_OPTIONS.authMode);
+    } else if (arg.startsWith('--email=')) {
+      emailProvider = parseValueFlag('--email', arg.slice('--email='.length), PROVIDER_OPTIONS.emailProvider);
+    } else if (arg.startsWith('--monitoring=')) {
+      monitoringProvider = parseValueFlag('--monitoring', arg.slice('--monitoring='.length), PROVIDER_OPTIONS.monitoringProvider);
+    } else if (arg.startsWith('--oauth=')) {
+      //? Comma-separated list; each entry validated against the provider list
+      //? (exit 2 on any bad entry). Empty (`--oauth=`) yields an empty list.
+      const raw = arg.slice('--oauth='.length).split(',').map((p) => p.trim()).filter(Boolean);
+      oauthProviders = raw.map((entry) => parseValueFlag('--oauth', entry, PROVIDER_OPTIONS.oauthProviders));
     } else if (arg.startsWith('-')) {
       //? Fail-fast on unknown flags. Silently ignoring them previously
       //? meant a typo like `--ni-install` would be swallowed and the
@@ -101,7 +159,10 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
     }
   }
-  return { projectName, install, prompt, help, noPresence, aiBrowserTooling };
+  return {
+    projectName, install, prompt, help, noPresence, aiBrowserTooling,
+    dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n, aiInstructions,
+  };
 };
 
 //? Single source of truth for the selectable provider lists. The wizard, the
@@ -223,60 +284,59 @@ const askYesNo = async (rl: readline.Interface, label: string, defaultValue: boo
 //? Non-interactive fallback (pipes / CI / no-TTY): the numbered-prompt flow.
 //? Used automatically when stdin/stdout isn't a terminal, so the arrow-key
 //? wizard below never breaks an automated run.
-const runPromptsFallback = async (): Promise<ScaffoldChoices> => {
+const runPromptsFallback = async (
+  presets: Record<string, string | string[]> = {},
+): Promise<ScaffoldChoices> => {
   const rl = readline.createInterface({ input, output });
+  //? Gather into the same answer-bag the wizard produces, then funnel through
+  //? `convertAnswersToChoices` so the two prompt paths share one validation +
+  //? normalization seam. CLI-flag presets (CFG-01) pre-fill the bag; we only
+  //? prompt for keys that weren't supplied on the command line.
+  const answers: Record<string, string | string[]> = { ...presets };
+  const need = (key: string): boolean => !(key in presets);
   try {
-    const dbProvider = await pickFromList(
-      rl,
-      'Which database provider do you want to use?',
-      PROVIDER_OPTIONS.dbProvider,
-      'mongodb',
-    );
-    const authMode = await pickFromList(
-      rl,
-      'Authentication mode?',
-      PROVIDER_OPTIONS.authMode,
-      'credentials',
-    );
-    let oauthProviders: ScaffoldChoices['oauthProviders'] = [];
-    if (authMode === 'credentials+oauth') {
-      oauthProviders = await pickMulti(
-        rl,
-        'Which OAuth providers to wire?',
-        PROVIDER_OPTIONS.oauthProviders,
-      );
+    if (need('dbProvider')) {
+      answers.dbProvider = await pickFromList(rl, 'Which database provider do you want to use?', PROVIDER_OPTIONS.dbProvider, 'mongodb');
     }
-    const emailProvider = await pickFromList(
-      rl,
-      'Transactional email adapter?',
-      PROVIDER_OPTIONS.emailProvider,
-      'console',
-    );
-    const monitoringProvider = await pickFromList(
-      rl,
-      'Observability backend?',
-      PROVIDER_OPTIONS.monitoringProvider,
-      'none',
-    );
-    const presence = await askYesNo(rl, 'Install @luckystack/presence (AFK / presence / socket-status)?', true);
-    const i18n = await askYesNo(rl, 'Enable i18n (translations + locale switching)?', true);
-    const aiInstructions = await askYesNo(
-      rl,
-      'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?',
-      true,
-    );
-    //? Browser tooling is an AI-template sub-feature — only offered when the
-    //? AI instructions are included (it relies on the shipped CLAUDE.md rule
-    //? + consumer doc). Forced to 'none' otherwise.
-    const aiBrowserTooling: AiBrowserTooling = aiInstructions
-      ? await pickFromList(
+    if (need('authMode')) {
+      answers.authMode = await pickFromList(rl, 'Authentication mode?', PROVIDER_OPTIONS.authMode, 'credentials');
+    }
+    const authMode = asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'credentials');
+    if (authMode === 'credentials+oauth' && need('oauthProviders')) {
+      answers.oauthProviders = await pickMulti(rl, 'Which OAuth providers to wire?', PROVIDER_OPTIONS.oauthProviders);
+    }
+    if (need('emailProvider')) {
+      answers.emailProvider = await pickFromList(rl, 'Transactional email adapter?', PROVIDER_OPTIONS.emailProvider, 'console');
+    }
+    if (need('monitoringProvider')) {
+      answers.monitoringProvider = await pickFromList(rl, 'Observability backend?', PROVIDER_OPTIONS.monitoringProvider, 'none');
+    }
+    if (need('presence')) {
+      answers.presence = (await askYesNo(rl, 'Install @luckystack/presence (AFK / presence / socket-status)?', true)) ? 'Yes' : 'No';
+    }
+    if (need('i18n')) {
+      answers.i18n = (await askYesNo(rl, 'Enable i18n (translations + locale switching)?', true)) ? 'Yes' : 'No';
+    }
+    if (need('aiInstructions')) {
+      answers.aiInstructions = (await askYesNo(
+        rl,
+        'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?',
+        true,
+      )) ? 'Yes' : 'No';
+    }
+    //? Browser tooling is an AI-template sub-feature — only offered when the AI
+    //? instructions are included. `convertAnswersToChoices` forces 'none' when
+    //? aiInstructions is off, so a stale preset can't leak through.
+    const aiInstructions = answers.aiInstructions !== 'No';
+    if (aiInstructions && need('aiBrowserTooling')) {
+      answers.aiBrowserTooling = await pickFromList(
         rl,
         'Set up AI browser-testing tooling? (all = agent-browser + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none)',
         PROVIDER_OPTIONS.aiBrowserTooling,
         'agent-browser',
-      )
-      : 'none';
-    return { dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, presence, i18n, aiInstructions, aiBrowserTooling };
+      );
+    }
+    return convertAnswersToChoices(answers);
   } finally {
     rl.close();
   }
@@ -315,12 +375,25 @@ const asOption = <T extends string>(value: string | string[] | undefined, option
   return options.find((option) => option === single) ?? fallback;
 };
 
-const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string | string[]>> =>
+const runWizard = (
+  steps: readonly WizardStep[],
+  presets: Record<string, string | string[]> = {},
+): Promise<Record<string, string | string[]>> =>
   new Promise((resolve) => {
-    const answers: Record<string, string | string[]> = {};
+    //? Steps whose answer arrived via a CLI flag (CFG-01) are pre-filled and
+    //? hidden — the wizard only asks for what wasn't specified on the command
+    //? line. Skip predicates still read `answers`, so a preset `authMode`
+    //? correctly drives whether the OAuth step shows.
+    const answers: Record<string, string | string[]> = { ...presets };
     const cursors = steps.map((step) => Math.max(0, step.options.indexOf(step.defaultValue ?? '')));
     const selections = steps.map(() => new Set<string>());
-    const visibleSteps = (): number[] => steps.map((_, i) => i).filter((i) => steps[i]?.skip?.(answers) !== true);
+    const visibleSteps = (): number[] =>
+      steps.map((_, i) => i).filter((i) => {
+        const step = steps[i];
+        if (!step) return false;
+        if (step.key in presets) return false;
+        return step.skip?.(answers) !== true;
+      });
 
     let pointer = 0;
     let prevLines = 0;
@@ -445,6 +518,13 @@ const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string 
       }
     }
 
+    //? Every step was supplied via CLI flags — nothing to ask. Resolve with the
+    //? presets immediately instead of entering raw-mode with an empty prompt.
+    if (visibleSteps().length === 0) {
+      resolve(answers);
+      return;
+    }
+
     emitKeypressEvents(input);
     if (input.isTTY) input.setRawMode(true);
     input.resume();
@@ -482,8 +562,8 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
   };
 };
 
-const runPrompts = async (): Promise<ScaffoldChoices> => {
-  if (!input.isTTY || !output.isTTY) return runPromptsFallback();
+const runPrompts = async (presets: Record<string, string | string[]> = {}): Promise<ScaffoldChoices> => {
+  if (!input.isTTY || !output.isTTY) return runPromptsFallback(presets);
 
   const answers = await runWizard([
     { key: 'dbProvider', type: 'select', label: 'Which database provider?', options: PROVIDER_OPTIONS.dbProvider, defaultValue: 'mongodb' },
@@ -495,9 +575,51 @@ const runPrompts = async (): Promise<ScaffoldChoices> => {
     { key: 'i18n', type: 'select', label: 'Enable i18n (translations + locale switching)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
     { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
     { key: 'aiBrowserTooling', type: 'select', label: 'Set up AI browser-testing tooling? (all = + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none)', options: PROVIDER_OPTIONS.aiBrowserTooling, defaultValue: 'agent-browser', skip: (a) => a.aiInstructions === 'No' },
-  ]);
+  ], presets);
 
   return convertAnswersToChoices(answers);
+};
+
+//? Build the wizard/fallback answer-bag from CLI flags (CFG-01). Only keys that
+//? were actually passed are set, so unspecified options still get asked (or fall
+//? to defaults under `--no-prompt`). Booleans map to the wizard's Yes/No vocab.
+const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> => {
+  const presets: Record<string, string | string[]> = {};
+  if (args.dbProvider) presets.dbProvider = args.dbProvider;
+  if (args.authMode) presets.authMode = args.authMode;
+  if (args.oauthProviders) presets.oauthProviders = args.oauthProviders;
+  if (args.emailProvider) presets.emailProvider = args.emailProvider;
+  if (args.monitoringProvider) presets.monitoringProvider = args.monitoringProvider;
+  if (args.noPresence) presets.presence = 'No';
+  if (args.i18n !== null) presets.i18n = args.i18n ? 'Yes' : 'No';
+  if (args.aiInstructions !== null) presets.aiInstructions = args.aiInstructions ? 'Yes' : 'No';
+  if (args.aiBrowserTooling) presets.aiBrowserTooling = args.aiBrowserTooling;
+  return presets;
+};
+
+//? Enforce the cross-field invariants the wizard's `convertAnswersToChoices`
+//? guarantees, for the `--no-prompt` (flags-over-defaults) path: OAuth providers
+//? only matter under `credentials+oauth`, and browser tooling rides on the AI
+//? template. Keeps both choice-resolution paths consistent.
+const normalizeChoices = (choices: ScaffoldChoices): ScaffoldChoices => ({
+  ...choices,
+  oauthProviders: choices.authMode === 'credentials+oauth' ? choices.oauthProviders : [],
+  aiBrowserTooling: choices.aiInstructions ? choices.aiBrowserTooling : 'none',
+});
+
+//? `--no-prompt` choice resolution: typed flag values layered over DEFAULT_CHOICES.
+const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
+  const choices: ScaffoldChoices = { ...DEFAULT_CHOICES };
+  if (args.dbProvider) choices.dbProvider = args.dbProvider;
+  if (args.authMode) choices.authMode = args.authMode;
+  if (args.oauthProviders) choices.oauthProviders = args.oauthProviders;
+  if (args.emailProvider) choices.emailProvider = args.emailProvider;
+  if (args.monitoringProvider) choices.monitoringProvider = args.monitoringProvider;
+  if (args.noPresence) choices.presence = false;
+  if (args.i18n !== null) choices.i18n = args.i18n;
+  if (args.aiInstructions !== null) choices.aiInstructions = args.aiInstructions;
+  if (args.aiBrowserTooling) choices.aiBrowserTooling = args.aiBrowserTooling;
+  return normalizeChoices(choices);
 };
 
 const printHelp = (): void => {
@@ -509,8 +631,17 @@ Usage:
 
 Options:
   --no-install   Don't run \`npm install\` or \`npx prisma generate\` after copying.
-  --no-prompt    Skip the interactive prompts and use defaults (Mongo + credentials).
-  --no-presence  Omit @luckystack/presence (applies with --no-prompt; the wizard asks otherwise).
+  --no-prompt    Skip the interactive prompts and use defaults + any flags below.
+
+  Scaffold choices (each pre-fills the matching wizard step, or applies under --no-prompt):
+  --db=<mongodb|postgresql|mysql|sqlite>      Database provider.
+  --auth=<none|credentials|credentials+oauth> Authentication mode ('none' = no auth).
+  --oauth=<google,github,discord,facebook,microsoft>  OAuth providers (comma list; needs --auth=credentials+oauth).
+  --email=<none|console|resend|smtp>          Transactional email adapter.
+  --monitoring=<none|sentry|datadog|posthog>  Observability backend.
+  --no-presence  Omit @luckystack/presence.
+  --i18n / --no-i18n   Enable / disable i18n (translations + locale switching).
+  --ai-docs / --no-ai-docs   Include / omit LuckyStack AI dev instructions.
   --ai-browser=<all|agent-browser|none>
                  AI browser-testing tooling (default agent-browser). 'all' also wires the
                  Playwright + Chrome DevTools MCP servers. Needs the AI instructions on.
@@ -519,6 +650,7 @@ Options:
 Example:
   npx create-luckystack-app my-app
   npx create-luckystack-app my-app --no-prompt --no-install
+  npx create-luckystack-app my-app --no-prompt --db=postgresql --auth=credentials+oauth --oauth=google,github --email=resend --monitoring=sentry
 `);
 };
 
@@ -790,8 +922,9 @@ const runPrismaGenerate = (cwd: string): void => {
 };
 
 //? Pre-commit hook that regenerates the consumer's AI snapshot files
-//? (docs/AI_CAPABILITIES.md + docs/AI_PROJECT_INDEX.md) and stages them, so they
-//? never drift from the code. Mirrors the framework repo's own hook. Wired via a
+//? (docs/AI_CAPABILITIES.md + docs/AI_PROJECT_INDEX.md + docs/AI_DECISIONS_INDEX.md
+//? + docs/AI_RUNBOOKS.md + docs/AI_PRODUCT_OVERVIEW.md + docs/ai-graph.json) and stages them, so they never drift. Mirrors the
+//? framework repo's own hook. Wired via a
 //? `prepare` script setting `core.hooksPath` at install time (no-op when the
 //? project isn't a git repo yet — the hook activates after `git init`).
 const AI_INDEX_HOOK = `#!/bin/sh
@@ -803,11 +936,22 @@ if ! command -v npm >/dev/null 2>&1; then
   echo "[pre-commit] npm not on PATH — skipping AI snapshot regeneration."
   exit 0
 fi
+echo "[pre-commit] Checking CLAUDE.md invariants on staged changes..."
+npm run ai:lint --silent
 echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
 npm run ai:capabilities --silent
 echo "[pre-commit] Regenerating docs/AI_PROJECT_INDEX.md..."
 npm run ai:project-index --silent
-git add docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md
+echo "[pre-commit] Regenerating docs/AI_DECISIONS_INDEX.md..."
+npm run ai:decisions --silent
+echo "[pre-commit] Regenerating docs/AI_RUNBOOKS.md..."
+npm run ai:runbooks --silent
+echo "[pre-commit] Regenerating docs/AI_PRODUCT_OVERVIEW.md..."
+npm run ai:product --silent
+echo "[pre-commit] Regenerating docs/ai-graph.json..."
+npm run ai:graph --silent
+git add docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json
+git add docs/ai-product 2>/dev/null || true
 `;
 
 const installAiIndexHook = (targetDir: string): void => {
@@ -873,6 +1017,16 @@ const dropDependency = (targetDir: string, depName: string): void => {
     pkg.dependencies = rest;
     fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   }
+};
+
+//? Delete a file or directory (recursively) from the scaffolded project. Used
+//? by the choice-gated prunes (`authMode: 'none'` removes auth pages/APIs;
+//? `i18n: false` removes the extra-language locale files). A missing path is a
+//? silent no-op so the prune is idempotent. `relPath` is always repo-internal
+//? (built from literals here), never user input.
+const removeScaffoldPath = (targetDir: string, relPath: string): void => {
+  const full = path.join(targetDir, relPath);
+  fs.rmSync(full, { recursive: true, force: true });
 };
 
 //? ─────────────────── AI browser-testing tooling ───────────────────
@@ -1055,6 +1209,190 @@ const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): voi
       ],
     ]);
   }
+
+  if (choices.authMode === 'none') {
+    //? Auth-less scaffold. The framework's (anonymous) session plumbing stays —
+    //? `session_v1` returns a null user, `SessionProvider`/`useSession` resolve to
+    //? "no session", and the sockets still run — but every built-in auth UI/flow
+    //? is removed: the credentials/OAuth login + register + password-reset pages,
+    //? the account-management settings page, the LoginForm, and the `functions/
+    //? session` shim (which re-exported @luckystack/login). The direct
+    //? @luckystack/login dependency is dropped (framework packages still pull it
+    //? transitively for their own internals); no scaffold code imports it after
+    //? this prune. Run BEFORE the i18n prune so its settings/page.tsx edit safely
+    //? no-ops on the now-removed file.
+    dropDependency(targetDir, '@luckystack/login');
+    for (const target of [
+      'src/login',
+      'src/register',
+      'src/reset-password',
+      'src/settings',
+      'src/_components/LoginForm.tsx',
+      'functions/session.ts',
+      //? Auth/account transactional-email hooks (new-sign-in + password-change).
+      //? They register a `postLogin` hook whose payload type ships with
+      //? @luckystack/login — which we just dropped — and the password-change
+      //? helper was only called by the (now-removed) settings page.
+      'server/hooks/notifications.ts',
+    ]) {
+      removeScaffoldPath(targetDir, target);
+    }
+
+    //? Server overlay registered the notification hooks + an example postLogin
+    //? logger. Both reference login-only hook payloads; strip them so the
+    //? overlay compiles without @luckystack/login (leave a minimal placeholder).
+    editScaffoldFile(targetDir, 'luckystack/server/index.ts', [
+      [
+        `import { registerHook } from '@luckystack/core';
+import { registerNotificationHooks } from '../../server/hooks/notifications';
+
+//? Wires the transactional notification hooks (new sign-in email,
+//? password-change email). Reads \`user.preferences\` to respect opt-in. Safe
+//? to leave on even if @luckystack/email isn't installed — the email
+//? sender no-ops with \`{ ok: false, reason: 'no-sender' }\`.
+registerNotificationHooks();
+
+//? Example dev-only logger — delete or replace with your own audit hook.
+registerHook('postLogin', ({ userId, provider, isNewUser }) => {
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(\`[hooks] login: user=\${userId}, provider=\${provider}, new=\${String(isNewUser)}\`);
+  }
+  return undefined;
+});`,
+        `//? authMode 'none': no auth hooks to register. Add your own framework-hook
+//? registrations here (this overlay is auto-imported at boot, after every
+//? other overlay file).
+export {};`,
+      ],
+    ]);
+
+    //? Root route '/': no login page to bounce to — land on the app's main surface.
+    editScaffoldFile(targetDir, 'src/page.tsx', [
+      [
+        `import type { PageMiddleware } from "@luckystack/core/client";
+import { loginPageUrl, loginRedirectUrl, type SessionLayout } from "config";
+
+export const template = 'plain';
+
+export const middleware: PageMiddleware<SessionLayout> = ({ session }) =>
+  session
+    ? { success: false, redirect: loginRedirectUrl }
+    : { success: false, redirect: loginPageUrl };`,
+        `import type { PageMiddleware } from "@luckystack/core/client";
+
+export const template = 'plain';
+
+//? No auth: '/' lands on the app's main surface (the sample dashboard).
+export const middleware: PageMiddleware = () => ({ success: false, redirect: '/dashboard' });`,
+      ],
+    ]);
+
+    //? Dashboard: public (drop the logged-out → /login redirect guard).
+    editScaffoldFile(targetDir, 'src/dashboard/page.tsx', [
+      [
+        `import { useTranslator } from '@luckystack/core/client';
+import type { PageMiddleware } from '@luckystack/core/client';
+import type { SessionLayout } from '../../config';`,
+        `import { useTranslator } from '@luckystack/core/client';`,
+      ],
+      [
+        `export const template = 'plain' as const;
+
+//? Per-page route guard. Logged-out visitors bounce to \`/login\`. Customize
+//? the function body for role-checks (e.g. \`if (!session.admin) return;\`
+//? returns \`undefined\` which sends the user back in browser history).
+export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
+  if (!session) return { success: false, redirect: '/login' };
+  return { success: true };
+};
+
+export default Dashboard;`,
+        `export const template = 'plain' as const;
+
+export default Dashboard;`,
+      ],
+    ]);
+
+    //? Home shell: drop the settings + sign-out links (those routes no longer
+    //? exist) and the now-unused translator wiring.
+    editScaffoldFile(targetDir, 'src/_components/templates/Home.tsx', [
+      [
+        "import { Middleware, useSession, useTranslator } from '@luckystack/core/client';",
+        "import { Middleware, useSession } from '@luckystack/core/client';",
+      ],
+      ['  const translate = useTranslator();\n', ''],
+      [
+        `        <div className="flex items-center gap-3">
+          <Link to="/settings" className="text-sm text-common hover:text-primary transition-colors">
+            {translate({ key: 'home.settings' })}
+          </Link>
+          <Link to="/logout" className="text-sm text-common hover:text-primary transition-colors">
+            {translate({ key: 'home.signOut' })}
+          </Link>
+        </div>
+`,
+        '',
+      ],
+    ]);
+
+    //? config.ts: disable credentials + framework forgot-password (no auth flows).
+    editScaffoldFile(targetDir, 'config.ts', [
+      [
+        `  auth: {
+    //? Framework-mode forgot-password (needs @luckystack/email installed + a
+    //? sender registered in server.ts). Set to 'disabled' or 'custom' to opt out.
+    forgotPassword: 'framework',
+    //? Email+password auth. Set \`false\` for an OAuth-only app — the login form
+    //? hides the email/password fields and the credentials route rejects.
+    credentials: true,
+  },`,
+        `  auth: {
+    //? authMode 'none': no built-in auth UI/flows are scaffolded.
+    forgotPassword: 'disabled',
+    credentials: false,
+  },`,
+      ],
+    ]);
+  }
+
+  if (!choices.i18n) {
+    //? Single-language (English) scaffold. The translator layer itself stays —
+    //? it lives in @luckystack/core and backs every `translate()` call — so all
+    //? components keep compiling; what we remove is the EXTRA languages + the
+    //? locale switcher. Drop nl/de/fr locale files, reduce the locale registry
+    //? to English, and collapse the settings language picker to a single option.
+    removeScaffoldPath(targetDir, 'src/_locales/nl.json');
+    removeScaffoldPath(targetDir, 'src/_locales/de.json');
+    removeScaffoldPath(targetDir, 'src/_locales/fr.json');
+    editScaffoldFile(targetDir, 'luckystack/i18n/locales.ts', [
+      ["import deJson from 'src/_locales/de.json';\n", ''],
+      ["import frJson from 'src/_locales/fr.json';\n", ''],
+      ["import nlJson from 'src/_locales/nl.json';\n", ''],
+      [
+        `registerLocales({
+  en: enJson,
+  nl: nlJson,
+  de: deJson,
+  fr: frJson,
+});`,
+        `registerLocales({
+  en: enJson,
+});`,
+      ],
+    ]);
+    //? Picker → English only. editScaffoldFile is a no-op when settings/ was
+    //? already removed by the authMode:'none' prune, so the order is safe.
+    //? The `newLanguage` state is also re-seeded to `'en'` — with `Language`
+    //? narrowed to `'en'`, the original `session?.language ?? 'en'` seed (the
+    //? session language is a wider union) no longer type-checks.
+    editScaffoldFile(targetDir, 'src/settings/page.tsx', [
+      ["const LANGUAGES = ['nl', 'en', 'de', 'fr'] as const;", "const LANGUAGES = ['en'] as const;"],
+      [
+        "  const [newLanguage, setNewLanguage] = useState<Language>(session?.language ?? 'en');",
+        "  const [newLanguage, setNewLanguage] = useState<Language>('en');",
+      ],
+    ]);
+  }
 };
 
 const main = async (): Promise<void> => {
@@ -1100,11 +1438,13 @@ const main = async (): Promise<void> => {
     process.exit(1);
   }
 
-  //? Interactive prompts gather scaffold choices. `--no-prompt` skips
-  //? them and uses sane defaults (Mongo + credentials + console email).
+  //? Choice resolution. Every wizard option also has a CLI flag (CFG-01):
+  //?   - interactive (`--prompt`, default): flags PRE-FILL the matching wizard
+  //?     steps (which are then skipped) and the user is only asked for the rest;
+  //?   - `--no-prompt`: typed flag values layered over DEFAULT_CHOICES, no prompts.
   const choices: ScaffoldChoices = args.prompt
-    ? await runPrompts()
-    : { ...DEFAULT_CHOICES, presence: !args.noPresence, aiBrowserTooling: args.aiBrowserTooling ?? DEFAULT_CHOICES.aiBrowserTooling };
+    ? await runPrompts(buildPresetAnswers(args))
+    : buildNoPromptChoices(args);
 
   //? Provider-specific Prisma + DATABASE_URL bits. MongoDB needs an ObjectId
   //? `_id` mapping; the SQL providers use a cuid string id. The example URL is
@@ -1219,8 +1559,21 @@ const main = async (): Promise<void> => {
 
     installAiIndexHook(targetDir);
 
+    //? Wire the @luckystack/mcp server into .mcp.json so the consumer's Claude
+    //? Code can QUERY the committed AI context (decisions, dependency graph,
+    //? routes, runbooks, capabilities) instead of loading whole files. Run via
+    //? npx — no app dependency. Additive (mergeJsonFile + ??=), so it coexists
+    //? as a SEPARATE entry alongside the playwright/chrome-devtools browser MCP
+    //? servers that wireAiBrowserTooling adds (they are not merged into one).
+    //? Gated on the AI instructions (it's repo-context tooling), not on the
+    //? browser-testing choice.
+    mergeJsonFile(path.join(targetDir, '.mcp.json'), (data) => {
+      const servers = (data.mcpServers ??= {}) as Record<string, unknown>;
+      servers.luckystack ??= { type: 'stdio', command: 'npx', args: ['@luckystack/mcp@latest'] };
+    });
+
     if (copiedCount > 0) {
-      console.log(`Framework AI documentation copied (${copiedCount} source(s) merged into target) + pre-commit AI-index hook installed.`);
+      console.log(`Framework AI documentation copied (${copiedCount} source(s) merged into target) + pre-commit AI-index hook + @luckystack/mcp server installed.`);
     }
   }
 

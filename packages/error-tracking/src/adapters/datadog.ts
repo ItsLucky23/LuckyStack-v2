@@ -20,7 +20,7 @@ import { createRequire } from 'node:module';
 
 import { ensurePeerDepInstalled, type ErrorTracker, type ErrorTrackerEvent } from '@luckystack/core';
 
-import { runBeforeSend } from './runBeforeSend';
+import { resolveExceptionEvent, resolveMessageEvent } from './runBeforeSend';
 
 const localRequire = createRequire(import.meta.url);
 
@@ -78,43 +78,37 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
     name: 'datadog',
 
     captureException(error, context) {
-      const filtered = runBeforeSend(options.beforeSend, {
-        forwarded: true,
-        kind: 'exception',
-        payload: { error, context: context ?? null },
-      });
-      if (!filtered) return;
+      const resolved = resolveExceptionEvent(options.beforeSend, error, context);
+      if (!resolved) return;
+      const { error: fwdError, context: fwdContext } = resolved;
       const span = options.tracer.startSpan('luckystack.error', {
         tags: {
-          'error.type': error instanceof Error ? error.name : typeof error,
-          'error.msg': error instanceof Error ? error.message : String(error),
-          ...context,
+          'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
+          'error.msg': fwdError instanceof Error ? fwdError.message : String(fwdError),
+          ...fwdContext,
         },
       });
       span.setTag('error', true);
-      if (error instanceof Error && error.stack) {
-        span.setTag('error.stack', error.stack);
+      if (fwdError instanceof Error && fwdError.stack) {
+        span.setTag('error.stack', fwdError.stack);
       }
       span.finish();
-      options.statsd?.increment(`${prefix}error.exception`, 1, formatTags(context as Record<string, string> | undefined));
+      options.statsd?.increment(`${prefix}error.exception`, 1, formatTags(fwdContext as Record<string, string> | undefined));
     },
 
     captureMessage(message, level, context) {
-      const filtered = runBeforeSend(options.beforeSend, {
-        forwarded: true,
-        kind: 'message',
-        payload: { message, level, context: context ?? null },
-      });
-      if (!filtered) return;
+      const resolved = resolveMessageEvent(options.beforeSend, message, level, context);
+      if (!resolved) return;
+      const { message: fwdMessage, level: fwdLevel, context: fwdContext } = resolved;
       const span = options.tracer.startSpan('luckystack.message', {
         tags: {
-          'message.text': message,
-          'message.level': level,
-          ...context,
+          'message.text': fwdMessage,
+          'message.level': fwdLevel,
+          ...fwdContext,
         },
       });
       span.finish();
-      options.statsd?.increment(`${prefix}error.message`, 1, [`level:${level}`, ...formatTags(context as Record<string, string> | undefined)]);
+      options.statsd?.increment(`${prefix}error.message`, 1, [`level:${fwdLevel}`, ...formatTags(fwdContext as Record<string, string> | undefined)]);
     },
 
     setUser(user) {

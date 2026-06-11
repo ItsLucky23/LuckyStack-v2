@@ -15,6 +15,12 @@ This is a *map*, not the docs themselves. Follow the links to the artifact you a
 | Auto-generated framework index | `docs/AI_QUICK_INDEX.md` | Framework surfaces, packages, slash commands, skills |
 | Auto-generated capabilities | `docs/AI_CAPABILITIES.md` | Installed `@luckystack/*` packages + flat local exports with signatures |
 | Auto-generated project index | `docs/AI_PROJECT_INDEX.md` | Routes, pages, helpers, components, cross-refs in the consumer project |
+| Auto-generated decision index | `docs/AI_DECISIONS_INDEX.md` | The committed "why" record — `docs/decisions/` ADRs (title, status, tags, summary); the AI auto-fills + reads it |
+| Auto-generated runbooks | `docs/AI_RUNBOOKS.md` | Task-shaped golden paths (add API/page/sync/helper, verify, decide) grounded in the project's real files |
+| Product / intent layer | `docs/PRODUCT.md` + `docs/AI_PRODUCT_OVERVIEW.md` (`npm run ai:product`) | Plain-language "what the app + each page is FOR" (intent), distinct from the structural "what exists" |
+| Invariant linter | `scripts/lintInvariants.mjs` (`npm run ai:lint`) | Diff-time enforcement of the machine-checkable contract (no as-any, arbitrary colors, untranslated JSX) |
+| Dependency graph | `docs/ai-graph.json` (`npm run ai:graph`) | File/import graph: transitive blast-radius (change-impact) + god-nodes |
+| Project MCP server | `@luckystack/mcp` (`.mcp.json` entry, runs via `npx`) | Exposes the committed artifacts above to Claude Code as queryable tools (blast_radius, who_imports, god_nodes, list/get_decision, find_route, get_runbook, get_capability) |
 | Per-package contracts | `node_modules/@luckystack/*/CLAUDE.md` | Function INDEX + when-to-use per framework package (14 packages) |
 | Architecture deep-dives | `docs/ARCHITECTURE_*.md` | 12 per-topic specs (API, AUTH, SESSION, SOCKET, SYNC, ROUTING, LOGGING, EMAIL, PACKAGING, FUNCTION_INJECTION, EXTENSION_POINTS, TESTING) |
 | AI behavior contract | `CLAUDE.md` (repo root) | 26 rules + inherited patterns (component table, color tokens, provider hierarchy, JSX micro-conventions) |
@@ -29,15 +35,20 @@ This is a *map*, not the docs themselves. Follow the links to the artifact you a
 
 ---
 
-## The three regen commands every AI session should know
+## The regen commands every AI session should know
 
 ```sh
-npm run ai:index           # framework surfaces        → docs/AI_QUICK_INDEX.md
+npm run ai:index           # framework surfaces           → docs/AI_QUICK_INDEX.md
 npm run ai:capabilities    # installed packages + exports → docs/AI_CAPABILITIES.md
 npm run ai:project-index   # consumer project structure   → docs/AI_PROJECT_INDEX.md
+npm run ai:decisions       # docs/decisions/ ADRs         → docs/AI_DECISIONS_INDEX.md
+npm run ai:runbooks        # task-shaped golden paths     → docs/AI_RUNBOOKS.md
+npm run ai:product         # intent: app + per-page purpose → docs/AI_PRODUCT_OVERVIEW.md
+npm run ai:graph           # file/import + symbol graph   → docs/ai-graph.json
+npm run ai:lint            # CLAUDE.md invariant check (staged diff; report-only by default)
 ```
 
-All three are autonomous per root `CLAUDE.md` rule 8 (no permission prompt). `.githooks/pre-commit` re-runs them on every commit as a safety net, but AI agents should refresh in-session after relevant changes (per rules 12 and 15) so subsequent work in the same session sees the new state. The hook is the safety net, not the primary path.
+The generators are autonomous per root `CLAUDE.md` rule 8 (no permission prompt). `.githooks/pre-commit` re-runs the five generators (+ the invariant linter) on every commit as a safety net, but AI agents should refresh in-session after relevant changes (per rules 12 and 15) so subsequent work in the same session sees the new state. The hook is the safety net, not the primary path. Decisions are captured automatically by the AI during sessions (no slash command) — see `docs/DECISION_MEMORY_PROTOCOL.md`. The full AI-boost roadmap (incl. the MCP server + native call-graph + RAG rungs) lives in `docs/AI_BOOST_PLAN.md`.
 
 ---
 
@@ -120,11 +131,11 @@ The devkit type-map emitter (`npm run generateArtifacts`) walks every `_api/` an
 
 The auto-generated indexes are deterministic markdown — they cover the vast majority of projects. Climb a rung only when the cheaper one stops fitting:
 
-1. **Default — the three indexes (`AI_QUICK_INDEX` / `AI_CAPABILITIES` / `AI_PROJECT_INDEX`).** Sufficient for most apps (roughly < ~50 routes). Zero setup, regenerated on every commit, always in context. Use these until an AI starts repeatedly asking "what depends on this?" or missing cross-file relationships.
-2. **Escalate → graphify (`docs/GRAPHIFY_INTEGRATION.md`).** When the project sprawls (many routes, deep call graphs, "god nodes") and the AI needs a real **call-graph + community detection + an interactive map + MCP-server retrieval** rather than a flat inventory. Opt-in, AST-only resync (zero ongoing cost); commit `graph.json` per branch to avoid staleness.
-3. **Escalate → a vector/RAG layer (project-specific, not framework-provided).** Only when natural-language retrieval over a large corpus (docs, prior decisions, large data models) beats structured lookup — e.g. "find everywhere we handle refunds" across hundreds of files. Wire your own embeddings/vector store + an MCP retrieval server; the framework deliberately stays out of this (it's app-shaped, and a static index + graphify cover the structural questions first). Reach for it last — most "I can't find it" problems are solved one rung down.
+1. **Default — the committed indexes + decision log + runbooks (`AI_QUICK_INDEX` / `AI_CAPABILITIES` / `AI_PROJECT_INDEX` / `AI_DECISIONS_INDEX` / `AI_RUNBOOKS`).** Sufficient for most apps. Zero setup, regenerated on every commit, always in context.
+2. **Structural queries → the native dependency graph (`docs/ai-graph.json`) + `@luckystack/mcp`.** When the project sprawls and the AI needs transitive "what depends on this / blast-radius / god-nodes" rather than a flat inventory, `npm run ai:graph` emits a deterministic committed graph and the MCP server exposes `blast_radius` / `who_imports` / `god_nodes` (plus decision/route/runbook lookups) as tools — no full-file reads. This is **native, file/import-level, shipped** (ADR 0004). Symbol-level call edges via the TypeScript compiler are the next increment (ADR 0002); the external Python `graphify` (`docs/GRAPHIFY_INTEGRATION.md`) remains an optional add-on for interactive HTML visualization only.
+3. **Escalate → a vector/RAG layer (optional, the last rung — ADR 0003).** Only when natural-language retrieval over a large corpus (docs, prior decisions, large data models) beats structured lookup — e.g. "find everywhere we handle refunds" across hundreds of files. It needs an external embeddings model (the only third-party dependency in the stack), so it stays gated: build it only after measuring that grep + the graph + the decision log fall short. See `docs/AI_BOOST_PLAN.md` Wave 4.
 
-> Rule of thumb: structured questions (routes, exports, deps, "what calls X") → indexes/graphify; fuzzy semantic questions over a big corpus → RAG. Don't add a vector store to dodge a stale index — regenerate the index.
+> Rule of thumb: structured questions (routes, exports, deps, "what depends on X") → indexes + graph + the MCP server; fuzzy semantic questions over a big corpus → RAG (last rung). Don't add a vector store to dodge a stale index — regenerate the index.
 
 ---
 

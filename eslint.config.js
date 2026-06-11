@@ -9,25 +9,21 @@ import luckystack from './eslint.luckystack.config.js'
 export default [
   ...official,
   ...luckystack,
-  //? `src/workspaces/**` is the in-repo UI prototype for the Workspaces project
-  //? (dummy data, English design copy, moves to its own repo before publish).
-  //? Relax the i18n-enforcement + purely-stylistic rules here so the prototype
-  //? can iterate fast; the strict config still governs the rest of the repo.
-  //? When Workspaces graduates to its own repo these get re-enabled + strings
-  //? routed through `useTranslator`.
+  //? `workspaces-handoff/**` is a self-contained drop-in handoff package for the separate
+  //? Workspaces project (portable TSX prototype + docs + the ui-builder reference). It is
+  //? NOT part of this repo's build/lint surface and is slated for removal — ignore it wholesale.
+  { ignores: ['workspaces-handoff/**'] },
+  //? @luckystack/mcp imports the official MCP SDK via its `.js` subpaths
+  //? (`@modelcontextprotocol/sdk/server/mcp.js`). The SDK's `exports` types
+  //? wildcard is `./dist/esm/*.d.ts`, so a `*.js` import maps types to a
+  //? non-existent `*.js.d.ts` — tsc (bundler resolution) and Node both resolve
+  //? it fine (the package builds + the server runs), but eslint-import-resolver
+  //? -typescript can't follow that one mapping. Scope the no-unresolved
+  //? exception to this dependency only; everything else stays strictly checked.
   {
-    files: ['src/workspaces/**/*.{ts,tsx}'],
+    files: ['packages/mcp/src/**/*.ts'],
     rules: {
-      'react/jsx-no-literals': 'off',
-      '@typescript-eslint/no-confusing-void-expression': 'off',
-      'unicorn/no-nested-ternary': 'off',
-      'unicorn/prefer-global-this': 'off',
-      'unicorn/consistent-function-scoping': 'off',
-      '@typescript-eslint/no-empty-function': 'off',
-      //? Dummy seed arrays are indexed with `!` and primitives.tsx is a shared
-      //? module exporting helpers alongside components — both fine for the kit.
-      '@typescript-eslint/no-non-null-assertion': 'off',
-      'react-refresh/only-export-components': 'off',
+      'import-x/no-unresolved': ['error', { ignore: ['^@modelcontextprotocol/sdk/'] }],
     },
   },
 ]

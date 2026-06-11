@@ -27,6 +27,15 @@ export interface UserRecord extends BaseSessionLayout {
 
 export interface UserAdapter {
   findByEmail: (params: { email: string; provider: string }) => Promise<UserRecord | null>;
+  /**
+   * Look up a user by email IRRESPECTIVE of provider. Required only when
+   * `auth.providerAccountStrategy === 'unified'` — the framework resolves
+   * accounts by email alone so the same address maps to one User across
+   * providers. Optional so existing custom adapters keep compiling; when a
+   * project sets `'unified'` but its adapter omits this method, the framework
+   * logs a one-time warning and falls back to provider-scoped lookup.
+   */
+  findByEmailAnyProvider?: (params: { email: string }) => Promise<UserRecord | null>;
   findById: (id: string) => Promise<UserRecord | null>;
   create: (input: UserAdapterCreateInput) => Promise<UserRecord>;
   update: (id: string, patch: Partial<UserRecord>) => Promise<UserRecord>;
@@ -54,7 +63,7 @@ export const isUserAdapterRegistered = (): boolean => registeredAdapter !== null
 //? register their own `UserAdapter` via `registerUserAdapter(...)` rather
 //? than relying on this default.
 interface PrismaUserDelegate {
-  findFirst: (args: { where: { email: string; provider: string } }) => Promise<UserRecord | null>;
+  findFirst: (args: { where: { email: string; provider?: string } }) => Promise<UserRecord | null>;
   findUnique: (args: { where: { id: string } }) => Promise<UserRecord | null>;
   create: (args: { data: Record<string, unknown> }) => Promise<UserRecord>;
   update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<UserRecord>;
@@ -72,6 +81,8 @@ export const defaultPrismaUserAdapter = (): UserAdapter => {
   return {
     findByEmail: async ({ email, provider }) =>
       getPrismaUser().findFirst({ where: { email, provider } }),
+    findByEmailAnyProvider: async ({ email }) =>
+      getPrismaUser().findFirst({ where: { email } }),
     findById: async (id) =>
       getPrismaUser().findUnique({ where: { id } }),
     create: async (input) =>

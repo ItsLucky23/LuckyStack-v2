@@ -29,6 +29,7 @@ import type {
 import { shouldLogDev, shouldLogStream } from './_shared/logFlags';
 import { buildFormattedError } from './_shared/errorBuilders';
 import { processClientSyncForRecipient } from './_shared/clientFanout';
+import { resolveSyncValidationMode } from './_shared/validationMode';
 
 interface HttpSyncRequestParams {
   name: string;
@@ -359,22 +360,26 @@ export default async function handleHttpSyncRequest({
           },
         });
 
-      const inputValidation = await validateInputByType({
-        typeText: inputType,
-        value: data,
-        rootKey: 'clientInput',
-        filePath: inputTypeFilePath,
-      });
-      if (inputValidation.status === 'error') {
-        return buildSyncError({
-          response: {
-            status: 'error',
-            errorCode: 'sync.invalidInputType',
-            errorParams: [{ key: 'message', value: inputValidation.message }],
-          },
-          preferred: preferredLocale,
-          userLanguage: user?.language,
+      //? Per-route validation toggle (mirrors the API + socket-sync handler).
+      //? `'relaxed'` / `{ input: 'skip' }` skips runtime input validation.
+      if (resolveSyncValidationMode(serverSyncEntry.validation) === 'strict') {
+        const inputValidation = await validateInputByType({
+          typeText: inputType,
+          value: data,
+          rootKey: 'clientInput',
+          filePath: inputTypeFilePath,
         });
+        if (inputValidation.status === 'error') {
+          return buildSyncError({
+            response: {
+              status: 'error',
+              errorCode: 'sync.invalidInputType',
+              errorParams: [{ key: 'message', value: inputValidation.message }],
+            },
+            preferred: preferredLocale,
+            userLanguage: user?.language,
+          });
+        }
       }
 
       const [serverSyncError, serverSyncResult] = await tryCatch(
