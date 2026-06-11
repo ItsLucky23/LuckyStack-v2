@@ -350,6 +350,9 @@
 | `EmailSender`, `EmailMessage`, `EmailResult`, `EmailSenderRegistry` | Re-exported from `@luckystack/core` | Adapter contract + result tuple. |
 | `PreEmailSendPayload`, `PostEmailSendPayload` | `./hookPayloads` | Hook payload shapes (also augmented onto `HookPayloads`). |
 
+### `env-resolver`
+- _(no `CLAUDE.md` yet)_
+
 ### `error-tracking`
 | Function / Export | One-liner | Deep doc |
 |---|---|---|
@@ -649,6 +652,7 @@
 | devkit | 8 | 8 | 0 |
 | docs-ui | 4 | 4 | 0 |
 | email | 5 | 5 | 0 |
+| env-resolver | 0 | 0 | 0 |
 | error-tracking | 4 | 4 | 0 |
 | login | 8 | 8 | 0 |
 | presence | 6 | 6 | 0 |

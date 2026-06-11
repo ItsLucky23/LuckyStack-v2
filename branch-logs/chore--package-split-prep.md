@@ -2828,3 +2828,22 @@ No code logic change (docs/comments + the part-9l diagnostic). Gates unchanged: 
 ### Session (2026-06-10, part 9s): rewrote SESSION_STATE.md as the full-session handoff
 
 Rewrote `SESSION_STATE.md` from scratch to capture the entire 2026-06-10 session: TL;DR (0.2.0 uncommitted, gates green 782/782), the F1–F12 + W1 fix table + the dev-perf/UX fixes (env diagnostics, Vite polling/plugin, lazy-loading, login-shift, navbar), what was browser-verified, the open/report-only items, and — answering the user's question — a REQUIRED `.smoke-test/app` verification plan (§4) explaining WHY consumer-context testing is non-optional (F7/F8/F9 only manifest on the dist/tarball path, never in the source-run framework repo). Docs-only; no code change.
+
+### Session (2026-06-11): full pre-publish test sweep + 3 fixes (vitest dist-decouple, lockfile, HydrateFallback)
+
+**User:** run every test possible (granted standing server/client/install/publish-script access this session), then propose fixes for the findings.
+
+**Verified GREEN this session:** `lint` (client/server/packages) 0 · `build:packages` 15/15 · full `npm run build` exit 0 · `test:unit` 782/782 · `publish:dry` 15 pkgs 0 warnings · `.smoke-test` matrix (full + no-presence) GREEN. Live runtime (LS-v2 on alt-ports :4100 backend + :5180 Vite, beside the user's running `matchrix` on :80/:5173): `npm run test` integration sweep **113 passed · 0 failed · 11 legit skips**; browser E2E via agent-browser confirmed **F7** (5 OAuth buttons render, `/auth/providers` JSON, Google redirect works), **F1** (register → auto-login → /playground), credentials login, **F4** (logout clears HttpOnly cookie → `/auth/csrf` 401 after), HttpOnly (cookie not JS-readable), **F11** (CSRF minted authed / 401 unauthed), API echo + 10-chunk API stream.
+
+**Two real blockers fixed to even reach green:** (1) `npm install` had never been run after the committed `plugin-react-swc → plugin-react` swap → full build died on `Cannot find module '@vitejs/plugin-react'`; `npm install` materialised it AND reconciled `package-lock.json` (removed the stale swc tree, 316 lines). (2) stale package `dist` → `test:unit` was 145-failing with cryptic `"X is not a function"` (escapeHtml/tryCatchSync/deepMerge); `build:packages` fixed it but exposed a fragility (below).
+
+**Fixes applied (this commit):**
+- **`vitest.config.ts` — decouple the unit suite from built `dist`.** Root `tsconfig.json` has no `paths`, so vitest's `resolve.tsconfigPaths:true` only mapped `@luckystack/*` for `src/`-rooted importers; tests under `packages/<pkg>/src` fell through to `node_modules → dist`, so a skipped `build:packages` silently broke 145 tests. Added explicit `resolve.alias` built from `tsconfig.server.json`'s path map (parsed via the TypeScript JSONC reader — the file has comments — so it stays a single source of truth, no drift; exact-match regexes prevent `@luckystack/core` swallowing `…/core/client`). **Proven:** physically moved `packages/core/dist` aside → `test:unit` still 782/782, confirming source resolution.
+- **`package-lock.json`** committed reconciled (plugin-react swap).
+- **`src/main.tsx` + template `main.tsx` — `HydrateFallback: () => null`** on the root route, silencing React Router 7's "No HydrateFallback element provided" warning introduced by the lazy-routes conversion (no flash; minimal per consumer style).
+
+**Files touched:** `vitest.config.ts`, `src/main.tsx`, `packages/create-luckystack-app/template/src/main.tsx`, `package-lock.json`.
+
+**Gates after fixes:** lint 0 · full `npm run build` exit 0 · `test:unit` 782/782 (incl. the dist-removed proof run).
+
+**Still open (reported, user's call):** F10 (`listSessions_v1.ts` returns raw session tokens — consumer demo code); SESSION_STATE test-account emails don't exist in the live dev DB (the sweep self-registers; browser test registered a fresh account). Cleanup: agent-browser Chrome installed to its cache; LS-v2 :4100/:5180 processes stopped; matchrix untouched.

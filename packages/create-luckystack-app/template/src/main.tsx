@@ -176,6 +176,10 @@ const router = createBrowserRouter([{
   path: '/',
   element: <LocationProvider />,
   errorElement: <ErrorPage />,
+  //? Lazy routes make this a data router that hydrates async; React Router 7
+  //? warns without a HydrateFallback for the initial chunk load. `() => null`
+  //? renders nothing during that brief window (no flash) and silences the warn.
+  HydrateFallback: () => null,
   children: routes,
 }]);
 
