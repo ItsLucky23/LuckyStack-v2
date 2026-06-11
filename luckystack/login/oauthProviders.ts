@@ -5,7 +5,7 @@
 //? OAuthProvider object. For a custom provider (Okta, Apple, X, ...) drop a
 //? raw object into the array — see `OAuthProvider` type for the shape.
 
-import { loadEnvFiles } from '@luckystack/core';
+import { loadEnvFiles, getProjectConfig } from '@luckystack/core';
 import {
   registerOAuthProviders,
   credentialsProvider,
@@ -21,12 +21,15 @@ loadEnvFiles();
 
 const prod = process.env.NODE_ENV !== 'development';
 const secure = process.env.SECURE === 'true';
-const protocol = secure ? 'https' : 'http';
-const backendUrl = prod
-  ? (process.env.DNS || '')
-  : `${protocol}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
+//? The OAuth redirect URI host MUST equal what you registered in the provider's
+//? console (Google Cloud, etc.). Use the framework's canonical backend origin —
+//? `getProjectConfig().oauthCallbackBase` (set in config.ts: dev `http://localhost:80`,
+//? prod the public domain) — NOT a hand-built `SERVER_IP:SERVER_PORT`, which in
+//? dev resolves to `http://127.0.0.1:80` and fails Google's exact-match check
+//? against the registered `http://localhost:80/...` (Error 400 redirect_uri_mismatch).
+const callbackBase = (getProjectConfig().oauthCallbackBase || getProjectConfig().app.publicUrl).replace(/\/+$/, '');
 
-const callback = (name: string): string => `${backendUrl}/auth/callback/${name}`;
+const callback = (name: string): string => `${callbackBase}/auth/callback/${name}`;
 
 const useProdCreds = prod && secure;
 const env = (prodKey: string, devKey: string): string =>

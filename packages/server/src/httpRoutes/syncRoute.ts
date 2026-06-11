@@ -3,6 +3,8 @@ import {
   dispatchHook,
   extractTokenFromRequest,
   getLogger,
+  getProjectConfig,
+  resolveClientIp,
   tryCatch,
 } from '@luckystack/core';
 import type { HttpSyncStreamEvent } from '@luckystack/sync';
@@ -100,6 +102,18 @@ export const handleSyncRoute: HttpRouteHandler = async ({
 
     const syncParams = normalizeHttpSyncParams(params);
 
+    //? Resolve the real client IP for per-IP rate limiting. Default
+    //? `http.trustProxy: false` returns the raw `req.socket.remoteAddress`
+    //? (only IPv4-mapped IPv6 canonicalized); a trusted proxy honors
+    //? X-Forwarded-For / X-Real-IP. Preserve the historical `undefined`
+    //? fallback when there is genuinely no address so downstream bucketing
+    //? stays byte-identical.
+    const trustProxy = getProjectConfig().http.trustProxy;
+    const rawRemoteAddress = req.socket.remoteAddress;
+    const requesterIp = (rawRemoteAddress || (trustProxy && (req.headers['x-forwarded-for'] || req.headers['x-real-ip'])))
+      ? resolveClientIp({ rawAddress: rawRemoteAddress, headers: req.headers, trustProxy })
+      : undefined;
+
     const result = await sync.handleHttpSyncRequest({
       name: `sync/${syncName}`,
       cb: syncParams.cb,
@@ -107,7 +121,7 @@ export const handleSyncRoute: HttpRouteHandler = async ({
       receiver: syncParams.receiver,
       ignoreSelf: syncParams.ignoreSelf,
       token: httpToken,
-      requesterIp: req.socket.remoteAddress ?? undefined,
+      requesterIp,
       xLanguageHeader: req.headers['x-language'],
       acceptLanguageHeader: req.headers['accept-language'],
       stream: useHttpStream

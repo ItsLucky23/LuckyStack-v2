@@ -4,7 +4,6 @@ import type { apiMessage, PostApiExecutePayload } from '@luckystack/core';
 import { readSession, performLogout } from '@luckystack/core';
 import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
 import { getProjectConfig } from '@luckystack/core';
-import type { AuthProps } from '@luckystack/core';
 import { Socket } from 'socket.io';
 import { getRuntimeApiMaps } from '@luckystack/core';
 import {
@@ -13,88 +12,26 @@ import {
   tryCatch,
   parseTransportRouteName,
   buildApiResponseEventName,
-  buildApiStreamEventName,
   dispatchHook,
-  validateInputByType,
   getLogger,
+  resolveClientIp,
 } from '@luckystack/core';
 import {
-  defaultHttpStatusForResponse,
   extractLanguageFromHeader,
   normalizeErrorResponse,
   applyErrorFormatter,
-  registerApiAbortController,
-  unregisterApiAbortController,
-  socketEventNames,
 } from '@luckystack/core';
 import type { ErrorFormatter } from '@luckystack/core';
+import type { ApiStreamPayload, ApiFlushPressure, RuntimeApiResponse, RuntimeApiEntry } from './_shared/apiTypes';
+import { shouldLogDev } from './_shared/logFlags';
+import { normalizeApiResponse } from './_shared/responseEnvelope';
+import { createApiRequestLifecycle } from './_shared/requestLifecycle';
+import { runSocketApiValidation } from './_shared/socketValidationStage';
 
 interface handleApiRequestType {
   msg: apiMessage,
   socket: Socket,
   token: string | null,
-}
-
-type ApiStreamPayload = Record<string, unknown>;
-
-interface RuntimeErrorResponse {
-  status: 'error';
-  errorCode?: string;
-  errorParams?: { key: string; value: string | number | boolean; }[];
-  httpStatus?: number;
-  message?: string;
-  [key: string]: unknown;
-}
-
-interface RuntimeSuccessResponse {
-  status: 'success';
-  message?: string;
-  httpStatus?: number;
-  [key: string]: unknown;
-}
-
-type RuntimeApiResponse = RuntimeSuccessResponse | RuntimeErrorResponse;
-
-//? B2 — backpressure helper for API handlers. Same opt-in pattern as
-//? sync; resolves once the originator socket's pending write buffer drops
-//? below the threshold. Default 1 MB.
-export interface ApiFlushPressureOptions {
-  thresholdBytes?: number;
-}
-export type ApiFlushPressure = (options?: ApiFlushPressureOptions) => Promise<void>;
-
-interface RuntimeApiEntry {
-  auth: AuthProps;
-  main: (params: {
-    data: Record<string, unknown>;
-    user: SessionLayout | null;
-    functions: Record<string, unknown>;
-    stream: (payload?: ApiStreamPayload) => void;
-    //? B1 — aborts on `apiCancel` or socket disconnect.
-    abortSignal: AbortSignal;
-    //? B2 — backpressure helper bound to the originator socket.
-    flushPressure: ApiFlushPressure;
-  }) => Promise<RuntimeApiResponse>;
-  inputType?: string;
-  inputTypeFilePath?: string;
-  rateLimit?: number | false;
-  /**
-   * Per-route validation strictness.
-   * `'strict'` (default): runtime Zod validation runs, mismatched payloads
-   *   are rejected with `api.invalidInputType`.
-   * `'relaxed'` / `{ input: 'skip' }`: skip the validate step. Use for public
-   *   webhooks that receive third-party-shaped payloads you can't model in TS,
-   *   or for migration windows when input shapes are in flux.
-   */
-  validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
-  /**
-   * Per-route error response formatter. Receives the normalized error
-   * envelope + context and returns the shape to emit. Falls back to the
-   * global formatter from `registerErrorFormatter(...)`, then to the
-   * framework default `normalizeErrorResponse`. See
-   * docs/ARCHITECTURE_EXTENSION_POINTS.md for the resolution order.
-   */
-  errorFormatter?: ErrorFormatter;
 }
 
 interface ApiErrorResponse {
@@ -105,20 +42,6 @@ interface ApiErrorResponse {
 }
 
 type EmitApiError = (args: { response: ApiErrorResponse; fallbackHttpStatus?: number; }) => void;
-
-const shouldLogDev = () => getProjectConfig().logging.devLogs;
-const shouldLogStream = () => getProjectConfig().logging.stream;
-
-//? Track routes we've already warned about so we don't spam the log every
-//? request. Set is module-level — fine for the dev-only warning.
-const warnedMissingInputType = new Set<string>();
-const warnIfInputTypeMissing = (resolvedName: string, inputType: string | undefined): void => {
-  if (!getProjectConfig().dev.warnOnMissingInputType) return;
-  if (inputType && inputType.trim().length > 0 && inputType.trim() !== 'any') return;
-  if (warnedMissingInputType.has(resolvedName)) return;
-  warnedMissingInputType.add(resolvedName);
-  getLogger().warn(`api: route ${resolvedName} has no inputType — runtime input validation is disabled. Regenerate types or set the inputType on the handler.`);
-};
 
 const validateApiMessage = ({ msg, emitApiError }: {
   msg: apiMessage;
@@ -194,8 +117,18 @@ const applyApiRateLimits = async ({ apiEntry, resolvedName, token, socket, user,
     ? getProjectConfig().rateLimiting.defaultApiLimit
     : apiRateLimit;
 
+  //? Resolve the real client IP once for both buckets. With the default
+  //? `http.trustProxy: false` this returns `socket.handshake.address` verbatim
+  //? (only IPv4-mapped IPv6 is canonicalized), preserving historical keys;
+  //? when a trusted proxy is configured it honors X-Forwarded-For / X-Real-IP.
+  const resolvedIp = resolveClientIp({
+    rawAddress: socket.handshake.address,
+    headers: socket.handshake.headers,
+    trustProxy: getProjectConfig().http.trustProxy,
+  });
+
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
-    const requesterIdentity = token ?? socket.handshake.address ?? 'unknown';
+    const requesterIdentity = token ?? resolvedIp;
     const keyPrefix = token ? 'token' : 'ip';
     const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${resolvedName}`;
 
@@ -232,7 +165,7 @@ const applyApiRateLimits = async ({ apiEntry, resolvedName, token, socket, user,
 
   const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
   if (defaultIpLimit !== false && defaultIpLimit > 0) {
-    const requesterIp = socket.handshake.address ?? 'unknown';
+    const requesterIp = resolvedIp;
 
     const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${requesterIp}:api:all`,
@@ -294,76 +227,71 @@ const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObje
   return { error: error ?? null, result: result ?? undefined, durationMs: Date.now() - executeStart };
 };
 
-const buildApiResponseEnvelope = ({
+//? Execution stage: `preApiExecute` hook (stop-signal short-circuit) ->
+//? `executeApiHandler` (tryCatch-wrapped) -> `postApiExecute` hook. Extracted
+//? from the orchestrator per the `api` package audit. Returns either a stop
+//? signal (the orchestrator builds the localized error envelope from it) or the
+//? `(error, result)` pair to feed `emitApiResult`. The shared `executePayload`
+//? reference is created here and threaded through both hooks so the
+//? error-tracking auto-instrumentation can pin spans via WeakMap on it.
+type SocketApiExecutionOutcome =
+  | { stopped: true; errorCode: string; httpStatus?: number }
+  | { stopped: false; error: Error | null; result: RuntimeApiResponse | undefined };
+
+const runSocketApiExecution = async ({
+  apiEntry,
   resolvedName,
-  error,
-  result,
-  preferredLocale,
+  normalizedData,
   user,
+  functionsObject,
+  emitStream,
+  abortSignal,
+  flushPressure,
 }: {
+  apiEntry: RuntimeApiEntry;
   resolvedName: string;
-  error: Error | null;
-  result: RuntimeApiResponse | undefined;
-  preferredLocale: string | undefined;
+  normalizedData: Record<string, unknown>;
   user: SessionLayout | null;
-}): { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } => {
-  if (error) {
-    if (shouldLogDev()) {
-      getLogger().error(`api: error in ${resolvedName}`, error, { route: resolvedName });
-    }
-    return { ...normalizeErrorResponse({
-      response: { status: 'error', errorCode: 'api.internalServerError' },
-      preferredLocale,
-      userLanguage: user?.language,
-      fallbackHttpStatus: 500,
-    }) };
-  }
-
-  if (result === undefined || result === null) {
-    if (shouldLogDev()) {
-      getLogger().warn(`api: ${resolvedName} returned nothing`);
-    }
-    return { ...normalizeErrorResponse({
-      response: { status: 'error', errorCode: 'api.emptyResponse' },
-      preferredLocale,
-      userLanguage: user?.language,
-      fallbackHttpStatus: 500,
-    }) };
-  }
-
-  if (shouldLogDev()) {
-    getLogger().debug(`api: ${resolvedName} completed`);
-  }
-
-  if (result.status !== 'success' && result.status !== 'error') {
-    return { ...normalizeErrorResponse({
-      response: { status: 'error', errorCode: 'api.invalidResponseStatus' },
-      preferredLocale,
-      userLanguage: user?.language,
-      fallbackHttpStatus: 500,
-    }) };
-  }
-
-  if (result.status === 'error') {
-    return { ...normalizeErrorResponse({
-      response: result,
-      preferredLocale,
-      userLanguage: user?.language,
-      fallbackHttpStatus: defaultHttpStatusForResponse({
-        status: 'error',
-        explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
-      }),
-    }) };
-  }
-
-  return {
-    ...result,
-    status: 'success',
-    httpStatus: defaultHttpStatusForResponse({
-      status: 'success',
-      explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
-    }),
+  functionsObject: Record<string, unknown>;
+  emitStream: (payload?: ApiStreamPayload) => void;
+  abortSignal: AbortSignal;
+  flushPressure: ApiFlushPressure;
+}): Promise<SocketApiExecutionOutcome> => {
+  //? Single payload reference reused by pre/post — auto-instrumentation
+  //? subscribers in `@luckystack/error-tracking` pin spans via WeakMap on
+  //? this object. Mutating `result/error/durationMs` is safe because
+  //? handlers observe by-name (not by snapshot).
+  const executePayload: PostApiExecutePayload = {
+    routeName: resolvedName,
+    data: normalizedData,
+    user,
+    transport: 'socket',
+    result: undefined,
+    error: null,
+    durationMs: 0,
   };
+  const preExecuteResult = await dispatchHook('preApiExecute', executePayload);
+  if (preExecuteResult.stopped) {
+    return { stopped: true, errorCode: preExecuteResult.signal.errorCode, httpStatus: preExecuteResult.signal.httpStatus };
+  }
+
+  const { error, result, durationMs } = await executeApiHandler({
+    apiEntry,
+    normalizedData,
+    user,
+    functionsObject,
+    resolvedName,
+    emitStream,
+    abortSignal,
+    flushPressure,
+  });
+
+  executePayload.result = result;
+  executePayload.error = error ?? null;
+  executePayload.durationMs = durationMs;
+  await dispatchHook('postApiExecute', executePayload);
+
+  return { stopped: false, error, result };
 };
 
 const emitApiResult = async ({
@@ -385,7 +313,7 @@ const emitApiResult = async ({
   user: SessionLayout | null;
   perRouteFormatter?: ErrorFormatter;
 }): Promise<void> => {
-  const envelope = buildApiResponseEnvelope({ resolvedName, error, result, preferredLocale, user });
+  const envelope = normalizeApiResponse({ resolvedName, error, result, preferredLocale, user });
 
   //? `preApiRespond` handlers may mutate `payload.response` to swap or rewrite
   //? the outgoing envelope (PII redaction, response signing, schema injection).
@@ -526,61 +454,16 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const apiEntry = apisObject[resolvedName] as RuntimeApiEntry;
   currentPerRouteFormatter = apiEntry.errorFormatter;
 
-  //? B1 — per-request AbortController. Aborts on `apiCancel { responseIndex }`
-  //? from the originator OR socket disconnect. Cleanup runs in every exit
-  //? path (errors, validation rejects, completion) to remove the disconnect
-  //? listener and drop the cancel-registry entry. The signal is also handed
-  //? to `emitStream` so chunks queued after an abort never hit the wire.
-  const abortController = new AbortController();
-  const abortKey = registerApiAbortController(socket.id, responseIndex, abortController);
-  const onSocketDisconnect = () => { abortController.abort(); };
-  socket.once(socketEventNames.disconnect, onSocketDisconnect);
-  let cleanupDone = false;
-  const cleanupRequest = () => {
-    if (cleanupDone) return;
-    cleanupDone = true;
-    socket.off(socketEventNames.disconnect, onSocketDisconnect);
-    unregisterApiAbortController(abortKey);
-  };
-
-  const emitStream = (payload: ApiStreamPayload = {}) => {
-    if (abortController.signal.aborted) {
-      if (shouldLogStream()) {
-        getLogger().debug(`api: ${resolvedName} stream skipped — request aborted`);
-      }
-      return;
-    }
-    if (shouldLogStream()) {
-      getLogger().debug(`api: ${resolvedName} stream`, { payload });
-    }
-    socket.emit(buildApiStreamEventName(responseIndex), payload);
-  };
-
-  //? B2 — backpressure helper for API handlers. Same shape as the sync
-  //? variant but always scoped to a single originator socket. Polls the
-  //? engine.io writeBuffer length every 10ms until the buffer drains below
-  //? threshold (default 1 MB ≈ 1024 packets at ~1KB each).
-  const apiFlushPressure: ApiFlushPressure = async ({ thresholdBytes } = {}) => {
-    if (abortController.signal.aborted) return;
-    const effectiveThresholdBytes = typeof thresholdBytes === 'number' && thresholdBytes > 0
-      ? thresholdBytes
-      : 1_048_576;
-    const packetThreshold = Math.max(1, Math.ceil(effectiveThresholdBytes / 1024));
-    interface EngineIoConnLike {
-      writeBuffer?: { length: number };
-      transport?: { writable?: boolean };
-    }
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      if (abortController.signal.aborted) return;
-      const conn = (socket as unknown as { conn?: EngineIoConnLike }).conn;
-      const packets = conn?.writeBuffer?.length ?? 0;
-      const writable = conn?.transport?.writable ?? true;
-      if (!writable) return;
-      if (packets < packetThreshold) return;
-      await new Promise<void>((resolve) => setTimeout(resolve, 10));
-    }
-  };
+  //? Per-request lifecycle bundle (B1 abortController + cleanup, B2
+  //? backpressure, abort-aware emitStream). Extracted to `_shared/
+  //? requestLifecycle.ts`; the closures stay intact and the orchestrator
+  //? threads the returned handles through the pipeline. `cleanupRequest`
+  //? runs in every exit path below.
+  const { abortSignal, emitStream, flushPressure, cleanupRequest } = createApiRequestLifecycle({
+    socket,
+    responseIndex,
+    resolvedName,
+  });
 
   //? Auth → rate-limit → validate → execute → respond.
   //? Auth runs before validate so unauthenticated probes can't enumerate
@@ -590,98 +473,43 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const rateLimitOk = await applyApiRateLimits({ apiEntry, resolvedName, token, socket, user, emitApiError });
   if (!rateLimitOk) { cleanupRequest(); return; }
 
-  //? Per-route validation toggle. `'relaxed'` or `{ input: 'skip' }` skips
-  //? runtime input validation entirely — useful for public webhooks (Stripe,
-  //? Slack, GitHub) where the third party's payload shape isn't reasonable
-  //? to model in TypeScript. Default `'strict'`.
-  const validationMode = (() => {
-    const v = apiEntry.validation;
-    if (!v) return 'strict';
-    if (typeof v === 'string') return v;
-    return v.input === 'skip' ? 'relaxed' : 'strict';
-  })();
-
-  if (validationMode === 'strict') {
-    warnIfInputTypeMissing(resolvedName, apiEntry.inputType);
-  }
-  await dispatchHook('preApiValidate', { routeName: resolvedName, data: normalizedData, user, transport: 'socket' });
-
-  if (validationMode === 'strict') {
-    const inputValidation = await validateInputByType({
-      typeText: apiEntry.inputType,
-      value: normalizedData,
-      rootKey: 'data',
-      filePath: apiEntry.inputTypeFilePath,
-    });
-
-    await dispatchHook('postApiValidate', {
-      routeName: resolvedName,
-      data: normalizedData,
-      user,
-      validation: inputValidation,
-      transport: 'socket',
-    });
-
-    if (inputValidation.status === 'error') {
-      cleanupRequest();
-      return emitApiError({
-        response: {
-          status: 'error',
-          errorCode: 'api.invalidInputType',
-          errorParams: [{ key: 'message', value: inputValidation.message }],
-        },
-        fallbackHttpStatus: 400,
-      });
-    }
-  } else {
-    //? Relaxed: surface the skip via postApiValidate so audit handlers see it.
-    await dispatchHook('postApiValidate', {
-      routeName: resolvedName,
-      data: normalizedData,
-      user,
-      validation: { status: 'success' },
-      transport: 'socket',
-    });
-  }
-
-  //? Single payload reference reused by pre/post — auto-instrumentation
-  //? subscribers in `@luckystack/error-tracking` pin spans via WeakMap on
-  //? this object. Mutating `result/error/durationMs` is safe because
-  //? handlers observe by-name (not by snapshot).
-  const executePayload: PostApiExecutePayload = {
-    routeName: resolvedName,
-    data: normalizedData,
-    user,
-    transport: 'socket',
-    result: undefined,
-    error: null,
-    durationMs: 0,
-  };
-  const preExecuteResult = await dispatchHook('preApiExecute', executePayload);
-  if (preExecuteResult.stopped) {
-    cleanupRequest();
-    return emitApiError({
-      response: { status: 'error', errorCode: preExecuteResult.signal.errorCode },
-      fallbackHttpStatus: preExecuteResult.signal.httpStatus ?? 403,
-    });
-  }
-
-  const { error, result, durationMs } = await executeApiHandler({
+  //? Validation stage (mode resolve + preApiValidate -> validateInputByType ->
+  //? postApiValidate). On failure it runs cleanup + emits the GENERIC
+  //? `api.invalidInputType` (raw validator message never reaches the client)
+  //? via the closures below, then returns false.
+  const validationOk = await runSocketApiValidation({
     apiEntry,
+    resolvedName,
+    normalizedData,
+    user,
+    cleanupRequest,
+    emitInvalidInputType: () => emitApiError({
+      response: { status: 'error', errorCode: 'api.invalidInputType' },
+      fallbackHttpStatus: 400,
+    }),
+  });
+  if (!validationOk) return;
+
+  //? Execution stage: preApiExecute (stop-signal short-circuit) -> handler ->
+  //? postApiExecute. Returns either a stop signal or the (error, result) pair.
+  const execution = await runSocketApiExecution({
+    apiEntry,
+    resolvedName,
     normalizedData,
     user,
     functionsObject,
-    resolvedName,
     emitStream,
-    abortSignal: abortController.signal,
-    flushPressure: apiFlushPressure,
+    abortSignal,
+    flushPressure,
   });
+  if (execution.stopped) {
+    cleanupRequest();
+    return emitApiError({
+      response: { status: 'error', errorCode: execution.errorCode },
+      fallbackHttpStatus: execution.httpStatus ?? 403,
+    });
+  }
 
-  executePayload.result = result;
-  executePayload.error = error ?? null;
-  executePayload.durationMs = durationMs;
-  await dispatchHook('postApiExecute', executePayload);
-
-  await emitApiResult({ socket, responseIndex, resolvedName, error, result, preferredLocale, user, perRouteFormatter: apiEntry.errorFormatter });
+  await emitApiResult({ socket, responseIndex, resolvedName, error: execution.error, result: execution.result, preferredLocale, user, perRouteFormatter: apiEntry.errorFormatter });
   cleanupRequest();
 }

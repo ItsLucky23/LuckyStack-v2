@@ -12,10 +12,15 @@
 //? merges on top of defaults (later wins per key).
 
 import type { IncomingMessage } from 'node:http';
+import { createRegistry } from '@luckystack/core';
 
 export type SecurityHeadersBuilder = (req: IncomingMessage) => Record<string, string> | null | undefined;
 
-let registeredBuilder: SecurityHeadersBuilder | null = null;
+//? Single-slot registry: one builder at a time, last-write-wins, `null` is the
+//? unregistered baseline. Backed by core's `createRegistry` so the register /
+//? read / reset triad isn't hand-rolled. The public `registerSecurityHeaders` /
+//? `getSecurityHeadersBuilder` signatures below are preserved verbatim.
+const builderRegistry = createRegistry<SecurityHeadersBuilder | null>(null);
 
 /**
  * Register a custom security-headers builder. Called for every HTTP
@@ -26,8 +31,8 @@ let registeredBuilder: SecurityHeadersBuilder | null = null;
  * `null` to unregister.
  */
 export const registerSecurityHeaders = (builder: SecurityHeadersBuilder | null): void => {
-  registeredBuilder = builder;
+  builderRegistry.register(builder);
 };
 
 /** Read the active builder (or null). */
-export const getSecurityHeadersBuilder = (): SecurityHeadersBuilder | null => registeredBuilder;
+export const getSecurityHeadersBuilder = (): SecurityHeadersBuilder | null => builderRegistry.get();

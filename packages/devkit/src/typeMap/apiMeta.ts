@@ -1,6 +1,6 @@
 import * as ts from 'typescript';
 import fs from 'node:fs';
-import { inferHttpMethod } from '@luckystack/core';
+import { inferHttpMethod, tryCatchSync } from '@luckystack/core';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
@@ -37,25 +37,28 @@ const unwrapExpression = (node: ts.Expression): ts.Expression => {
 };
 
 export const extractHttpMethod = (filePath: string, apiName: string): HttpMethod => {
-  try {
+  const [error, method] = tryCatchSync((): HttpMethod | undefined => {
     const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'httpMethod');
 
     const initializer = decl?.initializer ? unwrapExpression(decl.initializer) : undefined;
     if (initializer && ts.isStringLiteral(initializer)) {
-      const method = initializer.text.toUpperCase() as HttpMethod;
-      if (['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return method;
+      const candidate = initializer.text.toUpperCase() as HttpMethod;
+      if (['GET', 'POST', 'PUT', 'DELETE'].includes(candidate)) return candidate;
     }
-  } catch (error) {
+    return undefined;
+  });
+
+  if (error) {
     console.error(`[TypeMapGenerator] Error extracting httpMethod from ${filePath}:`, error);
   }
 
-  return inferHttpMethod(apiName);
+  return method ?? inferHttpMethod(apiName);
 };
 
 export const extractRateLimit = (filePath: string): number | false | undefined => {
-  try {
+  const [error, rateLimit] = tryCatchSync((): number | false | undefined => {
     const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'rateLimit');
@@ -65,11 +68,14 @@ export const extractRateLimit = (filePath: string): number | false | undefined =
       if (initializer.kind === ts.SyntaxKind.FalseKeyword) return false;
       if (ts.isNumericLiteral(initializer)) return Number(initializer.text);
     }
-  } catch (error) {
+    return undefined;
+  });
+
+  if (error) {
     console.error(`[TypeMapGenerator] Error extracting rateLimit from ${filePath}:`, error);
   }
 
-  return undefined;
+  return rateLimit ?? undefined;
 };
 
 /**
@@ -80,7 +86,7 @@ export const extractRateLimit = (filePath: string): number | false | undefined =
 export type ApiValidationMode = 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
 
 export const extractValidation = (filePath: string): ApiValidationMode | undefined => {
-  try {
+  const [error, validation] = tryCatchSync((): ApiValidationMode | undefined => {
     const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'validation');
@@ -103,11 +109,14 @@ export const extractValidation = (filePath: string): ApiValidationMode | undefin
         if (input === 'skip' || input === 'strict') return { input };
       }
     }
-  } catch (error) {
+    return undefined;
+  });
+
+  if (error) {
     console.error(`[TypeMapGenerator] Error extracting validation from ${filePath}:`, error);
   }
 
-  return undefined;
+  return validation ?? undefined;
 };
 
 // Reads a primitive value from an AST expression node.
@@ -157,27 +166,28 @@ export interface DocsMeta {
   deprecated?: string | true;
 }
 
+//? Flatten a JSDoc tag comment (string or `ts.NodeArray` of comment parts) to text.
+const commentToString = (commentValue: unknown): string => {
+  if (typeof commentValue === 'string') return commentValue;
+  if (Array.isArray(commentValue)) {
+    return commentValue
+      .map((part) => {
+        if (part && typeof part === 'object' && 'text' in part && typeof (part as { text: unknown }).text === 'string') {
+          return (part as { text: string }).text;
+        }
+        return '';
+      })
+      .join('');
+  }
+  return '';
+};
+
 export const extractDocsMeta = (filePath: string): DocsMeta | undefined => {
-  try {
+  const [error, docsMeta] = tryCatchSync((): DocsMeta | undefined => {
     const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
 
     const result: DocsMeta = {};
-
-    const commentToString = (commentValue: unknown): string => {
-      if (typeof commentValue === 'string') return commentValue;
-      if (Array.isArray(commentValue)) {
-        return commentValue
-          .map((part) => {
-            if (part && typeof part === 'object' && 'text' in part && typeof (part as { text: unknown }).text === 'string') {
-              return (part as { text: string }).text;
-            }
-            return '';
-          })
-          .join('');
-      }
-      return '';
-    };
 
     const consumeTag = (tag: ts.JSDocTag): void => {
       if (tag.tagName.text !== 'docs') return;
@@ -212,14 +222,18 @@ export const extractDocsMeta = (filePath: string): DocsMeta | undefined => {
       return undefined;
     }
     return result;
-  } catch (error) {
+  });
+
+  if (error) {
     console.error(`[TypeMapGenerator] Error extracting @docs metadata from ${filePath}:`, error);
     return undefined;
   }
+
+  return docsMeta ?? undefined;
 };
 
 export const extractAuth = (filePath: string): { login: boolean; additional?: Record<string, unknown>[] } => {
-  try {
+  const [, auth] = tryCatchSync((): { login: boolean; additional?: Record<string, unknown>[] } => {
     const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'auth');
@@ -248,10 +262,9 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
     }
 
     return additional && additional.length > 0 ? { login, additional } : { login };
-  } catch {
-    // fall through
-  }
+  });
 
-  return { login: true };
+  //? Parse failure falls through silently (no log), preserving prior behaviour.
+  return auth ?? { login: true };
 };
 

@@ -1,5 +1,3 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
 import { Socket } from "socket.io";
 import { redis as redisClient, tryCatch, socketEventNames, dispatchHook, getLogger } from '@luckystack/core';
 import { deleteSession, activeUsersKeyFor } from "./session";
@@ -35,7 +33,10 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
     if (userId) {
       await redisClient.srem(activeUsersKeyFor(userId), token);
     }
-    socket.leave(token);
+    //? `socket.leave` returns a Promise in socket.io's adapter contract but the
+    //? room-leave is fire-and-forget here (the session is already being torn
+    //? down) — `void` marks it intentionally un-awaited without changing timing.
+    void socket.leave(token);
 
     // Presence state (disconnectTimers, tempDisconnectedSockets) is cleaned up
     // by `@luckystack/presence`'s `postLogout` hook handler, registered at

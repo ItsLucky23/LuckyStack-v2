@@ -37,12 +37,16 @@ export interface CliArgs {
   help: boolean;
   /** `--no-presence`: omit @luckystack/presence (applies under --no-prompt / CI). */
   noPresence: boolean;
+  /** `--ai-browser=<all|agent-browser|none>`: AI browser-testing tooling (null = unspecified → DEFAULT_CHOICES). */
+  aiBrowserTooling: AiBrowserTooling | null;
 }
 
 //? Single source of truth for recognised flag tokens. Used both by the
 //? parser (to reject unknown flags) and the help banner (so the list stays
-//? in sync with what `parseArgs` actually accepts).
-export const VALID_FLAGS = ['--no-install', '--no-prompt', '--no-presence', '--help', '-h'] as const;
+//? in sync with what `parseArgs` actually accepts). `--ai-browser` is a
+//? value flag (`--ai-browser=<all|agent-browser|none>`) parsed in the
+//? default arm; it's listed here only for the help/error banner.
+export const VALID_FLAGS = ['--no-install', '--no-prompt', '--no-presence', '--ai-browser=<all|agent-browser|none>', '--help', '-h'] as const;
 
 export const parseArgs = (argv: string[]): CliArgs => {
   let projectName = '';
@@ -50,6 +54,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
   let prompt = true;
   let help = false;
   let noPresence = false;
+  let aiBrowserTooling: AiBrowserTooling | null = null;
   for (const arg of argv) {
     switch (arg) {
     case '--no-install': {
@@ -64,12 +69,24 @@ export const parseArgs = (argv: string[]): CliArgs => {
     noPresence = true;
     break;
     }
-    case '--help': 
+    case '--help':
     case '-h': {
     help = true;
     break;
     }
-    default: { if (arg.startsWith('-')) {
+    default: { if (arg.startsWith('--ai-browser=')) {
+      //? Value flag — `--ai-browser=<all|agent-browser|none>`. Validate
+      //? against the canonical option list; exit 2 on a bad value (matches
+      //? the unknown-flag convention below).
+      const value = arg.slice('--ai-browser='.length);
+      if ((PROVIDER_OPTIONS.aiBrowserTooling as readonly string[]).includes(value)) {
+        aiBrowserTooling = value as AiBrowserTooling;
+      } else {
+        console.error(`Invalid --ai-browser value: ${value}`);
+        console.error(`Valid values: ${PROVIDER_OPTIONS.aiBrowserTooling.join(', ')}`);
+        process.exit(2);
+      }
+    } else if (arg.startsWith('-')) {
       //? Fail-fast on unknown flags. Silently ignoring them previously
       //? meant a typo like `--ni-install` would be swallowed and the
       //? scaffold would proceed with default behavior. Exit 2 matches
@@ -84,20 +101,41 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
     }
   }
-  return { projectName, install, prompt, help, noPresence };
+  return { projectName, install, prompt, help, noPresence, aiBrowserTooling };
 };
+
+//? Single source of truth for the selectable provider lists. The wizard, the
+//? non-interactive fallback prompts, the answer→choice conversion, and the
+//? env-var builders all read from here so a new provider is added in exactly
+//? one place. Declared `as const` so each list stays a readonly literal-union
+//? tuple (drives the `ScaffoldChoices` field types below).
+const PROVIDER_OPTIONS = {
+  dbProvider: ['mongodb', 'postgresql', 'mysql', 'sqlite'],
+  authMode: ['none', 'credentials', 'credentials+oauth'],
+  oauthProviders: ['google', 'github', 'discord', 'facebook', 'microsoft'],
+  emailProvider: ['none', 'console', 'resend', 'smtp'],
+  monitoringProvider: ['none', 'sentry', 'datadog', 'posthog'],
+  aiBrowserTooling: ['all', 'agent-browser', 'none'],
+} as const;
+
+type DbProvider = (typeof PROVIDER_OPTIONS.dbProvider)[number];
+type AuthMode = (typeof PROVIDER_OPTIONS.authMode)[number];
+type OAuthProvider = (typeof PROVIDER_OPTIONS.oauthProviders)[number];
+type EmailProvider = (typeof PROVIDER_OPTIONS.emailProvider)[number];
+type MonitoringProvider = (typeof PROVIDER_OPTIONS.monitoringProvider)[number];
+type AiBrowserTooling = (typeof PROVIDER_OPTIONS.aiBrowserTooling)[number];
 
 interface ScaffoldChoices {
   /** Database provider used in `schema.prisma`. */
-  dbProvider: 'mongodb' | 'postgresql' | 'mysql' | 'sqlite';
+  dbProvider: DbProvider;
   /** Auth strategy. `'none'` skips auth wiring. */
-  authMode: 'none' | 'credentials' | 'credentials+oauth';
+  authMode: AuthMode;
   /** OAuth providers wired into `luckystack/login/oauthProviders.ts`. */
-  oauthProviders: ('google' | 'github' | 'discord' | 'facebook' | 'microsoft')[];
+  oauthProviders: OAuthProvider[];
   /** Transactional email adapter. */
-  emailProvider: 'none' | 'console' | 'resend' | 'smtp';
+  emailProvider: EmailProvider;
   /** Observability backend. */
-  monitoringProvider: 'none' | 'sentry' | 'datadog' | 'posthog';
+  monitoringProvider: MonitoringProvider;
   /** Install @luckystack/presence (AFK/presence/socket-status). Optional peer. */
   presence: boolean;
   /** Enable @luckystack/i18n integration. */
@@ -109,6 +147,14 @@ interface ScaffoldChoices {
    * AI snapshot files fresh. Off = a clean project with no AI tooling.
    */
   aiInstructions: boolean;
+  /**
+   * AI browser-testing tooling (agent-browser CLI + optional Playwright /
+   * Chrome DevTools MCP servers, all user-approval-gated). `'agent-browser'`
+   * = the cheap CLI default; `'all'` = also wire both MCP servers; `'none'`
+   * = skip. Only wired when `aiInstructions` is on (it's an AI-template
+   * sub-feature). Dev-tools only — never runtime dependencies.
+   */
+  aiBrowserTooling: AiBrowserTooling;
 }
 
 const DEFAULT_CHOICES: ScaffoldChoices = {
@@ -120,6 +166,7 @@ const DEFAULT_CHOICES: ScaffoldChoices = {
   presence: true,
   i18n: true,
   aiInstructions: true,
+  aiBrowserTooling: 'agent-browser',
 };
 
 const pickFromList = async <T extends string>(
@@ -182,13 +229,13 @@ const runPromptsFallback = async (): Promise<ScaffoldChoices> => {
     const dbProvider = await pickFromList(
       rl,
       'Which database provider do you want to use?',
-      ['mongodb', 'postgresql', 'mysql', 'sqlite'] as const,
+      PROVIDER_OPTIONS.dbProvider,
       'mongodb',
     );
     const authMode = await pickFromList(
       rl,
       'Authentication mode?',
-      ['none', 'credentials', 'credentials+oauth'] as const,
+      PROVIDER_OPTIONS.authMode,
       'credentials',
     );
     let oauthProviders: ScaffoldChoices['oauthProviders'] = [];
@@ -196,19 +243,19 @@ const runPromptsFallback = async (): Promise<ScaffoldChoices> => {
       oauthProviders = await pickMulti(
         rl,
         'Which OAuth providers to wire?',
-        ['google', 'github', 'discord', 'facebook', 'microsoft'] as const,
+        PROVIDER_OPTIONS.oauthProviders,
       );
     }
     const emailProvider = await pickFromList(
       rl,
       'Transactional email adapter?',
-      ['none', 'console', 'resend', 'smtp'] as const,
+      PROVIDER_OPTIONS.emailProvider,
       'console',
     );
     const monitoringProvider = await pickFromList(
       rl,
       'Observability backend?',
-      ['none', 'sentry', 'datadog', 'posthog'] as const,
+      PROVIDER_OPTIONS.monitoringProvider,
       'none',
     );
     const presence = await askYesNo(rl, 'Install @luckystack/presence (AFK / presence / socket-status)?', true);
@@ -218,7 +265,18 @@ const runPromptsFallback = async (): Promise<ScaffoldChoices> => {
       'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?',
       true,
     );
-    return { dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, presence, i18n, aiInstructions };
+    //? Browser tooling is an AI-template sub-feature — only offered when the
+    //? AI instructions are included (it relies on the shipped CLAUDE.md rule
+    //? + consumer doc). Forced to 'none' otherwise.
+    const aiBrowserTooling: AiBrowserTooling = aiInstructions
+      ? await pickFromList(
+        rl,
+        'Set up AI browser-testing tooling? (all = agent-browser + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none)',
+        PROVIDER_OPTIONS.aiBrowserTooling,
+        'agent-browser',
+      )
+      : 'none';
+    return { dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, presence, i18n, aiInstructions, aiBrowserTooling };
   } finally {
     rl.close();
   }
@@ -231,6 +289,12 @@ const ANSI = {
   reset: '[0m', bold: '[1m', dim: '[2m',
   cyan: '[36m', green: '[32m',
 } as const;
+
+//? Wrap `text` in one or more ANSI style codes and terminate with a reset, so
+//? call sites read as `ansiStyle('Next', ANSI.cyan, ANSI.bold)` instead of
+//? hand-concatenating escape strings around every span.
+const ansiStyle = (text: string, ...styles: string[]): string =>
+  `${styles.join('')}${text}${ANSI.reset}`;
 
 interface WizardStep {
   key: string;
@@ -270,17 +334,17 @@ const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string 
         if (p < pointer) {
           const answer = answers[step.key];
           const shown = Array.isArray(answer) ? (answer.length > 0 ? answer.join(', ') : 'none') : (answer ?? '');
-          lines.push(`${ANSI.green}✔${ANSI.reset} ${step.label} ${ANSI.cyan}${shown}${ANSI.reset}`);
+          lines.push(`${ansiStyle('✔', ANSI.green)} ${step.label} ${ansiStyle(shown, ANSI.cyan)}`);
           continue;
         }
         if (p > pointer) continue;
-        lines.push(`${ANSI.bold}${step.label}${ANSI.reset}`);
+        lines.push(ansiStyle(step.label, ANSI.bold));
         const cursor = cursors[i] ?? 0;
         for (const [oi, option] of step.options.entries()) {
           const active = oi === cursor;
           const box = step.type === 'multi' ? `${selections[i]?.has(option) === true ? '◉' : '◯'} ` : '';
-          const arrow = active ? `${ANSI.cyan}❯${ANSI.reset} ` : '  ';
-          const text = active ? `${ANSI.cyan}${box}${option}${ANSI.reset}` : `${box}${option}`;
+          const arrow = active ? `${ansiStyle('❯', ANSI.cyan)} ` : '  ';
+          const text = active ? ansiStyle(`${box}${option}`, ANSI.cyan) : `${box}${option}`;
           lines.push(`${arrow}${text}`);
         }
         //? Multi-select gets a trailing, non-toggleable "Next" action row (cursor
@@ -289,14 +353,14 @@ const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string 
         //? Two leading spaces align the label past the ◉/◯ checkbox column.
         if (step.type === 'multi') {
           const active = cursor === step.options.length;
-          const arrow = active ? `${ANSI.cyan}❯${ANSI.reset} ` : '  ';
-          const label = active ? `${ANSI.cyan}${ANSI.bold}Next${ANSI.reset}` : `${ANSI.dim}Next${ANSI.reset}`;
+          const arrow = active ? `${ansiStyle('❯', ANSI.cyan)} ` : '  ';
+          const label = active ? ansiStyle('Next', ANSI.cyan, ANSI.bold) : ansiStyle('Next', ANSI.dim);
           lines.push(`${arrow}  ${label}`);
         }
         const hint = step.type === 'multi'
           ? '↑/↓ move · space/enter toggle · select Next to continue'
           : '↑/↓ move · enter select';
-        lines.push(`${ANSI.dim}${hint}${pointer > 0 ? ' · ← back' : ''}${ANSI.reset}`);
+        lines.push(ansiStyle(`${hint}${pointer > 0 ? ' · ← back' : ''}`, ANSI.dim));
       }
       return `${lines.join('\n')}\n`;
     };
@@ -389,35 +453,51 @@ const runWizard = (steps: readonly WizardStep[]): Promise<Record<string, string 
     paint();
   });
 
-const runPrompts = async (): Promise<ScaffoldChoices> => {
-  if (!input.isTTY || !output.isTTY) return runPromptsFallback();
-
-  const answers = await runWizard([
-    { key: 'dbProvider', type: 'select', label: 'Which database provider?', options: ['mongodb', 'postgresql', 'mysql', 'sqlite'], defaultValue: 'mongodb' },
-    { key: 'authMode', type: 'select', label: 'Authentication mode?', options: ['none', 'credentials', 'credentials+oauth'], defaultValue: 'credentials' },
-    { key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire?', options: ['google', 'github', 'discord', 'facebook', 'microsoft'], skip: (a) => a.authMode !== 'credentials+oauth' },
-    { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', options: ['none', 'console', 'resend', 'smtp'], defaultValue: 'console' },
-    { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', options: ['none', 'sentry', 'datadog', 'posthog'], defaultValue: 'none' },
-    { key: 'presence', type: 'select', label: 'Install @luckystack/presence (AFK / presence / socket-status)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
-    { key: 'i18n', type: 'select', label: 'Enable i18n (translations + locale switching)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
-    { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
-  ]);
-
-  const authMode = asOption(answers.authMode, ['none', 'credentials', 'credentials+oauth'] as const, 'credentials');
-  const oauthAll = ['google', 'github', 'discord', 'facebook', 'microsoft'] as const;
+//? Map the raw wizard answer bag onto a fully-typed `ScaffoldChoices`,
+//? validating every provider field against `PROVIDER_OPTIONS` (so an out-of-band
+//? value falls back to its default instead of leaking through as an arbitrary
+//? string). Centralizes the per-field `asOption` validation that used to be
+//? inlined at the return site.
+const convertAnswersToChoices = (answers: Record<string, string | string[]>): ScaffoldChoices => {
+  const authMode = asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'credentials');
   const rawOauth = answers.oauthProviders;
   const oauthPicked = Array.isArray(rawOauth) ? rawOauth : [];
 
   return {
-    dbProvider: asOption(answers.dbProvider, ['mongodb', 'postgresql', 'mysql', 'sqlite'] as const, 'mongodb'),
+    dbProvider: asOption(answers.dbProvider, PROVIDER_OPTIONS.dbProvider, 'mongodb'),
     authMode,
-    oauthProviders: authMode === 'credentials+oauth' ? oauthAll.filter((provider) => oauthPicked.includes(provider)) : [],
-    emailProvider: asOption(answers.emailProvider, ['none', 'console', 'resend', 'smtp'] as const, 'console'),
-    monitoringProvider: asOption(answers.monitoringProvider, ['none', 'sentry', 'datadog', 'posthog'] as const, 'none'),
+    oauthProviders: authMode === 'credentials+oauth'
+      ? PROVIDER_OPTIONS.oauthProviders.filter((provider) => oauthPicked.includes(provider))
+      : [],
+    emailProvider: asOption(answers.emailProvider, PROVIDER_OPTIONS.emailProvider, 'console'),
+    monitoringProvider: asOption(answers.monitoringProvider, PROVIDER_OPTIONS.monitoringProvider, 'none'),
     presence: answers.presence !== 'No',
     i18n: answers.i18n === 'Yes',
     aiInstructions: answers.aiInstructions !== 'No',
+    //? Browser tooling rides on the AI template — forced 'none' when AI
+    //? instructions are excluded (the wizard step is skipped in that case).
+    aiBrowserTooling: answers.aiInstructions === 'No'
+      ? 'none'
+      : asOption(answers.aiBrowserTooling, PROVIDER_OPTIONS.aiBrowserTooling, 'agent-browser'),
   };
+};
+
+const runPrompts = async (): Promise<ScaffoldChoices> => {
+  if (!input.isTTY || !output.isTTY) return runPromptsFallback();
+
+  const answers = await runWizard([
+    { key: 'dbProvider', type: 'select', label: 'Which database provider?', options: PROVIDER_OPTIONS.dbProvider, defaultValue: 'mongodb' },
+    { key: 'authMode', type: 'select', label: 'Authentication mode?', options: PROVIDER_OPTIONS.authMode, defaultValue: 'credentials' },
+    { key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire?', options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.authMode !== 'credentials+oauth' },
+    { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', options: PROVIDER_OPTIONS.emailProvider, defaultValue: 'console' },
+    { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', options: PROVIDER_OPTIONS.monitoringProvider, defaultValue: 'none' },
+    { key: 'presence', type: 'select', label: 'Install @luckystack/presence (AFK / presence / socket-status)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
+    { key: 'i18n', type: 'select', label: 'Enable i18n (translations + locale switching)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
+    { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
+    { key: 'aiBrowserTooling', type: 'select', label: 'Set up AI browser-testing tooling? (all = + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none)', options: PROVIDER_OPTIONS.aiBrowserTooling, defaultValue: 'agent-browser', skip: (a) => a.aiInstructions === 'No' },
+  ]);
+
+  return convertAnswersToChoices(answers);
 };
 
 const printHelp = (): void => {
@@ -431,6 +511,9 @@ Options:
   --no-install   Don't run \`npm install\` or \`npx prisma generate\` after copying.
   --no-prompt    Skip the interactive prompts and use defaults (Mongo + credentials).
   --no-presence  Omit @luckystack/presence (applies with --no-prompt; the wizard asks otherwise).
+  --ai-browser=<all|agent-browser|none>
+                 AI browser-testing tooling (default agent-browser). 'all' also wires the
+                 Playwright + Chrome DevTools MCP servers. Needs the AI instructions on.
   --help, -h     Show this message.
 
 Example:
@@ -478,6 +561,28 @@ export const readSelfVersion = (): string => {
 //?   _dot_env_dot_local_template  -> .env.local_template
 export const renameDotFile = (name: string): string => name.replaceAll('_dot_', '.');
 
+//? Comment prefix for an `.env.local` line: empty when the provider is active
+//? (the developer fills the value in), `# ` when it's an enable-later stub.
+const commentPrefix = (active: boolean): string => (active ? '' : '# ');
+
+//? Declarative `.env.local` provider registry. Each provider owns the exact
+//? lines it contributes, parameterized only by whether it's the active choice.
+//? One `buildProviderEnvBlocks` renderer walks a spec list and joins the blocks,
+//? so OAuth and monitoring no longer hand-roll their own per-provider loops and
+//? a new provider is declared in exactly one place.
+interface EnvProviderSpec {
+  id: string;
+  /** Lines this provider emits given its active/inactive state. */
+  lines: (active: boolean) => string[];
+}
+
+//? One EnvVarBuilder: render the given provider specs (active = matches the
+//? selection predicate) into `\n\n`-separated blocks.
+const buildProviderEnvBlocks = (
+  specs: readonly EnvProviderSpec[],
+  isActive: (id: string) => boolean,
+): string => specs.map((spec) => spec.lines(isActive(spec.id)).join('\n')).join('\n\n');
+
 //? Per selected OAuth provider, emit BOTH a `DEV_*` pair (read when NODE_ENV !==
 //? production) and an unprefixed pair (read in production) — matching the
 //? env-driven registry in `luckystack/login/oauthProviders.ts`. Left uncommented
@@ -487,7 +592,24 @@ export const renameDotFile = (name: string): string => name.replaceAll('_dot_', 
 //? Every built-in provider `oauthProviders.ts` wires by env. We always emit a
 //? block for each so unselected ones are visible (commented) and enable-later is
 //? a one-line uncomment — mirroring the email / monitoring blocks below.
-const OAUTH_PROVIDERS = ['google', 'github', 'discord', 'facebook', 'microsoft'] as const;
+const OAUTH_ENV_PROVIDERS: readonly EnvProviderSpec[] = PROVIDER_OPTIONS.oauthProviders.map((provider) => ({
+  id: provider,
+  lines: (active) => {
+    const upper = provider.toUpperCase();
+    const c = commentPrefix(active);
+    const out = [
+      active ? `# ${provider} (active)` : `# ${provider} (enable later)`,
+      `${c}DEV_${upper}_CLIENT_ID=`,
+      `${c}DEV_${upper}_CLIENT_SECRET=`,
+      `${c}${upper}_CLIENT_ID=`,
+      `${c}${upper}_CLIENT_SECRET=`,
+    ];
+    //? Microsoft needs a tenant ('common' for multi-tenant). Default it so the
+    //? provider works out of the box once id + secret are filled.
+    if (provider === 'microsoft') out.push(`${c}MICROSOFT_TENANT_ID=common`);
+    return out;
+  },
+}));
 
 export const buildOAuthEnvVars = (providers: readonly string[]): string => {
   const selected = new Set(providers);
@@ -500,66 +622,91 @@ export const buildOAuthEnvVars = (providers: readonly string[]): string => {
     '# secret are set.',
   ].join('\n');
 
-  const blocks = OAUTH_PROVIDERS.map((provider) => {
-    const upper = provider.toUpperCase();
-    const c = selected.has(provider) ? '' : '# ';
-    const lines = [
-      selected.has(provider) ? `# ${provider} (active)` : `# ${provider} (enable later)`,
-      `${c}DEV_${upper}_CLIENT_ID=`,
-      `${c}DEV_${upper}_CLIENT_SECRET=`,
-      `${c}${upper}_CLIENT_ID=`,
-      `${c}${upper}_CLIENT_SECRET=`,
-    ];
-    //? Microsoft needs a tenant ('common' for multi-tenant). Default it so the
-    //? provider works out of the box once id + secret are filled.
-    if (provider === 'microsoft') lines.push(`${c}MICROSOFT_TENANT_ID=common`);
-    return lines.join('\n');
-  });
-
-  return [intro, ...blocks].join('\n\n');
+  const blocks = buildProviderEnvBlocks(OAUTH_ENV_PROVIDERS, (id) => selected.has(id));
+  return [intro, blocks].join('\n\n');
 };
+
+//? Monitoring provider registry: drives BOTH the `.env.local` block (below) AND
+//? the npm deps injected for the selected provider (`injectOptionalDeps`), so a
+//? new observability backend is declared once instead of in two tandem-edited
+//? tables. Sentry/PostHog wire from the `luckystack/` overlays by env; Datadog
+//? also needs the dd-trace block in server/server.ts.
+interface MonitoringProviderSpec extends EnvProviderSpec {
+  /** npm deps to add to the scaffold when this provider is the selected one. */
+  deps: Record<string, string>;
+}
+
+const MONITORING_PROVIDERS: readonly MonitoringProviderSpec[] = [
+  {
+    id: 'sentry',
+    deps: { '@sentry/node': '^10.48.0' },
+    lines: (active) => active
+      ? ['# Sentry (active) — set the DSN + restart. Requires `npm i @sentry/node`.',
+        '# Sends only in production by default; SENTRY_ENABLED=true forces dev capture.',
+        'SENTRY_DSN=', '# SENTRY_ENABLED=true']
+      : ['# Sentry (enable later): npm i @sentry/node, then set SENTRY_DSN + restart.',
+        '# SENTRY_DSN=', '# SENTRY_ENABLED=true'],
+  },
+  {
+    id: 'posthog',
+    deps: { 'posthog-node': '^4.0.0' },
+    lines: (active) => active
+      ? ['# PostHog (active) — set the key + restart. Requires `npm i posthog-node`.',
+        'POSTHOG_KEY=', 'POSTHOG_HOST=https://us.i.posthog.com']
+      : ['# PostHog (enable later): npm i posthog-node, then set POSTHOG_KEY + restart.',
+        '# POSTHOG_KEY=', '# POSTHOG_HOST=https://us.i.posthog.com'],
+  },
+  {
+    id: 'datadog',
+    deps: { 'dd-trace': '^5.0.0', 'hot-shots': '^10.0.0' },
+    lines: (active) => active
+      ? ['# Datadog (active) — set the keys AND uncomment the dd-trace block at the top',
+        '# of server/server.ts (dd-trace must load first). Requires `npm i dd-trace hot-shots`.',
+        'DD_API_KEY=', 'DD_SITE=datadoghq.com', '# DD_TRACE_AGENT_URL=']
+      : ['# Datadog (enable later): npm i dd-trace hot-shots, uncomment the dd-trace block',
+        '# in server/server.ts, then set DD_API_KEY (+ DD_SITE).',
+        '# DD_API_KEY=', '# DD_SITE=datadoghq.com'],
+  },
+];
 
 //? Observability env block for `.env.local`. Each provider is enable-later: the
 //? SELECTED one gets uncommented (empty) keys to fill, the others stay commented
-//? with their `npm i` + restart steps. Sentry/PostHog wire from the `luckystack/`
-//? overlays by env; Datadog also needs the dd-trace block in server/server.ts.
-export const buildMonitoringEnvVars = (provider: string): string => {
-  const pick = (target: string, active: string[], inactive: string[]): string =>
-    (provider === target ? active : inactive).join('\n');
+//? with their `npm i` + restart steps.
+export const buildMonitoringEnvVars = (provider: string): string =>
+  buildProviderEnvBlocks(MONITORING_PROVIDERS, (id) => id === provider);
 
-  const sentry = pick('sentry',
-    ['# Sentry (active) — set the DSN + restart. Requires `npm i @sentry/node`.',
-      '# Sends only in production by default; SENTRY_ENABLED=true forces dev capture.',
-      'SENTRY_DSN=', '# SENTRY_ENABLED=true'],
-    ['# Sentry (enable later): npm i @sentry/node, then set SENTRY_DSN + restart.',
-      '# SENTRY_DSN=', '# SENTRY_ENABLED=true']);
-
-  const posthog = pick('posthog',
-    ['# PostHog (active) — set the key + restart. Requires `npm i posthog-node`.',
-      'POSTHOG_KEY=', 'POSTHOG_HOST=https://us.i.posthog.com'],
-    ['# PostHog (enable later): npm i posthog-node, then set POSTHOG_KEY + restart.',
-      '# POSTHOG_KEY=', '# POSTHOG_HOST=https://us.i.posthog.com']);
-
-  const datadog = pick('datadog',
-    ['# Datadog (active) — set the keys AND uncomment the dd-trace block at the top',
-      '# of server/server.ts (dd-trace must load first). Requires `npm i dd-trace hot-shots`.',
-      'DD_API_KEY=', 'DD_SITE=datadoghq.com', '# DD_TRACE_AGENT_URL='],
-    ['# Datadog (enable later): npm i dd-trace hot-shots, uncomment the dd-trace block',
-      '# in server/server.ts, then set DD_API_KEY (+ DD_SITE).',
-      '# DD_API_KEY=', '# DD_SITE=datadoghq.com']);
-
-  return [sentry, posthog, datadog].join('\n\n');
-};
+//? Email adapter specs (resend / smtp). Email's layout interleaves blank-line
+//? separators and shares a trailing EMAIL_FROM line, so it composes these blocks
+//? directly rather than via `buildProviderEnvBlocks` (which `\n\n`-joins).
+const EMAIL_ADAPTERS: readonly EnvProviderSpec[] = [
+  {
+    id: 'resend',
+    lines: (active) => [
+      active
+        ? '# Resend (active) — set your API key. Requires `npm i resend`.'
+        : '# Resend (enable later): npm i resend, then set RESEND_API_KEY.',
+      `${commentPrefix(active)}RESEND_API_KEY=`,
+    ],
+  },
+  {
+    id: 'smtp',
+    lines: (active) => {
+      const c = commentPrefix(active);
+      return [
+        active
+          ? '# SMTP (active) — set host + credentials. Requires `npm i nodemailer`.'
+          : '# SMTP (enable later): npm i nodemailer, then set SMTP_HOST (+ user/pass).',
+        `${c}SMTP_HOST=`, `${c}SMTP_PORT=587`, `${c}SMTP_SECURE=false`, `${c}SMTP_USER=`, `${c}SMTP_PASS=`,
+      ];
+    },
+  },
+];
 
 //? Email env block for `.env.local`. Email turns on as soon as @luckystack/email
 //? is installed (luckystack/email/init.ts auto-registers the sender). The chosen
 //? adapter's keys are uncommented; the alternatives stay commented enable-later.
 export const buildEmailEnvVars = (provider: string): string => {
-  const resendActive = provider === 'resend';
-  const smtpActive = provider === 'smtp';
-  const anyActive = resendActive || smtpActive || provider === 'console';
-  const rp = resendActive ? '' : '# ';
-  const sp = smtpActive ? '' : '# ';
+  const anyActive = provider === 'resend' || provider === 'smtp' || provider === 'console';
 
   let intro: string[] = [];
   if (provider === 'console') {
@@ -571,21 +718,14 @@ export const buildEmailEnvVars = (provider: string): string => {
       '# sender (Resend if RESEND_API_KEY set, else SMTP if SMTP_HOST set, else Console).'];
   }
 
+  const adapterLines = EMAIL_ADAPTERS.flatMap((adapter) => ['', ...adapter.lines(adapter.id === provider)]);
+
   return [
     ...intro,
-    '',
-    resendActive
-      ? '# Resend (active) — set your API key. Requires `npm i resend`.'
-      : '# Resend (enable later): npm i resend, then set RESEND_API_KEY.',
-    `${rp}RESEND_API_KEY=`,
-    '',
-    smtpActive
-      ? '# SMTP (active) — set host + credentials. Requires `npm i nodemailer`.'
-      : '# SMTP (enable later): npm i nodemailer, then set SMTP_HOST (+ user/pass).',
-    `${sp}SMTP_HOST=`, `${sp}SMTP_PORT=587`, `${sp}SMTP_SECURE=false`, `${sp}SMTP_USER=`, `${sp}SMTP_PASS=`,
+    ...adapterLines,
     '',
     '# Default From address for outgoing mail.',
-    `${anyActive ? '' : '# '}EMAIL_FROM=noreply@example.com`,
+    `${commentPrefix(anyActive)}EMAIL_FROM=noreply@example.com`,
   ].join('\n');
 };
 
@@ -691,16 +831,12 @@ const installAiIndexHook = (targetDir: string): void => {
 //? Add the npm deps the SELECTED monitoring + email providers need, so the chosen
 //? integration is installed and ready to use (the developer only fills in env).
 //? Non-selected providers stay enable-later behind a single `npm i` documented in
-//? the `.env.local` comments. No-op when both choices are 'none'.
-const MONITORING_DEPS: Record<string, Record<string, string>> = {
-  sentry: { '@sentry/node': '^10.48.0' },
-  posthog: { 'posthog-node': '^4.0.0' },
-  datadog: { 'dd-trace': '^5.0.0', 'hot-shots': '^10.0.0' },
-  none: {},
-};
-
+//? the `.env.local` comments. No-op when both choices are 'none'. Monitoring deps
+//? come from the `MONITORING_PROVIDERS` registry that also drives the env block,
+//? so a new backend is declared in one place.
 const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckystackVersion: string): void => {
-  const deps: Record<string, string> = { ...MONITORING_DEPS[choices.monitoringProvider] };
+  const monitoringDeps = MONITORING_PROVIDERS.find((spec) => spec.id === choices.monitoringProvider)?.deps ?? {};
+  const deps: Record<string, string> = { ...monitoringDeps };
   const devDeps: Record<string, string> = {};
 
   if (choices.emailProvider !== 'none') {
@@ -739,6 +875,117 @@ const dropDependency = (targetDir: string, depName: string): void => {
   }
 };
 
+//? ─────────────────── AI browser-testing tooling ───────────────────
+//? Skill stub pointing the AI at the always-current official agent-browser
+//? skill (the framework doesn't pin a version — the upstream skill is the
+//? source of truth for invocations). Distinct from `skills/custom/agent-browser`
+//? (which GENERATES committed E2E tests); this stub is for INTERACTIVE dev verify.
+const AGENT_BROWSER_SKILL_STUB = `---
+description: Interactive AI browser verification with agent-browser (navigate/click/fill/screenshot/console). Cheapest-first; always propose + get user approval before driving a browser. See docs/luckystack/AI_BROWSER_TESTING.md.
+---
+
+# agent-browser (interactive verification)
+
+Use the **agent-browser** CLI to verify a frontend flow against the LOCAL dev server.
+Always announce the action and get explicit user approval first (see the "AI Browser
+Testing" section of CLAUDE.md + docs/luckystack/AI_BROWSER_TESTING.md).
+
+## Setup (once, developer action)
+- Install: \`npm i -g agent-browser && agent-browser install\` (fetches Chrome-for-Testing), OR
+- Get the always-current usage skill: \`npx skills add vercel-labs/agent-browser\` then
+  \`agent-browser skills get core\`.
+
+## Guardrails (shipped \`agent-browser.json\`)
+- \`allowedDomains: ["localhost","127.0.0.1"]\` — fenced to the dev server.
+- \`confirmActions: ["click","fill","navigate"]\` — per-action confirmation.
+
+## When NOT this tool
+- Cross-browser / mobile rendering or a real vision styling judgement → Playwright MCP.
+- Lighthouse / performance traces → Chrome DevTools MCP.
+- Generating COMMITTED tests/audits → the \`/agent-browser\`, \`/lighthouse\`, \`/a11y-audit\` skills.
+`;
+
+const PLAYWRIGHT_EXAMPLE_SPEC = `import { test, expect } from '@playwright/test';
+
+//? Deterministic CI complement: after agent-browser confirms a flow interactively,
+//? capture it here as a committed @playwright/test spec (no LLM in the CI loop).
+//? Start the dev server first (npm run server + npm run client). Remove this file
+//? if you don't want the @playwright/test layer.
+test('home page loads', async ({ page }) => {
+  await page.goto('http://localhost:5173/');
+  await expect(page).toHaveTitle(/.+/);
+});
+`;
+
+//? Read-or-create a JSON file in the scaffold, apply a merge, write it back
+//? pretty-printed. Used for the additive .mcp.json / .claude/settings.json wiring.
+const mergeJsonFile = (filePath: string, mutate: (data: Record<string, unknown>) => void): void => {
+  const data: Record<string, unknown> = fs.existsSync(filePath)
+    ? (JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>)
+    : {};
+  mutate(data);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
+};
+
+//? Add entries to permissions.ask (set-union — deny-by-default for browser tools).
+const addAskPermissions = (data: Record<string, unknown>, entries: string[]): void => {
+  const permissions = (data.permissions ??= {}) as Record<string, unknown>;
+  const ask = (permissions.ask ??= []) as string[];
+  for (const entry of entries) {
+    if (!ask.includes(entry)) ask.push(entry);
+  }
+};
+
+//? Wire the opt-in AI browser-testing tooling into the scaffold. Additive +
+//? user-approval-gated; dev-tools only. 'none' → no-op. 'agent-browser' →
+//? the cheap CLI + its skill stub + guardrails + an ask-gate. 'all' → also
+//? the Playwright + Chrome DevTools MCP servers (.mcp.json) + their ask-gates
+//? + the @playwright/test CI layer.
+const wireAiBrowserTooling = (targetDir: string, choices: ScaffoldChoices): void => {
+  if (choices.aiBrowserTooling === 'none') return;
+  const wantAll = choices.aiBrowserTooling === 'all';
+
+  //? Layer 3 — agent-browser's own domain fence + per-action confirmation.
+  fs.writeFileSync(
+    path.join(targetDir, 'agent-browser.json'),
+    `${JSON.stringify({ allowedDomains: ['localhost', '127.0.0.1'], confirmActions: ['click', 'fill', 'navigate'] }, null, 2)}\n`,
+  );
+
+  //? Interactive-verify skill stub (official skill is the always-current source).
+  const skillDir = path.join(targetDir, '.claude', 'skills', 'agent-browser');
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), AGENT_BROWSER_SKILL_STUB);
+
+  //? Layer 2 — deny-by-default permission gate so the harness prompts even if
+  //? the AI forgets the CLAUDE.md rule.
+  const askEntries = ['Bash(agent-browser:*)', ...(wantAll ? ['mcp__playwright', 'mcp__chrome-devtools'] : [])];
+  mergeJsonFile(path.join(targetDir, '.claude', 'settings.json'), (data) => { addAskPermissions(data, askEntries); });
+
+  if (wantAll) {
+    //? Claude Code auto-reads project-root .mcp.json. Both servers active by
+    //? default (token cost accepted); a user trims by deleting a server here.
+    mergeJsonFile(path.join(targetDir, '.mcp.json'), (data) => {
+      const servers = (data.mcpServers ??= {}) as Record<string, unknown>;
+      servers.playwright ??= { type: 'stdio', command: 'npx', args: ['@playwright/mcp@latest'] };
+      servers['chrome-devtools'] ??= { type: 'stdio', command: 'npx', args: ['chrome-devtools-mcp@latest'] };
+    });
+
+    //? Deterministic CI complement (devDep + one example spec).
+    const pkgPath = path.join(targetDir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { devDependencies?: Record<string, string> };
+      pkg.devDependencies = { ...pkg.devDependencies, '@playwright/test': '^1.50.0' };
+      fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+    }
+    const e2eDir = path.join(targetDir, 'tests', 'e2e');
+    fs.mkdirSync(e2eDir, { recursive: true });
+    fs.writeFileSync(path.join(e2eDir, 'example.spec.ts'), PLAYWRIGHT_EXAMPLE_SPEC);
+  }
+
+  console.log(`AI browser tooling wired: ${choices.aiBrowserTooling}.`);
+};
+
 //? Apply ordered string edits to a scaffolded file. Throws loudly if a `find`
 //? token is absent so template drift surfaces during the smoke scaffold instead
 //? of producing a broken project — every edit must match exactly once.
@@ -746,14 +993,26 @@ const editScaffoldFile = (targetDir: string, relPath: string, edits: readonly [s
   const filePath = path.join(targetDir, relPath);
   if (!fs.existsSync(filePath)) return;
   //? Normalize to LF so our `\n`-bearing match tokens work regardless of the
-  //? checkout's line endings (Windows copies template files as CRLF).
-  let content = fs.readFileSync(filePath, 'utf8').replaceAll('\r\n', '\n');
+  //? checkout's line endings (Windows copies template files as CRLF). Restore
+  //? CRLF on write-back when the file was CRLF so we don't leave a whole-file
+  //? LF diff in an otherwise CRLF scaffold.
+  const original = fs.readFileSync(filePath, 'utf8');
+  const wasCrlf = original.includes('\r\n');
+  let content = original.replaceAll('\r\n', '\n');
   for (const [find, replace] of edits) {
-    if (!content.includes(find)) {
-      throw new Error(`[create-luckystack-app] prune edit failed — token not found in ${relPath}:\n${find}`);
+    //? A token must match EXACTLY once. Zero matches means template drift broke
+    //? the edit; multiple matches mean the token is ambiguous and a `replaceAll`
+    //? would silently mutate more than intended — both should surface during the
+    //? smoke scaffold rather than produce a subtly-broken project.
+    const occurrences = content.split(find).length - 1;
+    if (occurrences !== 1) {
+      throw new Error(
+        `[create-luckystack-app] prune edit failed — token matched ${String(occurrences)}× (expected exactly 1) in ${relPath}:\n${find}`,
+      );
     }
     content = content.replaceAll(find, replace);
   }
+  if (wasCrlf) content = content.replaceAll('\n', '\r\n');
   fs.writeFileSync(filePath, content);
 };
 
@@ -818,7 +1077,18 @@ const main = async (): Promise<void> => {
     process.exit(1);
   }
 
-  const targetDir = path.resolve(process.cwd(), args.projectName);
+  //? Build the directory from the sanitized `slug` (never the raw
+  //? `args.projectName`) and assert the resolved path stays inside the
+  //? current working directory, so `../` segments can't escape the project
+  //? root and write template files to arbitrary locations.
+  const cwd = process.cwd();
+  const targetDir = path.resolve(cwd, slug);
+  const relativeTarget = path.relative(cwd, targetDir);
+  if (relativeTarget.startsWith('..') || path.isAbsolute(relativeTarget)) {
+    console.error(`Invalid project name: "${args.projectName}". The target directory must stay within the current directory.`);
+    process.exit(1);
+  }
+
   if (fs.existsSync(targetDir)) {
     console.error(`Target directory already exists: ${targetDir}`);
     process.exit(1);
@@ -834,7 +1104,7 @@ const main = async (): Promise<void> => {
   //? them and uses sane defaults (Mongo + credentials + console email).
   const choices: ScaffoldChoices = args.prompt
     ? await runPrompts()
-    : { ...DEFAULT_CHOICES, presence: !args.noPresence };
+    : { ...DEFAULT_CHOICES, presence: !args.noPresence, aiBrowserTooling: args.aiBrowserTooling ?? DEFAULT_CHOICES.aiBrowserTooling };
 
   //? Provider-specific Prisma + DATABASE_URL bits. MongoDB needs an ObjectId
   //? `_id` mapping; the SQL providers use a cuid string id. The example URL is
@@ -954,6 +1224,10 @@ const main = async (): Promise<void> => {
     }
   }
 
+  //? AI browser-testing tooling (agent-browser CLI + optional MCP servers).
+  //? Additive, user-approval-gated, dev-tools only. No-op when 'none'.
+  wireAiBrowserTooling(targetDir, choices);
+
   console.log('Files written.');
 
   if (args.install) {
@@ -974,6 +1248,7 @@ Choices:
   presence:    ${choices.presence ? 'installed' : 'skipped'}
   i18n:        ${choices.i18n ? 'on' : 'off'}
   ai-docs:     ${choices.aiInstructions ? 'included (+ pre-commit AI-index hook)' : 'skipped'}
+  ai-browser:  ${choices.aiBrowserTooling}
 
 Next steps:
   cd ${args.projectName}

@@ -14,14 +14,13 @@ import {
   type StreamChunkFrame,
   type StreamWatcher,
 } from './streamWatcher';
+//? `ApiMethodMap` mirrors the generated `apiMethodMap` shape (page → name →
+//? version → method) and is a type-only import, so there's still no import-time
+//? coupling to the consumer's generated artifact.
+import type { ApiMethodMap } from './types';
 
 const API_TEST_FILE_PATTERN = /_v(\d+)\.tests\.ts$/;
 const SYNC_SERVER_TEST_FILE_PATTERN = /_server_v(\d+)\.tests\.ts$/;
-
-//? Mirror of the generated `apiMethodMap` shape (page → name → version →
-//? method). Kept local so the test-runner has no import-time coupling to the
-//? consumer's generated artifact.
-type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
 
 export interface CustomTestCase {
   name: string;

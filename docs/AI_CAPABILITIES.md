@@ -15,6 +15,7 @@ Each row links to that package's CLAUDE.md (the canonical function INDEX) if it 
 | Package | Version | One-liner | INDEX |
 | --- | --- | --- | --- |
 | `@luckystack/api` | 0.2.0 | Type-safe API request handlers for LuckyStack. WebSocket-first via socket.io, with HTTP fallback. File-based routing, generated route map, integrated rate limiting, validation, hooks, and error-tracking tracing. | [CLAUDE.md](../node_modules/@luckystack/api/CLAUDE.md) |
+| `@luckystack/cli` | 0.2.0 | LuckyStack project CLI. `npx luckystack add <feature>` installs an optional package AND injects the consumer-`src/` assets it needs (login pages, presence client mounts) that a plain `npm i` can't — the inverse of create-luckystack-app's optional-package pruner. | [CLAUDE.md](../node_modules/@luckystack/cli/CLAUDE.md) |
 | `@luckystack/core` | 0.2.0 | LuckyStack core: socket-first transport contracts, Redis adapter, project-config registry, hooks registry, response normalization, rate limiting, and shared session types. Foundation for every other @luckystack/* package. | [CLAUDE.md](../node_modules/@luckystack/core/CLAUDE.md) |
 | `@luckystack/devkit` | 0.2.0 | Dev-time tooling for LuckyStack: hot reload, route discovery, generated type-map emitter, Zod schema emitter, deploy-config validator CLI. Install as a devDependency in projects that build LuckyStack apps locally. | [CLAUDE.md](../node_modules/@luckystack/devkit/CLAUDE.md) |
 | `@luckystack/docs-ui` | 0.2.0 | Dev-only API docs UI for LuckyStack. Mounts a Swagger-style page at /_docs that reads `apiDocs.generated.json` and renders every API route, its inputs/outputs, auth, and rate-limit metadata. | [CLAUDE.md](../node_modules/@luckystack/docs-ui/CLAUDE.md) |
@@ -30,11 +31,40 @@ Each row links to that package's CLAUDE.md (the canonical function INDEX) if it 
 
 ### API routes (`_api/`)
 
-No project API routes detected in the generated type map.
+Every typed API route in this project. Sourced from `_ProjectApiTypeMap` in `src/_sockets/apiTypes.generated.ts`. Files live at `src/<page>/_api/<name>_v<version>.ts`. Check here **before** authoring a new endpoint — the route might already exist. The `Tests` column shows whether a per-route business-logic test stub exists (`npm run scaffold:test <route>` to create one).
+
+| Route | Method | Rate limit | Has stream | Tests |
+| --- | --- | --- | --- | --- |
+| `playground/echo/v1` | POST | 60 | — | ✓ |
+| `playground/spam/v1` | POST | 3 | — | ✓ |
+| `playground/streamCounter/v1` | POST | 30 | yes | ✓ |
+| `playground/testEmail/v1` | POST | 3 | — | ✓ |
+| `playground/throwError/v1` | POST | 60 | — | ✓ |
+| `reset-password/confirmReset/v1` | POST | 5 | — | ✓ |
+| `reset-password/sendReset/v1` | POST | 5 | — | ✓ |
+| `settings/changePassword/v1` | POST | 10 | — | ✓ |
+| `settings/confirmEmailChange/v1` | POST | 10 | — | ✓ |
+| `settings/deleteAccount/v1` | POST | 3 | — | ✓ |
+| `settings/listSessions/v1` | POST | 30 | — | ✓ |
+| `settings/requestEmailChange/v1` | POST | 5 | — | ✓ |
+| `settings/revokeSession/v1` | POST | 20 | — | ✓ |
+| `settings/signOutEverywhere/v1` | POST | 5 | — | ✓ |
+| `settings/updatePreferences/v1` | POST | 30 | — | ✓ |
+| `settings/updateUser/v1` | POST | 20 | — | ✓ |
+| `system/logout/v1` | DELETE | ? | — | — |
+| `system/session/v1` | POST | ? | — | — |
 
 ### Sync routes (`_sync/`)
 
-No project sync routes detected in the generated type map.
+Every typed sync route in this project. Sourced from `_ProjectSyncTypeMap` in `src/_sockets/apiTypes.generated.ts`. Files live at `src/<page>/_sync/<name>_server_v<version>.ts` (+ optional `_client_v<version>.ts`). The `Tests` column shows whether a per-route business-logic test stub exists.
+
+| Route | Server stream | Client stream | Tests |
+| --- | --- | --- | --- |
+| `playground/echo/v1` | — | — | ✓ |
+| `playground/streamBroadcast/v1` | yes | — | ✓ |
+| `playground/streamProgress/v1` | yes | — | ✓ |
+| `playground/streamToToken/v1` | yes | — | ✓ |
+| `playground/throwSync/v1` | — | — | ✓ |
 
 ### Server-injected `functions.*` map
 
@@ -42,26 +72,26 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 
 | Access path | Signature |
 | --- | --- |
-| `functions.db.prisma` | `typeof import('@luckystack/core')['prisma']` |
-| `functions.redis.redis` | `typeof import('@luckystack/core')['redis']` |
-| `functions.redis.default` | `typeof import('@luckystack/core')['redis']` |
-| `functions.sentry.initializeSentry` | `typeof import('@luckystack/error-tracking')['initializeSentry']` |
-| `functions.sentry.captureException` | `typeof import('@luckystack/error-tracking')['captureException']` |
-| `functions.sentry.captureMessage` | `typeof import('@luckystack/error-tracking')['captureMessage']` |
-| `functions.sentry.setSentryUser` | `typeof import('@luckystack/error-tracking')['setSentryUser']` |
-| `functions.sentry.startSpan` | `typeof import('@luckystack/error-tracking')['startSpan']` |
-| `functions.sentry.default` | `typeof import('@luckystack/error-tracking')['default']` |
-| `functions.session.saveSession` | `typeof import('@luckystack/login')['saveSession']` |
-| `functions.session.getSession` | `typeof import('@luckystack/login')['getSession']` |
-| `functions.session.deleteSession` | `typeof import('@luckystack/login')['deleteSession']` |
-| `functions.session.getAllSessions` | `typeof import('@luckystack/login')['getAllSessions']` |
-| `functions.session.revokeUserSessions` | `typeof import('@luckystack/login')['revokeUserSessions']` |
-| `functions.responseNormalizer` | `typeof import('../../packages/core/src/responseNormalizer')` |
-| `functions.sentrySetup` | `typeof import('../../packages/core/src/sentrySetup')` |
-| `functions.serviceRoute` | `typeof import('../../packages/core/src/serviceRoute')` |
-| `functions.sleep.sleep` | `typeof import('../../packages/core/src/sleep')['default']` |
-| `functions.socketEvents` | `typeof import('../../packages/core/src/socketEvents')` |
-| `functions.tryCatch.tryCatch` | `typeof import('../../packages/core/src/tryCatch')['default']` |
+| `functions.db.prisma` | `(typeof import("@luckystack/core"))["prisma"]` |
+| `functions.redis.redis` | `(typeof import("@luckystack/core"))["redis"]` |
+| `functions.redis.default` | `(typeof import("@luckystack/core"))["redis"]` |
+| `functions.sentry.initializeSentry` | `(typeof import("@luckystack/error-tracking"))["initializeSentry"]` |
+| `functions.sentry.captureException` | `(typeof import("@luckystack/error-tracking"))["captureException"]` |
+| `functions.sentry.captureMessage` | `(typeof import("@luckystack/error-tracking"))["captureMessage"]` |
+| `functions.sentry.setSentryUser` | `(typeof import("@luckystack/error-tracking"))["setSentryUser"]` |
+| `functions.sentry.startSpan` | `(typeof import("@luckystack/error-tracking"))["startSpan"]` |
+| `functions.sentry.default` | `(typeof import("@luckystack/error-tracking"))["default"]` |
+| `functions.session.saveSession` | `(typeof import("@luckystack/login"))["saveSession"]` |
+| `functions.session.getSession` | `(typeof import("@luckystack/login"))["getSession"]` |
+| `functions.session.deleteSession` | `(typeof import("@luckystack/login"))["deleteSession"]` |
+| `functions.session.getAllSessions` | `(typeof import("@luckystack/login"))["getAllSessions"]` |
+| `functions.session.revokeUserSessions` | `(typeof import("@luckystack/login"))["revokeUserSessions"]` |
+| `functions.responseNormalizer` | `typeof import("../../packages/core/src/responseNormalizer")` |
+| `functions.sentrySetup` | `typeof import("../../packages/core/src/sentrySetup")` |
+| `functions.serviceRoute` | `typeof import("../../packages/core/src/serviceRoute")` |
+| `functions.sleep.sleep` | `(typeof import("../../packages/core/src/sleep"))["default"]` |
+| `functions.socketEvents` | `typeof import("../../packages/core/src/socketEvents")` |
+| `functions.tryCatch.tryCatch` | `(typeof import("../../packages/core/src/tryCatch"))["default"]` |
 
 ### Server-function shims in `functions/` (source for the injection map)
 
@@ -106,3 +136,10 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 | `src/_components/Navbar.tsx` | `default: Navbar` — `interface NavbarItem`, `interface NavbarItemContext`, `interface NavbarProps`, `type NavbarState` |
 | `src/_components/TemplateProvider.tsx` | `default: TemplateProvider` — `type Template` |
 | `src/_components/dropdownInternals.tsx` | `type DropdownDirection`, `interface DropdownItem`, `interface DropdownMenuController`, `DropdownMenuShell({ controller, size, className = "", menuClassName = "", showSearch = false, searchPlaceholder = "Search...", noResultsText = "No results", triggerLabel, hasSelection, filteredOptions, onActivate, initialFocusKey, ariaMultiselectable, children, }: DropdownMenuShellProps)`, `type DropdownSize`, `type DropdownValue`, `interface NormalizedOption`, `filterOptions(options: NormalizedOption[], searchValue: string): NormalizedOption[]`, `normalizeOptions(items: DropdownItem[]): NormalizedOption[]`, `useDropdownMenu({ showSearch }: UseDropdownMenuArgs): DropdownMenuController` |
+| `src/_components/inputs/Checkbox.tsx` | `default: Checkbox` — `interface CheckboxProps` |
+| `src/_components/inputs/DatePicker.tsx` | `default: DatePicker` — `type DatePickerProps`, `interface DateRange` |
+| `src/_components/inputs/Popover.tsx` | `default: Popover` — `interface PopoverProps` |
+| `src/_components/inputs/TextField.tsx` | `default: TextField` — `interface TextFieldProps`, `type TextFieldType` |
+| `src/_components/inputs/Toggle.tsx` | `default: Toggle` — `interface ToggleProps` |
+| `src/_components/inputs/fieldShell.tsx` | `FIELD_SIZES: Record<FieldSize, { control: string; text: string; icon: string }>`, `FieldShell({ label, htmlFor, description, error, required = false, size = "md", className = "", labelAside, children, }: FieldShellProps)`, `interface FieldShellProps`, `type FieldSize`, `inputBoxClass(args: { size: FieldSize; hasError: boolean; disabled?: boolean }): string`, `useErrorPulse`, `useShake()` |
+| `src/_components/inputs/floatingLayer.tsx` | `type FloatingAlign`, `interface FloatingLayerController`, `FloatingPanel({ controller, className = "", matchTriggerWidth = false, children }: FloatingPanelProps)`, `interface FloatingPanelProps`, `type FloatingPlacement`, `interface UseFloatingLayerArgs`, `useFloatingLayer(args: UseFloatingLayerArgs = {}): FloatingLayerController` |

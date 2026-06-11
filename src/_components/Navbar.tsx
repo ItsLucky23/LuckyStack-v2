@@ -197,10 +197,8 @@ export default function Navbar({ items = DEFAULT_ITEMS }: NavbarProps = {}) {
         className={`bg-container1 border-r border-container1-border text-common flex flex-col py-4 px-2 gap-1 z-20
           absolute inset-y-0 left-0 w-64 transition-transform duration-200
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-          md:translate-x-0 md:transition-[width] md:duration-200 md:h-full
-          ${isOpen
-            ? 'md:absolute md:inset-0 md:w-64'
-            : 'md:relative md:inset-auto md:w-14'}`}
+          md:translate-x-0 md:absolute md:inset-y-0 md:left-0 md:transition-[width] md:duration-200 md:h-full
+          ${isOpen ? 'md:w-64' : 'md:w-14'}`}
       >
         {topItems.map((item, index) => (
           <NavbarItemView key={`top-${String(index)}`} item={item} ctx={ctx} />

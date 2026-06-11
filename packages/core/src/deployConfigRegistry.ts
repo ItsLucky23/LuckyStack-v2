@@ -54,19 +54,17 @@ export interface DeployConfigShape {
   development?: DeployDevelopmentShape;
 }
 
+import { createRegistry } from './createRegistry';
+
 const DEFAULT_DEPLOY_CONFIG: DeployConfigShape = {
   resources: {},
 };
 
-let activeConfig: DeployConfigShape = DEFAULT_DEPLOY_CONFIG;
-let registered = false;
+const registry = createRegistry<DeployConfigShape>(DEFAULT_DEPLOY_CONFIG);
 
-export const registerDeployConfig = (config: DeployConfigShape): DeployConfigShape => {
-  activeConfig = config;
-  registered = true;
-  return activeConfig;
-};
+export const registerDeployConfig = (config: DeployConfigShape): DeployConfigShape =>
+  registry.register(config);
 
-export const getDeployConfig = (): DeployConfigShape => activeConfig;
+export const getDeployConfig = (): DeployConfigShape => registry.get();
 
-export const isDeployConfigRegistered = (): boolean => registered;
+export const isDeployConfigRegistered = (): boolean => registry.isRegistered();

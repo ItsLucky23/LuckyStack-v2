@@ -8,15 +8,25 @@
 
 import { getCsrfConfig } from './csrfConfig';
 import { getProjectConfig } from './projectConfig';
+import { socket } from './socketState';
 import tryCatch from './tryCatch';
 
 let cachedToken: string | null = null;
 let inflightFetch: Promise<string | null> | null = null;
 
 const resolveBackendUrl = (): string => {
-  // The browser's location is the most reliable backend URL when the app
-  // is served same-origin. Server-side callers should not invoke this
-  // helper — they have direct access to the session.
+  //? Prefer the live socket's connection URI — it IS the backend origin, even
+  //? in the split-origin dev model (Vite on :5173, server on :80) where
+  //? `location.origin` would point at the FRONTEND and `/auth/csrf` would hit
+  //? the dev server's SPA fallback (HTML, not JSON → token resolution fails).
+  const socketUri = socket?.io.opts.hostname
+    ? `${socket.io.opts.secure ? 'https' : 'http'}://${socket.io.opts.hostname}${socket.io.opts.port ? `:${socket.io.opts.port}` : ''}`
+    : '';
+  if (socketUri) return socketUri;
+
+  // Same-origin deploys (template prod + Vite proxy) fall back to the
+  // browser's location. Server-side callers should not invoke this helper —
+  // they have direct access to the session.
   //? Both checks here look redundant to TS (globals are always typed as set)
   //? but at runtime in Node `globalThis.window` is undefined; the defensive
   //? guard is what keeps SSR from crashing.

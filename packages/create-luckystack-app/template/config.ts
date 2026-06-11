@@ -51,10 +51,6 @@ const config = {
   sessionBasedToken: false,
   sessionExpiryDays: 7,
   allowMultipleSessions: false,
-  //? Auth providers shown on the login/register form. Keep 'credentials' for
-  //? email+password; add OAuth provider ids (e.g. 'google') once you register
-  //? them in server.ts and set their env vars.
-  providers: ['credentials'] as string[],
   //? Presence/activity broadcasting + route-change location syncing. Opt-in.
   socketActivityBroadcaster: false,
   locationProviderEnabled: false,
@@ -98,11 +94,20 @@ registerProjectConfig({
   },
   defaultLanguage: config.defaultLanguage,
   loginRedirectUrl: config.loginRedirectUrl,
+  //? Backend origin for OAuth callback redirect URIs. Read by
+  //? @luckystack/login/register's env-driven provider scan so adding an OAuth
+  //? provider is just env vars + restart (no code edit).
+  oauthCallbackBase,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
   locationProviderEnabled: config.locationProviderEnabled,
-  //? Framework-mode forgot-password (needs @luckystack/email installed + a
-  //? sender registered in server.ts). Set to 'disabled' or 'custom' to opt out.
-  auth: { forgotPassword: 'framework' },
+  auth: {
+    //? Framework-mode forgot-password (needs @luckystack/email installed + a
+    //? sender registered in server.ts). Set to 'disabled' or 'custom' to opt out.
+    forgotPassword: 'framework',
+    //? Email+password auth. Set `false` for an OAuth-only app — the login form
+    //? hides the email/password fields and the credentials route rejects.
+    credentials: true,
+  },
 });
 
 export default config;
@@ -115,7 +120,6 @@ export const {
   sessionBasedToken,
   sessionExpiryDays,
   allowMultipleSessions,
-  providers,
   socketActivityBroadcaster,
   locationProviderEnabled,
   logging,
@@ -124,13 +128,14 @@ export const {
 // Project-specific session shape. Extend the framework's BaseSessionLayout
 // with whatever extra fields your User model has. Keep it structurally
 // compatible with BaseSessionLayout (the type-check below enforces it).
-import type { BaseSessionLayout } from '@luckystack/login';
+import type { BaseSessionLayout } from '@luckystack/core';
 import type { User } from '@prisma/client';
 
 //? Re-export AuthProps so file-based `_api` / `_sync` handlers can
 //? `import { AuthProps } from '../../config'` (mirrors the framework's config.ts).
-//? It originates in @luckystack/core and is re-exported by @luckystack/login.
-export type { AuthProps } from '@luckystack/login';
+//? It originates in @luckystack/core (login re-exports it too); we import from
+//? core so this file compiles identically with or without @luckystack/login.
+export type { AuthProps } from '@luckystack/core';
 
 export interface SessionLayout extends Omit<User, 'password'> {
   avatarFallback: string;

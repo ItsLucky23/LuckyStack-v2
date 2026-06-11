@@ -153,10 +153,10 @@ Called early in each handler:
 | `auth.invalidCondition` | `validateRequest` | 500 | `auth.additional[].key` is not on the session shape. Setup error. |
 | `api.rateLimitExceeded` | `applyApiRateLimits` | 429 | `errorParams[0]` is `{ key: 'seconds', value: resetIn }`. |
 | `api.methodNotAllowed` | HTTP method check | 405 | `errorParams[0]` is `{ key: 'method', value: expectedMethod }`. |
-| `api.invalidInputType` | `validateInputByType` | 400 | `errorParams[0]` is `{ key: 'message', value: <validator message> }`. |
+| `api.invalidInputType` | `validateInputByType` | 400 | Generic code only — the raw validator message is NOT echoed to the client (it would leak the input schema to unauthenticated callers). The detailed message is routed to the `postApiValidate` hook + dev logs. |
 | `api.internalServerError` | `tryCatch` caught a throw | 500 | The original exception is on the registered tracker; not in the wire envelope. |
-| `api.emptyResponse` | `buildApiResponseEnvelope` | 500 | Handler returned `null` or `undefined`. |
-| `api.invalidResponseStatus` | `buildApiResponseEnvelope` / `isRuntimeApiResult` | 500 | Handler returned an object whose `status` is not `'success'` / `'error'`. |
+| `api.emptyResponse` | `normalizeApiResponse` | 500 | Handler returned `null` or `undefined`. |
+| `api.invalidResponseStatus` | `normalizeApiResponse` | 500 | Handler returned an object whose `status` is not `'success'` / `'error'`. |
 
 Consumer-emitted error codes (returned from `main(...)`) flow through `normalizeErrorResponse` unchanged. Consumers should register translations for the framework codes above plus their own.
 

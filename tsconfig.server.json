@@ -95,6 +95,7 @@
     "packages/server/src/**/*",
     "packages/test-runner/src/**/*",
     "packages/create-luckystack-app/src/**/*",
+    "packages/cli/src/**/*",
     "packages/docs-ui/src/**/*",
     "packages/secret-manager/src/**/*",
     "src/**/_api/**/*",

@@ -1,5 +1,10 @@
 # Public, non-secret environment configuration. Commit this file as `.env`.
 #
+# SECRETS DO NOT BELONG HERE — put API keys, OAuth client secrets, DB/Redis
+# passwords in `.env.local` (gitignored). Keep every key in EXACTLY ONE file:
+# `.env.local` is loaded after `.env` and overrides it, so a key in both makes
+# edits behave confusingly (run LUCKYSTACK_ENV_DEBUG=1 to list any duplicates).
+#
 # Listen port and preset bundle are positional argv, not env-vars:
 #   npm run server                              (default preset, port 80)
 #   npm run server -- billing                   (one bundle, port 80)
@@ -38,6 +43,12 @@ REDIS_PORT=6379
 # Default ".env,.env.local". Set as a REAL environment variable (shell / process
 # manager), NOT here — these files are only read after the list is resolved.
 # LUCKYSTACK_ENV_FILES=.env,.env.local
+
+# Set LUCKYSTACK_ENV_DEBUG=1 to log, at boot, every key defined in MORE THAN ONE
+# loaded env file (and which file wins). Use it when a value "won't change" —
+# usually it's still set in .env while you edited only .env.local (or vice-versa);
+# removing a key from just one file lets the other file's value resurface.
+# LUCKYSTACK_ENV_DEBUG=1
 
 # Optional @luckystack/secret-manager (opt-in): commit POINTERS instead of secrets.
 # A value of the shape <BASE>_V<n> is resolved at boot against the server at

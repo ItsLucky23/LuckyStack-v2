@@ -11,3 +11,13 @@ src/_sockets/apiTypes.generated.ts
 src/_sockets/apiInputSchemas.generated.ts
 src/docs/apiDocs.generated.json
 server/prod/generatedApis*.ts
+
+# `luckystack check-env` / `check-i18n` scan reports.
+dump/
+
+# AI browser-testing artifacts (agent-browser / Playwright / Chrome DevTools MCP).
+.agent-browser/
+.playwright-mcp/
+test-results/
+playwright-report/
+.claude/settings.local.json

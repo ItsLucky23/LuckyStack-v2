@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom';
+import type { RouteObject } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import 'src/index.css';
 
@@ -72,14 +73,16 @@ const PageWrapper = ({ Page }: { Page: React.ComponentType<PageProps> }) => {
   return <Page params={params} searchParams={searchParamsObj} />;
 };
 
-const getRoutes = (pages: Record<string, PageModule>) => {
-  const routes = [];
+type PageLoader = () => Promise<PageModule>;
+
+const getRoutes = (loaders: Record<string, PageLoader>): RouteObject[] => {
+  const routes: RouteObject[] = [];
   //? Collision detection — two page.tsx files in different folder trees
   //? can compute the SAME route after invisible-parent stripping. First
   //? wins; second is skipped with a loud console.error.
   const seenRoutes = new Map<string, string>();
-  for (const path in pages) {
-    const module = pages[path];
+  for (const path in loaders) {
+    const loader = loaders[path];
 
     //? Apply the framework's invisible-parent rule: `_<folder>` segments
     //? are stripped from the URL; pages directly inside an `_<folder>` are
@@ -107,23 +110,30 @@ const getRoutes = (pages: Record<string, PageModule>) => {
     }
     seenRoutes.set(finalPath, path);
 
-    //? Auto-register the page's `export const middleware` (if any) against
-    //? its route. Framework's <Middleware> + useRouter prefer this over the
-    //? global handler.
-    if (module.middleware) {
-      registerPageMiddleware(finalPath, module.middleware);
-    }
-
-    const template = module.template ?? 'plain';
-    const Page = module.default;
-
+    //? Lazy: the page component + its import tree load only when the route is
+    //? visited, instead of every page eager-loading on first paint (which made
+    //? even `/login` pull in every page + its deps). The page's `template` and
+    //? per-page `middleware` live on the same module, so they resolve inside the
+    //? loader.
     routes.push({
       path: finalPath,
-      element: (
-        <TemplateProvider key={`${template}-${finalPath}`} initialTemplate={template}>
-          <PageWrapper Page={Page} />
-        </TemplateProvider>
-      ),
+      lazy: async () => {
+        const module = await loader();
+        //? Auto-register the page's `export const middleware` (if any) against
+        //? its route. Framework's <Middleware> + useRouter prefer this over the
+        //? global handler.
+        if (module.middleware) {
+          registerPageMiddleware(finalPath, module.middleware);
+        }
+        const template = module.template ?? 'plain';
+        return {
+          element: (
+            <TemplateProvider key={`${template}-${finalPath}`} initialTemplate={template}>
+              <PageWrapper Page={module.default} />
+            </TemplateProvider>
+          ),
+        };
+      },
     });
   }
   return routes;
@@ -138,15 +148,15 @@ const prodPages = import.meta.glob([
   '!./**/_sync/**',
   '!./**/_server/**',
   '!./**/*_server.tsx',
-], { eager: true });
+]);
 
 const devPages = import.meta.glob([
   './**/page.tsx',
-], { eager: true });
+]);
 
-const pages = (import.meta.env.PROD ? prodPages : devPages) as Record<string, PageModule>;
+const loaders = (import.meta.env.PROD ? prodPages : devPages) as Record<string, PageLoader>;
 
-const routes = getRoutes(pages);
+const routes = getRoutes(loaders);
 
 //? Catch-all — any URL that doesn't match a page renders ErrorPage inside the
 //? plain template wrapper. Middleware lets the framework intercept auth /

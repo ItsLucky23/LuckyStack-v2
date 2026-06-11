@@ -1,288 +1,123 @@
 # SESSION_STATE — read me first
 
-> Branch: `chore/package-split-prep` · Base: `master` · Date written: 2026-06-08
-> **For a fresh AI:** read `CLAUDE.md` first, then this file top-to-bottom, then
-> `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md`. This file is self-sufficient — it has
-> the full plan for the next initiative plus the current repo state.
+> Branch: `chore/package-split-prep` · Base: `master` · Last rewritten: 2026-06-10 (end of the
+> big browser-test + hardening session). For a fresh AI: read `CLAUDE.md` first, then this file
+> top-to-bottom. Blow-by-blow detail lives in `branch-logs/chore--package-split-prep.md`
+> (parts 1–9r) and `docs/audits/`. Canonical architecture spec for the optional-package model:
+> `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md`.
 
 ---
 
-## 0. TL;DR — where we are & what's next
+## 0. TL;DR — where we are
 
-- **Published on npm: 0.1.8. Working tree: 0.2.0, UNCOMMITTED, unpublished.** All
-  automated gates GREEN: `build:packages` 14/14 · `test:unit` 772/772 ·
-  `.smoke-test/run.mjs` MATRIX (full + no-presence) GREEN · `lint:packages` 0/0.
-- **The 0.2.0 architecture is DONE**: login/presence/sync are genuine OPTIONAL
-  peers; the server auto-degrades when one is absent (§3 below).
-- **THE NEXT BIG INITIATIVE (planned, not started): "install-anything-anytime."**
-  A consumer installs a BASE set, then later `npm i @luckystack/<pkg>` (or
-  `npx luckystack add <feature>`) + sets env + restarts → it just works, with ZERO
-  manual wiring. Flip Sentry / OAuth providers / login on or off at any time.
-  The complete plan is §5–§8. **Implementation has NOT begun** — tomorrow start at §8 step 1.
+- **Published on npm: 0.1.8. Working tree: 0.2.0 (15 packages incl. `@luckystack/cli`), UNCOMMITTED, unpublished.** ~190+ uncommitted files.
+- **All automated gates GREEN (2026-06-10):** `lint` 0 (client/server/packages) · `build:packages` 15/15 · full `npm run build` exit 0 · `test:unit` **782/782**.
+- **This session = frontend testing + a long bug-fix/hardening pass.** 12 numbered findings + 1 warning fixed (F1–F12, W1) plus dev-perf/UX fixes (env diagnostics, Vite polling, lazy-loading, login layout-shift, navbar glitch). The login matrix (4 scenarios), the full playground sweep, cookie-mode, and forgot-password were all verified in a browser.
+- **NEXT (answer to "should we test `.smoke-test/app`?"): YES — and it's REQUIRED before publishing 0.2.0.** Several of this session's most important bugs only manifested in the **dist/tarball/consumer path**, NOT in the framework repo (which runs from source). See §4.
 
 ---
 
-## 1. The goal (user's words, locked)
+## 1. What this session did (2026-06-10) — the fixes
 
-> "I can either install all packages OR just the base package list, and then later
-> run `npm i @luckystack/presence` and it works as well. Same for Sentry (don't
-> want it now, want it later — no problem), for the OAuth providers, and for the
-> login package. It should be possible to add anything at any moment."
+> All browser-verified unless marked. Framework src + the create-luckystack-app template + the
+> `@luckystack/cli` login assets were kept in sync (mirror) where the file ships to consumers.
 
-The dial: **install everything (Django-style) ↔ base-only + à-la-carte (FastAPI-style).**
-
----
-
-## 2. Decisions LOCKED (2026-06-08, via AskUserQuestion)
-
-1. **Login UI delivery = `npx luckystack add login` generator.** `npm i @luckystack/login`
-   auto-wires the auth BACKEND (routes + session + OAuth-by-env). The editable
-   pages (`/login`, `/register`, `/reset-password`, `/settings/**` + their `_api`)
-   + `LoginForm` are copied into the consumer's `src/` by the generator (shadcn-style;
-   the consumer owns + edits them; they match the project's `SessionLayout`). NOT a
-   package-mounted page (file-based routing scans `src/`; node_modules can't inject routes).
-2. **The add command = a NEW dedicated CLI: `npx luckystack add <feature>`.** A
-   lightweight new package (`@luckystack/cli`, or a `bin` on an existing package).
-   It is the INVERSE of the scaffold's `pruneOptionalPackages`.
-3. **`luckystack add` does NOT replace `npm i`** — it WRAPS it. For backend-only /
-   zero-UI features (sync, email, error-tracking, oauth-by-env, docs-ui, login-backend)
-   a plain `npm i @luckystack/<pkg>` is enough (boot auto-detect wires it). For
-   features that need `src/` assets (login pages, presence JSX mounts), `luckystack add`
-   runs `npm i` AND injects the folders/files into `src/`. So: `add` = `npm i` + src injection.
-4. **BASE set = `@luckystack/core` + `@luckystack/api` + `@luckystack/server` +
-   `@luckystack/error-tracking`** (+ peers `@prisma/client`, `socket.io`).
-   error-tracking is a thin adapter (heavy `@sentry/node` stays an optional peer),
-   so Sentry/PostHog stay pure env+restart. login / presence / sync / email / docs-ui = à-la-carte.
-5. **Scope tonight = PLANNING + this doc only.** Implementation is "everything in one
-   push" tomorrow (decision was option 2), but executed in the verifiable sequence in §8.
-6. **(internal, not asked — going with the design recommendations):**
-   - Optional-package list = a hardcoded `OPTIONAL_PACKAGES` constant in `@luckystack/server`
-     (mirrors `capabilities.ts` + `OVERLAY_ORDER`), NOT a node_modules dir scan.
-   - Override precedence = **last-writer-wins**: auto-detect `./register` phase runs
-     FIRST, the consumer overlay folder runs SECOND so a hand-written overlay overrides.
-   - Auto-detect is **server-side** + targeted **client** conditional dynamic-imports
-     (sync bridge); no generic client registry yet.
-
----
-
-## 3. What's ALREADY DONE (0.2.0, in the working tree, uncommitted)
-
-**Core decouple (the foundation install-anytime builds on):**
-- `@luckystack/core/src/sessionProviderRegistry.ts` — `registerSessionProvider` +
-  null-safe `readSession`/`writeSession`/`removeSession`/`performLogout` (return
-  null/no-op when login absent). Exported from core index + client.
-- `@luckystack/login` registers its session impl into core at module load (index.ts).
-- `api`/`sync`/`presence`/`server` read sessions via core, NOT login. login dropped
-  from api/sync deps; optional peer of presence (type-only import) + server.
-- `@luckystack/server/src/capabilities.ts` — `createRequire().resolve` guard +
-  cached lazy `getLogin`/`getPresence`/`getSync`. Server routes degrade:
-  `auth.disabled` (login absent), `sync.disabled` (sync absent), presence skipped.
-- **CSRF**: login-present path unchanged (session-bound); login-absent path =
-  stateless double-submit (`csrfMiddleware.ts` + `csrfRoute.ts`); `csrfMiddleware.test.ts` (10 tests).
-- All 14 packages at **0.2.0** (`npm run bump minor`).
-
-**Installer (Phase 4) — presence opt-out DONE + verified:**
-- `create-luckystack-app`: wizard asks "Install @luckystack/presence?"; `--no-presence` flag;
-  `pruneOptionalPackages()` drops the dep + rewrites `main.tsx` (LocationProvider→Outlet)
-  + `TemplateProvider.tsx` (drops SocketStatusIndicator + orphaned wiring).
-- `.smoke-test/run.mjs` is now a MATRIX (full + no-presence), each: scaffold →
-  prune-assert → install → typecheck → build → lint. Both GREEN.
-
-**Also this session (0.1.x patch fixes folded into 0.2.0):** port-conflict truthful
-boot + `SERVER_PORT_AUTO_INCREMENT`; `npm run bump`; package.json trim + `npm run help`;
-OAuth env-comments in `.env.local`; OAuth redirect→`loginRedirectUrl`; session supersede
-on re-login; sessionStorage-mode login fixes (OAuth `?token=` pickup in `main.tsx`,
-`saveSession` returns `{ok}`, credentials Bearer); `public/microsoft.png` added.
-
----
-
-## 4. Target architecture — install-anything-anytime (3 layers)
-
-**Layer 1 — package self-wiring via a `./register` subpath.** Each optional package
-ships a side-effect entry `@luckystack/<pkg>/register` that performs its OWN default
-env-driven wiring, idempotently. The logic currently in the consumer overlay files
-(`luckystack/<pkg>/*.ts`) MOVES INTO the packages:
-- `@luckystack/login/register`: force session-provider register; guard-register
-  `defaultPrismaUserAdapter`; run the OAuth env-scan loop (from `oauthProviders.ts`)
-  reading `callbackUrl` from `getProjectConfig()` (new `oauthCallbackBase` slot), NOT
-  the consumer's `../../config`.
-- `@luckystack/email/register`: `autoSelectEmailSender()` + `registerEmailSender` (body
-  of `email/init.ts`), already env-driven; register into `default` + `transactional` slots.
-- `@luckystack/error-tracking/register`: `initializeSentry()` + PostHog env-scan (env-gated no-ops).
-- `@luckystack/presence/register`: `registerPresenceHooks()` + default AFK event.
-- `@luckystack/docs-ui/register`: `registerCustomRoute` for its self-contained HTML route (auto-mounts).
-
-**Layer 2 — boot auto-detect phase in `@luckystack/server`.** Add an `OPTIONAL_PACKAGES`
-constant. In `bootstrapLuckyStack`, BEFORE `loadOverlayFolder` (so overlay overrides),
-iterate the list and for each package resolvable via `createRequire().resolve`,
-`await import('@luckystack/<pkg>/register')`. Force `await getLogin()` once when
-`capabilities.login` so login self-registers even in an app that never imports it.
-→ **`npm i <pkg>` + env + restart = server-side wiring lights up, zero code edits.**
-
-**Layer 3 — client side** (Node auto-detect can't reach Vite):
-- **sync receive bridge**: move the inline listener (consumer `socketInitializer.ts`
-  ~L228-282) INTO `@luckystack/sync/client` as idempotent `attachSyncReceiver(socket)`.
-  The always-present `socketInitializer` does a `tryCatch` dynamic
-  `import('@luckystack/sync/client')` in the connect effect and attaches only on
-  success — DECOUPLED from the presence/activity flag (today entangled ~L159).
-  → sync client add-later becomes pure `npm i`.
-- **presence mounts** (`<LocationProvider/>` root in `main.tsx`, `<SocketStatusIndicator/>`
-  in `TemplateProvider`) + **login pages**: CANNOT be pure `npm i` (JSX mount points +
-  routable pages live in consumer `src/`; Vite breaks on a static import of an
-  uninstalled package). Delivered by `npx luckystack add <feature>`.
-
-**Prerequisite cleanup (do FIRST, zero behavior change):** switch template `config.ts`
-to import `BaseSessionLayout`/`AuthProps` from `@luckystack/core` (already exported)
-instead of `@luckystack/login`, so `config.ts` compiles identically with or without
-login. Add `oauthCallbackBase` + `socketStatusIndicator` slots to `projectConfig`.
-
----
-
-## 5. Per-feature: can it be pure `npm i`?
-
-| Feature | Pure `npm i`? | How it arrives |
+| # | Fix | Where |
 |---|---|---|
-| error-tracking (Sentry/PostHog) | yes (in BASE) | env (`SENTRY_DSN`) + restart; `./register` auto-wires |
-| email (Resend/SMTP) | yes | `npm i @luckystack/email <driver>` + env + restart |
-| OAuth provider (google, …) | yes | set provider env vars + restart (env-scan in login/register) |
-| sync | yes (after L3 bridge) | `npm i @luckystack/sync` (+ migrate app code to `@luckystack/sync/client`) |
-| docs-ui | yes | `npm i @luckystack/docs-ui` + `./register` customRoute |
-| login BACKEND (auth routes, session, OAuth) | yes | `npm i @luckystack/login` + env + restart |
-| login PAGES (/login,/register,/settings + LoginForm) | **no** | `npx luckystack add login` (copies editable pages into `src/`) |
-| presence SERVER (lifecycle/hooks) | yes | `npm i @luckystack/presence` + `./register` |
-| presence CLIENT mounts (LocationProvider, SocketStatusIndicator) | **no** | `npx luckystack add presence` (injects JSX mounts) |
-| Datadog | **no** | `dd-trace` must be the process's first import → `NODE_OPTIONS=--import @luckystack/error-tracking/datadog-preload` (documented in `.env.local`) |
+| **F1** | Register now AUTO-LOGS-IN (was: account created but bounced to /login). Mints token + session, returns `newToken`. | `packages/login/src/login.ts` |
+| **F3** | Playground "offline" demo simulates a network blip (`engine.close()` → `transport close` → long grace) instead of `socket.disconnect()` which (with presence on) killed the session after 2s. | `src/playground/page.tsx` + presenceConfig doc |
+| **F4** | Logout now CLEARS the HttpOnly cookie — sockets can't `Set-Cookie`, so a new `POST /auth/logout` route + a client call on logout expire it. | `packages/server/.../authLogoutRoute.ts` (+ test), `src/_sockets/socketInitializer.ts` |
+| **F5** | Cookie-mode login clears any stale sessionStorage token (was confusing client mode-detection). | `LoginForm.tsx` ×3 |
+| **W1** | Suppressed the spurious "Sync event … has no registered callback" warning for streaming-only routes. | `packages/sync/src/syncRequest.ts` |
+| **F6** | Password-reset email link used the BACKEND origin (`localhost:80`) instead of the FRONTEND. `config.ts` `app.publicUrl` now = detected public origin. | `config.ts` |
+| **F7** | **PUBLISH-CRITICAL:** tsup `splitting:false` gave each package entry a PRIVATE copy of shared registry state → `@luckystack/login/register` registered OAuth providers into a registry the server couldn't see → **OAuth buttons NEVER appeared in consumer installs.** `splitting:true` across all 10 multi-entry packages. | every `packages/*/tsup.config.ts` |
+| **F8** | Consumers had NO dev file/env watch — devkit's supervisor was never built/exposed. Now shipped as the **`luckystack-dev`** bin; template `server` script uses it (`server:once` = old behaviour). | `packages/devkit` (+ bin, supervisor entry), template `package.json` |
+| **F9** | Supervised restarts served STALE env: the supervisor imported `@luckystack/core`, whose import-time `bootstrapEnv()` polluted its env snapshot (inlined by tsup) → `.env` edits never reached the child. Supervisor now imports NOTHING from core (pure `dotenv.parse`) + a guard test. | `packages/devkit/src/supervisor.ts` |
+| **F10** | **REPORT-ONLY (not fixed):** `src/settings/_api/listSessions_v1.ts` returns full raw session tokens to the client (own tokens only, no cross-user leak). Should mask/opaque-id. Consumer demo code — left for the user. | `src/settings/_api/listSessions_v1.ts` |
+| **F11** | Cookie-mode CSRF fetch used the FRONTEND origin in split-origin dev → `/auth/csrf` hit the SPA fallback (HTML, not JSON). Now prefers the socket's backend URI. | `packages/core/src/csrf.ts` |
+| **F12** | Google OAuth `redirect_uri_mismatch`: the legacy consumer overlay `luckystack/login/oauthProviders.ts` hand-built the callback from `SERVER_IP` → `127.0.0.1:80` (Google had `localhost:80`). Now uses `getProjectConfig().oauthCallbackBase`. | `luckystack/login/oauthProviders.ts` |
+
+**Dev experience / perf (this session, mostly framework-repo only):**
+- **Env dual-file footgun:** the "value won't change" confusion was a key defined in BOTH `.env` and `.env.local` (`.env.local` overrides; deleting from one resurfaces the other). Added opt-in `LUCKYSTACK_ENV_DEBUG=1` (logs every multi-file key + winner at boot) + template comments + the agreed **one-key-per-file** convention (memory saved).
+- **Vite `usePolling` was pegging a CPU core** → now off by default (`VITE_USE_POLLING=1` to re-enable for WSL/Docker); `.smoke-test`/`dist`/`.cache` added to the dev-watch ignore.
+- **`@vitejs/plugin-react-swc` → `@vitejs/plugin-react`** (rolldown-vite oxc; silences the startup hint). Framework-repo only — the template runs stable Vite 6 where swc is correct.
+- **Login UI layout-shift:** the OAuth buttons popped in after the `/auth/providers` fetch → now the whole form is gated behind a spinner until the fetch resolves. (×3 copies.)
+- **LAZY-LOADED PAGES (big one):** `main.tsx` eager-globbed ALL pages on every route → even `/login` pulled in ~127 modules (playground, workspaces, every component), and Chrome DevTools froze ~10s parsing their source-maps. Converted to React-Router-7 `lazy`; `/login` now loads **17** modules. Splat (`/foo/*`) handled via a per-page wildcard route (no eager metadata read). Template mirrored. Prod build now code-splits per page.
+- **Navbar animation glitch on playground:** the sidebar toggled `relative`↔`absolute`, jumping the content 14px each toggle. Now always-overlay + a constant `md:pl-14` on content → only the overlay width animates, content never moves.
+
+**Earlier this branch (pre-session, parts 1–8):** the package split into 15 `@luckystack/*` packages, security audits + fixes, the new UI input components (TextField/Toggle/Checkbox/DatePicker/Popover), production AFK/presence, AI browser-testing tooling, the `bin` `./dist`→`dist` publish fix. See the branch-log.
 
 ---
 
-## 6. The `luckystack add` CLI (new `@luckystack/cli`)
+## 2. State of play before you touch anything
 
-The inverse of `create-luckystack-app`'s `pruneOptionalPackages`. `npx luckystack add <feature>`:
-1. `npm install`s the peer package(s).
-2. Copies the consumer-`src/` surfaces packages can't inject — login pages/_api +
-   `LoginForm`, presence JSX mounts — from **package-shipped `assets/`** bundles,
-   idempotently (skip-if-exists).
-3. Applies the inverse idempotent JSX edits to `main.tsx` / `TemplateProvider.tsx`
-   (re-add the mount the pruner removes), and flips the relevant `config.ts` values.
-4. (login) optionally has the generated `/login` page import `LoginForm` from
-   `@luckystack/login/client` so it's a thin, swappable wrapper.
-
-**Packages must ship**: (a) `./register` side-effect subpath; (b) client packages an
-idempotent attach fn from `/client` (`attachSyncReceiver`); (c) login must ship
-`LoginForm` + provider icons from `/client` AND the page/_api templates as `assets/`
-(login currently ships ZERO `.tsx` — must add). A future `luckystack remove <feature>`
-can reuse the existing pruner logic.
+- Start: `npm run server` + `npm run client` (server-start is normally YOUR action; this session the user granted standing autonomy). Backend `http://localhost:80`, frontend Vite `http://localhost:5173`.
+- `config.ts` currently: `sessionBasedToken: false` (cookie mode), `allowMultipleSessions: true`, presence (`socketActivityBroadcaster`) + `socketStatusIndicator` ON.
+- Test accounts (dev DB): `lstest+76702@example.com` / `LsTest!76702#Aa` · `lstest+90210@example.com` / `LsTest!90210#Bb` · `mathijsvanmelick3@gmail.com` (Google OAuth + the password-reset test; pw last set to `LsNieuw!2026#Zz`).
+- `.env` = public keys only; secrets in `.env.local` (one-key-per-file). NEVER read `.env.local` unless the user re-grants it.
 
 ---
 
-## 7. BASE vs à-la-carte package set
+## 3. Verified GREEN this session (don't re-do unless you changed it)
 
-- **BASE (always)**: `@luckystack/core`, `@luckystack/api`, `@luckystack/server`,
-  `@luckystack/error-tracking` (+ peers `@prisma/client`, `socket.io`; `@luckystack/devkit` dev-only).
-- **À-la-carte**: `login`, `presence`, `sync`, `email`, `docs-ui`, `secret-manager`,
-  `router`, `test-runner`.
-- The scaffold should offer a "base / full / custom" choice; `create-luckystack-app`'s
-  `pruneOptionalPackages` already removes deselected packages (presence done; extend to the rest).
-
----
-
-## 8. IMPLEMENTATION SEQUENCE (start here tomorrow)
-
-> Verify after EACH step: `npm run lint:packages` 0/0 · `npm run build:packages` 14/14 ·
-> `npm run test:unit` (keep ≥772) · `.smoke-test/run.mjs` MATRIX green. The smoke matrix
-> is the safety net for "did I break the default install." Extend it with a `base-only`
-> combo as you go. Do NOT regress the default full install.
-
-1. **Prereq decouple (small, zero behavior change).** Template `config.ts`:
-   import `BaseSessionLayout`/`AuthProps` from `@luckystack/core` (not login). Add
-   `oauthCallbackBase` + `socketStatusIndicator` slots to `projectConfig`
-   (`packages/core/src/projectConfig.ts`).
-2. **Boot auto-detect phase (medium — the spine).** `@luckystack/server`:
-   `OPTIONAL_PACKAGES` constant + register-import loop in `bootstrapLuckyStack` (find it
-   under `packages/server/src/`, ~`bootstrap.ts`), BEFORE `loadOverlayFolder`,
-   resolve-guarded `await import('@luckystack/<pkg>/register')`. Force `getLogin()` when present.
-3. **Easy env-driven `./register` entries first (small each).** `@luckystack/email/register`
-   + `@luckystack/error-tracking/register` (relocate `template/luckystack/{email,sentry}/*` bodies).
-   Verify pure `npm i` + env on a base-only app (add the base-only smoke combo).
-4. **`@luckystack/login/register` (medium).** Relocate the OAuth env-scan into the package
-   (callbackUrl from `getProjectConfig()`); force `getLogin()` at boot; drop the duplicate
-   `config.ts` `providers` array (drive credentials-form visibility from `/auth/providers`);
-   delete the boilerplate `template/luckystack/login/userAdapter.ts` overlay. Backend login → pure `npm i`.
-5. **`@luckystack/presence/register` (small).** `registerPresenceHooks()` via auto-detect;
-   REMOVE the manual `registerPresenceHooks()` call in the dev repo `server.ts` (kills divergence).
-6. **sync client bridge (medium).** Extract `attachSyncReceiver` into `@luckystack/sync/client`;
-   make `socketInitializer` conditionally dynamic-import it (tryCatch), decoupled from the
-   presence/activity flag. Client sync add-later → pure `npm i`.
-7. **`@luckystack/cli` — `luckystack add` (large).** New package with `bin`. Implements
-   `add login` + `add presence` (copy assets into `src/`, inverse JSX edits, npm install).
-   Ship the page/_api/LoginForm/icon `assets/` in `@luckystack/login`; ship presence mount
-   assets. Idempotent skip-if-exists. Add smoke combos that scaffold base-only then
-   `luckystack add login` / `add presence` and re-run the gates.
-8. **docs-ui `./register` + docs sweep (small).** Dormant `@luckystack/docs-ui/register`
-   (auto-mount in dev). Update `packages/server/CLAUDE.md` to move login/presence/sync from
-   Required → Optional. Update `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md` status.
-
-**Datadog (separate, medium):** standardize on `NODE_OPTIONS=--import
-@luckystack/error-tracking/datadog-preload`, documented in `.env.local_template`.
+- **Login matrix 4/4** (sessionBasedToken × allowMultipleSessions): token location, multi-session kick + `sessionReplaced`, register auto-login, cookie-clear-on-kick, supersede-on-relogin.
+- **Playground full sweep:** notifications, buttons, confirm dialogs (basic/typed/stacked), dropdown+search, multiselect, lifecycle hooks, rate-limit (3 ok / 7 limited), health probes, error boundary, streaming (31 chunks), offline queue.
+- **Cookie token-mode:** HttpOnly+SameSite=Strict, CSRF 403-without/200-with header.
+- **Forgot-password e2e** (real Resend delivery): token form, old-pw rejected, new-pw login, one-shot token.
+- **Presence/AFK** at the wire level: `userAfk {userId, endTime}` — no token in the payload.
 
 ---
 
-## 9. INVARIANTS / gotchas (don't get burned)
+## 4. NEXT — `.smoke-test/app` verification for 0.2.0 (REQUIRED before publish)
 
-- **Never regress the default full install.** The smoke matrix `full` combo must stay green.
-- **Vite cannot statically import an uninstalled package** — that's why presence mounts +
-  login pages need the CLI, not pure `npm i`. Client optional deps use `tryCatch` dynamic import.
-- **Scaffold file edits hit CRLF on Windows** — `create-luckystack-app`'s `editScaffoldFile`
-  normalizes `\r\n`→`\n` before matching; do the same in the `luckystack add` CLI.
-- **Override precedence**: auto-detect `./register` runs BEFORE the overlay folder so a
-  consumer overlay (last writer) overrides. `register*` are last-writer-wins already.
-- **peer-dep-guard policy** (memory `feedback_peer_dep_guard_policy`): an env key set with
-  its peer NOT installed = hard boot crash, never silent fallthrough. Exception:
-  secret-manager fails OPEN. Keep `./register` entries env-gated no-ops when env absent.
-- **Strict typing** (memory `feedback_strict_typing_policy`): zero `as any`/`as unknown`;
-  no disabled lint rules; document structural exceptions.
-- `BaseSessionLayout`/`AuthProps` are exported from BOTH `@luckystack/core` (index + client)
-  and re-exported by login — use the CORE ones in template/config to stay login-agnostic.
+**Why it's required, not optional:** the framework repo runs every `@luckystack/*` package from **source** (Vite aliases / tsx). Consumers run them from the **built dist tarballs**. Three of this session's most important bugs — **F7** (splitting → OAuth registry), **F8** (the supervisor bin), **F9** (supervisor env snapshot) — only exist on the dist/consumer path. The framework repo looked healthy the whole time. So a consumer-context check is the only thing that proves these are actually fixed for a real install.
 
----
+### 4.1 The offline gate (fast)
+`.smoke-test/run.mjs` re-packs all 14 tarballs, scaffolds a fresh consumer project against them, and runs the consumer gates (generateArtifacts → typecheck → build → lint) + the AI-browser scaffold asserts.
+```
+npm run build:packages          # ensure dist is current (this session changed login/server/core/devkit/sync)
+node .smoke-test/run.mjs         # GREEN = "ready to publish" (offline)
+```
+⚠️ **`run.mjs` WIPES `.smoke-test/app` — including its `.env.local` with the user's real OAuth/Resend keys.** Copy those out first if you want them back.
 
-## 10. TEST CHECKLIST (manual — user will run when able)
+### 4.2 The end-to-end consumer check (the part that proves F7/F8/F9)
+The offline gate doesn't run the app. After it's green, in the FRESH scaffold:
+- `npm run server` (the new `luckystack-dev` supervisor) + `npm run client`.
+- **F8/F9:** edit a value in `.env` while the server runs → the supervised child restarts AND serves the NEW value (no stale env). Remove a key → its effect is gone (mind the one-key-per-file rule).
+- **F7:** set `DEV_GOOGLE_CLIENT_ID`/`SECRET` (+ restart) → the **Google button appears** on `/login` (this is the bug that was invisible in consumer installs before). `curl /auth/providers` lists `google`.
+- **F1/F4/F5/F11:** register → auto-login; cookie-mode logout clears the cookie; CSRF works.
+- **Lazy-loading + login-shift + (no navbar in the base template):** `/login` loads few modules; the form doesn't pop-in.
+- **CLI bins:** `npx luckystack --help`, `npx luckystack-dev` (supervisor), `npx create-luckystack-app --help` all resolve.
+- **`luckystack add` round-trip** (see `docs/LUCKYSTACK_ADD_GUIDE.md`).
 
-> Legend: [repo] = this repo (`npm run server` + `npm run client`); [scaffold] = fresh
-> `npx create-luckystack-app`; the framework sample `config.ts` defaults `sessionBasedToken: true` (sessionStorage mode).
-
-**Login matrix (both cookie AND sessionStorage modes):** fresh credentials login →
-/dashboard; re-login to another account WHILE logged in → success, no bounce, session is
-new account; OAuth login → /dashboard, session adopted, no `?token=` left in URL; OAuth
-while logged in → no session loss; register while logged in → no corruption.
-**Optional packages:** default full install works (login/OAuth/sync/presence); no-presence
-scaffold builds + runs (no AFK/status-indicator, room join/leave still work).
-**Dev/tooling:** `npm run server` truthful port-in-use error; `SERVER_PORT_AUTO_INCREMENT=1`
-boots on next free port; `npm run help`; `npm run bump patch -- --dry-run`.
+### 4.3 The full create-luckystack-app matrix (post- or pre-publish)
+See `docs/` + the original §4 checklist in the git history: default scaffold, `--no-prompt`, `--ai-browser=all|none`, opt-out cleanliness, AI-docs shipped.
 
 ---
 
-## 11. PUBLISH BLOCKER + user actions
+## 5. Publish blocker + your actions
 
 - **Nothing committed or published.** Working tree at 0.2.0.
-- **Publish is blocked on the npm 2FA wall.** On npmjs.com set Two-Factor Auth to
-  "Authorization only", then `npm run publish:packages` (builds + publishes 14 in dep order).
-  Fallback: `npm config set auth-type legacy` then publish with the OTP.
-- A human **security review of the CSRF double-submit fallback** is wise before publish (design §7).
+- After §4 is green: commit, then publish. **Publish is gated on the npm 2FA wall** — on npmjs.com set Two-Factor Auth to "Authorization only", then `npm run publish:packages` (builds + publishes the 15 in dependency order). Fallback: `npm config set auth-type legacy` + OTP.
+- A human security review of the CSRF double-submit fallback (login-absent path, `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md` §7) is wise before publish.
+- Re-run `publish:dry` (should be 0 warnings after the `bin` fix from part 8).
 
 ---
 
-## 12. Key file references (verified this session)
+## 6. Open / report-only items (the user decides)
 
-- Core session registry: `packages/core/src/sessionProviderRegistry.ts` (+ index L209 area, client.ts).
-- Server capability layer: `packages/server/src/capabilities.ts`.
-- CSRF: `packages/server/src/httpRoutes/{csrfMiddleware,csrfRoute}.ts` (+ `.test.ts`).
-- Scaffold + pruner: `packages/create-luckystack-app/src/index.ts`
-  (`pruneOptionalPackages`, `editScaffoldFile`, `dropDependency`, `--no-presence`).
-- Smoke matrix: `.smoke-test/run.mjs` (COMBOS array).
-- Overlay model (to relocate into packages): `luckystack/{login,server,docs-ui,core}/*` +
-  `template/luckystack/**` + `template/server/server.ts`.
-- Bootstrap/auto-import overlay: `packages/server/src/` (`bootstrap.ts` — `loadOverlayFolder`, `OVERLAY_ORDER`).
-- OAuth env-scan to relocate: `template/luckystack/login/oauthProviders.ts` (~L35-78; L27 reads `../../config`).
-- Design spec (canonical, ships to consumers): `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md`.
-- Reusable design workflow: `.claude/workflows/install-anytime-design.mjs` (re-run for refresh).
+- **F10:** `listSessions_v1.ts` returns raw session tokens to the client — mask them (consumer demo code).
+- **The user's personal `.env`** still has (or had) OAuth secrets duplicated from `.env.local`. Convention is one-key-per-file; the user may want to clean `.env`. (Offered; not done.)
+- **DevTools lag:** lazy-loading cut `/login` from ~127→17 modules; ask the user whether DevTools is now acceptable. Fully eliminating it would require bundling dev (breaks HMR).
+- **Cosmetic:** ~11 em-dashes in `.env.local` COMMENT lines got mangled to `?` by an earlier `Set-Content -Encoding ascii` (harmless; offered to clean).
+- **Splat + lazy-loading:** the per-page `/*` wildcard means a splat page (only `src/workspaces`, a not-yet-active prototype) remounts on subpath nav instead of keeping a persistent shell. Fine for now; a build-time route manifest would be the "proper" fix if splat shells matter later.
+
+---
+
+## 7. Key references
+
+- Full work log: `branch-logs/chore--package-split-prep.md` (parts 1–9r).
+- Optional-package architecture: `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md`. Adding features later: `docs/LUCKYSTACK_ADD_GUIDE.md`.
+- Audits + cleared backlog: `docs/audits/*` (esp. `REAUDIT_2026-06-09.md`).
+- AI browser testing: `docs/AI_BROWSER_TESTING.md`. Package matrix: `docs/PACKAGE_OVERVIEW.md`.
+- Workspaces (separate prototype, KEEP): `handoff/`, `sparring/`, `src/workspaces/`, `ui-builder/`.

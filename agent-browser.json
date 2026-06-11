@@ -1,0 +1,4 @@
+{
+  "allowedDomains": ["localhost", "127.0.0.1"],
+  "_note": "Fenced to the local dev server. confirmActions is intentionally OMITTED here (unlike the scaffold default) because agent-browser is driven non-interactively from Claude Code's Bash tool — a per-action TTY confirmation would hang the run. The Bash(agent-browser:*) ask-gate in .claude/settings.json is the approval layer instead."
+}

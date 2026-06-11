@@ -1,13 +1,7 @@
 import { walkEndpoints } from './walkEndpoints';
 import { runAuthEnforcementCheck } from './authEnforcementCheck';
-import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
-
-type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
-type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, {
-  method: string;
-  auth: { login: boolean; additional?: Record<string, unknown>[] };
-  rateLimit?: number | false;
-}>>>>>>;
+import { shouldSkip, requiresLogin, calculateSummary } from './testLayerHelpers';
+import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
 export interface RunAuthEnforcementTestsInput {
   apiMethodMap: ApiMethodMap;
@@ -17,18 +11,6 @@ export interface RunAuthEnforcementTestsInput {
   inputFor?: (endpoint: EndpointDescriptor) => unknown;
   onResult?: (result: ContractCheckResult) => void;
 }
-
-const shouldSkip = (endpoint: EndpointDescriptor, skip: string[]): boolean => {
-  if (skip.length === 0) return false;
-  const versioned = `${endpoint.page}/${endpoint.name}/${endpoint.version}`;
-  const versionless = `${endpoint.page}/${endpoint.name}`;
-  return skip.includes(versioned) || skip.includes(versionless);
-};
-
-const requiresLogin = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): boolean => {
-  const meta = apiMetaMap[endpoint.page]?.[endpoint.name]?.[endpoint.version];
-  return meta?.auth.login ?? false;
-};
 
 export const runAuthEnforcementTests = async (
   input: RunAuthEnforcementTestsInput,
@@ -65,11 +47,5 @@ export const runAuthEnforcementTests = async (
     input.onResult?.(result);
   }
 
-  return {
-    total: results.length,
-    passed: results.filter(r => r.status === 'pass').length,
-    failed: results.filter(r => r.status === 'fail').length,
-    skipped: results.filter(r => r.status === 'skipped').length,
-    results,
-  };
+  return calculateSummary(results);
 };

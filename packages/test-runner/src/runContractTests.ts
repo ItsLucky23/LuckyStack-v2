@@ -1,8 +1,7 @@
 import { walkEndpoints } from './walkEndpoints';
 import { runContractCheck } from './contractCheck';
-import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
-
-type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
+import { shouldSkip, calculateSummary } from './testLayerHelpers';
+import type { ApiMethodMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
 export interface RunContractTestsInput {
   apiMethodMap: ApiMethodMap;
@@ -17,13 +16,6 @@ export interface RunContractTestsInput {
   headers?: Record<string, string>;
   onResult?: (result: ContractCheckResult) => void;
 }
-
-const shouldSkip = (endpoint: EndpointDescriptor, skip: string[]): boolean => {
-  if (skip.length === 0) return false;
-  const versioned = `${endpoint.page}/${endpoint.name}/${endpoint.version}`;
-  const versionless = `${endpoint.page}/${endpoint.name}`;
-  return skip.includes(versioned) || skip.includes(versionless);
-};
 
 export const runContractTests = async (input: RunContractTestsInput): Promise<RunContractSummary> => {
   const endpoints = walkEndpoints(input.apiMethodMap);
@@ -55,11 +47,5 @@ export const runContractTests = async (input: RunContractTestsInput): Promise<Ru
     input.onResult?.(result);
   }
 
-  return {
-    total: results.length,
-    passed: results.filter(r => r.status === 'pass').length,
-    failed: results.filter(r => r.status === 'fail').length,
-    skipped: results.filter(r => r.status === 'skipped').length,
-    results,
-  };
+  return calculateSummary(results);
 };

@@ -49,6 +49,22 @@ const syncSpans = new WeakMap<PreSyncFanoutPayload, SpanHandle>();
 const isSpanHandle = (value: unknown): value is SpanHandle =>
   typeof value === 'object' && value !== null && 'end' in value && typeof (value as SpanHandle).end === 'function';
 
+//? Identity propagation maps the same `user` shape from both the API and sync
+//? pipelines into the error-tracker's user context (or `null` when anonymous).
+//? Extracted so the two hooks below stay in lockstep.
+type HookUser = { id?: string | null; email?: string | null; name?: string | null } | null | undefined;
+
+const createSentryUserContext = (
+  user: HookUser,
+): { id: string; email?: string; username?: string } | null =>
+  user?.id
+    ? {
+        id: user.id,
+        email: user.email ?? undefined,
+        username: user.name ?? undefined,
+      }
+    : null;
+
 let installed = false;
 
 /**
@@ -65,63 +81,48 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
   //? `preApiValidate` is the earliest API hook that carries `user`. Set
   //? identity here so handlers further down the pipeline (rate-limit + audit)
   //? already see the Sentry user context.
-  registerHook('preApiValidate', (payload: PreApiValidatePayload) => {
-    setSentryUser(payload.user?.id ? {
-      id: payload.user.id,
-      email: payload.user.email ?? undefined,
-      username: payload.user.name ?? undefined,
-    } : null);
-    return;
+  registerHook('preApiValidate', (payload: PreApiValidatePayload): void => {
+    setSentryUser(createSentryUserContext(payload.user));
   });
 
   //? Open a performance span around the handler. WeakMap keyed on the payload
   //? object — the framework reuses the same reference for `postApiExecute`.
-  registerHook('preApiExecute', (payload: PreApiExecutePayload) => {
+  registerHook('preApiExecute', (payload: PreApiExecutePayload): void => {
     const op = payload.transport === 'http' ? 'api.request.http' : 'api.request';
     const span = startSpan(payload.routeName, op);
     if (isSpanHandle(span)) apiSpans.set(payload, span);
-    return;
   });
 
-  registerHook('postApiExecute', (payload: PostApiExecutePayload) => {
+  registerHook('postApiExecute', (payload: PostApiExecutePayload): void => {
     const span = apiSpans.get(payload);
     span?.end?.();
-    return;
   });
 
   //? Sync identity propagation. `preSyncAuthorize` is the first sync hook
   //? that has the resolved session attached.
-  registerHook('preSyncAuthorize', (payload: PreSyncAuthorizePayload) => {
-    setSentryUser(payload.user?.id ? {
-      id: payload.user.id,
-      email: payload.user.email ?? undefined,
-      username: payload.user.name ?? undefined,
-    } : null);
-    return;
+  registerHook('preSyncAuthorize', (payload: PreSyncAuthorizePayload): void => {
+    setSentryUser(createSentryUserContext(payload.user));
   });
 
   //? Span lifecycle for sync. Socket fanout currently has no span op tag in
   //? the legacy implementation; HTTP fanout was `sync.request.http`. Preserve
   //? both behaviors — only open a span when transport is `http`.
-  registerHook('preSyncFanout', (payload: PreSyncFanoutPayload) => {
+  registerHook('preSyncFanout', (payload: PreSyncFanoutPayload): void => {
     if (payload.transport !== 'http') return;
     const span = startSpan(payload.routeName, 'sync.request.http');
     if (isSpanHandle(span)) syncSpans.set(payload, span);
-    return;
   });
 
-  registerHook('postSyncFanout', (payload: PostSyncFanoutPayload) => {
+  registerHook('postSyncFanout', (payload: PostSyncFanoutPayload): void => {
     const span = syncSpans.get(payload);
     span?.end?.();
-    return;
   });
 
   //? Clear identity immediately on logout. Without this the next anonymous
   //? request from the same socket would still appear as the logged-out user
   //? in the error-tracker's context (until `preApiValidate` runs and resets
   //? it). One round-trip earlier is worth the small type-only import cost.
-  registerHook('postLogout', (_payload: PostLogoutPayload) => {
+  registerHook('postLogout', (_payload: PostLogoutPayload): void => {
     setSentryUser(null);
-    return;
   });
 };

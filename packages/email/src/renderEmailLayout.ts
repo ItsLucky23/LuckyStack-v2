@@ -2,6 +2,8 @@
 //? strip <style> blocks). One CTA button optional. Keeps the surface tiny so
 //? consumers don't need React Email / MJML for transactional messages.
 
+import { escapeHtml } from '@luckystack/core';
+
 export interface RenderEmailLayoutInput {
   /** Email title shown as the H1 heading and (optionally) used by the caller as the subject. */
   title: string;
@@ -25,14 +27,6 @@ export interface RenderedEmail {
   html: string;
   text: string;
 }
-
-const escapeHtml = (value: string): string =>
-  value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 
 export const renderEmailLayout = ({
   title,
@@ -102,7 +96,7 @@ export const renderEmailLayout = ({
 
   // Plain-text fallback
   const textParts: string[] = [];
-  if (safeBrand) textParts.push(brand ?? '');
+  if (brand) textParts.push(brand);
   textParts.push(title, '', intro);
   if (ctaLabel && ctaUrl) textParts.push('', `${ctaLabel}: ${ctaUrl}`);
   if (outro) textParts.push('', outro);

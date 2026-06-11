@@ -1,18 +1,26 @@
 # Design — Optional `login` / `presence` / `sync` in `@luckystack/server`
 
-> Status: **ARCHITECTURE IMPLEMENTED in 0.2.0 (2026-06-08), uncommitted/unpublished.**
-> The decouple landed via a **core session-provider registry** (chosen over the
-> per-package resolve-guard) — see §4-note below. Login/presence/sync are now
-> genuine OPTIONAL peers; the server degrades gracefully (`auth.disabled` /
-> `sync.disabled`, presence skipped) and CSRF falls back to stateless
-> double-submit when login is absent. §6 scaffold-CLI: **PRESENCE opt-out DONE**
-> (installer prompt + `--no-presence`; `pruneOptionalPackages` drops the dep +
-> rewrites main.tsx/TemplateProvider; verified by the smoke MATRIX which runs
-> `full` + `no-presence` combos). **sync + login opt-out STILL TODO** (sync:
-> `initSyncRequest` is called from the presence/activity path in
-> `socketInitializer.ts` → decouple the socket client layer first; login: a no-auth
-> template, ~17 files — config type swap is ready since core now exports
-> `BaseSessionLayout`/`AuthProps`). Originally proposed 2026-06-04.
+> **Canonical source:** this file is the canonical *architecture spec* for the
+> install-anything-anytime / optional-package model. For the live working-context
+> handoff (current uncommitted repo state, developer actions, next steps) see the
+> root `SESSION_STATE.md`. Design details live here; current status lives there.
+
+> Status: **INSTALL-ANYTHING-ANYTIME IMPLEMENTED in 0.2.0 (2026-06-08), uncommitted/unpublished.**
+> The §1-9 decouple landed via a **core session-provider registry**; login/presence/sync
+> are genuine OPTIONAL peers and the server degrades gracefully (`auth.disabled` /
+> `sync.disabled`, presence skipped); CSRF falls back to stateless double-submit
+> when login is absent.
+>
+> **§10 install-anything-anytime is now BUILT (all 8 SESSION_STATE §8 steps):**
+> 1. Template/dev `config.ts` import `BaseSessionLayout`/`AuthProps` from core (login-agnostic); `oauthCallbackBase` slot added to `projectConfig`.
+> 2. `bootstrapLuckyStack` runs an auto-detect phase BEFORE the overlay that imports each installed `@luckystack/<pkg>/register` (`OPTIONAL_PACKAGES` in `capabilities.ts`), and force-loads login so its session provider registers.
+> 3-5,8. `@luckystack/{email,error-tracking,login,presence,docs-ui}` each ship a `./register` side-effect subpath (env-driven, idempotent); the old `template/luckystack/{email,sentry,login}` overlays were relocated into the packages and deleted.
+> 6. The sync receive listener moved into `@luckystack/sync/client` (`attachSyncReceiver`); `socketInitializer.ts` dynamic-imports it via `tryCatch`, decoupled from the presence/activity flag.
+> 7. **`@luckystack/cli`** (`npx luckystack add <feature>`) — the inverse of the scaffold pruner: installs the package AND injects the consumer-`src/` assets a plain `npm i` can't (login pages copied from shipped `assets/`; presence JSX mounts re-injected). `add presence` round-trips byte-identical to the full template.
+>
+> **Important fix found during the build:** `capabilities.has()` used `createRequire().resolve()`, which fails on the import-only `@luckystack/*` exports maps (`ERR_PACKAGE_PATH_NOT_EXPORTED`) — i.e. it silently reported every optional package as ABSENT at runtime (the compile-only smoke test never caught it). Switched to `import.meta.resolve` (with a CJS fallback for Node < 20.6).
+>
+> **STILL TODO:** scaffold `--no-login` / `--no-sync` pruners + a `base-only` smoke combo; a `luckystack remove`. Originally proposed 2026-06-04.
 >
 > **Implementation note (supersedes §4's server-local capabilities-only plan):**
 > session reads/writes were decoupled at the CORE level. `@luckystack/core` owns a

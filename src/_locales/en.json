@@ -20,7 +20,7 @@
     "invalidRequestFormat": "Invalid request format.",
     "payloadTooLarge": "Request payload is too large.",
     "notFound": "API '{{name}}' was not found.",
-    "invalidInputType": "Invalid API input: {{message}}",
+    "invalidInputType": "Invalid API input.",
     "rateLimitExceeded": "Too many requests. Try again in {{seconds}} seconds.",
     "methodNotAllowed": "Method not allowed. Expected {{method}}.",
     "internalServerError": "An internal server error occurred.",

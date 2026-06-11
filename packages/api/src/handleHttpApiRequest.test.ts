@@ -342,7 +342,7 @@ describe('handleHttpApiRequest — HTTP method check', () => {
 });
 
 describe('handleHttpApiRequest — input validation', () => {
-  it('returns api.invalidInputType / 400 when validateInputByType fails', async () => {
+  it('returns the GENERIC api.invalidInputType / 400 when validateInputByType fails — never the raw validator message', async () => {
     registerRoute();
     seam.inputValidation = { status: 'error', message: 'foo must be a number' };
 
@@ -351,8 +351,25 @@ describe('handleHttpApiRequest — input validation', () => {
     expect(result.httpStatus).toBe(400);
     if (result.status === 'error') {
       expect(result.errorCode).toBe('api.invalidInputType');
-      expect(result.errorParams?.find((p) => p.key === 'message')?.value).toBe('foo must be a number');
+      //? SECURITY: the raw validator message must NOT leak to the client — it
+      //? would let an unauthenticated caller enumerate the input schema. The
+      //? detailed message is routed to the postApiValidate hook / logs only.
+      const messageParam = result.errorParams?.find((p) => p.key === 'message');
+      expect(messageParam).toBeUndefined();
+      expect(JSON.stringify(result)).not.toContain('foo must be a number');
     }
+  });
+
+  it('still routes the DETAILED validator message to the postApiValidate hook (not the client)', async () => {
+    registerRoute();
+    seam.inputValidation = { status: 'error', message: 'foo must be a number' };
+
+    await handleHttpApiRequest(baseParams());
+
+    const postValidate = dispatchHookMock.mock.calls.find((c) => c[0] === 'postApiValidate');
+    expect(postValidate?.[1]).toMatchObject({
+      validation: { status: 'error', message: 'foo must be a number' },
+    });
   });
 
   it('dispatches preApiValidate before postApiValidate', async () => {
@@ -440,20 +457,19 @@ describe('handleHttpApiRequest — pipeline ordering and hooks', () => {
     expect(idx('preApiRespond')).toBeLessThan(idx('postApiRespond'));
   });
 
-  it('does NOT dispatch transformApiResponse on the HTTP transport', async () => {
-    //? FINDING: the HTTP handler (handleHttpApiRequest) only dispatches
-    //? preApiRespond -> postApiRespond. transformApiResponse is dispatched
-    //? exclusively by the SOCKET handler (handleApiRequest.emitApiResult).
-    //? The package CLAUDE.md claims both transports "execute the same
-    //? sequence", but transformApiResponse is socket-only. Reported, not
-    //? patched (Report-Without-Auto-Fixing). This test pins the actual
-    //? HTTP behavior so a future fix is a deliberate, visible change.
+  it('dispatches transformApiResponse on the HTTP transport, AFTER preApiRespond and BEFORE postApiRespond', async () => {
+    //? Transport parity: the HTTP handler now runs the same respond-phase hook
+    //? sequence as the socket handler (handleApiRequest.emitApiResult), per
+    //? CLAUDE.md "both transports execute the same sequence". This pins that
+    //? transformApiResponse fires between preApiRespond and postApiRespond.
     registerRoute();
 
     await handleHttpApiRequest(baseParams());
 
-    const dispatched = dispatchHookMock.mock.calls.map((c) => c[0]);
-    expect(dispatched).not.toContain('transformApiResponse');
+    const order = dispatchHookMock.mock.calls.map((c) => c[0]);
+    expect(order).toContain('transformApiResponse');
+    expect(order.indexOf('preApiRespond')).toBeLessThan(order.indexOf('transformApiResponse'));
+    expect(order.indexOf('transformApiResponse')).toBeLessThan(order.indexOf('postApiRespond'));
   });
 
   it('short-circuits with the preApiExecute stop signal and never runs the handler', async () => {

@@ -21,7 +21,6 @@ import './utils/responseNormalizer';
 
 import { initializeSentry } from '../functions/sentry';
 import { registerSentryConfig } from '@luckystack/error-tracking';
-import { registerPresenceHooks } from '@luckystack/presence';
 import { bootstrapLuckyStack } from '@luckystack/server';
 import {
   autoSelectEmailSender,
@@ -55,7 +54,9 @@ registerEmailConfig({
 registerSentryConfig(sentryConfigInput);
 
 initializeSentry();
-registerPresenceHooks();
+//? presence hooks now auto-wire via @luckystack/presence/register, imported by
+//? bootstrapLuckyStack's optional-package auto-detect phase (0.2.0). No manual
+//? registerPresenceHooks() call here — kills divergence from the consumer template.
 registerNotificationHooks();
 registerWorkspacesTerminalHooks();
 

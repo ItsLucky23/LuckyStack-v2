@@ -8,10 +8,10 @@ import {
   locationProviderEnabled,
   loginPageUrl,
 } from "config";
-import { i18nNotify as notify, clearCsrfToken, socket, setSocket, incrementResponseIndex, waitForSocket } from "@luckystack/core/client";
+import { i18nNotify as notify, clearCsrfToken, socket, setSocket, incrementResponseIndex, waitForSocket, tryCatch } from "@luckystack/core/client";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { useEffect, useRef } from "react";
-import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
+import { initSyncRequest } from "./syncRequest";
 import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
 import {
   buildGetJoinedRoomsResponseEventName,
@@ -20,51 +20,9 @@ import {
   socketEventNames,
 } from "../../shared/socketEvents";
 
-interface SyncEventPayload {
-  cb?: string;
-  clientOutput?: unknown;
-  serverOutput?: unknown;
-  message?: string;
-  status?: 'success' | 'error' | 'stream';
-  fullName?: string;
-  errorCode?: string;
-  errorParams?: { key: string; value: string | number | boolean }[];
-  httpStatus?: number;
-  [key: string]: unknown;
-}
-
-const normalizeSyncRouteKey = (value: string): string => {
-  const sanitized = value.replaceAll(/^\/+|\/+$/g, '');
-  if (sanitized.length === 0) return '';
-  if (sanitized.startsWith('sync/')) return sanitized;
-  return `sync/${sanitized}`;
-};
-
-const getSyncRouteKeys = ({
-  fullName,
-  cb,
-}: {
-  fullName?: string;
-  cb?: string;
-}) => {
-  const keys = new Set<string>();
-
-  if (typeof fullName === 'string') {
-    const normalized = normalizeSyncRouteKey(fullName);
-    if (normalized) {
-      keys.add(normalized);
-    }
-  }
-
-  if (typeof cb === 'string') {
-    const normalized = normalizeSyncRouteKey(cb);
-    if (normalized) {
-      keys.add(normalized);
-    }
-  }
-
-  return [...keys];
-};
+//? The incoming `sync` socket listener + its route-key helpers now live in
+//? `@luckystack/sync/client` (`attachSyncReceiver`), dynamic-imported below so a
+//? base install without `@luckystack/sync` still builds + runs.
 
 const setDisconnectedStatus = (setSocketStatus: ReturnType<typeof useSocketStatus>["setSocketStatus"]) => {
   setSocketStatus(prev => ({
@@ -81,7 +39,6 @@ const isLocationProviderEnabled: boolean = locationProviderEnabled;
 const shouldLogDev = logging.devLogs;
 const shouldNotifyDev = logging.devNotifications;
 const shouldLogSocketStatus = logging.socketStatus;
-const shouldLogStream = logging.stream;
 
 // Socket state (`socket`, `incrementResponseIndex`, `waitForSocket`) now
 // lives in @luckystack/core/socketState — single source of truth shared with
@@ -94,7 +51,6 @@ export { socket, incrementResponseIndex, waitForSocket };
 
 export function useSocket(session: SessionLayout | null) {
   const { socketStatus, setSocketStatus } = useSocketStatus();
-  const { triggerSyncEvent, triggerSyncStreamEvent } = useSyncEventTrigger();
   const sessionRef = useRef(session);
   const socketStatusRef = useRef(socketStatus);
 
@@ -149,6 +105,26 @@ export function useSocket(session: SessionLayout | null) {
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
+
+    //? Activity heartbeat: forward real user interaction (throttled to once per
+    //? 10s) to the server so the activity-event system (built-in AFK detection
+    //? + any custom pause/kick events) knows when the user is active. Idle =
+    //? no events emitted = the server's last-activity ages past the AFK
+    //? threshold and the registered event fires.
+    let lastActivitySent = 0;
+    const handleActivity = () => {
+      if (!socketActivityBroadcaster) { return; }
+      const now = Date.now();
+      if (now - lastActivitySent < 10_000) { return; }
+      lastActivitySent = now;
+      socketConnection.emit(socketEventNames.activity);
+    };
+    const activityEvents = ["pointerdown", "pointermove", "keydown", "scroll", "wheel", "touchstart"];
+    if (socketActivityBroadcaster) {
+      for (const eventName of activityEvents) {
+        globalThis.addEventListener(eventName, handleActivity, { passive: true });
+      }
+    }
 
     if (socketActivityBroadcaster) {
       void initSyncRequest({
@@ -213,6 +189,18 @@ export function useSocket(session: SessionLayout | null) {
         //? Drop the CSRF cache so the next login fetches a fresh token bound
         //? to the new session.
         clearCsrfToken();
+        if (!sessionBasedToken) {
+          //? Cookie mode: the socket transport cannot clear the HttpOnly
+          //? session cookie — ask the server to expire it over HTTP (POST
+          //? /auth/logout answers with a Max-Age=0 Set-Cookie) before the
+          //? redirect. Redirect regardless of the request outcome: the
+          //? session is already invalidated server-side.
+          void (async () => {
+            await tryCatch(() => fetch(`${backendUrl}/auth/logout`, { method: "POST", credentials: "include" }));
+            globalThis.location.href = loginPageUrl;
+          })();
+          return;
+        }
         globalThis.location.href = loginPageUrl;
       } else {
         console.error("Logout failed");
@@ -220,63 +208,22 @@ export function useSocket(session: SessionLayout | null) {
       }
     });
 
-    socketConnection.on(socketEventNames.sync, (payload: SyncEventPayload) => {
-      const { cb, clientOutput, serverOutput, message, status, fullName, errorCode, errorParams } = payload;
-      if (shouldLogDev) {
-        console.log("Server Sync Response:", payload);
-      }
-
-      const routeKeys = getSyncRouteKeys({ fullName, cb });
-
-      if (status === "stream") {
-        if (routeKeys.length === 0) {
-          return;
-        }
-
-        const streamPayload = { ...payload };
-        delete streamPayload.status;
-        delete streamPayload.fullName;
-        delete streamPayload.cb;
-
-        if (shouldLogStream) {
-          console.log("Server Sync Stream:", { routeKeys, streamPayload });
-        }
-
-        for (const routeKey of routeKeys) {
-          triggerSyncStreamEvent(routeKey, streamPayload);
-        }
-        return;
-      }
-
-      if (status === "error") {
-        if (errorCode === 'sync.ignore' || message === 'sync.ignore') {
-          return;
-        }
-        if (shouldNotifyDev) {
-          if (errorCode) {
-            notify.error({ key: errorCode, params: errorParams });
-          } else if (message) {
-            notify.error({ key: message });
-          }
-        }
-        return;
-      }
-
-      if (routeKeys.length === 0) {
-        const errorMessage = `Sync response is missing fullName for cb '${cb ?? 'unknown'}'.`;
+    //? Sync receive bridge. The incoming `sync` listener lives in
+    //? `@luckystack/sync/client` (`attachSyncReceiver`) so the consumer doesn't
+    //? carry a copy of the dispatch logic. Dynamic-imported + tryCatch so a base
+    //? install WITHOUT `@luckystack/sync` simply runs without sync receive (no
+    //? crash). Decoupled from the presence/activity flag — sync attaches whenever
+    //? the package is present, independent of `socketActivityBroadcaster`.
+    void (async () => {
+      const [syncImportError, syncClient] = await tryCatch(() => import("@luckystack/sync/client"));
+      if (syncImportError || !syncClient) {
         if (shouldLogDev) {
-          console.error(errorMessage);
+          console.log("[sync] @luckystack/sync/client not installed — sync receive disabled.");
         }
-        if (shouldNotifyDev) {
-          notify.error({ key: 'sync.invalidRequestFormat' });
-        }
-        throw new Error(errorMessage);
+        return;
       }
-
-      for (const routeKey of routeKeys) {
-        triggerSyncEvent(routeKey, clientOutput, serverOutput);
-      }
-    });
+      syncClient.attachSyncReceiver(socketConnection);
+    })();
 
 
     const handleOnline = () => {
@@ -299,9 +246,12 @@ export function useSocket(session: SessionLayout | null) {
 
       document.removeEventListener("visibilitychange", handleVisibility)
       globalThis.removeEventListener("online", handleOnline)
+      for (const eventName of activityEvents) {
+        globalThis.removeEventListener(eventName, handleActivity);
+      }
     };
 
-  }, [setSocketStatus, triggerSyncEvent, triggerSyncStreamEvent]);
+  }, [setSocketStatus]);
 
   return socket;
 }

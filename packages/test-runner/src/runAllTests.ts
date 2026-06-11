@@ -11,16 +11,11 @@ import { runAuthEnforcementTests } from './runAuthEnforcementTests';
 import { runRateLimitTests } from './runRateLimitTests';
 import { runFuzzTests } from './runFuzzTests';
 import { runCustomTests } from './customTests';
+import { calculateSummary } from './testLayerHelpers';
 import type { CustomTestResult, RunCustomTestsSummary } from './customTests';
-import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
+import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 import type { ZodType } from 'zod';
 
-type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
-type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, {
-  method: string;
-  auth: { login: boolean; additional?: Record<string, unknown>[] };
-  rateLimit?: number | false;
-}>>>>>>;
 type ApiInputSchemas = Partial<Record<string, Partial<Record<string, Partial<Record<string, ZodType | undefined>>>>>>;
 
 export interface RunAllTestsInput {
@@ -69,14 +64,7 @@ const filterResults = (results: ContractCheckResult[], filter: string | undefine
 
 const cloneSummary = (summary: RunContractSummary, filter: string | undefined): RunContractSummary => {
   if (!filter) return summary;
-  const results = filterResults(summary.results, filter);
-  return {
-    total: results.length,
-    passed: results.filter(r => r.status === 'pass').length,
-    failed: results.filter(r => r.status === 'fail').length,
-    skipped: results.filter(r => r.status === 'skipped').length,
-    results,
-  };
+  return calculateSummary(filterResults(summary.results, filter));
 };
 
 export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsSummary> => {

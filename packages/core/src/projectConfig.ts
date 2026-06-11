@@ -17,6 +17,9 @@
 //? fields fall back to the defaults defined here. This means a project's
 //? `config.ts` only has to specify the values it wants to override.
 
+import { deepMerge, type DeepPartial } from './configUtils';
+import { createRegistry } from './createRegistry';
+
 export interface LoggingConfig {
   devLogs: boolean;
   devNotifications: boolean;
@@ -171,6 +174,15 @@ export interface HttpConfig {
   readyEndpoint: string;
   /** Path of the dev-only state-reset endpoint (gated by NODE_ENV + token). */
   testResetEndpoint: string;
+  /**
+   * Whether a known reverse proxy sits in front of this server. DEFAULT false.
+   * When false, per-IP rate-limit keys derive from the raw transport peer
+   * address (historical behaviour). When true, the framework resolves the real
+   * client IP from `X-Forwarded-For` (leftmost hop) / `X-Real-IP` before keying
+   * — so per-IP limits stay meaningful behind nginx/HAProxy. Only enable when a
+   * trusted proxy populates those headers, otherwise clients can spoof their IP.
+   */
+  trustProxy?: boolean;
   stream: HttpStreamConfig;
   securityHeaders: SecurityHeadersConfig;
   cors: CorsConfig;
@@ -204,6 +216,14 @@ export interface PasswordPolicyConfig {
 }
 
 export interface AuthConfig {
+  /**
+   * Whether email+password (credentials) auth is enabled. When `true` (default)
+   * `@luckystack/login/register` registers the credentials provider, so it shows
+   * up in `GET /auth/providers` and the login form renders the email/password
+   * fields. Set `false` for an OAuth-only app — the form hides the fields AND the
+   * `/auth/api/credentials` route rejects (`auth.credentialsDisabled`).
+   */
+  credentials: boolean;
   /** TTL for OAuth state tokens stored in Redis. */
   oauthStateTtlSeconds: number;
   /**
@@ -384,11 +404,16 @@ export interface ProjectConfig {
   locationProviderEnabled?: boolean;
   /** Where to redirect the user after a successful OAuth callback. */
   loginRedirectUrl?: string;
+  /**
+   * Base origin used to build OAuth callback redirect URIs
+   * (`<oauthCallbackBase>/auth/callback/<provider>`). This is the BACKEND
+   * origin the provider redirects to — in dev typically `http://localhost:80`,
+   * in prod the public domain. Read by `@luckystack/login/register`'s env-driven
+   * provider scan so OAuth wiring needs no consumer code. Empty default — the
+   * consumer's `config.ts` sets it.
+   */
+  oauthCallbackBase?: string;
 }
-
-type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends object | undefined ? DeepPartial<NonNullable<T[K]>> : T[K];
-};
 
 export type ProjectConfigInput = DeepPartial<ProjectConfig>;
 
@@ -435,6 +460,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     liveEndpoint: '/livez',
     readyEndpoint: '/readyz',
     testResetEndpoint: '/_test/reset',
+    trustProxy: false,
     stream: {
       queryParam: 'stream',
       enabledValue: 'true',
@@ -456,6 +482,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     },
   },
   auth: {
+    credentials: true,
     oauthStateTtlSeconds: 60 * 10,
     passwordMinLength: 8,
     passwordMaxLength: 191,
@@ -518,38 +545,21 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   socketStatusIndicator: false,
   locationProviderEnabled: false,
   loginRedirectUrl: '/',
+  oauthCallbackBase: '',
 };
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> => {
-  if (value === null || typeof value !== 'object') return false;
-  const proto = Object.getPrototypeOf(value) as object | null;
-  return proto === Object.prototype || proto === null;
-};
-
-const deepMerge = <T>(base: T, override: DeepPartial<T> | undefined): T => {
-  if (override === undefined) return base;
-  if (!isPlainObject(base) || !isPlainObject(override)) {
-    return (override as T) ?? base;
-  }
-
-  const result: Record<string, unknown> = { ...(base as Record<string, unknown>) };
-  for (const [key, overrideValue] of Object.entries(override as Record<string, unknown>)) {
-    if (overrideValue === undefined) continue;
-    const baseValue = (base as Record<string, unknown>)[key];
-    result[key] = isPlainObject(baseValue) && isPlainObject(overrideValue) ? deepMerge(baseValue, overrideValue as DeepPartial<unknown>) : overrideValue;
-  }
-  return result as T;
-};
-
-let activeConfig: ProjectConfig = DEFAULT_PROJECT_CONFIG;
-let isRegistered = false;
+const registry = createRegistry<ProjectConfig, ProjectConfigInput>(DEFAULT_PROJECT_CONFIG, {
+  //? Always merge the consumer override over the pristine defaults (not the
+  //? previously-stored config) — matches the historical register behaviour
+  //? where each call rebuilds from `DEFAULT_PROJECT_CONFIG`.
+  transform: (input) => deepMerge(DEFAULT_PROJECT_CONFIG, input),
+});
 
 export const registerProjectConfig = (config: ProjectConfigInput): void => {
-  activeConfig = deepMerge(DEFAULT_PROJECT_CONFIG, config);
-  isRegistered = true;
+  registry.register(config);
 };
 
-export const getProjectConfig = (): ProjectConfig => activeConfig;
+export const getProjectConfig = (): ProjectConfig => registry.get();
 
 //? Resolve the project namespace at call time. Single source of truth used
 //? for Redis key prefixes (`<projectName>-session:`, `-activeUsers:`,
@@ -561,7 +571,7 @@ export const getProjectConfig = (): ProjectConfig => activeConfig;
 //?   2. `process.env.PROJECT_NAME` (read at call time — works after dotenv)
 //?   3. literal `'luckystack'` as the absolute fallback
 export const getProjectName = (): string => {
-  const fromConfig = activeConfig.session.projectName;
+  const fromConfig = registry.get().session.projectName;
   if (fromConfig && fromConfig.length > 0) return fromConfig;
   const fromEnv = process.env.PROJECT_NAME;
   if (fromEnv && fromEnv.length > 0) return fromEnv;
@@ -572,4 +582,4 @@ export const getProjectName = (): string => {
 //? startup sequence). Log once, never throw — framework packages should
 //? still do something reasonable when called in a test or CLI context that
 //? never registered.
-export const isProjectConfigRegistered = (): boolean => isRegistered;
+export const isProjectConfigRegistered = (): boolean => registry.isRegistered();

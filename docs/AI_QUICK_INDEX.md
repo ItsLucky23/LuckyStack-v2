@@ -20,6 +20,7 @@
 | Type Generation & Template Injection Contract | Preferred direction: route literals + generated maps + inferred `serverOutput` / `clientOutput` typing. |
 | Templates | Pages export a `template` constant: `'plain'`, `'dashboard'`, or a project-specific addition wired into `TemplateProvider`. |
 | Provider Hierarchy | ``` |
+| AI Browser Testing | When verifying the frontend in a browser, follow the cheapest-first ladder + suggest→approve protocol — full detail in `docs/AI_BROWSER_TESTING.md` (consumer copy: `docs/luckystack/AI_BROWSER_TESTING.md`). Wired in via `--ai-browser=<all\|agent-browser\|none>`; dev-tools only. |
 | Documentation Reference | \| Doc \| Purpose \| |
 | User Project Rules | <!-- |
 
@@ -63,6 +64,19 @@
 | `buildApiResponseEnvelope` | Normalizes success/error result into the wire envelope, inferring `httpStatus` via `defaultHttpStatusForResponse`. |
 | `emitApiResult` | Runs `preApiRespond` / `transformApiResponse` / `postApiRespond` hooks and emits on the socket. |
 | `warnIfInputTypeMissing` | Dev-only one-shot warning when a route has no generated `inputType` (Zod validation effectively disabled). |
+
+### `cli`
+| Export / file | One-liner |
+|---|---|
+| `src/index.ts` (bin entry) | Parse `add <feature> [--no-install]`, locate the project, dispatch. |
+| `commands/addLogin.ts` | Copy auth UI assets into `src/` (skip-if-exists) + add `@luckystack/login` + install. |
+| `commands/addPresence.ts` | Re-add `@luckystack/presence` + inject `<LocationProvider/>` / `<SocketStatusIndicator/>` (inverse of the pruner) + install. |
+| `commands/addBackendOnly.ts` | Generic handler for `sync` / `email` / `error-tracking` / `docs-ui`: add dep + install (they self-wire at boot). |
+| `commands/checkEnv.ts` | `check-env` — A: unused `.env` keys; B: env vars used but undefined. DEV_-aware; framework-key ignore list; env files via `getEnvFiles()` semantics (`LUCKYSTACK_ENV_FILES` else `.env`,`.env.local`). |
+| `commands/checkI18n.ts` | `check-i18n` — C: unused locale keys; D: used keys missing per-language. Used-set = literal `{ key: '...' }` + `errorCode: '...'` (dotted) harvested repo-wide; dynamic `key:<var>` sites listed for review. |
+| `lib/scan.ts` | Shared regex scanner: `collectSourceFiles` (skips node_modules/dist/tests/generated), `matchAll` (capture+line), `groupLocations`, `writeDumpLog` (`dump/<KIND>_<hash>.log`). |
+| `lib/project.ts` | `findProjectRoot` (consumer dep OR framework `packages/core`), `addDependency`, `editFile` (CRLF-safe), `copyDirIfAbsent` (idempotent), `assetPath`, `runNpmInstall`. |
+| `assets/login/src/**` | The shipped auth UI bundle copied by `add login` (login/register/reset-password/settings pages + `_api` + `LoginForm`). |
 
 ### `core`
 | Function / Export | 1-line | Deep doc |
@@ -207,7 +221,7 @@
 | Function / Export | One-liner | Deep doc |
 | --- | --- | --- |
 | `main()` (CLI entrypoint, auto-invoked at bottom of `src/index.ts`) | Orchestrates the full scaffold flow: parse argv -> validate target dir -> optional prompts -> `copyTree` -> framework-docs copy (E.2) -> optional `npm install` + `npx prisma generate` -> print next-step block. | -> docs/scaffold-flow.md |
-| `parseArgs(argv)` | Strict argv parser. Recognises `--no-install`, `--no-prompt`, `--help` / `-h` (the `VALID_FLAGS` list), plus the first non-flag token as the project name. Any other `-`/`--` token causes `process.exit(2)` with an "Unknown flag" error. Returns `CliArgs`. | -> docs/cli-flags.md |
+| `parseArgs(argv)` | Strict argv parser. Recognises `--no-install`, `--no-prompt`, `--no-presence`, `--ai-browser=<all\|agent-browser\|none>`, `--help` / `-h` (the `VALID_FLAGS` list), plus the first non-flag token as the project name. Any other `-`/`--` token (or a bad `--ai-browser` value) causes `process.exit(2)`. Returns `CliArgs`. | -> docs/cli-flags.md |
 | `printHelp()` | Prints the human-readable usage banner. Triggered by `--help` / `-h` and on missing project name. | -> docs/cli-flags.md |
 | `runPrompts()` | Opens a `readline` interface and walks the user through `dbProvider`, `authMode`, `oauthProviders` (conditional), `emailProvider`, `monitoringProvider`, `i18n`. Returns a fully populated `ScaffoldChoices`. Skipped when `--no-prompt` is passed. | -> docs/scaffold-flow.md |
 | `pickFromList(rl, label, options, defaultValue)` | Single-choice prompt helper. Accepts either a numeric index or a case-insensitive option name. Blank input returns the default. | -> docs/scaffold-flow.md |
@@ -224,8 +238,8 @@
 | `runPrismaGenerate(cwd)` | Spawns `npx prisma generate` after `npm install` so first-build types resolve. Does NOT run `prisma db push` or `prisma migrate` — those require a populated `DATABASE_URL`. | -> docs/post-scaffold-suggestions.md |
 | Framework-docs copy block (inside `main`) | After the template copy, recursively copies root `CLAUDE.md`, `docs/` (-> `docs/luckystack/` in the scaffold), `skills/`, `.claude/commands/`, and `branch-logs/README.md` from the repo root into the target. Each source is optional — missing sources are skipped silently. | -> docs/framework-docs-copy.md |
 | Type: `CliArgs` | `{ projectName: string; install: boolean; prompt: boolean; help: boolean }`. Output of `parseArgs`. | -> docs/cli-flags.md |
-| Type: `ScaffoldChoices` | `{ dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n }`. Output of `runPrompts` / `DEFAULT_CHOICES`. | -> docs/scaffold-flow.md |
-| Constant: `DEFAULT_CHOICES` | Sane defaults used when `--no-prompt` is passed (Mongo + credentials + console email + no monitoring + i18n on). | -> docs/scaffold-flow.md |
+| Type: `ScaffoldChoices` | `{ dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, presence, i18n, aiInstructions, aiBrowserTooling }`. Output of `runPrompts` / `DEFAULT_CHOICES`. `aiBrowserTooling: 'all' \| 'agent-browser' \| 'none'` is forced to `'none'` when `aiInstructions` is off. | -> docs/scaffold-flow.md |
+| Constant: `DEFAULT_CHOICES` | Sane defaults used when `--no-prompt` is passed (Mongo + credentials + console email + no monitoring + presence on + i18n on + AI instructions on + `aiBrowserTooling: 'agent-browser'`). | -> docs/scaffold-flow.md |
 | Constant: `TEMPLATE_DIR` | Resolved absolute path to the bundled `template/` folder (`../template` from `dist/index.js`). The scaffold aborts with a packaging-bug message when this directory is missing at runtime. | -> docs/scaffold-flow.md |
 
 ### `devkit`
@@ -336,9 +350,6 @@
 | `EmailSender`, `EmailMessage`, `EmailResult`, `EmailSenderRegistry` | Re-exported from `@luckystack/core` | Adapter contract + result tuple. |
 | `PreEmailSendPayload`, `PostEmailSendPayload` | `./hookPayloads` | Hook payload shapes (also augmented onto `HookPayloads`). |
 
-### `env-resolver`
-- _(no `CLAUDE.md` yet)_
-
 ### `error-tracking`
 | Function / Export | One-liner | Deep doc |
 |---|---|---|
@@ -438,8 +449,12 @@
 | `registerActivityEvent(name, event)` | Register / replace a pluggable activity event (predicate + onTrigger + refractoryMs) | → docs/activity-broadcaster.md |
 | `unregisterActivityEvent(name)` | Remove a registered activity event by name | → docs/activity-broadcaster.md |
 | `listActivityEvents()` | List every registered activity event in registration order | → docs/activity-broadcaster.md |
-| `dispatchActivitySample(sample)` | Evaluate all registered events against an activity sample; fires matching `onTrigger`s with refractory throttle | → docs/activity-broadcaster.md |
-| `registerPresenceConfig(input)` | Override disconnect timers, ignore/allow reasons, AFK timeout | → docs/disconnect-grace.md |
+| `dispatchActivitySample(sample)` | Evaluate all registered events against an activity sample; fires matching `onTrigger`s with refractory throttle. Driven in production by `startActivitySampler` | → docs/activity-broadcaster.md |
+| `recordActivity(socketId)` | Mark a socket active right now (called by the server on connect + every client `activity` heartbeat) | → docs/activity-broadcaster.md |
+| `clearActivity(socketId)` | Drop a socket's last-activity record (called by the server on disconnect) | → docs/activity-broadcaster.md |
+| `startActivitySampler({ io?, intervalMs? })` | Start the single interval that walks every socket and feeds `dispatchActivitySample` every `activitySampleIntervalMs`. Idempotent; returns the stop fn. Auto-started by `@luckystack/server` on first connect when `socketActivityBroadcaster` is on | → docs/activity-broadcaster.md |
+| `stopActivitySampler()` | Stop the sampler interval (shutdown / test reset) | → docs/activity-broadcaster.md |
+| `registerPresenceConfig(input)` | Override disconnect timers, ignore/allow reasons, AFK timeout, activity-sample interval | → docs/disconnect-grace.md |
 | `getPresenceConfig()` | Read the merged active config (lazy — reads at call time) | → docs/disconnect-grace.md |
 | `DEFAULT_PRESENCE_CONFIG` | Default values (tabSwitch 20s, transportClose 60s, default 2s, afkTimeout 5min) | → docs/disconnect-grace.md |
 | Type: `ActivityEvent`, `ActivitySample` | Activity-event registry types | → docs/activity-broadcaster.md |
@@ -628,12 +643,12 @@
 | Package | Total stubs | CONTENT done | TODO remaining |
 | --- | --- | --- | --- |
 | api | 6 | 6 | 0 |
+| cli | 0 | 0 | 0 |
 | core | 9 | 9 | 0 |
 | create-luckystack-app | 5 | 5 | 0 |
 | devkit | 8 | 8 | 0 |
 | docs-ui | 4 | 4 | 0 |
 | email | 5 | 5 | 0 |
-| env-resolver | 0 | 0 | 0 |
 | error-tracking | 4 | 4 | 0 |
 | login | 8 | 8 | 0 |
 | presence | 6 | 6 | 0 |
@@ -661,8 +676,11 @@
 | --- | --- |
 | a11y-audit | Spin up the dev server, run `@axe-core/cli` against every page route from `docs/AI_PROJECT_INDEX.md`, and report WCAG violations grouped by severity. Also cross-references Tailwind color tokens in `src/index.css` and flags any token combination that fails WCAG AA contrast. |
 | add-new-api | Add a new API endpoint to a LuckyStack page under `src/{page}/_api/`. |
+| add-new-component | Scaffold a new reusable UI component under `src/_components/` (inputs live in `src/_components/inputs/`) that matches the framework's conventions, then mirror it into the `create-luckystack-app` template so it ships to consumers. |
 | add-new-package | Scaffold a new `@luckystack/*` package in the monorepo under `packages/<name>/`. |
+| add-new-page | Scaffold a new page route in a LuckyStack app under `src/{path}/page.tsx`. |
 | agent-browser | Generate per-route E2E tests under `e2e/<route>.test.ts` using [`@vercel-labs/agent-browser`](https://github.com/vercel-labs/agent-browser). One test per page route discovered via `docs/AI_PROJECT_INDEX.md`. Tests run headless in CI. |
+| agent-browser-verify | INTERACTIVE verification of a running LuckyStack app with [`agent-browser`](https://github.com/vercel-labs/agent-browser) (and, on escalation, the Playwright / Chrome DevTools MCP servers). This is the *interactive dev-verify* counterpart to the `/agent-browser` skill (which GENERATES committed E2E tests). Use it to confirm a flow works before writing the committed spec. |
 | audit-api-rate-limits | Scan every `src/**/_api/*_v*.ts` and flag rate-limit configurations that look suspect: missing entirely, set to `false` (unlimited) on a write endpoint, or set to an unusually-high number on an auth/billing surface. |
 | audit-error-code-coverage | Cross-check every `errorCode` returned from `src/**/_api/*.ts` and `src/**/_sync/*.ts` against the locale JSON files under `src/_locales/`. Flag missing translation keys — those produce ugly fallback strings (or the raw code) in the user's notify toasts. |
 | audit-invalid-page-locations | Scan every `src/**/page.tsx` and flag files that aren't routeable under LuckyStack's invisible-parent folder convention. |

@@ -1,6 +1,7 @@
 import { Socket } from "socket.io-client";
 import { getProjectConfig } from "./projectConfig";
 import { getLogger } from "./loggerRegistry";
+import tryCatchSync from "./tryCatchSync";
 
 interface ApiQueueItem {
   id: string;
@@ -110,6 +111,25 @@ export const removeApiQueueItemsByKey = (key: string) => {
   }
 };
 
+//? Run one dequeued item. If `run` throws, requeue it at the FRONT (so the
+//? next flush retries it in order) and signal the caller to stop this flush —
+//? otherwise a throwing item is silently lost AND the `isFlushing*` guard
+//? would be left stuck `true`, wedging every future flush.
+const runQueueItem = <T extends { run: (s: Socket) => void }>(
+  queue: T[],
+  item: T,
+  socketInstance: Socket,
+  label: string,
+): boolean => {
+  const [error] = tryCatchSync(() => { item.run(socketInstance); });
+  if (error) {
+    queue.unshift(item);
+    getLogger().warn(`offlineQueue:${label} run threw — requeued item, pausing flush`, { error });
+    return false;
+  }
+  return true;
+};
+
 export const flushApiQueue = (canRun: () => boolean, socketInstance: Socket) => {
   if (isFlushingApi) return;
   evictExpired(apiQueue);
@@ -120,7 +140,7 @@ export const flushApiQueue = (canRun: () => boolean, socketInstance: Socket) => 
   while (apiQueue.length > 0) {
     if (!canRun()) break;
     const item = apiQueue.shift();
-    item?.run(socketInstance);
+    if (item && !runQueueItem(apiQueue, item, socketInstance, 'api')) break;
   }
   isFlushingApi = false;
 };
@@ -135,7 +155,7 @@ export const flushSyncQueue = (canRun: () => boolean, socketInstance: Socket) =>
   while (syncQueue.length > 0) {
     if (!canRun()) break;
     const item = syncQueue.shift();
-    item?.run(socketInstance);
+    if (item && !runQueueItem(syncQueue, item, socketInstance, 'sync')) break;
   }
   isFlushingSync = false;
 };

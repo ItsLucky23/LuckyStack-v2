@@ -20,7 +20,7 @@
     "invalidRequestFormat": "Ongeldig requestformaat.",
     "payloadTooLarge": "Request payload is te groot.",
     "notFound": "API '{{name}}' bestaat niet.",
-    "invalidInputType": "Ongeldige API-input: {{message}}",
+    "invalidInputType": "Ongeldige API-input.",
     "rateLimitExceeded": "Te veel requests. Probeer opnieuw over {{seconds}} seconden.",
     "methodNotAllowed": "Methode niet toegestaan. Verwacht {{method}}.",
     "internalServerError": "Er is een interne serverfout opgetreden.",

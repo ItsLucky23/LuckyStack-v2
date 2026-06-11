@@ -1,3 +1,4 @@
+import { tryCatch } from '@luckystack/core';
 import type { ServiceTargetResolver } from './resolveTarget';
 
 /**
@@ -35,17 +36,14 @@ const probeTarget = async (url: string): Promise<boolean> => {
   const timeout = setTimeout(() => {
     controller.abort();
   }, DEFAULT_REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      method: 'HEAD',
-      signal: controller.signal,
-    });
-    return response.ok || response.status < 500;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
+  const [error, response] = await tryCatch(() => fetch(url, {
+    method: 'HEAD',
+    signal: controller.signal,
+  }));
+  clearTimeout(timeout);
+  //? A probe failure (network error / abort timeout) means the target is down.
+  if (error || !response) return false;
+  return response.ok || response.status < 500;
 };
 
 export const startHealthPoller = ({

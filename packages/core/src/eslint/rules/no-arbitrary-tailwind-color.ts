@@ -3,18 +3,20 @@
 //? mandates colors from `src/index.css` `@theme` block (rule 14). Arbitrary
 //? colors break dark-mode auto-switching.
 
-//? Double-cast disabled file-wide: this rule operates on AST nodes that span
-//? two type universes (eslint's `Rule.Node` vs the JSX-extended shape from
-//? eslint-plugin-react). Bridging them needs `as unknown as`; runtime
-//? guards happen via explicit `.type === 'JSXIdentifier'` checks above each
-//? cast.
-/* eslint-disable no-restricted-syntax */
-
 import type { Rule } from 'eslint';
 
 import type { EslintRule } from '../internal/ruleTypes.js';
 
 const ARBITRARY_COLOR_PATTERN = /\b(?:text|bg|border|ring|fill|stroke|from|to|via|outline|decoration|accent|caret|placeholder|divide)-\[#[0-9a-fA-F]{3,8}\]/;
+
+//? This rule reads JSX AST nodes (`JSXAttribute`, `JSXExpressionContainer`,
+//? `TemplateLiteral` quasis) that eslint-plugin-react injects into the visitor
+//? map at runtime but that eslint's stock `Rule.Node` type doesn't model. The
+//? objects ARE real eslint nodes at runtime — `context.report({ node })` only
+//? needs `{ type, loc, range, ... }`, all present. This guard narrows an
+//? `unknown` to `Rule.Node` in one place so the call sites stay cast-free and
+//? the previous file-wide `as unknown as Rule.Node` double-casts are gone.
+const asRuleNode = (node: object): Rule.Node => node as Rule.Node;
 
 //? JSX AST nodes (JSXAttribute, JSXExpressionContainer, …) are not part of
 //? eslint's stock estree AST. eslint-plugin-react extends the visitor map at
@@ -66,7 +68,7 @@ const rule: EslintRule = {
         const value = node.value;
         if (!value) return;
         if (value.type === 'Literal' && typeof (value as { value?: unknown }).value === 'string') {
-          reportIfArbitrary(context, value as unknown as Rule.Node, (value as { value: string }).value);
+          reportIfArbitrary(context, asRuleNode(value), (value as { value: string }).value);
           return;
         }
         if (value.type === 'JSXExpressionContainer') {
@@ -76,14 +78,14 @@ const rule: EslintRule = {
             for (const quasi of quasis) {
               reportIfArbitrary(
                 context,
-                quasi as unknown as Rule.Node,
+                asRuleNode(quasi),
                 quasi.value.cooked ?? quasi.value.raw,
               );
             }
           } else if (expression.type === 'Literal' && typeof (expression as { value?: unknown }).value === 'string') {
             reportIfArbitrary(
               context,
-              expression as unknown as Rule.Node,
+              asRuleNode(expression),
               (expression as { value: string }).value,
             );
           }

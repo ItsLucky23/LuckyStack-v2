@@ -34,6 +34,7 @@ export default [
   {
     files: [
       'packages/create-luckystack-app/src/**/*.ts',
+      'packages/cli/src/**/*.ts',
       'packages/devkit/src/supervisor.ts',
     ],
     rules: {

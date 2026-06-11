@@ -5,6 +5,8 @@
 //? The project's entry point registers a notifier backed by its UI toolkit
 //? (sonner + i18n) via `registerNotifier({ error, success, ... })`.
 
+import { createRegistry } from './createRegistry';
+
 export interface NotifyParam {
   key: string;
   value: string | number | boolean;
@@ -29,19 +31,19 @@ const noopNotifier: Notifier = {
   warning: () => { /* no-op */ },
 };
 
-let activeNotifier: Notifier = noopNotifier;
+const registry = createRegistry<Notifier>(noopNotifier);
 
 export const registerNotifier = (notifier: Notifier): void => {
-  activeNotifier = notifier;
+  registry.register(notifier);
 };
 
-export const getNotifier = (): Notifier => activeNotifier;
+export const getNotifier = (): Notifier => registry.get();
 
 //? Delegating wrapper matching the project's existing `notify` shape so the
 //? switchover inside framework packages is a one-line import change.
 export const notify: Notifier = {
-  success: (input) => { activeNotifier.success(input); },
-  error: (input) => { activeNotifier.error(input); },
-  info: (input) => { activeNotifier.info(input); },
-  warning: (input) => { activeNotifier.warning(input); },
+  success: (input) => { registry.get().success(input); },
+  error: (input) => { registry.get().error(input); },
+  info: (input) => { registry.get().info(input); },
+  warning: (input) => { registry.get().warning(input); },
 };

@@ -38,6 +38,7 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 2. **Keep responses short.** No giant recap summaries. A TL;DR is always acceptable as the entire reply.
 3. **Ask focused questions when unsure.** Inline in plans when the user is away (use `OPEN VRAAG` sections instead of popups).
    - **3a. When multiple valid interpretations exist, present them — don't pick silently.** Use `AskUserQuestion` when the user is present, or inline `OPEN VRAAG` sections in plans when the user is away. Silently picking one path is the most common AI failure mode.
+   - **3b. Flag conflicts between what the user asks and what the docs say — never silently comply, never silently refuse.** When a user's stated preference or request contradicts this `CLAUDE.md`, an `ARCHITECTURE_*.md` doc, or an established convention, surface it: (1) name the contradiction, (2) explain BOTH sides — what the docs say + why, and what the user wants + the tradeoff, (3) state whether YOU would endorse the deviation and your reasoning, (4) ask how to proceed (or, if the user is away, state your default and proceed, logging it as an `OPEN VRAAG`). The user's docs are a contract: deviating is allowed, but only as a conscious decision, never by accident. The same applies in reverse — if the docs themselves look wrong or outdated, say so rather than blindly following them. Related: when the user describes a problem an **uninstalled `@luckystack/*` package** would solve in whole or part, proactively flag that the package exists and why installing it beats hand-rolling (Rule 12 + `docs/PACKAGE_OVERVIEW.md`).
 4. **Suggest `/compact`, new chat, or a recap at appropriate moments** when context is getting heavy.
 5. **After an update, spell out the developer actions required** (what to run, what to restart, what to verify).
 6. **Tell the user what to test and what observable differences to expect** after a change.
@@ -56,6 +57,7 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 
 11. **After every code change: `npm run lint && npm run build` autonomously.** Zero warnings, zero errors before delivery.
 12. **Reuse existing helpers in `src/_functions` and components in `src/_components`.** Check `docs/AI_CAPABILITIES.md` (the auto-generated capability snapshot) BEFORE authoring any new helper, util, or cross-cutting module. Check `docs/AI_PROJECT_INDEX.md` (the consumer-project snapshot — routes, pages, helpers, components, cross-refs) BEFORE creating a new route or page, AND when you need to know which existing helpers/components a similar route already imports. If a capability already exists there — use it. If it lives in a not-yet-installed `@luckystack/*` package (see `docs/PACKAGE_OVERVIEW.md`), propose the install instead of reimplementing. After adding ANY new export to `functions/`, `shared/`, `src/_functions/`, `src/_components/`, or after installing/upgrading a `@luckystack/*` package, run `npm run ai:capabilities` autonomously to refresh the snapshot. After adding/removing/renaming a route (`_api/`, `_sync/`), page, helper, or component, also run `npm run ai:project-index` autonomously. The `.githooks/pre-commit` hook regenerates AND `git add`s all three snapshots (`ai:index`, `ai:capabilities`, `ai:project-index`) on every commit, so **the user never has to run these manually** — the AI refreshes in-session (so subsequent work in the same session sees the new state) and the hook is the commit-time backstop. **Exception:** `ai:capabilities` scans `node_modules/@luckystack/*`, so after adding/removing/renaming a `@luckystack/*` package the user must run `npm install` first — until the workspace symlinks are refreshed, both the in-session run and the pre-commit hook regenerate a stale snapshot.
+   - **12a. Package-recommendation safety net.** Before you hand-roll any *cross-cutting* capability (auth/session, sockets/realtime, presence/AFK, transactional email, error-tracking, rate-limiting, secret rotation, multi-instance routing, a test harness, browser testing, …), STOP and check `docs/PACKAGE_OVERVIEW.md` for a `@luckystack/*` package that already solves it. If one exists and isn't installed, **propose installing it** — name the package, the one-line reason it beats hand-rolling, and the exact `npm i @luckystack/<pkg>` (+ any env) — and wait for the user before reimplementing. Reimplementing a framework package's job in consumer code is a primary failure mode; the package is battle-tested, typed, and maintained. (This is the proactive half of Rule 3b's uninstalled-package flag.)
 13. **i18n is mandatory for user-facing text** via the `useTranslator` pattern from `src/_functions/translator`.
 14. **Tailwind colors come ONLY from `src/index.css` `@theme` block.** Never arbitrary hex values.
 15. **Update documentation immediately after code changes.** After significant doc updates (new doc file, slash command, skill, package), run `npm run ai:index` autonomously to regenerate `docs/AI_QUICK_INDEX.md`. For route/page/helper/component changes, rule 12 covers the in-session regen of `ai:capabilities` + `ai:project-index`. The `.githooks/pre-commit` hook re-runs all three at commit time as a safety net; refresh in-session anyway so the new state is visible to subsequent work.
@@ -98,6 +100,8 @@ AI MUST append an entry to `branch-logs/<sanitized-branch>.md` after every promp
 **INDEX is mandatory**: every append to a `branch-logs/<branch>.md` file MUST be followed by an update to the corresponding row in `branch-logs/INDEX.md` (`Last updated` timestamp, `Entries` count, and `Status` if changed). Add a new row if none exists. See `docs/BRANCH_LOG_PROTOCOL.md` Section 6.5 for the full rule.
 
 Format spec lives in `docs/BRANCH_LOG_PROTOCOL.md`. Logs are NOT gitignored — the `/review_branch` slash command reads them to compare AI-reported progress against the actual diff.
+
+**Consumer first-session quick-start.** In a freshly-scaffolded project the `branch-logs/` folder ships with only `README.md`. On your first real change: create `branch-logs/<sanitized-current-branch>.md`, append an entry (heading `## YYYY-MM-DD HH:MM — <title>`, then *user prompt* / *what I did* / *files touched* / *notes*), and add the branch's row to `branch-logs/INDEX.md`. The `.githooks/pre-commit` hook does NOT write log entries for you — only the AI does — so make it a habit after every substantive prompt. This is what lets a future AI (or you) resume with full context.
 
 ---
 
@@ -262,6 +266,19 @@ SocketStatusProvider > SessionProvider > TranslationProvider > AvatarProvider > 
 
 ---
 
+## AI Browser Testing
+
+When verifying the frontend in a browser, follow the cheapest-first ladder + suggest→approve protocol — full detail in `docs/AI_BROWSER_TESTING.md` (consumer copy: `docs/luckystack/AI_BROWSER_TESTING.md`). Wired in via `--ai-browser=<all|agent-browser|none>`; dev-tools only.
+
+- **Cheapest-first ladder:** `agent-browser` (CLI) is the default for ~90% — flows, console/errors/network, single-browser screenshot + visual-diff, Web Vitals. Escalate to **Playwright MCP** ONLY for cross-browser / mobile rendering or a vision styling judgement; to **Chrome DevTools MCP** ONLY for Lighthouse / performance traces / Core Web Vitals / deep diagnostics.
+- **Never launch a browser tool without proposing it + getting explicit user approval.** Announce *"I want to verify X → cheapest fit = `<tool>` → approve?"*; for an escalation, name the exclusive capability that forces the higher rung. (The harness also hard-gates these via `.claude/settings.json` `permissions.ask`; first MCP use shows a one-time trust prompt.)
+- **Server-start is a developer action (Rule 8):** the dev server (`npm run server` + `npm run client`) must be running before any browser test — ask the user to start it.
+- **Auth:** use the tool's session/state persistence + a dedicated test account; **never read `.env.local`** (Rule 16).
+- After agent-browser confirms a flow, offer to capture it as a deterministic `@playwright/test` spec (keep the LLM out of the permanent CI loop).
+- **Complementary skills** GENERATE committed artifacts (vs the interactive tooling above): `/agent-browser` (E2E tests), `/lighthouse` (perf), `/a11y-audit` (axe). `/agent-browser-verify` drives the interactive login-matrix check.
+
+---
+
 ## Documentation Reference
 
 | Doc | Purpose |
@@ -281,11 +298,13 @@ SocketStatusProvider > SessionProvider > TranslationProvider > AvatarProvider > 
 | `docs/DEVELOPER_GUIDE.md` | Getting started |
 | `docs/HOSTING.md` | Deployment |
 | `docs/PACKAGE_OVERVIEW.md` | Per-package use-case + peer-deps table |
+| `docs/LUCKYSTACK_ADD_GUIDE.md` | Adding an optional feature later (`npx luckystack add <feature>`): npm-i-vs-add matrix + per-feature checklists + troubleshooting |
 | `docs/AGENT_TEAM_PLAYBOOK.md` | Multi-agent workflow |
 | `docs/BRANCH_LOG_PROTOCOL.md` | Branch-log entry format |
 | `docs/AI_QUICK_INDEX.md` | Auto-generated cross-repo index (framework surfaces) |
 | `docs/AI_PROJECT_INDEX.md` | Auto-generated inventory of the consumer project's own code (routes, pages, helpers, components, cross-refs) |
 | `docs/AI_BOOST_OVERVIEW.md` | One-page catalog of every AI-tooling surface in LuckyStack |
+| `docs/AI_BROWSER_TESTING.md` | AI browser-testing tooling (agent-browser + Playwright/Chrome DevTools MCP): the cheapest-first ladder + suggest→approve protocol |
 | `docs/GRAPHIFY_INTEGRATION.md` | Opt-in graphify integration — upgrade path beyond `AI_PROJECT_INDEX.md` for call-graph + community detection + MCP |
 
 ---

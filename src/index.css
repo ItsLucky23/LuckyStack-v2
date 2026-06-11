@@ -1,4 +1,4 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 
 /*
  * COLOR PALETTE
@@ -13,26 +13,26 @@
  *   - Every token defined in `@theme` must also appear in `.dark` (and vice
  *     versa) so dark-mode is always consistent.
  *   - The `*-primary` / `*-secondary` suffix is for text-on-coloured-button
- *     overlays — title-primary is the text color you put ON TOP of the
+ *     overlays â€” title-primary is the text color you put ON TOP of the
  *     primary button background.
  *
  * Token roles (in display order):
- *   background        — page background.
- *   container1/2      — surface layers (cards, dropdowns, panels). 1 sits on
+ *   background        â€” page background.
+ *   container1/2      â€” surface layers (cards, dropdowns, panels). 1 sits on
  *                       the page; 2 sits on container1.
- *   container*-hover  — hover state of the same surface.
- *   container*-border — border for the same surface.
- *   title             — high-contrast headings + emphasized text.
- *   common            — body text. Slightly de-emphasized vs. title.
- *   muted             — captions, tertiary metadata, "X items" counters.
- *   disabled          — text/icon for disabled inputs and buttons.
- *   overlay           — semi-transparent backdrop behind modals/menus.
- *   focus-ring        — outline color used by the focus-ring utility.
- *   divider           — hairline separator (lighter than container border).
- *   primary / secondary  — accent colors. Usually buttons + active links.
- *   title-primary     — text on the primary button background.
- *   common-primary    — secondary text on the primary button background.
- *   correct / warning / wrong — semantic feedback colors.
+ *   container*-hover  â€” hover state of the same surface.
+ *   container*-border â€” border for the same surface.
+ *   title             â€” high-contrast headings + emphasized text.
+ *   common            â€” body text. Slightly de-emphasized vs. title.
+ *   muted             â€” captions, tertiary metadata, "X items" counters.
+ *   disabled          â€” text/icon for disabled inputs and buttons.
+ *   overlay           â€” semi-transparent backdrop behind modals/menus.
+ *   focus-ring        â€” outline color used by the focus-ring utility.
+ *   divider           â€” hairline separator (lighter than container border).
+ *   primary / secondary  â€” accent colors. Usually buttons + active links.
+ *   title-primary     â€” text on the primary button background.
+ *   common-primary    â€” secondary text on the primary button background.
+ *   correct / warning / wrong â€” semantic feedback colors.
  */
 
 @theme {
@@ -79,7 +79,7 @@
   --color-wrong: oklch(63.7% 0.237 25.331);
   --color-wrong-hover: oklch(57.7% 0.245 27.325);
 
-  /* Terminal surface — fixed dark in BOTH themes (terminals stay dark in light
+  /* Terminal surface â€” fixed dark in BOTH themes (terminals stay dark in light
    * mode). Same values duplicated in .dark so the tokens resolve identically. */
   --color-terminal-bg: #0C1018;
   --color-terminal-surface: #11161F;
@@ -93,7 +93,7 @@
 }
 
 /*
- * Dark theme — neutral slate palette. Replaced the previous purple scheme
+ * Dark theme â€” neutral slate palette. Replaced the previous purple scheme
  * (background #231934, primary #6800D8) with slate-based surfaces and a
  * blue primary that matches light mode for consistency. If you want a
  * different accent, change `--color-primary*` here AND in `@theme`; the
@@ -144,7 +144,7 @@
   --color-wrong: oklch(63.7% 0.237 25.331);
   --color-wrong-hover: oklch(57.7% 0.245 27.325);
 
-  /* Terminal surface — fixed dark, identical to the light @theme values. */
+  /* Terminal surface â€” fixed dark, identical to the light @theme values. */
   --color-terminal-bg: #0C1018;
   --color-terminal-surface: #11161F;
   --color-terminal-text: #C9D4E3;

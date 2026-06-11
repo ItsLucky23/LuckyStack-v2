@@ -17,6 +17,10 @@ export const socketEventNames = {
 
   intentionalDisconnect: 'intentionalDisconnect',
   intentionalReconnect: 'intentionalReconnect',
+  //? Client -> server activity heartbeat (mouse/keyboard/touch), throttled.
+  //? Drives the server-side activity sampler that fires registered activity
+  //? events (e.g. the built-in AFK detector).
+  activity: 'activity',
   userAfk: 'userAfk',
   userBack: 'userBack',
 

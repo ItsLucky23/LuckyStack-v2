@@ -1,5 +1,13 @@
 export { default as sleep } from './sleep';
 export { default as tryCatch } from './tryCatch';
+export { default as tryCatchSync } from './tryCatchSync';
+export { deepMerge, isPlainObject } from './configUtils';
+export type { DeepPartial } from './configUtils';
+export { createRegistry } from './createRegistry';
+export type { Registry, RegistryOptions } from './createRegistry';
+export { escapeHtml } from './escapeHtml';
+export { ensurePeerDepInstalled, loadPeer } from './peerDeps';
+export type { PeerRequire } from './peerDeps';
 export * from './serviceRoute';
 export * from './socketEvents';
 export * from './responseNormalizer';
@@ -9,7 +17,7 @@ export {
   getErrorFormatter,
   applyErrorFormatter,
 } from './errorFormatterRegistry';
-export type { ErrorFormatter, ErrorFormatterContext } from './errorFormatterRegistry';
+export type { ErrorFormatter, ErrorFormatterContext, FormatterEnvelope } from './errorFormatterRegistry';
 export {
   validatePagePath,
   DEFAULT_PAGE_ROUTE_RULES,
@@ -129,7 +137,7 @@ export type {
 } from './errorTrackerRegistry';
 export * from './env';
 export * from './db';
-export { redis, getRedisConnectionOptions } from './redis';
+export { redis, getRedisConnectionOptions, registerStrayPrefixCommand } from './redis';
 export type { RedisConnectionOptions } from './redis';
 export {
   registerRedisKeyFormatter,
@@ -207,6 +215,8 @@ export type { AvatarConfig, AvatarConfigInput } from './avatarConfig';
 export { default as getParams } from './getParams';
 export { extractTokenFromSocket } from './extractToken';
 export { extractTokenFromRequest } from './extractTokenFromRequest';
+export { resolveClientIp, UNKNOWN_CLIENT_IP } from './resolveClientIp';
+export type { ResolveClientIpParams } from './resolveClientIp';
 export {
   registerSessionProvider,
   getRegisteredSessionProvider,

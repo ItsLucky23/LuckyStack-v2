@@ -324,6 +324,10 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       abortAllForSocket(socket.id);
       void dispatchHook('onSocketDisconnect', { socketId: socket.id, token, reason });
 
+      if (activityBroadcasterEnabled) {
+        void getPresence().then((presence) => { presence?.clearActivity(socket.id); });
+      }
+
       if (activityBroadcasterEnabled && token) {
         void (async () => {
           const presence = await getPresence();
@@ -373,6 +377,26 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
         const presence = await getPresence();
         if (presence) presence.initActivityBroadcaster({ socket, token });
       })();
+    }
+
+    //? Activity tracking (production AFK + custom activity events). Seed the
+    //? socket's last-activity on connect, start the single sampler interval
+    //? (idempotent), and refresh last-activity on every client heartbeat /
+    //? tab-return. The sampler walks all sockets and fires registered events
+    //? (built-in AFK + any consumer pause/kick events).
+    if (activityBroadcasterEnabled) {
+      void (async () => {
+        const presence = await getPresence();
+        if (!presence) return;
+        presence.startActivitySampler({ io });
+        presence.recordActivity(socket.id);
+      })();
+      socket.on(socketEventNames.activity, () => {
+        void getPresence().then((presence) => { presence?.recordActivity(socket.id); });
+      });
+      socket.on(socketEventNames.intentionalReconnect, () => {
+        void getPresence().then((presence) => { presence?.recordActivity(socket.id); });
+      });
     }
 
     if (token) {

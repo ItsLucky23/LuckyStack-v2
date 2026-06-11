@@ -230,6 +230,7 @@ describe("parseArgs", () => {
       prompt: true,
       help: false,
       noPresence: false,
+      aiBrowserTooling: null,
     });
   });
 
@@ -240,6 +241,7 @@ describe("parseArgs", () => {
       prompt: true,
       help: false,
       noPresence: false,
+      aiBrowserTooling: null,
     });
   });
 
@@ -265,6 +267,18 @@ describe("parseArgs", () => {
     expect(parseArgs(["my-app", "--no-presence"]).noPresence).toBe(true);
   });
 
+  it("parses --ai-browser=<value> (default null)", () => {
+    expect(parseArgs(["my-app"]).aiBrowserTooling).toBeNull();
+    expect(parseArgs(["my-app", "--ai-browser=all"]).aiBrowserTooling).toBe("all");
+    expect(parseArgs(["my-app", "--ai-browser=agent-browser"]).aiBrowserTooling).toBe("agent-browser");
+    expect(parseArgs(["my-app", "--ai-browser=none"]).aiBrowserTooling).toBe("none");
+  });
+
+  it("exits with code 2 on an invalid --ai-browser value", () => {
+    expect(() => parseArgs(["my-app", "--ai-browser=bogus"])).toThrow("process.exit:2");
+    expect(exitSpy).toHaveBeenCalledWith(2);
+  });
+
   it("combines --no-install and --no-prompt in any order", () => {
     expect(parseArgs(["--no-prompt", "my-app", "--no-install"])).toEqual({
       projectName: "my-app",
@@ -272,6 +286,7 @@ describe("parseArgs", () => {
       prompt: false,
       help: false,
       noPresence: false,
+      aiBrowserTooling: null,
     });
   });
 

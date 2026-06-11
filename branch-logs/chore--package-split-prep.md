@@ -2378,3 +2378,453 @@ User retest surfaced two more: **(1) register → `csrfMismatch`** — same root
 - Wrote the full plan: repo-root `SESSION_STATE.md` rewritten as a self-sufficient handoff (§4 architecture, §5 pure-npm-i matrix, §6 the CLI, §7 base set, §8 the 8-step implementation sequence with files + per-step verification, §9 invariants/gotchas, §10 test checklist, §11 publish blocker, §12 key file refs). Canonical architecture also appended to `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md` §10. Memory updated.
 
 **State unchanged from prior entry:** 0.2.0 in tree, uncommitted, 772 tests + smoke MATRIX green. No code touched this turn. Tomorrow: "read SESSION_STATE.md" → start §8 step 1.
+
+### Follow-up (2026-06-08): "install-anything-anytime" IMPLEMENTED — all 8 §8 steps in one autonomous pass
+
+**User prompt**: implement everything from SESSION_STATE §8 in one go (ultracode); scan the codebase to be sure; run every verification command possible (server-start / login-flow stays for the user).
+
+**Method**: two ultracode workflows bookended the work — a 9-agent understanding scan (mapped every step to exact files; corrected the plan's stale line numbers) and a 6-dimension × adversarial-verify review of the final diff.
+
+**Done (each verified after the step):**
+1. **Prereq decouple** — template + repo-root `config.ts` import `BaseSessionLayout`/`SessionLocation`/`AuthProps` from `@luckystack/core` (login-agnostic). New top-level `oauthCallbackBase` slot in `projectConfig.ts` (+ default `''`), registered from both config.ts files. (`socketStatusIndicator` already existed — NOT re-added.)
+2. **Boot auto-detect spine** — `@luckystack/server/capabilities.ts`: `OPTIONAL_PACKAGES = [login,email,error-tracking,presence,docs-ui]` (sync excluded — client-bridge only) + `canResolve`. `bootstrap.ts`: `importOptionalPackageRegisters()` runs BEFORE `loadOverlayFolder` (overlay overrides), each `await import('@luckystack/<pkg>/register')` in a try/catch (register failure never crashes boot); then force `await getLogin()` so login's session provider registers even with no overlay. **Latent-bug fix:** `capabilities.has()` used `createRequire().resolve()`, which throws `ERR_PACKAGE_PATH_NOT_EXPORTED` on the import-only `@luckystack/*` exports maps → it reported EVERY optional package ABSENT at runtime (the compile-only smoke never caught it). Switched to `import.meta.resolve` with a CJS fallback for Node <20.6.
+3. **email + error-tracking `./register`** — relocated `template/luckystack/{email,sentry}/*` bodies into `packages/{email,error-tracking}/src/register.ts` (env-gated no-ops; PostHog lazy-imports `posthog-node`). Added `./register` export + tsup entry; deleted the template overlays.
+4. **login `./register`** — OAuth env-scan relocated into `packages/login/src/register.ts` (callbackUrl from `getProjectConfig().oauthCallbackBase`, length-checked fallback to `app.publicUrl`) + guarded `defaultPrismaUserAdapter` registration. Session registration STAYS in index.ts (force-loaded at boot) → no double-registration. Deleted the TEMPLATE login overlays; KEPT the dev-repo login overlay (preserves dev OAuth `SERVER_IP` origin; harmlessly overrides register). **Deviation:** kept `config.ts` `providers` array (template `LoginForm` reads it for credentials-form visibility; OAuth buttons already come from live `/auth/providers`).
+5. **presence `./register`** — `registerPresenceHooks()` + `registerDefaultAfkEvent()` (both idempotent). Removed the manual `registerPresenceHooks()` from the dev `server/server.ts` (kills divergence; template never had it).
+6. **sync client bridge** — extracted the inline `sync` receive listener + route-key helpers into `@luckystack/sync/client` as idempotent `attachSyncReceiver(socket)` (WeakSet guard; uses the module-level trigger fns — no React hook). Both socketInitializers (template + dev) now `tryCatch`-dynamic-import it, DECOUPLED from the presence/activity flag.
+7. **`@luckystack/cli`** (new pkg, `bin: luckystack`) — `npx luckystack add <feature>`: `add presence` (inverse of the pruner's JSX edits — main.tsx LocationProvider + TemplateProvider SocketStatusIndicator, idempotency-guarded), `add login` (copies shipped `assets/login/src/**` into consumer `src/`, skip-if-exists — pages are file-routed so no main.tsx edits), `add {sync,email,error-tracking,docs-ui}` (backend-only: dep + install). CRLF-safe edits. Wired into `buildPackages.mjs` + `publishPackages.mjs` (docs-ui moved AFTER server — its `./register` imports `@luckystack/server`). **Manually verified:** `add presence` round-trips a `--no-presence` scaffold BYTE-IDENTICAL to the full template; `add login` copies all 16 files + LoginForm identical to assets.
+8. **docs-ui `./register` + docs sweep** — `packages/docs-ui/src/register.ts` auto-mounts `mountDocsUi()` via `registerCustomRoute`. Updated `packages/server/CLAUDE.md` (login/presence/sync Required→Optional + the 0.2.0 auto-detect note) and `docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md` status header.
+
+**Adversarial review (35 agents):** only ONE confirmed real finding — `editFile` write-back was LF-only on CRLF files (cosmetic git-diff noise on Windows, not corruption). FIXED in both `@luckystack/cli`'s `editFile` and create-luckystack-app's `editScaffoldFile` (preserve original line ending). All other findings refuted on verification (e.g. a misread "login→server peer", a false TDZ claim).
+
+**Verified GREEN**: `lint:packages` 0/0 · `lint:client` 0/0 · `build:packages` **15/15** (cli added) · `test:unit` **772/772** · full `npm run build` exit 0 · `.smoke-test/run.mjs` GREEN (fresh consumer scaffold: typecheck 0 TS · build PASS · lint 0/0 — confirms the template changes don't break consumers). CLI add-flows verified manually.
+
+**Pre-existing (NOT mine — reported, not fixed):** `tsc -b` prints 3 non-fatal `TS2322 userId: null` errors in `packages/server/src/httpRoutes/{csrfMiddleware,authApiRoute,authCallbackRoute}.ts` (present in HEAD/commit 7c9aa95, in the login-absent CSRF/auth paths). They don't fail the build (tsc -b exits 0), don't affect `build:packages`/published `.d.ts`/consumer scaffolds/lint/tests. A 1-line `null`→`undefined` each clears them.
+
+**Still TODO**: scaffold `--no-login`/`--no-sync` pruners + base-only/add-flow smoke combos; a `luckystack remove`. **Manual verification left to the user** (needs a running server/DB): the §10 login matrix (cookie + sessionStorage, OAuth, re-login-while-logged-in), and a base-only→`luckystack add`→boot round-trip. Nothing committed/published (tree at 0.2.0, +`@luckystack/cli`).
+
+### Follow-up (2026-06-08): tsc-b fixes · OAuth single-source · env+i18n CLI scanners
+
+**User prompt**: fix the tsc-b errors; make OAuth single-source (button shows iff env creds present, Microsoft included, defined in ONE place); add AI-feedable CLI scanners for dead/missing env keys + i18n keys (dump/ folder, hashed logs). Plan-mode approved. No commits.
+
+**Part 1 — tsc-b errors (the 3 pre-existing ones, now fixed):** `csrfMiddleware.ts:60` `userId: null`→`undefined` (CsrfMismatchPayload.userId is `string|undefined`); `authApiRoute.ts:101` + `authCallbackRoute.ts:45` `supersedeToken: token`→`token ?? undefined`. `npx tsc -b` now exits 0 with **zero** errors.
+
+**Part 2 — OAuth single-source (registry-driven; decision via AskUserQuestion):**
+- `projectConfig.ts`: new `auth.credentials: boolean` (default true). `@luckystack/login/register` now registers `credentialsProvider()` only when enabled — so the env-driven registry (exposed via `GET /auth/providers`) is the ONE source. Credentials-disabled also rejects the API (existing provider-lookup returns `login.providerNotFound` — no extra code).
+- Removed the static `config.providers` arrays from BOTH `config.ts` files (+ destructure). Rewrote the dev `LoginForm` (was the old static version) AND extended the template `LoginForm` to drive BOTH the credentials form and OAuth buttons from the single `/auth/providers` fetch. Updated `src/playground/page.tsx` to fetch the live list. Microsoft needs no special-casing (the env-present rule works; `MICROSOFT_TENANT_ID` is optional). `ui-builder/` left untouched (separate prototype).
+
+**Part 3 — `@luckystack/cli` audit scanners (decision: ship to consumers):**
+- `lib/scan.ts`: regex scanner infra (`collectSourceFiles` — skips node_modules/dist/tests/generated, `matchAll` capture+line, `groupLocations`, `writeDumpLog` → `dump/<KIND>_<hash>.log`).
+- `check-env` (A unused / B missing): env-file list via `getEnvFiles()` semantics (`LUCKYSTACK_ENV_FILES` else `.env`,`.env.local`); DEV_-prefix aware; `env('KEY')` helper + `process.env[...]` tracing; framework-key ignore list (Redis/Prisma/OAuth/`VITE_*`/`TEST_*`); KEYS only (never logs `.env.local` values).
+- `check-i18n` (C unused / D missing-per-language): used-set = literal `{ key: '...' }` + `errorCode: '...'` (dotted) harvested repo-wide (covers the dynamic `notify.error({ key: errorCode })` path); dynamic `key:<var>` sites listed for manual review (type-annotation false-positives filtered).
+- Wired `check-env`/`check-i18n` into the CLI dispatch + help; `findProjectRoot` relaxed to also accept the framework monorepo (`packages/core`). `dump/` added to repo + template `.gitignore`. README + CLAUDE.md updated. **Verified by running both against the repo** — hashed logs written, per-language missing detection + errorCode harvesting confirmed correct (counts inflated only by the monorepo's 4 nested `_locales` sub-projects; a single consumer project is clean).
+
+**Verified GREEN**: `npx tsc -b` 0 errors · `lint:packages` 0/0 · `lint:client` 0/0 · `build:packages` **15/15** · `test:unit` **772/772** · `.smoke-test/run.mjs` GREEN (consumer scaffold with the new env-driven LoginForm: typecheck 0 · build PASS · lint 0/0). Nothing committed/published.
+
+**OPEN (minor)**: command names `check-env`/`check-i18n` (could be `scan-*`/`doctor`); at the framework-monorepo root the i18n scan cross-matches 4 nested `_locales` trees (noisy-but-correct) — intended for single consumer projects.
+
+### Session (2026-06-09): ultracode 6-part audit + new UI input components
+
+**User prompt**: large autonomous ultracode pass over the whole codebase — (1) code-quality audit, (2) security audit (until confident it's safe), (3) docs/AI-usability audit, (4) build new UI input components, (5) project-docs audit, (6) skills review/improve + confirm they ship via the CLI. Many agents allowed; save open questions for later. Locked decisions via AskUserQuestion: analysis tracks = **report-only**; UI components = **mirror src/_components + template** (shadcn-style, like Dropdown); date/time = **native Intl, no dependency**; git = **leave uncommitted + summarize**.
+
+**Part A — Audits (report-only, written to `docs/audits/`)** via a background Workflow (50 agents, ~16 min, per-area security + per-package quality fan-out + adversarial verification of every high/critical):
+- `SECURITY_AUDIT.md` — 36 findings; **3 confirmed** after adversarial verify (H-1 Socket.io per-IP rate-limit bypass behind reverse proxy `api/handleApiRequest.ts:235`; H-2 path traversal in `create-luckystack-app/src/index.ts:826` scaffold dir; H-3 same proxy-IP root cause on HTTP `server/httpRoutes/apiRoute.ts:63`, downgraded High→Medium). **13 high/critical refuted as by-design** (incl. CSRF double-submit, secret-manager fail-open). 19 medium / 4 low remain as raised. Dominant real risk = no `trustProxy` IP resolution.
+- `CODE_QUALITY_AUDIT.md` — ~175 findings across 13 pkgs. Themes: cross-package util duplication (`deepMerge`/`DeepPartial`/registry/peer-dep-guard/`escapeHtml`), socket-vs-HTTP handler duplication in api+sync, a few god-functions (`hotReload.setupWatchers`, `handleSyncRequest`). Top-10 refactor list + prioritized backlog included.
+- `AI_USABILITY_AUDIT.md` — 5 doc-only gaps; biggest: **no rule encoding "AI flags user requests that contradict the docs and proposes alignment"** (draft rule text provided); package-recommendation is guidance-only; consumer branch-logging onboarding + RAG/graphify scaling guidance thin.
+- `PROJECT_DOCS_AUDIT.md` — 4 stale-vs-code spots (ARCHITECTURE_PACKAGING user-adapter pattern; phantom env-resolver refs in FINAL_SWEEP/HANDOFF), 3 redundancy clusters (SESSION_STATE vs DESIGN doc), 5 gaps (no `luckystack add` guide, missing diagram, undocumented CLI).
+- `SKILLS_AUDIT.md` — all 15 custom skills high quality + **confirmed they DO ship** to consumers (framework-docs/skills → CLI copy on AI-instructions=Yes). README index was stale (3/15). 5 new-skill proposals (Priority-1: `add-new-page`, `add-new-component`).
+
+**Part B — New UI input components (REAL code, mirrored to `src/_components/` AND `packages/create-luckystack-app/template/src/_components/`):**
+- `floatingLayer.tsx` — generic anchored portal with the smooth mount→measure→fade choreography (same technique as `dropdownInternals`, but reusable; dropdown left untouched). Hook `useFloatingLayer` + `FloatingPanel`.
+- `fieldShell.tsx` — shared label/description/error scaffold + size tokens + `useShake` (Web Animations API, no CSS keyframes) + `useErrorPulse` (auto-shake when error appears).
+- `TextField.tsx` — text/email/password/number/tel/url/search; leftIcon/rightIcon, prefix/suffix, clearable, password reveal, char counter, number with custom steppers (native spinners hidden via `[appearance:textfield]`), error-shake, sizes sm/md/lg.
+- `Toggle.tsx` — primary-coloured switch, sliding knob, label/description, sizes.
+- `Checkbox.tsx` — **primary background when checked** (per request), check/indeterminate, error+shake, sizes.
+- `Popover.tsx` — smooth anchored popover (click/hover), placements + alignment, controlled/uncontrolled.
+- `DatePicker.tsx` + `dateUtils.ts` — timezone-aware (native Intl, DST-correct wall-clock↔UTC via offset iteration), single + range modes, relative-range presets (last 7/30/60/90 days, 6 months, 1 year), optional time picker, min/max, locale + weekStartsOn. All copy via props (lint-clean vs `react/jsx-no-literals`; colours from tokens only).
+- `src/playground/page.tsx` — added a self-contained `InputsShowcase` section demonstrating all of the above (dev-only, not shipped).
+
+**Verified GREEN (my changes):** `eslint` on all 8 new files 0/0 · `lint:client` 0/0 · `tsc -b` 0 errors · `vite build` PASS (components bundle; only pre-existing vconsole `eval` warnings). AI indexes regenerated (`ai:capabilities`/`ai:project-index`/`ai:index`).
+
+**Part C — Skills (item 6):** applied the safe factual fix — `skills/custom/README.md` index now lists all 15 (was 3). New-skill creation left as proposals (open question).
+
+**NOT done (report-only by decision; awaiting user):** none of the security/quality/doc findings were fixed — all captured in `docs/audits/*` for the user to triage. New skills + the AI-usability rule drafts left as proposals. Nothing committed.
+
+### Session (2026-06-09, part 2): applied fixes — security + skills + docs-hygiene + component reorg
+
+**User prompt**: approved applying the fixes via ultracode. Answers: Q1=C (fix ALL confirmed security, but only if 100% sure they're real AND don't break the code), Q2=deferred (code-quality refactors — wants them in one go later if low-risk), Q3=A (build both new skills), Q4=A (add the doc-conflict rule), Q5=A (project-docs corrections), Q6.1=B (reorg primitives into subfolders), Q6.2=yes (drop stale template/skills). User clarified the socket.io-vs-HTTP "duplication" is INTENTIONAL (HTTP = external-software API entry) — confirmed: the audit never proposed removing either transport (that's a deferred Q2 DRY refactor of internal logic + one parity bug), so untouched this round.
+
+**Done by me (serial, sensitive):**
+- **Q6.1** — moved the 8 new UI primitives into `src/_components/inputs/` (+ mirrored to `template/src/_components/inputs/`); internal imports → relative `./`; playground imports → `src/_components/inputs/*`.
+- **Q4** — added **Rule 3b** to `CLAUDE.md` (flag user-request↔docs conflicts: name it, explain both sides, give your own stance, ask/log a default; also reverse — call out wrong docs; + reinforce proposing uninstalled `@luckystack/*` packages).
+- **Q6.2** — deleted the stale `packages/create-luckystack-app/template/skills/` (7-skill duplicate). Consumers now get skills ONLY via the framework-docs bundle on AI-instructions=Yes (opt-out = truly clean, no orphan skills). CLI line 930 still copies `framework-docs/skills` → scaffold.
+
+**Done via workflow (10 agents, disjoint file owners; I verified centrally):**
+- **Q1 security (confirmed-only, behaviour-preserving):**
+  - **H-1/H-3** — new `packages/core/src/resolveClientIp.ts` (`resolveClientIp()` + `UNKNOWN_CLIENT_IP`) + `http.trustProxy?: boolean` (default **false** → byte-identical default behaviour). Applied at all per-IP rate-limit sites (api socket+HTTP, sync socket+HTTP, server apiRoute/syncRoute). IPv4-mapped IPv6 canonicalized (item 7), `unknown` sentinel centralized (item 8).
+  - **H-2** — scaffold target dir now built from sanitized `slug` + asserts containment within cwd (`create-luckystack-app/src/index.ts`).
+  - login: CSRF token rotation on new-session/OAuth (item 5); null-check before bcrypt.compare + `toReasonKey` the bcrypt error + whitelist OAuth provider name before use (item 12); OAuth state-TTL clarifying comment (item 14).
+  - core: Authorization header array-normalization via `unknown`+typeof guards (item 6).
+  - email: SHA-256-hash recipients + redact subject in the Sentry `captureException` context only — local diagnostics keep real values (item 4).
+  - router: envKey `^[A-Za-z0-9_-]+$` validation at config load (`resolveTarget.ts`, item 10).
+  - secret-manager: bearer-token/URL-scheme/env-key-regex/response-key-filter/dev-envFiles-path hardening, fail-OPEN design preserved (items 11+15).
+  - **Skipped (honouring "don't break"):** item 3 (validation-message leak) — a test asserts the raw message verbatim; genericizing needs a coordinated out-of-scope test update. Item 16 (presence dead-code) — only tests call it; removal would break tests. Item 14 redirect_uri — already pinned to immutable config. All three documented for a future coordinated pass.
+- **Q3 skills:** new `skills/custom/add-new-page/SKILL.md` (135 lines) + `add-new-component/SKILL.md` (166 lines); README index + 2 rows.
+- **Q5 docs:** conservative corrections — ARCHITECTURE_PACKAGING user-adapter row → 0.2.0 `./register` model; removed phantom `env-resolver` refs in FINAL_SWEEP/HANDOFF; added canonical-source cross-pointers between SESSION_STATE ↔ DESIGN_OPTIONAL_SERVER_PACKAGES (no substantive deletion). Out-of-scope/net-new items (new guides, diagrams, file moves) skipped + listed.
+
+**Two post-workflow lint fixes by me:** the agents' Authorization-header normalization + `.map(hashRecipient)` tripped type-aware rules — rewrote with `unknown`+typeof narrowing and an arrow wrapper.
+
+**Verified GREEN (full suite):** `lint:packages` 0/0 · `lint:client` 0/0 · `lint:server` 0/0 · `tsc -b` 0 · `build:packages` **15/15** · `test:unit` **772/772** · `vite build` PASS. AI indexes regenerated. Nothing committed.
+
+**Still open:** Q2 (code-quality refactors — deferred by user; includes the api/sync transport-parity BUG + the DRY dedups, all keeping both transports). The 3 skipped security items above (need coordinated test updates).
+
+### Session (2026-06-09, part 3): full code-quality refactor (Q2) + the 3 skipped security items
+
+**User prompt**: do ALL code-quality refactors (Q2, previously deferred) via ultracode; fix the 3 skipped security items or confirm they're false detections. User clarified the socket-vs-HTTP "duplication" is intentional (HTTP = external-software API entry) — confirmed: neither transport is removed; the refactor only de-duplicates INTERNAL logic + fixes one parity bug.
+
+**The 3 skipped security items, resolved:**
+- **OAuth redirect_uri** — FALSE detection: `exchangeOAuthToken` already pins `redirect_uri` to the immutable registered `provider.callbackURL` (never request-derived). The proposed fix is a no-op. No change.
+- **Validation-message leak (api item 3)** — REAL; FIXED this round (was only skipped to avoid breaking a test). Both api handlers now return generic `api.invalidInputType` to the client; the detailed validator message flows to the `postApiValidate` hook + dev logs only. Test updated to assert the generic code + a new test asserts the hook still gets the detail. Consequence: dropped `: {{message}}` from the `api.invalidInputType` locale strings in all 4 languages (dev + template `_locales`).
+- **Presence dead-code (item 16)** — confirmed NON-exploitable (refuted appendix #13: production AFK uses initActivityBroadcaster→informRoomPeers, not the dead `dispatchActivitySample`). The phase-2 agent removed the whole AFK activity-event feature, but that ORPHANED the public activity-event registry + dropped `afkTimeoutMs` config + removed a documented public export — a PRODUCT decision, not a security fix (per new Rule 3b, flag don't unilaterally remove). **Reverted** that removal; left the dead code intact. OPEN QUESTION for the user: remove the AFK activity-event feature deliberately, or wire it up? (It is currently non-functional in production.)
+
+**Code-quality refactor — 3 verified phases (foundation → 11 packages → api/sync/server):**
+- **Phase 1 (core foundation):** new shared `@luckystack/core` exports — `createRegistry<T>()` (CC-2; migrated 11 core registries), `deepMerge`/`isPlainObject`/`DeepPartial` with depth+circular guard (CC-1, `configUtils.ts`), `escapeHtml` (CC-4), `ensurePeerDepInstalled`/`loadPeer`/`PeerRequire` (CC-3), `tryCatchSync` (CC-7), `registerStrayPrefixCommand`. Public API unchanged.
+- **Phase 2 (11 packages):** email/error-tracking/presence migrated config-merge to core `deepMerge`; error-tracking adapters → `ensurePeerDepInstalled`/`loadPeer` + de-duped `loadSentry` + shared `runBeforeSend`; docs-ui → core `escapeHtml`; router/secret-manager raw try/catch → `tryCatch`/`tryCatchSync` (CC-7); login CC-8 disable narrowing; cli/create-luckystack-app dedup (validateProject, buildScanReports, PROVIDER_OPTIONS, EnvVarBuilder, ansiStyle, Result-returning handlers); test-runner shared helpers; devkit `commentToString` hoist.
+- **Phase 3 (api/sync/server):** api — the security fix above + transport-parity BUG fix (HTTP now dispatches `transformApiResponse` like the socket handler) + `_shared/{apiTypes,responseEnvelope,inputTypeWarning,logFlags,backpressure}.ts` extracted (both handlers share them). sync — shared `_shared/{syncTypes,errorBuilders,logFlags}.ts`; **removed all `as unknown as` double-casts** by making core `applyErrorFormatter` generic (+ exported `FormatterEnvelope`/`FormatterErrorEnvelope`). server — registries → `createRegistry` where they fit; httpHandler try/catch → tryCatch.
+
+**Skipped (justified, behaviour/risk):** the 256-line `handleApiRequest` god-function split (stateful closures — risk); the full sync `executeSyncTransaction` structural merge (did the safe subset: shared types + helpers); `user!` null-safety (would need a banned cast + behaviour change); several "DOCUMENT-only" audit notes; devkit `hotReload.setupWatchers` split (dev-only, hard to test safely). The deferred-but-large refactors are noted for a future pass.
+
+**Fixes I made to keep it green (central verification caught what tsup/tests missed):** an ESM/`loadPeer`(require) regression on the resend adapter (reverted that one adapter to its working `import('resend')` form); an `eslint --fix` that removed a REQUIRED `ok()` argument (made the cli `ok()` helper void-friendly — only `tsc -b` caught it); two test core-mocks needed the new pure utils via `importOriginal`; a mis-named eslint-disable on the backpressure `while(true)` (rewrote as `while(!aborted)`); a defensive malformed-status guard kept with a justified disable.
+
+**Verified GREEN (full suite):** `lint:packages` 0 · `lint:client` 0 · `lint:server` 0 · `tsc -b` 0 · `build:packages` **15/15** · `test:unit` **773/773** · `vite build` PASS · all 8 locale JSON valid. AI indexes regenerated. Nothing committed.
+
+**Reported (out-of-scope, for the user):** api/CLAUDE.md "Internal pipeline helpers" table now lists helpers that moved to `_shared/` (minor doc drift); core CLAUDE.md could add the new util rows.
+
+### Session (2026-06-09, part 4): production AFK/activity-events + api/sync god-function thinning
+
+**User prompt**: make the activity-events usable in production (e.g. a game that pauses on AFK for X seconds then kicks); thin out the apiRequest/syncRequest god-functions if recommended; then re-run the earlier audit roles to check results.
+
+**Production AFK / activity-event system (was dead — only called from tests):**
+- `@luckystack/core/socketEvents.ts`: new `activity` client→server heartbeat event name.
+- `@luckystack/presence/activity/activitySampler.ts` (NEW): `recordActivity(socketId)` / `clearActivity(socketId)` (module Map keyed by socketId — type-safe, no `socket.data`), `startActivitySampler({io,intervalMs?})` (idempotent single interval that walks `io.sockets.sockets`, builds an `ActivitySample` per socket, calls `dispatchActivitySample`), `stopActivitySampler()`. Exported from the presence index.
+- `@luckystack/presence/activity/afkEvent.ts`: **token-leak FIXED** — `fireAfkPresence` now delegates to `informRoomPeers` (broadcasts `{ userId, endTime }`, never the raw session token; fires pre/postPresenceUpdate with the real userId+roomCodes). Removes the resolved presence security item properly without removing the feature.
+- `@luckystack/presence/presenceConfig.ts`: new `activitySampleIntervalMs` (default 15_000).
+- `@luckystack/server/loadSocket.ts`: on connect (gated by `socketActivityBroadcaster`) `recordActivity` + `startActivitySampler({io})` (idempotent) + listens `activity`/`intentionalReconnect` → `recordActivity`; on disconnect `clearActivity`. Wires the previously-stray `intentionalReconnect` client event.
+- Client (`src/_sockets/socketInitializer.ts` + template mirror): throttled (≤1/10s) `activity` emit on real user interaction (pointer/key/scroll/touch), with listener cleanup. Idle = no emits = server's lastActivity ages past `afkTimeoutMs` → the `'afk'` event fires. Consumers build pause/kick via `registerActivityEvent` (documented in presence/CLAUDE.md with a worked example).
+
+**God-function thinning (behaviour-preserving, via 2 parallel agents):**
+- api: extracted `_shared/{requestLifecycle,socketValidationStage,httpValidationStage}.ts`; `handleApiRequest` orchestrator cut ~242→~117 lines. Risky stateful closures (emitApiError mutating currentRouteName/formatter refs) kept inline per mandate.
+- sync: extracted `_shared/clientFanout.ts` (shared per-recipient `_client` dispatch, transport differences as explicit params) + client `prepareSyncRequest()` (pre-flight validation chain). Transports kept SEPARATE (no risky merge); risky closures inline.
+
+**Fixes I made for green:** unused `RuntimeApiEntry` import (api httpValidationStage); a `string|null`→`string|undefined` mismatch from the clientFanout extraction (widened `resolvePreferredLocale` return type, `buildSyncError.preferred` already accepts null); a `||`→justified-disable; `presenceConfig.test.ts` updated for the new `activitySampleIntervalMs` default.
+
+**Verified GREEN (full suite):** `lint:packages` 0 · `lint:client` 0 · `lint:server` 0 · `tsc -b` 0 · `build:packages` **15/15** · `test:unit` **773/773** · `vite build` PASS.
+
+**Then:** launched a 6-role RE-AUDIT workflow (security ×3 incl. adversarial review of the new AFK code, code-quality, AI/docs/skills, UI) → `docs/audits/REAUDIT_2026-06-09.md` (verifies fixes landed + catches regressions).
+
+### Session (2026-06-09, part 5): re-audit results + the 2 confirmed new fixes
+
+**Re-audit outcome** (`docs/audits/REAUDIT_2026-06-09.md`, 6 roles + adversarial verify): all prior security fixes verified landed; NO regressions from the refactors; **the new AFK feature is secure** (the flagged `{token}` broadcast is test-only dead code — production uses `informRoomPeers` `{userId,endTime}`, room-scoped, forgery-resistant, leak-free on disconnect). Only **2 genuine new issues**, both in my DatePicker — now FIXED:
+- **HIGH (a11y, WCAG 2.1.1):** calendar grid not keyboard-navigable → added full keyboard nav to `Calendar` (Arrow/Home/End/PageUp-Down/Enter+Space, roving tabindex, focus-ring, per-day `aria-label`, disabled-guard, range-preview follows focus; `onKeyDown` on the day buttons to stay a11y-clean). Mirrored to template.
+- **MEDIUM (clarity):** redundant `updateTime` ternary (`... ? selectedStart : selectedStart`) → simplified to `const startDay = selectedStart`.
+- One critical-flagged DatePicker bug was the same ternary (downgraded to medium, behaviourally correct); one docs-ui "implicit-any" HIGH was refuted as a false positive.
+
+**Verified GREEN:** `lint:client` 0 · `tsc -b` 0 · `vite build` PASS (DatePicker is client-only; package gates unaffected). AI indexes regenerated.
+
+**Residual backlog (in REAUDIT report, not blocking):** mediums M-7/M-8 (IPv6/`ip:unknown` rate-limit bucket spreading), deferred hotReload god-function split + docs-ui typed-JS extraction, 4 AI-usability doc gaps (package-recommendation safety net, consumer branch-logging quick-start, RAG/graphify scaling guidance), minor a11y polish on Popover, the pre-existing blanket eslint-disable on core/extractToken.ts.
+
+### Session (2026-06-09, part 6): AI browser-testing tooling + markdown cleanup
+
+**User prompt**: execute `docs/AI_BROWSER_TOOLING_PLAN.md` (after clarifying questions) — both the opt-in scaffold feature AND dogfood it in this repo; then clean up stale .md files and explain the leftovers. Plan-mode approved. Decisions: scope=both, keep the 3 existing skills (complementary), hard-delete stale docs, keep all Workspaces material.
+
+**Part A — AI browser tooling (agent-browser CLI + Playwright/Chrome DevTools MCP):**
+- `create-luckystack-app/src/index.ts`: new `aiBrowserTooling: 'all'|'agent-browser'|'none'` (ScaffoldChoices + DEFAULT_CHOICES default `'agent-browser'`), `--ai-browser=<...>` value flag (parseArgs + VALID_FLAGS + printHelp + exit-2 on bad value), wizard step + fallback prompt (skipped→`'none'` when AI instructions off), `convertAnswersToChoices` + `main()` resolution + choices echo.
+- New `wireAiBrowserTooling()` + `mergeJsonFile()` + `addAskPermissions()`: writes `agent-browser.json` (domain-fence + confirm-actions), `.claude/skills/agent-browser/SKILL.md` stub, `.claude/settings.json` `permissions.ask` (Layer 2); for `'all'` also `.mcp.json` (both MCP servers) + `@playwright/test` devDep + `tests/e2e/example.spec.ts`.
+- Ship-via-copy-block (author once in repo): NEW `docs/AI_BROWSER_TESTING.md` (consumer doc), root `CLAUDE.md` `## AI Browser Testing` section (standalone, not a numbered rule) + doc-table row, NEW `skills/custom/agent-browser-verify/SKILL.md` + README row, `docs/AI_BOOST_OVERVIEW.md` pointer.
+- Template `_dot_gitignore`: browser-artifact ignores.
+- **Repo dogfooding**: root `.mcp.json` (both servers) + `.claude/settings.json` `permissions.ask` (the 3 browser tools). → next Claude Code session in this repo shows a one-time MCP trust prompt + ask-gates the tools.
+- Verified the Claude Code config mechanics via the claude-code-guide agent (`.mcp.json` schema, `mcp__<server>` + `Bash(agent-browser:*)` ask syntax, trust prompt, settings.local.json gitignored).
+- Tests: `index.test.ts` 3 `CliArgs` `toEqual` shapes += `aiBrowserTooling: null` + 2 new `--ai-browser` parse tests. `.smoke-test/run.mjs`: fast no-install `--ai-browser=all` (asserts all wiring) + `=none` (asserts absence) assertion runs. **Manually verified all 3 variants** by running the built CLI: `all`/`agent-browser`/`none` generate exactly the right files.
+
+**Part B — markdown cleanup (hard-delete; git retains history):**
+- DELETED: `docs/FINAL_SWEEP.md`, `docs/AI_BROWSER_TOOLING_PLAN.md` (now implemented), `branch-logs/{TESTING_PHASE,TODO,COMMIT_MESSAGE.draft}.md`. Scrubbed the dangling `FINAL_SWEEP` refs from `docs/HANDOFF-R1-R5.md`'s header.
+- **KEPT (deviations from the first cut, flagged):** `docs/STREAMING_RECONSTRUCTION.md` — turned out to be referenced by ARCHITECTURE_API/SYNC.md + DEVELOPER_GUIDE.md (deleting would dangle shipped docs); `docs/HANDOFF-R1-R5.md` (shipped framework record the Workspaces project builds against — part of the kept Workspaces material); `docs/MONITORING.md` (design for a not-yet-built package); `docs/PUBLISH_READINESS_AUDIT.md` (publish checklist). All Workspaces material (`handoff/`, `sparring/`, `src/workspaces/`, `ui-builder/`) untouched.
+- Confirmed ZERO active dangling references after deletion (only historical audits/branch-logs mention them, left as-is).
+
+**Verified GREEN (full suite):** `lint:packages` 0 · `lint:client` 0 · `lint:server` 0 · `tsc -b` 0 · `build:packages` **15/15** (framework-docs bundle ok) · `test:unit` **775/775** · `vite build` PASS. AI indexes regenerated. Nothing committed.
+
+### Session (2026-06-09, part 7): cleared the re-audit residual backlog
+
+**User prompt**: resolve ALL remaining backlog points; ask where there's doubt, fix everything obvious in one pass. 4 design/risk questions answered (all recommended): rate-limit IP = lightweight no-dep; hotReload split = leave deferred; package-recommendation rule = add it; secret-manager custom-CA = document fetchImpl.
+
+**Fixed:**
+- **M-7/M-8 (security):** `core/resolveClientIp.ts` — `canonicalizeIp` now also lowercases IPv6 + strips the zone-id (`%eth0`) on top of the IPv4-mapped strip (lightweight, no dep; full IPv6 expansion left to a parser if needed). Added a `getLogger().warn` when the shared `unknown` bucket is hit (surfaces a proxy-without-trustProxy misconfig). Limits unchanged.
+- **secret-manager envFiles path validation:** new `isSafeEnvFile` — rejects RELATIVE `..` traversal in `config.dev.envFiles` (watch + read paths); ABSOLUTE paths are an explicit allowed consumer choice (they're config, not user input — and a legit test/consumer points at an absolute shared-secrets file). Preserves fail-open.
+- **CC-3:** `email/adapters/resend.ts` guard migrated to core `ensurePeerDepInstalled(...)` (resolve-guard only — the ESM `import('resend')` stays, since require would break the ESM-only package).
+- **core/extractToken.ts:** removed the whole-file `/* eslint-disable */` — the only thing it hid was one unnecessary optional chain (`handshake.auth?.token` → `auth.token`, with a comment). No disable left.
+- **socket `ignoreSelf` symmetry:** `handleSyncRequest.ts:549` tightened to `===` + a `token` guard, matching the HTTP handler (an anonymous token-less socket is no longer treated as "self").
+- **UI a11y:** `floatingLayer` `close()` now returns focus to the opener ONLY when focus is inside the panel (Escape with a day focused) — not on outside-click. `Popover` gained an `ariaLabel` prop + a comment: it's intentionally NON-modal so `aria-modal` is deliberately omitted (true would mislead AT). Mirrored to template.
+- **Rule 12a (CLAUDE.md):** package-recommendation safety net — before hand-rolling cross-cutting logic, check `PACKAGE_OVERVIEW` for a `@luckystack/*` package and propose the install.
+- **Docs:** consumer branch-logging quick-start added to the Branch Log Protocol section; a "Scaling AI context" (indexes → graphify → RAG) section added to `AI_BOOST_OVERVIEW.md`; new `docs/LUCKYSTACK_ADD_GUIDE.md` (npm-i-vs-`luckystack add` matrix + per-feature checklists + troubleshooting) + CLAUDE.md doc-table row.
+
+**Consciously closed (already done / non-defect / deferred by decision):**
+- `offlineQueue` requeue — ALREADY fixed in part 1 (`runQueueItem` unshift-on-throw + break). Verified.
+- AFK dead-token path — already removed in part 4 (afkEvent routes via `informRoomPeers`).
+- docs-ui "implicit-any embedded JS" — adversarially refuted as a by-design false positive (re-audit); no action.
+- `_shared/*` "over-abstraction" — left as-is; the helpers are clean + focused, merging would reduce clarity.
+- secret-manager custom-CA — documented `fetchImpl` as the override (per decision); no new API.
+- **devkit `hotReload.ts setupWatchers()` split — DEFERRED by user decision** (dev-only, ~550 LOC, no unit-test coverage → a behaviour-preserving split can't be safely verified). The one item intentionally left open.
+
+**Verified GREEN (full suite):** `lint:packages` 0 · `lint:client` 0 · `lint:server` 0 · `tsc -b` 0 · `build:packages` 15/15 · `test:unit` 775/775 · `vite build` PASS. AI indexes regenerated. Nothing committed.
+
+### Session (2026-06-09, part 8): publish-readiness — zero errors everywhere + SESSION_STATE handoff
+
+**User prompt**: ensure no errors anywhere (npm publish, lint, build), then write a SESSION_STATE summary + the manual test checklists (dev repo + create-luckystack-app) for the v0.2.0 publish.
+
+**Publish-blocker fixed:** `publish:dry` warned `"bin[<name>]" ... was invalid and removed` for ALL 4 bin packages (npm 11.6.1 rejects the leading `./` and silently drops the bin → would break `npx luckystack` / `create-luckystack-app` / `luckystack-router` / `luckystack-validate-deploy`). Changed all 4 `bin` paths `./dist/...` → `dist/...` (kept `main`/`exports` with `./` — those require it). `publish:dry` now 0 warnings, 15/15 validated.
+
+**Consumer lint warnings fixed:** the smoke test failed on 3 `react-x` WARNINGS (not errors) in the shipped `DatePicker.tsx`: `no-array-index-key` (weekday labels `key={i}` → `key={labelText}`) + two `no-unstable-default-props` (`timeZone = getBrowserTimeZone()` / `locale = getBrowserLocale()` call-expression param defaults → resolved in the body via `?? `). Mirrored to template.
+
+**Verified GREEN (everything):** `npm run build` (full pipeline incl. bundleServer) exit 0 · `lint:all` + `lint:packages` 0 · `lint:client` 0 warnings · `tsc -b` 0 · `test:unit` **775/775** · `pack:dry` 15/15 · `publish:dry` 15/15 **0 warnings** · **`.smoke-test/run.mjs` GREEN** (typecheck 0 · build PASS · lint 0/0 · all AI-browser asserts). AI indexes regenerated.
+
+**Handoff:** rewrote `SESSION_STATE.md` as a fresh, self-sufficient handoff — TL;DR (all gates green, nothing committed), what-was-done (parts 1-8 high-level + pointers), the npm-2FA publish blocker, and TWO manual test checklists: §3 in-repo (login matrix in both token modes, the new UI components incl. DatePicker keyboard nav, realtime/presence/AFK, infra) and §4 create-luckystack-app (default + --no-prompt + --ai-browser variants + CLI bins + `luckystack add` round-trip + opt-out cleanliness). Nothing committed.
+
+### Session (2026-06-10, part 9): browser-test execution — Phase A (agent-browser) + Phase B1 (Playwright MCP) GREEN
+
+**User prompt**: read SESSION_STATE.md, start frontend testing with the MCP servers + agent-browser (the §7 plan).
+
+**What I did (no code changes — test execution + findings only):**
+- **A1 — register:** created throwaway `lstest+76702@example.com`. **FINDING F1: register POSTs `/auth/api/credentials` 200 and creates the account, but does NOT auto-login — user is bounced to `/login` (expected per plan: auto-session → `/playground`).** Login with the same creds works (sessionStorage token set, lands on `/playground`).
+- **A2 — UI components (all PASS):** TextField (text/email fill, password eye-reveal toggles type, number steppers clamp 0–10 incl. spam-click, clearable ×, char-counter 17/60, error+shake fires via WAAPI `getAnimations()`, red border + "This field is required"); Toggle flip + sizes; Checkbox checked/indeterminate→checked cycle + required-error clears on check; DatePicker single (pick→close→"Jun 15, 2026"), **keyboard fully working** (Enter opens, Arrow/Home/PageDown move focus across weeks/months, Enter picks, Escape closes + focus returns to trigger), date+time (Hours/Minutes inputs update label live, day-pick preserves time), range presets (all 6: 7/30/60/90d/6m/1y — "Last 30 days" → May 12–Jun 10 2026), manual range, range+time Amsterdam (start 12:00 AM / end 11:59 PM defaults); Popover click-open/outside-close/Escape-close/hover-open+close (real mouse events; synthetic JS events don't trigger outside-click/hover — by design, pointer-based).
+- **A3 — console/network sweep:** `/`, `/login`, `/playground`, `/settings` — **0 page errors, 0 console warn/error, 0 failed requests** (the 2 `example.invalid/missing.png` console errors visible under Playwright are the INTENTIONAL Avatar-fallback demo).
+- **A4 — logout/login:** logout → `/login` + sessionStorage cleared; re-login → `/playground` + fresh token.
+- **B1 — cross-tab (Playwright MCP, 2 tabs, both joined `playground-room`; tab2 logged in separately — sessionStorage is per-tab; `allowMultipleSessions` second session OK):** API echo caller-only (tab2: 0 entries) · sync echo fan-out (tab2 received) · broadcastStream cross-tab token-by-token (29 chunks over ~2s in BOTH tabs + complete) · originator-only stream isolated (tab1: 8 progress ticks; tab2: 0 chunks — tab2 DOES get the final `streamProgress complete` serverOutput, which is BY DESIGN: sync output fans out to the room, only the stream is originator-scoped) · streamTo targeted (tab2 = target: 57 chunks; tab1: 0) · API stream caller-only (tab2: 10 ticks; tab1: 0) · **offline queue:** disconnect → 5 syncs queue (counter 5) → reconnect → drains to 0, `queued-0..4` replay in order and arrive cross-tab.
+- **Findings/observations:** **F1** register no auto-login (above — the one real bug). **F2** 5 OAuth buttons visible = correct (all 5 `DEV_*_CLIENT_ID/SECRET` set in `.env`). **W1** (minor): console warning `Sync event sync/playground/streamToToken/v1 has no registered callback on this page` on the ORIGINATOR tab during streamTo. **Test-tooling note:** the playground log-drawer (expanded by default) overlays lower-page buttons → coordinate clicks silently no-op (collapse it first); navbar items are `div[role=button]` so DOM `button` queries miss them.
+- **NOT done (user-gated, §7.4):** B2 presence/AFK (needs `socketActivityBroadcaster: true` + restart), OAuth round-trip, cookie token-mode matrix, forgot-password link paste, scaffold matrix, publish.
+
+**Files touched:** none (test-only session) + this log + INDEX + SESSION_STATE §7 status.
+
+### Session (2026-06-10, part 9b): B2 presence/AFK — wire-level verification GREEN
+
+**User prompt**: flipped `socketActivityBroadcaster: true` + `socketStatusIndicator: true`, restarted the server — continue with B2.
+
+**Method:** raw WebSocket frame capture in tab 2 (patched `WebSocket.prototype` onmessage/addEventListener before the socket (re)connects) + deterministic `document.visibilityState` override in tab 1 to drive the tab-switch AFK path (`hidden` → client emits `intentionalDisconnect` → server `informRoomPeers(userAfk)`; `visible` → reconnect → `socketConnected` → `userBack`). No 5-min idle wait needed; the idle-sampler path emits via the SAME `fireAfkPresence → informRoomPeers` with the identical payload, so the wire assert covers both.
+
+**Results (all PASS):**
+- Tab 2 captured raw frame `42["userAfk",{"userId":"9df0…","endTime":1781083223793}]` — **`{userId, endTime}` only; NO token in ANY presence frame** (the token-leak fix verified at wire level).
+- `userBack {userId}` frame arrives when tab 1 returns to visible.
+- `SocketStatusIndicator` badge renders (showed "Socket status: DISCONNECTED" during the server restart window).
+- Tab-switch grace (20s, `clientSwitchedTab`) keeps the session alive across a hidden→visible cycle; rooms rebuilt on reconnect.
+
+**FINDING F3 (report-only):** with the activity broadcaster ON, the playground "Disconnect (start queueing)" demo becomes a trap: manual `socket.disconnect()` → presence grace `defaultMs` (2s) expires → `removeSession` → reconnect lands on a dead token → `joinRoom` fails `session.notFound` and the tab needs a re-login. Before the config flip the same demo survived a ~50s disconnect (replay worked), so the disconnect-grace/session-delete path appears gated on the broadcaster flag — worth a conscious look (demo hint, longer default grace, or `deleteSessionOnDisconnect` opt-out for the demo).
+- Also re-confirmed: server restart invalidates sessions → both tabs bounced to `/login` (expected); the 11 `ERR_CONNECTION_REFUSED` console errors during the restart window are reconnect noise, not bugs.
+
+**Files touched:** none (test-only) + this log + INDEX + SESSION_STATE §7 status.
+
+### Session (2026-06-10, part 9c): cookie token-mode matrix (sessionBasedToken: false) — GREEN + 2 findings
+
+**User prompt**: flipped `sessionBasedToken: false` + restarted — test the cookie auth mode.
+
+**Verified PASS (agent-browser, fresh login as lstest+76702):**
+- Login → **HttpOnly + SameSite=Strict `token` cookie** (path /, ~7d expiry, secure:false on localhost dev); `document.cookie` empty (JS can't read it); **NO sessionStorage token** in cookie mode.
+- Session survives a page reload purely on the cookie.
+- Realtime works: API echo over the socket (cookie-authenticated handshake) succeeds.
+- **CSRF enforced on HTTP writes**: POST `api/playground/echo/v1` with the session cookie but NO header → **403 `auth.csrfMismatch`** ("Fetch /auth/csrf first"); GET `/auth/csrf` → 200 `{csrfToken}`; retry with `x-csrf-token` → 200 success. (echo is `login:false`/public — enforcement correctly keys on "valid session cookie present", and anonymous requests skip CSRF.)
+- Logout invalidates the session server-side (echo then returns `sessionId:null`; `/playground` bounces to `/login`); re-login issues a FRESH cookie value.
+
+**FINDING F4:** logout does NOT clear the `token` cookie client-side — the dead HttpOnly cookie (same value/expiry) keeps riding along on every request until it expires or is overwritten by the next login. Server-side invalidation makes it non-exploitable, but the logout response should `Set-Cookie` it away (hygiene + privacy).
+**FINDING F5 (minor):** after switching modes, a STALE sessionStorage token from the previous token-mode login lingers; the client then logs `CSRF skipped (token mode or no session)` (mode detection prefers the sessionStorage token over projectConfig). Clearing the sessionStorage token on cookie-mode login (or keying mode detection on config) removes the confusion.
+**Observation:** `/auth/csrf` returns the token in the body only — the `csrf-token` cookie (csrfConfig `cookieName`) is never set on this path; presumably reserved for the login-absent double-submit fallback (§5 review item).
+
+**Files touched:** none (test-only) + this log + INDEX + SESSION_STATE §7 status.
+
+### Session (2026-06-10, part 9d): fixes for F1/F3/F4/F5/W1 (browser-test findings)
+
+**User prompt**: fix every found bug where the correct fix is certain; ask otherwise.
+
+**Root-cause investigation:** 4 parallel Explore agents (register flow, logout/cookie, mode detection, presence-grace + sync warning). All five fixes implemented:
+
+- **F1 — register now auto-logs-in** (`packages/login/src/login.ts`): `registerWithCredentials` minted no token/session, violating ARCHITECTURE_AUTH.md ("both flows return `{status, session, newToken}`") — the client redirect keys on `authenticated: Boolean(newToken)`. Now mirrors the login branch: mint token → build `SessionLayout` → `saveSession(..., true, {supersedeToken})` (register-while-signed-in keeps the old session from kicking the new one) → dispatch `postLogin` (`isNewUser: true`) → return `newToken`. Session-save failure returns `{status:false, reason}` (account exists; user can log in normally).
+- **F4 — logout clears the cookie** : logout is socket-only and sockets cannot send `Set-Cookie`. New **`POST /auth/logout`** route (`packages/server/src/httpRoutes/authLogoutRoute.ts`, wired in `httpHandler.ts` PRE_PARAMS): deletes the session when a live token rides along (tryCatch-guarded) and ALWAYS replies with a `Max-Age=0` clearing cookie matching `buildSessionCookieOptions` attributes; 405 on non-POST. CSRF: intentionally outside the guarded `/auth/api` prefix — SameSite=Strict means a cross-site POST never carries the cookie (same argument as the credentials-bootstrap exemption). Client (`src/_sockets/socketInitializer.ts` + template mirror): in cookie mode the logout socket-event handler now POSTs `/auth/logout` (credentials include) before redirecting. New test `authLogoutRoute.test.ts` (5 cases: path miss, 405, clear-without-token, delete+clear, clear-despite-adapter-error).
+- **F5 — stale sessionStorage token cleanup** (`src/_components/LoginForm.tsx` + template + cli-assets copy): cookie-mode login success now does `sessionStorage.removeItem("token")` so a leftover token-mode entry can no longer confuse client mode detection.
+- **F3 — playground offline demo** (`src/playground/page.tsx`, dev-only): `socket.disconnect()` ('client namespace disconnect' → 2s default grace → `removeSession` with the activity broadcaster on) replaced by `socket.io.reconnection(false) + socket.io.engine.close()` → reason 'transport close' → 60s `transportCloseMs` grace; Reconnect re-enables reconnection. Framework behavior unchanged (deliberate disconnect = short grace is CORRECT); `presenceConfig.ts` `allowReasons` doc-comment now spells out the network-blip vs deliberate-goodbye distinction.
+- **W1 — spurious sync warning** (`packages/sync/src/syncRequest.ts`): `triggerSyncCallbacks` now suppresses "has no registered callback" when a STREAM callback is registered for the route (streaming-only routes are legitimate; warn only when NEITHER registry has an entry).
+
+**Gates:** lint 0 (client/server/packages) · `build:packages` 15/15 · full `npm run build` exit 0 · `test:unit` **780/780** (775 + 5 new).
+**Verify (user):** restart the dev server (rebuilt packages), then: register a fresh account → should land on `/playground` logged-in (F1); logout in cookie mode → `token` cookie GONE (F4); streamTo demo → no console warning (W1); offline demo Disconnect→wait 5s→Reconnect → queue flushes, session alive (F3).
+
+### Session (2026-06-10, part 9e): post-restart browser verification of all five fixes — ALL PASS
+
+- **F1**: fresh register (`lstest+90210@example.com`) → lands logged-in on `/playground`, fresh HttpOnly cookie, sessionStorage empty (F5 implicitly verified in the same flow).
+- **F4**: logout → `/login` and the `token` cookie is GONE (cookie jar empty).
+- **W1**: streamTo (originator targeting its own socket id) → 57 chunks + completion, NO "no registered callback" console warning.
+- **F3**: Disconnect (engine.close) → 5 syncs queue → 6s wait (past the old 2s kill window) → Reconnect → all 5 replay in order, queue drains to 0, no `session.notFound`.
+
+### Session (2026-06-10, part 9f): forgot-password e2e GREEN + F6 reset-link origin fix
+
+**User prompt**: run the forgot-password flow; user pastes the emailed link.
+
+**Flow verified end-to-end (real Resend delivery):**
+- `/reset-password` request → anti-enumeration toast; first attempt to `lstest+90210@example.com` FAILED at Resend (sandbox only delivers to the account owner) — adapter selection is `autoSelectEmailSender` (RESEND_API_KEY set → ResendSender, NOT the ConsoleSender SESSION_STATE assumed).
+- Re-ran with a fresh account on the owner address (`mathijsvanmelick3@gmail.com` / register auto-login worked again ✓). Mail delivered (`[email:resend] sent`).
+- Token form accepts the link → new password set → **old password rejected ("Password does not match") → new password logs in → token re-use rejected ("invalid", one-shot consumption works)**.
+
+**FINDING F6 (user-spotted) + FIX:** the emailed link pointed at `http://localhost:80/reset-password?token=…` — the BACKEND origin. Root cause: framework repo `config.ts:345` registered `app.publicUrl: resolvedEnvironment.backendUrl`. In prod frontend+backend share an origin so it masked itself; in dev they split (5173 vs 80). Fixed: `publicUrl: detectedDns.split(',')[0] ?? detectedDns` — the detected PUBLIC origin (server: first `DNS` env entry, dev fallback `http://localhost:5173`; browser: window origin). OAuth callbacks unaffected (`oauthCallbackBase` explicitly stays on the backend, config.ts:366). **The create-luckystack-app template already did this correctly** (`publicUrl = dev ? 'http://localhost:5173' : env('PUBLIC_URL')`) — no mirror change needed; this was framework-repo-only drift. Same fix also heals `/settings/confirm-email` links (emailChangeNotification.ts uses the same base).
+
+**Gates:** lint 0 · tsc -b 0. Needs server restart to take effect; verify by re-requesting a reset and checking the link host is :5173.
+
+**Part 9f verification (post-restart):** re-requested reset → emailed link now reads `http://localhost:5173/reset-password?token=…` (frontend origin). F6 CONFIRMED FIXED.
+
+### Session (2026-06-10, part 9g): F7 — tsup `splitting: false` duplicated registry state across package entries (OAuth buttons missing in consumer installs)
+
+**User prompt**: smoke-test scaffold + Google OAuth env values set (both DEV_ and prod, in `.env.local`, server restarted) — the Google button never appears.
+
+**Diagnosis trail:** `/auth/providers` on the smoke app returned only `credentials`. Probe inside `.smoke-test/app` proved env loads fine (all 4 vars set, NODE_ENV=development) yet importing `@luckystack/login/register` left `getOAuthProviders()` at the default. Root cause: every multi-entry package built with tsup **`splitting: false`** — tsup then inlines a PRIVATE COPY of every shared module into each entry. `dist/register.js` (imported by bootstrap auto-detect) pushed google into ITS copy of the `oauthProviders` registry; `dist/index.js` (read by the server via `getLogin()`) served ITS copy's default `[credentials]`. **Invisible in the framework repo** (runs from source = single module instance) — exactly the class of bug only tarball-based consumer testing catches. Same latent hazard in every multi-entry package (incl. `core` with 4 entries hosting all framework registries, `presence`, `email`, `error-tracking` register subpaths, `sync` client/server).
+
+**Fix:** `splitting: true` in all 10 multi-entry tsup configs (core, devkit, docs-ui, email, error-tracking, login, presence, router, server, sync) + a comment explaining WHY it must stay on. Shared modules now land in common chunks (verified: `registerOAuthProviders` defined exactly once, in a chunk, imported by both entries).
+
+**Verified:** fresh login tarball installed into the existing `.smoke-test/app` (user's `.env.local` preserved) → probe now reports `providers: credentials,google`. Gates: `build:packages` 15/15 · `test:unit` 780/780 · `pack:dry` 15/15.
+
+**Follow-up note:** the other 13 tarballs inside `.smoke-test/app` are still the pre-split builds; a full `node .smoke-test/run.mjs` re-packs everything but WIPES `.smoke-test/app` (incl. `.env.local` — copy creds out first).
+
+### Session (2026-06-10, part 9h): F8 — scaffold ships no dev supervisor (no env/config watch) + OAuth-callback 403 diagnosis
+
+**User prompt**: (1) env edits in the smoke app don't reload on save; (2) Google login round-trip ends in "Forbidden" on `/auth/callback/google?state=…&code=…`.
+
+**(2) OAuth 403 — diagnosis, no code change:** the origin gate (`enforceOriginPolicy`, httpHandler.ts:141) 403s any request whose Origin/Referer is present but not allowlisted. Google's redirect carries `Referer: https://accounts.google.com` → must be in `EXTERNAL_ORIGINS` (.env). `normalizeOrigin` strips paths/ports so the bare origin string suffices. The `--no-prompt` scaffold selected no OAuth providers → `EXTERNAL_ORIGINS` empty. USER ACTION: `EXTERNAL_ORIGINS=https://accounts.google.com` in `.smoke-test/app/.env` + restart. (Template pre-fills this when providers are chosen in the wizard — works as designed; documented in `.env` comments.)
+
+**(1) F8 root cause + fix:** the framework repo's `npm run server` runs `devkit/src/supervisor.ts` (chokidar on `config.ts` + `getEnvFiles()` + `server/**` → debounced child restart with a CLEAN ambient env so `.env` reloads fresh). But devkit never BUILT or EXPOSED it (tsup entries = index + validateDeploy only) and the template's `server` script was a bare `tsx server/server.ts` → consumers had NO file/env watching at all. Fixed:
+- `devkit/src/supervisor.ts`: `#!/usr/bin/env node` shebang; child now passes `--tsconfig tsconfig.server.json` when present (matches the manual run); stray color-arg strings removed from console.logs.
+- `devkit/tsup.config.ts`: `src/supervisor.ts` added as entry. `devkit/package.json`: new bin **`luckystack-dev`** → `dist/supervisor.js`.
+- Template `package.json`: `"server": "luckystack-dev"` (+ `"server:once"` keeps the unsupervised run).
+- Smoke app: fresh devkit tarball installed + same script patch applied in place (user's `.env.local` untouched).
+
+**Gates:** build:packages 15/15 · lint:packages 0 · test:unit 780/780. Encoding hygiene: repaired mojibake the bulk PowerShell edit introduced in 3 tsup configs + supervisor.ts (em-dashes + a BOM that broke esbuild on the shebang).
+
+### Session (2026-06-10, part 9i): F9 — stale env in supervised restarts (dist): root cause + fix + wire-level proof
+
+**User prompt**: autonomous session (plan approved, ultracode authorized): env edits don't reach the runtime despite a visible restart, in the framework repo AND the smoke app.
+
+**Empirical triage:** framework repo (tsx source path) proved HEALTHY — env-touch → supervisor restart → process tree fully replaced → `/auth/providers` flips correctly. The smoke app (dist tarball path) reproduced the bug EXACTLY: `.env` `EXTERNAL_ORIGINS` edit → real restart (PID change) → origin gate STILL stale (403 with the value present in the file); cold start with identical files → 200.
+
+**Root cause (adversarially verified by a 5-agent ultracode workflow, incl. an independent ESM mini-repro):** tsup INLINED `ambientEnvSnapshot.ts` into the `dist/supervisor.js` entry body. ESM imports are hoisted, so `@luckystack/core` (whose `env.ts:73` `export const env = bootstrapEnv()` merges `.env` into `process.env` at import time) evaluated BEFORE the `var ambientEnv = {...process.env}` body line → snapshot polluted with first-boot `.env` values → child inherits them as real env vars → child's `loadEnvFiles` loads `.env` with `override:false` → inherited stale values win forever. `.env.local` keys masked the bug (they load with `override:true`); `.env`-only keys (EXTERNAL_ORIGINS!) stayed frozen. Source path never broke (module order preserved under tsx) — which is why the framework repo always seemed fine.
+
+**Fix (devkit/src/supervisor.ts):** the supervisor now imports NOTHING from @luckystack/core — `getEnvFiles()` inlined (documented ambient-only semantics), NODE_ENV resolved via pure `dotenv.parse` (no `process.env` mutation), child spawned with `{...process.env}` which is now guaranteed `.env`-free. `ambientEnvSnapshot.ts` deleted (orphaned); `dotenv` added as a direct devkit dependency. NEW GUARD TEST `supervisor.test.ts`: asserts source AND dist contain no `@luckystack/core` reference, so the regression cannot silently return.
+
+**Adversarial side-verdicts:** the Windows orphan-grandchild theory was REFUTED (libuv job objects kill the tsx grandchild with the wrapper; empirically the listener PID is replaced each restart). Sweep surfaced report-only items for the final report: ambient-vs-`.env.local` precedence inconsistency (core env.ts, by-design question), secret-manager dev-reload staleness, register.ts module-eval config freeze, workspacesTerminal pty kill, smoke-run shell:true Ctrl+C orphans.
+
+**Wire-level end proof (smoke app, fixed tarballs installed in-place):** cold start with value → 200 · REMOVE value + save (no manual action) → **403** · re-add + save → **200** · `.env.local` Google-keys restore → provider list back to `credentials,google`. Gates: build:packages 15/15 · lint 0 · test:unit 782/782 (2 new guard tests).
+
+### Session (2026-06-10, part 9j): fase 2+3 — login-UI volgt env + login-matrix 4/4 GREEN
+
+**Fase 2 (smoke app, browser-proof):** the login UI reads `GET /auth/providers` live on every page load (LoginForm useEffect — no client cache). With the F9 fix in place: remove Google keys + save → refresh → Google button GONE; restore keys + save → refresh → button BACK. No manual restart anywhere. (Open tabs need a refresh — fetch is mount-time, by design.) The user-reported "UI still shows google" was downstream of the F9 stale-env bug.
+
+**Fase 3 (framework app, every flip via config.ts save → supervisor auto-restart — dogfooding the F9 fix):**
+| # | basedToken | allowMultiple | result |
+|---|---|---|---|
+| S1 | true | true | PASS — token in sessionStorage, NO cookie; register → auto-login → /playground; 2nd concurrent login (Playwright) leaves 1st (agent-browser) alive (API echo OK); re-login-while-signed-in swaps 90210→76702 without loss; logout clears storage |
+| S2 | true | false | PASS — 2nd login same account KICKS 1st: tab A bounced to /login with the `[session] Server emitted logout` warn; tab B lives |
+| S3 | false | true | PASS — HttpOnly cookie, sessionStorage empty; 2nd concurrent login leaves 1st alive (`/auth/csrf` 200 probe); raw POST without CSRF header correctly 403s (enforcement regression-checked) |
+| S4 | false | false | PASS — 2nd login KICKS 1st AND the kicked browser's HttpOnly cookie is CLEARED via the new `POST /auth/logout` (F4 flow fires on kick, not just manual logout); re-login-while-signed-in (cookie+single, the supersede-sensitive path) swaps without loss |
+
+Config restored to the user's state (`sessionBasedToken: false`, `allowMultipleSessions: true`). Test accounts: lstest+76702 / lstest+90210 / lstest+s1@example.com (S1 register).
+
+### Session (2026-06-10, part 9k): F11 CSRF backend-origin fix + playground full sweep + F10 report-only
+
+**F11 (cookie-mode CSRF in split-origin dev) — FIX:** `getCsrfToken()` built the `/auth/csrf` URL from `location.origin`, which in the dev split-origin model is the FRONTEND (:5173) — so the request hit Vite's SPA fallback (HTML, not JSON) and token resolution silently failed. `packages/core/src/csrf.ts` now prefers the live socket's connection URI (`socket.io.opts.hostname/port/secure`) as the backend origin, falling back to `location.origin` for same-origin (prod / Vite-proxy) deploys. This is the CSRF analogue of the F6 reset-link origin bug.
+
+**Playground full sweep (framework app, lstest+76702, all PASS):**
+- Notifications ×4 (success/warning/error/info toasts, correct data-type) · Buttons (primary/secondary/destructive/new/remove; Disabled stays disabled).
+- Confirm dialogs: Basic (open→Confirm→close), Typed-DELETE (Confirm disabled until "DELETE" typed, then enabled), Stacked menus (2 layers, Escape closes layer-by-layer).
+- Dropdown single (options list, pick, close, trigger shows pick) + search-filter ("neth"→Netherlands) · MultiSelect (stays open across picks, outside-click closes).
+- Lifecycle: apiError + syncError normalized to the log + server stacktrace; rateLimit Spam×10 → "3 ok / 7 rate-limited" (limit=3).
+- Health probes /livez 200{live}, /readyz 200{bootUuid,redis,prisma all true}, /_health 200{bootUuid,envHashes} · CSRF fetch+clear-cache · Settings: List sessions, email prefs Enable/Disable.
+- Error boundary: "Throw a render error" → ErrorPage (Go Back / Home / Developer Details).
+- Streaming (verified in a CLEAN agent-browser session): broadcastStream 31 chunks + complete; offline queue disconnect→5 queued→reconnect→drain to 0, all replay, session alive (F3 regression-clear).
+- **False alarm corrected:** Playwright tabs initially showed 0 stream chunks — caused by MY OWN earlier WebSocket.prototype monkeypatch on those tabs corrupting socket.io's message path, NOT a framework regression. Server emitted chunks correctly; the independent agent-browser session confirmed streaming works. Lesson: don't leave WS-prototype patches installed on a page you later assert against.
+
+**FINDING F10 (report-only, consumer demo code):** `src/settings/_api/listSessions_v1.ts` returns each session's FULL raw token to the client. It's the logged-in user's OWN tokens (no cross-user leak), but a list-sessions surface should return a masked/truncated token or an opaque session id. Left unfixed per report-without-auto-fixing — it's consumer-side demo code; flagging for the user.
+
+**Gates:** lint 0 (client/server/packages) · build:packages 15/15 · full build exit 0 · test:unit 782/782.
+
+### Session (2026-06-10, part 9l): env "won't change" — REAL root cause was dual-file definition (correcting the F9 framing) + LUCKYSTACK_ENV_DEBUG diagnostic
+
+**User pushback (correct):** removing an OAuth key's VALUE (empty) hides the button, but deleting the whole KEY line keeps it — "the env resolver upserts each detected key instead of replacing the whole runtime env."
+
+**Reproduced + root-caused (framework repo, throwaway DEV_GITHUB key, real secrets backed up + restored byte-exact):**
+- github present → delete `DEV_GITHUB_CLIENT_*` from `.env.local` only → COLD restart → github STILL present.
+- Cause: the keys are defined in **BOTH `.env` and `.env.local`**. `loadEnvFiles` loads `.env` then `.env.local` (override:true). Deleting from `.env.local` removes the override, so `.env`'s value resurfaces; setting it EMPTY in `.env.local` overrides to '' (button hides). This is correct dotenv precedence, NOT runtime upsert-persistence. Removing the key from BOTH files → github disappears (confirmed).
+- **This corrects the F9 framing:** F9 (supervised-dist env-snapshot pollution) was a REAL, separate bug that affected the SMOKE APP (EXTERNAL_ORIGINS, a `.env`-only key, stayed stale until the supervisor stopped importing core). The user's framework-repo symptom here is a DIFFERENT mechanism: dual-file definition. Both are now resolved/explained.
+- `.env` is gitignored (not tracked) — the duplicated secrets are not committed. Surfaced for the user: their personal `.env` duplicates nearly every secret from `.env.local` (OAuth, REDIS_PASSWORD, RESEND_API_KEY, SMTP_PASS, SENTRY_DSN); consolidating each into ONE file removes the whole confusion class. Left as the user's config decision (report-only).
+
+**New diagnostic (`packages/core/src/env.ts`):** opt-in `LUCKYSTACK_ENV_DEBUG=1` → at boot, `loadEnvFiles` parses each loaded file with `dotenv.parse` (pure, no mutation) and warns for every key present in >1 file, naming the winner. Default OFF (zero noise). Empirically verified: with the flag on, the framework boot logged all ~30 duplicated keys incl. `DEV_GITHUB_CLIENT_ID … ".env.local" wins`. Documented in the scaffold `.env_template`. Core tarball repacked + reinstalled into `.smoke-test/app`.
+
+**Gates:** lint:packages 0 · build:packages 15/15 · test:unit 782/782. Server restarted clean (flag off); all 6 providers back; env files restored byte-exact.
+
+### Session (2026-06-10, part 9m): convention agreed — one env key per file + clearer template comments
+
+**User agreed:** never put the same key in both `.env` and `.env.local`; add comments so it's obvious that emptying an OAuth id/secret removes its login button.
+
+- `template/_dot_env_template`: header now states secrets do NOT belong in `.env` (→ `.env.local`), keep every key in exactly one file, LUCKYSTACK_ENV_DEBUG=1 lists duplicates.
+- `template/_dot_env_dot_local_template`: top "ONE FILE PER KEY" note (load order + the empty-vs-delete footgun); OAuth block now explains the login page reads `GET /auth/providers` (a provider shows ONLY when both id+secret are non-empty), so emptying them hides the button — and warns the same keys must not also live in `.env`.
+- Memory saved: `feedback-env-one-file-per-key` (convention I will uphold going forward).
+- Scaffolder tarball repacked into `.smoke-test/tarballs`.
+
+No code logic change (docs/comments + the part-9l diagnostic). Gates unchanged: lint 0 · build:packages 15/15 · test:unit 782/782.
+
+### Session (2026-06-10, part 9n): Vite slowness — usePolling pegging a CPU core + zombie processes from my restart cycles
+
+**User report:** Vite client suddenly slow; console shows repeated ".env / .env.local changed, restarting server" + "optimizer bundling dependencies".
+
+**Two causes found:**
+1. **`server.watch.usePolling: true`** in the framework repo's `vite.config.ts` — polling re-stats every watched file on a timer, pegging a CPU core. Measured: the running vite process had burned **604 CPU-seconds** since boot. On native Windows with the source on a local NTFS drive, native fs events work fine and polling is pure waste. FIX: `usePolling: process.env.VITE_USE_POLLING === '1'` (OFF by default; opt back in only for WSL2→Windows / Docker / network shares). Also added `.smoke-test/`, `dist/`, `.cache/` to the dev-watch ignore list (the `.smoke-test` scaffold alone added 612 polled source files). After the fix a fresh vite uses ~5 CPU-sec idle and HMR still fires (verified by touching `src/index.css` → `hmr update`). The scaffold TEMPLATE vite.config does NOT use polling (proxy model) — no mirror needed; this was framework-repo-only.
+2. **Zombie processes** from my many start/kill cycles this session: 3 orphaned supervisors + 2 server/server.ts (one owning :80, the other EADDRINUSE-crash-looping every 300ms under its supervisor → extra CPU + the restart spam). Killed all; restarted ONE clean server + client (single listener on :80 and :5173, no crash loop).
+- The ".env changed, restarting" lines the user saw (20:14–20:15) were Vite's built-in env-file watch reacting to MY test edits (add/remove OAuth keys, env-debug runs); they stop now that the edits are done.
+
+**Gates:** full `npm run build` exit 0. `vite.config.ts` change is dev-server-only. Server + client running clean.
+
+### Session (2026-06-10, part 9o): F12 — Google OAuth redirect_uri_mismatch (127.0.0.1 vs localhost)
+
+**User report:** Google login → "Error 400: redirect_uri_mismatch", redirect_uri=http://127.0.0.1:80/auth/callback/google (Google Console has http://localhost:80/...).
+
+**Root cause:** the framework repo's legacy consumer overlay `luckystack/login/oauthProviders.ts` (pre-0.2.0; the template no longer ships a `luckystack/login/` overlay — `@luckystack/login/register` replaced it) builds the callback host by hand: `${protocol}://${SERVER_IP}:${SERVER_PORT}` → `http://127.0.0.1:80` in dev. It runs AFTER `@luckystack/login/register` and overrides it (last-writer-wins), so the correct `oauthCallbackBase` (= `http://localhost:80`, from config.ts) was discarded. Google does an EXACT-match on redirect_uri → 127.0.0.1 ≠ the registered localhost → 400. (Diagnosis: a temp debug in register.ts dist never fired → register's OAuth auto-wire isn't the active registrant in this repo; this overlay is. Removing the overlay dropped providers to just `credentials`, confirming it's the live registrant — so fixed in place rather than deleted.)
+
+**Fix (`luckystack/login/oauthProviders.ts`):** callback host now = `getProjectConfig().oauthCallbackBase || app.publicUrl` (the canonical backend origin config.ts already resolves: dev localhost:80, prod public domain), not a hand-built SERVER_IP URL. Verified live: `redirect_uri=http://localhost:80/auth/callback/google`, providers `credentials,google,github` (the two with DEV_ creds set; discord/facebook/microsoft remain commented template defaults).
+
+**Collateral I caused + disclosed (NOT functional):** earlier this session a `Set-Content -Encoding ascii` (during the part-9l dual-file github test) corrupted ~11 em-dashes (—) → `?` in `.env.local` COMMENT lines only. Verified: google/github credential VALUES intact (correct lengths, no `?`); the lone `?` on a non-comment line is the legitimate `?authSource=...` MongoDB query string in DATABASE_URL. `.env` now holds only public keys (its duplicated OAuth secrets are gone — aligns with the one-file-per-key convention; real values safe in `.env.local`). Left the secret files untouched from here; offered cosmetic cleanup to the user.
+
+**Gates:** lint 0 (client/server/packages). Server+client running; redirect verified localhost:80.
+
+### Session (2026-06-10, part 9p): orphan vite kill + react-swc→react plugin swap + DevTools-lag diagnosis
+
+**User reports:** (1) a hidden vite on :5173 they couldn't find; (2) lag whenever DevTools/console is open, even on a fresh :5174 instance; (3) the recurring `[vite:react-swc] We recommend switching to @vitejs/plugin-react` hint (raised before, not acted on).
+
+1. **Orphan :5173** — it was the child of a `Start-Process -WindowStyle Hidden powershell` I launched earlier for the client (untrackable hidden window = why the user couldn't find it). Killed the tree; :5173 free. Won't use hidden Start-Process again — use tracked background runs.
+2. **react-swc → react plugin** — framework repo runs rolldown-vite (Vite 8.0.16 + rolldown 1.0.3); under rolldown the oxc-based `@vitejs/plugin-react` is faster than `@vitejs/plugin-react-swc` when no SWC plugins are used, and silences the hint. Installed `@vitejs/plugin-react@6`, swapped the import in `vite.config.ts`, removed `@vitejs/plugin-react-swc` from package.json. Verified: warning GONE, `vite ready in ~461ms`, page renders, 0 console errors, full `npm run build` exit 0. **Template NOT changed** — it runs regular Vite 6 where plugin-react-swc is the correct/faster choice and the hint never appears.
+3. **DevTools-open lag — diagnosed (not fully eliminable):** measured 0 console lines over 8s idle → NOT console spam. Root cause is the unbundled rolldown-vite dev model: Chrome DevTools parses source maps for the many separately-served modules (packages/*/src aliased to source + deps). The swc→oxc swap generates cleaner maps under rolldown and may reduce it — user to re-test. Compounding factor on /playground specifically: `src/playground/page.tsx:510` polls queue sizes via `setInterval(…, 500)` → a React re-render every 500ms forever (no console output, but costly with React DevTools open). Left as-is (dev playground code; raising the interval is the user's call).
+
+**Gates:** full `npm run build` exit 0. Server+client running clean (single :5173 listener).
+
+### Session (2026-06-10, part 9q): login UI layout-shift fix + lazy-loaded pages (DevTools-lag root cause)
+
+**#1 — login UI "verspringt de hele tijd":** the OAuth buttons popped in AFTER the rest of the form rendered (the `GET /auth/providers` fetch resolves async), shifting layout on every mount / login↔register nav. The providers useEffect has `[]` deps (no loop) — it's a one-time-per-mount shift, frequent because the user navigates login↔register a lot. FIX (`src/_components/LoginForm.tsx` + template + cli-assets mirror): a `ready` state gates the whole form on the fetch; a centered spinner shows until it resolves (success OR error), then the form renders once, fully-formed. No incremental button pop-in.
+
+**#2 — severe DevTools-open lag (10s freeze + 3s interactions), diagnosed + fixed:** measured 0 console spam → not logging. Root cause: `src/main.tsx` eager-globbed pages (`import.meta.glob('./**/*.tsx', { eager: true })`), so EVERY route loaded ALL pages + their (heavy) import trees on first paint — even `/login` pulled in playground (1700-line) + workspaces shells + every component. Each dev module carries a fat rolldown-vite inline source-map; Chrome DevTools parses them all on open → the freeze. FIX: convert to LAZY loading via React Router 7 `lazy` (`eager: false` → per-route dynamic import). `template`/`middleware` resolve inside the loader (same module). Splat (`/foo/*`, 1 page: workspaces) can't read its `splat` export without loading the heavy component (an eager `import:'splat'` glob was tried + measured — it statically imports all 51 modules, defeating lazy), so instead each non-root page also registers a `${finalPath}/*` route whose loader renders the page IF it opts into splat, else ErrorPage (404). Measured: `/login` now loads **17** `/src` modules (was ~127), only its own page.tsx. Verified live: login/register/playground render lazily; `/workspaces` → owns its subtree (`/workspaces/board`); `/register/garbage` → ErrorPage (non-splat 404). Bonus: prod `vite build` now code-splits each page into its own chunk. Template mirrored (no splat there — exact lazy routes only, matching its prior no-splat behavior).
+
+**Also (part 9p, same session): @vitejs/plugin-react-swc → @vitejs/plugin-react** (rolldown-vite oxc, silences the startup hint) + killed an orphan hidden-window vite on :5173 + Vite `usePolling` off by default.
+
+**Gates:** full `npm run build` exit 0 · lint:client/server 0. Server+client running; login renders, no console errors.
+
+### Session (2026-06-10, part 9r): playground navbar animation glitch — content-jump on sidebar toggle
+
+**User:** navbar animations glitchy on /playground.
+
+**Root cause:** the sidebar toggled between `md:relative md:w-14` (in-flow rail) when folded and `md:absolute md:inset-0 md:w-64` (overlay) when expanded. The relative↔absolute switch is instant (not animatable), so on every toggle the main content JUMPED 14px as the rail left/entered the flex flow — most visible on /playground (heavy DOM reflow). The intervals on that page (`setInterval` 500ms queue-size, 300ms socket-id) both bail on unchanged values, so they were NOT the cause.
+
+**Fix (`src/_components/Navbar.tsx` + `src/_components/TemplateProvider.tsx`, framework-repo only — the template ships no Navbar/sidebar dashboard):** the desktop sidebar is now ALWAYS `md:absolute` (overlay), toggling only its width (`md:w-14` ↔ `md:w-64`). The dashboard content reserves the folded rail with a constant `md:pl-14`, so it never reflows on toggle — only the overlay width animates. Verified live: folded rail 56px (content heading at x=235), expanded overlay 256px with the heading STILL at x=235 (zero content shift) — preserves the original overlay-on-expand look, glitch gone.
+
+**Gates:** lint:client 0 · full `npm run build` exit 0. (Server had been killed during a vite-restart cycle earlier and was restarted.)
+
+### Session (2026-06-10, part 9s): rewrote SESSION_STATE.md as the full-session handoff
+
+Rewrote `SESSION_STATE.md` from scratch to capture the entire 2026-06-10 session: TL;DR (0.2.0 uncommitted, gates green 782/782), the F1–F12 + W1 fix table + the dev-perf/UX fixes (env diagnostics, Vite polling/plugin, lazy-loading, login-shift, navbar), what was browser-verified, the open/report-only items, and — answering the user's question — a REQUIRED `.smoke-test/app` verification plan (§4) explaining WHY consumer-context testing is non-optional (F7/F8/F9 only manifest on the dist/tarball path, never in the source-run framework repo). Docs-only; no code change.

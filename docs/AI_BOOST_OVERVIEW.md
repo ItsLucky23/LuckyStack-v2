@@ -1,6 +1,6 @@
 # AI Boost — One-page Overview
 
-> Last reviewed: 2026-05-27
+> Last reviewed: 2026-06-09
 
 Catalog of every AI-tooling surface LuckyStack ships, organized so consumers, contributors, and AI agents can find the right artifact for the right question without piecing it together from scratch. Each row points to the canonical file or pattern; the per-category paragraphs below explain when each one fires and what command (if any) refreshes it.
 
@@ -24,6 +24,7 @@ This is a *map*, not the docs themselves. Follow the links to the artifact you a
 | Template injection | (automatic) `_api/`, `_sync/`, `page.tsx` | Empty files get starter content + framework conventions auto-injected on save |
 | JSDoc `@docs` tags | (in route files, parsed by devkit) | `owner` / `tags` / `deprecated` metadata surfaced in apiDocs UI + `AI_PROJECT_INDEX.md` |
 | Type generation | `src/_sockets/apiTypes.generated.ts`, `apiInputSchemas.generated.ts`, `apiDocs.generated.json` | Exact input/output typing per route, Zod schemas, docs JSON |
+| AI browser testing | `docs/AI_BROWSER_TESTING.md` + `agent-browser.json` / `.mcp.json` / `.claude/settings.json` | agent-browser (CLI) + Playwright/Chrome DevTools MCP; cheapest-first ladder + suggest→approve protocol (opt-in via `--ai-browser`) |
 | Optional upgrade path | `docs/GRAPHIFY_INTEGRATION.md` | Graphify (Python tool) for call-graph + community detection + MCP server mode |
 
 ---
@@ -112,6 +113,18 @@ The devkit type-map emitter (`npm run generateArtifacts`) walks every `_api/` an
 1. `docs/AGENT_TEAM_PLAYBOOK.md` — multi-agent workflow conventions.
 2. `docs/BRANCH_LOG_PROTOCOL.md` — how to log per-branch progress.
 3. `docs/PACKAGE_OVERVIEW.md` — per-package use-cases + peer dependencies.
+
+---
+
+## Scaling AI context (retrieval as the project grows)
+
+The auto-generated indexes are deterministic markdown — they cover the vast majority of projects. Climb a rung only when the cheaper one stops fitting:
+
+1. **Default — the three indexes (`AI_QUICK_INDEX` / `AI_CAPABILITIES` / `AI_PROJECT_INDEX`).** Sufficient for most apps (roughly < ~50 routes). Zero setup, regenerated on every commit, always in context. Use these until an AI starts repeatedly asking "what depends on this?" or missing cross-file relationships.
+2. **Escalate → graphify (`docs/GRAPHIFY_INTEGRATION.md`).** When the project sprawls (many routes, deep call graphs, "god nodes") and the AI needs a real **call-graph + community detection + an interactive map + MCP-server retrieval** rather than a flat inventory. Opt-in, AST-only resync (zero ongoing cost); commit `graph.json` per branch to avoid staleness.
+3. **Escalate → a vector/RAG layer (project-specific, not framework-provided).** Only when natural-language retrieval over a large corpus (docs, prior decisions, large data models) beats structured lookup — e.g. "find everywhere we handle refunds" across hundreds of files. Wire your own embeddings/vector store + an MCP retrieval server; the framework deliberately stays out of this (it's app-shaped, and a static index + graphify cover the structural questions first). Reach for it last — most "I can't find it" problems are solved one rung down.
+
+> Rule of thumb: structured questions (routes, exports, deps, "what calls X") → indexes/graphify; fuzzy semantic questions over a big corpus → RAG. Don't add a vector store to dodge a stale index — regenerate the index.
 
 ---
 

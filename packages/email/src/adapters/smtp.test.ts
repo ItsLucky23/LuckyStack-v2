@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest';
 
 import { SmtpSender } from './smtp';
 
-//? SmtpSender's factory runs a SYNCHRONOUS boot guard:
-//?   createRequire(import.meta.url).resolve('nodemailer')
-//? `nodemailer` is an OPTIONAL peer and is NOT installed in this repo, so the
-//? guard throws a descriptive error before any transporter is built. That is
-//? the only branch we can deterministically cover here without installing the
-//? peer (a `vi.mock('nodemailer')` cannot satisfy `require.resolve`, which hits
-//? the real module resolver on disk).
+//? SmtpSender's factory runs a SYNCHRONOUS boot guard via
+//?   loadPeer('nodemailer', ..., createRequire(import.meta.url))
+//? which asserts the peer is installed before loading it. `nodemailer` is an
+//? OPTIONAL peer and is NOT installed in this repo, so the guard throws a
+//? descriptive error before any transporter is built. That is the only branch
+//? we can deterministically cover here without installing the peer (a
+//? `vi.mock('nodemailer')` cannot satisfy `require.resolve`, which hits the
+//? real module resolver on disk).
 //?
 //? Intentionally NOT covered (requires the `nodemailer` peer to be installed):
 //?   - happy-path transporter construction + send()

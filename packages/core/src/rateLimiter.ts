@@ -10,6 +10,7 @@
  */
 
 import { getProjectConfig } from './projectConfig';
+import { createRegistry } from './createRegistry';
 import tryCatch from './tryCatch';
 import { redis } from './redis';
 import { formatKey } from './redisKeyFormatter';
@@ -254,7 +255,11 @@ export const defaultRateLimitStrategy: RateLimitStrategy = {
   },
 };
 
-let activeStrategy: RateLimitStrategy = defaultRateLimitStrategy;
+const strategyRegistry = createRegistry<RateLimitStrategy>(defaultRateLimitStrategy, {
+  onRegister: (strategy) => {
+    getLogger().debug(`[RateLimiter] active strategy → ${strategy.name}`);
+  },
+});
 
 /**
  * Replace the active rate-limit backend. Pass a strategy that implements
@@ -270,38 +275,37 @@ let activeStrategy: RateLimitStrategy = defaultRateLimitStrategy;
  * registration (last-write-wins).
  */
 export const registerRateLimitStrategy = (strategy: RateLimitStrategy): void => {
-  activeStrategy = strategy;
-  getLogger().debug(`[RateLimiter] active strategy → ${strategy.name}`);
+  strategyRegistry.register(strategy);
 };
 
 /** Read the currently-active strategy (defaults to the built-in). */
-export const getRateLimitStrategy = (): RateLimitStrategy => activeStrategy;
+export const getRateLimitStrategy = (): RateLimitStrategy => strategyRegistry.get();
 
 /**
  * Check if a request is allowed under rate limiting rules.
  * Increments the counter for the key if allowed.
  */
 export const checkRateLimit = async (params: CheckRateLimitParams): Promise<RateLimitResult> =>
-  activeStrategy.check(params);
+  strategyRegistry.get().check(params);
 
 /**
  * Get current rate limit status without incrementing counter.
  * Useful for rate limit headers in responses.
  */
 export const getRateLimitStatus = async (key: string, limit: number): Promise<RateLimitResult> =>
-  activeStrategy.getStatus(key, limit);
+  strategyRegistry.get().getStatus(key, limit);
 
 /**
  * Clear rate limit for a specific key.
  * Useful for admin overrides or testing.
  */
-export const clearRateLimit = async (key: string): Promise<void> => activeStrategy.clear(key);
+export const clearRateLimit = async (key: string): Promise<void> => strategyRegistry.get().clear(key);
 
 /**
  * Clear all rate limits.
  * Useful for testing or server restart.
  */
-export const clearAllRateLimits = async (): Promise<void> => activeStrategy.clearAll();
+export const clearAllRateLimits = async (): Promise<void> => strategyRegistry.get().clearAll();
 
 //? Cleanup expired entries from the in-memory store on a configurable
 //? interval. Only relevant for the default strategy; custom strategies

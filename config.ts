@@ -1,5 +1,5 @@
 import { LANGUAGE, THEME, User } from "@prisma/client";
-import type { BaseSessionLayout } from '@luckystack/login';
+import type { BaseSessionLayout } from '@luckystack/core';
 //? Import from the specific file (not the barrel) so Vite's client bundle
 //? doesn't drag server-only core modules (bootUuid, ioredis, etc.) into the
 //? browser. Same rule we use in apiRequest/syncRequest.
@@ -28,16 +28,16 @@ const env = (key: string): string | undefined =>
 const fallbackEnvironment: AppEnvironmentConfig = {
   backendUrl: "http://localhost:80",
   dev: true,
-  sessionBasedToken: true,
+  sessionBasedToken: false,
   allowMultipleSessions: true,
 };
 
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
   "http://localhost:5173": fallbackEnvironment,
   "http://localhost:5174": {
-    backendUrl: "http://localhost:81",
+    backendUrl: "http://localhost:80",
     dev: true,
-    sessionBasedToken: true,
+    sessionBasedToken: false,
     allowMultipleSessions: true
   },
   "https://staging.server.com": {
@@ -169,14 +169,14 @@ const config = {
    * }
    * ```
    */
-  socketActivityBroadcaster: false,
+  socketActivityBroadcaster: true,
 
   /**
    * Show the floating socket-status indicator badge in the corner of the screen.
    * Renders the `<SocketStatusIndicator />` from `@luckystack/presence/client`.
    * Useful in development to confirm connect/disconnect/reconnect state at a glance.
    */
-  socketStatusIndicator: false,
+  socketStatusIndicator: true,
 
   /**
    * Enable route-based location syncing from client to server session.
@@ -300,7 +300,7 @@ const config = {
 // TYPE DEFINITIONS
 // ============================================
 
-export type { SessionLocation, AuthProps } from '@luckystack/login';
+export type { SessionLocation, AuthProps } from '@luckystack/core';
 
 // Project-specific session shape — extends the Prisma User model and satisfies BaseSessionLayout.
 interface SessionLayoutBase extends Omit<User, 'password'> {
@@ -310,7 +310,7 @@ interface SessionLayoutBase extends Omit<User, 'password'> {
 }
 
 export interface SessionLayout extends SessionLayoutBase {
-  location?: import('@luckystack/login').SessionLocation;
+  location?: import('@luckystack/core').SessionLocation;
   /** CSRF token bound to this session. Minted by `saveSession` in cookie mode. */
   csrfToken?: string;
   //? `lastLogin` already comes from Prisma's User model via SessionLayoutBase
@@ -321,10 +321,12 @@ export interface SessionLayout extends SessionLayoutBase {
 
 // Verify SessionLayout is structurally compatible with BaseSessionLayout at compile time.
 export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true : never;
- 
-/** Supported OAuth providers */
-export const providers = ['credentials', 'google', 'github', 'facebook', 'discord'];
- 
+
+//? OAuth providers + the credentials form are now ENV-DRIVEN and read from the
+//? live registry via `GET /auth/providers` (a provider registers in
+//? `@luckystack/login/register` only when its *_CLIENT_ID + *_CLIENT_SECRET are
+//? set; credentials is gated by `auth.credentials`). No static `providers` array.
+//?
 //? Build the CORS allowedOrigins list from the env vars this project cares
 //? about. The framework no longer reads DNS/EXTERNAL_ORIGINS itself — it
 //? expects an explicit list via ProjectConfig.http.cors.allowedOrigins.
@@ -340,7 +342,12 @@ const collectAllowedOrigins = (): string[] =>
 //? in server.ts for order safety, which is a no-op overwrite.
 registerProjectConfig({
   app: {
-    publicUrl: resolvedEnvironment.backendUrl,
+    //? The PUBLIC app origin — where the SPA routes live. Email links
+    //? (/reset-password, /settings/confirm-email) are built on this base, so
+    //? it must point at the FRONTEND (dev: Vite on :5173), not the backend.
+    //? Server-side this is the first DNS entry; in the browser it's the
+    //? window origin. OAuth callbacks use `oauthCallbackBase` (backend) below.
+    publicUrl: detectedDns.split(',')[0] ?? detectedDns,
   },
   logging: config.logging,
   rateLimiting: config.rateLimiting,
@@ -359,6 +366,9 @@ registerProjectConfig({
     },
   },
   defaultLanguage: config.defaultLanguage,
+  //? Backend origin for OAuth callback redirect URIs, read by
+  //? @luckystack/login/register's env-driven provider scan.
+  oauthCallbackBase: resolvedEnvironment.backendUrl,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
   socketStatusIndicator: config.socketStatusIndicator,
   locationProviderEnabled: config.locationProviderEnabled,

@@ -24,7 +24,10 @@ function DashboardTemplate({ children }: { children: React.ReactNode }) {
   return (
     <div className="w-full h-full flex flex-col md:flex-row bg-background text-title">
       <Navbar />
-      <div className="flex-1 min-w-0 h-full overflow-hidden">
+      {/* Reserve the folded rail's 14px so the content never reflows when the
+          sidebar toggles — the rail is an absolute overlay (not in flow), so the
+          expand/collapse only animates the overlay width, never the content. */}
+      <div className="flex-1 min-w-0 h-full overflow-hidden md:pl-14">
         <Middleware>
           {children}
         </Middleware>

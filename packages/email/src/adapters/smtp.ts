@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 
-import { tryCatch, type EmailSender } from '@luckystack/core';
+import { loadPeer, tryCatch, type EmailSender } from '@luckystack/core';
 
 interface SmtpSenderOptions {
   host: string;
@@ -14,49 +14,40 @@ interface SmtpSenderOptions {
   from?: string;
 }
 
+//? `localRequire` (built from THIS module's `import.meta.url`) is passed to
+//? `loadPeer` so resolution + load happen from the adapter's perspective, not
+//? core's node_modules.
 const localRequire = createRequire(import.meta.url);
 
-//? Wraps Nodemailer. Lazy-imported so consumers who only use Resend (or only
+//? Wraps Nodemailer. Lazy-loaded so consumers who only use Resend (or only
 //? Console) don't need nodemailer installed.
 //?
-//? Boot-time guard: synchronously resolves the `nodemailer` package at factory
+//? Boot-time guard: synchronously loads the `nodemailer` package at factory
 //? call time. If the consumer set SMTP_HOST without installing the package,
 //? the server crashes during bootstrap instead of silently failing on the
 //? first email send.
 export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
   const { from: defaultFrom, ...smtpConfig } = options;
 
-  try {
-    localRequire.resolve('nodemailer');
-  } catch {
-    throw new Error(
-      '[email:smtp] The `nodemailer` package is not installed but SmtpSender was called. ' +
-      'Run `npm install nodemailer @types/nodemailer`, or remove the SMTP_HOST env var and pick a different EmailSender adapter.',
-    );
+  const mod = loadPeer<{
+    default?: { createTransport: (config: unknown) => unknown };
+    createTransport?: (config: unknown) => unknown;
+  }>(
+    'nodemailer',
+    'Run `npm install nodemailer @types/nodemailer`, or remove the SMTP_HOST env var and pick a different EmailSender adapter.',
+    localRequire,
+  );
+  const factory = mod.default?.createTransport ?? mod.createTransport;
+  if (!factory) {
+    throw new Error('[email:smtp] nodemailer module has no createTransport export.');
   }
-
-  const transporterPromise = (
-    // @ts-expect-error optional peer dep — types resolved at consumer install time
-    // eslint-disable-next-line import-x/no-unresolved -- optional peer; consumer installs `nodemailer` when wiring SMTP
-    import('nodemailer') as Promise<{
-      default?: { createTransport: (config: unknown) => unknown };
-      createTransport?: (config: unknown) => unknown;
-    }>
-  )
-    .then((mod) => {
-      const factory = mod.default?.createTransport ?? mod.createTransport;
-      if (!factory) {
-        throw new Error('[email:smtp] nodemailer module has no createTransport export.');
-      }
-      return factory(smtpConfig) as {
-        sendMail: (input: Record<string, unknown>) => Promise<{ messageId?: string | number }>;
-      };
-    });
+  const transporter = factory(smtpConfig) as {
+    sendMail: (input: Record<string, unknown>) => Promise<{ messageId?: string | number }>;
+  };
 
   return {
     name: 'smtp',
     send: async (message) => {
-      const transporter = await transporterPromise;
       const fromAddress = message.from ?? defaultFrom;
       if (!fromAddress) {
         return { ok: false, reason: 'missing-from' };

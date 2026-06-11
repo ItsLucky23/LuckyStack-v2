@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing */
 
-import type { BaseSessionLayout as SessionLayout, AuthProps, PostApiExecutePayload, ErrorFormatter  } from '@luckystack/core';
+import type { BaseSessionLayout as SessionLayout, PostApiExecutePayload, ErrorFormatter  } from '@luckystack/core';
 import { getProjectConfig, readSession, getRuntimeApiMaps as getRuntimeApiMapsFromSource ,
   validateRequest,
   checkRateLimit,
@@ -8,9 +8,13 @@ import { getProjectConfig, readSession, getRuntimeApiMaps as getRuntimeApiMapsFr
   HttpMethod,
   tryCatch,
   parseTransportRouteName,
-  validateInputByType,
   dispatchHook,
-  getLogger, defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse, applyErrorFormatter  } from '@luckystack/core';
+  getLogger, extractLanguageFromHeader, normalizeErrorResponse, applyErrorFormatter  } from '@luckystack/core';
+import type { ApiStreamPayload, RuntimeApiEntry } from './_shared/apiTypes';
+import { shouldLogDev, shouldLogStream } from './_shared/logFlags';
+import { normalizeApiResponse } from './_shared/responseEnvelope';
+import { httpApiFlushPressureNoop } from './_shared/backpressure';
+import { runHttpApiValidation } from './_shared/httpValidationStage';
 
 
 
@@ -74,77 +78,6 @@ type ApiNetworkResponse<T = Record<string, unknown>> =
     }[];
   };
 
-type ApiStreamPayload = Record<string, unknown>;
-
-//? B2 — backpressure helper for HTTP API handlers. SSE has no socket
-//? write-buffer, so this is a no-op for HTTP transport — but the shape
-//? matches the socket variant so handlers don't branch by transport.
-export interface HttpApiFlushPressureOptions {
-  thresholdBytes?: number;
-}
-
-//? No-op shared at module scope so per-request allocation stays cheap and
-//? the consistent-function-scoping lint rule doesn't trip.
-const httpApiFlushPressureNoop: HttpApiFlushPressure = async () => {
-  /* SSE backpressure is the caller's responsibility (res.write returns bool) */
-};
-export type HttpApiFlushPressure = (options?: HttpApiFlushPressureOptions) => Promise<void>;
-
-interface RuntimeApiRoute {
-  auth: AuthProps;
-  main: (params: {
-    data: Record<string, unknown>;
-    user: SessionLayout | null;
-    functions: Record<string, unknown>;
-    stream: (payload?: ApiStreamPayload) => void;
-    abortSignal: AbortSignal;
-    flushPressure: HttpApiFlushPressure;
-  }) => Promise<RuntimeApiResult> | RuntimeApiResult;
-  inputType?: string;
-  inputTypeFilePath?: string;
-  rateLimit?: number | false;
-  httpMethod?: HttpMethod;
-  validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
-  errorFormatter?: ErrorFormatter;
-}
-
-type RuntimeApiResult =
-  | {
-    status: 'success';
-    httpStatus?: number;
-    message?: string;
-    [key: string]: unknown;
-  }
-  | {
-    status: 'error';
-    httpStatus?: number;
-    errorCode?: string;
-    errorParams?: { key: string; value: string | number | boolean }[];
-    message?: string;
-    [key: string]: unknown;
-  };
-
-const isRuntimeApiResult = (value: unknown): value is RuntimeApiResult => {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const status = (value as { status?: unknown }).status;
-  return status === 'success' || status === 'error';
-};
-
-const shouldLogDev = () => getProjectConfig().logging.devLogs;
-const shouldLogStream = () => getProjectConfig().logging.stream;
-
-const warnedMissingInputType = new Set<string>();
-const warnIfInputTypeMissing = (resolvedName: string, inputType: string | undefined): void => {
-  if (!getProjectConfig().dev.warnOnMissingInputType) return;
-  if (inputType && inputType.trim().length > 0 && inputType.trim() !== 'any') return;
-  if (warnedMissingInputType.has(resolvedName)) return;
-  warnedMissingInputType.add(resolvedName);
-  getLogger().warn(`http-api: route ${resolvedName} has no inputType — runtime input validation is disabled.`);
-};
-
 export type ApiHttpStreamEvent = ApiStreamPayload;
 
 export async function handleHttpApiRequest(params: HttpApiRequestParams): Promise<ApiNetworkResponse> {
@@ -169,6 +102,14 @@ export async function handleHttpApiRequest(params: HttpApiRequestParams): Promis
       }) as ApiNetworkResponse
     : preRespond.response as ApiNetworkResponse;
 
+  //? `transformApiResponse` fires AFTER preApiRespond and BEFORE the wire
+  //? response is finalized. Mirrors the socket handler (handleApiRequest)
+  //? so BOTH transports run the same hook sequence per CLAUDE.md. Handlers
+  //? mutate `payload.response` in place (header injection, body transform,
+  //? response signing).
+  const transformPayload = { routeName: routeNameForHook, user, response: finalResponse };
+  await dispatchHook('transformApiResponse', transformPayload);
+
   //? Per-route → global → identity error formatter chain. Mirrors the socket
   //? handler so HTTP + WebSocket responses honor the same `errorFormatter`
   //? export on each route. No-op on success envelopes.
@@ -177,7 +118,7 @@ export async function handleHttpApiRequest(params: HttpApiRequestParams): Promis
   //? that union doesn't structurally satisfy. The double-cast is the
   //? documented framework boundary between the union and the formatter input.
   // eslint-disable-next-line no-restricted-syntax -- formatter boundary cast
-  const formatterInput = finalResponse as unknown as Record<string, unknown> & { status?: string };
+  const formatterInput = transformPayload.response as unknown as Record<string, unknown> & { status?: string };
   const formattedResponse = applyErrorFormatter({
     response: formatterInput,
     routeName: routeNameForHook,
@@ -268,7 +209,8 @@ async function runHandleHttpApiRequestInner(
     });
   }
 
-  const requestData = data ?? {};
+  //? `data` is already guaranteed non-null object by the guard above.
+  const requestData = data;
 
   const parsedRoute = parseTransportRouteName({ value: normalizedName, prefix: 'api' });
   if (parsedRoute.status === 'error') {
@@ -302,7 +244,7 @@ async function runHandleHttpApiRequestInner(
     });
   }
 
-  const runtimeApiRoute = apisObject[resolvedName] as RuntimeApiRoute;
+  const runtimeApiRoute = apisObject[resolvedName] as RuntimeApiEntry;
   formatterHolder.current = runtimeApiRoute.errorFormatter;
   const { auth, main, httpMethod: declaredMethod } = runtimeApiRoute;
   const inputType = runtimeApiRoute.inputType;
@@ -448,31 +390,24 @@ async function runHandleHttpApiRequestInner(
     });
   }
 
-  // Input-type validation (post-auth so unauthenticated probes don't get input-shape leaks)
-  warnIfInputTypeMissing(resolvedName, inputType);
-  await dispatchHook('preApiValidate', { routeName: resolvedName, data: requestData, user, transport: 'http' });
-
-  const inputValidation = await validateInputByType({
-    typeText: inputType,
-    value: requestData,
-    rootKey: 'data',
-    filePath: inputTypeFilePath,
-  });
-
-  await dispatchHook('postApiValidate', {
-    routeName: resolvedName,
-    data: requestData,
+  //? Input-type validation stage (preApiValidate -> validateInputByType ->
+  //? postApiValidate). Extracted to `_shared/httpValidationStage.ts` for
+  //? symmetry with the socket handler. On failure the caller builds the
+  //? GENERIC `api.invalidInputType` (the raw validator message never reaches
+  //? the client). Behaviour preserved verbatim — the HTTP transport always
+  //? validates (it does not honor `validation: 'relaxed'`).
+  const httpValidation = await runHttpApiValidation({
+    resolvedName,
+    inputType,
+    inputTypeFilePath,
+    requestData,
     user,
-    validation: inputValidation,
-    transport: 'http',
   });
-
-  if (inputValidation.status === 'error') {
+  if (!httpValidation.ok) {
     return buildNetworkError({
       response: {
         status: 'error',
         errorCode: 'api.invalidInputType',
-        errorParams: [{ key: 'message', value: inputValidation.message }],
       },
       fallbackHttpStatus: 400,
     });
@@ -542,55 +477,17 @@ async function runHandleHttpApiRequestInner(
   executePayload.durationMs = Date.now() - executeStart;
   await dispatchHook('postApiExecute', executePayload);
 
-  if (error) {
-    if (shouldLogDev()) {
-      getLogger().error(`http-api: error in ${resolvedName}`, error, { route: resolvedName, transport: 'http' });
-    }
-    return buildNetworkError({
-      response: { status: 'error', errorCode: 'api.internalServerError' },
-      fallbackHttpStatus: 500,
-    });
-  }
-
-  if (result !== undefined && result !== null) {
-    if (shouldLogDev()) {
-      getLogger().debug(`http api: ${resolvedName} completed`);
-    }
-
-    // Check if result is already formatted as ApiResponse
-    if (isRuntimeApiResult(result)) {
-      if (result.status === 'error') {
-        return buildNetworkError({
-          response: result,
-          fallbackHttpStatus: defaultHttpStatusForResponse({
-            status: 'error',
-            explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
-          }),
-        });
-      }
-
-      const successEnvelope: ApiNetworkResponse = {
-        ...result,
-        status: 'success',
-        httpStatus: defaultHttpStatusForResponse({
-          status: 'success',
-          explicitHttpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : undefined,
-        }),
-      };
-      return successEnvelope;
-    }
-
-    return buildNetworkError({
-      response: { status: 'error', errorCode: 'api.invalidResponseStatus' },
-      fallbackHttpStatus: 500,
-    });
-  }
-
-  if (shouldLogDev()) {
-    getLogger().warn(`http api: ${resolvedName} returned nothing`);
-  }
-  return buildNetworkError({
-    response: { status: 'error', errorCode: 'api.emptyResponse' },
-    fallbackHttpStatus: 500,
+  //? Shared envelope assembly (CC-6) — identical to the socket handler's
+  //? `buildApiResponseEnvelope`: localized error shapes for failure / empty /
+  //? invalid-status, or a success envelope with inferred default HTTP status.
+  //? `normalizeApiResponse` runtime-checks `result.status`, so a handler that
+  //? returns a non-status object still maps to `api.invalidResponseStatus`.
+  const envelope = normalizeApiResponse({
+    resolvedName,
+    error: error ?? null,
+    result: result ?? undefined,
+    preferredLocale,
+    user,
   });
+  return envelope as ApiNetworkResponse;
 }

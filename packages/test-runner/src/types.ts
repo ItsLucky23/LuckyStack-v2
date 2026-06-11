@@ -7,6 +7,20 @@
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
+//? Runtime mirrors of the generated artifacts the test-runner walks. Kept here
+//? (not imported from the consumer's generated map) so the runner has no
+//? import-time coupling to a project's generated files. Shared across the layer
+//? files so the page→name→version shape is declared once.
+export type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
+
+export interface ApiMetaEntry {
+  method: string;
+  auth: { login: boolean; additional?: Record<string, unknown>[] };
+  rateLimit?: number | false;
+}
+
+export type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, ApiMetaEntry>>>>>>;
+
 export interface EndpointDescriptor {
   page: string;
   name: string;

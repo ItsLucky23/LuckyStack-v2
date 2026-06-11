@@ -13,7 +13,13 @@ import { getCookieValue } from './cookies';
  * @returns The token string or null if not found
  */
 export const extractTokenFromRequest = (req: IncomingMessage): string | null => {
-  const authHeader = req.headers.authorization;
+  // Node types `authorization` as `string`, but duplicate headers can arrive as
+  // an array at runtime via the IncomingHttpHeaders index signature. Treat the
+  // value as unknown and narrow with typeof guards so a single string is used.
+  const rawAuthHeader: unknown = req.headers.authorization;
+  const authHeader = typeof rawAuthHeader === 'string'
+    ? rawAuthHeader
+    : (Array.isArray(rawAuthHeader) && typeof rawAuthHeader[0] === 'string' ? rawAuthHeader[0] : undefined);
   const bearerToken = authHeader?.startsWith('Bearer ')
     ? authHeader.slice(7)
     : null;

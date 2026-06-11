@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { tryCatch, tryCatchSync } from '@luckystack/core';
 
 //? Shared health state across multiple router instances.
 //?
@@ -53,14 +54,14 @@ export const createRedisHealthStore = async (
   await subscriber.subscribe(healthChannel(input.envKey));
   subscriber.on('message', (channel, raw) => {
     if (channel !== healthChannel(input.envKey)) return;
-    try {
-      const parsed = JSON.parse(raw) as { service?: string; healthy?: boolean };
-      if (typeof parsed.service !== 'string' || typeof parsed.healthy !== 'boolean') return;
-      cache.set(parsed.service, parsed.healthy);
-      input.onExternalChange(parsed.service, parsed.healthy);
-    } catch {
-      //? Ignore malformed messages. Another router's bug shouldn't crash us.
-    }
+    //? Ignore malformed messages. Another router's bug shouldn't crash us.
+    const [parseError, parsed] = tryCatchSync(
+      () => JSON.parse(raw) as { service?: string; healthy?: boolean },
+    );
+    if (parseError || !parsed) return;
+    if (typeof parsed.service !== 'string' || typeof parsed.healthy !== 'boolean') return;
+    cache.set(parsed.service, parsed.healthy);
+    input.onExternalChange(parsed.service, parsed.healthy);
   });
 
   const hydrate = async (services: string[]): Promise<void> => {
@@ -87,7 +88,8 @@ export const createRedisHealthStore = async (
   const get = (service: string): boolean => cache.get(service) ?? true;
 
   const close = async (): Promise<void> => {
-    try { await subscriber.unsubscribe(healthChannel(input.envKey)); } catch { /* noop */ }
+    //? Best-effort unsubscribe; a failure here must not block teardown.
+    await tryCatch(() => subscriber.unsubscribe(healthChannel(input.envKey)));
     subscriber.disconnect();
     client.disconnect();
   };

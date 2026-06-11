@@ -13,7 +13,9 @@
 
 import { createRequire } from 'node:module';
 
-import type { ErrorTracker, ErrorTrackerEvent } from '@luckystack/core';
+import { loadPeer, type ErrorTracker, type ErrorTrackerEvent } from '@luckystack/core';
+
+import { runBeforeSend } from './runBeforeSend';
 
 const localRequire = createRequire(import.meta.url);
 
@@ -25,20 +27,14 @@ interface SentrySDK {
   startSpan: <T>(context: { name: string; op: string }, fn: () => T) => T;
 }
 
-const loadSentry = (): SentrySDK => {
-  try {
-    localRequire.resolve('@sentry/node');
-  } catch {
-    throw new Error(
-      '[error-tracking:sentry] The `@sentry/node` package is not installed but createSentryAdapter() was called. ' +
-      'Run `npm install @sentry/node` or remove the Sentry registration.',
-    );
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = localRequire('@sentry/node') as SentrySDK;
-  return mod;
-};
+//? `localRequire` (built from THIS module's `import.meta.url`) is passed so
+//? resolution happens from the adapter's perspective, not core's node_modules.
+const loadSentry = (): SentrySDK =>
+  loadPeer<SentrySDK>(
+    '@sentry/node',
+    'Run `npm install @sentry/node` or remove the Sentry registration.',
+    localRequire,
+  );
 
 export interface SentryAdapterOptions {
   /**
@@ -52,17 +48,11 @@ export interface SentryAdapterOptions {
 export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTracker => {
   const sentry = loadSentry();
 
-  const runBeforeSend = (event: ErrorTrackerEvent): ErrorTrackerEvent | null => {
-    if (!options.beforeSend) return event;
-    const result = options.beforeSend(event);
-    return result;
-  };
-
   return {
     name: 'sentry',
 
     captureException(error, context) {
-      const filtered = runBeforeSend({
+      const filtered = runBeforeSend(options.beforeSend, {
         forwarded: true,
         kind: 'exception',
         payload: { error, context: context ?? null },
@@ -76,7 +66,7 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
     },
 
     captureMessage(message, level, context) {
-      const filtered = runBeforeSend({
+      const filtered = runBeforeSend(options.beforeSend, {
         forwarded: true,
         kind: 'message',
         payload: { message, level, context: context ?? null },

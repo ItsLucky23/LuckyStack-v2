@@ -49,17 +49,17 @@ import {
 import Avatar from 'src/_components/Avatar';
 import Dropdown, { type DropdownItem } from 'src/_components/Dropdown';
 import MultiSelectDropdown from 'src/_components/MultiSelectDropdown';
+import TextField from 'src/_components/inputs/TextField';
+import Toggle from 'src/_components/inputs/Toggle';
+import Checkbox from 'src/_components/inputs/Checkbox';
+import DatePicker, { type DateRange } from 'src/_components/inputs/DatePicker';
+import Popover from 'src/_components/inputs/Popover';
 import { menuHandler } from 'src/_functions/menuHandler';
 import { apiRequest } from 'src/_sockets/apiRequest';
 import { syncRequest, useSyncEvents } from 'src/_sockets/syncRequest';
 import { joinRoom, leaveRoom } from 'src/_sockets/socketInitializer';
-import { providers as registeredProviderIds, backendUrl, sessionBasedToken } from 'config';
-
-//? Filter out the credentials login provider — it isn't an OAuth flow (no
-//? external redirect; it's a username/password form on /login). Showing it
-//? in the OAuth provider list and POSTing to /auth/api/credentials would
-//? 404 or be confusing.
-const oauthProviderIds = registeredProviderIds.filter((id) => id !== 'credentials');
+import { backendUrl, sessionBasedToken } from 'config';
+import tryCatch from 'shared/tryCatch';
 
 export const template = 'dashboard';
 
@@ -350,6 +350,90 @@ const handleConfirmTyped = async () => {
   toast.info(`Typed-confirm result: ${String(confirmed)}`);
 };
 
+//? Self-contained showcase for the new form-input primitives. Holds its own
+//? state so it stays out of the main Playground function. Dev-only.
+function InputsShowcase() {
+  const [text, setText] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [amount, setAmount] = useState('3');
+  const [bio, setBio] = useState('');
+  const [nameError, setNameError] = useState<string>('');
+  const [toggleA, setToggleA] = useState(true);
+  const [toggleB, setToggleB] = useState(false);
+  const [check1, setCheck1] = useState(true);
+  const [check2, setCheck2] = useState(false);
+  const [checkErr, setCheckErr] = useState(false);
+  const [single, setSingle] = useState<Date | null>(null);
+  const [singleTime, setSingleTime] = useState<Date | null>(null);
+  const [range, setRange] = useState<DateRange>({ start: null, end: null });
+  const [rangeTime, setRangeTime] = useState<DateRange>({ start: null, end: null });
+
+  return (
+    <div className="flex flex-col gap-6">
+      <Section title="Text inputs (TextField)">
+        <div className="grid sm:grid-cols-2 gap-4 max-w-2xl">
+          <TextField label="Name" value={text} onChange={setText} placeholder="Jane Doe" leftIcon={faUser} clearable description="With a leading icon + clear button." />
+          <TextField label="Email" type="email" value={email} onChange={setEmail} placeholder="jane@example.com" leftIcon={faEnvelope} />
+          <TextField label="Password" type="password" value={password} onChange={setPassword} placeholder="••••••••" leftIcon={faKey} description="Click the eye to reveal." />
+          <TextField label="Amount" type="number" value={amount} onChange={setAmount} min={0} max={10} prefix="€" description="No native spinners — custom steppers, clamped 0–10." />
+          <TextField label="Bio" value={bio} onChange={setBio} maxLength={60} showCount placeholder="Short bio…" description="Character counter." />
+          <TextField label="Name (validated)" value={text} onChange={(v) => { setText(v); setNameError(''); }} error={nameError} placeholder="Type then validate" />
+        </div>
+        <Row label="Trigger the error-shake animation">
+          <Btn variant="danger" onClick={() => { setNameError('This field is required'); }}>Validate (shake on error)</Btn>
+        </Row>
+        <Row label="Sizes">
+          <div className="w-40"><TextField size="sm" value={text} onChange={setText} placeholder="sm" /></div>
+          <div className="w-40"><TextField size="md" value={text} onChange={setText} placeholder="md" /></div>
+          <div className="w-40"><TextField size="lg" value={text} onChange={setText} placeholder="lg" /></div>
+        </Row>
+      </Section>
+
+      <Section title="Toggle & Checkbox">
+        <Row label="Toggles (primary when on)">
+          <Toggle checked={toggleA} onChange={setToggleA} label="Email notifications" size="md" />
+          <Toggle checked={toggleB} onChange={setToggleB} label="Compact mode" description="Smaller spacing" size="lg" />
+        </Row>
+        <Row label="Toggle sizes">
+          <Toggle checked={toggleA} onChange={setToggleA} size="sm" ariaLabel="sm" />
+          <Toggle checked={toggleA} onChange={setToggleA} size="md" ariaLabel="md" />
+          <Toggle checked={toggleA} onChange={setToggleA} size="lg" ariaLabel="lg" />
+        </Row>
+        <Row label="Checkboxes (primary background when checked)">
+          <Checkbox checked={check1} onChange={setCheck1} label="I agree to the terms" />
+          <Checkbox checked={check2} onChange={setCheck2} indeterminate={!check2} label="Mixed / indeterminate" />
+          <Checkbox checked={checkErr} onChange={setCheckErr} label="Required" error={checkErr ? '' : 'You must accept'} />
+        </Row>
+      </Section>
+
+      <Section title="Date & time picker (timezone-aware, native Intl)">
+        <div className="grid sm:grid-cols-2 gap-4 max-w-2xl">
+          <DatePicker label="Single date" value={single} onChange={setSingle} placeholder="Pick a date" />
+          <DatePicker label="Single date + time" value={singleTime} onChange={setSingleTime} withTime placeholder="Pick date & time" />
+          <DatePicker mode="range" label="Date range (with presets)" value={range} onChange={setRange} placeholder="Pick a range" />
+          <DatePicker mode="range" label="Range + time (Europe/Amsterdam)" value={rangeTime} onChange={setRangeTime} withTime timeZone="Europe/Amsterdam" placeholder="Pick a range" />
+        </div>
+        <Row label="Selected values (instants, shown in your local zone)">
+          <span className="text-xs font-mono text-common">single: {single ? single.toISOString() : '—'}</span>
+          <span className="text-xs font-mono text-common">range: {range.start ? range.start.toISOString() : '—'} → {range.end ? range.end.toISOString() : '—'}</span>
+        </Row>
+      </Section>
+
+      <Section title="Popover (smooth, click or hover)">
+        <Row label="Click vs hover trigger">
+          <Popover content={<div className="max-w-xs">A click-triggered popover. Click outside or press Escape to close.</div>}>
+            <Btn icon={faCircleInfo}>Click me</Btn>
+          </Popover>
+          <Popover trigger="hover" placement="top" content={<div className="max-w-xs">Hover popover — appears above.</div>}>
+            <Btn variant="ghost">Hover me</Btn>
+          </Popover>
+        </Row>
+      </Section>
+    </div>
+  );
+}
+
 export default function Playground() {
   //? React 18+ does not propagate errors thrown inside event handlers to
   //? error boundaries (router or React's). The button sets state, then the
@@ -395,6 +479,24 @@ export default function Playground() {
   const [offlineSimulated, setOfflineSimulated] = useState<boolean>(false);
   const [apiQueueSize, setApiQueueSize] = useState<number>(0);
   const [syncQueueSize, setSyncQueueSize] = useState<number>(0);
+  //? OAuth providers now come from the live env-driven registry (GET
+  //? /auth/providers), not a static config list. `credentials` is filtered out —
+  //? it's the email/password form, not an OAuth redirect.
+  const [oauthProviderIds, setOauthProviderIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      const [error, response] = await tryCatch(() =>
+        fetch(`${backendUrl}/auth/providers`, { signal: controller.signal }),
+      );
+      if (error || !response?.ok) return;
+      const [parseError, body] = await tryCatch(() => response.json() as Promise<{ providers?: string[] }>);
+      if (parseError || !Array.isArray(body?.providers)) return;
+      setOauthProviderIds(body.providers.filter((id) => id !== 'credentials'));
+    })();
+    return () => { controller.abort(); };
+  }, []);
 
   const showApiStreamsRef = useRef(showApiStreams);
   showApiStreamsRef.current = showApiStreams;
@@ -966,13 +1068,21 @@ export default function Playground() {
   // ───────────────────────── Offline queue ─────────────────────────
   const handleToggleOffline = () => {
     if (offlineSimulated) {
+      socket?.io.reconnection(true);
       socket?.connect();
       setOfflineSimulated(false);
       log('offline', `socket.connect() — queued items will flush as the socket reconnects`);
     } else {
-      socket?.disconnect();
+      //? Simulate a NETWORK blip, not a deliberate goodbye. Closing the engine
+      //? produces disconnect reason 'transport close', which presence grants
+      //? the long transportCloseMs reconnect window. A plain socket.disconnect()
+      //? lands in the 2s default window — with `socketActivityBroadcaster: true`
+      //? the session would be deleted before you click Reconnect. Auto-reconnect
+      //? is paused so the queue actually fills while "offline".
+      socket?.io.reconnection(false);
+      socket?.io.engine.close();
       setOfflineSimulated(true);
-      log('offline', `socket.disconnect() — subsequent api/sync calls will enqueue (offline queue)`);
+      log('offline', `engine.close() — simulated network blip ('transport close'); subsequent api/sync calls will enqueue (offline queue)`);
     }
   };
 
@@ -1228,12 +1338,12 @@ export default function Playground() {
 
           <DemoCard
             full
-            title={`OAuth providers (${String(oauthProviderIds.length)} from config.providers)`}
+            title={`OAuth providers (${String(oauthProviderIds.length)} from /auth/providers)`}
             what="Each button redirects to /auth/api/<provider> to start the OAuth dance (needs the provider's env creds configured)."
             expect="Browser redirects to the provider; on callback you land back logged in."
           >
             {oauthProviderIds.length === 0
-              ? <span className="text-xs text-muted">No OAuth providers registered — add one in <code className="font-mono">config.providers</code>.</span>
+              ? <span className="text-xs text-muted">No OAuth providers registered — set a provider's <code className="font-mono">*_CLIENT_ID</code> + <code className="font-mono">*_CLIENT_SECRET</code> (DEV_ prefix in dev) and restart.</span>
               : oauthProviderIds.map((id) => (
                 <Btn key={id} variant="ghost" icon={faLink} onClick={() => { handleOauthLaunch(id); }}>{id}</Btn>
               ))}
@@ -1481,6 +1591,8 @@ export default function Playground() {
             <MultiSelectDropdown items={ROLES} size="md" placeholder="Pick roles…" closeOnSelect />
           </Row>
         </Section>
+
+        <InputsShowcase />
 
         <Section title="Confirm dialogs (menuHandler.confirm)">
           <Row label="Click to open">

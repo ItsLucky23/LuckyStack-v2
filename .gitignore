@@ -56,3 +56,13 @@ repomix-output.xml
 
 # Test runner machine-readable output (npm run test)
 test-results.json
+
+# `luckystack check-env` / `check-i18n` scan reports (hashed logs per run)
+dump/
+
+# AI browser-testing artifacts (agent-browser / Playwright / Chrome DevTools MCP)
+.agent-browser/
+.playwright-mcp/
+test-results/
+playwright-report/
+.claude/settings.local.json

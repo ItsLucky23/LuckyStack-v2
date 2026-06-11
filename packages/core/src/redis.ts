@@ -90,6 +90,20 @@ const STRAY_PREFIX_COMMANDS = new Set<string>([
   'getbit', 'setbit', 'bitcount',
 ]);
 
+//? Extend the set of single-key, arg0-is-key commands the `redis` proxy runs
+//? through `applyStrayKeyPrefix`. Additive — the built-in set above is always
+//? retained — so a consumer using a Redis command the framework's default
+//? list doesn't cover (a newer/module command whose first argument is the
+//? key) can opt it into the multi-tenant stray-prefix net without forking.
+//? Command names are matched case-insensitively, mirroring the proxy lookup.
+//? Variadic / non-arg0-key commands must NOT be registered here — their key
+//? positions can't be inferred safely; use `formatKey()` explicitly instead.
+export const registerStrayPrefixCommand = (...commands: string[]): void => {
+  for (const command of commands) {
+    STRAY_PREFIX_COMMANDS.add(command.toLowerCase());
+  }
+};
+
 //? Proxy: same pattern as `prisma`. Defers resolution until call time so
 //? `registerRedisClient(...)` can still win after this module is loaded.
 // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Proxy target placeholder

@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom'
+import type { RouteObject } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import 'src/index.css'
 import 'src/scrollbar.css'
@@ -91,8 +92,32 @@ const PageWrapper = ({ Page }: { Page: React.ComponentType<PageProps> }) => {
   return <Page params={params} searchParams={searchParamsObj} />;
 };
 
-const getRoutes = (pages: Record<string, PageModule>) => {
-  const routes = [];
+type PageLoader = () => Promise<PageModule>;
+
+//? Build the rendered element for a resolved page module: register its per-page
+//? middleware (lives on the same module) and wrap it in its chosen template.
+const buildPageElement = (module: PageModule, finalPath: string) => {
+  if (module.middleware) {
+    registerPageMiddleware(finalPath, module.middleware);
+  }
+  const template = module.template ?? 'plain';
+  return (
+    <TemplateProvider key={`${template}-${finalPath}`} initialTemplate={template}>
+      <PageWrapper Page={module.default} />
+    </TemplateProvider>
+  );
+};
+
+const splatFallbackElement = (
+  <TemplateProvider initialTemplate='plain'>
+    <Middleware>
+      <ErrorPage />
+    </Middleware>
+  </TemplateProvider>
+);
+
+const getRoutes = (loaders: Record<string, PageLoader>): RouteObject[] => {
+  const routes: RouteObject[] = [];
   //? Track which final URL each registered page resolves to, so we can
   //? log an error when two different files compute the same route (e.g.
   //? `src/_test/admin/page.tsx` + `src/admin/page.tsx` both → `/admin`
@@ -100,9 +125,9 @@ const getRoutes = (pages: Record<string, PageModule>) => {
   //? `assertNoDuplicatePageRoutes` blocks this at build time; this
   //? runtime guard prints a visible warning during dev too.
   const seenRoutes = new Map<string, string>();
-  for (const path in pages) {
-    const module = pages[path];
-    if (!module) continue;
+  for (const path in loaders) {
+    const loader = loaders[path];
+    if (!loader) continue;
 
     //? Only `page.tsx` files become routes. Filename is the last segment;
     //? skip everything else (component files, helpers, etc.).
@@ -138,36 +163,40 @@ const getRoutes = (pages: Record<string, PageModule>) => {
     }
     seenRoutes.set(finalPath, path);
 
-    //? Per-page middleware: when the page module exports one, register it
-    //? against its route path. Framework's `<Middleware>` + `useRouter`
-    //? prefer this over the global handler.
-    if (module.middleware) {
-      registerPageMiddleware(finalPath, module.middleware);
-    }
-
-    const template = module.template ?? 'plain';
-    const Page = module.default;
-
-    //? Splat pages own their whole sub-tree (`/workspaces/*`). The exact root
-    //? still maps via the same finalPath, so the page mounts for `/workspaces`
-    //? and every descendant — letting it keep one persistent shell + route its
-    //? own views from the URL. The `'/'` root can't be a splat (would swallow
-    //? every route), so it's ignored there.
-    const routePath = module.splat && finalPath !== '/' ? `${finalPath}/*` : finalPath;
-
+    //? Lazy: the page component + its (often heavy) import tree load only when
+    //? this route is actually visited, instead of every page eager-loading on
+    //? first paint — which made even `/login` pull in all pages + their deps
+    //? (a huge DevTools source-map parse). `template` and per-page `middleware`
+    //? live on the same module, so they resolve inside the loader.
     routes.push({
-      path: routePath,
-      element: (
-        <TemplateProvider key={`${template}-${finalPath}`} initialTemplate={template}>
-          <PageWrapper Page={Page} />
-        </TemplateProvider>
-      ),
+      path: finalPath,
+      lazy: async () => ({ element: buildPageElement(await loader(), finalPath) }),
     });
+
+    //? Splat pages own their whole sub-tree (`/workspaces/*`). We can't read the
+    //? `splat` export without loading the (heavy) component, which would defeat
+    //? lazy-loading — so instead we register a sub-tree route for EVERY non-root
+    //? page and decide at load time: if the page opts into `splat`, it renders
+    //? for the whole sub-tree; otherwise the sub-path is a 404 (ErrorPage). The
+    //? module load on an invalid sub-path is negligible (only on bad navigation).
+    if (finalPath !== '/') {
+      routes.push({
+        path: `${finalPath}/*`,
+        lazy: async () => {
+          const module = await loader();
+          return { element: module.splat ? buildPageElement(module, finalPath) : splatFallbackElement };
+        },
+      });
+    }
   }
 
   return routes;
 };
 
+//? LAZY page loaders (`eager: false`) → `Record<path, () => Promise<Module>>`.
+//? Each page (and its import tree) is only fetched when its route is visited,
+//? instead of every page eager-loading on first paint — which made even `/login`
+//? pull in all pages + their deps (heavy bundle + huge DevTools source-map parse).
 const prodPages = import.meta.glob([
   './**/*.tsx',
   './**/*.jsx',
@@ -180,18 +209,18 @@ const prodPages = import.meta.glob([
   '!./**/docs/**',
   '!./**/*_server.tsx',
   '!./**/*_server.jsx'
-], { eager: true });
+]);
 
 const devPages = import.meta.glob([
   './**/*.tsx',
   './**/*.jsx'
-], { eager: true });
+]);
 
 const pagesUnknown = import.meta.env.PROD ? prodPages : devPages;
 
-const pages: Record<string, PageModule> = pagesUnknown as Record<string, PageModule>;
+const loaders = pagesUnknown as Record<string, PageLoader>;
 
-const routes = getRoutes(pages);
+const routes = getRoutes(loaders);
 routes.push({
   path: '*',
   element: (

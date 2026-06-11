@@ -18,7 +18,9 @@
 
 import { createRequire } from 'node:module';
 
-import type { ErrorTracker, ErrorTrackerEvent } from '@luckystack/core';
+import { ensurePeerDepInstalled, type ErrorTracker, type ErrorTrackerEvent } from '@luckystack/core';
+
+import { runBeforeSend } from './runBeforeSend';
 
 const localRequire = createRequire(import.meta.url);
 
@@ -56,37 +58,27 @@ export interface DatadogAdapterOptions {
   beforeSend?: (event: ErrorTrackerEvent) => ErrorTrackerEvent | null;
 }
 
-const ensurePeerDepInstalled = (): void => {
-  try {
-    localRequire.resolve('dd-trace');
-  } catch {
-    throw new Error(
-      '[error-tracking:datadog] The `dd-trace` package is not installed but createDatadogAdapter() was called. ' +
-      'Run `npm install dd-trace hot-shots` and import dd-trace as the FIRST require in your server entry.',
-    );
-  }
-};
-
 const formatTags = (tags?: Record<string, string>): string[] => {
   if (!tags) return [];
   return Object.entries(tags).map(([k, v]) => `${k}:${v}`);
 };
 
 export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTracker => {
-  ensurePeerDepInstalled();
+  //? `localRequire` (this module's `createRequire`) resolves `dd-trace` from
+  //? the adapter's perspective, not core's node_modules.
+  ensurePeerDepInstalled(
+    'dd-trace',
+    'Run `npm install dd-trace hot-shots` and import dd-trace as the FIRST require in your server entry.',
+    localRequire,
+  );
 
   const prefix = options.metricPrefix ?? 'luckystack.';
-
-  const runBeforeSend = (event: ErrorTrackerEvent): ErrorTrackerEvent | null => {
-    if (!options.beforeSend) return event;
-    return options.beforeSend(event);
-  };
 
   return {
     name: 'datadog',
 
     captureException(error, context) {
-      const filtered = runBeforeSend({
+      const filtered = runBeforeSend(options.beforeSend, {
         forwarded: true,
         kind: 'exception',
         payload: { error, context: context ?? null },
@@ -108,7 +100,7 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
     },
 
     captureMessage(message, level, context) {
-      const filtered = runBeforeSend({
+      const filtered = runBeforeSend(options.beforeSend, {
         forwarded: true,
         kind: 'message',
         payload: { message, level, context: context ?? null },

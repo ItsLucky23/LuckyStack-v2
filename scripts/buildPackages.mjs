@@ -26,7 +26,7 @@ import process from 'node:process';
 
 const WAVES = [
   ['core'],
-  ['email', 'login', 'devkit', 'router', 'test-runner', 'create-luckystack-app', 'docs-ui', 'secret-manager'],
+  ['email', 'login', 'devkit', 'router', 'test-runner', 'create-luckystack-app', 'secret-manager'],
   // error-tracking depends on @luckystack/login for the postLogout hook
   // payload augmentation (auto-instrumentation type-checks 'postLogout' as
   // a keyof HookPayloads, which is only populated when login is in scope).
@@ -34,6 +34,12 @@ const WAVES = [
   ['error-tracking'],
   ['api', 'sync', 'presence'],
   ['server'],
+  // docs-ui's `./register` side-effect imports `@luckystack/server`
+  // (registerCustomRoute) so the docs route auto-mounts on bare `npm i`.
+  // Build it AFTER server so server's dist/index.d.ts resolves for the dts pass.
+  // cli has no @luckystack runtime imports (it copies shipped assets + patches
+  // consumer files), so its placement is free — kept here with the tail tools.
+  ['docs-ui', 'cli'],
 ];
 
 const ALL_PACKAGES = WAVES.flat();

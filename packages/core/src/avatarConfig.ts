@@ -2,6 +2,9 @@
 //? `serveAvatar` to change the file format, cache headers, or storage path.
 //? Defaults match the framework's prior hardcoded behavior (.webp, 24h cache).
 
+import { type DeepPartial } from './configUtils';
+import { createRegistry } from './createRegistry';
+
 export interface AvatarConfig {
   /**
    * File format(s) the framework will look for on disk, in order. The first
@@ -22,19 +25,20 @@ export const DEFAULT_AVATAR_CONFIG: AvatarConfig = {
   cacheControl: 'public, max-age=86400',
 };
 
-type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends object | undefined ? DeepPartial<NonNullable<T[K]>> : T[K];
-};
-
 export type AvatarConfigInput = DeepPartial<AvatarConfig>;
 
-let activeConfig: AvatarConfig = DEFAULT_AVATAR_CONFIG;
-
-export const registerAvatarConfig = (config: AvatarConfigInput): void => {
-  activeConfig = {
+const registry = createRegistry<AvatarConfig, AvatarConfigInput>(DEFAULT_AVATAR_CONFIG, {
+  //? Bespoke merge (not a generic deep-merge): an empty `formats` array falls
+  //? back to the default formats rather than wiping serving. Built fresh from
+  //? the defaults each call, matching the historical behaviour.
+  transform: (config) => ({
     formats: config.formats?.length ? (config.formats as AvatarConfig['formats']) : DEFAULT_AVATAR_CONFIG.formats,
     cacheControl: config.cacheControl ?? DEFAULT_AVATAR_CONFIG.cacheControl,
-  };
+  }),
+});
+
+export const registerAvatarConfig = (config: AvatarConfigInput): void => {
+  registry.register(config);
 };
 
-export const getAvatarConfig = (): AvatarConfig => activeConfig;
+export const getAvatarConfig = (): AvatarConfig => registry.get();

@@ -24,22 +24,26 @@ export interface ServicesConfigShape {
   presets: Record<string, PresetDefinition>;
 }
 
-let activeServicesConfig: ServicesConfigShape | null = null;
+import { createRegistry } from './createRegistry';
 
-export const registerServicesConfig = (config: ServicesConfigShape): ServicesConfigShape => {
-  activeServicesConfig = config;
-  return activeServicesConfig;
-};
+const registry = createRegistry<ServicesConfigShape>(
+  //? Unregistered sentinel — `get` never returns this because `resolveDefault`
+  //? throws first. Typed as the real shape so the slot stays well-typed.
+  { services: {}, presets: {} },
+  {
+    resolveDefault: (): ServicesConfigShape => {
+      throw new Error(
+        '@luckystack/core: services config has not been registered. Call ' +
+        '`registerServicesConfig({...})` from your `services.config.ts` (which should be ' +
+        'imported as a side-effect during boot).'
+      );
+    },
+  },
+);
 
-export const getServicesConfig = (): ServicesConfigShape => {
-  if (!activeServicesConfig) {
-    throw new Error(
-      '@luckystack/core: services config has not been registered. Call ' +
-      '`registerServicesConfig({...})` from your `services.config.ts` (which should be ' +
-      'imported as a side-effect during boot).'
-    );
-  }
-  return activeServicesConfig;
-};
+export const registerServicesConfig = (config: ServicesConfigShape): ServicesConfigShape =>
+  registry.register(config);
 
-export const isServicesConfigRegistered = (): boolean => activeServicesConfig !== null;
+export const getServicesConfig = (): ServicesConfigShape => registry.get();
+
+export const isServicesConfigRegistered = (): boolean => registry.isRegistered();

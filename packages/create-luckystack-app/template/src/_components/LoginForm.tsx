@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { backendUrl, loginRedirectUrl, loginPageUrl, providers, SessionLayout, sessionBasedToken } from "config";
+import { backendUrl, loginRedirectUrl, loginPageUrl, SessionLayout, sessionBasedToken } from "config";
 import tryCatch from "shared/tryCatch";
 
 import { i18nNotify as notify, useTranslator } from "@luckystack/core/client";
@@ -23,21 +23,30 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [loading, setLoading] = useState(false);
 
-  //? OAuth buttons are driven by the server's env-based registry (a provider is
-  //? active only when its credentials env vars are set). We ask the server which
-  //? providers are enabled — secrets never reach the browser. `credentials` is
-  //? filtered out here; the email/password form is gated by config instead.
+  //? The login form is driven entirely by the server's env-based registry
+  //? (`GET /auth/providers`) — the single source of truth. A provider is active
+  //? only when its credentials env vars are set; `credentials` (email+password)
+  //? is present when `auth.credentials` is enabled. Secrets never reach the
+  //? browser. We split the returned list: `credentials` gates the form fields,
+  //? everything else becomes an OAuth button.
   const [oauthProviders, setOauthProviders] = useState<string[]>([]);
+  const [showCredentials, setShowCredentials] = useState(false);
+  //? Gate the whole form on the providers fetch so the OAuth buttons + credential
+  //? fields render once, fully-formed, instead of popping in after the rest
+  //? (which caused a visible layout shift on every mount / login↔register nav).
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
       const [error, response] = await tryCatch(() =>
         fetch(`${backendUrl}/auth/providers`, { signal: controller.signal }),
       );
-      if (error || !response?.ok) return;
+      if (error || !response?.ok) { setReady(true); return; }
       const [parseError, body] = await tryCatch(() => response.json() as Promise<{ providers?: string[] }>);
-      if (parseError || !Array.isArray(body?.providers)) return;
+      if (parseError || !Array.isArray(body?.providers)) { setReady(true); return; }
+      setShowCredentials(body.providers.includes("credentials"));
       setOauthProviders(body.providers.filter((name) => name !== "credentials"));
+      setReady(true);
     })();
     return () => { controller.abort(); };
   }, []);
@@ -138,6 +147,11 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     setTimeout(() => {
       if (response.sessionToken && sessionBasedToken) {
         sessionStorage.setItem("token", response.sessionToken);
+      } else if (!sessionBasedToken) {
+        //? Cookie mode: drop any stale sessionStorage token left behind by a
+        //? previous token-mode session — a leftover entry makes parts of the
+        //? client mis-detect the auth mode.
+        sessionStorage.removeItem("token");
       }
       globalThis.location.href = response.authenticated ? loginRedirectUrl : loginPageUrl;
     }, 1000);
@@ -165,7 +179,13 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
           </div>
         </div>
 
-        {providers.includes("credentials") && (
+        {!ready && (
+          <div className="flex items-center justify-center py-8">
+            <div className="w-6 h-6 rounded-full border-2 border-container1-border border-t-primary animate-spin" />
+          </div>
+        )}
+
+        {ready && showCredentials && (
           <>
             <div className="flex flex-col gap-3">
               {!isLogin && (
@@ -239,7 +259,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
           </>
         )}
 
-        {oauthProviders.length > 0 && (
+        {ready && oauthProviders.length > 0 && (
           <div className="grid grid-cols-2 gap-2">
             {oauthProviders.map((provider) => (
               <button

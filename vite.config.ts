@@ -1,6 +1,9 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react-swc'
+//? Under rolldown-vite (Vite 8) the oxc-based `@vitejs/plugin-react` is faster
+//? than `@vitejs/plugin-react-swc` when no SWC plugins are used, and silences
+//? the "switch to @vitejs/plugin-react" startup hint. See https://vite.dev/rolldown.
+import react from '@vitejs/plugin-react'
 
 const fromRoot = (relativePath: string) => fileURLToPath(new URL(relativePath, import.meta.url));
 
@@ -13,6 +16,12 @@ const isIgnoredDevWatchPath = (filePath: string): boolean => {
     || normalizedPath.includes('/_sync/')
     || normalizedPath.includes('/server/')
     || normalizedPath.includes('/_server/')
+    //? Heavy artifact trees that the client bundle never imports — never watch
+    //? them. `.smoke-test` is a full scaffolded project (612+ source files);
+    //? polling them wastes CPU. `dist`/`.cache` are build output.
+    || normalizedPath.includes('/.smoke-test/')
+    || normalizedPath.includes('/dist/')
+    || normalizedPath.includes('/.cache/')
     || normalizedPath.endsWith('/src/_sockets/apiTypes.generated.ts')
     || normalizedPath.endsWith('/src/docs/apiDocs.generated.json')
   );
@@ -64,7 +73,12 @@ export default defineConfig(({ command }) => {
     },
     server: {
       watch: {
-        usePolling: true,
+        //? Polling is OFF by default — native fs events are far cheaper and work
+        //? on local NTFS/macOS/Linux. Set `VITE_USE_POLLING=1` only when the
+        //? source lives on a filesystem without reliable native events (WSL2 →
+        //? Windows drive, Docker bind mounts, some network shares). Leaving it on
+        //? everywhere pegs a CPU core (it re-stats every watched file on a timer).
+        usePolling: process.env.VITE_USE_POLLING === '1',
         ignored: isIgnoredDevWatchPath,
       },
     }

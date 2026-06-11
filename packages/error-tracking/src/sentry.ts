@@ -13,6 +13,7 @@ import {
   getLogger,
   getProjectName,
   initSharedSentry,
+  loadPeer,
   captureException as sharedCaptureException,
   captureMessage as sharedCaptureMessage,
   setSentryUser as sharedSetSentryUser,
@@ -34,18 +35,17 @@ type SentryModule = typeof import('@sentry/node');
 
 let cachedSentry: SentryModule | null = null;
 
+//? `localRequire` (built from THIS module's `import.meta.url`) is passed so
+//? resolution + load happen from the package's perspective, not core's
+//? node_modules. Result is cached so repeated proxy/property access resolves
+//? the optional peer at most once.
 const loadSentry = (): SentryModule => {
   if (cachedSentry) return cachedSentry;
-  try {
-    localRequire.resolve('@sentry/node');
-  } catch {
-    throw new Error(
-      '[error-tracking:sentry] The `@sentry/node` package is not installed but Sentry was used. ' +
-      'Run `npm install @sentry/node`, or use the adapter API / another tracker instead.',
-    );
-  }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  cachedSentry = localRequire('@sentry/node') as SentryModule;
+  cachedSentry = loadPeer<SentryModule>(
+    '@sentry/node',
+    'Run `npm install @sentry/node`, or use the adapter API / another tracker instead.',
+    localRequire,
+  );
   return cachedSentry;
 };
 

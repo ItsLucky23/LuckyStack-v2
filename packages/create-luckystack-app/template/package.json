@@ -8,7 +8,8 @@
   },
   "scripts": {
     "client": "vite --host",
-    "server": "tsx --tsconfig tsconfig.server.json server/server.ts",
+    "server": "luckystack-dev",
+    "server:once": "tsx --tsconfig tsconfig.server.json server/server.ts",
     "build": "vite build",
     "prod": "node dist/server.js",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"server/**/*.ts\" --cache --cache-location .eslintcache --ignore-pattern \"**/*.generated.*\" --ignore-pattern \"server/prod/**\"",

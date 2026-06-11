@@ -7,6 +7,8 @@
 //? Read at call-time so projects can `registerPresenceConfig(...)` after
 //? import. Same lazy pattern as `getProjectConfig()` in core.
 
+import { deepMerge, type DeepPartial } from '@luckystack/core';
+
 export interface DisconnectTimers {
   /**
    * The user actively switched tabs (intentionalDisconnect signal). The
@@ -35,8 +37,13 @@ export interface PresenceConfig {
   ignoreReasons: string[];
   /**
    * Disconnect reasons that grant the longer reconnect window
-   * (`transportCloseMs`). Anything not in this list falls back to
-   * `defaultMs`. Default: ['transport close', 'transport error'].
+   * (`transportCloseMs`). These represent NETWORK-level events (refresh,
+   * connection blip) where the session should be preserved. Deliberate
+   * client disconnects (`socket.disconnect()` → 'client namespace
+   * disconnect') are intentionally NOT included — an explicit goodbye gets
+   * the short `defaultMs` window before the session is torn down. Anything
+   * not in this list falls back to `defaultMs`.
+   * Default: ['transport close', 'transport error'].
    */
   allowReasons: string[];
   /**
@@ -45,6 +52,13 @@ export interface PresenceConfig {
    * disable AFK detection entirely. Default: 5 minutes.
    */
   afkTimeoutMs: number;
+  /**
+   * How often the server-side activity sampler walks every connected socket
+   * and feeds an `ActivitySample` to `dispatchActivitySample` (which fires the
+   * registered events). Smaller = faster AFK detection, more CPU. Should be
+   * well below `afkTimeoutMs`. Set to 0 to disable the sampler. Default: 15s.
+   */
+  activitySampleIntervalMs: number;
 }
 
 export const DEFAULT_PRESENCE_CONFIG: PresenceConfig = {
@@ -56,35 +70,12 @@ export const DEFAULT_PRESENCE_CONFIG: PresenceConfig = {
   ignoreReasons: ['ping timeout'],
   allowReasons: ['transport close', 'transport error'],
   afkTimeoutMs: 5 * 60_000,
-};
-
-type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends object | undefined ? DeepPartial<NonNullable<T[K]>> : T[K];
+  activitySampleIntervalMs: 15_000,
 };
 
 export type PresenceConfigInput = DeepPartial<PresenceConfig>;
 
 let activeConfig: PresenceConfig = DEFAULT_PRESENCE_CONFIG;
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> => {
-  if (value === null || typeof value !== 'object') return false;
-  const proto = Object.getPrototypeOf(value) as object | null;
-  return proto === Object.prototype || proto === null;
-};
-
-const deepMerge = <T>(base: T, override: DeepPartial<T> | undefined): T => {
-  if (override === undefined) return base;
-  if (!isPlainObject(base) || !isPlainObject(override)) {
-    return (override as T) ?? base;
-  }
-  const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
-  for (const [key, value] of Object.entries(override as Record<string, unknown>)) {
-    if (value === undefined) continue;
-    const baseValue = (base as Record<string, unknown>)[key];
-    out[key] = isPlainObject(baseValue) && isPlainObject(value) ? deepMerge(baseValue, value as DeepPartial<unknown>) : value;
-  }
-  return out as T;
-};
 
 export const registerPresenceConfig = (config: PresenceConfigInput): void => {
   activeConfig = deepMerge(DEFAULT_PRESENCE_CONFIG, config);

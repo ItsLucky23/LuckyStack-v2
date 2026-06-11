@@ -1,3 +1,4 @@
+import { tryCatchSync } from '@luckystack/core';
 import type {
   DeployConfigShape,
   DeployEnvironmentShape,
@@ -140,12 +141,27 @@ export const resolveServiceKey = (input: {
   return parseServiceFromPath(input.pathname);
 };
 
+//? Env keys are forwarded verbatim to upstream backends in the
+//? `x-luckystack-resolved-env` header (see httpProxy.ts). HTTP header values
+//? must not carry control characters (CRLF would enable header injection), so
+//? we constrain env keys to a safe identifier charset and fail fast at boot —
+//? a bad value surfaces at startup, never silently at request time.
+const ENV_KEY_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+const assertEnvKeyIsSafe = (envKey: string): void => {
+  if (!ENV_KEY_PATTERN.test(envKey)) {
+    throw new Error(
+      `[router] Environment key "${envKey}" contains invalid characters. ` +
+      `Env keys are forwarded to upstream backends as a header and must match ${ENV_KEY_PATTERN.toString()} ` +
+      `(letters, digits, underscore, hyphen). Rename it in deploy.config.ts → environments.`,
+    );
+  }
+};
+
 const assertBindingsHaveExplicitPorts = (env: EnvironmentDefinition, envKey: string): void => {
   for (const [service, target] of Object.entries(env.bindings)) {
-    let url: URL;
-    try {
-      url = new URL(target);
-    } catch {
+    const [urlError, url] = tryCatchSync(() => new URL(target));
+    if (urlError || !url) {
       throw new Error(
         `[router] Binding for service "${service}" in env "${envKey}" is not a valid URL: "${target}".`,
       );
@@ -182,8 +198,10 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
   //? deploy that "default" almost always means "wrong service" — the user
   //? forgot to specify which backend handles this preset. Fail fast at boot so
   //? a missing port shows up before any request reaches a stranger.
+  assertEnvKeyIsSafe(currentEnvKey);
   assertBindingsHaveExplicitPorts(currentEnv, currentEnvKey);
   if (fallbackEnv && fallbackEnvKey) {
+    assertEnvKeyIsSafe(fallbackEnvKey);
     assertBindingsHaveExplicitPorts(fallbackEnv, fallbackEnvKey);
   }
 

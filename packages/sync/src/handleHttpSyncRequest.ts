@@ -3,7 +3,6 @@
 import { readSession } from "@luckystack/core";
 import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
 import { getProjectConfig } from '@luckystack/core';
-import type { AuthProps } from '@luckystack/core';
 import { getRuntimeSyncMaps as getRuntimeSyncMapsFromSource } from '@luckystack/core';
 import {
   validateRequest,
@@ -17,10 +16,19 @@ import {
   dispatchHook,
   getLogger,
 } from "@luckystack/core";
-import { extractLanguageFromHeader, normalizeErrorResponse, applyErrorFormatter } from "@luckystack/core";
+import { extractLanguageFromHeader } from "@luckystack/core";
 import type { ErrorFormatter } from "@luckystack/core";
 import type { PostSyncFanoutPayload } from '@luckystack/core';
-import { buildSyncStreamEmitters, type FlushPressure } from './_shared/streamEmitters';
+import { buildSyncStreamEmitters } from './_shared/streamEmitters';
+import type {
+  RuntimeSyncServerEntry,
+  RuntimeSyncClientHandler,
+  SyncStreamPayload,
+  SyncErrorEnvelopeInput,
+} from './_shared/syncTypes';
+import { shouldLogDev, shouldLogStream } from './_shared/logFlags';
+import { buildFormattedError } from './_shared/errorBuilders';
+import { processClientSyncForRecipient } from './_shared/clientFanout';
 
 interface HttpSyncRequestParams {
   name: string;
@@ -49,66 +57,9 @@ interface HttpSyncResponse {
   httpStatus?: number;
 }
 
-type SyncStreamPayload = Record<string, unknown>;
-
-interface RuntimeErrorResponse {
-  status: 'error';
-  errorCode?: string;
-  errorParams?: { key: string; value: string | number | boolean; }[];
-  httpStatus?: number;
-  message?: string;
-  [key: string]: unknown;
-}
-
-interface RuntimeSuccessResponse {
-  status: 'success';
-  message?: string;
-  httpStatus?: number;
-  [key: string]: unknown;
-}
-
-type RuntimeSyncResponse = RuntimeSuccessResponse | RuntimeErrorResponse;
-
-type SyncBroadcastStream = (payload?: SyncStreamPayload) => void;
-type SyncStreamTo = (
-  tokens: string | string[],
-  payload?: SyncStreamPayload,
-) => void;
-
-interface RuntimeSyncServerEntry {
-  auth: AuthProps;
-  main: (params: {
-    clientInput: Record<string, unknown>;
-    user: SessionLayout | null;
-    functions: Record<string, unknown>;
-    roomCode: string;
-    stream: (payload?: SyncStreamPayload) => void;
-    broadcastStream: SyncBroadcastStream;
-    streamTo: SyncStreamTo;
-    abortSignal: AbortSignal;
-    flushPressure: FlushPressure;
-  }) => Promise<RuntimeSyncResponse>;
-  inputType?: string;
-  inputTypeFilePath?: string;
-  validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
-  errorFormatter?: ErrorFormatter;
-}
-
-type RuntimeSyncClientHandler = (params: {
-  clientInput: Record<string, unknown>;
-  token: string | null;
-  functions: Record<string, unknown>;
-  serverOutput: unknown;
-  roomCode: string;
-  stream: (payload?: SyncStreamPayload) => void;
-}) => Promise<RuntimeSyncResponse>;
-
-const shouldLogDev = () => getProjectConfig().logging.devLogs;
-const shouldLogStream = () => getProjectConfig().logging.stream;
-
 interface HttpSyncErrorBuilder {
   (args: {
-    response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean }[]; httpStatus?: number };
+    response: SyncErrorEnvelopeInput;
     preferred?: string | null;
     userLanguage?: string | null;
   }): HttpSyncResponse;
@@ -254,43 +205,18 @@ export default async function handleHttpSyncRequest({
     preferred,
     userLanguage,
   }: {
-    response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[]; httpStatus?: number };
+    response: SyncErrorEnvelopeInput;
     preferred?: string | null;
     userLanguage?: string | null;
-  }): HttpSyncResponse => {
-    const normalized = normalizeErrorResponse({
-      response,
-      preferredLocale: preferred,
-      userLanguage,
-    });
-
-    const baseEnvelope = {
-      status: normalized.status,
-      message: normalized.message,
-      errorCode: normalized.errorCode,
-      errorParams: normalized.errorParams,
-      httpStatus: normalized.httpStatus,
-    };
-
-    return applyErrorFormatter({
-      response: baseEnvelope as unknown as Record<string, unknown> & { status?: string },
-      routeName: currentRouteName ?? 'sync/unknown',
-      transport: 'http',
-      userId: user?.id,
-      perRouteFormatter: currentPerRouteFormatter,
-    }) as unknown as HttpSyncResponse;
-  };
-
-  const ensureSyncErrorShape = (response: { status: 'error'; errorCode?: string; errorParams?: { key: string; value: string | number | boolean; }[]; httpStatus?: number }) => {
-    if (typeof response.errorCode === 'string' && response.errorCode.trim().length > 0) {
-      return response;
-    }
-
-    return {
-      ...response,
-      errorCode: 'sync.clientRejected',
-    };
-  };
+  }): HttpSyncResponse => buildFormattedError({
+    response,
+    preferred,
+    userLanguage,
+    routeName: currentRouteName,
+    transport: 'http',
+    userId: user?.id,
+    perRouteFormatter: currentPerRouteFormatter,
+  });
 
   const ioInstance = getIoInstance();
 
@@ -530,83 +456,40 @@ export default async function handleHttpSyncRequest({
     for (const tempSocket of sockets) {
       const tempToken = extractTokenFromSocket(tempSocket);
 
-      if (ignoreSelf && token && token === tempToken) {
+      if (ignoreSelf && typeof ignoreSelf === 'boolean' && token && token === tempToken) {
         continue;
       }
 
+      //? Count every recipient the request fanned out to — including ones whose
+      //? per-recipient `_client` handler later errors — matching the Socket.io
+      //? handler (handleSyncRequest.ts) so `postSyncFanout` sees the same total.
+      recipientCount++;
+
       if (syncObject[`${resolvedName}_client`]) {
         const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
-        const emitClientSyncStream = (payload: SyncStreamPayload = {}) => {
-          if (shouldLogStream()) {
-            getLogger().debug(`http sync: ${resolvedName} client stream`, { payload });
-          }
-
-          tempSocket.emit(socketEventNames.sync, {
-            ...payload,
-            cb: callbackName,
-            fullName: resolvedName,
-            status: 'stream',
-          });
-        };
-
-        const [clientSyncError, clientSyncResult] = await tryCatch(
-          async () => await clientSyncHandler({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: normalizedReceiver, stream: emitClientSyncStream }),
-          undefined,
-          {
-            handler: 'handleHttpSyncRequest',
-            sync: resolvedName,
-            stage: 'client',
-            sourceUserId: user?.id,
-            targetToken: tempToken,
-            receiver,
-            transport: 'http',
-          },
-        );
-        if (clientSyncError) {
-          tempSocket.emit(socketEventNames.sync, {
-            cb: callbackName,
-            fullName: resolvedName,
-            ...buildSyncError({
-              response: { status: 'error', errorCode: 'sync.clientExecutionFailed' },
-              preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
-            }),
-          });
-          continue;
-        }
-
-        if (clientSyncResult?.status === 'error') {
-          tempSocket.emit(socketEventNames.sync, {
-            cb: callbackName,
-            fullName: resolvedName,
-            ...buildSyncError({
-              response: ensureSyncErrorShape(clientSyncResult),
-              preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
-            }),
-          });
-          continue;
-        }
-
-        if (clientSyncResult?.status !== 'success') {
-          tempSocket.emit(socketEventNames.sync, {
-            cb: callbackName,
-            fullName: resolvedName,
-            ...buildSyncError({
-              response: { status: 'error', errorCode: 'sync.invalidClientResponse' },
-              preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
-            }),
-          });
-          continue;
-        }
-
-        tempSocket.emit(socketEventNames.sync, {
-          cb: callbackName,
-          fullName: resolvedName,
+        await processClientSyncForRecipient({
+          tempSocket,
+          tempToken,
+          clientSyncHandler,
+          data,
+          functionsObject,
           serverOutput,
-          clientOutput: clientSyncResult,
-          message: clientSyncResult.message || `${resolvedName} sync success`,
-          status: 'success',
+          receiver: normalizedReceiver,
+          resolvedName,
+          callbackKey: callbackName,
+          transport: 'http',
+          handlerName: 'handleHttpSyncRequest',
+          logLabel: 'http sync',
+          shouldLogDev,
+          shouldLogStream,
+          buildSyncError,
+          //? HTTP transport prefers `accept-language` over `x-language`
+          //? (reversed vs. the socket handler) — preserved verbatim from the
+          //? previous inlined error path.
+          resolvePreferredLocale: (headers) =>
+            extractLanguageFromHeader(headers['accept-language'] || headers['x-language']),
+          sourceUserId: user?.id,
         });
-        recipientCount++;
         continue;
       }
 
@@ -618,7 +501,6 @@ export default async function handleHttpSyncRequest({
         message: `${resolvedName} sync success`,
         status: 'success',
       });
-      recipientCount++;
     }
 
     fanoutPayload.recipientCount = recipientCount;

@@ -33,7 +33,19 @@
       "Bash(npm config *)",
       "Bash(xargs grep -n \"DEFAULT_DASHBOARD_PATH_PATTERN\\\\|export const DEFAULT\")",
       "Bash(Get-ChildItem -Path \"C:\\\\youcomm\\\\LuckyStack-v2\\\\packages\\\\create-luckystack-app\" -Recurse -Depth 2)",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_fill_form",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_tabs",
+      "mcp__playwright__browser_wait_for"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "playwright",
+    "chrome-devtools"
+  ]
 }

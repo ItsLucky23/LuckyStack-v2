@@ -16,7 +16,9 @@
 
 import { createRequire } from 'node:module';
 
-import type { ErrorTracker, ErrorTrackerEvent } from '@luckystack/core';
+import { ensurePeerDepInstalled, type ErrorTracker, type ErrorTrackerEvent } from '@luckystack/core';
+
+import { runBeforeSend } from './runBeforeSend';
 
 const localRequire = createRequire(import.meta.url);
 
@@ -42,32 +44,18 @@ export interface PostHogAdapterOptions {
   beforeSend?: (event: ErrorTrackerEvent) => ErrorTrackerEvent | null;
 }
 
-const ensurePeerDepInstalled = (): void => {
-  try {
-    localRequire.resolve('posthog-node');
-  } catch {
-    throw new Error(
-      '[error-tracking:posthog] The `posthog-node` package is not installed but createPostHogAdapter() was called. ' +
-      'Run `npm install posthog-node`.',
-    );
-  }
-};
-
 export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTracker => {
-  ensurePeerDepInstalled();
+  //? `localRequire` (this module's `createRequire`) resolves `posthog-node`
+  //? from the adapter's perspective, not core's node_modules.
+  ensurePeerDepInstalled('posthog-node', 'Run `npm install posthog-node`.', localRequire);
 
   let currentDistinctId = options.anonymousDistinctId ?? 'anonymous';
-
-  const runBeforeSend = (event: ErrorTrackerEvent): ErrorTrackerEvent | null => {
-    if (!options.beforeSend) return event;
-    return options.beforeSend(event);
-  };
 
   return {
     name: 'posthog',
 
     captureException(error, context) {
-      const filtered = runBeforeSend({
+      const filtered = runBeforeSend(options.beforeSend, {
         forwarded: true,
         kind: 'exception',
         payload: { error, context: context ?? null },
@@ -94,7 +82,7 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
     },
 
     captureMessage(message, level, context) {
-      const filtered = runBeforeSend({
+      const filtered = runBeforeSend(options.beforeSend, {
         forwarded: true,
         kind: 'message',
         payload: { message, level, context: context ?? null },

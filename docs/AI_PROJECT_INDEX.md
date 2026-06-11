@@ -61,7 +61,7 @@
 | `menuHandler.ts` | `_functions/menuHandler.ts` | menuHandler, setMenuHandlerRef | — |
 | `sentry.ts` | `_functions/sentry.ts` | SentryErrorBoundary, default, initializeSentry, withSentryProfiler | Sentry error monitoring initialization for the client. |
 
-## Components — `src/_components/` (26 exports across 10 files)
+## Components — `src/_components/` (52 exports across 17 files)
 
 | File | Path | Exports | Summary |
 | --- | --- | --- | --- |
@@ -75,6 +75,13 @@
 | `Navbar.tsx` | `_components/Navbar.tsx` | NavbarItem, NavbarItemContext, NavbarProps, NavbarState, +1 | — |
 | `TemplateProvider.tsx` | `_components/TemplateProvider.tsx` | Template, default | — |
 | `dropdownInternals.tsx` | `_components/dropdownInternals.tsx` | DropdownDirection, DropdownItem, DropdownMenuController, DropdownMenuShell, +6 | — |
+| `Checkbox.tsx` | `_components/inputs/Checkbox.tsx` | CheckboxProps, default | — |
+| `DatePicker.tsx` | `_components/inputs/DatePicker.tsx` | DatePickerProps, DateRange, default | — |
+| `Popover.tsx` | `_components/inputs/Popover.tsx` | PopoverProps, default | — |
+| `TextField.tsx` | `_components/inputs/TextField.tsx` | TextFieldProps, TextFieldType, default | — |
+| `Toggle.tsx` | `_components/inputs/Toggle.tsx` | ToggleProps, default | — |
+| `fieldShell.tsx` | `_components/inputs/fieldShell.tsx` | FIELD_SIZES, FieldShell, FieldShellProps, FieldSize, +3 | — |
+| `floatingLayer.tsx` | `_components/inputs/floatingLayer.tsx` | FloatingAlign, FloatingLayerController, FloatingPanel, FloatingPanelProps, +3 | — |
 
 ## Cross-references
 
@@ -117,6 +124,32 @@ _(no cross-references detected)_
 | `normalizeOptions` | `_components/dropdownInternals.tsx` |
 | `useDropdownMenu` | `_components/dropdownInternals.tsx` |
 | `default` | `_components/ErrorPage.tsx` |
+| `CheckboxProps` | `_components/inputs/Checkbox.tsx` |
+| `default` | `_components/inputs/Checkbox.tsx` |
+| `DatePickerProps` | `_components/inputs/DatePicker.tsx` |
+| `DateRange` | `_components/inputs/DatePicker.tsx` |
+| `default` | `_components/inputs/DatePicker.tsx` |
+| `FIELD_SIZES` | `_components/inputs/fieldShell.tsx` |
+| `FieldShell` | `_components/inputs/fieldShell.tsx` |
+| `FieldShellProps` | `_components/inputs/fieldShell.tsx` |
+| `FieldSize` | `_components/inputs/fieldShell.tsx` |
+| `inputBoxClass` | `_components/inputs/fieldShell.tsx` |
+| `useErrorPulse` | `_components/inputs/fieldShell.tsx` |
+| `useShake` | `_components/inputs/fieldShell.tsx` |
+| `FloatingAlign` | `_components/inputs/floatingLayer.tsx` |
+| `FloatingLayerController` | `_components/inputs/floatingLayer.tsx` |
+| `FloatingPanel` | `_components/inputs/floatingLayer.tsx` |
+| `FloatingPanelProps` | `_components/inputs/floatingLayer.tsx` |
+| `FloatingPlacement` | `_components/inputs/floatingLayer.tsx` |
+| `useFloatingLayer` | `_components/inputs/floatingLayer.tsx` |
+| `UseFloatingLayerArgs` | `_components/inputs/floatingLayer.tsx` |
+| `default` | `_components/inputs/Popover.tsx` |
+| `PopoverProps` | `_components/inputs/Popover.tsx` |
+| `default` | `_components/inputs/TextField.tsx` |
+| `TextFieldProps` | `_components/inputs/TextField.tsx` |
+| `TextFieldType` | `_components/inputs/TextField.tsx` |
+| `default` | `_components/inputs/Toggle.tsx` |
+| `ToggleProps` | `_components/inputs/Toggle.tsx` |
 | `default` | `_components/LoginForm.tsx` |
 | `MenuHandlerProvider` | `_components/MenuHandler.tsx` |
 | `useMenuHandler` | `_components/MenuHandler.tsx` |

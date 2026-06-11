@@ -15,6 +15,12 @@ export {
   dispatchActivitySample,
 } from './activityEvents';
 export type { ActivityEvent, ActivitySample } from './activityEvents';
+export {
+  recordActivity,
+  clearActivity,
+  startActivitySampler,
+  stopActivitySampler,
+} from './activity/activitySampler';
 
 //? Auto-register the default AFK event at module load so a fresh install
 //? gets AFK detection without an explicit registration step. Consumers

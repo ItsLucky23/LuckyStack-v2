@@ -1,10 +1,10 @@
-# Branch Log Index
+﻿# Branch Log Index
 
 > Maintained automatically. Every time a `branch-logs/<branch>.md` is created or appended to, the corresponding row here MUST be added or updated. Last-updated timestamps are the basis for sprint-end audits ("review tickets DEV-120..DEV-140"). See `docs/BRANCH_LOG_PROTOCOL.md` Section 6.5 for the full enforcement rule.
 
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
-| chore/package-split-prep | (none) | 2026-06-08 | active | 117 |
+| chore/package-split-prep | (none) | 2026-06-10 | active | 144 |
 
 ## Columns
 

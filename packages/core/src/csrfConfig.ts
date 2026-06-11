@@ -9,6 +9,8 @@
 //? consumers who never call `registerCsrfConfig` get the historical
 //? behaviour unchanged.
 
+import { createRegistry } from './createRegistry';
+
 export interface CsrfCookieOptions {
   sameSite?: 'strict' | 'lax' | 'none';
   secure?: boolean;
@@ -46,7 +48,16 @@ export const DEFAULT_CSRF_CONFIG: CsrfConfig = {
   },
 };
 
-let active: CsrfConfig = DEFAULT_CSRF_CONFIG;
+const registry = createRegistry<CsrfConfig, Partial<CsrfConfig>>(DEFAULT_CSRF_CONFIG, {
+  //? Merge shallowly with the CURRENT config; `cookieOptions` is deep-merged
+  //? so a partial override of (say) `sameSite` does not clobber `path` /
+  //? `maxAgeMs`. Last-write-wins, and successive calls accumulate.
+  transform: (input, current) => ({
+    ...current,
+    ...input,
+    cookieOptions: { ...current.cookieOptions, ...input.cookieOptions },
+  }),
+});
 
 /**
  * Override one or more CSRF settings. Merges shallowly with the current
@@ -54,17 +65,13 @@ let active: CsrfConfig = DEFAULT_CSRF_CONFIG;
  * `sameSite` does not clobber `path` / `maxAgeMs`. Last-write-wins.
  */
 export const registerCsrfConfig = (input: Partial<CsrfConfig>): void => {
-  active = {
-    ...active,
-    ...input,
-    cookieOptions: { ...active.cookieOptions, ...input.cookieOptions },
-  };
+  registry.register(input);
 };
 
 /** Read the active config at call time (never at module load). */
-export const getCsrfConfig = (): CsrfConfig => active;
+export const getCsrfConfig = (): CsrfConfig => registry.get();
 
 /** Test-only — restore defaults between scenarios. */
 export const resetCsrfConfigForTests = (): void => {
-  active = DEFAULT_CSRF_CONFIG;
+  registry.reset();
 };

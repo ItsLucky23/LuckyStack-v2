@@ -13,10 +13,12 @@ export type HttpMethodLiteral = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
 export type ApiMethodMap = Record<string, Record<string, Record<string, HttpMethodLiteral>>>;
 
-let activeMap: ApiMethodMap | null = null;
+import { createRegistry } from './createRegistry';
+
+const registry = createRegistry<ApiMethodMap | null>(null);
 
 export const registerApiMethodMap = (map: ApiMethodMap): void => {
-  activeMap = map;
+  registry.register(map);
 };
 
 export const getRegisteredApiMethod = (
@@ -24,6 +26,7 @@ export const getRegisteredApiMethod = (
   apiName: string,
   version: string,
 ): HttpMethodLiteral | undefined => {
+  const activeMap = registry.get();
   if (!activeMap) return undefined;
   //? The map shape is `Record<page, Record<name, Record<version, method>>>`;
   //? TS treats each indexed access as defined (no `noUncheckedIndexedAccess`),
@@ -34,4 +37,4 @@ export const getRegisteredApiMethod = (
   /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 };
 
-export const isApiMethodMapRegistered = (): boolean => activeMap !== null;
+export const isApiMethodMapRegistered = (): boolean => registry.isRegistered();

@@ -27,11 +27,14 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 //? scaffold references is already on the registry.
 const WAVES = [
   ['core'],
-  ['email', 'login', 'devkit', 'router', 'test-runner', 'docs-ui', 'secret-manager'],
+  ['email', 'login', 'devkit', 'router', 'test-runner', 'secret-manager'],
   ['error-tracking'],
   ['api', 'sync', 'presence'],
   ['server'],
-  ['create-luckystack-app'],
+  //? docs-ui's ./register imports @luckystack/server; publish it after server.
+  ['docs-ui'],
+  //? Tools last: @luckystack/cli + the scaffold reference every runtime package.
+  ['cli', 'create-luckystack-app'],
 ];
 
 const dryRun = new Set(process.argv.slice(2)).has('--dry-run');

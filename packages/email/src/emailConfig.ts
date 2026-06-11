@@ -9,6 +9,8 @@
 //? email links AND OAuth callback redirects) stays in core's `app.publicUrl`
 //? because it isn't email-specific.
 
+import { deepMerge, type DeepPartial } from '@luckystack/core';
+
 export interface EmailLoggingConfig {
   /** Log a warning to terminal when an email fails to send. */
   errors: boolean;
@@ -79,33 +81,9 @@ export const DEFAULT_EMAIL_CONFIG: EmailConfig = {
   },
 };
 
-type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends object | undefined ? DeepPartial<NonNullable<T[K]>> : T[K];
-};
-
 export type EmailConfigInput = DeepPartial<EmailConfig>;
 
 let activeConfig: EmailConfig = DEFAULT_EMAIL_CONFIG;
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> => {
-  if (value === null || typeof value !== 'object') return false;
-  const proto = Object.getPrototypeOf(value) as object | null;
-  return proto === Object.prototype || proto === null;
-};
-
-const deepMerge = <T>(base: T, override: DeepPartial<T> | undefined): T => {
-  if (override === undefined) return base;
-  if (!isPlainObject(base) || !isPlainObject(override)) {
-    return (override as T) ?? base;
-  }
-  const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
-  for (const [key, value] of Object.entries(override as Record<string, unknown>)) {
-    if (value === undefined) continue;
-    const baseValue = (base as Record<string, unknown>)[key];
-    out[key] = isPlainObject(baseValue) && isPlainObject(value) ? deepMerge(baseValue, value as DeepPartial<unknown>) : value;
-  }
-  return out as T;
-};
 
 export const registerEmailConfig = (config: EmailConfigInput): void => {
   activeConfig = deepMerge(DEFAULT_EMAIL_CONFIG, config);

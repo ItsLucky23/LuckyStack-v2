@@ -20,7 +20,7 @@
     "invalidRequestFormat": "Format de requête invalide.",
     "payloadTooLarge": "Le payload de la requête est trop volumineux.",
     "notFound": "API '{{name}}' introuvable.",
-    "invalidInputType": "Entrée API invalide : {{message}}",
+    "invalidInputType": "Entrée API invalide.",
     "rateLimitExceeded": "Trop de requêtes. Réessayez dans {{seconds}} secondes.",
     "methodNotAllowed": "Méthode non autorisée. Méthode attendue : {{method}}.",
     "internalServerError": "Une erreur interne du serveur est survenue.",

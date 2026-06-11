@@ -1,4 +1,4 @@
-import { defineConfig } from 'tsup';
+﻿import { defineConfig } from 'tsup';
 
 //? Router publishes both the runtime API (`./index.ts`) and a CLI entry
 //? (`./cli.ts`). The CLI is wired via `bin` in package.json so consumers
@@ -10,7 +10,10 @@ export default defineConfig({
   dts: { entry: 'src/index.ts' },
   sourcemap: true,
   clean: true,
-  splitting: false,
+  //? splitting MUST stay on for multi-entry packages: with it off, tsup inlines
+  //? a private COPY of every shared module into each entry, so registry state
+  //? written via one entry (e.g. ./register) is invisible through the other.
+  splitting: true,
   skipNodeModulesBundle: true,
   external: [/^@luckystack\//],
   target: 'es2022',

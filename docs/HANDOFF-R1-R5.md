@@ -1,5 +1,10 @@
 # Handoff — Framework-first remediation (R1–R5 + D-MT)
 
+> **Intent (clarified 2026-06-09):** this is a **deliberately-shipped framework doc** — a
+> stable record of the R1–R5 + D-MT remediation that ships to consumers. It is NOT the
+> live status document: for current uncommitted repo state / next steps see the root
+> `SESSION_STATE.md`.
+
 > **Date:** 2026-06-02 · **Branch:** `chore/package-split-prep` · **Status:** code complete, all gates + live sweep green, **nothing committed** (solo session).
 >
 > Landed the 5 framework-scope gaps from `sparring/FRAMEWORK_REMEDIATION.md` **before** the npm publish, so the published `@luckystack/*` packages cover the sharp edges every serious product hits (webhooks, graded DB clients, multi-tenant Redis keys, real uploads, single-owner orchestration). The Workspaces project builds against these post-publish.
@@ -78,7 +83,7 @@ The live sweep proves R3 byte-preservation end-to-end (`credentials login succes
 ## Open items (developer actions — not blockers in the code)
 
 - **Optional:** webhook/upload end-to-end via the curl recipe in `docs/ARCHITECTURE_HTTP.md` (`/webhooks/*` → 200 not 403; `/api/*` with no Origin → still 403; >1 MiB upload → no 413).
-- **Before publish:** `npm install` (refreshes the stale `@luckystack/env-resolver` symlink) + `npm org create luckystack`.
+- **Before publish:** `npm install` (refreshes the workspace symlinks + lockfile) + `npm org create luckystack`.
 - **Commit:** the whole session sits uncommitted on `chore/package-split-prep` (plus the earlier secret-manager pile). Commit when ready.
 
 ## Notes

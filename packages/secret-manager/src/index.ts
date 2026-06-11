@@ -27,6 +27,9 @@
 //? without restarting a long-running dev process. It is a no-op in production.
 
 import { readFileSync, watch as fsWatch, type FSWatcher } from 'node:fs';
+import path from 'node:path';
+
+import { tryCatchSync } from '@luckystack/core';
 
 /** Bearer token: a literal string, or a file whose entire contents are the token. */
 export type SecretManagerToken = string | { fromFile: string };
@@ -80,6 +83,19 @@ export interface CachedResolution {
 const DEFAULT_POINTER_PATTERN = /^(.+)_V(\d+)$/;
 const DEFAULT_ENV_FILES = ['.env', '.env.local'];
 
+//? Dev hot-reload reads these files and injects their values into `process.env`.
+//? `dev.envFiles` is consumer config (not runtime user input), so an ABSOLUTE
+//? path is treated as an explicit, allowed choice (e.g. a shared secrets file).
+//? A RELATIVE path, however, must stay within the project root — reject `..`
+//? traversal (the plausible "injected via a relative path" escape). The caller
+//? skips + warns on a rejected entry (fail-open, consistent with the package's
+//? swallow-on-missing-file behaviour).
+const isSafeEnvFile = (file: string): boolean => {
+  if (path.isAbsolute(file)) return true;
+  const rel = path.relative(process.cwd(), path.resolve(process.cwd(), file));
+  return !rel.startsWith('..');
+};
+
 //? Module state. The resolver is meant to run once per process at boot; these
 //? bindings keep it idempotent and let dev hot-reload re-resolve later.
 let cachedResolution: CachedResolution | null = null;
@@ -95,6 +111,18 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 const fileWatchers: FSWatcher[] = [];
 
+const validateUrl = (url: string): void => {
+  //? Reject relative / non-http(s) URLs (e.g. `file://`) up front so the resolve
+  //? endpoint can't be pointed at the local filesystem or another protocol.
+  const [parseError, parsed] = tryCatchSync(() => new URL(url));
+  if (parseError || !parsed) {
+    throw new Error(`[secret-manager] Invalid \`url\`: "${url}" is not an absolute URL.`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`[secret-manager] Invalid \`url\` scheme "${parsed.protocol}": only http(s) is supported.`);
+  }
+};
+
 const capturePointers = (pattern: RegExp): Record<string, string> => {
   const map: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env)) {
@@ -105,8 +133,37 @@ const capturePointers = (pattern: RegExp): Record<string, string> => {
   return map;
 };
 
-const resolveToken = (token: SecretManagerToken): string =>
-  typeof token === 'string' ? token : readFileSync(token.fromFile, 'utf8').trim();
+const validateToken = (token: string): string => {
+  //? An empty/whitespace token yields an `Authorization: Bearer ` header that
+  //? silently auth-fails (and in hybrid mode falls back to local env) — reject it.
+  const trimmed = token.trim();
+  if (trimmed.length === 0) {
+    throw new Error('[secret-manager] Bearer token is empty or whitespace-only.');
+  }
+  //? The `Bearer ` scheme is added at the call site; a token that already carries
+  //? it produces a malformed `Bearer Bearer <...>` header — warn but don't mutate.
+  if (/^bearer\s/i.test(trimmed)) {
+    console.warn('[secret-manager] Token starts with a "Bearer " prefix; the scheme is added automatically — drop the prefix from the configured token.');
+  }
+  return trimmed;
+};
+
+const resolveToken = (token: SecretManagerToken): string => {
+  if (typeof token === 'string') return validateToken(token);
+  let raw: string;
+  try {
+    raw = readFileSync(token.fromFile, 'utf8');
+  } catch (error) {
+    //? Distinguish a missing/deleted file from other I/O errors so a dev
+    //? hot-reload poll over a transiently-absent token file gives a clear log.
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === 'ENOENT') {
+      throw new Error(`[secret-manager] Token file not found: "${token.fromFile}".`);
+    }
+    throw new Error(`[secret-manager] Failed to read token file "${token.fromFile}": ${String((error as Error | undefined)?.message ?? error)}`);
+  }
+  return validateToken(raw);
+};
 
 const fetchResolve = async (
   config: SecretManagerConfig,
@@ -129,12 +186,24 @@ const fetchResolve = async (
     throw new Error(`[secret-manager] Resolve request failed: ${String(response.status)} ${response.statusText}`);
   }
 
-  const body = await response.json() as { values?: Record<string, string> };
-  if (!body.values || typeof body.values !== 'object') {
+  //? Parse as `unknown`, then narrow `values` with a runtime guard rather than
+  //? trusting an up-front cast — the response is attacker-influenced (a
+  //? compromised/buggy server) so its shape is not assumed.
+  const body: unknown = await response.json();
+  const values = (body as { values?: unknown } | null)?.values;
+  if (values === null || typeof values !== 'object') {
     throw new Error('[secret-manager] Resolve response missing `values` object.');
   }
 
-  return body.values;
+  //? Filter the response down to the pointers we actually requested. A
+  //? compromised/buggy server could otherwise inject extra keys that get cached
+  //? (and surfaced via getCachedResolution); only requested pointers are trusted.
+  const requested = new Set(pointers);
+  const filtered: Record<string, string> = {};
+  for (const [key, value] of Object.entries(values as Record<string, string>)) {
+    if (requested.has(key)) filtered[key] = value;
+  }
+  return filtered;
 };
 
 const applyResolved = (
@@ -167,16 +236,24 @@ const doResolve = async (config: SecretManagerConfig): Promise<void> => {
   const source = config.source ?? 'remote';
   if (source === 'local') return;
 
-  pointerMap ??= capturePointers(config.pointerPattern ?? DEFAULT_POINTER_PATTERN);
-  const pointers = [...new Set(Object.values(pointerMap))];
+  //? Capture once on first resolve and reuse: the first resolve OVERWRITES the
+  //? env value with the real secret, after which it no longer looks like a pointer.
+  const activePointerMap = (pointerMap ??= capturePointers(config.pointerPattern ?? DEFAULT_POINTER_PATTERN));
+  const pointers = [...new Set(Object.values(activePointerMap))];
   if (pointers.length === 0) {
     cachedResolution = { fetchedAt: Date.now(), values: {} };
     return;
   }
 
+  //? CC-7 exemption (no-raw-try-catch): the async framework `tryCatch` auto-captures
+  //? to the error tracker, but this is a deliberate fail-OPEN boot-time guard in an
+  //? intentionally dependency-light client — a 'hybrid' resolve failure must stay a
+  //? silent warn with NO error-tracker side-effect (and 'remote' re-throws untouched
+  //? for a hard boot stop). `tryCatchSync` can't wrap the `await`, so the raw
+  //? try/catch is kept on purpose; the fail-OPEN contract is the load-bearing detail.
   try {
     const values = await fetchResolve(config, pointers);
-    applyResolved(pointerMap, values, source);
+    applyResolved(activePointerMap, values, source);
     cachedResolution = { fetchedAt: Date.now(), values };
   } catch (error) {
     if (source === 'hybrid') {
@@ -198,7 +275,12 @@ const parseEnvFile = (content: string): Record<string, string> => {
     const eq = line.indexOf('=');
     if (eq <= 0) continue;
     const key = line.slice(0, eq).trim();
-    if (!/^[\w.-]+$/.test(key)) continue;
+    //? Restrict to POSIX-shell env-var names. `.`/`-` keys can't be read via the
+    //? normal `process.env.NAME` lookup, so accepting them is a silent footgun.
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      console.warn(`[secret-manager] Ignoring env key "${key}": not a valid environment variable name (^[A-Za-z_][A-Za-z0-9_]*$).`);
+      continue;
+    }
     let value = line.slice(eq + 1).trim();
     const quote = value[0];
     if ((quote === '"' || quote === "'") && value.length >= 2 && value.endsWith(quote)) {
@@ -235,6 +317,10 @@ const startDevReload = (config: SecretManagerConfig): void => {
 
   if (watch) {
     for (const file of config.dev.envFiles ?? DEFAULT_ENV_FILES) {
+      if (!isSafeEnvFile(file)) {
+        console.warn(`[secret-manager] ignoring unsafe dev envFile path (must be relative + within the project): ${file}`);
+        continue;
+      }
       try {
         const watcher = fsWatch(file, () => {
           scheduleReload();
@@ -267,6 +353,9 @@ const startDevReload = (config: SecretManagerConfig): void => {
 export const initSecretManager = async (config: SecretManagerConfig): Promise<void> => {
   activeConfig = config;
   if ((config.source ?? 'remote') === 'local') return;
+  //? Only validate the URL when we'll actually hit the network ('remote' /
+  //? 'hybrid'); 'local' short-circuits above and may carry a placeholder url.
+  validateUrl(config.url);
   await doResolve(config);
   startDevReload(config);
 };
@@ -297,6 +386,10 @@ export const reloadSecretManagerFromFiles = async (): Promise<void> => {
   //? Re-read every file in load order; later files (e.g. .env.local) override.
   const merged: Record<string, string> = {};
   for (const file of files) {
+    if (!isSafeEnvFile(file)) {
+      console.warn(`[secret-manager] ignoring unsafe dev envFile path: ${file}`);
+      continue;
+    }
     let content: string;
     try {
       content = readFileSync(file, 'utf8');

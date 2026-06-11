@@ -6,37 +6,22 @@
 //? `unregisterActivityEvent('afk')` first, then `registerActivityEvent('afk', ...)`
 //? with the alternative implementation.
 
-import { dispatchHook, getIoInstance, socketEventNames } from '@luckystack/core';
+import { socketEventNames } from '@luckystack/core';
 
 import { getPresenceConfig } from '../presenceConfig';
+import { informRoomPeers } from './peerNotifier';
 import { registerActivityEvent, type ActivitySample } from '../activityEvents';
 
 const fireAfkPresence = async (sample: ActivitySample): Promise<void> => {
-  const io = getIoInstance();
-  if (!io || !sample.token) return;
+  if (!sample.token) return;
 
-  await dispatchHook('prePresenceUpdate', {
+  //? Route through `informRoomPeers` so roommates receive `{ userId, endTime }`
+  //? — NEVER the raw session token — and the pre/postPresenceUpdate hooks fire
+  //? with the real userId + roomCodes (resolved from the session).
+  await informRoomPeers({
     token: sample.token,
-    userId: null,
-    kind: 'afk',
-    roomCodes: [],
-  });
-
-  //? Notify everyone in the same rooms as this token. Same emit pattern
-  //? as `informRoomPeers` but without the broadcaster's runtime weight —
-  //? room membership is computed once on the io adapter.
-  const rooms = io.sockets.adapter.rooms;
-  for (const [roomName, members] of rooms.entries()) {
-    if (!members.has(sample.socketId)) continue;
-    io.to(roomName).emit(socketEventNames.userAfk, { token: sample.token });
-  }
-
-  await dispatchHook('postPresenceUpdate', {
-    token: sample.token,
-    userId: null,
-    kind: 'afk',
-    roomCodes: [],
-    recipientCount: -1,
+    event: socketEventNames.userAfk,
+    extraData: { time: getPresenceConfig().afkTimeoutMs },
   });
 };
 

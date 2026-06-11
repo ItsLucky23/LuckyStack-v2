@@ -9,13 +9,15 @@
 //? `getLocaleReloader()?.()` whenever a `_locales/*.json` file changes. If
 //? no reloader is registered, the watcher is a no-op for that event.
 
+import { createRegistry } from './createRegistry';
+
 export type LocaleReloader = () => void | Promise<void>;
 
-let activeReloader: LocaleReloader | null = null;
+const registry = createRegistry<LocaleReloader | null>(null);
 
 export const registerLocaleReloader = (reloader: LocaleReloader): LocaleReloader => {
-  activeReloader = reloader;
+  registry.register(reloader);
   return reloader;
 };
 
-export const getLocaleReloader = (): LocaleReloader | null => activeReloader;
+export const getLocaleReloader = (): LocaleReloader | null => registry.get();

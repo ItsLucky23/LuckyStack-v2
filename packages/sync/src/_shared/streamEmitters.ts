@@ -2,10 +2,10 @@ import {
   dispatchHook,
   getIoInstance,
   getLogger,
-  getProjectConfig,
   socketEventNames,
 } from '@luckystack/core';
 import type { Socket } from 'socket.io';
+import { shouldLogStream } from './logFlags';
 
 //? Counter of chunks per (routeName, recipient) pair so postSyncStream
 //? consumers can index streams. Cleared on receiver-room teardown.
@@ -54,8 +54,6 @@ export interface SyncStreamEmitters {
   buildBroadcastFrame: (payload: SyncStreamPayload) => Record<string, unknown>;
   flushPressure: FlushPressure;
 }
-
-const shouldLogStream = () => getProjectConfig().logging.stream;
 
 //? Default 1 MB threshold (per spec B2). Packet count = bytes / avg-packet-size.
 const DEFAULT_THRESHOLD_BYTES = 1_048_576;

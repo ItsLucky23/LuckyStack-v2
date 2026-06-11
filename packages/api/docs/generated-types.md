@@ -121,7 +121,7 @@ const inputValidation = await validateInputByType({
 | `rootKey` | `string` | Label used in error messages (`data` for API, `clientInput` for sync). |
 | `filePath` | `string \| undefined` | Source file path. The dev-mode resolver lazy-loads `@luckystack/devkit` to re-walk imports / re-exports. |
 
-**Return shape**: `{ status: 'success' } | { status: 'error'; message: string }`. On error the handler responds with `api.invalidInputType` + `400`, surfacing the validator's `message` as `errorParams[0].value`.
+**Return shape**: `{ status: 'success' } | { status: 'error'; message: string }`. On error the handler responds with the generic `api.invalidInputType` + `400`. The validator's `message` is NOT surfaced to the client (echoing it would let unauthenticated callers enumerate the input schema); it is routed to the `postApiValidate` hook payload (`validation.message`) and the dev logs instead.
 
 `validateInputByType` lazy-loads `@luckystack/devkit`'s deep resolver in development so types defined across files (re-exported aliases, utility wrappers like `Partial`/`Pick`/`Omit`/`Record`) expand correctly. In production it relies on the resolver's last-known cache — regenerate before shipping.
 

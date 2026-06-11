@@ -1,14 +1,8 @@
 import { walkEndpoints } from './walkEndpoints';
 import { runRateLimitCheck } from './rateLimitCheck';
 import { resetServerState } from './resetServerState';
-import type { ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
-
-type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
-type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, {
-  method: string;
-  auth: { login: boolean; additional?: Record<string, unknown>[] };
-  rateLimit?: number | false;
-}>>>>>>;
+import { shouldSkip, requiresLogin, getRateLimit, calculateSummary } from './testLayerHelpers';
+import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
 export interface RunRateLimitTestsInput {
   apiMethodMap: ApiMethodMap;
@@ -36,24 +30,6 @@ export interface RunRateLimitTestsInput {
   resetToken?: string;
   onResult?: (result: ContractCheckResult) => void;
 }
-
-const getRateLimit = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): number | null => {
-  const meta = apiMetaMap[endpoint.page]?.[endpoint.name]?.[endpoint.version];
-  if (!meta || meta.rateLimit === false || meta.rateLimit === undefined) return null;
-  return meta.rateLimit;
-};
-
-const requiresLogin = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): boolean => {
-  const meta = apiMetaMap[endpoint.page]?.[endpoint.name]?.[endpoint.version];
-  return meta?.auth.login ?? false;
-};
-
-const shouldSkip = (endpoint: EndpointDescriptor, skip: string[]): boolean => {
-  if (skip.length === 0) return false;
-  const versioned = `${endpoint.page}/${endpoint.name}/${endpoint.version}`;
-  const versionless = `${endpoint.page}/${endpoint.name}`;
-  return skip.includes(versioned) || skip.includes(versionless);
-};
 
 export const runRateLimitTests = async (
   input: RunRateLimitTestsInput,
@@ -124,11 +100,5 @@ export const runRateLimitTests = async (
     input.onResult?.(result);
   }
 
-  return {
-    total: results.length,
-    passed: results.filter(r => r.status === 'pass').length,
-    failed: results.filter(r => r.status === 'fail').length,
-    skipped: results.filter(r => r.status === 'skipped').length,
-    results,
-  };
+  return calculateSummary(results);
 };

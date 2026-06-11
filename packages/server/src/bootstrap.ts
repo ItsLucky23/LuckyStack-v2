@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { ROOT_DIR } from '@luckystack/core';
 import { createLuckyStackServer } from './createServer';
+import { OPTIONAL_PACKAGES, canResolve, getLogin } from './capabilities';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -91,14 +92,48 @@ const loadOverlayFolder = async (overlayRoot: string): Promise<void> => {
   }
 };
 
+//? Auto-detect phase (0.2.0 "install-anything-anytime"). For each optional
+//? package that ships a `./register` side-effect subpath, import it so the
+//? package self-wires from env WITHOUT any consumer code edit — `npm i
+//? @luckystack/<pkg>` + env + restart is enough. Resolve-guarded so an absent
+//? package is a silent no-op; a single register's internal failure must never
+//? crash boot (register modules log their own errors). Runs BEFORE
+//? `loadOverlayFolder` so a consumer overlay file (last writer) can override the
+//? auto-wired defaults.
+const importOptionalPackageRegisters = async (): Promise<void> => {
+  for (const pkg of OPTIONAL_PACKAGES) {
+    const specifier = `@luckystack/${pkg}/register`;
+    if (!canResolve(specifier)) continue;
+    await importIfExistsSpecifier(specifier);
+  }
+};
+
+const importIfExistsSpecifier = async (specifier: string): Promise<void> => {
+  try {
+    await import(specifier);
+  } catch {
+    //? A register module that throws at load (e.g. an internal peer-dep error)
+    //? should not take the whole server down — the module is responsible for
+    //? logging its own failure. Boot continues with that feature degraded.
+  }
+};
+
 export const bootstrapLuckyStack = async (
   options: BootstrapLuckyStackOptions = {}
 ): Promise<RunningLuckyStackServer> => {
   const overlayRoot = options.overlayRoot ?? 'luckystack';
 
   if (!options.skipOverlayLoad) {
+    //? Package self-wiring first, consumer overlay second (overlay overrides).
+    await importOptionalPackageRegisters();
     await loadOverlayFolder(overlayRoot);
   }
+
+  //? Force login to load when installed so its session provider registers into
+  //? core (`registerSessionProvider`, side-effect of the package index) even in
+  //? an app that never imports any `@luckystack/login` export directly. No-op
+  //? when login is absent — the app runs unauthenticated.
+  await getLogin();
 
   const server = await createLuckyStackServer(options);
   return server;

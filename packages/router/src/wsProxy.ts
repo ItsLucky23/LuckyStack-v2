@@ -4,6 +4,7 @@ import { URL } from 'node:url';
 import type { IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { ServiceTargetResolver } from './resolveTarget';
+import { WS_HOP_BY_HOP_HEADERS, stripHopByHopHeaders, safeDestroy } from './proxyUtils';
 
 //? Service key used for WebSocket upgrades. Socket.io clients connect to a
 //? single URL with path `/socket.io/?...`, so the first path segment doesn't
@@ -11,26 +12,6 @@ import type { ServiceTargetResolver } from './resolveTarget';
 //? With the Socket.io Redis adapter attached on every backend, rooms fan out
 //? across instances regardless of which one holds the WS connection.
 const DEFAULT_WS_SERVICE = 'system';
-
-const HOP_BY_HOP_HEADERS = new Set([
-  'connection',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-]);
-
-const stripHopByHopHeaders = (headers: IncomingMessage['headers']): Record<string, string | string[]> => {
-  const out: Record<string, string | string[]> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue;
-    if (value === undefined) continue;
-    out[key] = value;
-  }
-  return out;
-};
 
 export interface CreateWsProxyInput {
   resolver: ServiceTargetResolver;
@@ -44,7 +25,7 @@ export const createWsProxy = ({ resolver, wsTargetService }: CreateWsProxyInput)
     const resolved = resolver.resolve(service);
     if (!resolved) {
       clientSocket.write(`HTTP/1.1 502 Bad Gateway\r\n\r\n`);
-      clientSocket.destroy();
+      safeDestroy(clientSocket);
       return;
     }
 
@@ -60,7 +41,7 @@ export const createWsProxy = ({ resolver, wsTargetService }: CreateWsProxyInput)
       path: targetUrl.pathname + targetUrl.search,
       method: req.method,
       headers: {
-        ...stripHopByHopHeaders(req.headers),
+        ...stripHopByHopHeaders(req.headers, WS_HOP_BY_HOP_HEADERS),
         //? These two must be preserved verbatim to complete the WS handshake.
         connection: 'Upgrade',
         upgrade: 'websocket',
@@ -91,8 +72,8 @@ export const createWsProxy = ({ resolver, wsTargetService }: CreateWsProxyInput)
       clientSocket.pipe(upstreamSocket);
 
       const teardown = (): void => {
-        try { upstreamSocket.destroy(); } catch { /* noop */ }
-        try { clientSocket.destroy(); } catch { /* noop */ }
+        safeDestroy(upstreamSocket);
+        safeDestroy(clientSocket);
       };
       upstreamSocket.on('error', teardown);
       upstreamSocket.on('close', teardown);
@@ -102,7 +83,7 @@ export const createWsProxy = ({ resolver, wsTargetService }: CreateWsProxyInput)
 
     upstreamRequest.on('error', () => {
       clientSocket.write(`HTTP/1.1 502 Bad Gateway\r\n\r\n`);
-      clientSocket.destroy();
+      safeDestroy(clientSocket);
     });
 
     upstreamRequest.end(head);

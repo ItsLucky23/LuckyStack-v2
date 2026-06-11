@@ -1,0 +1,150 @@
+//? `luckystack check-env` — two scans over the project:
+//?   A. Unused keys  — defined in a loaded .env file but referenced nowhere in code.
+//?   B. Missing defs — referenced in code but defined in no loaded .env file.
+//? Results are written to dump/UNUSED_ENV_<hash>.log + dump/MISSING_ENV_<hash>.log,
+//? structured so an LLM can resolve them directly.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { buildScanReports, collectSourceFiles, groupLocations, matchAll } from '../lib/scan';
+import type { ConsumerProject } from '../lib/project';
+
+//? Keys consumed by the framework itself (read inside node_modules/@luckystack/*
+//? or by external tools like Prisma/Vite), so a consumer scan must NOT flag them
+//? as "unused" just because the consumer's own src never reads them. Edit/extend
+//? per project as needed.
+const FRAMEWORK_ENV_KEYS = new Set([
+  'NODE_ENV', 'SECURE', 'PROJECT_NAME', 'SERVER_IP', 'SERVER_PORT',
+  'REDIS_HOST', 'REDIS_USER', 'REDIS_PASSWORD', 'REDIS_PORT',
+  'EXTERNAL_ORIGINS', 'DNS', 'LUCKYSTACK_ENV', 'LUCKYSTACK_ENV_FILES',
+  'LUCKYSTACK_PRESET', 'ROUTER_PORT', 'LUCKYSTACK_SECRET_MANAGER_URL',
+  'DATABASE_URL',
+  'EMAIL_FROM', 'RESEND_API_KEY', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS',
+  'SENTRY_DSN', 'SENTRY_ENABLED', 'POSTHOG_KEY', 'POSTHOG_HOST', 'BCRYPT_ROUNDS',
+  'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
+  'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET',
+  'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET',
+  'FACEBOOK_CLIENT_ID', 'FACEBOOK_CLIENT_SECRET',
+  'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET', 'MICROSOFT_TENANT_ID',
+]);
+//? Prefixes whose keys are read outside the server's `process.env` (Vite injects
+//? VITE_*; TEST_* are consumed by the test-runner scripts).
+const IGNORED_PREFIXES = ['VITE_', 'TEST_'];
+
+const isIgnored = (key: string): boolean =>
+  FRAMEWORK_ENV_KEYS.has(key) || IGNORED_PREFIXES.some((p) => key.startsWith(p));
+
+//? Strip the dev-only `DEV_` prefix so `DEV_GOOGLE_CLIENT_ID` (env file) and
+//? `env('GOOGLE_CLIENT_ID')` / `process.env.GOOGLE_CLIENT_ID` (code) match — the
+//? framework reads `DEV_<KEY>` in dev and the unprefixed `<KEY>` in prod.
+const baseKey = (key: string): string => key.replace(/^DEV_/, '');
+
+//? Mirror @luckystack/core `getEnvFiles()`: `LUCKYSTACK_ENV_FILES` (comma list)
+//? overrides the `['.env', '.env.local']` default. Kept in lockstep so the scan
+//? sees exactly the files the server loads.
+const resolveEnvFiles = (): string[] => {
+  const override = process.env.LUCKYSTACK_ENV_FILES;
+  if (override && override.trim().length > 0) {
+    return override.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return ['.env', '.env.local'];
+};
+
+//? Parse KEY names only (never values — `.env.local` holds secrets) from `KEY=…`
+//? lines, skipping comments + blanks.
+const parseEnvKeys = (absPath: string): string[] => {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(absPath, 'utf8');
+  } catch {
+    return [];
+  }
+  const keys: string[] = [];
+  for (const line of raw.replaceAll('\r\n', '\n').split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(trimmed);
+    if (match?.[1]) keys.push(match[1]);
+  }
+  return keys;
+};
+
+export const checkEnv = (project: ConsumerProject): void => {
+  const files = collectSourceFiles(project.root);
+
+  //? Code references: process.env.X / process.env['X'] / env('X') helper calls.
+  const refHits = [
+    ...matchAll(files, /process\.env\.([A-Za-z_][A-Za-z0-9_]*)/),
+    ...matchAll(files, /process\.env\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\]/),
+    ...matchAll(files, /\benv\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]/),
+  ];
+  const usedLocations = groupLocations(refHits);
+  const usedBases = new Set([...usedLocations.keys()].map((key) => baseKey(key)));
+
+  //? Defined keys, per env file.
+  const envFiles = resolveEnvFiles();
+  const definedByFile = new Map<string, string[]>();
+  const definedBases = new Set<string>();
+  const presentEnvFiles: string[] = [];
+  for (const rel of envFiles) {
+    const abs = path.join(project.root, rel);
+    if (!fs.existsSync(abs)) continue;
+    presentEnvFiles.push(rel);
+    const keys = parseEnvKeys(abs);
+    definedByFile.set(rel, keys);
+    for (const key of keys) definedBases.add(baseKey(key));
+  }
+
+  // ---- Command A: unused keys ----
+  const unused = buildScanReports({
+    root: project.root,
+    kind: 'UNUSED_ENV',
+    items: [...definedByFile],
+    renderSection: ([rel, keys]) => {
+      const unusedKeys = keys.filter((key) => !usedBases.has(baseKey(key)) && !isIgnored(key));
+      if (unusedKeys.length === 0) return null;
+      return {
+        section: `## file: ${rel}\n${unusedKeys.map((k) => `- ${k}`).join('\n')}`,
+        count: unusedKeys.length,
+      };
+    },
+    header: (count) =>
+      `# UNUSED ENV KEYS — ${String(count)} found\n` +
+      `# Defined in a loaded .env file but referenced nowhere in code.\n` +
+      `# Loaded env files: ${presentEnvFiles.join(', ') || '(none found)'}\n` +
+      `# Framework-consumed keys (Redis/Prisma/OAuth/Vite/Test…) are excluded.\n` +
+      `# Feed this to an LLM: for each key, decide whether to delete it from the\n` +
+      `# .env file or wire it into the code that should consume it.\n\n`,
+    emptyText: '(no unused keys)\n',
+  });
+
+  // ---- Command B: missing definitions ----
+  const missing = buildScanReports({
+    root: project.root,
+    kind: 'MISSING_ENV',
+    items: [...usedLocations.entries()].toSorted(([a], [b]) => a.localeCompare(b)),
+    renderSection: ([key, locations]) => {
+      const base = baseKey(key);
+      if (definedBases.has(base) || isIgnored(key) || isIgnored(base)) return null;
+      return {
+        section:
+          `## KEY: ${key}\n` +
+          `- used in: ${locations.join(', ')}\n` +
+          `- not defined in: ${presentEnvFiles.join(', ') || '(no env files found)'}\n` +
+          `- suggested: add \`${base}=\` to .env (or .env.local if it's a secret)`,
+        count: 1,
+      };
+    },
+    header: (count) =>
+      `# MISSING ENV DEFINITIONS — ${String(count)} found\n` +
+      `# Referenced in code but defined in no loaded .env file (DEV_ prefix aware).\n` +
+      `# Loaded env files: ${presentEnvFiles.join(', ') || '(none found)'}\n` +
+      `# Framework/ambient keys (NODE_ENV, Redis, OAuth, VITE_/TEST_…) are excluded.\n` +
+      `# Feed this to an LLM: add each missing key to the right .env file.\n\n`,
+    emptyText: '(no missing definitions)\n',
+  });
+
+  console.log(`\n✓ env scan complete (${String(files.length)} source files, ${String(presentEnvFiles.length)} env file(s)).`);
+  console.log(`  Unused keys:        ${String(unused.count)} → Look in ${unused.path} and resolve all unused keys.`);
+  console.log(`  Missing definitions: ${String(missing.count)} → Look in ${missing.path} and resolve all missing keys.`);
+};

@@ -4,6 +4,8 @@
 //? (background / container / muted / common) loosely so it doesn't look
 //? wildly out of place in projects that haven't customized them.
 
+import { escapeHtml } from '@luckystack/core';
+
 export interface RenderDocsHtmlOptions {
   branding?: {
     logoUrl?: string;
@@ -18,25 +20,11 @@ export interface RenderDocsHtmlOptions {
   enableTryItOut?: boolean;
 }
 
-export const renderDocsHtml = (
-  jsonPath: string,
-  pageTitle: string,
-  options: RenderDocsHtmlOptions = {},
-): string => {
-  const branding = options.branding ?? {};
-  const accent = branding.brandColor ?? '#58a6ff';
-  const fontFamily = branding.fontFamily ?? `system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
-  const logoMarkup = branding.logoUrl
-    ? `<img src="${escapeHtml(branding.logoUrl)}" alt="logo" style="height:32px;width:auto;margin-right:12px;" />`
-    : '';
-  const tryItOutData = options.enableTryItOut ? 'true' : 'false';
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(pageTitle)}</title>
-<style>
+//? Renders the `<style>` block. Split out of `renderDocsHtml` so the
+//? document assembler stays readable; `accent` + `fontFamily` are the only
+//? two values interpolated into the stylesheet. Output is byte-identical to
+//? the previously inlined CSS.
+const renderDocsCss = (accent: string, fontFamily: string): string => `<style>
   :root {
     --bg: #0e1116;
     --container: #161b22;
@@ -196,19 +184,16 @@ export const renderDocsHtml = (
     color: var(--muted);
   }
   a.json-link { color: var(--accent); }
-</style>
-</head>
-<body>
-<div class="layout">
-  <div class="brand-row">${logoMarkup}<h1>${escapeHtml(pageTitle)}</h1></div>
-  <p class="lead">Generated from <code>apiDocs.generated.json</code>. Raw JSON: <a class="json-link" href="${escapeHtml(jsonPath)}">${escapeHtml(jsonPath)}</a></p>
-  <div class="summary" id="summary"></div>
-  <div class="filter-bar">
-    <input type="search" id="filter" placeholder="Filter by route name…" autofocus />
-  </div>
-  <div id="content"></div>
-</div>
-<script>
+</style>`;
+
+//? Renders the self-contained client `<script>` block. Split out of
+//? `renderDocsHtml` for readability; `jsonPath` (fetch target, injected as a
+//? JSON.stringify literal) and `tryItOutData` (`'true'`/`'false'`) are the
+//? only two interpolations. This is browser-runtime JavaScript embedded as a
+//? string — it cannot import from `@luckystack/core`, so it carries its own
+//? minimal `escapeHtml` mirror of core's escaping. Output is byte-identical
+//? to the previously inlined script.
+const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<script>
   const JSON_PATH = ${JSON.stringify(jsonPath)};
   const ENABLE_TRY_IT_OUT = ${tryItOutData};
   const stateByKey = new Map();
@@ -399,18 +384,39 @@ export const renderDocsHtml = (
       document.getElementById('content').innerHTML =
         '<div class="empty">Could not load API docs: ' + escapeHtml(err.message) + '</div>';
     });
-</script>
+</script>`;
+
+export const renderDocsHtml = (
+  jsonPath: string,
+  pageTitle: string,
+  options: RenderDocsHtmlOptions = {},
+): string => {
+  const branding = options.branding ?? {};
+  const accent = branding.brandColor ?? '#58a6ff';
+  const fontFamily = branding.fontFamily ?? `system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+  const logoMarkup = branding.logoUrl
+    ? `<img src="${escapeHtml(branding.logoUrl)}" alt="logo" style="height:32px;width:auto;margin-right:12px;" />`
+    : '';
+  const tryItOutData = options.enableTryItOut ? 'true' : 'false';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(pageTitle)}</title>
+${renderDocsCss(accent, fontFamily)}
+</head>
+<body>
+<div class="layout">
+  <div class="brand-row">${logoMarkup}<h1>${escapeHtml(pageTitle)}</h1></div>
+  <p class="lead">Generated from <code>apiDocs.generated.json</code>. Raw JSON: <a class="json-link" href="${escapeHtml(jsonPath)}">${escapeHtml(jsonPath)}</a></p>
+  <div class="summary" id="summary"></div>
+  <div class="filter-bar">
+    <input type="search" id="filter" placeholder="Filter by route name…" autofocus />
+  </div>
+  <div id="content"></div>
+</div>
+${renderDocsScript(jsonPath, tryItOutData)}
 </body>
 </html>`;
 };
-
-const HTML_ESCAPE_MAP: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
-};
-
-const escapeHtml = (str: string): string =>
-  str.replaceAll(/[&<>"']/g, (c) => HTML_ESCAPE_MAP[c] ?? c);

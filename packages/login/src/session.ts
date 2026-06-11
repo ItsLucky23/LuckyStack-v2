@@ -59,11 +59,16 @@ const saveSession = async (
       }
     }
 
-    //? Mint a CSRF token on first session write. Subsequent writes preserve
-    //? the existing token so the client doesn't have to re-fetch on every
-    //? session update. The token is rotated on logout via `deleteSession`.
+    //? Mint a CSRF token on first session write. Subsequent (non-new) writes
+    //? preserve the existing token so the client doesn't have to re-fetch on
+    //? every session update. The token is rotated on logout via `deleteSession`
+    //? AND whenever a genuinely new session is established (`newUser`) — a fresh
+    //? login / OAuth re-login must not inherit a CSRF token that may have been
+    //? carried into `data` from a prior session, so we always mint a new one.
     //? Token length is consumer-configurable via `registerCsrfConfig({ tokenLength })`.
-    data.csrfToken ??= randomBytes(getCsrfConfig().tokenLength).toString('hex');
+    if (newUser || !data.csrfToken) {
+      data.csrfToken = randomBytes(getCsrfConfig().tokenLength).toString('hex');
+    }
 
     const ttl = getSessionTtl();
     await adapter.setRaw(token, JSON.stringify(data), ttl);

@@ -6,5 +6,6 @@ export {
   useSyncEvents,
   useSyncEventTrigger,
   initSyncRequest,
+  attachSyncReceiver,
 } from './syncRequest';
 export type { SyncRequestStreamEvent, SyncRouteStreamEvent } from './syncRequest';

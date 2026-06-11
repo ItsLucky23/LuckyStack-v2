@@ -98,7 +98,7 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
   //? Pass the requester's current session token as `supersedeToken` so that, on
   //? a re-login while already signed in, single-session enforcement does NOT kick
   //? this same browser's old session (which would log it straight back out).
-  const result = (await login.loginWithCredentials(params, { supersedeToken: token })) as {
+  const result = (await login.loginWithCredentials(params, { supersedeToken: token ?? undefined })) as {
     status: boolean;
     reason: string;
     newToken: string | null;

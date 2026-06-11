@@ -42,7 +42,7 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
     : `${publicOrigin}${loginRedirect.startsWith('/') ? loginRedirect : `/${loginRedirect}`}` || '/';
   const callbackResult = await login.loginCallback(routePath, req, res, {
     defaultRedirectUrl: baseLocation,
-    supersedeToken: token,
+    supersedeToken: token ?? undefined,
   });
 
   if (!callbackResult) {

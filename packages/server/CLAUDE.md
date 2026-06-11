@@ -73,9 +73,10 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 
 ## Peer dependencies
 
-- **Required (runtime deps)**: `@luckystack/api`, `@luckystack/core`, `@luckystack/login`, `@luckystack/presence`, `@luckystack/sync`.
+- **Required (runtime deps)**: `@luckystack/api`, `@luckystack/core`.
 - **Peer (canonical ranges)**: `@prisma/client@^6.19.0` (transitive via core), `socket.io@^4.8.0`.
-- **Optional**: `@luckystack/error-tracking`, `@luckystack/email`, `@luckystack/docs-ui` (auto-detected by `bootstrapLuckyStack`; not required), `@luckystack/devkit` (dev-only, dynamically imported by `enableDevTools` branch).
+- **Optional (all auto-detected by `bootstrapLuckyStack`; the server degrades gracefully when absent — `auth.disabled` / `sync.disabled`, presence skipped)**: `@luckystack/login`, `@luckystack/presence`, `@luckystack/sync`, `@luckystack/error-tracking`, `@luckystack/email`, `@luckystack/docs-ui`, `@luckystack/devkit` (dev-only, dynamically imported by the `enableDevTools` branch).
+  - **0.2.0 install-anything-anytime**: `bootstrapLuckyStack` runs an auto-detect phase BEFORE the consumer overlay that imports each installed optional package's `@luckystack/<pkg>/register` side-effect subpath (`OPTIONAL_PACKAGES` in `capabilities.ts` = `login, email, error-tracking, presence, docs-ui`). So `npm i @luckystack/<pkg>` + env + restart self-wires the BACKEND with zero code edits. Detection uses `import.meta.resolve` (the `@luckystack/*` exports maps are import-only — a CJS `require.resolve` reports them absent). Client-side mounts (presence JSX, login pages) need `npx luckystack add <feature>` (`@luckystack/cli`) because Vite can't statically import an uninstalled package and file-routing only scans `src/`.
 
 ## Related
 

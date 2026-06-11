@@ -1,4 +1,12 @@
 # Local secrets. NOT checked into git. Copy this to `.env.local` and fill in.
+#
+# ONE FILE PER KEY: keep every key in EXACTLY ONE of `.env` / `.env.local`.
+# `.env.local` is loaded AFTER `.env` and overrides it, so a key set in both
+# means editing only one file has confusing effects: emptying the value in
+# `.env.local` overrides `.env` (the value goes away), but DELETING the line in
+# `.env.local` lets `.env`'s old value resurface. Secrets belong here, in
+# `.env.local`, and NOT in `.env`. Run with LUCKYSTACK_ENV_DEBUG=1 to list any
+# key that ended up in both files.
 
 # Database connection used by Prisma. This is pre-filled for the provider you
 # chose at scaffold time; the other formats are shown for when you switch.
@@ -18,6 +26,12 @@ REDIS_PASSWORD=
 # works. No code edit needed: luckystack/login/oauthProviders.ts already wires
 # every built-in provider by env. DEV_* are read when NODE_ENV is not
 # 'production'; the unprefixed pair is read in production.
+#
+# The login page reads GET /auth/providers, which lists a provider ONLY when
+# BOTH its id and secret are non-empty. So: EMPTY a provider's id/secret here
+# (and restart) → its button disappears from /login. Leave them empty to keep a
+# provider off. (Make sure the same keys are not ALSO set in `.env`, or the
+# button will stay — see the one-file-per-key note at the top.)
 #
 # IMPORTANT — Authorized redirect URI (fixes "Error 400: redirect_uri_mismatch"):
 # /auth/callback/<provider> is a BACKEND route, so register the BACKEND origin in

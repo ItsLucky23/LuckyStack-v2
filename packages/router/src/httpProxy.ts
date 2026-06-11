@@ -6,54 +6,8 @@ import { dispatchHook } from '@luckystack/core';
 
 import type { ServiceTargetResolver } from './resolveTarget';
 import { resolveServiceKey } from './resolveTarget';
-import type { PostProxyResponseErrorCause } from './hookPayloads';
-
-// Node attaches `code` to system errors but the public Error type does not expose it,
-// so we narrow via a structural property check rather than a cast.
-const readErrorCode = (err: Error): string | undefined => {
-  if (!('code' in err)) return undefined;
-  const candidate: unknown = err.code;
-  return typeof candidate === 'string' ? candidate : undefined;
-};
-
-const inferErrorCause = (code: string | undefined): PostProxyResponseErrorCause => {
-  if (!code) return 'unknown';
-  if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT') return 'timeout';
-  if (
-    code === 'ECONNREFUSED' ||
-    code === 'ECONNRESET' ||
-    code === 'EHOSTUNREACH' ||
-    code === 'ENETUNREACH' ||
-    code === 'ENOTFOUND' ||
-    code === 'EAI_AGAIN' ||
-    code === 'EPIPE'
-  ) {
-    return 'network';
-  }
-  return 'upstream-throw';
-};
-
-// Headers that should not be forwarded to the upstream (they're hop-by-hop).
-const HOP_BY_HOP_HEADERS = new Set([
-  'connection',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
-]);
-
-const stripHopByHopHeaders = (headers: IncomingMessage['headers']): Record<string, string | string[]> => {
-  const out: Record<string, string | string[]> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue;
-    if (value === undefined) continue;
-    out[key] = value;
-  }
-  return out;
-};
+import { HTTP_HOP_BY_HOP_HEADERS, stripHopByHopHeaders } from './proxyUtils';
+import { readErrorCode, inferErrorCause } from './errorClassification';
 
 export interface CreateHttpProxyInput {
   resolver: ServiceTargetResolver;
@@ -111,7 +65,7 @@ export const createHttpProxy = ({ resolver, missingServiceErrorCode }: CreateHtt
       path: targetUrl.pathname + targetUrl.search,
       method: req.method,
       headers: {
-        ...stripHopByHopHeaders(req.headers),
+        ...stripHopByHopHeaders(req.headers, HTTP_HOP_BY_HOP_HEADERS),
         // Preserve the original host so the upstream knows the public hostname.
         'x-forwarded-host': req.headers.host ?? '',
         'x-forwarded-proto': req.headers['x-forwarded-proto'] ?? 'http',
@@ -122,7 +76,7 @@ export const createHttpProxy = ({ resolver, missingServiceErrorCode }: CreateHtt
       res.statusCode = upstream.statusCode ?? 502;
       for (const [key, value] of Object.entries(upstream.headers)) {
         if (value === undefined) continue;
-        if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue;
+        if (HTTP_HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue;
         res.setHeader(key, value);
       }
       upstream.pipe(res);

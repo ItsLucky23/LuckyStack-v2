@@ -1,14 +1,51 @@
-//? MUST stay first: captures the clean shell env before the `@luckystack/core`
-//? import below triggers `bootstrapEnv()` and merges `.env` into `process.env`.
-import { ambientEnv } from './ambientEnvSnapshot';
+#!/usr/bin/env node
+//? CRITICAL INVARIANT: this process must NEVER merge `.env` files into its own
+//? `process.env`. The child is spawned with `{ ...process.env }`, and the
+//? child's own `loadEnvFiles()` loads `.env` with `override: false` — any
+//? `.env`-derived value that leaks into the supervisor's env would therefore
+//? WIN over freshly edited file values on every restart (stale-env bug).
+//? That is why this file imports NOTHING from `@luckystack/core` (core runs
+//? `bootstrapEnv()` as an import side-effect) and reads env files via
+//? `dotenv.parse` (pure — no `process.env` mutation). The previous design
+//? (an `ambientEnvSnapshot` module imported first) broke as soon as tsup
+//? inlined the snapshot into the entry body: ESM imports are hoisted, so
+//? core's side-effect ran BEFORE the snapshot line.
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { watch } from 'chokidar';
-import { env, getEnvFiles } from '@luckystack/core';
+import { parse as parseDotenv } from 'dotenv';
 
 const RESTART_DEBOUNCE_MS = 150;
 const CRASH_RESTART_DELAY_MS = 300;
+
+//? Mirrors `getEnvFiles()` from @luckystack/core — duplicated on purpose so the
+//? supervisor never imports core (see the invariant above). Keep in sync.
+const DEFAULT_ENV_FILES = ['.env', '.env.local'];
+const getEnvFiles = (): string[] => {
+  const override = process.env.LUCKYSTACK_ENV_FILES;
+  if (override) {
+    const list = override.split(',').map((entry) => entry.trim()).filter(Boolean);
+    if (list.length > 0) return list;
+  }
+  return DEFAULT_ENV_FILES;
+};
+
+//? Resolve NODE_ENV without mutating `process.env`: a real ambient env var
+//? wins; otherwise read the env files via the pure `dotenv.parse` ("later
+//? overrides earlier", matching loadEnvFiles' file order).
+const resolveNodeEnv = (): string => {
+  if (process.env.NODE_ENV) return process.env.NODE_ENV;
+  let fromFiles: string | undefined;
+  for (const file of getEnvFiles()) {
+    const filePath = path.resolve(process.cwd(), file);
+    if (!existsSync(filePath)) continue;
+    const parsed = parseDotenv(readFileSync(filePath, 'utf8'));
+    if (typeof parsed.NODE_ENV === 'string' && parsed.NODE_ENV.length > 0) fromFiles = parsed.NODE_ENV;
+  }
+  return fromFiles ?? 'development';
+};
 
 const CORE_WATCH_GLOBS = [
   'config.ts',
@@ -22,7 +59,12 @@ const CORE_WATCH_GLOBS = [
 ];
 
 const tsxCliPath = path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
-const childArgs = [tsxCliPath, 'server/server.ts'];
+//? Scaffolded projects carry a dedicated server tsconfig — pass it when present
+//? so the child matches a manual `tsx --tsconfig tsconfig.server.json` run.
+const tsconfigServerArgs = existsSync(path.resolve(process.cwd(), 'tsconfig.server.json'))
+  ? ['--tsconfig', 'tsconfig.server.json']
+  : [];
+const childArgs = [tsxCliPath, ...tsconfigServerArgs, 'server/server.ts'];
 
 let childProcess: ChildProcess | null = null;
 let pendingRestart = false;
@@ -36,16 +78,16 @@ const startChild = () => {
   childBootStartedAt = performance.now();
   childProcess = spawn(process.execPath, childArgs, {
     stdio: 'inherit',
-    //? Pass the clean shell env (NOT this supervisor's `.env`-polluted
-    //? `process.env`) so the child loads `.env` fresh on every restart and
+    //? `process.env` is guaranteed `.env`-free here (see the invariant at the
+    //? top of this file), so the child loads `.env` fresh on every restart and
     //? picks up edited values — mirroring a cold `npm run server` boot.
     env: {
-      ...ambientEnv,
+      ...process.env,
       LUCKYSTACK_CORE_SUPERVISED: 'true',
     },
   });
 
-  console.log(`[Supervisor] Started server process (pid: ${String(childProcess.pid)})`, 'cyan');
+  console.log(`[Supervisor] Started server process (pid: ${String(childProcess.pid)})`);
 
   childProcess.on('exit', (code, signal) => {
     const uptimeMs = Math.round(performance.now() - childBootStartedAt);
@@ -62,7 +104,7 @@ const startChild = () => {
 
     if (shouldRestart) {
       pendingRestart = false;
-      console.log(`[Supervisor] Restarting server after ${String(uptimeMs)}ms uptime`, 'yellow');
+      console.log(`[Supervisor] Restarting server after ${String(uptimeMs)}ms uptime`);
       startChild();
       return;
     }
@@ -72,7 +114,7 @@ const startChild = () => {
     }
 
     if (typeof code === 'number' && code !== 0) {
-      console.log(`[Supervisor] Server crashed with code ${String(code)}. Restarting in ${String(CRASH_RESTART_DELAY_MS)}ms`, 'red');
+      console.log(`[Supervisor] Server crashed with code ${String(code)}. Restarting in ${String(CRASH_RESTART_DELAY_MS)}ms`);
       crashRestartTimer = setTimeout(() => {
         crashRestartTimer = null;
         startChild();
@@ -96,7 +138,7 @@ const scheduleRestart = ({
     restartTimer = null;
     pendingRestart = true;
 
-    console.log(`[Supervisor] Core change detected (${event}): ${changedPath}. Restarting server`, 'yellow');
+    console.log(`[Supervisor] Core change detected (${event}): ${changedPath}. Restarting server`);
 
     if (!childProcess) {
       pendingRestart = false;
@@ -135,7 +177,7 @@ const shutdownSupervisor = () => {
   }
 };
 
-if (env.NODE_ENV === 'production') {
+if (resolveNodeEnv() === 'production') {
   startChild();
 } else {
   const watcher = watch(CORE_WATCH_GLOBS, {
@@ -158,7 +200,7 @@ if (env.NODE_ENV === 'production') {
       process.exit(1);
     }
     isShuttingDown = true;
-    console.log(`[Supervisor] Received ${signalName}, shutting down`, 'yellow');
+    console.log(`[Supervisor] Received ${signalName}, shutting down`);
     void watcher.close().then(() => {
       shutdownSupervisor();
     }).catch(() => {

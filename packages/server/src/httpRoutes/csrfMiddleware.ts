@@ -57,7 +57,7 @@ export const enforceCsrfOnStateChangingRequest = async ({
       route: routePath,
       method: req.method,
       requestId,
-      userId: null,
+      userId: undefined,
       providedToken: Boolean(provided),
     });
 

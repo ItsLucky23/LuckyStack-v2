@@ -1,5 +1,3 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
 import { Socket } from 'socket.io';
 import { getProjectConfig } from './projectConfig';
 import { getCookieValue } from './cookies';
@@ -19,7 +17,8 @@ import { getCookieValue } from './cookies';
 //? only has RemoteSockets, which expose `handshake` but not the full Socket API.
 export const extractTokenFromSocket = (socket: Pick<Socket, 'handshake'>): string | null => {
   const cookie = socket.handshake.headers.cookie;
-  const sessionToken = typeof socket.handshake.auth?.token === 'string'
+  //? socket.io always initializes `handshake.auth` to at least `{}` (RemoteSockets included).
+  const sessionToken = typeof socket.handshake.auth.token === 'string'
     ? socket.handshake.auth.token
     : null;
   const cookieToken = getCookieValue(cookie, getProjectConfig().http.sessionCookieName);

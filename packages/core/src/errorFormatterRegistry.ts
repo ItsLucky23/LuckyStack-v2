@@ -20,6 +20,9 @@
 //? here for backward compatibility — `import { registerErrorFormatter }
 //? from '@luckystack/server'` continues to work.
 
+import { createRegistry } from './createRegistry';
+import tryCatchSync from './tryCatchSync';
+
 export interface ErrorFormatterContext {
   /** Resolved route name (`api/billing/getInvoice/v1`, `sync/...`). */
   routeName: string;
@@ -29,12 +32,30 @@ export interface ErrorFormatterContext {
   userId?: string | null;
 }
 
+/** The normalized error envelope handed to every formatter. */
+export interface FormatterErrorEnvelope {
+  status: 'error';
+  errorCode?: string;
+  message?: string;
+  httpStatus?: number;
+  [key: string]: unknown;
+}
+
 export type ErrorFormatter = (
-  error: { status: 'error'; errorCode?: string; message?: string; httpStatus?: number; [key: string]: unknown },
+  error: FormatterErrorEnvelope,
   ctx: ErrorFormatterContext,
 ) => Record<string, unknown>;
 
-let activeFormatter: ErrorFormatter | null = null;
+/**
+ * Minimal structural contract every formatter-eligible envelope satisfies:
+ * a discriminant `status` plus an open string-index so formatters can read /
+ * add arbitrary fields. Generic helpers below constrain to this so transport
+ * handlers no longer need `as unknown as` double-casts at the formatter
+ * boundary — see `applyErrorFormatter` / `buildFormattedError`.
+ */
+export interface FormatterEnvelope { status?: string;[key: string]: unknown }
+
+const registry = createRegistry<ErrorFormatter | null>(null);
 
 /**
  * Register a global error-response formatter. Receives the normalized
@@ -46,11 +67,11 @@ let activeFormatter: ErrorFormatter | null = null;
  * it through `applyErrorFormatter`.
  */
 export const registerErrorFormatter = (formatter: ErrorFormatter | null): void => {
-  activeFormatter = formatter;
+  registry.register(formatter);
 };
 
 /** Read the active global formatter (or null). */
-export const getErrorFormatter = (): ErrorFormatter | null => activeFormatter;
+export const getErrorFormatter = (): ErrorFormatter | null => registry.get();
 
 /**
  * Apply per-route → global → identity formatter chain to a normalized
@@ -59,36 +80,44 @@ export const getErrorFormatter = (): ErrorFormatter | null => activeFormatter;
  * are caught and logged; the un-formatted envelope is returned in that
  * case to keep the error path crash-resistant.
  */
-export const applyErrorFormatter = (input: {
-  response: Record<string, unknown> & { status?: string };
+export const applyErrorFormatter = <T extends FormatterEnvelope>(input: {
+  response: T;
   routeName: string;
   transport: 'socket' | 'http';
   userId?: string | null;
   perRouteFormatter?: ErrorFormatter | undefined | null;
-}): Record<string, unknown> => {
+}): T => {
   const { response, routeName, transport, userId, perRouteFormatter } = input;
   if (response.status !== 'error') return response;
 
   const ctx: ErrorFormatterContext = { routeName, transport, userId };
-  const errorEnvelope = response as { status: 'error'; errorCode?: string; message?: string; httpStatus?: number; [key: string]: unknown };
+  //? After the `status !== 'error'` guard, `response` is an error envelope.
+  //? `T` and `FormatterErrorEnvelope` share the open `[key: string]: unknown`
+  //? index + `status` discriminant, so this is a single, direct narrowing
+  //? assertion (plain `as`, NOT a `as unknown as` double-cast). This is the one
+  //? documented envelope→formatter boundary.
+  const errorEnvelope = response as FormatterErrorEnvelope;
 
   if (perRouteFormatter) {
-    try {
-      return perRouteFormatter(errorEnvelope, ctx);
-    } catch (error) {
+    const [error, formatted] = tryCatchSync(() => perRouteFormatter(errorEnvelope, ctx));
+    //? A formatter may add/rename fields, so its output is the wider
+    //? `Record<string, unknown>`. We return it as `T` because the framework
+    //? contract guarantees a formatter receives and returns the SAME logical
+    //? error envelope for a given route — the discriminant + required keys are
+    //? preserved. This is the single, documented formatter→envelope boundary.
+    if (!error && formatted) return formatted as T;
+    if (error) {
       console.error(`[errorFormatter] per-route formatter for ${routeName} threw:`, error);
       //? Fall through to global / identity so the error path stays resilient.
     }
   }
 
-  const globalFormatter = activeFormatter;
+  const globalFormatter = registry.get();
   if (globalFormatter) {
-    try {
-      return globalFormatter(errorEnvelope, ctx);
-    } catch (error) {
-      console.error(`[errorFormatter] global formatter threw on ${routeName}:`, error);
-      return response;
-    }
+    const [error, formatted] = tryCatchSync(() => globalFormatter(errorEnvelope, ctx));
+    if (!error && formatted) return formatted as T;
+    console.error(`[errorFormatter] global formatter threw on ${routeName}:`, error);
+    return response;
   }
 
   return response;

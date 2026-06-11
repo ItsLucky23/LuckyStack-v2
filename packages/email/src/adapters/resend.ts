@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 
-import type { EmailSender } from '@luckystack/core';
+import { ensurePeerDepInstalled, type EmailSender } from '@luckystack/core';
 
 interface ResendSenderOptions {
   apiKey: string;
@@ -34,14 +34,15 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
     throw new Error('[email:resend] ResendSender requires `apiKey`.');
   }
 
-  try {
-    localRequire.resolve('resend');
-  } catch {
-    throw new Error(
-      '[email:resend] The `resend` package is not installed but ResendSender was called. ' +
-      'Run `npm install resend`, or remove the RESEND_API_KEY env var and pick a different EmailSender adapter.',
-    );
-  }
+  //? Boot-time guard (CC-3): resolve `resend` from the ADAPTER's node_modules.
+  //? The actual load stays a dynamic ESM `import('resend')` below — `resend` is
+  //? ESM-only, so a CJS `require` would fail; ensurePeerDepInstalled only does
+  //? the `require.resolve` existence check, not the load.
+  ensurePeerDepInstalled(
+    'resend',
+    'Run `npm install resend`, or remove the RESEND_API_KEY env var and pick a different EmailSender adapter.',
+    localRequire,
+  );
 
   const clientPromise = (
     // @ts-expect-error optional peer dep — types resolved at consumer install time

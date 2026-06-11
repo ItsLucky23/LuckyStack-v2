@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   captureException,
   dispatchHook,
@@ -11,6 +13,22 @@ import {
 
 import { getEmailConfig } from './emailConfig';
 import { getEmailTemplate } from './templates';
+
+//? Recipient addresses + subjects are PII and must never reach the EXTERNAL
+//? error tracker verbatim (a Sentry `beforeSend` strips cookies but not these
+//? fields). The local server-log diagnostics keep the real values; only the
+//? captured context is redacted. Addresses are SHA-256 hashed (truncated) so
+//? the same recipient still correlates across error reports without exposing
+//? the address itself; subjects are reduced to presence + length.
+const hashRecipient = (address: string): string =>
+  `sha256:${createHash('sha256').update(address.trim().toLowerCase()).digest('hex').slice(0, 16)}`;
+
+const redactRecipients = (value: string | string[] | undefined): string[] | undefined => {
+  if (value === undefined) return undefined;
+  return (Array.isArray(value) ? value : [value]).map((address) => hashRecipient(address));
+};
+
+const redactSubject = (subject: string): string => `redacted(len=${subject.length})`;
 
 /**
  * Input to the multi-mode `sendEmail` helper.
@@ -148,8 +166,10 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
   captureException(result.cause ?? new Error(`Email send failed: ${result.reason}`), {
     fn: 'sendEmail',
     senderName: sender.name,
-    to: message.to,
-    subject: message.subject,
+    to: redactRecipients(message.to),
+    cc: redactRecipients(message.cc),
+    bcc: redactRecipients(message.bcc),
+    subject: redactSubject(message.subject),
     reason: result.reason,
   });
 

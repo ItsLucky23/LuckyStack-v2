@@ -9,6 +9,7 @@ import {
   getProjectConfig,
   hasCookie,
   readSession,
+  tryCatchSync,
 } from '@luckystack/core';
 import { sanitizeForLog } from './logSanitize';
 import { getSecurityHeadersBuilder } from './securityHeadersRegistry';
@@ -20,6 +21,7 @@ import { handleHealthRoute, handleLivezRoute, handleReadyzRoute } from './httpRo
 import { handleTestResetRoute } from './httpRoutes/testResetRoute';
 import { handleUploadsRoute } from './httpRoutes/uploadsRoute';
 import { handleAuthApiRoute } from './httpRoutes/authApiRoute';
+import { handleAuthLogoutRoute } from './httpRoutes/authLogoutRoute';
 import { handleAuthProvidersRoute } from './httpRoutes/authProvidersRoute';
 import { handleAuthCallbackRoute } from './httpRoutes/authCallbackRoute';
 import { handleApiRoute } from './httpRoutes/apiRoute';
@@ -55,14 +57,18 @@ const setSecurityHeaders = (req: IncomingMessage, res: ServerResponse, origin: s
   //? through to defaults so a buggy builder can't kill response delivery.
   const builder = getSecurityHeadersBuilder();
   if (builder) {
-    try {
+    //? Wrap both the builder call AND the header writes so a buggy builder (or
+    //? an invalid header name/value it returns) can't kill response delivery —
+    //? same guarded scope as the original raw try/catch, just via tryCatchSync.
+    const [error] = tryCatchSync(() => {
       const custom = builder(req);
       if (custom) {
         for (const [name, value] of Object.entries(custom)) {
           res.setHeader(name, value);
         }
       }
-    } catch (error) {
+    });
+    if (error) {
       getLogger().warn('securityHeadersBuilder threw — falling back to defaults', { err: error });
     }
   }
@@ -80,6 +86,7 @@ const PRE_PARAMS_ROUTES: HttpRouteHandler[] = [
   handleHealthRoute,
   handleTestResetRoute,
   handleAuthProvidersRoute,
+  handleAuthLogoutRoute,
   handlePreParamsCustomRoutes,
 ];
 

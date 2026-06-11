@@ -1,4 +1,6 @@
-import { config as loadDotenv } from 'dotenv';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { config as loadDotenv, parse as parseDotenv } from 'dotenv';
 import { z } from 'zod';
 
 const EnvSchema = z.object({
@@ -31,11 +33,44 @@ export const getEnvFiles = (): string[] => {
   return DEFAULT_ENV_FILES;
 };
 
+//? Opt-in diagnostic (set `LUCKYSTACK_ENV_DEBUG=1`). The layered-env model is
+//? `.env` (shared) -> `.env.local` (local overrides): a later file's value wins,
+//? and a key REMOVED from the later file silently falls back to the earlier
+//? file's value (it is never "unset"). That's correct dotenv precedence but a
+//? common footgun — e.g. removing an OAuth key from `.env.local` while a copy
+//? lingers in `.env` keeps the provider enabled. When the flag is on we parse
+//? each file purely (`dotenv.parse`, no `process.env` mutation) and report every
+//? key defined in more than one loaded file, naming the file whose value wins.
+const reportDuplicateEnvKeys = (files: string[]): void => {
+  const seenIn = new Map<string, string[]>();
+  for (const file of files) {
+    const filePath = path.resolve(process.cwd(), file);
+    if (!existsSync(filePath)) continue;
+    const parsed = parseDotenv(readFileSync(filePath, 'utf8'));
+    for (const key of Object.keys(parsed)) {
+      const list = seenIn.get(key) ?? [];
+      list.push(file);
+      seenIn.set(key, list);
+    }
+  }
+  for (const [key, sources] of seenIn) {
+    if (sources.length > 1) {
+      const winner = sources.at(-1);
+      // eslint-disable-next-line no-console -- runs before the logger registry is wired
+      console.warn(`[env] "${key}" is defined in ${sources.join(' + ')}; "${winner}" wins. Removing it from only one file lets the other file's value resurface.`);
+    }
+  }
+};
+
 export const loadEnvFiles = (): void => {
+  const files = getEnvFiles();
   //? First file is non-override (a real ambient env var wins); each later file
   //? overrides earlier ones, matching the historical `.env` -> `.env.local` order.
-  for (const [index, file] of getEnvFiles().entries()) {
+  for (const [index, file] of files.entries()) {
     loadDotenv({ path: file, override: index > 0 });
+  }
+  if (process.env.LUCKYSTACK_ENV_DEBUG) {
+    reportDuplicateEnvKeys(files);
   }
 };
 

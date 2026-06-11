@@ -15,6 +15,7 @@
 //? this dynamic import is never reached when NODE_ENV === 'production'.
 
 import {
+  getLogger,
   registerRuntimeMapsProvider,
   type RuntimeApiMapsResult,
   type RuntimeMapsProvider,
@@ -167,7 +168,7 @@ export const createProdRuntimeMapsProvider = (
       let loadedAny = false;
       for (const { preset, mod } of loadedModules) {
         if (!mod) {
-          console.warn(
+          getLogger().warn(
             `[luckystack:runtimeMaps] preset "${preset}" failed to load — skipping. ` +
             `Calls owned by that preset will return notFound until the generated module resolves.`,
           );
@@ -181,7 +182,7 @@ export const createProdRuntimeMapsProvider = (
       }
 
       if (!loadedAny) {
-        console.warn(
+        getLogger().warn(
           `[luckystack:runtimeMaps] no presets resolved (tried: ${presets.join(', ')}). ` +
           `Every api/sync request will return notFound until at least one generated module loads.`,
         );

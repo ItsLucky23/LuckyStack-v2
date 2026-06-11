@@ -12,7 +12,27 @@ import { createRequire } from 'node:module';
 
 const localRequire = createRequire(import.meta.url);
 
+//? Detect whether an optional package (or one of its subpaths) is installed.
+//?
+//? IMPORTANT: every `@luckystack/*` package ships an **import-only** `exports`
+//? map (`{ "import": ..., "types": ... }` — no `"require"`/`"default"`). A
+//? CJS `require.resolve()` resolves with CJS conditions and therefore THROWS
+//? `ERR_PACKAGE_PATH_NOT_EXPORTED` on those maps — i.e. it reports every
+//? installed `@luckystack/*` package as ABSENT. We must resolve with the ESM
+//? resolver (`import.meta.resolve`, which honors the `"import"` condition).
+//? `createRequire().resolve` is kept only as a fallback for Node < 20.6 where
+//? synchronous `import.meta.resolve` is unavailable.
+const esmResolve = (import.meta as { resolve?: (specifier: string) => string }).resolve;
+
 const has = (pkg: string): boolean => {
+  if (typeof esmResolve === 'function') {
+    try {
+      esmResolve(pkg);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   try {
     localRequire.resolve(pkg);
     return true;
@@ -27,6 +47,27 @@ export const capabilities = {
   presence: has('@luckystack/presence'),
   sync: has('@luckystack/sync'),
 } as const;
+
+//? Optional packages that ship a side-effect `@luckystack/<pkg>/register`
+//? subpath. `bootstrapLuckyStack` resolve-guards + imports each one BEFORE the
+//? consumer overlay folder so a hand-written overlay (last writer) still wins.
+//? Each `./register` is an env-driven, idempotent no-op when its env is unset.
+//? Order is topological (mirrors `OVERLAY_ORDER`). NOTES:
+//?   - `sync` is excluded: it has no server-side register; its add-later wiring
+//?     is the client receive bridge (`@luckystack/sync/client` attachSyncReceiver).
+//?   - `secret-manager` is excluded: it is resolved explicitly in the consumer
+//?     entry (fails-OPEN), not via a register subpath.
+export const OPTIONAL_PACKAGES = [
+  'login',
+  'email',
+  'error-tracking',
+  'presence',
+  'docs-ui',
+] as const;
+
+//? Cheap resolve guard reused by the bootstrap auto-detect loop: true when the
+//? given specifier (e.g. `@luckystack/login/register`) is installed + resolvable.
+export const canResolve = (specifier: string): boolean => has(specifier);
 
 let loginMod: typeof import('@luckystack/login') | null | undefined;
 export const getLogin = async (): Promise<typeof import('@luckystack/login') | null> => {

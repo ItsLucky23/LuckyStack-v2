@@ -28,6 +28,7 @@ describe('presenceConfig', () => {
         ignoreReasons: ['ping timeout'],
         allowReasons: ['transport close', 'transport error'],
         afkTimeoutMs: 5 * 60_000,
+        activitySampleIntervalMs: 15_000,
       });
     });
   });

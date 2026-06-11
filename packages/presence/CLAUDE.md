@@ -38,8 +38,12 @@ Presence and activity awareness layer for LuckyStack: AFK detection, disconnect 
 | `registerActivityEvent(name, event)` | Register / replace a pluggable activity event (predicate + onTrigger + refractoryMs) | → docs/activity-broadcaster.md |
 | `unregisterActivityEvent(name)` | Remove a registered activity event by name | → docs/activity-broadcaster.md |
 | `listActivityEvents()` | List every registered activity event in registration order | → docs/activity-broadcaster.md |
-| `dispatchActivitySample(sample)` | Evaluate all registered events against an activity sample; fires matching `onTrigger`s with refractory throttle | → docs/activity-broadcaster.md |
-| `registerPresenceConfig(input)` | Override disconnect timers, ignore/allow reasons, AFK timeout | → docs/disconnect-grace.md |
+| `dispatchActivitySample(sample)` | Evaluate all registered events against an activity sample; fires matching `onTrigger`s with refractory throttle. Driven in production by `startActivitySampler` | → docs/activity-broadcaster.md |
+| `recordActivity(socketId)` | Mark a socket active right now (called by the server on connect + every client `activity` heartbeat) | → docs/activity-broadcaster.md |
+| `clearActivity(socketId)` | Drop a socket's last-activity record (called by the server on disconnect) | → docs/activity-broadcaster.md |
+| `startActivitySampler({ io?, intervalMs? })` | Start the single interval that walks every socket and feeds `dispatchActivitySample` every `activitySampleIntervalMs`. Idempotent; returns the stop fn. Auto-started by `@luckystack/server` on first connect when `socketActivityBroadcaster` is on | → docs/activity-broadcaster.md |
+| `stopActivitySampler()` | Stop the sampler interval (shutdown / test reset) | → docs/activity-broadcaster.md |
+| `registerPresenceConfig(input)` | Override disconnect timers, ignore/allow reasons, AFK timeout, activity-sample interval | → docs/disconnect-grace.md |
 | `getPresenceConfig()` | Read the merged active config (lazy — reads at call time) | → docs/disconnect-grace.md |
 | `DEFAULT_PRESENCE_CONFIG` | Default values (tabSwitch 20s, transportClose 60s, default 2s, afkTimeout 5min) | → docs/disconnect-grace.md |
 | Type: `ActivityEvent`, `ActivitySample` | Activity-event registry types | → docs/activity-broadcaster.md |
@@ -71,6 +75,25 @@ Presence and activity awareness layer for LuckyStack: AFK detection, disconnect 
 - `ignoreReasons` (presenceConfig, default `['ping timeout']`) — disconnect reasons we treat as no-ops (no timer, no peer notify).
 - `allowReasons` (presenceConfig, default `['transport close', 'transport error']`) — disconnect reasons that earn the generous `transportCloseMs` window.
 - `afkTimeoutMs` (presenceConfig, default `5 * 60_000`) — idle threshold for the default `'afk'` activity event; set to `0` to disable.
+- `activitySampleIntervalMs` (presenceConfig, default `15_000`) — how often the server-side sampler walks every socket and fires registered activity events (well below `afkTimeoutMs`); set to `0` to disable the sampler.
+
+## Production AFK / activity events
+
+The activity-event system is wired end-to-end (gated by `socketActivityBroadcaster`):
+1. **Client** (`socketInitializer.ts`) emits a throttled `activity` socket event on real user interaction (pointer/key/scroll/touch).
+2. **Server** (`@luckystack/server` `loadSocket`) calls `recordActivity(socket.id)` on connect + each `activity`/`intentionalReconnect`, `clearActivity` on disconnect, and `startActivitySampler({ io })` once.
+3. **Sampler** feeds an `ActivitySample` per socket to `dispatchActivitySample` every `activitySampleIntervalMs`; the built-in `'afk'` event fires when `now - lastActivity > afkTimeoutMs` and notifies roommates via `informRoomPeers` (`{ userId, endTime }` — never the session token).
+
+To build e.g. a game that pauses on AFK and kicks after a grace period, register a custom event:
+```ts
+import { registerActivityEvent, unregisterActivityEvent } from '@luckystack/presence';
+// add a longer-threshold "kick" event alongside the built-in 'afk'
+registerActivityEvent('afk-kick', {
+  trigger: (s) => s.now - s.lastActivity > 5 * 60_000, // 5 min idle
+  refractoryMs: 60_000,
+  onTrigger: async (s) => { /* leave room / disconnect s.socketId, end the match */ },
+});
+```
 
 ## Peer dependencies
 

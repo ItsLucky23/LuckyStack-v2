@@ -10,7 +10,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 //? branches are exercised exactly as in production.
 const getGeneratedApiDocsPathMock = vi.fn<() => string>();
 
-vi.mock('@luckystack/core', () => ({
+vi.mock('@luckystack/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@luckystack/core')>()),
   getGeneratedApiDocsPath: () => getGeneratedApiDocsPathMock(),
   tryCatch: async <T>(fn: () => Promise<T> | T): Promise<[Error | null, T | null]> => {
     try {

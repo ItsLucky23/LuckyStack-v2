@@ -234,7 +234,11 @@ const getStreamCallbacksForRoute = (route: string): SyncEventStreamCallback[] =>
 const triggerSyncCallbacks = (name: string, clientOutput: unknown, serverOutput: unknown) => {
   const callbacks = syncEvents[name] ?? [];
   if (callbacks.length === 0) {
-    if (shouldLogDev()) {
+    //? Streaming-only routes legitimately register ONLY a stream callback —
+    //? the final success envelope is implicit in the stream completing. Only
+    //? warn when NEITHER callback type is registered for the route.
+    const streamCallbacks = syncStreamEvents[name] ?? [];
+    if (streamCallbacks.length === 0 && shouldLogDev()) {
       getLogger().warn(`Sync event ${name} has no registered callback on this page`);
     }
     return;
@@ -291,6 +295,110 @@ const normalizeSyncError = ({
 type SyncRequestParamsWithOptions<F extends SyncFullName, V extends VersionsForFullName<F>> =
   SyncParamsForFullName<F, V>;
 
+//? Outcome of the pre-flight validation phase of a sync send. Either a
+//? normalized error envelope to resolve the request with, or the sanitized
+//? values the send phase needs. Extracted from `syncRequestInternal` so the
+//? "validate first, execute second" split is explicit (the orchestrator stays
+//? a thin promise wrapper around prepare → run).
+type PreparedSyncRequest =
+  | { ok: false; error: SyncResponseError }
+  | { ok: true; sanitizedName: string; version: string; data: object; normalizedReceiver: string };
+
+//? Pure-ish validation chain (logs + dev-notifies on failure, same as the
+//? previous inlined block). Async because the socket-readiness gate
+//? (`waitForSocket`) is awaited last, after the cheap structural checks. Each
+//? failure path returns the SAME normalized error envelope the inlined code
+//? resolved with — behaviour-identical.
+const prepareSyncRequest = async ({
+  name,
+  version,
+  receiver,
+  payloadData,
+}: {
+  name: unknown;
+  version: unknown;
+  receiver: unknown;
+  payloadData: unknown;
+}): Promise<PreparedSyncRequest> => {
+  if (!name || typeof name !== "string") {
+    if (shouldLogDev()) {
+      getLogger().error("Invalid name for syncRequest");
+    }
+    if (shouldNotifyDev()) {
+      notify.error({ key: 'sync.invalidName' });
+    }
+    return { ok: false, error: normalizeSyncError({
+      response: { status: 'error', errorCode: 'sync.invalidName' },
+      fallbackErrorCode: 'sync.invalidName',
+    }) };
+  }
+
+  const parsedRoute = parseServiceRouteName(name);
+  if (parsedRoute.status === 'error') {
+    if (shouldLogDev()) {
+      getLogger().error(`[syncRequest] Invalid service route name '${name}'`, undefined, { reason: parsedRoute.reason });
+    }
+    if (shouldNotifyDev()) {
+      notify.error({ key: 'routing.invalidServiceRouteName' });
+    }
+    return { ok: false, error: normalizeSyncError({
+      response: {
+        status: 'error',
+        errorCode: 'routing.invalidServiceRouteName',
+        errorParams: [{ key: 'name', value: name }],
+      },
+      fallbackErrorCode: 'routing.invalidServiceRouteName',
+    }) };
+  }
+
+  const sanitizedName = parsedRoute.normalizedRouteName;
+
+  const data = payloadData && typeof payloadData === "object" ? payloadData : {};
+
+  if (!version || typeof version !== 'string') {
+    if (shouldLogDev()) {
+      getLogger().error("Invalid version for syncRequest");
+    }
+    if (shouldNotifyDev()) {
+      notify.error({ key: 'sync.invalidVersion' });
+    }
+    return { ok: false, error: normalizeSyncError({
+      response: { status: 'error', errorCode: 'sync.invalidVersion' },
+      fallbackErrorCode: 'sync.invalidVersion',
+    }) };
+  }
+
+  const normalizedReceiver = typeof receiver === 'string' ? receiver.trim() : '';
+
+  if (!normalizedReceiver) {
+    if (shouldLogDev()) {
+      getLogger().error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
+    }
+    if (shouldNotifyDev()) {
+      notify.error({ key: 'sync.missingReceiver' });
+    }
+    return { ok: false, error: normalizeSyncError({
+      response: { status: 'error', errorCode: 'sync.missingReceiver' },
+      fallbackErrorCode: 'sync.missingReceiver',
+    }) };
+  }
+
+  if (!await waitForSocket()) {
+    return { ok: false, error: normalizeSyncError({
+      response: { status: 'error', errorCode: 'sync.ioUnavailable' },
+      fallbackErrorCode: 'sync.ioUnavailable',
+    }) };
+  }
+  if (!socket) {
+    return { ok: false, error: normalizeSyncError({
+      response: { status: 'error', errorCode: 'sync.ioUnavailable' },
+      fallbackErrorCode: 'sync.ioUnavailable',
+    }) };
+  }
+
+  return { ok: true, sanitizedName, version, data, normalizedReceiver };
+};
+
 const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullName<F>>(
   params: SyncRequestParamsWithOptions<F, V>
 ): Promise<Prettify<SyncRequestResponseForFullName<F, V>>> => {
@@ -311,81 +419,20 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         }));
         return;
       }
-      if (!name || typeof name !== "string") {
-        if (shouldLogDev()) {
-          getLogger().error("Invalid name for syncRequest");
-        }
-        if (shouldNotifyDev()) {
-          notify.error({ key: 'sync.invalidName' });
-        }
-        resolve(normalizeSyncError({
-          response: { status: 'error', errorCode: 'sync.invalidName' },
-          fallbackErrorCode: 'sync.invalidName',
-        }));
+
+      const prepared = await prepareSyncRequest({ name, version, receiver, payloadData });
+      if (!prepared.ok) {
+        resolve(prepared.error);
         return;
       }
+      const { sanitizedName, version: resolvedVersion, data, normalizedReceiver } = prepared;
 
-      const parsedRoute = parseServiceRouteName(name);
-      if (parsedRoute.status === 'error') {
-        if (shouldLogDev()) {
-          getLogger().error(`[syncRequest] Invalid service route name '${name}'`, undefined, { reason: parsedRoute.reason });
-        }
-        if (shouldNotifyDev()) {
-          notify.error({ key: 'routing.invalidServiceRouteName' });
-        }
-        resolve(normalizeSyncError({
-          response: {
-            status: 'error',
-            errorCode: 'routing.invalidServiceRouteName',
-            errorParams: [{ key: 'name', value: name }],
-          },
-          fallbackErrorCode: 'routing.invalidServiceRouteName',
-        }));
-        return;
-      }
-
-      const sanitizedName = parsedRoute.normalizedRouteName;
-
-      const data = payloadData && typeof payloadData === "object" ? payloadData : {};
-
-      if (!version || typeof version !== 'string') {
-        if (shouldLogDev()) {
-          getLogger().error("Invalid version for syncRequest");
-        }
-        if (shouldNotifyDev()) {
-          notify.error({ key: 'sync.invalidVersion' });
-        }
-        resolve(normalizeSyncError({
-          response: { status: 'error', errorCode: 'sync.invalidVersion' },
-          fallbackErrorCode: 'sync.invalidVersion',
-        }));
-        return;
-      }
-
-      const normalizedReceiver = typeof receiver === 'string' ? receiver.trim() : '';
-
-      if (!normalizedReceiver) {
-        if (shouldLogDev()) {
-          getLogger().error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
-        }
-        if (shouldNotifyDev()) {
-          notify.error({ key: 'sync.missingReceiver' });
-        }
-        resolve(normalizeSyncError({
-          response: { status: 'error', errorCode: 'sync.missingReceiver' },
-          fallbackErrorCode: 'sync.missingReceiver',
-        }));
-        return;
-      }
-
-      if (!await waitForSocket()) {
-        resolve(normalizeSyncError({
-          response: { status: 'error', errorCode: 'sync.ioUnavailable' },
-          fallbackErrorCode: 'sync.ioUnavailable',
-        }));
-        return;
-      }
-      if (!socket) {
+      //? Re-narrow `socket` for the closures below. `prepareSyncRequest`
+      //? already guaranteed it is non-null (returns an `ioUnavailable` error
+      //? otherwise), but that guard lives in another function so TS can't
+      //? carry the narrowing across the call boundary.
+      const activeSocket = socket;
+      if (!activeSocket) {
         resolve(normalizeSyncError({
           response: { status: 'error', errorCode: 'sync.ioUnavailable' },
           fallbackErrorCode: 'sync.ioUnavailable',
@@ -393,7 +440,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         return;
       }
 
-      const fullName = `sync/${sanitizedName}/${version}`;
+      const fullName = `sync/${sanitizedName}/${resolvedVersion}`;
       let queueId: string | null = null;
 
       const runRequest = (socketInstance: Socket) => {
@@ -445,7 +492,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
           };
         }
 
-        const syncCb = `${sanitizedName}/${version}`;
+        const syncCb = `${sanitizedName}/${resolvedVersion}`;
         socketInstance.emit(socketEventNames.sync, { name: fullName, data, cb: syncCb, receiver: normalizedReceiver, responseIndex: tempIndex, ignoreSelf });
 
         //? B1 — bridge the consumer's AbortSignal to the server. When the
@@ -526,7 +573,7 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         });
       };
 
-      runRequest(socket);
+      runRequest(activeSocket);
     })();
   });
 };
@@ -774,6 +821,114 @@ export const useSyncEventTrigger = () => {
 
   return { triggerSyncEvent, triggerSyncStreamEvent }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sync Receive Bridge — attachSyncReceiver
+// ═══════════════════════════════════════════════════════════════════════════════
+
+//? Shape of the `sync` socket event the server emits to clients. Mirrors the
+//? server's emit payload; extra keys are stream chunk fields.
+interface SyncEventPayload {
+  cb?: string;
+  clientOutput?: unknown;
+  serverOutput?: unknown;
+  message?: string;
+  status?: 'success' | 'error' | 'stream';
+  fullName?: string;
+  errorCode?: string;
+  errorParams?: { key: string; value: string | number | boolean }[];
+  httpStatus?: number;
+  [key: string]: unknown;
+}
+
+const normalizeSyncRouteKey = (value: string): string => {
+  const sanitized = value.replaceAll(/^\/+|\/+$/g, '');
+  if (sanitized.length === 0) return '';
+  if (sanitized.startsWith('sync/')) return sanitized;
+  return `sync/${sanitized}`;
+};
+
+const getSyncRouteKeys = ({ fullName, cb }: { fullName?: string; cb?: string }): string[] => {
+  const keys = new Set<string>();
+  if (typeof fullName === 'string') {
+    const normalized = normalizeSyncRouteKey(fullName);
+    if (normalized) keys.add(normalized);
+  }
+  if (typeof cb === 'string') {
+    const normalized = normalizeSyncRouteKey(cb);
+    if (normalized) keys.add(normalized);
+  }
+  return [...keys];
+};
+
+//? Per-socket idempotency guard — attaching twice to the same socket would
+//? double-dispatch every sync event.
+const attachedSyncSockets = new WeakSet<Socket>();
+
+//? Wire the incoming `sync` socket listener that routes server fan-out into the
+//? registered `upsertSyncEventCallback` / `upsertSyncEventStreamCallback`
+//? subscribers. Previously this logic was inlined in the consumer's
+//? `socketInitializer.ts`; relocating it here makes `@luckystack/sync` own its
+//? own receive path, so a consumer only has to dynamic-import this and call it
+//? (the add-later sync wiring is then a single line, not a copy-paste block).
+export const attachSyncReceiver = (socketInstance: Socket): void => {
+  if (attachedSyncSockets.has(socketInstance)) return;
+  attachedSyncSockets.add(socketInstance);
+
+  socketInstance.on(socketEventNames.sync, (payload: SyncEventPayload) => {
+    const { cb, clientOutput, serverOutput, message, status, fullName, errorCode, errorParams } = payload;
+    if (shouldLogDev()) {
+      getLogger().debug('Server Sync Response', { payload });
+    }
+
+    const routeKeys = getSyncRouteKeys({ fullName, cb });
+
+    if (status === 'stream') {
+      if (routeKeys.length === 0) return;
+
+      const streamPayload = { ...payload };
+      delete streamPayload.status;
+      delete streamPayload.fullName;
+      delete streamPayload.cb;
+
+      if (shouldLogStream()) {
+        getLogger().debug('Server Sync Stream', { routeKeys, streamPayload });
+      }
+
+      for (const routeKey of routeKeys) {
+        triggerSyncStreamCallbacks(routeKey, streamPayload);
+      }
+      return;
+    }
+
+    if (status === 'error') {
+      if (errorCode === 'sync.ignore' || message === 'sync.ignore') return;
+      if (shouldNotifyDev()) {
+        if (errorCode) {
+          notify.error({ key: errorCode, params: errorParams });
+        } else if (message) {
+          notify.error({ key: message });
+        }
+      }
+      return;
+    }
+
+    if (routeKeys.length === 0) {
+      const errorMessage = `Sync response is missing fullName for cb '${cb ?? 'unknown'}'.`;
+      if (shouldLogDev()) {
+        getLogger().error(errorMessage);
+      }
+      if (shouldNotifyDev()) {
+        notify.error({ key: 'sync.invalidRequestFormat' });
+      }
+      throw new Error(errorMessage);
+    }
+
+    for (const routeKey of routeKeys) {
+      triggerSyncCallbacks(routeKey, clientOutput, serverOutput);
+    }
+  });
+};
 
 type SocketStatusSetter = Dispatch<
   SetStateAction<{

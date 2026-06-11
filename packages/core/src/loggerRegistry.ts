@@ -12,6 +12,8 @@
 //? Read at call-time via `getLogger()` so registration order does not matter
 //? — same contract as `getProjectConfig()` and friends.
 
+import { createRegistry } from './createRegistry';
+
 export type LoggerContext = Record<string, unknown>;
 
 export interface Logger {
@@ -69,21 +71,18 @@ export const createDevLogger = (): Logger => ({
   },
 });
 
-let activeLogger: Logger = defaultLogger;
-let isRegistered = false;
+const registry = createRegistry<Logger>(defaultLogger);
 
 export const registerLogger = (logger: Logger): void => {
-  activeLogger = logger;
-  isRegistered = true;
+  registry.register(logger);
 };
 
-export const getLogger = (): Logger => activeLogger;
+export const getLogger = (): Logger => registry.get();
 
-export const isLoggerRegistered = (): boolean => isRegistered;
+export const isLoggerRegistered = (): boolean => registry.isRegistered();
 
 //? Test-only helper — restore the default logger between integration tests.
 //? Never call from production code.
 export const resetLoggerForTests = (): void => {
-  activeLogger = defaultLogger;
-  isRegistered = false;
+  registry.reset();
 };
