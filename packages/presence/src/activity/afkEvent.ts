@@ -6,14 +6,42 @@
 //? `unregisterActivityEvent('afk')` first, then `registerActivityEvent('afk', ...)`
 //? with the alternative implementation.
 
-import { socketEventNames } from '@luckystack/core';
+import { extractTokenFromSocket, getIoInstance, socketEventNames } from '@luckystack/core';
 
 import { getPresenceConfig } from '../presenceConfig';
 import { informRoomPeers } from './peerNotifier';
 import { registerActivityEvent, type ActivitySample } from '../activityEvents';
+import { getLastActivity } from './activitySampler';
+import { lastAfkFireByToken } from './state';
 
 const fireAfkPresence = async (sample: ActivitySample): Promise<void> => {
   if (!sample.token) return;
+
+  //? PRESENCE-5: if ANY socket belonging to this token was recently active, the
+  //? user is not truly AFK — one idle tab must not mark the user AFK while
+  //? another tab is still receiving activity heartbeats. Walk the local sockets
+  //? and bail if another socket for this token has a fresher last-activity entry
+  //? inside the AFK threshold.
+  const afkTimeoutMs = getPresenceConfig().afkTimeoutMs;
+  const io = getIoInstance();
+  if (io) {
+    for (const [otherId, otherSocket] of io.sockets.sockets) {
+      if (otherId === sample.socketId) continue;
+      //? Only check sockets that belong to the same user (same session token).
+      if (extractTokenFromSocket(otherSocket) !== sample.token) continue;
+      const otherActivity = getLastActivity(otherId);
+      if (otherActivity !== undefined && sample.now - otherActivity <= afkTimeoutMs) {
+        //? Another tab for this user is still active — do not mark AFK overall.
+        return;
+      }
+    }
+  }
+
+  //? PRESENCE-4: token-level refractory prevents double-fire when the same user
+  //? has two idle tabs that both pass the trigger in the same sampler tick.
+  const lastFired = lastAfkFireByToken.get(sample.token) ?? 0;
+  if (sample.now - lastFired < 60_000) return;
+  lastAfkFireByToken.set(sample.token, sample.now);
 
   //? Route through `informRoomPeers` so roommates receive `{ userId, endTime }`
   //? — NEVER the raw session token — and the pre/postPresenceUpdate hooks fire
@@ -27,7 +55,7 @@ const fireAfkPresence = async (sample: ActivitySample): Promise<void> => {
   await informRoomPeers({
     token: sample.token,
     event: socketEventNames.userAfk,
-    extraData: { time: 0 },
+    extraData: { time: 0, ignoreSelf: true },
   });
 };
 
@@ -40,6 +68,8 @@ export const registerDefaultAfkEvent = (): void => {
     },
     //? Reasonable default so the same idle session doesn't re-fire on
     //? every activity-tick. Consumers re-registering can override.
+    //? Token-level dedup in `fireAfkPresence` provides a secondary guard for
+    //? multi-tab sessions (PRESENCE-4/5).
     refractoryMs: 60_000,
     onTrigger: fireAfkPresence,
   });

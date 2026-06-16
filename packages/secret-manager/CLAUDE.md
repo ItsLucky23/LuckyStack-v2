@@ -24,14 +24,17 @@ Three modes: `'remote'` (default — missing pointer / unreachable server throws
 
 | Function / Export | One-liner | Deep doc |
 | --- | --- | --- |
-| `initSecretManager(config)` | Boot-time entry. Scans `process.env` for pointer-shaped values, `POST /resolve`s them, overwrites `process.env` with real values. No-op in `'local'`. Starts dev hot reload when `config.dev` is set. | -> docs/architecture.md |
-| `refreshSecretManager()` | Re-resolve the captured pointers against the server (the dev **poll** channel). Call manually after an admin rotates a secret on a long-running process. | -> docs/architecture.md |
-| `reloadSecretManagerFromFiles()` | Re-parse the configured env files (`dev.envFiles`, default `.env` + `.env.local`) and apply them: plain values injected into `process.env` (live config reload), pointer-shaped values re-resolved. The dev **file-watch** channel; callable manually. | -> docs/architecture.md |
-| `getCachedResolution()` | Returns the last `{ fetchedAt, values }` (pointer -> value) for diagnostics, or `null`. | -> docs/architecture.md |
-| `resetSecretManagerForTests()` | Test-only — clears module state and tears down dev watchers / timers. | -> docs/architecture.md |
-| Type `SecretManagerConfig` | `{ url; token; source?; pointerPattern?; fetchImpl?; dev? }` where `dev` is `{ watch?; pollIntervalMs?; envFiles? }`. | -> docs/architecture.md |
+| `initSecretManager(config)` | Boot-time entry. Scans `process.env` for pointer-shaped values, `POST /resolve`s them, overwrites `process.env` with real values. No-op in `'local'`. Starts dev hot reload when `config.dev` is set. Starts the production rotation poll when `config.pollIntervalMs` is set. | -> docs/architecture.md |
+| `refreshSecretManager()` | Re-resolve the captured pointers against the server (the production rotation poll channel). Call manually after an admin rotates a secret on a long-running process. No-op in `'local'` mode. | -> docs/architecture.md |
+| `reloadSecretManagerFromFiles()` | Re-parse the configured env files (`dev.envFiles`, default `.env` + `.env.local`) and apply them: plain values injected into `process.env` (live config reload), pointer-shaped values re-resolved. The dev **file-watch** channel; callable manually. No-op before init or in `'local'` mode. | -> docs/architecture.md |
+| `stopSecretManager()` | Tear down all dev watchers, debounce timers, and rotation-poll intervals started by `initSecretManager`. Call on process shutdown if you need deterministic cleanup; otherwise timers are `unref`'d and won't block exit. | -> docs/architecture.md |
+| `getCachedResolution()` | Returns a shallow copy of the last `{ fetchedAt, values }` (pointer -> resolved secret) for diagnostics, or `null`. **Sensitive** — never serialize into HTTP responses, health payloads, or logs. | -> docs/architecture.md |
+| `getCachedResolutionMeta()` | Values-free diagnostic view: `{ fetchedAt, pointerNames, pointerCount }` — the resolved pointer names only, never the secret values. Safe for logs and health endpoints. | -> docs/architecture.md |
+| `resetSecretManagerForTests()` | Test-only — clears all module state and tears down dev watchers / timers. | -> docs/architecture.md |
+| Type `SecretManagerConfig` | `{ url; token; source?; pointerPattern?; envNames?; allowInsecureHttp?; timeoutMs?; retries?; resolvePath?; headers?; onApplied?; onResolveError?; fetchImpl?; pollIntervalMs?; dev? }` where `dev` is `{ watch?; pollIntervalMs?; envFiles? }`. | -> docs/architecture.md |
 | Type `SecretManagerToken` | `string \| { fromFile: string }`. | -> docs/architecture.md |
 | Type `CachedResolution` | `{ fetchedAt: number; values: Record<string, string> }`. | -> docs/architecture.md |
+| Type `CachedResolutionMeta` | `{ fetchedAt: number; pointerNames: string[]; pointerCount: number }`. | -> docs/architecture.md |
 
 ### Internal helpers (not exported, listed for AI context)
 
@@ -57,14 +60,34 @@ Three modes: `'remote'` (default — missing pointer / unreachable server throws
 
 This package reads **no** env vars itself — it consumes `SecretManagerConfig` (typically built in `config.ts` and passed in `server.ts`). The values you commonly source from env / a file:
 
-| Source | Purpose |
+| Key | Purpose | Notes |
+| --- | --- | --- |
+| `url` | Base URL of the secret-manager server (trailing slash optional). | Required (except `source:'local'`). |
+| `token` | Shared bearer token: literal string or `{ fromFile }` (gitignored single-line file). | Read at resolve time — file rotation picked up on next poll. A `Bearer ` prefix is stripped + warned. |
+| `source` | `'remote'` (default) / `'local'` / `'hybrid'`. | `'remote'` = hard boot stop on failure; `'hybrid'` = warn + keep local env. |
+| `envNames` | Allowlist of env-var NAMES eligible for resolution: `string[]` or `(name) => boolean`. **Secure default: unset resolves NOTHING off-host** (a boot warning is emitted so the deny-all is never silent). Pass `() => true` to scan every name deliberately. | Required to actually resolve anything. |
+| `dev` | Opt-in dev hot reload: `{ watch?, pollIntervalMs?, envFiles? }`. Ignored in production (`NODE_ENV !== 'development'|'test'`). | — |
+
+### Advanced keys (direct-call-only — not needed for typical boot wiring)
+
+| Key | Purpose |
 | --- | --- |
-| `config.url` | Base URL of the secret-manager server (trailing slash optional). |
-| `config.token` | Shared bearer token: literal string or `{ fromFile }` (gitignored single-line file). |
-| `config.source` | `'remote'` (default) / `'local'` / `'hybrid'`. |
-| `config.dev` | Opt-in dev hot reload: `{ watch?, pollIntervalMs? }`. Ignored in production. |
+| `pointerPattern` | Override the pointer-shape detector (default `/^(.+)_V(\d+)$/`). Stateful `g`/`y` flags are stripped automatically. |
+| `allowInsecureHttp` | Permit `http:` to a non-loopback host. A loud warning is still emitted. Loopback is always permitted. |
+| `timeoutMs` | Abort a black-hole server after N ms (default `10_000`). Set `0` to disable. |
+| `retries` | `{ count, delayMs? }` — retry on transport error / non-2xx before giving up. Default `{ count: 0 }`. |
+| `resolvePath` | Override the resolve endpoint path (default `'/resolve'`). |
+| `headers` | Extra request headers merged onto every resolve request (cannot override `Authorization`). |
+| `onApplied` | Called after secrets are written to `process.env` — receives changed env NAMES only (never the values). Use to re-create pools/SDK clients on rotation. |
+| `onResolveError` | Called on resolve failure (alongside the existing `console.warn`). Route to Sentry/metrics; useful for `'hybrid'` where a silent warn is the default. |
+| `fetchImpl` | Override the global `fetch`. For non-Node-20 hosts or test injection. |
+| `pollIntervalMs` | Production rotation poll interval in ms (re-resolves in ALL environments). Default `0` (disabled). Timers are `unref`'d. |
 
 `process.env` values matching `pointerPattern` (default `/^(.+)_V(\d+)$/`) are the pointers this client resolves and overwrites.
+
+## Design note — single resolver per process
+
+`@luckystack/secret-manager` uses module-level state (`activeConfig`, `pointerMap`, `cachedResolution`, `resolveChain`). This is intentional: there is one canonical view of `process.env`, so a second parallel resolver would race against the first. If you need to resolve different configs separately (e.g. a multi-stage bootstrap), call `stopSecretManager()` + `resetSecretManagerForTests()` between them (the latter is exported but named for test clarity — it is safe to call in non-test bootstrap code too). Running two resolvers concurrently against the same `process.env` is unsupported.
 
 ## Peer dependencies
 

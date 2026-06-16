@@ -23,8 +23,8 @@ REDIS_PASSWORD=
 
 # OAuth client secrets. Just fill in a provider's id + secret and restart — the
 # button appears on the login form automatically and its /auth/callback route
-# works. No code edit needed: luckystack/login/oauthProviders.ts already wires
-# every built-in provider by env. DEV_* are read when NODE_ENV is not
+# works. No code edit needed: @luckystack/login/register already wires
+# every built-in provider from env at boot. DEV_* are read when NODE_ENV is not
 # 'production'; the unprefixed pair is read in production.
 #
 # The login page reads GET /auth/providers, which lists a provider ONLY when

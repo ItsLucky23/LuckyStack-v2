@@ -13,6 +13,11 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 //? files so the page→name→version shape is declared once.
 export type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
 
+//? Mirror of the generated `syncMethodMap` shape (page → name → version → method).
+//? Sync routes always POST over HTTP-fallback but the map carries the server-side
+//? method declaration so `walkSyncEndpoints` can produce accurate descriptors.
+export type SyncMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
+
 export interface ApiMetaEntry {
   method: string;
   auth: { login: boolean; additional?: Record<string, unknown>[] };

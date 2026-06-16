@@ -12,11 +12,11 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
   const translate = useTranslator();
   const { search } = useLocation();
   const isLogin = formType === "login";
-  const title = isLogin ? "Sign in to your account" : "Create a new account";
-  const subtitleText = isLogin ? "Don't have an account yet? " : "Already have an account? ";
-  const subtitleLink = isLogin ? "Create one now" : "Log in";
+  const title = isLogin ? translate({ key: 'login.signInTitle' }) : translate({ key: 'login.createAccountTitle' });
+  const subtitleText = isLogin ? translate({ key: 'login.noAccountYet' }) : translate({ key: 'login.alreadyHaveAccount' });
+  const subtitleLink = isLogin ? translate({ key: 'login.createAccount' }) : translate({ key: 'login.logIn' });
   const redirectURL = isLogin ? `/register${search}` : `/login${search}`;
-  const buttonText = isLogin ? "Log in" : "Sign up";
+  const buttonText = isLogin ? translate({ key: 'login.logIn' }) : translate({ key: 'login.signUp' });
   const headerIcon = isLogin ? faRightToBracket : faUserPlus;
 
   const inputClass = "rounded-md w-full h-9 border border-container1-border bg-container1 px-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors";
@@ -249,7 +249,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 onClick={(e) => void handleSubmit(e, "credentials")}
                 disabled={loading}
               >
-                {loading ? "Loading..." : buttonText}
+                {loading ? translate({ key: 'login.loading' }) : buttonText}
               </button>
             </div>
 

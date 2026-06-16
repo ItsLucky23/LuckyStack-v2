@@ -20,6 +20,25 @@ export interface RenderDocsHtmlOptions {
   enableTryItOut?: boolean;
 }
 
+//? Strip CSS-break characters from a value before injecting it into a
+//? <style> block. Removes `}` (would close the rule-set), `;` (would inject
+//? extra declarations) and `<` (would close the <style> element).
+const sanitizeCssValue = (value: string): string =>
+  value.replaceAll('}', '').replaceAll(';', '').replaceAll('<', '');
+
+//? Only allow http: and https: schemes for the logo URL to block javascript:
+//? and data: XSS vectors. data: URLs are explicitly rejected because an SVG
+//? data-URI can carry script.
+const isSafeLogoUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    // Relative URLs (no scheme) are safe — they resolve on the same origin.
+    return !url.includes(':');
+  }
+};
+
 //? Renders the `<style>` block. Split out of `renderDocsHtml` so the
 //? document assembler stays readable; `accent` + `fontFamily` are the only
 //? two values interpolated into the stylesheet. Output is byte-identical to
@@ -330,7 +349,7 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
               <div style="color:var(--delete);">\${escapeHtml(String(meta.deprecated))}</div>
             </div>
           \` : ''}
-          \${renderTryItOut(page + '/' + name + '/' + version, method)}
+          \${renderTryItOut('api/' + page + '/' + name + '/' + version, method)}
         </div>
       </div>
     \`;
@@ -428,27 +447,33 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     return { summaryHtml, contentHtml };
   };
 
-  //? Binds the open/close toggle to every rendered endpoint. Extracted from
-  //? \`render\` unchanged: one listener per \`.endpoint\` element, re-bound on
-  //? each render (the prior innerHTML write discards the old listeners).
+  //? Event-delegation toggle: one listener on the #content container handles
+  //? all endpoint clicks. This replaces the per-element re-bind that was
+  //? called on every filter keystroke (DOCSUI-O13).
   const bindEndpointToggles = () => {
-    document.querySelectorAll('.endpoint').forEach((el) => {
-      el.addEventListener('click', () => {
-        const key = el.getAttribute('data-key');
-        const next = !el.classList.contains('open');
-        stateByKey.set(key, next);
-        el.classList.toggle('open');
-      });
+    const content = document.getElementById('content');
+    content.addEventListener('click', (e) => {
+      const el = e.target.closest('.endpoint');
+      if (!el) return;
+      const key = el.getAttribute('data-key');
+      const next = !el.classList.contains('open');
+      stateByKey.set(key, next);
+      el.classList.toggle('open');
     });
   };
 
   //? Thin orchestrator: resolve the DOM targets, guard the data shape, then
-  //? delegate assembly to \`buildGroups\` and wiring to \`bindEndpointToggles\`.
+  //? delegate assembly to \`buildGroups\`. Toggles are wired once via delegation.
   const render = (data, filter) => {
     const summary = document.getElementById('summary');
     const content = document.getElementById('content');
+    //? Accept both the new artifact shape \`{apis,syncs}\` and the legacy bare
+    //? map \`{page:Entry[]}\`. Warn in dev so consumers migrate (DOCSUI-O12).
     const apis = data && data.apis ? data.apis : data;
     const syncs = data && data.syncs ? data.syncs : {};
+    if (data && !data.apis && typeof data === 'object' && typeof console !== 'undefined') {
+      console.warn('[docs-ui] legacy artifact shape detected (bare map). Re-generate apiDocs.generated.json to get the {apis,syncs} shape.');
+    }
     if (!apis || typeof apis !== 'object') {
       content.innerHTML = '<div class="empty">No API docs available. Run <code>npm run generateArtifacts</code> to generate them.</div>';
       summary.innerHTML = '';
@@ -457,16 +482,22 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     const built = buildGroups(apis, syncs, filter);
     summary.innerHTML = built.summaryHtml;
     content.innerHTML = built.contentHtml;
-    bindEndpointToggles();
   };
 
   let cachedData = null;
+  //? Delegation is registered once; filter keystrokes only rebuild innerHTML.
+  bindEndpointToggles();
   document.getElementById('filter').addEventListener('input', (e) => {
     if (cachedData) render(cachedData, e.target.value);
   });
 
+  //? On non-OK responses, try to surface the JSON error body's \`error\` field
+  //? rather than just the raw status code (DOCSUI-O14).
   fetch(JSON_PATH, { credentials: 'include' })
-    .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+    .then(r => r.ok ? r.json() : r.json().then(
+      (j) => Promise.reject(new Error((j && j.error) ? j.error : String(r.status))),
+      () => Promise.reject(new Error(String(r.status)))
+    ))
     .then(data => { cachedData = data; render(data, ''); })
     .catch(err => {
       document.getElementById('content').innerHTML =
@@ -480,9 +511,11 @@ export const renderDocsHtml = (
   options: RenderDocsHtmlOptions = {},
 ): string => {
   const branding = options.branding ?? {};
-  const accent = branding.brandColor ?? '#58a6ff';
-  const fontFamily = branding.fontFamily ?? `system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
-  const logoMarkup = branding.logoUrl
+  //? Sanitize CSS-injected values to prevent rule-set / style-element breakout
+  //? (DOCSUI-O9). Sanitize logoUrl scheme to block javascript:/data: XSS (DOCSUI-O11).
+  const accent = sanitizeCssValue(branding.brandColor ?? '#58a6ff');
+  const fontFamily = sanitizeCssValue(branding.fontFamily ?? `system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`);
+  const logoMarkup = branding.logoUrl && isSafeLogoUrl(branding.logoUrl)
     ? `<img src="${escapeHtml(branding.logoUrl)}" alt="logo" style="height:32px;width:auto;margin-right:12px;" />`
     : '';
   const tryItOutData = options.enableTryItOut ? 'true' : 'false';

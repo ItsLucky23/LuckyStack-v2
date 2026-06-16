@@ -19,6 +19,8 @@ import { backendUrl, SessionLayout } from "../../config";
 
 const stripAvatarVersion = (url: string) => url.replace(/[?&]v=\d+/, '');
 
+//? Keep in sync with the locale files under `src/_locales/`. Each code here
+//? must match both a key in `settings.language.*` AND a `.json` locale file.
 const LANGUAGES = ['nl', 'en', 'de', 'fr'] as const;
 type Language = typeof LANGUAGES[number];
 

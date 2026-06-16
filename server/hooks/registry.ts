@@ -1,2 +1,3 @@
-export { registerHook, dispatchHook } from '../../packages/core/src/hooks/registry';
-export type { DispatchResult } from '../../packages/core/src/hooks/registry';
+// re-export only
+export { registerHook, dispatchHook } from '@luckystack/core';
+export type { DispatchResult } from '@luckystack/core';

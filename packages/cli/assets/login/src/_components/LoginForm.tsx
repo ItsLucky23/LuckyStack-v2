@@ -8,14 +8,18 @@ import tryCatch from "shared/tryCatch";
 
 import { i18nNotify as notify, useTranslator } from "@luckystack/core/client";
 
+//? Post-redirect delay in ms: long enough for the success toast to be read,
+//? short enough not to feel broken. Named to avoid a bare magic number.
+const REDIRECT_DELAY_MS = 1000;
+
 export default function LoginForm({ formType }: { formType: "login" | "register" }) {
   const translate = useTranslator();
   const isLogin = formType === "login";
-  const title = isLogin ? "Sign in to your account" : "Create a new account";
-  const subtitleText = isLogin ? "Don't have an account yet? " : "Already have an account? ";
-  const subtitleLink = isLogin ? "Create one now" : "Log in";
+  const title = isLogin ? translate({ key: 'login.signInTitle' }) : translate({ key: 'login.registerTitle' });
+  const subtitleText = isLogin ? translate({ key: 'login.noAccount' }) : translate({ key: 'login.haveAccount' });
+  const subtitleLink = isLogin ? translate({ key: 'login.createAccount' }) : translate({ key: 'login.logIn' });
   const redirectURL = isLogin ? "/register" : "/login";
-  const buttonText = isLogin ? "Log in" : "Sign up";
+  const buttonText = isLogin ? translate({ key: 'login.logIn' }) : translate({ key: 'login.signUp' });
   const headerIcon = isLogin ? faRightToBracket : faUserPlus;
 
   const inputClass = "rounded-md w-full h-9 border border-container1-border bg-container1 px-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors";
@@ -149,7 +153,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
         sessionStorage.removeItem("token");
       }
       globalThis.location.href = response.authenticated ? loginRedirectUrl : loginPageUrl;
-    }, 1000);
+    }, REDIRECT_DELAY_MS);
   };
 
   return (
@@ -236,7 +240,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 onClick={(e) => void handleSubmit(e, "credentials")}
                 disabled={loading}
               >
-                {loading ? "Loading..." : buttonText}
+                {loading ? translate({ key: 'login.loading' }) : buttonText}
               </button>
             </div>
 

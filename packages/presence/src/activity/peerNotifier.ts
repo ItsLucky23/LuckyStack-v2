@@ -128,6 +128,8 @@ export const informRoomPeers = async ({
 //? are passed in (resolved BEFORE teardown) rather than re-read here. Without
 //? this, peers would show a departed user as present forever (presence only ever
 //? emitted `userAfk`/`userBack`). Returns the recipient count for the caller.
+//? Fires `prePresenceUpdate`/`postPresenceUpdate` (kind `'left'`) so departure
+//? events are visible to the same audit/gate hooks as AFK/back fan-outs.
 export const informRoomPeersLeft = async ({
   token,
   userId,
@@ -145,6 +147,15 @@ export const informRoomPeersLeft = async ({
   }
   if (roomCodes.length === 0) { return 0; }
 
+  //? Veto seam symmetric with the AFK/back path: a `prePresenceUpdate` handler
+  //? returning stop suppresses the departure fan-out (invisible/DND modes).
+  //? `postPresenceUpdate` still fires with `recipientCount: 0` so audit sinks see it.
+  const pre = await dispatchHook('prePresenceUpdate', { token, userId, kind: 'left', roomCodes });
+  if (pre.stopped) {
+    await dispatchHook('postPresenceUpdate', { token, userId, kind: 'left', roomCodes, recipientCount: 0 });
+    return 0;
+  }
+
   let recipientCount = 0;
 
   await forEachRoomPeer({
@@ -160,6 +171,8 @@ export const informRoomPeersLeft = async ({
       recipientCount++;
     },
   });
+
+  await dispatchHook('postPresenceUpdate', { token, userId, kind: 'left', roomCodes, recipientCount });
 
   return recipientCount;
 };

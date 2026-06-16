@@ -138,6 +138,10 @@ export interface PreEmailChangePayload {
 export interface PostEmailChangeRequestedPayload {
   userId: string;
   newEmail: string;
+  //? `false` when the request was silently dropped (anti-enumeration: the new
+  //? address is already taken so no token is minted / no email sent), `true`/absent
+  //? on the normal path. Lets a GDPR/abuse-report subscriber observe the drop.
+  sent?: boolean;
 }
 
 export interface PostEmailChangedPayload {
@@ -162,6 +166,12 @@ export interface LoginFailedPayload {
   reason: string;
   /** Which flow the failure occurred in. */
   stage: 'login' | 'register' | 'oauth';
+  //? DD-LOGIN-F5: optional resolved client IP so the per-account lockout can
+  //? use an IP+account composite key. When absent the lockout falls back to a
+  //? pure account key. Callers in the HTTP auth route resolve the IP before
+  //? calling `loginWithCredentials` and thread it here; socket paths where the
+  //? IP isn't readily available omit it (pure-account bucket applies).
+  requesterIp?: string;
 }
 
 //? Account-deletion lifecycle. `preAccountDelete` is vetoable — compliance /

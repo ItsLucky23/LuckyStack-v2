@@ -2,8 +2,8 @@ node_modules
 dist
 .eslintcache
 
-# Local env (commit only the templates).
-.env
+# Local env: .env holds only non-secret config and IS committed.
+# .env.local holds secrets (DATABASE_URL, OAuth keys, etc.) and is NOT committed.
 .env.local
 
 # Generated artifacts.

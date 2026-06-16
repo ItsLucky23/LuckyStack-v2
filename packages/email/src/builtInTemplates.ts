@@ -20,8 +20,11 @@ const DEFAULT_BRAND = 'LuckyStack';
 const str = (value: unknown, fallback: string): string =>
   typeof value === 'string' && value.length > 0 ? value : fallback;
 
+//? Require a strictly positive finite number; zero/negative ttlMinutes would
+//? produce nonsensical copy ("expires in 0 minutes") and leak template data
+//? that might indicate a misconfiguration (EMAIL-N2).
 const num = (value: unknown, fallback: number): number =>
-  typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
 
 /**
  * Data accepted by the built-in `password-reset` template. A consumer override

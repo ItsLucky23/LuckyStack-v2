@@ -25,6 +25,18 @@ import { getParsedBundles } from './argv';
 
 type RuntimeMapRecord = Record<string, unknown>;
 
+/**
+ * The shape that the generated maps module must export. `scripts/generateServerRequests.ts`
+ * emits exactly this shape: `{ apis, syncs, functions }` where each value is a
+ * `Record<string, Handler>`. Consumers can import this type to validate their
+ * generated file in CI or type-check the `loadGenerated` callback return.
+ */
+export interface GeneratedRuntimeMapsModule {
+  apis: RuntimeMapRecord;
+  syncs: RuntimeMapRecord;
+  functions: RuntimeMapRecord;
+}
+
 interface LoadedRuntimeMaps {
   apisObject: RuntimeMapRecord;
   syncObject: RuntimeMapRecord;
@@ -46,7 +58,7 @@ const emptyRuntimeMaps: LoadedRuntimeMaps = {
 const isRuntimeMapRecord = (value: unknown): value is RuntimeMapRecord =>
   Boolean(value) && typeof value === 'object';
 
-const normalizeGeneratedModule = (moduleValue: unknown): LoadedRuntimeMaps => {
+const normalizeGeneratedModule = (moduleValue: unknown, preset: string): LoadedRuntimeMaps => {
   const moduleRecord = moduleValue && typeof moduleValue === 'object'
     ? (moduleValue as Record<string, unknown>)
     : {};
@@ -54,6 +66,23 @@ const normalizeGeneratedModule = (moduleValue: unknown): LoadedRuntimeMaps => {
   const apiCandidate = moduleRecord.apis;
   const syncCandidate = moduleRecord.syncs;
   const functionCandidate = moduleRecord.functions;
+
+  //? Warn when none of the expected keys are present — this is almost certainly
+  //? a mis-shaped module (wrong export, stale generated file, default-export
+  //? wrapper) rather than a legitimately empty app. Silent coercion to `{}`
+  //? causes every route to silently 404, which is hard to diagnose.
+  if (
+    !isRuntimeMapRecord(apiCandidate)
+    && !isRuntimeMapRecord(syncCandidate)
+    && !isRuntimeMapRecord(functionCandidate)
+  ) {
+    getLogger().warn(
+      `[luckystack:runtimeMaps] preset "${preset}" loaded but has no recognised shape ` +
+      `(expected { apis, syncs, functions }). ` +
+      `Verify that generateServerRequests has been run and the correct file is imported. ` +
+      `All routes for this preset will return notFound.`,
+    );
+  }
 
   return {
     apisObject: isRuntimeMapRecord(apiCandidate) ? apiCandidate : {},
@@ -68,7 +97,9 @@ export interface ProdRuntimeMapsLoaderOptions {
    * Called once per preset per process lifetime; the result is cached.
    *
    * The resolved module must have shape `{ apis, syncs, functions }` (the
-   * shape `scripts/generateServerRequests.ts` emits).
+   * shape `scripts/generateServerRequests.ts` emits — see
+   * {@link GeneratedRuntimeMapsModule}). A mis-shaped module logs a warning
+   * and results in every route for that preset returning `notFound`.
    *
    * Pass a function that calls `import()` with a path relative to YOUR
    * server-side module — the framework cannot resolve a relative path on
@@ -77,6 +108,9 @@ export interface ProdRuntimeMapsLoaderOptions {
    * @example
    * loadGenerated: (preset) => import(`./prod/generatedApis.${preset}`)
    */
+  //? Returns `unknown` because the consumer hands us an `import()` of a generated
+  //? module whose shape we cannot statically guarantee; `normalizeGeneratedModule`
+  //? validates it at runtime against `GeneratedRuntimeMapsModule` and warns on drift.
   loadGenerated: (preset: string) => Promise<unknown>;
   /**
    * Override the preset(s) to load. Skips the argv lookup. Accepts a single
@@ -175,7 +209,7 @@ export const createProdRuntimeMapsProvider = (
           continue;
         }
         loadedAny = true;
-        const normalized = normalizeGeneratedModule(mod);
+        const normalized = normalizeGeneratedModule(mod, preset);
         mergeInto(merged.apisObject, normalized.apisObject, 'api', preset, apiOrigin);
         mergeInto(merged.syncObject, normalized.syncObject, 'sync', preset, syncOrigin);
         mergeInto(merged.functionsObject, normalized.functionsObject, 'function', preset, functionOrigin);

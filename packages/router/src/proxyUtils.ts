@@ -28,16 +28,40 @@ export const HTTP_HOP_BY_HOP_HEADERS: ReadonlySet<string> = new Set([
 export const WS_HOP_BY_HOP_HEADERS: ReadonlySet<string> = BASE_HOP_BY_HOP_HEADERS;
 
 /**
- * Copy request headers, dropping the hop-by-hop entries in `hopByHopSet` and
- * any `undefined` values.
+ * Extract the extra hop-by-hop header names listed in the `Connection` header
+ * per RFC 7230 §6.1. A client can declare any header as connection-scoped by
+ * including its name as a `Connection` token (e.g. `Connection: close, x-my-token`).
+ * Those headers are hop-by-hop and must NOT be forwarded to the upstream.
+ */
+export const extractConnectionTokens = (
+  headers: IncomingMessage['headers'],
+): ReadonlySet<string> => {
+  const raw = headers.connection;
+  if (!raw) return new Set();
+  const value = Array.isArray(raw) ? raw.join(',') : raw;
+  return new Set(
+    value.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean),
+  );
+};
+
+/**
+ * Copy request headers, dropping the hop-by-hop entries in `hopByHopSet`,
+ * any headers dynamically listed in the `Connection` value (RFC 7230 §6.1),
+ * and any `undefined` values.
  */
 export const stripHopByHopHeaders = (
   headers: IncomingMessage['headers'],
   hopByHopSet: ReadonlySet<string>,
 ): Record<string, string | string[]> => {
+  //? RFC 7230 §6.1: any token listed in `Connection` is hop-by-hop for this
+  //? hop and must be stripped. This covers dynamic tokens like bearer
+  //? nonces that intermediaries sometimes inject into the Connection header.
+  const connectionTokens = extractConnectionTokens(headers);
   const out: Record<string, string | string[]> = {};
   for (const [key, value] of Object.entries(headers)) {
-    if (hopByHopSet.has(key.toLowerCase())) continue;
+    const lower = key.toLowerCase();
+    if (hopByHopSet.has(lower)) continue;
+    if (connectionTokens.has(lower)) continue;
     if (value === undefined) continue;
     out[key] = value;
   }
@@ -46,11 +70,9 @@ export const stripHopByHopHeaders = (
 
 /** Destroy a socket without letting a teardown error escape. */
 export const safeDestroy = (socket: Socket): void => {
-  try {
-    socket.destroy();
-  } catch {
-    /* noop — socket may already be torn down */
-  }
+  //? Swallow any error — a socket that is already destroyed or has an
+  //? in-progress teardown may throw; we never want a cleanup path to throw.
+  tryCatchSync(() => { socket.destroy(); });
 };
 
 /**

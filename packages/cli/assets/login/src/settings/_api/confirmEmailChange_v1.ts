@@ -46,17 +46,19 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   const oldEmail = before?.email ?? '';
 
   //? Race protection: between minting and clicking, the new address could have
-  //? been claimed by another sign-up. Re-check the collision before writing.
+  //? been claimed by another sign-up (any provider). Check across all providers
+  //? so an OAuth account with the same email is not silently aliased.
   const collision = await functions.db.prisma.user.findFirst({
-    where: { email: newEmail, provider: 'credentials', NOT: { id: userId } },
+    where: { email: newEmail, NOT: { id: userId } },
     select: { id: true },
   });
   if (collision) {
     return { status: 'error', errorCode: 'auth.emailTaken' };
   }
 
-  const patch: Record<string, unknown> = { email: newEmail };
-  await getUserAdapter().update(userId, patch);
+  //? Pass the typed `Partial<UserRecord>` directly — no `Record<string, unknown>`
+  //? intermediary needed; `email` is a valid key on `UserRecord`.
+  await getUserAdapter().update(userId, { email: newEmail });
 
   //? Email is a credential — rotate every session. NO `exceptToken` here:
   //? we want the user to sign in fresh with the new email everywhere.

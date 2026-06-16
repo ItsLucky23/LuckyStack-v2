@@ -11,7 +11,7 @@ import { z } from 'zod';
 //? to cwd. Cached for the process lifetime.
 let cachedRoot: string | null = null;
 export const projectRoot = async (): Promise<string> => {
-  if (cachedRoot) return cachedRoot;
+  if (cachedRoot !== null) return cachedRoot;
   let dir = process.cwd();
   for (let i = 0; i < 12; i++) {
     try {
@@ -40,7 +40,12 @@ export const readDocFile = async (relPath: string): Promise<string | null> => {
   const rel = path.relative(root, resolved);
   if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
   try {
-    return await fs.readFile(resolved, 'utf8');
+    //? Resolve symlinks via realpath so a symlink inside root that points outside
+    //? is caught by the containment check (lexical path.relative alone misses it).
+    const real = await fs.realpath(resolved);
+    const realRel = path.relative(root, real);
+    if (realRel.startsWith('..') || path.isAbsolute(realRel)) return null;
+    return await fs.readFile(real, 'utf8');
   } catch {
     return null;
   }
@@ -67,19 +72,36 @@ export type Graph = z.infer<typeof GraphSchema>;
 export const loadGraph = async (): Promise<Graph | null> => {
   const text = await readDocFile('docs/ai-graph.json');
   if (text === null) return null;
-  const parsed = GraphSchema.safeParse(JSON.parse(text));
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    // corrupt / torn file — treat the same as missing so callers render the
+    // friendly "generate with npm run ai:graph" message
+    return null;
+  }
+  const parsed = GraphSchema.safeParse(raw);
+  //? No referential-integrity check between blastRadius keys and nodes[] ids:
+  //? the generator guarantees consistency at emit time, and a stale/partial
+  //? graph simply surfaces fewer results rather than throwing. Callers already
+  //? handle empty arrays via `?? []`.
   return parsed.success ? parsed.data : null;
 };
 
 //? Resolve a user-supplied path to a graph node id. Accepts a src-relative id
 //? (`_functions/foo.ts`), a `src/`-prefixed path, or a bare basename match.
-export const resolveNodeId = (graph: Graph, input: string): string | null => {
+//? Returns the unique id, `null` when nothing matches, or a string[] with all
+//? matching candidates when a bare basename matches more than one node (so the
+//? caller can surface a disambiguation message instead of a bare null).
+export const resolveNodeId = (graph: Graph, input: string): string | string[] | null => {
   const norm = input.replaceAll('\\', '/').replace(/^\.?\//, '').replace(/^src\//, '');
   if (Object.hasOwn(graph.blastRadius, norm) || graph.nodes.some((n) => n.id === norm)) return norm;
   const base = path.posix.basename(norm);
   const byBase = graph.nodes.filter((n) => n.id.endsWith(`/${norm}`) || n.id === norm || path.posix.basename(n.id) === base);
-  const sole = byBase.length === 1 ? byBase[0] : undefined;
-  return sole ? sole.id : null;
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length===1 guarantees element exists
+  if (byBase.length === 1) return byBase[0]!.id;
+  if (byBase.length > 1) return byBase.map((n) => n.id);
+  return null;
 };
 
 // ---------------------------------------------------------------------------
@@ -101,8 +123,11 @@ export const sectionMatching = (markdown: string, needle: string): string | null
 export const headings = (markdown: string): string[] =>
   markdown.split(/\r?\n/).filter((l) => /^##\s+/.test(l)).map((l) => l.replace(/^##\s+/, '').trim());
 
-//? Lines containing `needle` (case-insensitive), with a cap.
-export const grepLines = (text: string, needle: string, limit = 60): string[] => {
+//? Lines containing `needle` (case-insensitive), with a cap. Returns the
+//? matching lines (up to `limit`) plus the total count so callers can signal
+//? truncation to the agent.
+export const grepLines = (text: string, needle: string, limit = 60): { lines: string[]; total: number } => {
   const low = needle.toLowerCase();
-  return text.split(/\r?\n/).filter((l) => l.toLowerCase().includes(low)).slice(0, limit);
+  const all = text.split(/\r?\n/).filter((l) => l.toLowerCase().includes(low));
+  return { lines: all.slice(0, limit), total: all.length };
 };

@@ -3,7 +3,9 @@
   "common": {
     "404": "Er is iets misgegaan, probeer het later opnieuw.",
     "whiteSpace": " ",
-    "error": "FOUT"
+    "error": "FOUT",
+    "unexpectedError": "Er is iets misgegaan.",
+    "refreshPage": "Pagina vernieuwen"
   },
   "middleware": {
     "notAdmin": "Je bent geen admin."
@@ -85,7 +87,25 @@
     "resetSuccess": "Je wachtwoord is bijgewerkt. Je kunt nu inloggen met het nieuwe wachtwoord.",
     "resetGoLogin": "Naar inloggen",
     "resetInvalidToken": "Deze reset-link is ongeldig of verlopen.",
-    "resetPasswordUpdated": "Wachtwoord bijgewerkt."
+    "resetPasswordUpdated": "Wachtwoord bijgewerkt.",
+    "signInTitle": "Inloggen op je account",
+    "createAccountTitle": "Nieuw account aanmaken",
+    "noAccountYet": "Nog geen account?",
+    "alreadyHaveAccount": "Al een account?",
+    "createAccount": "Nu aanmaken",
+    "logIn": "Inloggen",
+    "signUp": "Registreren",
+    "loading": "Laden..."
+  },
+  "navbar": {
+    "closeSidebar": "Zijpanel sluiten",
+    "showSidebar": "Zijpanel tonen",
+    "playground": "Playground",
+    "settings": "Instellingen",
+    "admin": "Admin",
+    "logout": "Uitloggen",
+    "closeMenu": "Menu sluiten",
+    "openMenu": "Menu openen"
   },
   "settings": {
     "changeAvatar": "Verander avatar",
@@ -115,6 +135,8 @@
       "label": "Vul een nieuw e-mailadres in; we sturen een bevestigingslink naar dat adres. Bij bevestiging word je op alle apparaten uitgelogd.",
       "button": "Bevestigingsmail versturen",
       "checkInbox": "Bekijk de nieuwe inbox voor een bevestigingslink.",
+      "confirmPrompt": "Klik op de knop hieronder om je nieuwe e-mailadres te bevestigen.",
+      "confirmButton": "E-mailwijziging bevestigen",
       "confirming": "Je nieuwe e-mail wordt bevestigd...",
       "confirmedTitle": "E-mail bijgewerkt",
       "confirmedBody": "Je e-mailadres is gewijzigd. Alle sessies zijn beëindigd — log opnieuw in met je nieuwe e-mailadres.",

@@ -61,7 +61,11 @@ export const customTests: CustomTestCase[] = [
     },
   },
   {
-    name: 'address owned by another credentials user is rejected with auth.emailTaken',
+    //? DD-ROOTSRC-O6 (anti-enumeration): the route silently succeeds when the
+    //? target address is already owned by another credentials user rather than
+    //? revealing the address exists in the database. A logged-in attacker could
+    //? otherwise enumerate every credentials account with a trivial loop.
+    name: 'address owned by another credentials user returns success (anti-enumeration — no email sent)',
     run: async (ctx: TestContext) => {
       //? Another credentials user already owns the target address.
       const takenEmail = uniqueEmail('req-taken');
@@ -77,9 +81,10 @@ export const customTests: CustomTestCase[] = [
       //? Caller is a different user (distinct session email).
       await ctx.session.login({ email: uniqueEmail('req-caller') });
 
+      //? Anti-enumeration: the response is identical to the "address available"
+      //? success path so the caller cannot tell whether the address is taken.
       const result = await ctx.callApi<unknown, RequestResponse>({ newEmail: takenEmail });
-      ctx.expect.eq(result.status, 'error');
-      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'auth.emailTaken');
+      ctx.expect.eq(result.status, 'success');
     },
   },
 ];

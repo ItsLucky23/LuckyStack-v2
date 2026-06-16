@@ -21,6 +21,7 @@
 import { appendErrorTracker, getLogger, tryCatch } from '@luckystack/core';
 import { initializeSentry } from './sentry';
 import { createPostHogAdapter, type PostHogAdapterOptions } from './adapters/posthog';
+import { getPostHogConfig } from './posthogConfig';
 
 //? Sentry (env-gated no-op without SENTRY_DSN).
 initializeSentry();
@@ -48,13 +49,23 @@ if (posthogKey) {
     //? here (e.g. a malformed POSTHOG_HOST) is logged rather than rejecting the
     //? `void`-discarded promise and surfacing as an unhandled rejection.
     const [registerError] = await tryCatch(() => {
-      const client = new mod.PostHog(posthogKey, { host: process.env.POSTHOG_HOST });
+      //? ET-N1: read the consumer-registered PostHog config (anonymousDistinctId,
+      //? beforeSend, clientOptions) so `registerPostHogConfig` is actually wired
+      //? rather than being a dead surface. clientOptions.host wins over POSTHOG_HOST.
+      const phConfig = getPostHogConfig();
+      const host = phConfig.clientOptions?.host ?? process.env.POSTHOG_HOST;
+      const clientOptions = host ? { ...phConfig.clientOptions, host } : phConfig.clientOptions;
+      const client = new mod.PostHog(posthogKey, clientOptions);
       //? APPEND (not REPLACE): the legacy `registerErrorTracker` clobbers the whole
       //? active-tracker list, so an async PostHog auto-register could silently wipe a
       //? Sentry adapter (or a consumer overlay) already registered before this microtask
       //? resolves. `appendErrorTracker` accumulates and de-dupes by `name`, so the
       //? zero-config PostHog adapter coexists with whatever else is registered.
-      appendErrorTracker(createPostHogAdapter({ client }));
+      appendErrorTracker(createPostHogAdapter({
+        client,
+        anonymousDistinctId: phConfig.anonymousDistinctId,
+        beforeSend: phConfig.beforeSend,
+      }));
     });
     if (registerError) {
       getLogger().error('[posthog] Failed to initialise the PostHog error tracker.', { err: registerError });

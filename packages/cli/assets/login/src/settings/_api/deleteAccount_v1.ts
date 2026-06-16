@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { unlink } from 'node:fs/promises';
-import { redis, dispatchHook, getUploadsDir } from '@luckystack/core';
-import { revokeUserSessions, verifyPassword, activeUsersKeyFor, getUserAdapter } from '@luckystack/login';
+import { dispatchHook, getUploadsDir } from '@luckystack/core';
+import { revokeUserSessions, verifyPassword, getUserAdapter } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
@@ -25,9 +25,13 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   }
 
   // Credentials accounts must reconfirm with their password.
+  //? Gate on `provider` (not `password`) so a credentials account with a null/empty
+  //? hash still requires the field — preventing silent bypass on hash-less rows.
   const dbUser = await functions.db.prisma.user.findUnique({ where: { id: user.id } });
-  if (dbUser?.password) {
-    const ok = data.password ? await verifyPassword(data.password, dbUser.password) : false;
+  if (user.provider === 'credentials') {
+    const ok = data.password && dbUser?.password
+      ? await verifyPassword(data.password, dbUser.password)
+      : false;
     if (!ok) {
       return { status: 'error', errorCode: 'login.wrongPassword' };
     }
@@ -54,10 +58,11 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'error', errorCode: 'api.internalServerError' };
   }
 
-  // Wipe every session (including current — the user IS being deleted). Use the
-  // framework key builder so a registered custom Redis key formatter is honored.
+  //? Wipe every session through the adapter. `revokeUserSessions` calls
+  //? `adapter.untrackActive` for each token, so a raw `redis.del(activeUsersKeyFor(…))`
+  //? bypass is not needed — it would skip custom adapters and leave the active-set
+  //? intact for any token `revokeUserSessions` couldn't delete.
   await revokeUserSessions(user.id);
-  await redis.del(activeUsersKeyFor(user.id));
 
   await adapter.delete(user.id);
 

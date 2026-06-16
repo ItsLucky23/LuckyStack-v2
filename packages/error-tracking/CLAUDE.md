@@ -4,7 +4,7 @@
 
 ## What this package does
 
-Optional, pluggable error-tracking integration for LuckyStack. Ships a backend-agnostic `ErrorTracker` adapter contract (the contract + registry lives in `@luckystack/core` so framework code in `api` / `sync` / `server` can dispatch events without taking a dep on a specific observability backend) plus three built-in adapters: Sentry (`@sentry/node`), Datadog (`dd-trace` + `hot-shots`), and PostHog (`posthog-node`). Multiple adapters can be registered at once and every captured event fans out to all of them; per-adapter throws are swallowed so one buggy tracker cannot break the chain. Also exposes the legacy single-Sentry entry (`initializeSentry`, `captureException`, `captureMessage`, `setSentryUser`, `startSpan`) which auto-wires into the framework's hook surface (`apiError`, `syncError`, `preApiExecute`/`postApiExecute`, `preSyncFanout`/`postSyncFanout`, `postLogin`/`postLogout`) and is a safe no-op when `SENTRY_DSN` is missing.
+Optional, pluggable error-tracking integration for LuckyStack. Ships a backend-agnostic `ErrorTracker` adapter contract (the contract + registry lives in `@luckystack/core` so framework code in `api` / `sync` / `server` can dispatch events without taking a dep on a specific observability backend) plus three built-in adapters: Sentry (`@sentry/node`), Datadog (`dd-trace` + `hot-shots`), and PostHog (`posthog-node`). Multiple adapters can be registered at once and every captured event fans out to all of them; per-adapter throws are swallowed so one buggy tracker cannot break the chain. Also exposes the legacy single-Sentry entry (`initializeSentry`, `captureException`, `captureMessage`, `setSentryUser`, `startSpan`) which auto-wires into the framework's hook surface (`preApiValidate`, `preApiExecute`/`postApiExecute`, `preSyncAuthorize`, `preSyncFanout`/`postSyncFanout`, `postLogout`) and is a safe no-op when `SENTRY_DSN` is missing. Note: ET-N3 — `postLogin` and `apiError`/`syncError` hooks are NOT wired; only `postLogout` clears the identity.
 
 ## When to USE this package
 
@@ -44,7 +44,7 @@ Optional, pluggable error-tracking integration for LuckyStack. Ships a backend-a
 | `registerSentryConfig(input)` | Register Sentry-specific sample rates + ignoreErrors. Owned by this package, not part of `ProjectConfig`. | -> docs/sentry-integration.md |
 | `getSentryConfig()` | Read the merged active `SentryConfig`. | -> docs/sentry-integration.md |
 | `DEFAULT_SENTRY_CONFIG` | Default sample-rate + ignoreErrors values used until `registerSentryConfig` runs. | -> docs/sentry-integration.md |
-| Types: `ErrorTracker`, `ErrorTrackerContext`, `ErrorTrackerUser`, `ErrorTrackerEvent`, `SpanResult<T>` | Adapter contract types (re-exported from `@luckystack/core`). | -> docs/adapter-pattern.md |
+| Types: `ErrorTracker`, `ErrorTrackerContext`, `ErrorTrackerUser`, `ErrorTrackerEvent`, `SpanResult<T>` | Adapter contract types (re-exported from `@luckystack/core`). `SpanResult<T>` is now a pass-through alias for `T` (no conditional unwrapping — kept for annotation intent only; ET-O11). | -> docs/adapter-pattern.md |
 | Types: `SentryAdapterOptions`, `DatadogAdapterOptions`, `PostHogAdapterOptions` | Per-adapter option shapes. | -> docs/adapter-pattern.md |
 | Types: `SentryConfig`, `SentryConfigInput`, `SentryClientConfig`, `SentryServerConfig`, `SentrySampleRates` | Sentry config registry types. | -> docs/sentry-integration.md |
 

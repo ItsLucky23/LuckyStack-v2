@@ -17,7 +17,18 @@ import { createHash } from 'node:crypto';
 
 const TTL_SECONDS = 3600;
 
-const { store, issueOneTimeToken, consumeOneTimeToken, consumeOneTimeTokenJson } = vi.hoisted(() => {
+const {
+  store,
+  issueOneTimeToken,
+  consumeOneTimeToken,
+  consumeOneTimeTokenJson,
+  redis,
+  formatKey,
+  oneTimeTokenKey,
+} = vi.hoisted(() => {
+  //? Unified in-memory map shared by both the one-time-token primitive and the
+  //? `redis` stub. Token hashes and pointer keys are always distinct strings so
+  //? they coexist without collision.
   const store = new Map<string, string>();
   // eslint-disable-next-line unicorn/consistent-function-scoping -- must live inside the hoisted factory so the mock closure is self-contained
   const sha = (token: string): string => createHash('sha256').update(token).digest('hex');
@@ -58,7 +69,35 @@ const { store, issueOneTimeToken, consumeOneTimeToken, consumeOneTimeTokenJson }
     }
   };
 
-  return { store, issueOneTimeToken, consumeOneTimeToken, consumeOneTimeTokenJson };
+  //? `formatKey` in tests: simple namespace:suffix join (no project-name prefix
+  //? needed — the key uniqueness contract is all that matters here).
+  const formatKey = (namespace: string, suffix = ''): string =>
+    suffix === '' ? namespace : `${namespace}:${suffix}`;
+
+  //? `oneTimeTokenKey` must produce the SAME key that `issueOneTimeToken.store()`
+  //? writes into `store` (i.e. sha(token)), so that `redis.del(priorKey)` issued
+  //? by the LOGIN-F16 invalidation path actually removes the old token entry.
+  //? The real implementation calls `formatKey(namespace, sha(token))`, but in our
+  //? mock the stored key is plain `sha(token)` — so we replicate that here.
+  const oneTimeTokenKey = (_namespace: string, token: string): string => sha(token);
+
+  //? Minimal Redis stub: get/set/del all operate on the shared `store` Map so
+  //? the pointer-key write (`redis.set`) and the invalidation read+delete
+  //? (`redis.get` + `redis.del`) exercise the real LOGIN-F16 code path against
+  //? the same data as the token-consumption assertions.
+  const redis = {
+    get: (key: string): Promise<string | null> => Promise.resolve(store.get(key) ?? null),
+    set: (key: string, value: string, ..._rest: unknown[]): Promise<void> => {
+      store.set(key, value);
+      return Promise.resolve();
+    },
+    del: (key: string): Promise<void> => {
+      store.delete(key);
+      return Promise.resolve();
+    },
+  };
+
+  return { store, issueOneTimeToken, consumeOneTimeToken, consumeOneTimeTokenJson, redis, formatKey, oneTimeTokenKey };
 });
 
 vi.mock('@luckystack/core', () => ({
@@ -68,6 +107,9 @@ vi.mock('@luckystack/core', () => ({
   issueOneTimeToken,
   consumeOneTimeToken,
   consumeOneTimeTokenJson,
+  redis,
+  formatKey,
+  oneTimeTokenKey,
 }));
 
 //? userAdapter + passwordPolicy are pulled in by passwordReset.ts's other

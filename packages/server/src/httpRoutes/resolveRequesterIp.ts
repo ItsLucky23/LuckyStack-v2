@@ -28,8 +28,9 @@ import { getProjectConfig, resolveClientIp } from '@luckystack/core';
  */
 export const resolveRequesterIp = (req: IncomingMessage): string | undefined => {
   const trustProxy = getProjectConfig().http.trustProxy;
+  const trustedProxyHopCount = getProjectConfig().http.trustedProxyHopCount;
   const rawRemoteAddress = req.socket.remoteAddress;
   return (rawRemoteAddress || (trustProxy && (req.headers['x-forwarded-for'] || req.headers['x-real-ip'])))
-    ? resolveClientIp({ rawAddress: rawRemoteAddress, headers: req.headers, trustProxy })
+    ? resolveClientIp({ rawAddress: rawRemoteAddress, headers: req.headers, trustProxy, trustedProxyHopCount })
     : undefined;
 };

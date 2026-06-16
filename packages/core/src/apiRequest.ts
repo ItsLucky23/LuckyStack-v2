@@ -73,7 +73,7 @@ export type ApiStreamEvent<T extends StreamPayload = StreamPayload> = T;
  */
 const isGetMethodByPrefix = (apiName: string): boolean => isGetMethodName(apiName.toLowerCase());
 
-const isGetMethod = (apiName: string, version: string): boolean => {
+const resolveGetMethod = (apiName: string, version: string): { isGet: boolean; usingHeuristic: boolean } => {
   //? Resolved-name shape: `pagePath/apiName`. apiMethodMap is nested by
   //? pagePath → apiName → version. Split at the last `/` so multi-segment
   //? page paths (e.g. 'admin/users') still resolve.
@@ -82,9 +82,9 @@ const isGetMethod = (apiName: string, version: string): boolean => {
     const pagePath = apiName.slice(0, lastSlash);
     const leaf = apiName.slice(lastSlash + 1);
     const method = getRegisteredApiMethod(pagePath, leaf, version);
-    if (method) return method === 'GET';
+    if (method) return { isGet: method === 'GET', usingHeuristic: false };
   }
-  return isGetMethodByPrefix(apiName);
+  return { isGet: isGetMethodByPrefix(apiName), usingHeuristic: true };
 };
 
 const canSendNow = (socketInstance: Socket) => {
@@ -106,12 +106,21 @@ const shouldLogStream = () => getLogging().stream;
 const shouldUseAbortController = ({
   abortable,
   isGet,
+  usingHeuristic,
 }: {
   abortable: boolean | undefined;
   isGet: boolean;
+  usingHeuristic: boolean;
 }) => {
   if (abortable === true) return true;
   if (abortable === false) return false;
+  //? CORE-O15: when `abortable` is unspecified and we are relying on the
+  //? name-prefix heuristic (apiMethodMap not registered), default to
+  //? non-abortable. A mis-named POST (e.g. `getReport`) would otherwise
+  //? silently abort an identical in-flight call it has nothing to do with.
+  //? Once `registerApiMethodMap` is called (normal boot), the generated map
+  //? resolves the method and the heuristic path is never taken.
+  if (usingHeuristic) return false;
   return isGet;
 };
 
@@ -185,7 +194,7 @@ interface RuntimeApiParams {
   timeoutMs?: number | false;
 }
 
-interface ApiErrorResponse extends Record<string, unknown> {
+export interface ApiErrorResponse extends Record<string, unknown> {
   status: 'error';
   httpStatus: number;
   message: string;
@@ -246,7 +255,7 @@ const normalizeApiError = ({
 
 export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<F>>(
   params: ApiParamsForFullName<F, V>
-): Promise<Prettify<OutputForFullName<F, V>>> {
+): Promise<Prettify<OutputForFullName<F, V>> | ApiErrorResponse> {
   type RequestOutput = Prettify<OutputForFullName<F, V> & ApiResponse>;
   const runtimeParams = params as RuntimeApiParams;
   const { name, version, disableErrorMessage = false, onStream, signal: externalSignal, timeoutMs } = runtimeParams;
@@ -337,10 +346,11 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
       //? Pass the full pagePath/apiName so the registry lookup can resolve via
       //? the generated apiMethodMap (falls back to the leaf-name prefix heuristic
       //? when the map isn't registered yet).
-      const isGet = isGetMethod(sanitizedName, version);
+      const { isGet, usingHeuristic } = resolveGetMethod(sanitizedName, version);
       const useAbortController = shouldUseAbortController({
         abortable: runtimeParams.abortable,
         isGet,
+        usingHeuristic,
       });
       const fullName = `api/${sanitizedName}/${version}`;
       //? Per-payload abort key: only an identical in-flight call to the same
@@ -454,6 +464,21 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
               fallbackErrorCode: 'offline.queueFull',
               fallbackHttpStatus: 503,
             }) as RequestOutput);
+          } else if (externalSignal && queueId) {
+            //? CORE-O14: if an external AbortSignal fires while the item is
+            //? sitting in the offline queue, its listener inside runRequest has
+            //? not been registered yet. Register a one-shot handler here so the
+            //? abort is not silently ignored and the queue slot is reclaimed.
+            const capturedQueueId = queueId;
+            const queueAbortHandler = () => {
+              removeApiQueueItem(capturedQueueId);
+              cleanupAbortController();
+              resolve(normalizeApiError({
+                response: { status: 'error', errorCode: 'request.aborted' },
+                fallbackErrorCode: 'request.aborted',
+              }) as RequestOutput);
+            };
+            externalSignal.addEventListener('abort', queueAbortHandler, { once: true });
           }
           return;
         }
@@ -565,6 +590,10 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           cleanupStreamListener = null;
           cleanupExternalAbort?.();
           cleanupExternalAbort = null;
+          //? Call cleanup (not just null) so that any watcher layered on top of
+          //? cleanupResponseListener (e.g. the CORE-O13 disconnect watcher) is
+          //? properly torn down when a normal response arrives.
+          cleanupResponseListener?.();
           cleanupResponseListener = null;
 
           const status = response.status;
@@ -603,6 +632,35 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         cleanupResponseListener = () => {
           socketInstance.off(responseEventName, responseListener);
         };
+
+        //? CORE-O13: when timeout is disabled AND there is no abort controller
+        //? a server restart between emit and reply leaves this promise pending
+        //? forever, leaking the response listener. The disconnect event is the
+        //? authoritative signal that no reply will ever arrive on this socket.
+        const disconnectHandler = () => {
+          if (cleanupResponseListener) {
+            cleanupResponseListener();
+            cleanupResponseListener = null;
+          }
+          cleanupStreamListener?.();
+          cleanupStreamListener = null;
+          cleanupExternalAbort?.();
+          cleanupExternalAbort = null;
+          clearResponseTimeout();
+          cleanupAbortController();
+          resolve(normalizeApiError({
+            response: { status: 'error', errorCode: 'api.disconnected' },
+            fallbackErrorCode: 'api.disconnected',
+          }) as RequestOutput);
+        };
+        socketInstance.once('disconnect', disconnectHandler);
+        //? Wrap the response listener to also remove the disconnect watcher on
+        //? a normal reply (avoids a dangling listener on every successful call).
+        const originalCleanupResponseListener = cleanupResponseListener;
+        cleanupResponseListener = () => {
+          socketInstance.off('disconnect', disconnectHandler);
+          originalCleanupResponseListener();
+        };
       };
 
       //? EXT-03 — fire client request interceptors just before the emit. They
@@ -615,6 +673,19 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         version,
         data: data as Record<string, unknown>,
       });
+
+      //? CORE-O12: re-check the external abort signal after the interceptor
+      //? await. A slow async interceptor adds uncounted latency; if the caller
+      //? aborted during that window the signal is already fired but nothing has
+      //? yet attached its listener (that happens inside runRequest). Settling
+      //? here avoids emitting a request whose response will never be consumed.
+      if (externalSignal?.aborted) {
+        resolve(normalizeApiError({
+          response: { status: 'error', errorCode: 'request.aborted' },
+          fallbackErrorCode: 'request.aborted',
+        }) as RequestOutput);
+        return;
+      }
 
       runRequest(socket);
     })();

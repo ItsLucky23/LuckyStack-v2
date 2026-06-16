@@ -91,8 +91,14 @@ export function translate({ translationList, key, params }: {
   let finalResult = result;
   for (const param of params) {
     if (!param.key) continue;
-    const regex = new RegExp(`\\{\\{${param.key}\\}\\}`, 'g');
-    finalResult = finalResult.replace(regex, String(param.value));
+    //? Escape key before building the RegExp — a key containing regex
+    //? meta-characters (e.g. `.`, `+`, `(`) would otherwise mis-substitute
+    //? or cause ReDoS. Use a function-form replacer to prevent `$`-sequences
+    //? in the translation value from being interpreted by String.prototype.replace.
+    const escapedKey = param.key.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+    const regex = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
+    const replacement = String(param.value);
+    finalResult = finalResult.replace(regex, () => replacement);
   }
   return finalResult;
 }

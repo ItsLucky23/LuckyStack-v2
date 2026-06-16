@@ -234,6 +234,12 @@ const config = {
      * Read server-side only — the client bundle never sends email, so the value
      * is just a placeholder there. `typeof process` guard keeps the browser
      * bundle from blowing up on a `process is not defined` ReferenceError.
+     *
+     * DEV-WARN: EMAIL_FROM (and DNS / EXTERNAL_ORIGINS below) are read at
+     * module-load time, BEFORE @luckystack/secret-manager can overwrite
+     * process.env. If these values come from the secret manager, move them
+     * into a factory function that is called AFTER `resolveSecretsIfConfigured`
+     * completes in server.ts.
      */
     from: env('EMAIL_FROM') ?? 'onboarding@resend.dev',
     /** Public app URL — used to build absolute reset-password / verification links. */

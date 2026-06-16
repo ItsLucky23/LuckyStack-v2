@@ -47,14 +47,15 @@ export const handleStaticAndSpaFallback: HttpRouteHandler = async ({
   }
 
   // ── /assets/* — static assets ──────────────────────────────────────────
-  if (routePath.includes('/assets/')) {
+  //? `startsWith` not `includes` — avoids matching `/other/assets/foo` and
+  //? prevents the indexOf slice from drifting to an interior segment.
+  if (routePath.startsWith('/assets/')) {
     if (!options.serveFile) {
       res.writeHead(404);
       res.end('Not Found');
       return true;
     }
-    const assetPath = routePath.slice(routePath.indexOf('/assets/'));
-    await serveWithRewrittenUrl(options.serveFile, req, res, assetPath);
+    await serveWithRewrittenUrl(options.serveFile, req, res, routePath);
     return true;
   }
 

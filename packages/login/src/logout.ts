@@ -1,6 +1,6 @@
 import { Socket } from "socket.io";
-import { redis as redisClient, tryCatch, socketEventNames, dispatchHook, getLogger } from '@luckystack/core';
-import { deleteSession, activeUsersKeyFor } from "./session";
+import { tryCatch, socketEventNames, dispatchHook, getLogger } from '@luckystack/core';
+import { deleteSession } from "./session";
 
 export const logout = async ({ token, socket, userId, skipSessionDelete }: {
   token: string | null,
@@ -28,10 +28,12 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
     getLogger().debug(`logout: user ${userId ?? '?'}`, { token });
 
     if (!skipSessionDelete) {
+      //? `deleteSession` handles both the key delete AND `adapter.untrackActive`
+      //? through the registered SessionAdapter (LOGIN-02). A separate raw
+      //? `redis.srem(activeUsersKeyFor(userId), token)` call here was a direct
+      //? bypass that broke custom adapters and duplicated work the adapter already
+      //? performed; removed.
       await deleteSession(token);
-    }
-    if (userId) {
-      await redisClient.srem(activeUsersKeyFor(userId), token);
     }
     //? `socket.leave` returns a Promise in socket.io's adapter contract but the
     //? room-leave is fire-and-forget here (the session is already being torn

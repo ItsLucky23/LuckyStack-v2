@@ -57,6 +57,14 @@ interface RateLimitEntry {
   resetAt: number;
 }
 
+//? CORE-O7: cap the in-memory store so a key-varying flood (e.g. path-parameter
+//? spray) can't grow the Map to OOM between cleanup ticks. When the cap is hit,
+//? the oldest entry is evicted (Map preserves insertion order; the first key is
+//? the oldest). Evicting the oldest is the least-harm choice: the victim can
+//? retry (now capped to 1) while the attacker's own keys are the new ones,
+//? making them the hardest to evict. In memory mode this is a single-instance
+//? soft limit; for multi-instance deployments use Redis mode.
+const MAX_MEMORY_STORE_SIZE = 50_000;
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
 //? Resolved at call time so `registerProjectConfig` can run after this
@@ -89,8 +97,8 @@ local ttl = redis.call('PTTL', KEYS[1])
 return { current, ttl }
 `;
 
-const normalizeWindowMs = (windowMs: number): number => {
-  if (!Number.isFinite(windowMs) || windowMs <= 0) {
+const normalizeWindowMs = (windowMs: number | undefined): number => {
+  if (windowMs === undefined || !Number.isFinite(windowMs) || windowMs <= 0) {
     return getProjectConfig().rateLimiting.windowMs;
   }
   return windowMs;
@@ -101,13 +109,24 @@ const getRedisRateLimitKey = (key: string): string => `${getRedisPrefix()}:${key
 const checkRateLimitInMemory = ({
   key,
   limit,
-  windowMs = 60_000,
+  //? No default here — `normalizeWindowMs` reads `projectConfig.rateLimiting.windowMs`
+  //? when `windowMs` is undefined or non-finite, so a hardcoded `60_000` would
+  //? shadow the configured value (CORE-N6).
+  windowMs,
 }: CheckRateLimitParams): RateLimitResult => {
   const safeWindowMs = normalizeWindowMs(windowMs);
   const now = Date.now();
   const entry = rateLimitStore.get(key);
 
   if (!entry || entry.resetAt < now) {
+    //? CORE-O7: evict the oldest entry before inserting a new key to keep the
+    //? store bounded. `Map` preserves insertion order so the first iterator key
+    //? is the oldest. Only evict when we are at the cap AND the incoming key is
+    //? genuinely new (i.e. not a refresh of an existing key checked above).
+    if (rateLimitStore.size >= MAX_MEMORY_STORE_SIZE) {
+      const oldest = rateLimitStore.keys().next().value;
+      if (oldest !== undefined) rateLimitStore.delete(oldest);
+    }
     rateLimitStore.set(key, { count: 1, resetAt: now + safeWindowMs });
     return { allowed: true, remaining: limit - 1, resetIn: Math.ceil(safeWindowMs / 1000) };
   }
@@ -123,7 +142,8 @@ const checkRateLimitInMemory = ({
 const checkRateLimitInRedis = async ({
   key,
   limit,
-  windowMs = 60_000,
+  //? No default — same reasoning as `checkRateLimitInMemory` (CORE-N6).
+  windowMs,
 }: CheckRateLimitParams): Promise<RateLimitResult | null> => {
   const safeWindowMs = normalizeWindowMs(windowMs);
   const redisKey = getRedisRateLimitKey(key);
@@ -330,9 +350,18 @@ export const clearRateLimit = async (key: string): Promise<void> => strategyRegi
 
 /**
  * Clear all rate limits.
- * Useful for testing or server restart.
+ * Intended for testing or dev-mode server reset only.
+ * CORE-O8: throws in production to prevent accidental global counter wipe across
+ * all tenants. If you need a production-safe reset, pass a scoped key to
+ * `clearRateLimit` or implement a tenant-namespaced strategy.
  */
-export const clearAllRateLimits = async (): Promise<void> => strategyRegistry.get().clearAll();
+export const clearAllRateLimits = async (): Promise<void> => {
+  if (process.env.NODE_ENV === 'production') {
+    getLogger().warn('[RateLimiter] clearAllRateLimits() called in production — ignored. Use clearRateLimit(key) for scoped resets.');
+    return;
+  }
+  return strategyRegistry.get().clearAll();
+};
 
 //? Cleanup expired entries from the in-memory store on a configurable
 //? interval. Only relevant for the default strategy; custom strategies
@@ -367,5 +396,13 @@ const scheduleCleanup = (): void => {
 const ensureCleanupScheduled = (): void => {
   if (cleanupStarted) return;
   cleanupStarted = true;
+  //? CORE-O6: warn once at the first request if `onStoreError:'deny'` is set
+  //? in non-Redis mode. In memory mode there is no "store error" path to honor,
+  //? so the setting is a silent no-op — log it so operators aren't surprised.
+  if (!isRedisMode() && getOnStoreError() === 'deny') {
+    getLogger().warn(
+      '[RateLimiter] onStoreError="deny" has no effect in memory mode (only Redis mode has a fallback path). Switch to store:"redis" or remove the setting.',
+    );
+  }
   scheduleCleanup();
 };

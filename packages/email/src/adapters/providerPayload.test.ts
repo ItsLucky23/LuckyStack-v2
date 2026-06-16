@@ -4,14 +4,12 @@ import type { EmailMessage } from '@luckystack/core';
 
 import { toProviderPayload } from './providerPayload';
 
-//? Characterization tests for the shared SMTP/Resend field mapper (E14). These
-//? pin the exact wire shape both adapters used to build inline so the extracted
-//? helper stays byte-for-byte equivalent: the same eight fields, the resolved
-//? `from`, and NO `attachments`/`headers` projection (neither adapter forwarded
-//? those before the extraction).
+//? Tests for the shared SMTP/Resend field mapper (E14). Covers the ten
+//? forwarded fields (the original eight + `attachments` + `headers`) and the
+//? resolved `from` override.
 
 describe('toProviderPayload', () => {
-  it('projects exactly the eight historically-forwarded fields with the resolved from', () => {
+  it('projects the eight base fields with the resolved from (no attachments or headers in this message)', () => {
     const message: EmailMessage = {
       to: 'user@test.dev',
       subject: 'Hi',
@@ -36,7 +34,7 @@ describe('toProviderPayload', () => {
       cc: ['c1@test.dev', 'c2@test.dev'],
       bcc: 'b@test.dev',
     });
-    // Exactly the eight keys — no more.
+    // Exactly the eight base keys — attachments/headers absent when not supplied.
     expect(Object.keys(payload).toSorted()).toEqual(
       ['bcc', 'cc', 'from', 'html', 'replyTo', 'subject', 'text', 'to'],
     );
@@ -57,13 +55,26 @@ describe('toProviderPayload', () => {
     expect(payload.bcc).toBeUndefined();
   });
 
-  it('does NOT forward attachments or headers (behavior preserved from before the extraction)', () => {
+  it('forwards attachments and headers when present (EMAIL-O2)', () => {
     const message: EmailMessage = {
       to: 'user@test.dev',
       subject: 'S',
       html: '<p>x</p>',
       attachments: [{ filename: 'a.txt', content: 'x' }],
       headers: { 'X-Entity-Ref-ID': '1' },
+    };
+
+    const payload = toProviderPayload(message, 'resolved@acme.test');
+
+    expect(payload.attachments).toEqual([{ filename: 'a.txt', content: 'x' }]);
+    expect(payload.headers).toEqual({ 'X-Entity-Ref-ID': '1' });
+  });
+
+  it('omits attachments and headers keys when the message has none', () => {
+    const message: EmailMessage = {
+      to: 'user@test.dev',
+      subject: 'S',
+      html: '<p>x</p>',
     };
 
     const payload = toProviderPayload(message, 'resolved@acme.test');

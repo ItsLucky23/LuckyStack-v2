@@ -32,6 +32,7 @@ export interface LocationProviderProps {
 }
 
 const buildSearchParams = (
+  search: string,
   filter: LocationProviderProps['searchParamFilter'],
 ): Record<string, string> => {
   if (!filter) return {};
@@ -40,7 +41,7 @@ const buildSearchParams = (
     : (key: string, value: string): boolean => filter(key, value);
 
   const searchParams: Record<string, string> = {};
-  for (const [key, value] of new URLSearchParams(globalThis.location.search)) {
+  for (const [key, value] of new URLSearchParams(search)) {
     if (allow(key, value)) searchParams[key] = value;
   }
   return searchParams;
@@ -48,9 +49,10 @@ const buildSearchParams = (
 
 const sendLocationUpdate = async (
   pathname: string,
+  search: string,
   filter: LocationProviderProps['searchParamFilter'],
 ): Promise<void> => {
-  const searchParams = buildSearchParams(filter);
+  const searchParams = buildSearchParams(search, filter);
   if (!await waitForSocket()) return;
   if (!socket) return;
   socket.emit(socketEventNames.updateLocation, { pathName: pathname, searchParams });
@@ -61,8 +63,11 @@ export default function LocationProvider({ searchParamFilter }: LocationProvider
 
   useEffect(() => {
     if (!getProjectConfig().locationProviderEnabled) return;
-    void sendLocationUpdate(location.pathname, searchParamFilter);
-  }, [location.pathname, searchParamFilter]);
+    //? Use `location.search` from React Router's hook (always in sync with the
+    //? current navigation) rather than `globalThis.location.search` (which may
+    //? lag or be absent in SSR/test environments).
+    void sendLocationUpdate(location.pathname, location.search, searchParamFilter);
+  }, [location.pathname, location.search, searchParamFilter]);
 
   return <Outlet />;
 }

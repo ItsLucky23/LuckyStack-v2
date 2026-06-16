@@ -1,5 +1,5 @@
-import { tryCatch } from '@luckystack/core';
 import type { ContractCheckResult, EndpointDescriptor } from './types';
+import { sendProbe } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -35,61 +35,67 @@ export const runCsrfEnforcementCheck = async (
   input: CsrfEnforcementCheckInput,
 ): Promise<ContractCheckResult> => {
   const { endpoint, baseUrl } = input;
+  //? CSRF is only enforced on state-changing methods (POST/PUT/DELETE). A GET
+  //? probe would never reach the CSRF middleware regardless of headers, so it
+  //? would always appear to pass — a false green. Guard here so the check is
+  //? safe to call directly (the runner already filters, but direct callers may not).
+  if (endpoint.method === 'GET') {
+    return {
+      endpoint,
+      status: 'skipped',
+      reason: `CSRF enforcement does not apply to ${endpoint.method} requests`,
+      durationMs: 0,
+    };
+  }
   const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}`;
   const body = input.inputFor ? input.inputFor(endpoint) : {};
   const started = Date.now();
-  const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const expectedErrorCode = input.expectedErrorCode ?? DEFAULT_EXPECTED_ERROR_CODE;
   const expectedHttpStatus = input.expectedHttpStatus ?? DEFAULT_EXPECTED_HTTP_STATUS;
 
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => { controller.abort(); }, requestTimeoutMs);
-  const [fetchError, response] = await tryCatch(() => fetch(url, {
+  //? Valid session Cookie + Origin, but NO CSRF header — that omission is the
+  //? whole point of the probe.
+  const result = await sendProbe({
+    url,
     method: endpoint.method,
-    //? Valid session Cookie + Origin, but NO CSRF header — that omission is the
-    //? whole point of the probe.
-    headers: { 'Content-Type': 'application/json', 'Origin': new URL(baseUrl).origin, Cookie: input.authCookie },
-    body: endpoint.method === 'GET' ? undefined : JSON.stringify(body),
-    signal: controller.signal,
-  }));
-  clearTimeout(timeoutHandle);
+    baseUrl,
+    body,
+    headers: { Cookie: input.authCookie },
+    requestTimeoutMs: input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+  });
 
-  if (fetchError || !response) {
-    return { endpoint, status: 'fail', reason: fetchError?.message ?? 'fetch returned no response', durationMs: Date.now() - started };
+  if (!result) {
+    return { endpoint, status: 'fail', reason: 'fetch returned no response', durationMs: Date.now() - started };
   }
 
-  const [parseError, parsed] = await tryCatch<{ status?: 'success' | 'error'; errorCode?: string } | null, undefined>(
-    async () => await response.json() as { status?: 'success' | 'error'; errorCode?: string },
-  );
+  const { httpStatus, parsed } = result;
   const durationMs = Date.now() - started;
-
-  if (parseError) {
-    return { endpoint, status: 'fail', httpStatus: response.status, responseStatus: 'unknown', reason: `JSON parse failed: ${parseError.message}`, durationMs };
-  }
 
   if (parsed?.status === 'success') {
     return {
-      endpoint, status: 'fail', httpStatus: response.status, responseStatus: 'success',
+      endpoint, status: 'fail', httpStatus, responseStatus: 'success',
       reason: 'state-changing endpoint accepted an authenticated request with NO CSRF header — CSRF protection is not enforced',
       durationMs,
     };
   }
 
   if (parsed?.status !== 'error' || parsed.errorCode !== expectedErrorCode) {
+    const responseStatus: ContractCheckResult['responseStatus'] =
+      parsed?.status === 'success' || parsed?.status === 'error' ? parsed.status : 'unknown';
     return {
-      endpoint, status: 'fail', httpStatus: response.status, responseStatus: parsed?.status ?? 'unknown', errorCode: parsed?.errorCode,
+      endpoint, status: 'fail', httpStatus, responseStatus, errorCode: parsed?.errorCode,
       reason: `expected CSRF rejection '${expectedErrorCode}' but got ${parsed?.status ?? 'none'}/${parsed?.errorCode ?? '(none)'}`,
       durationMs,
     };
   }
 
-  if (expectedHttpStatus !== false && response.status !== expectedHttpStatus) {
+  if (expectedHttpStatus !== false && httpStatus !== expectedHttpStatus) {
     return {
-      endpoint, status: 'fail', httpStatus: response.status, responseStatus: 'error', errorCode: parsed.errorCode,
-      reason: `expected HTTP ${expectedHttpStatus} on CSRF rejection but got ${response.status}`,
+      endpoint, status: 'fail', httpStatus, responseStatus: 'error', errorCode: parsed.errorCode,
+      reason: `expected HTTP ${expectedHttpStatus} on CSRF rejection but got ${httpStatus}`,
       durationMs,
     };
   }
 
-  return { endpoint, status: 'pass', httpStatus: response.status, responseStatus: 'error', errorCode: parsed.errorCode, durationMs };
+  return { endpoint, status: 'pass', httpStatus, responseStatus: 'error', errorCode: parsed.errorCode, durationMs };
 };

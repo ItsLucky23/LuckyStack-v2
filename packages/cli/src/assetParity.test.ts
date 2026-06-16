@@ -24,14 +24,12 @@ const normalize = (text: string): string => text.replaceAll('\r\n', '\n');
 //? legitimately differs, so we exempt it from strict equality (but still require
 //? the template counterpart to EXIST). Shrink this set to empty once the template
 //? catches up — that's the desired lockstep end state.
-//?   - settings/_api/updateUser_v1.ts : name/theme/language validation (SEC-L3)
 //?   - _components/LoginForm.tsx : asset + template carry two genuinely different
 //?     login implementations (asset reads `providers` from config; template fetches
 //?     `GET /auth/providers` with a loading-gated `showCredentials`). This is
 //?     pre-existing cross-package drift, not a lockstep-able single change —
 //?     exempt until the two are deliberately reconciled into one source.
 const ASSET_AHEAD_OF_TEMPLATE = new Set<string>([
-  'settings/_api/updateUser_v1.ts',
   '_components/LoginForm.tsx',
 ]);
 

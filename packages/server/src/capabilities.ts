@@ -24,6 +24,23 @@ const localRequire = createRequire(import.meta.url);
 //? synchronous `import.meta.resolve` is unavailable.
 const esmResolve = (import.meta as { resolve?: (specifier: string) => string }).resolve;
 
+//? Warn once when `import.meta.resolve` is absent (Node < 20.6). The CJS
+//? fallback misreports all import-only packages as absent, so optional
+//? features (login, presence, sync) silently degrade. Surface this so the
+//? operator can upgrade Node rather than debugging mysterious capability gaps.
+let _warnedResolverMissing = false;
+const warnResolverMissingOnce = (): void => {
+  if (_warnedResolverMissing) return;
+  _warnedResolverMissing = true;
+  // eslint-disable-next-line no-console -- intentional boot diagnostic; logger not yet available
+  console.warn(
+    '[luckystack:capabilities] import.meta.resolve is unavailable (Node < 20.6). ' +
+    'Optional package detection falls back to require.resolve, which cannot resolve ' +
+    'import-only exports maps and may misreport @luckystack/* packages as absent. ' +
+    'Upgrade to Node >= 20.6 to ensure correct capability detection.',
+  );
+};
+
 const has = (pkg: string): boolean => {
   if (typeof esmResolve === 'function') {
     try {
@@ -33,10 +50,17 @@ const has = (pkg: string): boolean => {
       return false;
     }
   }
+  //? CJS fallback: `ERR_PACKAGE_PATH_NOT_EXPORTED` means the package IS
+  //? installed but its exports map has no CJS condition — treat as PRESENT.
+  //? Any other error (MODULE_NOT_FOUND, ERR_MODULE_NOT_FOUND) means absent.
+  warnResolverMissingOnce();
   try {
     localRequire.resolve(pkg);
     return true;
-  } catch {
+  } catch (error: unknown) {
+    if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+      return true;
+    }
     return false;
   }
 };

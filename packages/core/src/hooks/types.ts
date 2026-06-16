@@ -44,6 +44,14 @@ export interface HookStopSignal {
   stop: true;
   errorCode: string;
   httpStatus?: number;
+  /**
+   * Optional output override for per-recipient hooks (`preSyncRecipient`).
+   * When present on a stop signal the framework DOES NOT skip the recipient —
+   * instead it sends this value in place of the full `serverOutput`. Use to
+   * redact PII before delivery without excluding the socket from the fanout.
+   * Ignored by all other hook dispatch sites.
+   */
+  overrideOutput?: unknown;
 }
 
 /** Handlers return undefined / void to continue, or a stop signal to abort the main flow. */
@@ -454,13 +462,20 @@ export interface ApiAuthRejectedPayload {
   failedKey?: string;
 }
 
-//? Per-recipient sync fanout hook (sync SYNC-22). Fires ONCE per resolved
-//? recipient just before the framework emits the sync payload to that socket,
-//? letting a consumer MUTATE or FILTER the fanout set: a handler returning a
-//? stop signal SKIPS that single recipient (the rest of the fanout continues —
-//? unlike other stop-capable hooks this does NOT abort the whole flow). Use for
-//? per-recipient visibility rules (block users, per-tenant redaction gates)
-//? without a `_client` file. The framework reads the stop signal per recipient.
+//? Per-recipient sync fanout hook (sync SYNC-22 / SYNC-O8). Fires ONCE per
+//? resolved recipient just before the framework emits the sync payload to that
+//? socket. A handler can:
+//?   • Return a stop signal to SKIP that recipient (rest of fanout continues).
+//?   • Return a stop signal with `overrideOutput` to REDACT — the recipient
+//?     still receives the event but with the override value instead of the full
+//?     `serverOutput`. Useful when no `_client` file is present and `serverOutput`
+//?     contains PII that should not reach every room member verbatim.
+//?
+//? NOTE: `recipientUserId` is null on the hot path to avoid a session read per
+//? recipient. Opt in to resolution by registering a `resolveRecipientUser`
+//? function in your hook registration (the framework will call it and populate
+//? the field before dispatching). When no resolver is registered the field stays
+//? null and the hook must derive the user from `recipientSocketId` itself if needed.
 export interface PreSyncRecipientPayload {
   /** Resolved route name (`sync/board/moveCard/v1`). */
   routeName: string;
@@ -468,7 +483,11 @@ export interface PreSyncRecipientPayload {
   receiver: string;
   /** Socket id of THIS recipient. */
   recipientSocketId: string;
-  /** Recipient's session user id when known, else null. */
+  /**
+   * Recipient's session user id.  `null` by default (avoids a Redis read per
+   * recipient on the hot path).  Populated when the consumer registers a
+   * `resolveRecipientUser` function via `registerHookHandler` options.
+   */
   recipientUserId: string | null;
   /** The server-validated output about to be sent. */
   serverOutput: unknown;

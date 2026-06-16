@@ -1,5 +1,3 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
 import { watch } from "chokidar";
 import fs from "node:fs";
 import path from 'node:path';
@@ -36,47 +34,29 @@ import { getRoutingRules } from './routingRules';
 // Watcher for Hot Reload + Type Generation
 // ----------------------------
 
-export const setupWatchers = () => {
-  const isDevMode = process.env.NODE_ENV !== 'production';
-  if (!isDevMode) return;
-  //? Marker path segments resolved once per startup. If a consumer registers
-  //? custom marker names, those wire through here automatically.
-  const apiMarkerSlash = `/${getRoutingRules().apiMarker}/`;
-  const syncMarkerSlash = `/${getRoutingRules().syncMarker}/`;
-  const apiMarkerNoLead = `${getRoutingRules().apiMarker}/`;
-  const syncMarkerNoLead = `${getRoutingRules().syncMarker}/`;
-  //? Path segments derived from configured paths. Consumers with custom
-  //? `srcDir`/`sharedDir`/`serverFunctionsDir` get correct watcher behavior.
-  const pathsCfg = getProjectConfig().paths;
-  const srcSegment = `/${pathsCfg.srcDir.replaceAll('\\', '/')}/`;
-  const sharedSegment = `/${pathsCfg.sharedDir.replaceAll('\\', '/')}/`;
-  //? Multi-directory function-injection roots. Falls back to the legacy
-  //? singular `serverFunctionsDir` for consumer configs that haven't
-  //? migrated to the array form.
-  const serverFunctionsSegments = (pathsCfg.serverFunctionDirs ?? [pathsCfg.serverFunctionsDir]).map(
-    (dir) => `/${dir.replaceAll('\\', '/')}/`,
+const normalizeFsPath = (value: string): string => path.resolve(value).replaceAll('\\', '/');
+
+const isGeneratedPath = (normalizedPath: string): boolean => {
+  return (
+    normalizedPath.includes('apiTypes.generated.ts')
+    || normalizedPath.includes('apiDocs.generated.json')
   );
-  const isInServerFunctionsDir = (normalizedPath: string): boolean =>
-    serverFunctionsSegments.some((segment) => normalizedPath.includes(segment));
-  const localesSegment = `${srcSegment}_locales/`;
-  const reloadTimers = new Map<'api' | 'sync' | 'functions' | 'typemap' | 'locales', NodeJS.Timeout>();
-  const pendingApiUpserts = new Set<string>();
-  const pendingApiDeletes = new Set<string>();
-  const pendingSyncUpserts = new Set<string>();
-  const pendingSyncDeletes = new Set<string>();
-  const normalizeFsPath = (value: string): string => path.resolve(value).replaceAll('\\', '/');
+};
 
-  //? Type-map regeneration is purely a DX artifact (IDE IntelliSense + Zod
-  //? schemas on disk). The runtime request path reads from in-memory
-  //? `devApis`/`devSyncs`/`devFunctions`, so we deliberately do NOT await
-  //? regeneration on the reload critical path. Instead, coalesce concurrent
-  //? requests into a single background run scheduled via setImmediate so the
-  //? event loop keeps serving Socket.io requests during a burst of saves.
-  const typeMapQueue = { pending: false, running: false };
+// ---------------------------------------------------------------------------
+// Type-map queue
+// ---------------------------------------------------------------------------
 
-  const runTypeMapRegeneration = () => {
-    typeMapQueue.running = true;
-    typeMapQueue.pending = false;
+/**
+ * Creates a self-contained type-map regeneration queue that coalesces
+ * concurrent save bursts into a single background run via setImmediate.
+ */
+const createTypeMapQueue = () => {
+  const queue = { pending: false, running: false };
+
+  const run = () => {
+    queue.running = true;
+    queue.pending = false;
     const startedAt = Date.now();
     setImmediate(() => {
       void (async () => {
@@ -86,46 +66,263 @@ export const setupWatchers = () => {
         } else {
           console.log(`[HotReload] type map ready in ${Date.now() - startedAt}ms`, 'green');
         }
-        typeMapQueue.running = false;
-        if (typeMapQueue.pending) {
-          runTypeMapRegeneration();
+        queue.running = false;
+        if (queue.pending) {
+          run();
         }
       })();
     });
   };
 
-  const requestTypeMapRegeneration = () => {
-    if (typeMapQueue.running) {
-      typeMapQueue.pending = true;
+  const request = () => {
+    if (queue.running) {
+      queue.pending = true;
       return;
     }
-    runTypeMapRegeneration();
+    run();
   };
 
-  const isRouteDependencyFile = (normalizedPath: string): boolean => {
-    if (!normalizedPath.endsWith('.ts') && !normalizedPath.endsWith('.tsx')) {
-      return false;
-    }
+  return { request };
+};
 
-    if (!normalizedPath.includes(srcSegment)) {
-      return false;
-    }
+// ---------------------------------------------------------------------------
+// Pending change sets
+// ---------------------------------------------------------------------------
 
-    if (normalizedPath.includes(apiMarkerSlash) || normalizedPath.includes(syncMarkerSlash)) {
-      return false;
-    }
+/**
+ * Bundles the four mutable sets that track pending API/Sync add/delete
+ * operations so they travel as a single value rather than four separate
+ * variables inside the watcher closure.
+ */
+const createPendingChangeSets = () => ({
+  apiUpserts: new Set<string>(),
+  apiDeletes: new Set<string>(),
+  syncUpserts: new Set<string>(),
+  syncDeletes: new Set<string>(),
+});
 
-    if (isGeneratedPath(normalizedPath)) {
-      return false;
-    }
+// ---------------------------------------------------------------------------
+// Path classifiers
+// ---------------------------------------------------------------------------
 
+/**
+ * Holds path-segment constants derived from the project config.
+ * Computed once per `setupWatchers` call.
+ */
+interface PathSegments {
+  apiMarkerSlash: string;
+  syncMarkerSlash: string;
+  apiMarkerNoLead: string;
+  syncMarkerNoLead: string;
+  srcSegment: string;
+  sharedSegment: string;
+  localesSegment: string;
+  serverFunctionsSegments: string[];
+}
+
+const buildPathSegments = (): PathSegments => {
+  const rules = getRoutingRules();
+  const pathsCfg = getProjectConfig().paths;
+  const srcSegment = `/${pathsCfg.srcDir.replaceAll('\\', '/')}/`;
+  const sharedSegment = `/${pathsCfg.sharedDir.replaceAll('\\', '/')}/`;
+  return {
+    apiMarkerSlash: `/${rules.apiMarker}/`,
+    syncMarkerSlash: `/${rules.syncMarker}/`,
+    apiMarkerNoLead: `${rules.apiMarker}/`,
+    syncMarkerNoLead: `${rules.syncMarker}/`,
+    srcSegment,
+    sharedSegment,
+    localesSegment: `${srcSegment}_locales/`,
+    serverFunctionsSegments: pathsCfg.serverFunctionDirs.map(
+      (dir) => `/${dir.replaceAll('\\', '/')}/`,
+    ),
+  };
+};
+
+const makeIsInServerFunctionsDir = (segments: PathSegments) =>
+  (normalizedPath: string): boolean =>
+    segments.serverFunctionsSegments.some((seg) => normalizedPath.includes(seg));
+
+const makeIsRouteDependencyFile = (segments: PathSegments) =>
+  (normalizedPath: string): boolean => {
+    if (!normalizedPath.endsWith('.ts') && !normalizedPath.endsWith('.tsx')) return false;
+    if (!normalizedPath.includes(segments.srcSegment)) return false;
+    if (normalizedPath.includes(segments.apiMarkerSlash) || normalizedPath.includes(segments.syncMarkerSlash)) return false;
+    if (isGeneratedPath(normalizedPath)) return false;
     return true;
   };
 
-  const isSharedDependencyFile = (normalizedPath: string): boolean => {
+const makeIsSharedDependencyFile = (
+  segments: PathSegments,
+  isInServerFunctionsDir: (p: string) => boolean,
+) =>
+  (normalizedPath: string): boolean => {
     if (!(normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'))) return false;
-    if (normalizedPath.includes(sharedSegment)) return true;
+    if (normalizedPath.includes(segments.sharedSegment)) return true;
     return isInServerFunctionsDir(normalizedPath);
+  };
+
+const makeIsTypeMapRelevantFile = (segments: PathSegments) =>
+  (normalizedPath: string): boolean => {
+    if (isGeneratedPath(normalizedPath)) return false;
+    if (!(normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'))) return false;
+    if (normalizedPath.includes(segments.apiMarkerSlash) || normalizedPath.includes(segments.syncMarkerSlash)) return false;
+    return (
+      normalizedPath.includes(segments.srcSegment)
+      || normalizedPath.endsWith('/config.ts')
+      || normalizedPath.includes(segments.sharedSegment)
+    );
+  };
+
+const makeIsLocaleFile = (segments: PathSegments) =>
+  (normalizedPath: string): boolean =>
+    normalizedPath.includes(segments.localesSegment) && normalizedPath.endsWith('.json');
+
+// ---------------------------------------------------------------------------
+// Reload scheduler
+// ---------------------------------------------------------------------------
+
+type ReloadKey = 'api' | 'sync' | 'functions' | 'typemap' | 'locales';
+
+/**
+ * Creates a debounced task scheduler keyed by reload category.
+ * Multiple requests for the same key within the debounce window collapse
+ * into a single execution.
+ */
+const createReloadScheduler = (debounceMs: () => number) => {
+  const timers = new Map<ReloadKey, NodeJS.Timeout>();
+
+  return (
+    key: ReloadKey,
+    task: () => Promise<void> | void,
+    delay = debounceMs(),
+  ) => {
+    const active = timers.get(key);
+    if (active) clearTimeout(active);
+
+    const timer = setTimeout(() => {
+      timers.delete(key);
+      // Errors in async tasks must be caught here — an unhandled rejection
+      // from a chokidar-triggered async callback crashes the dev server.
+      Promise.resolve(task()).catch((error: unknown) => {
+        console.log(`[HotReload] Scheduled task threw an error: ${String(error)}`, 'red');
+      });
+    }, delay);
+
+    timers.set(key, timer);
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Watcher mounting
+// ---------------------------------------------------------------------------
+
+/**
+ * Attaches chokidar watchers to all configured source and function directories.
+ * Kept separate from the event-handler setup so the two concerns don't collapse
+ * into a single function body.
+ */
+const mountWatchers = (
+  onAdd: (p: string) => void,
+  onChange: (p: string) => void,
+  onDelete: (p: string) => void,
+  onFunctionChange: (p: string) => void,
+) => {
+  const devConfig = getProjectConfig().dev;
+  const pathsConfig = getProjectConfig().paths;
+
+  watch(pathsConfig.srcDir, {
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: devConfig.watcherStabilityThresholdMs,
+      pollInterval: devConfig.watcherPollIntervalMs,
+    },
+  })
+    .on('add', onAdd)
+    .on('change', onChange)
+    .on('unlink', onDelete);
+
+  // Watch every configured server-function directory (the multi-dir injection roots).
+  for (const dir of pathsConfig.serverFunctionDirs) {
+    watch(dir, { ignoreInitial: true })
+      .on('add', onFunctionChange)
+      .on('change', onFunctionChange)
+      .on('unlink', onFunctionChange);
+  }
+
+  // Watch shared modules separately (changes here cascade to dependent
+  // routes via the import-dependency graph). NOTE: `shared/` is also one
+  // of the default function-injection roots, so the watcher above already
+  // covers it — but consumers can override `serverFunctionDirs` without
+  // dropping `shared/`, so we keep this explicit watcher for the cascade
+  // behavior. Duplicate add/change events are coalesced downstream.
+  watch(pathsConfig.sharedDir, { ignoreInitial: true })
+    .on('add', onFunctionChange)
+    .on('change', onFunctionChange)
+    .on('unlink', onFunctionChange);
+};
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+export const setupWatchers = () => {
+  const isDevMode = process.env.NODE_ENV !== 'production';
+  if (!isDevMode) return;
+
+  const segments = buildPathSegments();
+  const isInServerFunctionsDir = makeIsInServerFunctionsDir(segments);
+  const isRouteDependencyFile = makeIsRouteDependencyFile(segments);
+  const isSharedDependencyFile = makeIsSharedDependencyFile(segments, isInServerFunctionsDir);
+  const isTypeMapRelevantFile = makeIsTypeMapRelevantFile(segments);
+  const isLocaleFile = makeIsLocaleFile(segments);
+
+  const typeMap = createTypeMapQueue();
+  const pending = createPendingChangeSets();
+  const scheduleReload = createReloadScheduler(() => getProjectConfig().dev.hotReloadDebounceMs);
+
+  const processPendingApiChanges = async ({ regenerateTypeMap = false }: { regenerateTypeMap?: boolean } = {}) => {
+    const deletePaths = [...pending.apiDeletes];
+    const upsertPaths = [...pending.apiUpserts];
+    pending.apiDeletes.clear();
+    pending.apiUpserts.clear();
+
+    if (regenerateTypeMap) {
+      console.log(`[HotReload] API routes changed (add/delete), scheduling type map regeneration`, 'blue');
+      typeMap.request();
+    }
+
+    for (const deletePath of deletePaths) {
+      removeApiFromFile(deletePath);
+      console.log(`[HotReload] API removed: ${deletePath}`, 'yellow');
+    }
+
+    for (const upsertPath of upsertPaths) {
+      await upsertApiFromFile(upsertPath);
+      console.log(`[HotReload] API reloaded: ${upsertPath}`, 'green');
+    }
+  };
+
+  const processPendingSyncChanges = async ({ regenerateTypeMap = false }: { regenerateTypeMap?: boolean } = {}) => {
+    const deletePaths = [...pending.syncDeletes];
+    const upsertPaths = [...pending.syncUpserts];
+    pending.syncDeletes.clear();
+    pending.syncUpserts.clear();
+
+    if (regenerateTypeMap) {
+      console.log(`[HotReload] Sync routes changed (add/delete), scheduling type map regeneration`, 'blue');
+      typeMap.request();
+    }
+
+    for (const deletePath of deletePaths) {
+      removeSyncFromFile(deletePath);
+      console.log(`[HotReload] Sync removed: ${deletePath}`, 'yellow');
+    }
+
+    for (const upsertPath of upsertPaths) {
+      await upsertSyncFromFile(upsertPath);
+      console.log(`[HotReload] Sync reloaded: ${upsertPath}`, 'green');
+    }
   };
 
   const enqueueAffectedRoutesFromDependency = (changedPath: string) => {
@@ -144,13 +341,13 @@ export const setupWatchers = () => {
     let queuedSyncCount = 0;
 
     for (const routePath of affectedRoutes) {
-      if (routePath.includes(apiMarkerSlash)) {
-        pendingApiDeletes.delete(routePath);
-        pendingApiUpserts.add(routePath);
+      if (routePath.includes(segments.apiMarkerSlash)) {
+        pending.apiDeletes.delete(routePath);
+        pending.apiUpserts.add(routePath);
         queuedApiCount += 1;
-      } else if (routePath.includes(syncMarkerSlash)) {
-        pendingSyncDeletes.delete(routePath);
-        pendingSyncUpserts.add(routePath);
+      } else if (routePath.includes(segments.syncMarkerSlash)) {
+        pending.syncDeletes.delete(routePath);
+        pending.syncUpserts.add(routePath);
         queuedSyncCount += 1;
       }
     }
@@ -173,55 +370,14 @@ export const setupWatchers = () => {
     }
   };
 
-  const isGeneratedPath = (normalizedPath: string): boolean => {
-    return (
-      normalizedPath.includes('apiTypes.generated.ts')
-      || normalizedPath.includes('apiDocs.generated.json')
-    );
-  };
-
-  const isTypeMapRelevantFile = (normalizedPath: string): boolean => {
-    if (isGeneratedPath(normalizedPath)) return false;
-    if (!(normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'))) return false;
-    if (normalizedPath.includes(apiMarkerSlash) || normalizedPath.includes(syncMarkerSlash)) return false;
-
-    return (
-      normalizedPath.includes(srcSegment)
-      || normalizedPath.endsWith('/config.ts')
-      || normalizedPath.includes(sharedSegment)
-    );
-  };
-
-  const isLocaleFile = (normalizedPath: string): boolean => {
-    return normalizedPath.includes(localesSegment) && normalizedPath.endsWith('.json');
-  };
-
-  const scheduleReload = (
-    key: 'api' | 'sync' | 'functions' | 'typemap' | 'locales',
-    task: () => Promise<void> | void,
-    delay = getProjectConfig().dev.hotReloadDebounceMs
-  ) => {
-    const activeTimer = reloadTimers.get(key);
-    if (activeTimer) {
-      clearTimeout(activeTimer);
-    }
-
-    const timer = setTimeout(() => {
-      reloadTimers.delete(key);
-      void task();
-    }, delay);
-
-    reloadTimers.set(key, timer);
-  };
-
-  const handleAdd = async (path: string) => {
-    const normalizedPath = normalizeFsPath(path);
+  const handleAdd = async (filePath: string) => {
+    const normalizedPath = normalizeFsPath(filePath);
     invalidateGraphForFile(normalizedPath);
 
     const routeValidationMessage = getRouteFilenameValidationMessage(normalizedPath);
     if (routeValidationMessage) {
-      if (shouldInjectTemplate(path, { isNewFile: true })) {
-        const injected = await injectTemplate(path);
+      if (shouldInjectTemplate(filePath, { isNewFile: true })) {
+        const injected = await injectTemplate(filePath);
         if (injected) {
           return;
         }
@@ -232,7 +388,7 @@ export const setupWatchers = () => {
     }
 
     // Check if this is a new empty file that needs a template
-    if (shouldInjectTemplate(path, { isNewFile: true })) {
+    if (shouldInjectTemplate(filePath, { isNewFile: true })) {
       // Special handling for sync server files when client already exists
       if (isSyncServerFile(normalizedPath)) {
         const clientPath = getPairedSyncFile(normalizedPath);
@@ -241,13 +397,20 @@ export const setupWatchers = () => {
           const clientInputTypes = extractClientInputFromFile(clientPath);
           if (clientInputTypes) {
             // Inject server template with pre-filled clientInput from client
-            await injectServerTemplateWithClientInput(path, clientInputTypes);
+            await injectServerTemplateWithClientInput(filePath, clientInputTypes);
             // Schedule type regeneration in the background; the client file
             // update + sync upserts below don't depend on the artifact.
-            requestTypeMapRegeneration();
-            // Update client file to use imported types + add serverOutput
-            await updateClientFileForPairedServer(clientPath);
-            await upsertSyncFromFile(path);
+            typeMap.request();
+            // Update client file to use imported types + add serverOutput.
+            // If the rewrite fails (returns false) skip upserts — the client
+            // still has the old type shape and registering it now would give
+            // the server a mis-matched handler contract.
+            const clientRewritten = await updateClientFileForPairedServer(clientPath);
+            if (!clientRewritten) {
+              console.log(`[HotReload] Paired client rewrite failed, skipping upsert for: ${clientPath}`, 'yellow');
+              return;
+            }
+            await upsertSyncFromFile(filePath);
             await upsertSyncFromFile(clientPath);
             return;
           }
@@ -255,7 +418,7 @@ export const setupWatchers = () => {
       }
 
       // Default template injection
-      const injected = await injectTemplate(path);
+      const injected = await injectTemplate(filePath);
       if (injected) {
         // Don't continue processing - the template was just injected
         // The next 'change' event will handle it
@@ -263,18 +426,18 @@ export const setupWatchers = () => {
       }
     }
 
-    if (normalizedPath.includes(apiMarkerNoLead)) {
-      pendingApiDeletes.delete(normalizedPath);
-      pendingApiUpserts.add(normalizedPath);
+    if (normalizedPath.includes(segments.apiMarkerNoLead)) {
+      pending.apiDeletes.delete(normalizedPath);
+      pending.apiUpserts.add(normalizedPath);
       scheduleReload('api', async () => {
         await processPendingApiChanges({ regenerateTypeMap: true });
       });
       return;
     }
 
-    if (normalizedPath.includes(syncMarkerNoLead)) {
-      pendingSyncDeletes.delete(normalizedPath);
-      pendingSyncUpserts.add(normalizedPath);
+    if (normalizedPath.includes(segments.syncMarkerNoLead)) {
+      pending.syncDeletes.delete(normalizedPath);
+      pending.syncUpserts.add(normalizedPath);
       scheduleReload('sync', async () => {
         await processPendingSyncChanges({ regenerateTypeMap: true });
       });
@@ -282,61 +445,19 @@ export const setupWatchers = () => {
     }
 
     // Handle normal file additions
-    handleChange(path);
+    handleChange(filePath).catch((error: unknown) => {
+      console.log(`[HotReload] handleChange threw an error: ${String(error)}`, 'red');
+    });
   };
 
-  const processPendingApiChanges = async ({ regenerateTypeMap = false }: { regenerateTypeMap?: boolean } = {}) => {
-    const deletePaths = [...pendingApiDeletes];
-    const upsertPaths = [...pendingApiUpserts];
-    pendingApiDeletes.clear();
-    pendingApiUpserts.clear();
-
-    if (regenerateTypeMap) {
-      console.log(`[HotReload] API routes changed (add/delete), scheduling type map regeneration`, 'blue');
-      requestTypeMapRegeneration();
-    }
-
-    for (const deletePath of deletePaths) {
-      removeApiFromFile(deletePath);
-      console.log(`[HotReload] API removed: ${deletePath}`, 'yellow');
-    }
-
-    for (const upsertPath of upsertPaths) {
-      await upsertApiFromFile(upsertPath);
-      console.log(`[HotReload] API reloaded: ${upsertPath}`, 'green');
-    }
-  };
-
-  const processPendingSyncChanges = async ({ regenerateTypeMap = false }: { regenerateTypeMap?: boolean } = {}) => {
-    const deletePaths = [...pendingSyncDeletes];
-    const upsertPaths = [...pendingSyncUpserts];
-    pendingSyncDeletes.clear();
-    pendingSyncUpserts.clear();
-
-    if (regenerateTypeMap) {
-      console.log(`[HotReload] Sync routes changed (add/delete), scheduling type map regeneration`, 'blue');
-      requestTypeMapRegeneration();
-    }
-
-    for (const deletePath of deletePaths) {
-      removeSyncFromFile(deletePath);
-      console.log(`[HotReload] Sync removed: ${deletePath}`, 'yellow');
-    }
-
-    for (const upsertPath of upsertPaths) {
-      await upsertSyncFromFile(upsertPath);
-      console.log(`[HotReload] Sync reloaded: ${upsertPath}`, 'green');
-    }
-  };
-
-  const handleChange = async (path: string) => {
-    const normalizedPath = normalizeFsPath(path);
+  const handleChange = async (filePath: string) => {
+    const normalizedPath = normalizeFsPath(filePath);
     invalidateGraphForFile(normalizedPath);
 
     const routeValidationMessage = getRouteFilenameValidationMessage(normalizedPath);
     if (routeValidationMessage) {
-      if (shouldInjectTemplate(path)) {
-        const injected = await injectTemplate(path);
+      if (shouldInjectTemplate(filePath)) {
+        const injected = await injectTemplate(filePath);
         if (injected) {
           return;
         }
@@ -346,8 +467,8 @@ export const setupWatchers = () => {
       return;
     }
 
-    if (shouldInjectTemplate(path)) {
-      const injected = await injectTemplate(path);
+    if (shouldInjectTemplate(filePath)) {
+      const injected = await injectTemplate(filePath);
       if (injected) {
         return;
       }
@@ -367,7 +488,7 @@ export const setupWatchers = () => {
     if (isRouteDependencyFile(normalizedPath)) {
       scheduleReload('typemap', () => {
         console.log(`[HotReload] Route dependency changed, scheduling type map regeneration`, 'blue');
-        requestTypeMapRegeneration();
+        typeMap.request();
       });
       enqueueAffectedRoutesFromDependency(normalizedPath);
       return;
@@ -376,27 +497,27 @@ export const setupWatchers = () => {
     if (isTypeMapRelevantFile(normalizedPath)) {
       scheduleReload('typemap', () => {
         console.log(`[HotReload] Route dependency changed, scheduling type map regeneration`, 'blue');
-        requestTypeMapRegeneration();
+        typeMap.request();
       });
     }
 
-    if (normalizedPath.includes(apiMarkerNoLead)) {
+    if (normalizedPath.includes(segments.apiMarkerNoLead)) {
       scheduleReload('typemap', () => {
         console.log(`[HotReload] API changed, scheduling type map regeneration`, 'blue');
-        requestTypeMapRegeneration();
+        typeMap.request();
       });
-      pendingApiDeletes.delete(normalizedPath);
-      pendingApiUpserts.add(normalizedPath);
+      pending.apiDeletes.delete(normalizedPath);
+      pending.apiUpserts.add(normalizedPath);
       scheduleReload('api', async () => {
         await processPendingApiChanges();
       });
-    } else if (normalizedPath.includes(syncMarkerNoLead)) {
+    } else if (normalizedPath.includes(segments.syncMarkerNoLead)) {
       scheduleReload('typemap', () => {
         console.log(`[HotReload] Sync changed, scheduling type map regeneration`, 'blue');
-        requestTypeMapRegeneration();
+        typeMap.request();
       });
-      pendingSyncDeletes.delete(normalizedPath);
-      pendingSyncUpserts.add(normalizedPath);
+      pending.syncDeletes.delete(normalizedPath);
+      pending.syncUpserts.add(normalizedPath);
       scheduleReload('sync', async () => {
         await processPendingSyncChanges();
       });
@@ -408,7 +529,7 @@ export const setupWatchers = () => {
     invalidateGraphForFile(normalizedPath);
 
     scheduleReload('functions', async () => {
-      requestTypeMapRegeneration();
+      typeMap.request();
       await initializeFunctions();
     });
 
@@ -417,8 +538,8 @@ export const setupWatchers = () => {
     }
   };
 
-  const handleDelete = async (path: string) => {
-    const normalizedPath = normalizeFsPath(path);
+  const handleDelete = (filePath: string) => {
+    const normalizedPath = normalizeFsPath(filePath);
     invalidateGraphForFile(normalizedPath);
 
     if (isGeneratedPath(normalizedPath)) {
@@ -435,7 +556,7 @@ export const setupWatchers = () => {
     if (isRouteDependencyFile(normalizedPath)) {
       scheduleReload('typemap', () => {
         console.log(`[HotReload] Route dependency deleted, scheduling type map regeneration`, 'blue');
-        requestTypeMapRegeneration();
+        typeMap.request();
       });
       enqueueAffectedRoutesFromDependency(normalizedPath);
       return;
@@ -444,27 +565,27 @@ export const setupWatchers = () => {
     if (isTypeMapRelevantFile(normalizedPath)) {
       scheduleReload('typemap', () => {
         console.log(`[HotReload] Route dependency deleted, scheduling type map regeneration`, 'blue');
-        requestTypeMapRegeneration();
+        typeMap.request();
       });
     }
 
-    if (normalizedPath.includes(apiMarkerNoLead)) {
+    if (normalizedPath.includes(segments.apiMarkerNoLead)) {
       scheduleReload('typemap', () => {
         console.log(`[HotReload] API deleted, scheduling type map regeneration`, 'blue');
-        requestTypeMapRegeneration();
+        typeMap.request();
       });
-      pendingApiUpserts.delete(normalizedPath);
-      pendingApiDeletes.add(normalizedPath);
+      pending.apiUpserts.delete(normalizedPath);
+      pending.apiDeletes.add(normalizedPath);
       scheduleReload('api', async () => {
         await processPendingApiChanges();
       });
-    } else if (normalizedPath.includes(syncMarkerNoLead)) {
+    } else if (normalizedPath.includes(segments.syncMarkerNoLead)) {
       scheduleReload('typemap', () => {
         console.log(`[HotReload] Sync deleted, scheduling type map regeneration`, 'blue');
-        requestTypeMapRegeneration();
+        typeMap.request();
       });
-      pendingSyncUpserts.delete(normalizedPath);
-      pendingSyncDeletes.add(normalizedPath);
+      pending.syncUpserts.delete(normalizedPath);
+      pending.syncDeletes.add(normalizedPath);
       scheduleReload('sync', async () => {
         // Special handling for sync server file deletion when client exists
         if (isSyncServerFile(normalizedPath)) {
@@ -475,12 +596,11 @@ export const setupWatchers = () => {
             const syncName = extractSyncName(normalizedPath);
             const clientInputTypes = extractClientInputFromGeneratedTypes(pagePath, syncName);
 
-            if (clientInputTypes) {
-              await updateClientFileForDeletedServer(clientPath, clientInputTypes);
-            } else {
-              // Fallback if types couldn't be extracted
-              await updateClientFileForDeletedServer(clientPath, '{\n    // Types were in _server.ts - please add them here\n  }');
-            }
+            // Fall back to a placeholder block when types couldn't be extracted from generated file.
+            await updateClientFileForDeletedServer(
+              clientPath,
+              clientInputTypes ?? '{\n    // Types were in _server.ts - please add them here\n  }',
+            );
           }
         }
 
@@ -489,53 +609,22 @@ export const setupWatchers = () => {
     }
   };
 
-  const devConfig = getProjectConfig().dev;
-  const pathsConfig = getProjectConfig().paths;
-  // Watch the main source folders. Paths come from the registered project
-  // config so consumers with non-default layouts (e.g. `app/src`) work.
-  watch(pathsConfig.srcDir, {
-    ignoreInitial: true,
-    awaitWriteFinish: {
-      stabilityThreshold: devConfig.watcherStabilityThresholdMs,
-      pollInterval: devConfig.watcherPollIntervalMs,
-    },
-  })
-    .on('add', handleAdd)
-    .on('change', handleChange)
-    .on('unlink', handleDelete);
+  // Chokidar silently discards the promise returned by async listeners.
+  // Wrap each handler so a thrown error is caught instead of becoming an
+  // unhandled rejection that would crash the dev server.
+  const safeHandleAdd = (p: string): void => { void handleAdd(p).catch((error: unknown) => { console.log(`[HotReload] handleAdd threw an error: ${String(error)}`, 'red'); }); };
+  const safeHandleChange = (p: string): void => { void handleChange(p).catch((error: unknown) => { console.log(`[HotReload] handleChange threw an error: ${String(error)}`, 'red'); }); };
+  // handleDelete is sync; errors surface inside the scheduleReload callbacks, not at call-site.
+  const safeHandleDelete = (p: string): void => { handleDelete(p); };
 
-  // Watch every configured server-function directory (the multi-dir
-  // injection roots). Falls back to the legacy singular path for projects
-  // that haven't migrated their config yet.
-  const serverFunctionDirsToWatch =
-    pathsConfig.serverFunctionDirs && pathsConfig.serverFunctionDirs.length > 0
-      ? pathsConfig.serverFunctionDirs
-      : [pathsConfig.serverFunctionsDir];
-  for (const dir of serverFunctionDirsToWatch) {
-    watch(dir, { ignoreInitial: true })
-      .on('add', handleFunctionChange)
-      .on('change', handleFunctionChange)
-      .on('unlink', handleFunctionChange);
-  }
-
-  // Watch shared modules separately (changes here cascade to dependent
-  // routes via the import-dependency graph). NOTE: `shared/` is also one
-  // of the default function-injection roots, so the watcher above already
-  // covers it — but consumers can override `serverFunctionDirs` without
-  // dropping `shared/`, so we keep this explicit watcher for the cascade
-  // behavior. Duplicate add/change events are coalesced downstream.
-  watch(pathsConfig.sharedDir, { ignoreInitial: true })
-    .on('add', handleFunctionChange)
-    .on('change', handleFunctionChange)
-    .on('unlink', handleFunctionChange);
+  mountWatchers(safeHandleAdd, safeHandleChange, safeHandleDelete, handleFunctionChange);
 
   //? Generate initial type map on startup — fire-and-forget on the next
   //? event-loop tick so server.listen() happens first. Runtime reads from
   //? the in-memory devApis/devSyncs maps (already populated by
   //? initializeAll() before setupWatchers runs); the on-disk type-map is
   //? purely for IDE IntelliSense + Zod schema files. Deferring drops boot
-  //? time ~6-8s on a 54-API project. The hot-reload runner above (regel 70)
-  //? uses the same setImmediate + quiet pattern.
+  //? time ~6-8s on a 54-API project.
   setImmediate(() => {
     void (async () => {
       const [err] = await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
@@ -547,4 +636,3 @@ export const setupWatchers = () => {
     })();
   });
 };
-

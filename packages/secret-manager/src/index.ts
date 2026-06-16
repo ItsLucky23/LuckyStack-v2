@@ -317,10 +317,17 @@ const validateToken = (token: string): string => {
   if (trimmed.length === 0) {
     throw new Error('[secret-manager] Bearer token is empty or whitespace-only.');
   }
-  //? The `Bearer ` scheme is added at the call site; a token that already carries
-  //? it produces a malformed `Bearer Bearer <...>` header — warn but don't mutate.
+  //? The `Bearer ` scheme is added at the call site. A token that already carries
+  //? it would produce a malformed double-prefix `Bearer Bearer <...>` header —
+  //? strip the redundant prefix (case-insensitive) and warn so the operator knows
+  //? their config is wrong. Stripping is the forgiving path: a warn-but-pass-through
+  //? would silently break every request, making this a very hard-to-debug boot issue.
   if (/^bearer\s/i.test(trimmed)) {
-    console.warn('[secret-manager] Token starts with a "Bearer " prefix; the scheme is added automatically — drop the prefix from the configured token.');
+    const stripped = trimmed.replace(/^bearer\s+/i, '');
+    console.warn(
+      '[secret-manager] Token starts with a "Bearer " prefix; the scheme is added automatically — the prefix was stripped. Drop it from your configured token to silence this warning.',
+    );
+    return stripped;
   }
   return trimmed;
 };
@@ -774,12 +781,22 @@ export const reloadSecretManagerFromFiles = async (): Promise<void> => {
   //? a pointer captured at boot from the inherited shell/CI env that isn't in a
   //? watched file would otherwise be dropped and stop rotating. A file-sourced
   //? pointer with the same name still wins.
+  //? Build the merged map locally and commit it ONLY after a successful resolve so
+  //? a failed remote reload can't permanently poison the in-memory pointer map and
+  //? cause every subsequent refreshSecretManager / poll to resolve the bad set.
+  const previousPointerMap = pointerMap;
   pointerMap = { ...pointerMap, ...freshPointerMap };
 
   //? Resolve the pointers FIRST. In 'remote' mode an unresolved pointer throws —
   //? mirror the atomic boot path and inject the plain values only AFTER a
-  //? successful resolve, so a throw never leaves half-applied state.
-  await doResolve(config, 'file-reload');
+  //? successful resolve, so a throw never leaves half-applied state. On failure
+  //? roll back the pointer map to its pre-reload snapshot.
+  try {
+    await doResolve(config, 'file-reload');
+  } catch (error) {
+    pointerMap = previousPointerMap;
+    throw error;
+  }
   for (const [name, value] of Object.entries(plainValues)) {
     process.env[name] = value;
   }

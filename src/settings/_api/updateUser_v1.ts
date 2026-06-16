@@ -24,9 +24,15 @@ export interface ApiParams {
   functions: Functions;
 }
 
+const NAME_MAX_LENGTH = 100;
+
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
 
   const { avatar, name, theme, language } = data;
+
+  if (name !== undefined && name.length > NAME_MAX_LENGTH) {
+    return { status: 'error', errorCode: 'profile.nameTooLong' };
+  }
 
   if (avatar) {
     const matches = /^data:(.+);base64,(.+)$/.exec(avatar);

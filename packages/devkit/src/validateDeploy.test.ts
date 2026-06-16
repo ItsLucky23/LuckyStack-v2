@@ -46,6 +46,28 @@ const validEnv = (): Record<string, string | undefined> => ({
   MONGO_URL: "mongodb://localhost:27017",
 });
 
+//? Typed narrow helpers so tests can mutate known-present fixture properties
+//? without triggering no-non-null-assertion warnings.
+type EnvMap = NonNullable<DeployConfigShape['environments']>;
+type EnvEntry = NonNullable<EnvMap[string]>;
+
+const getEnvs = (deploy: DeployConfigShape): EnvMap => {
+  if (!deploy.environments) throw new Error('test fixture missing environments');
+  return deploy.environments;
+};
+
+const getProd = (deploy: DeployConfigShape): EnvEntry => {
+  const prod = getEnvs(deploy).production;
+  if (!prod) throw new Error('test fixture missing production environment');
+  return prod;
+};
+
+const getResource = (deploy: DeployConfigShape, key: string): NonNullable<DeployConfigShape['resources'][string]> => {
+  const r = deploy.resources[key];
+  if (!r) throw new Error(`test fixture missing resource: ${key}`);
+  return r;
+};
+
 describe("validateDeploy", () => {
   describe("happy path", () => {
     it("returns ok with zero findings for a fully-valid config", () => {
@@ -118,7 +140,7 @@ describe("validateDeploy", () => {
   describe("binding references unknown service (rule 3)", () => {
     it("flags an environment binding for a service that does not exist", () => {
       const deploy = validDeploy();
-      deploy.environments!.production!.bindings = {
+      getProd(deploy).bindings = {
         api: "http://10.0.0.1:4001",
         phantom: "http://10.0.0.2:4002",
       };
@@ -139,7 +161,7 @@ describe("validateDeploy", () => {
   describe("binding URL validity (rules in environment loop)", () => {
     it("flags a binding URL that does not parse", () => {
       const deploy = validDeploy();
-      deploy.environments!.production!.bindings = { api: "not a url" };
+      getProd(deploy).bindings = { api: "not a url" };
       const result = validateDeploy({
         services: validServices(),
         deploy,
@@ -155,7 +177,7 @@ describe("validateDeploy", () => {
 
     it("flags a binding URL that parses but omits an explicit port", () => {
       const deploy = validDeploy();
-      deploy.environments!.production!.bindings = { api: "http://10.0.0.1" };
+      getProd(deploy).bindings = { api: "http://10.0.0.1" };
       const result = validateDeploy({
         services: validServices(),
         deploy,
@@ -182,7 +204,7 @@ describe("validateDeploy", () => {
   describe("unknown redis/mongo resources (rules 5)", () => {
     it("flags an environment that references a redis resource not in resources", () => {
       const deploy = validDeploy();
-      deploy.environments!.production!.redis = "missingRedis";
+      getProd(deploy).redis = "missingRedis";
       const result = validateDeploy({
         services: validServices(),
         deploy,
@@ -196,7 +218,7 @@ describe("validateDeploy", () => {
 
     it("flags an environment that references a mongo resource not in resources", () => {
       const deploy = validDeploy();
-      deploy.environments!.production!.mongo = "missingMongo";
+      getProd(deploy).mongo = "missingMongo";
       const result = validateDeploy({
         services: validServices(),
         deploy,
@@ -211,7 +233,7 @@ describe("validateDeploy", () => {
   describe("fallback environment (rules 4 + 6)", () => {
     it("flags a fallback that names a non-existent environment", () => {
       const deploy = validDeploy();
-      deploy.environments!.production!.fallback = "ghostEnv";
+      getProd(deploy).fallback = "ghostEnv";
       const result = validateDeploy({
         services: validServices(),
         deploy,
@@ -226,12 +248,12 @@ describe("validateDeploy", () => {
     it("flags a fallback whose redis resource differs from the primary", () => {
       const deploy = validDeploy();
       deploy.resources.redisAlt = { type: "redis", urlEnvKey: "REDIS_URL" };
-      deploy.environments!.staging = {
+      getEnvs(deploy).staging = {
         redis: "redisAlt",
         mongo: "mongoMain",
         bindings: { api: "http://10.0.0.9:4009" },
       };
-      deploy.environments!.production!.fallback = "staging";
+      getProd(deploy).fallback = "staging";
       const result = validateDeploy({
         services: validServices(),
         deploy,
@@ -247,12 +269,12 @@ describe("validateDeploy", () => {
     it("flags a fallback whose mongo resource differs from the primary", () => {
       const deploy = validDeploy();
       deploy.resources.mongoAlt = { type: "mongo", urlEnvKey: "MONGO_URL" };
-      deploy.environments!.staging = {
+      getEnvs(deploy).staging = {
         redis: "redisMain",
         mongo: "mongoAlt",
         bindings: { api: "http://10.0.0.9:4009" },
       };
-      deploy.environments!.production!.fallback = "staging";
+      getProd(deploy).fallback = "staging";
       const result = validateDeploy({
         services: validServices(),
         deploy,
@@ -266,12 +288,12 @@ describe("validateDeploy", () => {
 
     it("raises no fallback findings when the fallback shares both resources", () => {
       const deploy = validDeploy();
-      deploy.environments!.staging = {
+      getEnvs(deploy).staging = {
         redis: "redisMain",
         mongo: "mongoMain",
         bindings: { api: "http://10.0.0.9:4009" },
       };
-      deploy.environments!.production!.fallback = "staging";
+      getProd(deploy).fallback = "staging";
       const result = validateDeploy({
         services: validServices(),
         deploy,
@@ -318,7 +340,7 @@ describe("validateDeploy", () => {
 
     it("warns when a synchronizedEnvKeys entry is unset", () => {
       const deploy = validDeploy();
-      deploy.resources.redisMain!.synchronizedEnvKeys = ["SHARED_SECRET"];
+      getResource(deploy, 'redisMain').synchronizedEnvKeys = ["SHARED_SECRET"];
       const env = validEnv(); //? SHARED_SECRET intentionally absent
       const result = validateDeploy({
         services: validServices(),
@@ -335,7 +357,7 @@ describe("validateDeploy", () => {
 
     it("does not warn for a synchronized key that is present", () => {
       const deploy = validDeploy();
-      deploy.resources.redisMain!.synchronizedEnvKeys = ["SHARED_SECRET"];
+      getResource(deploy, 'redisMain').synchronizedEnvKeys = ["SHARED_SECRET"];
       const env = validEnv();
       env.SHARED_SECRET = "value";
       const result = validateDeploy({
@@ -351,7 +373,7 @@ describe("validateDeploy", () => {
     it("warns when an assigned service is never bound in any environment", () => {
       const deploy = validDeploy();
       //? Drop the binding so `api` is assigned to a preset but unbound.
-      deploy.environments!.production!.bindings = {};
+      getProd(deploy).bindings = {};
       const result = validateDeploy({
         services: validServices(),
         deploy,
@@ -373,7 +395,7 @@ describe("validateDeploy", () => {
       const services = validServices();
       services.presets = {}; //? service-unassigned (error)
       const deploy = validDeploy();
-      delete deploy.environments!.production!.bindings.api; //? service-bound-in-no-environment (warning)
+      delete getProd(deploy).bindings.api; //? service-bound-in-no-environment (warning)
       const env = validEnv();
       delete env.REDIS_URL; //? missing-resource-env-var (warning)
       const result = validateDeploy({ services, deploy, env });

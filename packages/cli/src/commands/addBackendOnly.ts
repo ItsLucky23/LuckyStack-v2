@@ -27,7 +27,7 @@ export const addBackendOnly = (
 
   if (options.install) {
     console.log('• running npm install …');
-    if (!runNpmInstall(project.root)) {
+    if (!runNpmInstall(project.root, project.pkg)) {
       console.warn('  npm install failed — run it manually to finish.');
     }
   } else {

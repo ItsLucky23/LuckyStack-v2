@@ -128,9 +128,25 @@ export const resolveLuckyStackRange = (pkg: PackageJson, cliVersion: string): st
   return `^${cliVersion}`;
 };
 
+//? Detect the indentation used in a JSON file: look for the first property line
+//? (leading whitespace before `"`), return its whitespace prefix. Falls back to
+//? 2-space when the file is one-line or has no detectable indent, so the output
+//? is always valid JSON and matches the common convention.
+const detectJsonIndent = (raw: string): number | string => {
+  for (const line of raw.replaceAll('\r\n', '\n').split('\n').slice(1)) {
+    const match = /^(\s+)"/.exec(line);
+    if (match) return match[1] ?? 2;
+  }
+  return 2;
+};
+
 //? Add a dependency to package.json if absent. Returns true when it was added,
 //? false when it was already present (idempotent).
+//? DD-CLI-D1: an empty `name` is a caller bug — guard it so an accidental ''
+//? key never silently writes to dependencies['']. DD-CLI-D2: preserve the file's
+//? original indentation instead of always emitting 2-space.
 export const addDependency = (project: ConsumerProject, name: string, range: string): boolean => {
+  if (!name) throw new Error('addDependency: name must be a non-empty string');
   project.pkg.dependencies ??= {};
   if (project.pkg.dependencies[name]) return false;
   project.pkg.dependencies[name] = range;
@@ -138,7 +154,9 @@ export const addDependency = (project: ConsumerProject, name: string, range: str
   project.pkg.dependencies = Object.fromEntries(
     Object.entries(project.pkg.dependencies).toSorted(([a], [b]) => a.localeCompare(b)),
   );
-  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, 2)}\n`);
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  const indent = detectJsonIndent(raw);
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, indent)}\n`);
   return true;
 };
 
@@ -167,7 +185,10 @@ export const editFile = (filePath: string, edits: readonly FileEdit[]): void => 
     if (!content.includes(find)) {
       throw new Error(`edit failed — token not found in ${filePath}:\n${find}`);
     }
-    content = content.replaceAll(find, replace);
+    //? Replace only the FIRST occurrence so a token that appears more than once
+    //? in a drifted file does not cause a double-edit (would corrupt the output).
+    //? String.prototype.replace with a string needle replaces the first match only.
+    content = content.replace(find, replace);
   }
   if (wasCrlf) content = content.replaceAll('\n', '\r\n');
   fs.writeFileSync(filePath, content);
@@ -227,13 +248,28 @@ const resolveCommandPath = (command: string): string | null => {
   return null;
 };
 
-export const runNpmInstall = (root: string): boolean => {
+//? Detect the package manager in use by checking for lockfiles and the
+//? `packageManager` field in package.json. Checked in priority order so a
+//? project that committed multiple lockfiles still picks the right one.
+const detectPackageManager = (root: string, pkg: PackageJson): string => {
+  const pm = typeof pkg.packageManager === 'string' ? pkg.packageManager : '';
+  if (pm.startsWith('pnpm')) return 'pnpm';
+  if (pm.startsWith('yarn')) return 'yarn';
+  if (pm.startsWith('bun')) return 'bun';
+  if (fs.existsSync(path.join(root, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (fs.existsSync(path.join(root, 'yarn.lock'))) return 'yarn';
+  if (fs.existsSync(path.join(root, 'bun.lockb')) || fs.existsSync(path.join(root, 'bun.lock'))) return 'bun';
+  return 'npm';
+};
+
+export const runNpmInstall = (root: string, pkg: PackageJson = {}): boolean => {
   //? Security (Windows): `spawnSync('npm.cmd', …, { shell: true, cwd: root })` lets
   //? cmd.exe resolve `npm.cmd` against the CWD BEFORE PATH — a malicious `npm.cmd`
-  //? dropped at the project root would run with the user's privileges. Resolve npm
-  //? to an ABSOLUTE path via PATH (PATHEXT-aware, cwd excluded) and spawn THAT, so
-  //? the command is never resolved relative to `root`.
-  const resolved = resolveCommandPath('npm');
+  //? dropped at the project root would run with the user's privileges. Resolve the
+  //? detected package manager to an ABSOLUTE path via PATH (PATHEXT-aware, cwd
+  //? excluded) and spawn THAT, so the command is never resolved relative to `root`.
+  const manager = detectPackageManager(root, pkg);
+  const resolved = resolveCommandPath(manager);
   if (!resolved) return false;
   //? A `.cmd`/`.bat` shim still needs cmd.exe to interpret it, but we now hand the
   //? shell an ABSOLUTE path, so it is never resolved relative to `cwd`.

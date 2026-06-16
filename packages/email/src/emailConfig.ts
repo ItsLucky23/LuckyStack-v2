@@ -58,6 +58,29 @@ export interface EmailConfig {
   envVars: EmailEnvVarsConfig;
   /** Numeric defaults used when the env var resolves to nothing. */
   defaults: EmailDefaultsConfig;
+  /**
+   * Maximum milliseconds to wait for a single `sender.send()` call before
+   * treating it as a failure (reason `'send-timeout'`). Set to `false` to
+   * disable the timeout entirely. Default: 30 000 ms (30 s).
+   *
+   * EMAIL-O8: an SMTP/Resend call that never resolves would otherwise hang
+   * the request indefinitely.
+   */
+  sendTimeoutMs: number | false;
+  /**
+   * HMAC-SHA-256 key used to hash recipient addresses in error-tracking and
+   * log contexts. A keyed hash means the same address always correlates across
+   * reports (useful for deduplication) but cannot be reversed without the key.
+   *
+   * EMAIL-O5: an un-keyed SHA-256 hash is an enumeration oracle — an attacker
+   * with the hash can brute-force common email addresses offline. Setting this
+   * key makes the hash non-invertible without it.
+   *
+   * Leave `undefined` (the default) to fall back to an un-keyed SHA-256 with
+   * a dev-mode console warning. Set to an empty string to silence the warning
+   * and keep un-keyed hashing (opt-in; document the tradeoff in your ADR).
+   */
+  recipientHmacKey: string | undefined;
 }
 
 export const DEFAULT_EMAIL_CONFIG: EmailConfig = {
@@ -79,6 +102,8 @@ export const DEFAULT_EMAIL_CONFIG: EmailConfig = {
   defaults: {
     smtpPort: 587,
   },
+  sendTimeoutMs: 30_000,
+  recipientHmacKey: undefined,
 };
 
 export type EmailConfigInput = DeepPartial<EmailConfig>;

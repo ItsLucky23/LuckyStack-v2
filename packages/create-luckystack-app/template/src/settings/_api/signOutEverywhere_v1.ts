@@ -17,7 +17,9 @@ export interface ApiParams {
 }
 
 export const main = async ({ user }: ApiParams): Promise<ApiResponse> => {
-  const revokedCount = await revokeUserSessions(user.id).catch(() => null);
+  //? Pass the caller's own token so "sign out everywhere" keeps this session
+  //? alive — the intent is "sign out OTHER devices, stay logged in here."
+  const revokedCount = await revokeUserSessions(user.id, user.token).catch(() => null);
   if (revokedCount === null) {
     return { status: 'error', errorCode: 'common.500' };
   }

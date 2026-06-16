@@ -19,6 +19,11 @@ import { parse as parseDotenv } from 'dotenv';
 
 const RESTART_DEBOUNCE_MS = 150;
 const CRASH_RESTART_DELAY_MS = 300;
+//? Force-exit grace: how long we wait for the child to honour SIGTERM before
+//? the supervisor hard-exits. Windows does not deliver SIGKILL so the only
+//? lever is this timer. 1 500 ms is intentionally short (dev restarts should
+//? be fast); increase via LUCKYSTACK_SUPERVISOR_GRACE_MS for slow servers.
+const SHUTDOWN_GRACE_MS = Number(process.env.LUCKYSTACK_SUPERVISOR_GRACE_MS) || 1500;
 
 //? Mirrors `getEnvFiles()` from @luckystack/core — duplicated on purpose so the
 //? supervisor never imports core (see the invariant above). Keep in sync.
@@ -199,7 +204,7 @@ const shutdownSupervisor = () => {
     //? and call process.exit(0) once the child is gone. Force-exit after a
     //? short grace period in case the child ignores SIGTERM (Windows).
     childProcess.kill('SIGTERM');
-    setTimeout(() => process.exit(0), 1500).unref();
+    setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
   } else {
     //? No child running (e.g. we were between crashes, sitting in the
     //? crash-restart setTimeout we just cleared above) — exit immediately.
@@ -208,6 +213,19 @@ const shutdownSupervisor = () => {
 };
 
 if (resolveNodeEnv() === 'production') {
+  //? In production the supervisor has no file watcher, but it still needs to
+  //? forward shutdown signals so the child gets a chance to drain (e.g. flush
+  //? error trackers, close DB connections). Without these handlers a SIGTERM
+  //? from a process manager (systemd, Docker) kills the supervisor instantly
+  //? and the child may never exit cleanly.
+  process.on('SIGINT', () => {
+    isShuttingDown = true;
+    shutdownSupervisor();
+  });
+  process.on('SIGTERM', () => {
+    isShuttingDown = true;
+    shutdownSupervisor();
+  });
   startChild();
 } else {
   const watcher = watch(CORE_WATCH_GLOBS, {

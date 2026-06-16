@@ -13,6 +13,11 @@ import type { ConsumerProject } from '../lib/project';
 //? or by external tools like Prisma/Vite), so a consumer scan must NOT flag them
 //? as "unused" just because the consumer's own src never reads them. Edit/extend
 //? per project as needed.
+//? DEV NOTE: there is no automated parity test between this set and the actual
+//? `process.env` reads inside @luckystack/* packages. When adding or removing a
+//? framework env var, update this set manually. A future improvement would be a
+//? CI step that greps the published packages for `process.env.<KEY>` references
+//? and diffs them against this list.
 const FRAMEWORK_ENV_KEYS = new Set([
   'NODE_ENV', 'SECURE', 'PROJECT_NAME', 'SERVER_IP', 'SERVER_PORT',
   'REDIS_HOST', 'REDIS_USER', 'REDIS_PASSWORD', 'REDIS_PORT',
@@ -97,8 +102,11 @@ const parseEnvKeys = (absPath: string): string[] => {
   let openQuote: '"' | "'" | null = null;
   for (const line of raw.replaceAll('\r\n', '\n').split('\n')) {
     if (openQuote) {
-      //? Still inside a quoted value — only the matching closing quote ends it.
-      if (line.includes(openQuote)) openQuote = null;
+      //? Still inside a quoted value — a line whose TRIMMED form ends with the
+      //? matching quote is treated as the close. Using endsWith avoids closing
+      //? prematurely on a continuation line that merely contains the quote char
+      //? embedded in the value (e.g. `has a "word" in it`).
+      if (line.trimEnd().endsWith(openQuote)) openQuote = null;
       continue;
     }
     const trimmed = line.trim();

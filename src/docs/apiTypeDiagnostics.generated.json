@@ -1,0 +1,56 @@
+{
+  "generatedAt": "2026-06-16T16:37:35.674Z",
+  "totalRoutes": 23,
+  "fallbackCount": 7,
+  "fallbacks": [
+    {
+      "route": "system/session@v1",
+      "kind": "api",
+      "field": "output",
+      "fallback": "{\n  status: 'success';\n  result: null | {\n      location?: undefined | {\n       ",
+      "reason": "zod-any-fallback"
+    },
+    {
+      "route": "playground/echo@v1",
+      "kind": "sync",
+      "field": "clientOutput",
+      "fallback": "{ }",
+      "reason": "default-fallback"
+    },
+    {
+      "route": "playground/streamBroadcast@v1",
+      "kind": "sync",
+      "field": "clientOutput",
+      "fallback": "{ }",
+      "reason": "default-fallback"
+    },
+    {
+      "route": "playground/streamProgress@v1",
+      "kind": "sync",
+      "field": "clientOutput",
+      "fallback": "{ }",
+      "reason": "default-fallback"
+    },
+    {
+      "route": "playground/streamToToken@v1",
+      "kind": "sync",
+      "field": "clientOutput",
+      "fallback": "{ }",
+      "reason": "default-fallback"
+    },
+    {
+      "route": "playground/throwSync@v1",
+      "kind": "sync",
+      "field": "serverOutput",
+      "fallback": "{ status: string }",
+      "reason": "default-fallback"
+    },
+    {
+      "route": "playground/throwSync@v1",
+      "kind": "sync",
+      "field": "clientOutput",
+      "fallback": "{ }",
+      "reason": "default-fallback"
+    }
+  ]
+}

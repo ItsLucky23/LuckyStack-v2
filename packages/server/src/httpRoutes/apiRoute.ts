@@ -25,9 +25,17 @@ export const handleApiRoute: HttpRouteHandler = async ({
   let streamClosed = false;
   if (useHttpStream) {
     initSseResponse(res);
-    req.on('close', () => {
+    //? SRV-O1 — mirror the four-listener pattern from syncRoute: req 'error' and
+    //? 'aborted' + res 'error' must all flip streamClosed so a broken client or
+    //? a write error on the ServerResponse doesn't crash the worker with an
+    //? unhandled 'error' event.
+    const markClosed = () => {
       streamClosed = true;
-    });
+    };
+    req.on('close', markClosed);
+    req.on('error', markClosed);
+    req.on('aborted', markClosed);
+    res.on('error', markClosed);
   }
 
   const [error, handled] = await tryCatch(async () => {

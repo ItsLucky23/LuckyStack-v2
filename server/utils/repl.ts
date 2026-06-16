@@ -2,6 +2,7 @@
 /* eslint-disable */
 import { deleteSession, getAllSessions, getSession } from "../../functions/session"
 import repl from 'node:repl';
+import { sanitizeForLog } from '@luckystack/core';
 import { getRuntimeReplMaps } from "../prod/runtimeMaps";
 
 const getActiveApiMap = async (): Promise<Record<string, unknown>> => {
@@ -41,14 +42,15 @@ export const initRepl = () => {
   })
   
   replInstance.context.getAllSessions = async () => {
-    console.log(await getAllSessions())
+    //? Sanitize before logging — sessions carry csrfToken, token, and
+    //? other sensitive fields that must never appear in plaintext logs.
+    console.log(sanitizeForLog(await getAllSessions()))
   }
 
   replInstance.context.getSession = async (token: string) => {
-  
     const session = await getSession(token)
     if (session && typeof session == 'object' && Object.keys(session).length > 0) {
-      console.log(session) 
+      console.log(sanitizeForLog(session))
     } else {
       console.log('no session found')
     }

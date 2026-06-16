@@ -405,7 +405,7 @@
 | `registerSentryConfig(input)` | Register Sentry-specific sample rates + ignoreErrors. Owned by this package, not part of `ProjectConfig`. | -> docs/sentry-integration.md |
 | `getSentryConfig()` | Read the merged active `SentryConfig`. | -> docs/sentry-integration.md |
 | `DEFAULT_SENTRY_CONFIG` | Default sample-rate + ignoreErrors values used until `registerSentryConfig` runs. | -> docs/sentry-integration.md |
-| Types: `ErrorTracker`, `ErrorTrackerContext`, `ErrorTrackerUser`, `ErrorTrackerEvent`, `SpanResult<T>` | Adapter contract types (re-exported from `@luckystack/core`). | -> docs/adapter-pattern.md |
+| Types: `ErrorTracker`, `ErrorTrackerContext`, `ErrorTrackerUser`, `ErrorTrackerEvent`, `SpanResult<T>` | Adapter contract types (re-exported from `@luckystack/core`). `SpanResult<T>` is now a pass-through alias for `T` (no conditional unwrapping — kept for annotation intent only; ET-O11). | -> docs/adapter-pattern.md |
 | Types: `SentryAdapterOptions`, `DatadogAdapterOptions`, `PostHogAdapterOptions` | Per-adapter option shapes. | -> docs/adapter-pattern.md |
 | Types: `SentryConfig`, `SentryConfigInput`, `SentryClientConfig`, `SentryServerConfig`, `SentrySampleRates` | Sentry config registry types. | -> docs/sentry-integration.md |
 
@@ -489,7 +489,7 @@
 | `clearActivity(socketId)` | Drop a socket's last-activity record + its refractory-throttle entries (called by the server on disconnect) | → docs/activity-broadcaster.md |
 | `clearActivityThrottle(socketId)` | Purge a socket's refractory-throttle timestamps from the activity-event registry (called by `clearActivity`) | → docs/activity-broadcaster.md |
 | `getLastActivity(socketId)` | Read a socket's last-activity timestamp (ms epoch) or `undefined` — for consumer roster/AFK queries | → docs/activity-broadcaster.md |
-| `getRoomPresence(roomCode, { io? })` | Snapshot a room's peers (`socketId`, `token`, `lastActivity`, `afk`) for a late joiner; adapter-aware (spans instances) | → docs/activity-broadcaster.md |
+| `getRoomPresence(roomCode, { io? })` | Snapshot a room's peers (`socketId`, `token`, `lastActivity`, `afk`) for a late joiner; peer list is adapter-aware (spans instances). `afk` is `boolean` for local sockets, `'unknown'` for remote peers (activity is tracked in a local-only Map). Routes `roomCode` through `formatRoomName` (same as the broadcast side) so the snapshot targets the same physical room. | — (source: `src/activity/activitySampler.ts`) |
 | `startActivitySampler({ io?, intervalMs? })` | Start the single interval that walks every socket and feeds `dispatchActivitySample` every `activitySampleIntervalMs`. Idempotent; returns the stop fn. Auto-started by `@luckystack/server` on first connect when `socketActivityBroadcaster` is on | → docs/activity-broadcaster.md |
 | `stopActivitySampler()` | Stop the sampler interval (shutdown / test reset) | → docs/activity-broadcaster.md |
 | `registerPresenceConfig(input)` | Override disconnect timers, ignore/allow reasons, AFK timeout, activity-sample interval | → docs/disconnect-grace.md |
@@ -542,14 +542,17 @@
 ### `secret-manager`
 | Function / Export | One-liner | Deep doc |
 | --- | --- | --- |
-| `initSecretManager(config)` | Boot-time entry. Scans `process.env` for pointer-shaped values, `POST /resolve`s them, overwrites `process.env` with real values. No-op in `'local'`. Starts dev hot reload when `config.dev` is set. | -> docs/architecture.md |
-| `refreshSecretManager()` | Re-resolve the captured pointers against the server (the dev **poll** channel). Call manually after an admin rotates a secret on a long-running process. | -> docs/architecture.md |
-| `reloadSecretManagerFromFiles()` | Re-parse the configured env files (`dev.envFiles`, default `.env` + `.env.local`) and apply them: plain values injected into `process.env` (live config reload), pointer-shaped values re-resolved. The dev **file-watch** channel; callable manually. | -> docs/architecture.md |
-| `getCachedResolution()` | Returns the last `{ fetchedAt, values }` (pointer -> value) for diagnostics, or `null`. | -> docs/architecture.md |
-| `resetSecretManagerForTests()` | Test-only — clears module state and tears down dev watchers / timers. | -> docs/architecture.md |
-| Type `SecretManagerConfig` | `{ url; token; source?; pointerPattern?; fetchImpl?; dev? }` where `dev` is `{ watch?; pollIntervalMs?; envFiles? }`. | -> docs/architecture.md |
+| `initSecretManager(config)` | Boot-time entry. Scans `process.env` for pointer-shaped values, `POST /resolve`s them, overwrites `process.env` with real values. No-op in `'local'`. Starts dev hot reload when `config.dev` is set. Starts the production rotation poll when `config.pollIntervalMs` is set. | -> docs/architecture.md |
+| `refreshSecretManager()` | Re-resolve the captured pointers against the server (the production rotation poll channel). Call manually after an admin rotates a secret on a long-running process. No-op in `'local'` mode. | -> docs/architecture.md |
+| `reloadSecretManagerFromFiles()` | Re-parse the configured env files (`dev.envFiles`, default `.env` + `.env.local`) and apply them: plain values injected into `process.env` (live config reload), pointer-shaped values re-resolved. The dev **file-watch** channel; callable manually. No-op before init or in `'local'` mode. | -> docs/architecture.md |
+| `stopSecretManager()` | Tear down all dev watchers, debounce timers, and rotation-poll intervals started by `initSecretManager`. Call on process shutdown if you need deterministic cleanup; otherwise timers are `unref`'d and won't block exit. | -> docs/architecture.md |
+| `getCachedResolution()` | Returns a shallow copy of the last `{ fetchedAt, values }` (pointer -> resolved secret) for diagnostics, or `null`. **Sensitive** — never serialize into HTTP responses, health payloads, or logs. | -> docs/architecture.md |
+| `getCachedResolutionMeta()` | Values-free diagnostic view: `{ fetchedAt, pointerNames, pointerCount }` — the resolved pointer names only, never the secret values. Safe for logs and health endpoints. | -> docs/architecture.md |
+| `resetSecretManagerForTests()` | Test-only — clears all module state and tears down dev watchers / timers. | -> docs/architecture.md |
+| Type `SecretManagerConfig` | `{ url; token; source?; pointerPattern?; envNames?; allowInsecureHttp?; timeoutMs?; retries?; resolvePath?; headers?; onApplied?; onResolveError?; fetchImpl?; pollIntervalMs?; dev? }` where `dev` is `{ watch?; pollIntervalMs?; envFiles? }`. | -> docs/architecture.md |
 | Type `SecretManagerToken` | `string \| { fromFile: string }`. | -> docs/architecture.md |
 | Type `CachedResolution` | `{ fetchedAt: number; values: Record<string, string> }`. | -> docs/architecture.md |
+| Type `CachedResolutionMeta` | `{ fetchedAt: number; pointerNames: string[]; pointerCount: number }`. | -> docs/architecture.md |
 - ### Internal helpers (not exported, listed for AI context)
 | Helper | Role |
 | --- | --- |

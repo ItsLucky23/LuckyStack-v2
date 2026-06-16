@@ -17,23 +17,11 @@ export { enableErrorTrackingAutoInstrumentation } from './autoInstrumentation';
 //? to keep the dep graph clean). Built-in adapters ship below — consumers
 //? can also implement custom trackers against any backend (CloudWatch,
 //? New Relic, Honeybadger, Bugsnag, ...).
-export {
-  registerErrorTracker,
-  registerErrorTrackers,
-  getActiveErrorTrackers,
-  captureExceptionAcrossTrackers,
-  captureMessageAcrossTrackers,
-  setErrorTrackerUser,
-  recordMetricAcrossTrackers,
-  startSpanAcrossTrackers,
-} from './adapter';
-export type {
-  ErrorTracker,
-  ErrorTrackerContext,
-  ErrorTrackerUser,
-  ErrorTrackerEvent,
-  SpanResult,
-} from './adapter';
+//? ET-O10: `export *` replaces the hand-synced named re-export list so
+//? adapter.ts additions (ET-N2 additions: flushErrorTrackers, appendErrorTracker,
+//? runWithErrorTrackerIdentity*, registerPreCaptureFilter, startSpanHandle) are
+//? automatically visible to consumers without a manual index.ts edit.
+export * from './adapter';
 
 export { createSentryAdapter } from './adapters/sentry';
 export type { SentryAdapterOptions } from './adapters/sentry';
@@ -54,3 +42,9 @@ export type {
   SentryServerConfig,
   SentrySampleRates,
 } from './sentryConfig';
+
+//? ET-N1: posthogConfig.ts was entirely dead — not exported, not imported by
+//? register.ts. Export it so consumers can tune the auto-registered PostHog
+//? adapter via `registerPostHogConfig({ beforeSend, anonymousDistinctId })`.
+export { registerPostHogConfig, getPostHogConfig } from './posthogConfig';
+export type { PostHogConfig } from './posthogConfig';

@@ -1,11 +1,9 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
 import * as ts from 'typescript';
 import path from 'node:path';
 import { getServerProgram, expandTypeDetailed, ExpandedTypeResult, UnresolvedTypeSymbol } from './tsProgram';
-import { ROOT_DIR } from '@luckystack/core';
+import { getGeneratedSocketTypesPath } from '@luckystack/core';
 
-export interface TypeExtractionResult extends ExpandedTypeResult {}
+export type TypeExtractionResult = ExpandedTypeResult;
 
 const TYPE_NAME_PATTERN = /\b[A-Z][A-Za-z0-9_]*\b/g;
 
@@ -16,7 +14,9 @@ const KNOWN_GLOBAL_TYPE_NAMES = new Set([
 ]);
 
 const normalizeImportPath = (targetFilePath: string): string => {
-  const fromDir = path.join(ROOT_DIR, 'src', '_sockets');
+  // Derive fromDir from the configured generated socket types path so
+  // non-`src` srcDir layouts produce correct relative import paths.
+  const fromDir = path.dirname(getGeneratedSocketTypesPath());
   const from = fromDir.replaceAll('\\', '/');
   const to = targetFilePath.replaceAll('\\', '/');
   const normalized = path.posix.relative(from, to).replaceAll('\\', '/');
@@ -103,7 +103,6 @@ const getInterfacePropertyType = (
   for (const member of iface.members) {
     if (
       ts.isPropertySignature(member)
-      && member.name
       && ts.isIdentifier(member.name)
       && member.name.text === propertyName
       && member.type
@@ -248,7 +247,17 @@ export const getInputTypeDetailsFromFile = (filePath: string): TypeExtractionRes
   try {
     const program = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
-    if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
+    if (!sourceFile) {
+      //? Marker-contract (DD-DEVKIT-D1): a getSourceFile miss is always a loud
+      //? warning, never silent. The generator invalidates the TS Program cache
+      //? before every upsert, so a miss here means the file is genuinely absent
+      //? from the Program (e.g. added to disk but tsconfig globs not updated).
+      //? The route falls back to `{ }` (empty input) until the next full rebuild.
+      //? The fallback is surfaced in `apiTypeDiagnostics.generated.json` so it
+      //? is visible without parsing console output.
+      console.warn(`[TypeMapGenerator] getSourceFile miss for ${filePath} — input types will default to { }`);
+      return { text: DEFAULT, unresolvedSymbols: [] };
+    }
 
     const checker = program.getTypeChecker();
     const iface = findInterface(sourceFile, 'ApiParams');

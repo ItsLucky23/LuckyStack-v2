@@ -93,6 +93,7 @@ vi.mock("@luckystack/core", () => {
       httpStatus: response.httpStatus,
     })),
     applyErrorFormatter: vi.fn(({ response }: { response: unknown }) => response),
+    formatRoomName: vi.fn((room: string) => room),
     resolveClientIp: vi.fn(() => "127.0.0.1"),
     runWithErrorTrackerIdentityScope: vi.fn((fn: () => unknown) => fn()),
     setCurrentErrorTrackerIdentity: vi.fn(),

@@ -66,3 +66,5 @@ dump/
 test-results/
 playwright-report/
 .claude/settings.local.json
+# Stale scaffold-output artifact (SCAF-N6) — regenerate in CI into a temp dir if needed
+packages/create-luckystack-app/ls-np/

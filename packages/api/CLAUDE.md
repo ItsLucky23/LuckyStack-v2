@@ -57,7 +57,7 @@ Both transports execute the same sequence. Deviating is a breaking change.
 5. `getRuntimeApiMaps()` -> reject with `api.notFound` if the route is unknown.
 6. `checkApiAuth` (login + `validateRequest`).
 7. `applyApiRateLimits` (per-route -> global IP).
-8. HTTP-only: method check (`inferHttpMethod` vs `method`).
+8. **HTTP-only**: method check (`inferHttpMethod` vs `method`). The `httpMethod` route export and the `inferHttpMethod` heuristic are **HTTP-only**. The socket transport does NOT enforce the declared HTTP method — all routes are callable over WebSocket regardless of method declaration (socket.io has no method concept). Do not rely on `httpMethod` for authorization; use `auth` predicates or `preSocketMessage` for socket-specific gates.
 9. `preApiValidate` hook -> `validateInputByType` (skippable on BOTH transports via `validation: 'relaxed'` or `{ input: 'skip' }`) -> `postApiValidate` hook. `validateInputByType` now runs the structural validator in production too (gated by `validation.runtimeMode`, default `'enforce'`); set `validation.runtimeMode: 'off'` to restore the old prod no-op. See the caveat at the top.
 10. `preApiExecute` hook (stop-signal aborts with localized error).
 11. `executeApiHandler` (wrapped in `tryCatch`; span/identity via the `pre/postApiExecute` hook subscribers, not a direct span here).

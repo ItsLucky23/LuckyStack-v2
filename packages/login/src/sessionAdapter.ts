@@ -61,6 +61,11 @@ export interface SessionAdapter {
    * Admin walk: yield every active session record. Optional because
    * non-scannable backends (signed-JWT-stateless, log-only) cannot
    * enumerate. Callers fall back to a per-user listActive when omitted.
+   *
+   * **Dev/admin-only (LOGIN-F14).** Implementations scan the full keyspace and
+   * load every session into memory in one call — O(all sessions) in both Redis
+   * round-trips and memory. Do NOT call on the hot request path or from any
+   * user-facing API. Use `listActive(userId)` for per-user lookups.
    */
   listAll?(): Promise<{ token: string; raw: string }[]>;
 }
@@ -88,9 +93,11 @@ export const redisSessionAdapter: SessionAdapter = {
   },
 
   async setRaw(token, value, ttlSeconds) {
-    const key = sessionKey(token);
-    await redis.set(key, value);
-    await redis.expire(key, ttlSeconds);
+    //? Atomic SET+EX (LOGIN-M7): a two-step SET then EXPIRE leaves a window
+    //? where a crash or EXPIRE failure produces an immortal (TTL-less) key that
+    //? a stolen token could use indefinitely. A single command eliminates that
+    //? gap — the TTL is committed in the same atomic operation as the write.
+    await redis.set(sessionKey(token), value, 'EX', ttlSeconds);
   },
 
   async delete(token) {

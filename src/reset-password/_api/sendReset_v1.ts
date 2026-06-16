@@ -29,6 +29,9 @@ export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
     return { status: 'error', errorCode: 'login.forgotPasswordDisabled' };
   }
 
+  if (typeof data.email !== 'string') {
+    return { status: 'error', errorCode: 'login.invalidEmailFormat' };
+  }
   const email = data.email.trim().toLowerCase();
   // eslint-disable-next-line import-x/no-named-as-default-member
   if (!email || !validator.isEmail(email)) {

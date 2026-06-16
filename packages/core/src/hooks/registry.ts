@@ -55,8 +55,12 @@ export const dispatchHook = async <TName extends HookName>(
       // Isolated per hook — one failing handler never interrupts the main flow,
       // but plugin failures must still be visible. Surface to logger + Sentry
       // so installers can spot bugs in their registered handlers.
-      getLogger().error(`hook: handler for "${name}" threw`, error, { hook: name });
-      captureException(error, { hook: name });
+      //? Wrap the reporter calls themselves (CORE-N10): if the logger or error
+      //? tracker throws (misconfigured adapter, serialisation error), we must
+      //? not propagate out of `dispatchHook` — that would surface as an
+      //? unhandled rejection on the caller and undo the isolation guarantee.
+      try { getLogger().error(`hook: handler for "${name}" threw`, error, { hook: name }); } catch { /* luckystack-allow: reporter must not break hook isolation */ }
+      try { captureException(error, { hook: name }); } catch { /* luckystack-allow */ }
       continue;
     }
 
@@ -110,8 +114,9 @@ export const dispatchSyncHook = <TName extends SyncHookName>(
       handler(payload);
     } catch (error) {
       // Isolated per hook — one failing handler never interrupts the main flow.
-      getLogger().error(`hook: sync handler for "${name}" threw`, error, { hook: name });
-      captureException(error, { hook: name });
+      //? Same guard as the async hook path (CORE-N10).
+      try { getLogger().error(`hook: sync handler for "${name}" threw`, error, { hook: name }); } catch { /* luckystack-allow */ }
+      try { captureException(error, { hook: name }); } catch { /* luckystack-allow */ }
     }
   }
 };

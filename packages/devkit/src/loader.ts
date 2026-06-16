@@ -1,5 +1,8 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
+// Dynamic `import()` of user route modules returns `any` at the JS boundary —
+// there is no safe way to type these without codegen. The unsafe-*, no-dynamic-delete,
+// and prefer-nullish-coalescing rules are suppressed file-wide (falsy defaults on `any`
+// values from module imports); all other rules remain active.
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-dynamic-delete, @typescript-eslint/prefer-nullish-coalescing */
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from 'node:url';
@@ -17,7 +20,7 @@ export const devFunctions: Record<string, unknown> = {};
 const normalizePath = (value: string): string => value.replaceAll('\\', '/');
 
 const mapApiPageLocation = (pageLocation: string): string => {
-  return pageLocation ? pageLocation : 'system';
+  return pageLocation || 'system';
 };
 
 //? Root-level sync routes (directly under `src/_sync/`) get the SAME `'system'`
@@ -27,7 +30,7 @@ const mapApiPageLocation = (pageLocation: string): string => {
 //? `{service}/{name}/{version}` triple — so a root sync silently never
 //? dispatched. Mirrors `mapApiPageLocation` + `extractSyncPagePath`.
 const mapSyncPageLocation = (pageLocation: string): string => {
-  return pageLocation ? pageLocation : 'system';
+  return pageLocation || 'system';
 };
 
 const resolveApiRouteMetaFromPath = (filePath: string): { routeKey: string; absolutePath: string } | null => {
@@ -139,6 +142,9 @@ const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
   const results: string[] = [];
   const entries = fs.readdirSync(dir);
   for (const entry of entries) {
+    // Skip node_modules to avoid crawling installed packages (relevant when
+    // the src dir contains symlinked packages or nested node_modules trees).
+    if (entry === 'node_modules') continue;
     const entryPath = path.join(dir, entry);
     const relPath = relativeTo ? `${relativeTo}/${entry}` : entry;
     if (fs.statSync(entryPath).isDirectory()) {

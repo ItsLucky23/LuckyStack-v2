@@ -36,6 +36,7 @@ export {
   disconnectTimers,
   tempDisconnectedSockets,
   clientSwitchedTab,
+  lastAfkFireByToken,
 } from './activity/state';
 export { registerPresenceHooks } from './hooks';
 export {

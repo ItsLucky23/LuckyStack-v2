@@ -1,4 +1,4 @@
-export { walkEndpoints } from './walkEndpoints';
+export { walkEndpoints, walkSyncEndpoints } from './walkEndpoints';
 export { runContractCheck } from './contractCheck';
 export { runContractTests } from './runContractTests';
 export { runAuthEnforcementCheck } from './authEnforcementCheck';
@@ -17,6 +17,10 @@ export type {
   HttpMethod,
   ContractCheckResult,
   RunContractSummary,
+  SyncMethodMap,
+  ApiMethodMap,
+  ApiMetaMap,
+  ApiMetaEntry,
 } from './types';
 export type { RunContractTestsInput } from './runContractTests';
 export type { ContractCheckInput } from './contractCheck';
@@ -62,6 +66,8 @@ export {
   getTestReporter,
   resetTestExtensionsForTests,
 } from './extensionRegistry';
+
+export { LAYER_KEYS } from './testLayerHelpers';
 export type {
   TestLayer,
   TestLayerInput,

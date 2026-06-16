@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 import {
   captureException,
@@ -7,6 +7,7 @@ import {
   getEmailSenderByName,
   getLogger,
   tryCatch,
+  tryCatchSync,
   type EmailMessage,
   type EmailResult,
 } from '@luckystack/core';
@@ -18,11 +19,36 @@ import { getBuiltInEmailTemplate } from './builtInTemplates';
 //? Recipient addresses + subjects are PII and must never reach the EXTERNAL
 //? error tracker verbatim (a Sentry `beforeSend` strips cookies but not these
 //? fields). The local server-log diagnostics keep the real values; only the
-//? captured context is redacted. Addresses are SHA-256 hashed (truncated) so
-//? the same recipient still correlates across error reports without exposing
-//? the address itself; subjects are reduced to presence + length.
-const hashRecipient = (address: string): string =>
-  `sha256:${createHash('sha256').update(address.trim().toLowerCase()).digest('hex').slice(0, 16)}`;
+//? captured context is redacted.
+//?
+//? EMAIL-O5: a plain SHA-256 hash is an enumeration oracle — an attacker with
+//? the hash can brute-force common addresses offline. We use HMAC-SHA-256 with
+//? the configured `recipientHmacKey` when available. Without a key we fall back
+//? to the un-keyed hash and emit a one-time dev warning so operators know to
+//? configure the key. The `warned` flag is module-level so the warning fires
+//? only once per process, not once per email.
+let _warnedNoHmacKey = false;
+
+const hashRecipient = (address: string): string => {
+  const key = getEmailConfig().recipientHmacKey;
+  const normalized = address.trim().toLowerCase();
+  if (key !== undefined) {
+    //? Empty string = opt-in un-keyed (consumer documented the tradeoff).
+    if (key.length === 0) {
+      return `sha256:${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}`;
+    }
+    return `hmac:${createHmac('sha256', key).update(normalized).digest('hex').slice(0, 16)}`;
+  }
+  //? No key configured: fall back to un-keyed hash + one-time dev warning.
+  if (!_warnedNoHmacKey) {
+    _warnedNoHmacKey = true;
+    getLogger().warn(
+      '[email] recipientHmacKey not configured — recipient hashes in error reports are SHA-256 without a key ' +
+        '(enumeration oracle). Set emailConfig.recipientHmacKey to a secret string to harden this.',
+    );
+  }
+  return `sha256:${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}`;
+};
 
 const redactRecipients = (value: string | string[] | undefined): string[] | undefined => {
   if (value === undefined) return undefined;
@@ -61,12 +87,19 @@ export type SendEmailInput =
       bcc?: string | string[];
     };
 
+//? EMAIL-O4: distinguish an EXPLICITLY-requested adapter from a best-effort
+//? adapterHint. When the caller names a specific `adapter` slot and it is not
+//? registered, we return `null` so the no-sender path logs a warning and
+//? returns `{ ok: false, reason: 'no-sender' }`. Silently routing to a
+//? different adapter (e.g. the default) would be a confused-deputy: security
+//? mail (e.g. GDPR notifications) must go through the intended sender or fail.
 const resolveSender = (input: SendEmailInput) => {
   if (input.adapter) {
     const named = getEmailSenderByName(input.adapter);
     if (named) return named;
-    // Fall through to defaults if the requested slot is missing; better to
-    // send via the fallback than drop the message entirely.
+    //? Explicit slot not registered — return null so the caller sees a
+    //? clear no-sender failure rather than routing to an unintended adapter.
+    return null;
   }
   if ('adapterHint' in input && input.adapterHint) {
     const hinted = getEmailSenderByName(input.adapterHint);
@@ -74,6 +107,26 @@ const resolveSender = (input: SendEmailInput) => {
   }
   return getEmailSenderByName('default') ?? getEmailSender();
 };
+
+//? EMAIL-O7: CR and LF characters in header-bound fields let an attacker
+//? inject arbitrary SMTP headers (header injection). Strip them from every
+//? field that ends up in an RFC 5322 header (to, from, subject, cc, bcc,
+//? replyTo). The body (html / text) is NOT stripped here because it travels
+//? in the message body, not headers, and stripping newlines there would break
+//? content.
+const stripCrlf = (value: string): string => value.replaceAll(/[\r\n]/g, '');
+const stripCrlfAddress = (value: string | string[]): string | string[] =>
+  Array.isArray(value) ? value.map((v) => stripCrlf(v)) : stripCrlf(value);
+
+const sanitizeMessageHeaders = (message: EmailMessage): EmailMessage => ({
+  ...message,
+  to: stripCrlfAddress(message.to),
+  from: message.from ? stripCrlf(message.from) : message.from,
+  subject: stripCrlf(message.subject),
+  replyTo: message.replyTo ? stripCrlf(message.replyTo) : message.replyTo,
+  cc: message.cc === undefined ? message.cc : stripCrlfAddress(message.cc),
+  bcc: message.bcc === undefined ? message.bcc : stripCrlfAddress(message.bcc),
+});
 
 const isTemplateInput = (
   input: SendEmailInput,
@@ -104,11 +157,27 @@ const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMes
       return { failure: { ok: false, reason: 'no-template' } };
     }
     const data = input.data ?? {};
-    const rendered = template.render(data);
+    //? A consumer-registered template's `render` or `subject` can throw (e.g.
+    //? missing required data field). Wrap so a buggy template surfaces as a
+    //? typed failure instead of an unhandled exception (EMAIL-N3).
+    const [renderError, rendered] = tryCatchSync(() => template.render(data));
+    if (renderError || !rendered) {
+      if (config.logging.errors) {
+        getLogger().warn(`[email] template '${input.template}' render threw`, { error: renderError?.message ?? 'unknown' });
+      }
+      return { failure: { ok: false, reason: 'template-render-failed' } };
+    }
+    const [subjectError, resolvedSubject] = tryCatchSync(() => template.subject(data));
+    if (subjectError || resolvedSubject === null) {
+      if (config.logging.errors) {
+        getLogger().warn(`[email] template '${input.template}' subject threw`, { error: subjectError?.message ?? 'unknown' });
+      }
+      return { failure: { ok: false, reason: 'template-render-failed' } };
+    }
     return {
       message: {
         to: input.to,
-        subject: template.subject(data),
+        subject: resolvedSubject,
         html: rendered.html,
         text: rendered.text,
         from: input.from ?? config.from,
@@ -143,16 +212,19 @@ const normalizeSendResult = (sendError: Error | null, sendResult: EmailResult | 
 //? Terminal logging + Sentry capture for a completed send. Mirrors the inline
 //? tail exactly: success logs an info line (when enabled); failure logs a
 //? redacted warning (when enabled) and always captures with PII redacted.
+//? Recipients and subjects are redacted in log output (EMAIL-O6) — PII must
+//? not reach the server log in plain text. The Sentry capture path already
+//? applied redaction; the logger path was missing it.
 const reportSendOutcome = (senderName: string, message: EmailMessage, result: EmailResult, config: EmailConfigShape): void => {
   if (result.ok) {
     if (config.logging.sends) {
-      getLogger().info(`[email:${senderName}] sent`, { to: String(message.to), subject: message.subject, id: result.id });
+      getLogger().info(`[email:${senderName}] sent`, { to: redactRecipients(message.to), subject: redactSubject(message.subject), id: result.id });
     }
     return;
   }
 
   if (config.logging.errors) {
-    getLogger().warn(`[email:${senderName}] FAILED`, { to: String(message.to), subject: message.subject, reason: result.reason });
+    getLogger().warn(`[email:${senderName}] FAILED`, { to: redactRecipients(message.to), subject: redactSubject(message.subject), reason: result.reason });
   }
 
   captureException(result.cause ?? new Error(`Email send failed: ${result.reason}`), {
@@ -180,13 +252,21 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
 
   if (!sender) {
     if (config.required) {
-      throw new Error(
-        '[email] sendEmail() called but no email sender is registered. Install @luckystack/email and call registerEmailSender(...) (or registerEmailSenders({...})) at boot, or set emailConfig.required = false (via registerEmailConfig) to make this a soft failure.',
-      );
+      const detail = input.adapter
+        ? `adapter slot '${input.adapter}' is not registered`
+        : 'no email sender is registered. Install @luckystack/email and call registerEmailSender(...) (or registerEmailSenders({...})) at boot, or set emailConfig.required = false (via registerEmailConfig) to make this a soft failure';
+      throw new Error(`[email] sendEmail() called but ${detail}.`);
     }
 
     if (config.logging.errors) {
-      getLogger().warn(`[email] no sender registered — dropping message`, { to: String(input.to) });
+      if (input.adapter) {
+        //? EMAIL-O4: explicit adapter slot requested but not registered.
+        //? Warn clearly so operators know the message was dropped, not silently
+        //? rerouted to an unintended adapter.
+        getLogger().warn(`[email] adapter slot '${input.adapter}' not registered — dropping message`, { to: String(input.to) });
+      } else {
+        getLogger().warn(`[email] no sender registered — dropping message`, { to: String(input.to) });
+      }
     }
 
     return { ok: false, reason: 'no-sender' };
@@ -194,7 +274,10 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
 
   const built = buildMessage(input, config);
   if ('failure' in built) return built.failure;
-  const { message } = built;
+  //? Apply CRLF sanitization before any hook or adapter sees the message
+  //? (EMAIL-O7). Hooks observe the sanitized values so their payloads are
+  //? also safe for logging.
+  const message = sanitizeMessageHeaders(built.message);
 
   //? Honor the `preEmailSend` veto: a registered suppression hook (GDPR
   //? opt-out / unsubscribe / bounce list) returns a stop signal to abort the
@@ -210,7 +293,30 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
     return { ok: false, reason: preSend.signal.errorCode || 'email.suppressed' };
   }
 
-  const [sendError, sendResult] = await tryCatch<EmailResult, undefined>(() => sender.send(message));
+  //? EMAIL-O8: wrap the adapter send in a configurable timeout so a hung
+  //? SMTP/Resend call does not pin the request indefinitely. The race is
+  //? set up only when `sendTimeoutMs` is a positive number; `false` disables
+  //? it entirely (documented escape hatch for long-running adapters).
+  const sendWithTimeout = (): Promise<EmailResult> => {
+    const sendPromise = sender.send(message);
+    const { sendTimeoutMs } = config;
+    if (sendTimeoutMs === false || sendTimeoutMs <= 0) return sendPromise;
+    return new Promise<EmailResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        resolve({ ok: false, reason: 'send-timeout' });
+      }, sendTimeoutMs);
+      void sendPromise.then(
+        (result) => { clearTimeout(timer); resolve(result); },
+        (error: unknown) => {
+          clearTimeout(timer);
+          //? Rejection surfaces via the outer tryCatch wrapper below.
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    });
+  };
+
+  const [sendError, sendResult] = await tryCatch<EmailResult, undefined>(sendWithTimeout);
   const result = normalizeSendResult(sendError, sendResult);
 
   await dispatchHook('postEmailSend', {

@@ -412,12 +412,16 @@ describe('token validation (validateToken)', () => {
     );
   });
 
-  it('warns when the token already carries a Bearer prefix', async () => {
+  it('strips a Bearer prefix and warns — the resulting header must not be double-prefixed', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
     process.env.K = 'SECRET_V1';
     const fetchImpl = okFetch({ SECRET_V1: 'v' });
     await initSecretManager(baseConfig({ token: 'Bearer abc', fetchImpl }));
     expect(warn).toHaveBeenCalled();
+    //? The stripped token must NOT produce `Bearer Bearer abc`.
+    const init = callsOf(fetchImpl)[0]?.[1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer abc');
   });
 });
 

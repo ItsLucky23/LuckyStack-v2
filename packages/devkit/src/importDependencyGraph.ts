@@ -28,17 +28,32 @@ const existsDirectory = (value: string): boolean => {
   }
 };
 
-const collectScriptFiles = (dir: string, output: Set<string>): void => {
+const collectScriptFiles = (dir: string, output: Set<string>, visited = new Set<string>()): void => {
   if (!existsDirectory(dir)) {
     return;
   }
 
-  const entries = fs.readdirSync(dir);
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry);
+  // Resolve the real path to detect symlink cycles before descending.
+  let realDir: string;
+  try {
+    realDir = fs.realpathSync(dir);
+  } catch {
+    return;
+  }
+  if (visited.has(realDir)) return;
+  visited.add(realDir);
 
-    if (existsDirectory(fullPath)) {
-      collectScriptFiles(fullPath, output);
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    // Skip node_modules to avoid crawling installed packages.
+    if (entry.name === 'node_modules') continue;
+
+    const fullPath = path.join(dir, entry.name);
+
+    if (entry.isDirectory() || entry.isSymbolicLink()) {
+      if (existsDirectory(fullPath)) {
+        collectScriptFiles(fullPath, output, visited);
+      }
       continue;
     }
 
@@ -80,8 +95,12 @@ const extractImportSpecifiers = (filePath: string): string[] => {
     const source = fs.readFileSync(filePath, 'utf8');
     const specifiers = new Set<string>();
 
-    const importExportRegex = /(?:import|export)\s+(?:[^'"\n]*?\s+from\s+)?['"]([^'"\n]+)['"]/g;
-    const dynamicImportRegex = /import\(\s*['"]([^'"\n]+)['"]\s*\)/g;
+    // The `[\s\S]*?` allows the import clause to span multiple lines
+    // (e.g. named imports broken across lines). The `[^'"]+` keeps the
+    // specifier itself single-line so malformed source can't over-greedily
+    // consume closing quotes from later imports.
+    const importExportRegex = /(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g;
+    const dynamicImportRegex = /import\(\s*['"]([^'"]+)['"]\s*\)/g;
 
     let match: RegExpExecArray | null = null;
 

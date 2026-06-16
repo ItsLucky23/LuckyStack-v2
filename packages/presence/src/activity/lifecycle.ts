@@ -252,7 +252,9 @@ export const initActivityBroadcaster = ({
     //? Capture it, but ALWAYS run `socket.disconnect(false)` afterwards so the
     //? tab-switch teardown can't silently break while `clientSwitchedTab` is set.
     const [error] = await tryCatch(
-      async () => { await informRoomPeers({ token, event: socketEventNames.userAfk, extraData: { time } }); },
+      //? `ignoreSelf: true` so the disconnecting tab does not receive its own
+      //? AFK echo — consistent with the userBack broadcast on reconnect.
+      async () => { await informRoomPeers({ token, event: socketEventNames.userAfk, extraData: { time, ignoreSelf: true } }); },
       undefined,
       { scope: 'presence.intentionalDisconnect' },
     );

@@ -15,15 +15,19 @@ import {
   type ServiceResolver,
 } from "./resolveTarget";
 
-//? resolveTarget.ts imports ONLY types from @luckystack/core (`import type`),
-//? which are erased at runtime. It never calls getDeployConfig /
-//? getServicesConfig / getLogger / tryCatch — those run in startRouter.ts and
-//? other modules. The deploy + services topology is passed in as plain objects
-//? on `ResolveTargetInput`, so the unit under test is fully driven by the
-//? fixtures below with no DI seams to mock. The brief asked to mock those four
-//? core symbols; they are intentionally NOT mocked here because this module
-//? has no runtime reference to them (verified against the source). The
-//? `registeredResolver` module-level latch IS reset between tests.
+//? resolveTarget.ts now calls `getLogger()` for the healthStore error path, so
+//? we mock @luckystack/core to provide a silent logger. All other core symbols
+//? remain unused by this module — the deploy + services topology is passed in
+//? as plain objects on `ResolveTargetInput`. The `registeredResolver`
+//? module-level latch IS reset between tests.
+const mockLoggerError = vi.fn();
+vi.mock("@luckystack/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@luckystack/core")>();
+  return {
+    ...actual,
+    getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
+  };
+});
 
 const makeEnv = (overrides: Partial<DeployEnvironmentShape> = {}): DeployEnvironmentShape => ({
   redis: "redis://localhost:6379",
@@ -419,17 +423,17 @@ describe("createServiceTargetResolver — preset-scoped ownership", () => {
     expect(resolver.getLocallyOwnedServices().sort()).toEqual(["billing", "vehicles"]);
   });
 
-  it("owns nothing when the named preset is unknown", () => {
-    //? services.presets['missing'] is undefined -> ?? [] -> empty owned set.
-    const resolver = createServiceTargetResolver({
-      deploy,
-      services: makeServices(),
-      currentEnvKey: "dev",
-      localPresetKey: "missing",
-    });
-    expect(resolver.getLocallyOwnedServices()).toEqual([]);
-    //? With nothing owned, vehicles routes via fallback.
-    expect(resolver.resolve("vehicles")?.viaFallback).toBe(true);
+  it("throws at startup when the named preset is not registered", () => {
+    //? An unknown preset silently collapsing to an empty owned-set was the bug:
+    //? all traffic would route through fallback with no error. Fail fast instead.
+    expect(() =>
+      createServiceTargetResolver({
+        deploy,
+        services: makeServices(),
+        currentEnvKey: "dev",
+        localPresetKey: "missing",
+      }),
+    ).toThrow(/Preset 'missing' is not defined in services.config.ts/);
   });
 
   it("returns a fresh array copy from getLocallyOwnedServices (no internal mutation)", () => {
@@ -560,13 +564,12 @@ describe("createServiceTargetResolver — healthStore integration", () => {
       currentEnvKey: "dev",
       healthStore: store,
     });
-    //? The .catch handler logs via console.error; the call itself must not throw.
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockLoggerError.mockClear();
+    //? The .catch handler logs via getLogger().error; the call itself must not throw.
     expect(() => resolver.setLocalHealth("vehicles", false)).not.toThrow();
     //? Let the rejected promise's .catch microtask run.
     await Promise.resolve();
     await Promise.resolve();
-    expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
+    expect(mockLoggerError).toHaveBeenCalled();
   });
 });

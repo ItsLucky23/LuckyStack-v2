@@ -19,6 +19,13 @@ vi.mock('@luckystack/core', () => ({
   readSession: () => Promise.resolve(sessionRef.current),
 }));
 
+//? `isOriginExemptPath` comes from a separate module; mock it so tests can
+//? control whether a path is treated as an origin-exempt webhook.
+const { originExemptPaths } = vi.hoisted(() => ({ originExemptPaths: new Set<string>() }));
+vi.mock('../originExemptRegistry', () => ({
+  isOriginExemptPath: (path: string) => originExemptPaths.has(path),
+}));
+
 import { enforceCsrfOnStateChangingRequest } from './csrfMiddleware';
 
 interface FakeRes {
@@ -48,8 +55,9 @@ const run = async (opts: {
 
 beforeEach(() => {
   caps.login = true;
-  sessionRef.current =null;
+  sessionRef.current = null;
   for (const k of Object.keys(mockCookies)) delete mockCookies[k];
+  originExemptPaths.clear();
   dispatchHookMock.mockReset();
 });
 
@@ -59,13 +67,34 @@ describe('enforceCsrfOnStateChangingRequest — scope', () => {
     expect(rejected).toBe(false);
   });
 
-  it('does not enforce on non-framework routes', async () => {
-    const { rejected } = await run({ routePath: '/custom/webhook' });
+  it('does not enforce on the auth bootstrap endpoint', async () => {
+    const { rejected } = await run({ routePath: '/auth/api/credentials' });
     expect(rejected).toBe(false);
   });
 
-  it('does not enforce on the auth bootstrap endpoint', async () => {
-    const { rejected } = await run({ routePath: '/auth/api/credentials' });
+  it('does not enforce on the auth/callback path', async () => {
+    const { rejected } = await run({ routePath: '/auth/callback/github' });
+    expect(rejected).toBe(false);
+  });
+
+  it('does not enforce on static/asset paths', async () => {
+    const { rejected } = await run({ routePath: '/assets/app.js' });
+    expect(rejected).toBe(false);
+  });
+
+  it('enforces on state-changing custom routes (not origin-exempt)', async () => {
+    //? Custom POST routes now fall under the CSRF gate to protect session-cookie
+    //? consumers whose custom route performs a state mutation.
+    sessionRef.current = { id: 'user-1', csrfToken: 'tok' };
+    const { rejected } = await run({ routePath: '/custom/action', token: 'sess', header: 'wrong' });
+    expect(rejected).toBe(true);
+  });
+
+  it('does not enforce on origin-exempt custom routes (HMAC-authenticated webhooks)', async () => {
+    //? Webhooks that use HMAC/signature auth are registered as origin-exempt and
+    //? must not require a session CSRF token.
+    originExemptPaths.add('/webhooks/stripe');
+    const { rejected } = await run({ routePath: '/webhooks/stripe' });
     expect(rejected).toBe(false);
   });
 });

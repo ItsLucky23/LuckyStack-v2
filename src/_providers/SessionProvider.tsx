@@ -80,19 +80,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     cancelledRef.current = false;
     void (async () => {
       const maxAttempts = 5;
-      //? The generated `apiRequest` return type for `system/session` only
-      //? exposes the `status: 'success'` branch (because that's all the API
-      //? handler itself declares). At runtime, framework-level errors
-      //? (rate-limit, transport, network) DO come back as
-      //? `{ status: 'error', errorCode, ... }`. Widen here so the retry
-      //? branch is reachable to the type checker.
-      type WideSessionResponse =
-        | { status: 'success'; result: SessionLayout | null }
-        | { status: 'error'; errorCode?: string };
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const rawResponse = await apiRequest({ name: 'system/session', version: 'v1' });
+        const response = await apiRequest({ name: 'system/session', version: 'v1' });
         if (cancelledRef.current) return;
-        const response = rawResponse as WideSessionResponse;
 
         if (response.status === 'success') {
           if (response.result) setSession(response.result);

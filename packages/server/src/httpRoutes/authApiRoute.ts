@@ -97,6 +97,17 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
   }
 
   const rateLimiting = config.rateLimiting;
+  //? DD-LOGIN-F5: resolve the client IP once, unconditionally, so it can be
+  //? threaded into `loginWithCredentials` for the IP+account composite lockout
+  //? key even when the per-IP rate-limit gate is disabled. When trustProxy is
+  //? false this returns the raw socket address (sentinel `'unknown'` when absent).
+  const requesterIp = resolveClientIp({
+    rawAddress: req.socket.remoteAddress,
+    headers: req.headers,
+    trustProxy: config.http.trustProxy,
+    trustedProxyHopCount: config.http.trustedProxyHopCount,
+  });
+
   //? Derive the per-IP limit for this credentials endpoint. When the global
   //? `defaultApiLimit` is disabled (set to `false`), fall back to the auth-
   //? specific `rateLimiting.auth` slot so an IP spraying across accounts is
@@ -106,26 +117,14 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
   const ipLimitCount =
     rateLimiting.defaultApiLimit !== false && rateLimiting.defaultApiLimit > 0
       ? rateLimiting.defaultApiLimit
-      : rateLimiting.auth.enabled && rateLimiting.auth.maxAttempts > 0
+      : (rateLimiting.auth.enabled && rateLimiting.auth.maxAttempts > 0
         ? rateLimiting.auth.maxAttempts
-        : null;
+        : null);
   if (ipLimitCount !== null) {
-    //? Resolve the real client IP the SAME way the api/sync routes do — honoring
-    //? `http.trustProxy` — so that behind a proxy each client gets its own bucket
-    //? instead of all auth traffic collapsing into one (`req.socket.remoteAddress`
-    //? = the proxy's address). When trustProxy is false this still returns the raw
-    //? socket address (sentinel `'unknown'` when absent), so direct-exposure
-    //? behavior is unchanged.
-    const requesterIp = resolveClientIp({
-      rawAddress: req.socket.remoteAddress,
-      headers: req.headers,
-      trustProxy: config.http.trustProxy,
-      trustedProxyHopCount: config.http.trustedProxyHopCount,
-    });
     const ipWindowMs =
-      rateLimiting.defaultApiLimit !== false
-        ? rateLimiting.windowMs
-        : rateLimiting.auth.windowMs;
+      rateLimiting.defaultApiLimit === false
+        ? rateLimiting.auth.windowMs
+        : rateLimiting.windowMs;
     const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${requesterIp}:auth:credentials`,
       limit: ipLimitCount,
@@ -152,10 +151,11 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
     }
   }
 
-  //? Pass the requester's current session token as `supersedeToken` so that, on
-  //? a re-login while already signed in, single-session enforcement does NOT kick
-  //? this same browser's old session (which would log it straight back out).
-  const result = (await login.loginWithCredentials(params, { supersedeToken: token ?? undefined })) as {
+  //? Pass the requester's current session token as `supersedeToken` and the
+  //? resolved `requesterIp` (DD-LOGIN-F5 composite lockout key) so that on
+  //? a re-login while already signed in, single-session enforcement does NOT
+  //? kick this same browser's old session.
+  const result = (await login.loginWithCredentials(params, { supersedeToken: token ?? undefined, requesterIp })) as {
     status: boolean;
     reason: string;
     newToken: string | null;

@@ -41,6 +41,9 @@ interface SentrySDK {
   setUser: (user: unknown) => void;
   setContext: (name: string, context: Record<string, unknown> | null) => void;
   startSpan: <T>(context: { name: string; op: string }, fn: () => T) => T;
+  //? ET-O13: `close` drains the Sentry transport before process exit so buffered
+  //? events are not lost on graceful shutdown. `timeout` is in milliseconds.
+  close: (timeout?: number) => Promise<boolean>;
 }
 
 //? `localRequire` (built from THIS module's `import.meta.url`) is passed so
@@ -109,6 +112,13 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
 
     startSpan(name, op, fn) {
       return sentry.startSpan({ name, op }, fn);
+    },
+
+    //? ET-O13: drain the Sentry transport on graceful shutdown via `Sentry.close()`.
+    //? Called by `flushErrorTrackers()` so buffered error events are not lost when
+    //? the process exits. 2 000 ms is the recommended safe-shutdown timeout.
+    async flush() {
+      await sentry.close(2000);
     },
 
     beforeSend: options.beforeSend,

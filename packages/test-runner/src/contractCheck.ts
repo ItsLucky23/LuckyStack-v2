@@ -1,5 +1,5 @@
-import { tryCatch } from '@luckystack/core';
 import type { ContractCheckResult, EndpointDescriptor } from './types';
+import { sendProbe } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -37,56 +37,43 @@ export const runContractCheck = async (input: ContractCheckInput): Promise<Contr
   const body = input.inputFor ? input.inputFor(endpoint) : {};
   const started = Date.now();
 
-  const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => { controller.abort(); }, requestTimeoutMs);
-
-  const [fetchError, response] = await tryCatch(() => fetch(url, {
+  const result = await sendProbe({
+    url,
     method: endpoint.method,
-    headers: {
-      'Content-Type': 'application/json',
-      //? Browsers attach Origin on state-changing requests; the server's origin
-      //? policy fail-closes POST/PUT/DELETE without one. Send the same-origin
-      //? value so the request reaches the API pipeline (consumers can override).
-      'Origin': new URL(baseUrl).origin,
-      ...input.headers,
-    },
-    body: endpoint.method === 'GET' ? undefined : JSON.stringify(body),
-    signal: controller.signal,
-  }));
-  clearTimeout(timeoutHandle);
+    baseUrl,
+    body,
+    headers: input.headers,
+    requestTimeoutMs: input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+  });
 
-  if (fetchError || !response) {
+  if (!result) {
     return {
       endpoint,
       status: 'fail',
-      reason: fetchError?.message ?? 'fetch returned no response',
+      reason: 'fetch returned no response',
       durationMs: Date.now() - started,
     };
   }
 
-  const [parseError, parsed] = await tryCatch<{ status?: 'success' | 'error'; errorCode?: string } | null, undefined>(
-    async () => await response.json() as { status?: 'success' | 'error'; errorCode?: string },
-  );
-
+  const { httpStatus, parsed } = result;
   const durationMs = Date.now() - started;
 
-  if (parseError) {
+  if (!parsed) {
     return {
       endpoint,
       status: 'fail',
-      httpStatus: response.status,
+      httpStatus,
       responseStatus: 'unknown',
-      reason: `JSON parse failed: ${parseError.message}`,
+      reason: 'JSON parse failed',
       durationMs,
     };
   }
 
-  if (!parsed || (parsed.status !== 'success' && parsed.status !== 'error')) {
+  if (parsed.status !== 'success' && parsed.status !== 'error') {
     return {
       endpoint,
       status: 'fail',
-      httpStatus: response.status,
+      httpStatus,
       responseStatus: 'unknown',
       reason: 'Response missing standard `status` envelope',
       durationMs,
@@ -97,9 +84,30 @@ export const runContractCheck = async (input: ContractCheckInput): Promise<Contr
     return {
       endpoint,
       status: 'fail',
-      httpStatus: response.status,
+      httpStatus,
       responseStatus: 'error',
       reason: 'Error response missing `errorCode`',
+      durationMs,
+    };
+  }
+
+  //? When `inputFor` produced a non-empty sample body but the route returned an
+  //? error, the probe may have failed its own Zod validation rather than proving
+  //? the contract. Counting that as a PASS is misleading — the happy-path was
+  //? never exercised. Classify as `skipped` so the caller knows the body was
+  //? rejected before the handler ran and can supply a better sample.
+  const bodyIsNonEmpty = body !== null
+    && typeof body === 'object'
+    && !Array.isArray(body)
+    && Object.keys(body).length > 0;
+  if (input.inputFor && bodyIsNonEmpty && parsed.status === 'error') {
+    return {
+      endpoint,
+      status: 'skipped',
+      httpStatus,
+      responseStatus: 'error',
+      errorCode: parsed.errorCode,
+      reason: `inputFor produced a non-empty sample but route returned error (${parsed.errorCode ?? 'unknown'}); provide a valid sample via inputFor to test the happy path`,
       durationMs,
     };
   }
@@ -107,7 +115,7 @@ export const runContractCheck = async (input: ContractCheckInput): Promise<Contr
   return {
     endpoint,
     status: 'pass',
-    httpStatus: response.status,
+    httpStatus,
     responseStatus: parsed.status,
     errorCode: parsed.errorCode,
     durationMs,

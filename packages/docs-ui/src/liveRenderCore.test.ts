@@ -281,11 +281,14 @@ describe('docsHtml orchestrator decomposition guard', () => {
     expect(html).toContain('const built = buildGroups(apis, syncs, filter);');
     expect(html).toContain('summary.innerHTML = built.summaryHtml;');
     expect(html).toContain('content.innerHTML = built.contentHtml;');
+    //? bindEndpointToggles is called once at init (event delegation), not per render.
     expect(html).toContain('bindEndpointToggles();');
   });
 
-  it('preserves the per-element toggle binding (no event-delegation swap)', () => {
-    expect(html).toContain("document.querySelectorAll('.endpoint').forEach((el) => {");
-    expect(html).toContain("el.addEventListener('click', () => {");
+  it('uses event delegation on #content for endpoint toggles (DOCSUI-O13 fix)', () => {
+    //? bindEndpointToggles now attaches one delegated listener on the
+    //? container rather than re-binding per element on every filter keystroke.
+    expect(html).toContain("content.addEventListener('click', (e) => {");
+    expect(html).toContain("e.target.closest('.endpoint')");
   });
 });

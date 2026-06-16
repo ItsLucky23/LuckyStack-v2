@@ -46,6 +46,11 @@ export default async function getParams({ method, req, res: _res, queryString }:
 
     if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
       writeJsonErrorAndResolve(_res, 413, 'api.payloadTooLarge', resolve);
+      //? Destroy the socket immediately after writing the 413 so the client
+      //? can't park a slow body and tie up the connection (marginal slow-loris
+      //? vector). The response was already flushed by `writeJsonErrorAndResolve`
+      //? so destroying here only stops incoming data, not the outbound 413.
+      req.destroy();
       return;
     }
 
@@ -55,6 +60,13 @@ export default async function getParams({ method, req, res: _res, queryString }:
     const chunks: Buffer[] = [];
     let bodySize = 0;
     req.on('data', (chunk: Buffer) => {
+      //? Guard against already-responded: Node can deliver buffered 'data' events
+      //? even after `req.destroy()` is called (the event was already queued). A
+      //? second call into `writeJsonErrorAndResolve` on an ended response throws
+      //? ERR_HTTP_HEADERS_SENT. The `resolve` idempotency is fine; the response
+      //? write is not.
+      if (_res.headersSent) return;
+
       bodySize += chunk.length;
       if (bodySize > maxBodyBytes) {
         //? Write the 413 BEFORE tearing down the socket. `req` and `res` share one

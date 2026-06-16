@@ -5,7 +5,7 @@
 // eslint-disable-next-line import-x/default
 import validator from 'validator';
 import { dispatchHook } from '@luckystack/core';
-import { sendEmailChangeConfirmation } from '@luckystack/login';
+import { sendEmailChangeConfirmation, verifyPassword } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
@@ -18,7 +18,13 @@ export const auth: AuthProps = {
 };
 
 export interface ApiParams {
-  data: { newEmail: string };
+  //? LOGIN-EMAILCHG: `currentPassword` is required for credentials-provider
+  //? accounts. A session-hijack (stolen cookie / XSS) that can change the
+  //? email locks the real owner out permanently because the confirm link goes
+  //? to the NEW (attacker-controlled) address. Collecting the current password
+  //? at initiation time prevents the attack — only someone who already knows
+  //? the credential can start the change flow.
+  data: { newEmail: string; currentPassword?: string };
   user: SessionLayout;
   functions: Functions;
 }
@@ -34,17 +40,58 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'error', errorCode: 'auth.emailSameAsCurrent' };
   }
 
-  //? Reject when the new address already belongs to another credentials-provider
-  //? user. We do this BEFORE minting a token so the user gets immediate feedback
-  //? — and so an attacker can't probe address ownership by waiting for the
-  //? confirm-step error (constant-time response side leaks the same info anyway,
-  //? but failing early keeps the flow simple).
+  //? LOGIN-EMAILCHG: require and verify the current password before initiating
+  //? an email change for credentials-provider accounts. OAuth accounts have no
+  //? stored password so the check is skipped for them (the provider session is
+  //? the re-auth proof). An empty or missing `currentPassword` is rejected
+  //? before the DB read so there is no timing difference between "no password
+  //? supplied" and "wrong password" — both return the same errorCode.
+  if (user.provider === 'credentials') {
+    const currentPassword = data.currentPassword ?? '';
+    if (!currentPassword) {
+      return { status: 'error', errorCode: 'auth.currentPasswordRequired' };
+    }
+    const dbUser = await functions.db.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { password: true },
+    });
+    const storedHash = dbUser?.password ?? null;
+    if (!storedHash) {
+      return { status: 'error', errorCode: 'auth.currentPasswordRequired' };
+    }
+    const passwordOk = await verifyPassword(currentPassword, storedHash);
+    if (!passwordOk) {
+      return { status: 'error', errorCode: 'auth.wrongCurrentPassword' };
+    }
+  }
+
+  //? ADR — DD-ROOTSRC-O6: do NOT reveal whether the new address is already
+  //? taken to the authenticated caller. Returning `auth.emailTaken` here lets
+  //? any logged-in user enumerate the full credentials-account address space
+  //? with a trivial script. The reset-password flow already uses this pattern:
+  //? `sendPasswordResetEmail` returns `{ ok: true }` for unknown addresses.
+  //? We apply the same anti-enumeration posture here: silently succeed without
+  //? sending a token when the address is owned by another user. The
+  //? `confirmEmailChange` step is the hard guard — it re-checks ownership
+  //? under a DB transaction and rejects at that point. The real user sees
+  //? "email change requested" in the UI; no confirmation arrives (the email
+  //? simply isn't sent), which is sufficient UX signal. A GDPR / abuse-report
+  //? handler can hook `postEmailChangeRequested` where `sent: false` flags the
+  //? silent-drop case.
   const existing = await functions.db.prisma.user.findFirst({
     where: { email: newEmail, provider: 'credentials' },
     select: { id: true },
   });
   if (existing && existing.id !== user.id) {
-    return { status: 'error', errorCode: 'auth.emailTaken' };
+    //? Silent no-op: don't reveal the address is taken (anti-enumeration).
+    //? No token is minted; no email is sent. Return success so the caller
+    //? can't distinguish "taken" from "sent" at the HTTP layer.
+    void dispatchHook('postEmailChangeRequested', {
+      userId: user.id,
+      newEmail,
+      sent: false,
+    });
+    return { status: 'success' };
   }
 
   //? Vetoable pre-hook. Lets compliance / approval / 2FA add-ons abort the
@@ -64,6 +111,11 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     userName: user.name,
   });
 
+  //? LOGIN-EMAILCHG: notify the OLD address so the real owner is alerted to
+  //? the pending change and can take action (e.g. contact support) if they did
+  //? not initiate it. Wire this via the `postEmailChangeRequested` hook so
+  //? consumers can use their own email template/adapter without forking this
+  //? file. The hook receives `currentEmail` for that purpose.
   void dispatchHook('postEmailChangeRequested', {
     userId: user.id,
     newEmail,

@@ -19,7 +19,7 @@ export {
   createProdRuntimeMapsProvider,
   registerProdRuntimeMapsProvider,
 } from './runtimeMapsLoader';
-export type { ProdRuntimeMapsLoaderOptions } from './runtimeMapsLoader';
+export type { ProdRuntimeMapsLoaderOptions, GeneratedRuntimeMapsModule } from './runtimeMapsLoader';
 export {
   applyServerArgv,
   parseServerArgv,

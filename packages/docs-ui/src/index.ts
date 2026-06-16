@@ -17,7 +17,7 @@
 
 import fs from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { getGeneratedApiDocsPath, tryCatch } from '@luckystack/core';
+import { getBindAddress, getGeneratedApiDocsPath, isLoopbackIp, tryCatch } from '@luckystack/core';
 import { renderDocsHtml } from './docsHtml';
 
 export interface DocsBranding {
@@ -80,6 +80,13 @@ export interface MountDocsUiOptions {
    * runner needs a logged-in session.
    */
   enableTryItOut?: boolean;
+  /**
+   * Optional per-request authorization hook. Called after the env/bind-address
+   * gate passes. Return `true` to allow the request, `false` to serve 403.
+   * Use to restrict docs access to authenticated or IP-allowlisted callers on
+   * non-loopback deployments.
+   */
+  authorize?: (req: IncomingMessage) => boolean | Promise<boolean>;
 }
 
 export type DocsRouteHandler = (
@@ -104,11 +111,25 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
       return false;
     }
 
-    if (process.env.NODE_ENV === 'production' && !options.enabledInProd) {
+    //? Fail-closed on production env OR any non-loopback bind address unless the
+    //? consumer explicitly opts in. Staging/preview servers that bind to a public
+    //? interface must set `enabledInProd` to avoid exposing the docs route.
+    const isPublicBind = !isLoopbackIp(getBindAddress().ip);
+    if ((process.env.NODE_ENV === 'production' || isPublicBind) && !options.enabledInProd) {
       res.statusCode = 404;
       res.setHeader('Content-Type', 'text/plain');
       res.end('Not Found');
       return true;
+    }
+
+    if (options.authorize) {
+      const allowed = await options.authorize(req);
+      if (!allowed) {
+        res.statusCode = 403;
+        res.setHeader('Content-Type', 'text/plain');
+        res.end('Forbidden');
+        return true;
+      }
     }
 
     if (req.method !== 'GET') {
@@ -124,12 +145,31 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
       if (readError) {
         res.statusCode = 404;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        //? Only expose the absolute filesystem path in non-production envs to
+        //? avoid leaking internal directory structure to callers (DOCSUI-8).
+        const isDev = process.env.NODE_ENV !== 'production';
         res.end(JSON.stringify({
           error: 'apiDocs.generated.json not found',
-          expectedAt: docsPath,
+          ...(isDev ? { expectedAt: docsPath } : {}),
           hint: 'Run `npm run generateArtifacts` to generate it.',
         }));
       } else {
+        //? Validate JSON before serving so a torn/corrupt artifact surfaces a
+        //? meaningful 422 rather than a 200 with garbled payload that renders
+        //? as "Could not load API docs" in the browser with no actionable hint
+        //? (DD-DOCSUI-17). We parse but serve the original bytes — no
+        //? round-trip serialization that could change whitespace or key order.
+        try {
+          JSON.parse(content ?? '');
+        } catch {
+          res.statusCode = 422;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.end(JSON.stringify({
+            error: 'apiDocs.generated.json is not valid JSON (file may be torn/corrupted)',
+            hint: 'Run `npm run generateArtifacts` to regenerate it.',
+          }));
+          return true;
+        }
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');

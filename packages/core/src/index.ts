@@ -149,6 +149,8 @@ export {
   getCurrentErrorTrackerIdentity,
   registerPreCaptureFilter,
   flushErrorTrackers,
+  sanitizeErrorString,
+  sanitizeErrorStrings,
 } from './errorTrackerRegistry';
 export type {
   ErrorTracker,
@@ -248,7 +250,7 @@ export type { AvatarConfig, AvatarConfigInput } from './avatarConfig';
 export { default as getParams } from './getParams';
 export { extractTokenFromSocket } from './extractToken';
 export { extractTokenFromRequest } from './extractTokenFromRequest';
-export { resolveClientIp, isLoopbackIp, UNKNOWN_CLIENT_IP } from './resolveClientIp';
+export { resolveClientIp, isLoopbackIp, UNKNOWN_CLIENT_IP, deriveTokenBucketId } from './resolveClientIp';
 export type { ResolveClientIpParams } from './resolveClientIp';
 export {
   registerSessionProvider,
@@ -274,7 +276,7 @@ export {
 } from './rateLimiter';
 export type { RateLimitStrategy, CheckRateLimitParams, RateLimitResult } from './rateLimiter';
 export { validateInputByType } from './runtimeTypeValidation';
-export { default as allowedOrigin } from './checkOrigin';
+export { default as allowedOrigin, normalizeOrigin } from './checkOrigin';
 export {
   isOnline,
   enqueueApiRequest,

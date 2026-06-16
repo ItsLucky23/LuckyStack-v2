@@ -21,6 +21,8 @@ interface LoginFailedPayload {
   provider: string;
   reason: string;
   stage: 'login' | 'register' | 'oauth';
+  //? DD-LOGIN-F5: optional IP for composite lockout key
+  requesterIp?: string;
 }
 let registeredLoginFailedHandler: ((p: LoginFailedPayload) => Promise<void>) | null = null;
 const registerHookMock = vi.fn((name: string, handler: (p: LoginFailedPayload) => Promise<void>) => {
@@ -90,10 +92,36 @@ describe('authLockout', () => {
     });
   });
 
+  //? DD-LOGIN-F5: composite key includes IP when provided so one IP cannot lock
+  //? out the account for users on different IPs.
+  it('uses IP+account composite key when requesterIp is provided', async () => {
+    setAuth({ enabled: true, maxAttempts: 5, windowMs: 900_000 });
+    checkRateLimitMock.mockResolvedValue({ allowed: true, remaining: 4, resetIn: 0 });
+    await recordAuthFailure('alice@x.com', '1.2.3.4');
+    expect(checkRateLimitMock).toHaveBeenCalledWith({
+      key: 'auth:alice@x.com:1.2.3.4',
+      limit: 5,
+      windowMs: 900_000,
+    });
+  });
+
+  it('isAccountLocked uses composite key when requesterIp is provided', async () => {
+    setAuth({ enabled: true, maxAttempts: 5 });
+    getRateLimitStatusMock.mockResolvedValue({ allowed: false, remaining: 0, resetIn: 60 });
+    expect(await isAccountLocked('a@x.com', '10.0.0.1')).toBe(true);
+    expect(getRateLimitStatusMock).toHaveBeenCalledWith('auth:a@x.com:10.0.0.1', 5);
+  });
+
   it('clears the counter on success', async () => {
     setAuth({ enabled: true });
     await clearAuthFailures('Alice@x.com');
     expect(clearRateLimitMock).toHaveBeenCalledWith('auth:alice@x.com');
+  });
+
+  it('clears the composite key on success when requesterIp is provided', async () => {
+    setAuth({ enabled: true });
+    await clearAuthFailures('Alice@x.com', '1.2.3.4');
+    expect(clearRateLimitMock).toHaveBeenCalledWith('auth:alice@x.com:1.2.3.4');
   });
 
   it('ignores empty account keys', async () => {
@@ -136,9 +164,16 @@ describe('registerAuthLockoutHook — COUNTING_REASONS allow-list (M-15 / ADR 00
     });
   };
 
-  it('counts a genuine wrong-password attempt', async () => {
+  it('counts a genuine wrong-password attempt (bare account key when no IP)', async () => {
     await fire({ reason: 'login.wrongPassword' });
     expect(checkRateLimitMock).toHaveBeenCalledWith({ key: 'auth:victim@x.com', limit: 5, windowMs: 900_000 });
+  });
+
+  //? DD-LOGIN-F5: composite key used when `requesterIp` is present in the payload.
+  it('counts a genuine wrong-password attempt using composite key when requesterIp is provided', async () => {
+    checkRateLimitMock.mockClear();
+    await fire({ reason: 'login.wrongPassword', requesterIp: '5.6.7.8' });
+    expect(checkRateLimitMock).toHaveBeenCalledWith({ key: 'auth:victim@x.com:5.6.7.8', limit: 5, windowMs: 900_000 });
   });
 
   it.each([

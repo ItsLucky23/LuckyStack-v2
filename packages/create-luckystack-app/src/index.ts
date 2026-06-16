@@ -246,6 +246,12 @@ const pickFromList = async <T extends string>(
   }
   const lower = answer.toLowerCase();
   const match = options.find((opt) => opt.toLowerCase() === lower);
+  if (!match) {
+    //? Unrecognised input (e.g. piped script sent an unexpected string). Warn
+    //? so non-interactive callers notice the fallback rather than silently
+    //? accepting the wrong choice.
+    console.warn(`[create-luckystack-app] Unrecognised input "${answer}" for "${label}" — using default "${defaultValue}".`);
+  }
   return match ?? defaultValue;
 };
 
@@ -552,7 +558,8 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
     emailProvider: asOption(answers.emailProvider, PROVIDER_OPTIONS.emailProvider, 'console'),
     monitoringProvider: asOption(answers.monitoringProvider, PROVIDER_OPTIONS.monitoringProvider, 'none'),
     presence: answers.presence !== 'No',
-    i18n: answers.i18n === 'Yes',
+    //? Match presence/aiInstructions — opt-out convention: truthy unless explicitly 'No'.
+    i18n: answers.i18n !== 'No',
     aiInstructions: answers.aiInstructions !== 'No',
     //? Browser tooling rides on the AI template — forced 'none' when AI
     //? instructions are excluded (the wizard step is skipped in that case).
@@ -885,6 +892,9 @@ const copyTree = (src: string, dest: string, vars: Record<string, string>): void
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, renameDotFile(entry.name));
 
+    //? Skip symlinks to avoid cycles and to keep the scaffold output self-contained.
+    if (entry.isSymbolicLink()) continue;
+
     if (entry.isDirectory()) {
       copyTree(srcPath, destPath, vars);
       continue;
@@ -931,11 +941,18 @@ const AI_INDEX_HOOK = `#!/bin/sh
 #? Auto-installed by create-luckystack-app. Regenerates LuckyStack's AI snapshot
 #? files so they stay in sync with this commit, then stages them. The generators
 #? are deterministic (no timestamps), so a no-op commit leaves them unchanged.
-set -e
 if ! command -v npm >/dev/null 2>&1; then
   echo "[pre-commit] npm not on PATH — skipping AI snapshot regeneration."
   exit 0
 fi
+#? Skip gracefully before the first \`npm install\` so the very first commit on
+#? a fresh scaffold isn't hard-blocked. \`set -e\` is armed below, after the
+#? guards, so failures in the generators DO abort the commit.
+if [ ! -d node_modules ]; then
+  echo "[pre-commit] node_modules not found — skipping AI snapshot regeneration (run npm install first)."
+  exit 0
+fi
+set -e
 echo "[pre-commit] Checking CLAUDE.md invariants on staged changes..."
 npm run ai:lint --silent
 echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
@@ -966,7 +983,13 @@ const installAiIndexHook = (targetDir: string): void => {
   //? it never fails the install when the directory isn't a git repo yet.
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { scripts?: Record<string, string | undefined> };
+  let pkg: { scripts?: Record<string, string | undefined> };
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { scripts?: Record<string, string | undefined> };
+  } catch {
+    console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping prepare script injection.`);
+    return;
+  }
   pkg.scripts ??= {};
   pkg.scripts.prepare ??= "node -e \"try{require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})}catch{}\"";
   fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
@@ -996,10 +1019,13 @@ const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckyst
 
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-  };
+  let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+  } catch {
+    console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping optional dep injection.`);
+    return;
+  }
   pkg.dependencies = { ...pkg.dependencies, ...deps };
   if (Object.keys(devDeps).length > 0) {
     pkg.devDependencies = { ...pkg.devDependencies, ...devDeps };
@@ -1011,7 +1037,13 @@ const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckyst
 const dropDependency = (targetDir: string, depName: string): void => {
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { dependencies?: Record<string, string> };
+  let pkg: { dependencies?: Record<string, string> };
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+  } catch {
+    console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping dependency drop for "${depName}".`);
+    return;
+  }
   if (pkg.dependencies && depName in pkg.dependencies) {
     const { [depName]: _removed, ...rest } = pkg.dependencies;
     pkg.dependencies = rest;
@@ -1074,9 +1106,15 @@ test('home page loads', async ({ page }) => {
 //? Read-or-create a JSON file in the scaffold, apply a merge, write it back
 //? pretty-printed. Used for the additive .mcp.json / .claude/settings.json wiring.
 const mergeJsonFile = (filePath: string, mutate: (data: Record<string, unknown>) => void): void => {
-  const data: Record<string, unknown> = fs.existsSync(filePath)
-    ? (JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>)
-    : {};
+  let data: Record<string, unknown> = {};
+  if (fs.existsSync(filePath)) {
+    try {
+      data = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>;
+    } catch {
+      //? Treat a corrupted file as empty so a bad scaffold output doesn't abort.
+      console.warn(`[create-luckystack-app] Could not parse ${filePath} — treating as empty.`);
+    }
+  }
   mutate(data);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
@@ -1121,14 +1159,22 @@ const wireAiBrowserTooling = (targetDir: string, choices: ScaffoldChoices): void
     //? default (token cost accepted); a user trims by deleting a server here.
     mergeJsonFile(path.join(targetDir, '.mcp.json'), (data) => {
       const servers = (data.mcpServers ??= {}) as Record<string, unknown>;
-      servers.playwright ??= { type: 'stdio', command: 'npx', args: ['@playwright/mcp@latest'] };
-      servers['chrome-devtools'] ??= { type: 'stdio', command: 'npx', args: ['chrome-devtools-mcp@latest'] };
+      //? Pin to minor ranges so a breaking MCP API change doesn't silently
+      //? break the scaffolded project on the next npx invocation.
+      servers.playwright ??= { type: 'stdio', command: 'npx', args: ['@playwright/mcp@^0.0.29'] };
+      servers['chrome-devtools'] ??= { type: 'stdio', command: 'npx', args: ['chrome-devtools-mcp@^0.5.0'] };
     });
 
     //? Deterministic CI complement (devDep + one example spec).
     const pkgPath = path.join(targetDir, 'package.json');
     if (fs.existsSync(pkgPath)) {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { devDependencies?: Record<string, string> };
+      let pkg: { devDependencies?: Record<string, string> };
+      try {
+        pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+      } catch {
+        console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping @playwright/test injection.`);
+        pkg = {};
+      }
       pkg.devDependencies = { ...pkg.devDependencies, '@playwright/test': '^1.50.0' };
       fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     }
@@ -1143,6 +1189,9 @@ const wireAiBrowserTooling = (targetDir: string, choices: ScaffoldChoices): void
 //? Apply ordered string edits to a scaffolded file. Throws loudly if a `find`
 //? token is absent so template drift surfaces during the smoke scaffold instead
 //? of producing a broken project — every edit must match exactly once.
+//? Silent no-op when the file doesn't exist — intentional: an earlier prune
+//? may have removed the file (e.g. authMode:'none' removes settings/page.tsx
+//? before the i18n prune tries to edit it).
 const editScaffoldFile = (targetDir: string, relPath: string, edits: readonly [string, string][]): void => {
   const filePath = path.join(targetDir, relPath);
   if (!fs.existsSync(filePath)) return;
@@ -1170,80 +1219,76 @@ const editScaffoldFile = (targetDir: string, relPath: string, edits: readonly [s
   fs.writeFileSync(filePath, content);
 };
 
-//? Remove OPT-OUT packages from a freshly-copied scaffold. Only handles genuinely
-//? bounded packages today (presence). login/sync are more deeply woven (login is a
-//? whole auth surface; sync's `initSyncRequest` is called from the presence/activity
-//? path in socketInitializer) — see docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md §6.
-const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): void => {
-  if (!choices.presence) {
-    dropDependency(targetDir, '@luckystack/presence');
-    //? main.tsx: the router root used <LocationProvider/> (presence) as its layout
-    //? element; swap it for a plain <Outlet/> so child routes still render.
-    editScaffoldFile(targetDir, 'src/main.tsx', [
-      [
-        "import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom';",
-        "import { createBrowserRouter, RouterProvider, useParams, useSearchParams, Outlet } from 'react-router-dom';",
-      ],
-      ["import { LocationProvider } from '@luckystack/presence/client';\n", ''],
-      ['element: <LocationProvider />,', 'element: <Outlet />,'],
-    ]);
-    //? TemplateProvider.tsx: drop the <SocketStatusIndicator/> (presence) and the
-    //? now-orphaned socket-status + translator wiring it depended on.
-    editScaffoldFile(targetDir, 'src/_components/templates/TemplateProvider.tsx', [
-      ["import { SocketStatusIndicator } from '@luckystack/presence/client';\n", ''],
-      [
-        "import { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
-        "import { useTheme, useSession } from '@luckystack/core/client';",
-      ],
-      ["import { useSocketStatus } from 'src/_providers/socketStatusProvider';\n", ''],
-      ['  const { socketStatus } = useSocketStatus();\n', ''],
-      ['  const translate = useTranslator();\n', ''],
-      [
-        `      <SocketStatusIndicator
+//? Strip @luckystack/presence and the handful of files that reference it.
+const prunePresence = (targetDir: string): void => {
+  dropDependency(targetDir, '@luckystack/presence');
+  //? main.tsx: the router root used <LocationProvider/> (presence) as its layout
+  //? element; swap it for a plain <Outlet/> so child routes still render.
+  editScaffoldFile(targetDir, 'src/main.tsx', [
+    [
+      "import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom';",
+      "import { createBrowserRouter, RouterProvider, useParams, useSearchParams, Outlet } from 'react-router-dom';",
+    ],
+    ["import { LocationProvider } from '@luckystack/presence/client';\n", ''],
+    ['element: <LocationProvider />,', 'element: <Outlet />,'],
+  ]);
+  //? TemplateProvider.tsx: drop the <SocketStatusIndicator/> (presence) and the
+  //? now-orphaned socket-status + translator wiring it depended on.
+  editScaffoldFile(targetDir, 'src/_components/templates/TemplateProvider.tsx', [
+    ["import { SocketStatusIndicator } from '@luckystack/presence/client';\n", ''],
+    [
+      "import { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
+      "import { useTheme, useSession } from '@luckystack/core/client';",
+    ],
+    ["import { useSocketStatus } from 'src/_providers/socketStatusProvider';\n", ''],
+    ['  const { socketStatus } = useSocketStatus();\n', ''],
+    ['  const translate = useTranslator();\n', ''],
+    [
+      `      <SocketStatusIndicator
         status={socketStatus.self.status}
         reconnectAttempt={socketStatus.self.reconnectAttempt}
         label={translate({ key: 'template.socketStatus' })}
       />
 `,
-        '',
-      ],
-    ]);
+      '',
+    ],
+  ]);
+};
+
+//? Remove all built-in auth UI/flows for the authMode:'none' scaffold.
+//? Run BEFORE the i18n prune so the settings/page.tsx edit safely no-ops on the
+//? now-removed file.
+const pruneAuthNone = (targetDir: string): void => {
+  //? The framework's (anonymous) session plumbing stays — `session_v1` returns a
+  //? null user, `SessionProvider`/`useSession` resolve to "no session", and the
+  //? sockets still run — but the credentials/OAuth login + register + password-reset
+  //? pages, the account-management settings page, the LoginForm, and the
+  //? `functions/session` shim (which re-exported @luckystack/login) are all removed.
+  //? The direct @luckystack/login dependency is dropped (framework packages still
+  //? pull it transitively); no scaffold code imports it after this prune.
+  dropDependency(targetDir, '@luckystack/login');
+  for (const target of [
+    'src/login',
+    'src/register',
+    'src/reset-password',
+    'src/settings',
+    'src/_components/LoginForm.tsx',
+    'functions/session.ts',
+    //? Auth/account transactional-email hooks (new-sign-in + password-change).
+    //? They register a `postLogin` hook whose payload type ships with
+    //? @luckystack/login — which we just dropped — and the password-change
+    //? helper was only called by the (now-removed) settings page.
+    'server/hooks/notifications.ts',
+  ]) {
+    removeScaffoldPath(targetDir, target);
   }
 
-  if (choices.authMode === 'none') {
-    //? Auth-less scaffold. The framework's (anonymous) session plumbing stays —
-    //? `session_v1` returns a null user, `SessionProvider`/`useSession` resolve to
-    //? "no session", and the sockets still run — but every built-in auth UI/flow
-    //? is removed: the credentials/OAuth login + register + password-reset pages,
-    //? the account-management settings page, the LoginForm, and the `functions/
-    //? session` shim (which re-exported @luckystack/login). The direct
-    //? @luckystack/login dependency is dropped (framework packages still pull it
-    //? transitively for their own internals); no scaffold code imports it after
-    //? this prune. Run BEFORE the i18n prune so its settings/page.tsx edit safely
-    //? no-ops on the now-removed file.
-    dropDependency(targetDir, '@luckystack/login');
-    for (const target of [
-      'src/login',
-      'src/register',
-      'src/reset-password',
-      'src/settings',
-      'src/_components/LoginForm.tsx',
-      'functions/session.ts',
-      //? Auth/account transactional-email hooks (new-sign-in + password-change).
-      //? They register a `postLogin` hook whose payload type ships with
-      //? @luckystack/login — which we just dropped — and the password-change
-      //? helper was only called by the (now-removed) settings page.
-      'server/hooks/notifications.ts',
-    ]) {
-      removeScaffoldPath(targetDir, target);
-    }
-
-    //? Server overlay registered the notification hooks + an example postLogin
-    //? logger. Both reference login-only hook payloads; strip them so the
-    //? overlay compiles without @luckystack/login (leave a minimal placeholder).
-    editScaffoldFile(targetDir, 'luckystack/server/index.ts', [
-      [
-        `import { registerHook } from '@luckystack/core';
+  //? Server overlay registered the notification hooks + an example postLogin
+  //? logger. Both reference login-only hook payloads; strip them so the
+  //? overlay compiles without @luckystack/login (leave a minimal placeholder).
+  editScaffoldFile(targetDir, 'luckystack/server/index.ts', [
+    [
+      `import { registerHook } from '@luckystack/core';
 import { registerNotificationHooks } from '../../server/hooks/notifications';
 
 //? Wires the transactional notification hooks (new sign-in email,
@@ -1259,17 +1304,17 @@ registerHook('postLogin', ({ userId, provider, isNewUser }) => {
   }
   return undefined;
 });`,
-        `//? authMode 'none': no auth hooks to register. Add your own framework-hook
+      `//? authMode 'none': no auth hooks to register. Add your own framework-hook
 //? registrations here (this overlay is auto-imported at boot, after every
 //? other overlay file).
 export {};`,
-      ],
-    ]);
+    ],
+  ]);
 
-    //? Root route '/': no login page to bounce to — land on the app's main surface.
-    editScaffoldFile(targetDir, 'src/page.tsx', [
-      [
-        `import type { PageMiddleware } from "@luckystack/core/client";
+  //? Root route '/': no login page to bounce to — land on the app's main surface.
+  editScaffoldFile(targetDir, 'src/page.tsx', [
+    [
+      `import type { PageMiddleware } from "@luckystack/core/client";
 import { loginPageUrl, loginRedirectUrl, type SessionLayout } from "config";
 
 export const template = 'plain';
@@ -1278,25 +1323,25 @@ export const middleware: PageMiddleware<SessionLayout> = ({ session }) =>
   session
     ? { success: false, redirect: loginRedirectUrl }
     : { success: false, redirect: loginPageUrl };`,
-        `import type { PageMiddleware } from "@luckystack/core/client";
+      `import type { PageMiddleware } from "@luckystack/core/client";
 
 export const template = 'plain';
 
 //? No auth: '/' lands on the app's main surface (the sample dashboard).
 export const middleware: PageMiddleware = () => ({ success: false, redirect: '/dashboard' });`,
-      ],
-    ]);
+    ],
+  ]);
 
-    //? Dashboard: public (drop the logged-out → /login redirect guard).
-    editScaffoldFile(targetDir, 'src/dashboard/page.tsx', [
-      [
-        `import { useTranslator } from '@luckystack/core/client';
+  //? Dashboard: public (drop the logged-out → /login redirect guard).
+  editScaffoldFile(targetDir, 'src/dashboard/page.tsx', [
+    [
+      `import { useTranslator } from '@luckystack/core/client';
 import type { PageMiddleware } from '@luckystack/core/client';
 import type { SessionLayout } from '../../config';`,
-        `import { useTranslator } from '@luckystack/core/client';`,
-      ],
-      [
-        `export const template = 'plain' as const;
+      `import { useTranslator } from '@luckystack/core/client';`,
+    ],
+    [
+      `export const template = 'plain' as const;
 
 //? Per-page route guard. Logged-out visitors bounce to \`/login\`. Customize
 //? the function body for role-checks (e.g. \`if (!session.admin) return;\`
@@ -1307,22 +1352,22 @@ export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
 };
 
 export default Dashboard;`,
-        `export const template = 'plain' as const;
+      `export const template = 'plain' as const;
 
 export default Dashboard;`,
-      ],
-    ]);
+    ],
+  ]);
 
-    //? Home shell: drop the settings + sign-out links (those routes no longer
-    //? exist) and the now-unused translator wiring.
-    editScaffoldFile(targetDir, 'src/_components/templates/Home.tsx', [
-      [
-        "import { Middleware, useSession, useTranslator } from '@luckystack/core/client';",
-        "import { Middleware, useSession } from '@luckystack/core/client';",
-      ],
-      ['  const translate = useTranslator();\n', ''],
-      [
-        `        <div className="flex items-center gap-3">
+  //? Home shell: drop the settings + sign-out links (those routes no longer
+  //? exist) and the now-unused translator wiring.
+  editScaffoldFile(targetDir, 'src/_components/templates/Home.tsx', [
+    [
+      "import { Middleware, useSession, useTranslator } from '@luckystack/core/client';",
+      "import { Middleware, useSession } from '@luckystack/core/client';",
+    ],
+    ['  const translate = useTranslator();\n', ''],
+    [
+      `        <div className="flex items-center gap-3">
           <Link to="/settings" className="text-sm text-common hover:text-primary transition-colors">
             {translate({ key: 'home.settings' })}
           </Link>
@@ -1331,14 +1376,14 @@ export default Dashboard;`,
           </Link>
         </div>
 `,
-        '',
-      ],
-    ]);
+      '',
+    ],
+  ]);
 
-    //? config.ts: disable credentials + framework forgot-password (no auth flows).
-    editScaffoldFile(targetDir, 'config.ts', [
-      [
-        `  auth: {
+  //? config.ts: disable credentials + framework forgot-password (no auth flows).
+  editScaffoldFile(targetDir, 'config.ts', [
+    [
+      `  auth: {
     //? Framework-mode forgot-password (needs @luckystack/email installed + a
     //? sender registered in server.ts). Set to 'disabled' or 'custom' to opt out.
     forgotPassword: 'framework',
@@ -1346,63 +1391,102 @@ export default Dashboard;`,
     //? hides the email/password fields and the credentials route rejects.
     credentials: true,
   },`,
-        `  auth: {
+      `  auth: {
     //? authMode 'none': no built-in auth UI/flows are scaffolded.
     forgotPassword: 'disabled',
     credentials: false,
   },`,
-      ],
-    ]);
-  }
+    ],
+  ]);
+};
 
-  if (!choices.i18n) {
-    //? Single-language (English) scaffold. The translator layer itself stays —
-    //? it lives in @luckystack/core and backs every `translate()` call — so all
-    //? components keep compiling; what we remove is the EXTRA languages + the
-    //? locale switcher. Drop nl/de/fr locale files, reduce the locale registry
-    //? to English, and collapse the settings language picker to a single option.
-    removeScaffoldPath(targetDir, 'src/_locales/nl.json');
-    removeScaffoldPath(targetDir, 'src/_locales/de.json');
-    removeScaffoldPath(targetDir, 'src/_locales/fr.json');
-    editScaffoldFile(targetDir, 'luckystack/i18n/locales.ts', [
-      ["import deJson from 'src/_locales/de.json';\n", ''],
-      ["import frJson from 'src/_locales/fr.json';\n", ''],
-      ["import nlJson from 'src/_locales/nl.json';\n", ''],
-      [
-        `registerLocales({
+//? Drop extra locale files and narrow the locale registry + settings picker to
+//? English only. The translator layer itself stays (backed by @luckystack/core).
+const pruneI18n = (targetDir: string): void => {
+  removeScaffoldPath(targetDir, 'src/_locales/nl.json');
+  removeScaffoldPath(targetDir, 'src/_locales/de.json');
+  removeScaffoldPath(targetDir, 'src/_locales/fr.json');
+  editScaffoldFile(targetDir, 'luckystack/i18n/locales.ts', [
+    ["import deJson from 'src/_locales/de.json';\n", ''],
+    ["import frJson from 'src/_locales/fr.json';\n", ''],
+    ["import nlJson from 'src/_locales/nl.json';\n", ''],
+    [
+      `registerLocales({
   en: enJson,
   nl: nlJson,
   de: deJson,
   fr: frJson,
 });`,
-        `registerLocales({
+      `registerLocales({
   en: enJson,
 });`,
-      ],
-    ]);
-    //? Picker → English only. editScaffoldFile is a no-op when settings/ was
-    //? already removed by the authMode:'none' prune, so the order is safe.
-    //? The `newLanguage` state is also re-seeded to `'en'` — with `Language`
-    //? narrowed to `'en'`, the original `session?.language ?? 'en'` seed (the
-    //? session language is a wider union) no longer type-checks.
-    editScaffoldFile(targetDir, 'src/settings/page.tsx', [
-      ["const LANGUAGES = ['nl', 'en', 'de', 'fr'] as const;", "const LANGUAGES = ['en'] as const;"],
-      [
-        "  const [newLanguage, setNewLanguage] = useState<Language>(session?.language ?? 'en');",
-        "  const [newLanguage, setNewLanguage] = useState<Language>('en');",
-      ],
-    ]);
-  }
+    ],
+  ]);
+  //? Picker → English only. editScaffoldFile is a no-op when settings/ was
+  //? already removed by the authMode:'none' prune, so the order is safe.
+  //? The `newLanguage` state is also re-seeded to `'en'` — with `Language`
+  //? narrowed to `'en'`, the original `session?.language ?? 'en'` seed (the
+  //? session language is a wider union) no longer type-checks.
+  editScaffoldFile(targetDir, 'src/settings/page.tsx', [
+    ["const LANGUAGES = ['nl', 'en', 'de', 'fr'] as const;", "const LANGUAGES = ['en'] as const;"],
+    [
+      "  const [newLanguage, setNewLanguage] = useState<Language>(session?.language ?? 'en');",
+      "  const [newLanguage, setNewLanguage] = useState<Language>('en');",
+    ],
+  ]);
+  //? Trim the LANGUAGE enum to English-only so `Language = 'en'` (not a wider
+  //? union). Without this, the Prisma schema still has nl/de/fr values while
+  //? no locale files back them — a type mismatch on first tsc run.
+  editScaffoldFile(targetDir, 'prisma/schema.prisma', [
+    [
+      `enum LANGUAGE {
+  en
+  nl
+  de
+  fr
+}`,
+      `enum LANGUAGE {
+  en
+}`,
+    ],
+  ]);
 };
 
-const main = async (): Promise<void> => {
-  const args = parseArgs(process.argv.slice(2));
+//? Remove OPT-OUT packages from a freshly-copied scaffold. Only handles genuinely
+//? bounded packages today (presence). login/sync are more deeply woven (login is a
+//? whole auth surface; sync's `initSyncRequest` is called from the presence/activity
+//? path in socketInitializer) — see docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md §6.
+const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): void => {
+  if (!choices.presence) prunePresence(targetDir);
+  if (choices.authMode === 'none') pruneAuthNone(targetDir);
+  //? i18n prune runs AFTER auth-none so settings/page.tsx edits safely no-op on
+  //? the already-removed file.
+  if (!choices.i18n) pruneI18n(targetDir);
+};
 
-  if (args.help) {
-    printHelp();
-    return;
-  }
+//? Static lookup tables — moved to module scope so they aren't rebuilt on
+//? every `main()` invocation (by-call recreation was the original pattern).
+//? DATABASE_URL_BY_PROVIDER stays local to buildTemplateVars() because it embeds `slug`.
+const USER_ID_ATTRS_BY_PROVIDER: Readonly<Record<string, string>> = {
+  mongodb: '@id @default(auto()) @map("_id") @db.ObjectId',
+  postgresql: '@id @default(cuid())',
+  mysql: '@id @default(cuid())',
+  sqlite: '@id @default(cuid())',
+};
 
+//? OAuth provider → its canonical authorization-endpoint origin. These are
+//? added to EXTERNAL_ORIGINS so the framework's origin gate passes the callback.
+const OAUTH_PROVIDER_ORIGINS: Readonly<Record<string, string>> = {
+  google: 'https://accounts.google.com',
+  github: 'https://github.com',
+  facebook: 'https://www.facebook.com',
+  discord: 'https://discord.com',
+  microsoft: 'https://login.microsoftonline.com',
+};
+
+//? Validate CLI args: project name presence, slug derivability, and target-directory
+//? safety. Calls process.exit on any violation so callers need no error handling.
+const validateArgsOrExit = (args: CliArgs): { slug: string; targetDir: string } => {
   if (!args.projectName) {
     console.error('Missing project name.\n');
     printHelp();
@@ -1438,158 +1522,133 @@ const main = async (): Promise<void> => {
     process.exit(1);
   }
 
-  //? Choice resolution. Every wizard option also has a CLI flag (CFG-01):
-  //?   - interactive (`--prompt`, default): flags PRE-FILL the matching wizard
-  //?     steps (which are then skipped) and the user is only asked for the rest;
-  //?   - `--no-prompt`: typed flag values layered over DEFAULT_CHOICES, no prompts.
-  const choices: ScaffoldChoices = args.prompt
-    ? await runPrompts(buildPresetAnswers(args))
-    : buildNoPromptChoices(args);
+  return { slug, targetDir };
+};
 
-  //? Provider-specific Prisma + DATABASE_URL bits. MongoDB needs an ObjectId
-  //? `_id` mapping; the SQL providers use a cuid string id. The example URL is
-  //? pre-filled for the chosen provider (the others stay as commented hints).
-  const USER_ID_ATTRS_BY_PROVIDER: Record<string, string> = {
-    mongodb: '@id @default(auto()) @map("_id") @db.ObjectId',
-    postgresql: '@id @default(cuid())',
-    mysql: '@id @default(cuid())',
-    sqlite: '@id @default(cuid())',
-  };
-  const DATABASE_URL_BY_PROVIDER: Record<string, string> = {
-    //? Prisma + MongoDB REQUIRES a replica set (it uses transactions); a bare
-    //? `mongodb://host/db` URL fails at runtime. `replicaSet=rs0` +
-    //? `directConnection=true` is the canonical single-node dev replica-set shape.
+//? Build the {{TOKEN}} substitution map for the template tree. DATABASE_URL
+//? embeds `slug`, so it must be built per-run (not a module constant).
+const buildTemplateVars = (
+  slug: string,
+  args: CliArgs,
+  choices: ScaffoldChoices,
+  luckystackVersion: string,
+): Record<string, string> => {
+  //? Prisma + MongoDB REQUIRES a replica set (it uses transactions); a bare
+  //? `mongodb://host/db` URL fails at runtime. `replicaSet=rs0` +
+  //? `directConnection=true` is the canonical single-node dev replica-set shape.
+  const databaseUrlByProvider: Record<string, string> = {
     mongodb: `mongodb://localhost:27017/${slug}?replicaSet=rs0&directConnection=true`,
     postgresql: `postgresql://user:password@localhost:5432/${slug}`,
     mysql: `mysql://user:password@localhost:3306/${slug}`,
     sqlite: 'file:./dev.db',
   };
 
-  //? OAuth provider -> the browser origin its login redirect/callback arrives
-  //? from. The callback hits your app with the provider's origin as `Referer`,
-  //? so each enabled provider's origin must be in the CORS allow-list
-  //? (EXTERNAL_ORIGINS) or the framework's origin gate rejects the callback.
-  const OAUTH_PROVIDER_ORIGINS: Record<string, string> = {
-    google: 'https://accounts.google.com',
-    github: 'https://github.com',
-    facebook: 'https://www.facebook.com',
-    discord: 'https://discord.com',
-    microsoft: 'https://login.microsoftonline.com',
-  };
   const externalOrigins = choices.oauthProviders
-    .map((provider) => OAUTH_PROVIDER_ORIGINS[provider])
-    .filter(Boolean)
+    .flatMap((provider) => {
+      const origin = OAUTH_PROVIDER_ORIGINS[provider];
+      return origin ? [origin] : [];
+    })
     .join(',');
 
-  const luckystackVersion = readSelfVersion();
-  const vars: Record<string, string> = {
+  //? Only vars that are actually used as {{TOKEN}} in the template tree are
+  //? listed here. If you add a new placeholder to a template file, add it here
+  //? first — unused entries are silently skipped by replacePlaceholders.
+  return {
     PROJECT_NAME: slug,
     PROJECT_TITLE: titleCase(args.projectName),
     LUCKYSTACK_VERSION: luckystackVersion,
     DB_PROVIDER: choices.dbProvider,
     USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '@id @default(cuid())',
-    DATABASE_URL: DATABASE_URL_BY_PROVIDER[choices.dbProvider] ?? `postgresql://user:password@localhost:5432/${slug}`,
-    AUTH_MODE: choices.authMode,
-    OAUTH_PROVIDERS: choices.oauthProviders.join(','),
+    DATABASE_URL: databaseUrlByProvider[choices.dbProvider] ?? `postgresql://user:password@localhost:5432/${slug}`,
     OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders),
     EXTERNAL_ORIGINS: externalOrigins,
-    EMAIL_PROVIDER: choices.emailProvider,
     EMAIL_ENV_VARS: buildEmailEnvVars(choices.emailProvider),
-    MONITORING_PROVIDER: choices.monitoringProvider,
     MONITORING_ENV_VARS: buildMonitoringEnvVars(choices.monitoringProvider),
-    I18N_ENABLED: choices.i18n ? 'true' : 'false',
   };
+};
 
-  console.log(`\nScaffolding ${slug} into ${targetDir}\n`);
-  copyTree(TEMPLATE_DIR, targetDir, vars);
+//? Copy the framework AI docs (CLAUDE.md, docs/, skills/, .claude/commands/,
+//? branch-logs/README.md) into the scaffold, install the pre-commit AI-index hook,
+//? and wire the @luckystack/mcp server into .mcp.json. No-op when `aiInstructions`
+//? is off — callers gate on that before invoking.
+const copyAiDocs = (
+  targetDir: string,
+  vars: Record<string, string>,
+  luckystackVersion: string,
+): void => {
+  //? Source of the framework AI docs. In a published install they ship INSIDE
+  //? this package under `framework-docs/` (bundled at build time by
+  //? scripts/bundleFrameworkDocs.mjs) — the repo root is NOT in the tarball, so
+  //? without this bundle the copy silently no-ops. In the monorepo (no bundle)
+  //? we fall back to the repo-root originals so `scaffold:test` keeps working.
+  //? The bundle flattens the two nested/dot sources (.claude/commands,
+  //? branch-logs/README.md) to non-dot names so npm reliably ships them.
+  const bundledDir = path.resolve(__dirname, '..', 'framework-docs');
+  const fromBundle = fs.existsSync(bundledDir);
+  const base = fromBundle ? bundledDir : path.resolve(__dirname, '..', '..', '..');
 
-  //? Install the npm deps the selected monitoring/email providers need (before
-  //? npm install runs), so the chosen integration is ready to use.
-  injectOptionalDeps(targetDir, choices, luckystackVersion);
+  //? Only branch-logs/README.md is copied (not the framework's own log
+  //? entries) — the consumer's first session initializes their own log file.
+  const docsCopies: [string, string, boolean][] = [
+    // [source, dest, isDirectory]
+    [path.join(base, 'CLAUDE.md'),                                                 path.join(targetDir, 'CLAUDE.md'),               false],
+    [path.join(base, 'docs'),                                                      path.join(targetDir, 'docs', 'luckystack'),      true],
+    [path.join(base, 'skills'),                                                    path.join(targetDir, 'skills'),                  true],
+    [fromBundle ? path.join(base, 'claude-commands') : path.join(base, '.claude', 'commands'), path.join(targetDir, '.claude', 'commands'), true],
+    [fromBundle ? path.join(base, 'branch-logs-README.md') : path.join(base, 'branch-logs', 'README.md'), path.join(targetDir, 'branch-logs', 'README.md'), false],
+  ];
 
-  //? Remove opt-OUT framework packages (e.g. presence) from the scaffold — drops
-  //? the dependency AND the few files/lines that referenced it.
-  pruneOptionalPackages(targetDir, choices);
-
-  //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
-  //? the framework's AI docs so the consumer's AI agents inherit full context,
-  //? and install a pre-commit hook that keeps the AI snapshot files fresh. When
-  //? disabled the project ships clean — no CLAUDE.md, no docs/luckystack, no hook.
-  if (choices.aiInstructions) {
-    //? Source of the framework AI docs. In a published install they ship INSIDE
-    //? this package under `framework-docs/` (bundled at build time by
-    //? scripts/bundleFrameworkDocs.mjs) — the repo root is NOT in the tarball, so
-    //? without this bundle the copy silently no-ops. In the monorepo (no bundle)
-    //? we fall back to the repo-root originals so `scaffold:test` keeps working.
-    //? The bundle flattens the two nested/dot sources (.claude/commands,
-    //? branch-logs/README.md) to non-dot names so npm reliably ships them.
-    const bundledDir = path.resolve(__dirname, '..', 'framework-docs');
-    const fromBundle = fs.existsSync(bundledDir);
-    const base = fromBundle ? bundledDir : path.resolve(__dirname, '..', '..', '..');
-    //? Only branch-logs/README.md is copied (not the framework's own log
-    //? entries) — the consumer's first session initializes their own log file.
-    const docsCopies: [string, string, boolean][] = [
-      // [source, dest, isDirectory]
-      [path.join(base, 'CLAUDE.md'),                                                 path.join(targetDir, 'CLAUDE.md'),                  false],
-      [path.join(base, 'docs'),                                                      path.join(targetDir, 'docs', 'luckystack'),         true],
-      [path.join(base, 'skills'),                                                    path.join(targetDir, 'skills'),                     true],
-      [fromBundle ? path.join(base, 'claude-commands') : path.join(base, '.claude', 'commands'),   path.join(targetDir, '.claude', 'commands'),        true],
-      [fromBundle ? path.join(base, 'branch-logs-README.md') : path.join(base, 'branch-logs', 'README.md'), path.join(targetDir, 'branch-logs', 'README.md'), false],
-    ];
-    let copiedCount = 0;
-    for (const [src, dst, isDir] of docsCopies) {
-      if (!fs.existsSync(src)) continue;
-      if (isDir) {
-        copyTree(src, dst, vars);
+  let copiedCount = 0;
+  for (const [src, dst, isDir] of docsCopies) {
+    if (!fs.existsSync(src)) continue;
+    if (isDir) {
+      //? SCAF-N3 — docs/ are framework documentation that must be copied
+      //? verbatim: passing `vars` would silently rewrite {{…}} tokens used
+      //? as documentation examples (e.g. in ARCHITECTURE_*.md) into concrete
+      //? project-specific values in the consumer's docs/luckystack/ tree.
+      const treeVars = src === path.join(base, 'docs') ? {} : vars;
+      copyTree(src, dst, treeVars);
+    } else {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      //? Route text-file copies through `replacePlaceholders` so framework-doc
+      //? files that adopt `{{PROJECT_NAME}}`-style tokens later get rendered
+      //? consistently with the template tree. Binary files fall back to a raw
+      //? byte copy.
+      if (isTextFile(src)) {
+        const rendered = replacePlaceholders(fs.readFileSync(src, 'utf8'), vars);
+        fs.writeFileSync(dst, rendered);
       } else {
-        fs.mkdirSync(path.dirname(dst), { recursive: true });
-        //? Route text-file copies through `replacePlaceholders` so framework-doc
-        //? files that adopt `{{PROJECT_NAME}}`-style tokens later get rendered
-        //? consistently with the template tree. Binary files fall back to a raw
-        //? byte copy.
-        if (isTextFile(src)) {
-          const rendered = replacePlaceholders(fs.readFileSync(src, 'utf8'), vars);
-          fs.writeFileSync(dst, rendered);
-        } else {
-          fs.copyFileSync(src, dst);
-        }
+        fs.copyFileSync(src, dst);
       }
-      copiedCount++;
     }
-
-    installAiIndexHook(targetDir);
-
-    //? Wire the @luckystack/mcp server into .mcp.json so the consumer's Claude
-    //? Code can QUERY the committed AI context (decisions, dependency graph,
-    //? routes, runbooks, capabilities) instead of loading whole files. Run via
-    //? npx — no app dependency. Additive (mergeJsonFile + ??=), so it coexists
-    //? as a SEPARATE entry alongside the playwright/chrome-devtools browser MCP
-    //? servers that wireAiBrowserTooling adds (they are not merged into one).
-    //? Gated on the AI instructions (it's repo-context tooling), not on the
-    //? browser-testing choice.
-    mergeJsonFile(path.join(targetDir, '.mcp.json'), (data) => {
-      const servers = (data.mcpServers ??= {}) as Record<string, unknown>;
-      servers.luckystack ??= { type: 'stdio', command: 'npx', args: ['@luckystack/mcp@latest'] };
-    });
-
-    if (copiedCount > 0) {
-      console.log(`Framework AI documentation copied (${copiedCount} source(s) merged into target) + pre-commit AI-index hook + @luckystack/mcp server installed.`);
-    }
+    copiedCount++;
   }
 
-  //? AI browser-testing tooling (agent-browser CLI + optional MCP servers).
-  //? Additive, user-approval-gated, dev-tools only. No-op when 'none'.
-  wireAiBrowserTooling(targetDir, choices);
+  installAiIndexHook(targetDir);
 
-  console.log('Files written.');
+  //? Wire the @luckystack/mcp server into .mcp.json so the consumer's Claude
+  //? Code can QUERY the committed AI context (decisions, dependency graph,
+  //? routes, runbooks, capabilities) instead of loading whole files. Run via
+  //? npx — no app dependency. Additive (mergeJsonFile + ??=), so it coexists
+  //? as a SEPARATE entry alongside the playwright/chrome-devtools browser MCP
+  //? servers that wireAiBrowserTooling adds (they are not merged into one).
+  mergeJsonFile(path.join(targetDir, '.mcp.json'), (data) => {
+    const servers = (data.mcpServers ??= {}) as Record<string, unknown>;
+    //? Pin to a minor range matching the scaffold's own @luckystack/* version
+    //? so the MCP server speaks the same graph schema as the installed packages.
+    servers.luckystack ??= { type: 'stdio', command: 'npx', args: [`@luckystack/mcp@^${luckystackVersion}`] };
+  });
 
-  if (args.install) {
-    runNpmInstall(targetDir);
-    runPrismaGenerate(targetDir);
-  } else {
-    console.log('\nSkipped npm install (--no-install).');
+  if (copiedCount > 0) {
+    console.log(`Framework AI documentation copied (${copiedCount} source(s) merged into target) + pre-commit AI-index hook + @luckystack/mcp server installed.`);
   }
+};
 
+//? Print the post-scaffold summary and next-step instructions.
+const printNextSteps = (args: CliArgs, choices: ScaffoldChoices): void => {
+  const prismaCmd = choices.dbProvider === 'mongodb'
+    ? 'npm run prisma:db:push           # initializes the Mongo schema'
+    : 'npm run prisma:migrate:dev       # creates the User table + initial migration';
   console.log(`
 Done — scaffold complete.
 
@@ -1607,14 +1666,85 @@ Next steps:
   cd ${args.projectName}
   cp .env_template .env
   cp .env.local_template .env.local   # fill in DATABASE_URL, etc.
-  ${choices.dbProvider === 'mongodb'
-    ? 'npm run prisma:db:push           # initializes the Mongo schema'
-    : 'npm run prisma:migrate:dev       # creates the User table + initial migration'}
+  ${prismaCmd}
   npm run server                       # starts the dev server
 
 Docs:
   https://github.com/ItsLucky23/LuckyStack-v2#readme
 `);
+};
+
+const main = async (): Promise<void> => {
+  const args = parseArgs(process.argv.slice(2));
+
+  if (args.help) {
+    printHelp();
+    return;
+  }
+
+  const { slug, targetDir } = validateArgsOrExit(args);
+
+  //? Choice resolution. Every wizard option also has a CLI flag (CFG-01):
+  //?   - interactive (`--prompt`, default): flags PRE-FILL the matching wizard
+  //?     steps (which are then skipped) and the user is only asked for the rest;
+  //?   - `--no-prompt`: typed flag values layered over DEFAULT_CHOICES, no prompts.
+  const choices: ScaffoldChoices = args.prompt
+    ? await runPrompts(buildPresetAnswers(args))
+    : buildNoPromptChoices(args);
+
+  const luckystackVersion = readSelfVersion();
+  const vars = buildTemplateVars(slug, args, choices, luckystackVersion);
+
+  //? Track that THIS run created targetDir so a partial failure can roll back
+  //? cleanly. The existsSync guard above ensures it didn't exist beforehand.
+  //? The flag is set just before copyTree because mkdirSync is its first op —
+  //? even a mid-copy throw leaves a partial directory that must be cleaned up.
+  let dirCreatedByThisRun = false;
+  try {
+    console.log(`\nScaffolding ${slug} into ${targetDir}\n`);
+    dirCreatedByThisRun = true;
+    copyTree(TEMPLATE_DIR, targetDir, vars);
+
+    //? Install the npm deps the selected monitoring/email providers need (before
+    //? npm install runs), so the chosen integration is ready to use.
+    injectOptionalDeps(targetDir, choices, luckystackVersion);
+
+    //? Remove opt-OUT framework packages (e.g. presence) from the scaffold — drops
+    //? the dependency AND the few files/lines that referenced it.
+    pruneOptionalPackages(targetDir, choices);
+
+    //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
+    //? the framework's AI docs so the consumer's AI agents inherit full context,
+    //? and install a pre-commit hook that keeps the AI snapshot files fresh. When
+    //? disabled the project ships clean — no CLAUDE.md, no docs/luckystack, no hook.
+    if (choices.aiInstructions) copyAiDocs(targetDir, vars, luckystackVersion);
+
+    //? AI browser-testing tooling (agent-browser CLI + optional MCP servers).
+    //? Additive, user-approval-gated, dev-tools only. No-op when 'none'.
+    wireAiBrowserTooling(targetDir, choices);
+
+    console.log('Files written.');
+
+    if (args.install) {
+      runNpmInstall(targetDir);
+      runPrismaGenerate(targetDir);
+    } else {
+      console.log('\nSkipped npm install (--no-install).');
+    }
+
+    printNextSteps(args, choices);
+  } catch (error: unknown) {
+    //? Roll back only if we created the directory — never remove a pre-existing dir.
+    if (dirCreatedByThisRun) {
+      try {
+        fs.rmSync(targetDir, { recursive: true, force: true });
+      } catch {
+        // best-effort; ignore cleanup errors
+      }
+      console.error(`\n[create-luckystack-app] scaffold failed; removed partial directory "${targetDir}".`);
+    }
+    throw error;
+  }
 };
 
 //? Only run the scaffold when this file is the process entry point (i.e. the

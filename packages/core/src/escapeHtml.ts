@@ -15,6 +15,10 @@ const HTML_ESCAPE_MAP: Record<string, string> = {
   "'": '&#39;',
 };
 
-/** Escape `&`, `<`, `>`, `"`, `'` for safe interpolation into HTML. */
+/**
+ * Escape `&`, `<`, `>`, `"`, `'` for safe interpolation into HTML text nodes
+ * and quoted attribute values. Does NOT protect against CSS/JS/URL-context
+ * injection — use a dedicated sanitizer for those contexts.
+ */
 export const escapeHtml = (str: string): string =>
   str.replaceAll(/[&<>"']/g, (c) => HTML_ESCAPE_MAP[c] ?? c);

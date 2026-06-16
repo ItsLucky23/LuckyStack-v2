@@ -16,7 +16,9 @@ import type { ConsumerProject } from '../lib/project';
 //? Translation keys are dotted (`common.connectionError`, `sync.invalidName`).
 //? Restricting the "used" set to dotted strings filters out unrelated `key:`
 //? object props (e.g. `{ key: 'name' }` in a non-i18n context).
-const isTranslationKey = (value: string): boolean => /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9_-]+)+$/.test(value);
+//? Allow `_` and `-` in every segment (first included) so keys like
+//? `my-feature.some_key` are not incorrectly rejected as non-translation keys.
+const isTranslationKey = (value: string): boolean => /^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)+$/.test(value);
 
 //? Recursively flatten a nested locale object to dotted leaf keys.
 const flattenKeys = (obj: unknown, prefix: string, out: Set<string>): void => {

@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
+import type { Socket } from 'socket.io';
 import type { Redis as RedisClient } from 'ioredis';
 import { Server as SocketIOServer } from 'socket.io';
 import {
@@ -8,6 +9,7 @@ import {
   allowedOrigin,
   applySocketMiddlewares,
   attachSocketRedisAdapter,
+  formatRoomName,
   redis,
   setIoInstance,
   socketEventNames,
@@ -93,6 +95,386 @@ export interface LoadSocketResult {
   adapterClients: { pubClient: RedisClient; subClient: RedisClient };
 }
 
+// ---------------------------------------------------------------------------
+// Per-socket context passed to each per-event registrar
+// ---------------------------------------------------------------------------
+
+interface SocketContext {
+  socket: Socket;
+  token: string | null;
+  preferredLocale: string | undefined;
+  activityBroadcasterEnabled: boolean;
+  locationProviderEnabled: boolean;
+  shouldLogDev: boolean;
+  io: SocketIOServer;
+}
+
+// ---------------------------------------------------------------------------
+// Shared guard: validates the common room-mutation preconditions before the
+// async locked body runs. Returns false and emits the error when invalid.
+// ---------------------------------------------------------------------------
+
+const validateRoomRequest = (
+  socket: Socket,
+  responseIndex: number | undefined,
+  token: string | null,
+  group: string,
+  preferredLocale: string | undefined,
+  buildResponseEventName: (idx: number) => string
+): responseIndex is number => {
+  if (typeof responseIndex !== 'number') return false;
+
+  if (!token) {
+    socket.emit(buildResponseEventName(responseIndex), normalizeErrorResponse({
+      response: { status: 'error', errorCode: 'auth.required' },
+      preferredLocale,
+    }));
+    return false;
+  }
+  if (!group) {
+    socket.emit(buildResponseEventName(responseIndex), normalizeErrorResponse({
+      response: { status: 'error', errorCode: 'room.invalid' },
+      preferredLocale,
+    }));
+    return false;
+  }
+  return true;
+};
+
+// ---------------------------------------------------------------------------
+// Shared async body for room mutations (join / leave). The `mutate` callback
+// performs the transport-specific operation (join or leave) and computes the
+// next roomCodes array; the hook names and blocked error code differ per direction.
+// ---------------------------------------------------------------------------
+
+interface RoomMutationOptions {
+  socket: Socket;
+  token: string;
+  group: string;
+  responseIndex: number;
+  preferredLocale: string | undefined;
+  shouldLogDev: boolean;
+  buildResponseEventName: (idx: number) => string;
+  preHook: 'preRoomJoin' | 'preRoomLeave';
+  postHook: 'postRoomJoin' | 'postRoomLeave';
+  blockedErrorCode: string;
+  logVerb: string;
+  mutate: (socket: Socket, physicalRoom: string, rawGroup: string, existingRoomCodes: string[]) => Promise<string[]>;
+}
+
+const executeRoomMutation = async (opts: RoomMutationOptions): Promise<void> => {
+  const {
+    socket, token, group, responseIndex, preferredLocale, shouldLogDev,
+    buildResponseEventName, preHook, postHook, blockedErrorCode, logVerb, mutate,
+  } = opts;
+
+  const session = await readSession(token);
+  if (!session) {
+    socket.emit(buildResponseEventName(responseIndex), normalizeErrorResponse({
+      response: { status: 'error', errorCode: 'session.notFound' },
+      preferredLocale,
+    }));
+    return;
+  }
+
+  const preResult = await dispatchHook(preHook, { token, room: group });
+  if (preResult.stopped) {
+    socket.emit(buildResponseEventName(responseIndex), normalizeErrorResponse({
+      response: {
+        status: 'error',
+        errorCode: preResult.signal.errorCode || blockedErrorCode,
+      },
+      preferredLocale,
+      userLanguage: session.language,
+    }));
+    return;
+  }
+
+  const existingRoomCodes = getSessionRoomCodes(session);
+  //? Route the raw room code through the core room-name formatter so a
+  //? non-identity `registerRoomNameFormatter` (e.g. per-tenant prefixing) applies
+  //? to the socket.io room name the socket physically joins/leaves. The session
+  //? stores the RAW code; only the Socket.io room name uses the physical form.
+  const roomPurpose = preHook === 'preRoomJoin' ? 'join' as const : 'leave' as const;
+  const physicalRoom = formatRoomName(group, { purpose: roomPurpose, userId: session.id });
+  const nextRoomCodes = await mutate(socket, physicalRoom, group, existingRoomCodes);
+
+  const sanitizedSession = sanitizeSessionRoomKeys(session);
+  await writeSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
+
+  const visibleRooms = getVisibleSocketRooms(socket, token);
+  socket.emit(buildResponseEventName(responseIndex), { rooms: visibleRooms });
+  if (shouldLogDev) {
+    getLogger().debug(`Socket ${socket.id} ${logVerb} group ${group}`);
+  }
+
+  void dispatchHook(postHook, { token, room: group, allRooms: visibleRooms });
+};
+
+// ---------------------------------------------------------------------------
+// Per-event registrar helpers
+// ---------------------------------------------------------------------------
+
+const registerApiAndSyncEvents = (ctx: SocketContext): void => {
+  const { socket, token } = ctx;
+
+  socket.on(socketEventNames.apiRequest, (msg: apiMessage) => {
+    void handleApiRequest({ msg, socket, token });
+  });
+
+  //? Only wire the sync listener when @luckystack/sync is installed. Absent =>
+  //? clients that emit `sync` get no handler (their request times out / the
+  //? HTTP fallback returns `sync.disabled`). Lazy-loaded once on first event.
+  if (capabilities.sync) {
+    socket.on(socketEventNames.sync, (msg: syncMessage) => {
+      void (async () => {
+        const sync = await getSync();
+        if (sync) await sync.handleSyncRequest({ msg, socket, token });
+      })();
+    });
+  }
+};
+
+const registerCancellationEvents = (ctx: SocketContext): void => {
+  const { socket } = ctx;
+
+  //? B1 — cancellation events. Client emits `{ cb }` (sync) or
+  //? `{ responseIndex }` (api) on the matching cancel channel; we look up
+  //? the in-flight AbortController by `${socket.id}:<key>` and abort it.
+  //? Server-side handler chains gate further chunk emits on the signal
+  //? and exit early via the cleanup paths registered in each handler.
+  socket.on(socketEventNames.syncCancel, (data: { cb?: string }) => {
+    const cb = typeof data.cb === 'string' ? data.cb : null;
+    if (!cb) return;
+    abortSyncByCb(socket.id, cb);
+  });
+  socket.on(socketEventNames.apiCancel, (data: { responseIndex?: number | string }) => {
+    const responseIndex = data.responseIndex;
+    if (typeof responseIndex !== 'number' && typeof responseIndex !== 'string') return;
+    abortApiByResponseIndex(socket.id, responseIndex);
+  });
+};
+
+const registerRoomEvents = (ctx: SocketContext): void => {
+  const { socket, token, preferredLocale, shouldLogDev } = ctx;
+
+  socket.on(socketEventNames.joinRoom, (data: { group?: string; responseIndex?: number }) => {
+    const group = typeof data.group === 'string' ? data.group.trim() : '';
+    const responseIndex = data.responseIndex;
+
+    if (!validateRoomRequest(socket, responseIndex, token, group, preferredLocale, buildJoinRoomResponseEventName)) return;
+    // validateRoomRequest already rejects null tokens, so this guard is redundant but narrows the type
+    if (!token) return;
+
+    void withSessionLock(token, async () => {
+      await executeRoomMutation({
+        socket,
+        token,
+        group,
+        responseIndex,
+        preferredLocale,
+        shouldLogDev,
+        buildResponseEventName: buildJoinRoomResponseEventName,
+        preHook: 'preRoomJoin',
+        postHook: 'postRoomJoin',
+        blockedErrorCode: 'room.joinBlocked',
+        logVerb: 'joined',
+        mutate: async (sock, physicalRoom, rawGroup, existingCodes) => {
+          const nextCodes = [...new Set([...existingCodes, rawGroup])];
+          await sock.join(physicalRoom);
+          return nextCodes;
+        },
+      });
+    });
+  });
+
+  socket.on(socketEventNames.leaveRoom, (data: { group?: string; responseIndex?: number }) => {
+    const group = typeof data.group === 'string' ? data.group.trim() : '';
+    const responseIndex = data.responseIndex;
+
+    if (!validateRoomRequest(socket, responseIndex, token, group, preferredLocale, buildLeaveRoomResponseEventName)) return;
+    // validateRoomRequest already rejects null tokens, so this guard is redundant but narrows the type
+    if (!token) return;
+
+    void withSessionLock(token, async () => {
+      await executeRoomMutation({
+        socket,
+        token,
+        group,
+        responseIndex,
+        preferredLocale,
+        shouldLogDev,
+        buildResponseEventName: buildLeaveRoomResponseEventName,
+        preHook: 'preRoomLeave',
+        postHook: 'postRoomLeave',
+        blockedErrorCode: 'room.leaveBlocked',
+        logVerb: 'left',
+        mutate: async (sock, physicalRoom, rawGroup, existingCodes) => {
+          const nextCodes = existingCodes.filter((c) => c !== rawGroup);
+          await sock.leave(physicalRoom);
+          return nextCodes;
+        },
+      });
+    });
+  });
+
+  socket.on(socketEventNames.getJoinedRooms, (data: { responseIndex?: number }) => {
+    const responseIndex = data.responseIndex;
+    if (typeof responseIndex !== 'number') return;
+
+    if (!token) {
+      socket.emit(buildGetJoinedRoomsResponseEventName(responseIndex), {
+        ...normalizeErrorResponse({
+          response: { status: 'error', errorCode: 'auth.required' },
+          preferredLocale,
+        }),
+        rooms: [],
+      });
+      return;
+    }
+
+    socket.emit(buildGetJoinedRoomsResponseEventName(responseIndex), {
+      rooms: getVisibleSocketRooms(socket, token),
+    });
+  });
+};
+
+const registerDisconnectEvent = (ctx: SocketContext): void => {
+  const { socket, token, activityBroadcasterEnabled, shouldLogDev } = ctx;
+
+  socket.on(socketEventNames.disconnect, (reason: string) => {
+    //? B1 — safety-net sweep. Per-request handlers also register their
+    //? own `socket.once(disconnect, ...)` listeners that abort + clean up,
+    //? but `abortAllForSocket` covers anything that slipped through (e.g.
+    //? handler crashed before registering its disconnect listener).
+    abortAllForSocket(socket.id);
+    void dispatchHook('onSocketDisconnect', { socketId: socket.id, token, reason });
+
+    if (activityBroadcasterEnabled) {
+      void getPresence().then((presence) => { presence?.clearActivity(socket.id); });
+    }
+
+    if (activityBroadcasterEnabled && token) {
+      void (async () => {
+        const presence = await getPresence();
+        if (presence) presence.socketDisconnecting({ token, socket, reason });
+      })();
+    } else {
+      if (!token) return;
+      if (shouldLogDev) {
+        getLogger().debug(`user disconnected`, { reason });
+      }
+    }
+  });
+};
+
+const registerUpdateLocationEvent = (ctx: SocketContext): void => {
+  const { socket, token, activityBroadcasterEnabled, locationProviderEnabled, shouldLogDev } = ctx;
+
+  socket.on(
+    socketEventNames.updateLocation,
+    (newLocation: { pathName: string; searchParams?: Record<string, string> }) => {
+      if (!token) return;
+      if (!locationProviderEnabled) return;
+      if (shouldLogDev) {
+        getLogger().debug('updating location', { pathName: newLocation.pathName });
+      }
+
+      void withSessionLock(token, async () => {
+        let returnedUser: BaseSessionLayout | null = null;
+        if (activityBroadcasterEnabled) {
+          const presence = await getPresence();
+          if (presence) {
+            returnedUser = await presence.socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
+          }
+        }
+
+        const user = returnedUser ?? (await readSession(token));
+        if (!user) return;
+
+        const extendedUser = user as BaseSessionLayout & { location?: typeof newLocation };
+        const oldLocation = extendedUser.location;
+        //? Spread into a fresh object (no in-place mutation) and sanitize
+        //? legacy `code`/`codes` keys — same hygiene as the join/leave paths.
+        const sanitizedUser = sanitizeSessionRoomKeys({ ...extendedUser, location: newLocation });
+        await writeSession(token, sanitizedUser);
+
+        void dispatchHook('onLocationUpdate', { token, oldLocation, newLocation });
+      });
+    }
+  );
+};
+
+const registerActivityEvents = (ctx: SocketContext): void => {
+  const { socket, token, activityBroadcasterEnabled, io } = ctx;
+
+  if (activityBroadcasterEnabled && token) {
+    void (async () => {
+      const presence = await getPresence();
+      if (presence) presence.initActivityBroadcaster({ socket, token });
+    })();
+  }
+
+  //? Activity tracking (production AFK + custom activity events). Seed the
+  //? socket's last-activity on connect, start the single sampler interval
+  //? (idempotent), and refresh last-activity on every client heartbeat /
+  //? tab-return. The sampler walks all sockets and fires registered events
+  //? (built-in AFK + any consumer pause/kick events).
+  if (activityBroadcasterEnabled) {
+    void (async () => {
+      const presence = await getPresence();
+      if (!presence) return;
+      presence.startActivitySampler({ io });
+      presence.recordActivity(socket.id);
+    })();
+    socket.on(socketEventNames.activity, () => {
+      void getPresence().then((presence) => { presence?.recordActivity(socket.id); });
+    });
+    socket.on(socketEventNames.intentionalReconnect, () => {
+      void getPresence().then((presence) => { presence?.recordActivity(socket.id); });
+    });
+  }
+};
+
+const rejoinPersistedRooms = (ctx: SocketContext): void => {
+  const { socket, token, shouldLogDev } = ctx;
+
+  if (!token) return;
+
+  //? Rebuild this session's room membership on (re)connect. Socket.io rooms
+  //? are per-connection + in-memory, so a page refresh (brand-new socket) or
+  //? a server restart drops them while `session.roomCodes` (persisted in
+  //? Redis) still lists them. Without replaying them here the reconnected
+  //? socket only sits in its private token room, so a `syncRequest` fan-out
+  //? (`io.in(room).fetchSockets()`) finds zero members and returns
+  //? `sync.noReceiversFound`. Sequenced (await) so membership is restored
+  //? ASAP, and logged so a failed/empty rejoin is visible. Idempotent —
+  //? re-joining an already-joined room is a no-op.
+  void (async () => {
+    const [rejoinError, codes] = await tryCatch(async () => {
+      //? The token room is a private identity room (not a user-visible room code),
+      //? so it is NOT routed through the room-name formatter.
+      await socket.join(token);
+      const session = await readSession(token);
+      const roomCodes = session ? getSessionRoomCodes(session) : [];
+      const userId = session?.id ?? null;
+      for (const roomCode of roomCodes) {
+        //? Route through the formatter so a multi-tenant prefix applies on
+        //? reconnect exactly as it did on the original join (PRESENCE-1).
+        await socket.join(formatRoomName(roomCode, { purpose: 'join', userId }));
+      }
+      return roomCodes;
+    });
+    if (rejoinError) {
+      getLogger().warn(`socket room rejoin failed for ${socket.id}`, { error: rejoinError.message });
+      return;
+    }
+    if (shouldLogDev) {
+      getLogger().debug(`socket ${socket.id} (re)joined rooms: ${(codes ?? []).join(', ') || '(none)'}`);
+    }
+  })();
+};
+
 export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = {}): LoadSocketResult => {
   const config = getProjectConfig();
   const shouldLogDev = config.logging.devLogs;
@@ -102,7 +484,22 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     cors: {
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       origin: (origin, callback) => {
-        if (!origin || allowedOrigin(origin)) {
+        //? An absent `origin` header on a WebSocket upgrade comes from
+        //? server-to-server callers (native WS clients, proxies). Allow them
+        //? only when `cors.allowOriginless` is explicitly opted in, or when
+        //? the caller is a loopback address — not by default, because
+        //? Socket.io's CORS layer is the last browser-origin gate on the WS
+        //? path and silently accepting all non-browser upgrades is a
+        //? CSRF-analogue vector when the session token is in the handshake.
+        if (!origin) {
+          if (config.http.cors.allowOriginless) {
+            callback(null, true);
+          } else {
+            callback(new Error('Origin-less WebSocket upgrades are not allowed'));
+          }
+          return;
+        }
+        if (allowedOrigin(origin)) {
           callback(null, true);
         } else {
           callback(new Error('Not allowed by CORS'));
@@ -164,290 +561,23 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
       ip: socket.handshake.address,
     });
 
-    socket.on(socketEventNames.apiRequest, (msg: apiMessage) => {
-      void handleApiRequest({ msg, socket, token });
-    });
+    const ctx: SocketContext = {
+      socket,
+      token,
+      preferredLocale,
+      activityBroadcasterEnabled,
+      locationProviderEnabled,
+      shouldLogDev,
+      io,
+    };
 
-    //? Only wire the sync listener when @luckystack/sync is installed. Absent =>
-    //? clients that emit `sync` get no handler (their request times out / the
-    //? HTTP fallback returns `sync.disabled`). Lazy-loaded once on first event.
-    if (capabilities.sync) {
-      socket.on(socketEventNames.sync, (msg: syncMessage) => {
-        void (async () => {
-          const sync = await getSync();
-          if (sync) await sync.handleSyncRequest({ msg, socket, token });
-        })();
-      });
-    }
-
-    //? B1 — cancellation events. Client emits `{ cb }` (sync) or
-    //? `{ responseIndex }` (api) on the matching cancel channel; we look up
-    //? the in-flight AbortController by `${socket.id}:<key>` and abort it.
-    //? Server-side handler chains gate further chunk emits on the signal
-    //? and exit early via the cleanup paths registered in each handler.
-    socket.on(socketEventNames.syncCancel, (data: { cb?: string }) => {
-      const cb = typeof data.cb === 'string' ? data.cb : null;
-      if (!cb) return;
-      abortSyncByCb(socket.id, cb);
-    });
-    socket.on(socketEventNames.apiCancel, (data: { responseIndex?: number | string }) => {
-      const responseIndex = data.responseIndex;
-      if (typeof responseIndex !== 'number' && typeof responseIndex !== 'string') return;
-      abortApiByResponseIndex(socket.id, responseIndex);
-    });
-
-    socket.on(socketEventNames.joinRoom, (data: { group?: string; responseIndex?: number }) => {
-      const group = typeof data.group === 'string' ? data.group.trim() : '';
-      const responseIndex = data.responseIndex;
-      if (typeof responseIndex !== 'number') return;
-
-      if (!token) {
-        socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
-          response: { status: 'error', errorCode: 'auth.required' },
-          preferredLocale,
-        }));
-        return;
-      }
-      if (!group) {
-        socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
-          response: { status: 'error', errorCode: 'room.invalid' },
-          preferredLocale,
-        }));
-        return;
-      }
-
-      void withSessionLock(token, async () => {
-        const session = await readSession(token);
-        if (!session) {
-          socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
-            response: { status: 'error', errorCode: 'session.notFound' },
-            preferredLocale,
-          }));
-          return;
-        }
-
-        //? Allow consumers to veto a join (auth check, allowlist, ...).
-        const preResult = await dispatchHook('preRoomJoin', { token, room: group });
-        if (preResult.stopped) {
-          socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
-            response: {
-              status: 'error',
-              errorCode: preResult.signal.errorCode || 'room.joinBlocked',
-            },
-            preferredLocale,
-            userLanguage: session.language,
-          }));
-          return;
-        }
-
-        const existingRoomCodes = getSessionRoomCodes(session);
-        const nextRoomCodes = [...new Set([...existingRoomCodes, group])];
-
-        await socket.join(group);
-        const sanitizedSession = sanitizeSessionRoomKeys(session);
-        await writeSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
-        const visibleRooms = getVisibleSocketRooms(socket, token);
-        socket.emit(buildJoinRoomResponseEventName(responseIndex), { rooms: visibleRooms });
-        if (shouldLogDev) {
-          getLogger().debug(`Socket ${socket.id} joined group ${group}`);
-        }
-
-        void dispatchHook('postRoomJoin', { token, room: group, allRooms: visibleRooms });
-      });
-    });
-
-    socket.on(socketEventNames.leaveRoom, (data: { group?: string; responseIndex?: number }) => {
-      const group = typeof data.group === 'string' ? data.group.trim() : '';
-      const responseIndex = data.responseIndex;
-      if (typeof responseIndex !== 'number') return;
-
-      if (!token) {
-        socket.emit(buildLeaveRoomResponseEventName(responseIndex), normalizeErrorResponse({
-          response: { status: 'error', errorCode: 'auth.required' },
-          preferredLocale,
-        }));
-        return;
-      }
-      if (!group) {
-        socket.emit(buildLeaveRoomResponseEventName(responseIndex), normalizeErrorResponse({
-          response: { status: 'error', errorCode: 'room.invalid' },
-          preferredLocale,
-        }));
-        return;
-      }
-
-      void withSessionLock(token, async () => {
-        const session = await readSession(token);
-        if (!session) {
-          socket.emit(buildLeaveRoomResponseEventName(responseIndex), normalizeErrorResponse({
-            response: { status: 'error', errorCode: 'session.notFound' },
-            preferredLocale,
-          }));
-          return;
-        }
-
-        const preResult = await dispatchHook('preRoomLeave', { token, room: group });
-        if (preResult.stopped) {
-          socket.emit(buildLeaveRoomResponseEventName(responseIndex), normalizeErrorResponse({
-            response: {
-              status: 'error',
-              errorCode: preResult.signal.errorCode || 'room.leaveBlocked',
-            },
-            preferredLocale,
-            userLanguage: session.language,
-          }));
-          return;
-        }
-
-        const existingRoomCodes = getSessionRoomCodes(session);
-        const nextRoomCodes = existingRoomCodes.filter((roomCode) => roomCode !== group);
-
-        await socket.leave(group);
-        const sanitizedSession = sanitizeSessionRoomKeys(session);
-        await writeSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
-
-        const visibleRooms = getVisibleSocketRooms(socket, token);
-        socket.emit(buildLeaveRoomResponseEventName(responseIndex), { rooms: visibleRooms });
-        if (shouldLogDev) {
-          getLogger().debug(`Socket ${socket.id} left group ${group}`);
-        }
-
-        void dispatchHook('postRoomLeave', { token, room: group, allRooms: visibleRooms });
-      });
-    });
-
-    socket.on(socketEventNames.getJoinedRooms, (data: { responseIndex?: number }) => {
-      const responseIndex = data.responseIndex;
-      if (typeof responseIndex !== 'number') return;
-
-      if (!token) {
-        socket.emit(buildGetJoinedRoomsResponseEventName(responseIndex), {
-          ...normalizeErrorResponse({
-            response: { status: 'error', errorCode: 'auth.required' },
-            preferredLocale,
-          }),
-          rooms: [],
-        });
-        return;
-      }
-
-      socket.emit(buildGetJoinedRoomsResponseEventName(responseIndex), {
-        rooms: getVisibleSocketRooms(socket, token),
-      });
-    });
-
-    socket.on(socketEventNames.disconnect, (reason: string) => {
-      //? B1 — safety-net sweep. Per-request handlers also register their
-      //? own `socket.once(disconnect, ...)` listeners that abort + clean up,
-      //? but `abortAllForSocket` covers anything that slipped through (e.g.
-      //? handler crashed before registering its disconnect listener).
-      abortAllForSocket(socket.id);
-      void dispatchHook('onSocketDisconnect', { socketId: socket.id, token, reason });
-
-      if (activityBroadcasterEnabled) {
-        void getPresence().then((presence) => { presence?.clearActivity(socket.id); });
-      }
-
-      if (activityBroadcasterEnabled && token) {
-        void (async () => {
-          const presence = await getPresence();
-          if (presence) await presence.socketDisconnecting({ token, socket, reason });
-        })();
-      } else {
-        if (!token) return;
-        if (shouldLogDev) {
-          getLogger().debug(`user disconnected`, { reason });
-        }
-      }
-    });
-
-    socket.on(
-      socketEventNames.updateLocation,
-      (newLocation: { pathName: string; searchParams?: Record<string, string> }) => {
-        if (!token) return;
-        if (!locationProviderEnabled) return;
-        if (shouldLogDev) {
-          getLogger().debug('updating location', { pathName: newLocation.pathName });
-        }
-
-        void withSessionLock(token, async () => {
-          let returnedUser: BaseSessionLayout | null = null;
-          if (activityBroadcasterEnabled) {
-            const presence = await getPresence();
-            if (presence) {
-              returnedUser = await presence.socketLeaveRoom({ token, socket, newPath: newLocation.pathName });
-            }
-          }
-
-          const user = returnedUser ?? (await readSession(token));
-          if (!user) return;
-
-          const extendedUser = user as BaseSessionLayout & { location?: typeof newLocation };
-          const oldLocation = extendedUser.location;
-          extendedUser.location = newLocation;
-          await writeSession(token, user);
-
-          void dispatchHook('onLocationUpdate', { token, oldLocation, newLocation });
-        });
-      }
-    );
-
-    if (activityBroadcasterEnabled && token) {
-      void (async () => {
-        const presence = await getPresence();
-        if (presence) presence.initActivityBroadcaster({ socket, token });
-      })();
-    }
-
-    //? Activity tracking (production AFK + custom activity events). Seed the
-    //? socket's last-activity on connect, start the single sampler interval
-    //? (idempotent), and refresh last-activity on every client heartbeat /
-    //? tab-return. The sampler walks all sockets and fires registered events
-    //? (built-in AFK + any consumer pause/kick events).
-    if (activityBroadcasterEnabled) {
-      void (async () => {
-        const presence = await getPresence();
-        if (!presence) return;
-        presence.startActivitySampler({ io });
-        presence.recordActivity(socket.id);
-      })();
-      socket.on(socketEventNames.activity, () => {
-        void getPresence().then((presence) => { presence?.recordActivity(socket.id); });
-      });
-      socket.on(socketEventNames.intentionalReconnect, () => {
-        void getPresence().then((presence) => { presence?.recordActivity(socket.id); });
-      });
-    }
-
-    if (token) {
-      //? Rebuild this session's room membership on (re)connect. Socket.io rooms
-      //? are per-connection + in-memory, so a page refresh (brand-new socket) or
-      //? a server restart drops them while `session.roomCodes` (persisted in
-      //? Redis) still lists them. Without replaying them here the reconnected
-      //? socket only sits in its private token room, so a `syncRequest` fan-out
-      //? (`io.in(room).fetchSockets()`) finds zero members and returns
-      //? `sync.noReceiversFound`. Sequenced (await) so membership is restored
-      //? ASAP, and logged so a failed/empty rejoin is visible. Idempotent —
-      //? re-joining an already-joined room is a no-op.
-      void (async () => {
-        const [rejoinError, codes] = await tryCatch(async () => {
-          await socket.join(token);
-          const session = await readSession(token);
-          const roomCodes = session ? getSessionRoomCodes(session) : [];
-          for (const roomCode of roomCodes) {
-            await socket.join(roomCode);
-          }
-          return roomCodes;
-        });
-        if (rejoinError) {
-          getLogger().warn(`socket room rejoin failed for ${socket.id}`, { error: rejoinError.message });
-          return;
-        }
-        if (shouldLogDev) {
-          getLogger().debug(`socket ${socket.id} (re)joined rooms: ${(codes ?? []).join(', ') || '(none)'}`);
-        }
-      })();
-    }
+    registerApiAndSyncEvents(ctx);
+    registerCancellationEvents(ctx);
+    registerRoomEvents(ctx);
+    registerDisconnectEvent(ctx);
+    registerUpdateLocationEvent(ctx);
+    registerActivityEvents(ctx);
+    rejoinPersistedRooms(ctx);
   });
 
   return { io, adapterClients: { pubClient, subClient } };

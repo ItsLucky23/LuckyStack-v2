@@ -1,18 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-//? `mountDocsUi` reads two cross-package symbols from @luckystack/core:
-//? `getGeneratedApiDocsPath` (the default JSON file path) and `tryCatch`
-//? (the [error, result] tuple wrapper used around the fs read). We mock the
-//? whole module so no real config/registry is touched. `tryCatch` is given a
-//? faithful implementation (awaits the thunk, returns [null, value] on
-//? success / [error, null] on throw) so the JSON-route success and failure
-//? branches are exercised exactly as in production.
+//? `mountDocsUi` reads symbols from @luckystack/core. We mock the whole module
+//? so no real config/registry is touched. `tryCatch` gets a faithful
+//? implementation; `getBindAddress` defaults to loopback so the bind-address
+//? gate is inert unless a test overrides it.
 const getGeneratedApiDocsPathMock = vi.fn<() => string>();
+const getBindAddressMock = vi.fn<() => { ip: string; port: string }>();
 
 vi.mock('@luckystack/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@luckystack/core')>()),
   getGeneratedApiDocsPath: () => getGeneratedApiDocsPathMock(),
+  getBindAddress: () => getBindAddressMock(),
+  //? Real isLoopbackIp logic inlined so the bind-address gate works without
+  //? importing the real module (which pulls in unregistered config singletons).
+  isLoopbackIp: (ip: string): boolean => {
+    if (ip === '<unknown>') return true;
+    const canonical = ip.startsWith('::ffff:') ? ip.slice('::ffff:'.length) : ip;
+    if (canonical === '::1') return true;
+    return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(canonical);
+  },
   tryCatch: async <T>(fn: () => Promise<T> | T): Promise<[Error | null, T | null]> => {
     try {
       return [null, await fn()];
@@ -72,8 +79,11 @@ const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 describe('mountDocsUi', () => {
   beforeEach(() => {
     getGeneratedApiDocsPathMock.mockReset();
+    getBindAddressMock.mockReset();
     readFileMock.mockReset();
     getGeneratedApiDocsPathMock.mockReturnValue('/resolved/apiDocs.generated.json');
+    //? Default to loopback so the bind-address gate is inert unless overridden.
+    getBindAddressMock.mockReturnValue({ ip: '127.0.0.1', port: '3000' });
     //? Default to a non-production env; the prod-gate test overrides this.
     process.env.NODE_ENV = 'development';
   });
@@ -284,6 +294,110 @@ describe('mountDocsUi', () => {
       const handled = await handler(makeReq('/elsewhere'), asRes(res));
       expect(handled).toBe(false);
       expect(res.statusCode).toBe(0);
+    });
+  });
+
+  describe('non-loopback bind-address gating (DOCSUI-7)', () => {
+    it('returns 404 on a non-loopback bind address even in development without enabledInProd', async () => {
+      //? Simulates a staging server bound to a public IP with NODE_ENV=development.
+      getBindAddressMock.mockReturnValue({ ip: '10.0.0.5', port: '3000' });
+      process.env.NODE_ENV = 'development';
+      const handler = mountDocsUi();
+      const res = makeRes();
+      const handled = await handler(makeReq('/_docs'), asRes(res));
+      expect(handled).toBe(true);
+      expect(res.statusCode).toBe(404);
+      expect(res.body).toBe('Not Found');
+    });
+
+    it('serves docs on a non-loopback bind when enabledInProd is set', async () => {
+      getBindAddressMock.mockReturnValue({ ip: '10.0.0.5', port: '3000' });
+      process.env.NODE_ENV = 'development';
+      const handler = mountDocsUi({ enabledInProd: true });
+      const res = makeRes();
+      const handled = await handler(makeReq('/_docs'), asRes(res));
+      expect(handled).toBe(true);
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('allows a request when authorize hook returns true', async () => {
+      const authorize = vi.fn(() => true);
+      const handler = mountDocsUi({ authorize });
+      const res = makeRes();
+      const handled = await handler(makeReq('/_docs'), asRes(res));
+      expect(handled).toBe(true);
+      expect(res.statusCode).toBe(200);
+      expect(authorize).toHaveBeenCalledOnce();
+    });
+
+    it('returns 403 when authorize hook returns false', async () => {
+      const authorize = vi.fn(() => false);
+      const handler = mountDocsUi({ authorize });
+      const res = makeRes();
+      const handled = await handler(makeReq('/_docs'), asRes(res));
+      expect(handled).toBe(true);
+      expect(res.statusCode).toBe(403);
+      expect(res.body).toBe('Forbidden');
+    });
+
+    it('supports an async authorize hook', async () => {
+      const authorize = vi.fn(() => Promise.resolve(false));
+      const handler = mountDocsUi({ authorize });
+      const res = makeRes();
+      await handler(makeReq('/_docs'), asRes(res));
+      expect(res.statusCode).toBe(403);
+    });
+  });
+
+  describe('JSON validate-on-serve (DD-DOCSUI-17)', () => {
+    it('returns 422 with a hint when the file exists but contains invalid JSON', async () => {
+      readFileMock.mockResolvedValue('{ not valid json %%% ');
+      const handler = mountDocsUi({ apiDocsPath: '/docs/corrupted.json' });
+      const res = makeRes();
+      const handled = await handler(makeReq('/_docs/api.json'), asRes(res));
+      expect(handled).toBe(true);
+      expect(res.statusCode).toBe(422);
+      expect(res.headers['content-type']).toBe('application/json; charset=utf-8');
+      const payload = JSON.parse(res.body ?? '{}');
+      expect(payload.error).toContain('not valid JSON');
+      expect(payload.hint).toContain('generateArtifacts');
+    });
+
+    it('serves the file as-is when it contains valid JSON', async () => {
+      const raw = '{"apis":{"page":[{"name":"n"}]}}';
+      readFileMock.mockResolvedValue(raw);
+      const handler = mountDocsUi();
+      const res = makeRes();
+      await handler(makeReq('/_docs/api.json'), asRes(res));
+      expect(res.statusCode).toBe(200);
+      //? Serve original bytes — no re-serialization that could change whitespace.
+      expect(res.body).toBe(raw);
+    });
+  });
+
+  describe('filesystem path disclosure (DOCSUI-8)', () => {
+    it('omits expectedAt from the 404 JSON payload in production', async () => {
+      process.env.NODE_ENV = 'production';
+      readFileMock.mockRejectedValue(new Error('ENOENT'));
+      const handler = mountDocsUi({ apiDocsPath: '/prod/docs.json', enabledInProd: true });
+      const res = makeRes();
+      await handler(makeReq('/_docs/api.json'), asRes(res));
+      expect(res.statusCode).toBe(404);
+      const payload = JSON.parse(res.body ?? '{}');
+      expect(payload.error).toBe('apiDocs.generated.json not found');
+      expect(Object.prototype.hasOwnProperty.call(payload, 'expectedAt')).toBe(false);
+      expect(payload.hint).toContain('generateArtifacts');
+    });
+
+    it('includes expectedAt in the 404 JSON payload in development', async () => {
+      process.env.NODE_ENV = 'development';
+      readFileMock.mockRejectedValue(new Error('ENOENT'));
+      const handler = mountDocsUi({ apiDocsPath: '/dev/docs.json' });
+      const res = makeRes();
+      await handler(makeReq('/_docs/api.json'), asRes(res));
+      expect(res.statusCode).toBe(404);
+      const payload = JSON.parse(res.body ?? '{}');
+      expect(payload.expectedAt).toBe('/dev/docs.json');
     });
   });
 });

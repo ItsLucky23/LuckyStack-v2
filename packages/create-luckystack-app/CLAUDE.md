@@ -62,17 +62,18 @@ CLI flags (parsed by `parseArgs`):
 - `--ai-browser=<all|agent-browser|none>` — AI browser-testing tooling (default `agent-browser`); `'all'` also wires the Playwright + Chrome DevTools MCP servers. Value flag (`process.exit(2)` on a bad value). Needs the AI instructions on.
 - `--help`, `-h` — print usage and exit.
 
-Template variables substituted into every text file by `replacePlaceholders`:
+Template variables substituted into every text file by `replacePlaceholders` (only vars that appear as `{{TOKEN}}` in a template file are listed here):
 
-- `{{PROJECT_NAME}}` — slugified project name (from `slugify`).
-- `{{PROJECT_TITLE}}` — Title-Cased project name (from `titleCase`).
+- `{{PROJECT_NAME}}` — slugified project name (from `slugify`); used in `package.json` + `.env_template`.
+- `{{PROJECT_TITLE}}` — Title-Cased project name (from `titleCase`); used in `config.ts`, `index.html`, `README.md`, `docs/PRODUCT.md`.
 - `{{LUCKYSTACK_VERSION}}` — this package's own version (from `readSelfVersion`); used to pin `@luckystack/*` dependency ranges in the scaffolded `package.json`.
-- `{{DB_PROVIDER}}` — `'mongodb' | 'postgresql' | 'mysql' | 'sqlite'`.
-- `{{AUTH_MODE}}` — `'none' | 'credentials' | 'credentials+oauth'`.
-- `{{OAUTH_PROVIDERS}}` — comma-joined list (empty string when none).
-- `{{EMAIL_PROVIDER}}` — `'none' | 'console' | 'resend' | 'smtp'`.
-- `{{MONITORING_PROVIDER}}` — `'none' | 'sentry' | 'datadog' | 'posthog'`.
-- `{{I18N_ENABLED}}` — `'true'` / `'false'` string.
+- `{{DB_PROVIDER}}` — `'mongodb' | 'postgresql' | 'mysql' | 'sqlite'`; used in `prisma/schema.prisma`.
+- `{{USER_ID_ATTRS}}` — provider-specific Prisma `id` field attributes; used in `prisma/schema.prisma`.
+- `{{DATABASE_URL}}` — provider-specific example connection string; used in `.env.local_template`.
+- `{{OAUTH_ENV_VARS}}` — rendered OAuth env block (all providers, active/commented); used in `.env.local_template`.
+- `{{EXTERNAL_ORIGINS}}` — comma-joined OAuth origin allow-list; used in `.env_template`.
+- `{{EMAIL_ENV_VARS}}` — rendered email adapter env block; used in `.env.local_template`.
+- `{{MONITORING_ENV_VARS}}` — rendered monitoring provider env block; used in `.env.local_template`.
 
 ## Peer dependencies
 

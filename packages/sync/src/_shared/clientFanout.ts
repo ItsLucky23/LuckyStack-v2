@@ -101,6 +101,12 @@ export const processClientSyncForRecipient = async <TError extends object>({
     });
   };
 
+  //? SYNC-O14 — the raw `tempToken` is passed to the `_client` handler by design:
+  //? `_client` handlers receive it specifically so they can call
+  //? `functions.session.getSession(token)` to look up the RECIPIENT's session
+  //? without a server-side session store hit from the fanout loop. The token is
+  //? NOT forwarded to the error-tracker context — `targetToken` below uses
+  //? `redactToken(tempToken)` (SYNC-N2 fix).
   const [clientSyncError, clientSyncResult] = await tryCatch(
     async () => await clientSyncHandler({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver, stream: emitClientSyncStream }),
     undefined,

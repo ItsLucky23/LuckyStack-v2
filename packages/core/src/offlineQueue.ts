@@ -71,6 +71,19 @@ const notifyDropped = (item: DroppableItem, reason: QueueDropReason): void => {
   tryCatchSync(() => { item.onDrop?.(reason); });
 };
 
+//? Dispatch the `queueItemDropped` client hook, guarded so a misbehaving
+//? handler set can't interrupt the eviction/enqueue loop (CORE-N8).
+const safeDispatchDropHook = (
+  queue: 'api' | 'sync',
+  key: string,
+  reason: QueueDropReason,
+  dropPolicy: 'drop-oldest' | 'drop-newest' | 'reject',
+): void => {
+  tryCatchSync(() => {
+    dispatchClientHook('queueItemDropped', { queue, key, reason, dropPolicy });
+  });
+};
+
 const evictExpired = (
   queue: DroppableItem[],
   label: 'api' | 'sync',
@@ -83,12 +96,7 @@ const evictExpired = (
     if (item && item.createdAt < cutoff) {
       queue.splice(i, 1);
       notifyDropped(item, 'expired');
-      dispatchClientHook('queueItemDropped', {
-        queue: label,
-        key: item.key,
-        reason: 'expired',
-        dropPolicy: item.dropPolicy ?? globalPolicy,
-      });
+      safeDispatchDropHook(label, item.key, 'expired', item.dropPolicy ?? globalPolicy);
     }
   }
 };
@@ -114,19 +122,19 @@ const enqueueWithPolicy = <T extends DroppableItem>(
     getLogger().debug(`offlineQueue:${label} full — dropped oldest item (policy=${effectivePolicy})`);
     if (dropped) {
       notifyDropped(dropped, 'queue-full');
-      dispatchClientHook('queueItemDropped', { queue: label, key: dropped.key, reason: 'queue-full', dropPolicy: effectivePolicy });
+      safeDispatchDropHook(label, dropped.key, 'queue-full', effectivePolicy);
     }
     return true;
   }
   if (effectivePolicy === 'drop-newest') {
     getLogger().debug(`offlineQueue:${label} full — dropped newest item (policy=${effectivePolicy})`);
     notifyDropped(item, 'queue-full');
-    dispatchClientHook('queueItemDropped', { queue: label, key: item.key, reason: 'queue-full', dropPolicy: effectivePolicy });
+    safeDispatchDropHook(label, item.key, 'queue-full', effectivePolicy);
     return false;
   }
   getLogger().warn(`offlineQueue:${label} full — rejecting enqueue (policy=${effectivePolicy})`);
   notifyDropped(item, 'queue-full');
-  dispatchClientHook('queueItemDropped', { queue: label, key: item.key, reason: 'queue-full', dropPolicy: effectivePolicy });
+  safeDispatchDropHook(label, item.key, 'queue-full', effectivePolicy);
   return false;
 };
 

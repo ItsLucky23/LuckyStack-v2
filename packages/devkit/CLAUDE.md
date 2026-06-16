@@ -83,6 +83,20 @@ Internal modules (not exported from `index.ts`, but live in this package):
 | `importDependencyGraph.ts` | Tracks which `_api/` / `_sync/` files depend on each shared module so hot reload can fan out. | -> docs/hot-reload.md |
 | `runtimeTypeResolver.ts` | Cached recursive expander built on top of `tsProgram`. | -> docs/runtime-type-resolver.md |
 
+## Codegen contract decisions (DD-DEVKIT-D1 / D2 / D3)
+
+**D1 — getSourceFile/Program miss → loud warning, never silent**
+
+When `getServerProgram().getSourceFile(filePath)` returns `undefined`, the extractor always emits a `console.warn` and falls back to `{ }` (empty input) or `{ status: string }` (empty output). This is a documented marker: it means the file is present on disk but absent from the TS Program (typically because `tsconfig.server.json` globs do not cover it, or the Program was not rebuilt after a new file was added). The affected route is also listed in `apiTypeDiagnostics.generated.json` under `reason: 'default-fallback'`. Never suppress this warning — a silent `{ }` input accepts any payload shape at runtime.
+
+**D2 — Zod strict-vs-loose policy**
+
+Object literal types → `.strict()` (unknown keys rejected, fail-closed). This is the posture for all typed API/sync inputs that the Zod emitter can structurally resolve. Types that fall outside the emitter's scope (intersections, unresolvable TypeReferences, mapped/conditional types) → `z.any()` fallback with a TODO comment. The fallback count is surfaced in `apiTypeDiagnostics.generated.json` (`reason: 'zod-any-fallback'`). Do not add `.passthrough()` to the emitter's default output — consumers who need to accept extra keys should widen their `ApiParams.data` type explicitly.
+
+**D3 — apiTypeDiagnostics.generated.json**
+
+Every `generateTypeMapFile()` run emits `apiTypeDiagnostics.generated.json` alongside `apiDocs.generated.json`. It lists every route whose type extraction degraded to a fallback (source file miss or `z.any()` in the Zod schema). Shape: `{ generatedAt, totalRoutes, fallbackCount, fallbacks: DiagnosticsEntry[] }`. CI can fail on non-zero `fallbackCount` to enforce type-fidelity. The file path is `<generatedApiDocs dir>/apiTypeDiagnostics.generated.json`.
+
 ## Config keys (env vars + registerProjectConfig slots)
 
 - `NODE_ENV` (env, required for branching) — `setupWatchers()` is a no-op outside dev; `supervisor.ts` only watches files in non-prod mode.

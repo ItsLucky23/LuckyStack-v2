@@ -1,1 +1,2 @@
-export { loginWithCredentials, loginCallback, createOAuthState } from '../../packages/login/src/login';
+// re-export only
+export { loginWithCredentials, loginCallback, createOAuthState } from '@luckystack/login';

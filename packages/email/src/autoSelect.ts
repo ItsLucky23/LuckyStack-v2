@@ -53,7 +53,11 @@ export const autoSelectEmailSender = (options: AutoSelectEmailSenderOptions = {}
   const from = options.from ?? fromEnv;
   const force = options.force;
 
-  const resolvedSmtpPort = smtpPortRaw ? Number(smtpPortRaw) : defaults.smtpPort;
+  //? Guard against a non-numeric SMTP_PORT env var producing NaN (EMAIL-N1).
+  //? Fall back to the configured default (587) so a typo doesn't silently
+  //? create an invalid transporter instead of throwing at send time.
+  const parsedPort = smtpPortRaw ? Number(smtpPortRaw) : Number.NaN;
+  const resolvedSmtpPort = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaults.smtpPort;
   const buildSmtp = (host: string) => SmtpSender({
     host,
     port: resolvedSmtpPort,

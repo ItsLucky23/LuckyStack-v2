@@ -428,21 +428,37 @@ const hasTypedStreamField = (body, fieldName) => {
   return re.test(body);
 };
 
+// KEEP IN SYNC with scripts/generateAiCapabilities.mjs at the repo root.
+// Any change to hasTestFile, buildApiRoutesSection, or buildSyncRoutesSection
+// must be mirrored there, and vice versa.
+
+//? Detect whether a per-route business-logic test stub exists alongside
+//? the route source. Looks for `<name>_v<N>.tests.ts` in `_api/` and
+//? `<name>_server_v<N>.tests.ts` in `_sync/`. Path-aware so nested pages
+//? like `admin/users/_api/...` resolve correctly.
+const hasTestFile = async (kind, page, name, version) => {
+  const subdir = kind === "api" ? "_api" : "_sync";
+  const filename = kind === "api" ? `${name}_${version}.tests.ts` : `${name}_server_${version}.tests.ts`;
+  const candidate = path.join(REPO_ROOT, "src", page, subdir, filename);
+  return await fileExists(candidate);
+};
+
 const buildApiRoutesSection = async (source) => {
   const rows = parseRouteMap(source, "_ProjectApiTypeMap");
   if (rows.length === 0) {
     return `### API routes (\`_api/\`)\n\nNo project API routes detected in the generated type map.\n`;
   }
   const lines = [`### API routes (\`_api/\`)`, ""];
-  lines.push("Every typed API route in this project. Sourced from `_ProjectApiTypeMap` in `src/_sockets/apiTypes.generated.ts`. Files live at `src/<page>/_api/<name>_v<version>.ts`. Check here **before** authoring a new endpoint — the route might already exist.");
+  lines.push("Every typed API route in this project. Sourced from `_ProjectApiTypeMap` in `src/_sockets/apiTypes.generated.ts`. Files live at `src/<page>/_api/<name>_v<version>.ts`. Check here **before** authoring a new endpoint — the route might already exist. The `Tests` column shows whether a per-route business-logic test stub exists (`npm run scaffold:test <route>` to create one).");
   lines.push("");
-  lines.push("| Route | Method | Rate limit | Has stream |");
-  lines.push("| --- | --- | --- | --- |");
+  lines.push("| Route | Method | Rate limit | Has stream | Tests |");
+  lines.push("| --- | --- | --- | --- | --- |");
   for (const row of rows) {
     const method = (extractField(row.body, "method") ?? "?").replaceAll('"', "");
     const rateLimit = extractField(row.body, "rateLimit") ?? "?";
     const hasStream = hasTypedStreamField(row.body, "stream") ? "yes" : "—";
-    lines.push(`| \`${row.page}/${row.name}/${row.version}\` | ${method} | ${rateLimit} | ${hasStream} |`);
+    const tests = (await hasTestFile("api", row.page, row.name, row.version)) ? "✓" : "—";
+    lines.push(`| \`${row.page}/${row.name}/${row.version}\` | ${method} | ${rateLimit} | ${hasStream} | ${tests} |`);
   }
   lines.push("");
   return lines.join("\n");
@@ -454,14 +470,15 @@ const buildSyncRoutesSection = async (source) => {
     return `### Sync routes (\`_sync/\`)\n\nNo project sync routes detected in the generated type map.\n`;
   }
   const lines = [`### Sync routes (\`_sync/\`)`, ""];
-  lines.push("Every typed sync route in this project. Sourced from `_ProjectSyncTypeMap` in `src/_sockets/apiTypes.generated.ts`. Files live at `src/<page>/_sync/<name>_server_v<version>.ts` (+ optional `_client_v<version>.ts`).");
+  lines.push("Every typed sync route in this project. Sourced from `_ProjectSyncTypeMap` in `src/_sockets/apiTypes.generated.ts`. Files live at `src/<page>/_sync/<name>_server_v<version>.ts` (+ optional `_client_v<version>.ts`). The `Tests` column shows whether a per-route business-logic test stub exists.");
   lines.push("");
-  lines.push("| Route | Server stream | Client stream |");
-  lines.push("| --- | --- | --- |");
+  lines.push("| Route | Server stream | Client stream | Tests |");
+  lines.push("| --- | --- | --- | --- |");
   for (const row of rows) {
     const ss = hasTypedStreamField(row.body, "serverStream") ? "yes" : "—";
     const cs = hasTypedStreamField(row.body, "clientStream") ? "yes" : "—";
-    lines.push(`| \`${row.page}/${row.name}/${row.version}\` | ${ss} | ${cs} |`);
+    const tests = (await hasTestFile("sync", row.page, row.name, row.version)) ? "✓" : "—";
+    lines.push(`| \`${row.page}/${row.name}/${row.version}\` | ${ss} | ${cs} | ${tests} |`);
   }
   lines.push("");
   return lines.join("\n");

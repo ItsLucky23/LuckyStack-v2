@@ -28,6 +28,17 @@ export const handleCsrfRoute: HttpRouteHandler = async ({ res, routePath, token 
   //? attacker can neither read the body (CORS) nor forge the header to match the
   //? victim's cookie, so this blocks cross-site state changes without login.
   if (!capabilities.login) {
+    //? Stateless double-submit: the SAME random value is set as the CSRF cookie
+    //? and echoed in the JSON body. `enforceCsrfOnStateChangingRequest` later
+    //? compares the cookie against the `x-csrf-token` request header. A
+    //? cross-site attacker cannot read the cookie (SameSite + HttpOnly) or
+    //? the body (CORS), so they cannot forge a matching header.
+    //?
+    //? KNOWN LIMITATION: without HMAC binding to a server secret this token
+    //? cannot survive a subdomain compromise (an attacker on sub.example.com
+    //? can set a cookie on .example.com). This is accepted in the login-absent
+    //? posture; add `registerCsrfConfig({ sign: true })` to enable HMAC signing
+    //? when that threat model applies.
     const doubleSubmit = randomBytes(csrfConfig.tokenLength).toString('hex');
     res.statusCode = 200;
     res.setHeader('Set-Cookie', serializeCsrfCookie(csrfConfig.cookieName, doubleSubmit, csrfConfig.cookieOptions));

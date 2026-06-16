@@ -20,6 +20,10 @@ export const runAuthEnforcementTests = async (
   const results: ContractCheckResult[] = [];
 
   for (const endpoint of endpoints) {
+    //? Order matters: requiresLogin must run BEFORE shouldSkip so that a
+    //? login-required endpoint in the explicit skip list is still recorded as
+    //? `skipped` in the results (not silently dropped as a public route).
+    //? Reversing the order would hide the skip from the summary.
     if (!requiresLogin(input.apiMetaMap, endpoint)) {
       //? Public endpoints can't be tested by this layer — skip silently, no
       //? noise. They're still covered by the contract layer.

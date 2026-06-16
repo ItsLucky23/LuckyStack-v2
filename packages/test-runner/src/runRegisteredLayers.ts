@@ -1,13 +1,14 @@
 //? Runs every layer registered via `registerTestLayer` against every endpoint
-//? in the generated `apiMethodMap`, fans each result to the registered reporter
+//? in the given `apiMethodMap`, fans each result to the registered reporter
 //? (`onResult` / `onSummary`), and — when the reporter declares a `webhookUrl`
-//? — POSTs the JSON-serialised summary to it. This is the runtime that makes
-//? the extension registry's three slots (layers, reporter, webhook) actually do
-//? something; before it existed they were write/read-only façades.
+//? — POSTs the JSON-serialised summary to it.
 //?
-//? Built-in sweep layers (contract/auth/rate-limit/fuzz) are NOT run here —
-//? this is purely the consumer-registered extension surface, invoked after the
-//? built-in sweeps by `runAllTests`.
+//? Built-in sweep layers (contract/auth/rate-limit/fuzz) are NOT run here and
+//? `runAllTests` does NOT call this function automatically. The extension registry
+//? is a coordination surface for consumer test harnesses: read the layers with
+//? `listTestLayers()`, then call `runRegisteredLayers({ apiMethodMap, authToken })`
+//? from your own aggregator after the built-in sweeps finish. See
+//? docs/extension-hooks.md for the full lifecycle and examples.
 
 import { tryCatch, tryCatchSync } from '@luckystack/core';
 

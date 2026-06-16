@@ -134,9 +134,10 @@ export const registerStrayPrefixCommand = (...commands: string[]): void => {
 //? `registerRedisClient(...)` can still win after this module is loaded.
 // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Proxy target placeholder
 const redisProxy = new Proxy({} as RedisClient, {
-  get: (_target, prop, receiver) => {
+  get: (_target, prop, _receiver) => {
     const real = getRedisClient() as object;
-    const value: unknown = Reflect.get(real, prop, receiver);
+    //? Pass `real` as receiver (CORE-N9) — see the same fix in `db.ts`.
+    const value: unknown = Reflect.get(real, prop, real);
     if (typeof value !== 'function') return value;
     const fn = value as (...args: unknown[]) => unknown;
     const command = typeof prop === 'string' ? prop.toLowerCase() : '';

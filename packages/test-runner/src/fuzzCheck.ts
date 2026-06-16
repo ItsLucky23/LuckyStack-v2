@@ -1,5 +1,5 @@
-import { tryCatch } from '@luckystack/core';
 import type { ContractCheckResult, EndpointDescriptor } from './types';
+import { sendProbe } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -7,7 +7,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 //? asserts the server doesn't 5xx or return a non-envelope body. Real
 //? schema-driven fuzzing (TS type -> random valid input) is deferred until
 //? the generator emits Zod schemas alongside the types.
-const JUNK_PAYLOADS: unknown[] = [
+const JUNK_PAYLOADS: readonly unknown[] = [
   null,
   [],
   [1, 2, 3],
@@ -15,7 +15,10 @@ const JUNK_PAYLOADS: unknown[] = [
   1_234_567_890,
   true,
   { nested: { deeply: { nested: { value: 'x'.repeat(10_000) } } } },
-  { __proto__: { polluted: true } },
+  //? `{ __proto__: ... }` serializes to `{}` via JSON.stringify (prototype keys
+  //? are not own-enumerable), so it would probe nothing. Use `constructor` instead
+  //? — a named own-key that some parsers misinterpret but survives JSON round-trip.
+  { constructor: { polluted: true } },
   { key: null, other: undefined, third: Number.NaN },
 ];
 
@@ -27,37 +30,20 @@ export interface FuzzCheckInput {
   requestTimeoutMs?: number;
 }
 
-const probe = async (
-  endpoint: EndpointDescriptor,
-  baseUrl: string,
-  body: unknown,
-  headers: Record<string, string> | undefined,
-  requestTimeoutMs: number,
-): Promise<{ httpStatus: number; parsed: { status?: unknown; errorCode?: unknown } | null } | null> => {
-  const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}`;
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => { controller.abort(); }, requestTimeoutMs);
-  const [fetchError, response] = await tryCatch(() => fetch(url, {
-    method: endpoint.method,
-    headers: { 'Content-Type': 'application/json', 'Origin': new URL(baseUrl).origin, ...headers },
-    body: endpoint.method === 'GET' ? undefined : JSON.stringify(body),
-    signal: controller.signal,
-  }));
-  clearTimeout(timeoutHandle);
-  if (fetchError || !response) return null;
-
-  const [, parsed] = await tryCatch<{ status?: unknown; errorCode?: unknown } | null, undefined>(
-    async () => await response.json() as { status?: unknown; errorCode?: unknown },
-  );
-  return { httpStatus: response.status, parsed: parsed ?? null };
-};
-
 export const runFuzzCheck = async (input: FuzzCheckInput): Promise<ContractCheckResult> => {
   const started = Date.now();
   const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const url = `${input.baseUrl.replace(/\/$/, '')}/${input.endpoint.fullPath}`;
 
   for (const payload of JUNK_PAYLOADS) {
-    const result = await probe(input.endpoint, input.baseUrl, payload, input.headers, requestTimeoutMs);
+    const result = await sendProbe({
+      url,
+      method: input.endpoint.method,
+      baseUrl: input.baseUrl,
+      body: payload,
+      headers: input.headers,
+      requestTimeoutMs,
+    });
     const durationMs = Date.now() - started;
 
     if (!result) {

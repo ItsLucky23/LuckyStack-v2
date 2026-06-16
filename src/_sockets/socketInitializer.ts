@@ -6,19 +6,26 @@ import {
   sessionBasedToken,
   socketActivityBroadcaster,
   locationProviderEnabled,
-  loginPageUrl,
 } from "config";
-import { i18nNotify as notify, clearCsrfToken, socket, setSocket, incrementResponseIndex, waitForSocket, tryCatch } from "@luckystack/core/client";
+import { i18nNotify as notify, socket, setSocket, incrementResponseIndex, waitForSocket } from "@luckystack/core/client";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
 import { useEffect, useRef } from "react";
-import { initSyncRequest } from "./syncRequest";
-import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
 import {
   buildGetJoinedRoomsResponseEventName,
   buildJoinRoomResponseEventName,
   buildLeaveRoomResponseEventName,
   socketEventNames,
 } from "../../shared/socketEvents";
+import {
+  attachQueueFlush,
+  attachVisibilityHandler,
+  attachActivityHeartbeat,
+  attachMinimalStatusLogs,
+  attachSessionLifecycle,
+  attachSyncReceiver,
+  attachOnlineHandler,
+  attachPresenceHandlers,
+} from './_socketSetup';
 
 //? The incoming `sync` socket listener + its route-key helpers now live in
 //? `@luckystack/sync/client` (`attachSyncReceiver`), dynamic-imported below so a
@@ -38,7 +45,6 @@ const setDisconnectedStatus = (setSocketStatus: ReturnType<typeof useSocketStatu
 const isLocationProviderEnabled: boolean = locationProviderEnabled;
 const shouldLogDev = logging.devLogs;
 const shouldNotifyDev = logging.devNotifications;
-const shouldLogSocketStatus = logging.socketStatus;
 
 // Socket state (`socket`, `incrementResponseIndex`, `waitForSocket`) now
 // lives in @luckystack/core/socketState — single source of truth shared with
@@ -83,159 +89,33 @@ export function useSocket(session: SessionLayout | null) {
     const socketConnection = io(backendUrl, socketOptions);
     setSocket(socketConnection);
 
-    const canFlushQueue = () => socketConnection.connected && isOnline();
+    // Wire queue flush on reconnect
+    const canFlushQueue = attachQueueFlush(socketConnection);
 
-    const handleVisibility = () => {
-      if (!socketActivityBroadcaster) { return; }
+    // Wire visibility handler (tab switch → intentional disconnect/reconnect)
+    const cleanupVisibility = attachVisibilityHandler(
+      socketConnection,
+      () => socketStatusRef.current,
+    );
 
-      if (shouldLogSocketStatus) {
-        console.log(document.visibilityState);
-      }
+    // Wire activity heartbeat for AFK detection
+    const cleanupActivity = attachActivityHeartbeat(socketConnection);
 
-      //? user switched tab or navigated away
-      if (document.visibilityState === "hidden") {
-        socketConnection.emit(socketEventNames.intentionalDisconnect);
-
-        //? user switched back to the tab
-      } else {
-        if (socketStatusRef.current.self.status !== "CONNECTED") {
-          socketConnection.connect();
-        }
-        socketConnection.emit(socketEventNames.intentionalReconnect);
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-
-    //? Activity heartbeat: forward real user interaction (throttled to once per
-    //? 10s) to the server so the activity-event system (built-in AFK detection
-    //? + any custom pause/kick events) knows when the user is active. Idle =
-    //? no events emitted = the server's last-activity ages past the AFK
-    //? threshold and the registered event fires.
-    let lastActivitySent = 0;
-    const handleActivity = () => {
-      if (!socketActivityBroadcaster) { return; }
-      const now = Date.now();
-      if (now - lastActivitySent < 10_000) { return; }
-      lastActivitySent = now;
-      socketConnection.emit(socketEventNames.activity);
-    };
-    const activityEvents = ["pointerdown", "pointermove", "keydown", "scroll", "wheel", "touchstart"];
+    // Wire presence or minimal status logs, depending on config
     if (socketActivityBroadcaster) {
-      for (const eventName of activityEvents) {
-        globalThis.addEventListener(eventName, handleActivity, { passive: true });
-      }
-    }
-
-    if (socketActivityBroadcaster) {
-      void initSyncRequest({
-        setSocketStatus,
-        sessionRef,
-      });
+      attachPresenceHandlers(setSocketStatus, sessionRef);
     } else {
-      socketConnection.on(socketEventNames.connect, () => {
-        if (shouldLogSocketStatus) {
-          console.log("Connected to server");
-        }
-      });
-
-      socketConnection.on(socketEventNames.disconnect, () => {
-        if (shouldLogSocketStatus) {
-          console.log("Disconnected, trying to reconnect...");
-        }
-      });
-
-      socketConnection.on(socketEventNames.reconnectAttempt, (attempt) => {
-        if (shouldLogSocketStatus) {
-          console.log("Reconnecting attempt", attempt);
-        }
-      });
-
-      socketConnection.on(socketEventNames.connectError, (err: { message: string }) => {
-        if (shouldLogDev) {
-          console.error(`Connection error: ${err.message}`);
-        }
-        if (shouldNotifyDev) {
-          notify.error({ key: 'common.connectionError' });
-        }
-      });
+      attachMinimalStatusLogs(socketConnection);
     }
 
-    socketConnection.on(socketEventNames.connect, () => {
-      flushApiQueue(canFlushQueue, socketConnection);
-      flushSyncQueue(canFlushQueue, socketConnection);
-    });
+    // Wire session lifecycle (sessionReplaced toast, logout redirect)
+    attachSessionLifecycle(socketConnection);
 
-    //? Session replaced elsewhere (single-session enforcement or
-    //? maxConcurrentPerUser cap kicking the oldest device). Server fires
-    //? this just before its standard logout emit, giving us a chance to
-    //? surface a translated toast so the user understands why they're
-    //? being logged out.
-    socketConnection.on(socketEventNames.sessionReplaced, () => {
-      notify.warning({ key: 'common.sessionReplacedElsewhere' });
-    });
+    // Wire sync receive (dynamic import — no-op if package absent)
+    void attachSyncReceiver(socketConnection);
 
-    socketConnection.on(socketEventNames.logout, (status: "success" | "error") => {
-      if (status === "success") {
-        //? Loud log so we can see in devtools exactly when the server told us
-        //? to log out — paired with the server-side `[session] logout success`
-        //? warn this lets us correlate trigger ↔ effect across the wire.
-        console.warn(
-          `[session] Server emitted logout — clearing sessionStorage and redirecting to ${loginPageUrl}. ` +
-          `If you did not click logout, check the server terminal for the corresponding "[session] logout success" stacktrace.`,
-        );
-        if (sessionBasedToken) {
-          sessionStorage.clear();
-        }
-        //? Drop the CSRF cache so the next login fetches a fresh token bound
-        //? to the new session.
-        clearCsrfToken();
-        if (!sessionBasedToken) {
-          //? Cookie mode: the socket transport cannot clear the HttpOnly
-          //? session cookie — ask the server to expire it over HTTP (POST
-          //? /auth/logout answers with a Max-Age=0 Set-Cookie) before the
-          //? redirect. Redirect regardless of the request outcome: the
-          //? session is already invalidated server-side.
-          void (async () => {
-            await tryCatch(() => fetch(`${backendUrl}/auth/logout`, { method: "POST", credentials: "include" }));
-            globalThis.location.href = loginPageUrl;
-          })();
-          return;
-        }
-        globalThis.location.href = loginPageUrl;
-      } else {
-        console.error("Logout failed");
-        notify.error({ key: 'common.logoutFailed' });
-      }
-    });
-
-    //? Sync receive bridge. The incoming `sync` listener lives in
-    //? `@luckystack/sync/client` (`attachSyncReceiver`) so the consumer doesn't
-    //? carry a copy of the dispatch logic. Dynamic-imported + tryCatch so a base
-    //? install WITHOUT `@luckystack/sync` simply runs without sync receive (no
-    //? crash). Decoupled from the presence/activity flag — sync attaches whenever
-    //? the package is present, independent of `socketActivityBroadcaster`.
-    void (async () => {
-      const [syncImportError, syncClient] = await tryCatch(() => import("@luckystack/sync/client"));
-      if (syncImportError || !syncClient) {
-        if (shouldLogDev) {
-          console.log("[sync] @luckystack/sync/client not installed — sync receive disabled.");
-        }
-        return;
-      }
-      syncClient.attachSyncReceiver(socketConnection);
-    })();
-
-
-    const handleOnline = () => {
-      if (socketConnection.connected) {
-        flushApiQueue(canFlushQueue, socketConnection);
-        flushSyncQueue(canFlushQueue, socketConnection);
-        return;
-      }
-      socketConnection.connect();
-    };
-
-    globalThis.addEventListener("online", handleOnline);
+    // Reconnect + flush on browser coming back online
+    const cleanupOnline = attachOnlineHandler(socketConnection, canFlushQueue);
 
     return () => {
       if (socket) {
@@ -244,11 +124,9 @@ export function useSocket(session: SessionLayout | null) {
         setDisconnectedStatus(setSocketStatus);
       }
 
-      document.removeEventListener("visibilitychange", handleVisibility)
-      globalThis.removeEventListener("online", handleOnline)
-      for (const eventName of activityEvents) {
-        globalThis.removeEventListener(eventName, handleActivity);
-      }
+      cleanupVisibility();
+      cleanupOnline();
+      cleanupActivity();
     };
 
   }, [setSocketStatus]);

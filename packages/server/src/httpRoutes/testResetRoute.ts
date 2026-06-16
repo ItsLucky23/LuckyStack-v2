@@ -6,6 +6,7 @@ import {
   redis,
   tryCatch,
 } from '@luckystack/core';
+import { timingSafeStringEqual } from './timingSafeEqual';
 import type { HttpRouteHandler } from './types';
 
 export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePath }) => {
@@ -23,7 +24,9 @@ export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePa
     return true;
   }
   const requiredToken = process.env.TEST_RESET_TOKEN;
-  if (!requiredToken || req.headers['x-test-reset-token'] !== requiredToken) {
+  const providedToken = req.headers['x-test-reset-token'];
+  const tokenValue = Array.isArray(providedToken) ? providedToken[0] : providedToken;
+  if (!requiredToken || !tokenValue || !timingSafeStringEqual(tokenValue, requiredToken)) {
     res.statusCode = 403;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ status: 'error', errorCode: 'auth.forbidden' }));
@@ -68,9 +71,10 @@ export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePa
   //? parsing failure is the expected branch for malformed `req.url`, so use
   //? `URL.canParse` instead of try/catch.
   const rawUrl = req.url ?? '/';
-  const base = `http://${req.headers.host ?? 'localhost'}`;
-  const includeFlag = URL.canParse(rawUrl, base)
-    ? new URL(rawUrl, base).searchParams.get('include') ?? ''
+  //? Use a fixed loopback base — `req.headers.host` is client-controlled and
+  //? must not influence URL resolution; only the path and query matter here.
+  const includeFlag = URL.canParse(rawUrl, 'http://localhost')
+    ? new URL(rawUrl, 'http://localhost').searchParams.get('include') ?? ''
     : '';
   if (includeFlag.split(',').map((s) => s.trim()).includes('hooks')) {
     clearAllHooks();

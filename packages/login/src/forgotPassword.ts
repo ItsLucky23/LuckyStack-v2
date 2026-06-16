@@ -28,7 +28,8 @@ interface SendResetEmailArgs {
  */
 export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArgs): Promise<{ ok: boolean; reason?: string }> => {
   const config = getProjectConfig();
-  getLogger().info('[forgotPassword] start', { email, forgotPasswordMode: config.auth.forgotPassword });
+  //? Log mode but NOT the raw email at start — the email is a PII field.
+  getLogger().info('[forgotPassword] start', { forgotPasswordMode: config.auth.forgotPassword });
   if (config.auth.forgotPassword !== 'framework') {
     getLogger().warn('[forgotPassword] auth.forgotPassword is not "framework" — nothing sent', { mode: config.auth.forgotPassword });
     return { ok: false, reason: 'forgotPassword-not-framework' };
@@ -52,7 +53,9 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
 
   const userAdapter = getUserAdapter();
   const user = await userAdapter.findByEmail({ email, provider: 'credentials' });
-  getLogger().info('[forgotPassword] credentials user lookup', { email, found: Boolean(user), userId: user?.id ?? null });
+  //? Log found/userId without the raw email — logging email+found together is
+  //? an enumeration oracle (any reader of the log can probe the user table).
+  getLogger().info('[forgotPassword] credentials user lookup', { found: Boolean(user), userId: user?.id ?? null });
 
   // Anti-enumeration: always pretend it succeeded if the email isn't found.
   if (!user) {
@@ -61,7 +64,9 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
     //? (email+password) account — by far the most common reason a reset email
     //? never arrives (OAuth-only signups and unknown/typo'd addresses have no
     //? credentials row, so there is nothing to reset).
-    getLogger().warn('[forgotPassword] no credentials account for this email — nothing sent. Use the email+password account you registered with.', { email });
+    //? Do NOT include the email here — this line together with the email would
+    //? let a log reader determine which addresses have credentials accounts.
+    getLogger().warn('[forgotPassword] no credentials account for this email — nothing sent. Use the email+password account you registered with.');
     void dispatchHook('passwordResetRequested', {
       email,
       matched: false,
@@ -78,6 +83,20 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
     ttlSeconds: config.auth.passwordResetTtlSeconds,
   });
   const baseUrl = (config.app.publicUrl || '').replace(/\/+$/, '');
+  //? ADR — DD-ROOTSRC-O8: the reset token is in the URL query string
+  //? (`?token=<hex>`), not in the URL fragment (`#token=<hex>`).
+  //? Tradeoff: query strings appear in server access logs and Referer headers
+  //? if the user's mail client renders the link via a tracking proxy. Fragment
+  //? identifiers (`#`) are never sent to the server and are therefore
+  //? invisible to any log / proxy in the chain — they are more private.
+  //? Decision: query-string is the standard email-link pattern understood by
+  //? every SPA router, and tokens here are one-time + hashed at rest (Redis
+  //? holds only `sha256(token)`), so the exposure window is the TTL of a
+  //? single-use credential, not a replayable secret. Logging is mitigated
+  //? by not logging the full URL at the point of issue (we log `userId`, not
+  //? `resetUrl`). A future `auth.tokenLinkMode: 'fragment'` option can be
+  //? introduced without touching this file — callers receive the raw token
+  //? and can build their own URL.
   const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
 
   const ttlMinutes = Math.round(config.auth.passwordResetTtlSeconds / 60);

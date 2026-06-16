@@ -8,14 +8,19 @@
 //? instead of reaching into specific source files via relative paths.
 
 export { apiRequest } from './apiRequest';
-export type { ApiStreamEvent } from './apiRequest';
+export type { ApiStreamEvent, ApiErrorResponse } from './apiRequest';
 
 //? Browser-safe helpers also re-used by server handlers via the
 //? function-injection system. Exposed on `/client` so `shared/sleep.ts`
 //? and `shared/tryCatch.ts` can resolve them without dragging the
 //? server-only `bootUuid` / `redis` modules into a Vite client bundle.
 export { default as sleep } from './sleep';
-export { default as tryCatch } from './tryCatch';
+//? Browser-safe `tryCatch` (NOT the server `./tryCatch`): the server variant
+//? statically imports `./sentrySetup` → `errorTrackerRegistry` → `node:async_hooks`,
+//? which Vite externalizes for the client. Re-exporting it here would drag that
+//? `node:`-bearing module into the static graph of every client barrel importer.
+//? `tryCatchClient` is behaviourally identical but lazy-imports the capture seam.
+export { default as tryCatch } from './tryCatchClient';
 
 export {
   getProjectConfig,

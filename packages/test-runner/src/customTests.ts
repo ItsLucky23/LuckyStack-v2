@@ -312,7 +312,8 @@ const buildCallApi = (
   //? always sent POST.
   method: string,
 ): TestContext['callApi'] => {
-  return async (input) => {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- must match TestContext['callApi'] generic signature
+  return async <TInput = unknown, TOutput = unknown>(input: TInput): Promise<TOutput> => {
     const url = `${baseUrl.replace(/\/$/, '')}/api/${routePath}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
@@ -329,7 +330,11 @@ const buildCallApi = (
       state.lastResponse = null;
       throw new Error(`callApi ${method} ${routePath} failed: ${fetchError?.message ?? 'no response'}`);
     }
-    return await parseResponse(response, state) as never;
+    //? `parseResponse` returns `unknown`; TOutput is the caller-supplied expectation.
+    //? The runtime shape is unverifiable here — the route's own validator owns that
+    //? contract. The cast is required because parseResponse must return `unknown`.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, no-restricted-syntax -- parseResponse returns unknown; TOutput is the caller's type contract, verified at the call site
+    return await parseResponse(response, state) as TOutput;
   };
 };
 
@@ -339,7 +344,8 @@ const buildCallSync = (
   state: TestSessionState,
   cookieName: string,
 ): TestContext['callSync'] => {
-  return async (input, opts) => {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- must match TestContext['callSync'] generic signature
+  return async <TInput = unknown, TOutput = unknown>(input: TInput, opts?: { receiver?: string }): Promise<TOutput> => {
     const url = `${baseUrl.replace(/\/$/, '')}/sync/${routePath}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
@@ -358,7 +364,9 @@ const buildCallSync = (
       state.lastResponse = null;
       throw new Error(`callSync ${routePath} failed: ${fetchError?.message ?? 'no response'}`);
     }
-    return await parseResponse(response, state) as never;
+    //? parseResponse returns unknown; TOutput is the caller's type contract, verified at the call site
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, no-restricted-syntax -- parseResponse returns unknown; cast to TOutput is the boundary
+    return await parseResponse(response, state) as TOutput;
   };
 };
 
@@ -452,8 +460,15 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
     }
 
     const exported = (mod as { customTests?: unknown }).customTests;
+    //? DD-TR-various — empty-stub contract (documented decision):
+    //? A test file that exports an empty array (or no `customTests` export) is
+    //? silently skipped, NOT emitted as a `skipped` result. Rationale: AI-generated
+    //? stub files start life empty; surfacing them as "skipped" every run adds noise
+    //? before the author fills them in. The `CustomTestResult` status union therefore
+    //? stays `'pass' | 'fail' | 'xfail' | 'xpass'` — no `'skipped'` variant.
+    //? If you need to track unfilled stubs, scan `discoverCustomTestFiles()` and
+    //? compare against the results array.
     if (!Array.isArray(exported) || exported.length === 0) {
-      //? File present but no cases — treat as silent skip; the AI hasn't filled it in yet.
       continue;
     }
 
@@ -468,6 +483,17 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
       //? starts clean. tryCatch on the cleanup itself prevents a teardown
       //? throw from masking the original failure.
       await tryCatch(() => built.closeAllWatchers());
+      //? Best-effort session cleanup: if `session.login()` minted a Redis
+      //? session but the case didn't call `session.logout()`, the token
+      //? accumulates until its TTL expires. Delete it now to avoid a slow
+      //? session-key leak across a full sweep run.
+      const residualToken = built.state.token;
+      if (residualToken) {
+        await tryCatch(async () => {
+          const { deleteSession } = await import('@luckystack/login');
+          await deleteSession(residualToken);
+        });
+      }
       const durationMs = Date.now() - started;
 
       let r: CustomTestResult;

@@ -53,6 +53,10 @@ const serverVersion = ((): string => {
   return '0.2.0';
 })();
 
+//? Module-level side effects (server construction + registerTool calls) are
+//? by-design for an MCP server: this module IS the executable entry point and
+//? is never imported as a library. Any consumer importing this module directly
+//? would trigger the side effects, but that's not a supported use case.
 const server = new McpServer({ name: 'luckystack', version: serverVersion });
 
 // ---------------------------------------------------------------------------
@@ -68,8 +72,10 @@ server.registerTool(
   async ({ file }) => {
     const graph = await loadGraph();
     if (!graph) return text(missing('docs/ai-graph.json', 'npm run ai:graph'));
-    const id = resolveNodeId(graph, file);
-    if (!id) return text(`No graph node matches "${file}". Use a src-relative path (e.g. "_functions/foo.ts"). Run \`npm run ai:graph\` if the file is new.`);
+    const resolved = resolveNodeId(graph, file);
+    if (resolved === null) return text(`No graph node matches "${file}". Use a src-relative path (e.g. "_functions/foo.ts"). Run \`npm run ai:graph\` if the file is new.`);
+    if (Array.isArray(resolved)) return text(`"${file}" matches multiple nodes — be more specific:\n${bulletList(resolved)}`);
+    const id = resolved;
     const affected = graph.blastRadius[id] ?? [];
     if (affected.length === 0) return text(`Nothing imports \`${id}\` (transitively). Changing it has no in-project blast radius.`);
     return text(`Changing \`${id}\` can affect ${affected.length} file(s) (transitive importers):\n${bulletList(affected)}`);
@@ -85,8 +91,10 @@ server.registerTool(
   async ({ file }) => {
     const graph = await loadGraph();
     if (!graph) return text(missing('docs/ai-graph.json', 'npm run ai:graph'));
-    const id = resolveNodeId(graph, file);
-    if (!id) return text(`No graph node matches "${file}".`);
+    const resolved = resolveNodeId(graph, file);
+    if (resolved === null) return text(`No graph node matches "${file}".`);
+    if (Array.isArray(resolved)) return text(`"${file}" matches multiple nodes — be more specific:\n${bulletList(resolved)}`);
+    const id = resolved;
     const importers = graph.edges.filter((e) => e.to === id).map((e) => e.from).toSorted();
     if (importers.length === 0) return text(`Nothing directly imports \`${id}\`.`);
     return text(`${importers.length} file(s) directly import \`${id}\`:\n${bulletList(importers)}`);
@@ -97,7 +105,9 @@ server.registerTool(
   'god_nodes',
   {
     description: 'List the most-depended-upon files (highest transitive-dependent count) — the risky-to-change hubs — from the committed dependency graph.',
-    inputSchema: { limit: z.number().int().min(1).max(100).optional().describe('How many to return (default 15).') },
+    //? The generator (generateGraph.mjs) caps the stored list at GOD_NODE_LIMIT=25;
+    //? clamping the schema to 25 avoids misleading the caller that more are available.
+    inputSchema: { limit: z.number().int().min(1).max(25).optional().describe('How many to return (default 15, max 25 — the generator stores only the top 25).') },
   },
   async ({ limit }) => {
     const graph = await loadGraph();
@@ -151,8 +161,11 @@ server.registerTool(
     const index = await readDocFile('docs/AI_DECISIONS_INDEX.md');
     if (index === null) return text(missing('docs/AI_DECISIONS_INDEX.md', 'npm run ai:decisions'));
     if (!tag) return text(index);
-    const rows = grepLines(index, tag).filter((l) => l.trim().startsWith('|'));
-    return text(rows.length > 0 ? `Decisions matching "${tag}":\n${rows.join('\n')}` : `No decisions match "${tag}".`);
+    const { lines, total } = grepLines(index, tag);
+    const rows = lines.filter((l) => l.trim().startsWith('|'));
+    if (rows.length === 0) return text(`No decisions match "${tag}".`);
+    const truncNote = total > rows.length ? `\n\n(showing first ${rows.length} of ${total} matching lines)` : '';
+    return text(`Decisions matching "${tag}":\n${rows.join('\n')}${truncNote}`);
   },
 );
 
@@ -199,8 +212,11 @@ server.registerTool(
   async ({ query }) => {
     const index = await readDocFile('docs/AI_PROJECT_INDEX.md');
     if (index === null) return text(missing('docs/AI_PROJECT_INDEX.md', 'npm run ai:project-index'));
-    const rows = grepLines(index, query).filter((l) => l.trim().startsWith('|') && (l.includes('`api/') || l.includes('`sync/')));
-    return text(rows.length > 0 ? `Routes matching "${query}":\n${rows.join('\n')}` : `No routes match "${query}".`);
+    const { lines, total } = grepLines(index, query);
+    const rows = lines.filter((l) => l.trim().startsWith('|') && (l.includes('`api/') || l.includes('`sync/')));
+    if (rows.length === 0) return text(`No routes match "${query}".`);
+    const truncNote = total > rows.length ? `\n\n(showing first ${rows.length} of ${total} matching lines)` : '';
+    return text(`Routes matching "${query}":\n${rows.join('\n')}${truncNote}`);
   },
 );
 
@@ -228,8 +244,92 @@ server.registerTool(
   async ({ name }) => {
     const doc = await readDocFile('docs/AI_CAPABILITIES.md');
     if (doc === null) return text(missing('docs/AI_CAPABILITIES.md', 'npm run ai:capabilities'));
-    const hits = grepLines(doc, name);
-    return text(hits.length > 0 ? `"${name}" found in capabilities:\n${hits.join('\n')}` : `"${name}" not found in docs/AI_CAPABILITIES.md — it may not exist yet.`);
+    const { lines: hits, total } = grepLines(doc, name);
+    if (hits.length === 0) return text(`"${name}" not found in docs/AI_CAPABILITIES.md — it may not exist yet.`);
+    const truncNote = total > hits.length ? `\n\n(showing first ${hits.length} of ${total} matching lines)` : '';
+    return text(`"${name}" found in capabilities:\n${hits.join('\n')}${truncNote}`);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Graph staleness signal (DD-MCP-staleness)
+// ---------------------------------------------------------------------------
+
+//? The graph artifact is intentionally timestamp-free (the generator strips
+//? all timestamps to keep committed diffs deterministic). Freshness is therefore
+//? surfaced via the filesystem mtime of `docs/ai-graph.json` compared to the
+//? newest source file mtime in `src/`. This is an approximation — a file touch
+//? with no semantic change counts as "newer" — but it gives an agent a reliable
+//? "run ai:graph" nudge when the graph is clearly stale.
+server.registerTool(
+  'graph_status',
+  {
+    description: 'Check whether the committed dependency graph (docs/ai-graph.json) is likely fresh or stale by comparing its mtime to the newest source file in src/. Returns the graph mtime, the newest source mtime, and a staleness verdict.',
+    inputSchema: {},
+  },
+  async () => {
+    const root = await projectRoot();
+    const graphPath = path.join(root, 'docs', 'ai-graph.json');
+    let graphMtime: Date | null = null;
+    try {
+      const stat = await fs.stat(graphPath);
+      graphMtime = stat.mtime;
+    } catch {
+      return text('docs/ai-graph.json not found. Generate it with `npm run ai:graph`.');
+    }
+
+    //? Walk src/ up to a shallow budget to find the newest source file mtime.
+    //? We use a BFS capped at 5000 entries so a huge repo never makes this tool
+    //? slow. Missing src/ (non-standard layout) degrades to mtime-only output.
+    const srcDir = path.join(root, 'src');
+    let newestSrcMtime: Date | null = null;
+    let newestSrcFile = '';
+    const queue: string[] = [srcDir];
+    let visited = 0;
+    while (queue.length > 0 && visited < 5000) {
+      const dir = queue.shift();
+      if (dir === undefined) break;
+      let entries: { name: string; isDirectory: () => boolean }[] = [];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        visited++;
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== 'node_modules' && !entry.name.startsWith('.')) queue.push(full);
+        } else if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name)) {
+          try {
+            const st = await fs.stat(full);
+            if (newestSrcMtime === null || st.mtime > newestSrcMtime) {
+              newestSrcMtime = st.mtime;
+              newestSrcFile = path.relative(root, full).replaceAll('\\', '/');
+            }
+          } catch {
+            //? skip unreadable entries
+          }
+        }
+      }
+    }
+
+    const graphAge = `docs/ai-graph.json last generated: ${graphMtime.toISOString()}`;
+    if (newestSrcMtime === null) {
+      return text(`${graphAge}\n\nNo source files found under src/ — could not determine staleness.`);
+    }
+    const srcAge = `Newest src/ file: ${newestSrcFile} (${newestSrcMtime.toISOString()})`;
+    const deltaMs = newestSrcMtime.getTime() - graphMtime.getTime();
+    let verdict: string;
+    if (deltaMs <= 0) {
+      verdict = 'FRESH — graph is at least as new as the newest source file.';
+    } else if (deltaMs < 30_000) {
+      verdict = 'LIKELY FRESH — graph is within 30 s of the newest source file (filesystem clock skew).';
+    } else {
+      const minutes = Math.round(deltaMs / 60_000);
+      verdict = `STALE — newest source file is ${minutes} minute(s) newer than the graph. Run \`npm run ai:graph\` to refresh.`;
+    }
+    return text(`${graphAge}\n${srcAge}\n\nVerdict: ${verdict}`);
   },
 );
 
@@ -246,5 +346,8 @@ const main = async (): Promise<void> => {
 
 main().catch((error: unknown) => {
   console.error('[luckystack-mcp] fatal:', error);
-  process.exitCode = 1;
+  //? process.exit ensures the process terminates immediately on a fatal boot
+  //? error instead of spinning in an empty event loop.
+  // eslint-disable-next-line unicorn/no-process-exit -- MCP binary is a CLI entry point; exit is intentional
+  process.exit(1);
 });

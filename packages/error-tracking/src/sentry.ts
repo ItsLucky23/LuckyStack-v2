@@ -10,15 +10,21 @@
 import { createRequire } from 'node:module';
 
 import {
+  appendErrorTracker,
   getLogger,
   getProjectName,
+  getRedactedLogKeys,
   initSharedSentry,
   loadPeer,
+  REDACTED_PLACEHOLDER,
+  sanitizeForLog,
   captureException as sharedCaptureException,
   captureMessage as sharedCaptureMessage,
   setSentryUser as sharedSetSentryUser,
   startSpan as sharedStartSpan,
 } from '@luckystack/core';
+
+import { createSentryAdapter } from './adapters/sentry';
 
 import { getSentryConfig } from './sentryConfig';
 import { enableErrorTrackingAutoInstrumentation } from './autoInstrumentation';
@@ -85,15 +91,49 @@ const resolveSentryInitConfig = (): ResolvedSentryInitConfig | null => {
   return { dsn, isProduction, enabledOverride, tracesSampleRate, ignoreErrors };
 };
 
-//? beforeSend-assembly step. Strips sensitive cookies before an event is sent —
-//? identical body to the inline closure it replaces. Defined at module scope as
-//? a plain handler (rather than a factory returning a closure) so it carries no
-//? hidden state and is reused as-is for every init.
+//? ET-O5: redact sensitive headers, cookies, request.data, query_string,
+//? extra, and breadcrumb data in Sentry events using the same denylist
+//? as `sanitizeForLog`. Previously only `request.cookies` was removed.
+//? `sanitizeForLog` deep-scrubs objects by key; raw header maps and extra
+//? dicts are passed through it so all registered redacted keys are masked.
 type SentryBeforeSend = NonNullable<Parameters<SentryModule['init']>[0]>['beforeSend'];
+
+const redactSentryHeaders = (
+  headers: Record<string, string | string[] | undefined> | undefined,
+): Record<string, string | string[] | undefined> | undefined => {
+  if (!headers) return headers;
+  const denylist = new Set(getRedactedLogKeys().map((k) => k.toLowerCase()));
+  const out: Record<string, string | string[] | undefined> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    out[key] = denylist.has(key.toLowerCase()) ? REDACTED_PLACEHOLDER : value;
+  }
+  return out;
+};
+
 const builtinBeforeSend: SentryBeforeSend = (event) => {
-  // Remove sensitive data if needed
-  if (event.request?.cookies) {
-    delete event.request.cookies;
+  if (event.request) {
+    //? Wipe the entire cookies object (session tokens live here).
+    if (event.request.cookies) {
+      delete event.request.cookies;
+    }
+    //? Scrub sensitive authorization / cookie header values.
+    if (event.request.headers) {
+      event.request.headers = redactSentryHeaders(
+        event.request.headers,
+      ) as typeof event.request.headers;
+    }
+    //? request.data may carry POST body or JSON-encoded form fields.
+    if (event.request.data !== undefined && event.request.data !== null && typeof event.request.data === 'object') {
+      event.request.data = sanitizeForLog(event.request.data);
+    }
+    //? query_string may be a string ("token=abc") or a parsed object.
+    if (event.request.query_string !== undefined && typeof event.request.query_string === 'object') {
+      event.request.query_string = sanitizeForLog(event.request.query_string) as typeof event.request.query_string;
+    }
+  }
+  //? extra dict is the framework's per-capture context map (CORE-O4 fix extended).
+  if (event.extra) {
+    event.extra = sanitizeForLog(event.extra) as typeof event.extra;
   }
   return event;
 };
@@ -125,18 +165,28 @@ const buildSentryInitOptions = (
 
 //? Integration-wiring step: bridge the live `@sentry/node` SDK onto the shared
 //? DI surface exposed from `@luckystack/core` so framework code can report
-//? errors without a direct dep on `@sentry/node`. Body is byte-for-byte the
-//? same `initSharedSentry({...})` call that was inline.
+//? errors without a direct dep on `@sentry/node`.
+//? ET-O3: captureException / captureMessage are now no-ops in the legacy DI
+//? slot because `createSentryAdapter()` (registered below in `initializeSentry`)
+//? handles them via `captureExceptionAcrossTrackers` with per-event ALS identity
+//? (`withIdentity`). Keeping direct calls here would double-fire every Sentry
+//? event. setUser / setContext / startInactiveSpan are kept for legacy callers
+//? that bypass the adapter path.
+//? ET-N5 (mixed-mode double-capture): calling both `initializeSentry()` AND
+//? `appendErrorTracker(createSentryAdapter())` is safe — `appendErrorTracker`
+//? de-dupes by name and replaces the existing 'sentry' entry. Calling
+//? `registerErrorTracker(createSentryAdapter())` after `initializeSentry()`
+//? replaces ALL adapters (not append), so the original adapter is removed.
+//? Do NOT add a second `Sentry.init()` call — only one SDK init is supported.
 const wireSharedSentryDI = (Sentry: SentryModule): void => {
+  //? ET-O12: the `SentryInstance` contract in `@luckystack/core/sentrySetup` uses
+  //? `unknown` params so core stays dep-free of `@sentry/node`. The casts below
+  //? are therefore required at the boundary: the values are always valid Sentry
+  //? types (they're passed straight through from framework call sites) but TS
+  //? cannot infer that through the `unknown` slot. Document rather than eliminate.
   initSharedSentry({
-    captureException: (exception, context) => Sentry.captureException(
-      exception,
-      context as Parameters<typeof Sentry.captureException>[1],
-    ),
-    captureMessage: (message, level) => Sentry.captureMessage(
-      message,
-      level as Parameters<typeof Sentry.captureMessage>[1],
-    ),
+    captureException: () => '',
+    captureMessage: () => '',
     setUser: (user) => {
       Sentry.setUser(user as Parameters<typeof Sentry.setUser>[0]);
     },
@@ -169,6 +219,14 @@ export const initializeSentry = () => {
   // Wire the shared DI surface exposed from @luckystack/core so framework code
   // can report errors without taking a direct dependency on @sentry/node.
   wireSharedSentryDI(Sentry);
+
+  //? ET-O3: register the adapter so per-event identity comes from ALS
+  //? (`withIdentity` in `createSentryAdapter`) rather than the process-global
+  //? `Sentry.setUser()` scope that `wireSharedSentryDI` sets. The adapter uses
+  //? `getCurrentErrorTrackerIdentity()` per-capture so concurrent requests can't
+  //? bleed their user identity across events. `appendErrorTracker` de-dupes by
+  //? name (`'sentry'`) so repeated `initializeSentry()` calls stay idempotent.
+  appendErrorTracker(createSentryAdapter());
 
   //? Register the hook subscribers that previously lived as direct imports
   //? in `@luckystack/api` and `@luckystack/sync`. Idempotent — calling

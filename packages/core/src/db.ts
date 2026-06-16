@@ -38,9 +38,13 @@ export const prisma = new Proxy({} as PrismaClient, {
   //? Mirrors the `redis` proxy. Non-function reads (model delegates like
   //? `prisma.user`) pass through untouched, so their methods bind to the
   //? delegate as before.
-  get: (_target, prop, receiver) => {
+  get: (_target, prop, _receiver) => {
     const real = getPrismaClient() as object;
-    const value: unknown = Reflect.get(real, prop, receiver);
+    //? Pass `real` (not the Proxy) as the receiver so that getter-backed
+    //? private fields (Prisma uses #-private slots internally) look up their
+    //? slot on the real target instead of on the Proxy, which has no private
+    //? slots and would throw TypeError (CORE-N9).
+    const value: unknown = Reflect.get(real, prop, real);
     if (typeof value !== 'function') return value;
     const fn = value as (...args: unknown[]) => unknown;
     return fn.bind(real);

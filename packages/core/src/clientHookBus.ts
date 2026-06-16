@@ -25,6 +25,7 @@
 //? uses (see ARCHITECTURE_EXTENSION_POINTS.md `@luckystack/login` section).
 
 import type { BaseSessionLayout } from './sessionTypes';
+import { getLogger } from './loggerRegistry';
 
 export interface ClientHookPayloadMap {
   //? Fires BEFORE the framework commits a null → session transition.
@@ -123,11 +124,11 @@ export function dispatchClientHook<N extends ClientHookName>(
       const result = handler(payload);
       if (result && typeof (result as Promise<unknown>).catch === 'function') {
         (result as Promise<unknown>).catch((error: unknown) => {
-          console.error(`[clientHook:${name}] async handler rejected:`, error);
+          getLogger().error(`[clientHook:${name}] async handler rejected`, error);
         });
       }
     } catch (error) {
-      console.error(`[clientHook:${name}] handler threw:`, error);
+      getLogger().error(`[clientHook:${name}] handler threw`, error);
     }
   }
 }
@@ -155,7 +156,7 @@ export async function dispatchVetoableClientHook<N extends ClientHookName>(
     try {
       result = await handler(payload);
     } catch (error) {
-      console.error(`[clientHook:${name}] vetoable handler threw:`, error);
+      getLogger().error(`[clientHook:${name}] vetoable handler threw`, error);
       continue;
     }
     if (result?.stop) {

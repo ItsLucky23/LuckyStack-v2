@@ -91,8 +91,8 @@ To customize auth/redirect rules: edit `src/_functions/middlewareHandler.ts` —
 | `config.ts` | Project-wide framework config (CORS, session, logging, rate limiting, …) |
 | `deploy.config.ts` | Resource topology (Redis, Mongo) |
 | `services.config.ts` | Service / preset definitions for multi-instance deploys |
-| `luckystack/login/oauthProviders.ts` | Enabled OAuth providers (Google, GitHub, Discord, …) |
-| `luckystack/login/userAdapter.ts` | How auth flows look up / create users |
+| `@luckystack/login/register` | OAuth providers auto-wire from env at boot — no file needed; set the env vars in `.env.local` |
+| `@luckystack/login/register` | User adapter self-wires via `defaultPrismaUserAdapter`; override by calling `registerUserAdapter()` in `luckystack/server/index.ts` |
 | `luckystack/core/clients.ts` | Override Prisma / Redis clients (TLS, Accelerate, sentinel, …) |
 | `luckystack/server/index.ts` | Hook registrations + `customRoutes` + notification wiring |
 | `luckystack/i18n/locales.ts` | Translation registry — register `_locales/*.json` and the language source |

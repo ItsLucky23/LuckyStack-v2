@@ -357,7 +357,8 @@ describe('lifecycle (presence grace timers)', () => {
       expect(informRoomPeersMock).toHaveBeenCalledWith({
         token: 'tok',
         event: 'userAfk',
-        extraData: { time: 20_000 },
+        //? ignoreSelf: true so the disconnecting tab does not receive its own AFK echo.
+        extraData: { time: 20_000, ignoreSelf: true },
       });
       expect(disconnect).toHaveBeenCalledWith(false);
     });

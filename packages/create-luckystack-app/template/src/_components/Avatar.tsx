@@ -93,7 +93,7 @@ export default function Avatar({ user, textSize = 'text-lg' }: AvatarProps) {
   if (displayed.state === 'fallback' || !displayed.url) {
     return (
       <div
-        className={`rounded-full aspect-square text-white flex items-center justify-center w-full h-full select-none ${textSize}`}
+        className={`rounded-full aspect-square text-title-primary flex items-center justify-center w-full h-full select-none ${textSize}`}
         style={{ backgroundColor: user.avatarFallback ?? '#9ca3af' }}
       >
         {user.name ? user.name[0].toUpperCase() : null}
