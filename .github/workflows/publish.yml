@@ -63,6 +63,13 @@ jobs:
           test -s src/docs/apiDocs.generated.json
           ls server/prod/generatedApis.*.ts
 
+      # Build packages before linting: eslint.luckystack.config.js imports
+      # @luckystack/core/eslint (the custom-rules subpath, resolved from core's
+      # dist). Without the dist, eslint can't load its config and exits with
+      # code 2 — so both lint steps MUST run after the package dist exists.
+      - name: Build packages (lint depends on @luckystack/* dist)
+        run: npm run build:packages
+
       - name: Lint
         run: npm run lint
 
