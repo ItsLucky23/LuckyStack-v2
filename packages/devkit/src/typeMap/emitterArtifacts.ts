@@ -441,7 +441,12 @@ type _ProjectSyncTypeMap = {
 					clientOutput: entry.clientOutput,
 					serverStream: entry.serverStream,
 					clientStream: entry.clientStream,
-					path: pagePath === 'root' ? `sync/${syncName}/${version}` : `sync/${pagePath}/${syncName}/${version}`,
+					//? `extractSyncPagePath` returns the `'system'` sentinel (NOT
+					//? `'root'`) for a src-root sync, matching the loader's runtime key
+					//? (`sync/system/<name>/<version>`) AND the wire name the typed
+					//? `syncRequest` sends. The old `pagePath === 'root'` branch is now
+					//? dead and would emit a non-matching path, so it is removed.
+					path: `sync/${pagePath}/${syncName}/${version}`,
 					...(entry.meta ? { meta: entry.meta } : {}),
 				});
 

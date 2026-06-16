@@ -77,7 +77,7 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `extractTokenFromSocket(socket): string \| null` | Read session token from Socket.io handshake (cookie + header). | -> docs/socket-bootstrap.md |
 | `extractTokenFromRequest(request): string \| null` | Read session token from a Node IncomingMessage (cookie + `Authorization: Bearer`). | -> docs/socket-bootstrap.md |
 | `allowedOrigin(origin: string): boolean` | Same-origin + project-configured allow-list CORS check; dispatches `corsRejected` hook on miss. | -> docs/socket-bootstrap.md |
-| `validateRequest({ data, user, auth }): ValidationResult` | Auth gate driven by `AuthProps`; checks login + `additional[]` predicates. | -> docs/session-types.md |
+| `validateRequest({ auth, user }): ValidationResult` | Evaluates the `auth.additional[]` predicates against the session; returns success immediately when `additional` is absent. Does NOT check `auth.login` — login is enforced by the surrounding API/sync handler, not by this function. | -> docs/session-types.md |
 | `isFalsy(value): boolean` | Helper used inside `validateRequest`. | -> docs/session-types.md |
 | `validateInputByType(value, type)` | Runtime input validation; lazy-loads `@luckystack/devkit` in dev. | -> docs/session-types.md |
 | `registerNotifier(notifier: Notifier): void` | DI for client-side toast notifier (success/error/info/warning). | -> docs/app-bootstrap.md |
@@ -96,13 +96,21 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `resetLoggerForTests(): void` | Test-only — restore default logger. | -> docs/app-bootstrap.md |
 | `registerRedactedLogKeys(keys: Iterable<string>): void` | Add keys that the framework will redact from log payloads. | -> docs/app-bootstrap.md |
 | `getRedactedLogKeys(): Set<string>` | Read current redacted-keys set. | -> docs/app-bootstrap.md |
-| `isRedactedLogKey(key: string): boolean` | Hot-path lookup used inside the framework. | -> docs/app-bootstrap.md |
+| `isRedactedLogKey(key: string): boolean` | Hot-path lookup used inside the framework. Matches the exact registered set AND any key whose lowercased form ENDS WITH a sensitive suffix (`token`/`secret`/`apikey`/`password`) — so `targetToken` / `clientSecret` / `stripeApiKey` redact without being registered, while `tokenCount` / `secretSanta` stay untouched. | -> docs/app-bootstrap.md |
 | `resetRedactedLogKeysForTests(): void` | Test-only reset. | -> docs/app-bootstrap.md |
+| `sanitizeForLog(value): unknown` | Recursive redaction pass — deep-clones `value`, replacing any redacted-key field with `REDACTED_PLACEHOLDER`. Applied on the `captureException`/`captureMessage` fan-out so a raw token nested in context never reaches an adapter (SYNC-17). | -> docs/app-bootstrap.md |
+| `DEFAULT_REDACTED_LOG_KEYS: readonly string[]` | The built-in masked-key set (token, password, authorization, cookie, csrfToken, apiKey, secret, …) seeded into the redacted-keys registry. Widened in 0.2.0 (added `csrftoken`/`apikey`/`secret`) plus suffix matching in `isRedactedLogKey`. | -> docs/app-bootstrap.md |
+| `REDACTED_PLACEHOLDER: string` | The constant `sanitizeForLog` substitutes for a redacted value. | -> docs/app-bootstrap.md |
 | `initConsolelog(): void` | Monkey-patch `console.*` to render trailing color string (dev only). | -> docs/app-bootstrap.md |
 | `registerLocaleReloader(reloader: LocaleReloader): void` | DI for the dev-only i18n hot-reload trigger. | -> docs/app-bootstrap.md |
 | `getLocaleReloader(): LocaleReloader \| null` | Read active reloader (returns null when no project supplied one). | -> docs/app-bootstrap.md |
 | `registerErrorTracker(tracker: ErrorTracker): void` | Single-tracker registration (replaces previous). | -> docs/error-tracker-registry.md |
 | `registerErrorTrackers(trackers: ErrorTracker[]): void` | Multi-tracker registration (replaces the list). | -> docs/error-tracker-registry.md |
+| `appendErrorTracker(tracker: ErrorTracker): void` | Accumulate-not-replace registration — appends a tracker, deduping by `ErrorTracker.name`. Use for async auto-registration (e.g. PostHog) so it can't clobber a consumer overlay. | -> docs/error-tracker-registry.md |
+| `runWithErrorTrackerIdentity(user, fn): T` / `getCurrentErrorTrackerIdentity(): ErrorTrackerUser \| null` | AsyncLocalStorage per-event identity — wrap request handling in `runWithErrorTrackerIdentity(user, fn)` and capture sites read the current identity instead of a mutable global (no cross-request bleed). | -> docs/error-tracker-registry.md |
+| `registerPreCaptureFilter(filter: PreCaptureFilter): void` | Register a filter run before every capture fan-out (drop/transform events centrally). | -> docs/error-tracker-registry.md |
+| `startSpanHandle(name, op): SpanHandle` | Handle-style span — returns a `{ finish() }` handle (vs the callback-style `startSpanAcrossTrackers`). | -> docs/error-tracker-registry.md |
+| `flushErrorTrackers(): Promise<void>` | Flush lifecycle — calls every adapter's optional `flush?()`; call on shutdown so buffered events aren't lost. | -> docs/error-tracker-registry.md |
 | `getActiveErrorTrackers(): ErrorTracker[]` | Read active trackers. | -> docs/error-tracker-registry.md |
 | `captureExceptionAcrossTrackers(error, context?): void` | Fan-out exception capture; per-tracker errors are swallowed. | -> docs/error-tracker-registry.md |
 | `captureMessageAcrossTrackers(message, level, context?): void` | Fan-out message capture. | -> docs/error-tracker-registry.md |
@@ -136,8 +144,13 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `dispatchSyncHook<TName>(name, payload): void` | Internal: framework code invokes sync handlers; payload is mutated in place. | -> docs/hooks.md |
 | `BaseSessionLayout`, `SessionLocation`, `AuthProps` (types) | Foundational session-shape types; project `SessionLayout` extends `BaseSessionLayout`. | -> docs/session-types.md |
 | `HookSessionShape`, `HookName`, `HookHandler`, `HookResult`, `HookStopSignal`, `HookPayloads` (types) | Hook contract types (augmentable via TS module augmentation). | -> docs/hooks.md |
+| `preServerStop` hook + `PreServerStopPayload` (type) | Graceful-shutdown lifecycle hook — `@luckystack/server` dispatches it once on SIGTERM/SIGINT before the server stops accepting connections. Payload `{ reason, timeoutMs? }`. Best-effort (a stop signal does NOT abort shutdown); use to flush trackers / drain queues / close pools. | -> docs/hooks.md |
 | `isOnline()` / `enqueueApiRequest` / `enqueueSyncRequest` / `removeApiQueueItem` / `removeSyncQueueItem` / `removeApiQueueItemsByKey` / `flushApiQueue` / `flushSyncQueue` / `getApiQueueSize` / `getSyncQueueSize` | Client-side offline queue with per-item `dropPolicy` and global max-size/max-age caps. | -> docs/socket-bootstrap.md |
 | `getCsrfToken()`, `clearCsrfToken()`, `httpFetch(...)` | CSRF-aware fetch wrapper used by the client transport. | -> docs/socket-bootstrap.md |
+| `issueOneTimeToken(namespace, ttlSeconds, payload): OneTimeTokenHandle` | Mint a single-use Redis-backed token (returns `{ token, store() }`). HASHED AT REST — only `sha256(token)` is stored as the key, never the raw token. Used by `@luckystack/login` for password-reset + email-change links. | -> docs/app-bootstrap.md |
+| `consumeOneTimeToken(namespace, token): Promise<string \| null>` | Atomically validate + consume a one-time token (single `MULTI` GET+DEL → at-most-once). Returns the stored payload string, or null on miss/expired/reused. | -> docs/app-bootstrap.md |
+| `consumeOneTimeTokenJson<T>(namespace, token): Promise<T \| null>` | `consumeOneTimeToken` + JSON-parse; null on miss OR malformed payload. | -> docs/app-bootstrap.md |
+| `OneTimeTokenHandle` (type) | `{ token: string; store(): Promise<void> }` returned by `issueOneTimeToken`. | -> docs/app-bootstrap.md |
 | `registerCsrfConfig(input: Partial<CsrfConfig>): void` | Override the CSRF cookie name, header name, token length, or cookie options. | -> docs/csrf-config.md |
 | `getCsrfConfig(): CsrfConfig` | Read the active CSRF config at call time (defaults to `DEFAULT_CSRF_CONFIG`). | -> docs/csrf-config.md |
 | `DEFAULT_CSRF_CONFIG: CsrfConfig` | Built-in defaults (`csrf-token` cookie, `x-csrf-token` header, 32-byte token). | -> docs/csrf-config.md |
@@ -150,7 +163,10 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `readBootUuid(envKey?): Promise<string \| null>` | Read the boot UUID (router cross-checks against `/_health`). | -> docs/app-bootstrap.md |
 | `resolveEnvKey(): string` | `LUCKYSTACK_ENV` -> `NODE_ENV` -> `'development'`. | -> docs/app-bootstrap.md |
 | `BOOT_KEY_PREFIX: 'luckystack:boot:'` | Constant — single source of truth so router can't drift. | -> docs/app-bootstrap.md |
-| `collectSynchronizedEnvKeys()` / `computeSynchronizedEnvHashes()` / `hashSynchronizedValue()` | Cross-env drift detection helpers for the router boot handshake. | -> docs/app-bootstrap.md |
+| `collectSynchronizedEnvKeys()` / `computeSynchronizedEnvHashes(bootUuid?)` / `hashSynchronizedValue(value, bootUuid?)` | Cross-env drift detection helpers for the router boot handshake. Both hash helpers now honour `http.healthHash` (default `'plain'` = byte-identical to before); the optional `bootUuid?` arg is only needed when `http.healthHash.salt === '@bootUuid'`. Zero-arg callers unchanged. | -> docs/app-bootstrap.md |
+| `hashSynchronizedValueWith({ mode, salt }, value)` / `resolveHealthHashConfig(bootUuid?)` | Shared health-hash primitives so the router can hash a local value with the SAME `{mode,salt}` (+ resolved boot UUID) the backend used and the boot-handshake compare still matches. | -> docs/app-bootstrap.md |
+| `registerRoomNameFormatter(fn)` / `getRoomNameFormatter()` / `formatRoomName(raw, ctx)` / `defaultRoomNameFormatter` | Room-name formatter registry — route a raw room name through `formatRoomName(raw, { purpose, userId })` (e.g. per-tenant prefixing). Default is identity. Types `RoomNameFormatter` / `RoomNameFormatterContext`. | -> docs/socket-bootstrap.md |
+| `applyCookiePrefixConstraints(baseName, prefix, secureOverride?)` (via `cookies` barrel) | Pure `__Host-`/`__Secure-` constraint resolver for the server session-cookie builder (forces `Secure`, forbids `Domain`, pins `Path=/` per the prefix rules). Type `CookiePrefixConstraints`. | -> docs/socket-bootstrap.md |
 | `tryCatch<T>(fn): Promise<[Error \| null, T \| null]>` | Tuple-style async error handling used everywhere in the framework. | -> docs/app-bootstrap.md |
 | `sleep(ms): Promise<void>` | `setTimeout`-based delay. | -> docs/app-bootstrap.md |
 | `getParams(request)` | Parse URL params from a Node request. | -> docs/app-bootstrap.md |
@@ -161,7 +177,22 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `socketEvents` exports | Wire-protocol constants for socket events. | -> docs/socket-bootstrap.md |
 | `paths` exports (`getGeneratedApiDocsPath`, `getApiMethodMapPath`, ...) | Paths resolved through `projectConfig.paths`. | -> docs/config-registry.md |
 | `cookies` exports | Cookie parse/serialise helpers used by the HTTP layer. | -> docs/socket-bootstrap.md |
-| `httpApiUtils` exports | Shared HTTP helpers (status codes, header writers). | -> docs/socket-bootstrap.md |
+| `httpApiUtils` exports (`inferHttpMethod`, `getEffectiveHttpMethod`, `isMethodAllowed`) | Shared HTTP helpers (method inference + validation). NOTE: `isMethodAllowed` returns false for `OPTIONS` — answer preflights before the route check. | -> docs/socket-bootstrap.md |
+| `tryCatchSync<T>(fn): [Error \| null, T \| null]` | Synchronous tuple-style error handling (sync counterpart to `tryCatch`). | -> docs/app-bootstrap.md |
+| `deepMerge<T>(base, override)` / `isPlainObject(value)` (`configUtils`) | Shared config deep-merge primitive (every registry routes through it) + plain-object guard. Skips `__proto__`/`constructor`/`prototype` keys. | -> docs/config-registry.md |
+| `createRegistry(...)` | Generic DI-slot registry factory backing the config/client/strategy registries. | -> docs/config-registry.md |
+| `resolveClientIp({ rawAddress, headers, trustProxy })` / `UNKNOWN_CLIENT_IP` | Resolve the real client IP for per-IP rate-limit keying (XFF/x-real-ip only when `trustProxy`). | -> docs/app-bootstrap.md |
+| `isLoopbackIp(ip: string): boolean` | True for `127.0.0.0/8` / `::1` / `localhost`. Used for `rateLimiting.skipLoopbackInDev` keying (skip the cross-route IP abuse cap for loopback in non-prod). | -> docs/app-bootstrap.md |
+| `registerStrayPrefixCommand(...commands)` | Opt a custom single-key Redis command into the `redis` proxy's stray-prefix net. | -> docs/redis-adapter.md |
+| `attachSocketRedisAdapter(io, options?)` | Now accepts `{ adapterOptions, pubClient, subClient }` to tune `createAdapter` / supply pre-built clients. | -> docs/redis-adapter.md |
+
+### `/client` subpath (browser-safe React + i18n surface)
+
+Imported from `@luckystack/core/client` (the server barrel intentionally does NOT export these): `apiRequest`, `syncRequest` + sync-callback helpers, the offline-queue API, `registerClientHook` (returns an unsubscribe) + `ClientHookPayloadMap` (`preLogin`/`postLogin`/`postLogout`/`queueItemDropped`), `useTheme`, the `TranslationProvider` + i18n registry, `SessionProvider`/session context, `registerMiddlewareHandler`/`registerPageMiddleware`, and the CSRF-aware `httpFetch`.
+
+### `./eslint` subpath
+
+`@luckystack/core/eslint` exposes the shared ESLint rule set (the CLAUDE.md-invariant rules). Requires the optional `eslint@^9.0.0` peer.
 
 ## Config keys
 
@@ -181,7 +212,9 @@ Env vars read directly by core (via `env.ts` and call-time helpers):
 | `LUCKYSTACK_ENV` | (unset) | `resolveEnvKey()` first preference (boot UUID, router handshake). |
 | `LUCKYSTACK_ENV_FILES` | `.env,.env.local` | Ambient override for `getEnvFiles()` / `loadEnvFiles()` — comma-separated list of env files to load, "later overrides earlier". |
 
-`registerProjectConfig` slots (see `ProjectConfig` for full surface): `app.publicUrl`, `logging.*`, `rateLimiting.{enabled, store, redisKeyPrefix, defaultApiLimit, defaultIpLimit, windowMs, cleanupIntervalMs}`, `session.{basedToken, expiryDays, perBrowser, perUser, maxConcurrentPerUser, onConflict, notifyOldDeviceOnRevoke, projectName}`, `http.{sessionCookie*, requestBodyMaxBytes, healthEndpoint, liveEndpoint, readyEndpoint, testResetEndpoint, stream, securityHeaders, cors}`, `auth.{passwordPolicy, emailMaxLength, nameMaxLength, bcryptRounds, providerAccountStrategy, forgotPassword, passwordResetTtlSeconds, passwordResetBrand}`, `socket.{maxHttpBufferSize, pingTimeout, pingInterval}`, `sync.{streamThrottle, fanoutYieldEvery, fanoutYieldMs}`, `offlineQueue.{maxSize, maxAgeMs, dropPolicy}`, `dev.{hotReloadDebounceMs, watcherStabilityThresholdMs, watcherPollIntervalMs, warnOnMissingInputType}`, `paths.*`, `defaultLanguage`, `defaultTheme`, `socketActivityBroadcaster`, `socketStatusIndicator`, `locationProviderEnabled`, `loginRedirectUrl`.
+`registerProjectConfig` slots (see `ProjectConfig` for full surface): `app.publicUrl`, `logging.*`, `rateLimiting.{enabled, store, redisKeyPrefix, defaultApiLimit, defaultIpLimit, windowMs, cleanupIntervalMs, onStoreError, skipLoopbackInDev, identity, auth}`, `session.{basedToken, expiryDays, perBrowser, perUser, maxConcurrentPerUser, onConflict, notifyOldDeviceOnRevoke, projectName}`, `http.{sessionCookie*, sessionCookieDomain, sessionCookiePrefix, sessionCookieSecure, requestBodyMaxBytes, trustProxy, healthEndpoint, liveEndpoint, readyEndpoint, testResetEndpoint, healthHash, stream, securityHeaders, cors}`, `auth.{credentials, oauthStateTtlSeconds, passwordPolicy, emailMaxLength, nameMaxLength, bcryptRounds, providerAccountStrategy, forgotPassword, passwordResetTtlSeconds, passwordResetBrand, emailChangeTtlSeconds, allowRegistration, passwordResetPath, emailChangeConfirmPath}`, `socket.{maxHttpBufferSize, pingTimeout, pingInterval, activityHeartbeatThrottleMs}`, `api.{requestTimeoutMs}`, `validation.{runtimeMode}`, `sync.{streamThrottle, fanoutYieldEvery, fanoutYieldMs, requestTimeoutMs, allowClientReceiverAll, requireRoomMembership, flushPressure}`, `offlineQueue.{maxSize, maxAgeMs, dropPolicy}`, `dev.{hotReloadDebounceMs, watcherStabilityThresholdMs, watcherPollIntervalMs, warnOnMissingInputType}`, `deploy.routing.{upstreamTimeoutMs, websocketService, routerHealthPath, maxRequestBodyBytes}` (via `registerDeployConfig`), `paths.*`, `defaultLanguage`, `defaultTheme`, `socketActivityBroadcaster`, `socketStatusIndicator`, `locationProviderEnabled`, `loginRedirectUrl`, `oauthCallbackBase`.
+
+> **New 0.2.0 keys (all additive — a missing key keeps prior behavior EXCEPT `validation.runtimeMode`):** `validation.runtimeMode` (`'enforce'` default — prod input validation now ACTUALLY runs; set `'off'` to restore the old prod no-op). `rateLimiting.skipLoopbackInDev` (default `false`; skip the cross-route IP cap for loopback in dev), `rateLimiting.identity` (callback overriding the per-route bucket basis), `rateLimiting.auth` (`{ enabled false, maxAttempts 5, windowMs 900000 }` — per-account login lockout slot). **BREAKING — `sync.allowClientReceiverAll` (default now `false`, was `true`) + `sync.requireRoomMembership` (default now `true`, was `false`): a client can no longer broadcast to `'all'` nor target an unjoined room by default — join the room, approve via `preSyncAuthorize`, or opt back into the permissive values.** `sync.flushPressure` (`{ highWaterMarkChunks 1000, lowWaterMarkChunks 250, maxBufferedBytes 5242880 }`). **BREAKING — `http.healthHash` (`{ mode: 'plain'|'salted'|'hmac', salt: string }`) now DEFAULTS to `{ mode: 'hmac', salt: '@bootUuid' }`: `/_health` no longer exposes a stable, unsalted `sha256(secret)` — the synchronized-env fingerprint is HMAC-keyed on the per-boot UUID (rotates each restart). When no boot UUID is available the `'@bootUuid'` sentinel collapses to `'plain'` so the boot handshake never silently diverges. Set a non-empty `salt` to pin a stable key, or `mode:'plain'` to restore legacy wire output.** `http.sessionCookieDomain`/`sessionCookiePrefix` (`'__Host-'`/`'__Secure-'`)/`sessionCookieSecure`. `socket.activityHeartbeatThrottleMs` (default `10000`). `auth.allowRegistration` (default `true`), `auth.passwordResetPath` (default `'/reset-password'`), `auth.emailChangeConfirmPath` (default `'/confirm-email-change'`). `deploy.routing.{upstreamTimeoutMs, websocketService, routerHealthPath, maxRequestBodyBytes}` (all optional — undefined uses the router built-in default).
 
 Other registries: `registerDeployConfig(DeployConfigShape)`, `registerServicesConfig(ServicesConfigShape)`, `registerAvatarConfig(AvatarConfigInput)`, `registerBindAddress({ ip, port })`.
 
@@ -197,8 +230,9 @@ Required:
 
 Optional (mark in `peerDependenciesMeta`):
 
-- `react@^19.0.0`, `react-dom@^19.0.0`, `react-router-dom@^7.0.0` — only consumed by `@luckystack/core/client` and the `react/*` subpath helpers. Pure server boots can skip these.
+- `react@^19.2.0`, `react-dom@^19.2.0`, `react-router-dom@^7.0.0` — only consumed by `@luckystack/core/client` and the `react/*` subpath helpers. Pure server boots can skip these.
 - `sonner@^2.0.0` — only needed if you wire the default sonner-backed notifier from the project's React entry; the core notifier slot itself is library-agnostic.
+- `eslint@^9.0.0` — only needed to consume the shared rules from the `./eslint` subpath; pure runtime usage doesn't require it.
 
 Runtime (bundled): `@socket.io/redis-adapter`, `dotenv`.
 

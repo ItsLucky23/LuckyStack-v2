@@ -18,14 +18,38 @@
 
 import { startRouter } from '../packages/router/src/startRouter';
 
-const currentEnvKey =
-  process.env.LUCKYSTACK_ENV
-  ?? process.env.NODE_ENV
-  ?? 'development';
+const main = async (): Promise<void> => {
+  const currentEnvKey =
+    process.env.LUCKYSTACK_ENV
+    ?? process.env.NODE_ENV
+    ?? 'development';
 
-const localPresetKey = process.env.LUCKYSTACK_PRESET;
+  const localPresetKey = process.env.LUCKYSTACK_PRESET;
 
-await startRouter({
-  currentEnvKey,
-  localPresetKey: localPresetKey && localPresetKey.length > 0 ? localPresetKey : undefined,
+  //? Capture the running handle so SIGINT/SIGTERM can close the Redis
+  //? health-store + pub/sub clients. Discarding it (as before) left those
+  //? connections open on Ctrl-C / SIGTERM. Mirrors the graceful-shutdown
+  //? guard in `@luckystack/router`'s own CLI.
+  const running = await startRouter({
+    currentEnvKey,
+    localPresetKey: localPresetKey && localPresetKey.length > 0 ? localPresetKey : undefined,
+  });
+
+  let shuttingDown = false;
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    process.stdout.write(`\n[router] ${signal} received, shutting down...\n`);
+    await running.stop();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+};
+
+main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  process.stderr.write(`[router] fatal: ${message}\n`);
+  process.exit(1);
 });

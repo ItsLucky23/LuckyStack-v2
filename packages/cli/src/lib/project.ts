@@ -51,6 +51,25 @@ export const parsePackageVersion = (raw: unknown): string => {
   return version;
 };
 
+//? Best-effort read+parse of a package.json. Returns null on a missing/unreadable
+//? file OR invalid JSON (mid-edit, BOM-corrupted, …) so callers on the hot path
+//? can degrade gracefully instead of crashing with a raw SyntaxError stack.
+const readPackageJson = (pkgPath: string): PackageJson | null => {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(pkgPath, 'utf8');
+  } catch {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object') return null;
+    return parsed as PackageJson;
+  } catch {
+    return null;
+  }
+};
+
 //? A LuckyStack project is identified by a package.json that depends on at least
 //? one `@luckystack/*` package AND a top-level `config.ts`. We walk up from the
 //? CWD so the CLI works when invoked from a subdirectory.
@@ -59,15 +78,21 @@ export const findProjectRoot = (startDir: string): ConsumerProject | null => {
   for (;;) {
     const pkgPath = path.join(dir, 'package.json');
     if (fs.existsSync(pkgPath) && fs.existsSync(path.join(dir, 'config.ts'))) {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as PackageJson;
-      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-      //? A consumer project depends on at least one `@luckystack/*` package; the
-      //? framework monorepo itself doesn't, but has `packages/core`. Accept both
-      //? so the scan commands work in either (the `add` commands target consumers).
-      const hasLuckyStack =
-        Object.keys(deps).some((name) => name.startsWith('@luckystack/')) ||
-        fs.existsSync(path.join(dir, 'packages', 'core', 'package.json'));
-      if (hasLuckyStack) return { root: dir, pkg, pkgPath };
+      //? Guard the parse: a malformed / mid-edit `package.json` (here or in an
+      //? ancestor) must NOT throw a raw SyntaxError on the hot path of every
+      //? command — treat an unparseable file as "not a project" and keep walking,
+      //? mirroring the best-effort parsing in the env-key reader.
+      const pkg = readPackageJson(pkgPath);
+      if (pkg) {
+        const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+        //? A consumer project depends on at least one `@luckystack/*` package; the
+        //? framework monorepo itself doesn't, but has `packages/core`. Accept both
+        //? so the scan commands work in either (the `add` commands target consumers).
+        const hasLuckyStack =
+          Object.keys(deps).some((name) => name.startsWith('@luckystack/')) ||
+          fs.existsSync(path.join(dir, 'packages', 'core', 'package.json'));
+        if (hasLuckyStack) return { root: dir, pkg, pkgPath };
+      }
     }
     const parent = path.dirname(dir);
     if (parent === dir) return null;
@@ -177,8 +202,42 @@ export const assetPath = (...segments: string[]): string => {
   return path.join(here, '..', 'assets', ...segments);
 };
 
+//? Resolve a bare command name (`npm`) to an ABSOLUTE path by scanning `PATH`
+//? only — the current directory is intentionally NOT searched, so an `npm.cmd` /
+//? `npm.exe` dropped in the project root can never be picked up. On Windows we try
+//? each `PATHEXT` extension (`.cmd`, `.exe`, …); elsewhere the bare name. Returns
+//? null if not found (caller reports a clean failure).
+const resolveCommandPath = (command: string): string | null => {
+  const rawPath = process.env.PATH ?? process.env.Path ?? '';
+  const dirs = rawPath.split(path.delimiter).filter((d) => d.length > 0);
+  const exts =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((e) => e.length > 0)
+      : [''];
+  for (const dir of dirs) {
+    //? A relative PATH entry could still resolve against cwd — skip those.
+    if (!path.isAbsolute(dir)) continue;
+    for (const ext of exts) {
+      const candidate = path.join(dir, command + ext.toLowerCase());
+      const candidateUpper = path.join(dir, command + ext);
+      if (fs.existsSync(candidate)) return candidate;
+      if (candidateUpper !== candidate && fs.existsSync(candidateUpper)) return candidateUpper;
+    }
+  }
+  return null;
+};
+
 export const runNpmInstall = (root: string): boolean => {
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const result = spawnSync(npm, ['install'], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
+  //? Security (Windows): `spawnSync('npm.cmd', …, { shell: true, cwd: root })` lets
+  //? cmd.exe resolve `npm.cmd` against the CWD BEFORE PATH — a malicious `npm.cmd`
+  //? dropped at the project root would run with the user's privileges. Resolve npm
+  //? to an ABSOLUTE path via PATH (PATHEXT-aware, cwd excluded) and spawn THAT, so
+  //? the command is never resolved relative to `root`.
+  const resolved = resolveCommandPath('npm');
+  if (!resolved) return false;
+  //? A `.cmd`/`.bat` shim still needs cmd.exe to interpret it, but we now hand the
+  //? shell an ABSOLUTE path, so it is never resolved relative to `cwd`.
+  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
+  const result = spawnSync(resolved, ['install'], { cwd: root, stdio: 'inherit', shell: needsShell });
   return result.status === 0;
 };

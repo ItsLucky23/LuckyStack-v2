@@ -3,12 +3,11 @@ import {
   dispatchHook,
   extractTokenFromRequest,
   getLogger,
-  getProjectConfig,
-  resolveClientIp,
   tryCatch,
 } from '@luckystack/core';
 import { handleHttpApiRequest } from '@luckystack/api';
 import { initSseResponse, sendSseEvent, shouldUseHttpStream } from '../sse';
+import { resolveRequesterIp } from './resolveRequesterIp';
 import type { HttpRouteHandler } from './types';
 
 export const handleApiRoute: HttpRouteHandler = async ({
@@ -58,17 +57,10 @@ export const handleApiRoute: HttpRouteHandler = async ({
       : {};
     delete (apiData as Record<string, unknown>).stream;
 
-    //? Resolve the real client IP for per-IP rate limiting. Default
-    //? `http.trustProxy: false` returns the raw `req.socket.remoteAddress`
-    //? (only IPv4-mapped IPv6 canonicalized); a trusted proxy honors
-    //? X-Forwarded-For / X-Real-IP. Preserve the historical `undefined`
-    //? fallback when there is genuinely no address to resolve so downstream
-    //? `?? 'anonymous'` / `?? 'unknown'` bucketing stays byte-identical.
-    const trustProxy = getProjectConfig().http.trustProxy;
-    const rawRemoteAddress = req.socket.remoteAddress;
-    const requesterIp = (rawRemoteAddress || (trustProxy && (req.headers['x-forwarded-for'] || req.headers['x-real-ip'])))
-      ? resolveClientIp({ rawAddress: rawRemoteAddress, headers: req.headers, trustProxy })
-      : undefined;
+    //? Resolve the real client IP for per-IP rate limiting (honors
+    //? `http.trustProxy`; preserves the historical `undefined` fallback when
+    //? there is genuinely no address). See `resolveRequesterIp`.
+    const requesterIp = resolveRequesterIp(req);
 
     const result = await handleHttpApiRequest({
       name: apiName,

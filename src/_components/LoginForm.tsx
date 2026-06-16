@@ -119,7 +119,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     const [error, response] = await tryCatch(fetchUser);
 
     if (error || !response) {
-      notify.error({ key: 'common/.404' })
+      notify.error({ key: 'common.404' })
       console.error(error ?? "No JSON response");
       setLoading(false); return;
     }

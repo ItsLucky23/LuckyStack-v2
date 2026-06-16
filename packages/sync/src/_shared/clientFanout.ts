@@ -20,6 +20,7 @@
 import { tryCatch, socketEventNames, getLogger } from '@luckystack/core';
 import type { RuntimeSyncClientHandler, SyncStreamPayload, SyncErrorEnvelopeInput } from './syncTypes';
 import { ensureSyncErrorShape } from './errorBuilders';
+import { redactToken } from './redactToken';
 
 //? Minimal surface of the per-recipient socket the fanout uses. Both
 //? `RemoteSocket` (cross-instance, via the Redis adapter) and a plain local
@@ -108,7 +109,11 @@ export const processClientSyncForRecipient = async <TError extends object>({
       sync: resolvedName,
       stage: 'client',
       sourceUserId,
-      targetToken: tempToken,
+      //? Redact the raw bearer session token before it lands in the
+      //? error-tracker context (`captureException`) — a verbatim token there is
+      //? a usable credential (defeats HttpOnly-cookie mode). The 8-char prefix
+      //? still correlates error events.
+      targetToken: redactToken(tempToken),
       receiver,
       transport,
     },

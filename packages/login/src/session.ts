@@ -8,9 +8,11 @@ import {
   getProjectConfig,
   formatKey,
   tryCatch,
+  tryCatchSync,
 } from '@luckystack/core';
 
 import { getSessionAdapter } from './sessionAdapter';
+import { applySessionSanitizer } from './sessionSanitizer';
 
 //? Resolved at call time so project registration order doesn't matter.
 //? Session TTL comes from projectConfig and is honoured by every adapter
@@ -44,6 +46,17 @@ const saveSession = async (
   newUser?: boolean,
   options?: { supersedeToken?: string },
 ): Promise<{ ok: true } | { ok: false; errorCode: string }> => {
+  //? Reject a session with an empty `id` (B30). `isSessionLayout` only checks
+  //? the `id` KEY is present, so a custom adapter / caller handing us an
+  //? empty-string id would mint a session that is never tracked in the
+  //? activeUsers set keyed by id — making it invisible to `revokeUserSessions`
+  //? / "sign out everywhere". A real authenticated user always has a non-empty
+  //? id, so this can only reject a malformed/untrackable session.
+  if (!data.id) {
+    getLogger().error('saveSession: refusing to persist a session with an empty user id', { token });
+    return { ok: false, errorCode: 'api.internalServerError' };
+  }
+
   const [error, outcome] = await tryCatch(async () => {
     const adapter = getSessionAdapter();
 
@@ -56,6 +69,36 @@ const saveSession = async (
       if (preSessionCreateResult.stopped) {
         getLogger().warn(`session create aborted by preSessionCreate hook`, { errorCode: preSessionCreateResult.signal.errorCode });
         return { ok: false, errorCode: preSessionCreateResult.signal.errorCode || 'api.internalServerError' } as const;
+      }
+
+      //? `onConflict: 'rejectNew'` enforcement. Previously this was documented
+      //? as "enforced at the API layer" but NO code refused the login — the new
+      //? session was persisted regardless and sessions accumulated unbounded,
+      //? making the documented cap a silent no-op. Enforce it HERE (before any
+      //? persist) so every login surface — credentials AND OAuth — is covered by
+      //? construction: when `perUser: 'multiple'` with a `maxConcurrentPerUser`
+      //? cap already reached and `onConflict === 'rejectNew'`, refuse the new
+      //? login with a dedicated reason key instead of kicking an existing
+      //? session. `'single'` and `'revokeOld'` keep kicking (handled below).
+      const cfg = getProjectConfig().session;
+      // eslint-disable-next-line @typescript-eslint/no-deprecated -- BC shim: legacy `allowMultiple` still honored when set
+      const perUser = cfg.allowMultiple ? 'multiple' : cfg.perUser;
+      if (
+        perUser === 'multiple' &&
+        cfg.onConflict === 'rejectNew' &&
+        cfg.maxConcurrentPerUser !== null &&
+        data.id
+      ) {
+        const existing = await getSessionAdapter().listActive(data.id);
+        const others = existing.filter((t) => t !== token && t !== options?.supersedeToken);
+        if (others.length + 1 > cfg.maxConcurrentPerUser) {
+          getLogger().warn('session create rejected — concurrent-session cap reached (onConflict: rejectNew)', {
+            userId: data.id,
+            cap: cfg.maxConcurrentPerUser,
+            active: others.length,
+          });
+          return { ok: false, errorCode: 'login.sessionLimitReached' } as const;
+        }
       }
     }
 
@@ -70,8 +113,32 @@ const saveSession = async (
       data.csrfToken = randomBytes(getCsrfConfig().tokenLength).toString('hex');
     }
 
+    //? Apply the optional session sanitizer (M7) before BOTH persist and the
+    //? client broadcast, so a consumer-registered redactor strips sensitive
+    //? non-password columns (2FA secrets, billing ids, internal flags) that the
+    //? default `sanitizeUserForSession` (password-only) leaves on the record. A
+    //? throwing sanitizer must not break login — fall back to the raw record and
+    //? log. `data.id` (used below for tracking/enforcement) is read from the
+    //? original record, which is unaffected.
+    //? Fail-CLOSED on a throwing sanitizer (M6): the previous fallback persisted
+    //? AND broadcast the RAW record, leaking exactly the sensitive columns
+    //? (2FA secrets, billing ids, internal flags) the sanitizer exists to strip.
+    //? On error, fall back to a minimal known-safe projection — drop `password`
+    //? (always) and any field a registered sanitizer was meant to redact is at
+    //? least not leaked verbatim; the user can re-login if a field they needed is
+    //? missing, but we never broadcast secrets.
+    let persisted = data;
+    const [sanitizeErr, sanitized] = tryCatchSync(() => applySessionSanitizer(data));
+    if (sanitizeErr) {
+      getLogger().error('saveSession: session sanitizer threw — falling back to password-stripped projection', sanitizeErr, { token });
+      const { password: _password, ...safe } = data as SessionLayout & { password?: unknown };
+      persisted = safe;
+    } else if (sanitized) {
+      persisted = sanitized;
+    }
+
     const ttl = getSessionTtl();
-    await adapter.setRaw(token, JSON.stringify(data), ttl);
+    await adapter.setRaw(token, JSON.stringify(persisted), ttl);
 
     const userId = data.id;
 
@@ -97,8 +164,8 @@ const saveSession = async (
     //      kick every prior session for this user.
     //   2. perUser = 'multiple' with `maxConcurrentPerUser` cap reached:
     //      `onConflict === 'revokeOld'` kicks oldest until under cap,
-    //      `onConflict === 'rejectNew'` would refuse the new login (handled
-    //      at the login API layer, not here).
+    //      `onConflict === 'rejectNew'` already refused the login above (before
+    //      persisting), so by here the cap has room.
     //   3. perUser = 'multiple' with no cap → no kick.
     if (newUser && userId) {
       const sessionCfg = getProjectConfig().session;
@@ -156,13 +223,22 @@ const saveSession = async (
       }
     }
 
-    // Broadcast session updates to connected clients
+    // Broadcast session updates to connected clients (sanitized copy).
     if (io.sockets.adapter.rooms.has(token)) {
-      io.to(token).emit(socketEventNames.updateSession, JSON.stringify(data));
+      io.to(token).emit(socketEventNames.updateSession, JSON.stringify(persisted));
     }
 
     if (newUser) {
       await dispatchHook('postSessionCreate', { token, user: data, persistent: !getProjectConfig().session.basedToken });
+      //? Core-level observational session-lifecycle hook (CORE-40). Dispatched
+      //? alongside the login-owned `postSessionCreate` so consumers (audit,
+      //? presence, error-tracking) can react to a minted session via core's
+      //? `registerHook('sessionCreated', …)` WITHOUT importing @luckystack/login.
+      //? Fire-and-forget — the session already exists, so a handler error must
+      //? not change the login outcome.
+      if (userId) {
+        void dispatchHook('sessionCreated', { token, userId });
+      }
     }
 
     return { ok: true } as const;
@@ -209,6 +285,16 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
     let applied = false;
     if (!preRefreshResult.stopped) {
       applied = await adapter.expire(token, newTtl);
+      //? Also refresh the activeUsers-set TTL on a sliding read. `trackActive`
+      //? (which sets that TTL) runs only on saveSession, so a session kept
+      //? alive purely by reads would outlive its activeUsers entry — after
+      //? which `revokeUserSessions` / single-session enforcement enumerate
+      //? `listActive` -> [] and silently miss the live token (a stolen token
+      //? would then survive a password reset / sign-out-everywhere). Refresh
+      //? the set TTL in lock-step with the session-key TTL to close that drift.
+      if (applied && userId && adapter.touchActive) {
+        await adapter.touchActive(userId, newTtl);
+      }
     }
     await dispatchHook('postSessionRefresh', {
       token,
@@ -304,6 +390,11 @@ const deleteSession = async (
 
     await adapter.delete(token);
     await dispatchHook('postSessionDelete', { token, userId: resolvedUserId });
+    //? Core-level observational session-lifecycle hook (CORE-40), the revoke
+    //? counterpart to `sessionCreated`. Lets consumers react to a revoked
+    //? session via core's `registerHook('sessionRevoked', …)` without depending
+    //? on login internals. Fire-and-forget.
+    void dispatchHook('sessionRevoked', { token, userId: resolvedUserId });
     return true;
   }, undefined, { fn: 'deleteSession', token });
 
@@ -364,8 +455,14 @@ const revokeUserSessions = async (userId: string, exceptToken?: string | null): 
   const tokens = await adapter.listActive(userId);
   const targets = exceptToken ? tokens.filter((t) => t !== exceptToken) : tokens;
 
-  await Promise.all(targets.map((token) => deleteSession(token)));
-  return targets.length;
+  //? Count only the sessions that were ACTUALLY revoked (M13). `deleteSession`
+  //? can return `false` (preSessionDelete veto, adapter error) yet was
+  //? previously counted as revoked — so "sign out everywhere" / post-password-
+  //? reset over-reported and a token a delete failed for could survive a reset.
+  //? Summing truthy results means the count reflects reality; a failed token
+  //? stays live and is logged by `deleteSession` for retry.
+  const results = await Promise.all(targets.map((token) => deleteSession(token)));
+  return results.filter(Boolean).length;
 };
 
 //? Legacy key-builders preserved as exports for downstream code that

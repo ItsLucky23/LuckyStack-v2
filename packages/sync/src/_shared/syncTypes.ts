@@ -74,6 +74,14 @@ export interface RuntimeSyncServerEntry {
   inputTypeFilePath?: string;
   validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' };
   /**
+   * Per-route rate limit (mirrors `@luckystack/api`). Overrides
+   * `rateLimiting.defaultApiLimit` for this sync route's per-requester bucket;
+   * `false` disables it (the global per-IP bucket still applies); omit to fall
+   * back to `defaultApiLimit`. Honored by both transports (passed as
+   * `routeLimit` into `applySyncRateLimits` / `applyHttpSyncRateLimits`).
+   */
+  rateLimit?: number | false;
+  /**
    * Per-route error response formatter. Falls back to the global formatter
    * from `registerErrorFormatter(...)`, then to the framework default
    * `normalizeErrorResponse`. Same contract as the API handler — both

@@ -16,8 +16,6 @@ import { addBackendOnly } from './commands/addBackendOnly';
 import { checkEnv } from './commands/checkEnv';
 import { checkI18n } from './commands/checkI18n';
 
-const cliVersion = parsePackageVersion(createRequire(import.meta.url)('../package.json'));
-
 interface BackendFeature {
   kind: 'backend';
   pkg: string;
@@ -68,6 +66,11 @@ const main = (): void => {
     console.log(HELP);
     return;
   }
+
+  //? Read the CLI's own version INSIDE main() (not at module top-level) so a
+  //? malformed own package.json surfaces on the clean exit-code path below rather
+  //? than as an uncaught stack trace thrown before main() runs.
+  const cliVersion = parsePackageVersion(createRequire(import.meta.url)('../package.json'));
 
   const [command, feature] = argv;
   const install = !argv.includes('--no-install');
@@ -139,4 +142,13 @@ const main = (): void => {
   }
 };
 
-main();
+//? Convert an unexpected top-level throw (e.g. a malformed own package.json in
+//? parsePackageVersion) into the CLI's clean exit-code path — a one-line error +
+//? exit 1 — instead of a raw stack trace. This package has no dependencies, so a
+//? single guarded invocation here is used rather than the @luckystack/core tryCatch.
+try {
+  main();
+} catch (error) {
+  console.error(`\n✗ ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}

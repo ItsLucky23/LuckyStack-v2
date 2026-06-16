@@ -43,12 +43,18 @@ export const extractApiVersion = (filePath: string): string => {
 
 export const extractSyncPagePath = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/');
+  //? A sync directly under `src/_sync/` gets the `'system'` sentinel, matching
+  //? `extractPagePath` (API side) AND the dev loader's root-sync route key.
+  //? Using `'root'` here made the type-map key + generated `FullSyncPath`
+  //? (`sync/root/<name>/v1`) disagree with the loader's runtime registration
+  //? AND the wire name the typed `syncRequest` actually sends
+  //? (`sync/system/<name>/v1`) — so a root sync silently never dispatched.
   const match = normalized.match(/src\/(?:(.+?)\/)_sync\//);
   if (match) {
-    return match[1] || 'root';
+    return match[1] || 'system';
   }
   if (normalized.includes('/src/_sync/')) {
-    return 'root';
+    return 'system';
   }
   return '';
 };

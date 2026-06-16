@@ -1,11 +1,13 @@
 import path from "node:path";
 import { access } from 'node:fs/promises';
 import fs from "node:fs";
+import stream from "node:stream";
 import { ServerResponse } from "node:http";
 import { getUploadsDir } from './paths';
 import { getAvatarConfig } from './avatarConfig';
 import { getLogger } from './loggerRegistry';
 import tryCatch from './tryCatch';
+import { dispatchHook } from './hooks/registry';
 
 //? Belt-and-suspenders: `path.basename` already strips traversal segments,
 //? but explicitly allowlist the fileId character set so any future regression
@@ -28,6 +30,16 @@ export const serveAvatar = async ({
     return;
   }
 
+  //? Access-control / audit seam: a `preAvatarServe` handler may veto the read
+  //? (stop signal). We answer 404 — not 403 — so a private avatar's existence
+  //? isn't disclosed to an unauthorized caller.
+  const preDispatch = await dispatchHook('preAvatarServe', { routePath, fileId });
+  if (preDispatch.stopped) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('File not found');
+    return;
+  }
+
   const { formats, cacheControl } = getAvatarConfig();
 
   //? Try each configured format in order; first existing file wins. This
@@ -42,7 +54,16 @@ export const serveAvatar = async ({
       'Content-Type': contentType,
       'Cache-Control': cacheControl,
     });
-    fs.createReadStream(filePath).pipe(res);
+    //? Pipe with an error sink: once headers are flushed a read error can no
+    //? longer be turned into a 5xx, so `pipeline` just tears the response down
+    //? (destroys both streams) instead of letting the unhandled stream 'error'
+    //? crash the worker. No double-write — we never write a body after this.
+    stream.pipeline(fs.createReadStream(filePath), res, (pipelineError) => {
+      if (pipelineError) {
+        getLogger().debug('avatar: stream pipeline failed', { routePath, fileId, error: pipelineError });
+      }
+    });
+    void dispatchHook('postAvatarServe', { routePath, fileId, extension, contentType });
     return;
   }
 

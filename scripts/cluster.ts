@@ -22,4 +22,11 @@ if (!port || !/^\d+$/.test(port)) {
 //? line imports the argv parser, which reads process.argv at module load).
 process.argv = [process.argv[0] as string, process.argv[1] as string, 'core-preset', port];
 
-await import('../server/server');
+//? Surface a boot failure as a non-zero exit with the stack instead of a bare
+//? unhandled-rejection — mirrors the other launchers (`bundleServer.mjs`,
+//? `router/cli.ts`).
+await import('../server/server').catch((error: unknown) => {
+  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  process.stderr.write(`[cluster] fatal: ${message}\n`);
+  process.exit(1);
+});

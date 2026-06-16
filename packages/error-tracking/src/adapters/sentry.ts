@@ -13,15 +13,31 @@
 
 import { createRequire } from 'node:module';
 
-import { loadPeer, type ErrorTracker, type ErrorTrackerEvent } from '@luckystack/core';
+import {
+  getCurrentErrorTrackerIdentity,
+  loadPeer,
+  type ErrorTracker,
+  type ErrorTrackerEvent,
+  type ErrorTrackerUser,
+} from '@luckystack/core';
 
 import { resolveExceptionEvent, resolveMessageEvent } from './runBeforeSend';
 
 const localRequire = createRequire(import.meta.url);
 
+//? Sentry's `captureException` / `captureMessage` second arg is a CaptureContext
+//? that accepts a per-event `user` — passing it scopes identity to THIS event
+//? without mutating the process-global `setUser` scope (ET-02). We model only the
+//? fields we use.
+interface SentryCaptureContext {
+  level?: string;
+  extra?: Record<string, unknown>;
+  user?: ErrorTrackerUser;
+}
+
 interface SentrySDK {
-  captureException: (exception: unknown, hint?: { extra?: Record<string, unknown> }) => string;
-  captureMessage: (message: string, hint?: { level?: string; extra?: Record<string, unknown> }) => string;
+  captureException: (exception: unknown, hint?: SentryCaptureContext) => string;
+  captureMessage: (message: string, hint?: SentryCaptureContext) => string;
   setUser: (user: unknown) => void;
   setContext: (name: string, context: Record<string, unknown> | null) => void;
   startSpan: <T>(context: { name: string; op: string }, fn: () => T) => T;
@@ -45,6 +61,16 @@ export interface SentryAdapterOptions {
   beforeSend?: (event: ErrorTrackerEvent) => ErrorTrackerEvent | null;
 }
 
+//? Build the per-event Sentry CaptureContext, attaching the ALS-bound identity
+//? as a per-event `user` when a request scope is active (ET-02). When no ALS
+//? scope exists (background capture) we omit `user` and Sentry falls back to
+//? whatever the global `setUser` scope last held — preserving prior behavior.
+const withIdentity = (hint?: SentryCaptureContext): SentryCaptureContext | undefined => {
+  const alsUser = getCurrentErrorTrackerIdentity();
+  if (!alsUser) return hint;
+  return { ...hint, user: alsUser };
+};
+
 export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTracker => {
   const sentry = loadSentry();
 
@@ -54,8 +80,9 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
     captureException(error, context) {
       const resolved = resolveExceptionEvent(options.beforeSend, error, context);
       if (!resolved) return;
-      if (resolved.context) {
-        sentry.captureException(resolved.error, { extra: resolved.context });
+      const hint = withIdentity(resolved.context ? { extra: resolved.context } : undefined);
+      if (hint) {
+        sentry.captureException(resolved.error, hint);
       } else {
         sentry.captureException(resolved.error);
       }
@@ -64,11 +91,12 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
     captureMessage(message, level, context) {
       const resolved = resolveMessageEvent(options.beforeSend, message, level, context);
       if (!resolved) return;
-      if (resolved.context) {
-        sentry.captureMessage(resolved.message, { level: resolved.level, extra: resolved.context });
-      } else {
-        sentry.captureMessage(resolved.message, { level: resolved.level });
-      }
+      const hint = withIdentity(
+        resolved.context
+          ? { level: resolved.level, extra: resolved.context }
+          : { level: resolved.level },
+      );
+      sentry.captureMessage(resolved.message, hint);
     },
 
     setUser(user) {

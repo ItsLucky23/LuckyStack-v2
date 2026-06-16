@@ -90,9 +90,21 @@ const loadAiConfig = async () => {
 // ---------------------------------------------------------------------------
 
 const extractIntent = (src) => {
-  for (const raw of src.split(/\r?\n/).slice(0, 30)) {
-    const m = raw.match(/^\s*\/\/\??\s*intent:\s*(.+?)\s*$/i);
-    if (m) return m[1].trim();
+  const lines = src.split(/\r?\n/).slice(0, 30);
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*\/\/\??\s*intent:\s*(.+?)\s*$/i);
+    if (!m) continue;
+    //? Greedily consume subsequent `//?`/`//` continuation lines so a wrapped
+    //? multi-line `//? intent:` isn't truncated to its first line. Stop at the
+    //? first line that isn't a comment or that starts a new `key:` directive.
+    const parts = [m[1].trim()];
+    for (let j = i + 1; j < lines.length; j++) {
+      const cont = lines[j].match(/^\s*\/\/\??\s*(.+?)\s*$/);
+      if (!cont) break;
+      if (/^\s*[A-Za-z][\w-]*:\s/.test(cont[1])) break;
+      parts.push(cont[1].trim());
+    }
+    return parts.join(" ").trim();
   }
   return null;
 };
@@ -205,6 +217,10 @@ const main = async () => {
   }
 
   // Sharded: one file per area + a thin root overview linking them.
+  //? Clear the shard dir first so a renamed/deleted area's shard from a
+  //? previous run doesn't linger forever (the single-file branch already
+  //? does this on its own exit path).
+  await safe(fs.rm(SHARD_DIR, { recursive: true, force: true }));
   for (const area of areas) {
     const slug = area.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "") || "root";
     const body = [

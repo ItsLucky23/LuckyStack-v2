@@ -238,9 +238,17 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'auth');
     const authInitializer = decl?.initializer ? unwrapExpression(decl.initializer) : undefined;
-    if (!authInitializer || !ts.isObjectLiteralExpression(authInitializer)) return { login: true };
+    //? DK-05 (public-by-default): a route that omits `export const auth` — OR
+    //? whose `auth` omits / non-literally sets `login` — extracts as PUBLIC
+    //? (`login: false`), matching the dev runtime loader (`auth.login || false`),
+    //? the generated `apiMetaMap`, and the test-runner auth sweep. The defect
+    //? this closes was the runtime↔tooling DISAGREEMENT: the loader defaulted to
+    //? public while this extractor defaulted to protected, so the generated meta
+    //? + auth sweep disagreed with what actually ran. A route that needs auth
+    //? MUST declare a literal `auth: { login: true }`.
+    if (!authInitializer || !ts.isObjectLiteralExpression(authInitializer)) return { login: false };
 
-    let login = true;
+    let login = false;
     let additional: Record<string, unknown>[] | undefined;
 
     for (const prop of authInitializer.properties) {
@@ -264,7 +272,9 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
     return additional && additional.length > 0 ? { login, additional } : { login };
   });
 
-  //? Parse failure falls through silently (no log), preserving prior behaviour.
-  return auth ?? { login: true };
+  //? Parse failure falls through to PUBLIC, consistent with the public-by-default
+  //? policy above (and the runtime loader). A route needing auth declares a
+  //? literal `auth: { login: true }`.
+  return auth ?? { login: false };
 };
 

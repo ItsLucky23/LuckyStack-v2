@@ -171,7 +171,16 @@ export const openStreamWatcher = async <TChunk extends StreamChunkFrame = Stream
 
   socket.on(socketEventNames.sync, handleChunk);
 
-  await waitForConnect(socket);
+  //? On a connect timeout / connect_error the socket (and its `sync` listener)
+  //? must be torn down — otherwise every failed attempt leaks one socket that
+  //? is never auto-closed (the caller only tracks the watcher after this
+  //? resolves). Mirror the join-ack cleanup path below.
+  const [connectError] = await tryCatch(() => waitForConnect(socket));
+  if (connectError) {
+    socket.off(socketEventNames.sync, handleChunk);
+    socket.disconnect();
+    throw connectError;
+  }
 
   const responseIndex = nextResponseIndex();
   socket.emit(socketEventNames.joinRoom, {

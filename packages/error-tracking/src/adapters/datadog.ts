@@ -18,7 +18,13 @@
 
 import { createRequire } from 'node:module';
 
-import { ensurePeerDepInstalled, type ErrorTracker, type ErrorTrackerEvent } from '@luckystack/core';
+import {
+  ensurePeerDepInstalled,
+  getCurrentErrorTrackerIdentity,
+  type ErrorTracker,
+  type ErrorTrackerEvent,
+  type ErrorTrackerUser,
+} from '@luckystack/core';
 
 import { resolveExceptionEvent, resolveMessageEvent } from './runBeforeSend';
 
@@ -31,7 +37,6 @@ interface DdTracerSpan {
 
 interface DdTracer {
   startSpan: (operation: string, options?: { tags?: Record<string, unknown> }) => DdTracerSpan;
-  setUser?: (span: DdTracerSpan, user: Record<string, unknown>) => void;
 }
 
 interface DdStatsd {
@@ -58,9 +63,22 @@ export interface DatadogAdapterOptions {
   beforeSend?: (event: ErrorTrackerEvent) => ErrorTrackerEvent | null;
 }
 
-const formatTags = (tags?: Record<string, string>): string[] => {
+//? Coerce arbitrary context values to StatsD tag strings. Context is typed
+//? `Record<string, unknown>`, so a raw `${k}:${v}` would render objects as
+//? `key:[object Object]` and `String(symbol)` would THROW a TypeError and take
+//? the whole capture path down. Stringify objects as JSON, symbols via
+//? `.toString()`, everything else via `String(...)`.
+const formatTags = (tags?: Record<string, unknown>): string[] => {
   if (!tags) return [];
-  return Object.entries(tags).map(([k, v]) => `${k}:${v}`);
+  return Object.entries(tags).map(([k, v]) => {
+    const value =
+      typeof v === 'symbol'
+        ? v.toString()
+        : (v !== null && typeof v === 'object'
+          ? JSON.stringify(v)
+          : String(v));
+    return `${k}:${value}`;
+  });
 };
 
 export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTracker => {
@@ -74,6 +92,29 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
 
   const prefix = options.metricPrefix ?? 'luckystack.';
 
+  //? Closure fallback identity, set by `setUser`. Used ONLY for non-request /
+  //? background captures that run outside any per-request ALS scope. Datadog has
+  //? no process-global user slot reachable through the minimal tracer interface,
+  //? so we tag the spans we own rather than opening a throwaway `luckystack.user`
+  //? span on every identity set (which produced one junk span per request).
+  let fallbackUser: Record<string, unknown> | null = null;
+
+  //? Resolve the user at CAPTURE time: prefer the per-request ALS identity (ET-02
+  //? — isolated per concurrent request, survives await boundaries) and fall back
+  //? to the closure `fallbackUser` only when no request scope is active.
+  const resolveUser = (): ErrorTrackerUser | Record<string, unknown> | null =>
+    getCurrentErrorTrackerIdentity() ?? fallbackUser;
+
+  const userTags = (): Record<string, unknown> => {
+    const currentUser = resolveUser();
+    if (!currentUser) return {};
+    const tags: Record<string, unknown> = {};
+    if (currentUser.id !== undefined) tags['usr.id'] = currentUser.id;
+    if (currentUser.email !== undefined) tags['usr.email'] = currentUser.email;
+    if (currentUser.username !== undefined) tags['usr.name'] = currentUser.username;
+    return tags;
+  };
+
   return {
     name: 'datadog',
 
@@ -85,6 +126,7 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
         tags: {
           'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
           'error.msg': fwdError instanceof Error ? fwdError.message : String(fwdError),
+          ...userTags(),
           ...fwdContext,
         },
       });
@@ -93,7 +135,7 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
         span.setTag('error.stack', fwdError.stack);
       }
       span.finish();
-      options.statsd?.increment(`${prefix}error.exception`, 1, formatTags(fwdContext as Record<string, string> | undefined));
+      options.statsd?.increment(`${prefix}error.exception`, 1, formatTags(fwdContext));
     },
 
     captureMessage(message, level, context) {
@@ -104,23 +146,21 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
         tags: {
           'message.text': fwdMessage,
           'message.level': fwdLevel,
+          ...userTags(),
           ...fwdContext,
         },
       });
       span.finish();
-      options.statsd?.increment(`${prefix}error.message`, 1, [`level:${fwdLevel}`, ...formatTags(fwdContext as Record<string, string> | undefined)]);
+      options.statsd?.increment(`${prefix}error.message`, 1, [`level:${fwdLevel}`, ...formatTags(fwdContext)]);
     },
 
     setUser(user) {
-      //? dd-trace propagates user identity via span tags on the current
-      //? span. We can't set it globally without an active span; consumers
-      //? wanting user-tagged errors should pass it via context on each
-      //? captureException call.
-      if (user && options.tracer.setUser) {
-        const span = options.tracer.startSpan('luckystack.user');
-        options.tracer.setUser(span, user);
-        span.finish();
-      }
+      //? Record the closure-fallback identity for the next capture's span tags
+      //? instead of opening a dedicated `luckystack.user` span per call (which
+      //? produced one junk span per request). Per-request captures prefer the ALS
+      //? identity (ET-02); this fallback only covers non-request captures. Datadog
+      //? correlates the user via the `usr.*` tags attached in capture*.
+      fallbackUser = user;
     },
 
     recordMetric(name, value, tags) {

@@ -10,6 +10,7 @@ import {
   proposeLogin,
   getCurrentSession as coreGetCurrentSession,
   socketEventNames,
+  tryCatch,
 } from '@luckystack/core/client';
 
 import { dev, pageTitle, SessionLayout } from '../../config';
@@ -115,16 +116,29 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (!socket) return;
 
     const handler = (data: string) => {
-      if (dev) { console.log('updateSession', JSON.parse(data)); }
-      const parsed = JSON.parse(data) as SessionLayout;
-      setSession(prev => {
-        if (!prev) return parsed;
-        return {
-          ...prev,
-          ...parsed,
-          avatar: `${parsed.avatar}?v=${String(Date.now())}`,
-        };
-      });
+      //? Never raw `JSON.parse`: a malformed payload would throw inside the
+      //? socket listener. Parse once through `tryCatch` and bail on error.
+      //? `void (async …)()` so the `.on` callback itself stays sync (avoids
+      //? no-misused-promises) — mirrors the pattern in `socketInitializer`.
+      void (async () => {
+        const [error, parsed] = await tryCatch<SessionLayout>(() => JSON.parse(data) as SessionLayout);
+        if (error || !parsed) {
+          if (dev) console.warn('[session] updateSession: malformed payload', error);
+          return;
+        }
+        if (dev) { console.log('updateSession', parsed); }
+        setSession(prev => {
+          if (!prev) return parsed;
+          //? Strip any existing `?v=`/`&v=` cache-buster before re-stamping so
+          //? a re-emitted avatar URL doesn't accumulate `...?v=1?v=2`.
+          const baseAvatar = parsed.avatar.replaceAll(/[?&]v=[^?&]*/g, '');
+          return {
+            ...prev,
+            ...parsed,
+            avatar: `${baseAvatar}?v=${String(Date.now())}`,
+          };
+        });
+      })();
     };
 
     socket.on(socketEventNames.updateSession, handler);
@@ -132,7 +146,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (!socket) return;
       socket.off(socketEventNames.updateSession, handler);
     };
-  }, []);
+    //? `socket` is a module-level singleton (not React state) — listed only to
+    //? re-attach if the binding is replaced; eslint can't see it as reactive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket]);
 
   const contextValue = useMemo(() => ({
     session, sessionLoaded,

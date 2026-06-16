@@ -2,6 +2,7 @@
 /* eslint-disable */
 import type { apiMessage, PostApiExecutePayload } from '@luckystack/core';
 import { readSession, performLogout } from '@luckystack/core';
+import { runWithErrorTrackerIdentityScope, setCurrentErrorTrackerIdentity } from '@luckystack/core';
 import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
 import { getProjectConfig } from '@luckystack/core';
 import { Socket } from 'socket.io';
@@ -27,6 +28,7 @@ import { shouldLogDev } from './_shared/logFlags';
 import { normalizeApiResponse } from './_shared/responseEnvelope';
 import { createApiRequestLifecycle } from './_shared/requestLifecycle';
 import { runSocketApiValidation } from './_shared/socketValidationStage';
+import { deriveTokenBucketId } from './_shared/rateLimitIdentity';
 
 interface handleApiRequestType {
   msg: apiMessage,
@@ -49,14 +51,23 @@ const validateApiMessage = ({ msg, emitApiError }: {
 }): { name: string; data: Record<string, unknown> } | null => {
   const { name, data, responseIndex } = msg;
 
-  if (!responseIndex && typeof responseIndex !== 'number') {
+  //? Drop a message with no usable response channel. Written as a single
+  //? `typeof` test (equivalent to the former `!responseIndex && typeof !==
+  //? 'number'` double-negative) so a `responseIndex: 0` is correctly KEPT — a
+  //? future "simplify" to `!responseIndex` would silently drop every index-0
+  //? request.
+  if (typeof responseIndex !== 'number') {
     if (shouldLogDev()) {
       getLogger().warn('api: no response index given');
     }
     return null;
   }
 
-  if (!name || !data || typeof name != 'string' || typeof data != 'object') {
+  //? Positive plain-object guard (parity with the sync handler). `!data`
+  //? excludes `null`; `Array.isArray` rejects an ARRAY payload that
+  //? `typeof === 'object'` would otherwise admit to a handler expecting an
+  //? object.
+  if (!name || !data || typeof name != 'string' || typeof data != 'object' || Array.isArray(data)) {
     emitApiError({
       response: { status: 'error', errorCode: 'api.invalidRequest' },
       fallbackHttpStatus: 400,
@@ -128,7 +139,7 @@ const applyApiRateLimits = async ({ apiEntry, resolvedName, token, socket, user,
   });
 
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
-    const requesterIdentity = token ?? resolvedIp;
+    const requesterIdentity = token ? deriveTokenBucketId(token) : resolvedIp;
     const keyPrefix = token ? 'token' : 'ip';
     const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${resolvedName}`;
 
@@ -140,13 +151,19 @@ const applyApiRateLimits = async ({ apiEntry, resolvedName, token, socket, user,
 
     if (!allowed) {
       void dispatchHook('rateLimitExceeded', {
-        scope: token ? 'user' : 'route',
+        //? The per-route bucket is keyed by the validated user when a token is
+        //? present, else by the resolved IP (keyPrefix `ip`). Report the scope
+        //? that matches the bucket's actual identity — an anonymous per-route
+        //? bucket is IP-keyed, so it is `ip` (with `route` still set to mark it
+        //? a per-route bucket vs the global `:api:all` IP bucket), never `route`.
+        scope: token ? 'user' : 'ip',
         key: rateLimitKey,
         limit: effectiveApiLimit,
         windowMs: getProjectConfig().rateLimiting.windowMs,
         count: effectiveApiLimit + 1,
         route: resolvedName,
         userId: user?.id,
+        ip: token ? undefined : resolvedIp,
       });
       if (shouldLogDev()) {
         getLogger().warn(`api: rate limit exceeded for ${resolvedName}`, { route: resolvedName, key: rateLimitKey });
@@ -357,7 +374,19 @@ const emitApiResult = async ({
   await dispatchHook('postApiRespond', { routeName: resolvedName, user, response: formattedResponse });
 };
 
-export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
+//? ET-02 — open a per-request error-tracker identity scope around the ENTIRE
+//? handler before any await that could interleave with another concurrent
+//? request. `readSession` (the first await below) is itself such a boundary, so
+//? the scope must wrap it. The session is written into the scope via
+//? `setCurrentErrorTrackerIdentity(...)` the moment it resolves; from then on
+//? every error-tracker capture during this request (handler throw, hook
+//? subscriber, fanout) reads THIS request's identity from the AsyncLocalStorage
+//? box, never another concurrent request's. Each request gets its own box.
+export default async function handleApiRequest(args: handleApiRequestType): Promise<void> {
+  await runWithErrorTrackerIdentityScope(() => handleApiRequestInner(args));
+}
+
+async function handleApiRequestInner({ msg, socket, token }: handleApiRequestType) {
   //? This event gets triggered when the client uses the apiRequest function.
   //? Validate the message, check auth, then execute the registered handler.
 
@@ -370,9 +399,11 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   const { responseIndex } = msg;
   const user = await readSession(token);
-  //? Identity propagation now flows via the `preApiExecute` hook subscriber
-  //? registered by `@luckystack/error-tracking`'s `enableErrorTrackingAutoInstrumentation()`.
-  //? Direct `setSentryUser` removed from this handler — see migration doc.
+  //? ET-02 — bind the resolved session into the active per-request ALS identity
+  //? box so every subsequent capture attributes to this user. Identity also still
+  //? flows to the legacy global via the `preApiValidate` hook subscriber in
+  //? `@luckystack/error-tracking` (the ALS read takes precedence at capture time).
+  setCurrentErrorTrackerIdentity(user?.id ? { id: user.id, email: user.email ?? undefined, username: user.name ?? undefined } : null);
   const preferredLocale =
     extractLanguageFromHeader(socket.handshake.headers['x-language'])
     || extractLanguageFromHeader(socket.handshake.headers['accept-language'])

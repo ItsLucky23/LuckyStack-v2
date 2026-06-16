@@ -34,7 +34,7 @@ interface UserPreferences {
 }
 
 interface ActiveSession {
-  token: string;
+  handle: string;
   expiresInSeconds: number | null;
   isCurrent: boolean;
 }
@@ -190,6 +190,12 @@ export default function Home() {
   const passwordConfirmRef = useRef<HTMLInputElement>(null);
   const [passwordLoading, setPasswordLoading] = useState(false);
 
+  //? Credentials accounts must reconfirm with their password before the
+  //? server (`deleteAccount_v1`) will erase them — collected here and sent as
+  //? `data.password`. OAuth-only accounts have no hash, so the field is hidden
+  //? and the server skips the check.
+  const deletePasswordRef = useRef<HTMLInputElement>(null);
+
   const handleChangePassword = async (event: React.SyntheticEvent) => {
     event.preventDefault();
     if (passwordLoading) return;
@@ -217,11 +223,11 @@ export default function Home() {
   };
 
   // ------- sessions -------
-  const handleRevokeSession = async (token: string) => {
+  const handleRevokeSession = async (handle: string) => {
     const response = await apiRequest({
       name: 'settings/revokeSession',
       version: 'v1',
-      data: { token },
+      data: { handle },
     });
     if (response.status === 'success') {
       notify.success({ key: 'settings.sessionRevoked' });
@@ -278,10 +284,17 @@ export default function Home() {
     });
     if (!confirmed) return;
 
+    //? Credentials accounts must re-enter their password — the server
+    //? (`deleteAccount_v1`) rejects with `login.wrongPassword` otherwise.
+    //? OAuth-only accounts have no hash, so the field is hidden and we send
+    //? `undefined` (server skips the check).
+    const isCredentials = session?.provider === 'credentials';
+    const password = deletePasswordRef.current?.value ?? '';
+
     const response = await apiRequest({
       name: 'settings/deleteAccount',
       version: 'v1',
-      data: { confirmation: 'DELETE' },
+      data: { confirmation: 'DELETE', password: isCredentials ? password : undefined },
     });
     if (response.status === 'success') {
       notify.success({ key: 'settings.deleteAccountDone' });
@@ -433,10 +446,10 @@ export default function Home() {
             : (
               <ul className="flex flex-col gap-2">
                 {activeSessions.map((s) => (
-                  <li key={s.token} className="flex items-center gap-3 p-3 rounded-md border border-container1-border">
+                  <li key={s.handle} className="flex items-center gap-3 p-3 rounded-md border border-container1-border">
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-title">
-                        {s.isCurrent ? translate({ key: 'settings.currentSession' }) : `…${s.token.slice(-8)}`}
+                        {s.isCurrent ? translate({ key: 'settings.currentSession' }) : `…${s.handle.slice(-8)}`}
                       </div>
                       {s.expiresInSeconds !== null && (
                         <div className="text-xs text-common">
@@ -447,7 +460,7 @@ export default function Home() {
                     {!s.isCurrent && (
                       <button
                         type="button"
-                        onClick={() => void handleRevokeSession(s.token)}
+                        onClick={() => void handleRevokeSession(s.handle)}
                         className="h-9 px-3 rounded-md bg-container2 hover:bg-container2-hover border border-container2-border text-title text-sm font-medium transition-colors cursor-pointer"
                       >
                         {translate({ key: 'settings.revokeSession' })}
@@ -493,6 +506,12 @@ export default function Home() {
               {translate({ key: 'settings.deleteAccount' })}
             </button>
           </div>
+          {session.provider === 'credentials' && (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="delete-pw" className="text-xs font-medium">{translate({ key: 'settings.currentPassword' })}</label>
+              <input id="delete-pw" type="password" autoComplete="current-password" ref={deletePasswordRef} className={inputClass} />
+            </div>
+          )}
           <p className="text-xs text-common flex items-center gap-2">
             <FontAwesomeIcon icon={faTriangleExclamation} />
             {translate({ key: 'settings.deleteAccountConfirm' })}

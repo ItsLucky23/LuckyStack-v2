@@ -4,6 +4,7 @@ export type {
   PrePresenceUpdatePayload,
   PostPresenceUpdatePayload,
   PostSocketReconnectPayload,
+  PostDisconnectGraceExpiredPayload,
 } from './hookPayloads';
 
 export { socketLeaveRoom } from './activity/leaveRoom';
@@ -13,6 +14,7 @@ export {
   unregisterActivityEvent,
   listActivityEvents,
   dispatchActivitySample,
+  clearActivityThrottle,
 } from './activityEvents';
 export type { ActivityEvent, ActivitySample } from './activityEvents';
 export {
@@ -20,7 +22,10 @@ export {
   clearActivity,
   startActivitySampler,
   stopActivitySampler,
+  getLastActivity,
+  getRoomPresence,
 } from './activity/activitySampler';
+export type { RoomPresenceEntry } from './activity/activitySampler';
 
 //? Auto-register the default AFK event at module load so a fresh install
 //? gets AFK detection without an explicit registration step. Consumers

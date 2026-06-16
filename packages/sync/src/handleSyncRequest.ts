@@ -1,12 +1,16 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
-import type { syncMessage, PostSyncFanoutPayload } from "@luckystack/core";
+//? SYNC-20 — targeted disables replacing the former blanket `/* eslint-disable */`
+//? (which masked findings across this security-critical transport file). These
+//? mirror the `@luckystack/api` handlers: template expressions interpolate the
+//? route name / receiver (already validated strings); nullish-coalescing is
+//? deliberately avoided where `||`'s empty-string fallthrough is intended; the
+//? `?.` chains on runtime-map values read as "unnecessary" to the typed view but
+//? are real runtime guards. (The former `user!` assertion at the `validateRequest`
+//? call site was removed once core made `validateRequest` null-safe — CORE-06.)
+/* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/no-non-null-assertion, eqeqeq */
+import { randomUUID } from "node:crypto";
+import type { syncMessage, PostSyncFanoutPayload, PostSyncExecutePayload } from "@luckystack/core";
 import { Socket } from "socket.io";
-import { readSession } from "@luckystack/core";
-import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
-import { getProjectConfig } from '@luckystack/core';
-import { getRuntimeSyncMaps } from '@luckystack/core';
-import {
+import { readSession, getProjectConfig , getRuntimeSyncMaps ,
   validateRequest,
   extractTokenFromSocket,
   getIoInstance,
@@ -19,15 +23,19 @@ import {
   dispatchHook,
   validateInputByType,
   getLogger,
-  resolveClientIp,
-} from "@luckystack/core";
-import { extractLanguageFromHeader, normalizeErrorResponse } from "@luckystack/core";
+  resolveClientIp, extractLanguageFromHeader, normalizeErrorResponse ,
+  runWithErrorTrackerIdentityScope,
+  setCurrentErrorTrackerIdentity,
+  registerSyncAbortController,
+  unregisterSyncAbortController } from "@luckystack/core";
+import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
+
+
+
+
 import type { ErrorFormatter } from "@luckystack/core";
 import { buildSyncStreamEmitters } from './_shared/streamEmitters';
-import {
-  registerSyncAbortController,
-  unregisterSyncAbortController,
-} from '@luckystack/core';
+
 import type {
   RuntimeErrorResponse,
   RuntimeSyncServerEntry,
@@ -38,14 +46,13 @@ import { shouldLogDev, shouldLogStream } from './_shared/logFlags';
 import { buildFormattedError } from './_shared/errorBuilders';
 import { processClientSyncForRecipient } from './_shared/clientFanout';
 import { resolveSyncValidationMode } from './_shared/validationMode';
+import { authorizeSyncReceiver } from './_shared/receiverAuth';
 
-interface SyncErrorBuilder {
-  (args: {
+type SyncErrorBuilder = (args: {
     response: SyncErrorEnvelopeInput;
     preferred?: string | null;
     userLanguage?: string | null;
-  }): RuntimeErrorResponse;
-}
+  }) => RuntimeErrorResponse;
 
 //? Returns true when both buckets passed; false when one rejected and the
 //? caller should bail. The caller still owns the socket emit + responseIndex
@@ -59,6 +66,7 @@ const applySyncRateLimits = async ({
   responseIndex,
   buildSyncError,
   preferredLocale,
+  routeLimit,
 }: {
   resolvedName: string;
   token: string | null;
@@ -67,6 +75,10 @@ const applySyncRateLimits = async ({
   responseIndex: number | undefined;
   buildSyncError: SyncErrorBuilder;
   preferredLocale: string | null | undefined;
+  //? SYNC-11 — per-route `rateLimit` export. `undefined` ⇒ fall back to the
+  //? global `defaultApiLimit`; a number overrides the per-requester bucket;
+  //? `false` disables it (the global per-IP bucket below still applies).
+  routeLimit: number | false | undefined;
 }): Promise<boolean> => {
   const config = getProjectConfig();
   //? Resolve the real client IP once for both buckets. Default
@@ -78,7 +90,7 @@ const applySyncRateLimits = async ({
     headers: socket.handshake.headers,
     trustProxy: config.http.trustProxy,
   });
-  const defaultApiLimit = config.rateLimiting.defaultApiLimit;
+  const defaultApiLimit = routeLimit === undefined ? config.rateLimiting.defaultApiLimit : routeLimit;
   if (defaultApiLimit !== false && defaultApiLimit > 0) {
     const requesterIdentity = token ?? resolvedIp;
     const keyPrefix = token ? 'token' : 'ip';
@@ -90,13 +102,17 @@ const applySyncRateLimits = async ({
     });
     if (!allowed) {
       void dispatchHook('rateLimitExceeded', {
-        scope: token ? 'user' : 'route',
+        //? Parity with the API handler: an anonymous per-route bucket is IP-keyed,
+        //? so the scope is `ip` (with `route` still set to mark it a per-route
+        //? bucket vs the global `:sync:all` IP bucket), never `route`.
+        scope: token ? 'user' : 'ip',
         key: rateLimitKey,
         limit: defaultApiLimit,
         windowMs: config.rateLimiting.windowMs,
         count: defaultApiLimit + 1,
         route: resolvedName,
         userId: user?.id,
+        ip: token ? undefined : resolvedIp,
       });
       if (typeof responseIndex === 'number') {
         socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
@@ -153,7 +169,20 @@ const applySyncRateLimits = async ({
 
 
 // export default async function handleSyncRequest({ name, clientData, user, serverOutput, roomCode }: syncMessage) {
-export default async function handleSyncRequest({ msg, socket, token }: {
+//? ET-02 — open a per-request error-tracker identity scope around the ENTIRE sync
+//? handler before any await that could interleave with another concurrent request
+//? (`readSession` below is such a boundary). The resolved session is written into
+//? the scope's ALS box the moment it resolves, so two concurrent syncs with
+//? different users can't cross-attribute captures. Each request gets its own box.
+export default async function handleSyncRequest(args: {
+  msg: syncMessage,
+  socket: Socket,
+  token: string | null,
+}): Promise<void> {
+  await runWithErrorTrackerIdentityScope(() => handleSyncRequestInner(args));
+}
+
+async function handleSyncRequestInner({ msg, socket, token }: {
   msg: syncMessage,
   socket: Socket,
   token: string | null,
@@ -188,11 +217,41 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     extractLanguageFromHeader(socket.handshake.headers['x-language'])
     || extractLanguageFromHeader(socket.handshake.headers['accept-language']);
 
+  //? EXT-02 — per-message socket interception seam (websocket counterpart to
+  //? `preHttpRequest`). Fires before session lookup / route resolution / auth
+  //? so a consumer can gate, throttle, or audit individual sync messages. A
+  //? stop signal rejects the message: we emit a localized error envelope on the
+  //? response channel (when the client supplied a `responseIndex`) and abort.
+  const preMessageResult = await dispatchHook('preSocketMessage', {
+    channel: 'sync',
+    socketId: socket.id,
+    ip: socket.handshake.address,
+    authenticated: Boolean(token),
+    routeName: typeof name === 'string' ? name : undefined,
+  });
+  if (preMessageResult.stopped) {
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), normalizeErrorResponse({
+      response: {
+        status: 'error',
+        errorCode: preMessageResult.signal.errorCode,
+        httpStatus: preMessageResult.signal.httpStatus,
+      },
+      preferredLocale,
+    }));
+  }
+
   //? Per-route formatter ref + resolved-name ref — both undefined until the
   //? sync entry is looked up. Pre-lookup errors (invalid message, unknown
   //? route) emit with global formatter only because there's no syncEntry yet.
+  //? `let` (not `const`): each is declared here, captured by the `buildSyncError`
+  //? closure below, and assigned only further down once the route/session resolves
+  //? — so a `const` at declaration is impossible (TDZ in the closure). The
+  //? flow-based `prefer-const` mis-reads the single later assignment as the sole
+  //? init for the two `string | undefined` refs; disabled with that rationale.
+  // eslint-disable-next-line prefer-const
   let currentRouteName: string | undefined;
   let currentPerRouteFormatter: ErrorFormatter | undefined;
+  // eslint-disable-next-line prefer-const
   let currentUserId: string | undefined;
 
   const buildSyncError = ({
@@ -213,7 +272,11 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     perRouteFormatter: currentPerRouteFormatter,
   });
 
-  if (!name || !data || typeof name != 'string' || typeof data != 'object') {
+  //? Positive plain-object guard. `typeof data != 'object'` alone let an ARRAY
+  //? `clientInput` through (`typeof [] === 'object'`), reaching a `_server`
+  //? handler that assumes a plain object — and with `validation: 'relaxed'`
+  //? there is no further runtime shape check. `!data` already excludes `null`.
+  if (!name || !data || typeof name != 'string' || typeof data != 'object' || Array.isArray(data)) {
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
       response: { status: 'error', errorCode: 'sync.invalidRequest' },
       preferred: preferredLocale,
@@ -260,19 +323,41 @@ export default async function handleSyncRequest({ msg, socket, token }: {
 
   const user = await readSession(token);
   currentUserId = user?.id;
-  //? Identity propagation now flows via the `preSyncAuthorize` hook subscriber
-  //? registered by `@luckystack/error-tracking`'s `enableErrorTrackingAutoInstrumentation()`.
-  //? Direct `setSentryUser` removed from this handler — see migration doc.
+  //? ET-02 — bind the resolved session into the active per-request ALS identity
+  //? box so every subsequent capture (server handler throw, `_client` fanout,
+  //? hook subscriber) attributes to this user. Identity also still flows to the
+  //? legacy global via the `preSyncAuthorize` hook subscriber; the ALS read wins
+  //? at capture time.
+  setCurrentErrorTrackerIdentity(user?.id ? { id: user.id, email: user.email ?? undefined, username: user.name ?? undefined } : null);
   const { syncObject, functionsObject } = await getRuntimeSyncMaps();
 
-  //? B1 — per-request AbortController. The controller drives three things:
-  //?   1. Aborts when the client emits `syncCancel { cb }` (registered in cancelRegistry).
+  //? B1 / S13 — per-request AbortController. The controller drives three things:
+  //?   1. Aborts when the client emits `syncCancel { cb: <cancelId> }`.
   //?   2. Aborts when the originator socket disconnects (listener below).
   //?   3. Gates further chunk emits via the signal handed to streamEmitters.
-  //? `cb` is the stable per-request key the client already knows; we register
-  //? under `${socket.id}:${cb}` so cancel lookups are deterministic.
+  //?
+  //? S13 SECURITY: the registry key MUST NOT be the client-controlled callback
+  //? string (`cb` = `${name}/${version}`). That value is REUSED across every
+  //? concurrent request of the same route, so two in-flight `sync/chat/send/v1`
+  //? calls would register under the identical `${socket.id}:${cb}` key — the
+  //? second `Map.set` clobbered the first's controller, a `syncCancel` aborted
+  //? the wrong request, and the first request's `unregister` deleted the
+  //? second's entry (registry corruption). We now key on a SERVER-ISSUED,
+  //? per-request unique `cancelId` and hand that id to the client via a
+  //? handshake frame on the progress channel; the client cancels by echoing it
+  //? back as `syncCancel { cb: cancelId }`. The wire field stays `cb` so the
+  //? existing server-side cancel listener is unchanged — only its value is now
+  //? a unique id instead of a reused callback name.
+  const cancelId = randomUUID();
   const abortController = new AbortController();
-  const abortKey = registerSyncAbortController(socket.id, cb, abortController);
+  const abortKey = registerSyncAbortController(socket.id, cancelId, abortController);
+  //? Hand the server-issued cancel id to the originator on the progress channel
+  //? BEFORE any work runs, so an abort fired mid-flight (even on a non-streaming
+  //? route) can target THIS exact request. The client filters this frame out of
+  //? its `onStream` delivery by the reserved `__cancelId` marker key.
+  if (typeof responseIndex === 'number') {
+    socket.emit(buildSyncProgressEventName(responseIndex), { __cancelId: cancelId });
+  }
   const onSocketDisconnect = () => {
     abortController.abort();
   };
@@ -285,10 +370,37 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     unregisterSyncAbortController(abortKey);
   };
 
+  //? SYNC-02 — top-level error envelope. The socket handler runs un-`.catch()`'d
+  //? from loadSocket (`void (async () => …)()`), so ANY throw below — a
+  //? `fetchSockets()` Redis-adapter timeout, a misbehaving `_server`/`_client`
+  //? handler, a hook subscriber — would surface as a fatal unhandledRejection
+  //? (process kill on modern Node). The HTTP twin already wraps its body the
+  //? same way. On throw we run cleanup and emit `sync.serverExecutionFailed`.
+  const [handlerError] = await tryCatch(async () => {
+
   //? we check if there is a client file or/and a server file, if they both dont exist we abort
   if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
     if (shouldLogDev()) {
       getLogger().warn(`sync: ${name} has no _client or _server file`, { sync: name });
+    }
+    cleanupRequest();
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: { status: 'error', errorCode: 'sync.notFound' },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    }));
+  }
+
+  //? SYNC: reject a CLIENT-ONLY route (a `_client` file with no `_server`) as
+  //? misconfigured. The `_server` file is the documented, MANDATORY gate that
+  //? owns auth (`auth.login` / `additional`) and input validation; the entire
+  //? auth+validate block below lives inside `if (serverSyncEntry)`. Without
+  //? this guard a `_client`-only route would run receiver-auth + the `_client`
+  //? fanout with fully attacker-controlled, UNVALIDATED input and NO login
+  //? check — reachable by unauthenticated sockets. Treat it as a routing error.
+  if (!syncObject[`${resolvedName}_server`]) {
+    if (shouldLogDev()) {
+      getLogger().warn(`sync: ${resolvedName} has a _client file but no required _server file`, { sync: resolvedName });
     }
     cleanupRequest();
     return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
@@ -330,7 +442,31 @@ export default async function handleSyncRequest({ msg, socket, token }: {
       }));
     }
 
-    const validationResult = validateRequest({ auth, user: user! });
+    //? SYNC-02 — guard the anonymous `additional`-only case. When a route
+    //? declares `auth.additional` predicates but NOT `auth.login`, an
+    //? unauthenticated socket reaches here with `user === null`. Passing
+    //? `user!` into `validateRequest` would execute `condition.key in null`
+    //? → a fatal `TypeError` that, because loadSocket invokes this handler as
+    //? an un-`.catch()`'d `void` IIFE, becomes a process-killing
+    //? unhandledRejection. Reject as `auth.required` BEFORE the call (a route
+    //? gating on session fields legitimately requires a session).
+    if (auth.additional && auth.additional.length > 0 && !user) {
+      if (shouldLogDev()) {
+        getLogger().warn(`sync: ${resolvedName} requires a session for additional auth`, { sync: resolvedName });
+      }
+      cleanupRequest();
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: { status: 'error', errorCode: 'auth.required' },
+        preferred: preferredLocale,
+      }));
+    }
+
+    //? CORE-06 / SYNC-02 — `validateRequest` is now null-safe: pass the real
+    //? (possibly null) session instead of the former `user!` assertion. The
+    //? anonymous-additional case is still rejected explicitly above with
+    //? `auth.required`; core forbids any `additional[]` predicate when no
+    //? session rather than throwing on `condition.key in null`.
+    const validationResult = validateRequest({ auth, user });
     if (validationResult.status === 'error') {
       if (shouldLogDev()) {
         getLogger().warn(`sync: auth failed for ${resolvedName}`, { sync: resolvedName, errorCode: validationResult.errorCode });
@@ -347,6 +483,31 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         userLanguage: user?.language,
       }));
     }
+  }
+
+  //? SYNC-07 — default receiver authorization. Reject a cluster-wide `'all'`
+  //? broadcast when `sync.allowClientReceiverAll` is false, and (when
+  //? `sync.requireRoomMembership` is true) a room the originator socket has not
+  //? actually joined. Both flags default to today's permissive behavior, so a
+  //? missing key changes nothing. Runs before `preSyncAuthorize` so the
+  //? framework baseline is enforced first; the hook still applies finer policy.
+  const syncConfig = getProjectConfig().sync;
+  const receiverAuth = authorizeSyncReceiver({
+    receiver,
+    allowClientReceiverAll: syncConfig.allowClientReceiverAll,
+    requireRoomMembership: syncConfig.requireRoomMembership,
+    isMember: () => socket.rooms.has(receiver),
+  });
+  if (!receiverAuth.allowed) {
+    if (shouldLogDev()) {
+      getLogger().warn(`sync: receiver authorization failed for ${resolvedName}`, { sync: resolvedName, receiver, errorCode: receiverAuth.errorCode });
+    }
+    cleanupRequest();
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: { status: 'error', errorCode: receiverAuth.errorCode, httpStatus: 403 },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    }));
   }
 
   //? Custom authorization hook. Fires after basic auth + AuthProps check
@@ -398,12 +559,35 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     responseIndex,
     buildSyncError,
     preferredLocale,
+    routeLimit: serverSyncEntry?.rateLimit,
   });
   if (!rateLimitOk) { cleanupRequest(); return; }
 
   let serverOutput = {};
   if (serverSyncEntry) {
     const { main: serverMain, inputType, inputTypeFilePath } = serverSyncEntry;
+
+    //? EXT-04 — validation-stage hooks mirroring the API pipeline. `preSyncValidate`
+    //? may stop before validation; `postSyncValidate` reports the outcome.
+    const preValidateResult = await dispatchHook('preSyncValidate', {
+      routeName: resolvedName,
+      data: normalizedData,
+      user,
+      receiver,
+      transport: 'socket',
+    });
+    if (preValidateResult.stopped) {
+      cleanupRequest();
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: preValidateResult.signal.errorCode,
+          httpStatus: preValidateResult.signal.httpStatus,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
+    }
 
     //? Per-route validation toggle (mirrors the API handler). `'relaxed'` or
     //? `{ input: 'skip' }` skips runtime input validation entirely — for routes
@@ -415,21 +599,78 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         rootKey: 'clientInput',
         filePath: inputTypeFilePath,
       });
+      void dispatchHook('postSyncValidate', {
+        routeName: resolvedName,
+        data: normalizedData,
+        user,
+        receiver,
+        transport: 'socket',
+        validation: inputValidation.status === 'error'
+          ? { status: 'error', message: inputValidation.message }
+          : { status: 'success' },
+      });
       if (inputValidation.status === 'error') {
+        //? SYNC-04 SECURITY: do NOT echo the raw validator message (e.g.
+        //? "clientInput.userId should be string") back to the client — that lets
+        //? an unauthenticated caller enumerate a route's input schema. The
+        //? DETAILED message travels to the `postSyncValidate` hook above + the
+        //? dev log below only; the client receives the generic code. Mirrors the
+        //? API fix in `@luckystack/api`'s socketValidationStage.
+        if (shouldLogDev()) {
+          getLogger().warn(`sync: input validation failed for ${resolvedName}`, { sync: resolvedName, message: inputValidation.message });
+        }
         cleanupRequest();
         return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
           response: {
             status: 'error',
             errorCode: 'sync.invalidInputType',
-            errorParams: [{ key: 'message', value: inputValidation.message }],
           },
           preferred: preferredLocale,
           userLanguage: user?.language,
         }));
       }
+    } else {
+      void dispatchHook('postSyncValidate', {
+        routeName: resolvedName,
+        data: normalizedData,
+        user,
+        receiver,
+        transport: 'socket',
+        validation: { status: 'success' },
+      });
+    }
+
+    //? EXT-04 — execution-stage hooks mirroring the API pipeline. `preSyncExecute`
+    //? may stop before the `_server` runs; the single `executePayload` reference is
+    //? reused so `@luckystack/error-tracking` can pin spans via WeakMap, and
+    //? `postSyncExecute` fires on BOTH the success AND failure paths (the error
+    //? path was previously invisible to hook consumers).
+    const executePayload: PostSyncExecutePayload = {
+      routeName: resolvedName,
+      data: normalizedData,
+      user,
+      receiver,
+      transport: 'socket',
+      result: undefined,
+      error: null,
+      durationMs: 0,
+    };
+    const preExecuteResult = await dispatchHook('preSyncExecute', executePayload);
+    if (preExecuteResult.stopped) {
+      cleanupRequest();
+      return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: preExecuteResult.signal.errorCode,
+          httpStatus: preExecuteResult.signal.httpStatus,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }));
     }
 
     //? if the user has passed all the checks we call the preload sync function and return the result
+    const executeStart = Date.now();
     const [serverSyncError, serverSyncResult] = await tryCatch(
       async () => await serverMain({
         clientInput: normalizedData,
@@ -452,6 +693,10 @@ export default async function handleSyncRequest({ msg, socket, token }: {
         transport: 'socket',
       },
     );
+    executePayload.result = serverSyncResult;
+    executePayload.error = serverSyncError ?? null;
+    executePayload.durationMs = Date.now() - executeStart;
+    await dispatchHook('postSyncExecute', executePayload);
     if (serverSyncError) {
       if (shouldLogDev()) {
         getLogger().error(`sync: server execution failed for ${resolvedName}`, serverSyncError, { sync: resolvedName });
@@ -543,11 +788,15 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   //? Yield to the event loop periodically so a giant `receiver: 'all'` fanout
   //? doesn't starve other requests. Tunables live in projectConfig.sync.
   const { fanoutYieldEvery, fanoutYieldMs } = getProjectConfig().sync;
+  //? SYNC-16 — clamp to >= 1 so a misconfigured `fanoutYieldEvery: 0` doesn't
+  //? produce `n % 0 === NaN` (never truthy) → the loop never yields and a giant
+  //? `receiver: 'all'` fanout can starve the event loop.
+  const yieldEvery = Math.max(1, fanoutYieldEvery);
   let recipientCount = 0;
   let tempCount = 1;
   for (const tempSocket of sockets) {
     tempCount++;
-    if (tempCount % fanoutYieldEvery === 0) { await new Promise(resolve => setTimeout(resolve, fanoutYieldMs)); }
+    if (tempCount % yieldEvery === 0) { await new Promise(resolve => setTimeout(resolve, fanoutYieldMs)); }
 
     //? check if they have a token stored in their cookie or session based on the settings
     const tempToken = extractTokenFromSocket(tempSocket);
@@ -557,6 +806,24 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     if (ignoreSelf && typeof ignoreSelf === 'boolean' && token && token === tempToken) {
         continue;
       }
+
+    //? SYNC-22 — per-recipient fanout hook. Fires ONCE per resolved recipient,
+    //? before this socket receives anything, letting a consumer FILTER the
+    //? fanout (block users, per-tenant visibility) without a `_client` file. A
+    //? stop signal SKIPS just this recipient — the loop continues and the
+    //? recipient is NOT counted as delivered. `recipientUserId` is left null on
+    //? the hot path (resolving it would cost a session read per recipient); a
+    //? handler that needs it can derive it from `recipientSocketId` / `receiver`.
+    const preRecipientResult = await dispatchHook('preSyncRecipient', {
+      routeName: resolvedName,
+      receiver,
+      recipientSocketId: tempSocket.id,
+      recipientUserId: null,
+      serverOutput,
+    });
+    if (preRecipientResult.stopped) {
+      continue;
+    }
 
     recipientCount++;
 
@@ -611,4 +878,23 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     message: `sync ${resolvedName} success`,
     result: serverOutput,
   });
+
+  }, undefined, {
+    handler: 'handleSyncRequest',
+    sync: currentRouteName,
+    stage: 'handler',
+    userId: currentUserId,
+    receiver,
+    transport: 'socket',
+  });
+  if (handlerError) {
+    if (shouldLogDev()) {
+      getLogger().error(`sync: unhandled error for ${currentRouteName ?? name}`, handlerError, { sync: currentRouteName });
+    }
+    cleanupRequest();
+    return typeof responseIndex == 'number' && socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({
+      response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
+      preferred: preferredLocale,
+    }));
+  }
 }

@@ -16,7 +16,12 @@
 
 import { createRequire } from 'node:module';
 
-import { ensurePeerDepInstalled, type ErrorTracker, type ErrorTrackerEvent } from '@luckystack/core';
+import {
+  ensurePeerDepInstalled,
+  getCurrentErrorTrackerIdentity,
+  type ErrorTracker,
+  type ErrorTrackerEvent,
+} from '@luckystack/core';
 
 import { resolveExceptionEvent, resolveMessageEvent } from './runBeforeSend';
 
@@ -49,7 +54,20 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
   //? from the adapter's perspective, not core's node_modules.
   ensurePeerDepInstalled('posthog-node', 'Run `npm install posthog-node`.', localRequire);
 
-  let currentDistinctId = options.anonymousDistinctId ?? 'anonymous';
+  const anonymousDistinctId = options.anonymousDistinctId ?? 'anonymous';
+  //? Closure fallback identity, set by `setUser`. Used ONLY for non-request /
+  //? background captures that run outside any per-request ALS scope. Per-request
+  //? captures resolve the distinctId from the ALS at capture time (ET-02).
+  let fallbackDistinctId = anonymousDistinctId;
+
+  //? Resolve the distinctId at CAPTURE time: prefer the per-request ALS identity
+  //? (ET-02 — isolated per concurrent request, survives await boundaries) and only
+  //? fall back to the closure `fallbackDistinctId` when no request scope is active.
+  const resolveDistinctId = (): string => {
+    const alsUser = getCurrentErrorTrackerIdentity();
+    if (alsUser?.id) return alsUser.id;
+    return fallbackDistinctId;
+  };
 
   return {
     name: 'posthog',
@@ -61,18 +79,21 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
       const properties: Record<string, unknown> = {
         'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
         'error.message': fwdError instanceof Error ? fwdError.message : String(fwdError),
-        'error.stack': fwdError instanceof Error ? fwdError.stack : undefined,
+        //? Only emit `error.stack` when a stack actually exists — a non-Error
+        //? throw would otherwise add a noisy explicit-`undefined` field.
+        ...(fwdError instanceof Error && fwdError.stack ? { 'error.stack': fwdError.stack } : {}),
         ...fwdContext,
       };
       //? Prefer the dedicated `captureException` API when the installed
       //? posthog-node version supports it; fall back to a custom
       //? `$exception` event for older clients.
+      const distinctId = resolveDistinctId();
       if (options.client.captureException) {
-        options.client.captureException(fwdError, currentDistinctId, properties);
+        options.client.captureException(fwdError, distinctId, properties);
         return;
       }
       options.client.capture({
-        distinctId: currentDistinctId,
+        distinctId,
         event: '$exception',
         properties,
       });
@@ -82,7 +103,7 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
       const resolved = resolveMessageEvent(options.beforeSend, message, level, context);
       if (!resolved) return;
       options.client.capture({
-        distinctId: currentDistinctId,
+        distinctId: resolveDistinctId(),
         event: 'log_message',
         properties: { message: resolved.message, level: resolved.level, ...resolved.context },
       });
@@ -90,10 +111,10 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
 
     setUser(user) {
       if (!user?.id) {
-        currentDistinctId = options.anonymousDistinctId ?? 'anonymous';
+        fallbackDistinctId = anonymousDistinctId;
         return;
       }
-      currentDistinctId = user.id;
+      fallbackDistinctId = user.id;
       if (options.client.identify) {
         options.client.identify({
           distinctId: user.id,
@@ -107,10 +128,17 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
 
     recordMetric(name, value, tags) {
       options.client.capture({
-        distinctId: currentDistinctId,
+        distinctId: resolveDistinctId(),
         event: `metric_${name}`,
         properties: { value, ...tags },
       });
+    },
+
+    //? ET-16 flush lifecycle: drain posthog-node's in-memory event batch on
+    //? graceful shutdown via the client's `shutdown()` (no-op when the client
+    //? doesn't expose one). `flushErrorTrackers()` calls this on server stop.
+    async flush() {
+      await options.client.shutdown?.();
     },
 
     beforeSend: options.beforeSend,

@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Pluggable transactional email for LuckyStack: Console (dev), Resend, and SMTP adapters with a registry-based plug-in pattern. Optional dep — install only when forgotPassword='framework' or you want to send transactional mail.",

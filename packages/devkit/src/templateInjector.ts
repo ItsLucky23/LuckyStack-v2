@@ -325,7 +325,14 @@ export const hasPairedFile = (filePath: string): boolean => {
 export const extractSyncPagePath = (filePath: string): string => {
   const normalized = filePath.replaceAll('\\', '/');
   const match = /src\/(.+?)\/_sync\//.exec(normalized);
-  return match?.[1] ?? '';
+  if (match?.[1]) return match[1];
+  //? A sync directly under `src/_sync/` resolves to the `'system'` sentinel —
+  //? the SAME page key the type-map generator (`routeMeta.extractSyncPagePath`)
+  //? and the dev loader use for root syncs. Returning `''` here injected
+  //? `type PagePath = '';` into the paired client/server template, which then
+  //? failed to index `SyncTypeMap['system']` — a broken generated reference.
+  if (/(?:^|\/)src\/_sync\//.test(normalized)) return 'system';
+  return '';
 };
 
 /**
@@ -354,14 +361,22 @@ export const extractClientInputFromFile = (filePath: string): string | null => {
     const syncParamsMatch = /interface\s+SyncParams\s*\{/.exec(content);
     if (!syncParamsMatch) return null;
 
-    // Find clientInput property
-    const clientInputMatch = /clientInput\s*:\s*\{/.exec(content);
+    //? Scope the `clientInput` search to the region AFTER the `SyncParams`
+    //? declaration. An unscoped global search could match a `clientInput:` in
+    //? an earlier comment, a different interface, or a destructure above the
+    //? `SyncParams` body and extract the wrong block.
+    const searchRegion = content.slice(syncParamsMatch.index + syncParamsMatch[0].length);
+    const clientInputMatch = /clientInput\s*:\s*\{/.exec(searchRegion);
     if (!clientInputMatch) return null;
 
     // Extract balanced braces
-    const startIndex = content.indexOf('{', clientInputMatch.index);
+    const startIndex = content.indexOf(
+      '{',
+      syncParamsMatch.index + syncParamsMatch[0].length + clientInputMatch.index,
+    );
+    if (startIndex === -1) return null;
     let depth = 0;
-    let endIndex = startIndex;
+    let endIndex = -1;
 
     for (let i = startIndex; i < content.length; i++) {
       if (content[i] === '{') depth++;
@@ -372,6 +387,11 @@ export const extractClientInputFromFile = (filePath: string): string | null => {
         break;
       }
     }
+
+    //? Braces never balanced (truncated / malformed file) — return null rather
+    //? than a single `{` of garbage that a truthiness-checking caller would
+    //? splice into user source.
+    if (endIndex === -1) return null;
 
     return content.substring(startIndex, endIndex + 1);
   } catch (error) {
@@ -421,7 +441,7 @@ export const extractClientInputFromGeneratedTypes = (pagePath: string, syncName:
 
     // Extract balanced braces
     let depth = 0;
-    let endIndex = braceStart;
+    let endIndex = -1;
 
     for (let i = braceStart; i < content.length; i++) {
       if (content[i] === '{') depth++;
@@ -432,6 +452,9 @@ export const extractClientInputFromGeneratedTypes = (pagePath: string, syncName:
         break;
       }
     }
+
+    //? Braces never balanced — return null instead of a lone `{` of garbage.
+    if (endIndex === -1) return null;
 
     const extracted = content.substring(braceStart, endIndex + 1);
     console.log(`[TemplateInjector] Extracted clientInput types: ${extracted}`);
@@ -450,6 +473,37 @@ export const extractClientInputFromGeneratedTypes = (pagePath: string, syncName:
 export const calculateRelativePath = (filePath: string): string => {
   const normalized = filePath.replaceAll('\\', '/');
 
+  //? Anchor on the CONFIGURED srcDir, not the literal substring `src/`. A
+  //? non-`src` layout (`srcDir: 'app'`) or a root path that itself contains
+  //? `src/` (`C:/work/srcrepo/...`) computed the wrong depth with the old
+  //? `indexOf('src/')`, breaking the injected `{{REL_PATH}}` import. Reuse the
+  //? same srcDir-driven anchoring the rest of the package uses (mirrors
+  //? `computeSrcRelativePath`). For the standard `src` layout this is
+  //? byte-identical to the old heuristic.
+  const srcRelative = computeSrcRelativePath(filePath);
+  if (srcRelative !== null) {
+    try {
+      const srcDepthFromRoot = path
+        .relative(ROOT_DIR, getSrcDir())
+        .replaceAll('\\', '/')
+        .split('/')
+        .filter((segment) => segment.length > 0).length;
+      //? `srcRelative` is `<dirs.../file.ts>` relative to srcDir. The number of
+      //? `../` to climb from the FILE's directory up to srcDir is the count of
+      //? its DIRECTORY segments (drop the trailing filename). Adding srcDir's
+      //? own depth below the project root gives the climb to root — the template
+      //? then re-descends via the literal `src/` it appends after `{{REL_PATH}}`.
+      const dirSegmentsAfterSrc = Math.max(
+        0,
+        srcRelative.split('/').filter((segment) => segment.length > 0).length - 1,
+      );
+      return '../'.repeat(srcDepthFromRoot + dirSegmentsAfterSrc);
+    } catch {
+      //? Fall through to the literal-`src/` heuristic below.
+    }
+  }
+
+  // Fallback (relative path the watcher handed us, or srcDir unresolvable):
   // Find the 'src/' part of the path
   const srcIndex = normalized.indexOf('src/');
   if (srcIndex === -1) {
@@ -563,7 +617,10 @@ export const injectTemplate = async (filePath: string): Promise<boolean> => {
   }
 };
 
-export const shouldInjectTemplate = (filePath: string): boolean => {
+export const shouldInjectTemplate = (
+  filePath: string,
+  options: { isNewFile?: boolean } = {},
+): boolean => {
   //? Consumer disable hook — if `registerRoutingRules({ disableTemplateInjection })`
   //? was called with a predicate that returns true for this path, skip the
   //? injection entirely. Useful for files the consumer manages by hand
@@ -577,7 +634,18 @@ export const shouldInjectTemplate = (filePath: string): boolean => {
     return false;
   }
 
-  return isEmptyFile(filePath) || isCommentOnlyFile(filePath);
+  //? An EMPTY file is always safe to template (there is nothing to lose).
+  if (isEmptyFile(filePath)) return true;
+
+  //? A COMMENT-ONLY file is only templated when it is genuinely NEW (the `add`
+  //? event). Commenting out an entire EXISTING `_api`/`_sync`/`page` file and
+  //? saving it (a common debugging move) fires a `change` event with
+  //? comment-only content — injecting the starter template there silently
+  //? OVERWRITES the user's commented-out code with no undo (data loss). On
+  //? `add` there is no prior route entry to clobber, so it stays safe.
+  if (options.isNewFile) return isCommentOnlyFile(filePath);
+
+  return false;
 };
 
 /**
@@ -597,10 +665,23 @@ export const updateClientFileForPairedServer = async (clientFilePath: string): P
     if (!content.includes('SyncClientInput')) {
       content = content.replace(
         /import \{([^}]+)\} from ['"]([^'"]*apiTypes\.generated)['"]/,
-        (_match, imports, path) => {
-          return `import {${imports}, SyncClientInput, SyncServerOutput } from '${path}'`;
+        (_match, imports: string, importPath: string) => {
+          return `import {${imports}, SyncClientInput, SyncServerOutput } from '${importPath}'`;
         }
       );
+    }
+
+    //? Safety net for the import-merge above: the single-line `import { ... }`
+    //? regex misses multi-line, `type`-only, or namespace imports of the
+    //? generated file. When it misses, `clientInput`/`serverOutput` are still
+    //? rewritten below to reference `SyncClientInput`/`SyncServerOutput`,
+    //? injecting an unresolved-symbol COMPILE ERROR into the user's source. If
+    //? the symbols are STILL absent, prepend a fresh import so the rewritten
+    //? references always resolve (same target as the sync_client template's
+    //? `{{REL_PATH}}src/_sockets/apiTypes.generated` import).
+    if (!content.includes('SyncClientInput')) {
+      const relPath = calculateRelativePath(clientFilePath);
+      content = `import { SyncClientInput, SyncServerOutput } from '${relPath}src/_sockets/apiTypes.generated';\n` + content;
     }
 
     // Add type aliases after imports if not present
@@ -665,14 +746,17 @@ export const updateClientFileForDeletedServer = async (
 
     // STEP 1: Replace clientInput type declaration FIRST (before removing imports)
     // Pattern matches: clientInput: SyncClientInput<...> or clientInput: { ... }
-    // Preserve leading indentation
+    // Preserve leading indentation. Use a REPLACER FUNCTION (not a replacement
+    // string) so `$`-sequences in `clientInputTypes` — Prisma `$Enums.Role`,
+    // template-literal `${...}` types — are spliced VERBATIM instead of being
+    // re-interpreted by `String.replace` as `$1`/`$&` backreferences.
     content = content.replace(
       /^(\s*)clientInput:\s*SyncClientInput<[^>]+>/m,
-      `$1clientInput: ${clientInputTypes}`
+      (_match, indent: string) => `${indent}clientInput: ${clientInputTypes}`
     );
     content = content.replace(
       /^(\s*)clientInput:\s*\{[^}]*\}/m,
-      `$1clientInput: ${clientInputTypes}`
+      (_match, indent: string) => `${indent}clientInput: ${clientInputTypes}`
     );
 
     // STEP 2: Remove serverOutput line from SyncParams interface FIRST

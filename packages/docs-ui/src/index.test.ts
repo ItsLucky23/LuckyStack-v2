@@ -117,7 +117,7 @@ describe('mountDocsUi', () => {
       const jsonRes = makeRes();
       const jsonHandled = await handler(makeReq('/internal/docs/api.json'), asRes(jsonRes));
       expect(jsonHandled).toBe(true);
-      expect(jsonRes.headers['content-type']).toBe('application/json');
+      expect(jsonRes.headers['content-type']).toBe('application/json; charset=utf-8');
 
       //? The default route must no longer match once overridden.
       const missRes = makeRes();
@@ -196,7 +196,7 @@ describe('mountDocsUi', () => {
       const handled = await handler(makeReq('/_docs/api.json'), asRes(res));
       expect(handled).toBe(true);
       expect(res.statusCode).toBe(200);
-      expect(res.headers['content-type']).toBe('application/json');
+      expect(res.headers['content-type']).toBe('application/json; charset=utf-8');
       expect(res.headers['cache-control']).toBe('no-store');
       expect(res.body).toBe('{"apis":{"page":{}}}');
     });
@@ -224,7 +224,7 @@ describe('mountDocsUi', () => {
       const handled = await handler(makeReq('/_docs/api.json'), asRes(res));
       expect(handled).toBe(true);
       expect(res.statusCode).toBe(404);
-      expect(res.headers['content-type']).toBe('application/json');
+      expect(res.headers['content-type']).toBe('application/json; charset=utf-8');
       const payload = JSON.parse(res.body ?? '{}');
       expect(payload.error).toBe('apiDocs.generated.json not found');
       expect(payload.expectedAt).toBe('/missing/docs.json');

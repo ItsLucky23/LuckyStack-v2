@@ -11,7 +11,7 @@ import type { ErrorTrackerEvent } from '@luckystack/core';
 
 vi.mock('node:module', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:module')>();
-  const fakeRequire = ((id: string): unknown => ({})) as unknown as NodeRequire;
+  const fakeRequire = ((_id: string): unknown => ({})) as unknown as NodeRequire;
   fakeRequire.resolve = ((id: string): string => id) as NodeRequire['resolve'];
   return { ...actual, createRequire: () => fakeRequire };
 });

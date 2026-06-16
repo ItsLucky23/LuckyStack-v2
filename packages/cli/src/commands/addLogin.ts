@@ -38,8 +38,15 @@ export const addLogin = (project: ConsumerProject, options: AddOptions): Result<
   }
 
   const range = resolveLuckyStackRange(project.pkg, options.cliVersion);
-  if (addDependency(project, '@luckystack/login', range)) {
-    console.log(`• added @luckystack/login@${range} to package.json`);
+  //? addDependency writes package.json and can throw on EACCES/EROFS — guard it
+  //? into a returned Result (mirroring addBackendOnly) so a write failure reports
+  //? cleanly instead of crashing with a raw stack trace.
+  try {
+    if (addDependency(project, '@luckystack/login', range)) {
+      console.log(`• added @luckystack/login@${range} to package.json`);
+    }
+  } catch (error) {
+    return err(error as Error);
   }
 
   if (options.install) {

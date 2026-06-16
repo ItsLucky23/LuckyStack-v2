@@ -446,6 +446,14 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
       const runRequest = (socketInstance: Socket) => {
         if (!canSendNow(socketInstance)) {
           queueId ??= createQueueId();
+          //? For the immediate reject-new path (`drop-newest` / `reject`
+          //? policy) THIS item's `onDrop` fires SYNCHRONOUSLY inside
+          //? `enqueueSyncRequest`. We keep surfacing that as the historical
+          //? `offline.queueFull` via the `!enqueued` branch, so suppress the
+          //? `onDrop` resolve during the synchronous enqueue window and re-arm
+          //? it only if the item was actually queued (so a LATER async eviction
+          //? — drop-oldest by a future enqueue, or age expiry — still settles).
+          let suppressOnDrop = true;
           //? `enqueueSyncRequest` returns `false` when the offline queue is
           //? full and `dropPolicy: 'reject'` is active. Resolve with a
           //? normalized error envelope so the caller can branch instead of
@@ -458,7 +466,24 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
             },
             createdAt: Date.now(),
             dropPolicy: offlineDropPolicy,
+            //? SYNC-09 — settle the awaiting caller when this QUEUED request is
+            //? later EVICTED (drop-oldest by a future enqueue / age expiry)
+            //? instead of ever running. Without it the promise would hang
+            //? forever, since `run` is the only thing that could otherwise
+            //? resolve it. The default `offlineQueue.dropPolicy` is
+            //? `'drop-oldest'`, so async eviction is the NORMAL overflow path
+            //? for high-churn syncs (cursor moves), not an edge case.
+            onDrop: (reason) => {
+              if (suppressOnDrop) return;
+              resolve(normalizeSyncError({
+                response: { status: 'error', errorCode: 'offline.dropped', errorParams: [{ key: 'reason', value: reason }] },
+                fallbackErrorCode: 'offline.dropped',
+              }));
+            },
           });
+          //? Past the synchronous enqueue window: if the item is sitting in the
+          //? queue, a future eviction should settle via `onDrop`.
+          suppressOnDrop = false;
           if (!enqueued) {
             resolve(normalizeSyncError({
               response: { status: 'error', errorCode: 'offline.queueFull' },
@@ -471,40 +496,79 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         const tempIndex = incrementResponseIndex();
 
         let cleanupProgressListener: (() => void) | null = null;
+        //? CORE-06 — ack-timeout. Armed right after the request is emitted so a
+        //? lost acknowledgement (server restart/crash between emit and reply)
+        //? settles the promise with `sync.requestTimeout` (504) instead of
+        //? hanging the awaiting caller forever. Mirrors `apiRequest`'s
+        //? `api.requestTimeoutMs` wiring.
+        let responseTimeout: ReturnType<typeof setTimeout> | null = null;
+        const clearResponseTimeout = () => {
+          if (responseTimeout) {
+            clearTimeout(responseTimeout);
+            responseTimeout = null;
+          }
+        };
 
         if (shouldLogDev()) {
           getLogger().debug(`Client Sync Request(${String(tempIndex)})`, { syncName: sanitizedName, data, receiver: normalizedReceiver, ignoreSelf });
         }
 
-        if (typeof onStream === 'function') {
-          const progressEventName = buildSyncProgressEventName(tempIndex);
-          const progressListener = (streamPayload: SyncRequestStreamEvent) => {
-            if (shouldLogStream()) {
-              getLogger().debug(`Server Sync Stream(${String(tempIndex)})`, { syncName: sanitizedName, streamPayload });
-            }
+        //? S13 — server-issued cancel id. The server emits a `{ __cancelId }`
+        //? handshake frame on the progress channel before any work runs; we
+        //? capture it so an abort can target THIS exact request (not a callback
+        //? name reused across concurrent same-route requests, which corrupted
+        //? the server-side abort registry). The progress listener is ALWAYS
+        //? registered now — even without `onStream` — so the handshake is caught
+        //? on non-streaming routes too. The reserved `__cancelId` frame is
+        //? filtered out of `onStream` delivery.
+        let serverCancelId: string | null = null;
+        const progressEventName = buildSyncProgressEventName(tempIndex);
+        const progressListener = (streamPayload: SyncRequestStreamEvent & { __cancelId?: string }) => {
+          if (typeof streamPayload.__cancelId === 'string') {
+            serverCancelId = streamPayload.__cancelId;
+            return;
+          }
 
-            onStream(streamPayload);
-          };
+          if (typeof onStream !== 'function') return;
 
-          socketInstance.on(progressEventName, progressListener);
-          cleanupProgressListener = () => {
-            socketInstance.off(progressEventName, progressListener);
-          };
-        }
+          if (shouldLogStream()) {
+            getLogger().debug(`Server Sync Stream(${String(tempIndex)})`, { syncName: sanitizedName, streamPayload });
+          }
 
+          onStream(streamPayload);
+        };
+
+        socketInstance.on(progressEventName, progressListener);
+        cleanupProgressListener = () => {
+          socketInstance.off(progressEventName, progressListener);
+        };
+
+        //? Fallback cancel key for the narrow window before the `__cancelId`
+        //? handshake frame arrives (abort fired immediately on a slow link).
+        //? Best-effort only — once the handshake lands `serverCancelId` is the
+        //? authoritative, per-request-unique key the server registered under.
         const syncCb = `${sanitizedName}/${resolvedVersion}`;
         socketInstance.emit(socketEventNames.sync, { name: fullName, data, cb: syncCb, receiver: normalizedReceiver, responseIndex: tempIndex, ignoreSelf });
 
-        //? B1 — bridge the consumer's AbortSignal to the server. When the
-        //? signal fires we emit `syncCancel { cb }` so the server-side
-        //? handler stops emitting new chunks. We also resolve locally with
-        //? `request.aborted` so the awaiting caller settles.
+        //? B1 / S13 — bridge the consumer's AbortSignal to the server. When the
+        //? signal fires we emit `syncCancel { cb: <serverCancelId> }` so the
+        //? server-side handler stops emitting new chunks. We also resolve
+        //? locally with `request.aborted` so the awaiting caller settles.
+        const responseEventName = buildSyncResponseEventName(tempIndex);
+        //? Forward-declared so the abort/timeout paths can proactively `off()`
+        //? the lingering ack listener instead of waiting for a reply that was
+        //? cancelled / will never arrive.
+        let cleanupResponseListener: (() => void) | null = null;
+
         let cleanupExternalAbort: (() => void) | null = null;
         if (externalSignal) {
           const externalAbortHandler = () => {
-            socketInstance.emit(socketEventNames.syncCancel, { cb: syncCb });
+            clearResponseTimeout();
+            socketInstance.emit(socketEventNames.syncCancel, { cb: serverCancelId ?? syncCb });
             cleanupProgressListener?.();
             cleanupProgressListener = null;
+            cleanupResponseListener?.();
+            cleanupResponseListener = null;
             cleanupExternalAbort?.();
             cleanupExternalAbort = null;
             resolve(normalizeSyncError({
@@ -518,8 +582,34 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
           };
         }
 
-        socketInstance.once(buildSyncResponseEventName(tempIndex), (responseData: SyncAckResponse) => {
+        //? Arm the ack-timeout. `sync.requestTimeoutMs` (default 30000) may be
+        //? `false` to disable. On expiry we tear down every listener and settle
+        //? with a 504 envelope so the awaiting caller never hangs.
+        const effectiveTimeoutMs = getProjectConfig().sync.requestTimeoutMs;
+        if (typeof effectiveTimeoutMs === 'number' && effectiveTimeoutMs > 0) {
+          responseTimeout = setTimeout(() => {
+            responseTimeout = null;
+            cleanupProgressListener?.();
+            cleanupProgressListener = null;
+            cleanupResponseListener?.();
+            cleanupResponseListener = null;
+            cleanupExternalAbort?.();
+            cleanupExternalAbort = null;
+            if (shouldLogDev()) {
+              getLogger().error(`Sync ${sanitizedName} timed out`, undefined, { responseIndex: tempIndex });
+            }
+            resolve(normalizeSyncError({
+              response: { status: 'error', errorCode: 'sync.requestTimeout', httpStatus: 504 },
+              fallbackErrorCode: 'sync.requestTimeout',
+            }));
+          }, effectiveTimeoutMs);
+        }
+
+        const responseListener = (responseData: SyncAckResponse) => {
+          clearResponseTimeout();
           cleanupProgressListener?.();
+          cleanupProgressListener = null;
+          cleanupResponseListener = null;
           cleanupExternalAbort?.();
           cleanupExternalAbort = null;
 
@@ -570,7 +660,12 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
               : `sync ${sanitizedName} success`,
             result,
           } as RequestOutput);
-        });
+        };
+
+        socketInstance.once(responseEventName, responseListener);
+        cleanupResponseListener = () => {
+          socketInstance.off(responseEventName, responseListener);
+        };
       };
 
       runRequest(activeSocket);
@@ -921,7 +1016,12 @@ export const attachSyncReceiver = (socketInstance: Socket): void => {
       if (shouldNotifyDev()) {
         notify.error({ key: 'sync.invalidRequestFormat' });
       }
-      throw new Error(errorMessage);
+      //? SYNC-10 — degrade to a logged warning instead of throwing. This runs
+      //? inside the `socket.on(sync)` listener; a `throw` here is an uncaught
+      //? exception on a server-controlled (malformed) frame that can kill other
+      //? listeners bound to the same emit. The error is already logged + notified
+      //? above, so `return` loses no information.
+      return;
     }
 
     for (const routeKey of routeKeys) {

@@ -188,6 +188,12 @@ export default function Home() {
   const passwordConfirmRef = useRef<HTMLInputElement>(null);
   const [passwordLoading, setPasswordLoading] = useState(false);
 
+  //? Credentials accounts must reconfirm with their password before the
+  //? server (`deleteAccount_v1`) will erase them — collected here and sent as
+  //? `data.password`. OAuth-only accounts have no hash, so the field is hidden
+  //? and the server skips the check.
+  const deletePasswordRef = useRef<HTMLInputElement>(null);
+
   const handleChangePassword = async (event: React.SyntheticEvent) => {
     event.preventDefault();
     if (passwordLoading) return;
@@ -276,10 +282,17 @@ export default function Home() {
     });
     if (!confirmed) return;
 
+    //? Credentials accounts must re-enter their password — the server
+    //? (`deleteAccount_v1`) rejects with `login.wrongPassword` otherwise.
+    //? OAuth-only accounts have no hash, so the field is hidden and we send
+    //? `undefined` (server skips the check).
+    const isCredentials = session?.provider === 'credentials';
+    const password = deletePasswordRef.current?.value ?? '';
+
     const response = await apiRequest({
       name: 'settings/deleteAccount',
       version: 'v1',
-      data: { confirmation: 'DELETE' },
+      data: { confirmation: 'DELETE', password: isCredentials ? password : undefined },
     });
     if (response.status === 'success') {
       notify.success({ key: 'settings.deleteAccountDone' });
@@ -491,6 +504,12 @@ export default function Home() {
               {translate({ key: 'settings.deleteAccount' })}
             </button>
           </div>
+          {session.provider === 'credentials' && (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="delete-pw" className="text-xs font-medium">{translate({ key: 'settings.currentPassword' })}</label>
+              <input id="delete-pw" type="password" autoComplete="current-password" ref={deletePasswordRef} className={inputClass} />
+            </div>
+          )}
           <p className="text-xs text-common flex items-center gap-2">
             <FontAwesomeIcon icon={faTriangleExclamation} />
             {translate({ key: 'settings.deleteAccountConfirm' })}

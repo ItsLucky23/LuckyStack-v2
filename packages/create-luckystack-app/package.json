@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Scaffold a new LuckyStack project. Run `npx create-luckystack-app my-app` to generate a starter with the recommended overlay layout, Prisma schema, and config files in place.",

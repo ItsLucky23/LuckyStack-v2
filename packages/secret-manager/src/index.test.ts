@@ -9,6 +9,7 @@ import {
   refreshSecretManager,
   reloadSecretManagerFromFiles,
   getCachedResolution,
+  getCachedResolutionMeta,
   resetSecretManagerForTests,
   type SecretManagerConfig,
 } from './index';
@@ -48,10 +49,15 @@ const bodyOf = (fn: typeof fetch, call = 0): { keys?: string[] } => {
 //? Swallow console.warn during hybrid tests (expression body dodges no-empty-function).
 const swallowWarn = (): boolean => true;
 
+//? `envNames: () => true` opts these tests back into scanning every name — the
+//? secure default (unset `envNames`) now resolves NOTHING off-host, so the
+//? behavioral tests that assert resolution must explicitly opt in. The unset-default
+//? deny-all + warning is covered by its own describe block below.
 const baseConfig = (overrides: Partial<SecretManagerConfig> = {}): SecretManagerConfig => ({
   url: 'https://secrets.example.com',
   token: 'tok-123',
   source: 'remote',
+  envNames: () => true,
   ...overrides,
 });
 
@@ -316,7 +322,7 @@ describe('reloadSecretManagerFromFiles — dev file reload', () => {
 
       await reloadSecretManagerFromFiles();
 
-      //? Plain .env values injected live (dotenv strips the inline comment).
+      //? Plain .env values injected live (the in-package parser strips the inline comment).
       expect(process.env.ENVIRONMENT).toBe('production');
       expect(process.env.PORT).toBe('123');
       //? Pointer from .env.local resolved against the server.
@@ -344,5 +350,547 @@ describe('resetSecretManagerForTests', () => {
 
     resetSecretManagerForTests();
     expect(getCachedResolution()).toBeNull();
+  });
+});
+
+//? SM-07 — the security validators (validateUrl / validateToken / isSafeEnvFile /
+//? env-key regex) are not exported; drive them through the public surface.
+describe('url validation (validateUrl)', () => {
+  it('throws on a non-absolute url', async () => {
+    await expect(initSecretManager(baseConfig({ url: 'not-a-url' }))).rejects.toThrow(
+      /is not an absolute URL/,
+    );
+  });
+
+  it('throws on a file:// scheme', async () => {
+    await expect(initSecretManager(baseConfig({ url: 'file:///etc/passwd' }))).rejects.toThrow(
+      /only http\(s\) is supported/,
+    );
+  });
+
+  it('does not validate the url in local mode (placeholder allowed)', async () => {
+    await expect(
+      initSecretManager(baseConfig({ source: 'local', url: 'not-a-url' })),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('transport security — plain-http guard (SM-01)', () => {
+  it('rejects plain http to a non-loopback host by default', async () => {
+    process.env.K = 'SECRET_V1';
+    await expect(
+      initSecretManager(baseConfig({ url: 'http://secrets.example.com' })),
+    ).rejects.toThrow(/Refusing plain-http/);
+  });
+
+  it('allows plain http to loopback without the override', async () => {
+    process.env.K = 'LOOP_SECRET_V1';
+    const fetchImpl = okFetch({ LOOP_SECRET_V1: 'v' });
+    await expect(
+      initSecretManager(baseConfig({ url: 'http://localhost:8080', fetchImpl })),
+    ).resolves.toBeUndefined();
+    expect(process.env.K).toBe('v');
+  });
+
+  it('allows plain http to any host with allowInsecureHttp + warns', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    process.env.K = 'INSEC_SECRET_V1';
+    const fetchImpl = okFetch({ INSEC_SECRET_V1: 'v' });
+    await initSecretManager(
+      baseConfig({ url: 'http://secrets.example.com', allowInsecureHttp: true, fetchImpl }),
+    );
+    expect(process.env.K).toBe('v');
+    expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('token validation (validateToken)', () => {
+  it('throws on a whitespace-only token', async () => {
+    process.env.K = 'SECRET_V1';
+    await expect(initSecretManager(baseConfig({ token: '   ' }))).rejects.toThrow(
+      /token is empty or whitespace-only/,
+    );
+  });
+
+  it('warns when the token already carries a Bearer prefix', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    process.env.K = 'SECRET_V1';
+    const fetchImpl = okFetch({ SECRET_V1: 'v' });
+    await initSecretManager(baseConfig({ token: 'Bearer abc', fetchImpl }));
+    expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('parseEnvFile — env-key regex (SM-07)', () => {
+  it('warns and skips an invalid env-var name', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    const dir = mkdtempSync(join(tmpdir(), 'sm-key-'));
+    const envFile = join(dir, 'env');
+    writeFileSync(envFile, 'BAD-KEY=value\nGOOD_KEY=ok\n');
+    process.env.NODE_ENV = 'production'; //? avoid real fs.watchers
+    const fetchImpl = okFetch({});
+
+    try {
+      await initSecretManager(baseConfig({ fetchImpl, dev: { envFiles: [envFile] } }));
+      await reloadSecretManagerFromFiles();
+      expect(process.env.GOOD_KEY).toBe('ok');
+      expect(process.env['BAD-KEY']).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Ignoring env key "BAD-KEY"'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('unsafe dev envFile path (isSafeEnvFile, SM-07)', () => {
+  it('warns and skips a relative path that escapes the project root', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    process.env.NODE_ENV = 'production'; //? drive reload without fs.watch
+    const fetchImpl = okFetch({});
+
+    await initSecretManager(
+      baseConfig({ fetchImpl, dev: { envFiles: ['../outside.env'] } }),
+    );
+    await reloadSecretManagerFromFiles();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unsafe dev envFile path'));
+  });
+});
+
+describe('non-string resolved values (SM-05)', () => {
+  it('drops a non-string value: fatal in remote mode (treated as unresolved)', async () => {
+    process.env.NK = 'N_SECRET_V1';
+    //? Server returns a number for the requested pointer.
+    const fetchImpl = okFetch({ N_SECRET_V1: 123 });
+
+    await expect(initSecretManager(baseConfig({ fetchImpl }))).rejects.toThrow(
+      /did not resolve: N_SECRET_V1/,
+    );
+    expect(process.env.NK).toBe('N_SECRET_V1');
+  });
+});
+
+describe('envNames scoping (SM-06)', () => {
+  it('only resolves names on the allowlist; an unrelated pointer-shaped value is ignored', async () => {
+    process.env.WANTED = 'WANTED_SECRET_V1';
+    process.env.RELEASE_TAG = 'build_2024_V2'; //? pointer-shaped but unrelated
+    const fetchImpl = okFetch({ WANTED_SECRET_V1: 'real' });
+
+    await initSecretManager(baseConfig({ fetchImpl, envNames: ['WANTED'] }));
+
+    expect(process.env.WANTED).toBe('real');
+    //? Never sent to the server.
+    expect(bodyOf(fetchImpl).keys).toEqual(['WANTED_SECRET_V1']);
+    expect(process.env.RELEASE_TAG).toBe('build_2024_V2');
+  });
+});
+
+describe('envNames secure default (SM-06 — unset = deny-all + warn)', () => {
+  it('resolves NOTHING off-host and warns when envNames is unset', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    process.env.WANTED = 'WANTED_SECRET_V1';
+    process.env.RELEASE_TAG = 'build_2024_V2';
+    const fetchImpl = okFetch({ WANTED_SECRET_V1: 'real' });
+
+    //? Raw config (no `envNames`, and NOT the permissive `baseConfig` default).
+    await initSecretManager({
+      url: 'https://secrets.example.com',
+      token: 'tok-123',
+      source: 'remote',
+      fetchImpl,
+    });
+
+    //? Deny-all: nothing pointer-shaped is captured, so the server is never hit.
+    expect(fetchImpl).not.toHaveBeenCalled();
+    //? Both pointer-shaped values are left exactly as-is (never POSTed off-host).
+    expect(process.env.WANTED).toBe('WANTED_SECRET_V1');
+    expect(process.env.RELEASE_TAG).toBe('build_2024_V2');
+    //? A clear, actionable boot warning names `envNames`.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`envNames` is not set'));
+    //? Empty cache — a zero-pointer resolve, not a failure.
+    expect(getCachedResolution()).toEqual({ fetchedAt: expect.any(Number), values: {} });
+  });
+
+  it('does NOT throw in remote mode when envNames is unset (deny-all, not a hard stop)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    process.env.WANTED = 'WANTED_SECRET_V1';
+    const fetchImpl = okFetch({ WANTED_SECRET_V1: 'real' });
+
+    //? Even in 'remote' (hard-stop) mode, an unset allowlist is a clean no-op +
+    //? warn — the fail-OPEN-when-URL-unset contract is unchanged, this is the new
+    //? deny-all-when-envNames-unset secure default.
+    await expect(
+      initSecretManager({
+        url: 'https://secrets.example.com',
+        token: 'tok-123',
+        source: 'remote',
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('`envNames` is not set'));
+  });
+});
+
+describe('onApplied rotation hook (SM-10)', () => {
+  it('fires with changed env NAMES (never the secret values)', async () => {
+    process.env.OA_KEY = 'OA_SECRET_V1';
+    const onApplied = vi.fn();
+    const fetchImpl = okFetch({ OA_SECRET_V1: 'sk-real' });
+
+    await initSecretManager(baseConfig({ fetchImpl, onApplied }));
+
+    expect(onApplied).toHaveBeenCalledWith([{ name: 'OA_KEY', pointer: 'OA_SECRET_V1' }]);
+    //? The payload carries the name + pointer, not the resolved secret.
+    const arg = onApplied.mock.calls[0]?.[0] as { name: string; pointer: string }[];
+    expect(JSON.stringify(arg)).not.toContain('sk-real');
+  });
+
+  it('does not fire when no value changed on a refresh', async () => {
+    process.env.OA2_KEY = 'OA2_SECRET_V1';
+    const onApplied = vi.fn();
+    const fetchImpl = okFetch({ OA2_SECRET_V1: 'same' });
+
+    await initSecretManager(baseConfig({ fetchImpl, onApplied }));
+    expect(onApplied).toHaveBeenCalledTimes(1);
+
+    await refreshSecretManager();
+    //? Same value resolved again — no change, no second callback.
+    expect(onApplied).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('onResolveError hook (SM-11)', () => {
+  it('fires with the phase when a hybrid resolve fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    process.env.OE_KEY = 'OE_SECRET_V1';
+    const onResolveError = vi.fn();
+    const fetchImpl = rejectingFetch(new Error('boom'));
+
+    await initSecretManager(
+      baseConfig({ source: 'hybrid', fetchImpl, onResolveError }),
+    );
+
+    expect(onResolveError).toHaveBeenCalledWith(expect.any(Error), { phase: 'boot' });
+    expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('request timeout (SM-02)', () => {
+  it('passes an AbortSignal to fetch by default', async () => {
+    process.env.T_KEY = 'T_SECRET_V1';
+    const fetchImpl = okFetch({ T_SECRET_V1: 'v' });
+
+    await initSecretManager(baseConfig({ fetchImpl }));
+
+    const init = callsOf(fetchImpl)[0]?.[1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('omits the signal when timeoutMs is 0', async () => {
+    process.env.T2_KEY = 'T2_SECRET_V1';
+    const fetchImpl = okFetch({ T2_SECRET_V1: 'v' });
+
+    await initSecretManager(baseConfig({ fetchImpl, timeoutMs: 0 }));
+
+    const init = callsOf(fetchImpl)[0]?.[1] as RequestInit;
+    expect(init.signal).toBeUndefined();
+  });
+});
+
+describe('retries (SM-02)', () => {
+  it('retries a transient transport failure then succeeds', async () => {
+    process.env.RT_KEY = 'RT_SECRET_V1';
+    let calls = 0;
+    const fetchImpl = vi.fn<typeof fetch>(() => {
+      calls += 1;
+      if (calls === 1) return Promise.reject(new Error('transient'));
+      return Promise.resolve(Response.json({ values: { RT_SECRET_V1: 'v' } }));
+    });
+
+    await initSecretManager(baseConfig({ fetchImpl, retries: { count: 1 } }));
+
+    expect(calls).toBe(2);
+    expect(process.env.RT_KEY).toBe('v');
+  });
+});
+
+describe('resolvePath + headers (SM-12)', () => {
+  it('uses a custom resolve path and merges extra headers (cannot override Authorization)', async () => {
+    process.env.RP_KEY = 'RP_SECRET_V1';
+    const fetchImpl = okFetch({ RP_SECRET_V1: 'v' });
+
+    await initSecretManager(
+      baseConfig({
+        fetchImpl,
+        resolvePath: 'v2/resolve',
+        headers: { 'X-Tenant': 'acme', Authorization: 'Bearer hijack' },
+      }),
+    );
+
+    const [url, init] = callsOf(fetchImpl)[0] as [string, RequestInit];
+    expect(url).toBe('https://secrets.example.com/v2/resolve');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['X-Tenant']).toBe('acme');
+    //? Consumer headers cannot override the bearer auth.
+    expect(headers.Authorization).toBe('Bearer tok-123');
+  });
+});
+
+describe('getCachedResolution defensive copy (SM-03)', () => {
+  it('returns a copy that cannot corrupt the internal cache', async () => {
+    process.env.GC_KEY = 'GC_SECRET_V1';
+    const fetchImpl = okFetch({ GC_SECRET_V1: 'v' });
+
+    await initSecretManager(baseConfig({ fetchImpl }));
+
+    const snap = getCachedResolution();
+    expect(snap?.values.GC_SECRET_V1).toBe('v');
+    if (snap) snap.values.GC_SECRET_V1 = 'tampered';
+    //? A second read still reflects the real cached value.
+    expect(getCachedResolution()?.values.GC_SECRET_V1).toBe('v');
+  });
+});
+
+describe('stateful pointerPattern flags stripped (SM-16)', () => {
+  it('classifies every entry even with a /g pattern', async () => {
+    process.env.S1 = 'S1_SECRET_V1';
+    process.env.S2 = 'S2_SECRET_V1';
+    process.env.S3 = 'S3_SECRET_V1';
+    const fetchImpl = okFetch({
+      S1_SECRET_V1: 'a',
+      S2_SECRET_V1: 'b',
+      S3_SECRET_V1: 'c',
+    });
+
+    await initSecretManager(
+      baseConfig({ fetchImpl, pointerPattern: /^(.+)_V(\d+)$/g }),
+    );
+
+    //? Without flag-stripping a /g pattern's stateful lastIndex would skip
+    //? alternating entries — all three must resolve.
+    expect(process.env.S1).toBe('a');
+    expect(process.env.S2).toBe('b');
+    expect(process.env.S3).toBe('c');
+  });
+});
+
+describe('init validates url before recording config (SM-16)', () => {
+  it('a refresh after a failed init is a no-op (config not recorded)', async () => {
+    process.env.K = 'SECRET_V1';
+    await expect(initSecretManager(baseConfig({ url: 'not-a-url' }))).rejects.toThrow();
+    //? activeConfig must not have been set, so refresh does nothing (no throw).
+    await expect(refreshSecretManager()).resolves.toBeUndefined();
+  });
+});
+
+describe('envNames scoping on file-reload (SM-06 drift)', () => {
+  it('drops a pointer-shaped file value excluded by envNames (not POSTed) and skips its plain injection too', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sm-reload-scope-'));
+    const envFile = join(dir, 'env');
+    //? WANTED is allowlisted; RELEASE_TAG (pointer-shaped) + UNSCOPED_PLAIN are not.
+    writeFileSync(
+      envFile,
+      'WANTED=WANTED_SECRET_V1\nRELEASE_TAG=build_2024_V2\nUNSCOPED_PLAIN=hello\n',
+    );
+    process.env.NODE_ENV = 'production'; //? avoid real fs.watchers
+    const fetchImpl = okFetch({ WANTED_SECRET_V1: 'real' });
+
+    try {
+      await initSecretManager(
+        baseConfig({ fetchImpl, envNames: ['WANTED'], dev: { envFiles: [envFile] } }),
+      );
+      await reloadSecretManagerFromFiles();
+
+      expect(process.env.WANTED).toBe('real');
+      //? Only the allowlisted pointer is sent off-host.
+      expect(bodyOf(fetchImpl).keys).toEqual(['WANTED_SECRET_V1']);
+      //? An excluded pointer-shaped value is never POSTed.
+      expect(process.env.RELEASE_TAG).toBeUndefined();
+      //? An excluded plain value is not injected into process.env either.
+      expect(process.env.UNSCOPED_PLAIN).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('file-reload merges pointers (SM — drop inherited pointer fix)', () => {
+  it('keeps a boot-captured pointer that is not in any watched file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sm-reload-merge-'));
+    const envFile = join(dir, 'env');
+    writeFileSync(envFile, 'FROM_FILE=FILE_SECRET_V1\n');
+    process.env.NODE_ENV = 'production'; //? avoid real fs.watchers
+    //? Inherited pointer NOT present in the watched file.
+    process.env.INHERITED = 'INHERITED_SECRET_V1';
+    const fetchImpl = okFetch({
+      INHERITED_SECRET_V1: 'inh',
+      FILE_SECRET_V1: 'fil',
+    });
+
+    try {
+      await initSecretManager(baseConfig({ fetchImpl, dev: { envFiles: [envFile] } }));
+      //? Boot resolved the inherited pointer.
+      expect(process.env.INHERITED).toBe('inh');
+
+      await reloadSecretManagerFromFiles();
+      //? The inherited pointer survives the reload (merge, not replace) and the
+      //? file pointer is added.
+      const sent = bodyOf(fetchImpl, 1).keys ?? [];
+      expect(sent.toSorted()).toEqual(['FILE_SECRET_V1', 'INHERITED_SECRET_V1']);
+      expect(process.env.FROM_FILE).toBe('fil');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('refresh re-captures pointers added after an empty boot', () => {
+  it('picks up a pointer set into process.env after a zero-pointer boot', async () => {
+    Reflect.deleteProperty(process.env, 'LATE_KEY');
+    const fetchImpl = okFetch({ LATE_SECRET_V1: 'late' });
+
+    //? Boot finds no pointers.
+    await initSecretManager(baseConfig({ fetchImpl }));
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    //? A pointer appears after init.
+    process.env.LATE_KEY = 'LATE_SECRET_V1';
+    await refreshSecretManager();
+
+    expect(process.env.LATE_KEY).toBe('late');
+    expect(bodyOf(fetchImpl).keys).toEqual(['LATE_SECRET_V1']);
+  });
+});
+
+describe('response body size cap (SM — OOM guard)', () => {
+  it('rejects a response whose Content-Length exceeds the cap', async () => {
+    process.env.BIG_KEY = 'BIG_SECRET_V1';
+    const fetchImpl = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        Response.json(
+          { values: { BIG_SECRET_V1: 'v' } },
+          { status: 200, headers: { 'content-length': String(2_000_000) } },
+        ),
+      ),
+    );
+
+    await expect(initSecretManager(baseConfig({ fetchImpl }))).rejects.toThrow(/too large/);
+    expect(process.env.BIG_KEY).toBe('BIG_SECRET_V1');
+  });
+});
+
+describe('hook isolation (onApplied / onResolveError)', () => {
+  it('a throwing onApplied does not abort an otherwise-successful resolve', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    process.env.HI_KEY = 'HI_SECRET_V1';
+    const fetchImpl = okFetch({ HI_SECRET_V1: 'real' });
+    const onApplied = vi.fn(() => {
+      throw new Error('hook boom');
+    });
+
+    await expect(
+      initSecretManager(baseConfig({ fetchImpl, onApplied })),
+    ).resolves.toBeUndefined();
+    //? Resolve still applied + cached despite the throwing hook.
+    expect(process.env.HI_KEY).toBe('real');
+    expect(getCachedResolution()?.values.HI_SECRET_V1).toBe('real');
+    expect(onApplied).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('a throwing onResolveError does not mask the original remote-mode error', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    process.env.HE_KEY = 'HE_SECRET_V1';
+    const fetchImpl = rejectingFetch(new Error('network down'));
+    const onResolveError = vi.fn(() => {
+      throw new Error('hook boom');
+    });
+
+    //? The ORIGINAL transport error must surface, not the hook's throw.
+    await expect(
+      initSecretManager(baseConfig({ fetchImpl, onResolveError })),
+    ).rejects.toThrow('network down');
+    expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('getCachedResolutionMeta — values-free diagnostic', () => {
+  it('returns pointer names + count without exposing secret values', async () => {
+    process.env.MK_KEY = 'MK_SECRET_V1';
+    const fetchImpl = okFetch({ MK_SECRET_V1: 'sk-real' });
+
+    expect(getCachedResolutionMeta()).toBeNull();
+    await initSecretManager(baseConfig({ fetchImpl }));
+
+    const meta = getCachedResolutionMeta();
+    expect(meta?.pointerNames).toEqual(['MK_SECRET_V1']);
+    expect(meta?.pointerCount).toBe(1);
+    expect(typeof meta?.fetchedAt).toBe('number');
+    //? The secret value never appears in the meta view.
+    expect(JSON.stringify(meta)).not.toContain('sk-real');
+  });
+});
+
+describe('production rotation poll (SM-14)', () => {
+  it('polls in production via top-level pollIntervalMs', async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.PR_KEY = 'PR_SECRET_V1';
+      const fetchImpl = okFetch({ PR_SECRET_V1: 'v' });
+
+      await initSecretManager(baseConfig({ fetchImpl, pollIntervalMs: 1000 }));
+      expect(fetchImpl).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('dev hot-reload env gate (SM-04)', () => {
+  it('does not start the dev poll when NODE_ENV is unset', async () => {
+    vi.useFakeTimers();
+    const prev = process.env.NODE_ENV;
+    try {
+      Reflect.deleteProperty(process.env, 'NODE_ENV');
+      process.env.DG_KEY = 'DG_SECRET_V1';
+      const fetchImpl = okFetch({ DG_SECRET_V1: 'v' });
+
+      await initSecretManager(
+        baseConfig({ fetchImpl, dev: { watch: false, pollIntervalMs: 1000 } }),
+      );
+      expect(fetchImpl).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(5000);
+      //? Unset NODE_ENV is treated as non-dev — poll never starts.
+      expect(fetchImpl).toHaveBeenCalledOnce();
+    } finally {
+      if (prev === undefined) Reflect.deleteProperty(process.env, 'NODE_ENV');
+      else process.env.NODE_ENV = prev;
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('reloadSecretManagerFromFiles atomicity (SM-09a)', () => {
+  it('does not inject plain values when a pointer fails to resolve in remote mode', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sm-atomic-'));
+    const envFile = join(dir, 'env');
+    writeFileSync(envFile, 'PLAIN_CFG=injected\nNEEDS=NEEDS_SECRET_V9\n');
+    process.env.NODE_ENV = 'production'; //? avoid real fs.watchers
+    //? Server resolves nothing -> remote-mode throw.
+    const fetchImpl = okFetch({});
+
+    try {
+      await initSecretManager(baseConfig({ fetchImpl, dev: { envFiles: [envFile] } }));
+      await expect(reloadSecretManagerFromFiles()).rejects.toThrow(/did not resolve/);
+      //? Atomic: the plain value must NOT have been applied before the throw.
+      expect(process.env.PLAIN_CFG).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

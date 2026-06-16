@@ -115,21 +115,22 @@ Project codes can carry whatever slots their templates declare. The normalizer d
 
 Fired whenever a rate-limit bucket rejects a sync request. The payload differs by `scope`:
 
-### Scope `'user'` or `'route'` (per-route bucket, identified by token or by IP)
+### Scope `'user'` or `'ip'` (per-route bucket, identified by token or by IP)
 
 ```ts
 {
-  scope: 'user' | 'route',
+  scope: 'user' | 'ip',
   key: string,         // 'token:<token>:sync:<routeName>' or 'ip:<ip>:sync:<routeName>'
   limit: number,       // projectConfig.rateLimiting.defaultApiLimit
   windowMs: number,    // projectConfig.rateLimiting.windowMs
   count: number,       // limit + 1 (the request that tipped over)
-  route: string,       // e.g. 'board/moveCard/v1'
+  route: string,       // e.g. 'board/moveCard/v1' — marks this a per-route bucket
   userId: string | undefined,
+  ip: string | undefined, // set when anonymous (no token), else undefined
 }
 ```
 
-`scope: 'user'` when the request carried a session token; `scope: 'route'` when it was anonymous (only an IP).
+`scope: 'user'` when the request carried a session token; `scope: 'ip'` when it was anonymous (the per-route bucket is then IP-keyed). The `route` field stays set in both cases to distinguish this per-route bucket from the global `:sync:all` IP bucket below (parity with the API handler).
 
 ### Scope `'ip'` (global per-IP bucket, across all sync routes)
 

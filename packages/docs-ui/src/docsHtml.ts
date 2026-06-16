@@ -141,6 +141,16 @@ const renderDocsCss = (accent: string, fontFamily: string): string => `<style>
   .method.POST   { background: var(--post); }
   .method.PUT    { background: var(--put); color: #1f2328; }
   .method.DELETE { background: var(--delete); }
+  .method.SYNC   { background: var(--muted); }
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--container-hover);
+    color: var(--muted);
+    font-size: 11px;
+    margin-right: 4px;
+  }
   .endpoint-name { color: var(--title); font-weight: 500; }
   .endpoint-meta { margin-left: auto; color: var(--muted); font-size: 12px; }
   .endpoint-detail {
@@ -201,7 +211,11 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
   //? Inline runner: hits the live server using the same fetch transport
   //? that the framework apiRequest helper uses. Auth comes from the
   //? browser's existing session cookie or sessionStorage; no token prompt.
-  const runEndpoint = async (button, route, version, dataField) => {
+  const runEndpoint = async (button, route, method, dataField) => {
+    //? The framework enforces the route's declared HTTP method (405 on
+    //? mismatch), so the runner must send that method, not a hardcoded POST.
+    const httpMethod = (method || 'POST').toUpperCase();
+    const hasBody = httpMethod !== 'GET' && httpMethod !== 'DELETE';
     let parsed;
     try {
       parsed = dataField.value.trim().length === 0 ? {} : JSON.parse(dataField.value);
@@ -215,10 +229,10 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     resultEl.textContent = 'Sending...';
     try {
       const response = await fetch('/' + route + '?stream=false', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: httpMethod,
+        headers: hasBody ? { 'Content-Type': 'application/json' } : {},
         credentials: 'include',
-        body: JSON.stringify(parsed),
+        body: hasBody ? JSON.stringify(parsed) : undefined,
       });
       const text = await response.text();
       try {
@@ -233,12 +247,12 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     }
   };
 
-  const renderTryItOut = (route, version) => {
+  const renderTryItOut = (route, method) => {
     if (!ENABLE_TRY_IT_OUT) return '';
     return '<div class="try-it-out">' +
       '<div style="font-weight:600;font-size:12px;margin-bottom:4px;">Try it out (live request)</div>' +
       '<textarea placeholder=\\'{"key":"value"}\\'>{}</textarea>' +
-      '<button onclick="runEndpoint(this,\\'' + route + '\\',\\'' + version + '\\',this.previousElementSibling)">Send</button>' +
+      '<button onclick="runEndpoint(this,\\'' + route + '\\',\\'' + method + '\\',this.previousElementSibling)">Send</button>' +
       '<pre class="result"></pre>' +
       '</div>';
   };
@@ -253,44 +267,49 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     if (auth.login) tags.push('login required');
     if (Array.isArray(auth.additional)) {
       for (const rule of auth.additional) {
-        if (rule.key) tags.push(rule.key + (rule.value !== undefined ? '=' + JSON.stringify(rule.value) : ''));
+        if (rule && rule.key) tags.push(rule.key + (rule.value !== undefined ? '=' + JSON.stringify(rule.value) : ''));
       }
     }
     if (tags.length === 0) tags.push('public');
     return tags.map(t => '<span class="auth-tag">' + escapeHtml(t) + '</span>').join('');
   };
 
-  const renderEndpoint = (page, name, version, meta) => {
+  const renderEndpoint = (entry) => {
+    const page = entry.page || '';
+    const name = entry.name || '';
+    const version = entry.version || '';
     const key = page + '/' + name + '@' + version;
-    const method = (meta.method || 'POST').toUpperCase();
-    const rate = meta.rateLimit;
+    const method = (entry.method || 'POST').toUpperCase();
+    const methodClass = ['GET', 'POST', 'PUT', 'DELETE'].includes(method) ? method : 'POST';
+    const rate = entry.rateLimit;
     const rateLabel = rate === false ? 'no rate limit' : rate === undefined ? 'default rate' : (rate + '/min');
     const isOpen = stateByKey.get(key) === true;
     const path = '/api/' + page + '/' + name + '/' + version;
+    const meta = entry.meta || {};
     return \`
       <div class="endpoint \${isOpen ? 'open' : ''}" data-key="\${escapeHtml(key)}">
         <div class="endpoint-summary">
-          <span class="method \${method}">\${method}</span>
+          <span class="method \${methodClass}">\${escapeHtml(method)}</span>
           <span class="endpoint-name">\${escapeHtml(path)}</span>
           <span class="endpoint-meta">\${escapeHtml(rateLabel)}</span>
         </div>
         <div class="endpoint-detail">
           <div class="detail-section">
             <div class="detail-label">auth</div>
-            <div>\${renderAuth(meta.auth)}</div>
+            <div>\${renderAuth(entry.auth)}</div>
           </div>
           <div class="detail-section">
             <div class="detail-label">input</div>
-            <pre>\${escapeHtml(meta.input || '{}')}</pre>
+            <pre>\${escapeHtml(entry.input || '{}')}</pre>
           </div>
           <div class="detail-section">
             <div class="detail-label">output</div>
-            <pre>\${escapeHtml(meta.output || 'unknown')}</pre>
+            <pre>\${escapeHtml(entry.output || 'unknown')}</pre>
           </div>
-          \${meta.stream ? \`
+          \${entry.stream && entry.stream !== 'never' ? \`
             <div class="detail-section">
               <div class="detail-label">stream</div>
-              <pre>\${escapeHtml(meta.stream)}</pre>
+              <pre>\${escapeHtml(entry.stream)}</pre>
             </div>
           \` : ''}
           \${meta.owner ? \`
@@ -299,7 +318,7 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
               <div>\${escapeHtml(meta.owner)}</div>
             </div>
           \` : ''}
-          \${meta.tags && meta.tags.length ? \`
+          \${Array.isArray(meta.tags) && meta.tags.length ? \`
             <div class="detail-section">
               <div class="detail-label">tags</div>
               <div>\${meta.tags.map(t => '<span class="badge">' + escapeHtml(String(t)) + '</span>').join(' ')}</div>
@@ -311,7 +330,41 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
               <div style="color:var(--delete);">\${escapeHtml(String(meta.deprecated))}</div>
             </div>
           \` : ''}
-          \${renderTryItOut(page + '/' + name + '/' + version, version)}
+          \${renderTryItOut(page + '/' + name + '/' + version, method)}
+        </div>
+      </div>
+    \`;
+  };
+
+  const renderSyncEntry = (entry) => {
+    const page = entry.page || '';
+    const name = entry.name || '';
+    const version = entry.version || '';
+    const key = 'sync:' + page + '/' + name + '@' + version;
+    const isOpen = stateByKey.get(key) === true;
+    const path = 'sync/' + page + '/' + name + '/' + version;
+    const meta = entry.meta || {};
+    const section = (label, value) => value && value !== 'never'
+      ? '<div class="detail-section"><div class="detail-label">' + escapeHtml(label) + '</div><pre>' + escapeHtml(value) + '</pre></div>'
+      : '';
+    return \`
+      <div class="endpoint \${isOpen ? 'open' : ''}" data-key="\${escapeHtml(key)}">
+        <div class="endpoint-summary">
+          <span class="method SYNC">SYNC</span>
+          <span class="endpoint-name">\${escapeHtml(path)}</span>
+        </div>
+        <div class="endpoint-detail">
+          \${section('client input', entry.clientInput)}
+          \${section('server output', entry.serverOutput)}
+          \${section('client output', entry.clientOutput)}
+          \${section('server stream', entry.serverStream)}
+          \${section('client stream', entry.clientStream)}
+          \${meta.owner ? \`
+            <div class="detail-section">
+              <div class="detail-label">owner</div>
+              <div>\${escapeHtml(meta.owner)}</div>
+            </div>
+          \` : ''}
         </div>
       </div>
     \`;
@@ -323,28 +376,22 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     return haystack.includes(filter.toLowerCase());
   };
 
-  const render = (data, filter) => {
-    const summary = document.getElementById('summary');
-    const content = document.getElementById('content');
-    const apis = data && data.apis ? data.apis : data;
-    if (!apis || typeof apis !== 'object') {
-      content.innerHTML = '<div class="empty">No API docs available. Run <code>npm run generateArtifacts</code> to generate them.</div>';
-      summary.innerHTML = '';
-      return;
-    }
-
+  //? Pure (DOM-free) core: walks the FLAT \`apis[page] = Entry[]\` and
+  //? \`syncs[page] = SyncEntry[]\` maps (the real emitted artifact shape),
+  //? builds the grouped endpoint markup, and tallies the summary counts.
+  //? Extracted from \`render\` so the orchestrator stays a thin DOM shell and
+  //? the assembly logic can be reasoned about / tested in isolation.
+  const buildGroups = (apis, syncs, filter) => {
     let total = 0;
     let visible = 0;
     const groups = [];
-    for (const [page, names] of Object.entries(apis)) {
+    for (const [page, entries] of Object.entries(apis || {})) {
       const rows = [];
-      for (const [name, versions] of Object.entries(names)) {
-        for (const [version, meta] of Object.entries(versions)) {
-          total++;
-          if (!passesFilter(filter, page, name)) continue;
-          visible++;
-          rows.push(renderEndpoint(page, name, version, meta || {}));
-        }
+      for (const entry of (Array.isArray(entries) ? entries : [])) {
+        total++;
+        if (!passesFilter(filter, page, entry.name || '')) continue;
+        visible++;
+        rows.push(renderEndpoint(entry || {}));
       }
       if (rows.length > 0) {
         groups.push(\`
@@ -355,13 +402,36 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
         \`);
       }
     }
-
-    summary.innerHTML = \`
+    for (const [page, entries] of Object.entries(syncs || {})) {
+      const rows = [];
+      for (const entry of (Array.isArray(entries) ? entries : [])) {
+        total++;
+        if (!passesFilter(filter, page, entry.name || '')) continue;
+        visible++;
+        rows.push(renderSyncEntry(entry || {}));
+      }
+      if (rows.length > 0) {
+        groups.push(\`
+          <div class="group">
+            <div class="group-header">\${escapeHtml(page)} (sync)</div>
+            \${rows.join('')}
+          </div>
+        \`);
+      }
+    }
+    const pageCount = new Set([...Object.keys(apis || {}), ...Object.keys(syncs || {})]).size;
+    const summaryHtml = \`
       <div class="summary-pill"><strong>\${visible}</strong> of <strong>\${total}</strong> endpoints</div>
-      <div class="summary-pill"><strong>\${Object.keys(apis).length}</strong> pages</div>
+      <div class="summary-pill"><strong>\${pageCount}</strong> pages</div>
     \`;
-    content.innerHTML = groups.join('') || '<div class="empty">No matches.</div>';
+    const contentHtml = groups.join('') || '<div class="empty">No matches.</div>';
+    return { summaryHtml, contentHtml };
+  };
 
+  //? Binds the open/close toggle to every rendered endpoint. Extracted from
+  //? \`render\` unchanged: one listener per \`.endpoint\` element, re-bound on
+  //? each render (the prior innerHTML write discards the old listeners).
+  const bindEndpointToggles = () => {
     document.querySelectorAll('.endpoint').forEach((el) => {
       el.addEventListener('click', () => {
         const key = el.getAttribute('data-key');
@@ -370,6 +440,24 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
         el.classList.toggle('open');
       });
     });
+  };
+
+  //? Thin orchestrator: resolve the DOM targets, guard the data shape, then
+  //? delegate assembly to \`buildGroups\` and wiring to \`bindEndpointToggles\`.
+  const render = (data, filter) => {
+    const summary = document.getElementById('summary');
+    const content = document.getElementById('content');
+    const apis = data && data.apis ? data.apis : data;
+    const syncs = data && data.syncs ? data.syncs : {};
+    if (!apis || typeof apis !== 'object') {
+      content.innerHTML = '<div class="empty">No API docs available. Run <code>npm run generateArtifacts</code> to generate them.</div>';
+      summary.innerHTML = '';
+      return;
+    }
+    const built = buildGroups(apis, syncs, filter);
+    summary.innerHTML = built.summaryHtml;
+    content.innerHTML = built.contentHtml;
+    bindEndpointToggles();
   };
 
   let cachedData = null;

@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Dev-time tooling for LuckyStack: hot reload, route discovery, generated type-map emitter, Zod schema emitter, deploy-config validator CLI. Install as a devDependency in projects that build LuckyStack apps locally.",

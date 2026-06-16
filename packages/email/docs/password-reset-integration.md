@@ -44,9 +44,9 @@ Source-of-truth file: `packages/login/src/forgotPassword.ts`.
                      -> Redis: `${projectName}-pwreset:<token>` TTL `auth.passwordResetTtlSeconds`
   6. Dispatch hook:  passwordResetRequested({ email, matched: true, userId, token, ttlSeconds })
   7. Build URL:      `${config.app.publicUrl}/reset-password?token=${encodedToken}`
-  8. Render body:    renderEmailLayout({ brand, title, intro, ctaLabel, ctaUrl, outro, footer })
-  9. Send:           sendEmail({ to: user.email, subject, html, text, adapterHint: 'transactional' })
- 10. Return:         result.ok ? { ok: true } : { ok: false, reason: result.reason }
+  8. Send:           sendEmail({ to: user.email, template: 'password-reset', data: { resetUrl, userName, brand, ttlMinutes }, adapterHint: 'transactional' })
+                     -> resolves the `'password-reset'` template (consumer override -> built-in fallback) which renders via `renderEmailLayout`
+  9. Return:         result.ok ? { ok: true } : { ok: false, reason: result.reason }
 ```
 
 The client never learns whether the email matched a real account — both branches return `{ ok: true }`. This anti-enumeration behavior is per-spec, not a bug.
@@ -65,12 +65,12 @@ This means a project can register a single sender and password-reset works. A pr
 
 ### Template resolution
 
-The current `sendPasswordResetEmail` builds the email **inline** with `renderEmailLayout`, then calls `sendEmail` with `{ subject, html, text }` (raw message, no template name). It does NOT pass `template: 'password-reset'` today. The architecture doc describes a future built-in template fallback under that name, but in the current source the template registry is bypassed entirely by login.
+The current `sendPasswordResetEmail` dispatches via the template registry: it calls `sendEmail({ template: 'password-reset', data: { resetUrl, userName, brand, ttlMinutes }, ... })` (no inline `subject`/`html`). `sendEmail` resolves the `'password-reset'` name through the registry — a consumer override registered via `registerEmailTemplate('password-reset', …)` wins (last-write-wins), otherwise the framework built-in in `builtInTemplates.ts` renders the default copy with `renderEmailLayout`.
 
-If you want a registry-driven, fully-overrideable password-reset email today:
+To get a fully-overrideable password-reset email:
 
-1. Register your own `'password-reset'` template via `registerEmailTemplate('password-reset', { subject, render })`.
-2. Override the framework's reset API at the project level (a custom `_api/sendReset_v1.ts`) and have it call `sendEmail({ template: 'password-reset', data: { ... }, to, adapterHint: 'transactional' })` directly, bypassing `sendPasswordResetEmail`.
+1. Register your own `'password-reset'` template via `registerEmailTemplate('password-reset', { subject, render })` — `sendPasswordResetEmail` picks it up automatically, no API override needed.
+2. Or, for full control of recipient/adapter routing, override the framework's reset API at the project level (a custom `_api/sendReset_v1.ts`) and call `sendEmail({ template: 'password-reset', data: { ... }, to, adapterHint: 'transactional' })` directly, bypassing `sendPasswordResetEmail`.
 
 Or, keep login's default behavior and customize the brand/wording through `auth.passwordResetBrand` + the `brand` argument — see "Overriding the built-in template" below.
 
@@ -78,7 +78,7 @@ Or, keep login's default behavior and customize the brand/wording through `auth.
 
 ## Built-in email content fields
 
-`sendPasswordResetEmail` populates `renderEmailLayout` with:
+The built-in `'password-reset'` template (`packages/email/src/builtInTemplates.ts`) populates `renderEmailLayout` with:
 
 | Field | Value |
 | --- | --- |
@@ -92,7 +92,7 @@ Or, keep login's default behavior and customize the brand/wording through `auth.
 
 Subject: `Reset your <brand> password`.
 
-All of these are hard-coded in `packages/login/src/forgotPassword.ts`. Customization knobs are limited to `brand` and (indirectly) `userName`. For deeper customization, register your own template (see above) or fork the API.
+These are defined in the built-in template (`packages/email/src/builtInTemplates.ts`); `sendPasswordResetEmail` (`packages/login/src/forgotPassword.ts`) supplies `brand`, `userName`, `resetUrl`, and `ttlMinutes` as the template `data`. Customization knobs are limited to `brand` and (indirectly) `userName`. For deeper customization, register your own `'password-reset'` template (see above) or fork the API.
 
 ---
 

@@ -84,12 +84,7 @@ const collectFallbackSymbolsFromTypeText = (
   return unresolvedSymbols;
 };
 
-// Kept for backwards compatibility  callers outside this module may still import it.
-export const stripComments = (str: string): string => {
-  return str.replaceAll(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
-};
-
-//  shared helpers 
+//  shared helpers
 
 // Finds a top-level interface declaration by name in a source file's statements.
 const findInterface = (sourceFile: ts.SourceFile, name: string): ts.InterfaceDeclaration | null => {

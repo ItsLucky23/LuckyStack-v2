@@ -91,6 +91,22 @@ export interface CreateLuckyStackServerOptions {
   runtimeMapsPreset?: string | string[];
 }
 
+export interface StopLuckyStackServerOptions {
+  /**
+   * Why the server is stopping — threaded into the `preServerStop` hook payload.
+   * Defaults to `'manual'` for a programmatic `stop()`; the signal handlers pass
+   * the received signal name.
+   */
+  reason?: 'SIGTERM' | 'SIGINT' | 'SIGHUP' | 'manual';
+  /**
+   * Soft budget (ms) for the whole shutdown sequence — the `preServerStop` hook
+   * fan-out, the bounded `flushErrorTrackers()` race, and closing the
+   * http/io/redis-adapter handles. Each step is wrapped so a single hanging step
+   * cannot stall the others past this deadline. Defaults to `10000`.
+   */
+  timeoutMs?: number;
+}
+
 export interface RunningLuckyStackServer {
   httpServer: HttpServer;
   ioServer: SocketIOServer;
@@ -99,4 +115,16 @@ export interface RunningLuckyStackServer {
    * URL on success.
    */
   listen: (callback?: () => void) => Promise<HttpServer>;
+  /**
+   * Graceful shutdown (MIS-016). Stops accepting new connections, dispatches the
+   * core `preServerStop` hook, flushes error-trackers (bounded by a timeout
+   * race), and closes the Socket.io server, the HTTP server, and the
+   * Redis-adapter pub/sub clients. Every step is isolated + time-bounded so one
+   * failing/hanging step cannot hang the whole shutdown. Idempotent — a second
+   * call returns the in-flight shutdown promise. Resolves once shutdown
+   * completes (or the timeout forces it to finish).
+   */
+  stop: (options?: StopLuckyStackServerOptions) => Promise<void>;
+  /** Alias of {@link stop} matching the `net.Server`-style `close({ timeoutMs })` API. */
+  close: (options?: StopLuckyStackServerOptions) => Promise<void>;
 }

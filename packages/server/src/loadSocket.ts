@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
+import type { Redis as RedisClient } from 'ioredis';
 import { Server as SocketIOServer } from 'socket.io';
 import {
   abortAllForSocket,
@@ -7,6 +8,7 @@ import {
   allowedOrigin,
   applySocketMiddlewares,
   attachSocketRedisAdapter,
+  redis,
   setIoInstance,
   socketEventNames,
   buildJoinRoomResponseEventName,
@@ -79,7 +81,19 @@ export interface LoadSocketOptions {
   maxHttpBufferSize?: number;
 }
 
-export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = {}): SocketIOServer => {
+export interface LoadSocketResult {
+  io: SocketIOServer;
+  /**
+   * The duplicated Redis pub/sub clients backing the Socket.io adapter. The
+   * server bootstrap owns them so graceful shutdown can `quit()` them — they are
+   * NOT closed by `io.close()` (which only tears down the engine + connections).
+   * Created here (instead of letting `attachSocketRedisAdapter` duplicate
+   * internally) precisely so the server holds a handle to disconnect them.
+   */
+  adapterClients: { pubClient: RedisClient; subClient: RedisClient };
+}
+
+export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = {}): LoadSocketResult => {
   const config = getProjectConfig();
   const shouldLogDev = config.logging.devLogs;
   const shouldLogSocketStartup = config.logging.socketStartup;
@@ -110,7 +124,13 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
 
   //? Redis adapter so room broadcasts fan out across instances. Required for
   //? split/fallback deployments; safe overhead in single-instance deploys.
-  attachSocketRedisAdapter(io);
+  //? We duplicate the pub/sub clients HERE and pass them in (rather than letting
+  //? `attachSocketRedisAdapter` duplicate internally) so the server bootstrap
+  //? holds the handles and can `quit()` them on graceful shutdown — `io.close()`
+  //? does not close these adapter connections.
+  const pubClient = redis.duplicate();
+  const subClient = redis.duplicate();
+  attachSocketRedisAdapter(io, { pubClient, subClient });
 
   if (shouldLogSocketStartup) {
     getLogger().info('SocketIO server initialized (redis adapter attached)');
@@ -430,5 +450,5 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     }
   });
 
-  return io;
+  return { io, adapterClients: { pubClient, subClient } };
 };

@@ -35,6 +35,17 @@ export interface ClientHookPayloadMap {
   preLogin: { candidateSession: BaseSessionLayout };
   postLogin: { session: BaseSessionLayout };
   postLogout: { previousSession: BaseSessionLayout };
+  //? Fires when the offline queue drops a request (full queue with a
+  //? `drop-oldest`/`drop-newest`/`reject` policy, or an item past `maxAgeMs`).
+  //? The in-memory queue is not durable across refreshes; this is the seam to
+  //? surface a "your change wasn't sent" toast or to persist the item
+  //? elsewhere. `queue` says which queue, `reason` why it was dropped.
+  queueItemDropped: {
+    queue: 'api' | 'sync';
+    key: string;
+    reason: 'queue-full' | 'expired';
+    dropPolicy: 'drop-oldest' | 'drop-newest' | 'reject';
+  };
 }
 
 export type ClientHookName = keyof ClientHookPayloadMap;
@@ -105,8 +116,9 @@ export function dispatchClientHook<N extends ClientHookName>(
   //? Snapshot the set before iterating so a handler that unregisters itself
   //? (or a sibling) mid-dispatch doesn't skip un-visited handlers — Set
   //? iteration honors mid-iter deletes per ECMAScript spec, which we don't
-  //? want here. `Array.from` is the lint-friendly way to do the copy.
-  for (const handler of set) {
+  //? want here.
+  const handlers = [...set];
+  for (const handler of handlers) {
     try {
       const result = handler(payload);
       if (result && typeof (result as Promise<unknown>).catch === 'function') {
@@ -137,7 +149,8 @@ export async function dispatchVetoableClientHook<N extends ClientHookName>(
   const set = handlerSets[name];
   if (!set || set.size === 0) return { stopped: false };
   //? Snapshot the set (see `dispatchClientHook` for why).
-  for (const handler of set) {
+  const handlers = [...set];
+  for (const handler of handlers) {
     let result: ClientHookResult;
     try {
       result = await handler(payload);

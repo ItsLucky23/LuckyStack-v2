@@ -123,7 +123,7 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
       const [readError, content] = await tryCatch(() => fs.readFile(docsPath, 'utf8'));
       if (readError) {
         res.statusCode = 404;
-        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.end(JSON.stringify({
           error: 'apiDocs.generated.json not found',
           expectedAt: docsPath,
@@ -131,7 +131,7 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
         }));
       } else {
         res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         res.end(content);
       }

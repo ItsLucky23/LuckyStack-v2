@@ -7,13 +7,22 @@
 //?   3. A clean working tree committed + tagged (this script does NOT commit).
 //?
 //? This script ALWAYS runs a fresh `npm run build:packages` first so no stale
-//? dist is shipped, then publishes each package with `--access public`. Across
-//? waves it follows the dependency topology so a consumer who installs the
-//? moment a package lands can already resolve its @luckystack peers/deps.
+//? dist is shipped, then publishes each package with `--access public` and npm
+//? PROVENANCE (`--provenance`). Across waves it follows the dependency topology
+//? so a consumer who installs the moment a package lands can already resolve its
+//? @luckystack peers/deps.
+//?
+//? PROVENANCE: every package.json also sets `publishConfig.provenance: true`, so
+//? `npm publish` attaches a signed provenance attestation linking the tarball to
+//? the building workflow + commit. This REQUIRES a provenance-capable CI with an
+//? OIDC id-token (GitHub Actions `permissions: id-token: write` — see the
+//? `publish` job in `.github/workflows/ci.yml`). The `--provenance` flag is only
+//? passed on a real publish; a local `--dry-run` skips it because there is no
+//? OIDC token outside CI and npm would otherwise abort.
 //?
 //? Usage:
-//?   node scripts/publishPackages.mjs --dry-run   # `npm publish --dry-run` per package (no upload)
-//?   node scripts/publishPackages.mjs             # real publish
+//?   node scripts/publishPackages.mjs --dry-run   # `npm publish --dry-run` per package (no upload, no provenance)
+//?   node scripts/publishPackages.mjs             # real publish (with provenance)
 
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -52,7 +61,7 @@ console.log(`\n${dryRun ? '[DRY RUN] ' : ''}Step 2/2 — publishing in dependenc
 const done = [];
 for (const wave of WAVES) {
   for (const name of wave) {
-    const args = ['publish', '--access', 'public', ...(dryRun ? ['--dry-run'] : [])];
+    const args = ['publish', '--access', 'public', ...(dryRun ? ['--dry-run'] : ['--provenance'])];
     console.log(`\n→ (packages/${name}) npm ${args.join(' ')}`);
     if (!run('npm', args, path.join(ROOT, 'packages', name))) {
       console.error(`\nPublish FAILED for @luckystack/${name}. Already done this run: ${done.join(', ') || '(none)'}.`);

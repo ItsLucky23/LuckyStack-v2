@@ -52,9 +52,23 @@ const splitTopLevel = (value: string, splitter: '|' | '&' | ','): string[] => {
   let depthBrace = 0;
   let depthBracket = 0;
   let depthAngle = 0;
+  let quote: "'" | '"' | '`' | null = null;
   let token = '';
 
   for (const char of value) {
+    //? Inside a string-literal type (`'a|b'`, `"x,y"`) the splitter + brackets
+    //? must be ignored — otherwise `'a|b' | number` mis-splits into 3 parts.
+    if (quote !== null) {
+      if (char === quote) quote = null;
+      token += char;
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      quote = char;
+      token += char;
+      continue;
+    }
+
     if (char === '(') depthParen += 1;
     if (char === ')') depthParen -= 1;
     if (char === '{') depthBrace += 1;
@@ -62,7 +76,10 @@ const splitTopLevel = (value: string, splitter: '|' | '&' | ','): string[] => {
     if (char === '[') depthBracket += 1;
     if (char === ']') depthBracket -= 1;
     if (char === '<') depthAngle += 1;
-    if (char === '>') depthAngle -= 1;
+    //? Clamp at 0: a function type's `=>` (and `>=`) contributes a `>` with no
+    //? matching `<`, which would otherwise drive depthAngle negative and stop
+    //? later top-level splits from ever firing.
+    if (char === '>') depthAngle = Math.max(0, depthAngle - 1);
 
     if (
       char === splitter

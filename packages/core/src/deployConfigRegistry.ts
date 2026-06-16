@@ -39,6 +39,31 @@ export interface DeployRoutingShape {
   healthProbeTimeoutMs?: number;
   /** Seconds the boot-UUID Redis key lives for (default 3600 = 1h). */
   bootKeyTtlSeconds?: number;
+  /**
+   * ms before the router gives up proxying to an upstream backend (SEC-30 /
+   * router-DeployRoutingShape). Guards against slow-loris upstreams holding a
+   * router worker open. The router reads this when building its proxy request.
+   * DEFAULT undefined → router falls back to its own built-in default.
+   */
+  upstreamTimeoutMs?: number;
+  /**
+   * Name of the service that terminates websocket (Socket.io) traffic. The
+   * router pins WS upgrade requests to this service (they cannot be load-balanced
+   * round-robin without sticky sessions). DEFAULT undefined → router uses its
+   * `system` convention.
+   */
+  websocketService?: string;
+  /**
+   * Path the router exposes for its OWN health/liveness (distinct from the
+   * backend `/_health` boot-handshake endpoint). DEFAULT undefined → router
+   * uses its built-in default.
+   */
+  routerHealthPath?: string;
+  /**
+   * Max request body size (bytes) the router will buffer/forward before
+   * rejecting with 413. DEFAULT undefined → router uses its built-in default.
+   */
+  maxRequestBodyBytes?: number;
 }
 
 export interface DeployDevelopmentShape {

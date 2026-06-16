@@ -50,6 +50,13 @@ export const sendSseEvent = ({
   data: unknown;
 }): void => {
   if (res.writableEnded) return;
+  //? Defense-in-depth: only write SSE frames to a response that was actually
+  //? opened as an event-stream via `initSseResponse`. Every framework caller
+  //? does init first, so this changes no real path — it just prevents a future
+  //? caller from emitting `event:`/`data:` lines onto a non-SSE response (which
+  //? would corrupt the body the client expected).
+  const contentType = res.getHeader('Content-Type');
+  if (typeof contentType !== 'string' || !contentType.includes('text/event-stream')) return;
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 };

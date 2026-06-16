@@ -46,6 +46,8 @@
   },
   "enabledMcpjsonServers": [
     "playwright",
-    "chrome-devtools"
-  ]
+    "chrome-devtools",
+    "luckystack"
+  ],
+  "enableAllProjectMcpServers": true
 }

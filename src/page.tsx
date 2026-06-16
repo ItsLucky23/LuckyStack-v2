@@ -1,26 +1,21 @@
 import { useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
-import { loginRedirectUrl, loginPageUrl, sessionBasedToken } from "config";
+import { loginRedirectUrl, loginPageUrl } from "config";
 
 import { useSession } from "./_providers/SessionProvider";
 
 export const template = 'plain'
 export default function App() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { session, sessionLoaded } = useSession();
 
+  //? The session/handoff token is adopted ONLY from the URL fragment in
+  //? `main.tsx` (synchronously, before React mounts) — never from the query
+  //? string. A `?token=` branch here would reintroduce token leakage into
+  //? access logs / history / Referer and a session-fixation vector
+  //? (`/?token=ATTACKER`). Do not re-add it.
   useEffect(() => {
- 
-    const params = new URLSearchParams(location.search);
-    const token = params.get('token');
-    if (token && sessionBasedToken) {
-      sessionStorage.setItem('token', token);
-      globalThis.location.href = globalThis.location.pathname;
-      return;
-    }
-
     if (sessionLoaded) {
       if (session?.id) {
         void navigate(loginRedirectUrl);
@@ -28,8 +23,7 @@ export default function App() {
         void navigate(loginPageUrl);
       }
     }
-
-  }, [navigate, location, session, sessionLoaded]);
+  }, [navigate, session, sessionLoaded]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {

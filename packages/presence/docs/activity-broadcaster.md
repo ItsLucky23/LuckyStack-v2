@@ -119,7 +119,7 @@ registerActivityEvent('afk', {
 
 ### `unregisterActivityEvent(name)`
 
-No-op if not registered. Removes the entry from the registry; subsequent `dispatchActivitySample` calls will not invoke it. The refractory map is keyed by `${name}|${socketId}` so old entries become orphans (acceptable — they only consume a few bytes and get GC'd once the map churns).
+No-op if not registered. Removes the entry from the registry; subsequent `dispatchActivitySample` calls will not invoke it. The refractory map is keyed by `${name}|${socketId}`; the server prunes a socket's throttle entries on disconnect (`clearActivity` -> `clearActivityThrottle(socketId)`), so the map does not grow unbounded across the lifetime of a long-running deploy.
 
 ### `listActivityEvents()`
 
@@ -167,9 +167,9 @@ The default event:
 
 - `trigger`: returns `true` when `getPresenceConfig().afkTimeoutMs > 0` and `sample.now - sample.lastActivity > afkTimeoutMs` (default 5 minutes).
 - `refractoryMs`: `60_000` — once a user is marked AFK, the event does not re-fire for the same socket for at least a minute.
-- `onTrigger`: dispatches `prePresenceUpdate` (with `userId: null, kind: 'afk', roomCodes: []`), enumerates every room the socket belongs to via the io adapter, emits `socketEventNames.userAfk` with `{ token }` to each room, then dispatches `postPresenceUpdate` with `recipientCount: -1`.
+- `onTrigger`: calls `informRoomPeers({ token, event: userAfk, extraData: { time: afkTimeoutMs } })`. That resolves the session, dispatches `prePresenceUpdate` (`{ token, userId, kind: 'afk', roomCodes }` — a veto seam), emits `socketEventNames.userAfk` with `{ userId, endTime: now + afkTimeoutMs }` (**never** the raw session token) to each peer, then dispatches `postPresenceUpdate` with the real `recipientCount`.
 
-`recipientCount: -1` is a sentinel: the default event uses `io.to(roomName).emit(...)` (room-level fan-out) instead of socket-level iteration, so we cannot cheaply count recipients. Hooks that depend on a real count should subscribe to `postPresenceUpdate` from `informRoomPeers` (which sends `{ userId, endTime }` and counts) rather than the default AFK event.
+Because the default AFK event now routes through `informRoomPeers` (same path as reconnect `userBack`), its `postPresenceUpdate.recipientCount` is the real per-peer emit count and the broadcast is adapter-aware (reaches roommates on other instances). There is no `recipientCount: -1` sentinel anymore, and the payload carries `userId` + `endTime`, not `token`.
 
 To disable AFK detection entirely without unregistering:
 

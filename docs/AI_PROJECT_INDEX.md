@@ -35,7 +35,7 @@
 | `sync/playground/echo/v1` | yes | — | public | — | yes | — | Playground: simple sync echo. Whatever the originator sends fan-outs to |
 | `sync/playground/streamBroadcast/v1` | yes | — | public | — | yes | — | Playground: streams fake "AI tokens" to EVERYONE in the receiver room |
 | `sync/playground/streamProgress/v1` | yes | — | public | — | yes | — | Playground: streams progress updates to the ORIGINATOR ONLY (not the |
-| `sync/playground/streamToToken/v1` | yes | — | public | — | yes | — | Playground: token-targeted streaming. Demonstrates `streamTo(tokens, payload)` |
+| `sync/playground/streamToToken/v1` | yes | — | login | — | yes | — | Playground: token-targeted streaming. Demonstrates `streamTo(tokens, payload)` |
 | `sync/playground/throwSync/v1` | yes | — | public | — | yes | — | Playground: deliberately throws inside a sync handler so the framework's |
 
 ## Ownership & coverage

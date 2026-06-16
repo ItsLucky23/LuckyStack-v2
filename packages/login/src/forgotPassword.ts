@@ -5,6 +5,7 @@
 
 import { getProjectConfig, dispatchHook, getLogger } from '@luckystack/core';
 
+import { loadEmailModule } from './emailModuleLoader';
 import { createPasswordResetToken } from './passwordReset';
 import { getUserAdapter } from './userAdapter';
 
@@ -37,16 +38,10 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
 
   // Lazy import — the email package is an optional peer dep so its types
   // may not be resolvable at the framework's compile time.
-  interface EmailModule {
-    sendEmail: (input: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }>;
-  }
   //? Mirror testEmail's robustness: catch a failed dynamic import instead of
   //? throwing (an uncaught throw here would bubble out of the anti-enumeration
   //? wrapper as a generic 500). Surfaces the real reason in the server log.
-  const emailModule = await (
-    // @ts-expect-error optional peer dep — installed only when forgotPassword === 'framework'
-    import('@luckystack/email') as Promise<EmailModule>
-  ).catch((error: unknown) => {
+  const emailModule = await loadEmailModule().catch((error: unknown) => {
     getLogger().warn('[forgotPassword] failed to load @luckystack/email — is it installed?', { error: String(error) });
     return null;
   });

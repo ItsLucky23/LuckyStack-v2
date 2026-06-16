@@ -20,6 +20,16 @@ const mapApiPageLocation = (pageLocation: string): string => {
   return pageLocation ? pageLocation : 'system';
 };
 
+//? Root-level sync routes (directly under `src/_sync/`) get the SAME `'system'`
+//? sentinel as root-level APIs. Without it the loader registered `sync/<name>/v1`
+//? (two segments) while the typed `syncRequest` sends `sync/system/<name>/v1`
+//? and the wire parser (`parseTransportRouteName`) REQUIRES a
+//? `{service}/{name}/{version}` triple — so a root sync silently never
+//? dispatched. Mirrors `mapApiPageLocation` + `extractSyncPagePath`.
+const mapSyncPageLocation = (pageLocation: string): string => {
+  return pageLocation ? pageLocation : 'system';
+};
+
 const resolveApiRouteMetaFromPath = (filePath: string): { routeKey: string; absolutePath: string } | null => {
   const absolutePath = path.resolve(filePath);
   const normalizedAbsolutePath = normalizePath(absolutePath);
@@ -85,9 +95,8 @@ const resolveSyncRouteMetaFromPath = (
   const kind = match[1] as 'server' | 'client';
   const version = `v${match[2]}`;
   const syncName = rawSyncName.replace(rules.syncVersionRegex, '');
-  const routeBaseKey = pageLocation
-    ? `sync/${pageLocation}/${syncName}/${version}`
-    : `sync/${syncName}/${version}`;
+  const mappedPageLocation = mapSyncPageLocation(pageLocation);
+  const routeBaseKey = `sync/${mappedPageLocation}/${syncName}/${version}`;
 
   return {
     routeKey: `${routeBaseKey}_${kind}`,
@@ -415,9 +424,8 @@ const scanSyncFolder = async (file: string, basePath = "") => {
     const kind = syncMatch[1];
     const version = `v${syncMatch[2]}`;
     const syncName = rawSyncFileName.replace(syncRules.syncVersionRegex, '');
-    const routeBaseKey = pageLocation
-      ? `sync/${pageLocation}/${syncName}/${version}`
-      : `sync/${syncName}/${version}`;
+    const mappedPageLocation = mapSyncPageLocation(pageLocation);
+    const routeBaseKey = `sync/${mappedPageLocation}/${syncName}/${version}`;
 
     const filePath = path.resolve(path.join(fullPath, relFile));
     const [fileError, fileResult] = await tryCatch(async () => importFile(filePath));

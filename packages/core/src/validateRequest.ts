@@ -50,10 +50,23 @@ export const validateRequest = ({
   user
 }: {
   auth: AuthProps;
-  user: BaseSessionLayout;
+  //? Null-safe (api F4 / SYNC-02-root): unauth / additional-only routes used to
+  //? pass a non-null assertion (`user!`) here even when no session existed,
+  //? which crashed once `additional[]` was present (the `condition.key in user`
+  //? check throws on null/undefined). `user` is now optional; when it is
+  //? absent we forbid any `additional[]` predicate (an unauthenticated request
+  //? can't satisfy a session-field constraint) instead of throwing. A route with
+  //? no `additional` still succeeds regardless of `user` (login itself is
+  //? enforced by the surrounding handler, not here).
+  user?: BaseSessionLayout | null;
 }): ValidationResult => {
 
-  if (!auth.additional) {
+  //? No predicates to evaluate — succeed regardless of `user`. This MUST treat
+  //? an empty array the same as an absent one: the prod/generated auth map
+  //? normalizes every `auth` to include `additional: []`, so a non-empty-array
+  //? guard alone would forbid every PUBLIC route (login:false) for anonymous
+  //? callers once the null-user branch below runs.
+  if (!auth.additional || auth.additional.length === 0) {
     return { status: 'success' };
   }
 
@@ -63,6 +76,13 @@ export const validateRequest = ({
     errorParams: [{ key: 'key', value: key }],
     httpStatus: 403,
   });
+
+  //? No session but the route declares `additional[]` predicates: an
+  //? unauthenticated request cannot satisfy any session-field constraint, so
+  //? forbid the first one rather than dereferencing a null `user`.
+  if (user === null || user === undefined) {
+    return forbid(auth.additional[0]?.key ?? '');
+  }
 
   for (const condition of auth.additional) {
     // Key must exist in user session — that's a setup error, not a runtime auth fail.

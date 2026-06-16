@@ -62,15 +62,15 @@ Added to `Date.now()` to compute the `endTime` field of the `userAfk` payload. T
    - `roomCodes`: filtered `session?.roomCodes` keeping only non-empty strings.
    - `userId`: `session.id ?? null` (typed as the project session id, defaults to the Prisma `User.id` string).
 3. **Early exit** — if there is no session or zero room codes, return. Lone-user tokens that have not joined any room are silently skipped (they have nobody to notify).
-4. **`prePresenceUpdate` dispatch** — fires `{ token, userId, kind, roomCodes }` (kind derived from `event`). Consumers may abort here (the helper does not check the result; this is "audit" surface, not "veto" surface — if you need a veto, file an issue).
+4. **`prePresenceUpdate` dispatch** — fires `{ token, userId, kind, roomCodes }` (kind derived from `event`). This is a **veto seam** (symmetric with `preRoomJoin` / `preRoomLeave`): a handler returning a stop signal suppresses the fan-out entirely. When stopped, the helper still fires `postPresenceUpdate` with `recipientCount: 0` (so audit consumers see the suppressed event) and returns without emitting. Use this for per-user invisible / DND / hidden-observer modes.
 5. **Peer iteration** — for each room code:
-   - `io.sockets.adapter.rooms.get(room)` → set of socket ids.
-   - For each socket id, skip if already in `handledSockets` (de-dupe across overlapping rooms — a peer in two shared rooms only receives one emit).
-   - Resolve the socket via `io.sockets.sockets.get(socketKey)`. If gone (already disconnected), continue.
+   - `formatRoomName(room, { purpose: 'presence', userId })` → the physical room name (identity by default; a registered `registerRoomNameFormatter` applies its prefix here).
+   - `await io.in(physicalRoom).fetchSockets()` → the room's sockets (adapter-aware: spans instances under the Redis adapter).
+   - For each socket, skip if its id is already in `handledSockets` (de-dupe across overlapping rooms — a peer in two shared rooms only receives one emit).
    - If `extraData.ignoreSelf`, skip when the peer's token matches the originator.
    - Emit:
-     - `userAfk` → `tempSocket.emit('userAfk', { userId: session.id, endTime: Date.now() + (extraData.time || 0) })`.
-     - `userBack` → `tempSocket.emit('userBack', { userId: session.id })`.
+     - `userAfk` → `peerSocket.emit('userAfk', { userId: session.id, endTime: Date.now() + (extraData.time || 0) })`.
+     - `userBack` → `peerSocket.emit('userBack', { userId: session.id })`.
    - Increment `recipientCount`.
 6. **`postPresenceUpdate` dispatch** — fires `{ token, userId, kind, roomCodes, recipientCount }`. `recipientCount` is the number of `emit()` calls actually made (never includes the originator when `ignoreSelf` is true).
 
@@ -144,9 +144,9 @@ registerHook('postPresenceUpdate', async ({ kind, recipientCount }) => {
 });
 ```
 
-### Recipient-count semantics — `informRoomPeers` vs default AFK event
+### Recipient-count semantics
 
-The default `'afk'` activity event uses `io.to(roomName).emit(...)` (room-level fan-out) instead of socket iteration. It cannot cheaply count recipients, so its `postPresenceUpdate` payload uses `recipientCount: -1` as a sentinel. Consumers that need accurate counts should rely on the `informRoomPeers` path (used by `socketConnected` and `initActivityBroadcaster`) and treat `-1` as "unknown."
+All four framework presence broadcasts — reconnect `userBack` (`socketConnected`), tab-switch `userAfk` (`initActivityBroadcaster`), and the default `'afk'` activity event — route through `informRoomPeers`, so `postPresenceUpdate.recipientCount` is always the real per-peer emit count. (There is no `-1` "unknown" sentinel; that described an older room-level-emit AFK path that no longer exists.) A `recipientCount` of `0` means either every peer was the originator (with `ignoreSelf`), the rooms held only dead sockets, or a `prePresenceUpdate` handler vetoed the fan-out.
 
 ## Emitted socket events
 
@@ -163,11 +163,11 @@ Per-peer payload: `{ userId: string }`. Clients restore the peer's avatar to nor
 ```ts
 const handledSockets = new Set<string>();
 for (const room of roomCodes) {
-  const roomSockets = io.sockets.adapter.rooms.get(room);
-  for (const socketId of roomSockets || []) {
-    if (handledSockets.has(socketId)) continue;
-    handledSockets.add(socketId);
-    // ... emit
+  const roomSockets = await io.in(room).fetchSockets(); // adapter-aware (spans instances)
+  for (const peerSocket of roomSockets) {
+    if (handledSockets.has(peerSocket.id)) continue;
+    handledSockets.add(peerSocket.id);
+    // ... peerSocket.emit(...)
   }
 }
 ```
@@ -178,8 +178,10 @@ The set is per-`informRoomPeers` call; it does not persist between calls. Across
 
 - **Originator is in the room they emit into** — without `ignoreSelf`, the originator receives their own event. The fan-out callers that matter (`socketConnected`, default AFK event) all set `ignoreSelf: true` or use room-level emit that bypasses the issue.
 - **Stale socket id in the adapter** — `io.sockets.sockets.get(socketKey)` returns `undefined`; the iteration continues. No emit, no increment.
-- **Room exists but has zero members** — `roomSockets` is `undefined` (or empty Set); the loop is a no-op for that room.
-- **Single-instance vs Redis adapter** — when the redis adapter is attached, `io.sockets.adapter.rooms.get(room)` only includes locally-connected sockets. Remote peers are reached via the underlying socket.io adapter's pub/sub when the helper calls `tempSocket.emit(...)` — no, that is misleading: `tempSocket.emit` is local only. For cross-instance presence broadcasts you currently need `@luckystack/sync` or the `io.to(room).emit(...)` form used by the default AFK event. `informRoomPeers` is local-instance fan-out.
+- **Room exists but has zero members** — `fetchSockets()` returns an empty array; the loop is a no-op for that room.
+- **Multi-tenancy / room-code collision** — `informRoomPeers` routes each `session.roomCodes` string through core's `formatRoomName(room, { purpose: 'presence', userId })` before fan-out, so a registered `registerRoomNameFormatter` (the socket.io counterpart to `registerRedisKeyFormatter`) applies its tenant prefix here. By default the formatter is identity, so two tenants that both use the raw room code `"general"` still share one socket.io room (and one fan-out) unless you either register a non-identity formatter OR tenant-prefix the codes yourself (e.g. `join("acme:general")`) before `joinRoom`.
+  > **Known asymmetry (presence report finding #2):** the fan-out + `getRoomPresence` snapshot apply the formatter, but the server-side room *join* sites (`@luckystack/server` `loadSocket`) currently join the RAW code. Under a NON-identity `registerRoomNameFormatter` the broadcast would target a room nobody joined → presence deltas reach 0 peers. Until the join sites are reconciled to the same transform, run multi-tenant presence via raw tenant-prefixed room codes (identity formatter), not via a non-identity `registerRoomNameFormatter`. See `/docs/ARCHITECTURE_MULTI_TENANCY.md`.
+- **Single-instance vs Redis adapter** — `informRoomPeers` resolves peers via `await io.in(room).fetchSockets()`, which is **adapter-aware**: with the Redis adapter attached (always, under `@luckystack/server`) it returns `RemoteSocket`s for peers on OTHER instances too, and `peerSocket.emit(...)` routes the event across the adapter to that remote socket. So presence broadcasts (`userBack` / `userAfk`, including the default AFK event) reach roommates on every instance, not just the local one. (The earlier `io.sockets.adapter.rooms.get(room)` + `tempSocket.emit(...)` path was local-only; `fetchSockets()` replaced it precisely to cross the instance boundary.)
 
 ## Why `informRoomPeers` is not in the public barrel
 

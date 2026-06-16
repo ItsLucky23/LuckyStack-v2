@@ -10,7 +10,7 @@
 //? real `reset-password/sendReset` is for unauthenticated reset flows; this
 //? one is purely a dev fixture.
 
-import { AuthProps, SessionLayout } from '../../../config';
+import { AuthProps, SessionLayout, dev } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
 export const rateLimit: number | false = 3;
@@ -28,6 +28,14 @@ export interface ApiParams {
 }
 
 export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
+  //? DEV-ONLY: this fires a REAL `sendEmail({ to: <arbitrary recipient> })`.
+  //? Outside dev that's a spam-to-arbitrary-recipient surface for any logged-in
+  //? user, so hard-refuse to reach the real sender in production. (The whole
+  //? `src/playground/` tree should be deleted before shipping regardless.)
+  if (!dev) {
+    return { status: 'error', errorCode: 'playground.testEmail.devOnly' };
+  }
+
   const email = data.email.trim();
   if (!email) {
     return { status: 'error', errorCode: 'login.invalidEmailFormat' };

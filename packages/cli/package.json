@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "LuckyStack project CLI. `npx luckystack add <feature>` installs an optional package AND injects the consumer-`src/` assets it needs (login pages, presence client mounts) that a plain `npm i` can't — the inverse of create-luckystack-app's optional-package pruner.",

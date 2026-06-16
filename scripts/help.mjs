@@ -76,6 +76,11 @@ const META = {
   'ai:index': { desc: 'Regenerate docs/AI_QUICK_INDEX.md (cross-repo surfaces).', example: 'npm run ai:index' },
   'ai:capabilities': { desc: 'Regenerate the helper/component capability snapshot.', example: 'npm run ai:capabilities' },
   'ai:project-index': { desc: 'Regenerate the routes/pages/helpers inventory.', example: 'npm run ai:project-index' },
+  'ai:decisions': { desc: 'Regenerate docs/AI_DECISIONS_INDEX.md from docs/decisions/ ADRs.', example: 'npm run ai:decisions' },
+  'ai:runbooks': { desc: 'Regenerate docs/AI_RUNBOOKS.md (task-shaped golden paths).', example: 'npm run ai:runbooks' },
+  'ai:product': { desc: 'Regenerate docs/AI_PRODUCT_OVERVIEW.md (intent layer).', example: 'npm run ai:product' },
+  'ai:graph': { desc: 'Regenerate docs/ai-graph.json (dependency + call graph).', example: 'npm run ai:graph' },
+  'ai:lint': { desc: 'Run the CLAUDE.md invariant linter (no as-any / arbitrary colors / untranslated JSX).', example: 'npm run ai:lint' },
 
   // Scaffolding
   'scaffold:test': { desc: 'Create a per-route test stub.', example: 'npm run scaffold:test playground/getData/v1', params: '<page>/<name>/<version>' },
@@ -97,7 +102,7 @@ const GROUPS = [
   ['Lint', ['lint', 'lint:client', 'lint:server', 'lint:all', 'lint:packages']],
   ['Versioning & publish', ['bump', 'publish:packages', 'publish:dry']],
   ['Database (Prisma)', ['prisma:generate', 'prisma:db:push']],
-  ['AI indexes', ['ai:index', 'ai:capabilities', 'ai:project-index']],
+  ['AI indexes', ['ai:index', 'ai:capabilities', 'ai:project-index', 'ai:decisions', 'ai:runbooks', 'ai:product', 'ai:graph', 'ai:lint']],
   ['Scaffolding', ['scaffold:test', 'scaffold:page']],
   ['Bun (experimental)', ['bun:check', 'bun:server', 'bun:prod']],
   ['Help', ['help']],

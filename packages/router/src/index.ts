@@ -21,6 +21,12 @@ export type {
 } from './resolveTarget';
 export { startHealthPoller } from './healthPoller';
 export type { StartHealthPollerInput, HealthPoller } from './healthPoller';
+export {
+  DEFAULT_HEALTHY_STATUS_PREDICATE,
+  DEFAULT_HEALTH_STORE_TTL_SECONDS,
+  getHealthyStatusPredicate,
+  getHealthStoreTtlSeconds,
+} from './healthConfig';
 export { createHttpProxy } from './httpProxy';
 export type { CreateHttpProxyInput } from './httpProxy';
 export { createWsProxy } from './wsProxy';

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "luckystack": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "@luckystack/mcp@latest"
+      ]
+    }
+  }
+}

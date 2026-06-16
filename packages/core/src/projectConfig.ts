@@ -43,6 +43,73 @@ export interface RateLimitingConfig {
   windowMs: number;
   /** How often the in-memory store evicts expired entries. */
   cleanupIntervalMs: number;
+  /**
+   * What the default strategy does when `store: 'redis'` is active but a Redis
+   * operation fails (disconnect, eval error). DEFAULT `'memory'` — degrade to
+   * the process-local in-memory store (fail-open, backwards-compatible) and log
+   * a one-shot warning. In a multi-instance deployment this silently relaxes the
+   * global limit to per-instance (N×). Set `'deny'` to instead reject the
+   * request (fail-closed) so a Redis outage can't bypass rate limiting.
+   */
+  onStoreError: 'memory' | 'deny';
+  /**
+   * Skip rate limiting for requests that resolve to a loopback client IP
+   * (`127.0.0.1`, `::1`, the `UNKNOWN_CLIENT_IP` sentinel) when running in
+   * development (`NODE_ENV !== 'production'`). Lets a dev machine hammer its own
+   * server (HMR reload storms, local load tests) without tripping limits, while
+   * staying fully enforced in production. DEFAULT `false` (enforce everywhere) —
+   * a missing key keeps today's behavior. The api/sync transport handlers read
+   * this when building the per-IP key; core only owns the flag + the
+   * {@link isLoopbackIp} helper.
+   */
+  skipLoopbackInDev: boolean;
+  /**
+   * Identity callback that decides the BASIS of a rate-limit key for a given
+   * request — i.e. whether to key per-user, per-IP, or some custom dimension.
+   * The api/sync handlers call this (when set) to derive the `{ scope, id }`
+   * used to build the bucket key, instead of the built-in user-then-IP default.
+   * Returning `null` falls back to the framework default. Synchronous by design
+   * (it runs on the hot request path). DEFAULT unset.
+   */
+  identity?: (params: RateLimitIdentityParams) => RateLimitIdentity | null;
+  /**
+   * Per-account brute-force lockout slot, keyed independently from the general
+   * api/ip limits so credential endpoints (login, password-reset) can apply a
+   * stricter window without affecting normal traffic. The login package reads
+   * these when keying a per-account attempt counter (`auth:<accountKey>`).
+   * DEFAULT `{ enabled: false }` — a missing/disabled slot keeps today's
+   * behavior (no per-account lockout; only the per-IP throttle applies).
+   */
+  auth: AuthRateLimitConfig;
+}
+
+/** Inputs handed to the {@link RateLimitingConfig.identity} callback. */
+export interface RateLimitIdentityParams {
+  /** Resolved route name (`api/billing/getInvoice/v1`, `sync/...`). */
+  routeName: string;
+  /** Session user id when the request is authenticated, else null. */
+  userId: string | null;
+  /** Resolved client IP (already honours `http.trustProxy`). */
+  ip: string;
+  /** Transport the request arrived on. */
+  transport: 'socket' | 'http';
+}
+
+/** Result of a {@link RateLimitingConfig.identity} callback. */
+export interface RateLimitIdentity {
+  /** Which dimension the key is built from. */
+  scope: 'user' | 'ip' | 'custom';
+  /** The identity value (user id, ip, or a custom string). Never a raw token. */
+  id: string;
+}
+
+export interface AuthRateLimitConfig {
+  /** When false (default), no per-account lockout is applied. */
+  enabled: boolean;
+  /** Max failed attempts per account within `windowMs` before lockout. Default 5. */
+  maxAttempts: number;
+  /** Rolling window in ms over which `maxAttempts` is counted. Default 900000 (15 min). */
+  windowMs: number;
 }
 
 export interface SessionConfig {
@@ -158,6 +225,35 @@ export interface HttpConfig {
   sessionCookieName: string;
   sessionCookieSameSite: 'Strict' | 'Lax' | 'None';
   sessionCookiePath: string;
+  /**
+   * Optional `Domain` attribute for the session cookie (CORE-39). Leave unset
+   * (DEFAULT) for a host-only cookie (most secure). Set to a parent domain
+   * (`.example.com`) only when the cookie must be shared across subdomains.
+   * IGNORED when `sessionCookiePrefix === '__Host-'` (that prefix forbids
+   * `Domain`). A missing key keeps today's host-only behavior.
+   */
+  sessionCookieDomain?: string;
+  /**
+   * Optional cookie name prefix enforcing browser-level guarantees (CORE-10/39):
+   *
+   * - `'__Host-'` — forces `Secure`, `Path=/`, and NO `Domain` (blocks
+   *   subdomain cookie-tossing). The strongest option for a host-only session.
+   * - `'__Secure-'` — forces `Secure` (cookie only sent over HTTPS).
+   * - unset (DEFAULT) — no prefix; today's behavior. A missing key changes
+   *   nothing.
+   *
+   * The server's cookie builder (`buildSessionCookie`) reads this and applies
+   * the prefix to `sessionCookieName` plus the forced attributes. Use
+   * {@link applyCookiePrefixConstraints} to compute the effective attributes.
+   */
+  sessionCookiePrefix?: '__Host-' | '__Secure-';
+  /**
+   * Per-cookie `Secure` override (CORE-39). When unset (DEFAULT) the server
+   * derives `Secure` from `process.env.SECURE` as today. Set explicitly to
+   * force on/off independently of the env flag. A `__Host-`/`__Secure-` prefix
+   * forces `Secure: true` regardless.
+   */
+  sessionCookieSecure?: boolean;
   /** Maximum body size accepted on `/api/*` and `/sync/*` POSTs. */
   requestBodyMaxBytes: number;
   /** Path of the router boot-handshake endpoint. */
@@ -183,9 +279,46 @@ export interface HttpConfig {
    * trusted proxy populates those headers, otherwise clients can spoof their IP.
    */
   trustProxy?: boolean;
+  /**
+   * Controls how `/_health` exposes synchronized-env-var hashes (SEC-13).
+   * Previously `/_health` returned an UNSALTED `sha256(value)` of each
+   * synchronized secret, unauthenticated — enabling offline dictionary attacks
+   * on low-entropy secrets + key-name disclosure. This config + the shared
+   * {@link hashSynchronizedValue} helper let both the server (`/_health`) and the
+   * router (boot handshake) salt/HMAC consistently so the compare still works.
+   * DEFAULTS keep today's wire behavior (`mode: 'plain'`) so a missing key does
+   * not break an existing router handshake — opt into `'salted'`/`'hmac'`
+   * explicitly (and bump server + router together).
+   */
+  healthHash: HealthHashConfig;
   stream: HttpStreamConfig;
   securityHeaders: SecurityHeadersConfig;
   cors: CorsConfig;
+}
+
+export interface HealthHashConfig {
+  /**
+   * - `'plain'` — unsalted `sha256(value)`; the pre-0.2.0 behavior, kept so an
+   *   existing router boot handshake keeps comparing successfully. Opt in with
+   *   `mode:'plain'` to restore the legacy wire output.
+   * - `'salted'` — `sha256(salt + value)` using `salt` below (or the boot UUID
+   *   when `salt` is the literal `'@bootUuid'`). Stable across a boot, rotates on
+   *   restart when bound to the boot UUID.
+   * - `'hmac'` (DEFAULT in 0.2.0) — `HMAC-SHA256(key=salt, value)`. The default
+   *   `salt:'@bootUuid'` keys it on the per-boot UUID server + router already
+   *   share, so `/_health` no longer exposes a stable, offline-attackable
+   *   `sha256(secret)`. Collapses to `'plain'` when no boot UUID is available so
+   *   the boot handshake never silently diverges.
+   */
+  mode: 'plain' | 'salted' | 'hmac';
+  /**
+   * Shared salt / HMAC key. Both the backend `/_health` and the router's
+   * compare MUST use the same value. The literal `'@bootUuid'` is a sentinel
+   * meaning "use the current boot UUID as the salt" (valid with `'salted'` or
+   * `'hmac'`). DEFAULTS to `'@bootUuid'` in 0.2.0 (only consulted when
+   * `mode !== 'plain'`); set a non-empty static value to pin a stable key.
+   */
+  salt: string;
 }
 
 export interface PasswordPolicyConfig {
@@ -278,6 +411,27 @@ export interface AuthConfig {
   passwordResetBrand?: string;
   /** Email-change confirmation-token TTL in seconds. Default 3600 (1 hour). */
   emailChangeTtlSeconds: number;
+  /**
+   * Whether public self-service registration is permitted (login F18). When
+   * `false`, the credentials `/register` route rejects with
+   * `auth.registrationDisabled` and the login UI hides the "create account"
+   * affordance — useful for invite-only / admin-provisioned apps. OAuth-driven
+   * first-login account creation is governed separately by the provider flow.
+   * DEFAULT `true` (today's behavior — open registration).
+   */
+  allowRegistration: boolean;
+  /**
+   * Frontend path the framework-mode password-reset email links to (login F22).
+   * The reset token is appended as a query param. DEFAULT `/reset-password`.
+   * Override when your reset page lives at a different route.
+   */
+  passwordResetPath: string;
+  /**
+   * Frontend path the email-change confirmation email links to (login F22).
+   * The confirmation token is appended as a query param.
+   * DEFAULT `/confirm-email-change`.
+   */
+  emailChangeConfirmPath: string;
 }
 
 export interface OfflineQueueConfig {
@@ -303,8 +457,47 @@ export interface SyncStreamThrottleConfig {
   field: string;
 }
 
+export interface ApiConfig {
+  /**
+   * Default response timeout (ms) for `apiRequest`. After this elapses with no
+   * response (e.g. server restart/crash between emit and reply) the request
+   * settles with `{ status:'error', errorCode:'api.timeout', httpStatus:504 }`
+   * instead of hanging forever. Set `false` to disable the timeout. A per-call
+   * `timeoutMs` overrides this. Default 30000.
+   */
+  requestTimeoutMs: number | false;
+}
+
+export interface ValidationConfig {
+  /**
+   * Whether runtime input validation runs in PRODUCTION (CORE-01).
+   *
+   * - `'enforce'` (DEFAULT) — the structural validator (`validateType`) runs
+   *   against the route's resolved input type in production too, so a malformed
+   *   payload is rejected with `api.invalidInputType` / `sync.invalidInputType`
+   *   instead of reaching the handler. Only the dev-only devkit DEEP type
+   *   resolver (TypeScript compiler API) is skipped in prod — the already-resolved
+   *   generated type text is validated directly.
+   * - `'off'` — restore the legacy behavior where prod skips input validation
+   *   entirely (input shape is the handler's responsibility). This is the loud,
+   *   documented opt-out; set it only if a route's generated type text can't be
+   *   validated structurally in your deployment.
+   *
+   * DEFAULT `'enforce'`. Note: this CHANGES prior behavior (prod was a no-op).
+   * Set `'off'` to keep the old no-op.
+   */
+  runtimeMode: 'enforce' | 'off';
+}
+
 export interface SyncConfig {
   streamThrottle: SyncStreamThrottleConfig;
+  /**
+   * Default response timeout (ms) for `syncRequest`'s acknowledgement. Same
+   * semantics as `api.requestTimeoutMs` but for sync. Settles with
+   * `sync.requestTimeout` / httpStatus 504 on expiry. `false` to disable.
+   * Default 30000.
+   */
+  requestTimeoutMs: number | false;
   /**
    * Yield to the event loop every N recipients during a broadcast fanout
    * (`receiver: 'all'` or large rooms). Lower = more responsive, higher
@@ -313,6 +506,44 @@ export interface SyncConfig {
   fanoutYieldEvery: number;
   /** Milliseconds to sleep when yielding. Default 1ms. */
   fanoutYieldMs: number;
+  /**
+   * Receiver-authorization policy (SYNC-07). These flags add framework-level
+   * defaults read by `@luckystack/sync`'s `authorizeSyncReceiver`:
+   *
+   * - `allowClientReceiverAll` — when false, a client requesting the broadcast
+   *   receiver `'all'` is rejected unless a `preSyncAuthorize` handler approves
+   *   it. DEFAULT `false` (0.2.0 secure-default flip — a client can no longer
+   *   broadcast cluster-wide by default; opt back in with `true` for the legacy
+   *   permissive behavior).
+   * - `requireRoomMembership` — when true, a client may only target a room it
+   *   has actually joined (its `roomCodes`); targeting an unjoined room is
+   *   rejected. DEFAULT `true` (0.2.0 secure-default flip — a client can no
+   *   longer fan out to a room it never joined; set `false` for the legacy
+   *   any-room behavior).
+   *
+   * BREAKING (0.2.0): both defaults now fail CLOSED. Apps that relied on
+   * implicit cluster-wide / arbitrary-room broadcasts must either join the room
+   * before targeting it, approve the receiver via a `preSyncAuthorize` handler,
+   * or explicitly opt back into the permissive values.
+   */
+  allowClientReceiverAll: boolean;
+  requireRoomMembership: boolean;
+  /**
+   * Stream backpressure tuning (SYNC-15) for `createStreamThrottle` /
+   * server-initiated stream emits. Constants were previously hardcoded in the
+   * sync package; surfacing them here lets a consumer tune flush cadence under
+   * load without forking. DEFAULTS reproduce the historical hardcoded values.
+   */
+  flushPressure: SyncFlushPressureConfig;
+}
+
+export interface SyncFlushPressureConfig {
+  /** Max queued chunks before the stream applies backpressure (pauses). Default 1000. */
+  highWaterMarkChunks: number;
+  /** Resume emitting once the queue drains below this. Default 250. */
+  lowWaterMarkChunks: number;
+  /** Hard cap on bytes buffered for a single stream before dropping/erroring. Default 5_242_880 (5 MiB). */
+  maxBufferedBytes: number;
 }
 
 export interface SocketConfig {
@@ -322,6 +553,14 @@ export interface SocketConfig {
   pingTimeout: number;
   /** ms between pings. */
   pingInterval: number;
+  /**
+   * Minimum ms between client → server `activity` heartbeats (repo-src C-CFG /
+   * presence C1). The consumer template's activity tracker + `@luckystack/presence`
+   * read this to throttle how often mouse/keyboard/touch activity is reported
+   * (previously hardcoded to 10s). DEFAULT 10000 (10s) — a missing key keeps the
+   * historical cadence.
+   */
+  activityHeartbeatThrottleMs: number;
 }
 
 export interface DevConfig {
@@ -390,7 +629,9 @@ export interface ProjectConfig {
   http: HttpConfig;
   auth: AuthConfig;
   socket: SocketConfig;
+  api: ApiConfig;
   sync: SyncConfig;
+  validation: ValidationConfig;
   offlineQueue: OfflineQueueConfig;
   dev: DevConfig;
   paths: PathsConfig;
@@ -437,6 +678,13 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     defaultIpLimit: 100,
     windowMs: 60_000,
     cleanupIntervalMs: 60_000,
+    onStoreError: 'memory',
+    skipLoopbackInDev: false,
+    auth: {
+      enabled: false,
+      maxAttempts: 5,
+      windowMs: 15 * 60 * 1000,
+    },
   },
   session: {
     basedToken: false,
@@ -462,6 +710,17 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     readyEndpoint: '/readyz',
     testResetEndpoint: '/_test/reset',
     trustProxy: false,
+    //? 0.2.0 secure-default flip (SEC-13): `/_health` no longer exposes a stable,
+    //? unsalted `sha256(secret)` fingerprint. Default mode is `'hmac'` keyed on
+    //? the `'@bootUuid'` sentinel — the per-boot UUID both server + router already
+    //? share via the boot handshake — so the synchronized-env hash rotates every
+    //? restart and is no longer offline dictionary-attackable. Set an explicit
+    //? non-empty `salt` to pin a stable HMAC key across restarts, or `mode:'plain'`
+    //? to restore the legacy unsalted wire output.
+    healthHash: {
+      mode: 'hmac',
+      salt: '@bootUuid',
+    },
     stream: {
       queryParam: 'stream',
       enabledValue: 'true',
@@ -503,11 +762,21 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     forgotPassword: 'disabled',
     passwordResetTtlSeconds: 60 * 60,
     emailChangeTtlSeconds: 60 * 60,
+    allowRegistration: true,
+    passwordResetPath: '/reset-password',
+    emailChangeConfirmPath: '/confirm-email-change',
   },
   socket: {
     maxHttpBufferSize: 5 * 1024 * 1024,
     pingTimeout: 20_000,
     pingInterval: 25_000,
+    activityHeartbeatThrottleMs: 10_000,
+  },
+  api: {
+    requestTimeoutMs: 30_000,
+  },
+  validation: {
+    runtimeMode: 'enforce',
   },
   sync: {
     streamThrottle: {
@@ -517,6 +786,14 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     },
     fanoutYieldEvery: 100,
     fanoutYieldMs: 1,
+    requestTimeoutMs: 30_000,
+    allowClientReceiverAll: false,
+    requireRoomMembership: true,
+    flushPressure: {
+      highWaterMarkChunks: 1000,
+      lowWaterMarkChunks: 250,
+      maxBufferedBytes: 5 * 1024 * 1024,
+    },
   },
   offlineQueue: {
     maxSize: 200,

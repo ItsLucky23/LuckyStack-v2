@@ -28,13 +28,24 @@ if (!version || !/^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(version)) {
 }
 
 const DEP_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
-const changes = [];
+
+//? Two-pass: parse + compute EVERY package's edits first, and only start
+//? writing once all package.json files parsed cleanly. A malformed package N
+//? used to throw an opaque stack AFTER packages 1..N-1 were already rewritten,
+//? leaving a half-applied, un-publishable release.
+const planned = [];
 
 for (const name of fs.readdirSync(PACKAGES_DIR)) {
   const pkgPath = path.join(PACKAGES_DIR, name, 'package.json');
   if (!fs.existsSync(pkgPath)) continue;
   const raw = fs.readFileSync(pkgPath, 'utf8');
-  const pkg = JSON.parse(raw);
+  let pkg;
+  try {
+    pkg = JSON.parse(raw);
+  } catch (error) {
+    console.error(`Failed to parse ${pkgPath}: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
 
   const before = [];
   if (pkg.version !== version) {
@@ -55,8 +66,15 @@ for (const name of fs.readdirSync(PACKAGES_DIR)) {
   }
 
   if (before.length > 0) {
-    changes.push({ name, before });
-    if (!dryRun) fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+    planned.push({ name, pkgPath, pkg, before });
+  }
+}
+
+const changes = planned.map(({ name, before }) => ({ name, before }));
+
+if (!dryRun) {
+  for (const { pkgPath, pkg } of planned) {
+    fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   }
 }
 

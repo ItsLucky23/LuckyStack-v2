@@ -1,9 +1,11 @@
 //? Middleware handler registry. The framework's `Middleware` + `Router`
 //? components (in `./react/`) call the registered handler on every
 //? navigation change to decide whether the user is allowed on the target
-//? route. Consumer ships the actual logic in
-//? `src/_functions/middlewareHandler.ts` and registers it from the client
-//? bootstrap (typically `main.tsx`).
+//? route. Per-page `export const middleware` (see `registerPageMiddleware`
+//? below) is the canonical path; a consumer wanting a cross-cutting GLOBAL
+//? guard registers it from the client bootstrap (typically `main.tsx`) via
+//? `registerMiddlewareHandler(...)`. No separate
+//? `src/_functions/middlewareHandler.ts` file is required.
 
 import type { BaseSessionLayout } from './sessionTypes';
 

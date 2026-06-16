@@ -40,15 +40,14 @@ export const initConsolelog = () => {
 
     const extractedInfo = extractFrameLabel(frame);
 
-    // find color keyword and remove it from args
+    //? Color keyword strip — ONLY the trailing argument (the documented
+    //? contract: `console.log('hello', 'red')`). Scanning all args meant a
+    //? legitimate value of `"red"` anywhere in the call was silently dropped.
     let colorCode = COLORS.white;
-    for (const key of Object.keys(COLORS)) {
-      const index = args.indexOf(key);
-      if (index !== -1) {
-        colorCode = COLORS[key];
-        args.splice(index, 1);
-        break;
-      }
+    const lastArg = args.at(-1);
+    if (typeof lastArg === 'string' && Object.prototype.hasOwnProperty.call(COLORS, lastArg)) {
+      colorCode = COLORS[lastArg];
+      args.pop();
     }
 
     // handle object vs text

@@ -1,6 +1,7 @@
 import { getProjectConfig } from "./projectConfig";
 import { getLogger } from "./loggerRegistry";
 import { getRegisteredApiMethod } from "./apiMethodMapRegistry";
+import { isGetMethodName } from "./httpApiUtils";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketState";
 import type { ApiTypeMap, StreamPayload } from './apiTypeStubs';
 import { notify } from "./notifier";
@@ -8,17 +9,56 @@ import { enqueueApiRequest, isOnline, removeApiQueueItem } from "./offlineQueue"
 import { Socket } from "socket.io-client";
 import { normalizeErrorResponseCore } from "./responseNormalizer";
 import { parseServiceRouteName } from "./serviceRoute";
+import tryCatchSync from "./tryCatchSync";
 import {
   buildApiResponseEventName,
   buildApiStreamEventName,
   socketEventNames,
 } from "./socketEvents";
+import {
+  dispatchApiRequestInterceptors,
+  dispatchApiResponseInterceptors,
+} from "./apiInterceptors";
 
 //? Abort controller logic:
 //? - abortable: true → always use abort controller
 //? - abortable: false → never use abort controller
 //? - abortable: undefined → use abort controller for GET APIs (from generated types)
+//? Keyed by `fullName` + a stable hash of the request `data` so the
+//? replace-previous (dedupe) semantics only fire for an IDENTICAL in-flight
+//? call. Two components polling the same GET route with DIFFERENT params no
+//? longer abort each other (each gets its own bucket); a genuine duplicate
+//? still supersedes the prior one.
 const abortControllers = new Map<string, AbortController>();
+
+//? Stable, order-insensitive JSON stringify so `{a:1,b:2}` and `{b:2,a:1}`
+//? hash to the same abort-controller key. Falls back to a non-deduping unique
+//? token when the payload can't be serialised (circular ref), which is the
+//? safe choice — an unserialisable payload should never silently abort a
+//? sibling request.
+const stableStringify = (value: unknown): string => {
+  const seen = new WeakSet<object>();
+  const walk = (input: unknown): unknown => {
+    if (input === null || typeof input !== 'object') return input;
+    if (seen.has(input)) return '[circular]';
+    seen.add(input);
+    if (Array.isArray(input)) return input.map((entry) => walk(entry));
+    const record = input as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(record).toSorted()) {
+      out[key] = walk(record[key]);
+    }
+    return out;
+  };
+  const [error, json] = tryCatchSync(() => JSON.stringify(walk(value)));
+  if (error || typeof json !== 'string') {
+    return `__unserializable__:${String(Date.now())}-${String(Math.random())}`;
+  }
+  return json;
+};
+
+const buildAbortKey = (fullName: string, data: unknown): string =>
+  `${fullName}::${stableStringify(data)}`;
 
 export type ApiStreamEvent<T extends StreamPayload = StreamPayload> = T;
 
@@ -31,10 +71,7 @@ export type ApiStreamEvent<T extends StreamPayload = StreamPayload> = T;
  * registered yet — typically because the consumer hasn't called
  * `registerApiMethodMap(...)` from their `socketInitializer.ts` boot file.
  */
-const isGetMethodByPrefix = (apiName: string): boolean => {
-  const lower = apiName.toLowerCase();
-  return lower.startsWith('get') || lower.startsWith('fetch') || lower.startsWith('list');
-};
+const isGetMethodByPrefix = (apiName: string): boolean => isGetMethodName(apiName.toLowerCase());
 
 const isGetMethod = (apiName: string, version: string): boolean => {
   //? Resolved-name shape: `pagePath/apiName`. apiMethodMap is nested by
@@ -133,8 +170,8 @@ type ApiParamsForFullName<
   F extends ApiFullName,
   V extends VersionsForFullName<F>
 > = DataRequired<InputForFullName<F, V>> extends true
-  ? { name: F; version: V; data: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; signal?: AbortSignal; }
-  : { name: F; version: V; data?: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; signal?: AbortSignal; };
+  ? { name: F; version: V; data: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; signal?: AbortSignal; timeoutMs?: number | false; }
+  : { name: F; version: V; data?: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; onStream?: ApiStreamCallbackForFullName<F, V>; signal?: AbortSignal; timeoutMs?: number | false; };
 
 interface RuntimeApiParams {
   name?: string;
@@ -144,9 +181,11 @@ interface RuntimeApiParams {
   disableErrorMessage?: boolean;
   onStream?: (event: ApiStreamEvent) => void;
   signal?: AbortSignal;
+  /** Per-call response timeout (ms). Overrides `api.requestTimeoutMs`. `false` disables. */
+  timeoutMs?: number | false;
 }
 
-interface ApiErrorResponse {
+interface ApiErrorResponse extends Record<string, unknown> {
   status: 'error';
   httpStatus: number;
   message: string;
@@ -210,10 +249,10 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
 ): Promise<Prettify<OutputForFullName<F, V>>> {
   type RequestOutput = Prettify<OutputForFullName<F, V> & ApiResponse>;
   const runtimeParams = params as RuntimeApiParams;
-  const { name, version, disableErrorMessage = false, onStream, signal: externalSignal } = runtimeParams;
+  const { name, version, disableErrorMessage = false, onStream, signal: externalSignal, timeoutMs } = runtimeParams;
   const payloadData = runtimeParams.data;
 
-  return new Promise<RequestOutput>((resolve, reject) => {
+  return new Promise<RequestOutput>((resolve) => {
     void (async () => {
       //? B1 — if the consumer-supplied signal is already aborted at call
       //? time, short-circuit before we even touch the socket. Mirrors the
@@ -304,36 +343,64 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         isGet,
       });
       const fullName = `api/${sanitizedName}/${version}`;
+      //? Per-payload abort key: only an identical in-flight call to the same
+      //? route supersedes the previous one (see `buildAbortKey` rationale).
+      const abortKey = buildAbortKey(fullName, data);
 
       let signal: AbortSignal | null = null;
       let abortHandler: (() => void) | null = null;
       let queueId: string | null = null;
       let cleanupStreamListener: (() => void) | null = null;
+      //? Response listener cleanup, registered once the `.once` handler is
+      //? attached in `runRequest`. Lets the abort path proactively `off()` the
+      //? lingering response listener instead of waiting for a response that was
+      //? cancelled and will never arrive.
+      let cleanupResponseListener: (() => void) | null = null;
+      //? Response-timeout timer. Armed right after the request is emitted so a
+      //? lost response (server restart/crash between emit and reply) settles the
+      //? promise instead of hanging the awaiting caller forever.
+      let responseTimeout: ReturnType<typeof setTimeout> | null = null;
+      const clearResponseTimeout = () => {
+        if (responseTimeout) {
+          clearTimeout(responseTimeout);
+          responseTimeout = null;
+        }
+      };
 
       const cleanupAbortController = () => {
         if (signal && abortHandler) {
           signal.removeEventListener("abort", abortHandler);
         }
-        abortControllers.delete(fullName);
+        abortControllers.delete(abortKey);
       };
 
       if (useAbortController) {
-        if (abortControllers.has(fullName)) {
-          const prevAbortController = abortControllers.get(fullName);
+        if (abortControllers.has(abortKey)) {
+          const prevAbortController = abortControllers.get(abortKey);
           prevAbortController?.abort();
         }
         const abortController = new AbortController();
-        abortControllers.set(fullName, abortController);
+        abortControllers.set(abortKey, abortController);
         signal = abortController.signal;
 
         abortHandler = () => {
+          clearResponseTimeout();
           cleanupStreamListener?.();
           cleanupStreamListener = null;
+          cleanupResponseListener?.();
+          cleanupResponseListener = null;
           cleanupAbortController();
           if (queueId) {
             removeApiQueueItem(queueId);
           }
-          reject(new Error(`Request ${fullName} aborted`));
+          //? Resolve (not reject) with the same `request.aborted` envelope the
+          //? external-signal abort path uses. Rejecting here produced an
+          //? unhandled rejection for fire-and-forget GET calls that get
+          //? superseded by the default replace-previous behaviour.
+          resolve(normalizeApiError({
+            response: { status: 'error', errorCode: 'request.aborted' },
+            fallbackErrorCode: 'request.aborted',
+          }) as RequestOutput);
         };
 
         signal.addEventListener("abort", abortHandler);
@@ -342,6 +409,14 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
       const runRequest = (socketInstance: Socket) => {
         if (!canSendNow(socketInstance)) {
           queueId ??= createQueueId();
+          //? For the immediate reject-new path (`drop-newest` / `reject`
+          //? policy) THIS item's `onDrop` fires SYNCHRONOUSLY inside
+          //? `enqueueApiRequest`. We keep surfacing that as the historical
+          //? `offline.queueFull` via the `!enqueued` branch, so suppress the
+          //? `onDrop` resolve during the synchronous enqueue window and re-arm
+          //? it only if the item was actually queued (so a LATER async eviction
+          //? — drop-oldest by a future enqueue, or age expiry — still settles).
+          let suppressOnDrop = true;
           //? `enqueueApiRequest` returns `false` when the offline queue is
           //? full and `dropPolicy: 'reject'` is active. Without honoring
           //? that signal the outer promise never settles and the caller
@@ -354,7 +429,25 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
               runRequest(nextSocket);
             },
             createdAt: Date.now(),
+            //? CORE: mirror SYNC-09. Settle the awaiting caller when this
+            //? QUEUED request is later EVICTED (drop-oldest by a future
+            //? enqueue / age expiry) instead of ever running. Without it the
+            //? promise hangs forever, since `run` is the only thing that could
+            //? otherwise resolve it — `apiRequest` had drifted from the sibling
+            //? `syncRequest` which already had this fix. Also tear down the
+            //? abort-controller registry entry so it isn't leaked.
+            onDrop: (reason) => {
+              if (suppressOnDrop) return;
+              cleanupAbortController();
+              resolve(normalizeApiError({
+                response: { status: 'error', errorCode: 'offline.dropped', errorParams: [{ key: 'reason', value: reason }] },
+                fallbackErrorCode: 'offline.dropped',
+              }) as RequestOutput);
+            },
           });
+          //? Past the synchronous enqueue window: if the item is sitting in the
+          //? queue, a future eviction should settle via `onDrop`.
+          suppressOnDrop = false;
           if (!enqueued) {
             resolve(normalizeApiError({
               response: { status: 'error', errorCode: 'offline.queueFull', httpStatus: 503 },
@@ -380,9 +473,12 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         let cleanupExternalAbort: (() => void) | null = null;
         if (externalSignal) {
           const externalAbortHandler = () => {
+            clearResponseTimeout();
             socketInstance.emit(socketEventNames.apiCancel, { responseIndex: tempIndex });
             cleanupStreamListener?.();
             cleanupStreamListener = null;
+            cleanupResponseListener?.();
+            cleanupResponseListener = null;
             cleanupAbortController();
             cleanupExternalAbort?.();
             cleanupExternalAbort = null;
@@ -395,6 +491,33 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           cleanupExternalAbort = () => {
             externalSignal.removeEventListener('abort', externalAbortHandler);
           };
+        }
+
+        //? Arm the response timeout. A per-call `timeoutMs` overrides the
+        //? `api.requestTimeoutMs` config default; either may be `false` to
+        //? disable. On expiry we tear down every listener/controller and settle
+        //? with a 504 envelope so the awaiting caller never hangs.
+        clearResponseTimeout();
+        const effectiveTimeoutMs = timeoutMs ?? getProjectConfig().api.requestTimeoutMs;
+        if (typeof effectiveTimeoutMs === 'number' && effectiveTimeoutMs > 0) {
+          responseTimeout = setTimeout(() => {
+            responseTimeout = null;
+            cleanupStreamListener?.();
+            cleanupStreamListener = null;
+            cleanupResponseListener?.();
+            cleanupResponseListener = null;
+            cleanupExternalAbort?.();
+            cleanupExternalAbort = null;
+            cleanupAbortController();
+            if (queueId) {
+              removeApiQueueItem(queueId);
+            }
+            resolve(normalizeApiError({
+              response: { status: 'error', errorCode: 'api.timeout', httpStatus: 504 },
+              fallbackErrorCode: 'api.timeout',
+              fallbackHttpStatus: 504,
+            }) as RequestOutput);
+          }, effectiveTimeoutMs);
         }
 
         if (typeof onStream === 'function') {
@@ -428,19 +551,27 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         //? checked in isolation (e.g. per-package tsup dts build), ApiTypeMap
         //? is empty so OutputForFullName collapses to never; using ApiResponse
         //? here keeps the body type-safe in both cases.
-        socketInstance.once(buildApiResponseEventName(tempIndex), (response: ApiResponse) => {
+        const responseEventName = buildApiResponseEventName(tempIndex);
+        const responseListener = (response: ApiResponse) => {
           if (signal?.aborted) {
+            clearResponseTimeout();
             cleanupExternalAbort?.();
             cleanupExternalAbort = null;
             return;
           }
 
+          clearResponseTimeout();
           cleanupStreamListener?.();
           cleanupStreamListener = null;
           cleanupExternalAbort?.();
           cleanupExternalAbort = null;
+          cleanupResponseListener = null;
 
           const status = response.status;
+
+          //? EXT-03 — fire client response interceptors when the envelope
+          //? arrives (observation-only: metrics, breadcrumb, custom logging).
+          dispatchApiResponseInterceptors({ name: sanitizedName, version, response });
 
           if (shouldLogDev()) {
             getLogger().debug(`Server API Response(${String(tempIndex)})`, { ...response, APINAME: sanitizedName });
@@ -466,8 +597,24 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           cleanupAbortController();
 
           resolve(response as RequestOutput);
-        });
+        };
+
+        socketInstance.once(responseEventName, responseListener);
+        cleanupResponseListener = () => {
+          socketInstance.off(responseEventName, responseListener);
+        };
       };
+
+      //? EXT-03 — fire client request interceptors just before the emit. They
+      //? may mutate `data` in place (correlation id / feature-flag context).
+      //? `data` is the same reference passed to `socketInstance.emit`, so the
+      //? mutation is on the wire. Awaited so an async interceptor (flag lookup,
+      //? trace-id mint) completes first; failures are caught + logged inside.
+      await dispatchApiRequestInterceptors({
+        name: sanitizedName,
+        version,
+        data: data as Record<string, unknown>,
+      });
 
       runRequest(socket);
     })();

@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (6)
+## Decisions (11)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -19,6 +19,11 @@
 | 0004 | Ship the call-graph file/import-level first (pure-Node), symbol-level (TS compiler) as a later increment | 🟢 accepted | ai-tooling, graph, devkit, scope | — | `docs/decisions/0004-callgraph-file-level-first.md` |
 | 0005 | Ship @luckystack/mcp as its own npx-run MCP server, separate from the browser MCP servers | 🟢 accepted | ai-tooling, mcp, packaging, scaffold | — | `docs/decisions/0005-mcp-server-separate-from-browser-mcp.md` |
 | 0006 | Implement the symbol-level call graph in scripts/generateGraph.mjs (typescript package), not in @luckystack/devkit | 🟢 accepted | ai-tooling, graph, devkit, packaging | — | `docs/decisions/0006-symbol-graph-in-script-not-devkit.md` |
+| 0008 | Unify the sync response envelope across transports — socket ack shape is canonical | 🟢 accepted | sync, transport, wire-contract, breaking | — | `docs/decisions/0008-sync-response-envelope-unified.md` |
+| 0009 | Key syncCancel on a server-issued cancel id, not the client-controlled callback name | 🟢 accepted | sync, security, correctness | — | `docs/decisions/0009-synccancel-server-issued-id.md` |
+| 0010 | Store one-time tokens (password-reset, email-change) hashed at rest; never the raw token | 🟢 accepted | security, login, core, redis | — | `docs/decisions/0010-one-time-tokens-hashed-at-rest.md` |
+| 0011 | Add graceful server shutdown (stop/close + prod signals) and a preServerStop hook | 🟢 accepted | server, lifecycle, error-tracking, feature | — | `docs/decisions/0011-graceful-shutdown-and-onshutdown-hook.md` |
+| 0012 | Password-policy validation failures must not increment the per-account login lockout | 🟢 accepted | security, login, dos | — | `docs/decisions/0012-login-lockout-excludes-policy-failures.md` |
 
 ## Summaries
 
@@ -69,3 +74,43 @@ Ship `@luckystack/mcp` as its own standalone read-only stdio MCP server, **separ
 Implement the symbol-level call graph in `scripts/generateGraph.mjs` using the `typescript` package directly (build a `ts.Program` from `tsconfig.server.json`, walk `CallExpression`/`NewExpression`, resolve callees via the `TypeChecker`), emitting `symbols` / `callEdges` / `symbolBlastRadius` alongside the existing file-level fields in the same `docs/ai-graph.json`. This refines ADR 0002's "inside devkit" placement: the *capability* (TS-compiler symbol resolution) is delivered as 0002 intended; only the *home* is the existing generator script, to preserve the single `ai:graph` entry + pre-commit + template-mirror wiring. The MCP server gains a `who_calls(symbol)` tool over `symbolBlastRadius`.
 
 → `docs/decisions/0006-symbol-graph-in-script-not-devkit.md`
+
+### 0008 — Unify the sync response envelope across transports — socket ack shape is canonical
+
+**0008** · accepted · tags: sync, transport, wire-contract, breaking · 2026-06-15
+
+Adopt the socket ack shape `{ status, message, result: serverOutput }` as the single canonical sync response envelope. `handleHttpSyncRequest` now returns the identical shape (nesting `serverOutput` under `result`) so `response.result` carries the route's fields on both transports, matching the generated client type. Error fields remain on the error envelope only, on both transports.
+
+→ `docs/decisions/0008-sync-response-envelope-unified.md`
+
+### 0009 — Key syncCancel on a server-issued cancel id, not the client-controlled callback name
+
+**0009** · accepted · tags: sync, security, correctness · 2026-06-15
+
+The server mints a unique `randomUUID()` `cancelId` per sync request, registers the `AbortController` under `${socket.id}:${cancelId}`, and hands the id to the client via a `{ __cancelId }` handshake frame on the existing progress channel. The client echoes it back as `syncCancel { cb: <cancelId> }`. The wire field stays `cb` (so the server-side cancel listener in `@luckystack/server` is unchanged — only the *value* is now a server-issued opaque id), which kept the change inside the `@luckystack/sync` package.
+
+→ `docs/decisions/0009-synccancel-server-issued-id.md`
+
+### 0010 — Store one-time tokens (password-reset, email-change) hashed at rest; never the raw token
+
+**0010** · accepted · tags: security, login, core, redis · 2026-06-15
+
+Add a shared `@luckystack/core` primitive: `issueOneTimeToken(namespace, ttlSeconds, payload) -> { token, store() }` plus `consumeOneTimeToken` / `consumeOneTimeTokenJson`. It stores `sha256(token)` (hex) as the Redis key via `formatKey(namespace, hash)`; the raw token is returned to the caller exactly once and never persisted. Consume is a single `MULTI` `GET`+`DEL` (at-most-once even under concurrent redemption). `store()` is deferred from `issue()` so callers can run veto/validation between minting and committing without orphaning a key. `@luckystack/login` migrated both flows to it.
+
+→ `docs/decisions/0010-one-time-tokens-hashed-at-rest.md`
+
+### 0011 — Add graceful server shutdown (stop/close + prod signals) and a preServerStop hook
+
+**0011** · accepted · tags: server, lifecycle, error-tracking, feature · 2026-06-15
+
+Add a `preServerStop` (onShutdown) hook to `@luckystack/core`'s augmentable `HookPayloads` + registry (payload `{ reason, timeoutMs? }`, best-effort — a stop signal does not abort shutdown). Add `stop()/close({ timeoutMs? })` to the returned `RunningLuckyStackServer` and wire prod SIGTERM/SIGINT to it. On shutdown the server stops accepting new connections, dispatches `preServerStop`, calls `flushErrorTrackers()`, and closes the http/io servers + the Socket.io Redis-adapter pub/sub clients (which `loadSocket` now owns and returns) — each step wrapped in a bounded `withTimeout` so one failing/hanging step cannot hang shutdown.
+
+→ `docs/decisions/0011-graceful-shutdown-and-onshutdown-hook.md`
+
+### 0012 — Password-policy validation failures must not increment the per-account login lockout
+
+**0012** · accepted · tags: security, login, dos · 2026-06-15
+
+Password-policy validation is gated to the REGISTER path only (`validateCredentialsShape` runs the policy when `mode === 'register'`); the login branch skips it. The lockout counter excludes policy/validation reasons (`NON_COUNTING_REASONS`) and only records on a genuine `login.wrongPassword`. So a policy-invalid login attempt no longer trips the lockout, while a real wrong-password attempt still does.
+
+→ `docs/decisions/0012-login-lockout-excludes-policy-failures.md`

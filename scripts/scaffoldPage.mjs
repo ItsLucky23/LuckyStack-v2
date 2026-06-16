@@ -130,8 +130,7 @@ const flavor = looksLikeDashboard ? 'dashboard' : 'plain';
 const depth = folderSegments.length + 1; // +1 for the leading `src/`
 const relPath = '../'.repeat(depth);
 
-const PAGE_PLAIN_TEMPLATE = `/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
+const PAGE_PLAIN_TEMPLATE = `//? intent: TODO — describe in one plain-language line what this page is FOR.
 
 //? Plain page template — no UI chrome. Use for landing/public pages where
 //? the default surrounding layout (\`'plain'\`) is what you want. Per-page
@@ -154,18 +153,17 @@ interface PageProps {
   searchParams: Record<string, string>;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- scaffold props; use or remove when you build the page out
 export default function Page({ params, searchParams }: PageProps) {
   return (
     <div className='flex items-center justify-center w-full h-full text-title'>
-      {/* TODO: replace with your page content */}
-      <span>page scaffold — replace this</span>
+      {/* TODO: replace with your page content (wrap any user-facing copy in useTranslator) */}
     </div>
   );
 }
 `;
 
-const PAGE_DASHBOARD_TEMPLATE = `/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
+const PAGE_DASHBOARD_TEMPLATE = `//? intent: TODO — describe in one plain-language line what this page is FOR.
 
 //? Dashboard page template — wrapped in the \`'dashboard'\` template
 //? (sidebar + main content). Includes a login-required middleware as a
@@ -190,6 +188,7 @@ interface PageProps {
   searchParams: Record<string, string>;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- scaffold props; use or remove when you build the page out
 export default function Page({ params, searchParams }: PageProps) {
   return (
     <div className='flex flex-col gap-4 p-6 w-full h-full'>

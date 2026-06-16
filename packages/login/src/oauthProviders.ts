@@ -12,7 +12,7 @@
 
 import { tryCatch } from '@luckystack/core';
 
-type OAuthUserData = Record<string, unknown>;
+export type OAuthUserData = Record<string, unknown>;
 
 export const asOAuthUserData = (value: unknown): OAuthUserData => {
   if (value && typeof value === 'object') {
@@ -48,6 +48,15 @@ export interface FullOAuthProvider {
   scope: string[];
   nameKey: string;
   emailKey: string;
+  /**
+   * Optional key on the userInfo response holding a provider "email verified"
+   * boolean. When set AND the field is present-and-falsy, the framework rejects
+   * the profile rather than trusting an unverified address — defense-in-depth
+   * against account-linking takeover under the `'unified'` strategy (SEC-21).
+   * A missing field (provider doesn't report it) is treated as "trusted",
+   * preserving behaviour for providers that don't expose the flag.
+   */
+  emailVerifiedKey?: string;
   avatarKey?: string;
   avatarCodeKey: string;
   getEmail?: (accessToken: string) => Promise<string | false | undefined>;
@@ -74,6 +83,25 @@ export interface FullOAuthProvider {
     userData: OAuthUserData;
     accessToken: string;
   }) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  /**
+   * Extra query params appended to the authorization-redirect URL (CFG-21).
+   * Lets a provider request e.g. `access_type=offline`, `login_hint=...`, or
+   * override the framework's default `prompt=select_account`. The server's
+   * authorize route merges these over the built-in params (a key present here
+   * wins). Reserved OAuth params (`client_id`, `redirect_uri`, `scope`,
+   * `response_type`, `state`, `code_challenge`, `code_challenge_method`) should
+   * NOT be set here — they are framework-owned. Default unset.
+   */
+  extraAuthorizationParams?: Record<string, string>;
+  /**
+   * Opt this provider into PKCE (RFC 7636, S256) (F11). When `true`, the
+   * framework generates a `code_verifier` at flow start, stores it server-side
+   * with the OAuth state, sends `code_challenge`/`code_challenge_method=S256` on
+   * the authorize redirect, and replays the verifier at token exchange. Required
+   * by OAuth 2.1 / PKCE-mandating providers (X/Twitter, some Okta/Auth0
+   * policies). Default `false` (no PKCE — existing flows are byte-identical).
+   */
+  usePkce?: boolean;
 }
 
 export type OAuthProvider = CredentialsProvider | FullOAuthProvider;
@@ -108,6 +136,13 @@ interface OAuthHelperInput {
    * pattern.
    */
   extraSessionFields?: FullOAuthProvider['extraSessionFields'];
+  /**
+   * Extra query params for the authorize redirect (CFG-21). See
+   * `FullOAuthProvider.extraAuthorizationParams`.
+   */
+  extraAuthorizationParams?: Record<string, string>;
+  /** Opt this provider into PKCE (S256) (F11). See `FullOAuthProvider.usePkce`. */
+  usePkce?: boolean;
 }
 
 const mergeScopes = (defaults: string[], extra: string[] | undefined): string[] => {
@@ -132,16 +167,25 @@ export const googleProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   authorizationURL: input.endpoints?.authorizationURL ?? 'https://accounts.google.com/o/oauth2/v2/auth',
   tokenExchangeURL: input.endpoints?.tokenExchangeURL ?? 'https://oauth2.googleapis.com/token',
   tokenExchangeMethod: 'json',
-  userInfoURL: input.endpoints?.userInfoURL ?? 'https://www.googleapis.com/oauth2/v1/userinfo',
+  //? OIDC userinfo (v3) — the legacy `oauth2/v1/userinfo` is deprecated and
+  //? reports verification as `verified_email`; v3 reports the OIDC-standard
+  //? `email_verified`. Use v3 so `emailVerifiedKey` below lines up (SEC-21/QUA-24).
+  userInfoURL: input.endpoints?.userInfoURL ?? 'https://www.googleapis.com/oauth2/v3/userinfo',
   scope: mergeScopes([
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
   ], input.extraScopes),
   nameKey: 'name',
   emailKey: 'email',
+  //? Google's OIDC userinfo returns `email_verified`; reject an unverified
+  //? address so a Google account with an unverified email can't link to a
+  //? victim's existing account under the `'unified'` strategy (SEC-21).
+  emailVerifiedKey: 'email_verified',
   avatarKey: 'picture',
   avatarCodeKey: '',
   extraSessionFields: input.extraSessionFields,
+  extraAuthorizationParams: input.extraAuthorizationParams,
+  usePkce: input.usePkce,
 });
 
 export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
@@ -159,6 +203,8 @@ export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   avatarKey: 'avatar_url',
   avatarCodeKey: '',
   extraSessionFields: input.extraSessionFields,
+  extraAuthorizationParams: input.extraAuthorizationParams,
+  usePkce: input.usePkce,
   getEmail: async (accessToken) => {
     const fetchEmails = async () => {
       const response = await fetch('https://api.github.com/user/emails', {
@@ -172,17 +218,25 @@ export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
       if (!response.ok) return false;
       const emails: unknown = await response.json();
       if (!Array.isArray(emails)) return false;
-      return emails as { primary?: boolean; email?: string }[];
+      return emails as { primary?: boolean; verified?: boolean; email?: string }[];
     };
 
     const [error, emails] = await tryCatch(fetchEmails);
     if (error || !emails) return false;
 
+    //? Defense-in-depth: only ever select a `verified === true` address. GitHub
+    //? forbids an unverified email from being `primary`, so in the normal case
+    //? this is a no-op — but the `emails[0]` fallback (when no primary exists)
+    //? could otherwise pick an UNVERIFIED address an attacker added to their
+    //? GitHub account, which under the `'unified'` account strategy would link
+    //? to a victim's existing account by that email (SEC-21). Filtering on
+    //? `verified` first closes that fallback path.
+    const verified = emails.filter((entry) => entry.verified === true);
     let mainEmail: string | undefined;
-    for (const entry of emails) {
+    for (const entry of verified) {
       if (entry.primary && typeof entry.email === 'string') mainEmail = entry.email;
     }
-    mainEmail ??= emails[0]?.email;
+    mainEmail ??= verified[0]?.email;
     return mainEmail;
   },
 });
@@ -199,14 +253,21 @@ export const discordProvider = (input: OAuthHelperInput): FullOAuthProvider => (
   scope: mergeScopes(['identify', 'email'], input.extraScopes),
   nameKey: 'username',
   emailKey: 'email',
+  //? Discord's /users/@me returns a `verified` boolean for the account email;
+  //? reject the address when it is explicitly unverified (SEC-21).
+  emailVerifiedKey: 'verified',
   avatarCodeKey: 'avatar',
   extraSessionFields: input.extraSessionFields,
+  extraAuthorizationParams: input.extraAuthorizationParams,
+  usePkce: input.usePkce,
   getAvatar: ({ userData, avatarId }) => {
     if (!avatarId) return;
     const userId = typeof userData.id === 'string' ? userData.id : '';
     if (!userId) return;
     const format = avatarId.startsWith('a_') ? 'gif' : 'png';
-    return `https://cdn.discordapp.com/avatars/${userId}/${avatarId}.${format}`;
+    //? Encode the provider-supplied id + avatar hash before interpolation so a
+    //? malformed value can't inject `../` path segments into the CDN URL (SEC-23).
+    return `https://cdn.discordapp.com/avatars/${encodeURIComponent(userId)}/${encodeURIComponent(avatarId)}.${format}`;
   },
 });
 
@@ -229,8 +290,15 @@ export const facebookProvider = (input: FacebookProviderInput): FullOAuthProvide
   scope: mergeScopes(['public_profile', 'email'], input.extraScopes),
   nameKey: 'name',
   emailKey: 'email',
+  //? Facebook's Graph `/me` only returns `email` for an address the user has
+  //? CONFIRMED with Facebook (unconfirmed emails are omitted), so there is no
+  //? separate verified flag to gate on — the presence of `email` IS the verified
+  //? signal. If a consumer opts into receiving unverified emails via a future
+  //? Graph field, set `emailVerifiedKey` on the returned provider (SEC-21).
   avatarCodeKey: '',
   extraSessionFields: input.extraSessionFields,
+  extraAuthorizationParams: input.extraAuthorizationParams,
+  usePkce: input.usePkce,
   getAvatar: ({ userData }) => {
     const picture = asOAuthUserData(userData.picture);
     const pictureData = asOAuthUserData(picture.data);
@@ -247,6 +315,16 @@ export interface MicrosoftProviderInput extends OAuthHelperInput {
   apiVersion?: string;
   /** Graph API version segment for /me. Default `'v1.0'`. */
   graphApiVersion?: string;
+  /**
+   * Allow falling back to `userPrincipalName` as the account email when Graph
+   * `/me.mail` is empty (SEC-11). A UPN is NOT guaranteed routable or verified;
+   * under the `'unified'` account strategy a UPN equal to a victim's email would
+   * link accounts, and it commonly mis-keys an account on a non-deliverable
+   * address (reset emails never arrive). Default `false` — only enable when the
+   * tenant guarantees UPN == primary SMTP. When `false` and `.mail` is empty the
+   * provider reports "no email" and the login is rejected rather than linked.
+   */
+  allowUpnFallback?: boolean;
 }
 
 //? NOTE: Microsoft flow is implemented but has not been end-to-end verified
@@ -258,6 +336,7 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
   const tenant = input.tenant ?? 'common';
   const oauthVersion = input.apiVersion ?? 'v2.0';
   const graphVersion = input.graphApiVersion ?? 'v1.0';
+  const allowUpnFallback = input.allowUpnFallback ?? false;
   return {
   name: 'microsoft',
   clientID: requireString(input.clientId, 'microsoft clientId'),
@@ -272,13 +351,20 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
   emailKey: 'mail',
   avatarCodeKey: 'id',
   extraSessionFields: input.extraSessionFields,
+  extraAuthorizationParams: input.extraAuthorizationParams,
+  usePkce: input.usePkce,
   //? Graph's /photo/$value requires bearer auth, so we can't store the URL —
   //? a browser <img> would 401. Fetch the bytes and inline as a data URL.
   getAvatar: async ({ avatarId, accessToken }) => {
     if (!avatarId) return;
     const fetchPhoto = async () => {
+      //? `encodeURIComponent` the provider-supplied id before interpolating it
+      //? into the path: a malicious / malformed id could otherwise inject `../`
+      //? segments and redirect the bearer-authenticated fetch to another Graph
+      //? resource (SEC-23). The host is fixed, so this is not full SSRF, but the
+      //? result is inlined into the session, so still worth closing.
       const response = await fetch(
-        `https://graph.microsoft.com/${graphVersion}/users/${avatarId}/photo/$value`,
+        `https://graph.microsoft.com/${graphVersion}/users/${encodeURIComponent(avatarId)}/photo/$value`,
         { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
       );
       if (!response.ok) return;
@@ -310,8 +396,16 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
 
     const record = asOAuthUserData(profile);
     const mail = typeof record.mail === 'string' ? record.mail : '';
-    const userPrincipalName = typeof record.userPrincipalName === 'string' ? record.userPrincipalName : '';
-    return (mail || userPrincipalName) || false;
+    if (mail) return mail;
+    //? Only fall back to `userPrincipalName` when the consumer explicitly opted
+    //? in (SEC-11). A UPN is not guaranteed routable/verified; using it as the
+    //? account email under `'unified'` enables account-linking takeover and
+    //? mis-keys accounts on non-deliverable addresses.
+    if (allowUpnFallback) {
+      const userPrincipalName = typeof record.userPrincipalName === 'string' ? record.userPrincipalName : '';
+      return userPrincipalName || false;
+    }
+    return false;
   },
   };
 };

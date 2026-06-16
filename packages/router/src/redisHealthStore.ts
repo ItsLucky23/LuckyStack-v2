@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
-import { tryCatch, tryCatchSync } from '@luckystack/core';
+import { getLogger, tryCatch, tryCatchSync } from '@luckystack/core';
+import { getHealthStoreTtlSeconds } from './healthConfig';
 
 //? Shared health state across multiple router instances.
 //?
@@ -19,6 +20,12 @@ export interface RedisHealthStoreInput {
   redisHost?: string;
   redisPort?: number;
   redisPassword?: string;
+  /**
+   * TTL (seconds) for each health key. Defaults to the deploy-config
+   * `routing.healthStoreTtlSeconds` (itself defaulting to 60s — see
+   * `healthConfig.ts`). Injectable for testing.
+   */
+  ttlSeconds?: number;
 }
 
 export interface RedisHealthStore {
@@ -40,14 +47,39 @@ export const createRedisHealthStore = async (
   const host = input.redisHost ?? process.env.REDIS_HOST ?? '127.0.0.1';
   const port = input.redisPort ?? Number.parseInt(process.env.REDIS_PORT ?? '6379', 10);
   const password = input.redisPassword ?? process.env.REDIS_PASSWORD;
+  //? Every health key gets a TTL so a router that dies without flipping a
+  //? service back to healthy can't pin a stale verdict forever — the key
+  //? expires and siblings revert to the absent-key default on the next read.
+  //? A non-positive override is ignored in favour of the config/default so a
+  //? key can never be written without an expiry.
+  const ttlSeconds = (typeof input.ttlSeconds === 'number' && input.ttlSeconds > 0)
+    ? input.ttlSeconds
+    : getHealthStoreTtlSeconds();
 
   const client = new Redis({ host, port, password, lazyConnect: true });
   const subscriber = new Redis({ host, port, password, lazyConnect: true });
 
+  //? Attach 'error' listeners before connecting: an ioredis client that emits
+  //? 'error' with no listener throws as an unhandled exception and crashes the
+  //? process (e.g. a mid-session Redis drop). Logging keeps the router alive.
+  client.on('error', (err) => {
+    getLogger().error('[router] health-store client Redis error', err);
+  });
+  subscriber.on('error', (err) => {
+    getLogger().error('[router] health-store subscriber Redis error', err);
+  });
+
   //? lazyConnect + explicit connect lets us hard-fail when Redis is down
   //? instead of silently buffering commands behind a retry loop.
   await client.connect();
-  await subscriber.connect();
+  //? If the subscriber fails to connect, the already-connected `client` would
+  //? leak its socket/FD. Disconnect it before propagating the failure.
+  const [subscriberError] = await tryCatch(() => subscriber.connect());
+  if (subscriberError) {
+    client.disconnect();
+    subscriber.disconnect();
+    throw subscriberError;
+  }
 
   const cache = new Map<string, boolean>();
 
@@ -78,7 +110,13 @@ export const createRedisHealthStore = async (
 
   const set = async (service: string, healthy: boolean): Promise<void> => {
     cache.set(service, healthy);
-    await client.set(healthKey(input.envKey, service), healthy ? 'healthy' : 'unhealthy');
+    //? EX <ttl> stamps an expiry on every write so stale health self-heals.
+    await client.set(
+      healthKey(input.envKey, service),
+      healthy ? 'healthy' : 'unhealthy',
+      'EX',
+      ttlSeconds,
+    );
     await client.publish(
       healthChannel(input.envKey),
       JSON.stringify({ service, healthy }),

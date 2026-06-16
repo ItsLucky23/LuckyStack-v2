@@ -54,6 +54,7 @@ export type { ErrorFormatter, ErrorFormatterContext } from './errorFormatterRegi
 export type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
+  StopLuckyStackServerOptions,
   RouteContext,
   StaticFileHandler,
   FaviconHandler,

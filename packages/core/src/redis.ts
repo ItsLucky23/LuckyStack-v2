@@ -11,14 +11,28 @@ let cachedDefault: RedisClient | null = null;
 
 //? Stop reconnecting after this many consecutive failures so a permanently
 //? unreachable / misconfigured Redis (bad creds, wrong host) doesn't hammer
-//? forever. With the capped backoff below this is ~1 minute of attempts —
-//? long enough to ride out a transient blip, short enough to surface a real
-//? outage. A process manager / the dev supervisor restarts the process, which
-//? re-resolves a corrected `.env`. Raise it for longer outage tolerance.
-const MAX_REDIS_RECONNECT_ATTEMPTS = 50;
+//? forever. With the capped backoff below the default 50 is ~1 minute of
+//? attempts — long enough to ride out a transient blip, short enough to surface
+//? a real outage. Managed-Redis maintenance windows can exceed a minute, so
+//? both the attempt cap and the backoff ceiling are overridable via env
+//? (read at client-build time, so dotenv timing doesn't capture a stale value):
+//?   LUCKYSTACK_REDIS_MAX_RECONNECTS  — attempt cap (default 50)
+//?   LUCKYSTACK_REDIS_MAX_BACKOFF_MS  — per-attempt backoff ceiling (default 2000)
+const DEFAULT_MAX_REDIS_RECONNECT_ATTEMPTS = 50;
+const DEFAULT_MAX_REDIS_BACKOFF_MS = 2000;
+
+const readPositiveIntEnv = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
 
 const buildDefaultRedisClient = (): RedisClient => {
   if (cachedDefault) return cachedDefault;
+
+  const maxReconnectAttempts = readPositiveIntEnv('LUCKYSTACK_REDIS_MAX_RECONNECTS', DEFAULT_MAX_REDIS_RECONNECT_ATTEMPTS);
+  const maxBackoffMs = readPositiveIntEnv('LUCKYSTACK_REDIS_MAX_BACKOFF_MS', DEFAULT_MAX_REDIS_BACKOFF_MS);
 
   cachedDefault = new Redis({
     host: env.REDIS_HOST,
@@ -27,13 +41,13 @@ const buildDefaultRedisClient = (): RedisClient => {
     ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
 
     retryStrategy(times) {
-      if (times > MAX_REDIS_RECONNECT_ATTEMPTS) {
+      if (times > maxReconnectAttempts) {
         getLogger().error(
-          `Redis unreachable after ${String(MAX_REDIS_RECONNECT_ATTEMPTS)} reconnect attempts; giving up. Check REDIS_HOST / REDIS_PORT / credentials and that Redis is reachable.`,
+          `Redis unreachable after ${String(maxReconnectAttempts)} reconnect attempts; giving up. Check REDIS_HOST / REDIS_PORT / credentials and that Redis is reachable. Raise LUCKYSTACK_REDIS_MAX_RECONNECTS for longer outage tolerance.`,
         );
         return null;
       }
-      return Math.min(times * 50, 2000);
+      return Math.min(times * 50, maxBackoffMs);
     },
   });
 
@@ -90,6 +104,18 @@ const STRAY_PREFIX_COMMANDS = new Set<string>([
   'getbit', 'setbit', 'bitcount',
 ]);
 
+//? Variadic commands whose EVERY string argument is a key (`del('a','b')`,
+//? `mget('a','b')`). The single-key `STRAY_PREFIX_COMMANDS` set only prefixes
+//? arg0, which left these asymmetric: `redis.set('flag', v)` wrote
+//? `<project>:flag` while `redis.del('flag')` targeted the unprefixed `flag`
+//? and silently no-op'd. Prefixing every string arg here closes that footgun
+//? for revocation-style stray keys. (`eval`/`scan`/`multi` stay excluded —
+//? their key positions can't be inferred and framework call sites already use
+//? `formatKey()` there.)
+const ALL_ARGS_ARE_KEYS_COMMANDS = new Set<string>([
+  'del', 'unlink', 'exists', 'touch', 'mget',
+]);
+
 //? Extend the set of single-key, arg0-is-key commands the `redis` proxy runs
 //? through `applyStrayKeyPrefix`. Additive — the built-in set above is always
 //? retained — so a consumer using a Redis command the framework's default
@@ -113,7 +139,14 @@ const redisProxy = new Proxy({} as RedisClient, {
     const value: unknown = Reflect.get(real, prop, receiver);
     if (typeof value !== 'function') return value;
     const fn = value as (...args: unknown[]) => unknown;
-    if (typeof prop === 'string' && STRAY_PREFIX_COMMANDS.has(prop.toLowerCase())) {
+    const command = typeof prop === 'string' ? prop.toLowerCase() : '';
+    if (command && ALL_ARGS_ARE_KEYS_COMMANDS.has(command)) {
+      return (...args: unknown[]): unknown => {
+        const prefixed = args.map((arg) => (typeof arg === 'string' ? applyStrayKeyPrefix(arg) : arg));
+        return fn.apply(real, prefixed);
+      };
+    }
+    if (command && STRAY_PREFIX_COMMANDS.has(command)) {
       return (...args: unknown[]): unknown => {
         if (args.length > 0 && typeof args[0] === 'string') {
           args[0] = applyStrayKeyPrefix(args[0]);

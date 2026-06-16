@@ -22,7 +22,11 @@ export const getDisconnectTime = ({
 }): number => {
   const config = getPresenceConfig();
   if (clientSwitchedTab.has(token)) return config.disconnectTimers.tabSwitchMs;
-  if (config.allowReasons.includes(reason ?? 'NULL')) return config.disconnectTimers.transportCloseMs;
+  //? Guard `undefined` explicitly instead of coercing to a magic `'NULL'`
+  //? string — a consumer who literally listed `'NULL'` in `allowReasons` would
+  //? otherwise wrongly earn the generous transport-close window.
+  if (reason === undefined) return config.disconnectTimers.defaultMs;
+  if (config.allowReasons.includes(reason)) return config.disconnectTimers.transportCloseMs;
   return config.disconnectTimers.defaultMs;
 };
 

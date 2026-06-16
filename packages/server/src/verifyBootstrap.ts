@@ -9,7 +9,9 @@
 //? validators (e.g. `getProjectConfig()` always returns a deeply-merged value).
 
 import {
+  collectSynchronizedEnvKeys,
   getLogger,
+  getProjectConfig,
   isDeployConfigRegistered,
   isLocalizedNormalizerRegistered,
   isProjectConfigRegistered,
@@ -99,6 +101,26 @@ export const verifyBootstrap = async (requirements: BootstrapRequirements = {}):
     } else {
       getLogger().warn(
         '[LuckyStack] No LocalizedNormalizer registered — error messages will pass through as the raw errorCode.',
+      );
+    }
+  }
+
+  //? SEC-13: the unauthenticated `/_health` endpoint emits `sha256(<secret>)`
+  //? fingerprints of every `synchronizedEnvKeys` value so the router can detect
+  //? cross-env drift. With the default `healthHash.mode` of `'plain'` those
+  //? digests are UNSALTED — a public, offline-bruteforceable fingerprint of
+  //? production secrets. Loudly warn (not hard-fail, to preserve boot behavior)
+  //? so the operator opts into `http.healthHash.mode: 'hmac'` (or `'salted'`
+  //? with salt `'@bootUuid'`) when synchronized secrets are in play.
+  if (isProjectConfigRegistered()) {
+    const synchronizedKeyCount = collectSynchronizedEnvKeys().length;
+    const healthHashMode = getProjectConfig().http.healthHash.mode;
+    if (synchronizedKeyCount > 0 && healthHashMode === 'plain') {
+      getLogger().warn(
+        '[LuckyStack] SECURITY: /_health exposes UNSALTED sha256 fingerprints of '
+        + `${String(synchronizedKeyCount)} synchronized env secret(s) by default. `
+        + "Set `http.healthHash.mode` to 'hmac' (or 'salted' with salt '@bootUuid') "
+        + 'to stop publishing brute-forceable secret fingerprints to unauthenticated callers.',
       );
     }
   }

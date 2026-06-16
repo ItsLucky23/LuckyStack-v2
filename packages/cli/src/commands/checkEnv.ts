@@ -39,11 +39,38 @@ const isIgnored = (key: string): boolean =>
 //? framework reads `DEV_<KEY>` in dev and the unprefixed `<KEY>` in prod.
 const baseKey = (key: string): string => key.replace(/^DEV_/, '');
 
+//? Read a single non-secret config key's VALUE from the project's `.env` (only the
+//? `LUCKYSTACK_ENV_FILES` override, which lives in `.env`, never `.env.local`).
+//? Unlike parseEnvKeys (names only, by design — .env.local holds secrets) this
+//? must see one value to mirror the server's env-file selection. Best-effort:
+//? missing/unreadable file → null.
+const readEnvOverrideFromProject = (root: string): string | null => {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(root, '.env'), 'utf8');
+  } catch {
+    return null;
+  }
+  for (const line of raw.replaceAll('\r\n', '\n').split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+    const match = /^(?:export\s+)?LUCKYSTACK_ENV_FILES\s*=\s*(.*)$/.exec(trimmed);
+    if (match) {
+      //? Strip surrounding quotes a consumer may have wrapped the value in.
+      return (match[1] ?? '').trim().replaceAll(/^['"]|['"]$/g, '');
+    }
+  }
+  return null;
+};
+
 //? Mirror @luckystack/core `getEnvFiles()`: `LUCKYSTACK_ENV_FILES` (comma list)
-//? overrides the `['.env', '.env.local']` default. Kept in lockstep so the scan
-//? sees exactly the files the server loads.
-const resolveEnvFiles = (): string[] => {
-  const override = process.env.LUCKYSTACK_ENV_FILES;
+//? overrides the `['.env', '.env.local']` default. The CLI never loads dotenv, so
+//? read the override from BOTH the CLI process env AND the project's `.env`
+//? (process env wins) — otherwise a project that only sets the override in its
+//? `.env` would be scanned against the wrong files, producing false unused/missing
+//? findings an LLM might "fix" by deleting live keys.
+const resolveEnvFiles = (root: string): string[] => {
+  const override = process.env.LUCKYSTACK_ENV_FILES ?? readEnvOverrideFromProject(root);
   if (override && override.trim().length > 0) {
     return override.split(',').map((s) => s.trim()).filter(Boolean);
   }
@@ -51,7 +78,11 @@ const resolveEnvFiles = (): string[] => {
 };
 
 //? Parse KEY names only (never values — `.env.local` holds secrets) from `KEY=…`
-//? lines, skipping comments + blanks.
+//? lines, skipping comments + blanks. NOTE (CLAUDE.md Rule 16): reading `.env.local`
+//? at all is deliberate and within the letter of the rule — only the LEFT-hand KEY
+//? names are kept; every value is discarded here, so no secret is ever surfaced.
+//? Don't "fix" this by skipping `.env.local` — the scan needs its key names to
+//? avoid false "missing definition" findings.
 const parseEnvKeys = (absPath: string): string[] => {
   let raw: string;
   try {
@@ -60,11 +91,26 @@ const parseEnvKeys = (absPath: string): string[] => {
     return [];
   }
   const keys: string[] = [];
+  //? Track an open multi-line quoted value (`KEY="line1\nline2"`): while inside one,
+  //? a continuation line that happens to look like `WORD=` is part of the VALUE, not
+  //? a new key — counting it would produce a false "missing definition" finding.
+  let openQuote: '"' | "'" | null = null;
   for (const line of raw.replaceAll('\r\n', '\n').split('\n')) {
+    if (openQuote) {
+      //? Still inside a quoted value — only the matching closing quote ends it.
+      if (line.includes(openQuote)) openQuote = null;
+      continue;
+    }
     const trimmed = line.trim();
     if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
-    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(trimmed);
-    if (match?.[1]) keys.push(match[1]);
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(trimmed);
+    if (match?.[1]) {
+      keys.push(match[1]);
+      //? Detect a value that OPENS a quote without closing it on the same line.
+      const value = match[2] ?? '';
+      const quote = value.startsWith('"') ? '"' : (value.startsWith("'") ? "'" : null);
+      if (quote && !value.slice(1).includes(quote)) openQuote = quote;
+    }
   }
   return keys;
 };
@@ -82,7 +128,7 @@ export const checkEnv = (project: ConsumerProject): void => {
   const usedBases = new Set([...usedLocations.keys()].map((key) => baseKey(key)));
 
   //? Defined keys, per env file.
-  const envFiles = resolveEnvFiles();
+  const envFiles = resolveEnvFiles(project.root);
   const definedByFile = new Map<string, string[]>();
   const definedBases = new Set<string>();
   const presentEnvFiles: string[] = [];

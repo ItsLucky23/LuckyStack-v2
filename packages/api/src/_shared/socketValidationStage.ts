@@ -21,7 +21,14 @@ type EmitInvalidInputType = () => void;
 
 export const resolveValidationMode = (validation: RuntimeApiEntry['validation']): 'strict' | 'relaxed' => {
   if (!validation) return 'strict';
-  if (typeof validation === 'string') return validation;
+  //? FAIL CLOSED on an unrecognized value (parity with the sync transport's
+  //? `resolveSyncValidationMode`). Only the exact string `'relaxed'` (or the
+  //? object form `{ input: 'skip' }`) skips validation; ANY other value — a
+  //? typo like `'Strict'`/`'on'` — falls back to `'strict'` (validate) rather
+  //? than being returned verbatim and silently DISABLING validation.
+  if (typeof validation === 'string') {
+    return validation === 'relaxed' ? 'relaxed' : 'strict';
+  }
   return validation.input === 'skip' ? 'relaxed' : 'strict';
 };
 

@@ -30,8 +30,17 @@ export const projectRoot = async (): Promise<string> => {
 
 export const readDocFile = async (relPath: string): Promise<string | null> => {
   const root = await projectRoot();
+  //? Defensive containment: every real caller passes a hardcoded relative path
+  //? (or a real `fs.readdir` entry), so all legitimate reads resolve INSIDE root
+  //? and behave exactly as before. This only rejects a null byte or a path that
+  //? would escape the project root — returning the same `null` any read failure
+  //? already yields — so a future caller can't be coaxed into traversal.
+  if (relPath.includes('\0')) return null;
+  const resolved = path.resolve(root, relPath);
+  const rel = path.relative(root, resolved);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
   try {
-    return await fs.readFile(path.join(root, relPath), 'utf8');
+    return await fs.readFile(resolved, 'utf8');
   } catch {
     return null;
   }
@@ -66,9 +75,11 @@ export const loadGraph = async (): Promise<Graph | null> => {
 //? (`_functions/foo.ts`), a `src/`-prefixed path, or a bare basename match.
 export const resolveNodeId = (graph: Graph, input: string): string | null => {
   const norm = input.replaceAll('\\', '/').replace(/^\.?\//, '').replace(/^src\//, '');
-  if (graph.blastRadius[norm] !== undefined || graph.nodes.some((n) => n.id === norm)) return norm;
-  const byBase = graph.nodes.filter((n) => n.id.endsWith(`/${input}`) || n.id === input || path.posix.basename(n.id) === input);
-  return byBase.length === 1 ? byBase[0].id : null;
+  if (Object.hasOwn(graph.blastRadius, norm) || graph.nodes.some((n) => n.id === norm)) return norm;
+  const base = path.posix.basename(norm);
+  const byBase = graph.nodes.filter((n) => n.id.endsWith(`/${norm}`) || n.id === norm || path.posix.basename(n.id) === base);
+  const sole = byBase.length === 1 ? byBase[0] : undefined;
+  return sole ? sole.id : null;
 };
 
 // ---------------------------------------------------------------------------

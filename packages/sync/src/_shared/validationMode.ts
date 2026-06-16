@@ -17,6 +17,14 @@ export const resolveSyncValidationMode = (
   validation: RuntimeSyncServerEntry['validation'],
 ): 'strict' | 'relaxed' => {
   if (!validation) return 'strict';
-  if (typeof validation === 'string') return validation;
+  //? FAIL CLOSED on an unrecognized value. Only the exact string `'relaxed'`
+  //? (or the object form `{ input: 'skip' }`) skips validation; ANY other value
+  //? — a typo like `'Strict'`/`'on'`, or a stray string the generator emitted —
+  //? falls back to `'strict'` (validate). Returning the raw string verbatim
+  //? meant a typo silently DISABLED input validation (it failed the caller's
+  //? `=== 'strict'` test and skipped), a fail-open footgun.
+  if (typeof validation === 'string') {
+    return validation === 'relaxed' ? 'relaxed' : 'strict';
+  }
   return validation.input === 'skip' ? 'relaxed' : 'strict';
 };

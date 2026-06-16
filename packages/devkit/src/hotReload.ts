@@ -220,7 +220,7 @@ export const setupWatchers = () => {
 
     const routeValidationMessage = getRouteFilenameValidationMessage(normalizedPath);
     if (routeValidationMessage) {
-      if (shouldInjectTemplate(path)) {
+      if (shouldInjectTemplate(path, { isNewFile: true })) {
         const injected = await injectTemplate(path);
         if (injected) {
           return;
@@ -232,7 +232,7 @@ export const setupWatchers = () => {
     }
 
     // Check if this is a new empty file that needs a template
-    if (shouldInjectTemplate(path)) {
+    if (shouldInjectTemplate(path, { isNewFile: true })) {
       // Special handling for sync server files when client already exists
       if (isSyncServerFile(normalizedPath)) {
         const clientPath = getPairedSyncFile(normalizedPath);

@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Read-only MCP server that exposes a LuckyStack project's committed AI context (decisions, dependency graph, routes, runbooks, capabilities) to Claude Code as queryable tools.",

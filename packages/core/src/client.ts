@@ -101,10 +101,11 @@ export {
 } from './localesRegistry';
 export type { LocalesMap, LanguageSource } from './localesRegistry';
 
-//? Middleware handler registry — consumer ships the actual page-guard
-//? logic (`src/_functions/middlewareHandler.ts`) and registers it from
-//? their client bootstrap. Framework's `<Middleware>` and `useRouter`
-//? consume it via `getMiddlewareHandler()`.
+//? Middleware handler registry — per-page `export const middleware` is the
+//? canonical guard path; a consumer wanting a cross-cutting GLOBAL guard
+//? registers it from their client bootstrap via `registerMiddlewareHandler`
+//? (no separate `middlewareHandler.ts` file required). Framework's
+//? `<Middleware>` and `useRouter` consume it via `getMiddlewareHandler()`.
 export {
   registerMiddlewareHandler,
   getMiddlewareHandler,
@@ -138,6 +139,22 @@ export type {
   ClientHookResult,
   ClientDispatchResult,
 } from './clientHookBus';
+
+//? EXT-03 — client request/response interceptor registry for `apiRequest`.
+//? The sanctioned alternative to wrapping `apiRequest` (which Rule 21 / the
+//? `no-unsafe-api-wrappers` lint forbid): register an interceptor to inject a
+//? correlation id / feature-flag context onto outgoing calls, or to observe
+//? responses, without erasing the typed call site's route/version inference.
+export {
+  registerApiRequestInterceptor,
+  registerApiResponseInterceptor,
+} from './apiInterceptors';
+export type {
+  ApiRequestInterceptor,
+  ApiResponseInterceptor,
+  ApiRequestInterceptorContext,
+  ApiResponseInterceptorContext,
+} from './apiInterceptors';
 
 //? Pure page-route validator. Consumers' main.tsx auto-discovery uses this
 //? to decide whether a discovered page.tsx becomes a route (and what URL),

@@ -129,23 +129,26 @@ Both map `&`, `<`, `>`, `"`, `'` to their HTML entity equivalents. The renderer 
 Enabled by `options.enableTryItOut === true`. When on:
 
 - `ENABLE_TRY_IT_OUT` is `true` inside the inline script.
-- `renderTryItOut(route, version)` appends a `<div class="try-it-out">` containing a `<textarea>` (default content `{}`), a `Send` button, and an empty `<pre class="result">`.
-- The Send click invokes `runEndpoint(button, route, version, dataField)`.
+- `renderTryItOut(route, method)` appends a `<div class="try-it-out">` containing a `<textarea>` (default content `{}`), a `Send` button, and an empty `<pre class="result">`.
+- The Send click invokes `runEndpoint(button, route, method, dataField)`.
 
 `runEndpoint` performs:
 
 ```js
+const httpMethod = (method || 'POST').toUpperCase();
+const hasBody = httpMethod !== 'GET' && httpMethod !== 'DELETE';
 fetch('/' + route + '?stream=false', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  method: httpMethod,
+  headers: hasBody ? { 'Content-Type': 'application/json' } : {},
   credentials: 'include',
-  body: JSON.stringify(parsed),
+  body: hasBody ? JSON.stringify(parsed) : undefined,
 })
 ```
 
 Behavior:
 
-- `dataField.value.trim()` empty ⇒ posts `{}`. Otherwise the textarea value is parsed with `JSON.parse`. A parse error is shown in the result pane and no request is sent.
+- The endpoint's declared HTTP method is threaded through (the framework returns `405` on a method mismatch, so a hardcoded `POST` would break every documented GET/PUT/DELETE route). For `GET`/`DELETE` the JSON body and `Content-Type` header are omitted.
+- `dataField.value.trim()` empty ⇒ sends `{}` (for body-bearing methods). Otherwise the textarea value is parsed with `JSON.parse`. A parse error is shown in the result pane and no request is sent.
 - The button is disabled during flight and re-enabled in `finally`.
 - The response body is parsed as JSON when possible (pretty-printed via `JSON.stringify(..., null, 2)`) and otherwise displayed as raw text — this keeps non-JSON error pages readable.
 - `?stream=false` instructs the HTTP API surface to return the full final payload instead of a streamed chunked response, which is what the textarea-and-pre UI is built for.

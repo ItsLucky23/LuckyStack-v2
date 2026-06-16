@@ -74,7 +74,11 @@ const buildAllowedResult = (limit: number): RateLimitResult => ({
   resetIn: 0,
 });
 
-let redisFallbackLogged = false;
+//? Re-armable warning latch: log at most once per `REDIS_FALLBACK_LOG_COOLDOWN_MS`
+//? so a recurring Redis degradation stays visible (the old one-shot latch hid
+//? every fallback after the first, so a flapping Redis looked healthy in logs).
+const REDIS_FALLBACK_LOG_COOLDOWN_MS = 60_000;
+let redisFallbackLastLoggedAt = 0;
 
 const RATE_LIMIT_INCREMENT_SCRIPT = `
 local current = redis.call('INCR', KEYS[1])
@@ -185,11 +189,28 @@ const getRateLimitStatusInRedis = async (key: string, limit: number): Promise<Ra
   };
 };
 
+const getOnStoreError = (): 'memory' | 'deny' =>
+  getProjectConfig().rateLimiting.onStoreError;
+
 const logRedisFallback = (): void => {
-  if (redisFallbackLogged) return;
-  redisFallbackLogged = true;
-  getLogger().warn('[RateLimiter] Redis mode unavailable, falling back to in-memory mode');
+  const now = Date.now();
+  if (now - redisFallbackLastLoggedAt < REDIS_FALLBACK_LOG_COOLDOWN_MS) return;
+  redisFallbackLastLoggedAt = now;
+  getLogger().warn(
+    getOnStoreError() === 'deny'
+      ? '[RateLimiter] Redis mode unavailable — denying request (onStoreError=deny)'
+      : '[RateLimiter] Redis mode unavailable, falling back to in-memory mode (onStoreError=memory)',
+  );
 };
+
+//? When `onStoreError: 'deny'` we fail closed: a Redis outage must NOT silently
+//? relax the limit. Returns a not-allowed result with the full window as the
+//? reset hint so callers surface a sane `Retry-After`.
+const buildDeniedResult = (): RateLimitResult => ({
+  allowed: false,
+  remaining: 0,
+  resetIn: Math.ceil(getProjectConfig().rateLimiting.windowMs / 1000),
+});
 
 /**
  * Built-in strategy: in-memory counters with optional Redis backing for
@@ -208,6 +229,7 @@ export const defaultRateLimitStrategy: RateLimitStrategy = {
       const redisResult = await checkRateLimitInRedis(params);
       if (redisResult) return redisResult;
       logRedisFallback();
+      if (getOnStoreError() === 'deny') return buildDeniedResult();
     }
 
     return checkRateLimitInMemory(params);
@@ -220,6 +242,7 @@ export const defaultRateLimitStrategy: RateLimitStrategy = {
       const redisResult = await getRateLimitStatusInRedis(key, limit);
       if (redisResult) return redisResult;
       logRedisFallback();
+      if (getOnStoreError() === 'deny') return buildDeniedResult();
     }
 
     return getRateLimitStatusInMemory(key, limit);
@@ -285,15 +308,19 @@ export const getRateLimitStrategy = (): RateLimitStrategy => strategyRegistry.ge
  * Check if a request is allowed under rate limiting rules.
  * Increments the counter for the key if allowed.
  */
-export const checkRateLimit = async (params: CheckRateLimitParams): Promise<RateLimitResult> =>
-  strategyRegistry.get().check(params);
+export const checkRateLimit = async (params: CheckRateLimitParams): Promise<RateLimitResult> => {
+  ensureCleanupScheduled();
+  return strategyRegistry.get().check(params);
+};
 
 /**
  * Get current rate limit status without incrementing counter.
  * Useful for rate limit headers in responses.
  */
-export const getRateLimitStatus = async (key: string, limit: number): Promise<RateLimitResult> =>
-  strategyRegistry.get().getStatus(key, limit);
+export const getRateLimitStatus = async (key: string, limit: number): Promise<RateLimitResult> => {
+  ensureCleanupScheduled();
+  return strategyRegistry.get().getStatus(key, limit);
+};
 
 /**
  * Clear rate limit for a specific key.
@@ -312,6 +339,12 @@ export const clearAllRateLimits = async (): Promise<void> => strategyRegistry.ge
 //? handle their own cleanup. Restart-aware: we schedule recursively so the
 //? interval picks up `projectConfig.rateLimiting.cleanupIntervalMs` whenever
 //? it changes (e.g. after `registerProjectConfig`).
+//?
+//? Lazy-started on the first `checkRateLimit`/`getRateLimitStatus` call rather
+//? than at module load, so any tool/CLI/test that merely type-imports core does
+//? NOT inherit a recurring timer it never asked for (the package's "no import-
+//? time side effects" doctrine).
+let cleanupStarted = false;
 const scheduleCleanup = (): void => {
   const intervalMs = getProjectConfig().rateLimiting.cleanupIntervalMs;
   const timer = setTimeout(() => {
@@ -331,4 +364,8 @@ const scheduleCleanup = (): void => {
   timer.unref();
 };
 
-scheduleCleanup();
+const ensureCleanupScheduled = (): void => {
+  if (cleanupStarted) return;
+  cleanupStarted = true;
+  scheduleCleanup();
+};

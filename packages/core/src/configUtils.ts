@@ -59,6 +59,11 @@ const deepMergeInternal = <T>(
   const result: Record<string, unknown> = { ...(base as Record<string, unknown>) };
   for (const [key, overrideValue] of Object.entries(override as Record<string, unknown>)) {
     if (overrideValue === undefined) continue;
+    //? Prototype-pollution guard: never let an override key reassign the
+    //? prototype chain. Cheap defensive skip on the shared merge primitive
+    //? every config registry routes through (the contract invites consumer
+    //? partials, e.g. a `JSON.parse`d `{"__proto__":{...}}`).
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
     const baseValue = (base as Record<string, unknown>)[key];
     result[key] =
       isPlainObject(baseValue) && isPlainObject(overrideValue)

@@ -146,6 +146,40 @@ export interface PostEmailChangedPayload {
   newEmail: string;
 }
 
+//? Observational failure signal. Fires on every failed login/register/OAuth
+//? attempt so consumers can audit, feed a SIEM, or drive per-account lockout
+//? (the built-in brute-force lockout subscribes to this). Never vetoable — the
+//? auth outcome the caller already got must not change based on a handler.
+
+export interface LoginFailedPayload {
+  /** Email the attempt was for, when available. */
+  email?: string;
+  /** Resolved userId, when the attempt matched a real account. */
+  userId?: string;
+  /** Auth provider (e.g. `credentials`, `google`). */
+  provider: string;
+  /** i18n reason key describing why the attempt failed. */
+  reason: string;
+  /** Which flow the failure occurred in. */
+  stage: 'login' | 'register' | 'oauth';
+}
+
+//? Account-deletion lifecycle. `preAccountDelete` is vetoable — compliance /
+//? legal-hold / active-subscription add-ons can abort the deletion with their
+//? own errorCode before anything is destroyed. `postAccountDelete` is
+//? observational — cascade-clean external state (Stripe / S3), audit, goodbye
+//? email.
+
+export interface PreAccountDeletePayload {
+  userId: string;
+  email?: string;
+}
+
+export interface PostAccountDeletePayload {
+  userId: string;
+  email?: string;
+}
+
 declare module '@luckystack/core' {
   interface HookPayloads {
     preLogin: PreLoginPayload;
@@ -166,5 +200,8 @@ declare module '@luckystack/core' {
     preEmailChange: PreEmailChangePayload;
     postEmailChangeRequested: PostEmailChangeRequestedPayload;
     postEmailChanged: PostEmailChangedPayload;
+    loginFailed: LoginFailedPayload;
+    preAccountDelete: PreAccountDeletePayload;
+    postAccountDelete: PostAccountDeletePayload;
   }
 }

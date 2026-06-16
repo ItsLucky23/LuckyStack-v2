@@ -156,11 +156,54 @@ describe('sampleSchemaInput', () => {
     });
   });
 
+  describe('enums', () => {
+    it('returns the first member of an enum schema', () => {
+      const schema = z.enum(['draft', 'published', 'archived']);
+      const sample = sampleSchemaInput(schema);
+      expect(sample).toBe('draft');
+      expect(() => schema.parse(sample)).not.toThrow();
+    });
+
+    it('fills a required enum field with a valid member', () => {
+      const schema = z.object({ status: z.enum(['on', 'off']) });
+      const sample = sampleSchemaInput(schema);
+      expect(sample).toEqual({ status: 'on' });
+      expect(() => schema.parse(sample)).not.toThrow();
+    });
+  });
+
+  describe('wrapped schemas', () => {
+    it('unwraps a default to the inner schema sample', () => {
+      const schema = z.string().default('fallback');
+      expect(sampleSchemaInput(schema)).toBe('test');
+    });
+
+    it('recurses through a refine into the base schema', () => {
+      const schema = z.string().refine(() => true);
+      expect(sampleSchemaInput(schema)).toBe('test');
+    });
+
+    it('samples each position of a tuple', () => {
+      const schema = z.tuple([z.string(), z.number()]);
+      const sample = sampleSchemaInput(schema);
+      expect(sample).toEqual(['test', 0]);
+      expect(() => schema.parse(sample)).not.toThrow();
+    });
+  });
+
   describe('fallback', () => {
-    it('returns null for an unrecognised schema kind', () => {
+    it('omits an unrecognised schema kind (returns undefined, not null)', () => {
       //? `z.bigint()` is not in the handled switch; the walker hits the
-      //? `default` arm and returns null rather than throwing.
-      expect(sampleSchemaInput(z.bigint())).toBeNull();
+      //? `default` arm and returns `undefined` so the object walker omits the
+      //? key rather than posting a known-bad `null` for a required field.
+      expect(sampleSchemaInput(z.bigint())).toBeUndefined();
+    });
+
+    it('omits an unrecognised required field instead of sending null', () => {
+      const schema = z.object({ id: z.string(), big: z.bigint() });
+      const sample = sampleSchemaInput(schema) as Record<string, unknown>;
+      expect(Object.prototype.hasOwnProperty.call(sample, 'big')).toBe(false);
+      expect(sample).toEqual({ id: 'test' });
     });
   });
 });

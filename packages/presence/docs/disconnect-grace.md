@@ -29,8 +29,11 @@ socket disconnects with reason R, token T
   setTimeout(time, on expiry:
     remove T from tempDisconnectedSockets
     confirm we are still the active timer
+    if T's private token room still has live sockets -> bail (another tab is open)
+    resolve session (userId + roomCodes) for the hook
     socketLeaveRoom({ token, socket, newPath: null })
     if (deleteSessionOnDisconnect) deleteSession(T)
+    dispatch postDisconnectGraceExpired({ token, userId, roomCodes, reason, sessionDeleted })
   )
             │
             ▼
@@ -53,6 +56,7 @@ export interface PresenceConfig {
   ignoreReasons: string[];
   allowReasons: string[];
   afkTimeoutMs: number;
+  activitySampleIntervalMs: number;
 }
 ```
 
@@ -66,6 +70,7 @@ Each field:
 | `ignoreReasons` | `['ping timeout']` | Disconnect reasons treated as no-ops. The client is almost certainly still there; the socket got kicked by a heartbeat miss but will reconnect on its own. No timer, no peer notify, no session delete. |
 | `allowReasons` | `['transport close', 'transport error']` | Disconnect reasons that earn the generous `transportCloseMs` window. Anything outside both lists falls back to `defaultMs`. |
 | `afkTimeoutMs` | `5 * 60_000` | Idle threshold for the default `'afk'` activity event (see [`docs/activity-broadcaster.md`](./activity-broadcaster.md)). Set to `0` to disable AFK detection. |
+| `activitySampleIntervalMs` | `15_000` | How often the server-side activity sampler walks every connected socket and feeds an `ActivitySample` to `dispatchActivitySample` (which fires the registered activity events). Should be well below `afkTimeoutMs`. Set to `0` to disable the sampler. |
 
 ## `DEFAULT_PRESENCE_CONFIG`
 
@@ -79,6 +84,7 @@ export const DEFAULT_PRESENCE_CONFIG: PresenceConfig = {
   ignoreReasons: ['ping timeout'],
   allowReasons: ['transport close', 'transport error'],
   afkTimeoutMs: 5 * 60_000,
+  activitySampleIntervalMs: 15_000,
 };
 ```
 
@@ -163,6 +169,14 @@ The `reason ?? 'NULL'` fallback is for callers passing `undefined` (notably `ini
 2. **Repeated disconnect events on the same socket** — `tempDisconnectedSockets.has(token)` short-circuits the second invocation so we do not stack timers.
 3. **Logout during grace** — `registerPresenceHooks()` subscribes to `postLogout` and clears the timer + drops the token from `tempDisconnectedSockets`. The pending `setTimeout` then no-ops on the same `tempDisconnectedSockets.has(token)` check (the token is gone).
 4. **Tab switch → real disconnect** — `clientSwitchedTab` is consumed (deleted) at the start of `socketDisconnecting`, so a later "transport close" for the same token gets the normal `transportCloseMs` window, not a second tab-switch shortcut.
+5. **Multi-tab shared session** — two tabs share one token but hold two sockets, each joined to the token's private room (`socket.join(token)`). Closing tab B arms a grace timer, but tab A is still connected, so `socketConnected` never re-fires to cancel it. On expiry the timer checks `io.sockets.adapter.rooms.get(token)?.size`; if it is non-zero (tab A is live), it **bails** — no `socketLeaveRoom`, no `deleteSession`, no `postDisconnectGraceExpired`. The shared session survives until the last tab closes.
+
+## Trust model — `intentionalDisconnect` is client-asserted
+
+The tab-switch path is driven by the `intentionalDisconnect` socket event, which is **fully client-controlled**. A client can choose to emit it (to claim the short `tabSwitchMs` window + skip delete-on-disconnect) or not. Two consequences:
+
+- **Best-effort, not a guarantee.** A client that always emits `intentionalDisconnect` keeps `deleteSessionOnDisconnect = false`, so its session is preserved on disconnect rather than deleted. The Redis session **TTL is the real bound** on session lifetime — "delete on disconnect" is an optimization, not a security control. Do not rely on disconnect-delete to revoke access; rely on the TTL and explicit logout.
+- **No self-spam.** `initActivityBroadcaster` honours `intentionalDisconnect` **at most once per connection** (a per-socket `intentionalDisconnectHandled` flag), so a client cannot repeatedly emit it to spam `userAfk` to its own roommates. The broadcast `userId` is always resolved server-side from the session, so a client can never assert another user's presence either.
 
 ## Tuning recipes
 

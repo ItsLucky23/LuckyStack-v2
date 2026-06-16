@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { redis } from '@luckystack/core';
-import { deleteSession } from '@luckystack/login';
+import { deleteSession, activeUsersKeyFor } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
@@ -18,8 +18,6 @@ export interface ApiParams {
   functions: Functions;
 }
 
-const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
-
 export const main = async ({ data, user }: ApiParams): Promise<ApiResponse> => {
   const targetId = data.id;
   if (!targetId) {
@@ -28,8 +26,9 @@ export const main = async ({ data, user }: ApiParams): Promise<ApiResponse> => {
 
   //? Resolve the opaque SHA-256 id (from listSessions) back to a real token by
   //? scanning THIS user's own active-session set — so ownership is guaranteed by
-  //? set membership and the raw token never has to leave the server.
-  const tokens = await redis.smembers(`${PROJECT_NAME}-activeUsers:${user.id}`).catch(() => null);
+  //? set membership and the raw token never has to leave the server. Use the
+  //? framework key builders so a custom Redis key formatter is honored.
+  const tokens = await redis.smembers(activeUsersKeyFor(user.id)).catch(() => null);
   if (tokens === null) {
     return { status: 'error', errorCode: 'common.500' };
   }

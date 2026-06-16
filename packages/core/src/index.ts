@@ -10,6 +10,13 @@ export { ensurePeerDepInstalled, loadPeer } from './peerDeps';
 export type { PeerRequire } from './peerDeps';
 export * from './serviceRoute';
 export * from './socketEvents';
+export {
+  registerRoomNameFormatter,
+  getRoomNameFormatter,
+  formatRoomName,
+  defaultRoomNameFormatter,
+} from './roomNameFormatterRegistry';
+export type { RoomNameFormatter, RoomNameFormatterContext } from './roomNameFormatterRegistry';
 export * from './responseNormalizer';
 export * from './localizedNormalizer';
 export {
@@ -45,13 +52,20 @@ export type {
   SessionConfig,
   HttpConfig,
   HttpStreamConfig,
+  HealthHashConfig,
   SecurityHeadersConfig,
   CorsConfig,
   AuthConfig,
+  AuthRateLimitConfig,
+  RateLimitIdentity,
+  RateLimitIdentityParams,
   PasswordPolicyConfig,
   SocketConfig,
+  ApiConfig,
+  ValidationConfig,
   SyncConfig,
   SyncStreamThrottleConfig,
+  SyncFlushPressureConfig,
   OfflineQueueConfig,
   DevConfig,
   PathsConfig,
@@ -87,7 +101,7 @@ export {
   listEmailSenderNames,
   isEmailSenderRegistered,
 } from './emailRegistry';
-export type { EmailSender, EmailMessage, EmailResult, EmailSenderRegistry } from './emailRegistry';
+export type { EmailSender, EmailMessage, EmailAttachment, EmailResult, EmailSenderRegistry } from './emailRegistry';
 export {
   registerDeployConfig,
   getDeployConfig,
@@ -121,12 +135,20 @@ export * from './sentrySetup';
 export {
   registerErrorTracker,
   registerErrorTrackers,
+  appendErrorTracker,
   getActiveErrorTrackers,
   captureExceptionAcrossTrackers,
   captureMessageAcrossTrackers,
   setErrorTrackerUser,
   recordMetricAcrossTrackers,
   startSpanAcrossTrackers,
+  startSpanHandle,
+  runWithErrorTrackerIdentity,
+  runWithErrorTrackerIdentityScope,
+  setCurrentErrorTrackerIdentity,
+  getCurrentErrorTrackerIdentity,
+  registerPreCaptureFilter,
+  flushErrorTrackers,
 } from './errorTrackerRegistry';
 export type {
   ErrorTracker,
@@ -134,6 +156,8 @@ export type {
   ErrorTrackerUser,
   ErrorTrackerEvent,
   SpanResult,
+  SpanHandle,
+  PreCaptureFilter,
 } from './errorTrackerRegistry';
 export * from './env';
 export * from './db';
@@ -169,7 +193,12 @@ export {
   collectSynchronizedEnvKeys,
   computeSynchronizedEnvHashes,
   hashSynchronizedValue,
+  hashSynchronizedValueWith,
+  resolveHealthHashConfig,
+  describeHealthHashConfig,
+  resolveHealthHashConfigFromDescriptor,
 } from './synchronizedEnvHashes';
+export type { HealthHashDescriptor } from './synchronizedEnvHashes';
 export { initConsolelog } from './consoleLog';
 export {
   registerLogger,
@@ -184,6 +213,10 @@ export {
   getRedactedLogKeys,
   isRedactedLogKey,
   resetRedactedLogKeysForTests,
+  sanitizeForLog,
+  DEFAULT_REDACTED_LOG_KEYS,
+  REDACTED_PLACEHOLDER,
+  DEPTH_TRUNCATED_PLACEHOLDER,
 } from './redactedLogKeys';
 export * from './cookies';
 export * from './httpApiUtils';
@@ -215,7 +248,7 @@ export type { AvatarConfig, AvatarConfigInput } from './avatarConfig';
 export { default as getParams } from './getParams';
 export { extractTokenFromSocket } from './extractToken';
 export { extractTokenFromRequest } from './extractTokenFromRequest';
-export { resolveClientIp, UNKNOWN_CLIENT_IP } from './resolveClientIp';
+export { resolveClientIp, isLoopbackIp, UNKNOWN_CLIENT_IP } from './resolveClientIp';
 export type { ResolveClientIpParams } from './resolveClientIp';
 export {
   registerSessionProvider,
@@ -254,6 +287,7 @@ export {
   getApiQueueSize,
   getSyncQueueSize,
 } from './offlineQueue';
+export type { QueueDropReason } from './offlineQueue';
 export { socket, setSocket, incrementResponseIndex, waitForSocket } from './socketState';
 export {
   registerSyncAbortController,
@@ -265,6 +299,13 @@ export {
   abortAllForSocket,
 } from './cancelRegistry';
 export { getCsrfToken, clearCsrfToken, httpFetch } from './csrf';
+export {
+  issueOneTimeToken,
+  consumeOneTimeToken,
+  consumeOneTimeTokenJson,
+  oneTimeTokenKey,
+} from './oneTimeToken';
+export type { OneTimeTokenHandle } from './oneTimeToken';
 // `apiRequest` is exported from `./client.ts` — it imports React-coupled
 // project code (notify → TranslationProvider.tsx) that must not be pulled
 // into server compilation via this server-safe barrel.
@@ -284,18 +325,33 @@ export type {
   PreApiRespondPayload,
   PostApiRespondPayload,
   ApiResponseEnvelope,
+  PreHttpRequestPayload,
+  PostHttpRequestPayload,
+  PreSocketMessagePayload,
   PreSyncAuthorizePayload,
+  PostSyncAuthorizePayload,
+  PreSyncValidatePayload,
+  PostSyncValidatePayload,
+  PreSyncExecutePayload,
+  PostSyncExecutePayload,
   PreSyncFanoutPayload,
   PostSyncFanoutPayload,
+  PreSyncRecipientPayload,
   ApiErrorPayload,
   SyncErrorPayload,
+  ApiAuthRejectedPayload,
   RateLimitExceededPayload,
   CorsRejectedPayload,
   CsrfMismatchPayload,
   PreSessionRefreshPayload,
   PostSessionRefreshPayload,
+  SessionCreatedPayload,
+  SessionRevokedPayload,
   OnUploadStartPayload,
   OnUploadCompletePayload,
+  PreAvatarServePayload,
+  PostAvatarServePayload,
+  PreServerStopPayload,
   SyncHookName,
   SyncHookHandler,
   SyncHookPayloads,

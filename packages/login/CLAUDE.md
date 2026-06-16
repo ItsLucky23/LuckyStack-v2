@@ -17,7 +17,7 @@
 - **Password-reset primitives** (`createPasswordResetToken`, `consumePasswordResetToken`, `updatePasswordHash`, `verifyPassword`) plus the framework-mode `sendPasswordResetEmail` orchestrator (requires the optional `@luckystack/email` peer).
 - **Dynamic post-login redirect** resolver registry (per-user / per-tenant / per-provider OAuth landing pages).
 
-OAuth state is stored in Redis under `${projectName}-oauth-state:<provider>:<state>` with TTL `auth.oauthStateTtlSeconds`. Sessions live at `${projectName}-session:<token>`. Active-tokens-per-user set lives at `${projectName}-activeUsers:<userId>`. Password-reset tokens live at `${projectName}-pwreset:<token>`.
+OAuth state is stored in Redis under `${projectName}-oauth-state:<provider>:<state>` with TTL `auth.oauthStateTtlSeconds`. Sessions live at `${projectName}-session:<token>`. Active-tokens-per-user set lives at `${projectName}-activeUsers:<userId>`. Password-reset and email-change tokens are **hashed at rest** (0.2.0): only `sha256(token)` is stored as the Redis key (`${projectName}-pwreset:<sha256(token)>` / `${projectName}-email-change:<sha256(token)>`) via the `@luckystack/core` one-time-token primitive (`issueOneTimeToken` / `consumeOneTimeToken`). The raw token is returned to the caller exactly once for the emailed URL, so a leaked Redis keyspace can't be replayed to mint a reset or confirm an email change.
 
 ---
 
@@ -50,7 +50,7 @@ Do NOT use this package for:
 
 ### Credentials auth (`./src/login.ts`)
 
-- `loginWithCredentials(params)` — Combined login/register dispatcher. Inspects body shape: when `name` and `confirmPassword` are present it registers; otherwise it logs in. Returns `{ status, reason, newToken?, session? }`. Used by the HTTP `/auth/api/credentials` route.
+- `loginWithCredentials(params)` — Combined login/register dispatcher. Inspects body shape: when `name` and `confirmPassword` are present it registers; otherwise it logs in. Returns `{ status, reason, newToken?, session? }`. Used by the HTTP `/auth/api/credentials` route. **M-15:** the password-POLICY check runs ONLY on the register branch — a login accepts any password string and lets the bcrypt compare decide, so an attacker can't lock a victim's account by POSTing policy-violating passwords for their email (the per-account lockout counter only ever sees a genuine `login.wrongPassword`). It also means tightening the policy never locks out existing users with older-but-valid passwords.
 - `loginWithCredentialsCore({ email, password })` — Login-only entry point. Use when you wire a custom auth surface that bypasses the dispatcher's body-shape branching. Dispatches `preLogin` / `postLogin`.
 - `registerWithCredentials({ email, password, name, confirmPassword })` — Register-only entry point. Dispatches `preRegister` / `postRegister`. Returns the freshly-created user (password-sanitized) on success.
 - `loginCallback(pathname, req, res, options?)` — OAuth state-exchange handler. Validates `state`, exchanges `code` for an access token, fetches the user profile, finds-or-creates the user via the adapter, mints a session token, dispatches `postLogin` (+ `postRegister` for new users). Returns `{ token, redirectUrl, userId, provider, isNewUser }` or `false`. Wired to `/auth/callback/<provider>` by `@luckystack/server`.
@@ -101,14 +101,14 @@ Do NOT use this package for:
 
 ### Password reset (`./src/passwordReset.ts`, `./src/forgotPassword.ts`, `./src/passwordPolicy.ts`)
 
-- `createPasswordResetToken(userId)` — Mint a 64-char hex token, store under `${projectName}-pwreset:<token>` with `auth.passwordResetTtlSeconds`.
+- `createPasswordResetToken(userId)` — Mint a 64-char hex token; store `userId` under `${projectName}-pwreset:<sha256(token)>` (hashed at rest, via `@luckystack/core`'s `issueOneTimeToken`) with `auth.passwordResetTtlSeconds`. Returns the RAW token.
 - `consumePasswordResetToken(token)` — One-time-use redemption. Returns the bound `userId` or `null`.
 - `updatePasswordHash(userId, plaintext)` — Validate against the active password policy, bcrypt-hash, write via `getUserAdapter().update`. Throws `PasswordPolicyError` on policy violation.
 - `verifyPassword(plaintext, hash)` — Bcrypt comparison helper.
 - `PasswordPolicyError` — Thrown by `updatePasswordHash`; carries `errorCode` matching the i18n reason keys used by the rest of the login flow.
 - `validatePassword(plaintext)` — Returns `null` when the policy passes, or a reason key when it fails (length, complexity, common-list, custom validator).
 - `sendPasswordResetEmail({ email, brand? })` — Framework-mode orchestrator. Looks up the user (credentials provider only), mints a token, lazy-imports `@luckystack/email`, and sends a transactional reset email. Always resolves "ok" when the email is not found (anti-enumeration). No-op when `auth.forgotPassword !== 'framework'`.
-- `createEmailChangeToken(userId, newEmail)` — Mint a 1-hour one-shot token bound to `userId` + `newEmail`. Stored in Redis at `${projectName}-email-change:<token>` with TTL from `auth.emailChangeTtlSeconds`.
+- `createEmailChangeToken(userId, newEmail)` — Mint a one-shot token bound to `userId` + `newEmail`. Stored in Redis at `${projectName}-email-change:<sha256(token)>` (hashed at rest, via `@luckystack/core`'s `issueOneTimeToken`) with TTL from `auth.emailChangeTtlSeconds`. Returns the RAW token.
 - `consumeEmailChangeToken(token)` — Atomic get + del redemption. Returns `{ userId, newEmail }` on success, `null` on miss / malformed payload / expired entry.
 - `sendEmailChangeConfirmation({ userId, newEmail, userName?, brand? })` — Lazy-imports `@luckystack/email`, renders the confirmation template via `renderEmailLayout`, and sends to the NEW address with `adapterHint: 'transactional'`. Returns `{ ok, reason?, token }` — `token` is the minted email-change token so the caller can build the confirmation URL.
 

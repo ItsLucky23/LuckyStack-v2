@@ -62,8 +62,13 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
 
   const { token: newToken, redirectUrl } = callbackResult;
   if (config.session.basedToken) {
-    const separator = redirectUrl.includes('?') ? '&' : '?';
-    res.writeHead(302, { Location: `${redirectUrl}${separator}token=${newToken}` });
+    //? Deliver the based-token in the URL fragment, never the query string: a
+    //? `#token=` fragment is not sent to the server, not logged, and not leaked
+    //? via the `Referer` header on the next navigation. Drop any pre-existing
+    //? fragment on the redirect target so we never emit a double-`#`.
+    const hashIndex = redirectUrl.indexOf('#');
+    const baseUrl = hashIndex === -1 ? redirectUrl : redirectUrl.slice(0, hashIndex);
+    res.writeHead(302, { Location: `${baseUrl}#token=${newToken}` });
   } else {
     res.setHeader('Set-Cookie', `${sessionCookieName}=${newToken}; ${sessionCookieOptions}`);
     res.writeHead(302, { Location: redirectUrl });

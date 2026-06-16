@@ -52,6 +52,13 @@ const externalDeps = [
   ]),
 ];
 
+//? Source maps are OFF by default: shipping `dist/server.js.map` beside the
+//? bundle leaks the full readable server source (a source-disclosure risk if a
+//? consumer ever wires real dist/-rooted static serving). Opt in for local
+//? debugging with `BUNDLE_SERVER_SOURCEMAP=1`. Mirrors the consumer template
+//? copy (`packages/create-luckystack-app/template/scripts/bundleServer.mjs`).
+const enableSourcemap = process.env.BUNDLE_SERVER_SOURCEMAP === '1';
+
 const run = async () => {
   await build({
     entryPoints: ['server/server.ts'],
@@ -60,7 +67,7 @@ const run = async () => {
     platform: 'node',
     target: 'node22',
     format: 'esm',
-    sourcemap: true,
+    sourcemap: enableSourcemap,
     external: externalDeps,
     logLevel: 'info',
     alias: {

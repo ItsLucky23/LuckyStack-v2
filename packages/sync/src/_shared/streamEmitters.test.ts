@@ -28,6 +28,10 @@ interface IoStub {
 }
 
 let ioInstance: IoStub | null = null;
+//? Stable logger + stream-log toggle so a test can enable stream logging and
+//? assert what `getLogger().debug` was called with (token redaction).
+const loggerDebug = vi.fn();
+let streamLogEnabled = false;
 
 const makeSocket = (): SocketStub => ({ emit: vi.fn() });
 
@@ -54,8 +58,8 @@ const getIo = (): IoStub => {
 
 vi.mock("@luckystack/core", () => ({
   getIoInstance: () => ioInstance,
-  getProjectConfig: () => ({ logging: { stream: false } }),
-  getLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  getProjectConfig: () => ({ logging: { stream: streamLogEnabled } }),
+  getLogger: () => ({ debug: loggerDebug, info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   dispatchHook: vi.fn(),
   socketEventNames: { sync: "sync" },
 }));
@@ -73,6 +77,8 @@ const makeBaseArgs = () => ({
 describe("buildSyncStreamEmitters", () => {
   beforeEach(() => {
     ioInstance = makeIo();
+    streamLogEnabled = false;
+    loggerDebug.mockClear();
   });
 
   describe("buildBroadcastFrame", () => {
@@ -282,6 +288,26 @@ describe("buildSyncStreamEmitters", () => {
       emitStreamToTokens(["token-1"], { text: "hi" });
 
       expect(io.to).not.toHaveBeenCalled();
+    });
+
+    //? N-4 (SYNC-17): raw bearer session tokens are credentials and must be
+    //? redacted before they reach the stream debug log — never logged verbatim.
+    it("redacts the raw session tokens in the stream debug log", () => {
+      streamLogEnabled = true;
+      const { emitStreamToTokens } = buildSyncStreamEmitters(makeBaseArgs());
+
+      emitStreamToTokens(
+        ["abcdefghijklmnopqrstuvwxyz", "session-token-0987654321"],
+        { text: "hi" },
+      );
+
+      expect(loggerDebug).toHaveBeenCalledTimes(1);
+      const [, meta] = loggerDebug.mock.calls[0] as [string, { tokens: string[] }];
+      //? Truncated to the 8-char prefix — the full token is not recoverable.
+      expect(meta.tokens).toEqual(["abcdefgh…", "session-…"]);
+      const logged = JSON.stringify(meta.tokens);
+      expect(logged).not.toContain("abcdefghijklmnop");
+      expect(logged).not.toContain("0987654321");
     });
   });
 });

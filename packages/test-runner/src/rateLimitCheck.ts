@@ -49,8 +49,12 @@ export const runRateLimitCheck = async (input: RateLimitCheckInput): Promise<Con
 
   //? Fire `rateLimit` allowed requests first (drain the bucket), then a final
   //? request that should be blocked. Serial so the server sees a clean order.
+  //? Cancel each drain response body — we only care about the final probe's
+  //? envelope, but an unconsumed undici body holds its socket out of the pool
+  //? until GC, risking pool exhaustion / skewed timings on a large sweep.
   for (let i = 0; i < rateLimit; i += 1) {
-    await send();
+    const drained = await send();
+    if (drained) await tryCatch(() => drained.body?.cancel() ?? Promise.resolve());
   }
 
   const final = await send();

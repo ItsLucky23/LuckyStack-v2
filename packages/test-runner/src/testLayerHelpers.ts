@@ -24,8 +24,18 @@ export const shouldSkip = (endpoint: EndpointDescriptor, skip: string[]): boolea
 /** Whether the endpoint's meta entry declares `auth.login: true`. */
 export const requiresLogin = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): boolean => {
   const meta = apiMetaMap[endpoint.page]?.[endpoint.name]?.[endpoint.version];
-  return meta?.auth.login ?? false;
+  //? `apiMetaMap` is a consumer-generated RUNTIME artifact — the static type
+  //? declares `auth` as required, but a stale/partial entry can be missing it.
+  //? Read defensively so a malformed entry surfaces as `false` (no login) and
+  //? gets handled by the layer's skip path, instead of throwing a TypeError
+  //? outside the per-endpoint tryCatch and aborting the whole layer.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime-defensive read of a generated artifact
+  return meta?.auth?.login ?? false;
 };
+
+/** Whether the meta map carries an entry for this endpoint at all. */
+export const hasMetaEntry = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): boolean =>
+  apiMetaMap[endpoint.page]?.[endpoint.name]?.[endpoint.version] !== undefined;
 
 /**
  * The endpoint's declared numeric rate limit, or `null` when it has none

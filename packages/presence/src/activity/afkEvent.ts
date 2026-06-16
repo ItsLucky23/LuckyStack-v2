@@ -18,10 +18,16 @@ const fireAfkPresence = async (sample: ActivitySample): Promise<void> => {
   //? Route through `informRoomPeers` so roommates receive `{ userId, endTime }`
   //? — NEVER the raw session token — and the pre/postPresenceUpdate hooks fire
   //? with the real userId + roomCodes (resolved from the session).
+  //?
+  //? `time: 0` ⇒ `endTime === now` ("AFK since now"). The idle-AFK path has NO
+  //? scheduled return (the user is already past `afkTimeoutMs` with no reconnect
+  //? window), so emitting `now + afkTimeoutMs` here would mislead clients into a
+  //? "back in ~5:00" countdown. The reconnect-window `endTime` is correct only
+  //? for the tab-switch path, which passes its real grace window separately.
   await informRoomPeers({
     token: sample.token,
     event: socketEventNames.userAfk,
-    extraData: { time: getPresenceConfig().afkTimeoutMs },
+    extraData: { time: 0 },
   });
 };
 

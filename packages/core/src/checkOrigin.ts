@@ -25,7 +25,11 @@ const normalizeOrigin = ({ value, secure }: { value: string; secure: boolean }):
 };
 
 const isLocalhostOrigin = (normalized: string): boolean => {
-  return /^https?:\/\/localhost(:\d+)?$/i.test(normalized);
+  //? `allowLocalhost` covers every loopback spelling a dev frontend uses —
+  //? `localhost`, the IPv4 `127.0.0.1`, and the IPv6 `[::1]` — not just the
+  //? literal hostname (a Vite dev server on `http://127.0.0.1:5173` was
+  //? previously rejected even with the flag on).
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(normalized);
 };
 
 const allowedOrigin = (origin: string): boolean => {
@@ -45,9 +49,14 @@ const allowedOrigin = (origin: string): boolean => {
   //? are typically allowed via `cors.allowLocalhost` or the configured
   //? `allowedOrigins` list anyway.
   const { ip: bindIp, port: bindPort } = getBindAddress();
-  const location = bindPort
+  const rawLocation = bindPort
     ? `http${secure ? 's' : ''}://${bindIp}:${bindPort}`
     : `http${secure ? 's' : ''}://${bindIp}`;
+  //? Normalize the bind address ONCE and reuse it in both branches. Comparing a
+  //? normalized origin against the raw `location` made the same-origin fast-path
+  //? miss for default ports (:80/:443, which the normalizer strips) — it then
+  //? fell through to the resolver (still safe, but the shortcut didn't fire).
+  const location = normalizeOrigin({ value: rawLocation, secure });
   const normalizedOrigin = normalizeOrigin({ value: origin, secure });
 
   if (cors.allowLocalhost && normalizedOrigin && isLocalhostOrigin(normalizedOrigin)) {
@@ -55,15 +64,14 @@ const allowedOrigin = (origin: string): boolean => {
   }
 
   //? Resolver-function mode: defer entirely to the consumer's logic. The
-  //? framework still keeps the same-origin bind address always-allowed.
+  //? framework keeps the normalized same-origin bind address always-allowed.
   if (typeof configured === 'function') {
-    if (normalizedOrigin === location) return true;
+    if (normalizedOrigin && normalizedOrigin === location) return true;
     if (configured(origin)) return true;
     // Fall through to the rejection path below.
   } else {
     const normalizedAllowedOrigins = new Set(
-      [location, ...configured]
-        .map((value) => normalizeOrigin({ value, secure }))
+      [location, ...configured.map((value) => normalizeOrigin({ value, secure }))]
         .filter(Boolean)
     );
 

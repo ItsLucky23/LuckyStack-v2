@@ -13,6 +13,29 @@
 //? type-check against them without depending on the email package — keeping
 //? the email package optional.
 
+/**
+ * A single email attachment (email F2). Adapters (Resend, SMTP/Nodemailer, SES)
+ * thread these into their provider payload. `content` is the raw bytes
+ * (`Buffer`/`Uint8Array`) or a base64 string; provide a `path`/`href` instead
+ * for adapters that fetch externally. Shapes are intentionally permissive so a
+ * single attachment object works across providers — each adapter maps the
+ * fields it supports.
+ */
+export interface EmailAttachment {
+  /** File name shown to the recipient (e.g. `invoice.pdf`). */
+  filename: string;
+  /** Inline bytes or base64 string. Mutually exclusive with `path`/`href`. */
+  content?: Buffer | Uint8Array | string;
+  /** Local file path the adapter reads (when it supports path-based sends). */
+  path?: string;
+  /** Remote URL the adapter fetches (when it supports href-based sends). */
+  href?: string;
+  /** MIME type (e.g. `application/pdf`). Adapter may infer from `filename` if omitted. */
+  contentType?: string;
+  /** `Content-ID` for inline/embedded images referenced by `cid:` in the HTML. */
+  cid?: string;
+}
+
 export interface EmailMessage {
   to: string | string[];
   subject: string;
@@ -22,6 +45,20 @@ export interface EmailMessage {
   replyTo?: string;
   cc?: string | string[];
   bcc?: string | string[];
+  /**
+   * File attachments (email F2). Owned by core (not `@luckystack/email`) so the
+   * type is the single source of truth across the framework and every adapter;
+   * adapters thread these into their provider's attachment payload. Optional —
+   * a message without attachments behaves exactly as before.
+   */
+  attachments?: EmailAttachment[];
+  /**
+   * Custom message headers (email F2) — e.g. `X-Entity-Ref-ID`,
+   * `List-Unsubscribe`, idempotency keys. Adapters merge these over the headers
+   * they set themselves (adapter-reserved headers win to avoid breaking
+   * delivery). Optional.
+   */
+  headers?: Record<string, string>;
 }
 
 export type EmailResult =

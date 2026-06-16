@@ -46,8 +46,9 @@ Call `registerPresenceHooks()` at the very start of your boot — alongside othe
 | Hook | Source file | Fired by | Receives | Use |
 | --- | --- | --- | --- | --- |
 | `prePresenceUpdate` | `hookPayloads.ts` | `informRoomPeers` (broadcast.ts) + default AFK event | `{ token, userId, kind: 'afk' \| 'back', roomCodes }` | Audit / metrics before peer iteration. |
-| `postPresenceUpdate` | `hookPayloads.ts` | same as pre | pre payload + `recipientCount: number` | Audit / metrics after peer iteration. `recipientCount: -1` from the default AFK event (room-level fan-out). |
+| `postPresenceUpdate` | `hookPayloads.ts` | same as pre | pre payload + `recipientCount: number` | Audit / metrics after peer iteration. `recipientCount` is the real per-peer emit count (including the default AFK event, which now fans out via `informRoomPeers`). |
 | `postSocketReconnect` | `hookPayloads.ts` | `socketConnected` when a timer was active | `{ token, userId: string \| null, roomCodes: string[] }` | Rehydrate client state, replay missed events, refresh caches. |
+| `postDisconnectGraceExpired` | `hookPayloads.ts` | `socketDisconnecting` grace timer, on expiry | `{ token, userId, roomCodes, reason, sessionDeleted }` | Mark offline in DB, persist final state, audit the departure — the only "user truly gone" seam. |
 
 Hooks consumed by presence:
 
@@ -108,10 +109,12 @@ T+0..5m  app emits dispatchActivitySample(...) on heartbeats
 T+5m     dispatchActivitySample(...) — user has been idle 5+ minutes
          ├── default 'afk' event trigger -> true
          ├── refractoryMs check passes (no prior fire)
-         ├── prePresenceUpdate({ token, userId: null, kind: 'afk', roomCodes: [] })
-         ├── for each room containing socketId:
-         │     io.to(room).emit(socketEventNames.userAfk, { token })
-         └── postPresenceUpdate({ token, userId: null, kind: 'afk', roomCodes: [], recipientCount: -1 })
+         ├── onTrigger -> informRoomPeers({ token, event: userAfk, extraData: { time: afkTimeoutMs } })
+         │     ├── readSession(token) -> { id: userId, roomCodes }
+         │     ├── prePresenceUpdate({ token, userId, kind: 'afk', roomCodes })  (veto seam)
+         │     ├── for each peer socket in those rooms (adapter-aware fetchSockets):
+         │     │     peerSocket.emit(socketEventNames.userAfk, { userId, endTime: now + afkTimeoutMs })
+         │     └── postPresenceUpdate({ token, userId, kind: 'afk', roomCodes, recipientCount: N })
 
 T+5m+60s next dispatchActivitySample:
          ├── trigger -> true, but refractoryMs (60_000) not elapsed

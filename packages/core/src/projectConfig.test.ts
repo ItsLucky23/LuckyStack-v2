@@ -49,6 +49,17 @@ describe('registerProjectConfig + getProjectConfig', () => {
     expect(DEFAULT_PROJECT_CONFIG.auth.bcryptRounds).toBe(10);
     expect(DEFAULT_PROJECT_CONFIG.offlineQueue.dropPolicy).toBe('drop-oldest');
   });
+
+  it('ships the 0.2.0 secure sync receiver-auth defaults (fail-closed)', () => {
+    //? BREAKING (0.2.0): both flip from the legacy permissive values so a client
+    //? can neither broadcast cluster-wide nor target an unjoined room by default.
+    expect(DEFAULT_PROJECT_CONFIG.sync.allowClientReceiverAll).toBe(false);
+    expect(DEFAULT_PROJECT_CONFIG.sync.requireRoomMembership).toBe(true);
+  });
+
+  it('ships the 0.2.0 secure /_health hash default (hmac keyed on @bootUuid)', () => {
+    expect(DEFAULT_PROJECT_CONFIG.http.healthHash).toEqual({ mode: 'hmac', salt: '@bootUuid' });
+  });
 });
 
 describe('getProjectName', () => {

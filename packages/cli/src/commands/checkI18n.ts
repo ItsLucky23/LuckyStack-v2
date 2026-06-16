@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildScanReports, collectSourceFiles, groupLocations, matchAll, walkDir } from '../lib/scan';
+import type { SourceFile } from '../lib/scan';
 import type { ConsumerProject } from '../lib/project';
 
 //? Translation keys are dotted (`common.connectionError`, `sync.invalidName`).
@@ -44,28 +45,45 @@ const findLocaleFiles = (root: string): string[] => {
   return out.toSorted();
 };
 
-export const checkI18n = (project: ConsumerProject): void => {
-  const files = collectSourceFiles(project.root);
+//? Static-literal translation keys referenced in code, with where each was seen.
+//? Harvests literal `key: '...'` (notify/translate/upsert call sites) PLUS every
+//? literal `errorCode: '...'` (server error codes are hardcoded — this covers the
+//? dynamic `notify.error({ key: errorCode })` path), filtered to dotted keys via
+//? `isTranslationKey`. Returns the per-key location map (drives the MISSING report)
+//? plus the bare key set (drives the UNUSED report). Pure over `files`.
+export interface UsedKeys {
+  /** `dotted key -> ["rel:line", ...]` for every literal hit. */
+  locations: Map<string, string[]>;
+  /** The set of dotted keys (== `locations` keys). */
+  keys: Set<string>;
+}
 
-  //? Used keys: literal `key: '...'` (notify/translate/upsert) + every literal
-  //? `errorCode: '...'` (the dynamic-key source). Filtered to dotted keys.
+export const harvestUsedKeys = (files: SourceFile[]): UsedKeys => {
   const keyHits = matchAll(files, /\bkey:\s*['"]([^'"]+)['"]/);
   const errorCodeHits = matchAll(files, /\berrorCode:\s*['"]([^'"]+)['"]/);
-  const usedLocations = groupLocations([...keyHits, ...errorCodeHits].filter((h) => isTranslationKey(h.value)));
-  const usedKeys = new Set(usedLocations.keys());
+  const locations = groupLocations([...keyHits, ...errorCodeHits].filter((h) => isTranslationKey(h.value)));
+  return { locations, keys: new Set(locations.keys()) };
+};
 
-  //? Dynamic call sites we can't resolve: `key:` followed by an identifier.
+//? Exclude literals + TS type annotations (`key: string` in a function param /
+//? interface is not a translation call) so the manual-review note stays signal.
+const NON_KEY_VALUES = new Set(['true', 'false', 'null', 'undefined', 'string', 'number', 'boolean', 'unknown', 'any', 'void', 'object', 'never']);
+
+//? Dynamic call sites we can't statically resolve: `key:` followed by an
+//? identifier (not a quoted literal). These are listed for manual review — a key
+//? might be live via one of them. TS type annotations are filtered out. Pure.
+export const collectDynamicSites = (files: SourceFile[]): { value: string; file: string; line: number }[] => {
   const dynamicHits = matchAll(files, /\bkey:\s*([A-Za-z_$][A-Za-z0-9_$.]*)\s*[,})]/);
-  //? Exclude literals + TS type annotations (`key: string` in a function param /
-  //? interface is not a translation call) so the manual-review note stays signal.
-  const NON_KEY_VALUES = new Set(['true', 'false', 'null', 'undefined', 'string', 'number', 'boolean', 'unknown', 'any', 'void', 'object', 'never']);
-  const dynamicSites = dynamicHits.filter((h) => !NON_KEY_VALUES.has(h.value));
+  return dynamicHits.filter((h) => !NON_KEY_VALUES.has(h.value));
+};
 
-  //? Locale files → dotted key sets per file.
-  const localePaths = findLocaleFiles(project.root);
+//? Every `_locales/*.json` under `root` → dotted-key set, keyed by its posix
+//? rel-path. A file that fails to parse is warned about and skipped (so one bad
+//? locale never crashes the scan), matching the original inline behavior.
+export const loadLocaleKeys = (root: string): Map<string, Set<string>> => {
   const localeKeys = new Map<string, Set<string>>(); // rel -> keys
-  for (const abs of localePaths) {
-    const rel = path.relative(project.root, abs).split(path.sep).join('/');
+  for (const abs of findLocaleFiles(root)) {
+    const rel = path.relative(root, abs).split(path.sep).join('/');
     const keys = new Set<string>();
     try {
       flattenKeys(JSON.parse(fs.readFileSync(abs, 'utf8')), '', keys);
@@ -75,6 +93,18 @@ export const checkI18n = (project: ConsumerProject): void => {
     }
     localeKeys.set(rel, keys);
   }
+  return localeKeys;
+};
+
+export const checkI18n = (project: ConsumerProject): void => {
+  const files = collectSourceFiles(project.root);
+
+  //? Used keys (literal `key:`/`errorCode:`) + unresolved dynamic `key:<var>` sites.
+  const { locations: usedLocations, keys: usedKeys } = harvestUsedKeys(files);
+  const dynamicSites = collectDynamicSites(files);
+
+  //? Locale files → dotted key sets per file.
+  const localeKeys = loadLocaleKeys(project.root);
   const localeRels = [...localeKeys.keys()];
 
   // ---- Command C: unused translations (per locale file) ----
@@ -99,8 +129,11 @@ export const checkI18n = (project: ConsumerProject): void => {
       `# UNUSED TRANSLATIONS — ${String(count)} found across ${String(localeRels.length)} locale file(s)\n` +
       `# Present in a locale JSON but referenced nowhere in code.\n` +
       `# Used-key set = literal { key: '...' } + errorCode: '...' (dotted) repo-wide.\n` +
+      `# Heuristic limit: keys reached via a variable/helper (e.g. t('foo.bar'),\n` +
+      `# positional keys) are NOT recognized and may be listed here in error.\n` +
       dynamicNote +
-      `# Feed this to an LLM: delete each truly-unused key from the locale file(s).\n\n`,
+      `# Feed this to an LLM: before deleting each key, full-text-search the repo\n` +
+      `# for its dotted name; delete only keys with zero matches.\n\n`,
     emptyText: '(no unused translations)\n',
   });
 

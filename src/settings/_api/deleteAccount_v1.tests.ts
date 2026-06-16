@@ -98,4 +98,30 @@ export const customTests: CustomTestCase[] = [
       }
     },
   },
+  {
+    //? Pins H-6: the route must clear the active-users set via the framework
+    //? key builder (`activeUsersKeyFor`), NOT a hand-built `${PROJECT_NAME}-…`
+    //? literal. Reading back through the SAME builder the framework writes with
+    //? must return an empty set after deletion — a hardcoded-key regression
+    //? would leave a stale set here.
+    name: 'active-users set is cleared via the framework key builder after deletion',
+    run: async (ctx: TestContext) => {
+      const password = 'CorrectPassword123!';
+      const { userId } = await seedCredentialsUser(ctx, password);
+      const { activeUsersKeyFor } = await import('@luckystack/login');
+      const { redis } = await import('@luckystack/core');
+
+      const before = await redis.smembers(activeUsersKeyFor(userId));
+      ctx.expect.ok(before.length > 0, 'precondition: an active session token should be tracked');
+
+      const result = await ctx.callApi<unknown, DeleteAccountResponse>({
+        confirmation: 'DELETE',
+        password,
+      });
+      ctx.expect.eq(result.status, 'success');
+
+      const after = await redis.smembers(activeUsersKeyFor(userId));
+      ctx.expect.eq(after.length, 0, 'active-users set (framework key) must be empty after deletion');
+    },
+  },
 ];

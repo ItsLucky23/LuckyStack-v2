@@ -39,6 +39,19 @@ export interface UserAdapter {
   findById: (id: string) => Promise<UserRecord | null>;
   create: (input: UserAdapterCreateInput) => Promise<UserRecord>;
   update: (id: string, patch: Partial<UserRecord>) => Promise<UserRecord>;
+  /**
+   * Hard-delete a user. Account-deletion flows (`deleteAccount_v1`) call this
+   * instead of reaching past the adapter to `prisma.user.delete`, so a custom
+   * adapter / non-Prisma store / soft-delete strategy stays in control. To
+   * implement a soft delete, ignore the hard delete here and instead expose it
+   * through `update({ deletedAt: new Date() })` from your route.
+   *
+   * Optional so existing custom adapters keep compiling; the default Prisma
+   * adapter implements it. Consumers calling account deletion against a custom
+   * adapter that omits `delete` get a clear "adapter does not support delete"
+   * failure rather than a silent Prisma bypass.
+   */
+  delete?: (id: string) => Promise<void>;
 }
 
 let registeredAdapter: UserAdapter | null = null;
@@ -67,6 +80,7 @@ interface PrismaUserDelegate {
   findUnique: (args: { where: { id: string } }) => Promise<UserRecord | null>;
   create: (args: { data: Record<string, unknown> }) => Promise<UserRecord>;
   update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<UserRecord>;
+  delete: (args: { where: { id: string } }) => Promise<UserRecord>;
 }
 
 //? Bridge between Prisma's generated client surface and the adapter contract.
@@ -99,6 +113,9 @@ export const defaultPrismaUserAdapter = (): UserAdapter => {
       }),
     update: async (id, patch) =>
       getPrismaUser().update({ where: { id }, data: patch }),
+    delete: async (id) => {
+      await getPrismaUser().delete({ where: { id } });
+    },
   };
 };
 

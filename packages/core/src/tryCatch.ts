@@ -1,6 +1,6 @@
 import { captureException } from './sentrySetup';
 
-export default async function tryCatch<T, P>(
+export default async function tryCatch<T, P = void>(
   func: (values: P) => Promise<T> | T,
   params?: P,
   context?: Record<string, unknown>

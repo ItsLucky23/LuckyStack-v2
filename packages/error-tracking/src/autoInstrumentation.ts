@@ -17,6 +17,7 @@
 
 import {
   registerHook,
+  setCurrentErrorTrackerIdentity,
   type PreApiExecutePayload,
   type PostApiExecutePayload,
   type PreApiValidatePayload,
@@ -65,6 +66,19 @@ const createSentryUserContext = (
       }
     : null;
 
+//? ET-02 identity propagation. PRIMARY: write the per-request AsyncLocalStorage
+//? identity box (`setCurrentErrorTrackerIdentity`) — adapters read this at capture
+//? time, isolated per concurrent request. FALLBACK: keep mutating the legacy
+//? process-global Sentry scope (`setSentryUser`) so the legacy single-Sentry path
+//? and any background/non-request capture (no active ALS box) still gets a user.
+//? The request handlers also set the ALS box directly after `readSession`; this
+//? hook write is idempotent with that and remains the canonical mapping point.
+const propagateIdentity = (user: HookUser): void => {
+  const context = createSentryUserContext(user);
+  setCurrentErrorTrackerIdentity(context);
+  setSentryUser(context);
+};
+
 let installed = false;
 
 /**
@@ -82,7 +96,7 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
   //? identity here so handlers further down the pipeline (rate-limit + audit)
   //? already see the Sentry user context.
   registerHook('preApiValidate', (payload: PreApiValidatePayload): void => {
-    setSentryUser(createSentryUserContext(payload.user));
+    propagateIdentity(payload.user);
   });
 
   //? Open a performance span around the handler. WeakMap keyed on the payload
@@ -101,7 +115,7 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
   //? Sync identity propagation. `preSyncAuthorize` is the first sync hook
   //? that has the resolved session attached.
   registerHook('preSyncAuthorize', (payload: PreSyncAuthorizePayload): void => {
-    setSentryUser(createSentryUserContext(payload.user));
+    propagateIdentity(payload.user);
   });
 
   //? Span lifecycle for sync. Socket fanout currently has no span op tag in
@@ -123,6 +137,7 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
   //? in the error-tracker's context (until `preApiValidate` runs and resets
   //? it). One round-trip earlier is worth the small type-only import cost.
   registerHook('postLogout', (_payload: PostLogoutPayload): void => {
+    setCurrentErrorTrackerIdentity(null);
     setSentryUser(null);
   });
 };

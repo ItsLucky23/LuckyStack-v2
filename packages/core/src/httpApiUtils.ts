@@ -9,6 +9,17 @@
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
 /**
+ * Single source of truth for the GET-prefix naming heuristic
+ * (`get` / `fetch` / `list`). Used by both `inferHttpMethod` here and the
+ * client transport's `isGetMethod` fallback in `apiRequest.ts`, so the two
+ * prefix heuristics can't drift apart. Expects an already-lowercased leaf name.
+ */
+export const isGetMethodName = (methodNameLower: string): boolean =>
+  methodNameLower.startsWith('get') ||
+  methodNameLower.startsWith('fetch') ||
+  methodNameLower.startsWith('list');
+
+/**
  * Infer the HTTP method from an API name based on common naming conventions.
  * 
  * - Names starting with "get" → GET
@@ -33,7 +44,7 @@ export const inferHttpMethod = (apiName: string): HttpMethod => {
     ? (nameParts.at(-2) ?? '').toLowerCase()
     : lastPart;
 
-  if (methodName.startsWith('get') || methodName.startsWith('fetch') || methodName.startsWith('list')) {
+  if (isGetMethodName(methodName)) {
     return 'GET';
   }
 
@@ -62,14 +73,20 @@ export const getEffectiveHttpMethod = (
 
 /**
  * Check if an HTTP method is valid for an API.
- * 
+ *
  * @param requestMethod - The method from the HTTP request
  * @param allowedMethod - The method the API accepts
- * @returns true if the method matches or if it's a preflight OPTIONS request
+ * @returns true only when the method matches the route's allowed method.
+ *
+ * NOTE: `OPTIONS` is intentionally NOT treated as allowed here. A custom-route
+ * author wiring this into their dispatch must answer CORS preflights BEFORE the
+ * route check — letting `OPTIONS` through would execute the handler on a request
+ * the CSRF middleware treats as non-state-changing (CSRF-exempt), opening a
+ * bypass on method-locked routes.
  */
 export const isMethodAllowed = (
   requestMethod: string,
   allowedMethod: HttpMethod
 ): boolean => {
-  return requestMethod === allowedMethod || requestMethod === 'OPTIONS';
+  return requestMethod === allowedMethod;
 };

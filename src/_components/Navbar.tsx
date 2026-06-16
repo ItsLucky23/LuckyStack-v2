@@ -217,7 +217,7 @@ export default function Navbar({ items = DEFAULT_ITEMS }: NavbarProps = {}) {
         role="button"
         tabIndex={-1}
         aria-hidden={!isOpen}
-        className={`md:hidden fixed inset-0 z-10 bg-black transition-opacity duration-300
+        className={`md:hidden fixed inset-0 z-10 bg-overlay transition-opacity duration-300
           ${isOpen ? 'opacity-60' : 'opacity-0 pointer-events-none'}`}
         onClick={() => { setState('folded'); }}
         onKeyDown={(e) => { if (e.key === 'Escape') setState('folded'); }}

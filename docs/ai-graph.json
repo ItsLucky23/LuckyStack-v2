@@ -4,8 +4,8 @@
   "counts": {
     "nodes": 84,
     "edges": 49,
-    "symbols": 120,
-    "callEdges": 27
+    "symbols": 121,
+    "callEdges": 28
   },
   "nodes": [
     {
@@ -1393,6 +1393,12 @@
       "kind": "module"
     },
     {
+      "id": "settings/_api/deleteAccount_v1.tests.ts::activeUsersKeyFor",
+      "file": "settings/_api/deleteAccount_v1.tests.ts",
+      "name": "activeUsersKeyFor",
+      "kind": "fn"
+    },
+    {
       "id": "settings/_api/deleteAccount_v1.tests.ts::getSession",
       "file": "settings/_api/deleteAccount_v1.tests.ts",
       "name": "getSession",
@@ -1696,6 +1702,10 @@
     },
     {
       "from": "settings/_api/deleteAccount_v1.tests.ts::run",
+      "to": "settings/_api/deleteAccount_v1.tests.ts::activeUsersKeyFor"
+    },
+    {
+      "from": "settings/_api/deleteAccount_v1.tests.ts::run",
       "to": "settings/_api/deleteAccount_v1.tests.ts::getSession"
     },
     {
@@ -1789,6 +1799,9 @@
     ],
     "settings/_api/confirmEmailChange_v1.tests.ts::uniqueEmail": [
       "settings/_api/confirmEmailChange_v1.tests.ts::run"
+    ],
+    "settings/_api/deleteAccount_v1.tests.ts::activeUsersKeyFor": [
+      "settings/_api/deleteAccount_v1.tests.ts::run"
     ],
     "settings/_api/deleteAccount_v1.tests.ts::getSession": [
       "settings/_api/deleteAccount_v1.tests.ts::run"

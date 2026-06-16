@@ -29,6 +29,8 @@ import {
 | `reconnectAttempt` | `number \| undefined` | no | Retry counter. Only meaningful while `status === 'RECONNECTING'`. The default renderer appends `(attempt N)`. |
 | `label` | `string \| undefined` | no | Pre-translated prefix, e.g. `"Socket status:"`. Rendered verbatim before the status text. |
 | `formatStatus` | `(status, reconnectAttempt) => string` | no (strongly recommended) | Custom renderer. Without it, the raw `SOCKETSTATUS` enum value is rendered as English — fine for dev, ugly for prod. Wire your i18n translator here. |
+| `position` | `'top-left' \| 'top-right' \| 'bottom-left' \| 'bottom-right'` | no | Corner to anchor the floating badge to. Defaults to `'top-right'`. Use when the default corner collides with app chrome. |
+| `className` | `string \| undefined` | no | Extra classes appended AFTER the defaults (so they win on conflict) — override size, shape, `z-index`, or make it clickable (`pointer-events-auto`). |
 
 ### Render branches
 
@@ -87,7 +89,7 @@ export default function DashboardChrome({ children }: { children: React.ReactNod
 
 Notes:
 
-- The component must be rendered inside a relatively-positioned parent. The Tailwind class is `absolute top-2 right-2`; without a positioned ancestor the badge anchors to the body.
+- The component must be rendered inside a relatively-positioned parent. The Tailwind class is `absolute` + the corner from `position` (default `top-2 right-2`); without a positioned ancestor the badge anchors to the body.
 - `pointer-events-none` is set so the badge never intercepts clicks. Hovering and clicking through to UI underneath works.
 - `z-50` keeps it above page-level modals but below `@luckystack/core` overlays that use `z-[51]`.
 
@@ -105,7 +107,7 @@ function CustomIndicator(props: SocketStatusIndicatorProps) {
 }
 ```
 
-If you need to change the actual tint tokens, copy the component into your project and adjust `STATUS_TINT`. The source is ~50 lines (`packages/presence/src/client/SocketStatusIndicator.tsx`).
+For placement or shape, prefer the `position` / `className` props over forking. If you need to change the actual tint tokens, copy the component into your project and adjust `STATUS_TINT`. The source is ~60 lines (`packages/presence/src/client/SocketStatusIndicator.tsx`).
 
 ### Config gate
 
@@ -131,14 +133,34 @@ import LocationProvider from '@luckystack/presence/client';
 import { LocationProvider } from '@luckystack/presence/client';
 ```
 
+### Props
+
+| Prop | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `searchParamFilter` | `string[] \| ((key, value) => boolean) \| undefined` | no | Which query-string keys may be forwarded. Omitted/empty = **send no search params** (the secure default). Pass an allowlist array, or a predicate for finer control. |
+
 ### Behavior
 
 1. Renders `<Outlet />` from `react-router-dom`. It is a transparent wrapper — mount it inside the route tree wherever you want path-change tracking to start.
 2. Listens to `useLocation().pathname`. On every change:
    - If `getProjectConfig().locationProviderEnabled === false`, returns immediately. No emit.
-   - Otherwise builds a `searchParams: Record<string, string>` from `globalThis.location.search`.
+   - Builds `searchParams` from `globalThis.location.search` **filtered by `searchParamFilter`** — by default this is empty (no query keys forwarded).
    - Awaits `waitForSocket()` (from `@luckystack/core/client`). If the socket never connects, returns.
    - Emits `socket.emit(socketEventNames.updateLocation, { pathName, searchParams })`.
+
+### Security: query strings are NOT forwarded by default
+
+URLs routinely carry secrets — password-reset tokens, OAuth `code`/`state`, invite codes. The server **persists** `searchParams` on the session and may fan it out to peers, so `LocationProvider` sends **no** query params unless you opt specific keys in via `searchParamFilter`. Only allowlist keys you know are non-sensitive:
+
+```tsx
+// forward just the harmless `tab` + `view` keys
+<LocationProvider searchParamFilter={['tab', 'view']} />
+
+// or a predicate
+<LocationProvider searchParamFilter={(key) => key.startsWith('ui_')} />
+```
+
+Never blanket-forward the whole query string.
 
 The server-side handler (in `@luckystack/server`'s `loadSocket.ts`) updates the session's `location` field and dispatches `onLocationUpdate`. When `activityBroadcasterEnabled` is also true, it calls `socketLeaveRoom` first to refresh peer-room state.
 

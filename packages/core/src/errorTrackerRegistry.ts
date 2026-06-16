@@ -8,7 +8,21 @@
 //? every event fans out to all of them. Per-adapter errors are swallowed
 //? so one buggy tracker can't break the chain.
 
+import * as nodeAsyncHooks from 'node:async_hooks';
+import { sanitizeForLog } from './redactedLogKeys';
+import { getLogger } from './loggerRegistry';
+
 export type ErrorTrackerContext = Record<string, unknown>;
+
+//? SYNC-17 defense-in-depth: scrub registered redacted keys (tokens, passwords,
+//? auth/cookie headers) from the context object before it fans out to any
+//? adapter, so a raw token nested in a capture context never reaches Sentry /
+//? Datadog / PostHog breadcrumbs. Returns the original reference when there is
+//? nothing to sanitize (no context) to avoid needless allocation on the hot path.
+const sanitizeContext = (context?: ErrorTrackerContext): ErrorTrackerContext | undefined => {
+  if (!context) return context;
+  return sanitizeForLog(context) as ErrorTrackerContext;
+};
 
 export interface ErrorTrackerUser {
   id?: string;
@@ -45,10 +59,110 @@ export interface ErrorTracker {
   startSpan?: <T>(name: string, op: string, fn: () => T) => T;
   recordMetric?: (name: string, value: number, tags?: Record<string, string>) => void;
   beforeSend?: (event: ErrorTrackerEvent) => ErrorTrackerEvent | null;
+  /**
+   * Optional flush lifecycle hook (error-tracking ET batch). Called by
+   * {@link flushErrorTrackers} on graceful shutdown so a buffered adapter
+   * (PostHog batch, Sentry transport) can drain in-flight events before exit.
+   * Returns a promise that resolves when the adapter has flushed.
+   */
+  flush?: () => Promise<void>;
 }
+
+//? ET-02 fix seam: per-event identity carried in AsyncLocalStorage instead of a
+//? process-global mutable `currentDistinctId`. The framework's API + sync request
+//? handlers open an identity SCOPE at request entry (`runWithErrorTrackerIdentityScope`)
+//? — BEFORE the first await that could interleave with another concurrent request —
+//? then write the resolved session into it via `setCurrentErrorTrackerIdentity(user)`
+//? once `readSession` resolves. Adapters read `getCurrentErrorTrackerIdentity()` at
+//? capture time, so two concurrent requests with different users can't cross-attribute
+//? events. Lives in core so the registry (and any adapter) can read it without a
+//? back-dependency on error-tracking.
+//?
+//? The store holds a MUTABLE box (not the user directly) so the identity can be set
+//? AFTER the scope is entered: AsyncLocalStorage propagates the same box reference to
+//? every async child of the scope, and each request gets its own box — so mutating
+//? `box.user` post-`await` is visible to that request's captures only, never another's.
+interface IdentityBox {
+  user: ErrorTrackerUser | null;
+}
+
+//? BROWSER-SAFE LAZY ALS: this registry is reachable from the client bundle, but
+//? `node:async_hooks` only exists on the server — vite externalizes it and THROWS
+//? on any property access in the browser. So we never construct/touch
+//? AsyncLocalStorage at module-eval; we resolve it lazily behind a server guard
+//? (`typeof window === 'undefined'`). In the browser the store is null and every
+//? identity helper degrades to a no-op / null (the client never needs per-request
+//? identity). On the server, behaviour is identical to a top-level store (ET-02).
+type IdentityStore = nodeAsyncHooks.AsyncLocalStorage<IdentityBox>;
+let resolvedIdentityStore: IdentityStore | null | undefined;
+const getIdentityStore = (): IdentityStore | null => {
+  if (resolvedIdentityStore !== undefined) return resolvedIdentityStore;
+  resolvedIdentityStore =
+    typeof window === 'undefined' ? new nodeAsyncHooks.AsyncLocalStorage<IdentityBox>() : null;
+  return resolvedIdentityStore;
+};
+
+/**
+ * Open a per-request error-tracker identity scope and run `fn` inside it. Call at
+ * request ENTRY (before any await that could interleave with another request); the
+ * identity starts null and is filled in later via {@link setCurrentErrorTrackerIdentity}
+ * once the session is known. Each invocation gets an isolated box (ET-02).
+ */
+export const runWithErrorTrackerIdentityScope = <T>(fn: () => T): T => {
+  const store = getIdentityStore();
+  return store ? store.run({ user: null }, fn) : fn();
+};
+
+/**
+ * Run `fn` with `user` bound as the ambient error-tracker identity (ET-02). Convenience
+ * wrapper that opens a scope and immediately sets the identity — used where the user is
+ * already known up front (and by the adapter regression tests).
+ */
+export const runWithErrorTrackerIdentity = <T>(user: ErrorTrackerUser | null, fn: () => T): T => {
+  const store = getIdentityStore();
+  return store ? store.run({ user }, fn) : fn();
+};
+
+/**
+ * Write `user` into the active identity box opened by {@link runWithErrorTrackerIdentityScope}
+ * / {@link runWithErrorTrackerIdentity}. No-op when called outside any scope (a background /
+ * non-request capture has no per-request box; adapters fall back to their own global).
+ */
+export const setCurrentErrorTrackerIdentity = (user: ErrorTrackerUser | null): void => {
+  const box = getIdentityStore()?.getStore();
+  if (box) box.user = user;
+};
+
+/** Read the ambient per-event identity for the active request scope, if any. */
+export const getCurrentErrorTrackerIdentity = (): ErrorTrackerUser | null =>
+  getIdentityStore()?.getStore()?.user ?? null;
+
+//? Pre-capture filter (error-tracking ET batch). A registered filter runs on
+//? EVERY event just before fan-out; returning `false` DROPS the event entirely
+//? (e.g. suppress known-noisy errors, sample, or honour a per-event opt-out).
+//? Distinct from a per-adapter `beforeSend` (which transforms a single adapter's
+//? payload) — this gates the whole fan-out. Last-write-wins; `null` clears it.
+export type PreCaptureFilter = (event: ErrorTrackerEvent) => boolean;
+let preCaptureFilter: PreCaptureFilter | null = null;
+
+export const registerPreCaptureFilter = (filter: PreCaptureFilter | null): void => {
+  preCaptureFilter = filter;
+};
+
+const passesPreCaptureFilter = (kind: 'exception' | 'message', payload: Record<string, unknown>): boolean => {
+  if (!preCaptureFilter) return true;
+  try {
+    return preCaptureFilter({ forwarded: true, kind, payload });
+  } catch {
+    //? A throwing filter must not swallow telemetry — fail OPEN (forward).
+    return true;
+  }
+};
 
 let activeTrackers: ErrorTracker[] = [];
 
+//? REPLACE semantics — last-write-wins (ET-24 confirmed standard). Use
+//? `appendErrorTracker` when you need accumulate-not-replace (ET-05).
 export const registerErrorTracker = (tracker: ErrorTracker): void => {
   activeTrackers = [tracker];
 };
@@ -57,17 +171,53 @@ export const registerErrorTrackers = (trackers: ErrorTracker[]): void => {
   activeTrackers = [...trackers];
 };
 
+/**
+ * APPEND primitive (ET-05): add a tracker WITHOUT clobbering already-registered
+ * ones. Fixes the async-PostHog-vs-consumer-overlay race where the loser of
+ * `registerErrorTracker`'s replace silently vanished. De-duplicates by `name`
+ * (re-appending the same adapter name replaces that one entry in place) so a
+ * lazy adapter that registers a proxy then the real client doesn't double-fire.
+ */
+export const appendErrorTracker = (tracker: ErrorTracker): void => {
+  const withoutSameName = activeTrackers.filter((t) => t.name !== tracker.name);
+  activeTrackers = [...withoutSameName, tracker];
+};
+
 export const getActiveErrorTrackers = (): ErrorTracker[] => activeTrackers;
+
+/**
+ * Flush lifecycle (error-tracking ET batch): drain every adapter that exposes a
+ * `flush()` before shutdown. Per-adapter failures are swallowed + logged so one
+ * stuck adapter can't block graceful shutdown. Safe to call when no adapter has
+ * `flush`.
+ */
+export const flushErrorTrackers = async (): Promise<void> => {
+  await Promise.all(
+    activeTrackers.map(async (tracker) => {
+      if (!tracker.flush) return;
+      try {
+        await tracker.flush();
+      } catch {
+        // Swallow — a failing flush must not block shutdown.
+      }
+    }),
+  );
+};
 
 export const captureExceptionAcrossTrackers = (
   error: unknown,
   context?: ErrorTrackerContext,
 ): void => {
+  const safeContext = sanitizeContext(context);
+  if (!passesPreCaptureFilter('exception', safeContext ?? {})) return;
   for (const tracker of activeTrackers) {
     try {
-      tracker.captureException(error, context);
-    } catch {
-      // Swallow — one buggy tracker must not break the chain.
+      tracker.captureException(error, safeContext);
+    } catch (trackerError) {
+      //? Fan-out error logging (error-tracking ET batch): a buggy tracker must
+      //? not break the chain, but its failure was previously invisible. Log it
+      //? (best-effort) so a misbehaving adapter is diagnosable.
+      logTrackerFailure(tracker.name, 'captureException', trackerError);
     }
   }
 };
@@ -77,12 +227,25 @@ export const captureMessageAcrossTrackers = (
   level: 'info' | 'warning' | 'error' | 'fatal',
   context?: ErrorTrackerContext,
 ): void => {
+  const safeContext = sanitizeContext(context);
+  if (!passesPreCaptureFilter('message', safeContext ?? {})) return;
   for (const tracker of activeTrackers) {
     try {
-      tracker.captureMessage(message, level, context);
-    } catch {
-      // Swallow.
+      tracker.captureMessage(message, level, safeContext);
+    } catch (trackerError) {
+      logTrackerFailure(tracker.name, 'captureMessage', trackerError);
     }
+  }
+};
+
+//? Best-effort fan-out failure logger. Wrapped in its own try/catch because the
+//? logger itself could throw on a broken sink, and a capture path must never
+//? throw.
+const logTrackerFailure = (trackerName: string, op: string, error: unknown): void => {
+  try {
+    getLogger().warn(`errorTracker: "${trackerName}" threw in ${op}`, { error });
+  } catch {
+    // Last-resort swallow.
   }
 };
 
@@ -120,4 +283,33 @@ export const startSpanAcrossTrackers = <T>(name: string, op: string, fn: () => T
   const first = activeTrackers.find((t) => t.startSpan);
   if (!first?.startSpan) return fn();
   return first.startSpan(name, op, fn);
+};
+
+/**
+ * Handle-style span (error-tracking ET batch): for callers that can't wrap the
+ * measured work in a single synchronous `fn` (streaming, cross-await spans).
+ * Returns a handle whose `finish()` resolves the span's duration. The default
+ * implementation is a lightweight wall-clock timer (works with any backend);
+ * an adapter can supply a richer span via the existing `startSpan` callback
+ * form when it needs native instrumentation. `finish()` is idempotent.
+ */
+export interface SpanHandle {
+  /** Stop the span; safe to call more than once (subsequent calls are no-ops). */
+  finish: () => void;
+  /** Milliseconds elapsed at the moment `finish()` first ran (0 before). */
+  readonly durationMs: number;
+}
+
+export const startSpanHandle = (name: string, op: string): SpanHandle => {
+  const startedAt = Date.now();
+  let finishedAt: number | null = null;
+  recordMetricAcrossTrackers(`span.start.${op}`, 1, { name });
+  return {
+    finish: () => {
+      finishedAt ??= Date.now();
+    },
+    get durationMs() {
+      return finishedAt === null ? 0 : finishedAt - startedAt;
+    },
+  };
 };

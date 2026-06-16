@@ -11,6 +11,8 @@
 //? Registry is keyed by event name. Re-registering the same name replaces
 //? the previous entry (last-write-wins).
 
+import { getLogger, tryCatch } from '@luckystack/core';
+
 export interface ActivitySample {
   /** Socket id reporting the activity. */
   socketId: string;
@@ -59,6 +61,20 @@ export const unregisterActivityEvent = (name: string): void => {
   registry.delete(name);
 };
 
+/**
+ * Drop every refractory-throttle timestamp for a socket id. Called on
+ * disconnect (via `clearActivity`) so the `lastFired` map doesn't accumulate
+ * one entry per refractory-throttled event per socket forever — socket ids are
+ * per-connection, so without this every connection that ever fired a throttled
+ * event (e.g. the built-in `'afk'`) leaks an entry on a long-running deploy.
+ */
+export const clearActivityThrottle = (socketId: string): void => {
+  const suffix = `|${socketId}`;
+  for (const key of lastFired.keys()) {
+    if (key.endsWith(suffix)) lastFired.delete(key);
+  }
+};
+
 /** List every registered event in registration order. */
 export const listActivityEvents = (): ActivityEvent[] => [...registry.values()];
 
@@ -77,10 +93,17 @@ export const dispatchActivitySample = async (sample: ActivitySample): Promise<vo
       if (sample.now - last < event.refractoryMs) continue;
       lastFired.set(key, sample.now);
     }
-    try {
-      await event.onTrigger(sample);
-    } catch {
-      // Swallow — one buggy event must not break the chain.
+    //? Isolate each event so one buggy `onTrigger` (incl. the built-in AFK
+    //? fan-out) can't break the chain — but LOG/capture instead of swallowing
+    //? silently, otherwise a silently-broken AFK looks identical to "no one is
+    //? AFK" (it fails every tick with no trace). Routes through the framework
+    //? `tryCatch` (auto-captures to the error tracker) + an explicit log line.
+    const [error] = await tryCatch(() => event.onTrigger(sample), undefined, {
+      scope: 'presence.dispatchActivitySample',
+      event: event.name,
+    });
+    if (error) {
+      getLogger().error('presence: activity event onTrigger failed', { name: event.name, socketId: sample.socketId, error });
     }
   }
 };

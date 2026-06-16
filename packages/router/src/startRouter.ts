@@ -12,6 +12,13 @@ import { runBootHandshake } from './bootHandshake';
 
 type EnvironmentDefinition = DeployEnvironmentShape;
 
+//? Slow-loris hardening for the listening HTTP server (internet-facing edge).
+//? `headersTimeout` reaps a client dribbling request headers; `keepAliveTimeout`
+//? reaps an idle kept-alive connection. Built-in (not a deploy-config knob) to
+//? keep the change inside this package.
+const ROUTER_HEADERS_TIMEOUT_MS = 60_000;
+const ROUTER_KEEP_ALIVE_TIMEOUT_MS = 5000;
+
 /**
  * Starts the LuckyStack load-balancer backend.
  *
@@ -137,6 +144,14 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   const proxy = createHttpProxy({ resolver, missingServiceErrorCode });
   const wsProxy = createWsProxy({ resolver });
   const server = http.createServer(proxy);
+
+  //? Slow-loris / idle-hold hardening for an internet-facing edge. Node's `http`
+  //? server bounds this loosely; set the header + keep-alive idle limits
+  //? explicitly so a client dribbling request headers or holding an idle
+  //? connection is reaped instead of pinning a router worker indefinitely.
+  server.headersTimeout = ROUTER_HEADERS_TIMEOUT_MS;
+  server.keepAliveTimeout = ROUTER_KEEP_ALIVE_TIMEOUT_MS;
+
   server.on('upgrade', wsProxy);
 
   if (isDevMode && enableFallbackRouting && currentEnv) {

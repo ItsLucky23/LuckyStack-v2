@@ -9,6 +9,7 @@ import { sampleSchemaInput } from './schemaSampleInput';
 import { runContractTests } from './runContractTests';
 import { runAuthEnforcementTests } from './runAuthEnforcementTests';
 import { runRateLimitTests } from './runRateLimitTests';
+import { runCsrfEnforcementTests } from './runCsrfEnforcementTests';
 import { runFuzzTests } from './runFuzzTests';
 import { runCustomTests } from './customTests';
 import { calculateSummary } from './testLayerHelpers';
@@ -35,6 +36,12 @@ export interface RunAllTestsInput {
   noSweep?: boolean;
   noFuzz?: boolean;
   noRateLimit?: boolean;
+  /**
+   * Disable the CSRF-enforcement layer. Defaults to ON (the layer runs) — but it
+   * can only probe past the auth guard with a session, so it is a no-op unless an
+   * `authToken` is supplied.
+   */
+  noCsrf?: boolean;
   noCustom?: boolean;
 }
 
@@ -42,6 +49,7 @@ export interface RunAllTestsSummary {
   contract?: RunContractSummary;
   auth?: RunContractSummary;
   rateLimit?: RunContractSummary;
+  csrf?: RunContractSummary;
   fuzz?: RunContractSummary;
   custom?: RunCustomTestsSummary;
   totalPassed: number;
@@ -67,89 +75,145 @@ const cloneSummary = (summary: RunContractSummary, filter: string | undefined): 
   return calculateSummary(filterResults(summary.results, filter));
 };
 
-export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsSummary> => {
-  const summary: RunAllTestsSummary = { totalPassed: 0, totalFailed: 0 };
+//? Build the `Cookie` header sweep layers send when an `authToken` is supplied.
+//? Returns an empty object when no token is set (the auth-enforcement layer
+//? deliberately sends no cookie regardless).
+const buildAuthHeaders = (input: RunAllTestsInput): Record<string, string> => {
   const headers: Record<string, string> = {};
   if (input.authToken) {
     const cookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
     headers.Cookie = `${cookieName}=${input.authToken}`;
   }
-  const inputFor = inputForEndpoint(input.apiInputSchemas);
+  return headers;
+};
 
-  if (!input.noSweep) {
-    const contract = await runContractTests({
+//? Run the four auto-sweep layers (contract → auth → rate-limit → fuzz) in
+//? order, honoring the per-layer disable flags, and write each filtered
+//? summary onto `summary`. Mutates `summary` in place — identical to the
+//? prior inline block. The auth and rate-limit / fuzz nesting + ordering is
+//? preserved exactly (auth always runs in the sweep; rate-limit + fuzz are
+//? individually gated).
+const runSweepLayers = async (
+  input: RunAllTestsInput,
+  summary: RunAllTestsSummary,
+  headers: Record<string, string>,
+  inputFor: (endpoint: EndpointDescriptor) => unknown,
+): Promise<void> => {
+  const contract = await runContractTests({
+    apiMethodMap: input.apiMethodMap,
+    baseUrl: input.baseUrl,
+    skip: input.skip,
+    headers,
+    inputFor,
+  });
+  summary.contract = cloneSummary(contract, input.filter);
+
+  const auth = await runAuthEnforcementTests({
+    apiMethodMap: input.apiMethodMap,
+    apiMetaMap: input.apiMetaMap,
+    baseUrl: input.baseUrl,
+    skip: input.skip,
+    inputFor,
+  });
+  summary.auth = cloneSummary(auth, input.filter);
+
+  if (!input.noRateLimit) {
+    const rateLimit = await runRateLimitTests({
       apiMethodMap: input.apiMethodMap,
+      apiMetaMap: input.apiMetaMap,
       baseUrl: input.baseUrl,
       skip: input.skip,
       headers,
       inputFor,
     });
-    summary.contract = cloneSummary(contract, input.filter);
+    summary.rateLimit = cloneSummary(rateLimit, input.filter);
+  }
 
-    const auth = await runAuthEnforcementTests({
+  //? CSRF-enforcement layer: probes that the framework's CSRF middleware rejects
+  //? state-changing authenticated requests carrying NO CSRF header. It can only
+  //? reach the CSRF check past the auth guard with a valid session, so it runs
+  //? only when an `authToken` is supplied (and the layer isn't disabled). Without
+  //? a token there is nothing to probe — the layer is silently skipped, leaving
+  //? behavior unchanged for tokenless sweeps.
+  if (!input.noCsrf && headers.Cookie) {
+    const csrf = await runCsrfEnforcementTests({
       apiMethodMap: input.apiMethodMap,
       apiMetaMap: input.apiMetaMap,
       baseUrl: input.baseUrl,
+      authCookie: headers.Cookie,
       skip: input.skip,
       inputFor,
     });
-    summary.auth = cloneSummary(auth, input.filter);
-
-    if (!input.noRateLimit) {
-      const rateLimit = await runRateLimitTests({
-        apiMethodMap: input.apiMethodMap,
-        apiMetaMap: input.apiMetaMap,
-        baseUrl: input.baseUrl,
-        skip: input.skip,
-        headers,
-        inputFor,
-      });
-      summary.rateLimit = cloneSummary(rateLimit, input.filter);
-    }
-
-    if (!input.noFuzz) {
-      const fuzz = await runFuzzTests({
-        apiMethodMap: input.apiMethodMap,
-        baseUrl: input.baseUrl,
-        skip: input.skip,
-        headers,
-      });
-      summary.fuzz = cloneSummary(fuzz, input.filter);
-    }
+    summary.csrf = cloneSummary(csrf, input.filter);
   }
 
-  if (!input.noCustom) {
-    //? The rate-limit layer drains per-route buckets; clear them before the
-    //? custom layer so business-logic tests on low-limit routes (e.g.
-    //? confirmReset, sendReset) aren't spuriously rejected with
-    //? api.rateLimitExceeded. Runs in-process against the same Redis the server
-    //? uses. Non-fatal if the active strategy has no clear().
-    try {
-      await clearAllRateLimits();
-    } catch {
-      //? swallow — a missing clear() is a test-quality degrade, not a crash.
-    }
-    const custom = await runCustomTests({
-      baseUrl: input.baseUrl,
-      sessionCookieName: input.sessionCookieName,
-      filter: input.filter,
-      //? Pass the generated method map so the harness invokes each API route
-      //? with its declared HTTP method (e.g. logout is DELETE, not POST).
+  if (!input.noFuzz) {
+    const fuzz = await runFuzzTests({
       apiMethodMap: input.apiMethodMap,
+      baseUrl: input.baseUrl,
+      skip: input.skip,
+      headers,
     });
-    summary.custom = custom;
+    summary.fuzz = cloneSummary(fuzz, input.filter);
   }
+};
 
+//? Run the custom (Layer 5) sweep, after clearing the per-route rate-limit
+//? buckets the sweep layers drained. Mutates `summary` in place — identical to
+//? the prior inline block.
+const runCustomLayer = async (input: RunAllTestsInput, summary: RunAllTestsSummary): Promise<void> => {
+  //? The rate-limit layer drains per-route buckets; clear them before the
+  //? custom layer so business-logic tests on low-limit routes (e.g.
+  //? confirmReset, sendReset) aren't spuriously rejected with
+  //? api.rateLimitExceeded. Runs in-process against the same Redis the server
+  //? uses. Non-fatal if the active strategy has no clear().
+  try {
+    await clearAllRateLimits();
+  } catch {
+    //? swallow — a missing clear() is a test-quality degrade, not a crash.
+  }
+  const custom = await runCustomTests({
+    baseUrl: input.baseUrl,
+    sessionCookieName: input.sessionCookieName,
+    filter: input.filter,
+    //? Pass the generated method map so the harness invokes each API route
+    //? with its declared HTTP method (e.g. logout is DELETE, not POST).
+    apiMethodMap: input.apiMethodMap,
+  });
+  summary.custom = custom;
+};
+
+//? Sum the per-layer passed/failed counts into the top-level totals. Identical
+//? arithmetic to the prior inline block (missing layers contribute 0 via `?? 0`).
+const computeTotals = (summary: RunAllTestsSummary): void => {
   summary.totalPassed = (summary.contract?.passed ?? 0)
     + (summary.auth?.passed ?? 0)
     + (summary.rateLimit?.passed ?? 0)
+    + (summary.csrf?.passed ?? 0)
     + (summary.fuzz?.passed ?? 0)
     + (summary.custom?.passed ?? 0);
   summary.totalFailed = (summary.contract?.failed ?? 0)
     + (summary.auth?.failed ?? 0)
     + (summary.rateLimit?.failed ?? 0)
+    + (summary.csrf?.failed ?? 0)
     + (summary.fuzz?.failed ?? 0)
     + (summary.custom?.failed ?? 0);
+};
+
+export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsSummary> => {
+  const summary: RunAllTestsSummary = { totalPassed: 0, totalFailed: 0 };
+  const headers = buildAuthHeaders(input);
+  const inputFor = inputForEndpoint(input.apiInputSchemas);
+
+  if (!input.noSweep) {
+    await runSweepLayers(input, summary, headers, inputFor);
+  }
+
+  if (!input.noCustom) {
+    await runCustomLayer(input, summary);
+  }
+
+  computeTotals(summary);
 
   return summary;
 };
@@ -234,6 +298,7 @@ export const logRunAllSummary = (summary: RunAllTestsSummary): void => {
   console.log(formatLayerLine('contract', summary.contract));
   console.log(formatLayerLine('auth-enforcement', summary.auth));
   console.log(formatLayerLine('rate-limit', summary.rateLimit));
+  console.log(formatLayerLine('csrf-enforcement', summary.csrf));
   console.log(formatLayerLine('fuzz', summary.fuzz));
   console.log(formatLayerLine('custom', summary.custom));
 
@@ -243,6 +308,7 @@ export const logRunAllSummary = (summary: RunAllTestsSummary): void => {
     ...sweepFailRows(summary.contract),
     ...sweepFailRows(summary.auth),
     ...sweepFailRows(summary.rateLimit),
+    ...sweepFailRows(summary.csrf),
     ...sweepFailRows(summary.fuzz),
     ...customRows(summary.custom, 'fail'),
   ];
@@ -259,20 +325,26 @@ export const logRunAllSummary = (summary: RunAllTestsSummary): void => {
     ...sweepSkipRows('contract', summary.contract),
     ...sweepSkipRows('auth', summary.auth),
     ...sweepSkipRows('rate-limit', summary.rateLimit),
+    ...sweepSkipRows('csrf', summary.csrf),
     ...sweepSkipRows('fuzz', summary.fuzz),
   ];
   printSection(dim, 'Skipped — not run (with reason)', skipped, '–');
 
   const totalXfail = xfailOf(summary.contract) + xfailOf(summary.auth) + xfailOf(summary.rateLimit)
-    + xfailOf(summary.fuzz) + xfailOf(summary.custom);
+    + xfailOf(summary.csrf) + xfailOf(summary.fuzz) + xfailOf(summary.custom);
   const totalSkipped = skippedOf(summary.contract) + skippedOf(summary.auth) + skippedOf(summary.rateLimit)
-    + skippedOf(summary.fuzz) + skippedOf(summary.custom);
+    + skippedOf(summary.csrf) + skippedOf(summary.fuzz) + skippedOf(summary.custom);
+  //? `xpass` (a case still marked expectedToFail that now passes) is NOT a
+  //? failure, so it doesn't move the exit code — but it MUST be visible in the
+  //? final line, otherwise a stale marker rots silently behind a green run.
+  const totalXpass = summary.custom?.xpassed ?? 0;
 
   console.log('');
   const parts = [
     green(`${summary.totalPassed} passed`),
     summary.totalFailed > 0 ? red(`${summary.totalFailed} failed`) : dim('0 failed'),
     totalXfail > 0 ? yellow(`${totalXfail} expected-fail`) : dim('0 expected-fail'),
+    totalXpass > 0 ? yellow(`${totalXpass} unexpectedly-passed`) : dim('0 unexpectedly-passed'),
     totalSkipped > 0 ? yellow(`${totalSkipped} skipped`) : dim('0 skipped'),
   ];
   console.log(`Summary: ${parts.join(dim('  ·  '))}`);

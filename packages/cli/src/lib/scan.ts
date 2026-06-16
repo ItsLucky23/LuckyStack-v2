@@ -108,16 +108,43 @@ export interface Hit {
   line: number;
 }
 
+//? Offsets of every newline in `text` (the index of each `\n`). Used to map a
+//? match index to a 1-based line via binary search, instead of re-slicing +
+//? splitting the whole prefix per match (which is O(n²) on large, hit-dense
+//? files). Computed once per file.
+const newlineOffsets = (text: string): number[] => {
+  const offsets: number[] = [];
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) {
+    offsets.push(i);
+  }
+  return offsets;
+};
+
+//? 1-based line for `index`: count of newlines strictly before `index`, + 1.
+//? `offsets` is ascending, so binary-search the first newline at-or-after `index`.
+const lineForIndex = (offsets: number[], index: number): number => {
+  let lo = 0;
+  let hi = offsets.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    const offset = offsets[mid] ?? Number.POSITIVE_INFINITY;
+    if (offset < index) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo + 1;
+};
+
 export const matchAll = (files: SourceFile[], pattern: RegExp): Hit[] => {
   const hits: Hit[] = [];
   for (const file of files) {
     const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+    const offsets = newlineOffsets(file.text);
     let m: RegExpExecArray | null;
     while ((m = re.exec(file.text)) !== null) {
       const captured = m[1];
       if (captured === undefined) continue;
-      //? Line number = count of newlines before the match index.
-      const line = file.text.slice(0, m.index).split('\n').length;
+      //? Line number = count of newlines before the match index, +1.
+      const line = lineForIndex(offsets, m.index);
       hits.push({ value: captured, file: file.rel, line });
     }
   }

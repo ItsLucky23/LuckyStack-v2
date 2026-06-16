@@ -23,6 +23,11 @@ export const socketEventNames = {
   activity: 'activity',
   userAfk: 'userAfk',
   userBack: 'userBack',
+  //? Emitted to a room's remaining members when a peer leaves — hard disconnect
+  //? (socket close) or grace-expiry (presence MIS-003). Lets clients prune a
+  //? departed peer from their roster without polling. The presence package owns
+  //? the dispatch; core owns the wire-event name so client + server can't drift.
+  userLeft: 'userLeft',
 
   connect: 'connect',
   disconnect: 'disconnect',

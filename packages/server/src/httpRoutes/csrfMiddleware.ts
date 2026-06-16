@@ -19,7 +19,10 @@ export const enforceCsrfOnStateChangingRequest = async ({
 }): Promise<boolean> => {
   const config = getProjectConfig();
   const isCookieMode = !config.session.basedToken;
-  const isStateChanging = req.method !== 'GET' && req.method !== 'OPTIONS';
+  //? HEAD is read-only and excluded from `enforceOriginPolicy`; mirror that
+  //? here so the two state-changing predicates agree (HEAD is 404'd at the
+  //? method gate before this runs, so this is parity, not a behavior change).
+  const isStateChanging = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
   const isCallbackPath = routePath.startsWith('/auth/callback');
   //? The credentials login/register endpoint is the session BOOTSTRAP. Requiring a
   //? pre-existing session's CSRF token to authenticate is circular, and it blocks

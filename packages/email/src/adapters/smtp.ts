@@ -2,6 +2,8 @@ import { createRequire } from 'node:module';
 
 import { loadPeer, tryCatch, type EmailSender } from '@luckystack/core';
 
+import { toProviderPayload } from './providerPayload';
+
 interface SmtpSenderOptions {
   host: string;
   port: number;
@@ -53,16 +55,7 @@ export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
         return { ok: false, reason: 'missing-from' };
       }
 
-      const [error, info] = await tryCatch(() => transporter.sendMail({
-        from: fromAddress,
-        to: message.to,
-        subject: message.subject,
-        html: message.html,
-        text: message.text,
-        replyTo: message.replyTo,
-        cc: message.cc,
-        bcc: message.bcc,
-      }));
+      const [error, info] = await tryCatch(() => transporter.sendMail(toProviderPayload(message, fromAddress)));
       if (error) {
         return {
           ok: false,

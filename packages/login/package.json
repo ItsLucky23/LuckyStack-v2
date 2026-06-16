@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Authentication for LuckyStack: credentials + OAuth (Google/GitHub/Facebook/Discord), Redis-backed sessions, single-session enforcement, lifecycle hooks. Pairs with @luckystack/core.",

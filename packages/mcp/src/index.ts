@@ -14,6 +14,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -37,7 +38,22 @@ const missing = (artifact: string, regen: string): string =>
 
 const bulletList = (items: string[]): string => items.map((i) => `  - ${i}`).join('\n');
 
-const server = new McpServer({ name: 'luckystack', version: '0.2.0' });
+//? Read the server's own version from package.json (shipped alongside dist/index.js)
+//? so it never drifts from the published version on a bump. Falls back to a literal
+//? if the read/parse fails, preserving boot on a malformed own package.json.
+const serverVersion = ((): string => {
+  try {
+    const pkg: unknown = createRequire(import.meta.url)('../package.json');
+    if (pkg !== null && typeof pkg === 'object' && 'version' in pkg && typeof pkg.version === 'string' && pkg.version.length > 0) {
+      return pkg.version;
+    }
+  } catch {
+    //? fall through to the literal below
+  }
+  return '0.2.0';
+})();
+
+const server = new McpServer({ name: 'luckystack', version: serverVersion });
 
 // ---------------------------------------------------------------------------
 // Dependency-graph tools (docs/ai-graph.json)
@@ -47,7 +63,7 @@ server.registerTool(
   'blast_radius',
   {
     description: 'List the files that would be affected by changing a given source file (transitive reverse-dependency / change-impact), from the committed dependency graph. Pass a src-relative path like "_functions/foo.ts".',
-    inputSchema: { file: z.string().describe('Source file, src-relative (e.g. "_functions/foo.ts") or with a src/ prefix.') },
+    inputSchema: { file: z.string().min(1).describe('Source file, src-relative (e.g. "_functions/foo.ts") or with a src/ prefix.') },
   },
   async ({ file }) => {
     const graph = await loadGraph();
@@ -64,7 +80,7 @@ server.registerTool(
   'who_imports',
   {
     description: 'List the DIRECT importers of a given source file (one hop), from the committed dependency graph.',
-    inputSchema: { file: z.string().describe('Source file, src-relative or with a src/ prefix.') },
+    inputSchema: { file: z.string().min(1).describe('Source file, src-relative or with a src/ prefix.') },
   },
   async ({ file }) => {
     const graph = await loadGraph();
@@ -86,9 +102,14 @@ server.registerTool(
   async ({ limit }) => {
     const graph = await loadGraph();
     if (!graph) return text(missing('docs/ai-graph.json', 'npm run ai:graph'));
-    const top = graph.godNodes.slice(0, limit ?? 15);
+    const requested = limit ?? 15;
+    const top = graph.godNodes.slice(0, requested);
     if (top.length === 0) return text('No god-nodes — nothing has in-project dependents yet.');
-    return text(`Most-depended-upon files:\n${bulletList(top.map((n) => `${n.id} (${n.kind}) — ${n.dependents} transitive, ${n.directDependents} direct`))}`);
+    //? The generator caps the stored god-node list (GOD_NODE_LIMIT); if the
+    //? caller asked for more than the artifact holds, say so rather than imply
+    //? these are the only hubs that exist.
+    const capNote = requested > graph.godNodes.length ? `\n\n(Only ${graph.godNodes.length} god-node(s) are stored in the graph; the artifact caps this list. Asking for more returns all of them.)` : '';
+    return text(`Most-depended-upon files:\n${bulletList(top.map((n) => `${n.id} (${n.kind}) — ${n.dependents} transitive, ${n.directDependents} direct`))}${capNote}`);
   },
 );
 
@@ -96,21 +117,21 @@ server.registerTool(
   'who_calls',
   {
     description: 'Symbol-level change-impact: list the functions that (transitively) CALL a given function, from the committed call graph. Pass "file::fn" (e.g. "_functions/foo.ts::doThing") or just a function name to disambiguate.',
-    inputSchema: { symbol: z.string().describe('A symbol id "file::fn", or a bare function name.') },
+    inputSchema: { symbol: z.string().min(1).describe('A symbol id "file::fn", or a bare function name.') },
   },
   async ({ symbol }) => {
     const graph = await loadGraph();
     if (!graph) return text(missing('docs/ai-graph.json', 'npm run ai:graph'));
     const sbr = graph.symbolBlastRadius ?? {};
     const symbols = graph.symbols ?? [];
-    let id: string | null = sbr[symbol] !== undefined || symbols.some((s) => s.id === symbol) ? symbol : null;
+    let id: string | null = Object.hasOwn(sbr, symbol) || symbols.some((s) => s.id === symbol) ? symbol : null;
     if (!id) {
       const matches = symbols.filter((s) => s.name === symbol || s.id.endsWith(`::${symbol}`));
       if (matches.length > 1) return text(`"${symbol}" is ambiguous — pick one:\n${bulletList(matches.map((m) => m.id))}`);
       id = matches[0]?.id ?? null;
     }
     if (!id) return text(`No symbol matches "${symbol}". Symbol-level edges exist only where the graph is version >= 2; run \`npm run ai:graph\`.`);
-    const callers = sbr[id] ?? [];
+    const callers = Object.hasOwn(sbr, id) ? sbr[id] ?? [] : [];
     if (callers.length === 0) return text(`Nothing calls \`${id}\` (transitively, within the project).`);
     return text(`Changing \`${id}\` can affect ${callers.length} function(s) that transitively call it:\n${bulletList(callers)}`);
   },
@@ -139,7 +160,7 @@ server.registerTool(
   'get_decision',
   {
     description: 'Read a full decision record (Context / Decision / Rejected alternatives / Consequences) by ADR number or slug.',
-    inputSchema: { id: z.string().describe('ADR number ("2" or "0002") or slug ("native-callgraph...").') },
+    inputSchema: { id: z.string().min(1).describe('ADR number ("2" or "0002") or slug ("native-callgraph...").') },
   },
   async ({ id }) => {
     const root = await projectRoot();
@@ -153,8 +174,11 @@ server.registerTool(
     const padded = /^\d+$/.test(id) ? id.padStart(4, '0') : null;
     const match = entries.find((f) => {
       if (!f.endsWith('.md') || f === '0000-template.md') return false;
-      const matchesNumber = padded !== null && f.startsWith(`${padded}-`);
-      return matchesNumber || f.includes(id);
+      //? Numeric ids match ONLY the zero-padded prefix (so "2" -> 0002-*, never
+      //? every ADR whose number/slug merely contains "2"). Slug ids fall back to
+      //? a substring match.
+      if (padded !== null) return f.startsWith(`${padded}-`);
+      return f.includes(id);
     });
     if (!match) return text(`No decision matches "${id}". Use \`list_decisions\` to see them.`);
     const body = await readDocFile(`docs/decisions/${match}`);
@@ -170,12 +194,12 @@ server.registerTool(
   'find_route',
   {
     description: 'Find API/sync routes matching a query, from the committed project index (method, auth, summary).',
-    inputSchema: { query: z.string().describe('Route name / page / keyword to match.') },
+    inputSchema: { query: z.string().min(1).describe('Route name / page / keyword to match.') },
   },
   async ({ query }) => {
     const index = await readDocFile('docs/AI_PROJECT_INDEX.md');
     if (index === null) return text(missing('docs/AI_PROJECT_INDEX.md', 'npm run ai:project-index'));
-    const rows = grepLines(index, query).filter((l) => l.includes('`api/') || l.includes('`sync/'));
+    const rows = grepLines(index, query).filter((l) => l.trim().startsWith('|') && (l.includes('`api/') || l.includes('`sync/')));
     return text(rows.length > 0 ? `Routes matching "${query}":\n${rows.join('\n')}` : `No routes match "${query}".`);
   },
 );
@@ -199,7 +223,7 @@ server.registerTool(
   'get_capability',
   {
     description: 'Look up existing helpers/components/exports by name in the committed capability snapshot — check BEFORE authoring a new helper (Rule 12).',
-    inputSchema: { name: z.string().describe('Helper / component / export name to search for.') },
+    inputSchema: { name: z.string().min(1).describe('Helper / component / export name to search for.') },
   },
   async ({ name }) => {
     const doc = await readDocFile('docs/AI_CAPABILITIES.md');

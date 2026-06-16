@@ -18,10 +18,9 @@
 //? A consumer overlay (`luckystack/sentry/*.ts`) runs AFTER this import and can
 //? register additional adapters via `registerErrorTracker(s)(...)`.
 
-import { getLogger, tryCatch } from '@luckystack/core';
+import { appendErrorTracker, getLogger, tryCatch } from '@luckystack/core';
 import { initializeSentry } from './sentry';
 import { createPostHogAdapter, type PostHogAdapterOptions } from './adapters/posthog';
-import { registerErrorTracker } from './adapter';
 
 //? Sentry (env-gated no-op without SENTRY_DSN).
 initializeSentry();
@@ -50,7 +49,12 @@ if (posthogKey) {
     //? `void`-discarded promise and surfacing as an unhandled rejection.
     const [registerError] = await tryCatch(() => {
       const client = new mod.PostHog(posthogKey, { host: process.env.POSTHOG_HOST });
-      registerErrorTracker(createPostHogAdapter({ client }));
+      //? APPEND (not REPLACE): the legacy `registerErrorTracker` clobbers the whole
+      //? active-tracker list, so an async PostHog auto-register could silently wipe a
+      //? Sentry adapter (or a consumer overlay) already registered before this microtask
+      //? resolves. `appendErrorTracker` accumulates and de-dupes by `name`, so the
+      //? zero-config PostHog adapter coexists with whatever else is registered.
+      appendErrorTracker(createPostHogAdapter({ client }));
     });
     if (registerError) {
       getLogger().error('[posthog] Failed to initialise the PostHog error tracker.', { err: registerError });

@@ -1,5 +1,7 @@
-import { redis } from '@luckystack/core';
-import { revokeUserSessions, verifyPassword } from '@luckystack/login';
+import path from 'node:path';
+import { unlink } from 'node:fs/promises';
+import { redis, dispatchHook, getUploadsDir } from '@luckystack/core';
+import { revokeUserSessions, verifyPassword, activeUsersKeyFor, getUserAdapter } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
@@ -17,8 +19,6 @@ export interface ApiParams {
   functions: Functions;
 }
 
-const PROJECT_NAME = process.env.PROJECT_NAME ?? 'luckystack';
-
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   if (data.confirmation !== 'DELETE') {
     return { status: 'error', errorCode: 'auth.forbidden' };
@@ -33,10 +33,44 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     }
   }
 
-  // Wipe every session (including current — the user IS being deleted).
-  await revokeUserSessions(user.id);
-  await redis.del(`${PROJECT_NAME}-activeUsers:${user.id}`);
+  //? Vetoable pre-hook — lets compliance / legal-hold / active-subscription
+  //? add-ons block the deletion with their own errorCode before anything is
+  //? destroyed. Mirrors the pre-hook on every sibling auth mutation (HOK-05).
+  const preDelete = await dispatchHook('preAccountDelete', {
+    userId: user.id,
+    email: dbUser?.email ?? undefined,
+  });
+  if (preDelete.stopped) {
+    return { status: 'error', errorCode: preDelete.signal.errorCode };
+  }
 
-  await functions.db.prisma.user.delete({ where: { id: user.id } });
+  //? Route deletion through the UserAdapter (soft-delete consumers override it)
+  //? instead of reaching past it to `prisma.user.delete`. Resolve the deleter
+  //? BEFORE wiping sessions so an adapter that doesn't support hard-delete fails
+  //? CLEANLY (clear error) instead of silently no-opping the `?.` — which would
+  //? otherwise log the user out everywhere yet leave the account undeleted.
+  const adapter = getUserAdapter();
+  if (!adapter.delete) {
+    return { status: 'error', errorCode: 'api.internalServerError' };
+  }
+
+  // Wipe every session (including current — the user IS being deleted). Use the
+  // framework key builder so a registered custom Redis key formatter is honored.
+  await revokeUserSessions(user.id);
+  await redis.del(activeUsersKeyFor(user.id));
+
+  await adapter.delete(user.id);
+
+  //? Remove the avatar the user uploaded (updateUser writes `${id}.webp` under
+  //? the uploads dir) so no PII file survives the account (GDPR residue).
+  await unlink(path.join(getUploadsDir(), `${user.id}.webp`)).catch(() => undefined);
+
+  //? Observational post-hook — cascade-clean external state (Stripe / S3),
+  //? audit, goodbye email.
+  void dispatchHook('postAccountDelete', {
+    userId: user.id,
+    email: dbUser?.email ?? undefined,
+  });
+
   return { status: 'success', result: {} };
 };

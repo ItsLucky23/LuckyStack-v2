@@ -91,9 +91,6 @@ export const addPresence = (project: ConsumerProject, options: AddOptions): Resu
   //? edits but still ensure the dependency + install ran.
   const mainAlreadyWired = fs.readFileSync(mainPath, 'utf8').includes('@luckystack/presence/client');
 
-  const range = resolveLuckyStackRange(project.pkg, options.cliVersion);
-  const depAdded = addDependency(project, '@luckystack/presence', range);
-
   if (mainAlreadyWired) {
     console.log('• presence client mounts already present — skipped JSX injection.');
   } else {
@@ -103,6 +100,18 @@ export const addPresence = (project: ConsumerProject, options: AddOptions): Resu
     console.log('• injected <LocationProvider/> (main.tsx) + <SocketStatusIndicator/> (TemplateProvider.tsx)');
   }
 
+  //? Add the dependency only AFTER the JSX edits succeed: a token-miss aborts above
+  //? with package.json untouched, preserving the "command failed ⇒ nothing changed"
+  //? invariant (otherwise package.json would be left mutated with no mounts injected).
+  //? addDependency writes package.json and can throw on EACCES/EROFS — guard it into
+  //? a returned Result, matching addBackendOnly.
+  const range = resolveLuckyStackRange(project.pkg, options.cliVersion);
+  let depAdded: boolean;
+  try {
+    depAdded = addDependency(project, '@luckystack/presence', range);
+  } catch (error) {
+    return err(error as Error);
+  }
   if (depAdded) console.log(`• added @luckystack/presence@${range} to package.json`);
 
   if (options.install) {

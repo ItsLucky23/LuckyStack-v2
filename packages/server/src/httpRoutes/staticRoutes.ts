@@ -5,6 +5,14 @@ import type { HttpRouteHandler } from './types';
 
 const KNOWN_STATIC_FILE_REGEX = /^\/(assets\/[a-zA-Z0-9_/-]+|[a-zA-Z0-9_-]+)\.(png|jpg|jpeg|gif|svg|html|css|js)$/;
 
+//? Source-disclosure denylist. The server bundle (`dist/server.js`) and ANY
+//? source map (`*.map`) must never be served by a framework static path —
+//? leaking either hands an attacker the readable server source. This guards
+//? every branch below (assets, known-extension, SPA catch-all) regardless of
+//? which `serveFile` the consumer wired, so the protection is structural and
+//? does not rely on the default noop handler.
+const SERVE_DENYLIST_REGEX = /(^\/server\.js$)|(\.map$)/;
+
 //? `serveFile` consumers (Vite middleware, custom static handlers) read
 //? `req.url`, so we need to swap it for the rewritten asset path. We swap
 //? around the call and restore on return so anything downstream that
@@ -31,6 +39,13 @@ export const handleStaticAndSpaFallback: HttpRouteHandler = async ({
   routePath,
   options,
 }) => {
+  // ── denylist — never serve the server bundle or source maps ───────────
+  if (SERVE_DENYLIST_REGEX.test(routePath)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+    return true;
+  }
+
   // ── /assets/* — static assets ──────────────────────────────────────────
   if (routePath.includes('/assets/')) {
     if (!options.serveFile) {

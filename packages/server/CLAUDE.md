@@ -25,7 +25,8 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 
 | Function / Export | One-liner | Deep doc |
 |---|---|---|
-| `createLuckyStackServer(options)` | Lower-level factory that returns `{ httpServer, ioServer, listen }`. Wires HTTP + Socket.io + framework routes. | -> docs/create-server.md |
+| `createLuckyStackServer(options)` | Lower-level factory that returns `{ httpServer, ioServer, listen, stop, close }`. Wires HTTP + Socket.io + framework routes; installs a persistent `httpServer.on('error')` listener and (in prod) SIGTERM/SIGINT → graceful `stop()`. | -> docs/create-server.md |
+| `RunningLuckyStackServer.stop(options?)` / `.close(options?)` | Graceful shutdown (MIS-016). Stops accepting new connections, dispatches the core `preServerStop` hook, flushes error-trackers (bounded by a per-step timeout race), then closes io + http + the Redis-adapter pub/sub clients. Each step isolated + time-bounded so one hanging step can't stall shutdown. Idempotent. `options`: `{ reason?, timeoutMs? }` (default `timeoutMs` 10000). | -> docs/create-server.md |
 | `bootstrapLuckyStack(options)` | High-level entry: auto-imports `luckystack/<pkg>/*.ts` overlay in topological order, then delegates to `createLuckyStackServer`. | -> docs/create-server.md |
 | `verifyBootstrap(requirements?)` | Pre-flight check for ProjectConfig / DeployConfig / ServicesConfig / OAuth / RuntimeMapsProvider / LocalizedNormalizer. Throws one descriptive `Error`. | -> docs/create-server.md |
 | `parseServerArgv(argv)` | Pure parser: validates positional `<bundles> [port]` and returns `{ bundles, port }`. Throws on malformed input. | -> docs/argv-parsing.md |
@@ -56,7 +57,7 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 | Hook payload: `PreRoomLeavePayload` | Payload type for `preRoomLeave` hook handlers. | -> docs/create-server.md |
 | Hook payload: `PostRoomLeavePayload` | Payload type for `postRoomLeave` hook handlers. | -> docs/create-server.md |
 | Hook payload: `OnLocationUpdatePayload` | Payload type for `onLocationUpdate` hook handlers. | -> docs/create-server.md |
-| Types: `CreateLuckyStackServerOptions`, `BootstrapLuckyStackOptions`, `BootstrapRequirements`, `RunningLuckyStackServer`, `RouteContext`, `StaticFileHandler`, `FaviconHandler`, `CustomRouteHandler`, `ProdRuntimeMapsLoaderOptions`, `ParsedServerArgv`, `SecurityHeadersBuilder`, `ErrorFormatter`, `ErrorFormatterContext` | Handler + option typing. | -> docs/create-server.md |
+| Types: `CreateLuckyStackServerOptions`, `BootstrapLuckyStackOptions`, `BootstrapRequirements`, `RunningLuckyStackServer`, `StopLuckyStackServerOptions`, `RouteContext`, `StaticFileHandler`, `FaviconHandler`, `CustomRouteHandler`, `ProdRuntimeMapsLoaderOptions`, `ParsedServerArgv`, `SecurityHeadersBuilder`, `ErrorFormatter`, `ErrorFormatterContext` | Handler + option typing. | -> docs/create-server.md |
 
 ## Config keys (env vars + registerProjectConfig slots)
 

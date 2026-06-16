@@ -56,7 +56,7 @@ Both transports execute exactly:
 2. If `effectiveApiLimit !== false && effectiveApiLimit > 0`:
    - Build the per-route key.
    - `await checkRateLimit({ key, limit, windowMs })`.
-   - On `!allowed`, dispatch `rateLimitExceeded` with `scope: token ? 'user' : 'route'`, respond `api.rateLimitExceeded` + `429`, abort.
+   - On `!allowed`, dispatch `rateLimitExceeded` with `scope: token ? 'user' : 'ip'` (the bucket is user-keyed only when a token is present; an anonymous per-route bucket is IP-keyed, so it reports `ip` — with `route` still set to distinguish it from the global `:api:all` IP bucket below), respond `api.rateLimitExceeded` + `429`, abort.
 3. Read `defaultIpLimit = rateLimiting.defaultIpLimit`.
 4. If `defaultIpLimit !== false && defaultIpLimit > 0`:
    - Build the global IP key.

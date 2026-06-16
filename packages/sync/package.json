@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Real-time sync transport for LuckyStack: type-safe room-based fanout, server + per-client validation, streaming, optimistic offline queue. Server entry plus a browser-safe ./client subpath.",

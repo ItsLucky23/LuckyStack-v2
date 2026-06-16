@@ -2,6 +2,8 @@
 
 import type { BaseSessionLayout as SessionLayout, PostApiExecutePayload, ErrorFormatter  } from '@luckystack/core';
 import { getProjectConfig, readSession, getRuntimeApiMaps as getRuntimeApiMapsFromSource ,
+  runWithErrorTrackerIdentityScope,
+  setCurrentErrorTrackerIdentity,
   validateRequest,
   checkRateLimit,
   inferHttpMethod,
@@ -15,6 +17,7 @@ import { shouldLogDev, shouldLogStream } from './_shared/logFlags';
 import { normalizeApiResponse } from './_shared/responseEnvelope';
 import { httpApiFlushPressureNoop } from './_shared/backpressure';
 import { runHttpApiValidation } from './_shared/httpValidationStage';
+import { deriveTokenBucketId } from './_shared/rateLimitIdentity';
 
 
 
@@ -80,7 +83,16 @@ type ApiNetworkResponse<T = Record<string, unknown>> =
 
 export type ApiHttpStreamEvent = ApiStreamPayload;
 
+//? ET-02 — wrap the whole HTTP request in a per-request error-tracker identity
+//? scope (opened before `readSession` in `runHandleHttpApiRequest`, the first
+//? interleaving await). The resolved session is written into the scope's ALS box
+//? the moment it resolves, so concurrent HTTP requests with different users can't
+//? cross-attribute captures. Each request gets its own isolated box.
 export async function handleHttpApiRequest(params: HttpApiRequestParams): Promise<ApiNetworkResponse> {
+  return runWithErrorTrackerIdentityScope(() => handleHttpApiRequestScoped(params));
+}
+
+async function handleHttpApiRequestScoped(params: HttpApiRequestParams): Promise<ApiNetworkResponse> {
   const { response, user, preferredLocale, perRouteFormatter } = await runHandleHttpApiRequest(params);
 
   //? `name` may not parse to a valid route — pass the original raw name as
@@ -144,6 +156,11 @@ async function runHandleHttpApiRequest(params: HttpApiRequestParams): Promise<Ru
     extractLanguageFromHeader(params.xLanguageHeader)
     ?? extractLanguageFromHeader(params.acceptLanguageHeader);
   const user = await readSession(params.token);
+  //? ET-02 — bind the resolved session into the active per-request ALS identity
+  //? box (opened by `handleHttpApiRequest`) so every capture in this request
+  //? attributes to this user. The legacy global is still set via the
+  //? `preApiValidate` hook subscriber; the ALS read wins at capture time.
+  setCurrentErrorTrackerIdentity(user?.id ? { id: user.id, email: user.email ?? undefined, username: user.name ?? undefined } : null);
   const formatterHolder: { current?: ErrorFormatter } = {};
   const response = await runHandleHttpApiRequestInner(params, user, preferredLocale, formatterHolder);
   return { response, user, preferredLocale, perRouteFormatter: formatterHolder.current };
@@ -299,7 +316,7 @@ async function runHandleHttpApiRequestInner(
     : apiRateLimit;
 
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
-    const requesterIdentity = token ?? requesterIp ?? 'anonymous';
+    const requesterIdentity = token ? deriveTokenBucketId(token) : (requesterIp ?? 'anonymous');
     const keyPrefix = token ? 'token' : 'ip';
     const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${resolvedName}`;
 
@@ -311,13 +328,19 @@ async function runHandleHttpApiRequestInner(
 
     if (!allowed) {
       void dispatchHook('rateLimitExceeded', {
-        scope: token ? 'user' : 'route',
+        //? The per-route bucket is keyed by the validated user when a token is
+        //? present, else by the resolved IP (keyPrefix `ip`). Report the scope
+        //? that matches the bucket's actual identity — an anonymous per-route
+        //? bucket is IP-keyed, so it is `ip` (with `route` still set to mark it
+        //? a per-route bucket vs the global `:api:all` IP bucket), never `route`.
+        scope: token ? 'user' : 'ip',
         key: rateLimitKey,
         limit: effectiveApiLimit,
         windowMs: getProjectConfig().rateLimiting.windowMs,
         count: effectiveApiLimit + 1,
         route: resolvedName,
         userId: user?.id,
+        ip: token ? undefined : requesterIp,
       });
       if (shouldLogDev()) {
         getLogger().warn(`http api: rate limit exceeded for ${resolvedName}`);
@@ -394,14 +417,17 @@ async function runHandleHttpApiRequestInner(
   //? postApiValidate). Extracted to `_shared/httpValidationStage.ts` for
   //? symmetry with the socket handler. On failure the caller builds the
   //? GENERIC `api.invalidInputType` (the raw validator message never reaches
-  //? the client). Behaviour preserved verbatim — the HTTP transport always
-  //? validates (it does not honor `validation: 'relaxed'`).
+  //? the client). Honors the per-route `validation: 'relaxed'` / `{ input:
+  //? 'skip' }` escape hatch on BOTH transports — a public webhook route whose
+  //? third-party payload can't be modeled in TS is reachable over HTTP, not
+  //? just sockets.
   const httpValidation = await runHttpApiValidation({
     resolvedName,
     inputType,
     inputTypeFilePath,
     requestData,
     user,
+    validation: runtimeApiRoute.validation,
   });
   if (!httpValidation.ok) {
     return buildNetworkError({

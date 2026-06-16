@@ -19,6 +19,12 @@ registerSessionProvider({
     _logout({ token, socket, userId: userId ?? null, skipSessionDelete }),
 });
 
+//? Subscribe the per-account brute-force lockout to the `loginFailed` hook at
+//? boot (F7). Idempotent + cheap; the recorder no-ops unless
+//? `rateLimiting.auth.enabled` is set, so this is safe to wire unconditionally.
+import { registerAuthLockoutHook } from './authLockout';
+registerAuthLockoutHook();
+
 export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionLayout';
 export type {
   PreLoginPayload,
@@ -34,12 +40,30 @@ export type {
   PreEmailChangePayload,
   PostEmailChangeRequestedPayload,
   PostEmailChangedPayload,
+  LoginFailedPayload,
+  PreAccountDeletePayload,
+  PostAccountDeletePayload,
 } from './hookPayloads';
 export { saveSession, getSession, deleteSession, getAllSessions, revokeUserSessions, sessionKeyFor, activeUsersKeyFor } from './session';
 export { registerSessionAdapter, getSessionAdapter, redisSessionAdapter } from './sessionAdapter';
 export type { SessionAdapter } from './sessionAdapter';
+export { registerSessionSanitizer, getSessionSanitizer } from './sessionSanitizer';
+export type { SessionSanitizer } from './sessionSanitizer';
 export { loginWithCredentials, loginCallback, createOAuthState, registerWithCredentials, loginWithCredentialsCore } from './login';
+export type {
+  CredentialsLoginResult,
+  CredentialsLoginSuccess,
+  CredentialsLoginFailure,
+  OAuthCallbackResult,
+} from './login';
+export type { CreateOAuthStateResult } from './login';
+export { OAUTH_STATE_COOKIE_NAME } from './login';
 export { logout } from './logout';
+
+// Per-account brute-force lockout (F7). The hook is auto-registered at boot;
+// these are exported for consumers who want to query/clear a lock explicitly
+// (e.g. an admin "unlock account" action) or build their own surface on top.
+export { isAccountLocked, recordAuthFailure, clearAuthFailures } from './authLockout';
 
 // Password-reset primitives. Used by the framework's `framework`-mode
 // forgot-password flow AND exported for consumers who picked `'custom'`.
@@ -68,6 +92,7 @@ export {
   registerOAuthProviders,
   getOAuthProviders,
   isFullOAuthProvider,
+  asOAuthUserData,
   credentialsProvider,
   googleProvider,
   githubProvider,
@@ -79,6 +104,7 @@ export type {
   OAuthProvider,
   CredentialsProvider,
   FullOAuthProvider,
+  OAuthUserData,
 } from './oauthProviders';
 
 // User adapter registry: lets consumers swap out the Prisma User model behind auth flows.

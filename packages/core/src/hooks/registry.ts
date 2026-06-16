@@ -24,10 +24,21 @@ const hookHandlers = new Map<string, AnyHandler[]>();
 export const registerHook = <TName extends HookName>(
   name: TName,
   handler: HookHandler<HookPayloads[TName]>,
-): void => {
+): (() => void) => {
   const existing = hookHandlers.get(name) ?? [];
-  existing.push(handler as AnyHandler);
+  const wrapped = handler as AnyHandler;
+  existing.push(wrapped);
   hookHandlers.set(name, existing);
+  //? Return an unsubscribe that splices THIS exact handler (matching
+  //? `onClientHook`'s symmetry). Lets conditional plugins / per-tenant toggles /
+  //? hot-reload detach a single handler without `clearAllHooks` nuking the
+  //? framework-internal handlers too.
+  return () => {
+    const handlers = hookHandlers.get(name);
+    if (!handlers) return;
+    const index = handlers.indexOf(wrapped);
+    if (index !== -1) handlers.splice(index, 1);
+  };
 };
 
 export const dispatchHook = async <TName extends HookName>(
@@ -75,10 +86,18 @@ const syncHookHandlers = new Map<string, AnySyncHandler[]>();
 export const registerSyncHook = <TName extends SyncHookName>(
   name: TName,
   handler: SyncHookHandler<SyncHookPayloads[TName]>,
-): void => {
+): (() => void) => {
   const existing = syncHookHandlers.get(name) ?? [];
-  existing.push(handler as AnySyncHandler);
+  const wrapped = handler as AnySyncHandler;
+  existing.push(wrapped);
   syncHookHandlers.set(name, existing);
+  //? Returns an unsubscribe that splices THIS exact handler. See `registerHook`.
+  return () => {
+    const handlers = syncHookHandlers.get(name);
+    if (!handlers) return;
+    const index = handlers.indexOf(wrapped);
+    if (index !== -1) handlers.splice(index, 1);
+  };
 };
 
 export const dispatchSyncHook = <TName extends SyncHookName>(

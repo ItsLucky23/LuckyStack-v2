@@ -34,6 +34,20 @@ interface CliArgs {
   sharedHealth: boolean;
 }
 
+//? Parse a numeric CLI flag value. `Number('abc')` is `NaN` (not null), which
+//? would otherwise flow downstream and silently misbehave: a NaN `--port` makes
+//? `server.listen(NaN)` pick a random ephemeral port (operator believes it's on
+//? 4000). Reject unparseable values loudly instead of silently degrading.
+const parseNumericFlag = (raw: string | undefined, flag: string): number | null => {
+  if (raw === undefined) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    process.stderr.write(`[luckystack-router] ${flag} expects a number, got: ${raw}\n`);
+    process.exit(2);
+  }
+  return value;
+};
+
 const parseArgs = (argv: readonly string[]): CliArgs => {
   const args: CliArgs = {
     deploy: null,
@@ -73,7 +87,7 @@ const parseArgs = (argv: readonly string[]): CliArgs => {
         break;
       }
       case '--port': {
-        args.port = next ? Number(next) : null;
+        args.port = parseNumericFlag(next, '--port');
         i++;
         break;
       }
@@ -153,7 +167,14 @@ const main = async (): Promise<void> => {
     disableSharedHealthState: !args.sharedHealth,
   });
 
+  //? A second signal arriving while `running.stop()` is in flight must not start
+  //? a second shutdown — that calls `server.close()` on an already-closing
+  //? server (`ERR_SERVER_NOT_RUNNING`), surfacing as an unhandled rejection in
+  //? the detached `void shutdown(...)`. Guard so only the first signal acts.
+  let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     process.stdout.write(`\n[luckystack-router] ${signal} received, shutting down...\n`);
     await running.stop();
     process.exit(0);

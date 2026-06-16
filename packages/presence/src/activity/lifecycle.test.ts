@@ -22,7 +22,12 @@ vi.mock('@luckystack/login', () => ({
 
 const dispatchHookMock = vi.fn();
 const informRoomPeersMock = vi.fn();
+const informRoomPeersLeftMock = vi.fn();
 const socketLeaveRoomMock = vi.fn();
+//? Default: presence fully enabled + no live sockets in the token room. Tests
+//? that need a cold/disabled/multi-tab path tweak these per-case.
+let socketActivityBroadcasterMock = true;
+let liveTokenRoomSizeMock = 0;
 
 vi.mock('@luckystack/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@luckystack/core')>()),
@@ -30,6 +35,14 @@ vi.mock('@luckystack/core', async (importOriginal) => ({
   //? 0.2.0: session reads/deletes moved to core's null-safe accessors.
   readSession: (token: string) => getSessionMock(token),
   removeSession: (token: string) => deleteSessionMock(token),
+  getProjectConfig: () => ({ socketActivityBroadcaster: socketActivityBroadcasterMock }),
+  getIoInstance: () => ({
+    sockets: {
+      adapter: {
+        rooms: { get: () => (liveTokenRoomSizeMock > 0 ? { size: liveTokenRoomSizeMock } : undefined) },
+      },
+    },
+  }),
   getLogger: () => ({
     debug: vi.fn(),
     warn: vi.fn(),
@@ -39,12 +52,14 @@ vi.mock('@luckystack/core', async (importOriginal) => ({
   socketEventNames: {
     userAfk: 'userAfk',
     userBack: 'userBack',
+    userLeft: 'userLeft',
     intentionalDisconnect: 'intentionalDisconnect',
   },
 }));
 
 vi.mock('./peerNotifier', () => ({
   informRoomPeers: (...args: unknown[]) => informRoomPeersMock(...args),
+  informRoomPeersLeft: (...args: unknown[]) => informRoomPeersLeftMock(...args),
 }));
 
 vi.mock('./leaveRoom', () => ({
@@ -75,10 +90,13 @@ describe('lifecycle (presence grace timers)', () => {
     deleteSessionMock.mockReset();
     dispatchHookMock.mockReset();
     informRoomPeersMock.mockReset();
+    informRoomPeersLeftMock.mockReset();
     socketLeaveRoomMock.mockReset();
     getSessionMock.mockResolvedValue(null);
     socketLeaveRoomMock.mockResolvedValue(null);
     deleteSessionMock.mockResolvedValue(undefined);
+    socketActivityBroadcasterMock = true;
+    liveTokenRoomSizeMock = 0;
   });
 
   afterEach(() => {
@@ -176,6 +194,69 @@ describe('lifecycle (presence grace timers)', () => {
       expect(socketLeaveRoomMock).not.toHaveBeenCalled();
       clearTimeout(replacement);
     });
+
+    //? SEC-07 — multi-tab shared session: a second tab keeps the token's
+    //? private room non-empty, so grace expiry must NOT tear down the session.
+    it('bails on grace expiry when another tab still holds the token room (SEC-07)', async () => {
+      liveTokenRoomSizeMock = 1; // tab A still connected
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(socketLeaveRoomMock).not.toHaveBeenCalled();
+      expect(deleteSessionMock).not.toHaveBeenCalled();
+      expect(dispatchHookMock).not.toHaveBeenCalledWith('postDisconnectGraceExpired', expect.anything());
+    });
+
+    //? HOK-12 — grace expiry fires the "user truly gone" hook with the resolved
+    //? userId/roomCodes (read before teardown) and the delete verdict.
+    it('dispatches postDisconnectGraceExpired on teardown (HOK-12)', async () => {
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1', '', 'room-2'] });
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(dispatchHookMock).toHaveBeenCalledWith('postDisconnectGraceExpired', {
+        token: 'tok',
+        userId: 'u1',
+        roomCodes: ['room-1', 'room-2'],
+        reason: 'transport close',
+        sessionDeleted: true,
+      });
+    });
+
+    //? MIS-003 — grace expiry tells the room's remaining members the peer is
+    //? gone for good, with the userId/roomCodes resolved before teardown.
+    it('broadcasts userLeft to room peers on grace expiry (MIS-003)', async () => {
+      informRoomPeersLeftMock.mockResolvedValue(0);
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1', '', 'room-2'] });
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(informRoomPeersLeftMock).toHaveBeenCalledWith({
+        token: 'tok',
+        userId: 'u1',
+        roomCodes: ['room-1', 'room-2'],
+        io: expect.anything(),
+      });
+    });
+
+    //? MIS-003 — same gate as userBack/userAfk: a consumer who left
+    //? socketActivityBroadcaster at its default (false) gets NO userLeft fan-out.
+    it('does not broadcast userLeft when the broadcaster is disabled (MIS-003)', async () => {
+      socketActivityBroadcasterMock = false;
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1'] });
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(informRoomPeersLeftMock).not.toHaveBeenCalled();
+      //? Teardown still happens — only the peer fan-out is gated.
+      expect(socketLeaveRoomMock).toHaveBeenCalledOnce();
+    });
+
+    //? MIS-003 / SEC-07 — when another tab keeps the token room live, grace
+    //? expiry bails BEFORE the userLeft broadcast (the user has not left).
+    it('does not broadcast userLeft when another tab still holds the token room (MIS-003/SEC-07)', async () => {
+      liveTokenRoomSizeMock = 1;
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1'] });
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(informRoomPeersLeftMock).not.toHaveBeenCalled();
+    });
   });
 
   describe('socketConnected', () => {
@@ -230,6 +311,26 @@ describe('lifecycle (presence grace timers)', () => {
       await socketConnected({ token: 'tok', io: ioStub });
       expect(informRoomPeersMock).not.toHaveBeenCalled();
     });
+
+    //? QUA-039 — a COLD connect (no pending timer) with persisted roomCodes must
+    //? NOT fan out userBack, even though the session has rooms + a user.
+    it('does not broadcast userBack on a cold connect with persisted rooms (QUA-039)', async () => {
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1'] });
+      await socketConnected({ token: 'tok', io: ioStub });
+      expect(informRoomPeersMock).not.toHaveBeenCalled();
+    });
+
+    //? QUA-039 — even a real reconnect must stay silent when the consumer left
+    //? socketActivityBroadcaster at its default (false).
+    it('does not broadcast userBack on reconnect when the broadcaster is disabled (QUA-039)', async () => {
+      socketActivityBroadcasterMock = false;
+      disconnectTimers.set('tok', setTimeout(() => {}, 999_999));
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1'] });
+      await socketConnected({ token: 'tok', io: ioStub });
+      //? The reconnect hook still fires (lifecycle bookkeeping), but no fan-out.
+      expect(dispatchHookMock).toHaveBeenCalledWith('postSocketReconnect', expect.anything());
+      expect(informRoomPeersMock).not.toHaveBeenCalled();
+    });
   });
 
   describe('initActivityBroadcaster', () => {
@@ -259,6 +360,30 @@ describe('lifecycle (presence grace timers)', () => {
         extraData: { time: 20_000 },
       });
       expect(disconnect).toHaveBeenCalledWith(false);
+    });
+
+    //? L1/SEC-41 — the client-asserted intentionalDisconnect is honoured at most
+    //? once per connection, so a client cannot spam userAfk to its roommates.
+    it('honours intentionalDisconnect at most once per connection (L1/SEC-41)', async () => {
+      let handler: (() => Promise<void>) | undefined;
+      const disconnect = vi.fn();
+      const socket = {
+        on: vi.fn((event: string, cb: () => Promise<void>) => {
+          if (event === 'intentionalDisconnect') handler = cb;
+        }),
+        disconnect,
+      } as unknown as Socket;
+
+      initActivityBroadcaster({ token: 'tok', socket });
+      informRoomPeersMock.mockResolvedValue(undefined);
+
+      await handler?.();
+      await handler?.();
+      await handler?.();
+
+      //? Only the first emit goes through; repeats are ignored.
+      expect(informRoomPeersMock).toHaveBeenCalledTimes(1);
+      expect(disconnect).toHaveBeenCalledTimes(1);
     });
   });
 });

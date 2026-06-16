@@ -49,13 +49,19 @@ export const serveFavicon = (res: ServerResponse) => {
 
 export const serveFile = async (req: IncomingMessage | { url: string }, res: ServerResponse) => {
 
-  //? if request is / (root) we serve the index.html 
+  //? if request is / (root) we serve the index.html
   const url = req.url ? (req.url == '/' ? 'index.html' : req.url) : 'index.html';
-  const safePath = path.normalize(decodeURIComponent(url)).replace(/^(\.\.[/\\])+/, '');
-  const filePath = path.join(rootFolder, safePath);
 
-  console.log(filePath)
-  console.log(rootFolder)
+  //? decodeURIComponent throws a URIError on malformed escapes (e.g. /assets/%ZZ);
+  //? guard it so a bad URL becomes a 400 instead of an unhandled rejection that exits the worker.
+  const [decodeError, decodedUrl] = await tryCatch(() => decodeURIComponent(url));
+  if (decodeError || decodedUrl == null) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    return res.end("Bad Request");
+  }
+
+  const safePath = path.normalize(decodedUrl).replace(/^(\.\.[/\\])+/, '');
+  const filePath = path.join(rootFolder, safePath);
 
   if (!filePath.startsWith(rootFolder)) {
     //! here we avoid directory traversal attacks
@@ -67,6 +73,8 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
   //? a file that is in the list below should not be able to run this function in the first place cause we filter the routePath using zod before calling this function
   //? but if it passes somehow, we avoid it being served
   if (filePath.includes('.env') ||
+    filePath.endsWith('.map') ||
+    path.basename(filePath) === 'server.js' ||
     filePath.includes('.ts') ||
     filePath.includes('.tsx') ||
     filePath.includes('.py') ||

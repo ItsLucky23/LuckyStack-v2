@@ -166,7 +166,20 @@ const extractAuthShape = (src) => {
   let additionalCount = 0;
   if (additionalMatch) {
     const inside = additionalMatch[1].trim();
-    if (inside.length > 0) additionalCount = (inside.match(/\{/g) ?? []).length || 1;
+    if (inside.length > 0) {
+      //? Count comma-separated TOP-LEVEL array entries (depth-0 commas) rather
+      //? than `{` chars: `additional:[isAdmin, isOwner]` (function refs, zero
+      //? braces) previously collapsed to 1, under-reporting a security-relevant
+      //? column; inline-object predicates over-counted. Track bracket depth so
+      //? commas inside a nested `{}`/`[]`/`()` don't split an entry.
+      let depth = 0;
+      additionalCount = 1;
+      for (const ch of inside) {
+        if (ch === "{" || ch === "[" || ch === "(") depth++;
+        else if (ch === "}" || ch === "]" || ch === ")") depth--;
+        else if (ch === "," && depth === 0) additionalCount++;
+      }
+    }
   }
   return { login, additionalCount };
 };

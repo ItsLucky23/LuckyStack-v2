@@ -1,6 +1,5 @@
 //? Framework-default shim. Re-exports the ioredis singleton from @luckystack/core
-//? so it shows up as `functions.redis.redis` (and `functions.redis.default`) inside
-//? every API + sync handler.
+//? so it shows up as `functions.redis.redis` inside every API + sync handler.
 //?
 //? Edit this file to wrap Redis usage (custom key-prefix per tenant, dead-letter
 //? queue patterns, retry policies). Affects calls that go through
@@ -15,4 +14,4 @@
 //? `import { redis }; export { redis }` form falls back to `any` because
 //? the resolver can't trace the underlying module from a named export
 //? alone.
-export { redis, redis as default } from '@luckystack/core';
+export { redis } from '@luckystack/core';

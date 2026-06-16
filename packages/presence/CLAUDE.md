@@ -4,7 +4,7 @@
 
 ## What this package does
 
-Presence and activity awareness layer for LuckyStack: AFK detection, disconnect grace windows, room-peer notifications (userAfk / userBack), reconnect lifecycle, single-session enforcement integration, and a pluggable activity-event registry. Ships two entry points: a server bundle (default export — socket.io lifecycle wiring) and a browser-safe `/client` subpath (React surface for the socket status indicator and route-change location syncer).
+Presence and activity awareness layer for LuckyStack: AFK detection, disconnect grace windows, room-peer notifications (userAfk / userBack / userLeft), reconnect lifecycle, single-session enforcement integration, and a pluggable activity-event registry. Ships two entry points: a server bundle (default export — socket.io lifecycle wiring) and a browser-safe `/client` subpath (React surface for the socket status indicator and route-change location syncer).
 
 ## When to USE this package
 
@@ -29,8 +29,8 @@ Presence and activity awareness layer for LuckyStack: AFK detection, disconnect 
 |---|---|---|
 | `registerPresenceHooks()` | One-shot boot wiring — registers `postLogout` cleanup + activity broadcaster | → docs/lifecycle.md |
 | `socketConnected({ token, io })` | Lifecycle: clear disconnect timer on reconnect, fire `postSocketReconnect`, notify roommates `userBack` | → docs/server-handlers.md |
-| `socketDisconnecting({ token, reason, socket })` | Lifecycle: open disconnect grace timer (per reason); on expiry, leave rooms + delete session | → docs/disconnect-grace.md |
-| `socketLeaveRoom({ token, socket, newPath })` | Programmatic room leave with session lookup | → docs/server-handlers.md |
+| `socketDisconnecting({ token, reason, socket })` | Lifecycle: open disconnect grace timer (per reason); on expiry, broadcast `userLeft` to remaining room peers (gated by `socketActivityBroadcaster`), leave rooms + delete session | → docs/disconnect-grace.md |
+| `socketLeaveRoom({ token, socket, newPath })` | Resolve the departing token's session for grace-expiry teardown (does NOT call `socket.leave()`; `socket`/`newPath` unused) | → docs/server-handlers.md |
 | `initActivityBroadcaster({ token, socket })` | Wire the `intentionalDisconnect` socket event for tab-switch awareness | → docs/activity-broadcaster.md |
 | `clientSwitchedTab` (Set<string>) | Token-set: client signalled an intentional tab switch (short reconnect window) | → docs/disconnect-grace.md |
 | `disconnectTimers` (Map<string, Timeout>) | Token -> grace-period timer (introspection / test reset) | → docs/disconnect-grace.md |
@@ -40,7 +40,10 @@ Presence and activity awareness layer for LuckyStack: AFK detection, disconnect 
 | `listActivityEvents()` | List every registered activity event in registration order | → docs/activity-broadcaster.md |
 | `dispatchActivitySample(sample)` | Evaluate all registered events against an activity sample; fires matching `onTrigger`s with refractory throttle. Driven in production by `startActivitySampler` | → docs/activity-broadcaster.md |
 | `recordActivity(socketId)` | Mark a socket active right now (called by the server on connect + every client `activity` heartbeat) | → docs/activity-broadcaster.md |
-| `clearActivity(socketId)` | Drop a socket's last-activity record (called by the server on disconnect) | → docs/activity-broadcaster.md |
+| `clearActivity(socketId)` | Drop a socket's last-activity record + its refractory-throttle entries (called by the server on disconnect) | → docs/activity-broadcaster.md |
+| `clearActivityThrottle(socketId)` | Purge a socket's refractory-throttle timestamps from the activity-event registry (called by `clearActivity`) | → docs/activity-broadcaster.md |
+| `getLastActivity(socketId)` | Read a socket's last-activity timestamp (ms epoch) or `undefined` — for consumer roster/AFK queries | → docs/activity-broadcaster.md |
+| `getRoomPresence(roomCode, { io? })` | Snapshot a room's peers (`socketId`, `token`, `lastActivity`, `afk`) for a late joiner; adapter-aware (spans instances) | → docs/activity-broadcaster.md |
 | `startActivitySampler({ io?, intervalMs? })` | Start the single interval that walks every socket and feeds `dispatchActivitySample` every `activitySampleIntervalMs`. Idempotent; returns the stop fn. Auto-started by `@luckystack/server` on first connect when `socketActivityBroadcaster` is on | → docs/activity-broadcaster.md |
 | `stopActivitySampler()` | Stop the sampler interval (shutdown / test reset) | → docs/activity-broadcaster.md |
 | `registerPresenceConfig(input)` | Override disconnect timers, ignore/allow reasons, AFK timeout, activity-sample interval | → docs/disconnect-grace.md |
@@ -51,22 +54,25 @@ Presence and activity awareness layer for LuckyStack: AFK detection, disconnect 
 | Hook payload: `PrePresenceUpdatePayload` | `{ token, userId, kind, roomCodes }` | → docs/peer-notifier.md |
 | Hook payload: `PostPresenceUpdatePayload` | Pre payload + `recipientCount` | → docs/peer-notifier.md |
 | Hook payload: `PostSocketReconnectPayload` | `{ token, userId, roomCodes }` (reconnect-only, not initial connect) | → docs/lifecycle.md |
-| Hook: `prePresenceUpdate` | Before peer iteration (broadcast intent) | → docs/peer-notifier.md |
+| Hook payload: `PostDisconnectGraceExpiredPayload` | `{ token, userId, roomCodes, reason, sessionDeleted }` (grace window expired — user truly gone) | → docs/lifecycle.md |
+| Hook: `prePresenceUpdate` | Before peer iteration — VETO seam (return stop to suppress fan-out: invisible/DND) | → docs/peer-notifier.md |
 | Hook: `postPresenceUpdate` | After peer emits complete (with recipient count) | → docs/peer-notifier.md |
 | Hook: `postSocketReconnect` | Fires only when a reconnect lands within the grace window | → docs/lifecycle.md |
+| Hook: `postDisconnectGraceExpired` | Fires when the disconnect grace window expires without reconnect (mark offline / persist final state) | → docs/lifecycle.md |
 | Hook: `postLogout` (consumed) | Presence registers a handler that clears its disconnect timer + temp-set for the logged-out token | → docs/lifecycle.md |
 
 ### Client entry — `@luckystack/presence/client`
 
 | Function / Export | 1-regel | Deep doc |
 |---|---|---|
-| `SocketStatusIndicator` (React component) | Floating top-right badge showing socket status (gated by `projectConfig.socketStatusIndicator`) | → docs/client-component.md |
-| `SocketStatusIndicatorProps` (type) | `{ status, reconnectAttempt?, label?, formatStatus? }` | → docs/client-component.md |
-| `LocationProvider` (React component) | Route wrapper that emits `updateLocation` socket events on every `react-router` pathname change (gated by `projectConfig.locationProviderEnabled`) | → docs/client-component.md |
+| `SocketStatusIndicator` (React component) | Floating status badge (gated by `projectConfig.socketStatusIndicator`); `position` + `className` props for placement/shape | → docs/client-component.md |
+| `SocketStatusIndicatorProps` (type) | `{ status, reconnectAttempt?, label?, formatStatus?, position?, className? }` | → docs/client-component.md |
+| `LocationProvider` (React component) | Route wrapper that emits `updateLocation` on every `react-router` pathname change (gated by `projectConfig.locationProviderEnabled`). Sends NO query params by default; opt-in per-key via `searchParamFilter` (secrets in URLs never auto-forwarded) | → docs/client-component.md |
+| `LocationProviderProps` (type) | `{ searchParamFilter?: string[] \| (key, value) => boolean }` | → docs/client-component.md |
 
 ## Config keys (env vars + registerProjectConfig slots)
 
-- `socketActivityBroadcaster` (projectConfig, default `false`) — when `true`, peer notifications (`userAfk` / `userBack`) are broadcast on AFK / back / room churn.
+- `socketActivityBroadcaster` (projectConfig, default `false`) — when `true`, peer notifications (`userAfk` / `userBack` / `userLeft`) are broadcast on AFK / back / room churn / departure (hard disconnect or grace expiry).
 - `socketStatusIndicator` (projectConfig, default `false`) — when `true`, `SocketStatusIndicator` renders the floating badge.
 - `locationProviderEnabled` (projectConfig, default `false`) — when `true`, `LocationProvider` emits `updateLocation` socket events on react-router path changes.
 - `disconnectTimers.tabSwitchMs` (presenceConfig, default `20_000`) — reconnect window after an intentional tab switch.

@@ -42,6 +42,10 @@ const resolveEvent = (
   event: ErrorTrackerEvent,
 ): ErrorTrackerEvent | null => {
   const result = beforeSend ? beforeSend(event) : event;
+  //? A hook DROPS by returning `null` or a falsy `forwarded` (the type requires
+  //? `forwarded: boolean`, so a type-safe hook always sets it — `false` to drop,
+  //? `true` to keep). The seed event below carries `forwarded: true`, so the common
+  //? transform pattern (`{ ...event, payload: ... }`) preserves the keep flag.
   if (!result?.forwarded) return null;
   return result;
 };

@@ -79,10 +79,101 @@ const isTemplateInput = (
   input: SendEmailInput,
 ): input is Extract<SendEmailInput, { template: string }> => 'template' in input && Boolean(input.template);
 
+type EmailConfigShape = ReturnType<typeof getEmailConfig>;
+
+//? Resolved `EmailMessage` to send, OR a terminal `EmailResult` failure that
+//? short-circuits the send (currently only `no-template`). Extracted from the
+//? body of `sendEmail` (E13) — same branches, same effects, byte-for-byte.
+type BuildMessageOutcome = { message: EmailMessage } | { failure: EmailResult };
+
+//? Build the wire `EmailMessage` from either a template-based or raw input.
+//? Mirrors the original inline branch exactly: the template branch resolves
+//? consumer-override → built-in, logs + returns `no-template` on a miss, then
+//? renders; the raw branch projects the scalar fields. No behavior change.
+const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMessageOutcome => {
+  if (isTemplateInput(input)) {
+    //? Resolution order: consumer-registered template (last-write-wins
+    //? override) → framework built-in (`password-reset` / `email-change`) →
+    //? no-template. The built-in fallback is what makes the login flow's
+    //? `registerEmailTemplate` override contract real (CFG-05 / QUA-067).
+    const template = getEmailTemplate(input.template) ?? getBuiltInEmailTemplate(input.template);
+    if (!template) {
+      if (config.logging.errors) {
+        getLogger().warn(`[email] template '${input.template}' not registered`, { to: String(input.to) });
+      }
+      return { failure: { ok: false, reason: 'no-template' } };
+    }
+    const data = input.data ?? {};
+    const rendered = template.render(data);
+    return {
+      message: {
+        to: input.to,
+        subject: template.subject(data),
+        html: rendered.html,
+        text: rendered.text,
+        from: input.from ?? config.from,
+        replyTo: input.replyTo,
+        cc: input.cc,
+        bcc: input.bcc,
+      },
+    };
+  }
+  return {
+    message: {
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+      from: input.from ?? config.from,
+      replyTo: input.replyTo,
+      cc: input.cc,
+      bcc: input.bcc,
+    },
+  };
+};
+
+//? Normalize the `sender.send` tuple into an `EmailResult`. Mirrors the inline
+//? mapping exactly: a thrown error → `send-threw` (or its message); a
+//? null/undefined result → `send-no-result`; otherwise the adapter's result.
+const normalizeSendResult = (sendError: Error | null, sendResult: EmailResult | null): EmailResult =>
+  sendError
+    ? { ok: false, reason: sendError.message || 'send-threw', cause: sendError }
+    : (sendResult ?? { ok: false, reason: 'send-no-result' });
+
+//? Terminal logging + Sentry capture for a completed send. Mirrors the inline
+//? tail exactly: success logs an info line (when enabled); failure logs a
+//? redacted warning (when enabled) and always captures with PII redacted.
+const reportSendOutcome = (senderName: string, message: EmailMessage, result: EmailResult, config: EmailConfigShape): void => {
+  if (result.ok) {
+    if (config.logging.sends) {
+      getLogger().info(`[email:${senderName}] sent`, { to: String(message.to), subject: message.subject, id: result.id });
+    }
+    return;
+  }
+
+  if (config.logging.errors) {
+    getLogger().warn(`[email:${senderName}] FAILED`, { to: String(message.to), subject: message.subject, reason: result.reason });
+  }
+
+  captureException(result.cause ?? new Error(`Email send failed: ${result.reason}`), {
+    fn: 'sendEmail',
+    senderName,
+    to: redactRecipients(message.to),
+    cc: redactRecipients(message.cc),
+    bcc: redactRecipients(message.bcc),
+    subject: redactSubject(message.subject),
+    reason: result.reason,
+  });
+};
+
 //? The single helper framework + project code calls. Handles missing-sender
 //? policy, terminal logging, and Sentry reporting (no-ops if Sentry isn't
 //? installed). Returns a typed result rather than throwing so callers can
 //? branch without try/catch — matches the rest of the framework's patterns.
+//?
+//? Thin orchestrator over `buildMessage` → `preEmailSend` hook →
+//? `sender.send` (normalized via `normalizeSendResult`) → `postEmailSend` hook
+//? → `reportSendOutcome` (E13 decomposition — same effects, same order).
 export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => {
   const config = getEmailConfig();
   const sender = resolveSender(input);
@@ -101,53 +192,26 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
     return { ok: false, reason: 'no-sender' };
   }
 
-  let message: EmailMessage;
-  if (isTemplateInput(input)) {
-    //? Resolution order: consumer-registered template (last-write-wins
-    //? override) → framework built-in (`password-reset` / `email-change`) →
-    //? no-template. The built-in fallback is what makes the login flow's
-    //? `registerEmailTemplate` override contract real (CFG-05 / QUA-067).
-    const template = getEmailTemplate(input.template) ?? getBuiltInEmailTemplate(input.template);
-    if (!template) {
-      if (config.logging.errors) {
-        getLogger().warn(`[email] template '${input.template}' not registered`, { to: String(input.to) });
-      }
-      return { ok: false, reason: 'no-template' };
-    }
-    const data = input.data ?? {};
-    const rendered = template.render(data);
-    message = {
-      to: input.to,
-      subject: template.subject(data),
-      html: rendered.html,
-      text: rendered.text,
-      from: input.from ?? config.from,
-      replyTo: input.replyTo,
-      cc: input.cc,
-      bcc: input.bcc,
-    };
-  } else {
-    message = {
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
-      from: input.from ?? config.from,
-      replyTo: input.replyTo,
-      cc: input.cc,
-      bcc: input.bcc,
-    };
-  }
+  const built = buildMessage(input, config);
+  if ('failure' in built) return built.failure;
+  const { message } = built;
 
-  await dispatchHook('preEmailSend', {
+  //? Honor the `preEmailSend` veto: a registered suppression hook (GDPR
+  //? opt-out / unsubscribe / bounce list) returns a stop signal to abort the
+  //? send. Short-circuit BEFORE `sender.send` so suppressed recipients never
+  //? receive mail, and skip the `postEmailSend` "send attempt" hook +
+  //? `reportSendOutcome` (no send was attempted). No hook registered ->
+  //? `stopped` is false -> behavior unchanged.
+  const preSend = await dispatchHook('preEmailSend', {
     message,
     adapter: sender.name,
   });
+  if (preSend.stopped) {
+    return { ok: false, reason: preSend.signal.errorCode || 'email.suppressed' };
+  }
 
   const [sendError, sendResult] = await tryCatch<EmailResult, undefined>(() => sender.send(message));
-  const result: EmailResult = sendError
-    ? { ok: false, reason: sendError.message || 'send-threw', cause: sendError }
-    : (sendResult ?? { ok: false, reason: 'send-no-result' });
+  const result = normalizeSendResult(sendError, sendResult);
 
   await dispatchHook('postEmailSend', {
     message,
@@ -157,26 +221,7 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
     reason: result.ok ? undefined : result.reason,
   });
 
-  if (result.ok) {
-    if (config.logging.sends) {
-      getLogger().info(`[email:${sender.name}] sent`, { to: String(message.to), subject: message.subject, id: result.id });
-    }
-    return result;
-  }
-
-  if (config.logging.errors) {
-    getLogger().warn(`[email:${sender.name}] FAILED`, { to: String(message.to), subject: message.subject, reason: result.reason });
-  }
-
-  captureException(result.cause ?? new Error(`Email send failed: ${result.reason}`), {
-    fn: 'sendEmail',
-    senderName: sender.name,
-    to: redactRecipients(message.to),
-    cc: redactRecipients(message.cc),
-    bcc: redactRecipients(message.bcc),
-    subject: redactSubject(message.subject),
-    reason: result.reason,
-  });
+  reportSendOutcome(sender.name, message, result, config);
 
   return result;
 };

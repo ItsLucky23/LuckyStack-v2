@@ -6,6 +6,7 @@
 import { getProjectConfig } from '@luckystack/core';
 
 import { createEmailChangeToken } from './emailChange';
+import { loadEmailModule } from './emailModuleLoader';
 
 interface SendEmailChangeArgs {
   userId: string;
@@ -32,14 +33,10 @@ export const sendEmailChangeConfirmation = async (
   const config = getProjectConfig();
   const resolvedBrand = brand ?? config.auth.passwordResetBrand ?? 'LuckyStack';
 
-  // Lazy import — `@luckystack/email` is an optional peer dep.
-  interface EmailModule {
-    sendEmail: (input: Record<string, unknown>) => Promise<{ ok: boolean; reason?: string }>;
-  }
-  const { sendEmail } = await (
-    // @ts-expect-error optional peer dep — installed only when the consumer wires email sending
-    import('@luckystack/email') as Promise<EmailModule>
-  );
+  // Lazy import — `@luckystack/email` is an optional peer dep. A failed load
+  //? rejects here (unlike forgotPassword's catch); this caller's behavior is
+  //? unchanged — the rejection bubbles out exactly as the inline import did.
+  const { sendEmail } = await loadEmailModule();
 
   const token = await createEmailChangeToken(userId, newEmail);
   const baseUrl = (config.app.publicUrl || '').replace(/\/+$/, '');

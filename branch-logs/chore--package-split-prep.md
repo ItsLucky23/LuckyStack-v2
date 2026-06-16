@@ -3023,3 +3023,281 @@ Rewrote `SESSION_STATE.md` from scratch to capture the entire 2026-06-10 session
 **Files (new):** `luckystack.ai.json`, `scripts/generateProductOverview.mjs`, `docs/PRODUCT.md`, `docs/AI_PRODUCT_OVERVIEW.md`, `packages/create-luckystack-app/template/{docs/PRODUCT.md,luckystack.ai.json}` (+ generator mirror). **(edited):** `scripts/generateProjectIndex.mjs` (+template mirror, Tested + ownership), root+template `package.json` (`ai:product`), `.githooks/pre-commit`, scaffold `index.ts` (hook), `CLAUDE.md`, `docs/AI_BOOST_OVERVIEW.md`.
 
 **Next (parked):** RAG (ADR 0003); the larger-scale layers (cross-service graph, multi-agent coordination, eval-harness) only when the project reaches that scale — most solved by the per-folder/threshold approach now designed-in.
+
+## 2026-06-14 — ET-02: wire error-tracker AsyncLocalStorage identity end-to-end
+
+**User prompt (summary)**: Adversarial verification found ET-02 (merged H-8) NOT-FIXED: the `runWithErrorTrackerIdentity` primitive existed in core but had ZERO production call sites, so concurrent requests cross-attributed errors to the wrong user after an await boundary. Wire it for real: open an ALS identity scope at request entry, set the session once known, make adapters READ the ALS at capture time. Regression tests must pass against the REAL production path.
+
+**What I did**:
+- `packages/core/src/errorTrackerRegistry.ts`: ALS now stores a MUTABLE box `{ user }` (was the user directly) so identity can be set AFTER scope entry. Added `runWithErrorTrackerIdentityScope(fn)` (open empty box at request entry, before the first await) + `setCurrentErrorTrackerIdentity(user)` (write the box once session resolves). `runWithErrorTrackerIdentity(user, fn)` kept (binds upfront — used by the regression tests). `getCurrentErrorTrackerIdentity()` reads `box.user`. Exported the two new fns from the core barrel.
+- Adapters read ALS first at capture time (fall back to the per-adapter closure only when no scope is active): `adapters/posthog.ts` (`resolveDistinctId()`), `adapters/datadog.ts` (`resolveUser()` in `userTags`), `adapters/sentry.ts` (`withIdentity()` attaches a per-event Sentry `user` so it no longer relies on the mutated process-global scope). Also added PostHog `flush()` (ET-16, drains `client.shutdown()`).
+- `autoInstrumentation.ts`: `preApiValidate`/`preSyncAuthorize` now call a shared `propagateIdentity()` that writes the per-request ALS box (primary) AND the legacy global `setSentryUser` (fallback for background/non-request captures). `postLogout` clears both.
+- Request handlers open the scope around the WHOLE handler (before `readSession`) and set the identity right after the session resolves: `packages/api/src/handleApiRequest.ts` + `handleHttpApiRequest.ts`, `packages/sync/src/handleSyncRequest.ts` + `handleHttpSyncRequest.ts`.
+- Test mock: added the two new core fns to the hand-written `vi.mock('@luckystack/core')` in `packages/api/src/handleHttpApiRequest.test.ts` (scope wrapper invokes its callback; setter is a no-op).
+
+**Isolation guarantee**: each request enters its own ALS box at entry; `setCurrentErrorTrackerIdentity` mutates only the active request's box; AsyncLocalStorage propagates that same box to every async child of the request, so a post-await capture reads THIS request's user — never an interleaved request's. Two concurrent requests with different users cannot cross-attribute.
+
+**Verified**: error-tracking 57/57 (incl. posthog/datadog ET-02 + ET-16 regression files, against the REAL `@luckystack/core` ALS — dynamic import after `vi.resetModules()` binds the same module instance). api+sync 140/140, core 194/194. All four packages build (ESM+DTS typecheck). Root `npm run lint` + `ai:lint` clean. Edited production files lint clean.
+
+**Files (edited)**: `packages/core/src/errorTrackerRegistry.ts`, `packages/core/src/index.ts`, `packages/error-tracking/src/autoInstrumentation.ts`, `packages/error-tracking/src/adapters/{posthog,datadog,sentry}.ts`, `packages/api/src/{handleApiRequest,handleHttpApiRequest}.ts`, `packages/api/src/handleHttpApiRequest.test.ts`, `packages/sync/src/{handleSyncRequest,handleHttpSyncRequest}.ts`.
+
+**Reported (out of scope, pre-existing)**: 3 unrelated test files already fail on HEAD/working-tree (not touched by this change): `packages/login/src/oauthProviders.test.ts`, `packages/server/src/httpRoutes/authCallbackRoute.test.ts`, `packages/cli/src/assetParity.test.ts` (login/cli/server in-flight edits). Sync handler files carry pre-existing `import-x/no-duplicates` warnings (6x core-import sprawl in the already-modified working tree) — left alone per surgical-change rule.
+
+## 2026-06-14 — Merge 6 codebase-scans → MERGED + apply all in-scope fixes (multi-agent)
+
+**User prompt (summary)**: (1) merge all results from the ~6 `codebase-scan-14-06*` folders into one combined set; (2) apply all the fixes with as many opus agents as wanted (ultracode); (3) delete all scan folders except the merged one.
+
+**What I did**:
+- **Merge (24-agent workflow)**: consolidated 6 runs (r1, --2..--6, ~175 files) into `codebase-scan-14-06-MERGED/` — 19 per-area merges + 5 category rollups, deduplicated with cross-run corroboration (n/6). Output: `SECURITY.md` (52), `BUGS.md` (126), `CODE_QUALITY.md` (82), `FEATURES.md` (55), `REFACTOR_ROADMAP.md` (152), `SUMMARY.md` (corroboration matrix + must-fix shortlist), `README.md`, `per-area/`, `_category-rollups/`. 561 area-findings: 3 critical / 69 high / 196 medium / 293 low.
+- **Apply fixes (13-agent workflow, disjoint file clusters)**: 115 fixes across 96 files. Build-gate completed half-applied fixes (login hook-payload types, `SessionAdapter.touchActive` sliding-TTL, OAuth PKCE+state-cookie binding, test-runner helper, `tryCatch` generic default) and removed 4 speculative untracked test/bin stubs referencing non-existent APIs. `npm run build` + `lint` + `ai:lint` all green.
+- **Close ship-blocker gaps (6-agent follow-up)**: adversarial verify found C2 PARTIAL + ALS NOT-FIXED. Closed: **C2** source-disclosure structurally (template `bundleServer.mjs` `sourcemap` default false via `BUNDLE_SERVER_SOURCEMAP`; `staticRoutes.ts` `SERVE_DENYLIST_REGEX` for `/server.js` + `*.map`; `server/prod/serveFile.ts` denylist); **ALS** identity wired end-to-end (already detailed in the ET-02 entry above); two lost stream `error` listeners (`serveAvatars.ts` `stream.pipeline`, `syncRoute.ts` SSE `error`/`aborted`/`res.error`).
+- **Cleanup**: deleted the 6 original `codebase-scan-14-06*` source folders; kept `codebase-scan-14-06-MERGED/`.
+
+**Verified**: final `npm run build` exit 0 (16/16 packages), `npm run lint` exit 0. Re-verification: C1/C3/validateType-fail-closed/OAuth-linking/transport-twins(H-7,H-11)/C2/ALS/streams all FIXED in real source.
+
+**Reported (NOT done — your call)**:
+- **Out of scope (net-new feature work)**: missing `@luckystack/jobs` + `@luckystack/storage` packages (FEATURES F3/F4).
+- **Deferred (need an ADR-level decision, not a blind security edit)**: rate-limiter fail-open-on-Redis-outage default + unbounded memory store; `trustProxy`/XFF leftmost-hop IP-resolution semantics + per-IP bucket collapse; `healthHash.mode` default `plain`→`hmac`; router timeout config keys.
+- **Deferred (large behavior-preserving refactors, own test pass)**: transport-twin parity extraction + conformance test; `loadSocket`/`dispatchHttpRequest`/`createServer` god-function decompositions; api/sync god-functions.
+- **Residual Medium**: M-9 socket API handler has no `httpMethod` gate (read-only routes mutating-callable over socket).
+- **Pre-existing (untouched, surgical rule)**: two `console.log` debug lines in `server/prod/serveFile.ts:57-58` (in HEAD `14fd7fb`); framework-only `scripts/bundleServer.mjs:63` `sourcemap:true` (local build only, not shipped to consumers).
+
+**Files**: 96+ across packages/api, sync, core, router, server, login, error-tracking, secret-manager, presence, cli, devkit, docs-ui, mcp, test-runner, create-luckystack-app, src/, server/. New: `codebase-scan-14-06-MERGED/`.
+
+## 2026-06-14 — Deep-analyze + fix all LOW/INFO findings (multi-agent)
+
+**User prompt (summary)**: do a deep analysis of all low-risk bugs, then fix everything I'm confident must keep working (behavior-preserving), to process as much as possible. Don't worry about committing pieces; only release v0.2.0 once everything is solved.
+
+**What I did (15-agent workflow, 13 disjoint clusters)**: each cluster agent expanded the merged-report LOW/INFO cluster-entries into atomic findings, verified each vs CURRENT code, and applied only confident behavior-preserving fixes within owned paths; wrote a per-cluster deep-analysis doc to `codebase-scan-14-06-MERGED/LOW_ANALYSIS/<cluster>.md`.
+
+**Tally — 286 atomic findings**: 30 fixed-now · 91 already-fixed (prior passes) · 93 deferred (policy/contract/refactor/cross-path) · 69 won't-fix (by-design/cosmetic/info). 23 files touched by the LOW pass.
+
+**Representative fixes applied**: server SSE Content-Type guard + CSRF HEAD parity (dead-path defense); error-tracking PostHog `appendErrorTracker` (was clobbering Sentry/overlay adapters) + log-string redaction; mcp prototype-chain key hardening (`Object.hasOwn`) across `resolveNodeId`/`who_calls`/`get_decision` + basename fallback; devkit `splitTopLevel` quote-state + angle-clamp + scoped `clientInput` search (codegen correctness); test-runner undici drain-body lifecycle + plaintext-webhook warning + xpass-in-summary; cli i18n key `common/.404`→`common.404`; router healthPoller JSDoc accuracy; secret-manager background-catch error-string logging.
+
+**Build-gate**: surfaced 3 test failures, all fixed at root cause — (A) stale `oauthProviders.test.ts` v1→v3 userinfo assertion (matches the OIDC `email_verified` move); (B) **pre-existing** security bug in `packages/server/src/httpRoutes/authCallbackRoute.ts` (based-token redirect delivered token in the query string instead of the URL fragment → token-leak via logs/Referer; fixed to `#token=` + strip existing fragment); (C) asset↔template parity — propagated the asset-side session-handle/security hardening into `create-luckystack-app/template/src/settings/_api/{deleteAccount,listSessions,revokeSession}_v1.ts`, exempted the genuinely-divergent `LoginForm.tsx`.
+
+**Verified (own run)**: `npm run build` exit 0, `npm run lint` exit 0, `npm run test:unit` exit 0 — **86 test files, 1015 tests all pass**. Adversarial verify: no request/response shape, auth, or rate-limit policy altered; no `as any`/`as unknown as` introduced; SAFE TO KEEP.
+
+**Remaining backlog = the 93 deferred** (full list in `LOW_ANALYSIS/*.md`), bucketed: policy/default decisions (rate-limit scope label, health-poller predicate, health-store TTLs, redactedLogKeys defaults, distinctId anonymization, secret-manager envNames default); wire-contract redesigns (HTTP↔socket sync response envelope S22, syncCancel cb keying S13, shared one-time-token hashing primitive); structural god-function refactors (initializeSentry, docs-ui render(), runAllTests, sendEmail, checkI18n); and a set of still-safely-fixable items deferred only for cross-path ownership or wanting a test. **NOTE one HIGH leaked into deferred: root-misc `--db=sqlite scaffolds an invalid Prisma schema` — should be fixed regardless of severity bucket.**
+
+**Files**: 23 across packages/{server,error-tracking,mcp,devkit,test-runner,cli,router,secret-manager,login} + build-gate fixes in packages/{login,server,create-luckystack-app,cli}. New: `codebase-scan-14-06-MERGED/LOW_ANALYSIS/`.
+
+## 2026-06-14 — Safe-sweep of behavior-preserving deferred lows (bucket 4) + HIGH triage
+
+**User prompt (summary)**: of the 93 deferred lows, run the safe-sweep now — apply only the behavior-preserving subset + the HIGH `--db=sqlite` schema bug; leave policy/contract/refactor (bucket 1-3) for a later decision pass.
+
+**What I did (15-agent workflow, 13 disjoint clusters)**: each agent re-read its `LOW_ANALYSIS/<cluster>.md` deferred section, re-verified vs current code, and applied ONLY behavior-preserving items (additive guards/listeners/timeouts, path-hardening that doesn't change legit behavior, missing locale keys, contract-mismatch UI bugfixes, dep-pinning, version-from-package.json); everything policy/contract/output-shape/refactor stayed deferred.
+
+**Applied — 12 fixes / 29 files / 4 new tests**:
+- router-server: #14 redisHealthStore FD-leak on subscriber-connect failure (try/finally); #13 missing `'error'` listeners on boot-handshake + health-store Redis clients (+ `redisHealthStore.test.ts`).
+- login: A18 token/handle contract mismatch in settings sessions UI fixed.
+- email: E3 ResendSender floating import-promise unhandledRejection defense.
+- presence: applied room-name formatter on the `getRoomPresence` snapshot path (finish multi-tenant isolation on the sibling read path) (+ `activitySampler.test.ts`).
+- cli: #12 FEATURES parity-test keys derived from the real registry.
+- docs-ui: A11 charset=utf-8 on JSON sub-routes; A17 html-generation.md runner-signature doc drift.
+- mcp: A10 readDocFile path-containment hardening; A13 server version from package.json (+ `artifacts.test.ts`).
+- test-runner: TR-13 resetServerState AbortController timeout (+ `resetServerState.test.ts`).
+- root-misc: RM-17/#59 bundleServer sourcemap off-by-default (framework, consistency with template).
+
+**HIGH triaged as a FALSE POSITIVE (no fix needed, verified)**: `--db=sqlite scaffolds an invalid Prisma schema` was based on older-Prisma constraints. The template pins `prisma@^6.19.3` (caret, stays <7); rendering the exact sqlite schema and running the scaffolder's real `prisma validate` + `prisma generate` both succeed. Left unchanged.
+
+**Build-gate**: 2 root-cause fixes — widened a `vi.fn` fetch-mock param to `URL|RequestInfo` in `resetServerState.test.ts`; brought template `settings/page.tsx` into `handle`-model lockstep with the asset (was the stale side; `_api` siblings already on `{ handle }`).
+
+**Verified (own run)**: `npm run build` 0, `npm run lint` 0, `npm run test:unit` 0 — **90 files, 1029 tests pass**. Adversarial verify: all 12 fixes behavior-preserving; presence join-side asymmetry is a deliberate, documented deferral (harmless under the shipped identity-formatter default); no `as any`/`as unknown as` in production (2 pre-existing test-double casts are non-blocking ai:lint warnings).
+
+**Remaining = bucket 1-3 (policy/contract/refactor)**, awaiting user decisions before v0.2.0 release. Tracked in `LOW_ANALYSIS/*.md`.
+
+**Files**: 29 across packages/{router,login,email,presence,cli,docs-ui,mcp,test-runner,server,core,create-luckystack-app} + 4 new tests.
+
+## 2026-06-14 — Bucket-3: behavior-preserving refactors (god-functions + shared helpers)
+
+**User prompt (summary)**: finish everything that can be done without my decisions; I'll answer the open questions later; ideally everything solved.
+
+**What I did (12-agent workflow, 10 disjoint clusters)**: applied the decision-INDEPENDENT remaining work — behavior-preserving god-function decompositions + extract-shared-helper refactors, each gated on provable equivalence (existing suite stays green + new characterization tests pin the extracted units). Anything needing a decision (bucket 1 policy / bucket 2 contract) stayed deferred.
+
+**Refactors applied — 12 / 39 files, +82 tests (1029→1111)**:
+- error-tracking: decomposed `initializeSentry` (~108L) into config-build/integration/beforeSend/client-construct helpers (+ `sentry.initialize.test.ts`, 5 cases pinning the DSN path).
+- docs-ui: extracted typed `renderCore` + per-element binding from `render()` (+ `liveRenderCore.test.ts`, 17 cases run against the shipped browser code).
+- test-runner: decomposed `runAllTests` keeping totals/reporter/exit-code identical (+ 9 cases).
+- email: extracted `providerPayload` mapper + `sendEmail` orchestration helpers (+ 8 cases across 2 files).
+- cli: decomposed `checkI18n` into `harvestUsedKeys`/`collectDynamicSites`/`loadLocaleKeys` (+ 8 cases).
+- presence: extracted `forEachRoomPeer` fan-out helper with cross-room dedup (+ 2 cases).
+- router-server: extracted `resolveRequesterIp(req)` (thrice-duplicated) + `listenLuckyStackServer`/`initDevTools` out of `createServer` (+ 9 + 5 cases). `loadSocket` left untouched (couldn't prove lifecycle equivalence — correctly deferred).
+- devkit: removed dead plumbing + a latent-bug codegen fix (removed an UNREACHABLE `pagePath==='root'` sync branch that emitted a non-matching wire path; new output aligns with the loader runtime key).
+- login: extracted `loadEmailModule()` (+ 3 cases pinning the no-swallow invariant).
+- **core-transport: declined the risky transport-twin extraction (could not prove HTTP/socket equivalence)** but ADDED `transportParity.test.ts` — a 16-case table-driven conformance suite pinning that both transports enforce identical auth gates / validation mode / error-envelope / stage ordering, and that the raw validator message never leaks.
+
+**Build-gate**: all green — only 3 type errors in the NEW test files fixed (read-only socket.io props, `noUncheckedIndexedAccess` on mock.calls); zero refactor reverts.
+
+**Verified (own run)**: `npm run build` 0, `lint` 0, `test:unit` 0 — **100 files, 1111 tests pass**. Equivalence audit: all refactors signature-preserving, no removed/renamed exports, no `as any`/`as unknown as` in production, no unintended codegen drift. (The audit's "not purely equivalent" caveat refers to the cumulative branch diff surfacing the EARLIER intended security changes — SYNC-04 envelope, wsProxy SSRF/forwarding, HTTP-relaxed validation — not regressions from this pass.)
+
+**Remaining = bucket 1 (policy defaults) + bucket 2 (wire-contract redesigns) — awaiting user decisions.** All else is done + green.
+
+**Files**: 39 across packages/{error-tracking,docs-ui,test-runner,email,cli,presence,router,server,devkit,login,api,sync,core} + 12 new test files.
+
+## 2026-06-15 00:24 — Wave2 codebase audit (ultracode, 55 agents)
+
+*User prompt*: full codebase analysis — bugs/security/bad-habits/god-functions/improvements + useful framework feature suggestions toward the 100%-AI-driven goal; ultracode with many Opus 4.8 instances; read workspaces-brainstorm-14-06 for prior-scan context; output round into codebase-scan--wave2-14-06--3/.
+
+*What I did*: Ran a 4-phase background Workflow (Audit→Verify→Features→Synthesize), 18 area auditors each handed the condensed 6-run MERGED baseline to re-verify + then hunt NEW issues; every CRIT/HIGH through an adversarial skeptic (default-refute); 4 feature architects; per-category synthesizers. Initial 16-wide burst hit server-side rate-limiting (1/18 areas done) → rewrote into low-concurrency `inChunks` waves (audit 3 / verify 4 / synth 2) and resumed via resumeFromRunId → clean run (55 agents, ~4.3M tokens). Parsed the result with emit.mjs into the report set.
+
+*Result*: 162 findings (1 CRIT, 15 HIGH, 52 MED, 92 LOW), 124 NEW, 2 refuted, 36 god-functions, 24 feature proposals, 18/18 areas. Theme: shadow-API drift is the #1 defect class. CRIT = shipped docs renderer (docsHtml.ts) reads wrong artifact shape, test pins the wrong shape so CI green (renderCore.ts extracted earlier this branch is the unimported correct path). validateType fail-open (baseline 6/6) REFUTED — now fails closed. New DoS vectors: serveFile decodeURIComponent crash, proxy timeouts, SSE missing error listeners. Delete-account GDPR break confirmed in 4 locations.
+
+*Files touched*: analysis-only — codebase-scan--wave2-14-06--3/ (SUMMARY, README, SECURITY/BUGS/CODE_QUALITY/FEATURES, per-area/*18, raw/*, wave2.workflow.js, emit.mjs). No framework code changed.
+
+*Notes*: Reports are advisory (report-without-auto-fixing). Baseline router/server CRITs C1-C3 (wsProxy crash, /server.js, WS-SSRF) not re-counted this round — treat the MERGED must-fix list as still in force for those.
+
+## 2026-06-15 — Merge + reconcile wave-2 scans → codebase-scan-14-06-FINAL
+
+**User prompt (summary)**: 4 more ultracode sessions produced `codebase-scan--wave2-14-06--{1,3,4}` (run 2 = only the wave-1 known-issues digest, no findings). Merge them, dedupe, verify each against the CURRENT code (fixed / known / new / false-positive), and produce ONE complete combined output = first big scan (wave-1 MERGED) + the 4 wave-2 scans.
+
+**What I did (24-agent workflow, read-only analysis)**: 18 area agents reconciled wave-2 (3 runs) against the wave-1 MERGED baseline AND verified every kept finding against the live tree (file:line), classifying FIXED/OPEN/NEW/DEFERRED-DECISION/FALSE-POSITIVE; 5 writers + master produced the combined reports. NOTE: first run hit hard server-side rate-limiting (17/18 area agents failed) — re-ran wave-batched (4 concurrent per wave) which dodged the throttle and completed all 18.
+
+**Output**: `codebase-scan-14-06-FINAL/` — SECURITY/BUGS/CODE_QUALITY/FEATURES/REFACTOR_ROADMAP/SUMMARY/README + 18 tree-verified `per-area-reconciled/*.md`. Reconciled status totals (overlapping lenses): FIXED 174 · OPEN 325 · NEW 115 · DEFERRED-DECISION 36 · FALSE-POSITIVE 49.
+
+**Headline**: all 3 wave-1 CRITICALs (wsProxy crash C1, SSRF C3, /server.js disclosure C2) + the flagship-HIGH band are line-verified FIXED. NO security critical survives.
+
+**NEW v0.2.0 blockers wave-2 caught that wave-1 missed (all re-verified in-tree)** — mostly the twin-drift class our own in-flight fixes left exposed:
+- DOCSUI-1 (dev-only CRITICAL): docs-ui live renderer walks NESTED `apis[page][name][ver]` while emitter + committed `apiDocs.generated.json` are FLAT arrays → every route renders garbled, syncs never render; correct `renderCore.ts` is dead; a wrong-shaped fixture keeps CI green. `docs-ui/docsHtml.ts:339-342` vs `devkit/emitterArtifacts.ts`.
+- N-1 (HIGH): `serveFile` unguarded `decodeURIComponent(url)` → `GET /assets/%ZZ` URIError → unhandled rejection → worker crash; no `process.on('unhandledRejection')` anywhere. `server/prod/serveFile.ts:54`.
+- N-2 (HIGH): `getParams` request-stream `error` reject → worker crash on client RST mid-body. `core/getParams.ts:111-113`.
+- H-1 (HIGH): router WS+HTTP upstream leg has NO timeout → half-open socket accumulation DoS (unauth on WS); wave-1 only caught the now-fixed client-disconnect leg. `router/wsProxy.ts:96-119`.
+- N-3 (HIGH): per-route rate-limit bucket keyed on the RAW session token (token in Redis key names + dev warn log). `api/handleApiRequest.ts:141-143`.
+- N-4 (HIGH): dead `redactToken`; raw bearer token leaks to error-tracker context (un-gated). `sync/_shared/clientFanout.ts:111`.
+- H-4 (HIGH): `preEmailSend` stop-signal ignored → GDPR/unsubscribe suppression is a silent no-op. `email/sendEmail.ts:199-204`.
+- B7/API-O1 (HIGH): `packages/api/CLAUDE.md` documents phantom hooks/helper/config (`apiAuthRejected`, `preSocketMessage`, `applyGlobalIpRateLimit`, `rateLimiting.identity`, `skipLoopbackInDev`) — grep=0 in code.
+- N-7 (MED): test-runner CSRF-enforcement layer built+tested but never exported/orchestrated → `npm run test` gives ZERO CSRF coverage.
+
+**Known-OPEN highs carried (need decisions / larger work)**: H-3 `/_health` unsalted secret fingerprints (policy), H-5 credentials self-delete impossible (GDPR, ×3 surfaces), H-6 consumer `src/settings/_api/*` hand-built Redis keys, H-7 graceful shutdown + flushErrorTrackers unwired (= MIS-016 feature), M-15 login-lockout remote DoS, H-2/DD-1 permissive sync receiver-auth default (the 0.2.0 secure-default flip).
+
+**Notable FALSE-POSITIVE corrected**: `registerErrorFormatter` "shadow API" claim is bogus — `applyErrorFormatter` IS called in api/sync handlers (stale-scope grep in wave-2 run-3).
+
+**No code changed this turn** (analysis-only deliverable). Tree still build/lint/test-green at 1111 tests.
+
+## 2026-06-15 — Fix wave-2 behavior-preserving v0.2.0 blockers (multi-agent)
+
+**User prompt (summary)**: of the wave-2 blockers, fix the behavior-preserving NEW/known ones now; leave policy/feature (H-3, H-7, H-2/DD-1, M-15) for the decision pass.
+
+**What I did (11-agent workflow, 9 disjoint clusters, wave-batched)**: applied 10 behavior-preserving fixes for the wave-2-confirmed blockers.
+- **DOCSUI-1** (dev-CRIT): docs-ui live renderer now walks the FLAT `apis[page]=Entry[]` / `syncs[page]=SyncEntry[]` artifact shape (via renderCore) — routes + syncs render correctly; test fixture corrected to the real flat shape.
+- **N-1** (HIGH): `server/prod/serveFile.ts` wraps `decodeURIComponent` in tryCatch → 400 on malformed escape (no worker crash); removed the 2 stray pre-existing `console.log` debug lines.
+- **N-2** (HIGH): `core/getParams.ts` request-stream `error` now `resolve(null)` (handled "no usable body"), never an unhandled rejection.
+- **N-3** (HIGH): new `api/_shared/rateLimitIdentity.ts` `deriveTokenBucketId` = SHA-256(token).slice(0,32); both transports key on the hash, not the raw token — same bucket identity, token no longer in Redis keys/logs.
+- **N-4** (HIGH): `sync/_shared/redactToken` now actually applied to stream logs + the error-tracker `captureException` context (raw bearer token no longer leaks); sanitizeForLog cycle-guarded.
+- **H-1** (HIGH): both `wsProxy`/`httpProxy` bound the upstream leg with `setTimeout` → destroy/502-504 on expiry (closes the half-open-socket DoS).
+- **H-4** (HIGH): `email/sendEmail.ts` now honors the `preEmailSend` `.stopped` signal (suppressed → not sent, skips postEmailSend); no-hook path unchanged.
+- **H-5/H-6** (HIGH): credentials self-delete now collects+verifies the password in lockstep across consumer `src` + CLI asset + template (only required when a password exists, so OAuth-only unaffected); consumer `src/settings/_api/*` now use framework key-builders (`activeUsersKeyFor`) instead of hand-built Redis keys.
+- **N-7** (MED): test-runner CSRF-enforcement layer exported + orchestrated into the default sweep (opt-out `noCsrf`, gated on a session cookie), results threaded into totals.
+
+**Build-gate**: green on first run, no reverts. **Verified (own run)**: `npm run build` 0, `lint` 0, `test:unit` 0 — **104 files, 1130 tests pass** (+19). Adversarial verify: all 9 items actually fixed + behavior-preserving; no request/response shape, auth, or rate-limit-bucket identity changed; no new `as any`/`as unknown as` in production.
+
+**Still OPEN = the decision/feature items only**: H-3 `/_health` secret-fingerprints (policy), H-7 graceful shutdown + flushErrorTrackers (= MIS-016 feature), H-2/DD-1 permissive sync receiver-auth default (0.2.0 secure-default flip), M-15 login-lockout DoS reorder — plus bucket-1/2 policy/contract decisions from the wave-1 pass. All await user decisions.
+
+**Files**: 30 across packages/{docs-ui,core,api,sync,router,email,login,test-runner,create-luckystack-app,cli} + src/settings + server/prod.
+
+## 2026-06-15 — login cluster: token hash-at-rest migration + M-15 lockout fix
+
+**User prompt (summary)**: migrate password-reset AND email-change tokens onto the new `@luckystack/core` one-time-token primitive (sha256 at rest, raw token no longer in Redis) in lockstep across issue+consume; fix M-15 login-lockout DoS so password-POLICY validation on the LOGIN branch can't trip the per-account lockout counter; add tests.
+
+**What I did**:
+- **Token hash-at-rest (breaking storage shape, behavior-preserving API)**: `passwordReset.ts` + `emailChange.ts` now route through `issueOneTimeToken`/`consumeOneTimeToken`/`consumeOneTimeTokenJson` from `@luckystack/core`. Redis key is now `${projectName}-pwreset:<sha256(token)>` / `${projectName}-email-change:<sha256(token)>` instead of the raw token. The exported `createPasswordResetToken`/`consumePasswordResetToken`/`createEmailChangeToken`/`consumeEmailChangeToken` signatures are UNCHANGED (still return/accept the raw token), so `forgotPassword.ts`, `emailChangeNotification.ts`, and the consumer/CLI `confirmReset_v1`/`confirmEmailChange_v1` callers work without edits. Outstanding pre-migration tokens are invalidated by the key-shape change (acceptable pre-1.0; tokens are short-TTL).
+- **M-15 login-lockout DoS fix**: `validateCredentialsShape(creds, mode)` now runs the password-POLICY check ONLY when `mode === 'register'`. The dispatcher decides the branch (register vs login) BEFORE shape-validation and passes the mode. A login now accepts any password string and lets the bcrypt compare decide → an attacker can't lock a victim by POSTing policy-violating passwords for their email (the counter only ever sees a genuine `login.wrongPassword`); also stops a tightened policy from locking out existing users with older-but-valid passwords.
+- **Defense-in-depth**: `authLockout.ts` `NON_COUNTING_REASONS` now also excludes all 7 password-policy reason keys, so even a direct `loginWithCredentialsCore` caller that surfaces a policy reason on `stage:'login'` can't feed the counter.
+
+**Tests added**:
+- `tokenHashAtRest.test.ts` (14): pwreset + email-change issue->consume round-trip, single-use (no reuse), wrong/empty token -> null, malformed payload -> null, and hash-at-rest (raw token is never a stored key).
+- `loginLockoutPolicy.test.ts` (3): policy-violating LOGIN password reaches the wrong-password compare (no policy reason emitted) / logs in if it's the real password / REGISTER still enforces the policy.
+- `authLockout.test.ts` (+12): the `loginFailed` hook counts `login.wrongPassword` but NOT any policy reason / accountLocked / register-stage / oauth.
+
+**Verified (own run)**: login package `tsup` build (ESM+DTS) green, `eslint` 0 on all touched files, `ai:lint` 0, repo `npm run lint` green, `npm run test:unit` = 1205 pass (login package: 11 files / 94 tests).
+
+**Files**: packages/login/src/{passwordReset,emailChange,login,authLockout}.ts + {tokenHashAtRest,loginLockoutPolicy,authLockout}.test.ts + packages/login/CLAUDE.md.
+
+## 2026-06-15 — Implement all approved v0.2.0 decisions (secure defaults + contracts + features)
+
+**User prompt (summary)**: answered all open decision questions; implement everything. (Only exception: error-tracking privacy/redaction stays as-is.)
+
+**What I did (10-agent workflow, 2 waves: core foundation → dependents)**: 33 changes across 8 clusters implementing the user-approved decisions, + I wrote the ADRs and fixed the resulting doc-drift.
+
+- **Secure-default flips (core/projectConfig.ts)**: `sync.allowClientReceiverAll` true→**false** + `sync.requireRoomMembership` false→**true** (no more cluster-wide/unjoined-room broadcast by default); `http.healthHash` plain→**hmac `@bootUuid`** (no unsalted secret fingerprints on `/_health`, dead `@bootUuid` salt now actually passed in healthRoutes.ts); `DEFAULT_REDACTED_LOG_KEYS` widened (csrftoken/apikey/secret) + **suffix-matching** in isRedactedLogKey; secret-manager unset `envNames` now resolves NOTHING off-host + boot-warns (was allow-all).
+- **Wire-contracts (breaking, pre-1.0)**: **S22** — HTTP sync response now uses the canonical socket envelope `{status,message,result}` (was flattened); **S13** — syncCancel keys on a server-issued `randomUUID()` cancelId (handed via `{__cancelId}`), not the client-controlled cb; **A7** — new core `issueOneTimeToken/consumeOneTimeToken` primitive stores `sha256(token)` at rest, login reset+email-change migrated off raw-token keys.
+- **Features/infra**: **MIS-016 graceful shutdown** — `preServerStop` hook in core + `stop()/close()` on the server + prod SIGTERM/SIGINT drain that dispatches the hook, `flushErrorTrackers()`, closes io/http/redis (each bounded via withTimeout); **M-15** — login-lockout no longer counts password-policy failures (only genuine wrong-password), closing the lock-any-account DoS; **CI** — `.github/workflows/publish.yml` with `--provenance` + per-package `publishConfig.provenance` (dry-run by default, real publish only on `v*` tag); router **health-poller** treats status≥400 as unhealthy + redis health keys get a **TTL**; api **rate-limit hook scope** label now mirrors bucket identity (ip vs route).
+- **NOT changed (per your choice)**: error-tracking distinctId/message-stack redaction stays as-is.
+
+**ADRs**: wrote `docs/decisions/0007-0012` (secure-by-default, sync-envelope-unified, synccancel-id, one-time-tokens-hashed, graceful-shutdown, login-lockout-policy) + regenerated `AI_DECISIONS_INDEX.md` (11 decisions). Fixed doc-drift in `packages/sync/CLAUDE.md` + `projectConfig.ts` healthHash JSDoc to match the new secure defaults.
+
+**Build-gate**: green on first run (one sync test-cast fix for the S22-tightened type, no reverts). **Verified (own run)**: `generateArtifacts`+`build`+`lint`+`ai:lint`+`test:unit` all green — **111 files, 1205 tests** (+75). Adversarial verify: all 7 decision groups implemented + intended, breaking changes consistent (no half-migrated call sites), no new `as any`.
+
+**Status**: the merged wave-1+wave-2 audit (`codebase-scan-14-06-FINAL/`) is now essentially decision-complete — all approved fixes/decisions landed. No code bugs or pending decisions remain from the scans. Nothing committed.
+
+**Files**: ~40 across packages/{core,sync,api,server,router,login,secret-manager} + .github/workflows + docs/decisions + 2 CLAUDE.md doc fixes.
+
+## 2026-06-15 — WAVE3 diff-audit + fix H1 (router boot-handshake hmac default)
+
+**User prompt (summary)**: ultracode diff-gericht audit van de ~200 ongecommitte v0.2.0 changes (302cbf1 → working tree), focus op half-gemigreerde breaking-change call-sites; daarna: "ja doe maar" op mijn voorstel om H1 + de stale comment te fixen.
+
+**What I did**:
+- **Audit (12 cheap finders → dedup → Opus-verify)**: rapport in `codebase-scan-14-06-FINAL/WAVE3_DIFF_AUDIT.md`. 29 kandidaten → 8 REAL (1 HIGH, 2 MEDIUM, 5 LOW) / 10 weggestreept / 11 LOW-backlog. Geen nieuwe critical, geen auth-bypass, geen crash-pad door de diff.
+- **Fix H1** (`packages/router/src/bootHandshake.ts`): de 0.2.0 default `http.healthHash = { mode:'hmac', salt:'@bootUuid' }` was half-gemigreerd — server hashte met HMAC(bootUuid), router-compare riep `hashSynchronizedValue(localValue)` ZONDER bootUuid → collapse naar plain sha256 → `synchronized env DIFFERS` voor élke key (en hard-fail bij `strictBootHandshake`). Nu wordt `fallbackHealth.bootUuid` (al gegarandeerd non-null op die plek, komt al mee in de `/_health` body) doorgegeven aan `compareSynchronizedHashes` → `hashSynchronizedValue(localValue, fallbackBootUuid)`, zodat router en server dezelfde `{mode,salt}` resolven.
+- **Stale comments** (`packages/core/src/synchronizedEnvHashes.ts`): twee comments zeiden nog DEFAULT = `mode:'plain'`; bijgewerkt naar de werkelijke 0.2.0 default (`hmac` + `@bootUuid`).
+
+**Verification**: `npm run lint` + `npm run build` (16/16 packages, generateArtifacts + vite + bundleServer) groen; `npm run ai:lint` geen violations. De `eval`-warnings in de vite-output komen uit third-party `vconsole`, niet uit deze change.
+
+**Notes**: M1 (preLogin-veto telt mee in lockout) en M2 (OAuth state-cookie negeert `process.env.SECURE`) zijn ECHTE hardening-gaps maar laag-exploiteerbaar — bewust NIET in deze pass gefixt (wachten op user-go). Eindoordeel audit: nieuwe code ship-safe mits H1 gefixt (nu gedaan) vóór een multi-instance/router release.
+
+**Files**: packages/router/src/bootHandshake.ts, packages/core/src/synchronizedEnvHashes.ts, codebase-scan-14-06-FINAL/WAVE3_DIFF_AUDIT.md (new).
+
+## 2026-06-15 — Fix all remaining WAVE3 audit findings (M1/M2 + 5 LOW + backlog)
+
+**User prompt (summary)**: "fix alle overige problems" — fix alles wat de WAVE3 diff-audit nog open had.
+
+**What I did** (alle confirmed REAL issues + 6/11 LOW-backlog gefixt; 5 bewust gelaten met reden):
+- **M1 — preLogin-veto lockout (ADR 0012)** `packages/login/src/authLockout.ts`: deny-list (`NON_COUNTING_REASONS`) → allow-list (`COUNTING_REASONS = {login.wrongPassword}`). Sluit consumer-veto errorCodes én infra-errors (DB/bcrypt) automatisch uit → aanvaller kan account niet meer locken met enkel een e-mail. +2 regressietests (preLogin-veto + infra-reason tellen niet).
+- **M2 — OAuth state-cookie Secure** `packages/server/src/httpRoutes/authApiRoute.ts`: `sessionCookieSecure ?? process.env.SECURE === 'true'` (spiegelt de sessie-cookie i.p.v. alleen de undefined-default config te lezen).
+- **L1 — postSyncAuthorize parity** `handleHttpSyncRequest.ts`: ontbrekende observational hook nu ook op HTTP/SSE gedispatcht.
+- **L2 — shutdown close-errors** `stopServer.ts`: `closeHttpServer`/`closeIoServer` rejecten nu de close-cb error → `withTimeout`'s tryCatch logt 'm i.p.v. stil slikken.
+- **L3 — wsProxy upstream-leak** `wsProxy.ts`: `'response'` handler doet nu `upstreamRes.resume()` + `upstreamRequest.destroy()` (reapt direct i.p.v. ~30s timeout); nieuwe `settled`-vlag coördineert timeout/error/response/client-gone zodat maar één pad teardownt.
+- **L4 — getParams 413** `getParams.ts`: 413-body wordt nu vóór `req.destroy()` geschreven (client kreeg anders lege/RST i.p.v. de 413 JSON).
+- **L5 — rateLimit scope drift** `handleSyncRequest.ts` + `handleHttpSyncRequest.ts`: anon per-route bucket nu `scope:'ip'` + `ip`-veld (parity met API-handler); `sync/docs/error-states.md` bijgewerkt.
+- **Backlog gefixt**: `syncRequest.ts` null `cleanupProgressListener` na call; `redactedLogKeys.ts` aparte `DEPTH_TRUNCATED_PLACEHOLDER` (export via index) zodat diep-geneste benigne waarden niet als secret ogen; `secret-manager/index.ts` once-per-proces warn-guard (geen log-flood bij rotation-poll) + finite/non-negatieve `retryCount`/`delayMs` coercion + niet-undefined `lastError`.
+- **Backlog bewust gelaten (met reden)**: apiRequest abortKey-pre-interceptor (reorder = risico op abort-wiring, LOW/niche), createServer signal-before-listen (nu netjes via L2-logging; clean exit bij boot-signal is correct), functions/redis dropped default export (intended consumer-side, niemand gebruikt `.default`), proxyUtils lege XFF (= "unknown client", backend mapt naar sentinel; trigger vrijwel onmogelijk over TCP), cli deleteAccount void postAccountDelete (observational by-design in consumer-template).
+
+**Verification**: `npm run lint` + `npm run build` (16/16 packages) groen; `npm run ai:lint` geen violations; `npm run test:unit` **1207/1207 pass** (+2 nieuwe lockout-regressies, was 1205). Geen `as any`/casts toegevoegd.
+
+**Files**: packages/login/src/authLockout.ts(+test), packages/server/src/httpRoutes/authApiRoute.ts, packages/server/src/stopServer.ts, packages/sync/src/{handleSyncRequest,handleHttpSyncRequest,syncRequest}.ts + docs/error-states.md, packages/router/src/wsProxy.ts, packages/core/src/{getParams,redactedLogKeys,index}.ts, packages/secret-manager/src/index.ts, codebase-scan-14-06-FINAL/WAVE3_DIFF_AUDIT.md.
+
+## 2026-06-15 — WAVE4 delta-audit + fix 2 regressions surfaced by the wave-3 fixes
+
+**User prompt (summary)**: ultracode delta-audit van de wave-3-remediation files (regressies door de fixes); fix alleen Opus-bevestigde REAL bugs/security met regressietest; habits flag-only; gate draaien; CONVERGED-oordeel geven.
+
+**Audit** (7 cheap finders → dedup → Opus-verify): rapport `codebase-scan-14-06-FINAL/WAVE4_DELTA_AUDIT.md`. 15 kandidaten → **2 REAL (beide MEDIUM, 0 HIGH/CRIT)** / 6 weggestreept / 7 LOW-habits (flag-only).
+
+**Fixed (beide regressies die mijn wave-3 fixes blootlegden):**
+- **M2-followup** `httpHandler.ts`: de wave-3 M2-fix eerde `sessionCookieSecure` alleen op de OAuth-state-cookie; de security-kritische **session-token cookie** negeerde de override nog. Nu één gedeelde pure seam `resolveCookieSecure()` (`httpRoutes/sessionCookie.ts`) voor BEIDE cookies zodat ze niet meer kunnen driften. +regressietest `sessionCookie.test.ts`.
+- **H1-followup** `synchronizedEnvHashes.ts` + `healthRoutes.ts` + `bootHandshake.ts`: de router hashte met zijn EIGEN default `healthHash` (laadt nooit de backend `config.ts`), dus een non-default backend-config gaf permanente valse `DIFFERS` (hard-fail bij strict). `/_health` stuurt nu een **veilige** descriptor `{mode, bootUuidSalt}` (nooit de statische salt = secret); router gebruikt `resolveHealthHashConfigFromDescriptor` → reproduceert plain/@bootUuid exact, **skip+warn** bij statische salt i.p.v. valse drift; oude backend (geen descriptor) → fallback naar wave-3-gedrag. +4 regressietests.
+
+**Habits flag-only (NIET gefixt, op verzoek)**: login shape-fail geen emitLoginFailed, clearAuthFailures fire-and-forget, createServer signal `void` vs `.catch()` (onbereikbaar), sync `ip:undefined` expliciete key (matcht API-handler), postSyncExecute niet bij preSyncExecute-stop, preSyncExecute met post-shaped payload, secret-manager dode lastError-init. Zie rapport sectie (c).
+
+**Verification**: `npm run build` ✓ · `npm run lint` ✓ · `npm run ai:lint` geen violations · `npm run test:unit` **1213/1213** (was 1207; +6 tests, +1 file `sessionCookie.test.ts`). Geen `as any`/casts toegevoegd.
+
+**Oordeel**: 0 nieuwe HIGH/CRITICAL → **CONVERGED / ship-safe**. Advies: stoppen met static-auditen, freezen + committen, door naar runtime/integration-tests (multi-instance router boot-handshake met non-default healthHash, graceful-shutdown onder load, S22-envelope live) + pentest/DAST.
+
+**Files**: packages/server/src/httpHandler.ts, packages/server/src/httpRoutes/{authApiRoute,sessionCookie,sessionCookie.test}.ts, packages/server/src/httpRoutes/healthRoutes.ts, packages/router/src/bootHandshake.ts, packages/core/src/{synchronizedEnvHashes,synchronizedEnvHashes.test,index}.ts, codebase-scan-14-06-FINAL/WAVE4_DELTA_AUDIT.md.
+
+## 2026-06-15 — FIX: blank-page showstopper (node:async_hooks leaked into client bundle)
+
+**User prompt (summary)**: start server+client and test that login/register/playground work as expected; loop: don't stop until login/register/playground work properly.
+
+**Root cause (regression from THIS session's ET-02 ALS work)**: `packages/core/src/errorTrackerRegistry.ts` imported `AsyncLocalStorage` from `node:async_hooks` at module top-level and constructed `new AsyncLocalStorage()` at module-eval. This module is reachable from the client bundle (vite serves it via the core graph). `node:async_hooks` is server-only — vite externalizes it and THROWS on access in the browser → the entire React app failed to boot → **every page rendered blank (white screen)**.
+
+**Why every prior pass missed it**: vitest runs in Node (async_hooks exists) so 1213 unit tests passed; `vite build` externalizes without erroring (fails only at browser runtime); the 9 static scans + WAVE3/WAVE4 never ran the browser. The "ship-safe / CONVERGED" verdicts were therefore wrong — a total-frontend-outage survived all of it. (Lesson: static audit + unit tests gave false ship-confidence; running the real app caught it.)
+
+**Fix**: made the ALS browser-safe — `import * as nodeAsyncHooks` + a lazy `getIdentityStore()` guarded by `typeof window === 'undefined'`, so the browser bundle never accesses the externalized `node:async_hooks` binding (store is null → identity helpers no-op / return null). Server behaviour (ET-02 per-request identity) is byte-for-byte identical. `packages/core/src/errorTrackerRegistry.ts`.
+
+**Verified live (agent-browser + running server :80 / client :5173, Redis via SSH tunnel)**: app renders on `/`, `/register`, `/login`, `/settings`, `/admin`, `/docs`, `/reset-password` (was `#root` empty → now populated); no new `node:` externalization errors. Register → account created + auto-login + redirect to /playground; credentials login authenticates + session established; playground `playground/echo` action fires → `status:success` → log drawer fills. (The native-click-not-firing on a playground button was an agent-browser/short-viewport artifact — the fixed log drawer covered the button at the default headless height; at 1366×768+ all buttons are clickable. Not a product bug.)
+
+**Gate (own run)**: build 0, lint 0, ai:lint clean, `npm run test:unit` 1213/1213 — ET-02 ALS regression tests still pass (server detection works in the node test env).
+
+**Follow-up flagged (NOT yet done)**: the @luckystack/core client/server module boundary is leaky — a `node:`-only import in a client-reachable module silently broke everything and only the dev runtime caught it. Recommend a guard (e.g. a test that imports `@luckystack/core/client` under a browser-like env and fails on `node:` externalization) so this class can't recur. Also: broader runtime smoke-tests (sync/streaming, email, OAuth) before any npm publish, since "ship-safe" proved unreliable.
+
+**Files**: `packages/core/src/errorTrackerRegistry.ts`.

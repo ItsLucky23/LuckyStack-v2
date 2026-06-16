@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "LuckyStack core: socket-first transport contracts, Redis adapter, project-config registry, hooks registry, response normalization, rate limiting, and shared session types. Foundation for every other @luckystack/* package.",

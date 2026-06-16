@@ -75,13 +75,11 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 | --- | --- |
 | `functions.db.prisma` | `(typeof import("@luckystack/core"))["prisma"]` |
 | `functions.redis.redis` | `(typeof import("@luckystack/core"))["redis"]` |
-| `functions.redis.default` | `(typeof import("@luckystack/core"))["redis"]` |
 | `functions.sentry.initializeSentry` | `(typeof import("@luckystack/error-tracking"))["initializeSentry"]` |
 | `functions.sentry.captureException` | `(typeof import("@luckystack/error-tracking"))["captureException"]` |
 | `functions.sentry.captureMessage` | `(typeof import("@luckystack/error-tracking"))["captureMessage"]` |
 | `functions.sentry.setSentryUser` | `(typeof import("@luckystack/error-tracking"))["setSentryUser"]` |
 | `functions.sentry.startSpan` | `(typeof import("@luckystack/error-tracking"))["startSpan"]` |
-| `functions.sentry.default` | `(typeof import("@luckystack/error-tracking"))["default"]` |
 | `functions.session.saveSession` | `(typeof import("@luckystack/login"))["saveSession"]` |
 | `functions.session.getSession` | `(typeof import("@luckystack/login"))["getSession"]` |
 | `functions.session.deleteSession` | `(typeof import("@luckystack/login"))["deleteSession"]` |
@@ -99,8 +97,8 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 | File | Exports |
 | --- | --- |
 | `functions/db.ts` | `prisma` |
-| `functions/redis.ts` | `default: re-export of @luckystack/core` — `redis` |
-| `functions/sentry.ts` | `default: re-export of @luckystack/error-tracking` — `captureException`, `captureMessage`, `initializeSentry`, `setSentryUser`, `startSpan` |
+| `functions/redis.ts` | `redis` |
+| `functions/sentry.ts` | `captureException`, `captureMessage`, `initializeSentry`, `setSentryUser`, `startSpan` |
 | `functions/session.ts` | `deleteSession`, `getAllSessions`, `getSession`, `revokeUserSessions`, `saveSession` |
 
 ### Shared modules in `shared/` (also fed into the injection map)

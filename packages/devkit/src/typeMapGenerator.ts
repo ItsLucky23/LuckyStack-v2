@@ -1,7 +1,7 @@
 import { findAllApiFiles, findAllSyncClientFiles, findAllSyncServerFiles } from './typeMap/discovery';
 import { extractApiName, extractApiVersion, extractPagePath, extractSyncName, extractSyncPagePath, extractSyncVersion } from './typeMap/routeMeta';
-import { extractAuth, extractDocsMeta, extractHttpMethod, extractRateLimit, HttpMethod } from './typeMap/apiMeta';
-import { buildTypeMapArtifacts, writeTypeMapArtifacts } from './typeMap/emitterArtifacts';
+import { extractAuth, extractDocsMeta, extractHttpMethod, extractRateLimit } from './typeMap/apiMeta';
+import { buildTypeMapArtifacts, writeTypeMapArtifacts, ApiTypeEntry, SyncTypeEntry } from './typeMap/emitterArtifacts';
 import {
   getApiStreamPayloadTypeDetailsFromFile,
   getInputTypeDetailsFromFile,
@@ -27,35 +27,29 @@ interface GenerateTypeMapOptions {
   quiet?: boolean;
 }
 
-export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void => {
-  const { quiet = false } = options;
-  assertValidRouteNaming({
-    srcDir: getSrcDir(),
-    context: 'generating API/sync type maps',
-  });
-  assertNoDuplicateNormalizedRouteKeys({
-    srcDir: getSrcDir(),
-    context: 'generating API/sync type maps',
-  });
-  //? Hard-fail on duplicate page routes at build time. Dev startup only
-  //? warns (so a misplaced file doesn't block the entire dev server);
-  //? builds throw so collisions can never ship to production.
-  assertNoDuplicatePageRoutes({
-    srcDir: getSrcDir(),
-    context: 'generating API/sync type maps',
-  });
+//? Per-page map of versioned API entries, keyed by `pagePath -> `${name}@${version}``.
+type TypesByPage = Map<string, Map<string, ApiTypeEntry>>;
+//? Per-page map of versioned sync entries, keyed by `pagePath -> `${name}@${version}``.
+type SyncTypesByPage = Map<string, Map<string, SyncTypeEntry>>;
 
-  // Rebuild the TypeScript Program on each generation to pick up file changes.
-  invalidateProgramCache();
-  namedImports.clear();
-  defaultImports.clear();
+//? Shared mutable collectors threaded through both collection passes. Holding
+//? the import maps + unresolved-alias set by reference (rather than returning +
+//? merging) preserves the EXACT population order the inline loops had: API
+//? symbols are registered before sync symbols, in file-discovery order.
+interface TypeMapCollectors {
+  namedImports: Map<string, Set<string>>;
+  unresolvedTypeAliases: Set<string>;
+  quiet: boolean;
+}
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Collect API Types
-  // ═══════════════════════════════════════════════════════════════════════════
-  const apiFiles = findAllApiFiles(getSrcDir());
-  const typesByPage = new Map<string, Map<string, { input: string; output: string; stream: string; method: HttpMethod; rateLimit: number | false | undefined; auth: unknown; version: string; description?: string; meta?: { owner?: string; tags?: string[]; deprecated?: string | true } }>>();
-  const unresolvedTypeAliases = new Set<string>();
+//? Walks every discovered `_api/` file, runs the TypeChecker-backed extractors,
+//? registers unresolved import symbols into the shared collectors, and returns
+//? the per-page API type map. Side-effects (console logging, `namedImports` /
+//? `unresolvedTypeAliases` mutation) occur in the same order as the original
+//? inline loop — this is a pure code-motion extraction, not a behavior change.
+const collectApiTypes = (apiFiles: string[], collectors: TypeMapCollectors): TypesByPage => {
+  const { namedImports, unresolvedTypeAliases, quiet } = collectors;
+  const typesByPage: TypesByPage = new Map();
 
   if (!quiet) {
     console.log(' ═══════════════════════════════════════════════════════════════════════════');
@@ -99,12 +93,22 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
     getOrInit(typesByPage, pagePath, () => new Map()).set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, stream: streamType, method: httpMethod, rateLimit, auth, version: apiVersion, ...(meta ? { meta } : {}) });
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Collect Sync Types
-  // ═══════════════════════════════════════════════════════════════════════════
-  const syncServerFiles = findAllSyncServerFiles(getSrcDir());
-  const syncClientFiles = findAllSyncClientFiles(getSrcDir());
-  const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverOutput: string; clientOutput: string; serverStream: string; clientStream: string; version: string; meta?: { owner?: string; tags?: string[]; deprecated?: string | true } }>>();
+  return typesByPage;
+};
+
+//? Pairs `_sync/` server + client files into one entry per route, runs the
+//? TypeChecker-backed extractors for each present side, registers unresolved
+//? import symbols into the shared collectors, and returns the per-page sync
+//? type map. The `allSyncs` Map keeps insertion order (servers first, then
+//? clients) so the downstream iteration + logging order is identical to the
+//? original inline loop. Pure code-motion extraction — no behavior change.
+const collectSyncTypes = (
+  syncServerFiles: string[],
+  syncClientFiles: string[],
+  collectors: TypeMapCollectors,
+): SyncTypesByPage => {
+  const { namedImports, unresolvedTypeAliases, quiet } = collectors;
+  const syncTypesByPage: SyncTypesByPage = new Map();
 
   if (!quiet) {
     console.log(' ═══════════════════════════════════════════════════════════════════════════');
@@ -206,6 +210,48 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
       ...(syncMeta ? { meta: syncMeta } : {}),
     });
   }
+
+  return syncTypesByPage;
+};
+
+export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void => {
+  const { quiet = false } = options;
+  assertValidRouteNaming({
+    srcDir: getSrcDir(),
+    context: 'generating API/sync type maps',
+  });
+  assertNoDuplicateNormalizedRouteKeys({
+    srcDir: getSrcDir(),
+    context: 'generating API/sync type maps',
+  });
+  //? Hard-fail on duplicate page routes at build time. Dev startup only
+  //? warns (so a misplaced file doesn't block the entire dev server);
+  //? builds throw so collisions can never ship to production.
+  assertNoDuplicatePageRoutes({
+    srcDir: getSrcDir(),
+    context: 'generating API/sync type maps',
+  });
+
+  // Rebuild the TypeScript Program on each generation to pick up file changes.
+  invalidateProgramCache();
+  namedImports.clear();
+  defaultImports.clear();
+
+  const unresolvedTypeAliases = new Set<string>();
+  const collectors: TypeMapCollectors = { namedImports, unresolvedTypeAliases, quiet };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Collect API Types
+  // ═══════════════════════════════════════════════════════════════════════════
+  const apiFiles = findAllApiFiles(getSrcDir());
+  const typesByPage = collectApiTypes(apiFiles, collectors);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Collect Sync Types
+  // ═══════════════════════════════════════════════════════════════════════════
+  const syncServerFiles = findAllSyncServerFiles(getSrcDir());
+  const syncClientFiles = findAllSyncClientFiles(getSrcDir());
+  const syncTypesByPage = collectSyncTypes(syncServerFiles, syncClientFiles, collectors);
 
   const functionsInterface = generateServerFunctions({ namedImports, defaultImports });
 

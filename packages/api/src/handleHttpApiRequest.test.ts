@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createHash } from 'node:crypto';
 
 //? Unit tests for the @luckystack/api HTTP transport adapter. The handler is
 //? built around DI registry seams in @luckystack/core / @luckystack/login, so
@@ -60,6 +61,11 @@ vi.mock('@luckystack/login', () => ({
 
 vi.mock('@luckystack/core', () => ({
   getProjectConfig: () => seam.projectConfig,
+  //? ET-02: the handler opens a per-request error-tracker identity scope and writes
+  //? the resolved session into it. The scope wrapper must INVOKE its callback (it
+  //? wraps the whole handler); the identity setter is a no-op for these tests.
+  runWithErrorTrackerIdentityScope: <T>(fn: () => T): T => fn(),
+  setCurrentErrorTrackerIdentity: () => {},
   //? 0.2.0: session reads moved to core's null-safe accessor (login optional).
   readSession: (token: string | null) => getSessionMock(token),
   getRuntimeApiMaps: () => Promise.resolve({ apisObject: seam.apisObject, functionsObject: seam.functionsObject }),
@@ -271,8 +277,47 @@ describe('handleHttpApiRequest — rate limiting', () => {
       expect(result.errorCode).toBe('api.rateLimitExceeded');
       expect(result.errorParams?.find((p) => p.key === 'seconds')?.value).toBe(30);
     }
-    //? rateLimitExceeded hook fires with route/user scope.
+    //? A tokened caller hits the user-keyed per-route bucket -> scope `user`.
     expect(dispatchHookMock).toHaveBeenCalledWith('rateLimitExceeded', expect.objectContaining({ scope: 'user' }));
+  });
+
+  it('labels the ANONYMOUS per-route bucket as scope `ip` (IP-keyed), not `route`', async () => {
+    //? With no token the per-route bucket is keyed by the resolved IP
+    //? (`ip:<ip>:api:<route>`), so the hook scope must match that identity:
+    //? `ip`, with `route` still set to distinguish it from the global
+    //? `:api:all` IP bucket. The old code mislabeled this anon bucket as `route`.
+    registerRoute({ rateLimit: 5 });
+    seam.rateLimitResults = [{ allowed: false, resetIn: 30 }];
+
+    const result = await handleHttpApiRequest({ ...baseParams(), token: null, requesterIp: '9.9.9.9' });
+
+    expect(result.httpStatus).toBe(429);
+    expect(dispatchHookMock).toHaveBeenCalledWith('rateLimitExceeded', expect.objectContaining({
+      scope: 'ip',
+      route: 'examples/doThing/v1',
+      ip: '9.9.9.9',
+      key: 'ip:9.9.9.9:api:examples/doThing/v1',
+    }));
+    //? It must NOT report the genuine-per-route label for an IP-keyed bucket.
+    expect(dispatchHookMock).not.toHaveBeenCalledWith('rateLimitExceeded', expect.objectContaining({ scope: 'route' }));
+  });
+
+  it('keys the per-route bucket on a SHA-256 hash of the token, never the raw token (N-3)', async () => {
+    registerRoute({ rateLimit: 5 });
+
+    await handleHttpApiRequest(baseParams());
+
+    const routeBucketCall = checkRateLimitMock.mock.calls.find(([args]) =>
+      typeof (args as { key?: string }).key === 'string' &&
+      (args as { key: string }).key.startsWith('token:'),
+    );
+    expect(routeBucketCall).toBeDefined();
+    const key = (routeBucketCall![0] as { key: string }).key;
+    //? raw token never leaks into the Redis key name…
+    expect(key).not.toContain('tok-1');
+    //? …but the same token deterministically maps to the same hashed bucket.
+    const expectedHash = createHash('sha256').update('tok-1').digest('hex').slice(0, 32);
+    expect(key).toBe(`token:${expectedHash}:api:examples/doThing/v1`);
   });
 
   it('skips the per-route bucket entirely when rateLimit is explicitly false', async () => {

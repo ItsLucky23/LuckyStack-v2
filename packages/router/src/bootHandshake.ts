@@ -7,8 +7,11 @@ import {
   getLogger,
   getRedisConnectionOptions,
   hashSynchronizedValue,
+  hashSynchronizedValueWith,
+  resolveHealthHashConfigFromDescriptor,
   tryCatch,
 } from '@luckystack/core';
+import type { HealthHashDescriptor } from '@luckystack/core';
 
 //? Detects "two Redis URLs that both respond" — a failure mode where two
 //? environments think they share Redis but don't. Protocol:
@@ -48,6 +51,7 @@ export interface RunBootHandshakeInput {
 interface FallbackHealthResponse {
   bootUuid?: string;
   synchronizedHashes?: Record<string, string | null>;
+  healthHash?: HealthHashDescriptor;
 }
 
 const probeFallbackHealth = async (baseUrl: string): Promise<FallbackHealthResponse | null> => {
@@ -67,6 +71,8 @@ const probeFallbackHealth = async (baseUrl: string): Promise<FallbackHealthRespo
 
 const compareSynchronizedHashes = (
   fallbackHashes: Record<string, string | null> | undefined,
+  fallbackBootUuid: string,
+  fallbackHealthHash: HealthHashDescriptor | undefined,
   report: (msg: string) => void,
 ): void => {
   const keys = collectSynchronizedEnvKeys();
@@ -77,9 +83,29 @@ const compareSynchronizedHashes = (
     return;
   }
 
+  //? The router process never loads the backend's `config.ts`, so its own
+  //? `getProjectConfig().http.healthHash` is always the DEFAULT. To compare
+  //? hashes we MUST use the config the BACKEND reported in /_health, not ours —
+  //? otherwise any consumer-customized `http.healthHash` produces a false DIFFERS.
+  //? `null` from the resolver = the backend uses a STATIC salt (a secret the
+  //? router cannot see), so we cannot reproduce the hash: skip + report, never
+  //? claim drift. Absent descriptor = an older backend; fall back to the local
+  //? `@bootUuid` resolution (correct for the default config, which both sides use).
+  let hashLocal: ((value: string) => string) | null;
+  if (fallbackHealthHash) {
+    const cfg = resolveHealthHashConfigFromDescriptor(fallbackHealthHash, fallbackBootUuid);
+    if (cfg === null) {
+      report(`synchronized-env check: fallback uses a static '${fallbackHealthHash.mode}' health-hash salt the router cannot see — cannot verify ${keys.length} synchronized key(s) (set http.healthHash.salt to '@bootUuid', or 'plain', for router-verifiable drift detection)`);
+      return;
+    }
+    hashLocal = (value) => hashSynchronizedValueWith(cfg, value);
+  } else {
+    hashLocal = (value) => hashSynchronizedValue(value, fallbackBootUuid);
+  }
+
   for (const key of keys) {
     const localValue = process.env[key];
-    const localHash = localValue === undefined ? null : hashSynchronizedValue(localValue);
+    const localHash = localValue === undefined ? null : hashLocal(localValue);
     const remoteHash = fallbackHashes[key] ?? null;
 
     if (localHash === null && remoteHash === null) {
@@ -98,6 +124,12 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   const redisOptions = getRedisConnectionOptions();
 
   const client = new Redis({ ...redisOptions, lazyConnect: true });
+  //? An ioredis client that emits 'error' with no listener throws as an
+  //? unhandled exception and crashes the process. Log instead so the
+  //? tryCatch-wrapped connect failure below is the only surfaced error.
+  client.on('error', (err) => {
+    getLogger().error('[router] boot handshake Redis error', err);
+  });
   const bootUuid = randomUUID();
 
   const [writeError] = await tryCatch(async () => {
@@ -142,6 +174,9 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   //? value). If the two envs truly share Redis, fallback's key would be
   //? readable from here too. Check that separately.
   const fallbackClient = new Redis({ ...redisOptions, lazyConnect: true });
+  fallbackClient.on('error', (err) => {
+    getLogger().error('[router] boot handshake fallback Redis error', err);
+  });
   const [compareError, localReadOfFallbackKey] = await tryCatch(async () => {
     await fallbackClient.connect();
     return await fallbackClient.get(`${BOOT_KEY_PREFIX}${input.fallbackEnvKey}`);
@@ -164,7 +199,10 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   //? (cookie secrets, project-level config) match by hash across the two
   //? envs. Mismatch means sessions minted by one side can't be decrypted
   //? by the other — a subtle failure mode worth catching at boot.
-  compareSynchronizedHashes(fallbackHealth.synchronizedHashes, (msg) =>
-    { reportIssue(msg); },
+  compareSynchronizedHashes(
+    fallbackHealth.synchronizedHashes,
+    fallbackHealth.bootUuid,
+    fallbackHealth.healthHash,
+    (msg) => { reportIssue(msg); },
   );
 };

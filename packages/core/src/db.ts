@@ -17,10 +17,11 @@ const buildDefaultPrismaClient = (): PrismaClient => {
 
 setDefaultPrismaResolver(buildDefaultPrismaClient);
 
-if (process.env.NODE_ENV !== 'production') {
-  // Eager-init in dev so HMR sees a single Prisma instance across reloads.
-  buildDefaultPrismaClient();
-}
+//? No eager dev init: the `globalThis.__luckystackPrisma` cache already
+//? guarantees a single Prisma instance across HMR reloads on first proxy
+//? access, so constructing it at import time only burdens tools/CLIs/tests that
+//? type-import core but never touch the DB (the package's "no import-time side
+//? effects" doctrine).
 
 //? Proxy forwards every read/call to whichever client is active *at access
 //? time*, so a `registerPrismaClient(...)` performed after this module is

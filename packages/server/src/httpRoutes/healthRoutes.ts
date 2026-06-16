@@ -1,5 +1,6 @@
 import {
   computeSynchronizedEnvHashes,
+  describeHealthHashConfig,
   getProjectConfig,
   prisma,
   readBootUuid,
@@ -78,7 +79,12 @@ export const handleHealthRoute: HttpRouteHandler = async ({ res, routePath }) =>
   if (routePath !== getProjectConfig().http.healthEndpoint) return false;
 
   const bootUuid = await readBootUuid();
-  const synchronizedHashes = computeSynchronizedEnvHashes();
+  //? SEC-13: pass the boot UUID so the `'@bootUuid'` salt sentinel (the 0.2.0
+  //? default `http.healthHash` = `{ mode: 'hmac', salt: '@bootUuid' }`) resolves
+  //? to a per-boot HMAC key. Previously the arg was omitted, so the sentinel
+  //? always collapsed to `'plain'` and `/_health` leaked a stable, unsalted
+  //? `sha256(secret)` fingerprint of every synchronized env value.
+  const synchronizedHashes = computeSynchronizedEnvHashes(bootUuid);
   res.statusCode = bootUuid ? 200 : 503;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({
@@ -86,6 +92,10 @@ export const handleHealthRoute: HttpRouteHandler = async ({ res, routePath }) =>
     bootUuid,
     envKey: resolveEnvKey(),
     synchronizedHashes,
+    //? Tell the router HOW these hashes were produced (mode + whether the salt is
+    //? the `@bootUuid` sentinel) so it can hash its local values with the SAME
+    //? config instead of its own default. Never exposes a static salt (a secret).
+    healthHash: describeHealthHashConfig(),
   }));
   return true;
 };

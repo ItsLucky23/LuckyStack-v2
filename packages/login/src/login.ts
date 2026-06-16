@@ -1,16 +1,17 @@
-import { asOAuthUserData, getOAuthProviders, isFullOAuthProvider, type FullOAuthProvider } from './oauthProviders';
+import { getOAuthProviders, isFullOAuthProvider, type FullOAuthProvider, type OAuthUserData } from './oauthProviders';
 import { getPostLoginRedirect } from './redirectResolver';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { URLSearchParams } from 'node:url';
-import { tryCatch, redis as redisClient, getUploadsDir, dispatchHook, getLogger, formatKey, getProjectConfig } from '@luckystack/core';
+import { tryCatch, tryCatchSync, redis as redisClient, getUploadsDir, dispatchHook, getLogger, formatKey, getProjectConfig, getCookieValue } from '@luckystack/core';
 import bcrypt from 'bcryptjs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { saveSession } from "./session"
 import validator from 'validator';
 import type { BaseSessionLayout as SessionLayout } from './sessionLayout';
 import { getUserAdapter } from './userAdapter';
 import { resolveUserByEmail } from './accountStrategy';
 import { validatePassword } from './passwordPolicy';
+import { isAccountLocked, clearAuthFailures } from './authLockout';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -23,6 +24,23 @@ interface LoginOrRegisterParams {
   confirmPassword?: string,
 }
 
+//? Discriminated result of the credentials login/register surface (QUA-080).
+//? Exporting this lets `@luckystack/server`'s auth route narrow on `status`
+//? instead of casting the result to an inline shape. On `status: true`,
+//? `newToken` + `session` are always present; on `status: false` only `reason`
+//? is meaningful (the failure branch never mints a token).
+export interface CredentialsLoginSuccess {
+  status: true;
+  reason: string;
+  newToken: string;
+  session: SessionLayout;
+}
+export interface CredentialsLoginFailure {
+  status: false;
+  reason: string;
+}
+export type CredentialsLoginResult = CredentialsLoginSuccess | CredentialsLoginFailure;
+
 //? Resolved at call time via getUploadsDir() so consumer path overrides win.
 const uploadsFolder = (): string => getUploadsDir();
 //? Resolve at call time so dotenv/test-setup timing can't capture a stale
@@ -30,6 +48,17 @@ const uploadsFolder = (): string => getUploadsDir();
 //? which is the standard predicate everywhere else in the codebase.
 const isDevMode = (): boolean => getProjectConfig().logging.devLogs;
 const { compare, genSalt, hash } = bcrypt;
+
+//? Fixed bcrypt hash of a random throwaway string, used ONLY to spend ~one
+//? bcrypt-compare worth of CPU on the user-not-found / null-hash login path so
+//? its timing is indistinguishable from a real wrong-password compare (closes
+//? the timing side channel that complements the shared `login.wrongPassword`
+//? reason key). It must never match any real password — it is the hash of a
+//? value no user will ever submit. Cost factor 10 matches the default
+//? `auth.bcryptRounds`; a small cost mismatch with a consumer-tuned value does
+//? not reopen the channel meaningfully (the dominant signal — early return with
+//? zero bcrypt work — is what mattered).
+const DUMMY_BCRYPT_HASH = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 //? `validator` is a CommonJS module whose helpers hang off the default export;
 //? destructuring the default is the documented usage. The named-export warning
 //? is a false positive for this CJS interop shape.
@@ -45,41 +74,149 @@ const getOAuthStateKey = (providerName: string, state: string): string => {
   return formatKey('-oauth-state', `${providerName}:${state}`);
 };
 
-export const createOAuthState = async (providerName: string): Promise<string | null> => {
+//? Cookie the server sets at the OAuth-authorize step (F1). It carries a random
+//? nonce bound to the Redis state entry; the callback requires the cookie nonce
+//? to hash to the value stored alongside the state before it accepts the
+//? callback. This proves the SAME browser that started the flow is completing it
+//? (closes the login-CSRF / session-fixation hole where an attacker delivers
+//? their own valid `code+state` to a victim). Server + login MUST agree on this
+//? name — it is exported so `@luckystack/server`'s authorize route reuses it.
+export const OAUTH_STATE_COOKIE_NAME = 'ls-oauth-state';
+
+//? Hash the browser-binding nonce before persisting it in Redis: the Redis
+//? state value is server-side-readable, so storing only the SHA-256 means a
+//? leaked state entry can't be replayed without the matching cookie nonce.
+const hashStateNonce = (nonce: string): string =>
+  createHash('sha256').update(nonce).digest('hex');
+
+//? Generate a PKCE verifier + its S256 challenge (RFC 7636). Only used when a
+//? provider opts in via `usePkce` — default OAuth flows are byte-identical to
+//? before. The verifier is stored server-side (in the Redis state value) and
+//? replayed at token exchange; the challenge is handed to the authorize step.
+const base64Url = (buf: Buffer): string =>
+  buf.toString('base64').replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+const generatePkcePair = (): { verifier: string; challenge: string } => {
+  const verifier = base64Url(randomBytes(32));
+  const challenge = base64Url(createHash('sha256').update(verifier).digest());
+  return { verifier, challenge };
+};
+
+//? Server-side payload persisted under the Redis state key. `nonceHash` binds
+//? the flow to the initiating browser's cookie; `codeVerifier` (PKCE) is the
+//? secret replayed at token exchange.
+interface OAuthStateEntry {
+  nonceHash: string;
+  codeVerifier?: string;
+}
+
+export interface CreateOAuthStateResult {
+  /** Opaque `state` param put on the authorize URL + echoed back on callback. */
+  state: string;
+  /**
+   * Random nonce the server must set as the value of the {@link OAUTH_STATE_COOKIE_NAME}
+   * cookie (HttpOnly, SameSite=Lax, short TTL) at the authorize redirect. The
+   * callback requires this back to accept the flow (browser-binding, F1).
+   */
+  stateCookie: string;
+  /**
+   * PKCE `code_challenge` (S256) when the provider opted into PKCE — the server
+   * appends `code_challenge=<value>&code_challenge_method=S256` to the authorize
+   * URL. `undefined` for non-PKCE providers (default).
+   */
+  codeChallenge?: string;
+}
+
+export const createOAuthState = async (
+  providerName: string,
+  options?: { usePkce?: boolean },
+): Promise<CreateOAuthStateResult | null> => {
   const state = randomBytes(32).toString('hex');
+  const nonce = randomBytes(32).toString('hex');
   const key = getOAuthStateKey(providerName, state);
+
+  const pkce = options?.usePkce ? generatePkcePair() : null;
+  const entry: OAuthStateEntry = {
+    nonceHash: hashStateNonce(nonce),
+    ...(pkce ? { codeVerifier: pkce.verifier } : {}),
+  };
+
   //? State TTL is consumer-configurable via `auth.oauthStateTtlSeconds`
   //? (default 600s / 10 min). Too short and a legitimate, slow provider
   //? round-trip expires mid-flow and the callback fails state validation
   //? (UX/soft-DoS); too long and a stolen state stays replayable. The `NX`
   //? guard keeps each state single-use even before the TTL elapses, and
-  //? `consumeOAuthState` deletes it on first redemption.
-  const result = await redisClient.set(key, '1', 'EX', getProjectConfig().auth.oauthStateTtlSeconds, 'NX');
+  //? `consumeOAuthState` deletes it on first redemption. The value is now a
+  //? JSON envelope (nonce hash + optional PKCE verifier) instead of the literal
+  //? `'1'` so the flow can be bound to the initiating browser (F1) and carry a
+  //? PKCE secret (F11).
+  const result = await redisClient.set(
+    key,
+    JSON.stringify(entry),
+    'EX',
+    getProjectConfig().auth.oauthStateTtlSeconds,
+    'NX',
+  );
 
   if (result !== 'OK') {
     return null;
   }
 
-  return state;
+  return {
+    state,
+    stateCookie: nonce,
+    ...(pkce ? { codeChallenge: pkce.challenge } : {}),
+  };
 };
 
-const consumeOAuthState = async (providerName: string, state: string): Promise<boolean> => {
-  if (!state) {
-    return false;
+//? Atomically read + delete the state entry (single-use), then verify the
+//? browser-binding nonce. Returns the parsed entry on success (so the caller can
+//? read `codeVerifier` for the PKCE token exchange), or `null` on any failure:
+//? missing state, missing/empty cookie nonce, Redis miss, malformed payload, or
+//? a nonce that doesn't match the stored hash. `cookieNonce` is the value the
+//? server read from the {@link OAUTH_STATE_COOKIE_NAME} cookie on the callback
+//? request.
+const consumeOAuthState = async (
+  providerName: string,
+  state: string,
+  cookieNonce: string,
+): Promise<OAuthStateEntry | null> => {
+  if (!state || !cookieNonce) {
+    return null;
   }
 
   const key = getOAuthStateKey(providerName, state);
   const txResult = await redisClient.multi().get(key).del(key).exec();
   if (!txResult || txResult.length < 2) {
-    return false;
+    return null;
   }
 
   const getResult = txResult[0];
   if (!getResult || getResult[0]) {
-    return false;
+    return null;
   }
 
-  return getResult[1] === '1';
+  const rawValue = getResult[1];
+  if (typeof rawValue !== 'string') {
+    return null;
+  }
+
+  const [parseErr, entry] = tryCatchSync(() => JSON.parse(rawValue) as OAuthStateEntry);
+  if (parseErr || !entry || typeof entry.nonceHash !== 'string') {
+    return null;
+  }
+
+  //? Constant-time compare of the two fixed-length (SHA-256) hex digests via
+  //? `timingSafeEqual` (QUA-21). Both operands are 64-char hex strings, so their
+  //? byte buffers are equal-length; a length mismatch (malformed stored value)
+  //? falls through to reject. A mismatch means the browser completing the flow is
+  //? NOT the one that started it — reject (F1).
+  const incomingHash = Buffer.from(hashStateNonce(cookieNonce));
+  const storedHash = Buffer.from(entry.nonceHash);
+  if (incomingHash.length !== storedHash.length || !timingSafeEqual(incomingHash, storedHash)) {
+    return null;
+  }
+
+  return entry;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> => {
@@ -109,6 +246,20 @@ const generateAvatarFallbackColor = (): string =>
 const sanitizeUserForSession = <T extends { password?: unknown }>(user: T): Omit<T, 'password'> => {
   const { password: _password, ...safeUser } = user;
   return safeUser;
+};
+
+//? Fire-and-forget observational failure signal. Dispatched on every failed
+//? login/register/OAuth attempt so consumers can audit, feed a SIEM, or build
+//? per-account lockout (HOK-10). Never awaited and never throws — a failing
+//? handler must not change the auth outcome the user already got.
+const emitLoginFailed = (payload: {
+  email?: string;
+  userId?: string;
+  provider: string;
+  reason: string;
+  stage: 'login' | 'register' | 'oauth';
+}): void => {
+  void dispatchHook('loginFailed', payload);
 };
 
 const toReasonKey = (error: unknown, fallback = 'api.internalServerError'): string => {
@@ -152,18 +303,35 @@ const normalizeCredentials = (params: LoginOrRegisterParams): NormalizedCredenti
   confirmPassword: params.confirmPassword || undefined,
 });
 
-const validateCredentialsShape = (creds: NormalizedCredentials): { status: false; reason: string } | null => {
+//? Shape-validate normalized credentials. `mode` decides whether the
+//? password-POLICY check runs:
+//?  - `'register'` enforces the full policy (length, complexity, common-list,
+//?    customValidator) — a new account MUST meet the active policy.
+//?  - `'login'` does NOT run the policy (M-15). A login must accept ANY password
+//?    string and let the bcrypt compare decide pass/fail. Running the policy on
+//?    login is both a lockout-DoS vector (an attacker POSTing policy-violating
+//?    passwords for a victim's email could otherwise feed the per-account
+//?    failed-attempt counter) AND a correctness bug (tightening the policy would
+//?    lock out existing users whose stored password no longer meets it). Empty /
+//?    email-shape checks still run in both modes.
+const validateCredentialsShape = (
+  creds: NormalizedCredentials,
+  mode: 'login' | 'register',
+): { status: false; reason: string } | null => {
   const authLimits = getProjectConfig().auth;
   if (!creds.email || !creds.password) return { status: false, reason: 'login.empty' };
   if (creds.email.length > authLimits.emailMaxLength) return { status: false, reason: 'login.emailCharacterLimit' };
   if (creds.name && creds.name.length > authLimits.nameMaxLength) return { status: false, reason: 'login.nameCharacterLimit' };
   if (!isEmail(creds.email)) return { status: false, reason: 'login.invalidEmailFormat' };
-  //? Full password-policy check (length, complexity, common-list, customValidator).
-  //? Policy lives in `projectConfig.auth.passwordPolicy`; the deprecated
-  //? `passwordMinLength`/`passwordMaxLength` top-level fields are still read
-  //? from the policy's `minLength`/`maxLength` defaults.
-  const passwordReason = validatePassword(creds.password);
-  if (passwordReason) return { status: false, reason: passwordReason };
+  if (mode === 'register') {
+    //? Full password-policy check (length, complexity, common-list, customValidator).
+    //? Policy lives in `projectConfig.auth.passwordPolicy`; the deprecated
+    //? `passwordMinLength`/`passwordMaxLength` top-level fields are still read
+    //? from the policy's `minLength`/`maxLength` defaults. REGISTER-only — see the
+    //? function doc for why the login branch skips it (M-15).
+    const passwordReason = validatePassword(creds.password);
+    if (passwordReason) return { status: false, reason: passwordReason };
+  }
   return null;
 };
 
@@ -180,13 +348,15 @@ const registerWithCredentials = async (
     confirmPassword: string;
   },
   options?: { supersedeToken?: string },
-) => {
+): Promise<CredentialsLoginResult> => {
   if (password !== confirmPassword) {
+    emitLoginFailed({ email, provider: 'credentials', reason: 'login.passwordNotMatch', stage: 'register' });
     return { status: false, reason: 'login.passwordNotMatch' };
   }
 
   const preRegisterResult = await dispatchHook('preRegister', { email, provider: 'credentials', name });
   if (preRegisterResult.stopped) {
+    emitLoginFailed({ email, provider: 'credentials', reason: preRegisterResult.signal.errorCode, stage: 'register' });
     return { status: false, reason: preRegisterResult.signal.errorCode };
   }
 
@@ -196,9 +366,14 @@ const registerWithCredentials = async (
   );
   if (checkEmailError) {
     getLogger().error('login: findByEmail failed during register', checkEmailError);
-    return { status: false, reason: toReasonKey(checkEmailError) };
+    const reason = toReasonKey(checkEmailError);
+    emitLoginFailed({ email, provider: 'credentials', reason, stage: 'register' });
+    return { status: false, reason };
   }
-  if (checkEmailResponse) return { status: false, reason: 'login.emailExists' };
+  if (checkEmailResponse) {
+    emitLoginFailed({ email, provider: 'credentials', reason: 'login.emailExists', stage: 'register' });
+    return { status: false, reason: 'login.emailExists' };
+  }
 
   const createNewUser = async () => {
     const salt = await genSalt(getProjectConfig().auth.bcryptRounds);
@@ -215,8 +390,15 @@ const registerWithCredentials = async (
   };
 
   const [createNewUserError, createNewUserResponse] = await tryCatch(createNewUser);
-  if (createNewUserError) return { status: false, reason: toReasonKey(createNewUserError) };
-  if (!createNewUserResponse) return { status: false, reason: 'login.createUserFailed' };
+  if (createNewUserError) {
+    const reason = toReasonKey(createNewUserError);
+    emitLoginFailed({ email, provider: 'credentials', reason, stage: 'register' });
+    return { status: false, reason };
+  }
+  if (!createNewUserResponse) {
+    emitLoginFailed({ email, provider: 'credentials', reason: 'login.createUserFailed', stage: 'register' });
+    return { status: false, reason: 'login.createUserFailed' };
+  }
 
   await dispatchHook('postRegister', { userId: createNewUserResponse.id, provider: 'credentials' });
 
@@ -238,6 +420,7 @@ const registerWithCredentials = async (
     //? Account exists but the session never persisted — surface the failure so
     //? the route does not report an authenticated state it cannot back up. The
     //? user can recover by logging in normally.
+    emitLoginFailed({ email, userId: newUser.id, provider: 'credentials', reason: saved.errorCode, stage: 'register' });
     return { status: false, reason: saved.errorCode };
   }
   await dispatchHook('postLogin', { userId: newUser.id, provider: 'credentials', isNewUser: true, token: newToken });
@@ -253,10 +436,23 @@ const registerWithCredentials = async (
 const loginWithCredentialsCore = async (
   { email, password }: { email: string; password: string },
   options?: { supersedeToken?: string },
-) => {
+): Promise<CredentialsLoginResult> => {
   const preLoginResult = await dispatchHook('preLogin', { email, provider: 'credentials' });
   if (preLoginResult.stopped) {
+    emitLoginFailed({ email, provider: 'credentials', reason: preLoginResult.signal.errorCode, stage: 'login' });
     return { status: false, reason: preLoginResult.signal.errorCode };
+  }
+
+  //? Per-account brute-force lockout (F7 / MIS-017). When the auth rate-limit
+  //? slot is enabled and this account has exhausted its failed-attempt budget,
+  //? refuse the attempt BEFORE any bcrypt work — distributed credential stuffing
+  //? against one account (which the per-IP throttle can't see) is throttled
+  //? per-account here. The counter is incremented by the registered `loginFailed`
+  //? handler (see `registerAuthLockoutHook`); merely checking the lock does not
+  //? increment it. No-op when `rateLimiting.auth.enabled` is false (default).
+  if (await isAccountLocked(email)) {
+    emitLoginFailed({ email, provider: 'credentials', reason: 'login.accountLocked', stage: 'login' });
+    return { status: false, reason: 'login.accountLocked' };
   }
 
   const userAdapter = getUserAdapter();
@@ -265,25 +461,38 @@ const loginWithCredentialsCore = async (
   );
   if (findUserError) {
     getLogger().error('login: findByEmail failed', findUserError);
-    return { status: false, reason: toReasonKey(findUserError) };
+    const reason = toReasonKey(findUserError);
+    emitLoginFailed({ email, provider: 'credentials', reason, stage: 'login' });
+    return { status: false, reason };
   }
-  if (!findUserResponse) return { status: false, reason: 'login.userNotFound' };
-
-  //? `UserRecord.password` is `string | null`. A null hash (OAuth-only account,
-  //? data corruption, or partial migration) would make `compare` throw on the
-  //? non-null assertion. Treat it as a normal wrong-password outcome so the
-  //? response is indistinguishable from a bad password (no enumeration signal).
-  const passwordHash = findUserResponse.password;
-  if (!passwordHash) return { status: false, reason: 'login.wrongPassword' };
+  //? Anti-enumeration: a missing account and a missing/invalid password hash
+  //? must be INDISTINGUISHABLE from a wrong password — same reason key AND
+  //? similar timing. Returning a distinct `login.userNotFound` (and short-
+  //? circuiting before any bcrypt work) let an attacker probe which addresses
+  //? have credentials accounts via both the response key and a timing side
+  //? channel. When there is no real hash to compare, run a bcrypt compare
+  //? against a fixed dummy hash so the not-found path spends roughly the same
+  //? CPU as a real wrong-password compare, then return the shared key.
+  const passwordHash = findUserResponse?.password ?? null;
+  if (!findUserResponse || !passwordHash) {
+    await tryCatch(() => compare(password, DUMMY_BCRYPT_HASH));
+    emitLoginFailed({ email, userId: findUserResponse?.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login' });
+    return { status: false, reason: 'login.wrongPassword' };
+  }
 
   const [checkPasswordError, checkPasswordResponse] = await tryCatch(() =>
     compare(password, passwordHash)
   );
   if (checkPasswordError) {
     getLogger().error('login: bcrypt compare failed', checkPasswordError);
-    return { status: false, reason: toReasonKey(checkPasswordError) };
+    const reason = toReasonKey(checkPasswordError);
+    emitLoginFailed({ email, userId: findUserResponse.id, provider: 'credentials', reason, stage: 'login' });
+    return { status: false, reason };
   }
-  if (!checkPasswordResponse) return { status: false, reason: 'login.wrongPassword' };
+  if (!checkPasswordResponse) {
+    emitLoginFailed({ email, userId: findUserResponse.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login' });
+    return { status: false, reason: 'login.wrongPassword' };
+  }
 
   const newToken = randomBytes(32).toString('hex');
   const previousLogin = findUserResponse.lastLogin ?? null;
@@ -310,9 +519,13 @@ const loginWithCredentialsCore = async (
     //? Session never persisted (adapter blip / preSessionCreate veto). Fail the
     //? login so the route does NOT set a cookie or delete the prior session for
     //? a token that getSession() can't resolve.
+    emitLoginFailed({ email, userId: newUser.id, provider: 'credentials', reason: saved.errorCode, stage: 'login' });
     return { status: false, reason: saved.errorCode };
   }
   await dispatchHook('postLogin', { userId: newUser.id, provider: 'credentials', isNewUser: false, token: newToken });
+  //? Reset the brute-force counter on success so earlier typos don't keep a
+  //? legitimate user locked out (F7). No-op when the feature is disabled.
+  void clearAuthFailures(email);
   if (isDevMode()) {
     getLogger().debug(`credentials login success for user ${newUser.id}`);
   }
@@ -323,24 +536,46 @@ const loginWithCredentialsCore = async (
 //? to the dedicated register / login functions. `name && confirmPassword`
 //? present in the body means the client is registering; otherwise it's a
 //? login.
-const loginWithCredentials = async (params: LoginOrRegisterParams, options?: { supersedeToken?: string }) => {
+const loginWithCredentials = async (
+  params: LoginOrRegisterParams,
+  options?: { supersedeToken?: string },
+): Promise<CredentialsLoginResult> => {
   const creds = normalizeCredentials(params);
 
   if (isDevMode()) {
     getLogger().debug(`credentials auth attempt for ${creds.email || 'unknown-email'}`);
   }
 
-  const validationError = validateCredentialsShape(creds);
-  if (validationError) return validationError;
-
-  if (creds.name && creds.confirmPassword) {
+  //? Decide the branch BEFORE shape-validation so the password-POLICY check only
+  //? runs on register (M-15): `name && confirmPassword` present => register;
+  //? otherwise login. A login must accept any password string (the bcrypt
+  //? compare is the only authority), so an attacker can't trip a victim's
+  //? lockout counter by POSTing policy-violating passwords for their email.
+  //? Narrowing on the destructured locals keeps `name`/`confirmPassword` typed as
+  //? `string` inside the register branch (no cast needed).
+  const { name, confirmPassword } = creds;
+  if (name && confirmPassword) {
+    const validationError = validateCredentialsShape(creds, 'register');
+    if (validationError) return validationError;
+    //? Public-registration gate (F18). When `auth.allowRegistration === false`
+    //? (invite-only / admin-provisioned apps) refuse the register branch with a
+    //? dedicated reason key BEFORE any user lookup or hook. OAuth-driven
+    //? first-login account creation is governed separately by the provider flow.
+    //? Default `true` keeps today's open-registration behavior.
+    if (!getProjectConfig().auth.allowRegistration) {
+      emitLoginFailed({ email: creds.email, provider: 'credentials', reason: 'auth.registrationDisabled', stage: 'register' });
+      return { status: false, reason: 'auth.registrationDisabled' };
+    }
     return registerWithCredentials({
       email: creds.email,
       password: creds.password,
-      name: creds.name,
-      confirmPassword: creds.confirmPassword,
+      name,
+      confirmPassword,
     }, options);
   }
+
+  const validationError = validateCredentialsShape(creds, 'login');
+  if (validationError) return validationError;
   return loginWithCredentialsCore({ email: creds.email, password: creds.password }, options);
 };
 
@@ -354,6 +589,12 @@ export interface OAuthCallbackResult {
 
 const isAllowedRedirectUrl = (url: string): boolean => {
   if (!URL.canParse(url, 'http://placeholder')) return false;
+  //? Reject relative URLs whose path starts with a backslash or contains any
+  //? backslash before the same-origin shortcut (SEC-12): `new URL('/\\evil.com',
+  //? base)` keeps the placeholder origin and would pass the same-origin check,
+  //? yet browsers normalise `/\` → `//` (protocol-relative) → open-redirect to
+  //? `evil.com`. A legitimate same-origin path never needs a backslash.
+  if (url.includes('\\')) return false;
   const parsed = new URL(url, 'http://placeholder');
   if (parsed.origin === 'http://placeholder') {
     // relative URL — same-origin, always safe
@@ -375,7 +616,11 @@ const isAllowedRedirectUrl = (url: string): boolean => {
   });
 };
 
-const exchangeOAuthToken = async (provider: FullOAuthProvider, code: string): Promise<string | null> => {
+const exchangeOAuthToken = async (
+  provider: FullOAuthProvider,
+  code: string,
+  codeVerifier?: string,
+): Promise<string | null> => {
   //? `redirect_uri` is pinned to the registered, immutable `provider.callbackURL`
   //? — the SAME static config value the authorization request is built from.
   //? It is never derived from the incoming request, so there is no per-request
@@ -384,12 +629,16 @@ const exchangeOAuthToken = async (provider: FullOAuthProvider, code: string): Pr
   //? it into the Redis state would be a behaviour-preserving no-op here; if the
   //? callback URL ever becomes request-/tenant-derived, store it alongside the
   //? state in `createOAuthState` and compare before exchange.
+  //? `code_verifier` (PKCE, F11) is included ONLY when the provider opted in and
+  //? a verifier was stored with the state — for every existing flow it is
+  //? `undefined` and the exchange body is unchanged.
   const values = {
     code,
     client_id: provider.clientID,
     client_secret: provider.clientSecret,
     redirect_uri: provider.callbackURL,
     grant_type: 'authorization_code',
+    ...(codeVerifier ? { code_verifier: codeVerifier } : {}),
   };
 
   //? `Promise<unknown>` return annotation: `response.json()` is `any`, and an
@@ -402,6 +651,10 @@ const exchangeOAuthToken = async (provider: FullOAuthProvider, code: string): Pr
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(values),
       });
+      if (!response.ok) {
+        getLogger().warn('oauth: token exchange returned non-OK status', { provider: provider.name, status: response.status });
+        return null;
+      }
       return await response.json();
     }
     //? `tokenExchangeMethod` is the closed union `'json' | 'form'`; the `json`
@@ -412,15 +665,26 @@ const exchangeOAuthToken = async (provider: FullOAuthProvider, code: string): Pr
     formParams.append('code', values.code);
     formParams.append('grant_type', 'authorization_code');
     formParams.append('redirect_uri', provider.callbackURL);
+    if (codeVerifier) {
+      formParams.append('code_verifier', codeVerifier);
+    }
 
     if (isDevMode()) {
-      getLogger().debug('oauth: token-exchange form params', { params: formParams.toString() });
+      //? NEVER stringify the raw form — it carries `client_secret` (a
+      //? long-lived credential) and the single-use authorization `code`. Log
+      //? only the param NAMES so the dev sees the shape without leaking secrets
+      //? into the log sink.
+      getLogger().debug('oauth: token-exchange form params', { paramNames: [...formParams.keys()] });
     }
     const response = await fetch(provider.tokenExchangeURL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
       body: formParams.toString(),
     });
+    if (!response.ok) {
+      getLogger().warn('oauth: token exchange returned non-OK status', { provider: provider.name, status: response.status });
+      return null;
+    }
     return await response.json();
   };
 
@@ -442,6 +706,23 @@ interface OAuthProfile {
   email: string | undefined;
   name: string;
   avatar: string;
+  /**
+   * `true` only when the provider POSITIVELY reported the email as verified
+   * (via `emailVerifiedKey`) or supplied it through a `getEmail` accessor that
+   * itself filters on a verified flag (GitHub). `false` when the provider
+   * exposes NO verified-email signal at all — used to fail-closed on
+   * cross-provider account LINKING under the `'unified'` strategy (SEC-21/SEC-40),
+   * where linking an unverified address to a victim's existing account is an
+   * account-takeover vector. First-time account CREATION is unaffected.
+   */
+  emailVerified: boolean;
+  /**
+   * The RAW, un-stripped provider userInfo record. Threaded through so the
+   * `extraSessionFields` hook receives every provider-specific claim (`sub`,
+   * tenant id, custom claims) instead of the trimmed `{email,name,avatar}`
+   * projection — the documented contract (SEC-3 / oauthProviders.ts hook docs).
+   */
+  rawUserData: OAuthUserData;
 }
 
 const fetchOAuthProfile = async (
@@ -457,6 +738,10 @@ const fetchOAuthProfile = async (
         'Authorization': `Bearer ${accessToken}`,
       },
     });
+    if (!response.ok) {
+      getLogger().warn('oauth: userInfo fetch returned non-OK status', { provider: provider.name, status: response.status });
+      return null;
+    }
     return await response.json();
   };
 
@@ -477,6 +762,28 @@ const fetchOAuthProfile = async (
   const emailValue = userData[provider.emailKey];
   let email: string | undefined = typeof emailValue === 'string' ? emailValue : undefined;
 
+  //? Track whether the provider POSITIVELY confirmed this email as verified.
+  //? `emailVerifiedKey === true` (or any non-false value when the key is set and
+  //? present) counts as verified; a provider with NO `emailVerifiedKey` exposes
+  //? no signal, so the email stays `emailVerified: false` and only first-time
+  //? account creation (not cross-provider linking) is allowed downstream.
+  let emailVerified = false;
+
+  //? Reject a provider-supplied email that the provider explicitly marks
+  //? unverified (e.g. Discord's `verified: false`). A missing flag is treated
+  //? as "no signal" (not verified, but not rejected outright — see the
+  //? cross-provider link guard in `findOrCreateOAuthUser`). Defense-in-depth
+  //? against account-linking takeover under `'unified'` (SEC-21).
+  if (email && provider.emailVerifiedKey) {
+    const verifiedFlag = userData[provider.emailVerifiedKey];
+    if (verifiedFlag === false) {
+      getLogger().warn('oauth: provider email is not verified — rejecting', { provider: provider.name });
+      return null;
+    }
+    //? Key present-and-not-false ⇒ provider positively confirmed verification.
+    if (verifiedFlag !== undefined) emailVerified = true;
+  }
+
   const avatarId = provider.avatarCodeKey ? userData[provider.avatarCodeKey] : undefined;
   const avatarValue = provider.avatarKey
     ? readStringField(userData, provider.avatarKey)
@@ -486,7 +793,10 @@ const fetchOAuthProfile = async (
   const avatar = typeof avatarValue === 'string' ? avatarValue : '';
 
   //? Some providers (GitHub) don't return email in /userinfo — fall back to the
-  //? provider's `getEmail` accessor.
+  //? provider's `getEmail` accessor. GitHub's accessor only ever selects a
+  //? `verified === true` address (see `githubProvider.getEmail`), so an email
+  //? obtained this way is treated as positively verified for the cross-provider
+  //? link guard (SEC-21).
   if (!email && provider.getEmail) {
     const selectedEmail = await provider.getEmail(accessToken);
     if (!selectedEmail) {
@@ -494,9 +804,26 @@ const fetchOAuthProfile = async (
       return null;
     }
     email = selectedEmail;
+    emailVerified = true;
   }
 
-  return { email, name, avatar };
+  //? Normalize OAuth emails through the SAME gate as credentials (trim +
+  //? lowercase + `isEmail`) before they reach the adapter. Credentials emails
+  //? are normalized at `normalizeCredentials`; taking the provider value
+  //? verbatim meant `Victim@x.com` (OAuth) and `victim@x.com` (credentials)
+  //? resolved to different rows — which under the `'unified'` account strategy
+  //? (case-sensitive lookup) silently DEFEATS cross-provider linking. A
+  //? present-but-malformed provider email is treated as "no usable email".
+  if (email !== undefined) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!isEmail(normalizedEmail)) {
+      getLogger().warn('oauth: provider returned a malformed email', { provider: provider.name });
+      return null;
+    }
+    email = normalizedEmail;
+  }
+
+  return { email, name, avatar, emailVerified, rawUserData: userData };
 };
 
 interface ResolvedOAuthUser {
@@ -508,7 +835,7 @@ const findOrCreateOAuthUser = async (
   provider: FullOAuthProvider,
   profile: OAuthProfile,
 ): Promise<ResolvedOAuthUser | null> => {
-  const { email, name, avatar } = profile;
+  const { email, name, avatar, emailVerified } = profile;
   if (!email) return null;
 
   const preLoginResult = await dispatchHook('preLogin', { email, provider: provider.name });
@@ -530,6 +857,27 @@ const findOrCreateOAuthUser = async (
   }
 
   if (findResponse?.id) {
+    //? Fail-closed cross-provider account-LINK guard (SEC-21/SEC-40). Under the
+    //? `'unified'` strategy `resolveUserByEmail` matches by email across every
+    //? provider, so an OAuth sign-in can LINK into an account originally created
+    //? by a DIFFERENT provider (incl. credentials). If the current provider did
+    //? NOT positively verify the email (no `emailVerifiedKey` / `getEmail`
+    //? verified-filter), an attacker who controls an unverified address equal to
+    //? a victim's could take over that account. Refuse the link in that case —
+    //? same-provider re-login and first-time account CREATION are unaffected, so
+    //? existing flows for built-ins that DO verify (Google/GitHub/Discord) keep
+    //? working. `'per-provider'` always matches within the same provider, so the
+    //? cross-provider condition is never met there (no behaviour change).
+    const existingProvider = findResponse.provider ?? null;
+    const isCrossProviderLink = existingProvider !== null && existingProvider !== provider.name;
+    if (isCrossProviderLink && !emailVerified) {
+      getLogger().warn(
+        'oauth: refusing to link an unverified provider email to an existing account created by a different provider (account-takeover guard)',
+        { provider: provider.name, existingProvider },
+      );
+      return null;
+    }
+
     const filePath = path.join(uploadsFolder(), `${findResponse.id}.webp`);
     if (existsSync(filePath)) {
       findResponse.avatar = `${findResponse.id}.webp`;
@@ -634,25 +982,44 @@ const loginCallback = async (
   const code = params.get('code');
   const state = params.get('state');
 
-  const stateIsValid = await consumeOAuthState(provider.name, state ?? '');
-  if (!stateIsValid) {
-    getLogger().warn('oauth: invalid or missing state', { provider: provider.name });
+  //? Browser-binding (F1): the nonce the server set as the `ls-oauth-state`
+  //? cookie at the authorize step must round-trip back and match the value
+  //? stored alongside the Redis state entry. A missing/mismatched cookie means
+  //? this browser did NOT start the flow — reject before any token exchange.
+  const cookieNonce = getCookieValue(req.headers.cookie, OAUTH_STATE_COOKIE_NAME) ?? '';
+  const stateEntry = await consumeOAuthState(provider.name, state ?? '', cookieNonce);
+  if (!stateEntry) {
+    getLogger().warn('oauth: invalid, missing, or unbound state', { provider: provider.name });
+    emitLoginFailed({ provider: providerName, reason: 'oauth.invalidState', stage: 'oauth' });
     return false;
   }
 
   if (!code) {
     getLogger().warn('oauth: no code provided in callback url', { provider: provider.name });
+    emitLoginFailed({ provider: providerName, reason: 'oauth.noCode', stage: 'oauth' });
     return false;
   }
 
-  const accessToken = await exchangeOAuthToken(provider, code);
-  if (!accessToken) return false;
+  //? PKCE (F11): replay the verifier stored with the state entry at token
+  //? exchange when the provider opted in. `undefined` for non-PKCE providers,
+  //? in which case the exchange is byte-identical to before.
+  const accessToken = await exchangeOAuthToken(provider, code, stateEntry.codeVerifier);
+  if (!accessToken) {
+    emitLoginFailed({ provider: providerName, reason: 'oauth.tokenExchangeFailed', stage: 'oauth' });
+    return false;
+  }
 
   const profile = await fetchOAuthProfile(provider, accessToken);
-  if (!profile) return false;
+  if (!profile) {
+    emitLoginFailed({ provider: providerName, reason: 'oauth.profileFetchFailed', stage: 'oauth' });
+    return false;
+  }
 
   const resolved = await findOrCreateOAuthUser(provider, profile);
-  if (!resolved) return false;
+  if (!resolved) {
+    emitLoginFailed({ provider: providerName, email: profile.email, reason: 'oauth.userResolveFailed', stage: 'oauth' });
+    return false;
+  }
 
   const newToken = randomBytes(32).toString('hex');
   resolved.user.token = newToken;
@@ -664,13 +1031,28 @@ const loginCallback = async (
   //? from signing in.
   const extraSessionFields = provider.extraSessionFields;
   if (extraSessionFields) {
+    //? Pass the RAW provider userData (SEC-3) so the hook sees every provider
+    //? claim (`sub`, tenant id, custom claims) — not the trimmed
+    //? `{email,name,avatar}` projection it used to get, which silently made
+    //? every other field `undefined` and broke the documented contract.
     const [extraErr, extra] = await tryCatch(async () =>
-      extraSessionFields({ userData: asOAuthUserData(profile), accessToken }),
+      extraSessionFields({ userData: profile.rawUserData, accessToken }),
     );
     if (extraErr) {
       getLogger().warn(`[oauth:${providerName}] extraSessionFields hook threw — continuing without extras`, { err: extraErr });
     } else if (extra) {
-      Object.assign(resolved.user, extra);
+      //? Strip framework-owned session keys before merging (SEC-10): a buggy /
+      //? typo'd provider config returning `{ id, token, csrfToken, password,
+      //? admin }` would otherwise overwrite the freshly-minted token / user id /
+      //? CSRF token / privilege flags. Drop any reserved key and warn so the
+      //? misconfiguration surfaces instead of silently escalating privilege.
+      const { id, token, csrfToken, password, ...safeExtra } = extra;
+      if (id !== undefined || token !== undefined || csrfToken !== undefined || password !== undefined) {
+        getLogger().warn(
+          `[oauth:${providerName}] extraSessionFields returned framework-owned key(s) (id/token/csrfToken/password) — dropped`,
+        );
+      }
+      Object.assign(resolved.user, safeExtra);
     }
   }
 
@@ -679,6 +1061,7 @@ const loginCallback = async (
     //? Session never persisted — abort the OAuth callback so authCallbackRoute
     //? returns "Login failed" instead of redirecting with a dead token.
     getLogger().error(`[oauth:${providerName}] saveSession failed — aborting callback`, { errorCode: saved.errorCode });
+    emitLoginFailed({ provider: providerName, userId: resolved.user.id, reason: saved.errorCode, stage: 'oauth' });
     return false;
   }
 

@@ -2,6 +2,10 @@ import { Socket } from "socket.io-client";
 import { getProjectConfig } from "./projectConfig";
 import { getLogger } from "./loggerRegistry";
 import tryCatchSync from "./tryCatchSync";
+import { dispatchClientHook } from "./clientHookBus";
+
+/** Why a queued item was dropped (handed to its `onDrop` callback). */
+export type QueueDropReason = 'expired' | 'queue-full';
 
 interface ApiQueueItem {
   id: string;
@@ -13,6 +17,14 @@ interface ApiQueueItem {
    * `SyncQueueItem.dropPolicy` for details.
    */
   dropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
+  /**
+   * Optional callback invoked when THIS item is dropped (evicted for age or
+   * because the queue was full / rejected) instead of ever running (SYNC-09).
+   * The transport wires this to settle the pending `syncRequest`/`apiRequest`
+   * promise with an error envelope, so an evicted offline request resolves
+   * rather than hanging forever. Invoked at most once; failures are swallowed.
+   */
+  onDrop?: (reason: QueueDropReason) => void;
 }
 
 interface SyncQueueItem {
@@ -27,6 +39,8 @@ interface SyncQueueItem {
    * the global config.
    */
   dropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
+  /** See {@link ApiQueueItem.onDrop} (SYNC-09). */
+  onDrop?: (reason: QueueDropReason) => void;
 }
 
 const apiQueue: ApiQueueItem[] = [];
@@ -42,24 +56,49 @@ export const isOnline = () => {
   return navigator.onLine;
 };
 
-const evictExpired = (queue: { createdAt: number }[]): void => {
-  const maxAgeMs = getProjectConfig().offlineQueue.maxAgeMs;
+//? Common drop shape — every queue item the framework drops carries these.
+interface DroppableItem {
+  createdAt: number;
+  key: string;
+  dropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject';
+  onDrop?: (reason: QueueDropReason) => void;
+}
+
+//? Notify a dropped item's owner exactly once. Swallows callback errors so a
+//? throwing `onDrop` can't wedge the eviction/enqueue loop (SYNC-09).
+const notifyDropped = (item: DroppableItem, reason: QueueDropReason): void => {
+  if (!item.onDrop) return;
+  tryCatchSync(() => { item.onDrop?.(reason); });
+};
+
+const evictExpired = (
+  queue: DroppableItem[],
+  label: 'api' | 'sync',
+): void => {
+  const { maxAgeMs, dropPolicy: globalPolicy } = getProjectConfig().offlineQueue;
   if (maxAgeMs <= 0) return;
   const cutoff = Date.now() - maxAgeMs;
   for (let i = queue.length - 1; i >= 0; i -= 1) {
     const item = queue[i];
     if (item && item.createdAt < cutoff) {
       queue.splice(i, 1);
+      notifyDropped(item, 'expired');
+      dispatchClientHook('queueItemDropped', {
+        queue: label,
+        key: item.key,
+        reason: 'expired',
+        dropPolicy: item.dropPolicy ?? globalPolicy,
+      });
     }
   }
 };
 
-const enqueueWithPolicy = <T extends { createdAt: number; dropPolicy?: 'drop-oldest' | 'drop-newest' | 'reject' }>(
+const enqueueWithPolicy = <T extends DroppableItem>(
   queue: T[],
   item: T,
-  label: string,
+  label: 'api' | 'sync',
 ): boolean => {
-  evictExpired(queue);
+  evictExpired(queue, label);
   const { maxSize, dropPolicy: globalPolicy } = getProjectConfig().offlineQueue;
   //? Per-request override wins over the global policy. Lets specific
   //? syncs pick 'drop-oldest' for liveness while the app default stays
@@ -70,16 +109,24 @@ const enqueueWithPolicy = <T extends { createdAt: number; dropPolicy?: 'drop-old
     return true;
   }
   if (effectivePolicy === 'drop-oldest') {
-    queue.shift();
+    const dropped = queue.shift();
     queue.push(item);
     getLogger().debug(`offlineQueue:${label} full — dropped oldest item (policy=${effectivePolicy})`);
+    if (dropped) {
+      notifyDropped(dropped, 'queue-full');
+      dispatchClientHook('queueItemDropped', { queue: label, key: dropped.key, reason: 'queue-full', dropPolicy: effectivePolicy });
+    }
     return true;
   }
   if (effectivePolicy === 'drop-newest') {
     getLogger().debug(`offlineQueue:${label} full — dropped newest item (policy=${effectivePolicy})`);
+    notifyDropped(item, 'queue-full');
+    dispatchClientHook('queueItemDropped', { queue: label, key: item.key, reason: 'queue-full', dropPolicy: effectivePolicy });
     return false;
   }
   getLogger().warn(`offlineQueue:${label} full — rejecting enqueue (policy=${effectivePolicy})`);
+  notifyDropped(item, 'queue-full');
+  dispatchClientHook('queueItemDropped', { queue: label, key: item.key, reason: 'queue-full', dropPolicy: effectivePolicy });
   return false;
 };
 
@@ -132,7 +179,7 @@ const runQueueItem = <T extends { run: (s: Socket) => void }>(
 
 export const flushApiQueue = (canRun: () => boolean, socketInstance: Socket) => {
   if (isFlushingApi) return;
-  evictExpired(apiQueue);
+  evictExpired(apiQueue, 'api');
   if (apiQueue.length === 0) return;
   if (!canRun()) return;
 
@@ -147,7 +194,7 @@ export const flushApiQueue = (canRun: () => boolean, socketInstance: Socket) => 
 
 export const flushSyncQueue = (canRun: () => boolean, socketInstance: Socket) => {
   if (isFlushingSync) return;
-  evictExpired(syncQueue);
+  evictExpired(syncQueue, 'sync');
   if (syncQueue.length === 0) return;
   if (!canRun()) return;
 

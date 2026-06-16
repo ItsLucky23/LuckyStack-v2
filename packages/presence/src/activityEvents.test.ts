@@ -5,6 +5,7 @@ import {
   unregisterActivityEvent,
   listActivityEvents,
   dispatchActivitySample,
+  clearActivityThrottle,
   type ActivitySample,
 } from './activityEvents';
 
@@ -211,6 +212,37 @@ describe('activityEvents registry', () => {
       //? no prior firing seeded the refractory window.
       await dispatchActivitySample(sampleFor({ now: 10_010 }));
       expect(onTrigger).toHaveBeenCalledOnce();
+    });
+
+    //? QUA-040 — clearActivityThrottle drops a socket's refractory entries so
+    //? the lastFired map doesn't leak per-connection, and a fresh connection
+    //? reusing the id is not wrongly suppressed.
+    it('clearActivityThrottle resets the refractory window for a socket (QUA-040)', async () => {
+      const onTrigger = vi.fn();
+      registerActivityEvent('pruned', { trigger: () => true, onTrigger, refractoryMs: 1000 });
+      await dispatchActivitySample(sampleFor({ socketId: 's1', now: 10_000 }));
+      expect(onTrigger).toHaveBeenCalledTimes(1);
+      //? Still inside the window -> suppressed.
+      await dispatchActivitySample(sampleFor({ socketId: 's1', now: 10_500 }));
+      expect(onTrigger).toHaveBeenCalledTimes(1);
+      //? Disconnect prunes the throttle entry; the next sample fires immediately.
+      clearActivityThrottle('s1');
+      await dispatchActivitySample(sampleFor({ socketId: 's1', now: 10_600 }));
+      expect(onTrigger).toHaveBeenCalledTimes(2);
+    });
+
+    it('clearActivityThrottle only affects the given socket', async () => {
+      const onTrigger = vi.fn();
+      registerActivityEvent('scoped', { trigger: () => true, onTrigger, refractoryMs: 1000 });
+      await dispatchActivitySample(sampleFor({ socketId: 'keep', now: 10_000 }));
+      await dispatchActivitySample(sampleFor({ socketId: 'drop', now: 10_000 }));
+      expect(onTrigger).toHaveBeenCalledTimes(2);
+      clearActivityThrottle('drop');
+      //? 'keep' is still throttled; 'drop' was reset.
+      await dispatchActivitySample(sampleFor({ socketId: 'keep', now: 10_500 }));
+      expect(onTrigger).toHaveBeenCalledTimes(2);
+      await dispatchActivitySample(sampleFor({ socketId: 'drop', now: 10_500 }));
+      expect(onTrigger).toHaveBeenCalledTimes(3);
     });
   });
 });

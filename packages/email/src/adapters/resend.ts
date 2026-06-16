@@ -2,6 +2,8 @@ import { createRequire } from 'node:module';
 
 import { ensurePeerDepInstalled, type EmailSender } from '@luckystack/core';
 
+import { toProviderPayload } from './providerPayload';
+
 interface ResendSenderOptions {
   apiKey: string;
   /** Default sender address. Overridden per-message if the message specifies `from`. */
@@ -50,6 +52,13 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
   )
     .then(({ Resend }) => new Resend(apiKey));
 
+  //? Defensive: attach a no-op rejection handler to a SEPARATE promise so an
+  //? import failure before the first `send()` doesn't surface as an
+  //? `unhandledRejection` and crash the process. `send` still awaits the
+  //? original `clientPromise`, which still rejects identically — this only
+  //? marks the floating branch handled, it changes no failure semantics.
+  void clientPromise.catch(() => {});
+
   return {
     name: 'resend',
     send: async (message) => {
@@ -59,16 +68,7 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
         return { ok: false, reason: 'missing-from' };
       }
 
-      const { data, error } = await client.emails.send({
-        from: fromAddress,
-        to: message.to,
-        subject: message.subject,
-        html: message.html,
-        text: message.text,
-        replyTo: message.replyTo,
-        cc: message.cc,
-        bcc: message.bcc,
-      });
+      const { data, error } = await client.emails.send(toProviderPayload(message, fromAddress));
 
       if (error) {
         return { ok: false, reason: error.message || 'resend-error', cause: error }; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- empty `message` should fall back too

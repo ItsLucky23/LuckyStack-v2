@@ -83,8 +83,13 @@ describe("routeMeta filename parsing", () => {
       ).toBe("game");
     });
 
-    it("returns 'root' for a sync directly under src/_sync/", () => {
-      expect(extractSyncPagePath("project/src/_sync/ping_server_v1.ts")).toBe("root");
+    it("returns 'system' for a sync directly under src/_sync/", () => {
+      //? Root syncs share the `'system'` sentinel with root APIs so the type-map
+      //? key, the generated `FullSyncPath`, the dev loader's runtime route key,
+      //? and the wire name the typed `syncRequest` sends all agree
+      //? (`sync/system/<name>/v1`). A `'root'` sentinel silently broke root-sync
+      //? dispatch.
+      expect(extractSyncPagePath("project/src/_sync/ping_server_v1.ts")).toBe("system");
     });
 
     it("returns an empty string when no _sync segment is present", () => {

@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Generated-type-driven test layers for LuckyStack: contract smoke (Zod-valid input), auth enforcement, rate-limit, and crash-resistance fuzz. Walks every endpoint via the generated apiMethodMap.",

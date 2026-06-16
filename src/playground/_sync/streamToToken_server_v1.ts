@@ -29,9 +29,17 @@ import {
 } from '../../_sockets/apiTypes.generated';
 import { sleep } from '@luckystack/core';
 
+//? SECURITY: this is a DEV-ONLY demo fixture. Delete `src/playground/` before
+//? shipping to production. `login: true` so an unauthenticated caller can't use
+//? this as an open relay to stream attacker-supplied text into arbitrary
+//? token-rooms; the target count is also hard-capped below.
 export const auth: AuthProps = {
-  login: false,
+  login: true,
 };
+
+//? Hard ceiling on how many recipients a single call may address — caps the
+//? message-injection/spam blast radius even for an authenticated caller.
+const MAX_TARGETS = 10;
 
 export interface SyncParams {
   clientInput: {
@@ -60,6 +68,13 @@ export const main = async ({ clientInput, streamTo, user }: SyncParams): Promise
     return {
       status: 'error',
       errorCode: 'playground.streamTo.missingTargets',
+    };
+  }
+
+  if (tokens.length > MAX_TARGETS) {
+    return {
+      status: 'error',
+      errorCode: 'playground.streamTo.tooManyTargets',
     };
   }
 

@@ -96,6 +96,20 @@ const resolveRaw = ({ rawAddress, headers, trustProxy }: ResolveClientIpParams &
   return rawFallback;
 };
 
+/**
+ * Whether a resolved client IP is a loopback / unresolved address — used by the
+ * api/sync transports to honour `rateLimiting.skipLoopbackInDev` (api F5/F11).
+ * Matches IPv4 loopback (`127.0.0.0/8`), IPv6 loopback (`::1`), the IPv4-mapped
+ * form (`::ffff:127.0.0.1`, already canonicalized away by {@link resolveClientIp}),
+ * and the {@link UNKNOWN_CLIENT_IP} sentinel. Pass an already-resolved IP.
+ */
+export const isLoopbackIp = (ip: string): boolean => {
+  if (ip === UNKNOWN_CLIENT_IP) return true;
+  const canonical = ip.startsWith('::ffff:') ? ip.slice('::ffff:'.length) : ip;
+  if (canonical === '::1') return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(canonical);
+};
+
 export const resolveClientIp = ({ rawAddress, headers, trustProxy = false }: ResolveClientIpParams): string => {
   const resolved = resolveRaw({ rawAddress, headers, trustProxy });
   if (resolved === UNKNOWN_CLIENT_IP) {

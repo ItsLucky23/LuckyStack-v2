@@ -73,7 +73,7 @@ Payloads (augmented onto `HookPayloads` via `packages/presence/src/hookPayloads.
 | Export | Purpose |
 | --- | --- |
 | `registerPresenceHooks()` | One-shot wiring at server boot. |
-| `socketLeaveRoom({ token, socket, newPath })` | Programmatic room leave with peer notification. |
+| `socketLeaveRoom({ token, socket, newPath })` | Resolve the departing token's session (used by grace-expiry teardown). NOTE: does not itself call `socket.leave(...)` or emit peer notifications — `userLeft` fan-out is done separately by the lifecycle caller. The `socket` / `newPath` params are currently unused. |
 | `initActivityBroadcaster({ token, socket })` | Manual init for the broadcaster (wired automatically by `@luckystack/server`). |
 | `socketConnected({ token, io })` / `socketDisconnecting({ token, reason, socket })` | Lifecycle helpers. |
 | `clientSwitchedTab` (`Set<string>`) | Token-set of clients backgrounded without disconnecting. |

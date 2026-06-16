@@ -1,0 +1,95 @@
+name: publish
+
+# Publishes the @luckystack/* packages to npm WITH PROVENANCE.
+#
+# Triggers:
+#   - push of a version tag (v*) — the release path.
+#   - manual workflow_dispatch with `dry_run` (default true) so a maintainer can
+#     validate the full build/lint/test/pack gate without uploading anything.
+#
+# Provenance: each package sets `publishConfig.provenance: true` and the real
+# publish passes `--provenance`. npm only mints a provenance attestation when the
+# job runs in a supported CI with an OIDC id-token, hence `permissions.id-token`.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run the full gate + `npm publish --dry-run` (no upload).'
+        type: boolean
+        required: false
+        default: true
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      # OIDC token for npm provenance attestation.
+      id-token: write
+      # Read the repository contents for the build.
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      # npm provenance requires npm >= 9.5; pin a recent line to be safe.
+      - name: Ensure provenance-capable npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      # --- Audit / build gate (must pass before any publish) ---
+      - name: Generate type artifacts
+        run: npm run generateArtifacts
+
+      - name: Verify artifacts exist
+        run: |
+          test -s src/_sockets/apiTypes.generated.ts
+          test -s src/docs/apiDocs.generated.json
+          ls server/prod/generatedApis.*.ts
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Lint packages
+        run: npm run lint:packages
+
+      - name: Build
+        run: npm run build
+
+      - name: Test sweep
+        run: npm run test
+
+      - name: Security audit (production deps, high+)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Pack dry-run (inspect publishable tarballs)
+        run: npm run pack:dry
+
+      # --- Publish ---
+      # A manual run defaults to a dry-run; a v* tag push does a real publish.
+      - name: Publish (dry-run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: npm run publish:dry
+
+      - name: Publish (real, with provenance)
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
+        run: npm run publish:packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'

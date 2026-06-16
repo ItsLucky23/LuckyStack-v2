@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { getCsrfConfig, getPrismaClient, getProjectConfig, getSrcDir, tryCatch } from '@luckystack/core';
+import { getCsrfConfig, getPrismaClient, getProjectConfig, getSrcDir, tryCatch, tryCatchSync } from '@luckystack/core';
 
 import {
   openStreamWatcher,
@@ -21,6 +21,11 @@ import type { ApiMethodMap } from './types';
 
 const API_TEST_FILE_PATTERN = /_v(\d+)\.tests\.ts$/;
 const SYNC_SERVER_TEST_FILE_PATTERN = /_server_v(\d+)\.tests\.ts$/;
+
+//? Default per-request timeout for the Layer-5 call helpers. Mirrors the sweep
+//? layers so a hung (non-erroring) server can't wedge the whole custom-test run
+//? indefinitely — without it the case's own tryCatch never fires.
+const DEFAULT_CALL_TIMEOUT_MS = 10_000;
 
 export interface CustomTestCase {
   name: string;
@@ -91,12 +96,27 @@ export const discoverCustomTestFiles = (srcDir: string = getSrcDir()): Discovere
   if (!fs.existsSync(srcDir)) return [];
   const found: DiscoveredTestFile[] = [];
   const stack: string[] = [srcDir];
+  //? Track visited real-paths so a cyclic symlink under `src/` can't drive an
+  //? infinite walk / unbounded stack growth.
+  const visited = new Set<string>();
   while (stack.length > 0) {
     const current = stack.pop();
     if (current === undefined) break;
-    const entries = fs.readdirSync(current, { withFileTypes: true });
+    //? Resolve to the canonical path and skip if already seen (symlink cycle).
+    const [realError, realPath] = tryCatchSync(() => fs.realpathSync(current));
+    const canonical = realError || realPath === null ? current : realPath;
+    if (visited.has(canonical)) continue;
+    visited.add(canonical);
+    //? Guard the readdir: a permission error or a directory deleted mid-walk
+    //? throws synchronously and would otherwise abort the whole custom layer.
+    //? Skip the unreadable directory instead.
+    const [readError, entries] = tryCatchSync(() => fs.readdirSync(current, { withFileTypes: true }));
+    if (readError || entries === null) continue;
     for (const entry of entries) {
       const fullPath = path.join(current, entry.name);
+      //? Skip symlinked entries entirely — following them risks a cycle and
+      //? a discovered test file should live in the real source tree.
+      if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         stack.push(fullPath);
         continue;
@@ -261,6 +281,27 @@ const buildSessionHelpers = (state: TestSessionState): TestContext['session'] =>
   };
 };
 
+//? Parse a fetch Response as JSON behind tryCatch and store the raw body on the
+//? session state. A non-JSON body (HTML 500, empty 204, truncated) would
+//? otherwise throw a raw SyntaxError with `state.lastResponse` null, hiding the
+//? server's actual output. On parse failure we keep a snippet of the text body
+//? so a failed case's reason can show what the server actually returned.
+const parseResponse = async (response: Response, state: TestSessionState): Promise<unknown> => {
+  const [textError, text] = await tryCatch(() => response.text());
+  if (textError || text === null) {
+    state.lastResponse = null;
+    throw new Error(`failed to read response body (HTTP ${response.status}): ${textError?.message ?? 'unknown'}`);
+  }
+  const [parseError, parsed] = tryCatchSync(() => JSON.parse(text) as unknown);
+  if (parseError) {
+    const snippet = text.length > 500 ? `${text.slice(0, 500)}…` : text;
+    state.lastResponse = snippet;
+    throw new Error(`response was not valid JSON (HTTP ${response.status}): ${snippet}`);
+  }
+  state.lastResponse = parsed;
+  return parsed;
+};
+
 const buildCallApi = (
   baseUrl: string,
   routePath: string,
@@ -276,14 +317,19 @@ const buildCallApi = (
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
     if (state.csrfToken) headers[getCsrfConfig().headerName] = state.csrfToken;
-    const init: RequestInit = { method, headers };
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => { controller.abort(); }, DEFAULT_CALL_TIMEOUT_MS);
+    const init: RequestInit = { method, headers, signal: controller.signal };
     //? GET / HEAD requests cannot carry a body (fetch throws). Every other
     //? method sends the JSON payload.
     if (method !== 'GET' && method !== 'HEAD') init.body = JSON.stringify(input ?? {});
-    const response = await fetch(url, init);
-    const json = (await response.json()) as never;
-    state.lastResponse = json;
-    return json;
+    const [fetchError, response] = await tryCatch(() => fetch(url, init));
+    clearTimeout(timeoutHandle);
+    if (fetchError || !response) {
+      state.lastResponse = null;
+      throw new Error(`callApi ${method} ${routePath} failed: ${fetchError?.message ?? 'no response'}`);
+    }
+    return await parseResponse(response, state) as never;
   };
 };
 
@@ -299,14 +345,20 @@ const buildCallSync = (
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
     if (state.csrfToken) headers[getCsrfConfig().headerName] = state.csrfToken;
     const body = { data: input ?? {}, receiver: opts?.receiver };
-    const response = await fetch(url, {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => { controller.abort(); }, DEFAULT_CALL_TIMEOUT_MS);
+    const [fetchError, response] = await tryCatch(() => fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-    });
-    const json = (await response.json()) as never;
-    state.lastResponse = json;
-    return json;
+      signal: controller.signal,
+    }));
+    clearTimeout(timeoutHandle);
+    if (fetchError || !response) {
+      state.lastResponse = null;
+      throw new Error(`callSync ${routePath} failed: ${fetchError?.message ?? 'no response'}`);
+    }
+    return await parseResponse(response, state) as never;
   };
 };
 

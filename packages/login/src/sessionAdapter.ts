@@ -47,6 +47,17 @@ export interface SessionAdapter {
   listActive(userId: string): Promise<string[]>;
 
   /**
+   * Refresh the TTL on the active-tokens-per-user record WITHOUT adding a
+   * token (sliding-window expiration parity with the session key). Called on
+   * an authenticated read so a session kept alive purely by reads does not
+   * outlive its activeUsers entry — which would otherwise let a stolen token
+   * survive a sign-out-everywhere / password reset. Optional: backends whose
+   * active-set entries do not expire independently (or that have no TTL
+   * concept) can omit it. Must not create a record on miss.
+   */
+  touchActive?(userId: string, ttlSeconds: number): Promise<void>;
+
+  /**
    * Admin walk: yield every active session record. Optional because
    * non-scannable backends (signed-JWT-stateless, log-only) cannot
    * enumerate. Callers fall back to a per-user listActive when omitted.
@@ -105,6 +116,13 @@ export const redisSessionAdapter: SessionAdapter = {
 
   async untrackActive(userId, token) {
     await redis.srem(activeUsersKey(userId), token);
+  },
+
+  async touchActive(userId, ttlSeconds) {
+    //? `expire` only sets a TTL on an EXISTING key (returns 0 on miss), so this
+    //? never resurrects an emptied active-set — it just keeps a live one's TTL
+    //? in lock-step with the session key it is read alongside.
+    await redis.expire(activeUsersKey(userId), ttlSeconds);
   },
 
   async listActive(userId) {

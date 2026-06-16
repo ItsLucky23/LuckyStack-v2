@@ -232,7 +232,11 @@ const collectSymbolGraph = (fileSet) => {
           const calleeFile = srcIdOf(target.file);
           if (calleeFile && fileSet.has(calleeFile)) {
             const calleeId = addSymbol(calleeFile, target.name, "fn");
-            if (calleeId !== callerId) callEdgeSet.add(`${callerId} ${calleeId}`);
+            //? Join edge endpoints with `\n` (not a raw space): a src id is
+            //? `<posix-path>::<symbol-name>` and a path segment or identifier
+            //? CAN contain a space (`My Widget.tsx`), which would corrupt a
+            //? space-split edge key. `\n` can appear in neither.
+            if (calleeId !== callerId) callEdgeSet.add(`${callerId}\n${calleeId}`);
           }
         }
       }
@@ -245,7 +249,7 @@ const collectSymbolGraph = (fileSet) => {
 
   const symbolList = [...symbols.values()].sort((a, b) => a.id.localeCompare(b.id));
   const callEdges = [...callEdgeSet].map((k) => {
-    const [from, to] = k.split(" ");
+    const [from, to] = k.split("\n");
     return { from, to };
   }).sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
 
@@ -298,7 +302,9 @@ const build = async () => {
     for (const spec of extractImportSources(src)) {
       const target = resolveTarget(importerRel, spec, fileSet);
       if (!target || target === importerRel) continue;
-      const key = `${importerRel} ${target}`;
+      //? `\n`-joined edge key (not a raw space): a src-relative path can
+      //? contain a space (`My Widget.tsx`), which a space-split would corrupt.
+      const key = `${importerRel}\n${target}`;
       if (edgeSet.has(key)) continue;
       edgeSet.add(key);
       forward.get(importerRel).add(target);
@@ -307,7 +313,7 @@ const build = async () => {
   }
 
   const edges = [...edgeSet].map((k) => {
-    const [from, to] = k.split(" ");
+    const [from, to] = k.split("\n");
     return { from, to };
   }).sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
 

@@ -29,6 +29,7 @@ import { handleSyncRoute } from './httpRoutes/syncRoute';
 import { handleCustomRoutes, handlePreParamsCustomRoutes } from './httpRoutes/customRoutes';
 import { handleStaticAndSpaFallback } from './httpRoutes/staticRoutes';
 import { isOriginExemptPath } from './originExemptRegistry';
+import { resolveCookieSecure } from './httpRoutes/sessionCookie';
 import type { HttpRouteContext, HttpRouteHandler } from './httpRoutes/types';
 
 const buildSessionCookieOptions = (
@@ -215,7 +216,10 @@ export const handleHttpRequest = async (
   const sessionCookieName = config.http.sessionCookieName;
   const sessionCookieOptions = buildSessionCookieOptions(
     config.session.expiryDays,
-    process.env.SECURE === 'true',
+    //? Honor the explicit `http.sessionCookieSecure` override (CORE-39), else the
+    //? `SECURE` env flag — shared with the OAuth state cookie via
+    //? `resolveCookieSecure` so the two can never drift (WAVE4).
+    resolveCookieSecure(config.http.sessionCookieSecure, process.env.SECURE),
     config.http,
   );
 

@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Presence and activity awareness for LuckyStack: AFK detection, room-peer notifications, lifecycle (connect / disconnect / reconnect), single-session enforcement integration. For multiplayer and collaborative apps.",

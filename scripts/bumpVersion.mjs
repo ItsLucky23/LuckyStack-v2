@@ -43,7 +43,13 @@ if (!fs.existsSync(REFERENCE_PKG)) {
   process.exit(1);
 }
 
-const current = JSON.parse(fs.readFileSync(REFERENCE_PKG, 'utf8')).version;
+let current;
+try {
+  current = JSON.parse(fs.readFileSync(REFERENCE_PKG, 'utf8')).version;
+} catch (error) {
+  console.error(`Failed to parse ${REFERENCE_PKG}: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
 const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(current ?? '');
 if (!match) {
   console.error(`Current version ${JSON.stringify(current)} is not a plain x.y.z semver — bump only handles release versions.`);

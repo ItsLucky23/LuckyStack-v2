@@ -3,7 +3,8 @@
   "version": "0.2.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Optional error-tracking integration for LuckyStack (currently Sentry-backed). Auto-wires error/performance capture into the framework's hook surface and request transports. No-op when DSN is missing.",

@@ -76,7 +76,7 @@ let isShuttingDown = false;
 const startChild = () => {
   if (isShuttingDown) return;
   childBootStartedAt = performance.now();
-  childProcess = spawn(process.execPath, childArgs, {
+  const spawned = spawn(process.execPath, childArgs, {
     stdio: 'inherit',
     //? `process.env` is guaranteed `.env`-free here (see the invariant at the
     //? top of this file), so the child loads `.env` fresh on every restart and
@@ -86,13 +86,43 @@ const startChild = () => {
       LUCKYSTACK_CORE_SUPERVISED: 'true',
     },
   });
+  childProcess = spawned;
 
-  console.log(`[Supervisor] Started server process (pid: ${String(childProcess.pid)})`);
+  console.log(`[Supervisor] Started server process (pid: ${String(spawned.pid)})`);
 
-  childProcess.on('exit', (code, signal) => {
+  //? `'error'` and `'exit'` can BOTH fire for a single spawn (a failed spawn
+  //? emits `'error'`, and some platforms then emit `'exit'` too). This flag
+  //? resolves THIS child's lifecycle exactly once regardless of event order, so
+  //? we never double-schedule a restart.
+  let handled = false;
+
+  //? A failed `spawn` (ENOENT/EACCES — e.g. a missing `tsx`) emits `'error'`,
+  //? NOT `'exit'`. Without this listener Node re-throws it as an uncaught
+  //? exception that kills the SUPERVISOR instead of retrying — the dev wrapper
+  //? would just disappear. Route it through the same crash-restart delay.
+  spawned.on('error', (err) => {
+    console.log(`[Supervisor] Failed to spawn server process: ${String(err)}`, 'red');
+    if (handled) return;
+    handled = true;
+    childProcess = null;
+
+    if (isShuttingDown) {
+      process.exit(1);
+    }
+
+    console.log(`[Supervisor] Retrying server spawn in ${String(CRASH_RESTART_DELAY_MS)}ms`);
+    crashRestartTimer = setTimeout(() => {
+      crashRestartTimer = null;
+      startChild();
+    }, CRASH_RESTART_DELAY_MS);
+  });
+
+  spawned.on('exit', (code, signal) => {
     const uptimeMs = Math.round(performance.now() - childBootStartedAt);
     const shouldRestart = pendingRestart;
 
+    if (handled) return;
+    handled = true;
     childProcess = null;
 
     //? Once the user has asked us to stop, never spawn another child — no matter

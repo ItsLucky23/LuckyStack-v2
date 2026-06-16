@@ -1,10 +1,19 @@
 import http from 'node:http';
 import https from 'node:https';
 import { URL } from 'node:url';
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage, ClientRequest } from 'node:http';
 import type { Socket } from 'node:net';
 import type { ServiceTargetResolver } from './resolveTarget';
-import { WS_HOP_BY_HOP_HEADERS, stripHopByHopHeaders, safeDestroy } from './proxyUtils';
+import {
+  WS_HOP_BY_HOP_HEADERS,
+  stripHopByHopHeaders,
+  stripForwardedHeaders,
+  safeDestroy,
+  isOriginFormTarget,
+  isHostPinned,
+  normalizeForwardedProto,
+  buildForwardedFor,
+} from './proxyUtils';
 
 //? Service key used for WebSocket upgrades. Socket.io clients connect to a
 //? single URL with path `/socket.io/?...`, so the first path segment doesn't
@@ -13,26 +22,99 @@ import { WS_HOP_BY_HOP_HEADERS, stripHopByHopHeaders, safeDestroy } from './prox
 //? across instances regardless of which one holds the WS connection.
 const DEFAULT_WS_SERVICE = 'system';
 
+//? Bound the upstream-handshake leg. A backend that accepts the TCP connection
+//? but never answers the WS upgrade would otherwise pin both the client and the
+//? upstream socket indefinitely (unauth-reachable resource-exhaustion DoS).
+//? On expiry we reap the in-flight upstream request and cleanly fail the client
+//? leg. Built-in (not a deploy-config knob) to keep the change inside this
+//? package, mirroring the slow-loris timeouts in `startRouter.ts`.
+const UPSTREAM_HANDSHAKE_TIMEOUT_MS = 30_000;
+
 export interface CreateWsProxyInput {
   resolver: ServiceTargetResolver;
   wsTargetService?: string;
+  /**
+   * Upstream-handshake timeout in ms. A backend that accepts TCP but never
+   * answers the WS upgrade is reaped after this window (client gets 504).
+   * Defaults to `UPSTREAM_HANDSHAKE_TIMEOUT_MS`.
+   */
+  upstreamHandshakeTimeoutMs?: number;
 }
 
-export const createWsProxy = ({ resolver, wsTargetService }: CreateWsProxyInput) => {
+//? Write a minimal HTTP status line to a not-yet-upgraded client socket, then
+//? destroy it. Used on every pre-101 rejection path (bad path, unresolved
+//? service, host-pin failure, non-101 upstream, upstream error). `safeDestroy`
+//? swallows a write-after-destroy race when the client already vanished.
+const writeStatusAndDestroy = (socket: Socket, statusCode: number, statusMessage: string): void => {
+  if (!socket.destroyed) {
+    socket.write(`HTTP/1.1 ${String(statusCode)} ${statusMessage}\r\n\r\n`);
+  }
+  safeDestroy(socket);
+};
+
+export const createWsProxy = ({ resolver, wsTargetService, upstreamHandshakeTimeoutMs }: CreateWsProxyInput) => {
   const service = wsTargetService ?? DEFAULT_WS_SERVICE;
+  const handshakeTimeoutMs = upstreamHandshakeTimeoutMs ?? UPSTREAM_HANDSHAKE_TIMEOUT_MS;
 
   return (req: IncomingMessage, clientSocket: Socket, head: Buffer): void => {
-    const resolved = resolver.resolve(service);
-    if (!resolved) {
-      clientSocket.write(`HTTP/1.1 502 Bad Gateway\r\n\r\n`);
+    const pathname = req.url ?? '/';
+
+    //? Tracks whether the upgrade completed (101 + bidirectional pipe). Until it
+    //? does, the client socket has no upstream peer, so a client `'error'`/
+    //? `'close'` during the handshake window must tear down the in-flight
+    //? upstream request to avoid a half-open upstream socket leak.
+    let upgraded = false;
+    //? Guards the pre-101 rejection paths (handshake timeout, non-101 `'response'`,
+    //? upstream `'error'`, client-gone) so only the FIRST one writes the status +
+    //? tears both legs down. Without it, the timeout path destroys the upstream
+    //? request which re-emits `'error'`, double-running the teardown.
+    let settled = false;
+    let upstreamRequest: ClientRequest | null = null;
+
+    //? CRITICAL: attach client-socket listeners BEFORE any IO. A client RST /
+    //? disconnect mid-handshake emits `'error'` on the raw `net.Socket`; with no
+    //? listener that throws an uncaught exception and crashes the whole router
+    //? process (remote, unauthenticated DoS). The guard also reaps the in-flight
+    //? upstream handshake so a disconnecting client cannot leak upstream sockets.
+    const onClientGone = (): void => {
+      settled = true;
+      if (!upgraded && upstreamRequest) upstreamRequest.destroy();
       safeDestroy(clientSocket);
+    };
+    clientSocket.on('error', onClientGone);
+    clientSocket.on('close', onClientGone);
+
+    //? Reject anything but strict origin-form before building the upstream URL.
+    //? Absolute-form (`GET http://evil:port/...`) or protocol-relative (`//evil`)
+    //? targets would let `new URL(pathname, target)` re-host the upstream to an
+    //? attacker-chosen host:port (SSRF / open TCP tunnel).
+    if (!isOriginFormTarget(pathname)) {
+      writeStatusAndDestroy(clientSocket, 400, 'Bad Request');
       return;
     }
 
-    const targetUrl = new URL(req.url ?? '/', resolved.target);
-    const transport = targetUrl.protocol === 'https:' ? https : http;
+    const resolved = resolver.resolve(service);
+    if (!resolved) {
+      writeStatusAndDestroy(clientSocket, 502, 'Bad Gateway');
+      return;
+    }
 
-    const upstreamRequest = transport.request({
+    const targetUrl = new URL(pathname, resolved.target);
+
+    //? Defense-in-depth host pinning: the resolved upstream host MUST equal the
+    //? backend the resolver chose. A custom `ServiceResolver` or a malformed
+    //? path must never move the upstream off the chosen backend.
+    if (!isHostPinned(targetUrl, resolved.target)) {
+      writeStatusAndDestroy(clientSocket, 502, 'Bad Gateway');
+      return;
+    }
+
+    const transport = targetUrl.protocol === 'https:' ? https : http;
+    const forwardHeaders = stripForwardedHeaders(
+      stripHopByHopHeaders(req.headers, WS_HOP_BY_HOP_HEADERS),
+    );
+
+    upstreamRequest = transport.request({
       hostname: targetUrl.hostname,
       //? Boot-time guard in `resolveTarget.ts` ensures every binding URL has
       //? an explicit port. `targetUrl.port` is always a non-empty numeric
@@ -41,18 +123,37 @@ export const createWsProxy = ({ resolver, wsTargetService }: CreateWsProxyInput)
       path: targetUrl.pathname + targetUrl.search,
       method: req.method,
       headers: {
-        ...stripHopByHopHeaders(req.headers, WS_HOP_BY_HOP_HEADERS),
+        ...forwardHeaders,
         //? These two must be preserved verbatim to complete the WS handshake.
         connection: 'Upgrade',
         upgrade: 'websocket',
+        //? Router-authoritative forwarding values. The client's copies were
+        //? stripped above; XFF is the router's own peer view of the client so a
+        //? client cannot forge its source IP, and the scheme is normalized
+        //? rather than trusted from the inbound header.
+        'x-forwarded-for': buildForwardedFor(req.socket.remoteAddress),
         'x-forwarded-host': req.headers.host ?? '',
-        'x-forwarded-proto': req.headers['x-forwarded-proto'] ?? 'http',
+        'x-forwarded-proto': normalizeForwardedProto(req.headers['x-forwarded-proto']),
         'x-luckystack-resolved-env': resolved.resolvedEnvKey,
         'x-luckystack-via-fallback': resolved.viaFallback ? '1' : '0',
       },
     });
 
+    //? Reap the upstream leg if the backend accepts TCP but never completes the
+    //? upgrade handshake. `setTimeout` only schedules the `'timeout'` event — it
+    //? does not destroy the socket — so we destroy the request (which surfaces
+    //? on the `'error'` handler below, writing 504 + tearing down the client) and
+    //? guard against firing after a successful upgrade, where the piped sockets
+    //? own their own teardown.
+    upstreamRequest.setTimeout(handshakeTimeoutMs, () => {
+      if (upgraded || settled) return;
+      settled = true;
+      writeStatusAndDestroy(clientSocket, 504, 'Gateway Timeout');
+      upstreamRequest.destroy();
+    });
+
     upstreamRequest.on('upgrade', (upstreamRes, upstreamSocket, upstreamHead) => {
+      upgraded = true;
       //? Forward the 101 Switching Protocols response and any trailing bytes
       //? the upstream already sent, then bidirectionally pipe the raw sockets.
       const statusLine = `HTTP/1.1 ${upstreamRes.statusCode ?? 101} ${upstreamRes.statusMessage ?? 'Switching Protocols'}`;
@@ -81,9 +182,26 @@ export const createWsProxy = ({ resolver, wsTargetService }: CreateWsProxyInput)
       clientSocket.on('close', teardown);
     });
 
+    //? `http.request` only emits `'upgrade'` on a 101. A reachable backend that
+    //? answers the upgrade with a normal HTTP response (200/400/404/500 — common
+    //? on misroute / mid-boot / edge-auth) emits `'response'` instead. Without a
+    //? handler the client socket would leak (never written or destroyed).
+    upstreamRequest.on('response', (upstreamRes) => {
+      if (upgraded || settled) { upstreamRes.resume(); return; }
+      settled = true;
+      const statusCode = upstreamRes.statusCode ?? 502;
+      writeStatusAndDestroy(clientSocket, statusCode, upstreamRes.statusMessage ?? 'Bad Gateway');
+      //? Drain + reap the upstream leg. Without consuming the body the upstream
+      //? socket stays open (paused) until the handshake timeout reaps it ~30s
+      //? later; resume() lets it close now and destroy() releases the request.
+      upstreamRes.resume();
+      upstreamRequest.destroy();
+    });
+
     upstreamRequest.on('error', () => {
-      clientSocket.write(`HTTP/1.1 502 Bad Gateway\r\n\r\n`);
-      safeDestroy(clientSocket);
+      if (settled) return;
+      settled = true;
+      writeStatusAndDestroy(clientSocket, 502, 'Bad Gateway');
     });
 
     upstreamRequest.end(head);

@@ -5,9 +5,11 @@ import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
 import { registerProdRuntimeMapsProvider } from './runtimeMapsLoader';
 import { getParsedPort } from './argv';
+import { runGracefulShutdown } from './stopServer';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
+  StopLuckyStackServerOptions,
 } from './types';
 
 /**
@@ -48,6 +50,91 @@ import type {
  * await server.listen();
  * ```
  */
+//? Extracted verbatim from the previous inline `if (enableDevTools) { ... }`
+//? block. Same dynamic imports, same ordering, same SIGINT/SIGTERM handlers —
+//? hoisted so the bootstrap function reads as a sequence of named steps.
+const initDevTools = async (): Promise<void> => {
+  //? Dev-only: console-log color tagger + devkit hot reload + REPL.
+  //? Kept dynamic so tier-A consumers in production never load the
+  //? typescript compiler API or chokidar's filesystem watchers.
+  const { initConsolelog } = await import('@luckystack/core');
+  initConsolelog();
+  const devkitModuleId = '@luckystack/devkit';
+  const devkit = (await import(devkitModuleId)) as {
+    initializeAll: () => Promise<void>;
+    setupWatchers: () => void;
+  };
+  await devkit.initializeAll();
+  devkit.setupWatchers();
+  //? Belt-and-braces: explicit SIGINT/SIGTERM handler so Ctrl+C is honored
+  //? even if a sync CPU burst (TS Program build, large require chain) is
+  //? still in flight when the signal arrives.
+  process.once('SIGINT', () => process.exit(0));
+  process.once('SIGTERM', () => process.exit(0));
+};
+
+//? Extracted verbatim from the previous inline `listen` closure. Same
+//? auto-increment opt-in, same EADDRINUSE retry, same truthful-failure
+//? logging, same success log + callback + resolve. `httpServer`, `ip`, and
+//? `port` are threaded in as parameters instead of closed over.
+export const listenLuckyStackServer = (
+  httpServer: HttpServer,
+  ip: string,
+  port: string | number,
+  callback?: () => void,
+): Promise<HttpServer> =>
+  new Promise<HttpServer>((resolve, reject) => {
+    const startPort = typeof port === 'string' ? Number.parseInt(port, 10) : port;
+    //? Opt-in: only auto-pick the next free port when explicitly enabled.
+    //? Off by default because `SERVER_PORT` also drives `config.ts`'s
+    //? `backendOrigin` / OAuth callback base and the Vite dev proxy target —
+    //? silently moving the listen port would leave the frontend talking to the
+    //? old one. Safe to enable for standalone / `npm run cluster` use where
+    //? nothing else hardcodes the port.
+    const autoIncrement = ['1', 'true'].includes(
+      (process.env.SERVER_PORT_AUTO_INCREMENT ?? '').toLowerCase(),
+    );
+
+    const tryListen = (attemptPort: number): void => {
+      const onError = (err: NodeJS.ErrnoException): void => {
+        if (err.code !== 'EADDRINUSE') {
+          reject(err);
+          return;
+        }
+        if (autoIncrement) {
+          getLogger().warn(
+            `Port ${String(attemptPort)} is in use — trying ${String(attemptPort + 1)} (SERVER_PORT_AUTO_INCREMENT=1)`,
+          );
+          tryListen(attemptPort + 1);
+          return;
+        }
+        //? Truthful failure. The old code unconditionally logged "running on
+        //? :<port>" inside the listen callback even when the bind never
+        //? succeeded, so an in-use port looked like a healthy boot. Surface
+        //? the real problem and the two ways out instead.
+        getLogger().error(
+          `Port ${String(attemptPort)} is already in use — the server did NOT start. ` +
+            `Another \`npm run server\` is probably still running (stop it), or set ` +
+            `SERVER_PORT to a free port, or set SERVER_PORT_AUTO_INCREMENT=1 to auto-pick the next free port.`,
+        );
+        reject(err);
+      };
+
+      httpServer.once('error', onError);
+      httpServer.listen(attemptPort, ip, () => {
+        httpServer.off('error', onError);
+        const config = getProjectConfig();
+        if (config.logging.socketStartup || config.logging.devLogs) {
+          getLogger().info(`Server is running on http://${ip}:${String(attemptPort)}/`);
+        }
+        callback?.();
+        resolve(httpServer);
+      });
+    };
+
+    tryListen(startPort);
+  });
+
 export const createLuckyStackServer = async (
   options: CreateLuckyStackServerOptions = {}
 ): Promise<RunningLuckyStackServer> => {
@@ -87,23 +174,7 @@ export const createLuckyStackServer = async (
   });
 
   if (enableDevTools) {
-    //? Dev-only: console-log color tagger + devkit hot reload + REPL.
-    //? Kept dynamic so tier-A consumers in production never load the
-    //? typescript compiler API or chokidar's filesystem watchers.
-    const { initConsolelog } = await import('@luckystack/core');
-    initConsolelog();
-    const devkitModuleId = '@luckystack/devkit';
-    const devkit = (await import(devkitModuleId)) as {
-      initializeAll: () => Promise<void>;
-      setupWatchers: () => void;
-    };
-    await devkit.initializeAll();
-    devkit.setupWatchers();
-    //? Belt-and-braces: explicit SIGINT/SIGTERM handler so Ctrl+C is honored
-    //? even if a sync CPU burst (TS Program build, large require chain) is
-    //? still in flight when the signal arrives.
-    process.once('SIGINT', () => process.exit(0));
-    process.once('SIGTERM', () => process.exit(0));
+    await initDevTools();
   }
 
   //? Boot UUID must be written before /_health can answer truthfully. Router
@@ -126,62 +197,55 @@ export const createLuckyStackServer = async (
     void handleHttpRequest(req, res, options);
   });
 
-  const ioServer = loadSocket(httpServer, {
+  //? Persistent error listener. `listenLuckyStackServer` attaches a ONE-OFF
+  //? `error` handler only around the bind attempt; once listening, an async
+  //? socket error (e.g. EMFILE under load, an abrupt peer reset surfacing at the
+  //? server level) would otherwise be an unhandled `'error'` event and crash the
+  //? process. Log it instead so the server stays up and the cause is visible.
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    //? EADDRINUSE during bind is owned by the one-off handler in
+    //? `listenLuckyStackServer` (which rejects/retries); don't double-log it.
+    if (err.code === 'EADDRINUSE') return;
+    getLogger().error('[http-server] runtime error', err);
+  });
+
+  const { io: ioServer, adapterClients } = loadSocket(httpServer, {
     maxHttpBufferSize: options.maxHttpBufferSize,
   });
 
   const listen = (callback?: () => void): Promise<HttpServer> =>
-    new Promise<HttpServer>((resolve, reject) => {
-      const startPort = typeof port === 'string' ? Number.parseInt(port, 10) : port;
-      //? Opt-in: only auto-pick the next free port when explicitly enabled.
-      //? Off by default because `SERVER_PORT` also drives `config.ts`'s
-      //? `backendOrigin` / OAuth callback base and the Vite dev proxy target —
-      //? silently moving the listen port would leave the frontend talking to the
-      //? old one. Safe to enable for standalone / `npm run cluster` use where
-      //? nothing else hardcodes the port.
-      const autoIncrement = ['1', 'true'].includes(
-        (process.env.SERVER_PORT_AUTO_INCREMENT ?? '').toLowerCase(),
-      );
+    listenLuckyStackServer(httpServer, ip, port, callback);
 
-      const tryListen = (attemptPort: number): void => {
-        const onError = (err: NodeJS.ErrnoException): void => {
-          if (err.code !== 'EADDRINUSE') {
-            reject(err);
-            return;
-          }
-          if (autoIncrement) {
-            getLogger().warn(
-              `Port ${String(attemptPort)} is in use — trying ${String(attemptPort + 1)} (SERVER_PORT_AUTO_INCREMENT=1)`,
-            );
-            tryListen(attemptPort + 1);
-            return;
-          }
-          //? Truthful failure. The old code unconditionally logged "running on
-          //? :<port>" inside the listen callback even when the bind never
-          //? succeeded, so an in-use port looked like a healthy boot. Surface
-          //? the real problem and the two ways out instead.
-          getLogger().error(
-            `Port ${String(attemptPort)} is already in use — the server did NOT start. ` +
-              `Another \`npm run server\` is probably still running (stop it), or set ` +
-              `SERVER_PORT to a free port, or set SERVER_PORT_AUTO_INCREMENT=1 to auto-pick the next free port.`,
-          );
-          reject(err);
-        };
+  //? Idempotent graceful shutdown. A second call (e.g. SIGINT then SIGTERM, or a
+  //? programmatic `stop()` racing a signal) returns the in-flight promise rather
+  //? than running the teardown twice.
+  let shutdownPromise: Promise<void> | null = null;
+  const stop = (stopOptions: StopLuckyStackServerOptions = {}): Promise<void> => {
+    shutdownPromise ??= runGracefulShutdown({ httpServer, ioServer, adapterClients }, stopOptions);
+    return shutdownPromise;
+  };
 
-        httpServer.once('error', onError);
-        httpServer.listen(attemptPort, ip, () => {
-          httpServer.off('error', onError);
-          const config = getProjectConfig();
-          if (config.logging.socketStartup || config.logging.devLogs) {
-            getLogger().info(`Server is running on http://${ip}:${String(attemptPort)}/`);
-          }
-          callback?.();
-          resolve(httpServer);
-        });
-      };
+  //? Production signal wiring (MIS-016). In dev, `initDevTools` already installs
+  //? fast `process.exit(0)` handlers (hot-reload supervisor restarts). In prod
+  //? we run the FULL graceful shutdown and exit only after it settles — an
+  //? orchestrator's SIGTERM should drain connections + flush trackers, not hard-
+  //? kill. `process.once` so a repeated signal doesn't stack handlers; the
+  //? `stop()` idempotency covers a SIGINT-then-SIGTERM sequence.
+  if (!enableDevTools) {
+    const handleSignal = (reason: 'SIGTERM' | 'SIGINT'): void => {
+      void (async () => {
+        await stop({ reason });
+        //? Terminate AFTER the graceful drain completes. This is the process
+        //? entry's signal handler (not deep library code) — an orchestrator's
+        //? SIGTERM expects the process to exit once it has drained, so exiting
+        //? here is correct. Mirrors the dev handlers in `initDevTools`.
+        // eslint-disable-next-line unicorn/no-process-exit -- top-level signal handler, exits after graceful drain
+        process.exit(0);
+      })();
+    };
+    process.once('SIGTERM', () => { handleSignal('SIGTERM'); });
+    process.once('SIGINT', () => { handleSignal('SIGINT'); });
+  }
 
-      tryListen(startPort);
-    });
-
-  return { httpServer, ioServer, listen };
+  return { httpServer, ioServer, listen, stop, close: stop };
 };

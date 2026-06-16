@@ -58,9 +58,18 @@ Real-time sync transport for LuckyStack. Provides type-safe, room-based fanout o
 
 | Hook | When | Deep doc |
 |---|---|---|
+| `preSocketMessage` | At the very top of the socket message handler (before auth/route resolution). Stop to reject the message. Transport-level seam mirroring `preHttpRequest`; `channel: 'sync'`. | → `docs/server-vs-client-handlers.md` |
 | `preSyncAuthorize` | After basic `AuthProps` check, before rate-limit + input validation. Stop to reject. | → `docs/server-vs-client-handlers.md` |
+| `postSyncAuthorize` | Observational — after the request passes auth + custom policy, before rate-limit + validation. | → `docs/server-vs-client-handlers.md` |
+| `preSyncValidate` | Before runtime input validation. Stop to reject (mirrors `preApiValidate`). | → `docs/server-vs-client-handlers.md` |
+| `postSyncValidate` | After validation, carrying `{ validation }` (mirrors `postApiValidate`). | → `docs/server-vs-client-handlers.md` |
+| `preSyncExecute` | Before the `_server` handler runs. Stop to short-circuit (mirrors `preApiExecute`). | → `docs/server-vs-client-handlers.md` |
+| `postSyncExecute` | After `_server` resolves OR throws, carrying `{ result, error, durationMs }`. Fires on the FAILURE path too (mirrors `postApiExecute`). | → `docs/server-vs-client-handlers.md` |
 | `preSyncFanout` | After `_server` runs, before any recipient receives the payload. Stop to abort fanout. | → `docs/room-fanout.md` |
+| `preSyncRecipient` | Per recipient, before that ONE socket receives the payload. Carries `{ routeName, receiver, recipientSocketId, recipientUserId, serverOutput }`. A stop signal SKIPS just that recipient (the loop continues; it is not counted as delivered) — it does NOT abort the whole fanout. `recipientUserId` is null on the hot path. | → `docs/room-fanout.md` |
 | `postSyncFanout` | After all recipients have been emitted to. Receives `recipientCount`. | → `docs/room-fanout.md` |
+| `preSyncStream` | Per stream chunk, before it is emitted (`stream` / `broadcastStream` / `streamTo`). Carries `{ routeName, chunk, recipient }` (`recipient` = `'originator'`, the room, or a token). Observational. | → `docs/streaming.md` |
+| `postSyncStream` | Per stream chunk, after emit. Adds a 1-based per-stream `chunkIndex` to the `preSyncStream` payload. Observational. | → `docs/streaming.md` |
 | `rateLimitExceeded` | When the per-route or per-IP bucket rejects a sync. | → `docs/error-states.md` |
 
 ## Config keys
@@ -70,10 +79,19 @@ Real-time sync transport for LuckyStack. Provides type-safe, room-based fanout o
 - `sync.streamThrottle.flushAtChars` — char threshold before a buffered throttle flushes. Default `32`.
 - `sync.streamThrottle.flushEveryMs` — timer-based flush interval; `false` disables the timer. Default `50`.
 - `sync.streamThrottle.field` — payload key carrying the buffered text. Default `'chunk'`.
-- `sync.fanoutYieldEvery` — yield to the event loop every N recipients during a giant fanout.
+- `sync.fanoutYieldEvery` — yield to the event loop every N recipients during a giant fanout. Clamped to `>= 1` (a configured `0` would make the modulo `NaN` and never yield).
 - `sync.fanoutYieldMs` — duration of the yield `setTimeout`.
+- `sync.requestTimeoutMs` — client-side ack-timeout for `syncRequest` (CORE-06). After this elapses with no acknowledgement the promise settles with `{ status:'error', errorCode:'sync.requestTimeout', httpStatus:504 }` instead of hanging. `false` disables. Default `30000`.
+- `sync.allowClientReceiverAll` — when `false`, a client requesting the broadcast receiver `'all'` is rejected (`sync.receiverNotAllowed`, 403) on both transports (SYNC-07). **Default `false` (0.2.0 secure-default flip — was `true`); opt back into cluster-wide broadcast explicitly or approve via `preSyncAuthorize`.**
+- `sync.requireRoomMembership` — when `true`, a client may only target a room it has actually joined; an unjoined room is rejected (`sync.notRoomMember`, 403). Enforced on BOTH transports: the SOCKET path checks `socket.rooms`, the HTTP/SSE path derives membership from the session's persisted `roomCodes`. An anonymous HTTP caller (no session) has undeterminable membership and is rejected (fail-closed) — the flag is no longer silently bypassable over the HTTP fallback. **Default `true` (0.2.0 secure-default flip — was `false`); set `false` for the legacy any-room behavior.**
+- `sync.flushPressure.maxBufferedBytes` — default drain threshold for the `flushPressure` backpressure helper when no per-call `thresholdBytes` is given (SYNC-15). Default `5_242_880` (5 MiB).
+- `sync.flushPressure.highWaterMarkChunks` — upper bound (in packets) on the derived flush-pressure threshold. Default `1000`. (`lowWaterMarkChunks` is surfaced in core but full chunk-watermark hysteresis is a residual — see fix report.)
+
+### Per-route `_server` exports
+
+- `export const rateLimit: number | false` — per-route rate limit (mirrors `@luckystack/api`). Overrides `rateLimiting.defaultApiLimit` for this sync route's per-requester bucket; `false` disables it (the global per-IP bucket still applies); omit to fall back to `defaultApiLimit`. Honored by both transports.
 - `offlineQueue.maxSize` — cap on the client-side offline queue.
-- `offlineQueue.dropPolicy` — `'reject'` (default — overflow returns `offline.queueFull`), `'drop-oldest'`, or `'drop-newest'`. Per-request override via `syncRequest({ offlineDropPolicy })`.
+- `offlineQueue.dropPolicy` — `'reject'` (default — overflow returns `offline.queueFull`), `'drop-oldest'`, or `'drop-newest'`. Per-request override via `syncRequest({ offlineDropPolicy })`. SYNC-09: when a request that was already QUEUED is later evicted (drop-oldest by a newer enqueue, or age expiry) its awaiting promise now settles with `{ status:'error', errorCode:'offline.dropped' }` (was: hung forever).
 
 ### Logging toggles
 
@@ -85,7 +103,7 @@ None directly. Inherits socket transport config from `@luckystack/server` and Re
 
 ## Peer dependencies
 
-- **Required**: `@luckystack/core`, `@luckystack/login`, `@luckystack/error-tracking`
+- **Required**: `@luckystack/core`, `@luckystack/error-tracking`. **`@luckystack/login` is NOT a dependency** (0.2.0 decoupling) — sessions resolve through core's `readSession` / session-provider registry (`handleSyncRequest` imports `readSession` from `@luckystack/core`), with login as the default *provider* (optional package), not a hard runtime dep.
 - **Peer (canonical ranges, 2026-05-07)**:
   - `@prisma/client@^6.19.0` (transitively required via `@luckystack/core`)
   - `react@^19.2.0` (only the `/client` subpath)

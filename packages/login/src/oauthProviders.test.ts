@@ -82,7 +82,7 @@ describe("OAuth provider factories", () => {
     expect(p.authorizationURL).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(p.tokenExchangeURL).toBe("https://oauth2.googleapis.com/token");
     expect(p.tokenExchangeMethod).toBe("json");
-    expect(p.userInfoURL).toBe("https://www.googleapis.com/oauth2/v1/userinfo");
+    expect(p.userInfoURL).toBe("https://www.googleapis.com/oauth2/v3/userinfo");
     expect(p.nameKey).toBe("name");
     expect(p.emailKey).toBe("email");
     expect(p.avatarKey).toBe("picture");
