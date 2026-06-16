@@ -1,7 +1,7 @@
 import { faRightToBracket, faUserPlus } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { backendUrl, loginRedirectUrl, loginPageUrl, SessionLayout, sessionBasedToken } from "config";
 import tryCatch from "shared/tryCatch";
@@ -10,11 +10,12 @@ import { i18nNotify as notify, useTranslator } from "@luckystack/core/client";
 
 export default function LoginForm({ formType }: { formType: "login" | "register" }) {
   const translate = useTranslator();
+  const { search } = useLocation();
   const isLogin = formType === "login";
   const title = isLogin ? "Sign in to your account" : "Create a new account";
   const subtitleText = isLogin ? "Don't have an account yet? " : "Already have an account? ";
   const subtitleLink = isLogin ? "Create one now" : "Log in";
-  const redirectURL = isLogin ? "/register" : "/login";
+  const redirectURL = isLogin ? `/register${search}` : `/login${search}`;
   const buttonText = isLogin ? "Log in" : "Sign up";
   const headerIcon = isLogin ? faRightToBracket : faUserPlus;
 
@@ -63,7 +64,14 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
     setLoading(true);
 
     if (provider !== "credentials") {
-      globalThis.location.href = `${backendUrl}/auth/api/${provider}`;
+      //? Pass the desired post-auth landing URL as ?return_url so the server
+      //? stores it alongside the OAuth state and uses it for the callback
+      //? redirect. This ensures the browser ends up on the correct frontend
+      //? origin (e.g. :5174 instead of the hardcoded publicUrl :5173) and that
+      //? the configured loginRedirectUrl path is honoured regardless of which
+      //? backend port handled the OAuth flow.
+      const returnUrl = encodeURIComponent(`${globalThis.location.origin}${loginRedirectUrl}`);
+      globalThis.location.href = `${backendUrl}/auth/api/${provider}?return_url=${returnUrl}`;
       return;
     }
 
@@ -143,7 +151,11 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
         //? client mis-detect the auth mode.
         sessionStorage.removeItem("token");
       }
-      globalThis.location.href = response.authenticated ? loginRedirectUrl : loginPageUrl;
+      //? Preserve the current search params (e.g. ?backend=8080) so dev
+      //? overrides stay visible in the URL on the next page. Relative paths
+      //? keep the current frontend origin, so :5174 stays :5174.
+      const target = response.authenticated ? loginRedirectUrl : loginPageUrl;
+      globalThis.location.href = `${target}${search}`;
     }, 1000);
   };
 

@@ -90,7 +90,7 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 | `functions.serviceRoute` | `typeof import("../../packages/core/src/serviceRoute")` |
 | `functions.sleep.sleep` | `(typeof import("../../packages/core/src/sleep"))["default"]` |
 | `functions.socketEvents` | `typeof import("../../packages/core/src/socketEvents")` |
-| `functions.tryCatch.tryCatch` | `(typeof import("../../packages/core/src/tryCatch"))["default"]` |
+| `functions.tryCatch.tryCatch` | `(typeof import("../../packages/core/src/tryCatchClient"))["default"]` |
 
 ### Server-function shims in `functions/` (source for the injection map)
 
@@ -110,7 +110,7 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 | `shared/serviceRoute.ts` | `re-export * from ../packages/core/src/serviceRoute` |
 | `shared/sleep.ts` | `default: re-export of ../packages/core/src/sleep` |
 | `shared/socketEvents.ts` | `re-export * from ../packages/core/src/socketEvents` |
-| `shared/tryCatch.ts` | `default: re-export of ../packages/core/src/tryCatch` |
+| `shared/tryCatch.ts` | `default: re-export of ../packages/core/src/tryCatchClient` |
 
 ### Client helpers in `src/_functions/`
 

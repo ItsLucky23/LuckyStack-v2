@@ -54,7 +54,7 @@
 | Route | Template | Per-page middleware | File | Summary |
 | --- | --- | --- | --- | --- |
 | `/` | plain | — | `page.tsx` | — |
-| `/admin` | plain | yes | `admin/page.tsx` | — |
+| `/admin` | dashboard | yes | `admin/page.tsx` | — |
 | `/docs` | plain | — | `docs/page.tsx` | — |
 | `/login` | plain | — | `login/page.tsx` | — |
 | `/playground` | dashboard | yes | `playground/page.tsx` | — |

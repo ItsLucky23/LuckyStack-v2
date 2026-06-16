@@ -368,7 +368,16 @@ registerProjectConfig({
   defaultLanguage: config.defaultLanguage,
   //? Backend origin for OAuth callback redirect URIs, read by
   //? @luckystack/login/register's env-driven provider scan.
-  oauthCallbackBase: resolvedEnvironment.backendUrl,
+  //?
+  //? In dev: derive from the actual SERVER_PORT env var so that starting the
+  //? server on a non-standard port (e.g. SERVER_PORT=8080 for parallel instances)
+  //? produces the correct redirect_uri automatically. `resolvedEnvironment.backendUrl`
+  //? is a static DNS-map value (always :80) and is NOT overridden by ?backend=,
+  //? so it cannot be used here for multi-port dev setups.
+  //? In prod: use the static backendUrl from the DNS map (the public domain).
+  oauthCallbackBase: resolvedEnvironment.dev
+    ? `http://localhost:${env('SERVER_PORT') ?? '80'}`
+    : resolvedEnvironment.backendUrl,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
   socketStatusIndicator: config.socketStatusIndicator,
   locationProviderEnabled: config.locationProviderEnabled,

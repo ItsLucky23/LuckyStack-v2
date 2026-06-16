@@ -130,8 +130,8 @@
 | `setIoInstance(io: SocketIOServer \| null): void` | Module-level slot for the running Socket.io server. | -> docs/socket-bootstrap.md |
 | `getIoInstance(): SocketIOServer \| null` | Read the slot from framework code that needs to broadcast. | -> docs/socket-bootstrap.md |
 | `socket`, `setSocket`, `incrementResponseIndex`, `waitForSocket` | Client-side socket singleton + response-index counter. | -> docs/socket-bootstrap.md |
-| `extractTokenFromSocket(socket): string \| null` | Read session token from Socket.io handshake (cookie + header). | -> docs/socket-bootstrap.md |
-| `extractTokenFromRequest(request): string \| null` | Read session token from a Node IncomingMessage (cookie + `Authorization: Bearer`). | -> docs/socket-bootstrap.md |
+| `extractTokenFromSocket(socket): string \| null` | Read session token from Socket.io handshake. Token-mode reads `handshake.auth.token` then cookie; cookie-mode reads ONLY the cookie unless `http.acceptBearerInCookieMode` is true (CORE-O10). | -> docs/socket-bootstrap.md |
+| `extractTokenFromRequest(request): string \| null` | Read session token from a Node IncomingMessage. Token-mode reads `Authorization: Bearer` then cookie; cookie-mode reads ONLY the cookie unless `http.acceptBearerInCookieMode` is true (CORE-O10). | -> docs/socket-bootstrap.md |
 | `allowedOrigin(origin: string): boolean` | Same-origin + project-configured allow-list CORS check; dispatches `corsRejected` hook on miss. | -> docs/socket-bootstrap.md |
 | `validateRequest({ auth, user }): ValidationResult` | Evaluates the `auth.additional[]` predicates against the session; returns success immediately when `additional` is absent. Does NOT check `auth.login` — login is enforced by the surrounding API/sync handler, not by this function. | -> docs/session-types.md |
 | `isFalsy(value): boolean` | Helper used inside `validateRequest`. | -> docs/session-types.md |
@@ -237,7 +237,7 @@
 | `tryCatchSync<T>(fn): [Error \| null, T \| null]` | Synchronous tuple-style error handling (sync counterpart to `tryCatch`). | -> docs/app-bootstrap.md |
 | `deepMerge<T>(base, override)` / `isPlainObject(value)` (`configUtils`) | Shared config deep-merge primitive (every registry routes through it) + plain-object guard. Skips `__proto__`/`constructor`/`prototype` keys. | -> docs/config-registry.md |
 | `createRegistry(...)` | Generic DI-slot registry factory backing the config/client/strategy registries. | -> docs/config-registry.md |
-| `resolveClientIp({ rawAddress, headers, trustProxy })` / `UNKNOWN_CLIENT_IP` | Resolve the real client IP for per-IP rate-limit keying (XFF/x-real-ip only when `trustProxy`). | -> docs/app-bootstrap.md |
+| `resolveClientIp({ rawAddress, headers, trustProxy, trustedProxyHopCount })` / `UNKNOWN_CLIENT_IP` | Resolve the real client IP for per-IP rate-limit keying (XFF/x-real-ip only when `trustProxy`). Skips `trustedProxyHopCount` hops from the RIGHT of XFF (default 1 = immediate upstream proxy); never trusts the leftmost client-controlled hop (CORE-O3). | -> docs/app-bootstrap.md |
 | `isLoopbackIp(ip: string): boolean` | True for `127.0.0.0/8` / `::1` / `localhost`. Used for `rateLimiting.skipLoopbackInDev` keying (skip the cross-route IP abuse cap for loopback in non-prod). | -> docs/app-bootstrap.md |
 | `registerStrayPrefixCommand(...commands)` | Opt a custom single-key Redis command into the `redis` proxy's stray-prefix net. | -> docs/redis-adapter.md |
 | `attachSocketRedisAdapter(io, options?)` | Now accepts `{ adapterOptions, pubClient, subClient }` to tune `createAdapter` / supply pre-built clients. | -> docs/redis-adapter.md |
@@ -378,6 +378,9 @@
 | `AutoSelectEmailSenderOptions` | `./autoSelect` | `{ from?, force? }`. |
 | `EmailSender`, `EmailMessage`, `EmailResult`, `EmailSenderRegistry` | Re-exported from `@luckystack/core` | Adapter contract + result tuple. |
 | `PreEmailSendPayload`, `PostEmailSendPayload` | `./hookPayloads` | Hook payload shapes (also augmented onto `HookPayloads`). |
+
+### `env-resolver`
+- _(no `CLAUDE.md` yet)_
 
 ### `error-tracking`
 | Function / Export | One-liner | Deep doc |
@@ -697,6 +700,7 @@
 | devkit | 8 | 8 | 0 |
 | docs-ui | 4 | 4 | 0 |
 | email | 5 | 5 | 0 |
+| env-resolver | 0 | 0 | 0 |
 | error-tracking | 4 | 4 | 0 |
 | login | 8 | 8 | 0 |
 | mcp | 0 | 0 | 0 |

@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dispatchHook, getCookieValue, getCsrfConfig, getProjectConfig, readSession } from '@luckystack/core';
 import { capabilities } from '../capabilities';
+import { isOriginExemptPath } from '../originExemptRegistry';
+import { timingSafeStringEqual } from './timingSafeEqual';
 
 //? Returns true when the request was rejected (CSRF mismatch) and the response
 //? has been ended. Caller should bail out of the request loop.
@@ -31,13 +33,23 @@ export const enforceCsrfOnStateChangingRequest = async ({
   //? cookie — a cross-site POST never carries it, so `token` would be absent here
   //? and this guard wouldn't fire anyway. Exempting it removes no real protection.
   const isAuthBootstrap = routePath === '/auth/api/credentials';
-  const looksLikeFrameworkRoute =
+  //? CSRF covers all framework routes (/api/, /sync/, /auth/api/) AND
+  //? state-changing custom routes registered via `registerCustomRoute` that
+  //? are not marked origin-exempt (those authenticate via HMAC/signature, not
+  //? the session cookie, so the double-submit check is irrelevant there).
+  const isExemptFromCsrf =
+    isAuthBootstrap
+    || isCallbackPath
+    || isOriginExemptPath(routePath);
+  const isCsrfCandidate =
     routePath.startsWith('/api/')
     || routePath.startsWith('/sync/')
-    || (routePath.startsWith('/auth/api/') && !isAuthBootstrap);
+    || routePath.startsWith('/auth/api/')
+    || (!routePath.startsWith('/auth/') && !routePath.startsWith('/assets/'));
 
-  //? CSRF only applies to cookie-mode, state-changing framework routes.
-  if (!(isCookieMode && isStateChanging && looksLikeFrameworkRoute && !isCallbackPath)) {
+  //? CSRF only applies to cookie-mode, state-changing routes not already
+  //? exempted by another auth mechanism (origin-exempt webhooks, bootstrap).
+  if (!(isCookieMode && isStateChanging && isCsrfCandidate && !isExemptFromCsrf)) {
     return false;
   }
 
@@ -54,7 +66,7 @@ export const enforceCsrfOnStateChangingRequest = async ({
   //? read. A cross-site POST can't read the cookie value to forge the header.
   if (!capabilities.login) {
     const cookieValue = getCookieValue(req.headers.cookie, csrfConfig.cookieName);
-    if (cookieValue && provided && provided === cookieValue) return false;
+    if (cookieValue && provided && timingSafeStringEqual(provided, cookieValue)) return false;
 
     void dispatchHook('csrfMismatch', {
       route: routePath,
@@ -81,7 +93,7 @@ export const enforceCsrfOnStateChangingRequest = async ({
   const csrfSession = await readSession(token);
   if (!csrfSession?.id) return false;
 
-  if (provided && provided === csrfSession.csrfToken) return false;
+  if (provided && csrfSession.csrfToken && timingSafeStringEqual(provided, csrfSession.csrfToken)) return false;
 
   void dispatchHook('csrfMismatch', {
     route: routePath,

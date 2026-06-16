@@ -6,6 +6,8 @@ import type { SessionLayout } from 'config';
 //? `src/_functions/middlewareHandler.ts`. Logged-out users → `/login`;
 //? logged-in non-admins → toast + `navigate(-1)` (returning nothing from
 //? the middleware triggers the history-back behavior).
+export const template = 'dashboard';
+
 export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
   if (!session) return { success: false, redirect: '/login' };
   if (session.admin) return { success: true };

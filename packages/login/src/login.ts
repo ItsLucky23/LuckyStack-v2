@@ -107,6 +107,12 @@ const generatePkcePair = (): { verifier: string; challenge: string } => {
 interface OAuthStateEntry {
   nonceHash: string;
   codeVerifier?: string;
+  //? Frontend URL to redirect to after the OAuth callback completes. Stored
+  //? server-side in Redis (never echoed from the client at callback time) so it
+  //? is tamper-proof. Validated against allowedOrigins + allowLocalhost before
+  //? use — see isAllowedRedirectUrl. Absent when the auth initiation did not
+  //? carry a return_url param (falls back to the configured loginRedirectUrl).
+  returnUrl?: string;
 }
 
 export interface CreateOAuthStateResult {
@@ -128,7 +134,7 @@ export interface CreateOAuthStateResult {
 
 export const createOAuthState = async (
   providerName: string,
-  options?: { usePkce?: boolean },
+  options?: { usePkce?: boolean; returnUrl?: string },
 ): Promise<CreateOAuthStateResult | null> => {
   const state = randomBytes(32).toString('hex');
   const nonce = randomBytes(32).toString('hex');
@@ -138,6 +144,7 @@ export const createOAuthState = async (
   const entry: OAuthStateEntry = {
     nonceHash: hashStateNonce(nonce),
     ...(pkce ? { codeVerifier: pkce.verifier } : {}),
+    ...(options?.returnUrl ? { returnUrl: options.returnUrl } : {}),
   };
 
   //? State TTL is consumer-configurable via `auth.oauthStateTtlSeconds`
@@ -605,8 +612,13 @@ const isAllowedRedirectUrl = (url: string): boolean => {
   //? Defensive default at a security boundary (redirect-origin validation):
   //? the type is non-nullable, but a malformed consumer config could still
   //? hand us `undefined` at runtime, so the `?? []` fail-closed guard stays.
+  //? `allowLocalhost` is the dev convenience that accepts any http://localhost:*
+  //? origin without needing an explicit allowedOrigins entry. Safe in production
+  //? because allowLocalhost defaults to false there.
+  const cfg = getProjectConfig();
+  if (cfg.http.cors.allowLocalhost && parsed.hostname === 'localhost') return true;
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime-defensive guard at a security boundary
-  const allowed = getProjectConfig().http.cors.allowedOrigins ?? [];
+  const allowed = cfg.http.cors.allowedOrigins ?? [];
   if (typeof allowed === 'function') {
     return allowed(parsed.origin);
   }
@@ -1079,8 +1091,20 @@ const loginCallback = async (
     getLogger().debug(`oauth login success for user ${resolved.user.id}`);
   }
 
+  //? Prefer the return URL stored alongside the OAuth state (set by the
+  //? initiating browser, server-side in Redis, tamper-proof). This lets the
+  //? auth flow land on the correct frontend origin+path even when the callback
+  //? goes through a different backend port in dev (e.g. ?backend=8080) or when
+  //? the login server is split from the static server in production. Validated
+  //? against allowedOrigins + allowLocalhost before use.
+  const stateReturnUrl =
+    stateEntry.returnUrl && isAllowedRedirectUrl(stateEntry.returnUrl)
+      ? stateEntry.returnUrl
+      : undefined;
+
   const fallbackUrl =
-    options.defaultRedirectUrl
+    stateReturnUrl
+    ?? options.defaultRedirectUrl
     ?? getProjectConfig().loginRedirectUrl
     ?? '/';
 

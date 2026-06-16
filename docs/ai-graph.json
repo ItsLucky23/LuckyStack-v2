@@ -3,9 +3,9 @@
   "note": "Dependency graph, ids relative to src/. File level: blastRadius[file] = files transitively importing it. Symbol level: callEdges are function->function calls; symbolBlastRadius['file::fn'] = symbols transitively calling it. <module> = file top-level scope. functions.* injection-proxy / dynamic-import / interface-typed calls are intentionally not resolved. See docs/decisions/0002,0004,0006.",
   "counts": {
     "nodes": 84,
-    "edges": 49,
-    "symbols": 121,
-    "callEdges": 28
+    "edges": 50,
+    "symbols": 122,
+    "callEdges": 30
   },
   "nodes": [
     {
@@ -607,6 +607,10 @@
       "to": "_sockets/apiRequest.ts"
     },
     {
+      "from": "settings/_api/revokeSession_v1.ts",
+      "to": "settings/_api/listSessions_v1.ts"
+    },
+    {
       "from": "settings/confirm-email/page.tsx",
       "to": "_sockets/apiRequest.ts"
     },
@@ -757,6 +761,9 @@
       "main.tsx",
       "page.tsx",
       "playground/page.tsx"
+    ],
+    "settings/_api/listSessions_v1.ts": [
+      "settings/_api/revokeSession_v1.ts"
     ]
   },
   "godNodes": [
@@ -1465,6 +1472,12 @@
       "kind": "function"
     },
     {
+      "id": "settings/_api/listSessions_v1.ts::sessionHandle",
+      "file": "settings/_api/listSessions_v1.ts",
+      "name": "sessionHandle",
+      "kind": "function"
+    },
+    {
       "id": "settings/_api/requestEmailChange_v1.tests.ts::<module>",
       "file": "settings/_api/requestEmailChange_v1.tests.ts",
       "name": "<module>",
@@ -1721,6 +1734,10 @@
       "to": "settings/_api/listSessions_v1.tests.ts::idOf"
     },
     {
+      "from": "settings/_api/listSessions_v1.ts::main",
+      "to": "settings/_api/listSessions_v1.ts::sessionHandle"
+    },
+    {
       "from": "settings/_api/requestEmailChange_v1.tests.ts::run",
       "to": "settings/_api/requestEmailChange_v1.tests.ts::uniqueEmail"
     },
@@ -1731,6 +1748,10 @@
     {
       "from": "settings/_api/revokeSession_v1.tests.ts::run",
       "to": "settings/_api/revokeSession_v1.tests.ts::idOf"
+    },
+    {
+      "from": "settings/_api/revokeSession_v1.ts::main",
+      "to": "settings/_api/listSessions_v1.ts::sessionHandle"
     },
     {
       "from": "settings/_api/signOutEverywhere_v1.tests.ts::run",
@@ -1815,6 +1836,10 @@
     ],
     "settings/_api/listSessions_v1.tests.ts::idOf": [
       "settings/_api/listSessions_v1.tests.ts::run"
+    ],
+    "settings/_api/listSessions_v1.ts::sessionHandle": [
+      "settings/_api/listSessions_v1.ts::main",
+      "settings/_api/revokeSession_v1.ts::main"
     ],
     "settings/_api/requestEmailChange_v1.tests.ts::uniqueEmail": [
       "settings/_api/requestEmailChange_v1.tests.ts::run"
