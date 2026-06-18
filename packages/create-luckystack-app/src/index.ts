@@ -366,6 +366,8 @@ interface WizardStep {
   key: string;
   type: 'select' | 'multi';
   label: string;
+  /** One-line plain-language explanation shown dimmed under the label (e.g. which @luckystack package this installs + what it does). */
+  description?: string;
   options: readonly string[];
   defaultValue?: string;
   /** Hide this step when the predicate returns true (e.g. OAuth unless oauth mode). */
@@ -417,7 +419,12 @@ const runWizard = (
           continue;
         }
         if (p > pointer) continue;
-        lines.push(ansiStyle(step.label, ANSI.bold));
+        //? `(current/total)` progress counter — total is the count of currently
+        //? VISIBLE steps, so it reflects conditional steps appearing/disappearing.
+        lines.push(`${ansiStyle(step.label, ANSI.bold)} ${ansiStyle(`(${String(p + 1)}/${String(order.length)})`, ANSI.dim)}`);
+        if (step.description !== undefined && step.description !== '') {
+          lines.push(ansiStyle(step.description, ANSI.dim));
+        }
         const cursor = cursors[i] ?? 0;
         for (const [oi, option] of step.options.entries()) {
           const active = oi === cursor;
@@ -572,16 +579,24 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
 const runPrompts = async (presets: Record<string, string | string[]> = {}): Promise<ScaffoldChoices> => {
   if (!input.isTTY || !output.isTTY) return runPromptsFallback(presets);
 
+  //? Make the required runtime explicit before the optional toggles below, so it
+  //? is clear WHAT is always installed vs WHAT each question opts into.
+  output.write(
+    `\n${ansiStyle('Always installed', ANSI.bold)} (the framework runtime): ` +
+    `${ansiStyle('@luckystack/core, server, api, sync', ANSI.cyan)}.\n` +
+    `${ansiStyle('The questions below pick a database + toggle the optional packages and features.', ANSI.dim)}\n`,
+  );
+
   const answers = await runWizard([
-    { key: 'dbProvider', type: 'select', label: 'Which database provider?', options: PROVIDER_OPTIONS.dbProvider, defaultValue: 'mongodb' },
-    { key: 'authMode', type: 'select', label: 'Authentication mode?', options: PROVIDER_OPTIONS.authMode, defaultValue: 'credentials' },
-    { key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire?', options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.authMode !== 'credentials+oauth' },
-    { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', options: PROVIDER_OPTIONS.emailProvider, defaultValue: 'console' },
-    { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', options: PROVIDER_OPTIONS.monitoringProvider, defaultValue: 'none' },
-    { key: 'presence', type: 'select', label: 'Install @luckystack/presence (AFK / presence / socket-status)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
-    { key: 'i18n', type: 'select', label: 'Enable i18n (translations + locale switching)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
-    { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?', options: ['Yes', 'No'], defaultValue: 'Yes' },
-    { key: 'aiBrowserTooling', type: 'select', label: 'Set up AI browser-testing tooling? (all = + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none)', options: PROVIDER_OPTIONS.aiBrowserTooling, defaultValue: 'agent-browser', skip: (a) => a.aiInstructions === 'No' },
+    { key: 'dbProvider', type: 'select', label: 'Which database provider?', description: 'Database used in prisma/schema.prisma — drives the @prisma/client types.', options: PROVIDER_OPTIONS.dbProvider, defaultValue: 'mongodb' },
+    { key: 'authMode', type: 'select', label: 'Authentication mode?', description: '@luckystack/login — email/password auth, sessions + optional OAuth. "none" omits the package and all auth pages/APIs.', options: PROVIDER_OPTIONS.authMode, defaultValue: 'credentials' },
+    { key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire?', description: 'Social-login providers wired into @luckystack/login.', options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.authMode !== 'credentials+oauth' },
+    { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', description: '@luckystack/email — password-reset/verification mail. "none" = not installed; "console" = log to terminal (dev); resend/smtp = real delivery.', options: PROVIDER_OPTIONS.emailProvider, defaultValue: 'console' },
+    { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', description: 'Error/usage monitoring adapter (Sentry/Datadog/PostHog). "none" = no monitoring wired.', options: PROVIDER_OPTIONS.monitoringProvider, defaultValue: 'none' },
+    { key: 'presence', type: 'select', label: 'Install @luckystack/presence?', description: 'Live presence, AFK detection + a socket-status indicator. Optional.', options: ['Yes', 'No'], defaultValue: 'Yes' },
+    { key: 'i18n', type: 'select', label: 'Enable i18n?', description: 'Multi-language UI: translations + locale switching (ships nl/de/fr locale files).', options: ['Yes', 'No'], defaultValue: 'Yes' },
+    { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions?', description: 'CLAUDE.md, docs/luckystack, branch-logs + the auto-index git hook — context for AI coding agents.', options: ['Yes', 'No'], defaultValue: 'Yes' },
+    { key: 'aiBrowserTooling', type: 'select', label: 'Set up AI browser-testing tooling?', description: 'all = agent-browser CLI + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none = skip.', options: PROVIDER_OPTIONS.aiBrowserTooling, defaultValue: 'agent-browser', skip: (a) => a.aiInstructions === 'No' },
   ], presets);
 
   return convertAnswersToChoices(answers);
