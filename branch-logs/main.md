@@ -77,8 +77,25 @@
 
 **Niet verifieerbaar in-repo** (gemeld): consumer `npm install`+build — template pint `^0.2.0`, nog niet op npm (kip-ei). User's gate na publish.
 
-**Bewust uit de wizard**: router (los infra-proces) + mcp (AI-tooling stdio-server) — geen app-runtime packages; krijg je via `npm i @luckystack/<pkg>` per use-case.
+**Bewust uit de wizard**: router (los infra-proces) + mcp (AI-tooling stdio-server) — geen app-runtime packages; krijg je via `npm i @luckystack/<pkg>` per use-case. (Herzien — zie volgende entry: nu wél behandeld.)
 
 **Commits**: `c0ce5e7` (lean-default wizard) + eerdere `cbfe1f2`/`dec7f44`.
 
 **Files**: packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/src/index.test.ts, packages/create-luckystack-app/CLAUDE.md.
+
+## 2026-06-18 — Volledige package-dekking in de wizard (router/mcp/cli)
+
+**User-inzicht**: de wizard IS de enige echte setup (`npm i @luckystack/core` in lege map werkt niet — by design; je hebt het hele project-skelet nodig). Dus de wizard moet ALLE packages behandelen. Beslissingen: mcp auto-wiren bij AI-docs; router als opt-in optie; cli als devDep.
+
+**Wat ik deed** (`packages/create-luckystack-app/src/index.ts` + template):
+- **router**: nieuwe opt-in choice `router` (+ `--router` flag, wizard- + fallback-vraag). `wireRouter()` voegt `@luckystack/router` dep + een `"router": "luckystack-router"` script toe (los proces; topologie in de al-gescaffolde deploy.config.ts).
+- **mcp**: `wireGraphMcp()` voegt `@luckystack/mcp` devDep + een `.mcp.json` `luckystack`-server toe wanneer `aiInstructions` aan staat → AI krijgt graph-queries (blast_radius/who_imports) over het project. Aangeroepen in de aiInstructions-tak.
+- **cli**: `@luckystack/cli` als vaste template-devDep zodat `npx luckystack add` lokaal resolvet.
+
+**Conceptueel vastgelegd**: install-paden = (1) wizard = enige from-scratch weg; (2) `npx luckystack add <feature>` post-scaffold; (3) `npm i @luckystack/<pkg>` voor backend-only self-wire packages. Geen "vanuit niks zonder scaffold"-pad — by design (scaffold = de app). Alle 16 packages nu gedekt.
+
+**Verificatie**: scaffolder build + `lint:packages` + `ai:lint` 0 · 68/68 unit-tests (shape-assert router-veld) · scaffold `--router` → router dep+script ✓; AI-docs aan → mcp devDep + .mcp.json `luckystack` ✓; cli devDep altijd ✓; `--no-ai-docs` → geen mcp/.mcp.json ✓.
+
+**Commit**: `e87a390`.
+
+**Files**: packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/src/index.test.ts, packages/create-luckystack-app/CLAUDE.md, packages/create-luckystack-app/template/package.json.
