@@ -99,3 +99,21 @@
 **Commit**: `e87a390`.
 
 **Files**: packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/src/index.test.ts, packages/create-luckystack-app/CLAUDE.md, packages/create-luckystack-app/template/package.json.
+
+## 2026-06-18 — v0.2.1 publish-fix + client `process`-audit + wizard detail-toggle
+
+**Context**: user bumpte/tagde v0.2.1 → publish-gate faalde op `test:unit` (4 tests). Daarna bij testen: `config.ts:69 process is not defined` in de browser. + vraag: error-tracking is onduidelijk in de wizard naast de sentry/monitoring-vraag.
+
+**1. Publish-gate fix (`packages/server/src/listenServer.test.ts`)**: mijn port-fix voegde een `isProduction`-import aan `createServer.ts` toe; de test mockte `@luckystack/core` zonder die export → 4 failures. Mock nu met een mutabele `coreState.isProduction` (getter) + 2 nieuwe tests (dev-default auto-increment aan / expliciet uit). Volledige `test:unit` weer 1283 (was 1281 + 2). **Mijn fout: na de port/prisma-changes wel build+lint maar niet de volledige test:unit gedraaid.** Commit `9e0a7d3`.
+
+**2. Browser-`process` bug + audit**: `wireSecretManager` (en het template-blok) gebruikte `process.env.LUCKYSTACK_SECRET_MANAGER_URL` direct; `config.ts` draait óók in de Vite-browserbundle → ReferenceError. Nu via de bestaande `env()`-guard. **Audit alle packages**: client-gebundelde surfaces (`core/client`, `sync/client`, `presence/client`, `core/src/react/*.tsx`, template `src/**`, login-assets) zijn schoon — geen top-level `process`. Enige latente plek (GEMELD, niet gefixt): `core/projectConfig.ts` `getProjectName()` leest `process.env.PROJECT_NAME` zonder guard, maar staat in een functie-body met alleen server-callers (geen crash bij import). `vite.config.ts` `process.cwd()` = build-time node, veilig.
+
+**3. Wizard detail-toggle**: nieuwe `WizardStep.details` + `?`-keypress die een uitklapbaar detail-blok toont (reset per stap). Ingezet voor `@luckystack/error-tracking`: legt uit dat het de auto-capture-laag is die de in de vorige vraag gekozen backend (Sentry/Datadog/PostHog) voedt — "backend-vraag = WAARHEEN telemetry gaat; dit pakket = de lijm". Beide omschrijvingen aangescherpt.
+
+**Verificatie**: scaffolder build · `test:unit` 1283 · `lint:packages` + `ai:lint` 0 · scaffold `--secret-manager` → config.ts gebruikt `env()` (browser-veilig).
+
+**Commits**: `9e0a7d3` (test-fix), `<deze>` (browser-safe config + detail-toggle).
+
+**Open**: v0.2.1 tag wijst nog naar de pre-fix commit → user moet her-taggen naar de nieuwe HEAD (één re-tag dekt alle fixes), dan re-publish.
+
+**Files**: packages/server/src/listenServer.test.ts, packages/create-luckystack-app/template/config.ts, packages/create-luckystack-app/src/index.ts.
