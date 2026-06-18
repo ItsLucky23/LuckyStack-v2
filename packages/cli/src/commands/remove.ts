@@ -107,7 +107,21 @@ const removePresence = (project: ConsumerProject, entry: RegistryEntry): Result<
   const mainStillWired = fs.readFileSync(mainPath, 'utf8').includes('@luckystack/presence/client');
   if (mainStillWired) {
     const reversed = reversePresenceEdits(mainPath, templateProviderPath);
-    if (!reversed.ok) return reversed;
+    if (!reversed.ok) {
+      //? A token-miss here means the consumer hand-edited the injected presence
+      //? mounts. We refuse to guess — nothing is changed (dep still present). Tell
+      //? them how to finish by hand instead of leaving a cryptic token error.
+      return err(new Error(
+        `${reversed.error.message}\n\n` +
+        '  This usually means you edited the presence client code, so the CLI can\'t\n' +
+        '  safely auto-revert it. Nothing was changed. To remove presence by hand:\n' +
+        `    1. in ${MAIN_TSX}: remove the @luckystack/presence/client import and put\n` +
+        '       the router root element back to <Outlet />.\n' +
+        `    2. in ${TEMPLATE_PROVIDER}: remove the <SocketStatusIndicator/> block + its\n` +
+        '       useSocketStatus import.\n' +
+        '    3. drop "@luckystack/presence" from package.json, then npm install.',
+      ));
+    }
     console.log('• reverted <LocationProvider/> (main.tsx) + <SocketStatusIndicator/> (TemplateProvider.tsx)');
   } else {
     console.log('• presence client mounts already absent — skipped JSX revert.');
