@@ -66,7 +66,7 @@ const config = {
   //? LUCKYSTACK_SECRET_MANAGER_URL to resolve `.env` pointers (NAME=BASE_V<n>)
   //? against an external secret server at boot (see server.ts + the docs).
   // secretManager: {
-  //   url: process.env.LUCKYSTACK_SECRET_MANAGER_URL ?? '',
+  //   url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
   //   token: { fromFile: '.secret-manager-token' },
   // },
 };

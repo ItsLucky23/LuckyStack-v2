@@ -426,6 +426,8 @@ interface WizardStep {
   label: string;
   /** One-line plain-language explanation shown dimmed under the label (e.g. which @luckystack package this installs + what it does). */
   description?: string;
+  /** Optional longer, multi-line explanation revealed when the user presses `?` on this step (for packages whose purpose isn't obvious from one line). */
+  details?: string;
   options: readonly string[];
   defaultValue?: string;
   /** Hide this step when the predicate returns true (e.g. OAuth unless oauth mode). */
@@ -463,6 +465,9 @@ const runWizard = (
 
     let pointer = 0;
     let prevLines = 0;
+    //? Whether the current step's expandable `details` block is open (toggled with
+    //? `?`). Reset on every step change so each step starts collapsed.
+    let detailsOpen = false;
 
     const buildBlock = (): string => {
       const order = visibleSteps();
@@ -482,6 +487,13 @@ const runWizard = (
         lines.push(`${ansiStyle(step.label, ANSI.bold)} ${ansiStyle(`(${String(p + 1)}/${String(order.length)})`, ANSI.dim)}`);
         if (step.description !== undefined && step.description !== '') {
           lines.push(ansiStyle(step.description, ANSI.dim));
+        }
+        //? Expandable detail block (toggled with `?`) — for packages whose purpose
+        //? needs more than the one-line description.
+        if (detailsOpen && step.details !== undefined && step.details !== '') {
+          for (const detailLine of step.details.split('\n')) {
+            lines.push(ansiStyle(`  ${detailLine}`, ANSI.dim));
+          }
         }
         const cursor = cursors[i] ?? 0;
         for (const [oi, option] of step.options.entries()) {
@@ -504,7 +516,10 @@ const runWizard = (
         const hint = step.type === 'multi'
           ? '↑/↓ move · space/enter toggle · select Next to continue'
           : '↑/↓ move · enter select';
-        lines.push(ansiStyle(`${hint}${pointer > 0 ? ' · ← back' : ''}`, ANSI.dim));
+        const detailsHint = (step.details !== undefined && step.details !== '')
+          ? (detailsOpen ? ' · ? hide details' : ' · ? details')
+          : '';
+        lines.push(ansiStyle(`${hint}${pointer > 0 ? ' · ← back' : ''}${detailsHint}`, ANSI.dim));
       }
       return `${lines.join('\n')}\n`;
     };
@@ -535,6 +550,16 @@ const runWizard = (
         process.exit(130);
       }
 
+      //? `?` toggles the current step's expandable details block (no-op for steps
+      //? without `details`, so the keypress is simply ignored there).
+      if (_str === '?') {
+        if (step.details !== undefined && step.details !== '') {
+          detailsOpen = !detailsOpen;
+          paint();
+        }
+        return;
+      }
+
       //? Multi-select has one extra navigable row (the trailing "Next" action),
       //? so the cursor wraps over options.length + 1; single-select over the
       //? options alone.
@@ -551,6 +576,7 @@ const runWizard = (
       }
       if (key.name === 'left' && pointer > 0) {
         pointer -= 1;
+        detailsOpen = false;
         paint();
         return;
       }
@@ -581,6 +607,7 @@ const runWizard = (
           : asOption(step.options[cursorPos], step.options, step.defaultValue ?? step.options[0] ?? '');
         const nextOrder = visibleSteps();
         pointer += 1;
+        detailsOpen = false;
         paint();
         if (pointer >= nextOrder.length) {
           restoreTerminal();
@@ -656,9 +683,30 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
     { key: 'authMode', type: 'select', label: 'Authentication mode?', description: '@luckystack/login — email/password auth, sessions + optional OAuth. "none" (default) omits the package and all auth pages/APIs.', options: PROVIDER_OPTIONS.authMode, defaultValue: 'none' },
     { key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire?', description: 'Social-login providers wired into @luckystack/login.', options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.authMode !== 'credentials+oauth' },
     { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', description: '@luckystack/email — password-reset/verification mail. "none" (default) = not installed; "console" = log to terminal (dev); resend/smtp = real delivery.', options: PROVIDER_OPTIONS.emailProvider, defaultValue: 'none' },
-    { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', description: 'Error/usage monitoring adapter (Sentry/Datadog/PostHog). "none" = no monitoring wired.', options: PROVIDER_OPTIONS.monitoringProvider, defaultValue: 'none' },
+    { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', description: 'Picks WHERE telemetry goes — the backend SDK + .env keys (Sentry/Datadog/PostHog). @luckystack/error-tracking (next question) is the layer that feeds it.', options: PROVIDER_OPTIONS.monitoringProvider, defaultValue: 'none' },
     { key: 'presence', type: 'select', label: 'Install @luckystack/presence?', description: 'Live presence, AFK detection + a socket-status indicator. Optional.', options: ['Yes', 'No'], defaultValue: 'No' },
-    { key: 'errorTracking', type: 'select', label: 'Install @luckystack/error-tracking?', description: 'Error capture + auto-instrumentation (Sentry-compatible). Dormant until a DSN/adapter is set.', options: ['Yes', 'No'], defaultValue: 'No' },
+    {
+      key: 'errorTracking',
+      type: 'select',
+      label: 'Install @luckystack/error-tracking?',
+      description: 'The framework layer that auto-captures errors and feeds the backend above. Press ? for what it does (vs the backend question).',
+      details: [
+        '@luckystack/error-tracking is a thin layer the framework auto-wires into',
+        'every API + sync call: it captures thrown errors, adds request/timing',
+        'spans, and tags the current user — with zero code in your handlers.',
+        '',
+        'It does NOT store or send anything by itself. It forwards to whatever',
+        'backend you picked in the "Observability backend?" question above',
+        '(Sentry/Datadog/PostHog). So: that question = WHERE telemetry goes; this',
+        'package = the glue that collects it and sends it there.',
+        '',
+        'Install it for automatic error capture (stays a no-op until a DSN/key is',
+        'set, so it is safe to leave on). Skip it for a backend-free app, or if',
+        'you prefer to call captureException yourself.',
+      ].join('\n'),
+      options: ['Yes', 'No'],
+      defaultValue: 'No',
+    },
     { key: 'docsUi', type: 'select', label: 'Install @luckystack/docs-ui?', description: 'In-app viewer for your generated API docs. Backend self-wires; opt-in.', options: ['Yes', 'No'], defaultValue: 'No' },
     { key: 'secretManager', type: 'select', label: 'Install @luckystack/secret-manager?', description: 'Resolve `.env` pointers from a remote secret server (commit pointers, not secrets). Dormant until configured; opt-in.', options: ['Yes', 'No'], defaultValue: 'No' },
     { key: 'router', type: 'select', label: 'Install @luckystack/router?', description: 'Multi-instance load-balancer process (run separately via `npm run router`). Only needed when you scale to multiple server instances. Reads deploy.config.ts.', options: ['Yes', 'No'], defaultValue: 'No' },
@@ -1575,11 +1623,11 @@ const wireSecretManager = (targetDir: string): void => {
   editScaffoldFile(targetDir, 'config.ts', [
     [
       `  // secretManager: {
-  //   url: process.env.LUCKYSTACK_SECRET_MANAGER_URL ?? '',
+  //   url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
   //   token: { fromFile: '.secret-manager-token' },
   // },`,
       `  secretManager: {
-    url: process.env.LUCKYSTACK_SECRET_MANAGER_URL ?? '',
+    url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
     token: { fromFile: '.secret-manager-token' },
   },`,
     ],
