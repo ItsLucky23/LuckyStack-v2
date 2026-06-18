@@ -43,6 +43,8 @@ export interface CliArgs {
   docsUi: boolean;
   /** `--secret-manager`: opt INTO @luckystack/secret-manager (off by default). */
   secretManager: boolean;
+  /** `--router`: opt INTO @luckystack/router (multi-instance; off by default). */
+  router: boolean;
   /** `--ai-browser=<all|agent-browser|none>`: AI browser-testing tooling (null = unspecified → DEFAULT_CHOICES). */
   aiBrowserTooling: AiBrowserTooling | null;
   //? CFG-01 — every wizard choice now has a matching CLI flag so the scaffold is
@@ -71,7 +73,7 @@ export const VALID_FLAGS = [
   '--oauth=<google,github,discord,facebook,microsoft>',
   '--email=<none|console|resend|smtp>',
   '--monitoring=<none|sentry|datadog|posthog>',
-  '--presence', '--error-tracking', '--docs-ui', '--secret-manager',
+  '--presence', '--error-tracking', '--docs-ui', '--secret-manager', '--router',
   '--i18n', '--no-i18n', '--ai-docs', '--no-ai-docs',
   '--ai-browser=<all|agent-browser|none>',
   '--help', '-h',
@@ -96,6 +98,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
   let errorTracking = false;
   let docsUi = false;
   let secretManager = false;
+  let router = false;
   let aiBrowserTooling: AiBrowserTooling | null = null;
   let dbProvider: DbProvider | null = null;
   let authMode: AuthMode | null = null;
@@ -128,6 +131,10 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
     case '--secret-manager': {
     secretManager = true;
+    break;
+    }
+    case '--router': {
+    router = true;
     break;
     }
     case '--i18n': {
@@ -182,7 +189,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
   }
   return {
-    projectName, install, prompt, help, presence, errorTracking, docsUi, secretManager, aiBrowserTooling,
+    projectName, install, prompt, help, presence, errorTracking, docsUi, secretManager, router, aiBrowserTooling,
     dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n, aiInstructions,
   };
 };
@@ -227,6 +234,8 @@ interface ScaffoldChoices {
   docsUi: boolean;
   /** Install @luckystack/secret-manager (`.env`-pointer secret resolution). Opt-in; off by default. */
   secretManager: boolean;
+  /** Install @luckystack/router (multi-instance load-balancer process) + a `npm run router` script. Opt-in; off by default. */
+  router: boolean;
   /** Enable @luckystack/i18n integration. */
   i18n: boolean;
   /**
@@ -261,6 +270,7 @@ const DEFAULT_CHOICES: ScaffoldChoices = {
   errorTracking: false,
   docsUi: false,
   secretManager: false,
+  router: false,
   i18n: false,
   aiInstructions: true,
   aiBrowserTooling: 'agent-browser',
@@ -364,6 +374,9 @@ const runPromptsFallback = async (
     }
     if (need('secretManager')) {
       answers.secretManager = (await askYesNo(rl, 'Install @luckystack/secret-manager (.env-pointer secret resolution)?', false)) ? 'Yes' : 'No';
+    }
+    if (need('router')) {
+      answers.router = (await askYesNo(rl, 'Install @luckystack/router (multi-instance load-balancer; run via npm run router)?', false)) ? 'Yes' : 'No';
     }
     if (need('i18n')) {
       answers.i18n = (await askYesNo(rl, 'Enable i18n (translations + locale switching)?', false)) ? 'Yes' : 'No';
@@ -615,6 +628,7 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
     //? Opt-in convention (default off): only true when explicitly 'Yes'.
     docsUi: answers.docsUi === 'Yes',
     secretManager: answers.secretManager === 'Yes',
+    router: answers.router === 'Yes',
     //? Match presence/aiInstructions — opt-out convention: truthy unless explicitly 'No'.
     i18n: answers.i18n !== 'No',
     aiInstructions: answers.aiInstructions !== 'No',
@@ -647,6 +661,7 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
     { key: 'errorTracking', type: 'select', label: 'Install @luckystack/error-tracking?', description: 'Error capture + auto-instrumentation (Sentry-compatible). Dormant until a DSN/adapter is set.', options: ['Yes', 'No'], defaultValue: 'No' },
     { key: 'docsUi', type: 'select', label: 'Install @luckystack/docs-ui?', description: 'In-app viewer for your generated API docs. Backend self-wires; opt-in.', options: ['Yes', 'No'], defaultValue: 'No' },
     { key: 'secretManager', type: 'select', label: 'Install @luckystack/secret-manager?', description: 'Resolve `.env` pointers from a remote secret server (commit pointers, not secrets). Dormant until configured; opt-in.', options: ['Yes', 'No'], defaultValue: 'No' },
+    { key: 'router', type: 'select', label: 'Install @luckystack/router?', description: 'Multi-instance load-balancer process (run separately via `npm run router`). Only needed when you scale to multiple server instances. Reads deploy.config.ts.', options: ['Yes', 'No'], defaultValue: 'No' },
     { key: 'i18n', type: 'select', label: 'Enable i18n?', description: 'Multi-language UI: translations + locale switching (adds nl/de/fr locale files).', options: ['Yes', 'No'], defaultValue: 'No' },
     { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions?', description: 'CLAUDE.md, docs/luckystack, branch-logs + the auto-index git hook — context for AI coding agents.', options: ['Yes', 'No'], defaultValue: 'Yes' },
     { key: 'aiBrowserTooling', type: 'select', label: 'Set up AI browser-testing tooling?', description: 'all = agent-browser CLI + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none = skip.', options: PROVIDER_OPTIONS.aiBrowserTooling, defaultValue: 'agent-browser', skip: (a) => a.aiInstructions === 'No' },
@@ -669,6 +684,7 @@ const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> =>
   if (args.errorTracking) presets.errorTracking = 'Yes';
   if (args.docsUi) presets.docsUi = 'Yes';
   if (args.secretManager) presets.secretManager = 'Yes';
+  if (args.router) presets.router = 'Yes';
   if (args.i18n !== null) presets.i18n = args.i18n ? 'Yes' : 'No';
   if (args.aiInstructions !== null) presets.aiInstructions = args.aiInstructions ? 'Yes' : 'No';
   if (args.aiBrowserTooling) presets.aiBrowserTooling = args.aiBrowserTooling;
@@ -697,6 +713,7 @@ const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
   if (args.errorTracking) choices.errorTracking = true;
   if (args.docsUi) choices.docsUi = true;
   if (args.secretManager) choices.secretManager = true;
+  if (args.router) choices.router = true;
   if (args.i18n !== null) choices.i18n = args.i18n;
   if (args.aiInstructions !== null) choices.aiInstructions = args.aiInstructions;
   if (args.aiBrowserTooling) choices.aiBrowserTooling = args.aiBrowserTooling;
@@ -725,6 +742,7 @@ Options:
   --error-tracking  Install @luckystack/error-tracking (error capture + auto-instrumentation).
   --docs-ui      Install @luckystack/docs-ui (in-app API docs viewer).
   --secret-manager  Install @luckystack/secret-manager (.env-pointer secrets).
+  --router       Install @luckystack/router (multi-instance load-balancer; npm run router).
   --i18n / --no-i18n   Enable / disable i18n (default off).
   --ai-docs / --no-ai-docs   Include / omit LuckyStack AI dev instructions (default on).
   --ai-browser=<all|agent-browser|none>
@@ -1582,6 +1600,49 @@ const wireSecretManager = (targetDir: string): void => {
   ]);
 };
 
+//? Wire @luckystack/router (opt-in): a multi-instance load-balancer that runs as
+//? a SEPARATE process (`npm run router`) and reads the project's deploy.config.ts
+//? (already scaffolded) for its routing topology. Adds the dependency + the run
+//? script; env (ROUTER_PORT / LUCKYSTACK_ENV / LUCKYSTACK_PRESET) is documented in
+//? docs/luckystack/ARCHITECTURE_MULTI_INSTANCE.md. A single-instance app never
+//? runs it — it's here so scaling out later is `npm run router`, no rewiring.
+const wireRouter = (targetDir: string, luckystackVersion: string): void => {
+  const pkgPath = path.join(targetDir, 'package.json');
+  if (!fs.existsSync(pkgPath)) return;
+  let pkg: { dependencies?: Record<string, string>; scripts?: Record<string, string> };
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+  } catch {
+    console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping router wiring.`);
+    return;
+  }
+  pkg.dependencies = { ...pkg.dependencies, '@luckystack/router': `^${luckystackVersion}` };
+  pkg.scripts = { ...pkg.scripts, router: 'luckystack-router' };
+  fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+};
+
+//? Wire @luckystack/mcp (the project graph MCP server) when AI dev-context is on:
+//? add it as a devDep + register it in `.mcp.json` so an AI client (Claude Code)
+//? can query the dependency graph (blast_radius / who_imports / who_calls /
+//? god_nodes) over THIS project. Reads docs/ai-graph.json (kept fresh by the
+//? pre-commit hook). Additive — merges into any existing .mcp.json.
+const wireGraphMcp = (targetDir: string, luckystackVersion: string): void => {
+  const pkgPath = path.join(targetDir, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { devDependencies?: Record<string, string> };
+      pkg.devDependencies = { ...pkg.devDependencies, '@luckystack/mcp': `^${luckystackVersion}` };
+      fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+    } catch {
+      console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping @luckystack/mcp dep.`);
+    }
+  }
+  mergeJsonFile(path.join(targetDir, '.mcp.json'), (data) => {
+    const servers = (data.mcpServers ??= {}) as Record<string, unknown>;
+    servers.luckystack ??= { type: 'stdio', command: 'npx', args: ['@luckystack/mcp'] };
+  });
+};
+
 //? Remove OPT-OUT packages from a freshly-copied scaffold. Bounded packages:
 //? presence + error-tracking (drop dep + the few files/lines that referenced them).
 //? login/sync are more deeply woven (login is a whole auth surface; sync's
@@ -1851,11 +1912,20 @@ const main = async (): Promise<void> => {
     //? secret-manager needs the enable-later code blocks uncommented here.
     if (choices.secretManager) wireSecretManager(targetDir);
 
+    //? Router is a separate-process load-balancer: add its dependency + the
+    //? `npm run router` script (topology lives in the scaffolded deploy.config.ts).
+    if (choices.router) wireRouter(targetDir, luckystackVersion);
+
     //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
     //? the framework's AI docs so the consumer's AI agents inherit full context,
     //? and install a pre-commit hook that keeps the AI snapshot files fresh. When
     //? disabled the project ships clean — no CLAUDE.md, no docs/luckystack, no hook.
-    if (choices.aiInstructions) copyAiDocs(targetDir, vars, luckystackVersion);
+    if (choices.aiInstructions) {
+      copyAiDocs(targetDir, vars, luckystackVersion);
+      //? Register the @luckystack/mcp graph server in .mcp.json so AI agents can
+      //? query this project's dependency graph. Rides on the AI dev-context choice.
+      wireGraphMcp(targetDir, luckystackVersion);
+    }
 
     //? AI browser-testing tooling (agent-browser CLI + optional MCP servers).
     //? Additive, user-approval-gated, dev-tools only. No-op when 'none'.

@@ -60,6 +60,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@luckystack/cli": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/devkit": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/test-runner": "^{{LUCKYSTACK_VERSION}}",
     "@eslint/js": "^9.39.4",

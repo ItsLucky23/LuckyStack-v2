@@ -246,6 +246,7 @@ describe("parseArgs", () => {
       errorTracking: false,
       docsUi: false,
       secretManager: false,
+      router: false,
       aiBrowserTooling: null,
       ...CFG01_NULLS,
     });
@@ -261,6 +262,7 @@ describe("parseArgs", () => {
       errorTracking: false,
       docsUi: false,
       secretManager: false,
+      router: false,
       aiBrowserTooling: null,
       ...CFG01_NULLS,
     });
@@ -310,6 +312,7 @@ describe("parseArgs", () => {
       errorTracking: false,
       docsUi: false,
       secretManager: false,
+      router: false,
       aiBrowserTooling: null,
       ...CFG01_NULLS,
     });
