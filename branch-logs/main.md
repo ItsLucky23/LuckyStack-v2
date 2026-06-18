@@ -117,3 +117,25 @@
 **Open**: v0.2.1 tag wijst nog naar de pre-fix commit → user moet her-taggen naar de nieuwe HEAD (één re-tag dekt alle fixes), dan re-publish.
 
 **Files**: packages/server/src/listenServer.test.ts, packages/create-luckystack-app/template/config.ts, packages/create-luckystack-app/src/index.ts.
+
+## 2026-06-18 — v0.2.3: prisma-detectie fix + wizard review/details + CLI-onderzoek
+
+**Context**: 0.2.2 gepubliceerd. Nieuwe user-wensen: `?`-details op elke stap, hint op eigen regel, error-tracking onduidelijk (zeker zonder backend), per-stap package-naam, confirm/review-stap, en prisma:generate die niet runt + geen hint. Plus vraag over wat de CLI kan (list/add/remove wizard).
+
+**Onderzoek (2 agents)**:
+- **Prisma root cause**: `isPrismaClientMissing()` werd misleid — `@prisma/client`'s postinstall schrijft een STUB in `node_modules/.prisma/client/` vóór generate, dus de dir bestaat → check `false` → geen auto-gen én hint onderdrukt. ROOT_DIR was correct (geen verdachte). 
+- **CLI**: puur flag-gedreven (`add` only), geen list/remove/detectie/interactief; package-lijst staat 4× gedupliceerd (cli FEATURES, scaffolder, server OPTIONAL_PACKAGES, PACKAGE_OVERVIEW.md). `list` makkelijk; interactieve add/remove vereist wizard-extractie + detectie-port + remove-handlers + liefst één gedeelde registry.
+
+**Gedaan**:
+- **devkit prisma-fix** (`prismaClientCheck.ts` + `hotReload.ts`): probe de echte marker `.prisma/client/schema.prisma` (alleen ná echte generate) i.p.v. de dir; hint ontkoppeld van die check en gekoppeld aan de error-tekst (`/unresolved type identifiers/`) zodat 'ie altijd verschijnt.
+- **wizard** (`create-luckystack-app/src/index.ts`): `details` op ELKE stap (`?`-toggle), de details-hint op een eigen regel, per-stap package-naam in de labels (bijv. "Authentication mode? (@luckystack/login)"), een **review-scherm** als laatste stap (alle keuzes + `← back to edit`, geen dead-end meer), en de error-tracking details leggen nu de backend="none" (no-op) case uit.
+
+**CLI-feature**: NIET gebouwd — toegelicht + voorgesteld als aparte taak (list + interactieve add/remove + één gedeelde package-registry). Wacht op go van user.
+
+**Verificatie**: build:packages 16/16 · test:unit 1283/1283 · lint:packages + ai:lint 0 · smoke-scaffold OK.
+
+**Release**: working tree had een niet-gecommitte `bump patch` (0.2.2→0.2.3); gecommit als `chore(release): v0.2.3`. Commits: `b0aef86` (fix+feat), release-bump-commit.
+
+**Open**: user tagt `v0.2.3` → publisht. CLI-feature na go.
+
+**Files**: packages/devkit/src/prismaClientCheck.ts, packages/devkit/src/hotReload.ts, packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/CLAUDE.md, packages/*/package.json (0.2.3 bump).
