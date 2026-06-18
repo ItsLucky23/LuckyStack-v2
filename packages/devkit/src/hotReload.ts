@@ -645,10 +645,13 @@ export const setupWatchers = () => {
 
       const [err] = await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       if (err) {
-        //? Append an actionable hint only when the Prisma-client-missing signal
-        //? is still true — never spam it when the real cause is unrelated.
-        const hint = isPrismaClientMissing()
-          ? '\n  → This usually means @prisma/client is not generated. Run `npm run prisma:generate` and restart.'
+        //? Gate the hint on the actual failure CLASS, not the client-dir probe: an
+        //? "unresolved type identifiers" error is almost always an un-generated
+        //? @prisma/client (missing model types). Tying it to the error text means
+        //? the hint always shows when it's relevant, even if the dir-probe is
+        //? fooled by a stub, while staying quiet for unrelated failures.
+        const hint = /unresolved type identifiers/i.test(String(err))
+          ? '\n  → This usually means @prisma/client is not generated. Run `npm run prisma:generate` (no database needed) and restart.'
           : '';
         console.log(`[HotReload] initial type map generation failed: ${String(err)}${hint}`, 'red');
       } else {

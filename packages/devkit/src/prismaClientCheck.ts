@@ -3,12 +3,15 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT_DIR, tryCatch } from '@luckystack/core';
 
-//? Where the Prisma generator writes its client by default. `prisma generate`
-//? emits into `node_modules/.prisma/client` (the engine + generated client),
-//? which `@prisma/client` re-exports at runtime. Its presence is the most
-//? robust "client has been generated" signal — far more reliable than probing
-//? `@prisma/client` itself, which ships an un-generated stub on a fresh install.
+//? Where the Prisma generator writes its client by default: `node_modules/.prisma/
+//? client`. The DIRECTORY existing is NOT proof of generation — `@prisma/client`'s
+//? own postinstall writes an un-generated STUB there on a plain `npm install` (a
+//? throwing `PrismaClient` + no model types, no schema, no query engine). So we
+//? probe a marker that ONLY a real `prisma generate` produces: it copies the
+//? schema into the output dir as `.prisma/client/schema.prisma` (absent in the
+//? stub). That distinguishes "generated" from "stub-only".
 const GENERATED_CLIENT_DIR = path.join(ROOT_DIR, 'node_modules', '.prisma', 'client');
+const GENERATED_CLIENT_MARKER = path.join(GENERATED_CLIENT_DIR, 'schema.prisma');
 
 //? Default schema location in a scaffolded LuckyStack project. `prisma generate`
 //? auto-discovers `prisma/schema.prisma` from the project root, so no explicit
@@ -23,7 +26,7 @@ const DEFAULT_SCHEMA_PATH = path.join(ROOT_DIR, 'prisma', 'schema.prisma');
  * the Prisma-specific path.
  */
 export const isPrismaClientMissing = (): boolean =>
-	fs.existsSync(DEFAULT_SCHEMA_PATH) && !fs.existsSync(GENERATED_CLIENT_DIR);
+	fs.existsSync(DEFAULT_SCHEMA_PATH) && !fs.existsSync(GENERATED_CLIENT_MARKER);
 
 /**
  * Runs `npx prisma generate` once. `prisma generate` only reads the schema —

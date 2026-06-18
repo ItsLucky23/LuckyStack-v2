@@ -468,17 +468,40 @@ const runWizard = (
     //? Whether the current step's expandable `details` block is open (toggled with
     //? `?`). Reset on every step change so each step starts collapsed.
     let detailsOpen = false;
+    //? After the last step the wizard enters a REVIEW screen (all choices listed)
+    //? instead of resolving immediately — so the final answer is reviewable and
+    //? editable (← jumps back into the steps) before the project is created.
+    let reviewing = false;
+
+    //? Render a value for the review/confirmed-step lines (joins multi-selects,
+    //? shows 'none' for an empty multi-select).
+    const shownAnswer = (key: string): string => {
+      const answer = answers[key];
+      return Array.isArray(answer) ? (answer.length > 0 ? answer.join(', ') : 'none') : (answer ?? '');
+    };
 
     const buildBlock = (): string => {
       const order = visibleSteps();
+      //? Final review screen: every choice listed, editable via ← before commit.
+      if (reviewing) {
+        const lines = ['', ansiStyle('Review your choices', ANSI.bold)];
+        for (const i of order) {
+          const step = steps[i];
+          if (step) lines.push(`${ansiStyle('✔', ANSI.green)} ${step.label} ${ansiStyle(shownAnswer(step.key), ANSI.cyan)}`);
+        }
+        lines.push(
+          '',
+          ansiStyle('enter create project', ANSI.cyan, ANSI.bold),
+          ansiStyle('← back to edit', ANSI.dim),
+        );
+        return `${lines.join('\n')}\n`;
+      }
       const lines: string[] = [''];
       for (const [p, i] of order.entries()) {
         const step = steps[i];
         if (!step) continue;
         if (p < pointer) {
-          const answer = answers[step.key];
-          const shown = Array.isArray(answer) ? (answer.length > 0 ? answer.join(', ') : 'none') : (answer ?? '');
-          lines.push(`${ansiStyle('✔', ANSI.green)} ${step.label} ${ansiStyle(shown, ANSI.cyan)}`);
+          lines.push(`${ansiStyle('✔', ANSI.green)} ${step.label} ${ansiStyle(shownAnswer(step.key), ANSI.cyan)}`);
           continue;
         }
         if (p > pointer) continue;
@@ -516,10 +539,12 @@ const runWizard = (
         const hint = step.type === 'multi'
           ? '↑/↓ move · space/enter toggle · select Next to continue'
           : '↑/↓ move · enter select';
-        const detailsHint = (step.details !== undefined && step.details !== '')
-          ? (detailsOpen ? ' · ? hide details' : ' · ? details')
-          : '';
-        lines.push(ansiStyle(`${hint}${pointer > 0 ? ' · ← back' : ''}${detailsHint}`, ANSI.dim));
+        lines.push(ansiStyle(`${hint}${pointer > 0 ? ' · ← back' : ''}`, ANSI.dim));
+        //? The details affordance gets its OWN line below the nav hint so the row
+        //? stays readable (every step carries a `details` block).
+        if (step.details !== undefined && step.details !== '') {
+          lines.push(ansiStyle(detailsOpen ? 'press ? to hide details' : 'press ? for details', ANSI.dim));
+        }
       }
       return `${lines.join('\n')}\n`;
     };
@@ -539,16 +564,31 @@ const runWizard = (
     };
 
     function onKey(_str: string, key: KeyEvent): void {
-      const order = visibleSteps();
-      const i = order[pointer];
-      const step = i === undefined ? undefined : steps[i];
-      if (i === undefined || !step) return;
-
       if (key.ctrl === true && key.name === 'c') {
         restoreTerminal();
         output.write('\n');
         process.exit(130);
       }
+
+      //? Review screen: Enter creates the project, ← jumps back to the last step to
+      //? edit. Everything else is ignored (no pointer is "active" here).
+      if (reviewing) {
+        if (key.name === 'return') {
+          restoreTerminal();
+          resolve(answers);
+        } else if (key.name === 'left') {
+          reviewing = false;
+          pointer = Math.max(0, visibleSteps().length - 1);
+          detailsOpen = false;
+          paint();
+        }
+        return;
+      }
+
+      const order = visibleSteps();
+      const i = order[pointer];
+      const step = i === undefined ? undefined : steps[i];
+      if (i === undefined || !step) return;
 
       //? `?` toggles the current step's expandable details block (no-op for steps
       //? without `details`, so the keypress is simply ignored there).
@@ -605,14 +645,14 @@ const runWizard = (
         answers[step.key] = step.type === 'multi'
           ? step.options.filter((option) => selections[i]?.has(option) === true)
           : asOption(step.options[cursorPos], step.options, step.defaultValue ?? step.options[0] ?? '');
+        //? Recompute visibility AFTER recording the answer (it may reveal/hide a
+        //? conditional step, e.g. OAuth or browser-tooling). Past the last step we
+        //? enter the review screen instead of resolving straight away.
         const nextOrder = visibleSteps();
         pointer += 1;
         detailsOpen = false;
+        if (pointer >= nextOrder.length) reviewing = true;
         paint();
-        if (pointer >= nextOrder.length) {
-          restoreTerminal();
-          resolve(answers);
-        }
       }
     }
 
@@ -679,40 +719,160 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
   );
 
   const answers = await runWizard([
-    { key: 'dbProvider', type: 'select', label: 'Which database provider?', description: 'Database used in prisma/schema.prisma — drives the @prisma/client types.', options: PROVIDER_OPTIONS.dbProvider, defaultValue: 'mongodb' },
-    { key: 'authMode', type: 'select', label: 'Authentication mode?', description: '@luckystack/login — email/password auth, sessions + optional OAuth. "none" (default) omits the package and all auth pages/APIs.', options: PROVIDER_OPTIONS.authMode, defaultValue: 'none' },
-    { key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire?', description: 'Social-login providers wired into @luckystack/login.', options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.authMode !== 'credentials+oauth' },
-    { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', description: '@luckystack/email — password-reset/verification mail. "none" (default) = not installed; "console" = log to terminal (dev); resend/smtp = real delivery.', options: PROVIDER_OPTIONS.emailProvider, defaultValue: 'none' },
-    { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', description: 'Picks WHERE telemetry goes — the backend SDK + .env keys (Sentry/Datadog/PostHog). @luckystack/error-tracking (next question) is the layer that feeds it.', options: PROVIDER_OPTIONS.monitoringProvider, defaultValue: 'none' },
-    { key: 'presence', type: 'select', label: 'Install @luckystack/presence?', description: 'Live presence, AFK detection + a socket-status indicator. Optional.', options: ['Yes', 'No'], defaultValue: 'No' },
     {
-      key: 'errorTracking',
-      type: 'select',
-      label: 'Install @luckystack/error-tracking?',
-      description: 'The framework layer that auto-captures errors and feeds the backend above. Press ? for what it does (vs the backend question).',
+      key: 'dbProvider', type: 'select', label: 'Which database provider?',
+      description: 'Your database via Prisma — sets prisma/schema.prisma + the @prisma/client types.',
+      details: [
+        'Sets the `provider` in prisma/schema.prisma and the @prisma/client types',
+        'generated from it. This is Prisma (not a @luckystack package) — your data',
+        'layer. You can switch it later by editing schema.prisma and re-running',
+        '`npm run prisma:generate`.',
+      ].join('\n'),
+      options: PROVIDER_OPTIONS.dbProvider, defaultValue: 'mongodb',
+    },
+    {
+      key: 'authMode', type: 'select', label: 'Authentication mode? (@luckystack/login)',
+      description: 'Email/password + sessions + optional OAuth. "none" = no auth wired.',
+      details: [
+        '@luckystack/login. "none" = no auth (anonymous sessions still work).',
+        '"credentials" = email/password sign-in + registration + password-reset',
+        'pages. "credentials+oauth" = that plus social login (next question picks',
+        'the providers). The auth pages/APIs are copied into your src/ to edit.',
+        'Add later instead: npx luckystack add login.',
+      ].join('\n'),
+      options: PROVIDER_OPTIONS.authMode, defaultValue: 'none',
+    },
+    {
+      key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire? (@luckystack/login)',
+      description: 'Social-login providers pre-wired into @luckystack/login.',
+      details: [
+        '@luckystack/login wires each provider purely from env vars',
+        '(DEV_<PROVIDER>_CLIENT_ID / _SECRET), so you can add or drop providers',
+        'later with no code change — just set/unset the env. Pick the ones to',
+        'pre-wire now.',
+      ].join('\n'),
+      options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.authMode !== 'credentials+oauth',
+    },
+    {
+      key: 'emailProvider', type: 'select', label: 'Transactional email adapter? (@luckystack/email)',
+      description: '"none" = not installed · "console" = log to terminal (dev) · resend/smtp = real delivery.',
+      details: [
+        '@luckystack/email — sends transactional mail (password reset, email',
+        'verification). "none" = the package is not installed. "console" = emails',
+        'are logged to the terminal (handy in dev, no account needed). "resend" /',
+        '"smtp" = real delivery — set the API key / SMTP vars in .env.local.',
+      ].join('\n'),
+      options: PROVIDER_OPTIONS.emailProvider, defaultValue: 'none',
+    },
+    {
+      key: 'monitoringProvider', type: 'select', label: 'Observability backend? (Sentry/Datadog/PostHog SDK)',
+      description: 'WHERE telemetry goes — the backend SDK + .env keys. @luckystack/error-tracking (next) feeds it.',
+      details: [
+        'Picks the observability BACKEND + its SDK + .env keys (Sentry / Datadog /',
+        'PostHog) — i.e. WHERE telemetry ends up. It does not capture anything on',
+        'its own: @luckystack/error-tracking (the next question) is the layer that',
+        'collects errors and sends them here. "none" = no backend wired.',
+      ].join('\n'),
+      options: PROVIDER_OPTIONS.monitoringProvider, defaultValue: 'none',
+    },
+    {
+      key: 'presence', type: 'select', label: 'Install @luckystack/presence?',
+      description: 'Live presence, AFK detection + a socket-status indicator.',
+      details: [
+        '@luckystack/presence — shows who is online, detects AFK/idle, and renders',
+        'a live socket-status indicator. Adds a <LocationProvider/> + the indicator',
+        'to your client. Skip it if your app has no real-time/presence needs.',
+        'Add later instead: npx luckystack add presence.',
+      ].join('\n'),
+      options: ['Yes', 'No'], defaultValue: 'No',
+    },
+    {
+      key: 'errorTracking', type: 'select', label: 'Install @luckystack/error-tracking?',
+      description: 'Auto-captures errors and feeds the backend above. Press ? — important if you picked backend "none".',
       details: [
         '@luckystack/error-tracking is a thin layer the framework auto-wires into',
         'every API + sync call: it captures thrown errors, adds request/timing',
         'spans, and tags the current user — with zero code in your handlers.',
         '',
-        'It does NOT store or send anything by itself. It forwards to whatever',
-        'backend you picked in the "Observability backend?" question above',
-        '(Sentry/Datadog/PostHog). So: that question = WHERE telemetry goes; this',
-        'package = the glue that collects it and sends it there.',
+        'It does NOT store anything itself; it FORWARDS to a backend. Two cases:',
+        ' • You picked a backend above (Sentry/PostHog/Datadog) → errors flow there.',
+        ' • You picked "none" → there is nowhere to send, so this package stays a',
+        '   no-op. Only useful then if you register your own captureException sink',
+        '   in code.',
         '',
-        'Install it for automatic error capture (stays a no-op until a DSN/key is',
-        'set, so it is safe to leave on). Skip it for a backend-free app, or if',
-        'you prefer to call captureException yourself.',
+        'So install it together with a backend (or your own sink). It is safe to',
+        'leave on — dormant until a DSN/key is set. Skip it for a backend-free app.',
       ].join('\n'),
-      options: ['Yes', 'No'],
-      defaultValue: 'No',
+      options: ['Yes', 'No'], defaultValue: 'No',
     },
-    { key: 'docsUi', type: 'select', label: 'Install @luckystack/docs-ui?', description: 'In-app viewer for your generated API docs. Backend self-wires; opt-in.', options: ['Yes', 'No'], defaultValue: 'No' },
-    { key: 'secretManager', type: 'select', label: 'Install @luckystack/secret-manager?', description: 'Resolve `.env` pointers from a remote secret server (commit pointers, not secrets). Dormant until configured; opt-in.', options: ['Yes', 'No'], defaultValue: 'No' },
-    { key: 'router', type: 'select', label: 'Install @luckystack/router?', description: 'Multi-instance load-balancer process (run separately via `npm run router`). Only needed when you scale to multiple server instances. Reads deploy.config.ts.', options: ['Yes', 'No'], defaultValue: 'No' },
-    { key: 'i18n', type: 'select', label: 'Enable i18n?', description: 'Multi-language UI: translations + locale switching (adds nl/de/fr locale files).', options: ['Yes', 'No'], defaultValue: 'No' },
-    { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions?', description: 'CLAUDE.md, docs/luckystack, branch-logs + the auto-index git hook — context for AI coding agents.', options: ['Yes', 'No'], defaultValue: 'Yes' },
-    { key: 'aiBrowserTooling', type: 'select', label: 'Set up AI browser-testing tooling?', description: 'all = agent-browser CLI + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none = skip.', options: PROVIDER_OPTIONS.aiBrowserTooling, defaultValue: 'agent-browser', skip: (a) => a.aiInstructions === 'No' },
+    {
+      key: 'docsUi', type: 'select', label: 'Install @luckystack/docs-ui?',
+      description: 'In-app viewer for your generated API docs at /_docs (dev).',
+      details: [
+        '@luckystack/docs-ui — mounts an in-app viewer for your auto-generated API',
+        'docs at /_docs (development). The backend self-wires the moment the package',
+        'is installed (its ./register subpath), so no code edit is needed. Disabled',
+        'in production by default.',
+      ].join('\n'),
+      options: ['Yes', 'No'], defaultValue: 'No',
+    },
+    {
+      key: 'secretManager', type: 'select', label: 'Install @luckystack/secret-manager?',
+      description: 'Commit POINTERS in .env, resolve real secrets from a remote server at boot.',
+      details: [
+        '@luckystack/secret-manager — keeps real secrets OUT of your repo: you',
+        'commit POINTERS in .env (NAME=BASE_V<n>) and the package resolves them from',
+        'an external secret server at boot. Choosing Yes adds the dep and uncomments',
+        'its config.ts + server.ts blocks; it stays dormant until you set',
+        'LUCKYSTACK_SECRET_MANAGER_URL. Skip it unless you run a secret server.',
+      ].join('\n'),
+      options: ['Yes', 'No'], defaultValue: 'No',
+    },
+    {
+      key: 'router', type: 'select', label: 'Install @luckystack/router?',
+      description: 'Separate multi-instance load-balancer process (npm run router). Only for scaling out.',
+      details: [
+        '@luckystack/router — a SEPARATE load-balancer process (run via',
+        '`npm run router`) that routes traffic across multiple server instances. You',
+        'only need it when you scale out to multi-instance; a single-server app never',
+        'runs it. The routing topology lives in your deploy.config.ts. Adds the dep',
+        '+ the run script.',
+      ].join('\n'),
+      options: ['Yes', 'No'], defaultValue: 'No',
+    },
+    {
+      key: 'i18n', type: 'select', label: 'Enable i18n? (@luckystack/core)',
+      description: 'Multi-language UI: translations + locale switching (adds nl/de/fr).',
+      details: [
+        'Multi-language UI via @luckystack/core\'s translator: adds nl/de/fr locale',
+        'files, a language switcher, and the useTranslator wiring. "No" keeps the',
+        'app English-only (you can still translate strings later).',
+      ].join('\n'),
+      options: ['Yes', 'No'], defaultValue: 'No',
+    },
+    {
+      key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions?',
+      description: 'CLAUDE.md + docs + git hook + the @luckystack/mcp graph server for AI agents.',
+      details: [
+        'Copies LuckyStack\'s AI dev-context into the project: the root CLAUDE.md,',
+        'the docs/luckystack deep-dives, skills, and a pre-commit git hook that keeps',
+        'the AI index/graph fresh. Also registers @luckystack/mcp in .mcp.json so AI',
+        'agents can query your dependency graph (blast_radius / who_imports). No',
+        'app-runtime weight — pure dev tooling.',
+      ].join('\n'),
+      options: ['Yes', 'No'], defaultValue: 'Yes',
+    },
+    {
+      key: 'aiBrowserTooling', type: 'select', label: 'Set up AI browser-testing tooling?',
+      description: 'agent-browser = cheap CLI · all = + Playwright/Chrome DevTools MCP · none = skip.',
+      details: [
+        'AI browser-testing tooling (external tools, not a @luckystack package).',
+        '"agent-browser" = the cheap CLI for interactive verification. "all" = also',
+        'wires the Playwright + Chrome DevTools MCP servers for cross-browser / perf',
+        'checks. "none" = skip. Only applies when AI dev instructions are on.',
+      ].join('\n'),
+      options: PROVIDER_OPTIONS.aiBrowserTooling, defaultValue: 'agent-browser', skip: (a) => a.aiInstructions === 'No',
+    },
   ], presets);
 
   return convertAnswersToChoices(answers);
