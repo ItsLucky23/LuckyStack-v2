@@ -19,6 +19,15 @@ import { parse as parseDotenv } from 'dotenv';
 
 const RESTART_DEBOUNCE_MS = 150;
 const CRASH_RESTART_DELAY_MS = 300;
+//? Rapid-crash-loop breaker. A child that exits non-zero within
+//? FAST_CRASH_THRESHOLD_MS of booting counts as a "fast crash" (it died during
+//? startup rather than after serving). MAX_CONSECUTIVE_FAST_CRASHES of those in
+//? a row means the startup error is not transient (a port already in use, a
+//? syntax error, a missing env) — restarting forever just spams the console, so
+//? we give up and print an actionable message. A child that survives longer than
+//? the threshold resets the counter, so a normal restart loop is unaffected.
+const FAST_CRASH_THRESHOLD_MS = 3000;
+const MAX_CONSECUTIVE_FAST_CRASHES = 4;
 //? Force-exit grace: how long we wait for the child to honour SIGTERM before
 //? the supervisor hard-exits. Windows does not deliver SIGKILL so the only
 //? lever is this timer. 1 500 ms is intentionally short (dev restarts should
@@ -76,6 +85,7 @@ let pendingRestart = false;
 let restartTimer: NodeJS.Timeout | null = null;
 let crashRestartTimer: NodeJS.Timeout | null = null;
 let childBootStartedAt = 0;
+let consecutiveFastCrashes = 0;
 let isShuttingDown = false;
 
 const startChild = () => {
@@ -139,6 +149,9 @@ const startChild = () => {
 
     if (shouldRestart) {
       pendingRestart = false;
+      //? A watcher-driven restart is an explicit edit to a watched file — give
+      //? the new code a clean slate instead of inheriting a previous crash burst.
+      consecutiveFastCrashes = 0;
       console.log(`[Supervisor] Restarting server after ${String(uptimeMs)}ms uptime`);
       startChild();
       return;
@@ -149,6 +162,24 @@ const startChild = () => {
     }
 
     if (typeof code === 'number' && code !== 0) {
+      //? Rapid-crash-loop breaker: a child that died within the boot window
+      //? counts toward the consecutive-fast-crash tally; one that lived longer
+      //? proves the startup error cleared, so reset the tally.
+      if (uptimeMs < FAST_CRASH_THRESHOLD_MS) {
+        consecutiveFastCrashes += 1;
+      } else {
+        consecutiveFastCrashes = 0;
+      }
+
+      if (consecutiveFastCrashes >= MAX_CONSECUTIVE_FAST_CRASHES) {
+        console.log(
+          `[Supervisor] Server crashed ${String(consecutiveFastCrashes)} times within ` +
+            `${String(FAST_CRASH_THRESHOLD_MS / 1000)}s of starting — giving up. Fix the startup ` +
+            `error above (e.g. a port already in use), then re-run \`npm run server\`.`,
+        );
+        process.exit(1);
+      }
+
       console.log(`[Supervisor] Server crashed with code ${String(code)}. Restarting in ${String(CRASH_RESTART_DELAY_MS)}ms`);
       crashRestartTimer = setTimeout(() => {
         crashRestartTimer = null;
