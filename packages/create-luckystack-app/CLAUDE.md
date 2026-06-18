@@ -30,7 +30,7 @@ Beyond the bare template copy, the CLI also copies the framework's AI-facing doc
 | `main()` (CLI entrypoint, auto-invoked at bottom of `src/index.ts`) | Orchestrates the full scaffold flow: parse argv -> validate target dir -> optional prompts -> `copyTree` -> framework-docs copy (E.2) -> optional `npm install` + `npx prisma generate` -> print next-step block. | -> docs/scaffold-flow.md |
 | `parseArgs(argv)` | Strict argv parser. Recognises `--no-install`, `--no-prompt`, `--no-presence`, `--ai-browser=<all\|agent-browser\|none>`, `--help` / `-h` (the `VALID_FLAGS` list), plus the first non-flag token as the project name. Any other `-`/`--` token (or a bad `--ai-browser` value) causes `process.exit(2)`. Returns `CliArgs`. | -> docs/cli-flags.md |
 | `printHelp()` | Prints the human-readable usage banner. Triggered by `--help` / `-h` and on missing project name. | -> docs/cli-flags.md |
-| `runPrompts()` | Opens a `readline` interface and walks the user through `dbProvider`, `authMode`, `oauthProviders` (conditional), `emailProvider`, `monitoringProvider`, `i18n`. Returns a fully populated `ScaffoldChoices`. Skipped when `--no-prompt` is passed. | -> docs/scaffold-flow.md |
+| `runPrompts()` | Arrow-key TTY wizard (with an `(x/y)` progress counter + a one-line description under each step) walking `dbProvider`, `authMode`, `oauthProviders` (conditional), `emailProvider`, `monitoringProvider`, then the per-package opt toggles `presence`, `errorTracking` (opt-out), `docsUi` / `secretManager` (opt-in), `i18n`, `aiInstructions`, `aiBrowserTooling` (conditional). Falls back to `runPromptsFallback` (numbered prompts) on a non-TTY. Returns a fully populated `ScaffoldChoices`. Skipped when `--no-prompt` is passed. | -> docs/scaffold-flow.md |
 | `pickFromList(rl, label, options, defaultValue)` | Single-choice prompt helper. Accepts either a numeric index or a case-insensitive option name. Blank input returns the default. | -> docs/scaffold-flow.md |
 | `pickMulti(rl, label, options)` | Multi-choice prompt helper. Parses a comma-separated list of indices / option names; blank input returns `[]`. | -> docs/scaffold-flow.md |
 | `askYesNo(rl, label, defaultValue)` | Boolean prompt helper. Treats blank input as the default; `y` / `yes` -> `true`, anything else -> `false`. | -> docs/scaffold-flow.md |
@@ -45,8 +45,8 @@ Beyond the bare template copy, the CLI also copies the framework's AI-facing doc
 | `runPrismaGenerate(cwd)` | Spawns `npx prisma generate` after `npm install` so first-build types resolve. Does NOT run `prisma db push` or `prisma migrate` — those require a populated `DATABASE_URL`. | -> docs/post-scaffold-suggestions.md |
 | Framework-docs copy block (inside `main`) | After the template copy, recursively copies root `CLAUDE.md`, `docs/` (-> `docs/luckystack/` in the scaffold), `skills/`, `.claude/commands/`, and `branch-logs/README.md` from the repo root into the target. Each source is optional — missing sources are skipped silently. | -> docs/framework-docs-copy.md |
 | Type: `CliArgs` | `{ projectName: string; install: boolean; prompt: boolean; help: boolean }`. Output of `parseArgs`. | -> docs/cli-flags.md |
-| Type: `ScaffoldChoices` | `{ dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, presence, i18n, aiInstructions, aiBrowserTooling }`. Output of `runPrompts` / `DEFAULT_CHOICES`. `aiBrowserTooling: 'all' \| 'agent-browser' \| 'none'` is forced to `'none'` when `aiInstructions` is off. | -> docs/scaffold-flow.md |
-| Constant: `DEFAULT_CHOICES` | Sane defaults used when `--no-prompt` is passed (Mongo + credentials + console email + no monitoring + presence on + i18n on + AI instructions on + `aiBrowserTooling: 'agent-browser'`). | -> docs/scaffold-flow.md |
+| Type: `ScaffoldChoices` | `{ dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, presence, errorTracking, docsUi, secretManager, i18n, aiInstructions, aiBrowserTooling }`. Output of `runPrompts` / `DEFAULT_CHOICES`. `errorTracking` is opt-out (default on, pruned when off); `docsUi` / `secretManager` are opt-in (default off, injected as deps when on). `aiBrowserTooling: 'all' \| 'agent-browser' \| 'none'` is forced to `'none'` when `aiInstructions` is off. | -> docs/scaffold-flow.md |
+| Constant: `DEFAULT_CHOICES` | Sane defaults used when `--no-prompt` is passed (Mongo + credentials + console email + no monitoring + presence on + error-tracking on + docs-ui off + secret-manager off + i18n on + AI instructions on + `aiBrowserTooling: 'agent-browser'`). | -> docs/scaffold-flow.md |
 | Constant: `TEMPLATE_DIR` | Resolved absolute path to the bundled `template/` folder (`../template` from `dist/index.js`). The scaffold aborts with a packaging-bug message when this directory is missing at runtime. | -> docs/scaffold-flow.md |
 
 ## Config keys
@@ -59,6 +59,9 @@ CLI flags (parsed by `parseArgs`):
 - `--no-install` — skip `npm install` and `npx prisma generate` after copying.
 - `--no-prompt` — skip the interactive prompts and apply `DEFAULT_CHOICES`.
 - `--no-presence` — omit `@luckystack/presence` (applies under `--no-prompt`; the wizard asks otherwise).
+- `--no-error-tracking` — omit `@luckystack/error-tracking` (opt-out; installed by default).
+- `--docs-ui` — opt INTO `@luckystack/docs-ui` (in-app API docs viewer; off by default).
+- `--secret-manager` — opt INTO `@luckystack/secret-manager` (`.env`-pointer secrets; off by default).
 - `--ai-browser=<all|agent-browser|none>` — AI browser-testing tooling (default `agent-browser`); `'all'` also wires the Playwright + Chrome DevTools MCP servers. Value flag (`process.exit(2)` on a bad value). Needs the AI instructions on.
 - `--help`, `-h` — print usage and exit.
 

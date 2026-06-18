@@ -243,6 +243,9 @@ describe("parseArgs", () => {
       prompt: true,
       help: false,
       noPresence: false,
+      noErrorTracking: false,
+      docsUi: false,
+      secretManager: false,
       aiBrowserTooling: null,
       ...CFG01_NULLS,
     });
@@ -255,6 +258,9 @@ describe("parseArgs", () => {
       prompt: true,
       help: false,
       noPresence: false,
+      noErrorTracking: false,
+      docsUi: false,
+      secretManager: false,
       aiBrowserTooling: null,
       ...CFG01_NULLS,
     });
@@ -301,6 +307,9 @@ describe("parseArgs", () => {
       prompt: false,
       help: false,
       noPresence: false,
+      noErrorTracking: false,
+      docsUi: false,
+      secretManager: false,
       aiBrowserTooling: null,
       ...CFG01_NULLS,
     });
