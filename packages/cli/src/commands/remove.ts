@@ -17,7 +17,28 @@ import {
   type ConsumerProject,
   type Result,
 } from '../lib/project';
+import { collectSourceFiles, matchAll } from '../lib/scan';
 import type { RegistryEntry } from '../registry';
+
+//? After a removal, the package is gone from package.json but the consumer's OWN
+//? code may still import it (handlers using @luckystack/email, a page importing
+//? @luckystack/login, etc.) — those break at build time until cleaned up. Scan the
+//? source for any string literal that is the package or a subpath (covers
+//? `import … from`, dynamic `import()`, `require()`) and print the file:line list
+//? so the user can fix them — or hand the list straight to an AI. Read-only.
+const referencesToPackage = (root: string, pkg: string): string[] => {
+  const escaped = pkg.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  const pattern = new RegExp(`['"](${escaped}(?:/[^'"]*)?)['"]`, 'g');
+  return matchAll(collectSourceFiles(root), pattern).map((hit) => `${hit.file}:${String(hit.line)}`);
+};
+
+const warnRemainingReferences = (root: string, pkg: string): void => {
+  const refs = referencesToPackage(root, pkg);
+  if (refs.length === 0) return;
+  console.warn(`\n⚠ ${String(refs.length)} reference(s) to ${pkg} remain in your code — these will break until you remove or replace them:`);
+  for (const ref of refs) console.warn(`    ${ref}`);
+  console.warn('  Tip: hand this list to your AI (or grep it) to clean up the imports/usages.');
+};
 
 const MAIN_TSX = 'src/main.tsx';
 const TEMPLATE_PROVIDER = 'src/_components/templates/TemplateProvider.tsx';
@@ -164,22 +185,29 @@ const removeLogin = (project: ConsumerProject, entry: RegistryEntry): Result<voi
 };
 
 //? Dispatch a removal by registry kind. Install is run ONCE by the caller after
-//? all add/remove handlers, so removal handlers never install themselves.
+//? all add/remove handlers, so removal handlers never install themselves. On
+//? success, scan for any of the consumer's own remaining imports of the package
+//? (the JSX/copied-file handling above is package-managed; THIS catches the user's
+//? own usages that now dangle) and print them so they can be cleaned up.
 export const removeFeature = (project: ConsumerProject, entry: RegistryEntry): Result<void> => {
-  switch (entry.kind) {
-    case 'login': {
-      return removeLogin(project, entry);
+  const result = ((): Result<void> => {
+    switch (entry.kind) {
+      case 'login': {
+        return removeLogin(project, entry);
+      }
+      case 'presence': {
+        return removePresence(project, entry);
+      }
+      case 'backend': {
+        return removeBackend(project, entry);
+      }
+      default: {
+        //? Exhaustiveness guard — a new FeatureKind without a case is a compile error.
+        const _exhaustive: never = entry.kind;
+        throw new Error(`Unhandled feature kind: ${JSON.stringify(_exhaustive)}`);
+      }
     }
-    case 'presence': {
-      return removePresence(project, entry);
-    }
-    case 'backend': {
-      return removeBackend(project, entry);
-    }
-    default: {
-      //? Exhaustiveness guard — a new FeatureKind without a case is a compile error.
-      const _exhaustive: never = entry.kind;
-      throw new Error(`Unhandled feature kind: ${JSON.stringify(_exhaustive)}`);
-    }
-  }
+  })();
+  if (result.ok) warnRemainingReferences(project.root, entry.pkg);
+  return result;
 };

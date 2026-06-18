@@ -22,7 +22,7 @@ import { checkI18n } from './commands/checkI18n';
 import { listFeatures, installedRegistryIds } from './commands/list';
 import { applyManagePlan, computeManagePlan } from './commands/manage';
 import { REGISTRY, findRegistryEntry } from './registry';
-import { isInteractive, runCheckbox, type CheckboxItem } from './lib/wizard';
+import { confirmPrompt, isInteractive, runCheckbox, type CheckboxItem } from './lib/wizard';
 
 const HELP = `luckystack — LuckyStack project CLI
 
@@ -117,6 +117,24 @@ const runManageWizard = async (project: ConsumerProject, options: AddOptions): P
     return { ok: true, value: undefined };
   }
   const plan = computeManagePlan([...installed], result.selected);
+  if (plan.add.length === 0 && plan.remove.length === 0) {
+    console.log('\nNo changes selected.');
+    return { ok: true, value: undefined };
+  }
+  //? Show the resolved plan + a confirm before touching the filesystem, so the
+  //? final screen is reviewable (the checkbox screen alone wasn't a commit point).
+  console.log('\nPlanned changes:');
+  if (plan.add.length > 0) console.log(`  + add:    ${plan.add.join(', ')}`);
+  if (plan.remove.length > 0) console.log(`  - remove: ${plan.remove.join(', ')}`);
+  const guarded = plan.remove.filter((id) => findRegistryEntry(id)?.removable === 'guarded');
+  if (guarded.length > 0) {
+    console.log(`  note: ${guarded.join(', ')} keep their copied src/ files (you'll get a cleanup list).`);
+  }
+  const proceed = await confirmPrompt('\nApply these changes?');
+  if (!proceed) {
+    console.log('Cancelled — no changes made.');
+    return { ok: true, value: undefined };
+  }
   return applyManagePlan(project, plan, options);
 };
 

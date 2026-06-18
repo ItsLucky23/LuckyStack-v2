@@ -6,7 +6,7 @@
 //? The pure diff/apply logic lives elsewhere (see commands/manage.ts) so the part
 //? that can't be unit-tested (the raw TTY loop) stays minimal and isolated here.
 
-import { emitKeypressEvents } from 'node:readline';
+import { emitKeypressEvents, createInterface } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 
 const ANSI = {
@@ -45,6 +45,21 @@ export interface CheckboxResult {
 //? True when both stdin and stdout are interactive terminals — the prompt needs
 //? raw-mode keypresses, so a piped / CI run must take the non-TTY guard instead.
 export const isInteractive = (): boolean => input.isTTY && output.isTTY;
+
+//? A simple line-mode y/N confirm (no raw keypress mode). Blank input returns the
+//? default. Used to gate the manage plan before it touches the filesystem. The
+//? caller guards `isInteractive()` first, so this never hangs in CI.
+export const confirmPrompt = (question: string, defaultYes = false): Promise<boolean> =>
+  new Promise((resolve) => {
+    const rl = createInterface({ input, output });
+    const hint = defaultYes ? 'Y/n' : 'y/N';
+    rl.question(`${question} (${hint}) `, (raw) => {
+      rl.close();
+      const answer = raw.trim().toLowerCase();
+      if (answer === '') resolve(defaultYes);
+      else resolve(answer === 'y' || answer === 'yes');
+    });
+  });
 
 //? Render a single multi-select screen and resolve with the chosen ids. The
 //? caller MUST check `isInteractive()` first; on a non-TTY this would hang.
