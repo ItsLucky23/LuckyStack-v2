@@ -242,8 +242,8 @@ describe("parseArgs", () => {
       install: true,
       prompt: true,
       help: false,
-      noPresence: false,
-      noErrorTracking: false,
+      presence: false,
+      errorTracking: false,
       docsUi: false,
       secretManager: false,
       aiBrowserTooling: null,
@@ -257,8 +257,8 @@ describe("parseArgs", () => {
       install: true,
       prompt: true,
       help: false,
-      noPresence: false,
-      noErrorTracking: false,
+      presence: false,
+      errorTracking: false,
       docsUi: false,
       secretManager: false,
       aiBrowserTooling: null,
@@ -283,9 +283,9 @@ describe("parseArgs", () => {
     expect(result.install).toBe(true);
   });
 
-  it("sets noPresence for --no-presence (default false)", () => {
-    expect(parseArgs(["my-app"]).noPresence).toBe(false);
-    expect(parseArgs(["my-app", "--no-presence"]).noPresence).toBe(true);
+  it("sets presence for --presence (default false)", () => {
+    expect(parseArgs(["my-app"]).presence).toBe(false);
+    expect(parseArgs(["my-app", "--presence"]).presence).toBe(true);
   });
 
   it("parses --ai-browser=<value> (default null)", () => {
@@ -306,8 +306,8 @@ describe("parseArgs", () => {
       install: false,
       prompt: false,
       help: false,
-      noPresence: false,
-      noErrorTracking: false,
+      presence: false,
+      errorTracking: false,
       docsUi: false,
       secretManager: false,
       aiBrowserTooling: null,

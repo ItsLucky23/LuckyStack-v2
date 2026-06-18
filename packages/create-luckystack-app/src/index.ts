@@ -35,13 +35,13 @@ export interface CliArgs {
   install: boolean;
   prompt: boolean;
   help: boolean;
-  /** `--no-presence`: omit @luckystack/presence (applies under --no-prompt / CI). */
-  noPresence: boolean;
-  /** `--no-error-tracking`: omit @luckystack/error-tracking (opt-out; installed otherwise). */
-  noErrorTracking: boolean;
-  /** `--docs-ui`: opt INTO @luckystack/docs-ui (off otherwise). */
+  /** `--presence`: opt INTO @luckystack/presence (off by default). */
+  presence: boolean;
+  /** `--error-tracking`: opt INTO @luckystack/error-tracking (off by default). */
+  errorTracking: boolean;
+  /** `--docs-ui`: opt INTO @luckystack/docs-ui (off by default). */
   docsUi: boolean;
-  /** `--secret-manager`: opt INTO @luckystack/secret-manager (off otherwise). */
+  /** `--secret-manager`: opt INTO @luckystack/secret-manager (off by default). */
   secretManager: boolean;
   /** `--ai-browser=<all|agent-browser|none>`: AI browser-testing tooling (null = unspecified → DEFAULT_CHOICES). */
   aiBrowserTooling: AiBrowserTooling | null;
@@ -71,7 +71,7 @@ export const VALID_FLAGS = [
   '--oauth=<google,github,discord,facebook,microsoft>',
   '--email=<none|console|resend|smtp>',
   '--monitoring=<none|sentry|datadog|posthog>',
-  '--no-presence', '--no-error-tracking', '--docs-ui', '--secret-manager',
+  '--presence', '--error-tracking', '--docs-ui', '--secret-manager',
   '--i18n', '--no-i18n', '--ai-docs', '--no-ai-docs',
   '--ai-browser=<all|agent-browser|none>',
   '--help', '-h',
@@ -92,8 +92,8 @@ export const parseArgs = (argv: string[]): CliArgs => {
   let install = true;
   let prompt = true;
   let help = false;
-  let noPresence = false;
-  let noErrorTracking = false;
+  let presence = false;
+  let errorTracking = false;
   let docsUi = false;
   let secretManager = false;
   let aiBrowserTooling: AiBrowserTooling | null = null;
@@ -114,12 +114,12 @@ export const parseArgs = (argv: string[]): CliArgs => {
     prompt = false;
     break;
     }
-    case '--no-presence': {
-    noPresence = true;
+    case '--presence': {
+    presence = true;
     break;
     }
-    case '--no-error-tracking': {
-    noErrorTracking = true;
+    case '--error-tracking': {
+    errorTracking = true;
     break;
     }
     case '--docs-ui': {
@@ -182,7 +182,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
   }
   return {
-    projectName, install, prompt, help, noPresence, noErrorTracking, docsUi, secretManager, aiBrowserTooling,
+    projectName, install, prompt, help, presence, errorTracking, docsUi, secretManager, aiBrowserTooling,
     dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n, aiInstructions,
   };
 };
@@ -246,17 +246,22 @@ interface ScaffoldChoices {
   aiBrowserTooling: AiBrowserTooling;
 }
 
+//? Lean-by-default: every optional package/feature starts OFF so a fresh scaffold
+//? is the minimal runtime (core/server/api/sync + a database). Each is opt-in via
+//? the wizard or a CLI flag. The ONE exception is `aiInstructions` — it ships only
+//? docs + a git hook (no app-runtime weight) and is the framework's core dev value,
+//? so it stays on by default.
 const DEFAULT_CHOICES: ScaffoldChoices = {
   dbProvider: 'mongodb',
-  authMode: 'credentials',
+  authMode: 'none',
   oauthProviders: [],
-  emailProvider: 'console',
+  emailProvider: 'none',
   monitoringProvider: 'none',
-  presence: true,
-  errorTracking: true,
+  presence: false,
+  errorTracking: false,
   docsUi: false,
   secretManager: false,
-  i18n: true,
+  i18n: false,
   aiInstructions: true,
   aiBrowserTooling: 'agent-browser',
 };
@@ -336,23 +341,23 @@ const runPromptsFallback = async (
       answers.dbProvider = await pickFromList(rl, 'Which database provider do you want to use?', PROVIDER_OPTIONS.dbProvider, 'mongodb');
     }
     if (need('authMode')) {
-      answers.authMode = await pickFromList(rl, 'Authentication mode?', PROVIDER_OPTIONS.authMode, 'credentials');
+      answers.authMode = await pickFromList(rl, 'Authentication mode?', PROVIDER_OPTIONS.authMode, 'none');
     }
-    const authMode = asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'credentials');
+    const authMode = asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
     if (authMode === 'credentials+oauth' && need('oauthProviders')) {
       answers.oauthProviders = await pickMulti(rl, 'Which OAuth providers to wire?', PROVIDER_OPTIONS.oauthProviders);
     }
     if (need('emailProvider')) {
-      answers.emailProvider = await pickFromList(rl, 'Transactional email adapter?', PROVIDER_OPTIONS.emailProvider, 'console');
+      answers.emailProvider = await pickFromList(rl, 'Transactional email adapter?', PROVIDER_OPTIONS.emailProvider, 'none');
     }
     if (need('monitoringProvider')) {
       answers.monitoringProvider = await pickFromList(rl, 'Observability backend?', PROVIDER_OPTIONS.monitoringProvider, 'none');
     }
     if (need('presence')) {
-      answers.presence = (await askYesNo(rl, 'Install @luckystack/presence (AFK / presence / socket-status)?', true)) ? 'Yes' : 'No';
+      answers.presence = (await askYesNo(rl, 'Install @luckystack/presence (AFK / presence / socket-status)?', false)) ? 'Yes' : 'No';
     }
     if (need('errorTracking')) {
-      answers.errorTracking = (await askYesNo(rl, 'Install @luckystack/error-tracking (error capture + auto-instrumentation)?', true)) ? 'Yes' : 'No';
+      answers.errorTracking = (await askYesNo(rl, 'Install @luckystack/error-tracking (error capture + auto-instrumentation)?', false)) ? 'Yes' : 'No';
     }
     if (need('docsUi')) {
       answers.docsUi = (await askYesNo(rl, 'Install @luckystack/docs-ui (in-app API docs viewer)?', false)) ? 'Yes' : 'No';
@@ -361,7 +366,7 @@ const runPromptsFallback = async (
       answers.secretManager = (await askYesNo(rl, 'Install @luckystack/secret-manager (.env-pointer secret resolution)?', false)) ? 'Yes' : 'No';
     }
     if (need('i18n')) {
-      answers.i18n = (await askYesNo(rl, 'Enable i18n (translations + locale switching)?', true)) ? 'Yes' : 'No';
+      answers.i18n = (await askYesNo(rl, 'Enable i18n (translations + locale switching)?', false)) ? 'Yes' : 'No';
     }
     if (need('aiInstructions')) {
       answers.aiInstructions = (await askYesNo(
@@ -592,7 +597,7 @@ const runWizard = (
 //? string). Centralizes the per-field `asOption` validation that used to be
 //? inlined at the return site.
 const convertAnswersToChoices = (answers: Record<string, string | string[]>): ScaffoldChoices => {
-  const authMode = asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'credentials');
+  const authMode = asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
   const rawOauth = answers.oauthProviders;
   const oauthPicked = Array.isArray(rawOauth) ? rawOauth : [];
 
@@ -602,7 +607,7 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
     oauthProviders: authMode === 'credentials+oauth'
       ? PROVIDER_OPTIONS.oauthProviders.filter((provider) => oauthPicked.includes(provider))
       : [],
-    emailProvider: asOption(answers.emailProvider, PROVIDER_OPTIONS.emailProvider, 'console'),
+    emailProvider: asOption(answers.emailProvider, PROVIDER_OPTIONS.emailProvider, 'none'),
     monitoringProvider: asOption(answers.monitoringProvider, PROVIDER_OPTIONS.monitoringProvider, 'none'),
     presence: answers.presence !== 'No',
     //? Opt-out convention (default installed): truthy unless explicitly 'No'.
@@ -634,15 +639,15 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
 
   const answers = await runWizard([
     { key: 'dbProvider', type: 'select', label: 'Which database provider?', description: 'Database used in prisma/schema.prisma — drives the @prisma/client types.', options: PROVIDER_OPTIONS.dbProvider, defaultValue: 'mongodb' },
-    { key: 'authMode', type: 'select', label: 'Authentication mode?', description: '@luckystack/login — email/password auth, sessions + optional OAuth. "none" omits the package and all auth pages/APIs.', options: PROVIDER_OPTIONS.authMode, defaultValue: 'credentials' },
+    { key: 'authMode', type: 'select', label: 'Authentication mode?', description: '@luckystack/login — email/password auth, sessions + optional OAuth. "none" (default) omits the package and all auth pages/APIs.', options: PROVIDER_OPTIONS.authMode, defaultValue: 'none' },
     { key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire?', description: 'Social-login providers wired into @luckystack/login.', options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.authMode !== 'credentials+oauth' },
-    { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', description: '@luckystack/email — password-reset/verification mail. "none" = not installed; "console" = log to terminal (dev); resend/smtp = real delivery.', options: PROVIDER_OPTIONS.emailProvider, defaultValue: 'console' },
+    { key: 'emailProvider', type: 'select', label: 'Transactional email adapter?', description: '@luckystack/email — password-reset/verification mail. "none" (default) = not installed; "console" = log to terminal (dev); resend/smtp = real delivery.', options: PROVIDER_OPTIONS.emailProvider, defaultValue: 'none' },
     { key: 'monitoringProvider', type: 'select', label: 'Observability backend?', description: 'Error/usage monitoring adapter (Sentry/Datadog/PostHog). "none" = no monitoring wired.', options: PROVIDER_OPTIONS.monitoringProvider, defaultValue: 'none' },
-    { key: 'presence', type: 'select', label: 'Install @luckystack/presence?', description: 'Live presence, AFK detection + a socket-status indicator. Optional.', options: ['Yes', 'No'], defaultValue: 'Yes' },
-    { key: 'errorTracking', type: 'select', label: 'Install @luckystack/error-tracking?', description: 'Error capture + auto-instrumentation (Sentry-compatible). Dormant until a DSN/adapter is set. Recommended.', options: ['Yes', 'No'], defaultValue: 'Yes' },
+    { key: 'presence', type: 'select', label: 'Install @luckystack/presence?', description: 'Live presence, AFK detection + a socket-status indicator. Optional.', options: ['Yes', 'No'], defaultValue: 'No' },
+    { key: 'errorTracking', type: 'select', label: 'Install @luckystack/error-tracking?', description: 'Error capture + auto-instrumentation (Sentry-compatible). Dormant until a DSN/adapter is set.', options: ['Yes', 'No'], defaultValue: 'No' },
     { key: 'docsUi', type: 'select', label: 'Install @luckystack/docs-ui?', description: 'In-app viewer for your generated API docs. Backend self-wires; opt-in.', options: ['Yes', 'No'], defaultValue: 'No' },
     { key: 'secretManager', type: 'select', label: 'Install @luckystack/secret-manager?', description: 'Resolve `.env` pointers from a remote secret server (commit pointers, not secrets). Dormant until configured; opt-in.', options: ['Yes', 'No'], defaultValue: 'No' },
-    { key: 'i18n', type: 'select', label: 'Enable i18n?', description: 'Multi-language UI: translations + locale switching (ships nl/de/fr locale files).', options: ['Yes', 'No'], defaultValue: 'Yes' },
+    { key: 'i18n', type: 'select', label: 'Enable i18n?', description: 'Multi-language UI: translations + locale switching (adds nl/de/fr locale files).', options: ['Yes', 'No'], defaultValue: 'No' },
     { key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions?', description: 'CLAUDE.md, docs/luckystack, branch-logs + the auto-index git hook — context for AI coding agents.', options: ['Yes', 'No'], defaultValue: 'Yes' },
     { key: 'aiBrowserTooling', type: 'select', label: 'Set up AI browser-testing tooling?', description: 'all = agent-browser CLI + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none = skip.', options: PROVIDER_OPTIONS.aiBrowserTooling, defaultValue: 'agent-browser', skip: (a) => a.aiInstructions === 'No' },
   ], presets);
@@ -660,8 +665,8 @@ const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> =>
   if (args.oauthProviders) presets.oauthProviders = args.oauthProviders;
   if (args.emailProvider) presets.emailProvider = args.emailProvider;
   if (args.monitoringProvider) presets.monitoringProvider = args.monitoringProvider;
-  if (args.noPresence) presets.presence = 'No';
-  if (args.noErrorTracking) presets.errorTracking = 'No';
+  if (args.presence) presets.presence = 'Yes';
+  if (args.errorTracking) presets.errorTracking = 'Yes';
   if (args.docsUi) presets.docsUi = 'Yes';
   if (args.secretManager) presets.secretManager = 'Yes';
   if (args.i18n !== null) presets.i18n = args.i18n ? 'Yes' : 'No';
@@ -688,8 +693,8 @@ const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
   if (args.oauthProviders) choices.oauthProviders = args.oauthProviders;
   if (args.emailProvider) choices.emailProvider = args.emailProvider;
   if (args.monitoringProvider) choices.monitoringProvider = args.monitoringProvider;
-  if (args.noPresence) choices.presence = false;
-  if (args.noErrorTracking) choices.errorTracking = false;
+  if (args.presence) choices.presence = true;
+  if (args.errorTracking) choices.errorTracking = true;
   if (args.docsUi) choices.docsUi = true;
   if (args.secretManager) choices.secretManager = true;
   if (args.i18n !== null) choices.i18n = args.i18n;
@@ -710,17 +715,18 @@ Options:
   --no-prompt    Skip the interactive prompts and use defaults + any flags below.
 
   Scaffold choices (each pre-fills the matching wizard step, or applies under --no-prompt):
-  --db=<mongodb|postgresql|mysql|sqlite>      Database provider.
-  --auth=<none|credentials|credentials+oauth> Authentication mode ('none' = no auth).
+  Lean by default: every optional package/feature is OFF unless you opt in below.
+  --db=<mongodb|postgresql|mysql|sqlite>      Database provider (default mongodb).
+  --auth=<none|credentials|credentials+oauth> Authentication mode (default 'none' = no auth).
   --oauth=<google,github,discord,facebook,microsoft>  OAuth providers (comma list; needs --auth=credentials+oauth).
-  --email=<none|console|resend|smtp>          Transactional email adapter.
-  --monitoring=<none|sentry|datadog|posthog>  Observability backend.
-  --no-presence  Omit @luckystack/presence.
-  --no-error-tracking  Omit @luckystack/error-tracking (installed by default).
-  --docs-ui      Install @luckystack/docs-ui (in-app API docs viewer; off by default).
-  --secret-manager  Install @luckystack/secret-manager (.env-pointer secrets; off by default).
-  --i18n / --no-i18n   Enable / disable i18n (translations + locale switching).
-  --ai-docs / --no-ai-docs   Include / omit LuckyStack AI dev instructions.
+  --email=<none|console|resend|smtp>          Transactional email adapter (default 'none').
+  --monitoring=<none|sentry|datadog|posthog>  Observability backend (default 'none').
+  --presence     Install @luckystack/presence (AFK / presence / socket-status).
+  --error-tracking  Install @luckystack/error-tracking (error capture + auto-instrumentation).
+  --docs-ui      Install @luckystack/docs-ui (in-app API docs viewer).
+  --secret-manager  Install @luckystack/secret-manager (.env-pointer secrets).
+  --i18n / --no-i18n   Enable / disable i18n (default off).
+  --ai-docs / --no-ai-docs   Include / omit LuckyStack AI dev instructions (default on).
   --ai-browser=<all|agent-browser|none>
                  AI browser-testing tooling (default agent-browser). 'all' also wires the
                  Playwright + Chrome DevTools MCP servers. Needs the AI instructions on.
@@ -1541,6 +1547,41 @@ const pruneErrorTracking = (targetDir: string): void => {
   removeScaffoldPath(targetDir, 'functions/sentry.ts');
 };
 
+//? Fully wire @luckystack/secret-manager when opted IN: the dep is added by
+//? injectOptionalDeps; here we uncomment the two enable-later blocks the template
+//? ships (the `secretManager` slot in config.ts + the init block in server.ts).
+//? It stays dormant until LUCKYSTACK_SECRET_MANAGER_URL is set — the init is
+//? gated on `projectConfig.secretManager?.url` (empty by default) — so a fresh
+//? scaffold still boots without an external secret server.
+const wireSecretManager = (targetDir: string): void => {
+  editScaffoldFile(targetDir, 'config.ts', [
+    [
+      `  // secretManager: {
+  //   url: process.env.LUCKYSTACK_SECRET_MANAGER_URL ?? '',
+  //   token: { fromFile: '.secret-manager-token' },
+  // },`,
+      `  secretManager: {
+    url: process.env.LUCKYSTACK_SECRET_MANAGER_URL ?? '',
+    token: { fromFile: '.secret-manager-token' },
+  },`,
+    ],
+  ]);
+  editScaffoldFile(targetDir, 'server/server.ts', [
+    [
+      `  // const projectConfig = (await import('../config')).default;
+  // if (projectConfig.secretManager?.url) {
+  //   const sm = await import('@luckystack/secret-manager');
+  //   await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
+  // }`,
+      `  const projectConfig = (await import('../config')).default;
+  if (projectConfig.secretManager?.url) {
+    const sm = await import('@luckystack/secret-manager');
+    await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
+  }`,
+    ],
+  ]);
+};
+
 //? Remove OPT-OUT packages from a freshly-copied scaffold. Bounded packages:
 //? presence + error-tracking (drop dep + the few files/lines that referenced them).
 //? login/sync are more deeply woven (login is a whole auth surface; sync's
@@ -1804,6 +1845,11 @@ const main = async (): Promise<void> => {
     //? Remove opt-OUT framework packages (e.g. presence) from the scaffold — drops
     //? the dependency AND the few files/lines that referenced it.
     pruneOptionalPackages(targetDir, choices);
+
+    //? Fully wire opt-IN packages that need more than a bare dependency. docs-ui
+    //? self-wires via its `./register` subpath (dep alone is enough), so only
+    //? secret-manager needs the enable-later code blocks uncommented here.
+    if (choices.secretManager) wireSecretManager(targetDir);
 
     //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
     //? the framework's AI docs so the consumer's AI agents inherit full context,
