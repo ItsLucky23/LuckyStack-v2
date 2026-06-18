@@ -160,6 +160,35 @@ export const addDependency = (project: ConsumerProject, name: string, range: str
   return true;
 };
 
+//? Drop a dependency from package.json if present. Returns true when it was
+//? removed, false when it was already absent (idempotent — the inverse of
+//? addDependency). Preserves the file's original indentation, same as the add
+//? path. Only touches `dependencies` (the add path only ever writes there).
+export const dropDependency = (project: ConsumerProject, name: string): boolean => {
+  if (!name) throw new Error('dropDependency: name must be a non-empty string');
+  if (!project.pkg.dependencies || !(name in project.pkg.dependencies)) return false;
+  const { [name]: _removed, ...rest } = project.pkg.dependencies;
+  project.pkg.dependencies = rest;
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  const indent = detectJsonIndent(raw);
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, indent)}\n`);
+  return true;
+};
+
+//? True when the consumer's package.json lists `name` in dependencies OR
+//? devDependencies. Used by `list` / `manage` to detect the installed set from
+//? the manifest (the package.json is the consumer's declared intent — cheaper +
+//? mutation-aligned than resolving node_modules, which `add`/`remove` edit here).
+export const hasDependency = (pkg: PackageJson, name: string): boolean =>
+  Boolean(pkg.dependencies?.[name]) || Boolean(pkg.devDependencies?.[name]);
+
+//? The version range a dependency is pinned to (dependencies first, then
+//? devDependencies), or null when absent. Drives the `installed (vRANGE)` column.
+export const dependencyRange = (pkg: PackageJson, name: string): string | null => {
+  const range = pkg.dependencies?.[name] ?? pkg.devDependencies?.[name];
+  return typeof range === 'string' && range.length > 0 ? range : null;
+};
+
 export interface FileEdit {
   find: string;
   replace: string;

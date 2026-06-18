@@ -139,3 +139,24 @@
 **Open**: user tagt `v0.2.3` → publisht. CLI-feature na go.
 
 **Files**: packages/devkit/src/prismaClientCheck.ts, packages/devkit/src/hotReload.ts, packages/create-luckystack-app/src/index.ts, packages/create-luckystack-app/CLAUDE.md, packages/*/package.json (0.2.3 bump).
+
+## 2026-06-18 — CLI list + manage(wizard) + remove, single shared registry
+
+**Context**: Vervolg op de vorige entry's voorstel — de CLI kon alleen `add <feature>` (flag-gedreven), package-lijst stond 4× gedupliceerd. Nu: gedeelde registry + `list` + interactieve add/remove wizard + remove-handlers.
+
+**Gedaan** (`packages/cli`, zero runtime deps, strict typing):
+- **`src/registry.ts`** (NIEUW): `REGISTRY` typed array = single source of truth (`id, pkg, kind:'login'|'presence'|'backend', description, removable:'safe'|'guarded', note?`). login=guarded (kopieert user-owned pages), backend+presence=safe. `index.ts` dispatch + list/manage/remove deriven hieruit. `assetParity.test.ts` herschreven: importeert REGISTRY direct i.p.v. FEATURES-regex te scrapen; parity met server `OPTIONAL_PACKAGES` blijft afgedwongen.
+- **`commands/list.ts`** (NIEUW): read-only tabel installed (vRANGE)/available + "core/other @luckystack" sectie. `installedRegistryIds` (pure).
+- **`lib/wizard.ts`** (NIEUW): `runCheckbox` — zero-dep readline-keypress multi-select (↑/↓·space·enter·ctrl-c), `isInteractive` non-TTY guard.
+- **`commands/manage.ts`** (NIEUW): `computeManagePlan` (PURE diff installed↔selected, unit-getest) + `applyManagePlan` (adds→removes, daarna ÉÉN npm install).
+- **`commands/remove.ts`** (NIEUW): `removeFeature` per kind — backend: drop dep; presence: drop dep + reverse JSX (mirror van scaffolder `prunePresence`, editFile faalt loud op drift); login: GUARDED — drop dep maar KEEP gekopieerde auth-files + warn.
+- **`lib/project.ts`**: `dropDependency` (inverse van addDependency), `hasDependency`, `dependencyRange` toegevoegd.
+- **`index.ts`**: dispatch herschreven — list/manage/add/remove/check-*; bare `add`/`remove` zonder feature openen de wizard; `main()` nu async.
+
+**Verificatie**: `npx tsup` OK (ESM; dts intentioneel uit — bin entry) · `tsc --noEmit` clean · eslint src clean · eslint test-files clean · `vitest run packages/cli` 41/41 (registry parity, list output tegen temp pkg.json, computeManagePlan, remove backend/presence/login guarded + drift-faalt-loud).
+
+**Guarded beslissing**: login-removal verwijdert NOOIT automatisch de gekopieerde pages (user kan ze geëdit hebben); dep eraf + waarschuwing met de te-verwijderen paden. `--force` bewust NIET als auto-delete geïmplementeerd.
+
+**Open**: versie NIET gebumpt, niet gecommit (per opdracht). PACKAGE_OVERVIEW.md dedup (4e kopie) niet aangeraakt — buiten scope.
+
+**Files**: packages/cli/src/registry.ts, packages/cli/src/commands/{list,manage,remove}.ts, packages/cli/src/lib/wizard.ts, packages/cli/src/lib/project.ts, packages/cli/src/index.ts, packages/cli/src/assetParity.test.ts, packages/cli/src/commands/manage.test.ts, packages/cli/CLAUDE.md.
