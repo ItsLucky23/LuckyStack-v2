@@ -79,8 +79,12 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test sweep
-        run: npm run test
+      # `npm run test` (testAll.ts) is the live-server sweep — it hits
+      # http://localhost:80 and does NOT boot a server, so it can only run
+      # against a manually-started dev server. CI has no server, so it runs the
+      # self-contained vitest suite instead. The sweep stays a local/dev gate.
+      - name: Unit tests
+        run: npm run test:unit
 
       - name: Security audit (production deps, high+)
         run: npm audit --omit=dev --audit-level=high
