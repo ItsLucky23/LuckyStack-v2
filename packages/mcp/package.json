@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -19,7 +19,13 @@
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
-  "keywords": ["luckystack", "mcp", "claude", "ai", "context"],
+  "keywords": [
+    "luckystack",
+    "mcp",
+    "claude",
+    "ai",
+    "context"
+  ],
   "engines": {
     "node": ">=20.0.0"
   },

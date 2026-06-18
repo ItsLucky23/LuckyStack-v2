@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/docs-ui",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -55,10 +55,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.2.0"
+    "@luckystack/core": "^0.2.1"
   },
   "peerDependencies": {
-    "@luckystack/server": "^0.2.0"
+    "@luckystack/server": "^0.2.1"
   },
   "peerDependenciesMeta": {
     "@luckystack/server": {
