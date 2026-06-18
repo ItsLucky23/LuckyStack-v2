@@ -3412,3 +3412,20 @@ Rewrote `SESSION_STATE.md` from scratch to capture the entire 2026-06-10 session
 **Eindstaat (geverifieerd)**: `npm run lint` 0 · `npm run lint:packages` 0 · `npm run ai:lint` 0 violations (incl. nieuwe transport-parity invariant) · `npm run build` 16/16 · `npm run test:unit` **1281 passed** (was 1207 aan begin van de dag; +74 nieuwe tests). 0 OPEN/NEW rijen in de MEDIUM/HIGH-tabellen; LOW + DD secties voorzien van completion-banners die naar deze entry verwijzen. Niet gecommit/gepusht (wacht op user).
 
 **Files**: roadmap-breed — packages/{api,sync,core,server,router,login,email,error-tracking,devkit,mcp,docs-ui,test-runner,presence,secret-manager,create-luckystack-app,cli}/src/**, src/** (settings, providers, sockets, components), server/**, scripts/lintInvariants.mjs, docs/REFACTOR_ROADMAP.md, diverse package CLAUDE.md's. (Volledige per-bestand-lijst is te groot voor één entry; zie `git status`.)
+
+## 2026-06-18 — CI groen maken voor v0.2.0 publish: build-wave fix + test:unit switch
+
+**User goal**: vorige sessie meldde dat CI op `npm run test` zou falen omdat er in CI nooit een server draait → switch naar de unit-test command. Bevestigd + doorgevoerd, commit + push, daarna publish-instructies.
+
+**Wat ik deed**:
+- **Bevestigd** dat `npm run test` (`scripts/testAll.ts`) een live server op `http://localhost:80` aanroept en die NIET zelf boot (header zegt dit expliciet). In CI draait geen server → alle sweep-layers falen op connection-refused → `totalFailed > 0` → exit 1. Switch naar `npm run test:unit` (vitest, self-contained) is correct.
+- **`scripts/buildPackages.mjs`** (uit vorige sessie, was uncommitted): `test-runner` van wave 2 → wave 3 (na `login`), naast `error-tracking`. Beide type-checken hun DTS-pass tegen `login`'s `dist/index.d.ts`; in een verse CI-checkout (dist gitignored) bestond die nog niet als ze parallel met login bouwden → TS7016. Topologie-comment bijgewerkt.
+- **`.github/workflows/ci.yml` + `publish.yml`**: stap `Test sweep` (`npm run test`) → `Unit tests` (`npm run test:unit`), met comment waarom de live-server sweep een lokale/dev-gate blijft.
+
+**Verificatie**: `npm run test:unit` lokaal → **1281 passed / 0 failed** (113 files, 9.6s).
+
+**Commits**: `701ff9a` (build-wave fix) + `ea70eed` (CI test:unit switch), gepusht naar `origin/chore/package-split-prep`.
+
+**Open**: v0.2.0 tag wijst nog naar oude `66c6df1` (vóór de fixes, lokaal+remote). Moet her-getagd naar `ea70eed` om publish met de fixes te triggeren — outward-facing, wacht op user. master (`2912280`) loopt achter op de branch.
+
+**Files**: scripts/buildPackages.mjs, .github/workflows/ci.yml, .github/workflows/publish.yml, src/docs/apiTypeDiagnostics.generated.json (regen-timestamp).
