@@ -5,13 +5,20 @@ import type { Server as HttpServer } from 'node:http';
 //? extracted out of `createLuckyStackServer` into `listenLuckyStackServer`.
 //? They cover: successful bind + resolve + callback, parse of a string port,
 //? EADDRINUSE failure path (reject, NO success log), the
-//? SERVER_PORT_AUTO_INCREMENT retry path, and non-EADDRINUSE pass-through.
-const { loggerMock } = vi.hoisted(() => ({
+//? SERVER_PORT_AUTO_INCREMENT retry path (explicit + dev-default), and
+//? non-EADDRINUSE pass-through.
+//?
+//? `coreState.isProduction` is mutable so tests can flip the dev-vs-prod default
+//? for the auto-increment resolution. Reset to `true` in beforeEach so each test
+//? starts from the prod default (auto-increment off unless opted in).
+const { loggerMock, coreState } = vi.hoisted(() => ({
   loggerMock: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  coreState: { isProduction: true },
 }));
 
 vi.mock('@luckystack/core', () => ({
   getLogger: () => loggerMock,
+  get isProduction() { return coreState.isProduction; },
   getProjectConfig: () => ({ logging: { socketStartup: true, devLogs: false } }),
   //? Names the module imports at top level but these tests never reach.
   registerBindAddress: vi.fn(),
@@ -77,6 +84,7 @@ beforeEach(() => {
   loggerMock.info.mockReset();
   loggerMock.warn.mockReset();
   loggerMock.error.mockReset();
+  coreState.isProduction = true;
   delete process.env.SERVER_PORT_AUTO_INCREMENT;
 });
 
@@ -102,14 +110,38 @@ describe('listenLuckyStackServer — success', () => {
   });
 });
 
-describe('listenLuckyStackServer — EADDRINUSE without auto-increment', () => {
+describe('listenLuckyStackServer — EADDRINUSE without auto-increment (prod default)', () => {
   it('rejects, logs the actionable error, and does NOT log a success line', async () => {
+    //? isProduction=true (set in beforeEach) → auto-increment defaults OFF, so an
+    //? in-use port rejects rather than hopping to the next one.
     const fake = new FakeHttpServer();
     fake.mode = 'EADDRINUSE';
     await expect(listenLuckyStackServer(asServer(fake), '127.0.0.1', 8080)).rejects.toMatchObject({ code: 'EADDRINUSE' });
     expect(loggerMock.error).toHaveBeenCalledOnce();
     expect(loggerMock.info).not.toHaveBeenCalled();
     expect(fake.listenCalls).toHaveLength(1);
+  });
+
+  it('still rejects in dev when SERVER_PORT_AUTO_INCREMENT is explicitly 0', async () => {
+    coreState.isProduction = false;
+    process.env.SERVER_PORT_AUTO_INCREMENT = '0';
+    const fake = new FakeHttpServer();
+    fake.mode = 'EADDRINUSE';
+    await expect(listenLuckyStackServer(asServer(fake), '127.0.0.1', 8080)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    expect(fake.listenCalls).toHaveLength(1);
+  });
+});
+
+describe('listenLuckyStackServer — EADDRINUSE in dev (auto-increment on by default)', () => {
+  it('retries to the next free port with NO env flag when not in production', async () => {
+    coreState.isProduction = false;
+    const fake = new FakeHttpServer();
+    fake.succeedOnAttempt = 1; // first port busy, second free
+    const result = await listenLuckyStackServer(asServer(fake), '127.0.0.1', 8080);
+    expect(result).toBe(fake);
+    expect(fake.listenCalls.map((c) => c.port)).toEqual([8080, 8081]);
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+    expect(loggerMock.info).toHaveBeenCalledWith('Server is running on http://127.0.0.1:8081/');
   });
 });
 
