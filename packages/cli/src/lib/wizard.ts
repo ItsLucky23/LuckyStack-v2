@@ -66,11 +66,35 @@ export const confirmPrompt = (question: string, defaultYes = false): Promise<boo
 export const runCheckbox = (title: string, items: readonly CheckboxItem[]): Promise<CheckboxResult> =>
   new Promise((resolve) => {
     const checked = items.map((item) => item.checked);
-    //? Cursor wraps over the items plus one trailing "Confirm" action row, so the
-    //? user can toggle any row with space and confirm the whole screen separately.
+    //? The baseline (what's installed NOW) so each row can show, live, what
+    //? toggling it WILL DO relative to the current state — that's the "make it
+    //? clear what's going to happen" the plain checkbox lacked.
+    const initial = items.map((item) => item.checked);
+    //? Cursor wraps over the items plus one trailing "Confirm" action row.
     const navCount = items.length + 1;
     let cursor = 0;
     let prevLines = 0;
+
+    const pendingCounts = (): { add: number; remove: number } => {
+      let add = 0;
+      let remove = 0;
+      for (const [i] of items.entries()) {
+        if (checked[i] === initial[i]) continue;
+        if (checked[i]) add += 1;
+        else remove += 1;
+      }
+      return { add, remove };
+    };
+
+    //? Per-row state/action label: the pending change (ADD/REMOVE) when toggled
+    //? away from its installed state, else the current state. Words, not just
+    //? colour, so it's unambiguous.
+    const stateTag = (i: number): string => {
+      if (checked[i] !== initial[i]) {
+        return checked[i] ? ansiStyle(' → will be ADDED', ANSI.green) : ansiStyle(' → will be REMOVED', ANSI.cyan, ANSI.bold);
+      }
+      return ansiStyle(initial[i] ? ' (installed)' : ' (not installed)', ANSI.dim);
+    };
 
     const buildBlock = (): string => {
       const lines = ['', ansiStyle(title, ANSI.bold)];
@@ -79,17 +103,20 @@ export const runCheckbox = (title: string, items: readonly CheckboxItem[]): Prom
         const box = checked[i] === true ? ansiStyle('◉', ANSI.green) : '◯';
         const arrow = active ? ansiStyle('❯', ANSI.cyan) : ' ';
         const label = active ? ansiStyle(item.label, ANSI.cyan) : item.label;
-        lines.push(`${arrow} ${box} ${label}`);
+        lines.push(`${arrow} ${box} ${label}${stateTag(i)}`);
         if (item.description !== undefined && item.description !== '') {
           lines.push(ansiStyle(`     ${item.description}`, ANSI.dim));
         }
       }
+      const { add, remove } = pendingCounts();
       const confirmActive = cursor === items.length;
       const confirmArrow = confirmActive ? ansiStyle('❯', ANSI.cyan) : ' ';
-      const confirmLabel = confirmActive ? ansiStyle('Confirm', ANSI.cyan, ANSI.bold) : ansiStyle('Confirm', ANSI.dim);
+      const summary = add === 0 && remove === 0 ? 'no changes yet' : `${String(add)} to add, ${String(remove)} to remove`;
+      const confirmText = `Confirm (${summary})`;
+      const confirmLabel = confirmActive ? ansiStyle(confirmText, ANSI.cyan, ANSI.bold) : ansiStyle(confirmText, ANSI.dim);
       lines.push(
         `${confirmArrow}   ${confirmLabel}`,
-        ansiStyle('↑/↓ move · space toggle · enter confirm · ctrl-c cancel', ANSI.dim),
+        ansiStyle('↑/↓ move · space or enter = toggle the row · go to Confirm + enter to apply · ctrl-c cancel', ANSI.dim),
       );
       return `${lines.join('\n')}\n`;
     };
@@ -127,12 +154,15 @@ export const runCheckbox = (title: string, items: readonly CheckboxItem[]): Prom
       }
       const onConfirmRow = cursor === items.length;
       const spacePressed = key.name === 'space' || str === ' ';
-      if (spacePressed && !onConfirmRow) {
+      //? On an ITEM row, BOTH space and enter toggle it — pressing enter on a
+      //? package now does the intuitive thing (select/deselect it) instead of
+      //? immediately submitting. Submitting happens only from the Confirm row.
+      if ((spacePressed || key.name === 'return') && !onConfirmRow) {
         checked[cursor] = !(checked[cursor] === true);
         paint();
         return;
       }
-      if (key.name === 'return') {
+      if (key.name === 'return' && onConfirmRow) {
         restoreTerminal();
         const selected = items.filter((_, i) => checked[i] === true).map((item) => item.id);
         resolve({ selected, aborted: false });

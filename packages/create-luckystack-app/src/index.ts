@@ -379,7 +379,7 @@ const runPromptsFallback = async (
       answers.router = (await askYesNo(rl, 'Install @luckystack/router (multi-instance load-balancer; run via npm run router)?', false)) ? 'Yes' : 'No';
     }
     if (need('i18n')) {
-      answers.i18n = (await askYesNo(rl, 'Enable i18n (translations + locale switching)?', false)) ? 'Yes' : 'No';
+      answers.i18n = (await askYesNo(rl, 'Add extra languages beyond English (nl/de/fr + a language switcher)? Your app is always English-translatable either way.', false)) ? 'Yes' : 'No';
     }
     if (need('aiInstructions')) {
       answers.aiInstructions = (await askYesNo(
@@ -841,12 +841,18 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
       options: ['Yes', 'No'], defaultValue: 'No',
     },
     {
-      key: 'i18n', type: 'select', label: 'Enable i18n? (@luckystack/core)',
-      description: 'Multi-language UI: translations + locale switching (adds nl/de/fr).',
+      key: 'i18n', type: 'select', label: 'Add extra languages? (nl/de/fr)',
+      description: 'Your app is ALWAYS translatable (English, built-in). This only adds EXTRA locales + a language switcher.',
       details: [
-        'Multi-language UI via @luckystack/core\'s translator: adds nl/de/fr locale',
-        'files, a language switcher, and the useTranslator wiring. "No" keeps the',
-        'app English-only (you can still translate strings later).',
+        'Important: the translator (useTranslator) + the English locale live in',
+        '@luckystack/core and are ALWAYS present — every shipped component stays',
+        'fully translated in English whether you pick Yes or No. This question does',
+        'NOT turn translations off.',
+        '',
+        '"Yes" → also ship the nl/de/fr locale files + a language switcher in',
+        'settings (and the LANGUAGE enum gains those values).',
+        '"No"  → English-only: no switcher, no extra locale files. You can still add',
+        'languages later by dropping JSON in src/_locales and registering them.',
       ].join('\n'),
       options: ['Yes', 'No'], defaultValue: 'No',
     },
