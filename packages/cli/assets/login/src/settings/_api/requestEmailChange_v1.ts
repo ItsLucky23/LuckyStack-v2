@@ -34,10 +34,10 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   // eslint-disable-next-line import-x/no-named-as-default-member
   if (!newEmail || !validator.isEmail(newEmail)) {
-    return { status: 'error', errorCode: 'auth.invalidEmail' };
+    return { status: 'error', errorCode: 'settings.emailChange.invalidEmail' };
   }
   if (newEmail === user.email.toLowerCase()) {
-    return { status: 'error', errorCode: 'auth.emailSameAsCurrent' };
+    return { status: 'error', errorCode: 'settings.emailChange.emailSameAsCurrent' };
   }
 
   //? LOGIN-EMAILCHG: require and verify the current password before initiating
@@ -49,7 +49,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   if (user.provider === 'credentials') {
     const currentPassword = data.currentPassword ?? '';
     if (!currentPassword) {
-      return { status: 'error', errorCode: 'auth.currentPasswordRequired' };
+      return { status: 'error', errorCode: 'settings.emailChange.currentPasswordRequired' };
     }
     const dbUser = await functions.db.prisma.user.findUnique({
       where: { id: user.id },
@@ -57,11 +57,11 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     });
     const storedHash = dbUser?.password ?? null;
     if (!storedHash) {
-      return { status: 'error', errorCode: 'auth.currentPasswordRequired' };
+      return { status: 'error', errorCode: 'settings.emailChange.currentPasswordRequired' };
     }
     const passwordOk = await verifyPassword(currentPassword, storedHash);
     if (!passwordOk) {
-      return { status: 'error', errorCode: 'auth.wrongCurrentPassword' };
+      return { status: 'error', errorCode: 'settings.emailChange.wrongCurrentPassword' };
     }
   }
 
@@ -122,7 +122,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   });
 
   if (!result.ok) {
-    return { status: 'error', errorCode: 'auth.emailSendFailed' };
+    return { status: 'error', errorCode: 'settings.emailChange.emailSendFailed' };
   }
   return { status: 'success' };
 };

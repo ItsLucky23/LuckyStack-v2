@@ -2,8 +2,15 @@
   "test": "Hallo {{name}}",
   "common": {
     "404": "Er is iets misgegaan, probeer het later opnieuw.",
+    "500": "Er is een serverfout opgetreden. Probeer het later opnieuw.",
     "whiteSpace": " ",
-    "error": "FOUT"
+    "error": "FOUT",
+    "connectionError": "Verbindingsfout. Controleer je netwerk en probeer het opnieuw.",
+    "sessionReplacedElsewhere": "Je sessie is op een ander apparaat geopend.",
+    "logoutFailed": "Kon je niet uitloggen. Probeer het opnieuw.",
+    "invalidGroup": "Ongeldige kamer.",
+    "invalidLocation": "Ongeldige locatie.",
+    "unknownError": "Er is een onbekende fout opgetreden."
   },
   "middleware": {
     "notAdmin": "Je bent geen admin."
@@ -97,6 +104,7 @@
   },
   "settings": {
     "changeAvatar": "Verander avatar",
+    "deleteAvatar": "Avatar verwijderen",
     "changeAvatarDescription": "JPG, GIF of PNG. Max 4MB.",
     "language": {
       "title": "Taal",
@@ -131,7 +139,9 @@
       "emailTaken": "Dit e-mailadres is al in gebruik.",
       "invalidEmail": "Dit lijkt geen geldig e-mailadres.",
       "emailSameAsCurrent": "Het nieuwe e-mailadres is hetzelfde als het huidige.",
-      "emailSendFailed": "Kon de bevestigingsmail niet versturen. Probeer het later opnieuw."
+      "emailSendFailed": "Kon de bevestigingsmail niet versturen. Probeer het later opnieuw.",
+      "currentPasswordRequired": "Vul je huidige wachtwoord in om je e-mailadres te wijzigen.",
+      "wrongCurrentPassword": "Je huidige wachtwoord is onjuist."
     },
     "passwordSection": "Wachtwoord",
     "currentPassword": "Huidig wachtwoord",

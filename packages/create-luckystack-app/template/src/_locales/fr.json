@@ -2,8 +2,15 @@
   "test": "Bonjour {{name}}",
   "common": {
     "404": "Un problème est survenu, réessayez plus tard.",
+    "500": "Une erreur serveur est survenue. Réessayez plus tard.",
     "whiteSpace": " ",
-    "error": "ERREUR"
+    "error": "ERREUR",
+    "connectionError": "Erreur de connexion. Vérifiez votre réseau et réessayez.",
+    "sessionReplacedElsewhere": "Votre session a été ouverte sur un autre appareil.",
+    "logoutFailed": "Impossible de vous déconnecter. Réessayez.",
+    "invalidGroup": "Salle invalide.",
+    "invalidLocation": "Emplacement invalide.",
+    "unknownError": "Une erreur inconnue est survenue."
   },
   "middleware": {
     "notAdmin": "Vous n'êtes pas administrateur."
@@ -97,6 +104,7 @@
   },
   "settings": {
     "changeAvatar": "Changer d'avatar",
+    "deleteAvatar": "Supprimer l'avatar",
     "changeAvatarDescription": "JPG, GIF ou PNG. Max 4 Mo.",
     "language": {
       "title": "Langue",
@@ -131,7 +139,9 @@
       "emailTaken": "Cette adresse e-mail est déjà utilisée.",
       "invalidEmail": "Cela ne ressemble pas à une adresse e-mail valide.",
       "emailSameAsCurrent": "La nouvelle adresse e-mail est identique à l'actuelle.",
-      "emailSendFailed": "Impossible d'envoyer l'e-mail de confirmation. Réessayez plus tard."
+      "emailSendFailed": "Impossible d'envoyer l'e-mail de confirmation. Réessayez plus tard.",
+      "currentPasswordRequired": "Saisissez votre mot de passe actuel pour changer votre adresse e-mail.",
+      "wrongCurrentPassword": "Votre mot de passe actuel est incorrect."
     },
     "passwordSection": "Mot de passe",
     "currentPassword": "Mot de passe actuel",
