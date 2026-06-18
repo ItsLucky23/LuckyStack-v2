@@ -232,7 +232,6 @@ describe("parseArgs", () => {
     oauthProviders: null,
     emailProvider: null,
     monitoringProvider: null,
-    i18n: null,
     aiInstructions: null,
   };
 
@@ -336,10 +335,7 @@ describe("parseArgs", () => {
     expect(parseArgs(["my-app", "--oauth="]).oauthProviders).toEqual([]);
   });
 
-  it("parses the --i18n / --no-i18n and --ai-docs / --no-ai-docs boolean flags", () => {
-    expect(parseArgs(["my-app"]).i18n).toBeNull();
-    expect(parseArgs(["my-app", "--i18n"]).i18n).toBe(true);
-    expect(parseArgs(["my-app", "--no-i18n"]).i18n).toBe(false);
+  it("parses the --ai-docs / --no-ai-docs boolean flags", () => {
     expect(parseArgs(["my-app"]).aiInstructions).toBeNull();
     expect(parseArgs(["my-app", "--ai-docs"]).aiInstructions).toBe(true);
     expect(parseArgs(["my-app", "--no-ai-docs"]).aiInstructions).toBe(false);

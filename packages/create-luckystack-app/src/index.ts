@@ -56,8 +56,6 @@ export interface CliArgs {
   oauthProviders: OAuthProvider[] | null;
   emailProvider: EmailProvider | null;
   monitoringProvider: MonitoringProvider | null;
-  /** `--i18n` / `--no-i18n`. `null` = not passed. */
-  i18n: boolean | null;
   /** `--no-ai-docs` (off) / `--ai-docs` (on). `null` = not passed. */
   aiInstructions: boolean | null;
 }
@@ -74,7 +72,7 @@ export const VALID_FLAGS = [
   '--email=<none|console|resend|smtp>',
   '--monitoring=<none|sentry|datadog|posthog>',
   '--presence', '--error-tracking', '--docs-ui', '--secret-manager', '--router',
-  '--i18n', '--no-i18n', '--ai-docs', '--no-ai-docs',
+  '--ai-docs', '--no-ai-docs',
   '--ai-browser=<all|agent-browser|none>',
   '--help', '-h',
 ] as const;
@@ -105,7 +103,6 @@ export const parseArgs = (argv: string[]): CliArgs => {
   let oauthProviders: OAuthProvider[] | null = null;
   let emailProvider: EmailProvider | null = null;
   let monitoringProvider: MonitoringProvider | null = null;
-  let i18n: boolean | null = null;
   let aiInstructions: boolean | null = null;
   for (const arg of argv) {
     switch (arg) {
@@ -135,14 +132,6 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
     case '--router': {
     router = true;
-    break;
-    }
-    case '--i18n': {
-    i18n = true;
-    break;
-    }
-    case '--no-i18n': {
-    i18n = false;
     break;
     }
     case '--ai-docs': {
@@ -190,7 +179,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
   }
   return {
     projectName, install, prompt, help, presence, errorTracking, docsUi, secretManager, router, aiBrowserTooling,
-    dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, i18n, aiInstructions,
+    dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, aiInstructions,
   };
 };
 
@@ -236,8 +225,6 @@ interface ScaffoldChoices {
   secretManager: boolean;
   /** Install @luckystack/router (multi-instance load-balancer process) + a `npm run router` script. Opt-in; off by default. */
   router: boolean;
-  /** Enable @luckystack/i18n integration. */
-  i18n: boolean;
   /**
    * Copy LuckyStack's AI dev-context into the project (root `CLAUDE.md`, the
    * `docs/luckystack/` deep-dives, `skills/`, `.claude/commands/`, the
@@ -271,7 +258,6 @@ const DEFAULT_CHOICES: ScaffoldChoices = {
   docsUi: false,
   secretManager: false,
   router: false,
-  i18n: false,
   aiInstructions: true,
   aiBrowserTooling: 'agent-browser',
 };
@@ -377,9 +363,6 @@ const runPromptsFallback = async (
     }
     if (need('router')) {
       answers.router = (await askYesNo(rl, 'Install @luckystack/router (multi-instance load-balancer; run via npm run router)?', false)) ? 'Yes' : 'No';
-    }
-    if (need('i18n')) {
-      answers.i18n = (await askYesNo(rl, 'Add extra languages beyond English (nl/de/fr + a language switcher)? Your app is always English-translatable either way.', false)) ? 'Yes' : 'No';
     }
     if (need('aiInstructions')) {
       answers.aiInstructions = (await askYesNo(
@@ -696,8 +679,6 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
     docsUi: answers.docsUi === 'Yes',
     secretManager: answers.secretManager === 'Yes',
     router: answers.router === 'Yes',
-    //? Match presence/aiInstructions — opt-out convention: truthy unless explicitly 'No'.
-    i18n: answers.i18n !== 'No',
     aiInstructions: answers.aiInstructions !== 'No',
     //? Browser tooling rides on the AI template — forced 'none' when AI
     //? instructions are excluded (the wizard step is skipped in that case).
@@ -841,22 +822,6 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
       options: ['Yes', 'No'], defaultValue: 'No',
     },
     {
-      key: 'i18n', type: 'select', label: 'Add extra languages? (nl/de/fr)',
-      description: 'Your app is ALWAYS translatable (English, built-in). This only adds EXTRA locales + a language switcher.',
-      details: [
-        'Important: the translator (useTranslator) + the English locale live in',
-        '@luckystack/core and are ALWAYS present — every shipped component stays',
-        'fully translated in English whether you pick Yes or No. This question does',
-        'NOT turn translations off.',
-        '',
-        '"Yes" → also ship the nl/de/fr locale files + a language switcher in',
-        'settings (and the LANGUAGE enum gains those values).',
-        '"No"  → English-only: no switcher, no extra locale files. You can still add',
-        'languages later by dropping JSON in src/_locales and registering them.',
-      ].join('\n'),
-      options: ['Yes', 'No'], defaultValue: 'No',
-    },
-    {
       key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions?',
       description: 'CLAUDE.md + docs + git hook + the @luckystack/mcp graph server for AI agents.',
       details: [
@@ -899,7 +864,6 @@ const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> =>
   if (args.docsUi) presets.docsUi = 'Yes';
   if (args.secretManager) presets.secretManager = 'Yes';
   if (args.router) presets.router = 'Yes';
-  if (args.i18n !== null) presets.i18n = args.i18n ? 'Yes' : 'No';
   if (args.aiInstructions !== null) presets.aiInstructions = args.aiInstructions ? 'Yes' : 'No';
   if (args.aiBrowserTooling) presets.aiBrowserTooling = args.aiBrowserTooling;
   return presets;
@@ -928,7 +892,6 @@ const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
   if (args.docsUi) choices.docsUi = true;
   if (args.secretManager) choices.secretManager = true;
   if (args.router) choices.router = true;
-  if (args.i18n !== null) choices.i18n = args.i18n;
   if (args.aiInstructions !== null) choices.aiInstructions = args.aiInstructions;
   if (args.aiBrowserTooling) choices.aiBrowserTooling = args.aiBrowserTooling;
   return normalizeChoices(choices);
@@ -957,7 +920,6 @@ Options:
   --docs-ui      Install @luckystack/docs-ui (in-app API docs viewer).
   --secret-manager  Install @luckystack/secret-manager (.env-pointer secrets).
   --router       Install @luckystack/router (multi-instance load-balancer; npm run router).
-  --i18n / --no-i18n   Enable / disable i18n (default off).
   --ai-docs / --no-ai-docs   Include / omit LuckyStack AI dev instructions (default on).
   --ai-browser=<all|agent-browser|none>
                  AI browser-testing tooling (default agent-browser). 'all' also wires the
@@ -1369,10 +1331,9 @@ const dropDependency = (targetDir: string, depName: string): void => {
 };
 
 //? Delete a file or directory (recursively) from the scaffolded project. Used
-//? by the choice-gated prunes (`authMode: 'none'` removes auth pages/APIs;
-//? `i18n: false` removes the extra-language locale files). A missing path is a
-//? silent no-op so the prune is idempotent. `relPath` is always repo-internal
-//? (built from literals here), never user input.
+//? by the choice-gated prunes (e.g. `authMode: 'none'` removes auth pages/APIs).
+//? A missing path is a silent no-op so the prune is idempotent. `relPath` is
+//? always repo-internal (built from literals here), never user input.
 const removeScaffoldPath = (targetDir: string, relPath: string): void => {
   const full = path.join(targetDir, relPath);
   fs.rmSync(full, { recursive: true, force: true });
@@ -1508,7 +1469,7 @@ const wireAiBrowserTooling = (targetDir: string, choices: ScaffoldChoices): void
 //? of producing a broken project — every edit must match exactly once.
 //? Silent no-op when the file doesn't exist — intentional: an earlier prune
 //? may have removed the file (e.g. authMode:'none' removes settings/page.tsx
-//? before the i18n prune tries to edit it).
+//? before a later prune tries to edit it).
 const editScaffoldFile = (targetDir: string, relPath: string, edits: readonly [string, string][]): void => {
   const filePath = path.join(targetDir, relPath);
   if (!fs.existsSync(filePath)) return;
@@ -1573,8 +1534,6 @@ const prunePresence = (targetDir: string): void => {
 };
 
 //? Remove all built-in auth UI/flows for the authMode:'none' scaffold.
-//? Run BEFORE the i18n prune so the settings/page.tsx edit safely no-ops on the
-//? now-removed file.
 const pruneAuthNone = (targetDir: string): void => {
   //? The framework's (anonymous) session plumbing stays — `session_v1` returns a
   //? null user, `SessionProvider`/`useSession` resolve to "no session", and the
@@ -1717,58 +1676,6 @@ export default Dashboard;`,
   ]);
 };
 
-//? Drop extra locale files and narrow the locale registry + settings picker to
-//? English only. The translator layer itself stays (backed by @luckystack/core).
-const pruneI18n = (targetDir: string): void => {
-  removeScaffoldPath(targetDir, 'src/_locales/nl.json');
-  removeScaffoldPath(targetDir, 'src/_locales/de.json');
-  removeScaffoldPath(targetDir, 'src/_locales/fr.json');
-  editScaffoldFile(targetDir, 'luckystack/i18n/locales.ts', [
-    ["import deJson from 'src/_locales/de.json';\n", ''],
-    ["import frJson from 'src/_locales/fr.json';\n", ''],
-    ["import nlJson from 'src/_locales/nl.json';\n", ''],
-    [
-      `registerLocales({
-  en: enJson,
-  nl: nlJson,
-  de: deJson,
-  fr: frJson,
-});`,
-      `registerLocales({
-  en: enJson,
-});`,
-    ],
-  ]);
-  //? Picker → English only. editScaffoldFile is a no-op when settings/ was
-  //? already removed by the authMode:'none' prune, so the order is safe.
-  //? The `newLanguage` state is also re-seeded to `'en'` — with `Language`
-  //? narrowed to `'en'`, the original `session?.language ?? 'en'` seed (the
-  //? session language is a wider union) no longer type-checks.
-  editScaffoldFile(targetDir, 'src/settings/page.tsx', [
-    ["const LANGUAGES = ['nl', 'en', 'de', 'fr'] as const;", "const LANGUAGES = ['en'] as const;"],
-    [
-      "  const [newLanguage, setNewLanguage] = useState<Language>(session?.language ?? 'en');",
-      "  const [newLanguage, setNewLanguage] = useState<Language>('en');",
-    ],
-  ]);
-  //? Trim the LANGUAGE enum to English-only so `Language = 'en'` (not a wider
-  //? union). Without this, the Prisma schema still has nl/de/fr values while
-  //? no locale files back them — a type mismatch on first tsc run.
-  editScaffoldFile(targetDir, 'prisma/schema.prisma', [
-    [
-      `enum LANGUAGE {
-  en
-  nl
-  de
-  fr
-}`,
-      `enum LANGUAGE {
-  en
-}`,
-    ],
-  ]);
-};
-
 //? Strip @luckystack/error-tracking when the consumer opted out. The only active
 //? reference in the template is the `functions/sentry.ts` shim (which re-exports
 //? the package as `functions.sentry.*`); every other mention is a comment or the
@@ -1867,9 +1774,6 @@ const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): voi
   if (!choices.presence) prunePresence(targetDir);
   if (!choices.errorTracking) pruneErrorTracking(targetDir);
   if (choices.authMode === 'none') pruneAuthNone(targetDir);
-  //? i18n prune runs AFTER auth-none so settings/page.tsx edits safely no-op on
-  //? the already-removed file.
-  if (!choices.i18n) pruneI18n(targetDir);
 };
 
 //? Static lookup tables — moved to module scope so they aren't rebuilt on
@@ -2066,7 +1970,6 @@ Choices:
   email:       ${choices.emailProvider}
   monitoring:  ${choices.monitoringProvider}
   presence:    ${choices.presence ? 'installed' : 'skipped'}
-  i18n:        ${choices.i18n ? 'on' : 'off'}
   ai-docs:     ${choices.aiInstructions ? 'included (+ pre-commit AI-index hook)' : 'skipped'}
   ai-browser:  ${choices.aiBrowserTooling}
 
