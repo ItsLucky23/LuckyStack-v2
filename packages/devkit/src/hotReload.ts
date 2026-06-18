@@ -27,6 +27,7 @@ import {
   generateTypeMapFile,
 } from "./typeMapGenerator.js";
 import { findDependentRouteFiles, invalidateGraphForFile } from "./importDependencyGraph";
+import { isPrismaClientMissing, runPrismaGenerate } from "./prismaClientCheck";
 import { tryCatch, getProjectConfig, getLocaleReloader } from "@luckystack/core";
 import { getRoutingRules } from './routingRules';
 
@@ -627,9 +628,29 @@ export const setupWatchers = () => {
   //? time ~6-8s on a 54-API project.
   setImmediate(() => {
     void (async () => {
+      //? A scaffolded project whose consumer hasn't run `prisma generate` yet
+      //? has a schema on disk but no generated `@prisma/client`. The type-map
+      //? generator then throws on unresolved model identifiers (e.g. `User`).
+      //? Auto-generate ONCE on boot — `prisma generate` only reads the schema,
+      //? so it needs no DB credentials and is safe to run unattended.
+      if (isPrismaClientMissing()) {
+        console.log(`[HotReload] @prisma/client not generated yet — running prisma generate (no DB needed)…`, 'blue');
+        const [generateErr, exitCode] = await runPrismaGenerate();
+        if (generateErr || exitCode !== 0) {
+          console.log(`[HotReload] prisma generate failed${generateErr ? `: ${String(generateErr)}` : ` (exit code ${String(exitCode)})`} — run \`npm run prisma:generate\` manually and restart`, 'red');
+        } else {
+          console.log(`[HotReload] prisma generate complete`, 'green');
+        }
+      }
+
       const [err] = await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
       if (err) {
-        console.log(`[HotReload] initial type map generation failed: ${String(err)}`, 'red');
+        //? Append an actionable hint only when the Prisma-client-missing signal
+        //? is still true — never spam it when the real cause is unrelated.
+        const hint = isPrismaClientMissing()
+          ? '\n  → This usually means @prisma/client is not generated. Run `npm run prisma:generate` and restart.'
+          : '';
+        console.log(`[HotReload] initial type map generation failed: ${String(err)}${hint}`, 'red');
       } else {
         console.log(`[HotReload] type map ready in background`, 'green');
       }
