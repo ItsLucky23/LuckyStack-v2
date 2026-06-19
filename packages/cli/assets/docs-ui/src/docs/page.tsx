@@ -423,7 +423,7 @@ export default function DocsPage() {
   //? fields; structurally compatible with DocsResult but TS won't accept a
   //? single `as` cast. The double-cast is the JSON-import escape hatch.
   // eslint-disable-next-line no-restricted-syntax -- JSON import widening
-  const [docs] = useState<DocsResult | null>(apiDocs as unknown as DocsResult);
+  const [docs] = useState<DocsResult | null>(apiDocs as unknown as DocsResult); // luckystack-allow no-as-any: JSON-import widening — the readonly literal type is structurally a DocsResult but TS rejects a single cast
   const [selectedApi, setSelectedApi] = useState<ApiDoc | null>(null);
   const [selectedSync, setSelectedSync] = useState<SyncDoc | null>(null);
   const [inputData, setInputData] = useState('{}');
@@ -538,7 +538,7 @@ export default function DocsPage() {
         //? above for why we erase via typed local + identifier-as-never
         //? instead of object-literal-as. The narrowed `OutputForFullName`
         //? collapses to `never`, so a single `as ApiRunResponse` widens
-        //? without needing `as unknown as`.
+        //? without needing a double-cast.
         const apiParams = {
           name,
           version: selectedApi.version,
