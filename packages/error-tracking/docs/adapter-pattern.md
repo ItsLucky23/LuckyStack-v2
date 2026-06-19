@@ -98,7 +98,7 @@ All adapter fields besides `name`, `captureException`, `captureMessage`, and
 `setUser` are optional. A minimal adapter only needs those four methods; the
 registry skips optional methods on adapters that omit them.
 
-## Registration: single vs multi
+## Registration: single vs multi vs append
 
 ```ts
 // Replace the active list with a single tracker (idempotent).
@@ -107,35 +107,49 @@ registerErrorTracker(tracker: ErrorTracker): void;
 // Replace the active list with N trackers — every capture fans out to all of them.
 registerErrorTrackers(trackers: ErrorTracker[]): void;
 
+// Append a tracker WITHOUT clobbering already-registered ones.
+// De-duplicates by name: re-appending the same adapter name replaces that entry
+// in place, so repeated calls are safe. Use this for async auto-registration
+// (e.g. PostHog) where the order of registration relative to the consumer's
+// registerErrorTrackers call is non-deterministic.
+appendErrorTracker(tracker: ErrorTracker): void;
+
 // Snapshot the active list (useful for diagnostics + tests).
 getActiveErrorTrackers(): ErrorTracker[];
 ```
 
-Both functions REPLACE the active list. There is no `appendErrorTracker` — if
-you need to register adapters in stages, read the current list with
-`getActiveErrorTrackers()` and pass `[...existing, newOne]` to
-`registerErrorTrackers`.
+`registerErrorTracker` and `registerErrorTrackers` REPLACE the active list.
+`appendErrorTracker` ACCUMULATES — it was specifically designed to prevent the
+async PostHog auto-registration race where the loser of a
+`registerErrorTracker`/`registerErrorTrackers` replace call would silently
+vanish. Use `appendErrorTracker` whenever you need to add a tracker at a point
+in the boot lifecycle where the consumer may have already registered others.
 
 ```ts
 import {
   registerErrorTrackers,
+  appendErrorTracker,
   getActiveErrorTrackers,
   createSentryAdapter,
   createDatadogAdapter,
   createPostHogAdapter,
 } from '@luckystack/error-tracking';
 
+// Synchronous registration at boot — all three at once.
 registerErrorTrackers([
   createSentryAdapter(),
   createDatadogAdapter({ tracer, statsd }),
   createPostHogAdapter({ client: posthog }),
 ]);
 
-// Later, in a feature flag toggle:
-registerErrorTrackers([
-  ...getActiveErrorTrackers(),
-  myCustomCloudWatchAdapter,
-]);
+// Later, in an async feature flag toggle — appendErrorTracker is safe here
+// because it will not clobber the adapters registered above.
+appendErrorTracker(myCustomCloudWatchAdapter);
+
+// appendErrorTracker de-dupes by name, so registering the same name twice
+// replaces the existing entry rather than doubling it:
+appendErrorTracker(createDatadogAdapter({ tracer, statsd, metricPrefix: 'v2.' }));
+// ↑ the old 'datadog' entry is replaced, not added alongside it.
 ```
 
 ## Fan-out semantics

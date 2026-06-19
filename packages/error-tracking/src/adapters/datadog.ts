@@ -49,6 +49,15 @@ interface DdStatsd {
   close?: (callback?: () => void) => void;
 }
 
+/**
+ * @security PII note — user identity fields (`id`, `email`, `username`) passed
+ * via `setErrorTrackerUser` are tagged onto APM spans as `usr.id`, `usr.email`,
+ * `usr.name`. Sentry's `builtinBeforeSend` does NOT apply here: the Datadog
+ * adapter bypasses the Sentry scrubbing pipeline entirely. If your organisation
+ * requires that email addresses never leave the process boundary in plain text,
+ * hash or omit the `email` field before calling `setErrorTrackerUser`.
+ * There is no framework-level redaction of these span tags.
+ */
 export interface DatadogAdapterOptions {
   /**
    * Live dd-trace instance. Consumer-initialised because dd-trace MUST

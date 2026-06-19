@@ -15,7 +15,7 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/server"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/server#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/main/packages/server#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },

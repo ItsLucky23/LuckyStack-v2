@@ -60,6 +60,18 @@ export const resetSessionProviderForTests = (): void => {
 export const readSession = async (token: string | null): Promise<BaseSessionLayout | null> =>
   provider ? provider.getSession(token) : null;
 
+/**
+ * Persist a session via the registered provider, or no-op if no login provider
+ * is registered (unauthenticated-app case).
+ *
+ * **WARNING**: when no session provider is registered, this returns `{ ok: true }`
+ * as a no-op — the session is NOT actually persisted anywhere. Callers that
+ * check `result.ok` before considering a user logged in will incorrectly
+ * proceed as if the session was saved. This is intentional for apps that do not
+ * use `@luckystack/login`, but on a partial install (login package misconfigured
+ * or not yet registered) the failure is silent rather than loud.
+ * Use `isSessionProviderRegistered()` at boot to verify the provider is present.
+ */
 export const writeSession = async (
   token: string,
   data: BaseSessionLayout,

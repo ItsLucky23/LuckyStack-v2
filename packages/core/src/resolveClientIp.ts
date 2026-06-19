@@ -153,14 +153,25 @@ const TOKEN_HASH_LENGTH = 32;
 export const deriveTokenBucketId = (token: string): string =>
   createHash('sha256').update(token).digest('hex').slice(0, TOKEN_HASH_LENGTH);
 
+//? Re-armable cooldown latch for the UNKNOWN_CLIENT_IP warning so a
+//? misconfigured deployment (e.g. `trustProxy: false` behind a reverse proxy)
+//? does not flood the log sink — one log entry per 60-second window. The first
+//? occurrence is always emitted, then suppressed until the window resets.
+const UNKNOWN_IP_WARN_COOLDOWN_MS = 60_000;
+let unknownIpLastWarnedAt = 0;
+
 export const resolveClientIp = ({ rawAddress, headers, trustProxy = false, trustedProxyHopCount = 1 }: ResolveClientIpParams): string => {
   const resolved = resolveRaw({ rawAddress, headers, trustProxy, trustedProxyHopCount });
   if (resolved === UNKNOWN_CLIENT_IP) {
     //? M-8 — surface the shared fallback bucket. A burst of these usually means
     //? a reverse proxy is in front but `trustProxy` is off (every request then
-    //? collapses here), or the connection was torn down before keying. Rare in
-    //? a correctly-configured deployment, so a plain warn is not spammy.
-    getLogger().warn('rate-limit: client IP unresolved — keyed into the shared "unknown" bucket', { trustProxy });
+    //? collapses here), or the connection was torn down before keying.
+    //? Rate-suppressed to one log entry per 60 s to avoid log-sink flooding.
+    const now = Date.now();
+    if (now - unknownIpLastWarnedAt >= UNKNOWN_IP_WARN_COOLDOWN_MS) {
+      unknownIpLastWarnedAt = now;
+      getLogger().warn('rate-limit: client IP unresolved — keyed into the shared "unknown" bucket', { trustProxy });
+    }
   }
   return resolved;
 };

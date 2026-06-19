@@ -372,7 +372,11 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
         { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
       );
       if (!response.ok) return;
-      const contentType = response.headers.get('content-type') ?? 'image/jpeg';
+      const rawContentType = response.headers.get('content-type') ?? 'image/jpeg';
+      //? SEC: allowlist content-type to safe image MIME types before embedding in
+      //? a data-URI that is stored in Redis and later served to the browser.
+      const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+      const contentType = SAFE_IMAGE_TYPES.has(rawContentType) ? rawContentType : 'image/jpeg';
       const buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.byteLength > MAX_PHOTO_BYTES) return;
       return `data:${contentType};base64,${buffer.toString('base64')}`;

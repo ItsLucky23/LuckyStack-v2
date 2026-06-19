@@ -18,11 +18,6 @@ import { getSrcDir } from '@luckystack/core';
 import { assertNoDuplicateNormalizedRouteKeys, assertNoDuplicatePageRoutes, assertValidRouteNaming } from './routeNamingValidation';
 import { getOrInit } from './internal/mapUtils';
 
-// Collect required imports for the Functions interface only.
-// API/Sync types are now fully expanded by the TypeChecker and need no imports.
-const namedImports = new Map<string, Set<string>>();
-const defaultImports = new Map<string, string>();
-
 interface GenerateTypeMapOptions {
   quiet?: boolean;
 }
@@ -234,8 +229,12 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
 
   // Rebuild the TypeScript Program on each generation to pick up file changes.
   invalidateProgramCache();
-  namedImports.clear();
-  defaultImports.clear();
+
+  //? Local per-call maps — previously module-level mutable state, which
+  //? meant a second call (e.g. from a test or a race) would share and corrupt
+  //? state across calls. Moved here so each invocation gets a fresh set.
+  const namedImports = new Map<string, Set<string>>();
+  const defaultImports = new Map<string, string>();
 
   const unresolvedTypeAliases = new Set<string>();
   const collectors: TypeMapCollectors = { namedImports, unresolvedTypeAliases, quiet };

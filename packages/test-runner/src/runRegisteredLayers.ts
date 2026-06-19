@@ -58,11 +58,15 @@ const postWebhook = async (summary: TestSummary): Promise<void> => {
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (reporter.webhookAuth?.type === 'bearer') headers.Authorization = `Bearer ${reporter.webhookAuth.token}`;
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => { controller.abort(); }, 10_000);
   await tryCatch(() => fetch(webhookUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify(summary),
+    signal: controller.signal,
   }));
+  clearTimeout(timeoutHandle);
 };
 
 export const runRegisteredLayers = async (input: RunRegisteredLayersInput): Promise<TestSummary> => {

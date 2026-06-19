@@ -44,7 +44,7 @@ export const readDocFile = async (relPath: string): Promise<string | null> => {
     //? is caught by the containment check (lexical path.relative alone misses it).
     const real = await fs.realpath(resolved);
     const realRel = path.relative(root, real);
-    if (realRel.startsWith('..') || path.isAbsolute(realRel)) return null;
+    if (realRel === '' || realRel.startsWith('..') || path.isAbsolute(realRel)) return null;
     return await fs.readFile(real, 'utf8');
   } catch {
     return null;

@@ -10,6 +10,7 @@ import {
   hashSynchronizedValueWith,
   resolveHealthHashConfigFromDescriptor,
   tryCatch,
+  tryCatchSync,
 } from '@luckystack/core';
 import type { HealthHashDescriptor } from '@luckystack/core';
 
@@ -46,6 +47,23 @@ export interface RunBootHandshakeInput {
    * strictBootHandshake`.
    */
   strict?: boolean;
+  /**
+   * Override Redis connection options for the **fallback** env's Redis client.
+   * When omitted, the fallback client reuses the same options as the primary
+   * client (i.e. the current env's Redis, derived from `getRedisConnectionOptions()`).
+   *
+   * Supply this when the fallback env uses a different Redis instance
+   * (different host / port / password / TLS config) from the current env.
+   * Without it, a cross-credential mismatch will cause the Redis compare step
+   * to fail or silently succeed against the wrong instance — logged as a
+   * warning (or thrown in strict mode) via `reportIssue`.
+   */
+  fallbackRedisOptions?: {
+    host?: string;
+    port?: number;
+    password?: string;
+    tls?: boolean;
+  };
 }
 
 interface FallbackHealthResponse {
@@ -54,12 +72,28 @@ interface FallbackHealthResponse {
   healthHash?: HealthHashDescriptor;
 }
 
+const ALLOWED_HEALTH_PROBE_SCHEMES = new Set(['http:', 'https:']);
+
 const probeFallbackHealth = async (baseUrl: string): Promise<FallbackHealthResponse | null> => {
+  //? Validate that fallbackBaseUrl is an http: or https: URL before calling
+  //? fetch. An attacker-controlled value (e.g. `file://` or a localhost bypass)
+  //? would turn this probe into an SSRF vector. We also parse the URL to extract
+  //? the `Host` header so the probe reaches the right virtual-host when the
+  //? fallback sits behind a virtual-host router. A missing or invalid URL
+  //? returns null — the caller logs a warning or throws (strict mode).
+  const [urlParseError, parsedBase] = tryCatchSync(() => new URL(baseUrl));
+  if (urlParseError || !parsedBase || !ALLOWED_HEALTH_PROBE_SCHEMES.has(parsedBase.protocol)) {
+    return null;
+  }
+  const probeUrl = `${parsedBase.origin}/_health`;
+  const hostHeader = parsedBase.host;
+
   const controller = new AbortController();
   const timeout = setTimeout(() => { controller.abort(); }, getHealthProbeTimeoutMs());
   const [error, payload] = await tryCatch<FallbackHealthResponse | null, undefined>(async () => {
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/_health`, {
+    const response = await fetch(probeUrl, {
       signal: controller.signal,
+      headers: { host: hostHeader },
     });
     if (!response.ok) return null;
     return await response.json() as FallbackHealthResponse;
@@ -122,6 +156,13 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   //? Centralized connection options so a Redis env-rename touches one file
   //? in core, not both core and router.
   const redisOptions = getRedisConnectionOptions();
+  //? When the fallback env uses a different Redis instance, the caller supplies
+  //? `fallbackRedisOptions` to override. Without it we reuse `redisOptions`
+  //? (current-env Redis) — this is correct when both envs share one Redis, but
+  //? will produce a misleading mismatch report when they use separate instances.
+  const fallbackRedisOptions = input.fallbackRedisOptions
+    ? { ...redisOptions, ...input.fallbackRedisOptions }
+    : redisOptions;
 
   const client = new Redis({ ...redisOptions, lazyConnect: true });
   //? An ioredis client that emits 'error' with no listener throws as an
@@ -173,7 +214,7 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   //? Write our UUID, then read fallback's UUID (should be fallback's own boot
   //? value). If the two envs truly share Redis, fallback's key would be
   //? readable from here too. Check that separately.
-  const fallbackClient = new Redis({ ...redisOptions, lazyConnect: true });
+  const fallbackClient = new Redis({ ...fallbackRedisOptions, lazyConnect: true });
   fallbackClient.on('error', (err) => {
     getLogger().error('[router] boot handshake fallback Redis error', err);
   });

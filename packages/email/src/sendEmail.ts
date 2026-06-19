@@ -126,6 +126,13 @@ const sanitizeMessageHeaders = (message: EmailMessage): EmailMessage => ({
   replyTo: message.replyTo ? stripCrlf(message.replyTo) : message.replyTo,
   cc: message.cc === undefined ? message.cc : stripCrlfAddress(message.cc),
   bcc: message.bcc === undefined ? message.bcc : stripCrlfAddress(message.bcc),
+  //? EMAIL-O7 extension: strip CR/LF from custom header keys AND values so an
+  //? attacker-controlled header name or value can't inject arbitrary SMTP headers.
+  headers: message.headers === undefined
+    ? message.headers
+    : Object.fromEntries(
+        Object.entries(message.headers).map(([k, v]) => [stripCrlf(k), stripCrlf(v)]),
+      ),
 });
 
 const isTemplateInput = (

@@ -21,7 +21,11 @@ import { getBindAddress, getGeneratedApiDocsPath, isLoopbackIp, tryCatch } from 
 import { renderDocsHtml } from './docsHtml';
 
 export interface DocsBranding {
-  /** Logo URL shown in the header. PNG / SVG / data: URLs all accepted. */
+  /**
+   * Logo URL shown in the header. Accepts `https:`, `http:`, and scheme-free
+   * relative URLs. `data:` and `javascript:` URLs are rejected (the logo will
+   * be silently omitted) because SVG data-URIs can carry script.
+   */
   logoUrl?: string;
   /** CSS color for the header / accent (`#hex` or `rgb()` literal). */
   brandColor?: string;
@@ -135,6 +139,7 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
     if (req.method !== 'GET') {
       res.statusCode = 405;
       res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Allow', 'GET');
       res.end('Method Not Allowed');
       return true;
     }
@@ -186,6 +191,8 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
     const html = options.template
       ? options.template({ jsonPath, pageTitle: title, branding })
       : renderDocsHtml(jsonPath, title, {

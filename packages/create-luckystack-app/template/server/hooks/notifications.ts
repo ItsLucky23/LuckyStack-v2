@@ -37,11 +37,12 @@ export const registerNotificationHooks = (): void => {
 
         const prisma = getPrismaClient();
 
-        const user = await (prisma as { user: { findUnique: (q: unknown) => Promise<unknown> } })
-          .user.findUnique({ where: { id: userId }, select: { email: true, name: true, preferences: true } }) as
-          { email?: string | null; name?: string | null; preferences?: unknown } | null;
+        const userRaw = await (prisma as { user: { findUnique: (q: unknown) => Promise<unknown> } })
+          .user.findUnique({ where: { id: userId }, select: { email: true, name: true, preferences: true } });
 
-        if (!user?.email) return;
+        if (!userRaw || typeof userRaw !== 'object') return;
+        const user = userRaw as { email?: string | null; name?: string | null; preferences?: unknown };
+        if (typeof user.email !== 'string' || !user.email) return;
         const prefs = isPreferences(user.preferences) ? user.preferences : {};
         if (!prefs.notifyOnNewSignIn) return;
 
@@ -77,11 +78,12 @@ export const sendPasswordChangedNotification = async (userId: string): Promise<v
   await tryCatch(async () => {
     const prisma = getPrismaClient();
 
-    const user = await (prisma as { user: { findUnique: (q: unknown) => Promise<unknown> } })
-      .user.findUnique({ where: { id: userId }, select: { email: true, name: true, preferences: true } }) as
-      { email?: string | null; name?: string | null; preferences?: unknown } | null;
+    const userRaw = await (prisma as { user: { findUnique: (q: unknown) => Promise<unknown> } })
+      .user.findUnique({ where: { id: userId }, select: { email: true, name: true, preferences: true } });
 
-    if (!user?.email) return;
+    if (!userRaw || typeof userRaw !== 'object') return;
+    const user = userRaw as { email?: string | null; name?: string | null; preferences?: unknown };
+    if (typeof user.email !== 'string' || !user.email) return;
     const prefs = isPreferences(user.preferences) ? user.preferences : {};
     if (!prefs.notifyOnPasswordChange) return;
 

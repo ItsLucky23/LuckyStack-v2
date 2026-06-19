@@ -22,9 +22,20 @@ export interface RenderDocsHtmlOptions {
 
 //? Strip CSS-break characters from a value before injecting it into a
 //? <style> block. Removes `}` (would close the rule-set), `;` (would inject
-//? extra declarations) and `<` (would close the <style> element).
+//? extra declarations), `<` (would close the <style> element), newlines
+//? (CR/LF — would break out of the declaration into adjacent lines),
+//? `url(` (would allow loading arbitrary external resources), and CSS comment
+//? delimiters `/*` / `*/` (would allow commenting out surrounding rules).
 const sanitizeCssValue = (value: string): string =>
-  value.replaceAll('}', '').replaceAll(';', '').replaceAll('<', '');
+  value
+    .replaceAll('}', '')
+    .replaceAll(';', '')
+    .replaceAll('<', '')
+    .replaceAll('\n', '')
+    .replaceAll('\r', '')
+    .replaceAll('url(', '')
+    .replaceAll('/*', '')
+    .replaceAll('*/', '');
 
 //? Only allow http: and https: schemes for the logo URL to block javascript:
 //? and data: XSS vectors. data: URLs are explicitly rejected because an SVG
@@ -271,7 +282,7 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     return '<div class="try-it-out">' +
       '<div style="font-weight:600;font-size:12px;margin-bottom:4px;">Try it out (live request)</div>' +
       '<textarea placeholder=\\'{"key":"value"}\\'>{}</textarea>' +
-      '<button onclick="runEndpoint(this,\\'' + route + '\\',\\'' + method + '\\',this.previousElementSibling)">Send</button>' +
+      '<button onclick="runEndpoint(this,\\'' + escapeHtml(route) + '\\',\\'' + escapeHtml(method) + '\\',this.previousElementSibling)">Send</button>' +
       '<pre class="result"></pre>' +
       '</div>';
   };

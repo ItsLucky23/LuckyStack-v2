@@ -57,15 +57,15 @@ export const initRepl = () => {
   }
   
   replInstance.context.deleteSession = async (token: string) => {
-  
+
     const result = await deleteSession(token)
-    console.log(result)
+    console.log(sanitizeForLog(result))
   }
   
   replInstance.context.commands = () => {
     console.log('commands:')
     console.log('getSession(token) -- if no token provided then it will return all sessions')
-    console.log('deleteSession(token) -- if no token provided then it will delete all sessions')
+    console.log('deleteSession(token) -- deletes the session for the given token')
     console.log('listApiUrls() -- prints all discovered API urls')
     console.log('listSyncUrls() -- prints all discovered sync urls')
   }

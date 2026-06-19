@@ -84,8 +84,6 @@ export interface PasswordResetRequestedPayload {
   matched: boolean;
   /** The userId, when matched. */
   userId?: string;
-  /** The reset token (for audit; do not log). */
-  token?: string;
   /** Token TTL in seconds. */
   ttlSeconds?: number;
 }

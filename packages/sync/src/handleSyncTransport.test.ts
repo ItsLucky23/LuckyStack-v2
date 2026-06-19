@@ -42,8 +42,10 @@ const state = vi.hoisted((): {
       rateLimiting: { defaultApiLimit: 0, defaultIpLimit: 0, windowMs: 1000 },
       http: { trustProxy: false },
       sync: {
-        allowClientReceiverAll: true,
-        requireRoomMembership: false,
+        //? Match the actual 0.2.0 production secure defaults so the test
+        //? baseline validates what ships (audit finding SYNC-medium-4).
+        allowClientReceiverAll: false,
+        requireRoomMembership: true,
         fanoutYieldEvery: 50,
         fanoutYieldMs: 0,
       },
@@ -185,8 +187,9 @@ beforeEach(async () => {
   state.session = null;
   state.syncObject = {};
   state.config.sync = {
-    allowClientReceiverAll: true,
-    requireRoomMembership: false,
+    //? Mirror the hoisted baseline: secure production defaults.
+    allowClientReceiverAll: false,
+    requireRoomMembership: true,
     fanoutYieldEvery: 50,
     fanoutYieldMs: 0,
   };
@@ -227,6 +230,10 @@ describe("S22 — unified response envelope across transports", () => {
     });
 
     // ── HTTP transport ──
+    //? Set a session that has joined "chat-room" so the requireRoomMembership
+    //? secure default passes (same membership check as the socket transport's
+    //? socket.rooms.has(receiver) check above).
+    state.session = { id: "u-s22", roomCodes: ["chat-room"] };
     const httpResult = await handleHttpSyncRequest({
       name: "sync/chat/send/v1",
       data: { hello: "world" },

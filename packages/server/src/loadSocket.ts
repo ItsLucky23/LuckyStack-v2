@@ -131,7 +131,7 @@ const validateRoomRequest = (
     }));
     return false;
   }
-  if (!group) {
+  if (!group || group.length > 256) {
     socket.emit(buildResponseEventName(responseIndex), normalizeErrorResponse({
       response: { status: 'error', errorCode: 'room.invalid' },
       preferredLocale,
@@ -376,6 +376,23 @@ const registerUpdateLocationEvent = (ctx: SocketContext): void => {
     (newLocation: { pathName: string; searchParams?: Record<string, string> }) => {
       if (!token) return;
       if (!locationProviderEnabled) return;
+      //? SEC: validate client-supplied location fields before persisting in session.
+      //? pathName must start with '/', be at most 2048 chars, and contain no
+      //? null bytes. searchParams keys + values are capped to prevent session bloat.
+      if (
+        typeof newLocation.pathName !== 'string'
+        || !newLocation.pathName.startsWith('/')
+        || newLocation.pathName.length > 2048
+        || newLocation.pathName.includes('\0')
+      ) return;
+      if (newLocation.searchParams !== undefined) {
+        if (typeof newLocation.searchParams !== 'object' || Array.isArray(newLocation.searchParams)) return;
+        const entries = Object.entries(newLocation.searchParams);
+        if (entries.length > 50) return;
+        for (const [k, v] of entries) {
+          if (typeof k !== 'string' || k.length > 256 || typeof v !== 'string' || v.length > 1024) return;
+        }
+      }
       if (shouldLogDev) {
         getLogger().debug('updating location', { pathName: newLocation.pathName });
       }
@@ -503,6 +520,13 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
         //? the handshake (`extractTokenFromSocket`) + the auth hooks, which run
         //? regardless of the Origin header. `allowOriginless` is kept for
         //? symmetry/documented opt-in but no longer gates the handshake.
+        //?
+        //? THREAT MODEL: non-browser callers (CLI tools, native apps, server-to-
+        //? server) can connect without an Origin header and bypass the CORS check.
+        //? Mitigation: all socket events require a valid session token; use
+        //? `applySocketMiddlewares` (via `@luckystack/core`) to add an `io.use(...)`
+        //? middleware that rejects connections lacking a token if authentication is
+        //? required for ALL socket connections in the application.
         if (!origin) {
           callback(null, true);
           return;

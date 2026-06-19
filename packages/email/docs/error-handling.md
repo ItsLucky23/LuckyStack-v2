@@ -225,11 +225,11 @@ Then a separate worker pulls due rows, calls `sendEmail` again, and re-enqueues 
 | Adapter returns `undefined` from `send` | `{ ok: false, reason: 'send-no-result' }`. No throw. Sentry capture fires with a synthetic `Error('Email send failed: send-no-result')`. |
 | Adapter throws | Caught by `tryCatch`, normalized to `{ ok: false, reason: error.message || 'send-threw', cause: error }`. Sentry capture uses `cause` (preserves stack). |
 | `preEmailSend` returns a stop signal | Per the architecture doc: `sendEmail` returns `{ ok: false, reason: signal.errorCode }`, `sender.send` is never called, `postEmailSend` is *not* dispatched. **Current implementation caveat:** the abort wiring inside `sendEmail.ts` does not explicitly check the dispatcher's `stopped` flag in this revision — see `docs/hooks.md` for the workaround. |
-| Requested `adapter` slot missing | `sendEmail` falls through to `adapterHint` -> `'default'` -> legacy single sender, NOT a `no-sender` failure. Better to send via fallback than drop. |
+| Requested `adapter` slot missing | Returns `{ ok: false, reason: 'no-sender' }` — explicit adapter routing is a security contract (EMAIL-O4). No silent fallthrough to a different sender. When `emailConfig.required === true` this path throws instead. |
 | Hook handler throws | Caught by the dispatcher, logged + captured, dispatch continues with next handler. Never blocks the main send flow. |
 | Logger not registered | Falls back to `console.warn` / `console.info`. Same per-line content. |
 | Error-tracker not registered | `captureException` is a no-op. No crash, no warning. |
-| Template `render` throws | The throw bubbles out of `sendEmail` (no `tryCatch` wrap around template rendering). Catch at the call site if you need soft failure. |
+| Template `render` or `subject` throws | `sendEmail` catches it (via `tryCatchSync`) and returns `{ ok: false, reason: 'template-render-failed' }`. No try/catch is needed at the call site. |
 | `from` resolves to empty string | `from` is set to `getEmailConfig().from` when omitted (default `'noreply@example.com'`). To trigger `'missing-from'`, the adapter's constructor `from` must also be unset AND the message's `from` empty. |
 
 ---

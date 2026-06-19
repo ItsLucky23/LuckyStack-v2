@@ -29,22 +29,38 @@ export const isPrismaClientMissing = (): boolean =>
 	fs.existsSync(DEFAULT_SCHEMA_PATH) && !fs.existsSync(GENERATED_CLIENT_MARKER);
 
 /**
- * Runs `npx prisma generate` once. `prisma generate` only reads the schema —
+ * Runs `prisma generate` once. `prisma generate` only reads the schema —
  * it needs NO database credentials — so this is safe to run on dev boot without
  * any `.env` loading. Resolves to the child's exit code (0 on success). Spawn
  * failures (ENOENT/EACCES) surface through the `tryCatch` tuple, not a throw.
+ *
+ * Uses the local `node_modules/.bin/prisma` binary directly (shell: false) to
+ * avoid shell invocation on Windows. Falls back to `npx prisma` with
+ * shell: false when the local binary is absent (e.g. prisma not yet installed).
  */
 export const runPrismaGenerate = async (): Promise<[Error | null, number | null]> =>
 	tryCatch(
 		() =>
 			new Promise<number>((resolve, reject) => {
-				const child = spawn('npx', ['prisma', 'generate'], {
+				//? Prefer the local binary over `npx` — avoids shell invocation on
+				//? Windows and is faster (no npx resolution overhead). On Windows the
+				//? `.cmd` wrapper is what `PATH` resolves to from cmd.exe, but spawn
+				//? with shell:false needs the real script path, not the .cmd shim.
+				//? The actual JS CLI lives at `node_modules/prisma/build/index.js`
+				//? but the cross-platform entry is the `.bin` shim.
+				const localBinName = process.platform === 'win32' ? 'prisma.cmd' : 'prisma';
+				const localBin = path.join(ROOT_DIR, 'node_modules', '.bin', localBinName);
+				const useLocal = fs.existsSync(localBin);
+
+				//? shell: false in both branches — argv is fully static (no user input).
+				const [cmd, args] = useLocal
+					? [localBin, ['generate']]
+					: [process.platform === 'win32' ? 'npx.cmd' : 'npx', ['prisma', 'generate']];
+
+				const child = spawn(cmd, args, {
 					cwd: ROOT_DIR,
 					stdio: 'inherit',
-					//? `npx` resolves to `npx.cmd` on Windows, which requires shell
-					//? invocation to be found on PATH. Dev-only, fixed argv (no user
-					//? input interpolated), so the shell is not an injection surface.
-					shell: process.platform === 'win32',
+					shell: false,
 				});
 				child.on('error', reject);
 				child.on('exit', (code) => { resolve(code ?? 0); });

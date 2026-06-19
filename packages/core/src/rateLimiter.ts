@@ -119,13 +119,19 @@ const checkRateLimitInMemory = ({
   const entry = rateLimitStore.get(key);
 
   if (!entry || entry.resetAt < now) {
-    //? CORE-O7: evict the oldest entry before inserting a new key to keep the
-    //? store bounded. `Map` preserves insertion order so the first iterator key
-    //? is the oldest. Only evict when we are at the cap AND the incoming key is
-    //? genuinely new (i.e. not a refresh of an existing key checked above).
+    //? CORE-O7: evict before inserting a new key to keep the store bounded.
+    //? Prefer evicting an EXPIRED entry (rate limit already reset, no security
+    //? cost) over evicting the oldest ACTIVE entry (which could let a rate-limited
+    //? key bypass the limit by resetting its counter). Only when no expired entry
+    //? exists do we fall back to the insertion-order oldest (least-harm choice).
     if (rateLimitStore.size >= MAX_MEMORY_STORE_SIZE) {
-      const oldest = rateLimitStore.keys().next().value;
-      if (oldest !== undefined) rateLimitStore.delete(oldest);
+      const now = Date.now();
+      let evictKey: string | undefined;
+      for (const [k, e] of rateLimitStore) {
+        if (e.resetAt < now) { evictKey = k; break; }
+      }
+      evictKey ??= rateLimitStore.keys().next().value;
+      if (evictKey !== undefined) rateLimitStore.delete(evictKey);
     }
     rateLimitStore.set(key, { count: 1, resetAt: now + safeWindowMs });
     return { allowed: true, remaining: limit - 1, resetIn: Math.ceil(safeWindowMs / 1000) };
@@ -357,8 +363,10 @@ export const clearRateLimit = async (key: string): Promise<void> => strategyRegi
  */
 export const clearAllRateLimits = async (): Promise<void> => {
   if (process.env.NODE_ENV === 'production') {
-    getLogger().warn('[RateLimiter] clearAllRateLimits() called in production — ignored. Use clearRateLimit(key) for scoped resets.');
-    return;
+    //? Throw (not warn-and-return) so callers that catch the rejection know the
+    //? operation was skipped. A silent `return` makes integration test scaffolding
+    //? proceed with stale counters, producing flaky results (CORE-O8 logic-gap fix).
+    throw new Error('[RateLimiter] clearAllRateLimits() is not allowed in production. Use clearRateLimit(key) for scoped resets.');
   }
   return strategyRegistry.get().clearAll();
 };
@@ -373,6 +381,15 @@ export const clearAllRateLimits = async (): Promise<void> => {
 //? than at module load, so any tool/CLI/test that merely type-imports core does
 //? NOT inherit a recurring timer it never asked for (the package's "no import-
 //? time side effects" doctrine).
+//? NOTE: `cleanupStarted` is never reset, even when a custom strategy is
+//? registered via `registerRateLimitStrategy()`. The cleanup timer runs on the
+//? built-in `rateLimitStore` only — it is harmless but wasteful when a custom
+//? strategy takes over (the store stays empty). If your custom strategy needs
+//? its own cleanup, schedule it in the strategy's own `clearAll` / a separate
+//? boot hook. The one-shot `onStoreError='deny'-in-memory-mode` warning (below)
+//? will also NOT fire for a strategy registered after the first request; call
+//? `registerRateLimitStrategy` before the first request to ensure the warning
+//? check fires with the intended strategy in place.
 let cleanupStarted = false;
 const scheduleCleanup = (): void => {
   const intervalMs = getProjectConfig().rateLimiting.cleanupIntervalMs;

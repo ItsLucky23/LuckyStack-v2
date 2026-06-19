@@ -38,18 +38,21 @@ export function DangerSection({ isCredentials }: DangerSectionProps) {
   };
 
   const handleDeleteAccount = async () => {
+    //? Credentials accounts must re-enter their password — the server
+    //? (`deleteAccount_v1`) rejects with `login.wrongPassword` otherwise.
+    //? OAuth-only accounts have no hash, so the field is hidden and we send
+    //? `undefined` (server skips the check).
+    //? Read the password BEFORE opening the confirm dialog so the value
+    //? captured is the one the user typed, not whatever may be in the ref
+    //? after the dialog is dismissed (stale-ref risk on slow confirms).
+    const password = deletePasswordRef.current?.value ?? '';
+
     const confirmed = await menuHandler.confirm({
       title: translate({ key: 'settings.deleteAccount' }),
       content: translate({ key: 'settings.deleteAccountConfirm' }),
       input: 'DELETE',
     });
     if (!confirmed) return;
-
-    //? Credentials accounts must re-enter their password — the server
-    //? (`deleteAccount_v1`) rejects with `login.wrongPassword` otherwise.
-    //? OAuth-only accounts have no hash, so the field is hidden and we send
-    //? `undefined` (server skips the check).
-    const password = deletePasswordRef.current?.value ?? '';
 
     const response = await apiRequest({
       name: 'settings/deleteAccount',

@@ -129,7 +129,16 @@ export const createRedisHealthStore = async (
       .exec();
     //? Update local cache only after the durable write commits so a sibling
     //? querying our in-memory view (via getLocalHealth) agrees with Redis.
-    if (results !== null) cache.set(service, healthy);
+    //? MULTI/EXEC returns null when the transaction is aborted (EXECABORT —
+    //? e.g. a WATCH-triggered optimistic concurrency failure on some Redis
+    //? configurations). In that case the SET and PUBLISH were never executed:
+    //? log the failure so operators can see it; do NOT update the local cache
+    //? (which would disagree with Redis and potentially never self-correct).
+    if (results === null) {
+      getLogger().error('[router] health-store MULTI/EXEC aborted (EXECABORT) — health state may be stale', { service, healthy });
+    } else {
+      cache.set(service, healthy);
+    }
   };
 
   const get = (service: string): boolean => cache.get(service) ?? true;

@@ -97,10 +97,16 @@ const buildAuthHeaders = async (input: RunAllTestsInput): Promise<Record<string,
     if (session?.csrfToken) {
       headers[getCsrfConfig().headerName] = session.csrfToken;
     }
-  } catch {
+  } catch (error) {
     //? @luckystack/login not installed or session lookup failed.
-    //? The sweep will proceed without the CSRF header, which is the same
-    //? behavior as before this fix — acceptable for token-mode setups.
+    //? Warn so the operator knows the sweep is running without a CSRF header
+    //? (degraded mode) — the sweep continues, but CSRF-protected state-changing
+    //? endpoints will be unreachable in cookie-mode.
+    console.warn(
+      '[test-runner] buildAuthHeaders: could not resolve CSRF token —',
+      error instanceof Error ? error.message : String(error),
+      '— sweep will run without the CSRF header (degraded mode).',
+    );
   }
 
   return headers;

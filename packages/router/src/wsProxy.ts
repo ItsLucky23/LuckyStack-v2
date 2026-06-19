@@ -230,19 +230,20 @@ const openUpstream = async (
 
   upstreamRequest.on('upgrade', (upstreamRes, upstreamSocket, upstreamHead) => {
     setUpgraded(true);
-    //? The pre-101 `onClientGone` handler has served its purpose (no upstream
-    //? socket to leak anymore). Remove it before adding post-upgrade teardown
-    //? listeners so the same socket doesn't accumulate duplicate handlers on
-    //? every connection (listener count grows unboundedly without this).
-    clientSocket.off('error', onClientGone);
-    clientSocket.off('close', onClientGone);
 
     //? Forward the 101 Switching Protocols response and any trailing bytes
     //? the upstream already sent, then bidirectionally pipe the raw sockets.
+    //? Strip hop-by-hop and internal `x-luckystack-*` headers from the upstream
+    //? 101 response before writing to the client — a backend must not be able to
+    //? inject Set-Cookie, x-luckystack-* routing markers, or other internal headers
+    //? through the WS upgrade response into the browser's header context.
     const statusLine = `HTTP/1.1 ${upstreamRes.statusCode ?? 101} ${upstreamRes.statusMessage ?? 'Switching Protocols'}`;
     const headerLines: string[] = [statusLine];
     for (const [key, value] of Object.entries(upstreamRes.headers)) {
       if (value === undefined) continue;
+      const lower = key.toLowerCase();
+      if (WS_HOP_BY_HOP_HEADERS.has(lower)) continue;
+      if (lower.startsWith('x-luckystack-')) continue;
       if (Array.isArray(value)) {
         for (const v of value) headerLines.push(`${key}: ${v}`);
       } else {
@@ -261,8 +262,19 @@ const openUpstream = async (
     };
     upstreamSocket.on('error', teardown);
     upstreamSocket.on('close', teardown);
+    //? Add post-upgrade teardown listeners BEFORE removing the pre-upgrade
+    //? `onClientGone` listeners. An atomic swap ensures no window where the
+    //? client socket has no error/close handler — a client RST between the two
+    //? operations would otherwise be an uncaught exception that crashes the router.
     clientSocket.on('error', teardown);
     clientSocket.on('close', teardown);
+
+    //? The pre-101 `onClientGone` handler has served its purpose (no upstream
+    //? socket to leak anymore). Remove it now that the post-upgrade teardown
+    //? is in place, so the same socket doesn't accumulate duplicate handlers on
+    //? every connection (listener count grows unboundedly without this).
+    clientSocket.off('error', onClientGone);
+    clientSocket.off('close', onClientGone);
   });
 
   //? `http.request` only emits `'upgrade'` on a 101. A reachable backend that

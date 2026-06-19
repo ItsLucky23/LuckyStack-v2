@@ -9,6 +9,7 @@ import {
   getProjectConfig,
   hasCookie,
   readSession,
+  tryCatch,
   tryCatchSync,
 } from '@luckystack/core';
 import { sanitizeForLog } from './logSanitize';
@@ -206,7 +207,7 @@ const parseRequestParams = async ({
   return params;
 };
 
-export const handleHttpRequest = async (
+const handleHttpRequestInner = async (
   req: IncomingMessage,
   res: ServerResponse,
   options: CreateLuckyStackServerOptions
@@ -226,9 +227,19 @@ export const handleHttpRequest = async (
   //? Parse the path up-front so the origin gate can consult the exempt-path
   //? registry (registered webhooks) before it would otherwise 403 a
   //? header-less, state-changing request.
+  //? SEC: decode percent-encoded characters so that e.g. `/auth%2Flogout` cannot
+  //? bypass route guards that compare against plain `/auth/logout`. Malformed
+  //? encoding returns 400 so the request does not silently fall through.
   const url = req.url ?? '/';
   const [routePathRaw, queryStringRaw] = url.split('?');
-  const routePath = routePathRaw ?? '/';
+  const [decodeError, decodedPath] = tryCatchSync(() => decodeURIComponent(routePathRaw ?? '/'));
+  if (decodeError || decodedPath === null) {
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'text/plain');
+    res.end('Bad Request');
+    return;
+  }
+  const routePath = decodedPath;
   const queryString = queryStringRaw ?? '';
 
   const { origin, rejected } = enforceOriginPolicy(req, res, routePath);
@@ -239,8 +250,11 @@ export const handleHttpRequest = async (
   //? Honor an incoming x-request-id (idempotent for proxies/retries) or
   //? generate a fresh UUID. Echo back as a response header so client-side
   //? logs and Sentry can correlate.
+  //? SEC: validate before reflecting — only alphanumeric + hyphens, max 128 chars,
+  //? to prevent header-injection via a crafted x-request-id value.
   const incomingRequestId = req.headers['x-request-id'];
-  const requestId = (Array.isArray(incomingRequestId) ? incomingRequestId[0] : incomingRequestId) ?? randomUUID();
+  const rawRequestId = Array.isArray(incomingRequestId) ? incomingRequestId[0] : incomingRequestId;
+  const requestId = (rawRequestId && /^[a-zA-Z0-9-]{1,128}$/.test(rawRequestId)) ? rawRequestId : randomUUID();
   res.setHeader('X-Request-Id', requestId);
 
   //? `preHttpRequest` fires before any route dispatch. Use to instrument
@@ -308,4 +322,22 @@ export const handleHttpRequest = async (
   if (params === null) return;
 
   await dispatchRoutes(POST_PARAMS_ROUTES, { ...baseCtx, params });
+};
+
+export const handleHttpRequest = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: CreateLuckyStackServerOptions
+): Promise<void> => {
+  //? Top-level error boundary: catches any unhandled throw that escapes route
+  //? handlers and prevents it from propagating into the Node.js
+  //? unhandled-rejection handler (which would crash the process in Node ≥15).
+  //? Returns 500 so the client gets a defined response instead of a hang.
+  const [error] = await tryCatch(() => handleHttpRequestInner(req, res, options));
+  if (error && !res.writableEnded) {
+    getLogger().error('handleHttpRequest: unhandled error', { err: error });
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ status: 'error', errorCode: 'server.internalError' }));
+  }
 };

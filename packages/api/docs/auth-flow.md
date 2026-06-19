@@ -14,21 +14,21 @@ The auth gate has two stages: a login check (cheap, boolean — does the session
 
 | Step | What happens |
 | --- | --- |
-| 2 (early) | `getSession(token)` → `setSentryUser(user)`. Read once per request; downstream code reads `user` as a closure variable. |
+| 2 (early) | `readSession(token)` → resolve `user`. Read once per request; downstream code reads `user` as a closure variable. Error-tracker identity set via `setCurrentErrorTrackerIdentity` (ALS scope), not a direct `setSentryUser` call. |
 | 6 | `checkApiAuth({ apiEntry, user, name, emitApiError })` (or the inline HTTP block) runs the login + predicate gate. Rejection short-circuits the pipeline. |
-| 4 (socket only) | `system/logout` shortcut. When the route normalizes to `system/logout`, the handler calls `logout(...)` directly and emits a success envelope — bypassing the runtime-map lookup, the auth gate, and every subsequent step. |
+| 4 (socket only) | `system/logout` shortcut. When the route normalizes to `system/logout`, the handler applies the global per-IP rate-limit, calls `performLogout(...)` directly, and emits a success envelope via `emitApiResult` — bypassing the runtime-map lookup, the auth gate, input validation, and the `preApiExecute`/`postApiExecute` hooks. The respond-phase hooks (`preApiRespond`, `transformApiResponse`, `postApiRespond`) still fire. |
 
 ## API Reference
 
-### `getSession(token)` (from `@luckystack/login`)
+### `readSession(token)` (from `@luckystack/core`)
 
-Read at request time. Returns `Promise<SessionLayout | null>`. Reads from the active session adapter (Redis by default); applies sliding-expiration (dispatches `preSessionRefresh` / `postSessionRefresh` hooks).
+Read at request time via `@luckystack/core`'s session-provider registry. Returns `Promise<SessionLayout | null>`. Reads from the active session adapter (Redis by default); applies sliding-expiration (dispatches `preSessionRefresh` / `postSessionRefresh` hooks).
 
 A `null` return means: no session token, an expired session, a deleted session, or a session-adapter outage. The handler treats all four identically — `user` is `null` for the rest of the request, and `auth.login: true` rejects with `auth.required`.
 
-### `setSentryUser(user)` (from `@luckystack/error-tracking`)
+### Error-tracker identity propagation
 
-Called immediately after `getSession`. Records `{ id, email }` (or `null` for unauthenticated requests) on every active error tracker so that any subsequent `captureException` / `captureMessage` (including from inside `main(...)`) is attributed to this user.
+Called immediately after `readSession`. The handler calls `setCurrentErrorTrackerIdentity({ id, email, username })` (or `null` for unauthenticated requests) on the per-request ALS scope opened by `runWithErrorTrackerIdentityScope`. This replaces the former direct `setSentryUser` call — identity now flows through the ALS box, which hook subscribers in `@luckystack/error-tracking` read at capture time. The effect is identical: every `captureException` / `captureMessage` during this request is attributed to the correct user, even under concurrent requests.
 
 ### `checkApiAuth(...)` (internal helper, socket transport)
 
@@ -111,7 +111,7 @@ Multiple constraints on a single entry are AND'd. Multiple entries in the array 
 
 Only reachable via the `system/logout` socket shortcut. Calls `deleteSession(token)` (which dispatches `preSessionDelete` → adapter delete + active-user untrack → `postSessionDelete`), emits `socketEventNames.logout` to the socket, and leaves the socket room.
 
-The shortcut bypasses every later step: runtime-map lookup, auth gate, rate limit, validation, hooks (no `preApiExecute` / `postApiExecute`), execution, and respond hooks. Logout is a built-in, not a user-defined route.
+The shortcut bypasses: runtime-map lookup, the per-route auth gate, per-route rate limits, input validation, and the execution hooks (`preApiExecute`, `postApiExecute`). The global per-IP rate-limit bucket IS applied. The respond-phase hooks (`preApiRespond`, `transformApiResponse`, `postApiRespond`) ARE dispatched via `emitApiResult`. Logout is a built-in, not a user-defined route.
 
 ## `AuthProps` shape
 

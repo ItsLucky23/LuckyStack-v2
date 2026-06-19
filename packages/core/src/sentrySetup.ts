@@ -27,6 +27,10 @@ interface SentryInstance {
 
 let sentry: SentryInstance | undefined;
 
+/**
+ * @deprecated Use `registerErrorTracker` from `@luckystack/error-tracking` instead.
+ * Will be removed in a future major version.
+ */
 export const initSharedSentry = (instance: SentryInstance): void => {
   sentry = instance;
 };

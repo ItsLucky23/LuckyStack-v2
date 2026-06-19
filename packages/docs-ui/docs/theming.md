@@ -33,7 +33,7 @@ The renderer applies these tokens in the inline `<style>` block at the top of th
 
 ### Logo handling
 
-- The renderer accepts PNG, SVG, and `data:` URLs equally.
+- The renderer accepts `https:`, `http:`, and scheme-free relative URLs (e.g. `/logo.svg`). `data:` and `javascript:` URLs are **rejected** — the logo will be silently omitted — because SVG data-URIs can carry script.
 - The string is escaped via the same `escapeHtml` helper used for `pageTitle` and `jsonPath`. Embedding hostile content in the `logoUrl` cannot break out of the `src` attribute.
 - The img tag is fixed at `height: 32px; width: auto;`. If you need a different size, embed an SVG with a `viewBox` so it scales correctly, or use a `template` builder.
 - When `logoUrl` is omitted, the brand row contains only the `<h1>`. There is no placeholder block.

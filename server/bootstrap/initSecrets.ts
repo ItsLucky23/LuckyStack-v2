@@ -15,6 +15,17 @@
 
 import type { initSecretManager, SecretManagerConfig, SecretManagerToken } from '@luckystack/secret-manager';
 
+/**
+ * Minimal boot-seam config for `resolveSecretsIfConfigured`. This deliberately
+ * omits `envNames` — the boot seam is intended as a thin wiring layer that
+ * resolves ALL pointer-shaped env values for the project. If `envNames` is not
+ * forwarded here, `initSecretManager`'s secure default (deny-all, with a boot
+ * warning) applies and NOTHING will be resolved off-host.
+ *
+ * Consumers who need to scope resolution to a specific allowlist of env names
+ * should call `initSecretManager` from `@luckystack/secret-manager` directly,
+ * passing `envNames`, instead of using this boot-seam helper.
+ */
 export interface SecretManagerBootConfig {
   /** Base URL of the secret-manager server. An empty string disables resolution. */
   url?: string;

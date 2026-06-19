@@ -15,7 +15,7 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/devkit"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/devkit#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/main/packages/devkit#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
@@ -39,8 +39,8 @@
     }
   },
   "bin": {
-    "luckystack-validate-deploy": "dist/cli/validateDeploy.js",
-    "luckystack-dev": "dist/supervisor.js"
+    "luckystack-validate-deploy": "./dist/cli/validateDeploy.js",
+    "luckystack-dev": "./dist/supervisor.js"
   },
   "files": [
     "dist",
@@ -58,7 +58,7 @@
   "dependencies": {
     "@luckystack/core": "^0.2.5",
     "chokidar": "^5.0.0",
-    "dotenv": "^16.6.1"
+    "dotenv": "^17.0.0"
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",

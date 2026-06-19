@@ -27,6 +27,7 @@ export const createApiFlushPressure = (socket: Socket, abortSignal: AbortSignal)
       //? only way to measure socket backpressure; the cast is the documented
       //? boundary to those untyped internals. Moved verbatim from the socket
       //? handler — same access pattern, no behavioral change.
+      // luckystack-allow no-as-unknown: engine.io internal — `conn` is not typed on Socket; this is the documented access pattern
       // eslint-disable-next-line no-restricted-syntax -- engine.io internals boundary
       const conn = (socket as unknown as { conn?: EngineIoConnLike }).conn;
       //? API-O15 — if engine.io renames `conn` this silently becomes a no-op

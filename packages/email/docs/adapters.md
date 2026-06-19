@@ -225,7 +225,7 @@ Read helpers:
 
 `sendEmail({ adapter?, adapterHint?, ... })` resolves the sender like this:
 
-1. If `input.adapter` is set, return `getEmailSenderByName(input.adapter)`. If that slot is empty, fall through (better to send via fallback than drop the message).
+1. If `input.adapter` is set, return `getEmailSenderByName(input.adapter)`. If that slot is empty, return `null` → the no-sender path fires and `sendEmail` returns `{ ok: false, reason: 'no-sender' }` (EMAIL-O4: explicit routing is a security contract — security-critical or compliance mail must go through the named sender or fail, never silently reroute to a fallback).
 2. If `input.adapterHint` is set (internal hint used by framework callers), try `getEmailSenderByName(input.adapterHint)`.
 3. Try `getEmailSenderByName('default')`.
 4. Fall back to the legacy `getEmailSender()`.
@@ -404,7 +404,7 @@ registerEmailSender(RegionalSender({
 
 | Situation | Behaviour |
 | --- | --- |
-| `sendEmail({ adapter: 'xyz' })` and slot `'xyz'` is empty | Falls through to `adapterHint` -> `'default'` -> legacy single sender, NOT a `no-sender` failure. |
+| `sendEmail({ adapter: 'xyz' })` and slot `'xyz'` is empty | Returns `{ ok: false, reason: 'no-sender' }` — explicit adapter routing is a security contract (EMAIL-O4). No silent fallthrough to `adapterHint` or `'default'`. When `emailConfig.required === true` this path throws instead. |
 | All slots empty AND `emailConfig.required === true` | `sendEmail` throws with the boot-helpful "register a sender, or set `required: false`" message. |
 | All slots empty AND `emailConfig.required === false` | Returns `{ ok: false, reason: 'no-sender' }` and (if `logging.errors`) warns in the terminal. |
 | Adapter returns `undefined` | Normalized to `{ ok: false, reason: 'send-no-result' }`. |

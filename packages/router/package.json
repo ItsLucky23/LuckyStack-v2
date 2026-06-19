@@ -15,7 +15,7 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/router"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/router#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/main/packages/router#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
@@ -40,7 +40,7 @@
     }
   },
   "bin": {
-    "luckystack-router": "dist/cli.js"
+    "luckystack-router": "./dist/cli.js"
   },
   "files": [
     "dist",

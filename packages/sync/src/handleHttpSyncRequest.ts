@@ -525,7 +525,7 @@ async function stageExecuteServer(
   functionsObject: Record<string, unknown>,
   ctx: Pick<HttpSyncContext, 'data' | 'normalizedReceiver' | 'name' | 'user' | 'preferredLocale' | 'buildSyncError' | 'effectiveAbortSignal' | 'cb' | 'stream'>,
 ): Promise<{ serverOutput: Record<string, unknown>; error?: never } | { error: HttpSyncResponse; serverOutput?: never }> {
-  const { data, normalizedReceiver, name, user, preferredLocale, buildSyncError, effectiveAbortSignal, cb, stream } = ctx;
+  const { data, normalizedReceiver, user, preferredLocale, buildSyncError, effectiveAbortSignal, cb, stream } = ctx;
   const { main: serverMain } = serverSyncEntry;
 
   const { emitServerSyncStream, emitBroadcastSyncStream, emitStreamToTokens, flushPressure } =
@@ -593,7 +593,9 @@ async function stageExecuteServer(
       sync: resolvedName,
       stage: 'server',
       userId: user?.id,
-      receiver: name,
+      //? Bug fix: was `name` (the raw route-name string) — should be
+      //? `normalizedReceiver` to match the field's semantics and the socket handler.
+      receiver: normalizedReceiver,
       transport: 'http',
     },
   );
@@ -661,7 +663,12 @@ async function stageFanout(
     transport: 'http',
     recipientCount: 0,
   };
-  await dispatchHook('preSyncFanout', fanoutPayload);
+  //? Parity with the socket handler (handleSyncRequest.ts runSyncFanout): capture
+  //? the hook result and bail when the hook stops the fanout.
+  const preFanoutResult = await dispatchHook('preSyncFanout', fanoutPayload);
+  if (preFanoutResult.stopped) {
+    return;
+  }
 
   //? Over the HTTP/SSE fallback the caller IS the originator, so a receiver
   //? room with no connected sockets (no peers online, or the originator used
@@ -705,9 +712,16 @@ async function stageFanout(
       recipientUserId: null,
       serverOutput,
     });
-    if (preRecipientResult.stopped) {
+    //? Parity with the socket handler (SYNC-O8): a stop signal with no
+    //? overrideOutput skips this recipient entirely; a stop signal WITH
+    //? overrideOutput sends the override in place of serverOutput.
+    if (preRecipientResult.stopped && preRecipientResult.signal.overrideOutput === undefined) {
       continue;
     }
+
+    const effectiveServerOutput = preRecipientResult.stopped
+      ? preRecipientResult.signal.overrideOutput
+      : serverOutput;
 
     //? Count every recipient the request fanned out to — including ones whose
     //? per-recipient `_client` handler later errors — matching the Socket.io
@@ -722,7 +736,7 @@ async function stageFanout(
         clientSyncHandler,
         data,
         functionsObject,
-        serverOutput,
+        serverOutput: effectiveServerOutput,
         receiver: normalizedReceiver,
         resolvedName,
         callbackKey: callbackName,
@@ -745,7 +759,7 @@ async function stageFanout(
     tempSocket.emit(socketEventNames.sync, {
       cb: callbackName,
       fullName: resolvedName,
-      serverOutput,
+      serverOutput: effectiveServerOutput,
       clientOutput: {},
       message: `${resolvedName} sync success`,
       status: 'success',

@@ -3,6 +3,7 @@
 //? builds a route-bound `TestContext`, runs the exported `customTests`
 //? cases. Spec: docs/ARCHITECTURE_TESTING.md.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -249,10 +250,10 @@ const buildSessionHelpers = (state: TestSessionState): TestContext['session'] =>
   return {
     login: async (user) => {
       const { saveSession, getSession } = await import('@luckystack/login');
-      const userId = user?.id ?? `test-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const email = user?.email ?? `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+      const userId = user?.id ?? `test-user-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+      const email = user?.email ?? `test-${Date.now()}-${crypto.randomBytes(8).toString('hex')}@example.com`;
       const name = user?.name ?? 'Test User';
-      const token = `test-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const token = `test-${Date.now()}-${crypto.randomBytes(16).toString('hex')}`;
       const sessionData = {
         id: userId,
         email,
@@ -439,15 +440,32 @@ const buildContext = (
 };
 
 export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCustomTestsSummary> => {
-  const files = discoverCustomTestFiles();
+  const srcDir = getSrcDir();
+  const files = discoverCustomTestFiles(srcDir);
   const results: CustomTestResult[] = [];
 
   for (const discovery of files) {
     const routePath = `${discovery.route.page}/${discovery.route.name}/${discovery.route.version}`;
     if (input.filter && !routePath.includes(input.filter)) continue;
 
+    //? Canonical-path containment guard: resolve to the real path and verify
+    //? it is still inside srcDir. Protects against symlink-escaped paths or
+    //? an adversarially crafted filePath that slipped through the walker.
+    const [realPathErr, realFilePath] = tryCatchSync(() => fs.realpathSync(discovery.filePath));
+    const resolvedPath = realPathErr ? discovery.filePath : (realFilePath ?? discovery.filePath);
+    const relToSrc = path.relative(srcDir, resolvedPath);
+    if (relToSrc.startsWith('..') || path.isAbsolute(relToSrc)) {
+      const r: CustomTestResult = {
+        routePath, caseName: '(import)', status: 'fail', durationMs: 0,
+        reason: `test file path escapes srcDir and was rejected: ${discovery.filePath}`,
+      };
+      results.push(r);
+      input.onResult?.(r);
+      continue;
+    }
+
     const [importError, mod] = await tryCatch(
-      () => import(pathToFileURL(discovery.filePath).href) as Promise<Record<string, unknown>>,
+      () => import(pathToFileURL(resolvedPath).href) as Promise<Record<string, unknown>>,
     );
     if (importError || !mod) {
       const r: CustomTestResult = {

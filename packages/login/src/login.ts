@@ -585,9 +585,11 @@ const loginWithCredentialsCore = async (
   await dispatchHook('postLogin', { userId: newUser.id, provider: 'credentials', isNewUser: false, token: newToken });
   //? Reset the brute-force counter on success so earlier typos don't keep a
   //? legitimate user locked out (F7). No-op when the feature is disabled.
-  //? Pass `requesterIp` so the composite key (DD-LOGIN-F5) is cleared when
-  //? an IP was threaded in; falls back to the bare account key otherwise.
+  //? Clear the IP+account composite key (DD-LOGIN-F5) AND the bare account key
+  //? so that failures recorded without an IP (e.g. from a different surface) are
+  //? also cleared after a confirmed legitimate login.
   void clearAuthFailures(email, requesterIp);
+  if (requesterIp) void clearAuthFailures(email);
   if (isDevMode()) {
     getLogger().debug(`credentials login success for user ${newUser.id}`);
   }
@@ -1072,6 +1074,17 @@ const applyExtraSessionFields = async (
   if (id !== undefined || token !== undefined || csrfToken !== undefined || password !== undefined) {
     getLogger().warn(
       `[oauth:${provider.name}] extraSessionFields returned framework-owned key(s) (id/token/csrfToken/password) — dropped`,
+    );
+  }
+  //? SEC: warn when extra fields appear to contain bearer credentials. Access
+  //? tokens stored in the Redis session are broadcast to connected sockets via
+  //? updateSession — they should not be in session fields unless intentional.
+  //? The stripped set above already removes "token"; this covers other key names.
+  const CREDENTIAL_PATTERN = /token|secret|key|auth/i;
+  const suspiciousKeys = Object.keys(safeExtra).filter(k => CREDENTIAL_PATTERN.test(k));
+  if (suspiciousKeys.length > 0) {
+    getLogger().warn(
+      `[oauth:${provider.name}] extraSessionFields contains field(s) that look like credentials (${suspiciousKeys.join(', ')}) — these will be stored in the Redis session and broadcast to connected sockets. Consider keeping them server-side only.`,
     );
   }
   Object.assign(user, safeExtra);

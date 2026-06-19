@@ -16,6 +16,6 @@ export default function tryCatchSync<T, P>(
     const response = func(params as P);
     return [null, response];
   } catch (error) {
-    return [error as Error, null];
+    return [error instanceof Error ? error : new Error(String(error)), null];
   }
 }

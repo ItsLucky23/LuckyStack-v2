@@ -217,7 +217,7 @@ interface ScaffoldChoices {
   monitoringProvider: MonitoringProvider;
   /** Install @luckystack/presence (AFK/presence/socket-status). Optional peer. */
   presence: boolean;
-  /** Install @luckystack/error-tracking (Sentry capture + auto-instrumentation). Opt-out; installed by default. */
+  /** Install @luckystack/error-tracking (Sentry capture + auto-instrumentation). Opt-in; off by default. */
   errorTracking: boolean;
   /** Install @luckystack/docs-ui (in-app API docs viewer). Opt-in; off by default. */
   docsUi: boolean;
@@ -672,9 +672,9 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
       : [],
     emailProvider: asOption(answers.emailProvider, PROVIDER_OPTIONS.emailProvider, 'none'),
     monitoringProvider: asOption(answers.monitoringProvider, PROVIDER_OPTIONS.monitoringProvider, 'none'),
-    presence: answers.presence !== 'No',
-    //? Opt-out convention (default installed): truthy unless explicitly 'No'.
-    errorTracking: answers.errorTracking !== 'No',
+    presence: answers.presence === 'Yes',
+    //? Opt-in convention (default off): only true when explicitly 'Yes'.
+    errorTracking: answers.errorTracking === 'Yes',
     //? Opt-in convention (default off): only true when explicitly 'Yes'.
     docsUi: answers.docsUi === 'Yes',
     secretManager: answers.secretManager === 'Yes',
@@ -1227,9 +1227,10 @@ const runPrismaGenerate = (cwd: string): void => {
 };
 
 //? Pre-commit hook that regenerates the consumer's AI snapshot files
-//? (docs/AI_CAPABILITIES.md + docs/AI_PROJECT_INDEX.md + docs/AI_DECISIONS_INDEX.md
-//? + docs/AI_RUNBOOKS.md + docs/AI_PRODUCT_OVERVIEW.md + docs/ai-graph.json) and stages them, so they never drift. Mirrors the
-//? framework repo's own hook. Wired via a
+//? (docs/AI_QUICK_INDEX.md + docs/AI_CAPABILITIES.md + docs/AI_PROJECT_INDEX.md
+//? + docs/AI_DECISIONS_INDEX.md + docs/AI_RUNBOOKS.md + docs/AI_PRODUCT_OVERVIEW.md
+//? + docs/ai-graph.json) and stages them, so they never drift. Derived from the
+//? framework repo's own hook; extend here when new AI index scripts are added. Wired via a
 //? `prepare` script setting `core.hooksPath` at install time (no-op when the
 //? project isn't a git repo yet — the hook activates after `git init`).
 const AI_INDEX_HOOK = `#!/bin/sh
@@ -1250,6 +1251,8 @@ fi
 set -e
 echo "[pre-commit] Checking CLAUDE.md invariants on staged changes..."
 npm run ai:lint --silent
+echo "[pre-commit] Regenerating docs/AI_QUICK_INDEX.md..."
+npm run ai:index --silent
 echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
 npm run ai:capabilities --silent
 echo "[pre-commit] Regenerating docs/AI_PROJECT_INDEX.md..."
@@ -1262,7 +1265,7 @@ echo "[pre-commit] Regenerating docs/AI_PRODUCT_OVERVIEW.md..."
 npm run ai:product --silent
 echo "[pre-commit] Regenerating docs/ai-graph.json..."
 npm run ai:graph --silent
-git add docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json
+git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json
 git add docs/ai-product 2>/dev/null || true
 `;
 
@@ -1278,9 +1281,10 @@ const installAiIndexHook = (targetDir: string): void => {
   //? it never fails the install when the directory isn't a git repo yet.
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
-  let pkg: { scripts?: Record<string, string | undefined> };
+  let pkg: { name?: string; scripts?: Record<string, string | undefined> };
   try {
-    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { scripts?: Record<string, string | undefined> };
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
   } catch {
     console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping prepare script injection.`);
     return;
@@ -1321,9 +1325,10 @@ const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckyst
 
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
-  let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  let pkg: { name?: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
   } catch {
     console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping optional dep injection.`);
     return;
@@ -1339,9 +1344,10 @@ const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckyst
 const dropDependency = (targetDir: string, depName: string): void => {
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
-  let pkg: { dependencies?: Record<string, string> };
+  let pkg: { name?: string; dependencies?: Record<string, string> };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
   } catch {
     console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping dependency drop for "${depName}".`);
     return;
@@ -1359,6 +1365,10 @@ const dropDependency = (targetDir: string, depName: string): void => {
 //? always repo-internal (built from literals here), never user input.
 const removeScaffoldPath = (targetDir: string, relPath: string): void => {
   const full = path.join(targetDir, relPath);
+  const rel = path.relative(targetDir, full);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`[create-luckystack-app] removeScaffoldPath: path escapes targetDir: ${relPath}`);
+  }
   fs.rmSync(full, { recursive: true, force: true });
 };
 
@@ -1469,15 +1479,17 @@ const wireAiBrowserTooling = (targetDir: string, choices: ScaffoldChoices): void
     //? Deterministic CI complement (devDep + one example spec).
     const pkgPath = path.join(targetDir, 'package.json');
     if (fs.existsSync(pkgPath)) {
-      let pkg: { devDependencies?: Record<string, string> };
+      let pkg: { name?: string; devDependencies?: Record<string, string> } | undefined;
       try {
         pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+        if (typeof pkg?.name !== 'string') throw new Error('package.json missing name field');
       } catch {
         console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping @playwright/test injection.`);
-        pkg = {};
       }
-      pkg.devDependencies = { ...pkg.devDependencies, '@playwright/test': '^1.50.0' };
-      fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+      if (pkg) {
+        pkg.devDependencies = { ...pkg.devDependencies, '@playwright/test': '^1.50.0' };
+        fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+      }
     }
     const e2eDir = path.join(targetDir, 'tests', 'e2e');
     fs.mkdirSync(e2eDir, { recursive: true });
@@ -1607,6 +1619,11 @@ const pruneAuthNone = (targetDir: string): void => {
     'src/reset-password',
     'src/settings',
     'src/_components/LoginForm.tsx',
+    //? The example logout handler calls `functions.session.deleteSession` — the
+    //? `functions/session` shim is removed just below, so this handler can't
+    //? compile (and a no-auth app has nothing to log out of). `session_v1` stays
+    //? because it only echoes the (anonymous) session and never touches the shim.
+    'src/_api/logout_v1.ts',
     'functions/session.ts',
     //? Auth/account transactional-email hooks (new-sign-in + password-change).
     //? They register a `postLogin` hook whose payload type ships with
@@ -1817,9 +1834,10 @@ const wirePresence = (targetDir: string): void => {
 const wireRouter = (targetDir: string, luckystackVersion: string): void => {
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
-  let pkg: { dependencies?: Record<string, string>; scripts?: Record<string, string> };
+  let pkg: { name?: string; dependencies?: Record<string, string>; scripts?: Record<string, string> };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
   } catch {
     console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping router wiring.`);
     return;
@@ -1838,7 +1856,8 @@ const wireGraphMcp = (targetDir: string, luckystackVersion: string): void => {
   const pkgPath = path.join(targetDir, 'package.json');
   if (fs.existsSync(pkgPath)) {
     try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { devDependencies?: Record<string, string> };
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { name?: string; devDependencies?: Record<string, string> };
+      if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
       pkg.devDependencies = { ...pkg.devDependencies, '@luckystack/mcp': `^${luckystackVersion}` };
       fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     } catch {
@@ -1847,7 +1866,7 @@ const wireGraphMcp = (targetDir: string, luckystackVersion: string): void => {
   }
   mergeJsonFile(path.join(targetDir, '.mcp.json'), (data) => {
     const servers = (data.mcpServers ??= {}) as Record<string, unknown>;
-    servers.luckystack ??= { type: 'stdio', command: 'npx', args: ['@luckystack/mcp'] };
+    servers.luckystack ??= { type: 'stdio', command: 'npx', args: [`@luckystack/mcp@^${luckystackVersion}`] };
   });
 };
 
@@ -2054,7 +2073,7 @@ const copyAiDocs = (
 };
 
 //? Print the post-scaffold summary and next-step instructions.
-const printNextSteps = (args: CliArgs, choices: ScaffoldChoices): void => {
+const printNextSteps = (choices: ScaffoldChoices, slug: string): void => {
   const prismaCmd = choices.dbProvider === 'mongodb'
     ? 'npm run prisma:db:push           # initializes the Mongo schema'
     : 'npm run prisma:migrate:dev       # creates the User table + initial migration';
@@ -2071,7 +2090,7 @@ Choices:
   ai-browser:  ${choices.aiBrowserTooling}
 
 Next steps:
-  cd ${args.projectName}
+  cd ${slug}
   cp .env_template .env
   cp .env.local_template .env.local   # fill in DATABASE_URL, etc.
   ${prismaCmd}
@@ -2160,7 +2179,7 @@ const main = async (): Promise<void> => {
       console.log('\nSkipped npm install (--no-install).');
     }
 
-    printNextSteps(args, choices);
+    printNextSteps(choices, slug);
   } catch (error: unknown) {
     //? Roll back only if we created the directory — never remove a pre-existing dir.
     if (dirCreatedByThisRun) {

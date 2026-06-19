@@ -8,6 +8,13 @@
 //? every event fans out to all of them. Per-adapter errors are swallowed
 //? so one buggy tracker can't break the chain.
 
+//? SERVER-ONLY import. This static import of `node:async_hooks` is intentional
+//? and MUST remain externalized in any client-bundle build config (Vite/esbuild
+//? `external: ['node:async_hooks']`). Although AsyncLocalStorage is never
+//? constructed at module-eval time (the lazy `getIdentityStore()` guard handles
+//? that), the import itself will cause a runtime error in the browser if the
+//? bundler does not externalize it. Do NOT statically import this file from
+//? browser-bundle entry points — use `@luckystack/core/client` instead.
 import * as nodeAsyncHooks from 'node:async_hooks';
 import { getRedactedLogKeys, REDACTED_PLACEHOLDER, sanitizeForLog } from './redactedLogKeys';
 import { getLogger } from './loggerRegistry';
@@ -31,16 +38,42 @@ const sanitizeContext = (context?: ErrorTrackerContext): ErrorTrackerContext | u
 //? Runs at capture time (not on every Error construction) to stay off the
 //? hot path; the result is cached on the sanitized context so each adapter
 //? fan-out step reads the same pre-scrubbed string.
-const REDACTED_VALUE_RE_CACHE = new Map<string, RegExp>();
-const buildScrubPattern = (key: string): RegExp => {
+//? BOOT-TIME ONLY: `registerRedactedLogKeys` must be called at boot with a
+//? static key set (framework package init / project boot). Calling it with
+//? dynamically generated strings (route names, tenant IDs, etc.) at request
+//? time will cause this cache to grow without bound. A hard cap (200 entries)
+//? logs a warning when exceeded so misuse is immediately diagnosable.
+const REDACTED_VALUE_RE_CACHE_MAX = 200;
+interface ScrubPatternPair {
+  urlParam: RegExp;   // matches <key>=<value> (URL-param style)
+  logLabel: RegExp;   // matches <key>: <value> (log-label style)
+}
+const REDACTED_VALUE_RE_CACHE = new Map<string, ScrubPatternPair>();
+
+const buildScrubPattern = (key: string): ScrubPatternPair => {
   const cached = REDACTED_VALUE_RE_CACHE.get(key);
   if (cached) return cached;
-  // Match <key>=<value> (URL-param style) and <key>: <value> (log-label style).
-  // Capture up to the next whitespace / comma / quote / end-of-string.
+  if (REDACTED_VALUE_RE_CACHE.size >= REDACTED_VALUE_RE_CACHE_MAX) {
+    try {
+      getLogger().warn(`errorTracker: REDACTED_VALUE_RE_CACHE exceeded ${String(REDACTED_VALUE_RE_CACHE_MAX)} entries — registerRedactedLogKeys must only be called at boot with a static key set, not with dynamic/runtime-varying strings.`);
+    } catch {
+      // last-resort swallow
+    }
+  }
   const escaped = key.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
-  const re = new RegExp(String.raw`(?:${escaped}=[^\s,;"'&]*)|(${escaped}:\s*[^\s,;"']*)`, 'gi');
-  REDACTED_VALUE_RE_CACHE.set(key, re);
-  return re;
+  //? Two separate passes — one for `key=value` (URL-param style), one for
+  //? `key: value` (log-label style) — to avoid alternation complexity and the
+  //? subtle behaviours that arise when mixing capturing and non-capturing groups
+  //? inside a single pattern (ET-O2 alternation fix).
+  //? `+` (not `*`) for the value portion so `key=` with an empty value is NOT
+  //? replaced (empty parameters are not secrets worth scrubbing and a `*` match
+  //? would turn innocent `foo=` markers into `[redacted]`).
+  const pair: ScrubPatternPair = {
+    urlParam: new RegExp(String.raw`${escaped}=[^\s,;"'&]+`, 'gi'),
+    logLabel: new RegExp(String.raw`${escaped}:\s*[^\s,;"']+`, 'gi'),
+  };
+  REDACTED_VALUE_RE_CACHE.set(key, pair);
+  return pair;
 };
 
 export const sanitizeErrorString = (value: string): string => {
@@ -48,7 +81,8 @@ export const sanitizeErrorString = (value: string): string => {
   // Scrub matching `key=value` / `key: value` patterns for every registered
   // redacted key so interpolated secrets (e.g. "token=abc") never reach an adapter.
   for (const key of getRedactedLogKeys()) {
-    result = result.replace(buildScrubPattern(key), REDACTED_PLACEHOLDER);
+    const { urlParam, logLabel } = buildScrubPattern(key);
+    result = result.replace(urlParam, REDACTED_PLACEHOLDER).replace(logLabel, REDACTED_PLACEHOLDER);
   }
   return result;
 };

@@ -1,6 +1,8 @@
 import { AuthProps, SessionLayout } from '../../config';
 import { Functions, ApiResponse, MaybePromise } from '../_sockets/apiTypes.generated';
 
+export const rateLimit: number | false = 30;
+
 export const auth: AuthProps = {
   login: false,
 };

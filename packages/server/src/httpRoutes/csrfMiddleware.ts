@@ -37,6 +37,11 @@ export const enforceCsrfOnStateChangingRequest = async ({
   //? state-changing custom routes registered via `registerCustomRoute` that
   //? are not marked origin-exempt (those authenticate via HMAC/signature, not
   //? the session cookie, so the double-submit check is irrelevant there).
+  //?
+  //? IMPORTANT: `registerOriginExemptPath({ pathPrefix })` exempts ALL routes
+  //? whose path starts with the given prefix from BOTH the origin gate AND CSRF.
+  //? Register only the narrowest prefix needed (prefer ending with `/` — e.g.
+  //? `/webhooks/` — to avoid accidentally exempting `/webhooksAdmin`).
   const isExemptFromCsrf =
     isAuthBootstrap
     || isCallbackPath

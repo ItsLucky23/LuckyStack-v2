@@ -1,6 +1,8 @@
 import { AuthProps, SessionLayout } from '../../config';
 import { Functions, ApiResponse, MaybePromise } from '../_sockets/apiTypes.generated';
 
+export const rateLimit: number | false = 60;
+
 export const auth: AuthProps = {
   login: false
 };
@@ -12,7 +14,6 @@ export interface ApiParams {
 }
 
 export const main = ({ user }: ApiParams): MaybePromise<ApiResponse> => {
-  console.log(user);
   return {
     status: 'success',
     result: user

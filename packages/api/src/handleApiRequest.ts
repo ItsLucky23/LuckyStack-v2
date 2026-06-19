@@ -446,6 +446,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
       fallbackHttpStatus,
     });
     const formatted = applyErrorFormatter({
+      // luckystack-allow no-as-unknown: formatter boundary — normalizeErrorResponse returns a narrower type than applyErrorFormatter accepts; fix requires @luckystack/core type alignment
       // eslint-disable-next-line no-restricted-syntax -- formatter boundary cast, mirrors handleHttpApiRequest
       response: normalized as unknown as Record<string, unknown> & { status?: string },
       routeName: currentRouteName ?? 'api/unknown',

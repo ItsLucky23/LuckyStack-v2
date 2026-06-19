@@ -93,16 +93,21 @@ const allowedOrigin = (origin: string): boolean => {
         .map((value) => normalizeOrigin({ value, secure }))
         .filter(Boolean);
 
+  //? Sanitize the caller-supplied origin before including it in any log or hook
+  //? payload: cap length and strip non-printable characters so an attacker cannot
+  //? inject arbitrary bytes into log sinks or external alerting hooks.
+  const safeOrigin = origin.slice(0, 512).replaceAll(/[^ -~]/g, '');
+
   if (getProjectConfig().logging.devLogs) {
     getLogger().warn('cors: origin not allowed', {
-      origin,
+      origin: safeOrigin,
       normalizedOrigin,
       allowedOrigins: debugAllowedOrigins,
       allowLocalhost: cors.allowLocalhost,
     });
   }
   void dispatchHook('corsRejected', {
-    origin,
+    origin: safeOrigin,
     normalizedOrigin,
     allowedOrigins: debugAllowedOrigins,
     allowLocalhost: cors.allowLocalhost,

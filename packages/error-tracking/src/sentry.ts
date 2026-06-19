@@ -139,8 +139,17 @@ const builtinBeforeSend: SentryBeforeSend = (event) => {
       event.request.data = sanitizeForLog(event.request.data);
     }
     //? query_string may be a string ("token=abc") or a parsed object.
-    if (event.request.query_string !== undefined && typeof event.request.query_string === 'object') {
-      event.request.query_string = sanitizeForLog(event.request.query_string) as typeof event.request.query_string;
+    //? ET-O5: scrub both forms. String form is redacted wholesale to avoid
+    //? the complexity of re-serialising after partial key-by-key scrubbing
+    //? (URLSearchParams-based scrub would leave the "?" separator and key
+    //? order inconsistent with what Sentry captured). The object form goes
+    //? through sanitizeForLog so individual key redaction is preserved.
+    if (event.request.query_string !== undefined) {
+      if (typeof event.request.query_string === 'string') {
+        event.request.query_string = '[redacted:query_string]';
+      } else if (typeof event.request.query_string === 'object') {
+        event.request.query_string = sanitizeForLog(event.request.query_string) as typeof event.request.query_string;
+      }
     }
   }
   //? extra dict is the framework's per-capture context map (CORE-O4 fix extended).
@@ -198,6 +207,9 @@ const wireSharedSentryDI = (Sentry: SentryModule): void => {
   //? are therefore required at the boundary: the values are always valid Sentry
   //? types (they're passed straight through from framework call sites) but TS
   //? cannot infer that through the `unknown` slot. Document rather than eliminate.
+  //? `initSharedSentry` is deprecated for EXTERNAL callers (use registerErrorTracker);
+  //? this is the one legitimate internal legacy-Sentry DI bridge, so the warning is suppressed.
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- internal legacy-Sentry DI bridge
   initSharedSentry({
     captureException: () => '',
     captureMessage: () => '',

@@ -60,8 +60,8 @@ describe("processClientSyncForRecipient — token redaction in error context", (
 
     expect(tryCatch).toHaveBeenCalledTimes(1);
     const context = tryCatch.mock.calls[0]?.[2] ?? {};
-    //? Truncated to the 8-char prefix — the raw credential is not recoverable.
-    expect(context.targetToken).toBe("abcdefgh…");
+    //? Truncated to the 4-char prefix — the raw credential is not recoverable.
+    expect(context.targetToken).toBe("abcd…");
     expect(JSON.stringify(context)).not.toContain("ijklmnop");
   });
 

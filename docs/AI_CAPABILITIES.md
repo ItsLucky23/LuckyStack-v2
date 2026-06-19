@@ -52,8 +52,8 @@ Every typed API route in this project. Sourced from `_ProjectApiTypeMap` in `src
 | `settings/signOutEverywhere/v1` | POST | 5 | — | ✓ |
 | `settings/updatePreferences/v1` | POST | 30 | — | ✓ |
 | `settings/updateUser/v1` | POST | 20 | — | ✓ |
-| `system/logout/v1` | DELETE | ? | — | — |
-| `system/session/v1` | POST | ? | — | — |
+| `system/logout/v1` | DELETE | 30 | — | — |
+| `system/session/v1` | POST | 60 | — | — |
 
 ### Sync routes (`_sync/`)
 

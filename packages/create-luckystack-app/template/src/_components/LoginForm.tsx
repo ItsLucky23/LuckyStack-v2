@@ -272,7 +272,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 onClick={(e) => void handleSubmit(e, provider)}
                 className="h-9 rounded-md cursor-pointer bg-container1 text-title text-sm border border-container1-border flex gap-2 items-center justify-center hover:bg-container1-hover transition-colors"
               >
-                <img src={`/${provider}.png`} alt={provider} className="w-4 h-4" />
+                <img src={`/${provider}.png`} alt={provider} className="w-4 h-4" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                 <span>{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
               </button>
             ))}

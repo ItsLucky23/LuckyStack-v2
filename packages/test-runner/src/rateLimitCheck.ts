@@ -55,24 +55,21 @@ export const runRateLimitCheck = async (input: RateLimitCheckInput): Promise<Con
 
   //? Fire `rateLimit` allowed requests first (drain the bucket), then a final
   //? request that should be blocked. Serial so the server sees a clean order.
-  //? Read the first drain response to detect pre-limiter rejections (CSRF/auth/
-  //? validation): if the server rejects before the limiter runs, the bucket is
-  //? never incremented, the final probe will fail for the wrong reason, and we
-  //? classify the whole check as `skipped` rather than a false failure.
+  //? Inspect EVERY drain response for pre-limiter rejections (CSRF/auth/
+  //? validation): if the server rejects before the limiter runs at any point,
+  //? the bucket was never incremented for that request, the final probe will
+  //? fail for the wrong reason, and we classify the check as `skipped`.
   for (let i = 0; i < rateLimit; i += 1) {
     const drained = await send();
     if (!drained) continue;
-    if (i === 0) {
-      //? Inspect the first drain to detect pre-limiter rejection.
-      const errorCode = drained.parsed?.errorCode;
-      if (errorCode && PRE_LIMITER_ERROR_CODES.has(errorCode)) {
-        return {
-          endpoint,
-          status: 'skipped',
-          durationMs: Date.now() - started,
-          reason: `drain response rejected pre-limiter (${errorCode}); bucket was never incremented — check CSRF/auth headers`,
-        };
-      }
+    const errorCode = drained.parsed?.errorCode;
+    if (errorCode && PRE_LIMITER_ERROR_CODES.has(errorCode)) {
+      return {
+        endpoint,
+        status: 'skipped',
+        durationMs: Date.now() - started,
+        reason: `drain request ${i + 1} rejected pre-limiter (${errorCode}); bucket was never incremented — check CSRF/auth headers`,
+      };
     }
   }
 

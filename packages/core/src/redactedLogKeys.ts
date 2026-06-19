@@ -82,17 +82,26 @@ const MAX_SANITIZE_DEPTH = 8;
  * - Cycles / over-deep graphs are cut at {@link MAX_SANITIZE_DEPTH} with
  *   {@link DEPTH_TRUNCATED_PLACEHOLDER}; the input is never mutated.
  */
-export const sanitizeForLog = (value: unknown, depth = 0): unknown => {
+export const sanitizeForLog = (value: unknown, depth = 0, _seen?: WeakSet<object>): unknown => {
   if (depth > MAX_SANITIZE_DEPTH) return DEPTH_TRUNCATED_PLACEHOLDER;
   if (value === null || typeof value !== 'object') return value;
 
+  //? Cycle detection: if we have already visited this reference higher up in the
+  //? call stack, replace it with a marker rather than recursing into it — this
+  //? prevents a stack overflow when `value` contains a circular reference (e.g.
+  //? an Error whose `.cause` links back to itself, or a Node IncomingMessage
+  //? with circular HTTP-socket references).
+  const seen = _seen ?? new WeakSet<object>();
+  if (seen.has(value)) return '[circular]';
+  seen.add(value);
+
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeForLog(item, depth + 1));
+    return value.map((item) => sanitizeForLog(item, depth + 1, seen));
   }
 
   const out: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = isRedactedLogKey(key) ? REDACTED_PLACEHOLDER : sanitizeForLog(nested, depth + 1);
+    out[key] = isRedactedLogKey(key) ? REDACTED_PLACEHOLDER : sanitizeForLog(nested, depth + 1, seen);
   }
   return out;
 };

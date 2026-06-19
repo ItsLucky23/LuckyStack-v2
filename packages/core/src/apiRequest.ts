@@ -29,6 +29,11 @@ import {
 //? call. Two components polling the same GET route with DIFFERENT params no
 //? longer abort each other (each gets its own bucket); a genuine duplicate
 //? still supersedes the prior one.
+//? Size-capped at 1000 entries. All normal code paths (resolve, abort, disconnect,
+//? timeout) call `cleanupAbortController()` which deletes the entry. The cap
+//? is a safety net for edge cases where cleanup is skipped (socket torn down
+//? without a `disconnect` event, or a future code path that forgets to clean up).
+const ABORT_CONTROLLERS_MAX = 1000;
 const abortControllers = new Map<string, AbortController>();
 
 //? Stable, order-insensitive JSON stringify so `{a:1,b:2}` and `{b:2,a:1}`
@@ -388,6 +393,12 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         if (abortControllers.has(abortKey)) {
           const prevAbortController = abortControllers.get(abortKey);
           prevAbortController?.abort();
+        }
+        //? Evict the oldest entry when the cap is reached (LRU-insert-order).
+        //? Map preserves insertion order; the first key is the oldest in-flight entry.
+        if (!abortControllers.has(abortKey) && abortControllers.size >= ABORT_CONTROLLERS_MAX) {
+          const oldest = abortControllers.keys().next().value;
+          if (oldest !== undefined) abortControllers.delete(oldest);
         }
         const abortController = new AbortController();
         abortControllers.set(abortKey, abortController);

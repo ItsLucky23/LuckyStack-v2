@@ -303,8 +303,8 @@ describe("buildSyncStreamEmitters", () => {
 
       expect(loggerDebug).toHaveBeenCalledTimes(1);
       const [, meta] = loggerDebug.mock.calls[0] as [string, { tokens: string[] }];
-      //? Truncated to the 8-char prefix — the full token is not recoverable.
-      expect(meta.tokens).toEqual(["abcdefgh…", "session-…"]);
+      //? Truncated to the 4-char prefix — the full token is not recoverable.
+      expect(meta.tokens).toEqual(["abcd…", "sess…"]);
       const logged = JSON.stringify(meta.tokens);
       expect(logged).not.toContain("abcdefghijklmnop");
       expect(logged).not.toContain("0987654321");

@@ -127,6 +127,7 @@ async function handleHttpApiRequestScoped(params: HttpApiRequestParams): Promise
   //? accepts the wider `Record<string, unknown> & { status?: string }` shape
   //? that union doesn't structurally satisfy. The double-cast is the
   //? documented framework boundary between the union and the formatter input.
+  // luckystack-allow no-as-unknown: formatter boundary — ApiNetworkResponse union does not structurally satisfy applyErrorFormatter input; fix requires @luckystack/core type alignment
   // eslint-disable-next-line no-restricted-syntax -- formatter boundary cast
   const formatterInput = transformPayload.response as unknown as Record<string, unknown> & { status?: string };
   const formattedResponse = applyErrorFormatter({

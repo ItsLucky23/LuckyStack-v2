@@ -25,6 +25,6 @@ export default async function tryCatch<T, P = void>(
     //? `node:async_hooks`-bearing module never enters the client's static graph.
     const { captureException } = await import('./sentrySetup');
     captureException(error, context);
-    return [error as Error, null];
+    return [error instanceof Error ? error : new Error(String(error)), null];
   }
 }

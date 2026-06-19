@@ -142,17 +142,57 @@ const parseObjectFields = (typeText: string): {
 
   let part = '';
   let depth = 0;
-  for (const char of inner) {
-    if (char === '{' || char === '[' || char === '(' || char === '<') depth += 1;
-    if (char === '}' || char === ']' || char === ')' || char === '>') depth -= 1;
+  //? Track string literals (single and double quote) so a `;`, `{`, or `}`
+  //? character appearing inside a quoted type value (e.g. `name: 'a{b}'`) is not
+  //? treated as a field delimiter or nesting marker. Same logic as `splitTopLevel`.
+  let inString: '"' | "'" | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread -- intentional code-point split of an ASCII type string
+  const codePoints = [...inner];
+  let i = 0;
+  while (i < codePoints.length) {
+    const char = codePoints[i] ?? '';
+    i += 1;
 
-    if (char === ';' && depth === 0) {
-      const trimmed = part.trim();
-      if (trimmed) {
-        parseFieldOrIndex(trimmed, fields, indexSignatures);
-      }
-      part = '';
+    if (inString && char === '\\') {
+      part += char;
+      const next = codePoints[i] ?? '';
+      part += next;
+      i += 1;
       continue;
+    }
+
+    if (char === '"' || char === "'") {
+      if (inString === char) {
+        inString = null;
+      } else {
+        inString ??= char;
+      }
+      part += char;
+      continue;
+    }
+
+    if (!inString) {
+      //? Nesting depth tracks `{}[]()<>` to find field boundaries at `;`.
+      //? Supported field value types: primitives, object literals, arrays, unions,
+      //? intersections, Record<K,V>, and generics like Array<T> / Promise<T>.
+      //? NOT supported: conditional types (`T extends U ? A : B`), mapped types,
+      //? template-literal types, and function types (`() => void`). Those fall
+      //? through to the fail-closed terminal branch of `validateType` which
+      //? rejects with an "unvalidatable type" message rather than silently passing.
+      //? NOTE: `<` and `>` are used for generic delimiters (Array<T>, Record<K,V>)
+      //? but also appear as comparison operators in conditional types. For the
+      //? supported type set (no conditionals) this depth tracking is sufficient.
+      if (char === '{' || char === '[' || char === '(' || char === '<') depth += 1;
+      if (char === '}' || char === ']' || char === ')' || char === '>') depth -= 1;
+
+      if (char === ';' && depth === 0) {
+        const trimmed = part.trim();
+        if (trimmed) {
+          parseFieldOrIndex(trimmed, fields, indexSignatures);
+        }
+        part = '';
+        continue;
+      }
     }
 
     part += char;
@@ -315,6 +355,14 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
     return { status: 'error', message: `${path} should be ${expectedType}` };
   }
 
+  //? `any` and `unknown` typed fields pass validation unconditionally.
+  //? SECURITY NOTE: a route input field typed `any` or `unknown` accepts ANY
+  //? value from the caller without structural checking. In practice this occurs
+  //? in legacy routes, utility handlers, or pass-through relay fields.
+  //? To tighten: narrow the field type explicitly in `ApiParams.data`, or set
+  //? `validation: 'relaxed'` / `{ input: 'skip' }` on the route as a conscious
+  //? opt-out (which short-circuits before this validator runs rather than silently
+  //? admitting arbitrary values here).
   if (type === 'any' || type === 'unknown') {
     return { status: 'success' };
   }

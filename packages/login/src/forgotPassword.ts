@@ -75,11 +75,14 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
   }
 
   const token = await createPasswordResetToken(user.id);
+  //? SEC: do NOT emit the raw token on the hook bus — hook subscribers are
+  //? untrusted code and the token is a single-use credential. Consumers who need
+  //? to deliver the email themselves should call `createPasswordResetToken`
+  //? directly and build the URL without the framework exposing the secret here.
   void dispatchHook('passwordResetRequested', {
     email,
     matched: true,
     userId: user.id,
-    token,
     ttlSeconds: config.auth.passwordResetTtlSeconds,
   });
   const baseUrl = (config.app.publicUrl || '').replace(/\/+$/, '');
@@ -116,7 +119,8 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
   });
 
   if (result.ok) {
-    getLogger().info('[forgotPassword] reset email dispatched', { userId: user.id, to: user.email });
+    //? SEC: log only userId for correlation — not the email address (PII).
+    getLogger().info('[forgotPassword] reset email dispatched', { userId: user.id });
   } else {
     getLogger().warn('[forgotPassword] reset email send FAILED', { userId: user.id, reason: result.reason });
   }

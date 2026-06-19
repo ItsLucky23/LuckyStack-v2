@@ -78,36 +78,37 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
   //? here we check if the file extension or just the filename is in the list of files we dont want to serve
   //? a file that is in the list below should not be able to run this function in the first place cause we filter the routePath using zod before calling this function
   //? but if it passes somehow, we avoid it being served
-  if (filePath.includes('.env') ||
-    filePath.endsWith('.map') ||
-    path.basename(filePath) === 'server.js' ||
-    filePath.includes('.ts') ||
-    filePath.includes('.tsx') ||
-    filePath.includes('.py') ||
-    filePath.includes('package.json') ||
-    filePath.includes('package-lock.json') ||
-    filePath.includes('.gitignore') ||
-    filePath.includes('eslint.config.js') ||
-    filePath.includes('postcss.config.mjs') ||
-    filePath.includes('README.md') ||
-    filePath.includes('redis.conf') ||
-    filePath.includes('tailwind.config.js') ||
-    filePath.includes('tsconfig.client.json') ||
-    filePath.includes('tsconfig.node.json') ||
-    filePath.includes('vite.config.ts') ||
-    filePath.includes('schema.prisma')
-  ) {
+  //? Use path.extname / path.basename (not .includes) to avoid false positives on
+  //? directory or file names that coincidentally contain the blocked substring.
+  const fileExt = path.extname(filePath);
+  const fileName = path.basename(filePath);
+  const BLOCKED_EXTENSIONS = new Set(['.env', '.map', '.ts', '.tsx', '.py']);
+  const BLOCKED_BASENAMES = new Set([
+    'server.js',
+    'package.json',
+    'package-lock.json',
+    '.gitignore',
+    'eslint.config.js',
+    'postcss.config.mjs',
+    'README.md',
+    'redis.conf',
+    'tailwind.config.js',
+    'tsconfig.client.json',
+    'tsconfig.node.json',
+    'vite.config.ts',
+    'schema.prisma',
+  ]);
+  if (BLOCKED_EXTENSIONS.has(fileExt) || BLOCKED_BASENAMES.has(fileName) || fileName.startsWith('.env')) {
     res.writeHead(403, { "Content-Type": "text/plain" });
     return res.end("Forbidden");
   }
 
 
-  const extname = path.extname(filePath);
   let contentType: string | null = 'text/html';
 
   //? here we get the content type of the file and serve it to the client
   //? if the file extension is not in the list below, we serve the index.html file
-  switch (extname) {
+  switch (fileExt) {
     case '.html': { contentType = 'text/html'; break;
     }
     case '.css': { contentType = 'text/css'; break;

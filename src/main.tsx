@@ -208,7 +208,8 @@ const prodPages = import.meta.glob([
   '!./**/_server/**',
   '!./**/docs/**',
   '!./**/*_server.tsx',
-  '!./**/*_server.jsx'
+  '!./**/*_server.jsx',
+  '!./playground/**'
 ]);
 
 const devPages = import.meta.glob([

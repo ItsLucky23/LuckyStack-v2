@@ -93,11 +93,16 @@ export const consumeOneTimeToken = async (
   if (!token || typeof token !== 'string') return null;
   const key = tokenKey(namespace, token);
   const txResult = await redis.multi().get(key).del(key).exec();
-  if (!txResult || txResult.length === 0) return null;
+  if (!txResult || txResult.length < 2) return null;
   const first = txResult[0];
   if (!first) return null;
   const [getErr, value] = first;
   if (getErr) return null;
+  //? Verify the DEL also succeeded (txResult[1][0] is the per-command error slot).
+  //? If DEL failed the key was not consumed — return null (fail-closed) so the
+  //? token is not considered redeemed and cannot be replayed.
+  const second = txResult[1];
+  if (!second || second[0]) return null;
   return typeof value === 'string' && value.length > 0 ? value : null;
 };
 

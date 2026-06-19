@@ -40,7 +40,15 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       return { status: "error", errorCode: 'avatar.invalidFormat' };
     }
     const contentType = matches[1];
+    const ALLOWED_AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+    if (!ALLOWED_AVATAR_TYPES.has(contentType)) {
+      return { status: 'error', errorCode: 'avatar.invalidFormat' };
+    }
     const buffer = Buffer.from(matches[2], "base64");
+    const AVATAR_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+    if (buffer.byteLength > AVATAR_MAX_BYTES) {
+      return { status: 'error', errorCode: 'avatar.uploadFailed' };
+    }
     const fileName = `${user.id}.webp`;
     const uploadsDir = getUploadsDir();
     const filePath = path.join(uploadsDir, fileName);

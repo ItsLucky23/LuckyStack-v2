@@ -93,6 +93,24 @@ const ensureConsumerTemplateConfigLoaded = (): Promise<void> => {
     for (const fileName of ['templateRules.ts', 'templateRules.mjs', 'templateRules.js']) {
       const rulesFile = path.join(dir, fileName);
       if (!fs.existsSync(rulesFile)) continue;
+
+      //? Safety net: verify the resolved path stays within ROOT_DIR before
+      //? dynamic-importing it. In practice `dir` is always
+      //? `path.join(ROOT_DIR, '.luckystack', 'templates')` (see
+      //? `getConsumerTemplatesDir`), so this check can only fail if ROOT_DIR
+      //? itself is misconfigured or a symlink escapes the tree.
+      const resolvedRulesFile = path.resolve(rulesFile);
+      const resolvedRoot = path.resolve(ROOT_DIR);
+      if (
+        !resolvedRulesFile.startsWith(resolvedRoot + path.sep)
+        && resolvedRulesFile !== resolvedRoot
+      ) {
+        console.warn(
+          `[TemplateInjector] Template rules file resolves outside project root — skipping: ${rulesFile}`,
+        );
+        continue;
+      }
+
       try {
         await import(pathToFileURL(rulesFile).href);
       } catch (error) {

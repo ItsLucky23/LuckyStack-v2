@@ -15,7 +15,7 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/docs-ui"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/docs-ui#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/main/packages/docs-ui#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
