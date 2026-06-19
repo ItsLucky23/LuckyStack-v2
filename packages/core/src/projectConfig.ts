@@ -220,12 +220,15 @@ export interface CorsConfig {
    */
   allowLocalhost: boolean;
   /**
-   * Allow WebSocket upgrades that carry NO `Origin` header (server-to-server
-   * native WS clients, proxies). Defaults to `false` (fail-closed): an
-   * origin-less upgrade is rejected because the Socket.io CORS layer is the
-   * last browser-origin gate on the WS path. Set to `true` only when your
-   * architecture includes a non-browser WS consumer (e.g. a backend service
-   * connecting to push events).
+   * Historical opt-in kept for symmetry. Origin-less requests are ALWAYS
+   * admitted at the CORS layer now (see `loadSocket.ts`): browsers omit the
+   * `Origin` header on same-origin GETs, which is exactly the initial Socket.io
+   * polling handshake in both dev (Vite proxy) and prod-with-router (single
+   * origin) topologies — rejecting it broke every connection with
+   * `400 code:3 MIDDLEWARE_FAILURE`. The real auth gate is the session token
+   * in the handshake, not the Origin header. This flag no longer gates
+   * anything and is retained only so existing configs that set it keep
+   * type-checking; it may be removed in a future major version.
    */
   allowOriginless?: boolean;
   /**

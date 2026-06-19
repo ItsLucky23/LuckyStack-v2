@@ -90,6 +90,13 @@ registerProjectConfig({
       //? port is taken) can talk to the backend without listing each port. Stays
       //? false in production so deployments fail closed.
       allowLocalhost: dev,
+      //? NOTE: the initial Socket.io polling handshake is an origin-less GET in
+      //? BOTH dev (Vite proxy → backend) and prod-with-router (single origin),
+      //? because browsers omit the `Origin` header on same-origin requests. The
+      //? framework's CORS layer admits origin-less handshakes unconditionally
+      //? (see @luckystack/server loadSocket.ts) — this list only gates requests
+      //? that DO carry an `Origin` header (cross-origin browsers, OAuth
+      //? callbacks). So you do NOT need to list every same-origin variant here.
     },
   },
   defaultLanguage: config.defaultLanguage,

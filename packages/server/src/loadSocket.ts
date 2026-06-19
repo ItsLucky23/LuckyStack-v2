@@ -484,19 +484,27 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     cors: {
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       origin: (origin, callback) => {
-        //? An absent `origin` header on a WebSocket upgrade comes from
-        //? server-to-server callers (native WS clients, proxies). Allow them
-        //? only when `cors.allowOriginless` is explicitly opted in, or when
-        //? the caller is a loopback address — not by default, because
-        //? Socket.io's CORS layer is the last browser-origin gate on the WS
-        //? path and silently accepting all non-browser upgrades is a
-        //? CSRF-analogue vector when the session token is in the handshake.
+        //? CORS does not apply to same-origin requests, and browsers omit the
+        //? `Origin` header entirely on a same-origin GET — which is exactly
+        //? what the initial Socket.io polling handshake is in BOTH supported
+        //? topologies: dev (Vite dev server on :5173 proxying to the backend)
+        //? and prod-with-router (the @luckystack/router serves the frontend and
+        //? backend from one origin). Socket.io *must* complete that origin-less
+        //? HTTP handshake before it can upgrade to WebSocket, so rejecting an
+        //? absent Origin here — as this layer did before — returned
+        //? `400 {"code":3,"message":"Bad request"}` (engine.io's
+        //? `MIDDLEWARE_FAILURE`) and broke every fresh connection.
+        //?
+        //? The security rationale that used to gate this ("the CORS layer is
+        //? the last browser-origin gate on the WS path") was misplaced: this
+        //? callback also fires on the plain-HTTP polling handshake, and an
+        //? absent Origin there is the *same-origin browser* signal, not a
+        //? CSRF vector. The real auth gate is the session token extracted from
+        //? the handshake (`extractTokenFromSocket`) + the auth hooks, which run
+        //? regardless of the Origin header. `allowOriginless` is kept for
+        //? symmetry/documented opt-in but no longer gates the handshake.
         if (!origin) {
-          if (config.http.cors.allowOriginless) {
-            callback(null, true);
-          } else {
-            callback(new Error('Origin-less WebSocket upgrades are not allowed'));
-          }
+          callback(null, true);
           return;
         }
         if (allowedOrigin(origin)) {

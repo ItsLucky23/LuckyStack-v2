@@ -160,3 +160,30 @@
 **Open**: versie NIET gebumpt, niet gecommit (per opdracht). PACKAGE_OVERVIEW.md dedup (4e kopie) niet aangeraakt — buiten scope.
 
 **Files**: packages/cli/src/registry.ts, packages/cli/src/commands/{list,manage,remove}.ts, packages/cli/src/lib/wizard.ts, packages/cli/src/lib/project.ts, packages/cli/src/index.ts, packages/cli/src/assetParity.test.ts, packages/cli/src/commands/manage.test.ts, packages/cli/CLAUDE.md.
+
+## 2026-06-18 — socket.io 400 `code:3` fix: admit origin-less handshakes
+
+**User goal**: bij installeren via npm kreeg de client een `GET http://localhost:5173/socket.io/?EIO=4&transport=polling 400 (Bad Request)` (`{"code":3,"message":"Bad request"}`) in de console. Geen push/publish — een andere AI is op het repo actief (cli/prisma), dus conflict-vrij gehouden.
+
+**Diagnose (bewezen, niet gegokt)**:
+- Backend draaide wél (`node` PID 44048 op `:80`); Vite-proxy op `:5173` forward `/socket.io` correct — de `ws://` proxy-target was géén probleem (polling is plain HTTP; `http-proxy-middleware` routeert 't gewoon). `backendUrl = window.origin = localhost:5173` in dev is **juist** (same-origin via proxy), niet de bug.
+- Isolaat-test met engine.io + exact de `loadSocket` cors-callback: **origin-less handshake → 400 code:3 `MIDDLEWARE_FAILURE`**, zelfde request mét `Origin` → 200. Enige verschil = de `Origin`-header.
+- Root cause: `packages/server/src/loadSocket.ts` cors.origin-callback wees **elk request zonder `Origin`** af (tenzij `allowOriginless`, dat de template nóóit zet). Browsers sturen bij een **same-origin GET** géén `Origin`-header — en de Socket.io polling-handshake IS same-origin in **beide** topologieën: dev (Vite-proxy) én prod-met-`@luckystack/router` (frontend+backend één origin). Regressie sinds v0.2.0 `95a1e13` ("security hardening"); de JSDoc-rationale ("last browser-origin gate on the WS path") was misplaatst — dezelfde callback draait op de plain-HTTP handshake.
+- Correctie op mijn eerste hypothese: ik dacht even dat `FORBIDDEN`(code 4/403) de match was, maar de `connection_error`-context toonde `MIDDLEWARE_FAILURE` → code 3/400. Locatie (`loadSocket.ts`) bleek wél juist.
+
+**Fix (optie 3 = framework + template, per user-keuze)**:
+- `packages/server/src/loadSocket.ts`: origin-less → `callback(null, true)` (CORS geldt niet voor same-origin; de echte auth-gate = session-token in handshake + auth-hooks, onafhankelijk van Origin). Requests mét Origin blijven via `allowedOrigin()` ge-gate.
+- `packages/core/src/projectConfig.ts`: `allowOriginless` JSDoc herschreven — flag is nu no-op (behouden voor type-compat), gedocumenteerd als deprecated.
+- `packages/create-luckystack-app/template/config.ts`: commentaar maakt expliciet dat origin-less handshake framework-breed wordt toegelaten, zodat een lezer niet elke same-origin variant in `allowedOrigins` hoeft te zetten.
+
+**Verificatie**:
+- Isolaat-test met de nieuwe logica: [1] origin-less → **200** ✅, [2] geldige Origin → 200 ✅, [3] **ongeldige** cross-origin (evil.com) → **400** ✅ (CORS blijft afgedwongen voor requests mét Origin).
+- `lint:packages` 0 · `build:packages` 16/16 · `test:unit` 1296/1296 · `ai:lint` 0. Geen test asserteerde het oude origin-less-afwĳsgedrag (niets achterhaald).
+
+**Belangrijk**: de draaiende dev-server draait nog de **oude** build — de user moet `npm run server` herstarten om de nieuwe `@luckystack/server` te laden; daarna verdwijnt de 400.
+
+**ADR**: `docs/decisions/0013-admit-originless-socketio-handshake.md` (status: accepted — bewuste beleidswijziging mét verworpen alternatieven: hard-afwijzen behouden, alleen-`allowLocalhost`, en polling-vs-WS onderscheiden in de callback).
+
+**Niet gedaan**: versie niet gebumpt, niet gepubliceerd, niet gecommit (per opdracht — de andere AI doet publish). `allowOriginless` verwijderen = toekomstige major. `PACKAGE_OVERVIEW.md`/andere docs onaangetast.
+
+**Files**: packages/server/src/loadSocket.ts, packages/core/src/projectConfig.ts, packages/create-luckystack-app/template/config.ts, docs/decisions/0013-admit-originless-socketio-handshake.md.
