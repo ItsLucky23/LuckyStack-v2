@@ -1725,6 +1725,12 @@ const wireSecretManager = (targetDir: string): void => {
       `  secretManager: {
     url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
     token: { fromFile: '.secret-manager-token' },
+    //? Which \`.env\` names are eligible for off-host resolution. The package's
+    //? secure default (omitting this) resolves NOTHING — so the scaffold opts in
+    //? to resolving every pointer-shaped (\`NAME=BASE_V<n>\`) value here, which is
+    //? what "install secret-manager → it just works" expects. To restrict, replace
+    //? \`() => true\` with an allowlist array of names, e.g. \`['OPENAI_KEY', 'DB_URL']\`.
+    envNames: () => true,
   },`,
     ],
   ]);
@@ -1741,6 +1747,22 @@ const wireSecretManager = (targetDir: string): void => {
     await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
   }`,
     ],
+  ]);
+};
+
+//? Activate @luckystack/presence when opted IN (presence is KEPT, not pruned).
+//? The full template ships the client mounts (<LocationProvider/> +
+//? <SocketStatusIndicator/>) but the three gating flags default OFF, so without
+//? this presence renders/emits nothing. Flip all three to `true` so an installed
+//? presence is actually live: `socketActivityBroadcaster` (per-room activity),
+//? `socketStatusIndicator` (the status badge), `locationProviderEnabled`
+//? (client → server location syncing). Tokens match the template config.ts lines;
+//? `editScaffoldFile` throws on a miss so template drift fails loud.
+const wirePresence = (targetDir: string): void => {
+  editScaffoldFile(targetDir, 'config.ts', [
+    ['socketActivityBroadcaster: false,', 'socketActivityBroadcaster: true,'],
+    ['socketStatusIndicator: false,', 'socketStatusIndicator: true,'],
+    ['locationProviderEnabled: false,', 'locationProviderEnabled: true,'],
   ]);
 };
 
@@ -2051,6 +2073,12 @@ const main = async (): Promise<void> => {
     //? self-wires via its `./register` subpath (dep alone is enough), so only
     //? secret-manager needs the enable-later code blocks uncommented here.
     if (choices.secretManager) wireSecretManager(targetDir);
+
+    //? Presence is KEPT (not pruned) when opted in — flip the three gating flags
+    //? in config.ts to `true` so the shipped client mounts actually render/emit
+    //? (they default OFF, making a bare install a silent no-op). The prune path
+    //? (presence OFF) never runs this, so the flags stay false there.
+    if (choices.presence) wirePresence(targetDir);
 
     //? Router is a separate-process load-balancer: add its dependency + the
     //? `npm run router` script (topology lives in the scaffolded deploy.config.ts).

@@ -83,8 +83,7 @@ const saveSession = async (
       //? login with a dedicated reason key instead of kicking an existing
       //? session. `'single'` and `'revokeOld'` keep kicking (handled below).
       const cfg = getProjectConfig().session;
-      // eslint-disable-next-line @typescript-eslint/no-deprecated -- BC shim: legacy `allowMultiple` still honored when set
-      const perUser = cfg.allowMultiple ? 'multiple' : cfg.perUser;
+      const perUser = cfg.perUser;
       if (
         perUser === 'multiple' &&
         cfg.onConflict === 'rejectNew' &&
@@ -178,7 +177,7 @@ const saveSession = async (
     if (!io) return { ok: true } as const;
 
     // Handle session-limit enforcement on new login. Logic:
-    //   1. perUser = 'single' (default) OR legacy `allowMultiple: false` →
+    //   1. perUser = 'single' (default) →
     //      kick every prior session for this user.
     //   2. perUser = 'multiple' with `maxConcurrentPerUser` cap reached:
     //      `onConflict === 'revokeOld'` kicks oldest until under cap,
@@ -187,8 +186,7 @@ const saveSession = async (
     //   3. perUser = 'multiple' with no cap → no kick.
     if (newUser && userId) {
       const sessionCfg = getProjectConfig().session;
-      // eslint-disable-next-line @typescript-eslint/no-deprecated -- BC shim: legacy `allowMultiple` still honored when set
-      const effectivePerUser = sessionCfg.allowMultiple ? 'multiple' : sessionCfg.perUser;
+      const effectivePerUser = sessionCfg.perUser;
       const cap = sessionCfg.maxConcurrentPerUser;
 
       const allTokens = await adapter.listActive(userId);

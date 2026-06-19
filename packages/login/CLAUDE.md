@@ -148,7 +148,7 @@ All config keys live on `ProjectConfig` (from `@luckystack/core`). Resolved at c
 | Slot | Used by | Notes |
 | --- | --- | --- |
 | `session.expiryDays` | `getSessionTtl` in `session.ts` | TTL multiplier (days → seconds). |
-| `session.perUser` (`'single' \| 'multiple'`) | `saveSession` | Enforcement mode. Legacy `allowMultiple: false` collapses to `'single'`. |
+| `session.perUser` (`'single' \| 'multiple'`) | `saveSession` | Enforcement mode. `'single'` (default) keeps one session per user. |
 | `session.maxConcurrentPerUser` | `saveSession` | Cap when `perUser === 'multiple'`. `null` = unlimited. |
 | `session.onConflict` (`'revokeOld' \| 'rejectNew'`) | `saveSession` | What to do when cap is reached. `rejectNew` is enforced at the API layer; `revokeOld` kicks the oldest. |
 | `session.basedToken` | `saveSession` | Inverted into `persistent` for `preSessionCreate` / `postSessionCreate` payloads. |

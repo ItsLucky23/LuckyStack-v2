@@ -123,13 +123,6 @@ export interface SessionConfig {
   basedToken: boolean;
   expiryDays: number;
   /**
-   * @deprecated Use `perUser: 'multiple'` instead. Kept for backwards
-   * compatibility; when set, maps to `perUser: 'multiple'` with no concurrent
-   * cap. The framework emits a one-shot deprecation warning at boot when
-   * `allowMultiple` is explicitly set.
-   */
-  allowMultiple: boolean;
-  /**
    * Whether multiple parallel logins per browser are permitted.
    * `'single'` (default): one active login per browser; opening a second tab
    *   and logging in elsewhere replaces the first. `'multiple'`: each tab/window
@@ -735,7 +728,6 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   session: {
     basedToken: false,
     expiryDays: 7,
-    allowMultiple: false,
     perBrowser: 'single',
     perUser: 'single',
     maxConcurrentPerUser: null,

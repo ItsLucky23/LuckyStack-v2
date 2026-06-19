@@ -111,7 +111,7 @@ projectConfig.session = {
 };
 ```
 
-`allowMultiple: true` is honored as a deprecated alias for `perUser: 'multiple'`.
+Set `perUser: 'multiple'` to allow multiple concurrent sessions per user.
 
 ---
 

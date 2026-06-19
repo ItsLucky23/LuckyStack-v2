@@ -25,7 +25,7 @@ import { registerProjectConfig, getProjectConfig, notify, redis, prisma } from '
 
 registerProjectConfig({
   defaultLanguage: 'en',
-  session: { expiryDays: 30, basedToken: false, allowMultiple: true },
+  session: { expiryDays: 30, basedToken: false, perUser: 'multiple' },
   auth: {
     emailMaxLength: 254,
     passwordMinLength: 8,

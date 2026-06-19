@@ -360,7 +360,7 @@ registerProjectConfig({
   session: {
     basedToken: config.sessionBasedToken,
     expiryDays: config.sessionExpiryDays,
-    allowMultiple: config.allowMultipleSessions,
+    perUser: config.allowMultipleSessions ? 'multiple' : 'single',
   },
   http: {
     cors: {

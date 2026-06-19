@@ -50,9 +50,12 @@ const config = {
   /** false = HttpOnly cookie, true = sessionStorage. */
   sessionBasedToken: false,
   sessionExpiryDays: 7,
-  allowMultipleSessions: false,
+  //? `'single'` (default): logging in on a new device kicks the previous one.
+  //? `'multiple'` enables multiple concurrent sessions per user across devices.
+  sessionPerUser: 'single' as const,
   //? Presence/activity broadcasting + route-change location syncing. Opt-in.
   socketActivityBroadcaster: false,
+  socketStatusIndicator: false,
   locationProviderEnabled: false,
   //? Dev-only console logging toggles.
   logging: {
@@ -77,7 +80,7 @@ registerProjectConfig({
   session: {
     basedToken: config.sessionBasedToken,
     expiryDays: config.sessionExpiryDays,
-    allowMultiple: config.allowMultipleSessions,
+    perUser: config.sessionPerUser,
   },
   http: {
     cors: {
@@ -106,6 +109,7 @@ registerProjectConfig({
   //? provider is just env vars + restart (no code edit).
   oauthCallbackBase,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
+  socketStatusIndicator: config.socketStatusIndicator,
   locationProviderEnabled: config.locationProviderEnabled,
   auth: {
     //? Framework-mode forgot-password (needs @luckystack/email installed + a
@@ -126,8 +130,9 @@ export const {
   defaultTheme,
   sessionBasedToken,
   sessionExpiryDays,
-  allowMultipleSessions,
+  sessionPerUser,
   socketActivityBroadcaster,
+  socketStatusIndicator,
   locationProviderEnabled,
   logging,
 } = config;

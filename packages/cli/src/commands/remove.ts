@@ -42,6 +42,24 @@ const warnRemainingReferences = (root: string, pkg: string): void => {
 
 const MAIN_TSX = 'src/main.tsx';
 const TEMPLATE_PROVIDER = 'src/_components/templates/TemplateProvider.tsx';
+const CONFIG_TS = 'config.ts';
+
+//? Inverse of addPresence's `enablePresenceFlags`: flip the three presence gating
+//? flags back to `false` so a removed presence leaves no live broadcaster/indicator
+//? wiring behind. Tokens mirror the template config.ts lines; `editFile` throws on a
+//? miss (drifted config) — the desired loud-fail, converted to a Result by the caller.
+const disablePresenceFlags = (configPath: string): Result<void> => {
+  try {
+    editFile(configPath, [
+      { find: 'socketActivityBroadcaster: true,', replace: 'socketActivityBroadcaster: false,' },
+      { find: 'socketStatusIndicator: true,', replace: 'socketStatusIndicator: false,' },
+      { find: 'locationProviderEnabled: true,', replace: 'locationProviderEnabled: false,' },
+    ]);
+  } catch (error) {
+    return err(error as Error);
+  }
+  return ok();
+};
 
 //? The consumer-owned auth files `add login` copies into src/. Removal keeps them
 //? (they may be edited) — we only LIST them so the user can delete by hand.
@@ -146,6 +164,17 @@ const removePresence = (project: ConsumerProject, entry: RegistryEntry): Result<
     console.log('• reverted <LocationProvider/> (main.tsx) + <SocketStatusIndicator/> (TemplateProvider.tsx)');
   } else {
     console.log('• presence client mounts already absent — skipped JSX revert.');
+  }
+
+  //? Flip the three presence gating flags back to `false` (inverse of addPresence).
+  //? Only act when the enabled flag is actually present (`: true,`) — a config.ts
+  //? that never had them stays untouched (no hard-fail). Fails loud on partial
+  //? drift via `disablePresenceFlags`.
+  const configPath = path.join(project.root, CONFIG_TS);
+  if (fs.existsSync(configPath) && fs.readFileSync(configPath, 'utf8').includes('socketActivityBroadcaster: true,')) {
+    const flagged = disablePresenceFlags(configPath);
+    if (!flagged.ok) return flagged;
+    console.log('• disabled socketActivityBroadcaster / socketStatusIndicator / locationProviderEnabled in config.ts');
   }
 
   try {

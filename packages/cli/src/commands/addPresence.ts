@@ -17,6 +17,25 @@ export interface AddOptions {
 
 const MAIN_TSX = 'src/main.tsx';
 const TEMPLATE_PROVIDER = 'src/_components/templates/TemplateProvider.tsx';
+const CONFIG_TS = 'config.ts';
+
+//? Presence renders/emits nothing unless these three config.ts flags are on; a
+//? bare `npm i` (or re-add) leaves them false → a silent no-op. Flip all three to
+//? `true` so presence is actually live once added. `editFile` throws on a missing
+//? token (drifted config) — converted to a Result by the caller — which is the
+//? desired loud-fail. The tokens mirror the template config.ts lines exactly.
+const enablePresenceFlags = (configPath: string): Result<void> => {
+  try {
+    editFile(configPath, [
+      { find: 'socketActivityBroadcaster: false,', replace: 'socketActivityBroadcaster: true,' },
+      { find: 'socketStatusIndicator: false,', replace: 'socketStatusIndicator: true,' },
+      { find: 'locationProviderEnabled: false,', replace: 'locationProviderEnabled: true,' },
+    ]);
+  } catch (error) {
+    return err(error as Error);
+  }
+  return ok();
+};
 
 //? Reverse the pruner's edits in main.tsx + TemplateProvider.tsx. `editFile`
 //? throws on a missing token (drifted template); we convert that into a returned
@@ -114,6 +133,23 @@ export const addPresence = (project: ConsumerProject, options: AddOptions): Resu
   }
   if (depAdded) console.log(`• added @luckystack/presence@${range} to package.json`);
 
+  //? Activate presence in config.ts. The three gating flags default OFF, so an
+  //? added-but-not-enabled presence renders/emits nothing. Only act when the
+  //? disabled flag is actually present (`: false,`); already-`true` (a previous
+  //? add / full scaffold) is reported + skipped, and a config.ts without the flags
+  //? is left untouched (no hard-fail). `enablePresenceFlags` fails loud on partial drift.
+  const configPath = path.join(project.root, CONFIG_TS);
+  if (fs.existsSync(configPath)) {
+    const configSrc = fs.readFileSync(configPath, 'utf8');
+    if (configSrc.includes('socketActivityBroadcaster: true,')) {
+      console.log('• presence flags already enabled in config.ts — skipped.');
+    } else if (configSrc.includes('socketActivityBroadcaster: false,')) {
+      const flagged = enablePresenceFlags(configPath);
+      if (!flagged.ok) return flagged;
+      console.log('• enabled socketActivityBroadcaster / socketStatusIndicator / locationProviderEnabled in config.ts');
+    }
+  }
+
   if (options.install) {
     console.log('• running npm install …');
     if (!runNpmInstall(project.root, project.pkg)) {
@@ -123,7 +159,8 @@ export const addPresence = (project: ConsumerProject, options: AddOptions): Resu
     console.log('• skipped npm install (--no-install) — run `npm install` to finish.');
   }
 
-  console.log('\n✓ presence added. Restart the dev server. Presence is gated by');
-  console.log('  `socketActivityBroadcaster` / `socketStatusIndicator` in config.ts.');
+  console.log('\n✓ presence added and ENABLED. Restart the dev server. The three gating');
+  console.log('  flags are now `true` in config.ts: socketActivityBroadcaster,');
+  console.log('  socketStatusIndicator, locationProviderEnabled. Set any to `false` to opt out.');
   return ok();
 };
