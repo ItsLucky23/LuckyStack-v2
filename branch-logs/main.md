@@ -237,3 +237,22 @@
 **Verificatie**: build:packages 16/16 · lint:packages 0 · test:unit 1298 (incl. assetParity). Scaffold: default → géén `src/docs/page.tsx`; `--docs-ui` → page + dep `^0.2.5`. CLI round-trip met gebouwde CLI: `add docs-ui` kopieert page + dep; `remove docs-ui` verwijdert page + dep.
 
 **Files**: packages/create-luckystack-app/template/src/docs/page.tsx (new), packages/create-luckystack-app/template/src/main.tsx, packages/create-luckystack-app/src/index.ts, packages/cli/assets/docs-ui/src/docs/page.tsx (new), packages/cli/src/registry.ts, packages/cli/src/commands/addDocsUi.ts (new), packages/cli/src/commands/remove.ts, packages/cli/src/commands/manage.ts, packages/cli/src/index.ts, packages/cli/src/commands/addBackendOnly.ts, packages/cli/CLAUDE.md.
+
+## 2026-06-19 14:50 — CLI reconfigure wizard (laag 1: design + state-detectie)
+
+**User goal**: `luckystack manage` moet de scaffold-wizard spiegelen — per-package sub-opties (login authMode + OAuth-providers, email, monitoring) i.p.v. binair install/remove, mét een duidelijke consequentie-preview per wijziging. Plan ge-reviewd + goedgekeurd (3 beslissingen bevestigd); volledige uitvoering in lagen.
+
+**Beslissingen (ADR 0014)**: D1 `.env.local` mag op KEY-aanwezigheid gelezen worden (nooit values) — bewuste, user-geautoriseerde versmalling van Rule 16. D2 reconfigure→none verwijdert de auth-UI (met confirm), los van de guarded `remove login`. D3 CLI = transitie-source-of-truth + parity-test, geen gedeeld package nu.
+
+**Laag 1 gebouwd (additief, inert tot wiring)**:
+- `docs/decisions/0014-cli-reconfigure-wizard.md` — design + 3 beslissingen + verworpen alternatieven.
+- `packages/cli/src/featureOptions.ts` — reconfigureerbare opties (authMode/oauth/email/monitoring) + provider→env-key mappings (mirror van scaffolder PROVIDER_OPTIONS).
+- `packages/cli/src/lib/envKeys.ts` — leest gedeclareerde env-KEY-namen uit `.env.local` dan `.env`, value-blind (ADR 0014 D1).
+- `packages/cli/src/lib/state.ts` — `deriveState` (pure) + `detectProjectState`: leidt authMode/oauthProviders/email/monitoring + installed-packages af uit deps + env-keys + login-UI-aanwezigheid.
+- Tests: `envKeys.test.ts` + `state.test.ts` (18 cases).
+
+**Verificatie**: build:packages 16/16 · 18 nieuwe tests groen.
+
+**Nog te doen (volgende lagen)**: step-wizard UI (single/multi-select + navigatie), transition-descriptors (deps/files/env/origins per feature+optie) → preview + apply, `manage`-rework, auth/oauth/email/monitoring transities, parity-test.
+
+**Files**: docs/decisions/0014-cli-reconfigure-wizard.md (new), packages/cli/src/featureOptions.ts (new), packages/cli/src/lib/envKeys.ts (new), packages/cli/src/lib/envKeys.test.ts (new), packages/cli/src/lib/state.ts (new), packages/cli/src/lib/state.test.ts (new).
