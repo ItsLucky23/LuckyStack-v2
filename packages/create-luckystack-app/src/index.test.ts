@@ -395,14 +395,14 @@ describe("buildOAuthEnvVars", () => {
   const ALL = ["google", "github", "discord", "facebook", "microsoft"] as const;
 
   it("emits a block for EVERY built-in provider even when none are selected", () => {
-    const out = buildOAuthEnvVars([]);
+    const out = buildOAuthEnvVars([], "credentials+oauth");
     for (const p of ALL) {
       expect(out).toContain(`# ${p} (enable later)`);
     }
   });
 
   it("leaves selected providers uncommented and comments out the rest", () => {
-    const out = buildOAuthEnvVars(["google"]);
+    const out = buildOAuthEnvVars(["google"], "credentials+oauth");
     //? Selected: active header + uncommented key lines.
     expect(out).toContain("# google (active)");
     expect(out).toContain("\nDEV_GOOGLE_CLIENT_ID=");
@@ -416,15 +416,24 @@ describe("buildOAuthEnvVars", () => {
   });
 
   it("includes a MICROSOFT_TENANT_ID line, commented when microsoft is not selected", () => {
-    expect(buildOAuthEnvVars([])).toContain("# MICROSOFT_TENANT_ID=common");
-    expect(buildOAuthEnvVars(["microsoft"])).toContain("\nMICROSOFT_TENANT_ID=common");
+    expect(buildOAuthEnvVars([], "credentials+oauth")).toContain("# MICROSOFT_TENANT_ID=common");
+    expect(buildOAuthEnvVars(["microsoft"], "credentials+oauth")).toContain("\nMICROSOFT_TENANT_ID=common");
   });
 
   it("emits exactly the four credential keys per provider (dev + prod pair)", () => {
-    const out = buildOAuthEnvVars(["discord"]);
+    const out = buildOAuthEnvVars(["discord"], "credentials+oauth");
     expect(out).toContain("DEV_DISCORD_CLIENT_ID=");
     expect(out).toContain("DEV_DISCORD_CLIENT_SECRET=");
     expect(out).toContain("DISCORD_CLIENT_ID=");
     expect(out).toContain("DISCORD_CLIENT_SECRET=");
+  });
+
+  it("replaces the credential block with an add-login pointer under authMode 'none'", () => {
+    const out = buildOAuthEnvVars([], "none");
+    //? authMode 'none' = @luckystack/login isn't installed, so no provider keys
+    //? are emitted — just a pointer to add login first.
+    expect(out).toContain("npx luckystack add login");
+    expect(out).not.toContain("DEV_GOOGLE_CLIENT_ID=");
+    expect(out).not.toContain("(enable later)");
   });
 });

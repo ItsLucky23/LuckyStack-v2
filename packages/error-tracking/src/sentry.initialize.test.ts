@@ -132,8 +132,9 @@ describe('initializeSentry — DSN-present orchestration (characterization)', ()
     expect(opts.dsn).toBe('https://abc@example.ingest.sentry.io/1');
     expect(opts.environment).toBe('test');
     expect(opts.serverName).toBe('test-project');
-    //? NODE_ENV=test, no enable override ⇒ enabled stays false.
-    expect(opts.enabled).toBe(false);
+    //? DSN present, no SENTRY_ENABLED opt-out ⇒ capture enabled in every env
+    //? (NODE_ENV=test included) so install + DSN "just works".
+    expect(opts.enabled).toBe(true);
     //? Non-production ⇒ development default sample rate 1.
     expect(opts.tracesSampleRate).toBe(1);
     expect(opts.ignoreErrors).toEqual(['Socket connection timeout', 'ECONNREFUSED']);
@@ -211,20 +212,33 @@ describe('initializeSentry — DSN-present orchestration (characterization)', ()
     expect(opts.environment).toBe('production');
     //? production ⇒ production default sample rate 0.2.
     expect(opts.tracesSampleRate).toBe(0.2);
-    //? production ⇒ enabled true even without override.
+    //? DSN present ⇒ enabled (production sets the sample rate, not the gate).
     expect(opts.enabled).toBe(true);
   });
 
-  it('enables outside production when SENTRY_ENABLED=true', async () => {
+  it('enables outside production with a DSN and no SENTRY_ENABLED override', async () => {
     process.env.SENTRY_DSN = 'https://abc@example.ingest.sentry.io/1';
     process.env.NODE_ENV = 'development';
-    process.env.SENTRY_ENABLED = 'true';
     const { initializeSentry } = await import('./sentry');
 
     initializeSentry();
 
     const opts = firstCallArg(fakeSentry.init);
+    //? DSN present, no opt-out ⇒ capture ON in dev too.
     expect(opts.enabled).toBe(true);
     expect(opts.tracesSampleRate).toBe(1);
+  });
+
+  it('honors the SENTRY_ENABLED=false opt-out even with a DSN', async () => {
+    process.env.SENTRY_DSN = 'https://abc@example.ingest.sentry.io/1';
+    process.env.NODE_ENV = 'production';
+    process.env.SENTRY_ENABLED = 'false';
+    const { initializeSentry } = await import('./sentry');
+
+    initializeSentry();
+
+    const opts = firstCallArg(fakeSentry.init);
+    //? Explicit opt-out disables capture without unsetting the DSN.
+    expect(opts.enabled).toBe(false);
   });
 });

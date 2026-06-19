@@ -5,9 +5,10 @@
 //?
 //? Two env-gated, independent sub-phases (each a safe no-op when its env/peer is
 //? absent):
-//?   1. Sentry — `initializeSentry()` reads SENTRY_DSN; no-op when unset. By
-//?      default it only SENDS in production; set SENTRY_ENABLED=true for dev too.
-//?      Requires the optional `@sentry/node` peer.
+//?   1. Sentry — `initializeSentry()` reads SENTRY_DSN; no-op when unset (a
+//?      one-time dev info line nudges you to set it). With a DSN it captures in
+//?      ALL environments; set SENTRY_ENABLED=false to opt out without unsetting
+//?      the DSN. Requires the optional `@sentry/node` peer.
 //?   2. PostHog — activates only when POSTHOG_KEY is set; requires the optional
 //?      `posthog-node` peer. Runs ALONGSIDE Sentry (Sentry uses the legacy
 //?      shared-DI slot; PostHog uses the error-tracker adapter registry).

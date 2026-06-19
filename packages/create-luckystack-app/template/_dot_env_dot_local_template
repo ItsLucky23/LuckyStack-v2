@@ -21,26 +21,7 @@ DATABASE_URL="{{DATABASE_URL}}"
 REDIS_USER=
 REDIS_PASSWORD=
 
-# OAuth client secrets. Just fill in a provider's id + secret and restart — the
-# button appears on the login form automatically and its /auth/callback route
-# works. No code edit needed: @luckystack/login/register already wires
-# every built-in provider from env at boot. DEV_* are read when NODE_ENV is not
-# 'production'; the unprefixed pair is read in production.
-#
-# The login page reads GET /auth/providers, which lists a provider ONLY when
-# BOTH its id and secret are non-empty. So: EMPTY a provider's id/secret here
-# (and restart) → its button disappears from /login. Leave them empty to keep a
-# provider off. (Make sure the same keys are not ALSO set in `.env`, or the
-# button will stay — see the one-file-per-key note at the top.)
-#
-# IMPORTANT — Authorized redirect URI (fixes "Error 400: redirect_uri_mismatch"):
-# /auth/callback/<provider> is a BACKEND route, so register the BACKEND origin in
-# the provider's developer console (Google Cloud, GitHub OAuth App, …) — in dev
-# that's SERVER_IP:SERVER_PORT:
-#     http://localhost:80/auth/callback/google
-# In production use your domain: https://your-domain.com/auth/callback/google
-# It must match character-for-character (scheme, host, port). Also add the
-# provider's origin to EXTERNAL_ORIGINS in `.env`.
+# ───────────────────────────────── OAuth ────────────────────────────────────
 {{OAUTH_ENV_VARS}}
 
 # ─────────────────────────── Transactional email ───────────────────────────

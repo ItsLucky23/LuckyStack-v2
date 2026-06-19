@@ -1022,15 +1022,38 @@ const OAUTH_ENV_PROVIDERS: readonly EnvProviderSpec[] = PROVIDER_OPTIONS.oauthPr
   },
 }));
 
-export const buildOAuthEnvVars = (providers: readonly string[]): string => {
+export const buildOAuthEnvVars = (providers: readonly string[], authMode: string): string => {
+  //? authMode 'none' = @luckystack/login is NOT installed, so there's no login
+  //? form, no /auth/callback route, and nothing that reads these vars. Emitting
+  //? the full "fill a pair to enable" block would be misleading, so replace it
+  //? with a one-line pointer to `npx luckystack add login`.
+  if (authMode === 'none') {
+    return '# OAuth: requires auth — run `npx luckystack add login` first, then set the provider credentials here.';
+  }
+
   const selected = new Set(providers);
   const intro = [
-    '# OAuth client credentials. Providers you picked at scaffold time are',
-    '# uncommented; the rest are commented out — fill a pair and uncomment to',
-    '# enable later (no code edit: oauthProviders.ts wires every built-in provider',
-    '# by env). DEV_* are read when NODE_ENV is not "production"; the unprefixed',
-    '# pair is read in production. A provider stays disabled until BOTH its id and',
-    '# secret are set.',
+    '# OAuth client secrets. Just fill in a provider\'s id + secret and restart — the',
+    '# button appears on the login form automatically and its /auth/callback route',
+    '# works. No code edit needed: @luckystack/login/register already wires every',
+    '# built-in provider from env at boot. Providers you picked at scaffold time are',
+    '# uncommented; the rest are commented out — fill a pair and uncomment to enable',
+    '# later. DEV_* are read when NODE_ENV is not "production"; the unprefixed pair is',
+    '# read in production. A provider stays disabled until BOTH its id and secret are set.',
+    '#',
+    '# The login page reads GET /auth/providers, which lists a provider ONLY when BOTH',
+    '# its id and secret are non-empty. EMPTY a provider\'s id/secret here (and restart)',
+    '# → its button disappears from /login. (Make sure the same keys are not ALSO set',
+    '# in `.env`, or the button will stay — see the one-file-per-key note at the top.)',
+    '#',
+    '# IMPORTANT — Authorized redirect URI (fixes "Error 400: redirect_uri_mismatch"):',
+    '# /auth/callback/<provider> is a BACKEND route, so register the BACKEND origin in',
+    '# the provider\'s developer console (Google Cloud, GitHub OAuth App, …) — in dev',
+    '# that\'s SERVER_IP:SERVER_PORT:',
+    '#     http://localhost:80/auth/callback/google',
+    '# In production use your domain: https://your-domain.com/auth/callback/google',
+    '# It must match character-for-character (scheme, host, port). Also add the',
+    '# provider\'s origin to EXTERNAL_ORIGINS in `.env`.',
   ].join('\n');
 
   const blocks = buildProviderEnvBlocks(OAUTH_ENV_PROVIDERS, (id) => selected.has(id));
@@ -1053,10 +1076,10 @@ const MONITORING_PROVIDERS: readonly MonitoringProviderSpec[] = [
     deps: { '@sentry/node': '^10.48.0' },
     lines: (active) => active
       ? ['# Sentry (active) — set the DSN + restart. Requires `npm i @sentry/node`.',
-        '# Sends only in production by default; SENTRY_ENABLED=true forces dev capture.',
-        'SENTRY_DSN=', '# SENTRY_ENABLED=true']
+        '# Captures in all environments once the DSN is set; SENTRY_ENABLED=false opts out.',
+        'SENTRY_DSN=', '# SENTRY_ENABLED=false']
       : ['# Sentry (enable later): npm i @sentry/node, then set SENTRY_DSN + restart.',
-        '# SENTRY_DSN=', '# SENTRY_ENABLED=true'],
+        '# SENTRY_DSN=', '# SENTRY_ENABLED=false'],
   },
   {
     id: 'posthog',
@@ -1872,7 +1895,7 @@ const buildTemplateVars = (
     DB_PROVIDER: choices.dbProvider,
     USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '@id @default(cuid())',
     DATABASE_URL: databaseUrlByProvider[choices.dbProvider] ?? `postgresql://user:password@localhost:5432/${slug}`,
-    OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders),
+    OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders, choices.authMode),
     EXTERNAL_ORIGINS: externalOrigins,
     EMAIL_ENV_VARS: buildEmailEnvVars(choices.emailProvider),
     MONITORING_ENV_VARS: buildMonitoringEnvVars(choices.monitoringProvider),

@@ -23,33 +23,24 @@ Open <http://localhost:5173>.
 
 ## What you got out of the box
 
-The scaffolder ships a working starter — auth flows, settings, shared UI primitives — all in your `src/` so you have full control. The framework lives in `node_modules/@luckystack/*`; everything in your project is YOUR code, customize freely.
+The scaffolder ships a working starter — all in your `src/` so you have full control. Exactly which files you got depends on the choices you made when scaffolding (auth mode, presence, email, …); the framework itself lives in `node_modules/@luckystack/*`, but everything in your project is YOUR code, customize freely.
 
 ### Pages (you can edit these)
 
 | Path | Route | Purpose |
 | --- | --- | --- |
-| `src/login/page.tsx` | `/login` | Credentials login + OAuth buttons |
-| `src/register/page.tsx` | `/register` | Account creation form |
-| `src/reset-password/page.tsx` | `/reset-password` | Forgot-password flow |
-| `src/settings/page.tsx` | `/settings` | Profile, password, sessions, preferences (uses `home` layout) |
-| `src/dashboard/page.tsx` | `/dashboard` | Sample authenticated landing page — replace with yours |
+| `src/page.tsx` | `/` | App entry route |
+| `src/dashboard/page.tsx` | `/dashboard` | Sample landing page — replace with yours |
+
+If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, `reset-password/page.tsx`, and an account-management `settings/page.tsx`. Scaffolded with `auth: 'none'`? Add them later with `npx luckystack add login`.
 
 ### API routes (you can edit these)
 
 | Path | What it does |
 | --- | --- |
 | `src/_api/session_v1.ts` | Returns the current session payload to the client |
-| `src/_api/logout_v1.ts` | Logs the current session out |
-| `src/reset-password/_api/sendReset_v1.ts` | Sends the password-reset email (anti-enumeration) |
-| `src/reset-password/_api/confirmReset_v1.ts` | Consumes the reset token + updates the password |
-| `src/settings/_api/listSessions_v1.ts` | Active sessions for the current user |
-| `src/settings/_api/revokeSession_v1.ts` | Revokes one session by token |
-| `src/settings/_api/signOutEverywhere_v1.ts` | Revokes every session including the current |
-| `src/settings/_api/changePassword_v1.ts` | Verifies current, updates password, revokes others |
-| `src/settings/_api/updateUser_v1.ts` | Profile update + avatar upload (via `processUpload`) |
-| `src/settings/_api/updatePreferences_v1.ts` | Saves notify-on-* user preferences |
-| `src/settings/_api/deleteAccount_v1.ts` | Permanently deletes the account |
+
+Selecting an **auth** mode also adds the auth-related API handlers — e.g. `logout_v1`, the `reset-password/_api/*` reset flow, and the `settings/_api/*` session / password / profile / account handlers. These ship alongside the auth pages above (and arrive together via `npx luckystack add login`).
 
 ### Shared UI primitives (`src/_components/`)
 
@@ -58,15 +49,15 @@ Components you can modify, restyle, or extend:
 - `Avatar.tsx` — user avatar with image + first-letter fallback
 - `ConfirmMenu.tsx` — typed-confirm modal form
 - `ErrorPage.tsx` — route-level error boundary fallback
-- `LoginForm.tsx` — credentials + OAuth form (used by `/login` and `/register`)
 - `MenuHandler.tsx` — stack-based modal/sheet system
 - `dropdown/Dropdown.tsx` + `dropdown/MultiSelectDropdown.tsx` — single / multi-select inputs with keyboard nav
 - `templates/TemplateProvider.tsx` — registers the per-page layouts your site uses
-- `templates/Home.tsx` — sample signed-in shell (no Navbar by default — wire your own header/sidebar here)
+- `templates/Home.tsx` — sample shell (no Navbar by default — wire your own header/sidebar here)
+
+If you selected an **auth** mode, `LoginForm.tsx` (the credentials + OAuth form used by `/login` and `/register`) is here too.
 
 ### Shared helpers (`src/_functions/`)
 
-- `middlewareHandler.ts` — your page-load auth/redirect rules (registered with the framework via `main.tsx`)
 - `menuHandler.ts` — imperative `menuHandler.open()` / `confirm()` API
 - `confetti.ts` — `canvas-confetti` wrapper, tune the defaults to taste
 
@@ -76,13 +67,13 @@ The framework owns these so you don't have to maintain them — but knowing wher
 
 - `useSession()`, `useTheme()`, `useTranslator()`, `useRouter()` — hooks from `@luckystack/core/client`
 - `<Middleware>`, `<AvatarProvider>`, `<TranslationProvider>` — providers from `@luckystack/core/client`
-- `<LocationProvider>`, `<SocketStatusIndicator>` — presence from `@luckystack/presence/client`
 - `i18nNotify` (re-exported as `notify`) — i18n-backed toast wrapper from `@luckystack/core/client`
+- If you installed `@luckystack/presence`: `<LocationProvider>` + `<SocketStatusIndicator>` (live presence / socket-status) from `@luckystack/presence/client`.
 - Theme + language enums come from your `config.ts` (`defaultTheme`, `defaultLanguage`) and `SessionLayout` types — the framework reads them via `getProjectConfig()`.
 
 To customize translations: add JSON to `src/_locales/` and edit `luckystack/i18n/locales.ts` to register them.
 
-To customize auth/redirect rules: edit `src/_functions/middlewareHandler.ts` — it's registered once from `main.tsx`.
+To customize page-load auth / redirect rules: each page owns its own guard — add or edit `export const middleware` in that page's `page.tsx`. The `<Middleware>` component (from `@luckystack/core/client`) runs it before the page renders; return `{ success: false, redirect: '/login' }` to bounce, `{ success: true }` to allow. See `docs/luckystack/ARCHITECTURE_ROUTING.md`.
 
 ## Where to configure the framework
 
@@ -91,14 +82,13 @@ To customize auth/redirect rules: edit `src/_functions/middlewareHandler.ts` —
 | `config.ts` | Project-wide framework config (CORS, session, logging, rate limiting, …) |
 | `deploy.config.ts` | Resource topology (Redis, Mongo) |
 | `services.config.ts` | Service / preset definitions for multi-instance deploys |
-| `@luckystack/login/register` | OAuth providers auto-wire from env at boot — no file needed; set the env vars in `.env.local` |
-| `@luckystack/login/register` | User adapter self-wires via `defaultPrismaUserAdapter`; override by calling `registerUserAdapter()` in `luckystack/server/index.ts` |
 | `luckystack/core/clients.ts` | Override Prisma / Redis clients (TLS, Accelerate, sentinel, …) |
 | `luckystack/server/index.ts` | Hook registrations + `customRoutes` + notification wiring |
 | `luckystack/i18n/locales.ts` | Translation registry — register `_locales/*.json` and the language source |
 | `prisma/schema.prisma` | Database schema |
 | `server/server.ts` | Server entry — usually no need to edit |
-| `server/hooks/notifications.ts` | Transactional email wiring (new-sign-in, password-change) |
+
+With an **auth** mode selected, OAuth providers auto-wire from env at boot (set the vars in `.env.local`; no file needed), the user adapter self-wires via `defaultPrismaUserAdapter` (override with `registerUserAdapter()` in `luckystack/server/index.ts`), and `server/hooks/notifications.ts` wires the transactional new-sign-in / password-change emails.
 
 ## File-based routing
 

@@ -41,7 +41,7 @@ const vars: Record<string, string> = {
   DB_PROVIDER: choices.dbProvider,
   USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '...',
   DATABASE_URL: DATABASE_URL_BY_PROVIDER[choices.dbProvider] ?? '...',
-  OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders),
+  OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders, choices.authMode),
   EXTERNAL_ORIGINS: externalOrigins,
   EMAIL_ENV_VARS: buildEmailEnvVars(choices.emailProvider),
   MONITORING_ENV_VARS: buildMonitoringEnvVars(choices.monitoringProvider),
@@ -121,8 +121,8 @@ Rationale for the throw (from the inline comment): silently falling back to `'0.
 
 ### `{{OAUTH_ENV_VARS}}`
 
-- **Source**: `buildOAuthEnvVars(choices.oauthProviders)`.
-- **Type**: multi-line string. Selected providers are uncommented; unselected providers are comment-stubs.
+- **Source**: `buildOAuthEnvVars(choices.oauthProviders, choices.authMode)`.
+- **Type**: multi-line string. Selected providers are uncommented; unselected providers are comment-stubs. Under `authMode: 'none'` (no `@luckystack/login` installed) it collapses to a one-line `npx luckystack add login` pointer instead.
 - **Used for**: the OAuth block in `.env.local_template`.
 
 ### `{{EXTERNAL_ORIGINS}}`

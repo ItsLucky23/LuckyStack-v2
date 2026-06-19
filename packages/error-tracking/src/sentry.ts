@@ -41,6 +41,12 @@ type SentryModule = typeof import('@sentry/node');
 
 let cachedSentry: SentryModule | null = null;
 
+//? One-time guard for the dev "installed but inactive" info line emitted when no
+//? DSN is set (see `resolveSentryInitConfig`). `initializeSentry()` is idempotent
+//? boot wiring that may run more than once, so without this the notice would log
+//? on every call.
+let noDsnNoticeShown = false;
+
 //? `localRequire` (built from THIS module's `import.meta.url`) is passed so
 //? resolution + load happen from the package's perspective, not core's
 //? node_modules. Result is cached so repeated proxy/property access resolves
@@ -68,16 +74,22 @@ interface ResolvedSentryInitConfig {
 //? Config-build step extracted verbatim from `initializeSentry`. Reads env +
 //? the package-owned `getSentryConfig().server` and resolves the same derived
 //? values. Returns `null` when no DSN is set (the early-return branch); the
-//? production-only warning side-effect is preserved here so call-time behavior
-//? is unchanged.
+//? no-DSN notice side-effect (production warning + a one-time dev info line) is
+//? emitted here so call-time behavior is centralised.
 const resolveSentryInitConfig = (): ResolvedSentryInitConfig | null => {
   const dsn = process.env.SENTRY_DSN ?? process.env.VITE_SENTRY_DSN;
   const isProduction = process.env.NODE_ENV === 'production';
   const enabledOverride = process.env.SENTRY_ENABLED ?? process.env.VITE_SENTRY_ENABLED;
 
   if (!dsn) {
-    if (process.env.NODE_ENV === 'production') {
+    if (isProduction) {
       getLogger().warn('SENTRY_DSN not configured. Error monitoring disabled.');
+    } else if (!noDsnNoticeShown) {
+      //? Dev-friendly nudge so a developer who installed the package but hasn't
+      //? set a DSN isn't met with silence. One-time so it doesn't spam repeated
+      //? `initializeSentry()` calls (idempotent boot wiring).
+      noDsnNoticeShown = true;
+      getLogger().info('@luckystack/error-tracking installed but inactive — set SENTRY_DSN to capture.');
     }
     return null;
   }
@@ -153,8 +165,10 @@ const buildSentryInitOptions = (
   // honors projectConfig overrides, not just the raw env var.
   serverName: getProjectName(),
 
-  // Only send errors in production by default
-  enabled: config.isProduction || config.enabledOverride === 'true',
+  // DSN is set ⇒ capture is ON in every environment (dev + prod) so installing
+  // the package + setting SENTRY_DSN "just works". Explicit opt-out only:
+  // SENTRY_ENABLED=false disables capture without unsetting the DSN.
+  enabled: config.enabledOverride !== 'false',
 
   // Ignore certain errors
   ignoreErrors: config.ignoreErrors,
