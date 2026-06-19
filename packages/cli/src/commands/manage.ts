@@ -11,6 +11,7 @@ import { runNpmInstall, type ConsumerProject, type Result } from '../lib/project
 import { REGISTRY, findRegistryEntry, type RegistryEntry } from '../registry';
 import { addLogin } from './addLogin';
 import { addPresence, type AddOptions } from './addPresence';
+import { addDocsUi } from './addDocsUi';
 import { addBackendOnly } from './addBackendOnly';
 import { removeFeature } from './remove';
 
@@ -51,6 +52,9 @@ const runAdd = (project: ConsumerProject, entry: RegistryEntry, cliVersion: stri
     }
     case 'presence': {
       return addPresence(project, options);
+    }
+    case 'docs-ui': {
+      return addDocsUi(project, options, entry.note ?? '');
     }
     case 'backend': {
       return addBackendOnly(project, entry.pkg, options, entry.note ?? '');

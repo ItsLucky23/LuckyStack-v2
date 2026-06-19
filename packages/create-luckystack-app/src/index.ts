@@ -1851,15 +1851,25 @@ const wireGraphMcp = (targetDir: string, luckystackVersion: string): void => {
   });
 };
 
+//? Remove the docs-ui API explorer page when docs-ui was NOT chosen. The template
+//? ships `src/docs/page.tsx` (the React API explorer); it's only meaningful with
+//? @luckystack/docs-ui, so a lean (docs-ui OFF) scaffold drops it. The dep itself
+//? is opt-IN via injectOptionalDeps, so there's nothing else to remove here. The
+//? generated `apiDocs.generated.json` is gitignored (never in the template).
+const pruneDocsUi = (targetDir: string): void => {
+  removeScaffoldPath(targetDir, 'src/docs');
+};
+
 //? Remove OPT-OUT packages from a freshly-copied scaffold. Bounded packages:
-//? presence + error-tracking (drop dep + the few files/lines that referenced them).
-//? login/sync are more deeply woven (login is a whole auth surface; sync's
-//? `initSyncRequest` is called from the presence/activity path in socketInitializer)
-//? — see docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md §6. (docs-ui + secret-manager are
-//? opt-IN, added by injectOptionalDeps, so they have nothing to prune here.)
+//? presence + error-tracking (drop dep + the few files/lines that referenced them),
+//? and docs-ui's explorer page. login/sync are more deeply woven (login is a whole
+//? auth surface; sync's `initSyncRequest` is called from the presence/activity path
+//? in socketInitializer) — see docs/DESIGN_OPTIONAL_SERVER_PACKAGES.md §6.
+//? (secret-manager is opt-IN and only uncomments config blocks, nothing to prune.)
 const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): void => {
   if (!choices.presence) prunePresence(targetDir);
   if (!choices.errorTracking) pruneErrorTracking(targetDir);
+  if (!choices.docsUi) pruneDocsUi(targetDir);
   if (choices.authMode === 'none') pruneAuthNone(targetDir);
 };
 

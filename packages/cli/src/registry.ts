@@ -8,8 +8,9 @@
 //? handler:
 //?   - 'login'    : copies consumer-owned auth UI into src/ (guarded removal).
 //?   - 'presence' : injects/reverses client JSX mounts in main.tsx + TemplateProvider.
+//?   - 'docs-ui'  : dependency + copies the React API-explorer page into src/docs/ (removal deletes it).
 //?   - 'backend'  : dependency-only; self-wires at boot (or via the sync client bridge).
-export type FeatureKind = 'login' | 'presence' | 'backend';
+export type FeatureKind = 'login' | 'presence' | 'docs-ui' | 'backend';
 
 //? Removal safety:
 //?   - 'safe'    : removal fully reverses the add (drop dep + reverse JSX). No
@@ -79,10 +80,10 @@ export const REGISTRY: readonly RegistryEntry[] = [
   {
     id: 'docs-ui',
     pkg: '@luckystack/docs-ui',
-    kind: 'backend',
-    description: 'Dev API docs page at /_docs',
+    kind: 'docs-ui',
+    description: 'Dev API docs: server page at /_docs + an editable React explorer at src/docs/page.tsx',
     removable: 'safe',
-    note: 'The API docs page mounts at /_docs in development.',
+    note: 'Restart the server. Server docs mount at /_docs; the editable explorer is at /docs (dev-only). Run `npm run generateArtifacts` if src/docs/apiDocs.generated.json is missing.',
   },
 ] as const;
 

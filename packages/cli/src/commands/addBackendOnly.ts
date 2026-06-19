@@ -1,7 +1,7 @@
 //? Generic `luckystack add <feature>` handler for backend-only optional packages
 //? that need NO consumer-`src/` changes — they self-wire at boot via their
-//? `@luckystack/<pkg>/register` subpath (email, error-tracking, docs-ui) or via
-//? the always-present client bridge (sync). For these, `add` is just `npm i` +
+//? `@luckystack/<pkg>/register` subpath (email, error-tracking) or via the
+//? always-present client bridge (sync). For these, `add` is just `npm i` +
 //? the dependency line + a restart reminder. (`add` exists for them mainly so the
 //? whole optional surface is reachable through one consistent command.)
 

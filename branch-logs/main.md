@@ -222,3 +222,18 @@
 **Niet gedaan**: niet gebumpt/gepubliceerd (0.2.5-materiaal, wacht op user-go).
 
 **Files**: packages/server/src/devServerInfo.ts (new), packages/server/src/createServer.ts, packages/create-luckystack-app/template/vite.config.ts, packages/server/CLAUDE.md.
+
+## 2026-06-19 14:20 — docs-ui ships the editable React API-explorer page (scaffold + CLI)
+
+**User goal**: wie docs-ui kiest/installeert kreeg alleen de 2 generated JSON-files in `src/docs/`, niet de `page.tsx` (de React API-explorer) — die wil de user wél meegeleverd hebben, en de CLI moet 'm ook weer kunnen verwijderen.
+
+**Context**: er waren twee docs-surfaces — het `@luckystack/docs-ui` package (server-HTML op `/_docs`, self-wires via `./register`) en de dev-app's eigen `src/docs/page.tsx` (rijke React-explorer, leest `apiDocs.generated.json` client-side; hangt NIET aan het package). De user wil die page als consumer-asset bij docs-ui. Securitykant (explorer mag niet in prod) geflagd (Rule 3b) → opgelost via de prod-glob-exclusie i.p.v. een grote refactor.
+
+**Wat ik deed**:
+- *Asset*: `src/docs/page.tsx` gekopieerd naar `template/src/docs/page.tsx` (scaffold) én `packages/cli/assets/docs-ui/src/docs/page.tsx` (CLI). De `apiDocs.generated.json` is gitignored/dev-generated (devkit emitter) — niet meegeshipt.
+- *Scaffold*: `pruneDocsUi` verwijdert `src/docs` als docs-ui NIET gekozen is (toegevoegd aan `pruneOptionalPackages`); bij wél gekozen blijft de page + dep (injectOptionalDeps). Template `main.tsx` prodPages kreeg `'!./**/docs/**'` (mirror dev-app): de explorer is dev-only — voorkomt zowel een prod-build-break op de dev-only JSON als publieke exposure.
+- *CLI*: nieuwe `FeatureKind 'docs-ui'`; registry-entry omgezet van `backend` → `docs-ui`; `commands/addDocsUi.ts` (copy page + dep + install, mirror addLogin); `removeDocsUi` in `remove.ts` (delete page + drop dep); dispatch toegevoegd in `index.ts` runSingle + `manage.ts` runAdd + `remove.ts` removeFeature (exhaustive switches dwongen volledige dekking). `addBackendOnly` + CLI CLAUDE.md doc-drift bijgewerkt.
+
+**Verificatie**: build:packages 16/16 · lint:packages 0 · test:unit 1298 (incl. assetParity). Scaffold: default → géén `src/docs/page.tsx`; `--docs-ui` → page + dep `^0.2.5`. CLI round-trip met gebouwde CLI: `add docs-ui` kopieert page + dep; `remove docs-ui` verwijdert page + dep.
+
+**Files**: packages/create-luckystack-app/template/src/docs/page.tsx (new), packages/create-luckystack-app/template/src/main.tsx, packages/create-luckystack-app/src/index.ts, packages/cli/assets/docs-ui/src/docs/page.tsx (new), packages/cli/src/registry.ts, packages/cli/src/commands/addDocsUi.ts (new), packages/cli/src/commands/remove.ts, packages/cli/src/commands/manage.ts, packages/cli/src/index.ts, packages/cli/src/commands/addBackendOnly.ts, packages/cli/CLAUDE.md.

@@ -43,12 +43,14 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 | `lib/wizard.ts` | `runCheckbox` — ZERO-dep readline-keypress multi-select (↑/↓ · space · enter · ctrl-c). `isInteractive` non-TTY guard. |
 | `commands/addLogin.ts` | Copy auth UI assets into `src/` (skip-if-exists) + add `@luckystack/login` + install. |
 | `commands/addPresence.ts` | Re-add `@luckystack/presence` + inject `<LocationProvider/>` / `<SocketStatusIndicator/>` (inverse of the pruner) + install. |
-| `commands/addBackendOnly.ts` | Generic handler for `sync` / `email` / `error-tracking` / `docs-ui`: add dep + install (they self-wire at boot). |
+| `commands/addDocsUi.ts` | Add `@luckystack/docs-ui` + copy the editable React API explorer into `src/docs/page.tsx` (skip-if-exists) + install. Removal (`removeDocsUi` in `remove.ts`) deletes the page + drops the dep. |
+| `commands/addBackendOnly.ts` | Generic handler for `sync` / `email` / `error-tracking`: add dep + install (they self-wire at boot). |
 | `commands/checkEnv.ts` | `check-env` — A: unused `.env` keys; B: env vars used but undefined. DEV_-aware; framework-key ignore list; env files via `getEnvFiles()` semantics (`LUCKYSTACK_ENV_FILES` else `.env`,`.env.local`). |
 | `commands/checkI18n.ts` | `check-i18n` — C: unused locale keys; D: used keys missing per-language. Used-set = literal `{ key: '...' }` + `errorCode: '...'` (dotted) harvested repo-wide; dynamic `key:<var>` sites listed for review. |
 | `lib/scan.ts` | Shared regex scanner: `collectSourceFiles` (skips node_modules/dist/tests/generated), `matchAll` (capture+line), `groupLocations`, `writeDumpLog` (`dump/<KIND>_<hash>.log`). |
 | `lib/project.ts` | `findProjectRoot` (consumer dep OR framework `packages/core`), `addDependency` / `dropDependency`, `hasDependency` / `dependencyRange`, `editFile` (CRLF-safe), `copyDirIfAbsent` (idempotent), `assetPath`, `runNpmInstall`. |
 | `assets/login/src/**` | The shipped auth UI bundle copied by `add login` (login/register/reset-password/settings pages + `_api` + `LoginForm`). |
+| `assets/docs-ui/src/**` | The React API-explorer page (`src/docs/page.tsx`) copied by `add docs-ui`. |
 
 ## Notes
 

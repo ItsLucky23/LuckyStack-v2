@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import { parsePackageVersion, validateProject, type ConsumerProject, type Result } from './lib/project';
 import { addPresence, type AddOptions } from './commands/addPresence';
 import { addLogin } from './commands/addLogin';
+import { addDocsUi } from './commands/addDocsUi';
 import { addBackendOnly } from './commands/addBackendOnly';
 import { checkEnv } from './commands/checkEnv';
 import { checkI18n } from './commands/checkI18n';
@@ -86,6 +87,9 @@ const runSingle = (
     }
     case 'presence': {
       return addPresence(project, options);
+    }
+    case 'docs-ui': {
+      return addDocsUi(project, options, entry.note ?? '');
     }
     case 'backend': {
       return addBackendOnly(project, entry.pkg, options, entry.note ?? '');
