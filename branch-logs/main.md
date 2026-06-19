@@ -256,3 +256,23 @@
 **Nog te doen (volgende lagen)**: step-wizard UI (single/multi-select + navigatie), transition-descriptors (deps/files/env/origins per feature+optie) → preview + apply, `manage`-rework, auth/oauth/email/monitoring transities, parity-test.
 
 **Files**: docs/decisions/0014-cli-reconfigure-wizard.md (new), packages/cli/src/featureOptions.ts (new), packages/cli/src/lib/envKeys.ts (new), packages/cli/src/lib/envKeys.test.ts (new), packages/cli/src/lib/state.ts (new), packages/cli/src/lib/state.test.ts (new).
+
+## 2026-06-19 16:00 — CLI reconfigure wizard L2–L4 + 3× adversarial verification (ultracode)
+
+**User goal** (/goal, away): voer het hele plan uit, gebruik ultracode/sonnet, verifieer daarna alle changes met sonnet, commit+push als alles klopt.
+
+**Gebouwd (L2–L4, bovenop L1)**:
+- **L2 step-wizard UI** — `lib/wizard.ts` `runSingleSelect` (single-select + non-TTY/empty guards) naast de bestaande `runCheckbox`.
+- **L3 transition-engine** — `transitions.ts` `planChanges(current, desired)` → granulaire `Change[]`, elk met een consequentie-preview (`effects`) + `apply`, afgeleid uit dezelfde feiten (preview↔apply kan niet divergeren). `lib/envFile.ts`: value-SAFE env-bewerking (sentinel-blokken append-if-absent, nooit een gevulde value wissen, EXTERNAL_ORIGINS per line-index, CRLF-veilig). `featureOptions.ts` uitgebreid met env-line/origin/dep-builders.
+- **L4 orchestrator** — `commands/reconfigure.ts` `runReconfigureWizard`: detect state → step-menu → sub-screens (auth+oauth multi-select, email, monitoring, toggles) → per-change preview → confirm → apply → één install. `index.ts` routeert `manage` hiernaartoe (oude checkbox-wizard verwijderd). `manage.ts` blijft voor single-feature add/remove.
+
+**Verificatie — 3 ultracode-passes (sonnet)**:
+- Pass 1: 5 blockers → o.a. een ECHTE bug: mijn `runSingleSelect` raw-escapes misten de ESC-byte (uit gestripte display overgetypt) → wizard onleesbaar. Plus `dropEnvBlock` wiste gevulde secrets, `removeLoginChange` wiste files die `addLogin` nooit maakt, monitoring backend-switch preview-mismatch. Alle 5 gefixt.
+- Pass 2: 0 blockers; majors gefixt (env line-index, preview↔apply parity email/monitoring, state `loginOn` package-based ipv UI, monitoring-loop uit constant, `dropDependency` ook devDeps, editAuth zero-provider/abort-revert, gedeelde `LOGIN_COPIED_PATHS`, HELP/CLAUDE.md docs, `wrap` veilige error).
+- Pass 3: 0 blockers; 2 ECHTE CRLF-corruptie-majors (Windows!) — `appendSentinelBlock`/`addOrigin` gebruikten ruwe `\r\n`-text vóór `writeText`'s `\n→\r\n` → `\r\r\n`. Genormaliseerd + regressietest. Plus email apply-scoping + `pruneLoginDocs` ook bij manage→none.
+
+**Tests**: +71 (state/envKeys/envFile incl. value-safety+CRLF, transitions diff+apply+preview-parity, parity). Gate: lint:packages 0 · build:packages 16/16 · test:unit 1356 · scaffold + CLI add/remove round-trip + non-TTY guard geverifieerd.
+
+**Bewust gelaten (geen correctheidsbug)**: `manage.ts` ongebruikte add-pad (correcte generaliteit), OAuth lege-placeholder = "geselecteerd" (bedoeld per ADR 0014 D1), monitoring='none' bij et-installed-zonder-key (geen accidentele removal). ADR 0014 + memory voor de Rule-16 key-only uitzondering eerder vastgelegd.
+
+**Files (nieuw)**: packages/cli/src/{transitions.ts, transitions.test.ts, transitions.apply.test.ts, commands/reconfigure.ts, lib/envFile.ts, lib/envFile.test.ts}. **(gewijzigd)**: packages/cli/src/{index.ts, featureOptions.ts, registry-n/a, lib/wizard.ts, lib/state.ts(+test), lib/project.ts, commands/manage.ts, commands/remove.ts, assetParity.test.ts}, packages/cli/CLAUDE.md.

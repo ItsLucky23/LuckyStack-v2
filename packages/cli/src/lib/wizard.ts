@@ -61,10 +61,105 @@ export const confirmPrompt = (question: string, defaultYes = false): Promise<boo
     });
   });
 
+export interface SelectItem {
+  /** Primary label shown on the row. */
+  label: string;
+  /** One-line, dimmed explanation under the label. */
+  description?: string;
+}
+
+export interface SelectResult {
+  /** Chosen index, or -1 when aborted. */
+  index: number;
+  aborted: boolean;
+}
+
+//? A single-select (radio) screen: ↑/↓ move · enter choose · ctrl-c abort. Used
+//? for the step menu (pick a feature to edit / Review & apply / Cancel) and for
+//? single-value steps (auth mode, email, monitoring). Caller guards `isInteractive`.
+export const runSingleSelect = (
+  title: string,
+  items: readonly SelectItem[],
+  initialIndex = 0,
+): Promise<SelectResult> =>
+  new Promise((resolve) => {
+    //? Self-guard: never enter raw-mode without a TTY (would hang on a pipe). The
+    //? caller already checks isInteractive(), but make the precondition local too.
+    if (!input.isTTY) { resolve({ index: -1, aborted: true }); return; }
+    //? An empty list would divide-by-zero in the ↑/↓ modulo and trap the user in
+    //? raw mode with no navigable row — bail out as aborted.
+    if (items.length === 0) { resolve({ index: -1, aborted: true }); return; }
+    let cursor = Math.max(0, Math.min(initialIndex, items.length - 1));
+    let prevLines = 0;
+
+    const buildBlock = (): string => {
+      const lines = ['', ansiStyle(title, ANSI.bold)];
+      for (const [i, item] of items.entries()) {
+        const active = i === cursor;
+        const dot = active ? ansiStyle('◉', ANSI.green) : '◯';
+        const arrow = active ? ansiStyle('❯', ANSI.cyan) : ' ';
+        const label = active ? ansiStyle(item.label, ANSI.cyan) : item.label;
+        lines.push(`${arrow} ${dot} ${label}`);
+        if (item.description !== undefined && item.description !== '') {
+          lines.push(ansiStyle(`     ${item.description}`, ANSI.dim));
+        }
+      }
+      lines.push(ansiStyle('↑/↓ move · enter = choose · ctrl-c cancel', ANSI.dim));
+      return `${lines.join('\n')}\n`;
+    };
+
+    const paint = (): void => {
+      if (prevLines > 0) output.write(`[${String(prevLines)}A[0J`);
+      const block = buildBlock();
+      output.write(block);
+      prevLines = (block.match(/\n/g) ?? []).length;
+    };
+
+    const restoreTerminal = (): void => {
+      input.off('keypress', onKey);
+      if (input.isTTY) input.setRawMode(false);
+      input.pause();
+      output.write(`${ANSI.reset}[?25h`);
+    };
+
+    function onKey(_str: string, key: KeyEvent): void {
+      if (key.ctrl === true && key.name === 'c') {
+        restoreTerminal();
+        output.write('\n');
+        resolve({ index: -1, aborted: true });
+        return;
+      }
+      if (key.name === 'up') {
+        cursor = (cursor - 1 + items.length) % items.length;
+        paint();
+        return;
+      }
+      if (key.name === 'down') {
+        cursor = (cursor + 1) % items.length;
+        paint();
+        return;
+      }
+      if (key.name === 'return') {
+        restoreTerminal();
+        resolve({ index: cursor, aborted: false });
+      }
+    }
+
+    emitKeypressEvents(input);
+    //? Safe: the non-TTY early-return guard above guarantees a TTY here.
+    input.setRawMode(true);
+    input.resume();
+    output.write('[?25l');
+    input.on('keypress', onKey);
+    paint();
+  });
+
 //? Render a single multi-select screen and resolve with the chosen ids. The
 //? caller MUST check `isInteractive()` first; on a non-TTY this would hang.
 export const runCheckbox = (title: string, items: readonly CheckboxItem[]): Promise<CheckboxResult> =>
   new Promise((resolve) => {
+    //? Self-guard: never enter raw-mode without a TTY (would hang on a pipe).
+    if (!input.isTTY) { resolve({ selected: [], aborted: true }); return; }
     const checked = items.map((item) => item.checked);
     //? The baseline (what's installed NOW) so each row can show, live, what
     //? toggling it WILL DO relative to the current state — that's the "make it
@@ -170,7 +265,8 @@ export const runCheckbox = (title: string, items: readonly CheckboxItem[]): Prom
     }
 
     emitKeypressEvents(input);
-    if (input.isTTY) input.setRawMode(true);
+    //? Safe: the non-TTY early-return guard above guarantees a TTY here.
+    input.setRawMode(true);
     input.resume();
     output.write('[?25l');
     input.on('keypress', onKey);

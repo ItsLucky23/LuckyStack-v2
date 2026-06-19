@@ -20,10 +20,10 @@ import { addDocsUi } from './commands/addDocsUi';
 import { addBackendOnly } from './commands/addBackendOnly';
 import { checkEnv } from './commands/checkEnv';
 import { checkI18n } from './commands/checkI18n';
-import { listFeatures, installedRegistryIds } from './commands/list';
-import { applyManagePlan, computeManagePlan } from './commands/manage';
+import { listFeatures } from './commands/list';
+import { applyManagePlan } from './commands/manage';
+import { runReconfigureWizard } from './commands/reconfigure';
 import { REGISTRY, findRegistryEntry } from './registry';
-import { confirmPrompt, isInteractive, runCheckbox, type CheckboxItem } from './lib/wizard';
 
 const HELP = `luckystack — LuckyStack project CLI
 
@@ -39,8 +39,10 @@ Optional packages (add/remove/manage):
 ${REGISTRY.map((entry) => `  ${entry.id.padEnd(16)}${entry.description}`).join('\n')}
 
 list              Show which optional packages are installed vs available.
-manage            Interactive checkbox wizard to add/remove packages at once.
-                  Bare \`add\` / \`remove\` (no feature) opens the same wizard.
+manage            Step-based reconfiguration wizard: pick a setting (auth + OAuth
+                  providers / email / monitoring / presence / sync / docs-ui), see a
+                  consequence preview, confirm, then apply. Bare \`add\` / \`remove\`
+                  (no feature) opens the same wizard.
 add <feature>     Install one optional package + inject its consumer-src assets.
 remove <feature>  Drop one optional package (reverses add; login removal is guarded).
 
@@ -53,16 +55,6 @@ Flags:
   -h, --help      Show this help
 
 Run inside a LuckyStack project directory.`;
-
-//? The non-TTY guidance message for the interactive wizard. Printed (and exit 1)
-//? rather than hanging in raw-mode when stdin/stdout isn't a terminal.
-const printNonTtyGuidance = (): void => {
-  console.error('`luckystack manage` needs an interactive terminal (TTY).');
-  console.error('In a non-interactive shell, use the explicit commands instead:');
-  console.error('  npx luckystack list');
-  console.error('  npx luckystack add <feature>');
-  console.error('  npx luckystack remove <feature>');
-};
 
 //? Run the single-add/remove path for an explicit feature id. Shared by
 //? `add <feature>` and `remove <feature>`.
@@ -99,47 +91,6 @@ const runSingle = (
       throw new Error(`Unhandled feature kind: ${JSON.stringify(_exhaustive)}`);
     }
   }
-};
-
-//? Run the interactive manage wizard: build the pre-checked checkbox list, run it,
-//? compute the plan, apply it. Async because the prompt awaits keypresses.
-const runManageWizard = async (project: ConsumerProject, options: AddOptions): Promise<Result<void>> => {
-  if (!isInteractive()) {
-    printNonTtyGuidance();
-    return { ok: false, error: new Error('manage requires a TTY') };
-  }
-  const installed = new Set(installedRegistryIds(project));
-  const items: CheckboxItem[] = REGISTRY.map((entry) => ({
-    id: entry.id,
-    label: entry.id,
-    description: entry.description,
-    checked: installed.has(entry.id),
-  }));
-  const result = await runCheckbox('Select the optional packages you want installed:', items);
-  if (result.aborted) {
-    console.log('Cancelled — no changes made.');
-    return { ok: true, value: undefined };
-  }
-  const plan = computeManagePlan([...installed], result.selected);
-  if (plan.add.length === 0 && plan.remove.length === 0) {
-    console.log('\nNo changes selected.');
-    return { ok: true, value: undefined };
-  }
-  //? Show the resolved plan + a confirm before touching the filesystem, so the
-  //? final screen is reviewable (the checkbox screen alone wasn't a commit point).
-  console.log('\nPlanned changes:');
-  if (plan.add.length > 0) console.log(`  + add:    ${plan.add.join(', ')}`);
-  if (plan.remove.length > 0) console.log(`  - remove: ${plan.remove.join(', ')}`);
-  const guarded = plan.remove.filter((id) => findRegistryEntry(id)?.removable === 'guarded');
-  if (guarded.length > 0) {
-    console.log(`  note: ${guarded.join(', ')} keep their copied src/ files (you'll get a cleanup list).`);
-  }
-  const proceed = await confirmPrompt('\nApply these changes?');
-  if (!proceed) {
-    console.log('Cancelled — no changes made.');
-    return { ok: true, value: undefined };
-  }
-  return applyManagePlan(project, plan, options);
 };
 
 const finish = (result: Result<void>): void => {
@@ -204,7 +155,7 @@ const main = async (): Promise<void> => {
   const featureGiven = feature !== undefined && feature.length > 0 && !feature.startsWith('-');
   if (command === 'manage' || !featureGiven) {
     console.log(`luckystack ${command} — ${project.root}\n`);
-    finish(await runManageWizard(project, options));
+    finish(await runReconfigureWizard(project, options));
     return;
   }
 

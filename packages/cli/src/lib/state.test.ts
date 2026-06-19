@@ -3,7 +3,6 @@ import { deriveState, type StateInputs } from './state';
 
 const base = (over: Partial<StateInputs> = {}): StateInputs => ({
   hasPackage: () => false,
-  hasLoginUi: false,
   declaredKeys: new Set<string>(),
   ...over,
 });
@@ -17,8 +16,10 @@ describe('deriveState — authMode', () => {
     expect(deriveState(base({ hasPackage: (p) => p === '@luckystack/login' })).authMode).toBe('credentials');
   });
 
-  it('credentials when only the login UI is present (no dep yet)', () => {
-    expect(deriveState(base({ hasLoginUi: true })).authMode).toBe('credentials');
+  it('none when an OAuth key is declared but the login package is NOT installed (stale)', () => {
+    const state = deriveState(base({ declaredKeys: new Set(['DEV_GOOGLE_CLIENT_ID']) }));
+    expect(state.authMode).toBe('none');
+    expect(state.oauthProviders).toEqual([]);
   });
 
   it('credentials+oauth when login + an OAuth id key is declared', () => {
@@ -31,27 +32,37 @@ describe('deriveState — authMode', () => {
   });
 });
 
-describe('deriveState — email', () => {
-  it('resend when RESEND_API_KEY declared', () => {
-    expect(deriveState(base({ declaredKeys: new Set(['RESEND_API_KEY']) })).email).toBe('resend');
+describe('deriveState — email (requires @luckystack/email installed)', () => {
+  const withEmail = (keys: string[]): ReturnType<typeof deriveState> =>
+    deriveState(base({ hasPackage: (p) => p === '@luckystack/email', declaredKeys: new Set(keys) }));
+  it('resend when email pkg + RESEND_API_KEY', () => {
+    expect(withEmail(['RESEND_API_KEY']).email).toBe('resend');
   });
-  it('smtp when SMTP_HOST declared', () => {
-    expect(deriveState(base({ declaredKeys: new Set(['SMTP_HOST']) })).email).toBe('smtp');
+  it('smtp when email pkg + SMTP_HOST', () => {
+    expect(withEmail(['SMTP_HOST']).email).toBe('smtp');
   });
-  it('console when @luckystack/email installed but no adapter key', () => {
-    expect(deriveState(base({ hasPackage: (p) => p === '@luckystack/email' })).email).toBe('console');
+  it('console when email pkg installed but no adapter key', () => {
+    expect(withEmail([]).email).toBe('console');
+  });
+  it('none when the adapter key is present but the package is NOT (stale key)', () => {
+    expect(deriveState(base({ declaredKeys: new Set(['RESEND_API_KEY']) })).email).toBe('none');
   });
   it('none otherwise', () => {
     expect(deriveState(base()).email).toBe('none');
   });
 });
 
-describe('deriveState — monitoring', () => {
-  it('sentry when SENTRY_DSN declared', () => {
-    expect(deriveState(base({ declaredKeys: new Set(['SENTRY_DSN']) })).monitoring).toBe('sentry');
+describe('deriveState — monitoring (requires @luckystack/error-tracking installed)', () => {
+  const withEt = (keys: string[]): ReturnType<typeof deriveState> =>
+    deriveState(base({ hasPackage: (p) => p === '@luckystack/error-tracking', declaredKeys: new Set(keys) }));
+  it('sentry when error-tracking pkg + SENTRY_DSN', () => {
+    expect(withEt(['SENTRY_DSN']).monitoring).toBe('sentry');
   });
-  it('posthog when POSTHOG_KEY declared', () => {
-    expect(deriveState(base({ declaredKeys: new Set(['POSTHOG_KEY']) })).monitoring).toBe('posthog');
+  it('posthog when error-tracking pkg + POSTHOG_KEY', () => {
+    expect(withEt(['POSTHOG_KEY']).monitoring).toBe('posthog');
+  });
+  it('none when the backend key is present but the package is NOT (stale key)', () => {
+    expect(deriveState(base({ declaredKeys: new Set(['SENTRY_DSN']) })).monitoring).toBe('none');
   });
   it('none when no backend key declared', () => {
     expect(deriveState(base()).monitoring).toBe('none');

@@ -9,12 +9,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { REGISTRY } from './registry';
+import { AUTH_MODES, OAUTH_PROVIDERS, EMAIL_PROVIDERS, MONITORING_PROVIDERS } from './featureOptions';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
 const ASSET_ROOT = path.resolve(here, '..', 'assets', 'login', 'src');
 const TEMPLATE_ROOT = path.join(repoRoot, 'packages', 'create-luckystack-app', 'template', 'src');
 const SERVER_CAPABILITIES = path.join(repoRoot, 'packages', 'server', 'src', 'capabilities.ts');
+const SCAFFOLDER_INDEX = path.join(repoRoot, 'packages', 'create-luckystack-app', 'src', 'index.ts');
 
 const normalize = (text: string): string => text.replaceAll('\r\n', '\n');
 
@@ -96,6 +98,39 @@ describe('feature registry ↔ optional packages (audit QUA-021)', () => {
   it('every registry entry pkg name matches `@luckystack/<id>`', () => {
     const mismatched = REGISTRY.filter((entry) => entry.pkg !== `@luckystack/${entry.id}`);
     expect(mismatched.map((e) => e.id), 'registry id/pkg mismatch').toEqual([]);
+  });
+});
+
+//? ADR 0014 D3: featureOptions.ts is the CLI's own copy of the reconfigurable
+//? PROVIDER_OPTIONS. This guards it against drift from the scaffolder's source —
+//? add a provider/mode in one place without the other and this trips.
+describe('featureOptions ↔ scaffolder PROVIDER_OPTIONS parity (ADR 0014 D3)', () => {
+  const src = readFileSync(SCAFFOLDER_INDEX, 'utf8');
+  //? NOTE: this non-greedy capture assumes PROVIDER_OPTIONS stays a FLAT object of
+  //? arrays (no nested braces). If a value ever becomes a nested object, the regex
+  //? truncates at the first `}` — the per-list extract() calls below would return
+  //? null and trip the it.each tests, surfacing the need to update this matcher.
+  const block = /const PROVIDER_OPTIONS\s*=\s*\{([\s\S]*?)\}\s*as const;/.exec(src);
+
+  it('PROVIDER_OPTIONS block is present in the scaffolder', () => {
+    expect(block, 'could not find PROVIDER_OPTIONS in create-luckystack-app/src/index.ts').not.toBeNull();
+  });
+
+  const extract = (key: string): string[] | null => {
+    //? Escape the key before interpolating into a RegExp (defensive — keys are known
+    //? identifiers today, but a future key with a metacharacter must not corrupt the pattern).
+    const safeKey = key.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+    const m = new RegExp(`${safeKey}:\\s*\\[([^\\]]*)\\]`).exec(block?.[1] ?? '');
+    return m ? [...(m[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] ?? '') : null;
+  };
+
+  it.each([
+    ['authMode', [...AUTH_MODES]],
+    ['oauthProviders', [...OAUTH_PROVIDERS]],
+    ['emailProvider', [...EMAIL_PROVIDERS]],
+    ['monitoringProvider', [...MONITORING_PROVIDERS]],
+  ])('CLI %s matches the scaffolder list', (key, cliList) => {
+    expect(extract(key), `${key} not found in PROVIDER_OPTIONS`).toEqual(cliList);
   });
 });
 

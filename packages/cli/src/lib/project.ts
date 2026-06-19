@@ -166,9 +166,21 @@ export const addDependency = (project: ConsumerProject, name: string, range: str
 //? path. Only touches `dependencies` (the add path only ever writes there).
 export const dropDependency = (project: ConsumerProject, name: string): boolean => {
   if (!name) throw new Error('dropDependency: name must be a non-empty string');
-  if (!project.pkg.dependencies || !(name in project.pkg.dependencies)) return false;
-  const { [name]: _removed, ...rest } = project.pkg.dependencies;
-  project.pkg.dependencies = rest;
+  //? Remove from BOTH dependencies and devDependencies — `hasDependency` checks
+  //? both, so leaving a dep in devDependencies would make state detection report
+  //? the feature as still installed after a removal (an infinite "remove" loop).
+  let removed = false;
+  if (project.pkg.dependencies && name in project.pkg.dependencies) {
+    const { [name]: _removed, ...rest } = project.pkg.dependencies;
+    project.pkg.dependencies = rest;
+    removed = true;
+  }
+  if (project.pkg.devDependencies && name in project.pkg.devDependencies) {
+    const { [name]: _removedDev, ...rest } = project.pkg.devDependencies;
+    project.pkg.devDependencies = rest;
+    removed = true;
+  }
+  if (!removed) return false;
   const raw = fs.readFileSync(project.pkgPath, 'utf8');
   const indent = detectJsonIndent(raw);
   fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, indent)}\n`);

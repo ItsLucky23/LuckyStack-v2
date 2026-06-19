@@ -2,15 +2,14 @@
 //? wizard step with what's actually there (ADR 0014). State that isn't stored
 //? explicitly (authMode, active OAuth providers, email/monitoring backend) is
 //? inferred from installed packages + declared env KEY NAMES (never values, Rule
-//? 16 / ADR 0014 D1) + the presence of the login UI under `src/`.
+//? 16 / ADR 0014 D1).
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { hasDependency, type ConsumerProject } from './project';
 import { readDeclaredEnvKeys, anyKeyDeclared } from './envKeys';
 import { REGISTRY } from '../registry';
 import {
   OAUTH_PROVIDERS,
+  MONITORING_PROVIDERS,
   oauthIdKeys,
   emailKeys,
   monitoringKeys,
@@ -33,45 +32,52 @@ export interface ProjectState {
 export interface StateInputs {
   /** Is this npm package a dependency? (registry pkg names) */
   hasPackage: (pkg: string) => boolean;
-  /** Does the auth UI exist under src/ (src/login/page.tsx)? */
-  hasLoginUi: boolean;
   /** Declared env key NAMES (value-blind). */
   declaredKeys: ReadonlySet<string>;
 }
 
 const LOGIN_PKG = '@luckystack/login';
 const EMAIL_PKG = '@luckystack/email';
+const ERROR_TRACKING_PKG = '@luckystack/error-tracking';
 
 //? Pure state derivation from the gathered inputs.
 export const deriveState = (inputs: StateInputs): ProjectState => {
-  const { hasPackage, hasLoginUi, declaredKeys } = inputs;
+  const { hasPackage, declaredKeys } = inputs;
 
-  const oauthProviders = OAUTH_PROVIDERS.filter((provider) =>
-    anyKeyDeclared(declaredKeys, oauthIdKeys(provider)),
-  );
-
-  //? Login presence = dep OR the copied UI (either signals "auth is on"). With
-  //? any OAuth id key declared it's credentials+oauth, else plain credentials.
-  const loginOn = hasPackage(LOGIN_PKG) || hasLoginUi;
+  //? Auth is "on" iff @luckystack/login is installed — the PACKAGE is the source of
+  //? truth (a guarded `remove login` keeps the src/ UI but drops the dep, so a
+  //? UI-based check would contradict `packages.login`). OAuth providers are only
+  //? meaningful with login on; a stale OAuth key after an uninstall must not
+  //? resurrect providers. With any OAuth id key declared it's credentials+oauth.
+  const loginOn = hasPackage(LOGIN_PKG);
+  const oauthProviders = loginOn
+    ? OAUTH_PROVIDERS.filter((provider) => anyKeyDeclared(declaredKeys, oauthIdKeys(provider)))
+    : [];
   let authMode: AuthMode;
   if (!loginOn) authMode = 'none';
   else if (oauthProviders.length > 0) authMode = 'credentials+oauth';
   else authMode = 'credentials';
 
-  //? Email: an adapter key wins; otherwise the package being installed means the
-  //? console (dev) sender is active; otherwise off.
+  //? Email: a backend is only "active" when @luckystack/email is INSTALLED. A
+  //? stale RESEND_API_KEY after a dep removal must not report 'resend'. With the
+  //? package: adapter key → resend/smtp, else the console (dev) sender.
   let email: EmailProvider;
-  if (anyKeyDeclared(declaredKeys, emailKeys.resend)) email = 'resend';
+  if (!hasPackage(EMAIL_PKG)) email = 'none';
+  else if (anyKeyDeclared(declaredKeys, emailKeys.resend)) email = 'resend';
   else if (anyKeyDeclared(declaredKeys, emailKeys.smtp)) email = 'smtp';
-  else if (hasPackage(EMAIL_PKG)) email = 'console';
-  else email = 'none';
+  else email = 'console';
 
-  //? Monitoring: whichever backend's key is declared (first match wins), else off.
+  //? Monitoring: a backend is only "active" when @luckystack/error-tracking is
+  //? installed (else a stale SENTRY_DSN would falsely report 'sentry'). The
+  //? candidate list is derived from MONITORING_PROVIDERS so a new backend can't
+  //? silently drift out of detection.
   let monitoring: MonitoringProvider = 'none';
-  for (const candidate of ['sentry', 'datadog', 'posthog'] as const) {
-    if (anyKeyDeclared(declaredKeys, monitoringKeys[candidate])) {
-      monitoring = candidate;
-      break;
+  if (hasPackage(ERROR_TRACKING_PKG)) {
+    for (const candidate of MONITORING_PROVIDERS.filter((p) => p !== 'none')) {
+      if (anyKeyDeclared(declaredKeys, monitoringKeys[candidate])) {
+        monitoring = candidate;
+        break;
+      }
     }
   }
 
@@ -85,6 +91,5 @@ export const deriveState = (inputs: StateInputs): ProjectState => {
 export const detectProjectState = (project: ConsumerProject): ProjectState =>
   deriveState({
     hasPackage: (pkg) => hasDependency(project.pkg, pkg),
-    hasLoginUi: fs.existsSync(path.join(project.root, 'src', 'login', 'page.tsx')),
     declaredKeys: readDeclaredEnvKeys(project.root),
   });

@@ -1,11 +1,9 @@
-//? `luckystack manage` — interactive add/remove of optional @luckystack packages.
-//? Shows the REGISTRY as a checkbox list PRE-CHECKED for what's installed; on
-//? confirm it diffs the selection against the initial state and runs the add path
-//? for newly-checked ids and the remove path for unchecked-but-installed ids, then
-//? a SINGLE `npm install` at the end (unless --no-install).
-//?
-//? The diff is a PURE function (`computeManagePlan`) so it can be unit-tested
-//? without the raw TTY loop; only `applyManagePlan` touches the filesystem.
+//? Pure add/remove plan helpers shared by the single-feature `add <feature>` /
+//? `remove <feature>` dispatch (index.ts). The INTERACTIVE step wizard lives in
+//? commands/reconfigure.ts (it drives changes through transitions.ts, not this
+//? checkbox-style plan). `computeManagePlan` is a PURE diff (selected vs installed
+//? registry ids) so it's unit-testable; `applyManagePlan` runs the add/remove
+//? handlers + a SINGLE `npm install` at the end (unless --no-install).
 
 import { runNpmInstall, type ConsumerProject, type Result } from '../lib/project';
 import { REGISTRY, findRegistryEntry, type RegistryEntry } from '../registry';

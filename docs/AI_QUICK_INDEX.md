@@ -73,7 +73,11 @@
 | `src/index.ts` (bin entry) | Parse `list` / `manage` / `add` / `remove` / `check-*`, locate the project, dispatch. |
 | `src/registry.ts` | `REGISTRY` — the single typed source of truth for CLI-manageable optional packages (`id`, `pkg`, `kind`, `description`, `removable`, `note`). `add`/`list`/`manage`/`remove` all derive from it; mirror against server `OPTIONAL_PACKAGES`. |
 | `commands/list.ts` | `list` — read-only: registry packages `installed (vRANGE)` vs `available` + core/other @luckystack deps. `installedRegistryIds` (pure). |
-| `commands/manage.ts` | `manage` — `computeManagePlan` (PURE diff of installed vs selected) + `applyManagePlan` (run adds/removes, then ONE install). |
+| `commands/reconfigure.ts` | `runReconfigureWizard` — the interactive STEP wizard for `manage`: detect state (`lib/state.ts`) → edit per-setting → preview (`transitions.ts` `planChanges`) → confirm → apply → one install. |
+| `commands/manage.ts` | Single-feature plan helpers used by `add <feature>` / `remove <feature>`: `computeManagePlan` (PURE diff, test-only) + `applyManagePlan` (run the plan, then ONE install). NOT the interactive wizard (that's reconfigure.ts). |
+| `transitions.ts` | `planChanges(current, desired)` → granular `Change[]` each with a consequence preview + `apply`. `configFromState`, `TOGGLE_IDS`. The reconfigure engine. |
+| `lib/state.ts` / `lib/envKeys.ts` / `lib/envFile.ts` | `detectProjectState` (authMode/oauth/email/monitoring/packages from deps + env KEY names) · value-blind env-key reader (`.env.local` then `.env`) · value-safe env-block add/remove + EXTERNAL_ORIGINS edits. |
+| `featureOptions.ts` | Reconfigurable option lists (authMode/oauth/email/monitoring) + provider→env-key/origin/dep maps. Mirrors the scaffolder's PROVIDER_OPTIONS (parity-tested). |
 | `commands/remove.ts` | `removeFeature` — inverse of add by kind: backend = drop dep; presence = drop dep + reverse JSX (mirror of `prunePresence`); login = GUARDED (drop dep, keep files, warn). |
 | `lib/wizard.ts` | `runCheckbox` — ZERO-dep readline-keypress multi-select (↑/↓ · space · enter · ctrl-c). `isInteractive` non-TTY guard. |
 | `commands/addLogin.ts` | Copy auth UI assets into `src/` (skip-if-exists) + add `@luckystack/login` + install. |

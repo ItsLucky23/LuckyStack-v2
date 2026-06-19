@@ -16,8 +16,11 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 - `luckystack list` — read-only inventory: every manageable optional package as
   `installed (vRANGE)` vs `available` + a "core/other @luckystack" section.
 - `luckystack manage` (also bare `add` / `remove` with no feature) — interactive ZERO-dep
-  checkbox wizard, pre-checked for installed packages; on confirm it diffs the selection and
-  runs the add path for newly-checked + remove path for unchecked, then ONE `npm install`.
+  STEP-based reconfiguration wizard (ADR 0014): detects current state, opens a step per
+  setting (auth mode + OAuth providers, email, monitoring, presence, sync, docs-ui), shows a
+  per-change consequence preview, then applies (`commands/reconfigure.ts` + `transitions.ts`),
+  then ONE `npm install`. Env edits are value-safe (key-presence only; `.env.local` placeholders
+  appended on add, a filled block never deleted).
 - `luckystack check-env` / `luckystack check-i18n` — codebase audits that write AI-feedable,
   per-run hashed logs to `dump/<KIND>_<hash>.log` (dead/missing env keys + i18n keys).
 
@@ -38,7 +41,11 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 | `src/index.ts` (bin entry) | Parse `list` / `manage` / `add` / `remove` / `check-*`, locate the project, dispatch. |
 | `src/registry.ts` | `REGISTRY` — the single typed source of truth for CLI-manageable optional packages (`id`, `pkg`, `kind`, `description`, `removable`, `note`). `add`/`list`/`manage`/`remove` all derive from it; mirror against server `OPTIONAL_PACKAGES`. |
 | `commands/list.ts` | `list` — read-only: registry packages `installed (vRANGE)` vs `available` + core/other @luckystack deps. `installedRegistryIds` (pure). |
-| `commands/manage.ts` | `manage` — `computeManagePlan` (PURE diff of installed vs selected) + `applyManagePlan` (run adds/removes, then ONE install). |
+| `commands/reconfigure.ts` | `runReconfigureWizard` — the interactive STEP wizard for `manage`: detect state (`lib/state.ts`) → edit per-setting → preview (`transitions.ts` `planChanges`) → confirm → apply → one install. |
+| `commands/manage.ts` | Single-feature plan helpers used by `add <feature>` / `remove <feature>`: `computeManagePlan` (PURE diff, test-only) + `applyManagePlan` (run the plan, then ONE install). NOT the interactive wizard (that's reconfigure.ts). |
+| `transitions.ts` | `planChanges(current, desired)` → granular `Change[]` each with a consequence preview + `apply`. `configFromState`, `TOGGLE_IDS`. The reconfigure engine. |
+| `lib/state.ts` / `lib/envKeys.ts` / `lib/envFile.ts` | `detectProjectState` (authMode/oauth/email/monitoring/packages from deps + env KEY names) · value-blind env-key reader (`.env.local` then `.env`) · value-safe env-block add/remove + EXTERNAL_ORIGINS edits. |
+| `featureOptions.ts` | Reconfigurable option lists (authMode/oauth/email/monitoring) + provider→env-key/origin/dep maps. Mirrors the scaffolder's PROVIDER_OPTIONS (parity-tested). |
 | `commands/remove.ts` | `removeFeature` — inverse of add by kind: backend = drop dep; presence = drop dep + reverse JSX (mirror of `prunePresence`); login = GUARDED (drop dep, keep files, warn). |
 | `lib/wizard.ts` | `runCheckbox` — ZERO-dep readline-keypress multi-select (↑/↓ · space · enter · ctrl-c). `isInteractive` non-TTY guard. |
 | `commands/addLogin.ts` | Copy auth UI assets into `src/` (skip-if-exists) + add `@luckystack/login` + install. |

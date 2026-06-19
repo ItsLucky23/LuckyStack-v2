@@ -43,3 +43,58 @@ export const monitoringKeys: Readonly<Record<MonitoringProvider, readonly string
   datadog: ['DD_API_KEY'],
   posthog: ['POSTHOG_KEY'],
 };
+
+//? OAuth provider → canonical authorization-endpoint origin (added to
+//? EXTERNAL_ORIGINS so the framework's origin gate passes the callback). Mirrors
+//? the scaffolder's OAUTH_PROVIDER_ORIGINS.
+export const OAUTH_ORIGINS: Readonly<Record<OAuthProvider, string>> = {
+  google: 'https://accounts.google.com',
+  github: 'https://github.com',
+  facebook: 'https://www.facebook.com',
+  discord: 'https://discord.com',
+  microsoft: 'https://login.microsoftonline.com',
+};
+
+//? Empty placeholder lines appended to `.env.local` when a provider is added — the
+//? developer fills the values. DEV_* are read outside production; the unprefixed
+//? pair is read in production. A provider stays disabled until BOTH id + secret
+//? are set, so empty placeholders are inert until filled.
+export const oauthEnvLines = (provider: OAuthProvider): string[] => {
+  const upper = provider.toUpperCase();
+  const lines = [
+    `# ${provider} OAuth — fill BOTH to enable; register http://localhost:80/auth/callback/${provider} in the provider console.`,
+    `DEV_${upper}_CLIENT_ID=`,
+    `DEV_${upper}_CLIENT_SECRET=`,
+    `${upper}_CLIENT_ID=`,
+    `${upper}_CLIENT_SECRET=`,
+  ];
+  if (provider === 'microsoft') lines.push('MICROSOFT_TENANT_ID=common');
+  return lines;
+};
+
+//? Placeholder env lines for an email adapter (resend / smtp). `none` / `console`
+//? have no keys (console is the default sender once @luckystack/email is installed).
+export const emailEnvLines = (provider: EmailProvider): string[] => {
+  if (provider === 'resend') return ['# Resend — set your API key.', 'RESEND_API_KEY=', 'EMAIL_FROM=noreply@example.com'];
+  if (provider === 'smtp') {
+    return ['# SMTP — set host + credentials.', 'SMTP_HOST=', 'SMTP_PORT=587', 'SMTP_SECURE=false', 'SMTP_USER=', 'SMTP_PASS=', 'EMAIL_FROM=noreply@example.com'];
+  }
+  return [];
+};
+
+//? Placeholder env lines for a monitoring backend.
+export const monitoringEnvLines = (provider: MonitoringProvider): string[] => {
+  if (provider === 'sentry') return ['# Sentry — set the DSN (captures in all envs once set; SENTRY_ENABLED=false opts out).', 'SENTRY_DSN=', '# SENTRY_ENABLED=false'];
+  if (provider === 'posthog') return ['# PostHog — set the key.', 'POSTHOG_KEY=', 'POSTHOG_HOST=https://us.i.posthog.com'];
+  if (provider === 'datadog') return ['# Datadog — set the key AND uncomment the dd-trace block atop server/server.ts.', 'DD_API_KEY=', 'DD_SITE=datadoghq.com'];
+  return [];
+};
+
+//? Extra npm deps a monitoring backend needs (beyond @luckystack/error-tracking).
+//? Mirrors the scaffolder's MONITORING_PROVIDERS deps.
+export const monitoringDeps: Readonly<Record<MonitoringProvider, Readonly<Record<string, string>>>> = {
+  none: {},
+  sentry: { '@sentry/node': '^10.48.0' },
+  posthog: { 'posthog-node': '^4.0.0' },
+  datadog: { 'dd-trace': '^5.0.0', 'hot-shots': '^10.0.0' },
+};

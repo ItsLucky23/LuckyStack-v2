@@ -74,7 +74,7 @@ const LOGIN_DOC_EDITS = [
 //? edits one at a time so a paragraph the user hand-edited (token miss = editFile
 //? throws) is skipped + reported rather than aborting the whole removal. Doc
 //? cleanup must never be able to fail a package removal.
-const pruneLoginDocs = (root: string): void => {
+export const pruneLoginDocs = (root: string): void => {
   const readmePath = path.join(root, README);
   if (!fs.existsSync(readmePath)) return;
   let stripped = 0;
@@ -110,9 +110,11 @@ const disablePresenceFlags = (configPath: string): Result<void> => {
   return ok();
 };
 
-//? The consumer-owned auth files `add login` copies into src/. Removal keeps them
-//? (they may be edited) — we only LIST them so the user can delete by hand.
-const LOGIN_COPIED_PATHS = [
+//? The consumer-owned auth files `add login` copies into src/. The SINGLE source of
+//? truth for the auth-UI file set: `remove login` (guarded) LISTS them; the
+//? reconfigure→none path (transitions.ts) DELETES them — both import this so the two
+//? can never drift (ADR 0014 D2).
+export const LOGIN_COPIED_PATHS = [
   'src/login',
   'src/register',
   'src/reset-password',
