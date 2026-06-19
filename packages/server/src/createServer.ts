@@ -6,6 +6,7 @@ import { verifyBootstrap } from './verifyBootstrap';
 import { registerProdRuntimeMapsProvider } from './runtimeMapsLoader';
 import { getParsedPort } from './argv';
 import { runGracefulShutdown } from './stopServer';
+import { writeDevServerInfo, clearDevServerInfo } from './devServerInfo';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -131,6 +132,14 @@ export const listenLuckyStackServer = (
       httpServer.once('error', onError);
       httpServer.listen(attemptPort, ip, () => {
         httpServer.off('error', onError);
+        //? Dev only: advertise the ACTUALLY-bound port so the Vite proxy follows
+        //? us when auto-increment moved the listen off `SERVER_PORT`. Skipped in
+        //? production (no proxy) and under the test runner (avoid stray files +
+        //? exit handlers in unit tests). Best-effort — never blocks the boot.
+        if (!isProduction && process.env.NODE_ENV !== 'test') {
+          writeDevServerInfo(ip, attemptPort);
+          process.once('exit', clearDevServerInfo);
+        }
         const config = getProjectConfig();
         if (config.logging.socketStartup || config.logging.devLogs) {
           getLogger().info(`Server is running on http://${ip}:${String(attemptPort)}/`);

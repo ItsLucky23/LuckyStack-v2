@@ -205,3 +205,20 @@
 **Niet gedaan**: README-regel 76 (`/login` als generiek middleware-voorbeeld) bewust gelaten — leert de middleware-API, adverteert geen geïnstalleerde feature. Versie niet gebumpt/gepubliceerd (0.2.4 staat klaar, user-actie).
 
 **Files**: config.ts, docs/ARCHITECTURE_PACKAGING.md, docs/REFACTOR_ROADMAP.md, src/settings/_api/listSessions_v1.tests.ts, src/settings/_api/revokeSession_v1.tests.ts, packages/create-luckystack-app/src/index.ts, packages/cli/src/commands/remove.ts.
+
+## 2026-06-19 14:00 — Dev port-bump desync fix: backend advertises bound port, Vite proxy follows
+
+**User goal**: de huidige port-bump-logica klopt niet. Backend leest `SERVER_PORT` uit `.env` én auto-incrementeert bij EADDRINUSE — maar de Vite-proxy blijft naar de oude poort wijzen, dus de socket.io-websocket (en api/sync) breken. User koos (AskUserQuestion) optie "auto-pick + proxy volgt".
+
+**Root cause**: `npm run server` (backend) en `npm run client` (Vite) zijn losse processen. De backend kan stilletjes naar `port+1` springen, maar `template/vite.config.ts` leest `SERVER_PORT` één keer bij opstart en target dat hardcoded. Geen van beide weet van de ander.
+
+**Fix (proxy-volgt, geen workflow-wijziging)**:
+- `packages/server/src/devServerInfo.ts` (NEW): `writeDevServerInfo(ip,port)` schrijft de ÉCHT-gebonden poort naar `node_modules/.luckystack/dev-server.json` (altijd gitignored, gedeelde cwd, ephemeral); `clearDevServerInfo()` ruimt op. Best-effort — een mislukte write neemt de server nooit mee.
+- `packages/server/src/createServer.ts`: in de listen-success callback schrijft hij de bound port weg + registreert `process.once('exit', clearDevServerInfo)`. Gated op `!isProduction && NODE_ENV!=='test'` (geen prod-overhead, geen stray files in unit tests).
+- `packages/create-luckystack-app/template/vite.config.ts`: `readBackendPort()` leest dat bestand (fallback `.env SERVER_PORT`). Vite's proxy heeft geen `router`, dus een `bypass`-hook muteert per request `options.target` → live-follow. Cruciaal: socket.io doet ALTIJD eerst een HTTP-polling-handshake (gaat door `bypass`, zet de target op het gedeelde options-object) vóór de ws-upgrade (hergebruikt dat object) → de **websocket volgt mee**, ook bij een mid-session port-hop. Reconnect heelt de cold-start race.
+
+**Verificatie**: build:packages 16/16 · lint:packages 0 · test:unit 1298 (listen-tests skippen de write onder NODE_ENV=test — geen stray file bevestigd). Write↔read-contract end-to-end getest: met bestand → target `:8081`, zonder → fallback `:80`. Template gebruikt Vite 6.4.2 (`bypass` + `ProxyOptions` ondersteund). Root dev-app `vite.config.ts` heeft geen proxy (cross-origin via CORS) → bewust niet aangeraakt.
+
+**Niet gedaan**: niet gebumpt/gepubliceerd (0.2.5-materiaal, wacht op user-go).
+
+**Files**: packages/server/src/devServerInfo.ts (new), packages/server/src/createServer.ts, packages/create-luckystack-app/template/vite.config.ts, packages/server/CLAUDE.md.
