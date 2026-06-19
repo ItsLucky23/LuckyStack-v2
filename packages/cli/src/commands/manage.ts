@@ -7,10 +7,7 @@
 
 import { runNpmInstall, type ConsumerProject, type Result } from '../lib/project';
 import { REGISTRY, findRegistryEntry, type RegistryEntry } from '../registry';
-import { addLogin } from './addLogin';
-import { addPresence, type AddOptions } from './addPresence';
-import { addDocsUi } from './addDocsUi';
-import { addBackendOnly } from './addBackendOnly';
+import { runAddByKind } from './addDispatch';
 import { removeFeature } from './remove';
 
 //? A resolved plan: which registry ids to add and which to remove. Both lists are
@@ -42,27 +39,8 @@ export const computeManagePlan = (installed: readonly string[], selected: readon
 //? the end. Passing `install: false` makes each handler skip its own npm install
 //? (it prints a "--no-install" skip line); the batched install + summary at the
 //? end of `applyManagePlan` is the real install.
-const runAdd = (project: ConsumerProject, entry: RegistryEntry, cliVersion: string): Result<void> => {
-  const options: AddOptions = { install: false, cliVersion };
-  switch (entry.kind) {
-    case 'login': {
-      return addLogin(project, options);
-    }
-    case 'presence': {
-      return addPresence(project, options);
-    }
-    case 'docs-ui': {
-      return addDocsUi(project, options, entry.note ?? '');
-    }
-    case 'backend': {
-      return addBackendOnly(project, entry.pkg, options, entry.note ?? '');
-    }
-    default: {
-      const _exhaustive: never = entry.kind;
-      throw new Error(`Unhandled feature kind: ${JSON.stringify(_exhaustive)}`);
-    }
-  }
-};
+const runAdd = (project: ConsumerProject, entry: RegistryEntry, cliVersion: string): Result<void> =>
+  runAddByKind(project, entry, { install: false, cliVersion });
 
 export interface ApplyManageOptions {
   install: boolean;

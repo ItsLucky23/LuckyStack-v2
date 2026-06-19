@@ -18,6 +18,11 @@ const ENV_FILES = ['.env.local', '.env'] as const;
 //? `#` (enable-later block) means the key is NOT declared, so those are skipped —
 //? a commented `# DEV_GOOGLE_CLIENT_ID=` does not count as "google configured".
 //? `export FOO=` is tolerated. We never look past the `=`.
+//? NOTE: `KEY=` (empty value / placeholder) IS treated as declared — this is
+//? intentional, since an empty placeholder `DEV_GOOGLE_CLIENT_ID=` still signals
+//? "this provider is configured". This differs from `filledKeysInBlock` in
+//? envFile.ts, which requires a NON-EMPTY value to count a key as "filled".
+//? Do not consolidate the two parsers: the divergence is deliberate.
 const ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/;
 
 //? Parse a single env file's text into the set of declared key names. Pure +

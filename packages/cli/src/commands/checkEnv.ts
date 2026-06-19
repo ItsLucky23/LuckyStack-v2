@@ -105,8 +105,13 @@ const parseEnvKeys = (absPath: string): string[] => {
       //? Still inside a quoted value — a line whose TRIMMED form ends with the
       //? matching quote is treated as the close. Using endsWith avoids closing
       //? prematurely on a continuation line that merely contains the quote char
-      //? embedded in the value (e.g. `has a "word" in it`).
-      if (line.trimEnd().endsWith(openQuote)) openQuote = null;
+      //? embedded in the value (e.g. `has a "word" in it`). We also skip lines
+      //? whose last non-whitespace character is a backslash before the quote
+      //? (e.g. `KEY="line with trailing \"`), which is an escaped quote, not a close.
+      //? Heuristic: env files with escaped embedded quotes are extremely rare in
+      //? practice; this covers the common escape-at-EOL case.
+      const trimmed = line.trimEnd();
+      if (trimmed.endsWith(openQuote) && !trimmed.endsWith(`\\${openQuote}`)) openQuote = null;
       continue;
     }
     const trimmed = line.trim();

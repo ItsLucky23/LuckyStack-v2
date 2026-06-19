@@ -13,8 +13,11 @@ import { AUTH_MODES, OAUTH_PROVIDERS, EMAIL_PROVIDERS, MONITORING_PROVIDERS } fr
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
-const ASSET_ROOT = path.resolve(here, '..', 'assets', 'login', 'src');
-const TEMPLATE_ROOT = path.join(repoRoot, 'packages', 'create-luckystack-app', 'template', 'src');
+//? Walk the WHOLE login bundle (src/ UI + functions/session.ts + server/hooks)
+//? against the template ROOT so every shipped auth file is parity-checked, not
+//? just src/.
+const ASSET_ROOT = path.resolve(here, '..', 'assets', 'login');
+const TEMPLATE_ROOT = path.join(repoRoot, 'packages', 'create-luckystack-app', 'template');
 const SERVER_CAPABILITIES = path.join(repoRoot, 'packages', 'server', 'src', 'capabilities.ts');
 const SCAFFOLDER_INDEX = path.join(repoRoot, 'packages', 'create-luckystack-app', 'src', 'index.ts');
 
@@ -32,7 +35,7 @@ const normalize = (text: string): string => text.replaceAll('\r\n', '\n');
 //?     pre-existing cross-package drift, not a lockstep-able single change —
 //?     exempt until the two are deliberately reconciled into one source.
 const ASSET_AHEAD_OF_TEMPLATE = new Set<string>([
-  '_components/LoginForm.tsx',
+  'src/_components/LoginForm.tsx',
 ]);
 
 //? Walk every file under `dir`, returning paths relative to it (posix slashes).
@@ -79,10 +82,12 @@ describe('feature registry ↔ optional packages (audit QUA-021)', () => {
   it('every registry FEATURE (minus sync) is a known server OPTIONAL_PACKAGE', () => {
     //? Derive the feature list from the REAL `REGISTRY` (imported directly) rather
     //? than scraping source — so adding a registry entry without mirroring it into
-    //? OPTIONAL_PACKAGES trips this test. `sync` is intentionally excluded from
-    //? OPTIONAL_PACKAGES (client-bridge only, no server register), so exclude it
-    //? here too — mirrors the comment in server/src/capabilities.ts.
-    const featureKeys = REGISTRY.map((entry) => entry.id).filter((key) => key !== 'sync');
+    //? OPTIONAL_PACKAGES trips this test. Some entries are intentionally NOT in
+    //? server OPTIONAL_PACKAGES (which lists boot-auto-detected `./register`
+    //? packages): `sync` (client bridge), `secret-manager` (config-gated init in
+    //? server.ts), `router` (separate process), `mcp` (dev tool). Exclude those.
+    const NOT_BOOT_AUTODETECTED = new Set(['sync', 'secret-manager', 'router', 'mcp']);
+    const featureKeys = REGISTRY.map((entry) => entry.id).filter((key) => !NOT_BOOT_AUTODETECTED.has(key));
 
     const capsSrc = readFileSync(SERVER_CAPABILITIES, 'utf8');
     const block = /OPTIONAL_PACKAGES\s*=\s*\[([^\]]*)\]/.exec(capsSrc);

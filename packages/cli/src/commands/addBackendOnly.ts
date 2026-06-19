@@ -5,7 +5,7 @@
 //? the dependency line + a restart reminder. (`add` exists for them mainly so the
 //? whole optional surface is reachable through one consistent command.)
 
-import { addDependency, err, ok, resolveLuckyStackRange, runNpmInstall, type ConsumerProject, type Result } from '../lib/project';
+import { addDependency, err, ok, resolveLuckyStackRange, runNpmInstall, toError, type ConsumerProject, type Result } from '../lib/project';
 import type { AddOptions } from './addPresence';
 
 export const addBackendOnly = (
@@ -22,7 +22,7 @@ export const addBackendOnly = (
       console.log(`• ${packageName} already in package.json`);
     }
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
 
   if (options.install) {

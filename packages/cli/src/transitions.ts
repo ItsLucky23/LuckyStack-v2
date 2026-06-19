@@ -13,6 +13,7 @@ import path from 'node:path';
 import {
   addDependency,
   dropDependency,
+  editFile,
   resolveLuckyStackRange,
   ok,
   err,
@@ -21,10 +22,9 @@ import {
 } from './lib/project';
 import { upsertEnvBlock, dropEnvBlock, updateExternalOrigin } from './lib/envFile';
 import { findRegistryEntry } from './registry';
-import { addPresence } from './commands/addPresence';
-import { addDocsUi } from './commands/addDocsUi';
-import { addLogin } from './commands/addLogin';
-import { addBackendOnly } from './commands/addBackendOnly';
+import { runAddByKind } from './commands/addDispatch';
+import { addLogin, AUTH_SERVER_HOOKS, AUTH_NONE_SERVER_PLACEHOLDER } from './commands/addLogin';
+import { copySentryShim, removeSentryShim } from './commands/addErrorTracking';
 import { removeFeature, pruneLoginDocs, LOGIN_COPIED_PATHS } from './commands/remove';
 import type { ProjectState } from './lib/state';
 import {
@@ -42,7 +42,8 @@ import {
   type MonitoringProvider,
 } from './featureOptions';
 
-export const TOGGLE_IDS = ['presence', 'sync', 'docs-ui'] as const;
+//? Pure on/off optional packages (auth/email/monitoring have their own dimensions).
+export const TOGGLE_IDS = ['presence', 'sync', 'docs-ui', 'secret-manager', 'router', 'mcp'] as const;
 export type ToggleId = (typeof TOGGLE_IDS)[number];
 
 //? The full reconfigurable surface. The wizard edits this; `configFromState`
@@ -60,11 +61,7 @@ export const configFromState = (state: ProjectState): DesiredConfig => ({
   oauthProviders: [...state.oauthProviders],
   email: state.email,
   monitoring: state.monitoring,
-  toggles: {
-    presence: state.packages.presence ?? false,
-    sync: state.packages.sync ?? false,
-    'docs-ui': state.packages['docs-ui'] ?? false,
-  },
+  toggles: Object.fromEntries(TOGGLE_IDS.map((id) => [id, state.packages[id] ?? false])) as Record<ToggleId, boolean>,
 });
 
 export interface ApplyContext {
@@ -108,6 +105,18 @@ const wrap =(fn: (ctx: ApplyContext) => void): ((ctx: ApplyContext) => Result<vo
     }
   };
 
+//? Best-effort single edit: applies if the token is present, silently skips
+//? otherwise (the file is already in the target shape or the user customized it).
+const tryEdit = (root: string, rel: string, find: string, replace: string): void => {
+  const file = path.join(root, rel);
+  if (!fs.existsSync(file)) return;
+  try {
+    editFile(file, [{ find, replace }]);
+  } catch {
+    //? token absent — nothing to revert here.
+  }
+};
+
 // --- OAuth provider changes (granular, so the preview shows each X/Y) ----------
 
 const addProviderChange = (provider: OAuthProvider): Change => ({
@@ -149,17 +158,33 @@ const removeLoginChange = (): Change => ({
   summary: 'Auth: → none (remove login)',
   effects: [
     `- ${LOGIN_PKG}`,
-    '- delete src/login, src/register, src/reset-password, src/settings, src/_components/LoginForm.tsx',
+    '- delete the auth UI (login / register / reset-password / settings + LoginForm) + functions/session.ts + server/hooks/notifications.ts',
+    "- config.ts: credentials → false, forgotPassword → 'disabled'",
+    '- unregister the notification hooks in luckystack/server/index.ts',
     '- strip login sections from README.md (best-effort)',
-    '⚠ scaffolded auth server code (functions/session.ts, server/hooks/notifications.ts) is KEPT — delete it by hand if unused',
     '⚠ if a page redirects to /login (e.g. src/page.tsx middleware), update it — the auth routes are gone',
   ],
   apply: wrap((ctx) => {
+    //? Full clean removal (vs the guarded `remove login` which keeps files): delete
+    //? everything `add login` copied — incl. the framework shims — so the project
+    //? stays BUILDABLE once @luckystack/login is gone.
     for (const rel of LOGIN_COPIED_PATHS) {
       const target = path.join(ctx.project.root, rel);
       if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
     }
     dropDependency(ctx.project, LOGIN_PKG);
+    //? Reverse addLogin's config + server-index wiring (best-effort, line-level so it
+    //? matches both a verbose auth-scaffold block and the short add-login block).
+    tryEdit(ctx.project.root, 'config.ts', "forgotPassword: 'framework',", "forgotPassword: 'disabled',");
+    tryEdit(ctx.project.root, 'config.ts', 'credentials: true,', 'credentials: false,');
+    tryEdit(ctx.project.root, 'luckystack/server/index.ts', AUTH_SERVER_HOOKS, AUTH_NONE_SERVER_PLACEHOLDER);
+    //? If the server overlay was hand-edited, the tryEdit above couldn't revert it —
+    //? but we just deleted server/hooks/notifications.ts, so a lingering import would
+    //? break the build. Detect + warn so the user can fix the one line by hand.
+    const serverIndex = path.join(ctx.project.root, 'luckystack', 'server', 'index.ts');
+    if (fs.existsSync(serverIndex) && fs.readFileSync(serverIndex, 'utf8').includes('server/hooks/notifications')) {
+      console.warn('⚠ luckystack/server/index.ts still imports the deleted server/hooks/notifications — remove that import line (the build will fail until you do).');
+    }
     //? Mirror the single-feature `remove login`: strip login-as-installed prose from
     //? README so the manage path leaves the same clean state.
     pruneLoginDocs(ctx.project.root);
@@ -232,13 +257,18 @@ const planMonitoring = (current: DesiredConfig, desired: DesiredConfig): Change[
   const to = desired.monitoring;
   const from = current.monitoring;
 
+  //? `from !== 'none'` is guaranteed here by the early-return guard above
+  //? (`current.monitoring === desired.monitoring` catches 'none' → 'none').
+  //? So `monitoringDeps[from]` always accesses a meaningful key, never 'none'.
   const effects: string[] = [];
   if (to === 'none') {
-    effects.push(`- ${ERROR_TRACKING_PKG}`, ...Object.keys(monitoringDeps[from]).map((d) => `- ${d}`), `- the ${from} placeholder block from .env.local (if CLI-written)`);
+    effects.push(`- ${ERROR_TRACKING_PKG}`, ...Object.keys(monitoringDeps[from]).map((d) => `- ${d}`), '- functions/sentry.ts (the functions.sentry.* shim)', `- the ${from} placeholder block from .env.local (if CLI-written)`);
   } else {
-    //? Backend→backend switch ALSO removes the previous backend (apply does this);
-    //? show it so the preview matches what happens.
-    if (from !== 'none') {
+    //? from 'none' = fresh install (shim copied); backend→backend switch ALSO
+    //? removes the previous backend (apply does this) — show whichever applies.
+    if (from === 'none') {
+      effects.push('+ functions/sentry.ts (the functions.sentry.* shim)');
+    } else {
       effects.push(...Object.keys(monitoringDeps[from]).map((d) => `- ${d}`), `- the ${from} placeholder block from .env.local (if CLI-written)`);
     }
     effects.push(`+ ${ERROR_TRACKING_PKG}${from === 'none' ? '' : ' (already present)'}`, ...Object.keys(monitoringDeps[to]).map((d) => `+ ${d}`), `+ ${to} placeholder keys in .env.local (fill the values)`);
@@ -253,10 +283,14 @@ const planMonitoring = (current: DesiredConfig, desired: DesiredConfig): Change[
         dropDependency(ctx.project, ERROR_TRACKING_PKG);
         for (const dep of Object.keys(monitoringDeps[from])) dropDependency(ctx.project, dep);
         dropEnvBlock(ctx.project.root, `monitoring:${from}`);
+        removeSentryShim(ctx.project.root);
         return;
       }
       addDependency(ctx.project, ERROR_TRACKING_PKG, lsRange(ctx));
       for (const [dep, range] of Object.entries(monitoringDeps[to])) addDependency(ctx.project, dep, range);
+      //? Ensure the functions.sentry.* shim exists (skip-if-present) so handlers
+      //? calling functions.sentry.X resolve — same file the scaffolder ships.
+      copySentryShim(ctx.project.root);
       //? Switching backends: drop the previous one's CLI block + deps.
       if (from !== 'none' && from !== to) {
         dropEnvBlock(ctx.project.root, `monitoring:${from}`);
@@ -267,7 +301,7 @@ const planMonitoring = (current: DesiredConfig, desired: DesiredConfig): Change[
   }];
 };
 
-// --- Toggle features (presence / sync / docs-ui) ------------------------------
+// --- Toggle features (presence / sync / docs-ui / secret-manager / router / mcp) ---
 
 const TOGGLE_EFFECTS: Record<ToggleId, { on: string[]; off: string[] }> = {
   presence: {
@@ -282,6 +316,18 @@ const TOGGLE_EFFECTS: Record<ToggleId, { on: string[]; off: string[] }> = {
     on: ['+ @luckystack/docs-ui + src/docs/page.tsx (the editable API explorer)'],
     off: ['- @luckystack/docs-ui + delete src/docs/page.tsx'],
   },
+  'secret-manager': {
+    on: ['+ @luckystack/secret-manager + uncomment the secretManager block (config.ts) + initSecretManager (server/server.ts)'],
+    off: ['- @luckystack/secret-manager + re-comment both blocks'],
+  },
+  router: {
+    on: ['+ @luckystack/router + the `router` npm script (npm run router)'],
+    off: ['- @luckystack/router + the `router` npm script'],
+  },
+  mcp: {
+    on: ['+ @luckystack/mcp (devDep) + register the graph server in .mcp.json'],
+    off: ['- @luckystack/mcp + remove it from .mcp.json'],
+  },
 };
 
 const planToggles = (current: DesiredConfig, desired: DesiredConfig): Change[] => {
@@ -295,15 +341,10 @@ const planToggles = (current: DesiredConfig, desired: DesiredConfig): Change[] =
     changes.push({
       summary: `${id}: ${now ? 'on → off' : 'off → on'}`,
       effects: want ? TOGGLE_EFFECTS[id].on : TOGGLE_EFFECTS[id].off,
-      apply: (ctx) => {
-        const options = { install: false, cliVersion: ctx.cliVersion };
-        if (want) {
-          if (id === 'presence') return addPresence(ctx.project, options);
-          if (id === 'docs-ui') return addDocsUi(ctx.project, options, entry.note ?? '');
-          return addBackendOnly(ctx.project, entry.pkg, options, entry.note ?? '');
-        }
-        return removeFeature(ctx.project, entry);
-      },
+      apply: (ctx) =>
+        want
+          ? runAddByKind(ctx.project, entry, { install: false, cliVersion: ctx.cliVersion })
+          : removeFeature(ctx.project, entry),
     });
   }
   return changes;

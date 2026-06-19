@@ -276,3 +276,20 @@
 **Bewust gelaten (geen correctheidsbug)**: `manage.ts` ongebruikte add-pad (correcte generaliteit), OAuth lege-placeholder = "geselecteerd" (bedoeld per ADR 0014 D1), monitoring='none' bij et-installed-zonder-key (geen accidentele removal). ADR 0014 + memory voor de Rule-16 key-only uitzondering eerder vastgelegd.
 
 **Files (nieuw)**: packages/cli/src/{transitions.ts, transitions.test.ts, transitions.apply.test.ts, commands/reconfigure.ts, lib/envFile.ts, lib/envFile.test.ts}. **(gewijzigd)**: packages/cli/src/{index.ts, featureOptions.ts, registry-n/a, lib/wizard.ts, lib/state.ts(+test), lib/project.ts, commands/manage.ts, commands/remove.ts, assetParity.test.ts}, packages/cli/CLAUDE.md.
+
+## 2026-06-19 17:00 — CLI completeness: every scaffolder feature is now CLI-manageable + ships fully + removes cleanly
+
+**User goal**: "weet je zeker dat de cli moet werken en heel breed is — alles mogelijk + alles goed geshipped? doe een laatste scan." → coverage scan (3 sonnet agents) found the CLI was NOT complete. User chose "alles dichtzetten (volledig)".
+
+**Verified gaps (against real code) → all fixed**:
+- `add login` was BROKEN: shipped only `src/` (UI+_api), missing `functions/session.ts` (the `functions.session.*` shim the _api handlers need) + `server/hooks/notifications.ts`, and never restored config.ts auth flags / server-index hooks. Now copies the WHOLE bundle + restores `credentials:true`/`forgotPassword:'framework'` + registers the notification hooks (best-effort). Route guards (page.tsx/dashboard) are consumer-owned → explicit post-add warning + LUCKYSTACK_ADD_GUIDE checklist (not auto-edited; substring-overlap made reverse-edits unsafe).
+- `add error-tracking` now ships `functions/sentry.ts` (the `functions.sentry.*` shim); reconfigure monitoring→backend ships it too; remove deletes it.
+- NEW CLI features: `secret-manager` (uncomment config.ts + server/server.ts blocks, byte-identical to wireSecretManager so remove matches a `--secret-manager` scaffold too), `router` (dep + `router` npm script), `mcp`/ai-docs (devDep + `.mcp.json` graph server). All add/remove + reconfigure toggles.
+- remove-symmetry: reconfigure→none deletes the auth bundle (incl. shims) + reverts config/server-index → BUILDABLE; guarded `remove login` warns the build breaks + recommends reconfigure→none + warns on a dangling notifications import.
+- Shared `runAddByKind` dispatch (dedups the 3 add-switches); reconfigure toggles data-driven over TOGGLE_IDS (presence/sync/docs-ui/secret-manager/router/mcp); `setScript`/`dropScript`/`addDevDependency` helpers; assetParity extended to the whole login bundle + excludes non-boot-autodetected ids.
+
+**Verification**: 3-agent sonnet workflow → fixed all blockers/majors (test-toggle types, secret-manager token parity, dangling-import warn, page-guard warning). cli: lint 0 · tsc 0 · vitest 105. E2E with the built CLI: list shows all 9 features; add login/error-tracking/secret-manager/router/mcp each ship+wire fully; remove reverses each.
+
+**Note**: a PARALLEL session was concurrently refactoring core/api/template (toError/tryCatch sweep). Committed ONLY the cli completeness files + LUCKYSTACK_ADD_GUIDE; left the parallel core/api/template changes uncommitted for that session. Re-synced the login asset bundle to the (parallel-updated) template so parity passes.
+
+**Files**: packages/cli/src/{commands/{addLogin,addErrorTracking,addSecretManager,addRouter,addAiDocs,addDispatch,manage,remove,reconfigure}.ts, transitions.ts, registry.ts, index.ts, featureOptions.ts, lib/project.ts, assetParity.test.ts, transitions(.apply).test.ts}, packages/cli/assets/{login/{functions,server},error-tracking/functions}, packages/cli/CLAUDE.md, docs/LUCKYSTACK_ADD_GUIDE.md.

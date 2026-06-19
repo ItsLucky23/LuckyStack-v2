@@ -17,7 +17,7 @@ const cfg = (over: Partial<DesiredConfig> = {}): DesiredConfig => ({
   oauthProviders: [],
   email: 'none',
   monitoring: 'none',
-  toggles: { presence: false, sync: false, 'docs-ui': false },
+  toggles: { presence: false, sync: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false },
   ...over,
 });
 
@@ -93,6 +93,22 @@ describe('Change.apply — email & monitoring deps + env', () => {
   });
 });
 
+describe('Change.apply — upsertEnvBlock skips when key already declared (stale-set idempotency)', () => {
+  it('does not add a placeholder block when the id key is already in declaredKeys', () => {
+    //? Simulate a user who previously hand-filled DEV_GOOGLE_CLIENT_ID in .env.local
+    //? (no sentinel) — the apply must skip re-adding the placeholder and succeed.
+    const handFilledKey = 'DEV_GOOGLE_CLIENT_ID';
+    const handFilledCtx = (): ApplyContext => ({ project, cliVersion: '0.2.5', declaredKeys: new Set([handFilledKey]) });
+    const changes = planChanges(cfg({ authMode: 'credentials' }), cfg({ authMode: 'credentials+oauth', oauthProviders: ['google'] }));
+    const change = changes.find((c) => c.summary.includes('OAuth provider google: add'));
+    expect(change, 'no google:add change').toBeDefined();
+    const result = change?.apply(handFilledCtx());
+    expect(result?.ok).toBe(true);
+    //? .env.local must NOT have been created (the block was skipped).
+    expect(fs.existsSync(path.join(dir, '.env.local'))).toBe(false);
+  });
+});
+
 //? Guard configFromState round-trips a detected state into a DesiredConfig.
 describe('configFromState', () => {
   it('maps a ProjectState into the editable config shape', () => {
@@ -108,7 +124,8 @@ describe('configFromState', () => {
       oauthProviders: ['google'],
       email: 'resend',
       monitoring: 'sentry',
-      toggles: { presence: true, sync: false, 'docs-ui': true },
+      //? toggles cover every TOGGLE_ID; ids absent from packages default to false.
+      toggles: { presence: true, sync: false, 'docs-ui': true, 'secret-manager': false, router: false, mcp: false },
     });
   });
 });

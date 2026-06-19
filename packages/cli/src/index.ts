@@ -14,10 +14,8 @@
 
 import { createRequire } from 'node:module';
 import { parsePackageVersion, validateProject, type ConsumerProject, type Result } from './lib/project';
-import { addPresence, type AddOptions } from './commands/addPresence';
-import { addLogin } from './commands/addLogin';
-import { addDocsUi } from './commands/addDocsUi';
-import { addBackendOnly } from './commands/addBackendOnly';
+import { type AddOptions } from './commands/addPresence';
+import { runAddByKind } from './commands/addDispatch';
 import { checkEnv } from './commands/checkEnv';
 import { checkI18n } from './commands/checkI18n';
 import { listFeatures } from './commands/list';
@@ -73,24 +71,7 @@ const runSingle = (
     //? single-id plan so the install (and "nothing changed" semantics) match.
     return applyManagePlan(project, { add: [], remove: [entry.id] }, options);
   }
-  switch (entry.kind) {
-    case 'login': {
-      return addLogin(project, options);
-    }
-    case 'presence': {
-      return addPresence(project, options);
-    }
-    case 'docs-ui': {
-      return addDocsUi(project, options, entry.note ?? '');
-    }
-    case 'backend': {
-      return addBackendOnly(project, entry.pkg, options, entry.note ?? '');
-    }
-    default: {
-      const _exhaustive: never = entry.kind;
-      throw new Error(`Unhandled feature kind: ${JSON.stringify(_exhaustive)}`);
-    }
-  }
+  return runAddByKind(project, entry, options);
 };
 
 const finish = (result: Result<void>): void => {

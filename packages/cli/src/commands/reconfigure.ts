@@ -8,7 +8,7 @@ import { runNpmInstall, type ConsumerProject, type Result } from '../lib/project
 import { isInteractive, runSingleSelect, runCheckbox, confirmPrompt } from '../lib/wizard';
 import { detectProjectState } from '../lib/state';
 import { readDeclaredEnvKeys } from '../lib/envKeys';
-import { planChanges, configFromState, type DesiredConfig, type ApplyContext, type Change } from '../transitions';
+import { planChanges, configFromState, TOGGLE_IDS, type DesiredConfig, type ToggleId, type ApplyContext, type Change } from '../transitions';
 import { AUTH_MODES, EMAIL_PROVIDERS, MONITORING_PROVIDERS, OAUTH_PROVIDERS } from '../featureOptions';
 
 export interface ReconfigureOptions {
@@ -23,6 +23,16 @@ const authLabel = (c: DesiredConfig): string =>
     : c.authMode;
 
 const toggleLabel = (on: boolean): string => (on ? 'on' : 'off');
+
+//? Display title + one-liner for each toggle row (data-driven over TOGGLE_IDS).
+const TOGGLE_META: Record<ToggleId, { title: string; description: string }> = {
+  presence: { title: 'Presence', description: 'live presence + socket status' },
+  sync: { title: 'Sync', description: 'real-time sync events' },
+  'docs-ui': { title: 'Docs UI', description: 'API explorer at /docs + /_docs' },
+  'secret-manager': { title: 'Secret manager', description: 'off-host secret resolution' },
+  router: { title: 'Router', description: 'multi-instance load-balancer' },
+  mcp: { title: 'AI graph MCP', description: '@luckystack/mcp dependency-graph server' },
+};
 
 //? Open the Auth step: pick the mode, then (for oauth) the providers.
 const editAuth = async (desired: DesiredConfig): Promise<void> => {
@@ -102,13 +112,19 @@ export const runReconfigureWizard = async (
 
   for (;;) {
     const pending = planChanges(current, desired).length;
+    //? Rows: 3 fixed dimension steps (auth/email/monitoring) + one row per TOGGLE_ID,
+    //? then Review + Cancel. Toggle rows are data-driven so a new toggle appears here
+    //? automatically (its index maps to TOGGLE_IDS[index - FIXED_STEPS]).
+    const FIXED_STEPS = 3;
+    const toggleRows = TOGGLE_IDS.map((id) => ({
+      label: `${TOGGLE_META[id].title} — ${toggleLabel(desired.toggles[id])}`,
+      description: TOGGLE_META[id].description,
+    }));
     const rows = [
       { label: `Auth — ${authLabel(desired)}`, description: 'login / register / settings + OAuth providers' },
       { label: `Email — ${desired.email}`, description: 'transactional email adapter' },
       { label: `Monitoring — ${desired.monitoring}`, description: 'error tracking backend' },
-      { label: `Presence — ${toggleLabel(desired.toggles.presence)}`, description: 'live presence + socket status' },
-      { label: `Sync — ${toggleLabel(desired.toggles.sync)}`, description: 'real-time sync events' },
-      { label: `Docs UI — ${toggleLabel(desired.toggles['docs-ui'])}`, description: 'API explorer at /docs + /_docs' },
+      ...toggleRows,
       { label: `Review & apply (${String(pending)} change${pending === 1 ? '' : 's'})`, description: 'preview the consequences, then confirm' },
       { label: 'Cancel', description: 'exit without changing anything' },
     ];
@@ -126,10 +142,14 @@ export const runReconfigureWizard = async (
       case 0: { await editAuth(desired); break; }
       case 1: { desired.email = await editChoice('Transactional email adapter:', EMAIL_PROVIDERS, desired.email); break; }
       case 2: { desired.monitoring = await editChoice('Observability backend:', MONITORING_PROVIDERS, desired.monitoring); break; }
-      case 3: { desired.toggles.presence = !desired.toggles.presence; break; }
-      case 4: { desired.toggles.sync = !desired.toggles.sync; break; }
-      case 5: { desired.toggles['docs-ui'] = !desired.toggles['docs-ui']; break; }
-      default: { break; }
+      default: {
+        //? A toggle row: flip the corresponding TOGGLE_ID. `.at()` always returns
+        //? `ToggleId | undefined`, so the `if (id)` guard is honest under both tsc
+        //? settings (defends against an out-of-range index if rows are reordered).
+        const id = TOGGLE_IDS.at(menu.index - FIXED_STEPS);
+        if (id) desired.toggles[id] = !desired.toggles[id];
+        break;
+      }
     }
   }
 
@@ -146,6 +166,14 @@ export const runReconfigureWizard = async (
     return { ok: true, value: undefined };
   }
 
+  //? declaredKeys is read once before the apply loop. In most cases this is fine:
+  //? upsertEnvBlock re-reads the live file for the sentinel check, which catches the
+  //? common add→add scenario. Edge case: if a user previously hand-filled a key (no
+  //? sentinel), switched away, then switches back in one wizard pass, the snapshot
+  //? may still contain that key and upsertEnvBlock will skip re-adding the placeholder
+  //? template. Net effect: the user must add the placeholder block manually for that
+  //? provider. This is a known limitation — the value-safety contract (never overwrite
+  //? an existing key with a placeholder) takes precedence over re-hydrating the template.
   const ctx: ApplyContext = {
     project,
     cliVersion: options.cliVersion,

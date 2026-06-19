@@ -19,6 +19,7 @@ export interface ConsumerProject {
 export interface PackageJson {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
   [key: string]: unknown;
 }
 
@@ -31,6 +32,12 @@ export type Result<T, E = Error> = { ok: true; value: T } | { ok: false; error: 
 //? which the `no-useless-undefined` lint rule rejects). Defaults `T` to `void`.
 export const ok = <T = void>(value?: T): Result<T, never> => ({ ok: true, value: value as T });
 export const err = <E>(error: E): Result<never, E> => ({ ok: false, error });
+
+//? Normalize a caught `unknown` throw into a real Error. `catch` gives `unknown`;
+//? casting with `as Error` is forbidden (strict-typing policy) — callers must use
+//? this helper instead of `error as Error` so a thrown string or number never
+//? produces `err.error.message = undefined`.
+export const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
 
 //? Shared "not a LuckyStack project" message — kept as one const so the scan and
 //? add paths can't drift.
@@ -131,8 +138,9 @@ export const resolveLuckyStackRange = (pkg: PackageJson, cliVersion: string): st
 //? Detect the indentation used in a JSON file: look for the first property line
 //? (leading whitespace before `"`), return its whitespace prefix. Falls back to
 //? 2-space when the file is one-line or has no detectable indent, so the output
-//? is always valid JSON and matches the common convention.
-const detectJsonIndent = (raw: string): number | string => {
+//? is always valid JSON and matches the common convention. Exported so callers
+//? (e.g. addAiDocs patching .mcp.json) can preserve a file's original indentation.
+export const detectJsonIndent = (raw: string): number | string => {
   for (const line of raw.replaceAll('\r\n', '\n').split('\n').slice(1)) {
     const match = /^(\s+)"/.exec(line);
     if (match) return match[1] ?? 2;
@@ -157,6 +165,20 @@ export const addDependency = (project: ConsumerProject, name: string, range: str
   const raw = fs.readFileSync(project.pkgPath, 'utf8');
   const indent = detectJsonIndent(raw);
   fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, indent)}\n`);
+  return true;
+};
+
+//? Add a DEV dependency (idempotent). Used for dev-only tooling like @luckystack/mcp.
+export const addDevDependency = (project: ConsumerProject, name: string, range: string): boolean => {
+  if (!name) throw new Error('addDevDependency: name must be a non-empty string');
+  project.pkg.devDependencies ??= {};
+  if (project.pkg.devDependencies[name]) return false;
+  project.pkg.devDependencies[name] = range;
+  project.pkg.devDependencies = Object.fromEntries(
+    Object.entries(project.pkg.devDependencies).toSorted(([a], [b]) => a.localeCompare(b)),
+  );
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, detectJsonIndent(raw))}\n`);
   return true;
 };
 
@@ -199,6 +221,28 @@ export const hasDependency = (pkg: PackageJson, name: string): boolean =>
 export const dependencyRange = (pkg: PackageJson, name: string): string | null => {
   const range = pkg.dependencies?.[name] ?? pkg.devDependencies?.[name];
   return typeof range === 'string' && range.length > 0 ? range : null;
+};
+
+//? Add/overwrite a `scripts.<name>` entry in package.json (idempotent: returns
+//? false when already set to the same command). Preserves indentation.
+export const setScript = (project: ConsumerProject, name: string, command: string): boolean => {
+  if (!name) throw new Error('setScript: name must be a non-empty string');
+  project.pkg.scripts ??= {};
+  if (project.pkg.scripts[name] === command) return false;
+  project.pkg.scripts[name] = command;
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, detectJsonIndent(raw))}\n`);
+  return true;
+};
+
+//? Drop a `scripts.<name>` entry if present (inverse of setScript).
+export const dropScript = (project: ConsumerProject, name: string): boolean => {
+  if (!name || !project.pkg.scripts || !(name in project.pkg.scripts)) return false;
+  const { [name]: _removed, ...rest } = project.pkg.scripts;
+  project.pkg.scripts = rest;
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, detectJsonIndent(raw))}\n`);
+  return true;
 };
 
 export interface FileEdit {

@@ -14,10 +14,16 @@ import {
   editFile,
   err,
   ok,
+  toError,
   type ConsumerProject,
   type Result,
 } from '../lib/project';
 import { collectSourceFiles, matchAll } from '../lib/scan';
+import { removeSentryShim } from './addErrorTracking';
+import { removeSecretManager } from './addSecretManager';
+import { monitoringDeps } from '../featureOptions';
+import { removeRouter } from './addRouter';
+import { removeAiDocs } from './addAiDocs';
 import type { RegistryEntry } from '../registry';
 
 //? After a removal, the package is gone from package.json but the consumer's OWN
@@ -105,7 +111,7 @@ const disablePresenceFlags = (configPath: string): Result<void> => {
       { find: 'locationProviderEnabled: true,', replace: 'locationProviderEnabled: false,' },
     ]);
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
   return ok();
 };
@@ -120,6 +126,10 @@ export const LOGIN_COPIED_PATHS = [
   'src/reset-password',
   'src/settings',
   'src/_components/LoginForm.tsx',
+  //? Framework shims `add login` also copies — they import @luckystack/login, so a
+  //? reconfigure→none MUST delete them (else the build breaks once the dep is gone).
+  'functions/session.ts',
+  'server/hooks/notifications.ts',
 ] as const;
 
 //? Reverse the presence client mounts (mirror of create-luckystack-app's
@@ -157,7 +167,7 @@ const reversePresenceEdits = (mainPath: string, templateProviderPath: string): R
       },
     ]);
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
   return ok();
 };
@@ -173,7 +183,7 @@ const removeBackend = (project: ConsumerProject, entry: RegistryEntry): Result<v
       console.log(`• ${entry.pkg} was not in package.json — nothing to remove`);
     }
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
   return ok();
 };
@@ -233,7 +243,7 @@ const removePresence = (project: ConsumerProject, entry: RegistryEntry): Result<
       console.log(`• removed ${entry.pkg} from package.json`);
     }
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
   return ok();
 };
@@ -259,7 +269,7 @@ const removeDocsUi = (project: ConsumerProject, entry: RegistryEntry): Result<vo
       console.log(`• ${entry.pkg} was not in package.json`);
     }
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
   return ok();
 };
@@ -277,18 +287,43 @@ const removeLogin = (project: ConsumerProject, entry: RegistryEntry): Result<voi
       console.log(`• ${entry.pkg} was not in package.json`);
     }
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
 
   //? Scrub login-as-installed prose from the README (best-effort, never aborts).
   pruneLoginDocs(project.root);
 
-  console.warn('\n⚠ login removed from package.json, but the auth UI copied into src/ was KEPT');
-  console.warn('  (you may have edited it). Delete these by hand if you no longer want them:');
+  console.warn('\n⚠ login removed from package.json, but the auth files copied into the project were KEPT');
+  console.warn('  (you may have edited them). NOTE: functions/session.ts + server/hooks/notifications.ts');
+  console.warn('  import @luckystack/login — the project will NOT build until you delete them (or re-add login).');
+  console.warn('  For a clean, buildable removal instead, run `npx luckystack manage` → Auth → none.');
+  console.warn('  Files kept (delete by hand if you no longer want them):');
   for (const rel of LOGIN_COPIED_PATHS) {
     if (fs.existsSync(path.join(project.root, rel))) {
       console.warn(`    ${rel}`);
     }
+  }
+  return ok();
+};
+
+//? Remove error-tracking: drop the dep + any monitoring-backend SDK packages that
+//? `manage` → Monitoring may have installed (e.g. @sentry/node, posthog-node,
+//? dd-trace, hot-shots) + delete the functions/sentry.ts shim. The `manage` →
+//? Monitoring: none path covers these too, but the single-feature `remove
+//? error-tracking` path must also clean them up to avoid orphaned SDK packages.
+const removeErrorTracking = (project: ConsumerProject, entry: RegistryEntry): Result<void> => {
+  try {
+    if (dropDependency(project, entry.pkg)) console.log(`• removed ${entry.pkg} from package.json`);
+    else console.log(`• ${entry.pkg} was not in package.json`);
+    //? Drop any monitoring-backend SDK packages installed via `manage` → Monitoring.
+    for (const providerDeps of Object.values(monitoringDeps)) {
+      for (const dep of Object.keys(providerDeps)) {
+        if (dropDependency(project, dep)) console.log(`• removed orphaned monitoring SDK ${dep} from package.json`);
+      }
+    }
+    if (removeSentryShim(project.root)) console.log('• removed functions/sentry.ts (the functions.sentry.* shim)');
+  } catch (error) {
+    return err(toError(error));
   }
   return ok();
 };
@@ -309,6 +344,18 @@ export const removeFeature = (project: ConsumerProject, entry: RegistryEntry): R
       }
       case 'docs-ui': {
         return removeDocsUi(project, entry);
+      }
+      case 'error-tracking': {
+        return removeErrorTracking(project, entry);
+      }
+      case 'secret-manager': {
+        return removeSecretManager(project);
+      }
+      case 'router': {
+        return removeRouter(project);
+      }
+      case 'ai-docs': {
+        return removeAiDocs(project);
       }
       case 'backend': {
         return removeBackend(project, entry);

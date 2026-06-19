@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { addDependency, editFile, err, ok, resolveLuckyStackRange, runNpmInstall, type ConsumerProject, type Result } from '../lib/project';
+import { addDependency, editFile, err, ok, resolveLuckyStackRange, runNpmInstall, toError, type ConsumerProject, type Result } from '../lib/project';
 
 export interface AddOptions {
   install: boolean;
@@ -32,7 +32,7 @@ const enablePresenceFlags = (configPath: string): Result<void> => {
       { find: 'locationProviderEnabled: false,', replace: 'locationProviderEnabled: true,' },
     ]);
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
   return ok();
 };
@@ -55,15 +55,12 @@ const applyPresenceEdits = (mainPath: string, templateProviderPath: string): Res
       { find: 'element: <Outlet />,', replace: 'element: <LocationProvider />,' },
     ]);
 
-    //? TemplateProvider.tsx — reverse the pruner's edits, ordered so anchors
-    //? exist when each insert runs.
+    //? TemplateProvider.tsx — reverse the pruner's edits. The two import-line changes
+    //? are combined into a single find/replace so no intermediate state is needed as
+    //? an anchor (which would be fragile if the file is reformatted between edits).
     editFile(templateProviderPath, [
       {
         find: "import { useTheme, useSession } from '@luckystack/core/client';",
-        replace: "import { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
-      },
-      {
-        find: "import { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
         replace: "import { SocketStatusIndicator } from '@luckystack/presence/client';\nimport { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
       },
       {
@@ -90,7 +87,7 @@ const applyPresenceEdits = (mainPath: string, templateProviderPath: string): Res
       },
     ]);
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
   return ok();
 };
@@ -129,7 +126,7 @@ export const addPresence = (project: ConsumerProject, options: AddOptions): Resu
   try {
     depAdded = addDependency(project, '@luckystack/presence', range);
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
   if (depAdded) console.log(`• added @luckystack/presence@${range} to package.json`);
 

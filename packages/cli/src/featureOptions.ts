@@ -68,6 +68,13 @@ export const oauthEnvLines = (provider: OAuthProvider): string[] => {
     `${upper}_CLIENT_ID=`,
     `${upper}_CLIENT_SECRET=`,
   ];
+  //? MICROSOFT_TENANT_ID: 'common' allows any Microsoft account; replace with a
+  //? specific tenant UUID to restrict to one organization. This is a REAL default
+  //? (not a placeholder) — it makes microsoft OAuth work for multi-tenant apps
+  //? without requiring the developer to fill in a value. Side-effect: filledKeysInBlock
+  //? in envFile.ts treats this as a "filled" key, so dropEnvBlock will refuse to
+  //? auto-remove the block if the developer never changed it. Warn them to clear it
+  //? manually if they want to remove microsoft OAuth via `manage`.
   if (provider === 'microsoft') lines.push('MICROSOFT_TENANT_ID=common');
   return lines;
 };

@@ -6,11 +6,23 @@
 
 //? How a package is wired into the consumer project, which selects the add/remove
 //? handler:
-//?   - 'login'    : copies consumer-owned auth UI into src/ (guarded removal).
-//?   - 'presence' : injects/reverses client JSX mounts in main.tsx + TemplateProvider.
-//?   - 'docs-ui'  : dependency + copies the React API-explorer page into src/docs/ (removal deletes it).
-//?   - 'backend'  : dependency-only; self-wires at boot (or via the sync client bridge).
-export type FeatureKind = 'login' | 'presence' | 'docs-ui' | 'backend';
+//?   - 'login'         : copies the auth UI + functions/session.ts + server/hooks into the project + re-enables auth in config.ts/server.
+//?   - 'presence'      : injects/reverses client JSX mounts in main.tsx + TemplateProvider.
+//?   - 'docs-ui'       : dependency + copies the React API-explorer page into src/docs/ (removal deletes it).
+//?   - 'error-tracking': dependency + copies functions/sentry.ts shim (removal deletes it).
+//?   - 'secret-manager': dependency + uncomments the config.ts + server/server.ts blocks (removal re-comments).
+//?   - 'router'        : dependency + adds the `router` npm script (removal drops both).
+//?   - 'ai-docs'       : @luckystack/mcp devDep + registers the graph server in .mcp.json.
+//?   - 'backend'       : dependency-only; self-wires at boot (or via the sync client bridge).
+export type FeatureKind =
+  | 'login'
+  | 'presence'
+  | 'docs-ui'
+  | 'error-tracking'
+  | 'secret-manager'
+  | 'router'
+  | 'ai-docs'
+  | 'backend';
 
 //? Removal safety:
 //?   - 'safe'    : removal fully reverses the add (drop dep + reverse JSX). No
@@ -72,10 +84,10 @@ export const REGISTRY: readonly RegistryEntry[] = [
   {
     id: 'error-tracking',
     pkg: '@luckystack/error-tracking',
-    kind: 'backend',
-    description: 'Sentry / PostHog error tracking',
+    kind: 'error-tracking',
+    description: 'Sentry / PostHog error tracking (+ the functions.sentry.* shim)',
     removable: 'safe',
-    note: 'Set SENTRY_DSN (or POSTHOG_KEY) to start capturing.',
+    note: 'Set SENTRY_DSN (or POSTHOG_KEY) to capture, or `luckystack manage` → Monitoring.',
   },
   {
     id: 'docs-ui',
@@ -84,6 +96,30 @@ export const REGISTRY: readonly RegistryEntry[] = [
     description: 'Dev API docs: server page at /_docs + an editable React explorer at src/docs/page.tsx',
     removable: 'safe',
     note: 'Restart the server. Server docs mount at /_docs; the editable explorer is at /docs (dev-only). Run `npm run generateArtifacts` if src/docs/apiDocs.generated.json is missing.',
+  },
+  {
+    id: 'secret-manager',
+    pkg: '@luckystack/secret-manager',
+    kind: 'secret-manager',
+    description: 'Off-host secret resolution (`.env` pointers `NAME=BASE_V<n>`)',
+    removable: 'safe',
+    note: 'Set LUCKYSTACK_SECRET_MANAGER_URL (+ .secret-manager-token); dormant until the URL is set.',
+  },
+  {
+    id: 'router',
+    pkg: '@luckystack/router',
+    kind: 'router',
+    description: 'Multi-instance load-balancer (separate process: `npm run router`)',
+    removable: 'safe',
+    note: 'Start with `npm run router`; topology lives in deploy.config.ts.',
+  },
+  {
+    id: 'mcp',
+    pkg: '@luckystack/mcp',
+    kind: 'ai-docs',
+    description: 'AI dependency-graph MCP server (registered in .mcp.json)',
+    removable: 'safe',
+    note: 'AI agents can query the project graph; the doc tree is not re-copied (re-scaffold for that).',
   },
 ] as const;
 

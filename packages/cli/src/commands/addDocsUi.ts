@@ -14,6 +14,7 @@ import {
   ok,
   resolveLuckyStackRange,
   runNpmInstall,
+  toError,
   type ConsumerProject,
   type Result,
 } from '../lib/project';
@@ -25,7 +26,7 @@ export const addDocsUi = (project: ConsumerProject, options: AddOptions, note: s
   try {
     written = copyDirIfAbsent(assetPath('docs-ui', 'src'), path.join(project.root, 'src'));
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
   if (written.length > 0) {
     console.log(`• copied the API explorer into src/ (${written.map((file) => path.relative(project.root, file)).join(', ')})`);
@@ -41,7 +42,7 @@ export const addDocsUi = (project: ConsumerProject, options: AddOptions, note: s
       console.log('• @luckystack/docs-ui already in package.json');
     }
   } catch (error) {
-    return err(error as Error);
+    return err(toError(error));
   }
 
   if (options.install) {
