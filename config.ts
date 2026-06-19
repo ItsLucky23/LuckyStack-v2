@@ -9,7 +9,7 @@ interface AppEnvironmentConfig {
   backendUrl: string;
   dev: boolean;
   sessionBasedToken?: boolean;
-  allowMultipleSessions?: boolean;
+  sessionPerUser?: 'single' | 'multiple';
 }
 
 const normalizeDns = (dns: string): string => dns.replace(/\/+$/, "");
@@ -29,7 +29,7 @@ const fallbackEnvironment: AppEnvironmentConfig = {
   backendUrl: "http://localhost:80",
   dev: true,
   sessionBasedToken: false,
-  allowMultipleSessions: true,
+  sessionPerUser: 'multiple',
 };
 
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
@@ -38,19 +38,19 @@ const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
     backendUrl: "http://localhost:80",
     dev: true,
     sessionBasedToken: false,
-    allowMultipleSessions: true
+    sessionPerUser: 'multiple'
   },
   "https://staging.server.com": {
     backendUrl: "https://staging.server.com",
     dev: false,
     sessionBasedToken: false,
-    allowMultipleSessions: false
+    sessionPerUser: 'single'
   },
   "https://app.server.com": {
     backendUrl: "https://app.server.com",
     dev: false,
     sessionBasedToken: false,
-    allowMultipleSessions: false
+    sessionPerUser: 'single'
   },
 };
 
@@ -129,10 +129,10 @@ const config = {
   loginRedirectUrl: '/playground',
  
   /**
-   * If false, logging in on a new device will automatically sign out all other sessions for the user.
-   * Useful for security-sensitive apps. Set to true to allow multiple simultaneous sessions.
+   * 'single': logging in on a new device automatically signs out all other sessions for the user
+   * (useful for security-sensitive apps). 'multiple': allow multiple simultaneous sessions.
    */
-  allowMultipleSessions: resolvedEnvironment.allowMultipleSessions ?? false,
+  sessionPerUser: resolvedEnvironment.sessionPerUser ?? 'single',
  
   /** 
     * Controls where auth tokens are read/written.
@@ -360,7 +360,7 @@ registerProjectConfig({
   session: {
     basedToken: config.sessionBasedToken,
     expiryDays: config.sessionExpiryDays,
-    perUser: config.allowMultipleSessions ? 'multiple' : 'single',
+    perUser: config.sessionPerUser,
   },
   http: {
     cors: {
@@ -401,7 +401,7 @@ export const {
   loginRedirectUrl,
   defaultLanguage,
   mobileConsole,
-  allowMultipleSessions,
+  sessionPerUser,
   sessionBasedToken,
   sessionExpiryDays,
   socketActivityBroadcaster,

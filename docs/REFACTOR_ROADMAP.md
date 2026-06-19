@@ -224,7 +224,7 @@ Targeted re-verification of 14 HIGH/CRITICAL items + 5 DEFERRED-DECISION items a
 
 ### login
 - **run4-5..8, run1, F19/F20/F25/F36/F39, run3-06, LOGIN-04(run1)/05(run1)** OPEN/NEW — legacy `sessionKeyFor`/`activeUsersKeyFor` drive raw-Redis routes; reset/email tokens UN-hashed; `signOutEverywhere` revokes own session; `confirmEmailChange` non-atomic + provider-scoped; `deleteAccount` raw `redis.del` before adapter delete; bcrypt 72-byte truncation not enforced; raw email to `loginFailed`; duplicated `consume*` blocks; no OIDC nonce/code-binding; MS `getAvatar` unbounded base64 into session; `consume*` don't assert DEL leg; `forgotPassword` logs raw email+`found`. Per-route + a shared `oneTimeToken` core primitive.
-- **login god-files** OPEN 6/6·3/3 — `login.ts` (~1077, GREW), `saveSession`/`loginCallback`, duplicated `allowMultiple` BC shim. Continue extraction.
+- **login god-files** OPEN 6/6·3/3 — `login.ts` (~1077, GREW), `saveSession`/`loginCallback`. Continue extraction. (The duplicated `allowMultiple` BC shim is gone — `session.perUser` is now the sole key.)
 
 ### error-tracking
 - **ET-O7..O13, N3/N4/N5** OPEN/NEW — bare `catch {}` on setUser/recordMetric/flush; `beforeSend` no-`forwarded` silent drop; `startSpanHandle` per-call event (zero prod callers); `SpanResult<T>=T` no-op; shared-DI casts; Sentry/Datadog no `flush()`; CLAUDE.md `postLogin` claim (only `postLogout`); Datadog span-before-counter; mixed-mode double-capture. Per-item.

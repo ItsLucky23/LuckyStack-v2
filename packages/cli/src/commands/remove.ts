@@ -43,6 +43,54 @@ const warnRemainingReferences = (root: string, pkg: string): void => {
 const MAIN_TSX = 'src/main.tsx';
 const TEMPLATE_PROVIDER = 'src/_components/templates/TemplateProvider.tsx';
 const CONFIG_TS = 'config.ts';
+const README = 'README.md';
+
+//? README paragraphs that describe login as an INSTALLED feature. Mirror of
+//? create-luckystack-app's LOGIN_DOC_EDITS so removing login here strips the same
+//? prose the scaffold would never have emitted for an auth:'none' project. The
+//? auth-pages paragraph is replaced with a neutral "add it later" pointer (the
+//? @luckystack/login package still exists as an option); the rest are deleted.
+const LOGIN_DOC_EDITS = [
+  {
+    find: "If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, `reset-password/page.tsx`, and an account-management `settings/page.tsx`. Scaffolded with `auth: 'none'`? Add them later with `npx luckystack add login`.",
+    replace: "Want auth (login / register / account pages)? This project has none yet — add it anytime with `npx luckystack add login`.",
+  },
+  {
+    find: "Selecting an **auth** mode also adds the auth-related API handlers — e.g. `logout_v1`, the `reset-password/_api/*` reset flow, and the `settings/_api/*` session / password / profile / account handlers. These ship alongside the auth pages above (and arrive together via `npx luckystack add login`).\n\n",
+    replace: '',
+  },
+  {
+    find: "If you selected an **auth** mode, `LoginForm.tsx` (the credentials + OAuth form used by `/login` and `/register`) is here too.\n\n",
+    replace: '',
+  },
+  {
+    find: "With an **auth** mode selected, OAuth providers auto-wire from env at boot (set the vars in `.env.local`; no file needed), the user adapter self-wires via `defaultPrismaUserAdapter` (override with `registerUserAdapter()` in `luckystack/server/index.ts`), and `server/hooks/notifications.ts` wires the transactional new-sign-in / password-change emails.\n\n",
+    replace: '',
+  },
+];
+
+//? Best-effort: strip each login section from the consumer's README, applying the
+//? edits one at a time so a paragraph the user hand-edited (token miss = editFile
+//? throws) is skipped + reported rather than aborting the whole removal. Doc
+//? cleanup must never be able to fail a package removal.
+const pruneLoginDocs = (root: string): void => {
+  const readmePath = path.join(root, README);
+  if (!fs.existsSync(readmePath)) return;
+  let stripped = 0;
+  let missed = 0;
+  for (const edit of LOGIN_DOC_EDITS) {
+    try {
+      editFile(readmePath, [edit]);
+      stripped += 1;
+    } catch {
+      missed += 1;
+    }
+  }
+  if (stripped > 0) console.log(`• removed ${String(stripped)} login section(s) from README.md`);
+  if (missed > 0) {
+    console.warn(`⚠ ${String(missed)} README login section(s) looked hand-edited — left untouched; review README.md for stale login docs.`);
+  }
+};
 
 //? Inverse of addPresence's `enablePresenceFlags`: flip the three presence gating
 //? flags back to `false` so a removed presence leaves no live broadcaster/indicator
@@ -202,6 +250,9 @@ const removeLogin = (project: ConsumerProject, entry: RegistryEntry): Result<voi
   } catch (error) {
     return err(error as Error);
   }
+
+  //? Scrub login-as-installed prose from the README (best-effort, never aborts).
+  pruneLoginDocs(project.root);
 
   console.warn('\n⚠ login removed from package.json, but the auth UI copied into src/ was KEPT');
   console.warn('  (you may have edited it). Delete these by hand if you no longer want them:');

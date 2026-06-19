@@ -187,3 +187,21 @@
 **Niet gedaan**: versie niet gebumpt, niet gepubliceerd, niet gecommit (per opdracht — de andere AI doet publish). `allowOriginless` verwijderen = toekomstige major. `PACKAGE_OVERVIEW.md`/andere docs onaangetast.
 
 **Files**: packages/server/src/loadSocket.ts, packages/core/src/projectConfig.ts, packages/create-luckystack-app/template/config.ts, docs/decisions/0013-admit-originless-socketio-handshake.md.
+
+## 2026-06-19 10:30 — Verificatie confusion-fixes (ultracode) + login-doc pruning + allowMultiple volledig weg
+
+**User goal**: de 8 confusion-audit fixes adversarieel verifiëren met sonnet-agents, én borgen dat bij niet-installeren/CLI-verwijderen van login ALLE login-doc-content uit de docs verdwijnt (ook losse regels in een .md), behalve een neutrale "de package bestaat"-verwijzing.
+
+**Verificatie (9-agent Workflow, sonnet)**: 7/8 items volledig bevestigd zonder gaps (raw-keys, README-refs, auth-none-oauth, error-tracking-dev, presence-install, secret-manager, socket-originless). 1 partial + 1 nieuwe eis bleken reëel:
+- **allowMultiple (partial)**: packages/ schoon, maar restanten in dev-root `config.ts` (knob + bridge), 2 test-comments, `docs/ARCHITECTURE_PACKAGING.md`, `docs/REFACTOR_ROADMAP.md`.
+- **Login-docs lekken (leaks-login-docs)**: geen enkele pruner raakt `.md` aan; `template/README.md` regels 35/43/57/91 beschrijven login als geïnstalleerd en overleven een no-login scaffold.
+
+**Wat ik deed**:
+- *allowMultiple volledig weg*: dev-root `config.ts` `allowMultipleSessions:boolean` → `sessionPerUser:'single'|'multiple'` (interface, fallback, 4 dns-map entries, config-veld, `perUser`-derivatie, named export). 2 test-comments → `sessionPerUser: 'multiple'`. `ARCHITECTURE_PACKAGING.md` config-key lijst → `session.perUser`. `REFACTOR_ROADMAP.md` shim-item gemarkeerd als opgelost. Repo-breed nu 0 live refs (alleen branch-log history blijft).
+- *Login-doc pruning*: nieuwe `pruneLoginDocs` + `LOGIN_DOC_EDITS` in create-luckystack-app `index.ts`, aangeroepen in `pruneAuthNone` — strips de 3 login-beschrijvende paragrafen en vervangt de auth-pages paragraaf door één neutrale `npx luckystack add login`-pointer. Spiegel in `@luckystack/cli` `commands/remove.ts` (`pruneLoginDocs`, best-effort per-edit zodat een hand-edited README de removal niet breekt) aangeroepen in `removeLogin`.
+
+**Verificatie**: `build:packages` 16/16 · `lint:packages` 0 · `lint` (client+server+config.ts) 0 · `test:unit` 1298/1298. Scaffold-smoketest: `--auth=none` → 0 login-paragrafen + 1 neutrale pointer; `--auth=credentials` → alle 4 behouden.
+
+**Niet gedaan**: README-regel 76 (`/login` als generiek middleware-voorbeeld) bewust gelaten — leert de middleware-API, adverteert geen geïnstalleerde feature. Versie niet gebumpt/gepubliceerd (0.2.4 staat klaar, user-actie).
+
+**Files**: config.ts, docs/ARCHITECTURE_PACKAGING.md, docs/REFACTOR_ROADMAP.md, src/settings/_api/listSessions_v1.tests.ts, src/settings/_api/revokeSession_v1.tests.ts, packages/create-luckystack-app/src/index.ts, packages/cli/src/commands/remove.ts.

@@ -1556,6 +1556,41 @@ const prunePresence = (targetDir: string): void => {
   ]);
 };
 
+//? The four README paragraphs that describe login as an INSTALLED feature of the
+//? project. Each is removed (the OAuth/handlers/LoginForm ones) or replaced with a
+//? neutral "add it later" pointer (the auth-pages one) when login is absent. Kept
+//? as a shared constant so the prune is identical whether triggered at scaffold
+//? time (authMode 'none') or — mirrored in @luckystack/cli — on `luckystack remove login`.
+const LOGIN_DOC_EDITS: [string, string][] = [
+  //? Pages section: keep ONE neutral discovery pointer (the package still exists).
+  [
+    "If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, `reset-password/page.tsx`, and an account-management `settings/page.tsx`. Scaffolded with `auth: 'none'`? Add them later with `npx luckystack add login`.",
+    "Want auth (login / register / account pages)? This project has none yet — add it anytime with `npx luckystack add login`.",
+  ],
+  //? API-routes section: remove the auth-handlers paragraph entirely (+ trailing blank).
+  [
+    "Selecting an **auth** mode also adds the auth-related API handlers — e.g. `logout_v1`, the `reset-password/_api/*` reset flow, and the `settings/_api/*` session / password / profile / account handlers. These ship alongside the auth pages above (and arrive together via `npx luckystack add login`).\n\n",
+    '',
+  ],
+  //? Components section: remove the LoginForm paragraph entirely (+ trailing blank).
+  [
+    "If you selected an **auth** mode, `LoginForm.tsx` (the credentials + OAuth form used by `/login` and `/register`) is here too.\n\n",
+    '',
+  ],
+  //? Configure section: remove the OAuth/adapter/notifications paragraph (+ trailing blank).
+  [
+    "With an **auth** mode selected, OAuth providers auto-wire from env at boot (set the vars in `.env.local`; no file needed), the user adapter self-wires via `defaultPrismaUserAdapter` (override with `registerUserAdapter()` in `luckystack/server/index.ts`), and `server/hooks/notifications.ts` wires the transactional new-sign-in / password-change emails.\n\n",
+    '',
+  ],
+];
+
+//? Strip login-as-installed prose from the scaffolded README (see LOGIN_DOC_EDITS).
+//? editScaffoldFile throws on a token miss — desirable here: the template README is
+//? controlled, so a miss means the doc drifted from this list and must be re-synced.
+const pruneLoginDocs = (targetDir: string): void => {
+  editScaffoldFile(targetDir, 'README.md', LOGIN_DOC_EDITS);
+};
+
 //? Remove all built-in auth UI/flows for the authMode:'none' scaffold.
 const pruneAuthNone = (targetDir: string): void => {
   //? The framework's (anonymous) session plumbing stays — `session_v1` returns a
@@ -1581,6 +1616,13 @@ const pruneAuthNone = (targetDir: string): void => {
   ]) {
     removeScaffoldPath(targetDir, target);
   }
+
+  //? Strip every README paragraph that describes login as an INSTALLED feature of
+  //? this project (auth pages, auth API handlers, LoginForm, OAuth auto-wiring).
+  //? A `auth: 'none'` scaffold has none of these — leaving the prose would be a
+  //? doc lie. The ONLY surviving mention is a neutral "add it later" pointer (the
+  //? @luckystack/login package still EXISTS as an option; that reference stays).
+  pruneLoginDocs(targetDir);
 
   //? Server overlay registered the notification hooks + an example postLogin
   //? logger. Both reference login-only hook payloads; strip them so the
