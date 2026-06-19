@@ -16,7 +16,7 @@ Optional, pluggable error-tracking integration for LuckyStack. Ships a backend-a
 ## When to NOT suggest this (yet)
 
 - Pure local dev / scratch projects with no production deploy — every export is a no-op without `SENTRY_DSN` or another tracker registration, so installing the package buys nothing.
-- Audit-trail / "what happened?" use cases — that belongs in the future `@luckystack/monitoring` package (separate repo, see `docs/MONITORING.md`). Error-tracking covers the "why did it break?" half only.
+- Audit-trail / "what happened?" use cases — that belongs in the future `@luckystack/monitoring` package (separate repo, see `docs/ROADMAP.md`). Error-tracking covers the "why did it break?" half only.
 - Frontend-only error capture — this package targets the server runtime. Client-side Sentry should be configured directly in the React entry, not through `initializeSentry()`.
 - Custom transports that re-implement framework error capture — use the adapter pattern instead of forking; that is what the `ErrorTracker` contract exists for.
 
@@ -73,4 +73,4 @@ Optional, pluggable error-tracking integration for LuckyStack. Ships a backend-a
 - Span helpers + `SpanResult<T>` alias: `./docs/span-helpers.md`.
 - Auto-instrumentation via framework hooks: `./docs/auto-instrumentation.md`.
 - README (consumer quickstart): `./README.md`.
-- Future strategy spec for the `@luckystack/monitoring` companion package: `/docs/MONITORING.md`.
+- The future `@luckystack/monitoring` companion package (audit trail + metrics) is tracked in `/docs/ROADMAP.md` (separate repo).

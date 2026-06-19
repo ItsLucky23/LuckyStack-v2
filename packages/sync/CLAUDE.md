@@ -117,6 +117,6 @@ None directly. Inherits socket transport config from `@luckystack/server` and Re
 - Socket setup + Redis adapter: `/docs/ARCHITECTURE_SOCKET.md`
 - Multi-instance model + pitfalls (regular `syncRequest` fan-out reaches across instances via `io.in(room).fetchSockets()` + `RemoteSocket.emit()`; streaming via `broadcastStream`/`streamTo`): `/docs/ARCHITECTURE_MULTI_INSTANCE.md`
 - File-based `_sync/` routing: `/docs/ARCHITECTURE_ROUTING.md`
-- Streaming page reconstruction: `/docs/STREAMING_RECONSTRUCTION.md`
+- Streaming primitives (`stream` / `streamTo` / `broadcastStream` / `_client`) + throttle: `/docs/ARCHITECTURE_SYNC.md#streaming`
 - README (consumer quickstart): `./README.md`
 - Sibling packages: `@luckystack/api`, `@luckystack/presence`, `@luckystack/server`

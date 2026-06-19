@@ -94,11 +94,9 @@ You can change the ports in the `.env` file.
 | [Session architecture](./docs/ARCHITECTURE_SESSION.md)         | Redis-backed sessions and lifecycle                  |
 | [Socket architecture](./docs/ARCHITECTURE_SOCKET.md)           | Socket.io setup, Redis adapter, room model           |
 | [Email architecture](./docs/ARCHITECTURE_EMAIL.md)             | `@luckystack/email` adapters and forgot-password     |
-| [Monitoring architecture](./docs/MONITORING.md)                | Strategy spec for `@luckystack/monitoring` (planned) |
 | [Packaging architecture](./docs/ARCHITECTURE_PACKAGING.md)     | Package-split, hooks, multi-service builds           |
 | [Developer guide](./docs/DEVELOPER_GUIDE.md)                   | Getting started inside the monorepo                  |
 | [Hosting guide](./docs/HOSTING.md)                             | Deployment, Docker, multi-instance routing           |
-| [Streaming reconstruction](./docs/STREAMING_RECONSTRUCTION.md) | Recreating the streaming demo page                   |
 
 ### Packages
 

@@ -414,8 +414,7 @@ The same throttle works with `stream`, `broadcastStream`, or `streamTo` — the 
 
 Repository note:
 
-- The previous `/streaming` demo page and demo sync handlers were intentionally removed from source.
-- Use `docs/STREAMING_RECONSTRUCTION.md` to recreate that exact demo implementation when needed.
+- The previous `/streaming` demo page and demo sync handlers were intentionally removed from source. The streaming primitives (`stream` / `streamTo` / `broadcastStream` / `_client`), `createStreamThrottle`, and SSE are documented in the [Streaming](#streaming) section above.
 
 ## Offline Request Queue
 

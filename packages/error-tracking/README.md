@@ -51,7 +51,7 @@ Sample rates and ignore-list come from this package's own `registerSentryConfig(
 
 ## Related architecture docs
 
-- [`docs/MONITORING.md`](../../docs/MONITORING.md) — strategy spec for the future `@luckystack/monitoring` package (audit trail + metrics). Error-tracking covers the "Why?" half; monitoring will cover the "What?" half.
+- Error-tracking covers the "why did it break?" half (stack traces, breadcrumbs, error grouping). The "what happened?" half (input/output audit trail, metrics, RUM) is planned for a future `@luckystack/monitoring` package that lives in its own repo — see `docs/ROADMAP.md`.
 
 ## Dependencies
 

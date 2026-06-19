@@ -338,9 +338,7 @@ When verifying the frontend in a browser, follow the cheapest-first ladder + sug
 | `docs/AI_PRODUCT_OVERVIEW.md` | Auto-generated intent overview: app description (from `PRODUCT.md`) + each page's `//? intent:` purpose |
 | `luckystack.ai.json` | AI-tooling config — `docs.sharding` (`auto`/`single`/`per-folder`) controls when the read-whole indexes split per src folder |
 | `docs/AI_BOOST_OVERVIEW.md` | One-page catalog of every AI-tooling surface in LuckyStack |
-| `docs/AI_BOOST_PLAN.md` | Implementation plan for the shareable AI-dev capabilities (decision memory, runbooks, linter, MCP, native call-graph, RAG) |
 | `docs/AI_BROWSER_TESTING.md` | AI browser-testing tooling (agent-browser + Playwright/Chrome DevTools MCP): the cheapest-first ladder + suggest→approve protocol |
-| `docs/GRAPHIFY_INTEGRATION.md` | Opt-in graphify integration — upgrade path beyond `AI_PROJECT_INDEX.md` for call-graph + community detection + MCP |
 
 ---
 

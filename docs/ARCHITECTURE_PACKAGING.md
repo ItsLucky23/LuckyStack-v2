@@ -787,10 +787,10 @@ Step-by-step plan:
 
 Parked items that are intentionally out of scope for the current packaging push. Revisit when the core package split has shipped.
 
-- **`@luckystack/monitoring`** — full request-forensics package sketched in `docs/MONITORING.md` (dual-stream: Sentry for "why", monitoring package for "what"; OpenSearch-backed audit trail; P95/P99 metrics; RUM). Parked pending a decision on whether we self-host a search engine for this or consume an external one. The package would hang off `postApiExecute` / `postSyncFanout` hooks (now live in §4), so no core design changes are blocked on it.
+- **`@luckystack/monitoring`** — full request-forensics package (dual-stream: Sentry for "why", monitoring package for "what"; OpenSearch-backed audit trail; P95/P99 metrics; RUM), to live in its own repo. Tracked in `docs/ROADMAP.md`. Parked pending a decision on whether we self-host a search engine for this or consume an external one. The package would hang off `postApiExecute` / `postSyncFanout` hooks (now live in §4), so no core design changes are blocked on it.
 - **Phase 2 function pruning** — import-graph-based pruning of the per-preset function registry (§9.8 point 6). Current Phase 1 bundles all functions in every preset for safety; optimize only after measurement.
 - **Frontend typegen scope in split deployments** — define whether `apiTypes.generated.ts` should include all presets' routes or be preset-scoped when projects split frontend per domain. Currently aggregate.
-- **`@luckystack/web-vitals`** — client-side RUM package (from `docs/MONITORING.md` §4C). Lower priority than backend observability.
+- **`@luckystack/web-vitals`** — client-side RUM package (LCP/INP/CLS, etc.). Lower priority than backend observability; will fold into the `@luckystack/monitoring` repo as a subpath rather than ship standalone.
 
 ---
 

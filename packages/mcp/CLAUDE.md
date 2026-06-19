@@ -65,5 +65,5 @@ None. The server reads committed files relative to the project root (resolved by
 ## Related
 
 - The artifacts it serves are produced by `scripts/generateGraph.mjs` (ai:graph), `generateDecisionsIndex.mjs` (ai:decisions), `generateProjectIndex.mjs` (ai:project-index), `generateRunbooks.mjs` (ai:runbooks), `generateAiCapabilities.mjs` (ai:capabilities).
-- Decision protocol: `docs/DECISION_MEMORY_PROTOCOL.md`. AI-tooling overview: `docs/AI_BOOST_OVERVIEW.md`. Roadmap: `docs/AI_BOOST_PLAN.md`.
+- Decision protocol: `docs/DECISION_MEMORY_PROTOCOL.md`. AI-tooling overview: `docs/AI_BOOST_OVERVIEW.md`.
 - Call-graph design: `docs/decisions/0002-*` + `0004-*`.

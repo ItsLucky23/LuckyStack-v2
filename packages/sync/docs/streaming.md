@@ -344,6 +344,5 @@ The same `flushPressure({ thresholdBytes? })` is also injected into `_api/<name>
 - Originator API + `onStream`: [`./sync-request.md`](./sync-request.md)
 - Recipient subscription: [`./callback-registration.md`](./callback-registration.md)
 - Handler authoring (where streams come from): [`./server-vs-client-handlers.md`](./server-vs-client-handlers.md)
-- Stream reconstruction demo page: [`/docs/STREAMING_RECONSTRUCTION.md`](../../../docs/STREAMING_RECONSTRUCTION.md)
 - Full architecture: [`/docs/ARCHITECTURE_SYNC.md`](../../../docs/ARCHITECTURE_SYNC.md#streaming)
 - Throttle config: `projectConfig.sync.streamThrottle.*`

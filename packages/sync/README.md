@@ -139,7 +139,7 @@ Client entry (`@luckystack/sync/client`):
 - [`docs/ARCHITECTURE_SYNC.md`](../../docs/ARCHITECTURE_SYNC.md) — full sync lifecycle, streaming decision tree, performance notes.
 - [`docs/ARCHITECTURE_SOCKET.md`](../../docs/ARCHITECTURE_SOCKET.md) — Socket.io + Redis adapter (required for cross-instance fanout).
 - [`docs/ARCHITECTURE_ROUTING.md`](../../docs/ARCHITECTURE_ROUTING.md) — `_sync/` file conventions and `_server` / `_client` split.
-- [`docs/STREAMING_RECONSTRUCTION.md`](../../docs/STREAMING_RECONSTRUCTION.md) — recreating the streaming demo page.
+- [`docs/ARCHITECTURE_SYNC.md#streaming`](../../docs/ARCHITECTURE_SYNC.md#streaming) — the streaming primitives (`stream` / `streamTo` / `broadcastStream` / `_client`), `createStreamThrottle`, and SSE.
 
 ## Dependencies
 
