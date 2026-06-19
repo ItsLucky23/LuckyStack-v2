@@ -3,6 +3,12 @@ import { getLogin } from '../capabilities';
 import { resolveCookieSecure } from './sessionCookie';
 import type { HttpRouteHandler } from './types';
 
+//? Warn-once guard. The SameSite weakening is a boot-time config property, not a
+//? per-request condition, so we surface it a single time per process — in ALL
+//? environments (production is exactly where the missing CSRF mitigation matters
+//? most), without flooding the log on every logout request.
+let warnedNonStrictSameSite = false;
+
 //? HTTP logout endpoint — POST /auth/logout.
 //?
 //? Logout must terminate over HTTP in cookie mode because only an HTTP
@@ -48,9 +54,11 @@ export const handleAuthLogoutRoute: HttpRouteHandler = async ({ res, routePath, 
   const http = getProjectConfig().http;
   //? SEC: /auth/logout relies on SameSite=Strict as its CSRF mitigation (the
   //? route is deliberately outside the CSRF middleware's candidate check — see
-  //? csrfMiddleware.ts). Warn loudly in dev when the config weakens this
-  //? assumption so operators know they must add explicit CSRF protection.
-  if (http.sessionCookieSameSite !== 'Strict' && process.env.NODE_ENV !== 'production') {
+  //? csrfMiddleware.ts). Warn (once per process, all envs) when the config
+  //? weakens this assumption so operators know they must add explicit CSRF
+  //? protection.
+  if (http.sessionCookieSameSite !== 'Strict' && !warnedNonStrictSameSite) {
+    warnedNonStrictSameSite = true;
     getLogger().warn(
       `/auth/logout is exempt from CSRF middleware and relies on SameSite=Strict. ` +
       `Current sessionCookieSameSite="${http.sessionCookieSameSite}" weakens this protection.`,

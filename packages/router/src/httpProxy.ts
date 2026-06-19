@@ -217,7 +217,12 @@ const handleRequest = async (
     res.statusCode = upstream.statusCode ?? 502;
     for (const [key, value] of Object.entries(upstream.headers)) {
       if (value === undefined) continue;
-      if (HTTP_HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue;
+      const lower = key.toLowerCase();
+      if (HTTP_HOP_BY_HOP_HEADERS.has(lower)) continue;
+      //? Mirror the WS upgrade-response filter: a backend must not be able to echo
+      //? internal `x-luckystack-*` routing markers back into the client's header
+      //? context (would leak resolved-env / fallback topology).
+      if (lower.startsWith('x-luckystack-')) continue;
       res.setHeader(key, value);
     }
     upstream.pipe(res);

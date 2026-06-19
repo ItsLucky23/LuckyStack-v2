@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/cli",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -38,8 +38,7 @@
     "assets",
     "README.md",
     "CLAUDE.md",
-    "LICENSE",
-    "CHANGELOG.md"
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",

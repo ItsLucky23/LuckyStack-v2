@@ -210,6 +210,15 @@ const consumeOAuthState = async (
     return null;
   }
 
+  //? Verify the DEL also succeeded (txResult[1][0] is the per-command error slot).
+  //? If DEL failed the state key was not consumed — fail closed so the OAuth state
+  //? cannot be replayed with the same nonce before its TTL expires (mirrors the
+  //? consumeOneTimeToken hardening in @luckystack/core).
+  const delResult = txResult[1];
+  if (!delResult || delResult[0]) {
+    return null;
+  }
+
   const rawValue = getResult[1];
   if (typeof rawValue !== 'string') {
     return null;

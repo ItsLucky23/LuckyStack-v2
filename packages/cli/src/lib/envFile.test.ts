@@ -11,6 +11,7 @@ import {
   upsertEnvBlock,
   dropEnvBlock,
 } from './envFile';
+import { emailEnvLines, blockPlaceholderDefaults } from '../featureOptions';
 
 describe('sentinel blocks', () => {
   it('appends a delimited block and detects it', () => {
@@ -101,6 +102,30 @@ describe('upsertEnvBlock / dropEnvBlock (file, value-safe)', () => {
     fs.writeFileSync(localPath(), readLocal().replace('DEV_GOOGLE_CLIENT_ID=', 'DEV_GOOGLE_CLIENT_ID=real-secret'));
     expect(dropEnvBlock(dir, 'oauth:google')).toBe('kept');
     expect(readLocal()).toContain('real-secret'); // value preserved
+  });
+
+  it('removes a placeholder-only block whose only "filled" lines are SHIPPED DEFAULTS', () => {
+    //? email:resend ships RESEND_API_KEY= (empty) + EMAIL_FROM=noreply@example.com
+    //? (a non-empty default). Untouched, the block must auto-remove — the shipped
+    //? default is not a developer secret.
+    upsertEnvBlock(dir, 'email:resend', emailEnvLines('resend'), new Set(), ['RESEND_API_KEY']);
+    expect(dropEnvBlock(dir, 'email:resend', blockPlaceholderDefaults('email:resend'))).toBe('removed');
+    expect(readLocal()).not.toContain('luckystack:email:resend');
+  });
+
+  it('KEEPS a block when the developer changed a shipped default or filled an empty key', () => {
+    //? Developer filled the real secret → kept.
+    upsertEnvBlock(dir, 'email:resend', emailEnvLines('resend'), new Set(), ['RESEND_API_KEY']);
+    fs.writeFileSync(localPath(), readLocal().replace('RESEND_API_KEY=', 'RESEND_API_KEY=re_live_secret'));
+    expect(dropEnvBlock(dir, 'email:resend', blockPlaceholderDefaults('email:resend'))).toBe('kept');
+    expect(readLocal()).toContain('re_live_secret');
+
+    //? Developer changed the shipped default value → treated as a real value, kept.
+    fs.rmSync(localPath());
+    upsertEnvBlock(dir, 'email:resend', emailEnvLines('resend'), new Set(), ['RESEND_API_KEY']);
+    fs.writeFileSync(localPath(), readLocal().replace('EMAIL_FROM=noreply@example.com', 'EMAIL_FROM=hi@acme.com'));
+    expect(dropEnvBlock(dir, 'email:resend', blockPlaceholderDefaults('email:resend'))).toBe('kept');
+    expect(readLocal()).toContain('hi@acme.com');
   });
 
   it('drops a CLI-written block but KEEPS a hand-filled (sentinel-less) block', () => {

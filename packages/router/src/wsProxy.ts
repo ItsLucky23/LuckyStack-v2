@@ -242,6 +242,7 @@ const openUpstream = async (
     for (const [key, value] of Object.entries(upstreamRes.headers)) {
       if (value === undefined) continue;
       const lower = key.toLowerCase();
+      if (lower === 'set-cookie') continue;
       if (WS_HOP_BY_HOP_HEADERS.has(lower)) continue;
       if (lower.startsWith('x-luckystack-')) continue;
       if (Array.isArray(value)) {

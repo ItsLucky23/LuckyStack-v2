@@ -36,6 +36,7 @@ import {
   monitoringEnvLines,
   monitoringKeys,
   monitoringDeps,
+  blockPlaceholderDefaults,
   type AuthMode,
   type OAuthProvider,
   type EmailProvider,
@@ -138,7 +139,7 @@ const removeProviderChange = (provider: OAuthProvider): Change => ({
     `- the ${provider} placeholder block from .env.local (if CLI-written; a hand-filled block is kept — clear DEV_${provider.toUpperCase()}_* yourself)`,
   ],
   apply: wrap((ctx) => {
-    dropEnvBlock(ctx.project.root, `oauth:${provider}`);
+    dropEnvBlock(ctx.project.root, `oauth:${provider}`, blockPlaceholderDefaults(`oauth:${provider}`));
     updateExternalOrigin(ctx.project.root, OAUTH_ORIGINS[provider], 'remove');
   }),
 });
@@ -237,7 +238,7 @@ const planEmail = (current: DesiredConfig, desired: DesiredConfig): Change[] => 
     apply: wrap((ctx) => {
       //? Drop only the PREVIOUS adapter's CLI block (only resend/smtp ever wrote
       //? one) — scoped to `from` so apply matches the preview exactly.
-      if (from === 'resend' || from === 'smtp') dropEnvBlock(ctx.project.root, `email:${from}`);
+      if (from === 'resend' || from === 'smtp') dropEnvBlock(ctx.project.root, `email:${from}`, blockPlaceholderDefaults(`email:${from}`));
       if (to === 'none') {
         dropDependency(ctx.project, EMAIL_PKG);
         return;
@@ -282,7 +283,7 @@ const planMonitoring = (current: DesiredConfig, desired: DesiredConfig): Change[
       if (to === 'none') {
         dropDependency(ctx.project, ERROR_TRACKING_PKG);
         for (const dep of Object.keys(monitoringDeps[from])) dropDependency(ctx.project, dep);
-        dropEnvBlock(ctx.project.root, `monitoring:${from}`);
+        dropEnvBlock(ctx.project.root, `monitoring:${from}`, blockPlaceholderDefaults(`monitoring:${from}`));
         removeSentryShim(ctx.project.root);
         return;
       }
@@ -293,7 +294,7 @@ const planMonitoring = (current: DesiredConfig, desired: DesiredConfig): Change[
       copySentryShim(ctx.project.root);
       //? Switching backends: drop the previous one's CLI block + deps.
       if (from !== 'none' && from !== to) {
-        dropEnvBlock(ctx.project.root, `monitoring:${from}`);
+        dropEnvBlock(ctx.project.root, `monitoring:${from}`, blockPlaceholderDefaults(`monitoring:${from}`));
         for (const dep of Object.keys(monitoringDeps[from])) dropDependency(ctx.project, dep);
       }
       upsertEnvBlock(ctx.project.root, `monitoring:${to}`, monitoringEnvLines(to), ctx.declaredKeys, [...monitoringKeys[to]]);

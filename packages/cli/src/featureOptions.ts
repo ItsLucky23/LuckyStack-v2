@@ -71,10 +71,10 @@ export const oauthEnvLines = (provider: OAuthProvider): string[] => {
   //? MICROSOFT_TENANT_ID: 'common' allows any Microsoft account; replace with a
   //? specific tenant UUID to restrict to one organization. This is a REAL default
   //? (not a placeholder) — it makes microsoft OAuth work for multi-tenant apps
-  //? without requiring the developer to fill in a value. Side-effect: filledKeysInBlock
-  //? in envFile.ts treats this as a "filled" key, so dropEnvBlock will refuse to
-  //? auto-remove the block if the developer never changed it. Warn them to clear it
-  //? manually if they want to remove microsoft OAuth via `manage`.
+  //? without requiring the developer to fill in a value. It is registered as a
+  //? shipped default in `blockPlaceholderDefaults`, so `dropEnvBlock` treats an
+  //? UNTOUCHED `=common` as inert (the block auto-removes); only a developer who
+  //? pinned a specific tenant UUID keeps the block + gets the "clear by hand" warn.
   if (provider === 'microsoft') lines.push('MICROSOFT_TENANT_ID=common');
   return lines;
 };
@@ -95,6 +95,33 @@ export const monitoringEnvLines = (provider: MonitoringProvider): string[] => {
   if (provider === 'posthog') return ['# PostHog — set the key.', 'POSTHOG_KEY=', 'POSTHOG_HOST=https://us.i.posthog.com'];
   if (provider === 'datadog') return ['# Datadog — set the key AND uncomment the dd-trace block atop server/server.ts.', 'DD_API_KEY=', 'DD_SITE=datadoghq.com'];
   return [];
+};
+
+//? The KEY → shipped-default-VALUE map for a block, including ONLY keys whose
+//? generated placeholder line carries a NON-EMPTY default (e.g.
+//? `EMAIL_FROM=noreply@example.com`, `SMTP_PORT=587`, `MICROSOFT_TENANT_ID=common`).
+//? `dropEnvBlock` uses this to tell an UNTOUCHED shipped default apart from a real
+//? developer-typed secret: a value equal to its shipped default is inert and the
+//? block can be auto-removed; a changed/added value is a real secret and the block
+//? is kept (ADR 0014 D1). Empty-default keys are absent from the map, so any
+//? non-empty value there still counts as developer-filled. Unknown id → empty map.
+export const blockPlaceholderDefaults = (id: string): Map<string, string> => {
+  const [kind, provider = ''] = id.split(':');
+  let lines: readonly string[] = [];
+  if (kind === 'oauth' && (OAUTH_PROVIDERS as readonly string[]).includes(provider)) {
+    lines = oauthEnvLines(provider as OAuthProvider);
+  } else if (kind === 'email' && (EMAIL_PROVIDERS as readonly string[]).includes(provider)) {
+    lines = emailEnvLines(provider as EmailProvider);
+  } else if (kind === 'monitoring' && (MONITORING_PROVIDERS as readonly string[]).includes(provider)) {
+    lines = monitoringEnvLines(provider as MonitoringProvider);
+  }
+  const map = new Map<string, string>();
+  for (const line of lines) {
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+    const value = (match?.[2] ?? '').trim();
+    if (match && value.length > 0) map.set(match[1] ?? '', value);
+  }
+  return map;
 };
 
 //? Extra npm deps a monitoring backend needs (beyond @luckystack/error-tracking).

@@ -30,11 +30,19 @@ export const appendSentinelBlock = (text: string, id: string, lines: readonly st
   return `${base}${sep}${block}\n`;
 };
 
-//? The UNCOMMENTED keys inside a sentinel block that have a NON-EMPTY value (i.e.
-//? the developer filled in a real secret). Used to refuse deleting a block that
-//? would destroy live credentials — value presence is detected, the value itself
-//? is never read out or returned.
-export const filledKeysInBlock = (text: string, id: string): string[] => {
+//? The UNCOMMENTED keys inside a sentinel block that the developer FILLED with a
+//? real value. Used to refuse deleting a block that would destroy live credentials
+//? — value presence is detected, the value itself is never read out or returned.
+//? `shippedDefaults` (key → the non-empty default the CLI itself wrote, e.g.
+//? `EMAIL_FROM=noreply@example.com`) lets us EXCLUDE an untouched shipped default
+//? from the "filled" set: a value equal to its shipped default is inert, not a
+//? developer secret, so a placeholder-only block can still be auto-removed. A key
+//? absent from the map (empty default) counts any non-empty value as filled.
+export const filledKeysInBlock = (
+  text: string,
+  id: string,
+  shippedDefaults?: ReadonlyMap<string, string>,
+): string[] => {
   const lines = text.replaceAll('\r\n', '\n').split('\n');
   const start = lines.indexOf(open(id));
   if (start === -1) return [];
@@ -46,7 +54,11 @@ export const filledKeysInBlock = (text: string, id: string): string[] => {
   const filled: string[] = [];
   for (let i = start + 1; i < end; i += 1) {
     const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(lines[i] ?? '');
-    if (match && (match[2] ?? '').trim().length > 0) filled.push(match[1] ?? '');
+    if (!match) continue;
+    const key = match[1] ?? '';
+    const value = (match[2] ?? '').trim();
+    //? Non-empty AND not the untouched shipped default → a real developer value.
+    if (value.length > 0 && value !== shippedDefaults?.get(key)) filled.push(key);
   }
   return filled;
 };
@@ -143,14 +155,20 @@ export const upsertEnvBlock = (
 //? Remove a CLI-written sentinel block from `.env.local`. Returns 'removed' when a
 //? sentinel block existed, else 'kept' (no sentinel → possibly hand-filled; we never
 //? delete it). The caller informs the user which keys to clear in the 'kept' case.
-export const dropEnvBlock = (root: string, id: string): 'removed' | 'kept' => {
+export const dropEnvBlock = (
+  root: string,
+  id: string,
+  shippedDefaults?: ReadonlyMap<string, string>,
+): 'removed' | 'kept' => {
   const file = path.join(root, '.env.local');
   const original = readText(file);
   if (!hasSentinelBlock(original, id)) return 'kept';
   //? Value-safety (ADR 0014 D1): if the developer typed real values into the
   //? CLI-written placeholders, KEEP the block and tell them which keys to clear —
-  //? a `manage` removal must never silently destroy a live secret.
-  const filled = filledKeysInBlock(original, id);
+  //? a `manage` removal must never silently destroy a live secret. An untouched
+  //? shipped default (passed in `shippedDefaults`) is NOT a secret, so a block that
+  //? holds only placeholders + shipped defaults is removed cleanly.
+  const filled = filledKeysInBlock(original, id, shippedDefaults);
   if (filled.length > 0) {
     console.warn(`⚠ kept the .env.local block for "${id}" — it has filled value(s); clear these by hand: ${filled.join(', ')}`);
     return 'kept';

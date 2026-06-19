@@ -1204,10 +1204,42 @@ const copyTree = (src: string, dest: string, vars: Record<string, string>): void
   }
 };
 
+//? Resolve a bare command name (`npm`/`npx`) to an ABSOLUTE path by scanning
+//? `PATH` only — the current directory is intentionally NOT searched, so an
+//? `npm.cmd` / `npx.cmd` dropped in the freshly-scaffolded project root can never
+//? be picked up (BatBadBut-class hazard). On Windows we try each `PATHEXT`
+//? extension; elsewhere the bare name. Mirrors `@luckystack/cli`'s resolver.
+const resolveCommandPath = (command: string): string | null => {
+  const rawPath = process.env.PATH ?? process.env.Path ?? '';
+  const dirs = rawPath.split(path.delimiter).filter((d) => d.length > 0);
+  const exts =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((e) => e.length > 0)
+      : [''];
+  for (const dir of dirs) {
+    //? A relative PATH entry could still resolve against cwd — skip those.
+    if (!path.isAbsolute(dir)) continue;
+    for (const ext of exts) {
+      const candidate = path.join(dir, command + ext.toLowerCase());
+      const candidateUpper = path.join(dir, command + ext);
+      if (fs.existsSync(candidate)) return candidate;
+      if (candidateUpper !== candidate && fs.existsSync(candidateUpper)) return candidateUpper;
+    }
+  }
+  return null;
+};
+
 const runNpmInstall = (cwd: string): void => {
   console.log('\nInstalling dependencies (this may take a minute)...\n');
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const result = spawnSync(npmCmd, ['install'], { cwd, stdio: 'inherit', shell: false });
+  const resolved = resolveCommandPath('npm');
+  if (!resolved) {
+    console.error('\n[create-luckystack-app] Could not locate `npm` on PATH. Run `npm install` manually in the project directory.');
+    return;
+  }
+  //? A `.cmd`/`.bat` shim still needs cmd.exe to interpret it, but we now hand the
+  //? shell an ABSOLUTE path, so it is never resolved relative to `cwd`.
+  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
+  const result = spawnSync(resolved, ['install'], { cwd, stdio: 'inherit', shell: needsShell });
   if (result.status !== 0) {
     console.error('\n[create-luckystack-app] npm install failed. You can run it manually in the project directory.');
   }
@@ -1219,8 +1251,13 @@ const runNpmInstall = (cwd: string): void => {
 //? failing here would be the first thing they see.
 const runPrismaGenerate = (cwd: string): void => {
   console.log('\nGenerating Prisma client...\n');
-  const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const result = spawnSync(npxCmd, ['prisma', 'generate'], { cwd, stdio: 'inherit', shell: false });
+  const resolved = resolveCommandPath('npx');
+  if (!resolved) {
+    console.error('\n[create-luckystack-app] Could not locate `npx` on PATH. Run `npx prisma generate` manually after setting DATABASE_URL.');
+    return;
+  }
+  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
+  const result = spawnSync(resolved, ['prisma', 'generate'], { cwd, stdio: 'inherit', shell: needsShell });
   if (result.status !== 0) {
     console.error('\n[create-luckystack-app] `npx prisma generate` failed. Run it manually after setting DATABASE_URL.');
   }

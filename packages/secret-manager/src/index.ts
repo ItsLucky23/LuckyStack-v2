@@ -653,20 +653,25 @@ const parseEnvFile = (content: string): Record<string, string> => {
     }
     let value = line.slice(eq + 1).trim();
     const quote = value[0];
-    if ((quote === '"' || quote === "'") && value.length >= 2 && value.endsWith(quote)) {
-      //? Single-line quoted value: the entire content fits on one line. If the
-      //? closing quote is absent (multi-line value that dotenv supports but this
-      //? parser does not), we fall through to the unquoted path — warn so the
-      //? developer knows the value was truncated rather than silently getting a
-      //? partial PEM key or similar.
-      value = value.slice(1, -1);
-    } else if ((quote === '"' || quote === "'") && value.length > 0) {
-      //? An opening quote with no matching closing quote on the same line means
-      //? this is a multi-line value (supported by dotenv, not by this parser).
-      //? Warn so the developer isn't surprised by silent truncation.
-      console.warn(
-        `[secret-manager] parseEnvFile: "${key}" starts with a quote but has no matching closing quote on the same line. Multi-line values are not supported — the raw text will be used as-is. If this is a multi-line value (e.g. a PEM key), do not rely on this parser.`,
-      );
+    if (quote === '"' || quote === "'") {
+      //? Quoted value. The closing quote is the LAST occurrence of the same quote
+      //? char; anything after it (whitespace + `# ...`) is an inline comment and is
+      //? dropped (`KEY="v" # note` → `v`). A `#` BEFORE the closing quote is literal
+      //? and preserved (`KEY="a#b"` → `a#b`).
+      const closeIdx = value.lastIndexOf(quote);
+      if (closeIdx > 0) {
+        value = value.slice(1, closeIdx);
+      } else {
+        //? Opening quote with no matching closing quote on this line means a
+        //? multi-line value (dotenv supports it, this parser does not). Warn so the
+        //? value isn't silently truncated, then strip any inline comment from the
+        //? raw remainder so a trailing `# ...` doesn't leak into the value.
+        console.warn(
+          `[secret-manager] parseEnvFile: "${key}" starts with a quote but has no matching closing quote on the same line. Multi-line values are not supported — the raw text will be used as-is. If this is a multi-line value (e.g. a PEM key), do not rely on this parser.`,
+        );
+        const commentAt = value.indexOf(' #');
+        if (commentAt !== -1) value = value.slice(0, commentAt).trim();
+      }
     } else {
       const commentAt = value.indexOf(' #');
       if (commentAt !== -1) value = value.slice(0, commentAt).trim();
@@ -790,9 +795,12 @@ export const reloadSecretManagerFromFiles = async (): Promise<void> => {
   const pattern = stripStatefulFlags(config.pointerPattern ?? DEFAULT_POINTER_PATTERN);
 
   //? Re-read every file in load order; later files (e.g. .env.local) override.
+  //? `warnAbsolute=false`: the absolute-path notice already fired once at boot
+  //? (startDevReload). Repeating it on every debounced hot-reload would flood the
+  //? dev log for anyone legitimately using an absolute envFile path.
   const merged: Record<string, string> = {};
   for (const file of files) {
-    if (!isSafeEnvFile(file, true)) {
+    if (!isSafeEnvFile(file, false)) {
       console.warn(`[secret-manager] ignoring unsafe dev envFile path: ${file}`);
       continue;
     }

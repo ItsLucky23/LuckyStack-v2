@@ -647,9 +647,9 @@ async function stageFanout(
   serverOutput: Record<string, unknown>,
   syncObject: Record<string, unknown>,
   functionsObject: Record<string, unknown>,
-  ctx: Pick<HttpSyncContext, 'data' | 'normalizedReceiver' | 'token' | 'ignoreSelf' | 'user' | 'buildSyncError'>,
-): Promise<void> {
-  const { data, normalizedReceiver, token, ignoreSelf, user, buildSyncError } = ctx;
+  ctx: Pick<HttpSyncContext, 'data' | 'normalizedReceiver' | 'token' | 'ignoreSelf' | 'user' | 'buildSyncError' | 'preferredLocale'>,
+): Promise<HttpSyncResponse | null> {
+  const { data, normalizedReceiver, token, ignoreSelf, user, buildSyncError, preferredLocale } = ctx;
   const ioInstance = getIoInstance();
 
   //? Single payload reference reused by pre/post — span pinning in
@@ -667,7 +667,18 @@ async function stageFanout(
   //? the hook result and bail when the hook stops the fanout.
   const preFanoutResult = await dispatchHook('preSyncFanout', fanoutPayload);
   if (preFanoutResult.stopped) {
-    return;
+    //? Parity with the socket handler: a preSyncFanout stop is a DENY decision,
+    //? so the HTTP/SSE transport must surface it as an error response — not a
+    //? silent success (which would let a deny hook be bypassed over HTTP).
+    return buildSyncError({
+      response: {
+        status: 'error',
+        errorCode: preFanoutResult.signal.errorCode,
+        httpStatus: preFanoutResult.signal.httpStatus,
+      },
+      preferred: preferredLocale,
+      userLanguage: user?.language,
+    });
   }
 
   //? Over the HTTP/SSE fallback the caller IS the originator, so a receiver
@@ -768,6 +779,7 @@ async function stageFanout(
 
   fanoutPayload.recipientCount = recipientCount;
   await dispatchHook('postSyncFanout', fanoutPayload);
+  return null;
 }
 
 //? ET-02 — wrap the whole HTTP/SSE sync request in a per-request error-tracker
@@ -920,7 +932,8 @@ async function handleHttpSyncRequestScoped({
     }
 
     // Stage 7: fanout to room members.
-    await stageFanout(resolvedName, callbackName, serverOutput, syncObject, functionsObject, ctx);
+    const fanoutError = await stageFanout(resolvedName, callbackName, serverOutput, syncObject, functionsObject, ctx);
+    if (fanoutError) return fanoutError;
 
     if (shouldLogDev()) {
       getLogger().debug(`http sync: ${resolvedName} completed`);

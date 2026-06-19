@@ -311,3 +311,43 @@
 **Niet gecommit** (user heeft niet gevraagd): werktree bevat zowel het parallelle CLI-werk als deze ~100 audit-fixes.
 
 **Files**: ~100 gewijzigd over alle packages/* + src/ + server/ + 16× package.json + nieuwe packages/cli/LICENSE + packages/env-resolver/README.md.
+
+## 2026-06-19 18:15 — Verificatie-ronde v0.2.0..HEAD: diff-review + security + echte npm-install (ultracode, Opus-verified)
+
+**User goal**: alle AI-changes sinds release v0.2.0 (39 commits, ~213 files) reviewen op correctheid/regressies/security; ECHTE npm pack+install+scaffold-smoke; veilige fixes direct toepassen, rest navragen; geen commit. Sonnet voor scan, Opus voor adversariële verify (zuinig). `workspace-handoff` buiten scope.
+
+**Aanpak (1 workflow, 16 agents)**: 9 diff-review-scanners (per package-gebied) + 3 security-sweeps + 1 echte install-verificatie → 54 findings (4 zeker / 11 waarschijnlijk / 39 onzeker). Opus adversariële verify op de 15-item shortlist: 10 CONFIRMED, 1 REFUTED (#5 wizard ANSI — ESC-byte byte-geverifieerd aanwezig, terecht weerlegd), 4 UNCERTAIN.
+
+**Direct toegepast (6 veilige fixes)**: router/wsProxy.ts (`Set-Cookie` strip op WS-101 — code matcht nu de eigen security-comment, #27 ZEKER); router/httpProxy.ts (`x-luckystack-*` strip op response-pad, spiegelt de WS-fix, #44); login/login.ts `consumeOAuthState` (DEL-slot-check fail-closed, spiegelt oneTimeToken-hardening, #38 — replay-gat dicht); core/rateLimiter.ts (shadowing inner `now` weg, #14); cli/addAiDocs.ts (comment `add ai-docs`→`add mcp`, #0); mcp/package.json (bin `./dist/index.js` prefix, install-fix).
+
+**Navraag-lijst (NIET gefixt — risico/twijfel, aan user)**: #4 featureOptions placeholder-defaults → `dropEnvBlock` altijd `'kept'` (ZEKER, API-keuze); #25 sync HTTP stop-signal geeft success i.p.v. error (ZEKER, error-contract-wijziging); #34 sample-app updateUser theme/language-allowlist; #35/#48 CLI-assets avatar MIME-allowlist + size-guard (behavioural — kan uploads weigeren); #13 secret-manager abs-path-warning spamt elke hot-reload (logging-judgment); #11 parseEnvFile inline-comment regressie (UNCERTAIN); #24 verwijderde CLI-flags = breaking (UNCERTAIN); #28 CSRF-warning onderdrukt in prod (UNCERTAIN). Plus ONZEKER-security om te wegen: `allowOriginless`/origin-less WS-CORS onvoorwaardelijk toegelaten (ADR 0013, #39/#42/#46), token-in-URL-fragment based-token mode (#50), EmailAttachment.href schema-loos (#45), scaffolder spawnt npm.cmd zonder abs-path (#49).
+
+**Install-verificatie (echt)**: build:packages 16/16 OK; `npm pack` alle packages; verse temp-project install van create-luckystack-app (536 packages, 0 vuln); scaffold (db=sqlite, auth=none) + `npm install` OK; bins `luckystack`/`luckystack-dev`/`luckystack-mcp` linken + draaien. Bevonden: mcp bin miste `./` (gefixt); mcp+cli files[] noemen CHANGELOG.md die niet bestaat (npm laat 'm stil weg → navraag: stub maken of entry verwijderen).
+
+**Gate (alles groen)**: lint client+server+packages 0, ai:lint 0, build 16/16 + volledige consumer-build, test:unit **1362/1362**. Eigen fixes braken niets.
+
+**Niet gecommit** (per user-instructie). Werktree blijft schoon m.u.v. deze 6 fixes.
+
+**Files**: packages/router/src/wsProxy.ts, packages/router/src/httpProxy.ts, packages/login/src/login.ts, packages/core/src/rateLimiter.ts, packages/cli/src/commands/addAiDocs.ts, packages/mcp/package.json.
+
+## 2026-06-19 19:20 — Navraag-fixes uit de v0.2.0-verificatie toegepast (user-goedgekeurd)
+
+**User goal**: na het verificatie-rapport koos de user per finding wat te fixen. Veilige + goedgekeurde fixes toegepast; #1 (allowOriginless) bewust niet gewijzigd (ADR 0013 = bewuste keuze, uitleg gegeven); #50/#45 als niet-dringend geparkeerd; CLI-flags (#24) niet hersteld (wizard biedt die opties al).
+
+**Toegepast**:
+- **#25 (sync, ZEKER)** — `handleHttpSyncRequest.stageFanout` geeft nu een echte error-response bij een `preSyncFanout`-stop i.p.v. stilletjes success (HTTP-pariteit met de socket-handler; deny-hook niet meer omzeilbaar over HTTP). Return-type + `preferredLocale` in de ctx-Pick + call-site `if (fanoutError) return fanoutError`.
+- **#34/#35/#48 (security)** — `updateUser_v1` in ALLE DRIE de kopieën (consumer `src/`, CLI-asset, scaffold-template) is nu de secure-superset: avatar MIME-allowlist (`image/jpeg|png|gif|webp`) + 5 MB size-cap vóór de sharp-decode, theme/language-allowlist, en `getProjectConfig().auth.nameMaxLength` i.p.v. hardcoded 100. Fixte meteen de untranslated `profile.nameTooLong` (bestond niet in de locales) → `login.nameCharacterLimit`. Asset↔template byte-pariteit hersteld (assetParity-test).
+- **#4 (CLI, ZEKER)** — `dropEnvBlock`/`filledKeysInBlock` zijn placeholder-bewust: een nieuw `blockPlaceholderDefaults(id)` (single source uit de *EnvLines) laat een ONGEWIJZIGDE shipped-default (`EMAIL_FROM=noreply@example.com`, `SMTP_PORT=587`, `MICROSOFT_TENANT_ID=common`, …) NIET meer als "gevulde secret" tellen → een placeholder-only blok wordt nu netjes verwijderd, terwijl een écht getypte secret nog steeds behouden + gewaarschuwd wordt (ADR 0014 D1 secret-safety blijft intact). 2 nieuwe tests.
+- **#11 (secret-manager)** — `parseEnvFile` herschreven: laatste-quote als sluiter + trailing inline-comment strippen, zodat `KEY="value" # comment` correct `value` oplevert (oude `endsWith(quote)`-check faalde provable). `#` binnen quotes blijft literal. 1 nieuwe test. Fixte ook de stale comment (#10).
+- **#13 (secret-manager)** — abs-path-warning alleen nog bij boot (reload-pad `warnAbsolute=false`), geen log-spam meer per hot-reload.
+- **#28 (server)** — CSRF-logout-warning vuurt nu in ALLE envs (prod incl.) maar één keer per proces (module-guard) i.p.v. dev-only/per-request.
+- **#49 (scaffolder)** — `runNpmInstall`/`runPrismaGenerate` resolven npm/npx naar een ABSOLUUT pad via PATH (cwd uitgesloten, PATHEXT-aware), gespiegeld van `@luckystack/cli` — geen BatBadBut-achtige relative-resolve meer.
+- **Publish-cleanliness** — dangling `CHANGELOG.md` uit `files[]` van `@luckystack/mcp` + `@luckystack/cli` verwijderd (bestond niet op disk; npm liet 'm stil weg).
+
+**Niet gewijzigd (bewust)**: #1 `allowOriginless` — ADR 0013 admit-originless is een correcte, gedocumenteerde keuze (origin-less = same-origin browser-signal; échte auth-gate = sessietoken via `extractTokenFromSocket` + auth-hooks). Default blijft; wie ALLE sockets auth-only wil kan een `applySocketMiddlewares`-token-gate toevoegen (aangeboden). #50 (token-in-fragment, alleen session-storage, prod-afgeraden), #45 (EmailAttachment.href schema), #24 (CLI-flags, wizard dekt het) — geparkeerd op verzoek.
+
+**Gate (alles groen)**: lint client+server+packages 0, ai:lint 0, build 16/16 + volledige consumer-build, test:unit **1365/1365** (+3 nieuw). Onderweg gefixt: 1 nested-ternary (featureOptions), 1 no-lonely-if (consumer updateUser), assetParity-drift (template-kopie meegenomen).
+
+**Niet gecommit** (per user-instructie).
+
+**Files**: packages/sync/src/handleHttpSyncRequest.ts, packages/cli/src/{featureOptions.ts,lib/envFile.ts,lib/envFile.test.ts,transitions.ts,package.json}, packages/secret-manager/src/{index.ts,index.test.ts}, packages/server/src/httpRoutes/authLogoutRoute.ts, packages/create-luckystack-app/src/index.ts, packages/cli/assets/login/src/settings/_api/updateUser_v1.ts, packages/create-luckystack-app/template/src/settings/_api/updateUser_v1.ts, src/settings/_api/updateUser_v1.ts, packages/mcp/package.json.

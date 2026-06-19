@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/test-runner",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -54,10 +54,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.2.5"
+    "@luckystack/core": "^0.2.6"
   },
   "peerDependencies": {
-    "@luckystack/login": "^0.2.5",
+    "@luckystack/login": "^0.2.6",
     "socket.io-client": "^4.8.0",
     "zod": "^4.0.0"
   },

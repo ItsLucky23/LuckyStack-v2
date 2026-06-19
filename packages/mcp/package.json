@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/mcp",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -38,14 +38,13 @@
     }
   },
   "bin": {
-    "luckystack-mcp": "dist/index.js"
+    "luckystack-mcp": "./dist/index.js"
   },
   "files": [
     "dist",
     "README.md",
     "CLAUDE.md",
-    "LICENSE",
-    "CHANGELOG.md"
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",

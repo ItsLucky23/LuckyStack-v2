@@ -1,11 +1,11 @@
-//? `luckystack add ai-docs` / `remove` — mirror of the scaffolder's `wireGraphMcp`:
+//? `luckystack add mcp` / `remove` — mirror of the scaffolder's `wireGraphMcp`:
 //? registers the @luckystack/mcp graph server so AI agents can query the project's
 //? dependency graph. Adds @luckystack/mcp as a devDep + a `luckystack` entry in
 //? `.mcp.json`. Remove drops both.
 //?
 //? NOTE: the AI DOC TREE (root CLAUDE.md, docs/luckystack/, skills/, .claude/
 //? commands/) is copied by `create-luckystack-app` from the framework repo at
-//? scaffold time and is NOT bundled in this CLI's tarball — so `add ai-docs` wires
+//? scaffold time and is NOT bundled in this CLI's tarball — so `add mcp` wires
 //? the runnable MCP layer but does not re-copy those docs. Re-scaffold (or copy
 //? them from a fresh `npx create-luckystack-app`) if you need the full doc tree.
 

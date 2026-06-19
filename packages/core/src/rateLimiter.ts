@@ -125,7 +125,6 @@ const checkRateLimitInMemory = ({
     //? key bypass the limit by resetting its counter). Only when no expired entry
     //? exists do we fall back to the insertion-order oldest (least-harm choice).
     if (rateLimitStore.size >= MAX_MEMORY_STORE_SIZE) {
-      const now = Date.now();
       let evictKey: string | undefined;
       for (const [k, e] of rateLimitStore) {
         if (e.resetAt < now) { evictKey = k; break; }

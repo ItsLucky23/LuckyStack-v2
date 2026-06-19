@@ -3,7 +3,14 @@ import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated
 import sharp from 'sharp';
 import path from 'node:path';
 import { mkdir, stat } from 'node:fs/promises';
-import { getUploadsDir, processUpload } from '@luckystack/core';
+import { getProjectConfig, getUploadsDir, processUpload } from '@luckystack/core';
+
+//? Themes the framework recognises (mirrors `defaultTheme` in @luckystack/core).
+const ALLOWED_THEMES = new Set<string>(['light', 'dark']);
+//? A language is an i18n locale code — a short lowercase identifier (`en`,
+//? `nl`, `pt-BR`). We don't have the consumer's locale list in a handler, so
+//? bound the shape instead of letting an arbitrary string into the session.
+const LANGUAGE_RE = /^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/;
 
 export const rateLimit: number | false = 20;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -24,14 +31,21 @@ export interface ApiParams {
   functions: Functions;
 }
 
-const NAME_MAX_LENGTH = 100;
-
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
 
   const { avatar, name, theme, language } = data;
 
-  if (name !== undefined && name.length > NAME_MAX_LENGTH) {
-    return { status: 'error', errorCode: 'profile.nameTooLong' };
+  //? Validate every field before it reaches the session/DB. `theme`/`language`
+  //? are compile-time-only on SessionLayout, so a hijacked session could POST
+  //? arbitrary values; `name` must honour the configured `auth.nameMaxLength`.
+  if (name !== undefined && (typeof name !== 'string' || name.length > getProjectConfig().auth.nameMaxLength)) {
+    return { status: 'error', errorCode: 'login.nameCharacterLimit' };
+  }
+  if (theme !== undefined && (typeof theme !== 'string' || !ALLOWED_THEMES.has(theme))) {
+    return { status: 'error', errorCode: 'api.invalidInputType' };
+  }
+  if (language !== undefined && (typeof language !== 'string' || !LANGUAGE_RE.test(language))) {
+    return { status: 'error', errorCode: 'api.invalidInputType' };
   }
 
   if (avatar) {
