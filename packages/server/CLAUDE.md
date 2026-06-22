@@ -61,7 +61,7 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 
 ## Config keys (env vars + registerProjectConfig slots)
 
-- `SERVER_PORT` (env, optional) — fallback when neither `options.port` nor positional argv supplies one. Written back by `applyServerArgv()` when argv carries a port.
+- `SERVER_PORT` (env, optional) — fallback when neither `options.port` nor positional argv supplies one. Written back by `applyServerArgv()` when argv carries a port. In dev, the ACTUALLY-bound port (after any `SERVER_PORT_AUTO_INCREMENT` hop off a busy port) is advertised to `node_modules/.luckystack/dev-server.json` so the template Vite proxy follows the real port instead of the stale `.env` one (written by `devServerInfo.ts`; skipped in prod + tests, removed on exit).
 - `SERVER_IP` (env, optional, default `127.0.0.1`) — bind address fallback when `options.ip` is omitted.
 - `NODE_ENV` (env, required for security-sensitive branches) — `development` / `test` toggle devkit hot reload + REPL and gate `/_test/reset`.
 - `TEST_RESET_TOKEN` (env, required for `/_test/reset` to be reachable at all) — must match the `x-test-reset-token` request header. No fallback "no auth" mode.

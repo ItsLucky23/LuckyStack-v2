@@ -3,7 +3,9 @@
   "common": {
     "404": "Etwas ist schiefgelaufen, versuche es später erneut.",
     "whiteSpace": " ",
-    "error": "FEHLER"
+    "error": "FEHLER",
+    "unexpectedError": "Etwas ist schiefgelaufen.",
+    "refreshPage": "Seite neu laden"
   },
   "middleware": {
     "notAdmin": "Du bist kein Admin."
@@ -85,7 +87,25 @@
     "resetSuccess": "Dein Passwort wurde aktualisiert. Du kannst dich nun mit dem neuen Passwort anmelden.",
     "resetGoLogin": "Zur Anmeldung",
     "resetInvalidToken": "Dieser Link ist ungültig oder abgelaufen.",
-    "resetPasswordUpdated": "Passwort aktualisiert."
+    "resetPasswordUpdated": "Passwort aktualisiert.",
+    "signInTitle": "Bei deinem Konto anmelden",
+    "createAccountTitle": "Neues Konto erstellen",
+    "noAccountYet": "Noch kein Konto?",
+    "alreadyHaveAccount": "Bereits ein Konto?",
+    "createAccount": "Jetzt erstellen",
+    "logIn": "Anmelden",
+    "signUp": "Registrieren",
+    "loading": "Laden..."
+  },
+  "navbar": {
+    "closeSidebar": "Seitenleiste schließen",
+    "showSidebar": "Seitenleiste anzeigen",
+    "playground": "Playground",
+    "settings": "Einstellungen",
+    "admin": "Admin",
+    "logout": "Abmelden",
+    "closeMenu": "Menü schließen",
+    "openMenu": "Menü öffnen"
   },
   "settings": {
     "changeAvatar": "Avatar ändern",
@@ -115,6 +135,8 @@
       "label": "Gib eine neue E-Mail-Adresse ein; wir senden einen Bestätigungslink dorthin. Beim Bestätigen wirst du auf allen Geräten abgemeldet.",
       "button": "Bestätigung senden",
       "checkInbox": "Prüfe den neuen Posteingang auf den Bestätigungslink.",
+      "confirmPrompt": "Klicke auf die Schaltfläche unten, um deine neue E-Mail-Adresse zu bestätigen.",
+      "confirmButton": "E-Mail-Änderung bestätigen",
       "confirming": "Neue E-Mail wird bestätigt...",
       "confirmedTitle": "E-Mail aktualisiert",
       "confirmedBody": "Deine E-Mail-Adresse wurde geändert. Alle Sitzungen wurden beendet — bitte melde dich mit der neuen E-Mail-Adresse an.",

@@ -1,6 +1,6 @@
 // Prisma schema — recommended User model for LuckyStack's `defaultPrismaUserAdapter`.
-// If your app's User model deviates, write a custom UserAdapter in
-// `luckystack/login/userAdapter.ts` instead of editing the framework.
+// If your app's User model deviates, call `registerUserAdapter()` in
+// `luckystack/server/index.ts` with a custom adapter instead of editing the framework.
 
 generator client {
   provider = "prisma-client-js"

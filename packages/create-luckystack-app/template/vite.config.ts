@@ -1,18 +1,54 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type ProxyOptions } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import tsconfigPaths from 'vite-tsconfig-paths';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
-//? Backend proxy targets are derived from `SERVER_IP` + `SERVER_PORT` in the
-//? consumer's `.env` so a non-default port doesn't need a parallel edit here.
-//? `loadEnv` reads `.env`, `.env.local`, `.env.[mode]`, `.env.[mode].local`
-//? in that order — same precedence the framework uses elsewhere. Ships with
-//? Vite; no extra dep.
+//? The dev backend writes its ACTUALLY-bound port to
+//? `node_modules/.luckystack/dev-server.json` (it may have auto-incremented off
+//? a busy `SERVER_PORT`). Read it so the proxy targets the real port; fall back
+//? to `SERVER_PORT` from `.env` when the file is absent (backend not up yet, or
+//? a production build). Re-read per request via `bypass` (below) so a backend
+//? that hops ports mid-session is followed live.
+const readBackendPort = (fallback: string): string => {
+  try {
+    const raw = fs.readFileSync(
+      path.join(process.cwd(), 'node_modules', '.luckystack', 'dev-server.json'),
+      'utf8',
+    );
+    const info = JSON.parse(raw) as { port?: number };
+    return info.port ? String(info.port) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const ip = env.SERVER_IP || '127.0.0.1';
-  const port = env.SERVER_PORT || '80';
-  const httpTarget = `http://${ip}:${port}`;
-  const wsTarget = `ws://${ip}:${port}`;
+  const envPort = env.SERVER_PORT || '80';
+  const backendTarget = (): string => `http://${ip}:${readBackendPort(envPort)}`;
+
+  //? Vite's proxy (node-http-proxy) has NO `router` option, but `bypass` runs per
+  //? request with the live options object — set `target` there so every proxied
+  //? request hits the CURRENT backend port. socket.io always does an HTTP polling
+  //? handshake before upgrading; that handshake passes through here and mutates
+  //? the shared options object, so the subsequent websocket upgrade (which reuses
+  //? the same object) is carried to the right port too. Returning undefined lets
+  //? the proxy continue as normal.
+  const followBackend = (_req: IncomingMessage, _res: ServerResponse, options: ProxyOptions): undefined => {
+    options.target = backendTarget();
+    return undefined;
+  };
+
+  //? Fresh options object per route (spread) so each entry's `bypass` mutates its
+  //? own `target` and routes never cross-contaminate.
+  const entry = (extra: ProxyOptions = {}): ProxyOptions => ({
+    target: backendTarget(),
+    bypass: followBackend,
+    ...extra,
+  });
 
   return {
     plugins: [
@@ -36,17 +72,18 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       host: true,
       proxy: {
-        // Forward API + sync + auth + uploads + framework dev endpoints
-        // to the backend declared by SERVER_IP/SERVER_PORT.
-        '/api': httpTarget,
-        '/sync': httpTarget,
-        '/auth': httpTarget,
-        '/uploads': httpTarget,
-        '/_health': httpTarget,
-        '/livez': httpTarget,
-        '/readyz': httpTarget,
-        '/_docs': httpTarget,
-        '/socket.io': { target: wsTarget, ws: true },
+        // Forward API + sync + auth + uploads + framework dev endpoints to the
+        // backend declared by SERVER_IP/SERVER_PORT (or its auto-incremented port
+        // advertised in node_modules/.luckystack/dev-server.json).
+        '/api': entry(),
+        '/sync': entry(),
+        '/auth': entry(),
+        '/uploads': entry(),
+        '/_health': entry(),
+        '/livez': entry(),
+        '/readyz': entry(),
+        '/_docs': entry(),
+        '/socket.io': entry({ ws: true }),
       },
     },
   };

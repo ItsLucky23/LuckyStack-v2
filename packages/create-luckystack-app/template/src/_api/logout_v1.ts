@@ -1,5 +1,7 @@
 import { AuthProps, SessionLayout } from '../../config';
-import { Functions, ApiResponse, MaybePromise } from '../_sockets/apiTypes.generated';
+import { Functions, ApiResponse } from '../_sockets/apiTypes.generated';
+
+export const rateLimit: number | false = 30;
 
 export const auth: AuthProps = {
   login: false,
@@ -13,7 +15,10 @@ export interface ApiParams {
   functions: Functions;
 }
 
-export const main = (): MaybePromise<ApiResponse> => {
+export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse> => {
+  if (user?.token) {
+    await functions.tryCatch.tryCatch(() => functions.session.deleteSession(user.token));
+  }
   return {
     status: 'success',
     result: true

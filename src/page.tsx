@@ -25,17 +25,5 @@ export default function App() {
     }
   }, [navigate, session, sessionLoaded]);
 
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      if (!sessionLoaded) {
-        void navigate(loginPageUrl)
-      }
-    }, 1000);
-    return () => {
-      clearTimeout(timeout)
-    }
-  }, [sessionLoaded, navigate])
-
-
   return null;
 }

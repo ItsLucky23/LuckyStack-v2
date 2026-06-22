@@ -44,6 +44,16 @@ export interface ValidationResult {
  *                           explicitly means "val must be undefined".
  *   - `mustBeFalsy: true`  — `isFalsy(val)`.
  *   - `mustBeFalsy: false` — `!isFalsy(val)`.
+ *
+ * **SECURITY CONTRACT**: this function does NOT check `auth.login`. Login
+ * enforcement is the responsibility of the surrounding API/sync handler — it
+ * must verify the session exists before calling `validateRequest`. Callers
+ * that omit the login check will allow unauthenticated requests through the
+ * `additional[]` predicates even when `auth.login: true` is declared, because
+ * `validateRequest` short-circuits to success when `additional` is empty.
+ * The expected call pattern is:
+ *   1. Check session exists (enforce `auth.login`).
+ *   2. Call `validateRequest({ auth, user })` to enforce `auth.additional[]`.
  */
 export const validateRequest = ({
   auth,

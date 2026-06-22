@@ -1,8 +1,7 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as ts from 'typescript';
 import { ROOT_DIR, getGeneratedSocketTypesPath, getSrcDir, validatePagePath } from '@luckystack/core';
 import {
   ROUTE_NAMING_EXAMPLES,
@@ -24,7 +23,7 @@ import {
 
 /**
  * Template Injector
- * 
+ *
  * Injects default templates into new empty files in _api and _sync folders.
  * Handles sync file pairing with context-aware template selection.
  */
@@ -94,6 +93,24 @@ const ensureConsumerTemplateConfigLoaded = (): Promise<void> => {
     for (const fileName of ['templateRules.ts', 'templateRules.mjs', 'templateRules.js']) {
       const rulesFile = path.join(dir, fileName);
       if (!fs.existsSync(rulesFile)) continue;
+
+      //? Safety net: verify the resolved path stays within ROOT_DIR before
+      //? dynamic-importing it. In practice `dir` is always
+      //? `path.join(ROOT_DIR, '.luckystack', 'templates')` (see
+      //? `getConsumerTemplatesDir`), so this check can only fail if ROOT_DIR
+      //? itself is misconfigured or a symlink escapes the tree.
+      const resolvedRulesFile = path.resolve(rulesFile);
+      const resolvedRoot = path.resolve(ROOT_DIR);
+      if (
+        !resolvedRulesFile.startsWith(resolvedRoot + path.sep)
+        && resolvedRulesFile !== resolvedRoot
+      ) {
+        console.warn(
+          `[TemplateInjector] Template rules file resolves outside project root — skipping: ${rulesFile}`,
+        );
+        continue;
+      }
+
       try {
         await import(pathToFileURL(rulesFile).href);
       } catch (error) {
@@ -158,7 +175,7 @@ const isVersionedSyncFile = (filePath: string): boolean => {
 };
 
 const getFileName = (filePath: string): string => {
-  return path.basename(filePath.replace(/\\/g, '/'));
+  return path.basename(filePath.replaceAll('\\', '/'));
 };
 
 const stripTsExtension = (fileName: string): string => {
@@ -216,7 +233,7 @@ const getSyncFilenameReason = (fileName: string): string => {
 };
 
 export const getRouteFilenameValidationMessage = (filePath: string): string | null => {
-  const normalized = filePath.replace(/\\/g, '/');
+  const normalized = filePath.replaceAll('\\', '/');
   const fileName = getFileName(normalized);
 
   if (isInApiFolder(normalized) && !isVersionedApiFile(normalized)) {
@@ -245,7 +262,7 @@ export const getRouteFilenameValidationMessage = (filePath: string): string | nu
 };
 
 const getInvalidVersionMessage = (filePath: string): string => {
-  const validationMessage = getRouteFilenameValidationMessage(filePath) || 'Invalid route filename.';
+  const validationMessage = getRouteFilenameValidationMessage(filePath) ?? 'Invalid route filename.';
   return `// ${validationMessage}\n`;
 };
 
@@ -393,7 +410,7 @@ export const extractClientInputFromFile = (filePath: string): string | null => {
     //? splice into user source.
     if (endIndex === -1) return null;
 
-    return content.substring(startIndex, endIndex + 1);
+    return content.slice(startIndex, endIndex + 1);
   } catch (error) {
     console.error(`[TemplateInjector] Error extracting clientInput from ${filePath}:`, error);
     return null;
@@ -456,7 +473,7 @@ export const extractClientInputFromGeneratedTypes = (pagePath: string, syncName:
     //? Braces never balanced — return null instead of a lone `{` of garbage.
     if (endIndex === -1) return null;
 
-    const extracted = content.substring(braceStart, endIndex + 1);
+    const extracted = content.slice(braceStart, endIndex + 1);
     console.log(`[TemplateInjector] Extracted clientInput types: ${extracted}`);
     return extracted;
   } catch (error) {
@@ -523,40 +540,100 @@ export const calculateRelativePath = (filePath: string): string => {
   return '../'.repeat(segments);
 };
 
+// ---------------------------------------------------------------------------
+// File classification helpers
+// ---------------------------------------------------------------------------
+
+type FileClassification =
+  | { fileKind: 'api'; hasPairedServer: false; srcRelativePath: null }
+  | { fileKind: 'sync_server'; hasPairedServer: false; srcRelativePath: null }
+  | { fileKind: 'sync_client'; hasPairedServer: boolean; srcRelativePath: null }
+  | { fileKind: 'page'; hasPairedServer: false; srcRelativePath: string | null }
+  | null;
+
+/**
+ * Determines the structural file kind and paired-server presence for template selection.
+ * Returns null for files that should not receive a template.
+ */
+const classifyFile = (filePath: string): FileClassification => {
+  if (isInApiFolder(filePath)) {
+    return { fileKind: 'api', hasPairedServer: false, srcRelativePath: null };
+  }
+
+  if (isInSyncFolder(filePath)) {
+    if (isSyncServerFile(filePath)) {
+      return { fileKind: 'sync_server', hasPairedServer: false, srcRelativePath: null };
+    }
+    if (isSyncClientFile(filePath)) {
+      return { fileKind: 'sync_client', hasPairedServer: hasPairedFile(filePath), srcRelativePath: null };
+    }
+    console.log(`[TemplateInjector] Unknown sync file type: ${filePath}`);
+    return null;
+  }
+
+  if (isPageFile(filePath)) {
+    return { fileKind: 'page', hasPairedServer: false, srcRelativePath: computeSrcRelativePath(filePath) };
+  }
+
+  return null;
+};
+
+/**
+ * Validates page placement for a classified page file.
+ * Returns the placement-warning content when the page is un-routable, null when valid.
+ */
+const checkPagePlacement = (filePath: string, srcRelativePath: string | null): string | null => {
+  if (srcRelativePath === null) return null;
+  const placement = validatePagePath(srcRelativePath);
+  if (!placement.valid) {
+    return getInvalidPagePlacementMessage(filePath, placement.reason ?? 'invalid placement', srcRelativePath);
+  }
+  return null;
+};
+
+/**
+ * Substitutes `{{REL_PATH}}`, `{{PAGE_PATH}}`, and `{{SYNC_NAME}}` placeholders
+ * in a raw template string. Also strips `@ts-ignore`/`@ts-expect-error` pragma
+ * lines that guard `{{REL_PATH}}` imports in built-in templates.
+ */
+const applyTemplatePlaceholders = (
+  content: string,
+  filePath: string,
+  fileKind: TemplateMatchContext['fileKind'],
+): string => {
+  const relPath = calculateRelativePath(filePath);
+  const pragmaPattern = /\/\/\s*@ts-(?:ignore|expect-error).*\r?\n(.*)\{\{REL_PATH\}\}/g;
+  let result = content.replaceAll(pragmaPattern, (_, prefix) => `${prefix}${relPath}`);
+  result = result.replaceAll('{{REL_PATH}}', relPath);
+
+  //? Sync templates may carry PAGE_PATH / SYNC_NAME placeholders (paired client
+  //? + server). Substitute for any sync file — a no-op when the placeholders
+  //? are absent (e.g. standalone client).
+  if (fileKind === 'sync_client' || fileKind === 'sync_server') {
+    const pagePath = extractSyncPagePath(filePath);
+    const syncName = extractSyncName(filePath);
+    result = result.replaceAll('{{PAGE_PATH}}', pagePath);
+    result = result.replaceAll('{{SYNC_NAME}}', syncName);
+  }
+
+  return result;
+};
+
 const getTemplate = (filePath: string): string | null => {
   //? Classify the file structurally; the registered selection RULES then decide
   //? the kind (consumer-editable via `.luckystack/templates/templateRules.ts`).
-  let fileKind: TemplateMatchContext['fileKind'];
-  let hasPairedServer = false;
-  let srcRelativePath: string | null = null;
+  const classification = classifyFile(filePath);
+  if (!classification) return null;
 
-  if (isInApiFolder(filePath)) {
-    fileKind = 'api';
-  } else if (isInSyncFolder(filePath)) {
-    if (isSyncServerFile(filePath)) {
-      fileKind = 'sync_server';
-    } else if (isSyncClientFile(filePath)) {
-      fileKind = 'sync_client';
-      hasPairedServer = hasPairedFile(filePath);
-    } else {
-      console.log(`[TemplateInjector] Unknown sync file type: ${filePath}`);
-      return null;
-    }
-  } else if (isPageFile(filePath)) {
-    fileKind = 'page';
-    //? Validate placement BEFORE rule selection. A page inside a reserved
-    //? framework folder (`_api`, `_sync`, ...) or with no URL segment left
-    //? after stripping invisible-parent folders is silently un-routed — so we
-    //? emit a commented diagnostic instead of a dead plain/dashboard skeleton.
-    srcRelativePath = computeSrcRelativePath(filePath);
-    if (srcRelativePath !== null) {
-      const placement = validatePagePath(srcRelativePath);
-      if (!placement.valid) {
-        return getInvalidPagePlacementMessage(filePath, placement.reason ?? 'invalid placement', srcRelativePath);
-      }
-    }
-  } else {
-    return null;
+  const { fileKind, hasPairedServer, srcRelativePath } = classification;
+
+  //? Validate page placement BEFORE rule selection. A page inside a reserved
+  //? framework folder (`_api`, `_sync`, ...) or with no URL segment left
+  //? after stripping invisible-parent folders is silently un-routed — so we
+  //? emit a commented diagnostic instead of a dead plain/dashboard skeleton.
+  if (fileKind === 'page') {
+    const placementWarning = checkPagePlacement(filePath, srcRelativePath);
+    if (placementWarning !== null) return placementWarning;
   }
 
   const ctx: TemplateMatchContext = { filePath, fileKind, hasPairedServer, srcRelativePath };
@@ -566,37 +643,17 @@ const getTemplate = (filePath: string): string | null => {
     return null;
   }
 
-  let content = resolveTemplateContent(templateKind);
-  if (content === null) return null;
+  const rawContent = resolveTemplateContent(templateKind);
+  if (rawContent === null) return null;
 
-  //? Replace path placeholders. Matches BOTH `//@ts-ignore` and
-  //? `// @ts-expect-error` pragma lines (templates use either); the pragma + the
-  //? import line's `{{REL_PATH}}` are replaced together so the result is valid
-  //? TS without the pragma. A literal fallback covers consumer templates that
-  //? omit the pragma.
-  const relPath = calculateRelativePath(filePath);
-  const pragmaPattern = /\/\/\s*@ts-(?:ignore|expect-error).*\r?\n(.*)\{\{REL_PATH\}\}/g;
-  content = content.replaceAll(pragmaPattern, (_, prefix) => `${prefix}${relPath}`);
-  content = content.replaceAll('{{REL_PATH}}', relPath);
-
-  //? Sync templates may carry PAGE_PATH / SYNC_NAME placeholders (paired client
-  //? + server). Substitute for any sync file — a no-op when the placeholders
-  //? are absent (e.g. standalone client).
-  if (fileKind === 'sync_client' || fileKind === 'sync_server') {
-    const pagePath = extractSyncPagePath(filePath);
-    const syncName = extractSyncName(filePath);
-    content = content.replaceAll('{{PAGE_PATH}}', pagePath);
-    content = content.replaceAll('{{SYNC_NAME}}', syncName);
-  }
-
-  return content;
+  return applyTemplatePlaceholders(rawContent, filePath, fileKind);
 };
 
 export const injectTemplate = async (filePath: string): Promise<boolean> => {
   await ensureConsumerTemplateConfigLoaded();
 
   if (getRouteFilenameValidationMessage(filePath)) {
-    fs.writeFileSync(filePath, getInvalidVersionMessage(filePath), 'utf-8');
+    fs.writeFileSync(filePath, getInvalidVersionMessage(filePath), 'utf8');
     console.log(`[TemplateInjector] Invalid route filename, injected guidance: ${filePath}`);
     return true;
   }
@@ -608,7 +665,7 @@ export const injectTemplate = async (filePath: string): Promise<boolean> => {
   }
 
   try {
-    fs.writeFileSync(filePath, template, 'utf-8');
+    fs.writeFileSync(filePath, template, 'utf8');
     console.log(`[TemplateInjector] Injected template into: ${filePath}`);
     return true;
   } catch (error) {
@@ -626,7 +683,7 @@ export const shouldInjectTemplate = (
   //? injection entirely. Useful for files the consumer manages by hand
   //? (e.g. a generated migrations tree).
   const { disableTemplateInjection } = getRoutingRules();
-  if (disableTemplateInjection && disableTemplateInjection(filePath)) {
+  if (disableTemplateInjection?.(filePath)) {
     return false;
   }
 
@@ -648,80 +705,221 @@ export const shouldInjectTemplate = (
   return false;
 };
 
+// ---------------------------------------------------------------------------
+// Paired-client rewrite helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Ensures `SyncClientInput` and `SyncServerOutput` are imported from the
+ * generated types file. Prepends a new import line when the single-line
+ * regex misses multi-line or namespace variants.
+ */
+const ensureImportedTypes = (content: string, clientFilePath: string): string => {
+  if (content.includes('SyncClientInput')) return content;
+
+  let result = content.replace(
+    /import \{([^}]+)\} from ['"]([^'"]*apiTypes\.generated)['"]/,
+    (_match, imports: string, importPath: string) => {
+      return `import {${imports}, SyncClientInput, SyncServerOutput } from '${importPath}'`;
+    }
+  );
+
+  //? Safety net: the single-line regex above misses multi-line, `type`-only,
+  //? or namespace imports. When it misses, prepend a fresh import so the
+  //? rewritten `clientInput`/`serverOutput` references always resolve.
+  if (!result.includes('SyncClientInput')) {
+    const relPath = calculateRelativePath(clientFilePath);
+    result = `import { SyncClientInput, SyncServerOutput } from '${relPath}src/_sockets/apiTypes.generated';\n` + result;
+  }
+
+  return result;
+};
+
+/**
+ * Inserts `PagePath` and `SyncName` type aliases after the last import
+ * statement, when they are not already present.
+ */
+const insertTypeAliases = (content: string, pagePath: string, syncName: string): string => {
+  if (content.includes('type PagePath')) return content;
+
+  const importEndMatch = content.match(/import .+?;[\r\n]+/g);
+  if (!importEndMatch) return content;
+
+  const lastImport = importEndMatch.at(-1);
+  if (!lastImport) return content;
+
+  const lastImportEnd = content.lastIndexOf(lastImport) + lastImport.length;
+  const typeAliases = `\n// Types are imported from the generated file based on the _server.ts definition\ntype PagePath = '${pagePath}';\ntype SyncName = '${syncName}';\n`;
+  return content.slice(0, lastImportEnd) + typeAliases + content.slice(lastImportEnd);
+};
+
+/**
+ * Regex fallback: replaces the inline `clientInput: { ... }` type block with
+ * the generated type reference `SyncClientInput<PagePath, SyncName>`.
+ * Only handles single-line object types; multi-line types require the AST path.
+ */
+const rewriteClientInputType = (content: string): string => {
+  return content.replace(
+    /^(\s*)clientInput:\s*\{[^}]*\}/m,
+    '$1clientInput: SyncClientInput<PagePath, SyncName>'
+  );
+};
+
+/**
+ * Replaces the `clientInput` property type in the `SyncParams` interface using
+ * the TypeScript AST. Locates the `clientInput` `PropertySignature` inside
+ * `SyncParams` via the parser, extracts its type node's source span, and
+ * performs a targeted character-position replacement — preserving the rest of
+ * the source text verbatim (whitespace, comments, etc.).
+ *
+ * Returns the rewritten source on success, or `null` when:
+ * - the file cannot be parsed
+ * - `SyncParams` or `clientInput` is not found
+ * - the existing type is not a `TypeLiteralNode` (already migrated → skip)
+ * - the re-parsed result still contains a type literal (rewrite did not take)
+ *
+ * Callers must leave the file untouched and log the failure when `null` is
+ * returned.
+ */
+const rewriteClientInputTypeAst = (content: string, sourceFileName: string): string | null => {
+  // Parse to an AST (syntactic only — no type-checker needed).
+  const parseSource = (src: string) =>
+    ts.createSourceFile(
+      sourceFileName,
+      src,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ true,
+      ts.ScriptKind.TS,
+    );
+
+  const sourceFile = parseSource(content);
+
+  // Locate `SyncParams` interface.
+  let syncParamsInterface: ts.InterfaceDeclaration | undefined;
+  for (const stmt of sourceFile.statements) {
+    if (ts.isInterfaceDeclaration(stmt) && stmt.name.text === 'SyncParams') {
+      syncParamsInterface = stmt;
+      break;
+    }
+  }
+
+  if (!syncParamsInterface) return null;
+
+  // Locate `clientInput` property signature.
+  let clientInputMember: ts.PropertySignature | undefined;
+  for (const member of syncParamsInterface.members) {
+    if (
+      ts.isPropertySignature(member)
+      && ts.isIdentifier(member.name)
+      && member.name.text === 'clientInput'
+    ) {
+      clientInputMember = member;
+      break;
+    }
+  }
+
+  if (!clientInputMember?.type) return null;
+
+  //? Only replace object-literal type nodes ( `{ ... }` ) — already-migrated
+  //? files that carry `SyncClientInput<PagePath, SyncName>` are left untouched.
+  if (!ts.isTypeLiteralNode(clientInputMember.type)) return null;
+
+  // Use the type node's AST span for a targeted position replacement so the
+  // rest of the file's whitespace and comments are preserved verbatim.
+  const typeNode = clientInputMember.type;
+  const start = typeNode.getStart(sourceFile);
+  const end = typeNode.getEnd();
+
+  const rewritten = `${content.slice(0, start)}SyncClientInput<PagePath, SyncName>${content.slice(end)}`;
+
+  // Re-parse the rewritten source to verify it is syntactically valid before
+  // handing it back to the caller (who will write it to disk).
+  // Use a throw-away single-file program so we can call the public
+  // `getSyntacticDiagnostics` API (instead of the private `parseDiagnostics`).
+  const reparsedFile = parseSource(rewritten);
+  const verifyProgram = ts.createProgram({
+    rootNames: [sourceFileName],
+    options: { noResolve: true, skipLibCheck: true },
+    // Supply the in-memory source so `ts.createProgram` never touches the disk.
+    host: {
+      ...ts.createCompilerHost({}),
+      getSourceFile: (name) => (name === sourceFileName ? reparsedFile : undefined),
+      fileExists: (name) => name === sourceFileName,
+      readFile: (name) => (name === sourceFileName ? rewritten : undefined),
+    },
+  });
+  const syntaxErrors = verifyProgram.getSyntacticDiagnostics(reparsedFile);
+  if (syntaxErrors.length > 0) {
+    console.log(
+      `[TemplateInjector] AST rewrite produced invalid TypeScript for ${sourceFileName} — leaving untouched`,
+      'yellow',
+    );
+    return null;
+  }
+
+  return rewritten;
+};
+
+/**
+ * Adds `serverOutput: SyncServerOutput<PagePath, SyncName>` to the SyncParams
+ * interface when not already present.
+ */
+const addServerOutputToParams = (content: string): string => {
+  if (content.includes('serverOutput:')) return content;
+  return content.replace(
+    /^(\s*)(clientInput:\s*SyncClientInput<PagePath, SyncName>);?\s*$/m,
+    '$1$2;\n$1serverOutput: SyncServerOutput<PagePath, SyncName>;'
+  );
+};
+
+/**
+ * Adds `serverOutput` to the main function destructuring when not already present.
+ */
+const addServerOutputToDestructuring = (content: string): string => {
+  if (!content.includes('main') || /\{\s*[^}]*serverOutput[^}]*\}\s*:\s*SyncParams/.test(content)) {
+    return content;
+  }
+  return content.replace(
+    /\{\s*([^}]*?clientInput)([^}]*)\}\s*:\s*SyncParams/,
+    '{ $1, serverOutput$2 }: SyncParams'
+  );
+};
+
 /**
  * Update a client file to use the paired template (imports types from generated file)
  * Called when a _server.ts is created and _client.ts already exists
  * PRESERVES user's main function code!
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- async signature keeps the public interface awaitable for future I/O expansion
 export const updateClientFileForPairedServer = async (clientFilePath: string): Promise<boolean> => {
   try {
     const pagePath = extractSyncPagePath(clientFilePath);
     const syncName = extractSyncName(clientFilePath);
 
-    // Read the existing client file (preserve user's code)
     let content = fs.readFileSync(clientFilePath, 'utf8');
 
-    // Update imports: add SyncClientInput, SyncServerOutput if not present
-    if (!content.includes('SyncClientInput')) {
-      content = content.replace(
-        /import \{([^}]+)\} from ['"]([^'"]*apiTypes\.generated)['"]/,
-        (_match, imports: string, importPath: string) => {
-          return `import {${imports}, SyncClientInput, SyncServerOutput } from '${importPath}'`;
-        }
+    content = ensureImportedTypes(content, clientFilePath);
+    content = insertTypeAliases(content, pagePath, syncName);
+
+    // Prefer AST-based rewrite (type-aware, handles multi-line object types).
+    // Fall back to the regex path only when the AST cannot locate the node
+    // (e.g. non-standard structure) so the most common cases always benefit
+    // from the precise position replacement.
+    const astResult = rewriteClientInputTypeAst(content, path.basename(clientFilePath));
+    if (astResult === null) {
+      console.log(
+        `[TemplateInjector] AST clientInput rewrite unavailable for ${clientFilePath} — using regex fallback`,
+        'yellow',
       );
+      content = rewriteClientInputType(content);
+    } else {
+      content = astResult;
     }
 
-    //? Safety net for the import-merge above: the single-line `import { ... }`
-    //? regex misses multi-line, `type`-only, or namespace imports of the
-    //? generated file. When it misses, `clientInput`/`serverOutput` are still
-    //? rewritten below to reference `SyncClientInput`/`SyncServerOutput`,
-    //? injecting an unresolved-symbol COMPILE ERROR into the user's source. If
-    //? the symbols are STILL absent, prepend a fresh import so the rewritten
-    //? references always resolve (same target as the sync_client template's
-    //? `{{REL_PATH}}src/_sockets/apiTypes.generated` import).
-    if (!content.includes('SyncClientInput')) {
-      const relPath = calculateRelativePath(clientFilePath);
-      content = `import { SyncClientInput, SyncServerOutput } from '${relPath}src/_sockets/apiTypes.generated';\n` + content;
-    }
+    content = addServerOutputToParams(content);
+    content = addServerOutputToDestructuring(content);
 
-    // Add type aliases after imports if not present
-    if (!content.includes('type PagePath')) {
-      const importEndMatch = content.match(/import .+?;[\r\n]+/g);
-      if (importEndMatch) {
-        const lastImport = importEndMatch.at(-1);
-        if (!lastImport) {
-          return false;
-        }
-
-        const lastImportEnd = content.lastIndexOf(lastImport) + lastImport.length;
-        const typeAliases = `\n// Types are imported from the generated file based on the _server.ts definition\ntype PagePath = '${pagePath}';\ntype SyncName = '${syncName}';\n`;
-        content = content.slice(0, lastImportEnd) + typeAliases + content.slice(lastImportEnd);
-      }
-    }
-
-    // Replace clientInput type with imported type (preserve indentation)
-    content = content.replace(
-      /^(\s*)clientInput:\s*\{[^}]*\}/m,
-      '$1clientInput: SyncClientInput<PagePath, SyncName>'
-    );
-
-    // Add serverOutput if not present (after clientInput in SyncParams, with matching indentation)
-    if (!content.includes('serverOutput:')) {
-      content = content.replace(
-        /^(\s*)(clientInput:\s*SyncClientInput<PagePath, SyncName>);?\s*$/m,
-        '$1$2;\n$1serverOutput: SyncServerOutput<PagePath, SyncName>;'
-      );
-    }
-
-    // Add serverOutput to main function destructuring if not present
-    if (content.includes('main') && !/\{\s*[^}]*serverOutput[^}]*\}\s*:\s*SyncParams/.test(content)) {
-      content = content.replace(
-        /\{\s*([^}]*?clientInput)([^}]*)\}\s*:\s*SyncParams/,
-        '{ $1, serverOutput$2 }: SyncParams'
-      );
-    }
-
-    fs.writeFileSync(clientFilePath, content, 'utf-8');
+    fs.writeFileSync(clientFilePath, content, 'utf8');
     console.log(`[TemplateInjector] Updated client file to use paired types (preserved code): ${clientFilePath}`);
     return true;
   } catch (error) {
@@ -730,64 +928,89 @@ export const updateClientFileForPairedServer = async (clientFilePath: string): P
   }
 };
 
+// ---------------------------------------------------------------------------
+// Deleted-server cleanup helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Replaces the `clientInput` type (either a generated reference or an inline block)
+ * with the supplied inline type block.
+ */
+const inlineClientInputType = (content: string, clientInputTypes: string): string => {
+  // Use replacer functions so `$`-sequences in `clientInputTypes` (Prisma `$Enums.Role`,
+  // template-literal `${...}` types) are spliced verbatim, not re-interpreted as backrefs.
+  return content
+    .replace(
+      /^(\s*)clientInput:\s*SyncClientInput<[^>]+>/m,
+      (_match, indent: string) => `${indent}clientInput: ${clientInputTypes}`
+    )
+    .replace(
+      /^(\s*)clientInput:\s*\{[^}]*\}/m,
+      (_match, indent: string) => `${indent}clientInput: ${clientInputTypes}`
+    );
+};
+
+/**
+ * Removes `serverOutput` lines from the SyncParams interface body.
+ */
+const removeServerOutputFromParams = (content: string): string => {
+  return content
+    .replace(/^[ \t]*serverOutput:\s*SyncServerOutput<[^>]+>;?\s*\r?\n?/m, '')
+    .replace(/^[ \t]*serverOutput:\s*\{[^}]*\};?\s*\r?\n?/m, '');
+};
+
+/**
+ * Removes `serverOutput` from the main function destructuring.
+ */
+const removeServerOutputFromDestructuring = (content: string): string => {
+  return content
+    .replaceAll(/,\s*serverOutput(?=\s*[,}])/g, '')
+    .replaceAll(/serverOutput\s*,\s*/g, '');
+};
+
+/**
+ * Strips `SyncClientInput` and `SyncServerOutput` from import statements.
+ */
+const removeGeneratedTypeImports = (content: string): string => {
+  return content
+    .replaceAll(/,\s*SyncClientInput(?=\s*[,}])/g, '')
+    .replaceAll(/,\s*SyncServerOutput(?=\s*[,}])/g, '');
+};
+
+/**
+ * Removes the injected `PagePath` / `SyncName` type alias comment and declarations.
+ */
+const removeTypeAliases = (content: string): string => {
+  let result = content.replaceAll(/\/\/\s*Types are imported.*\n?/g, '');
+  result = result.replaceAll(/type PagePath = '[^']*';\s*\n?/g, '');
+  return result.replaceAll(/type SyncName = '[^']*';\s*\n?/g, '');
+};
+
 /**
  * Update a client file when the paired server file is deleted
  * Preserves user's main function code while:
  * - Inlining clientInput types
  * - Removing serverOutput from SyncParams and main function params
  */
+/* eslint-disable @typescript-eslint/require-await -- async signature keeps the public interface awaitable for future I/O expansion */
 export const updateClientFileForDeletedServer = async (
   clientFilePath: string,
   clientInputTypes: string
 ): Promise<boolean> => {
   try {
-    // Read the existing client file (preserve user's code)
     let content = fs.readFileSync(clientFilePath, 'utf8');
 
-    // STEP 1: Replace clientInput type declaration FIRST (before removing imports)
-    // Pattern matches: clientInput: SyncClientInput<...> or clientInput: { ... }
-    // Preserve leading indentation. Use a REPLACER FUNCTION (not a replacement
-    // string) so `$`-sequences in `clientInputTypes` — Prisma `$Enums.Role`,
-    // template-literal `${...}` types — are spliced VERBATIM instead of being
-    // re-interpreted by `String.replace` as `$1`/`$&` backreferences.
-    content = content.replace(
-      /^(\s*)clientInput:\s*SyncClientInput<[^>]+>/m,
-      (_match, indent: string) => `${indent}clientInput: ${clientInputTypes}`
-    );
-    content = content.replace(
-      /^(\s*)clientInput:\s*\{[^}]*\}/m,
-      (_match, indent: string) => `${indent}clientInput: ${clientInputTypes}`
-    );
+    // Order matters: replace type references BEFORE removing imports/aliases.
+    content = inlineClientInputType(content, clientInputTypes);
+    content = removeServerOutputFromParams(content);
+    content = removeServerOutputFromDestructuring(content);
+    content = removeGeneratedTypeImports(content);
+    content = removeTypeAliases(content);
 
-    // STEP 2: Remove serverOutput line from SyncParams interface FIRST
-    // Pattern: serverOutput: SyncServerOutput<...>; or serverOutput: { ... };
-    // Remove entire line including its indentation
-    content = content.replace(
-      /^[ \t]*serverOutput:\s*SyncServerOutput<[^>]+>;?\s*\r?\n?/m,
-      ''
-    );
-    content = content.replace(
-      /^[ \t]*serverOutput:\s*\{[^}]*\};?\s*\r?\n?/m,
-      ''
-    );
-
-    // STEP 3: Remove serverOutput from main function destructuring
-    content = content.replaceAll(/,\s*serverOutput(?=\s*[,}])/g, '');
-    content = content.replaceAll(/serverOutput\s*,\s*/g, '');
-
-    // STEP 4: NOW clean up imports (after type declarations are replaced)
-    content = content.replaceAll(/,\s*SyncClientInput(?=\s*[,}])/g, '');
-    content = content.replaceAll(/,\s*SyncServerOutput(?=\s*[,}])/g, '');
-
-    // STEP 5: Remove type aliases if present
-    content = content.replaceAll(/\/\/\s*Types are imported.*\n?/g, '');
-    content = content.replaceAll(/type PagePath = '[^']*';\s*\n?/g, '');
-    content = content.replaceAll(/type SyncName = '[^']*';\s*\n?/g, '');
-
-    // Clean up any double newlines
+    // Collapse runs of 3+ blank lines left by the removals.
     content = content.replaceAll(/\n{3,}/g, '\n\n');
 
-    fs.writeFileSync(clientFilePath, content, 'utf-8');
+    fs.writeFileSync(clientFilePath, content, 'utf8');
     console.log(`[TemplateInjector] Updated client file for deleted server (preserved code): ${clientFilePath}`);
     return true;
   } catch (error) {
@@ -795,6 +1018,7 @@ export const updateClientFileForDeletedServer = async (
     return false;
   }
 };
+/* eslint-enable @typescript-eslint/require-await */
 
 /**
  * Inject server template with pre-filled clientInput types (from existing client file)
@@ -823,13 +1047,16 @@ export const injectServerTemplateWithClientInput = async (
     });
     content = content.replaceAll('{{REL_PATH}}', relPath);
 
-    // Replace the empty clientInput with the provided types
+    // Replace the empty clientInput with the provided types.
+    // Use a replacer function so `$`-sequences in `clientInputTypes`
+    // (Prisma `$Enums.Role`, template-literal `${...}` types) are spliced
+    // verbatim instead of being re-interpreted as backreferences.
     content = content.replace(
       /clientInput:\s*\{[^}]*\}/s,
-      `clientInput: ${clientInputTypes}`
+      (_match) => `clientInput: ${clientInputTypes}`
     );
 
-    fs.writeFileSync(serverFilePath, content, 'utf-8');
+    fs.writeFileSync(serverFilePath, content, 'utf8');
     console.log(`[TemplateInjector] Injected server template with clientInput: ${serverFilePath}`);
     return true;
   } catch (error) {
@@ -837,4 +1064,3 @@ export const injectServerTemplateWithClientInput = async (
     return false;
   }
 };
-

@@ -13,7 +13,8 @@ interface SeamState {
   projectConfig: {
     logging: { devLogs: boolean; stream: boolean };
     dev: { warnOnMissingInputType: boolean };
-    rateLimiting: { defaultApiLimit: number | false; defaultIpLimit: number | false; windowMs: number };
+    rateLimiting: { defaultApiLimit: number | false; defaultIpLimit: number | false; windowMs: number; skipLoopbackInDev: boolean };
+    api: { requestTimeoutMs: number | false };
   };
   session: { id: string; language?: string } | null;
   apisObject: Record<string, unknown>;
@@ -32,7 +33,8 @@ const seam: SeamState = {
   projectConfig: {
     logging: { devLogs: false, stream: false },
     dev: { warnOnMissingInputType: false },
-    rateLimiting: { defaultApiLimit: false, defaultIpLimit: false, windowMs: 60_000 },
+    rateLimiting: { defaultApiLimit: false, defaultIpLimit: false, windowMs: 60_000, skipLoopbackInDev: false },
+    api: { requestTimeoutMs: false },
   },
   session: { id: 'user-1' },
   apisObject: {},
@@ -54,10 +56,6 @@ const validateRequestMock = vi.fn((_args?: unknown) => seam.validateRequestResul
 const inferHttpMethodMock = vi.fn((_name?: string) => seam.inferredMethod);
 const validateInputByTypeMock = vi.fn(() => Promise.resolve(seam.inputValidation));
 const getSessionMock = vi.fn((_token?: string | null) => Promise.resolve(seam.session));
-
-vi.mock('@luckystack/login', () => ({
-  getSession: (token: string | null) => getSessionMock(token),
-}));
 
 vi.mock('@luckystack/core', () => ({
   getProjectConfig: () => seam.projectConfig,
@@ -109,6 +107,18 @@ vi.mock('@luckystack/core', () => ({
   //? Identity formatter — pass the envelope through untouched so tests can
   //? assert on the api package's own envelope assembly.
   applyErrorFormatter: ({ response }: { response: unknown }) => response,
+  //? API-O9: resolves the effective client IP for rate-limit keying.
+  //? Returns a fixed sentinel so tests that supply `requesterIp` use that value
+  //? while tests without one get a deterministic fallback.
+  resolveClientIp: ({ rawAddress }: { rawAddress?: string; headers?: Record<string, unknown> }) =>
+    rawAddress ?? '203.0.113.1',
+  //? API-O2: loopback detection used to optionally skip the global IP bucket.
+  //? Always returns false in tests so the bucket logic runs normally.
+  isLoopbackIp: (_ip: string) => false,
+  //? Faithful stub: derives the token's rate-limit bucket id via SHA-256 hash,
+  //? matching the real implementation so the N-3 hash-key test can assert on it.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- mock factory cannot import from outer scope
+  deriveTokenBucketId: (token: string) => require('node:crypto').createHash('sha256').update(token).digest('hex').slice(0, 32),
 }));
 
 //? Imported AFTER the mocks are registered so the handler binds to them.
@@ -132,7 +142,8 @@ beforeEach(() => {
   seam.projectConfig = {
     logging: { devLogs: false, stream: false },
     dev: { warnOnMissingInputType: false },
-    rateLimiting: { defaultApiLimit: false, defaultIpLimit: false, windowMs: 60_000 },
+    rateLimiting: { defaultApiLimit: false, defaultIpLimit: false, windowMs: 60_000, skipLoopbackInDev: false },
+    api: { requestTimeoutMs: false },
   };
   seam.session = { id: 'user-1' };
   seam.apisObject = {};

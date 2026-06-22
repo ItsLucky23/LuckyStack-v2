@@ -19,6 +19,11 @@ import '../deploy.config';
 import '../services.config';
 import './utils/responseNormalizer';
 
+// Validate topology invariants at boot so that a `deploy.config.ts` edit
+// without re-running `generateArtifacts` is caught early, not silently ignored.
+import { loadResolvedConfig, validateResolvedConfig } from './config/presetLoader';
+validateResolvedConfig(loadResolvedConfig());
+
 import { initializeSentry } from '../functions/sentry';
 import { registerSentryConfig } from '@luckystack/error-tracking';
 import { bootstrapLuckyStack } from '@luckystack/server';

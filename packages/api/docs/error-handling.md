@@ -38,10 +38,9 @@ const executeApiHandler = async (params: {
 
 **Behavior**:
 
-- Starts a Sentry span via `startSpan(name, 'api.request')`. The HTTP variant uses `'api.request.http'`.
 - Calls `apiEntry.main({ data, user, functions, stream })` inside `tryCatch(..., undefined, { handler, api, userId, transport })`.
 - The third argument to `tryCatch` is the auto-capture context — recorded on the registered error tracker alongside the exception.
-- `span.end()` is called unconditionally after `main` resolves or rejects.
+- Span open/close is handled by hook subscribers in `@luckystack/error-tracking` (registered on `preApiExecute` / `postApiExecute`) — NOT by a direct `startSpan` call here.
 - Returns `{ error, result, durationMs }`. Caller decides what to do with each.
 
 The HTTP transport has no extracted helper — the same flow is inlined.
@@ -132,12 +131,12 @@ function defaultHttpStatusForResponse(params: {
 
 **Behavior**: returns `explicitHttpStatus` when present; otherwise `200` for `'success'` and `500` for `'error'`. The handler's per-response `httpStatus` (set inside `main`) always wins.
 
-### `setSentryUser` + `startSpan` (from `@luckystack/error-tracking`)
+### Error-tracker identity + tracing spans (hook-based, via `@luckystack/error-tracking`)
 
-Called early in each handler:
+These are no longer direct calls inside the handler. As of 0.2.x:
 
-- `setSentryUser({ id, email })` attributes every subsequent capture (within this request's call stack) to the user. Cleared with `setSentryUser(null)` between requests by virtue of being called per-request.
-- `startSpan(name, op)` opens a tracing span. The returned object exposes `.end()` (sometimes — depends on adapter). Both transports defensively call `span?.end?.()` to support adapters that don't implement spans.
+- **Identity**: `setCurrentErrorTrackerIdentity({ id, email, username })` is called immediately after `readSession` to populate the per-request ALS scope opened by `runWithErrorTrackerIdentityScope`. Hook subscribers registered by `@luckystack/error-tracking` (on `preApiValidate` or `preApiExecute`) read this scope and forward it to the underlying tracker (Sentry, Datadog, etc.) — there is no direct `setSentryUser` call in the handler.
+- **Spans**: tracing spans are opened and closed by hook subscribers registered on `preApiExecute` / `postApiExecute`. The handler no longer calls `startSpan` or `span.end()` directly. This decouples the transport from the instrumentation library.
 
 ## Framework-emitted error codes
 

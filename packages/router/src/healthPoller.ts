@@ -1,4 +1,4 @@
-import { tryCatch } from '@luckystack/core';
+import { tryCatch, tryCatchSync } from '@luckystack/core';
 import type { ServiceTargetResolver } from './resolveTarget';
 import { getHealthyStatusPredicate } from './healthConfig';
 
@@ -76,8 +76,17 @@ export const startHealthPoller = ({
     .filter((service) => Boolean(localBindings[service]));
 
   const checkService = async (service: string): Promise<void> => {
-    const url = localBindings[service];
-    if (!url) return;
+    const rawUrl = localBindings[service];
+    if (!rawUrl) return;
+    //? Strip any path from the binding URL — only probe the origin.
+    //? Binding URLs may include a path component that was intended for routing;
+    //? probing the full path could poll an arbitrary internal endpoint. Using
+    //? `new URL(rawUrl).origin` always probes `<scheme>://<host>:<port>/` only.
+    //? `assertBindingsHaveExplicitPorts` already guarantees `rawUrl` is a valid
+    //? URL with an explicit port, so this parse cannot fail in practice. The
+    //? tryCatchSync guard handles any malformed override passed via tests.
+    const [urlError, parsed] = tryCatchSync(() => new URL(rawUrl));
+    const url = urlError || !parsed ? rawUrl : parsed.origin;
     const healthy = await probeTarget(url, healthyStatus);
     const previous = resolver.getLocalHealth(service);
     if (healthy !== previous) {

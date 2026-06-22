@@ -60,7 +60,7 @@ export function ConfirmMenu({ title, content, input, resolve }: ConfirmMenuProps
         <button
           type="submit"
           disabled={inputRequiredAndInvalid}
-          className={`h-9 px-4 rounded-md text-white text-sm font-semibold transition-colors
+          className={`h-9 px-4 rounded-md text-title-primary text-sm font-semibold transition-colors
             ${inputRequiredAndInvalid
               ? 'bg-primary/50 cursor-not-allowed'
               : 'bg-primary hover:bg-primary-hover cursor-pointer'

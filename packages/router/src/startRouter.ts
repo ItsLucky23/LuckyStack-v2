@@ -14,10 +14,13 @@ type EnvironmentDefinition = DeployEnvironmentShape;
 
 //? Slow-loris hardening for the listening HTTP server (internet-facing edge).
 //? `headersTimeout` reaps a client dribbling request headers; `keepAliveTimeout`
-//? reaps an idle kept-alive connection. Built-in (not a deploy-config knob) to
-//? keep the change inside this package.
+//? reaps an idle kept-alive connection; `requestTimeout` reaps a client that
+//? finishes headers but never completes the body (the remaining slow-loris
+//? surface). Built-in (not a deploy-config knob) to keep the change inside
+//? this package.
 const ROUTER_HEADERS_TIMEOUT_MS = 60_000;
 const ROUTER_KEEP_ALIVE_TIMEOUT_MS = 5000;
+const ROUTER_REQUEST_TIMEOUT_MS = 300_000;
 
 /**
  * Starts the LuckyStack load-balancer backend.
@@ -72,8 +75,17 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   const deployConfig = getDeployConfig();
   const servicesConfig = getServicesConfig();
   const defaultRouterPort = deployConfig.routing?.defaultRouterPort ?? 4000;
-  const port = input.port ?? Number(process.env.ROUTER_PORT ?? defaultRouterPort);
+  const envPort = process.env.ROUTER_PORT === undefined ? undefined : Number(process.env.ROUTER_PORT);
+  if (envPort !== undefined && !Number.isFinite(envPort)) {
+    throw new Error(`[router] ROUTER_PORT env var is not a valid number: "${process.env.ROUTER_PORT}"`);
+  }
+  const port = input.port ?? envPort ?? defaultRouterPort;
   const missingServiceErrorCode = deployConfig.routing?.missingServiceErrorCode ?? 'serviceNotAssigned';
+  //? Honour the deploy-config knob; both proxy factories fall back to their own
+  //? built-in 30 s default when the value is unset (undefined pass-through).
+  const upstreamTimeoutMs = deployConfig.routing?.upstreamTimeoutMs;
+  //? Pass-through: undefined → httpProxy uses its built-in 100 MiB default.
+  const maxRequestBodyBytes = deployConfig.routing?.maxRequestBodyBytes;
 
   const envMap = (deployConfig.environments ?? {}) as Record<string, EnvironmentDefinition | undefined>;
   const currentEnv = envMap[input.currentEnvKey];
@@ -141,8 +153,8 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
     });
   }
 
-  const proxy = createHttpProxy({ resolver, missingServiceErrorCode });
-  const wsProxy = createWsProxy({ resolver });
+  const proxy = createHttpProxy({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs: upstreamTimeoutMs, maxRequestBodyBytes });
+  const wsProxy = createWsProxy({ resolver, upstreamHandshakeTimeoutMs: upstreamTimeoutMs });
   const server = http.createServer(proxy);
 
   //? Slow-loris / idle-hold hardening for an internet-facing edge. Node's `http`
@@ -151,6 +163,7 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   //? connection is reaped instead of pinning a router worker indefinitely.
   server.headersTimeout = ROUTER_HEADERS_TIMEOUT_MS;
   server.keepAliveTimeout = ROUTER_KEEP_ALIVE_TIMEOUT_MS;
+  server.requestTimeout = ROUTER_REQUEST_TIMEOUT_MS;
 
   server.on('upgrade', wsProxy);
 

@@ -31,7 +31,10 @@ export default function ErrorPage() {
     errorMessage = dataMessage ?? STATUS_MESSAGE[error.status] ?? errorMessage;
   } else if (error instanceof Error) {
     errorMessage = error.message || errorMessage;
-    errorDetails = error.stack ?? null;
+    //? Only expose the raw stack in development. In production a render-time
+    //? throw would otherwise leak internal paths / module structure to end
+    //? users (this is wired as the router `errorElement` + `*` catch-all).
+    errorDetails = import.meta.env.DEV ? (error.stack ?? null) : null;
   }
 
   return (
@@ -58,7 +61,7 @@ export default function ErrorPage() {
           </button>
           <Link
             to="/"
-            className="h-9 px-4 flex items-center rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors"
+            className="h-9 px-4 flex items-center rounded-md bg-primary hover:bg-primary-hover text-title-primary text-sm font-medium transition-colors"
           >
             {translate({ key: 'errorPage.home' })}
           </Link>

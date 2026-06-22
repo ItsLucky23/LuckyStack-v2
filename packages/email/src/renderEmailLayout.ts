@@ -4,6 +4,27 @@
 
 import { escapeHtml } from '@luckystack/core';
 
+const ALLOWED_CTA_SCHEMES = new Set(['https:', 'http:']);
+
+//? Validates ctaUrl against a scheme allowlist so javascript:/data: URIs
+//? cannot reach the href attribute. Returns null when the URL is unsafe or
+//? unparseable, suppressing the CTA block entirely (fail-closed).
+const safeCta = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+    if (!ALLOWED_CTA_SCHEMES.has(parsed.protocol)) return null;
+    return escapeHtml(parsed.href);
+  } catch {
+    return null;
+  }
+};
+
+//? Validates accent to a hex color or named CSS color keyword so a
+//? consumer-supplied value cannot break out of the inline style attribute
+//? (e.g. via `; color: red` CSS injection). Falls back to the default blue.
+const safeAccent = (accent: string): string =>
+  /^#[0-9a-fA-F]{3,8}$|^[a-zA-Z]+$/.test(accent) ? accent : '#3B82F6';
+
 export interface RenderEmailLayoutInput {
   /** Email title shown as the H1 heading and (optionally) used by the caller as the subject. */
   title: string;
@@ -44,13 +65,17 @@ export const renderEmailLayout = ({
   const safeFooter = footer ? escapeHtml(footer) : '';
   const safeBrand = brand ? escapeHtml(brand) : '';
   const safeCtaLabel = ctaLabel ? escapeHtml(ctaLabel) : '';
+  const safeAccentValue = safeAccent(accent);
 
-  const ctaBlock = ctaLabel && ctaUrl
+  // Validate ctaUrl scheme so javascript:/data: cannot reach href (EMAIL-O3).
+  const safeCtaHref = ctaUrl ? safeCta(ctaUrl) : null;
+
+  const ctaBlock = ctaLabel && safeCtaHref
     ? `
       <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="left" style="margin:24px 0;">
         <tr>
-          <td style="border-radius:6px;background:${accent};">
-            <a href="${ctaUrl}" target="_blank" style="display:inline-block;padding:10px 18px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">${safeCtaLabel}</a>
+          <td style="border-radius:6px;background:${safeAccentValue};">
+            <a href="${safeCtaHref}" target="_blank" style="display:inline-block;padding:10px 18px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">${safeCtaLabel}</a>
           </td>
         </tr>
       </table>`
@@ -98,7 +123,8 @@ export const renderEmailLayout = ({
   const textParts: string[] = [];
   if (brand) textParts.push(brand);
   textParts.push(title, '', intro);
-  if (ctaLabel && ctaUrl) textParts.push('', `${ctaLabel}: ${ctaUrl}`);
+  // Only include the CTA in plain text when the URL passed the scheme check.
+  if (ctaLabel && safeCtaHref && ctaUrl) textParts.push('', `${ctaLabel}: ${ctaUrl}`);
   if (outro) textParts.push('', outro);
   if (footer) textParts.push('', '---', footer);
 

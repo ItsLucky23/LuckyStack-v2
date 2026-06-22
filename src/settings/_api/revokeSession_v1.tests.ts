@@ -14,7 +14,7 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? or unknown id simply doesn't resolve and yields `session.invalid` (no
 //? `auth.forbidden`, no existence signal that would enable enumeration).
 //?
-//? Test environment runs with `allowMultipleSessions: true` (config.ts dev/
+//? Test environment runs with `sessionPerUser: 'multiple'` (config.ts dev/
 //? localhost env), so two logins for the same user id keep BOTH session tokens
 //? live in Redis — that is how the happy-path case obtains an "other device".
 //?

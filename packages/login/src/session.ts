@@ -53,7 +53,9 @@ const saveSession = async (
   //? / "sign out everywhere". A real authenticated user always has a non-empty
   //? id, so this can only reject a malformed/untrackable session.
   if (!data.id) {
-    getLogger().error('saveSession: refusing to persist a session with an empty user id', { token });
+    //? Log only the first 8 chars of the token (LOGIN-F2) — enough to correlate
+    //? with a specific request in logs/traces without exposing a live credential.
+    getLogger().error('saveSession: refusing to persist a session with an empty user id', { tokenPrefix: token.slice(0, 8) });
     return { ok: false, errorCode: 'api.internalServerError' };
   }
 
@@ -81,14 +83,23 @@ const saveSession = async (
       //? login with a dedicated reason key instead of kicking an existing
       //? session. `'single'` and `'revokeOld'` keep kicking (handled below).
       const cfg = getProjectConfig().session;
-      // eslint-disable-next-line @typescript-eslint/no-deprecated -- BC shim: legacy `allowMultiple` still honored when set
-      const perUser = cfg.allowMultiple ? 'multiple' : cfg.perUser;
+      const perUser = cfg.perUser;
       if (
         perUser === 'multiple' &&
         cfg.onConflict === 'rejectNew' &&
         cfg.maxConcurrentPerUser !== null &&
         data.id
       ) {
+        //? SOFT-CAP (LOGIN-F4): this is a read-then-decide, not an atomic
+        //? reserve, so two concurrent logins for the same user can both pass the
+        //? count check and temporarily exceed `maxConcurrentPerUser` by one.
+        //? A Lua SETNX atomic counter would close the gap, but at the cost of a
+        //? separate primitive and significant complexity. The window is narrowly
+        //? time-bounded (< round-trip latency of two simultaneous logins), the
+        //? worst case is one extra session that cleans up at normal TTL, and
+        //? consumers operating strict caps should keep `maxConcurrentPerUser` at
+        //? a margin that absorbs the race. Documented here so no future change
+        //? re-tightens without understanding the trade-off.
         const existing = await getSessionAdapter().listActive(data.id);
         const others = existing.filter((t) => t !== token && t !== options?.supersedeToken);
         if (others.length + 1 > cfg.maxConcurrentPerUser) {
@@ -130,7 +141,7 @@ const saveSession = async (
     let persisted = data;
     const [sanitizeErr, sanitized] = tryCatchSync(() => applySessionSanitizer(data));
     if (sanitizeErr) {
-      getLogger().error('saveSession: session sanitizer threw — falling back to password-stripped projection', sanitizeErr, { token });
+      getLogger().error('saveSession: session sanitizer threw — falling back to password-stripped projection', sanitizeErr, { tokenPrefix: token.slice(0, 8) });
       const { password: _password, ...safe } = data as SessionLayout & { password?: unknown };
       persisted = safe;
     } else if (sanitized) {
@@ -138,7 +149,13 @@ const saveSession = async (
     }
 
     const ttl = getSessionTtl();
-    await adapter.setRaw(token, JSON.stringify(persisted), ttl);
+    //? Strip `token` from the stored value (LOGIN-M9). The token is the Redis key
+    //? itself, so embedding it in the value is redundant AND means a Redis keyspace
+    //? dump / `getAllSessions` / any admin log that prints a session record exposes
+    //? a live replayable credential. `getSession` re-attaches it from the lookup
+    //? key (`{ ...parsed, token }`) so callers receive the expected shape.
+    const { token: _stripToken, ...persistedWithoutToken } = persisted as SessionLayout & { token?: unknown };
+    await adapter.setRaw(token, JSON.stringify(persistedWithoutToken), ttl);
 
     const userId = data.id;
 
@@ -160,7 +177,7 @@ const saveSession = async (
     if (!io) return { ok: true } as const;
 
     // Handle session-limit enforcement on new login. Logic:
-    //   1. perUser = 'single' (default) OR legacy `allowMultiple: false` →
+    //   1. perUser = 'single' (default) →
     //      kick every prior session for this user.
     //   2. perUser = 'multiple' with `maxConcurrentPerUser` cap reached:
     //      `onConflict === 'revokeOld'` kicks oldest until under cap,
@@ -169,8 +186,7 @@ const saveSession = async (
     //   3. perUser = 'multiple' with no cap → no kick.
     if (newUser && userId) {
       const sessionCfg = getProjectConfig().session;
-      // eslint-disable-next-line @typescript-eslint/no-deprecated -- BC shim: legacy `allowMultiple` still honored when set
-      const effectivePerUser = sessionCfg.allowMultiple ? 'multiple' : sessionCfg.perUser;
+      const effectivePerUser = sessionCfg.perUser;
       const cap = sessionCfg.maxConcurrentPerUser;
 
       const allTokens = await adapter.listActive(userId);
@@ -245,7 +261,7 @@ const saveSession = async (
   }, undefined, { fn: 'saveSession', token });
 
   if (error) {
-    getLogger().error('saveSession failed', error, { token });
+    getLogger().error('saveSession failed', error, { tokenPrefix: token.slice(0, 8) });
     //? Surface the failure instead of swallowing it. Callers (credentials/OAuth
     //? login) MUST NOT mint a token + delete the prior session when the new
     //? session never persisted — a transient adapter blip would otherwise log
@@ -259,9 +275,16 @@ const saveSession = async (
  * Retrieve a user session through the active session adapter.
  *
  * @param token - The session token
+ * @param options.refresh - When false, skip the sliding-expiration TTL
+ *   extension. Defaults to true. Pass false for read-only probes (e.g. a
+ *   background audit, an admin lookup) where a stolen token should NOT earn
+ *   extra lifetime just because the server touched it (LOGIN-F9).
  * @returns The session data or null if not found
  */
-const getSession = async (token: string | null): Promise<SessionLayout | null> => {
+const getSession = async (
+  token: string | null,
+  options?: { refresh?: boolean },
+): Promise<SessionLayout | null> => {
   if (!token) return null;
 
   const [error, value] = await tryCatch(async () => {
@@ -273,10 +296,18 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
     const parsed = parseSessionLayout(raw);
     const userId = parsed?.id ?? null;
 
+    //? Sliding expiration: each successful authenticated access extends session
+    //? lifetime. `options.refresh` defaults to true to preserve the existing
+    //? behaviour on the hot request path. Pass `{ refresh: false }` from
+    //? background / admin probes that must not extend a potentially stolen token.
+    const shouldRefresh = options?.refresh !== false;
+
     // Sliding expiration: each successful authenticated access extends session lifetime.
     const newTtl = getSessionTtl();
     const oldTtl = await adapter.ttl(token);
-    const preRefreshResult = await dispatchHook('preSessionRefresh', { token, userId, oldTtl, newTtl });
+    const preRefreshResult = shouldRefresh
+      ? await dispatchHook('preSessionRefresh', { token, userId, oldTtl, newTtl })
+      : { stopped: true };
 
     //? A `preSessionRefresh` handler can stop the TTL extension (e.g. admin
     //? freezing a session pending review). When stopped, we skip the
@@ -296,13 +327,15 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
         await adapter.touchActive(userId, newTtl);
       }
     }
-    await dispatchHook('postSessionRefresh', {
-      token,
-      userId,
-      oldTtl,
-      newTtl,
-      applied,
-    });
+    if (shouldRefresh) {
+      await dispatchHook('postSessionRefresh', {
+        token,
+        userId,
+        oldTtl,
+        newTtl,
+        applied,
+      });
+    }
 
     if (!parsed) return null;
     const merged: SessionLayout = { ...parsed, token };
@@ -310,7 +343,7 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
   }, undefined, { fn: 'getSession', token });
 
   if (error) {
-    getLogger().error('getSession failed', error, { token });
+    getLogger().error('getSession failed', error, { tokenPrefix: token.slice(0, 8) });
     return null;
   }
   return value;
@@ -399,7 +432,7 @@ const deleteSession = async (
   }, undefined, { fn: 'deleteSession', token });
 
   if (error) {
-    getLogger().error('deleteSession failed', error, { token });
+    getLogger().error('deleteSession failed', error, { tokenPrefix: token.slice(0, 8) });
     return false;
   }
   return ok ?? false;

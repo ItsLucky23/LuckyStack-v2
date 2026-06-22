@@ -50,9 +50,12 @@ const config = {
   /** false = HttpOnly cookie, true = sessionStorage. */
   sessionBasedToken: false,
   sessionExpiryDays: 7,
-  allowMultipleSessions: false,
+  //? `'single'` (default): logging in on a new device kicks the previous one.
+  //? `'multiple'` enables multiple concurrent sessions per user across devices.
+  sessionPerUser: 'single' as const,
   //? Presence/activity broadcasting + route-change location syncing. Opt-in.
   socketActivityBroadcaster: false,
+  socketStatusIndicator: false,
   locationProviderEnabled: false,
   //? Dev-only console logging toggles.
   logging: {
@@ -66,7 +69,7 @@ const config = {
   //? LUCKYSTACK_SECRET_MANAGER_URL to resolve `.env` pointers (NAME=BASE_V<n>)
   //? against an external secret server at boot (see server.ts + the docs).
   // secretManager: {
-  //   url: process.env.LUCKYSTACK_SECRET_MANAGER_URL ?? '',
+  //   url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
   //   token: { fromFile: '.secret-manager-token' },
   // },
 };
@@ -77,7 +80,7 @@ registerProjectConfig({
   session: {
     basedToken: config.sessionBasedToken,
     expiryDays: config.sessionExpiryDays,
-    allowMultiple: config.allowMultipleSessions,
+    perUser: config.sessionPerUser,
   },
   http: {
     cors: {
@@ -90,6 +93,13 @@ registerProjectConfig({
       //? port is taken) can talk to the backend without listing each port. Stays
       //? false in production so deployments fail closed.
       allowLocalhost: dev,
+      //? NOTE: the initial Socket.io polling handshake is an origin-less GET in
+      //? BOTH dev (Vite proxy → backend) and prod-with-router (single origin),
+      //? because browsers omit the `Origin` header on same-origin requests. The
+      //? framework's CORS layer admits origin-less handshakes unconditionally
+      //? (see @luckystack/server loadSocket.ts) — this list only gates requests
+      //? that DO carry an `Origin` header (cross-origin browsers, OAuth
+      //? callbacks). So you do NOT need to list every same-origin variant here.
     },
   },
   defaultLanguage: config.defaultLanguage,
@@ -99,6 +109,7 @@ registerProjectConfig({
   //? provider is just env vars + restart (no code edit).
   oauthCallbackBase,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
+  socketStatusIndicator: config.socketStatusIndicator,
   locationProviderEnabled: config.locationProviderEnabled,
   auth: {
     //? Framework-mode forgot-password (needs @luckystack/email installed + a
@@ -119,8 +130,9 @@ export const {
   defaultTheme,
   sessionBasedToken,
   sessionExpiryDays,
-  allowMultipleSessions,
+  sessionPerUser,
   socketActivityBroadcaster,
+  socketStatusIndicator,
   locationProviderEnabled,
   logging,
 } = config;

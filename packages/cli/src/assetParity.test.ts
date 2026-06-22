@@ -8,13 +8,18 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { REGISTRY } from './registry';
+import { AUTH_MODES, OAUTH_PROVIDERS, EMAIL_PROVIDERS, MONITORING_PROVIDERS } from './featureOptions';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
-const ASSET_ROOT = path.resolve(here, '..', 'assets', 'login', 'src');
-const TEMPLATE_ROOT = path.join(repoRoot, 'packages', 'create-luckystack-app', 'template', 'src');
+//? Walk the WHOLE login bundle (src/ UI + functions/session.ts + server/hooks)
+//? against the template ROOT so every shipped auth file is parity-checked, not
+//? just src/.
+const ASSET_ROOT = path.resolve(here, '..', 'assets', 'login');
+const TEMPLATE_ROOT = path.join(repoRoot, 'packages', 'create-luckystack-app', 'template');
 const SERVER_CAPABILITIES = path.join(repoRoot, 'packages', 'server', 'src', 'capabilities.ts');
-const CLI_INDEX = path.join(here, 'index.ts');
+const SCAFFOLDER_INDEX = path.join(repoRoot, 'packages', 'create-luckystack-app', 'src', 'index.ts');
 
 const normalize = (text: string): string => text.replaceAll('\r\n', '\n');
 
@@ -24,15 +29,13 @@ const normalize = (text: string): string => text.replaceAll('\r\n', '\n');
 //? legitimately differs, so we exempt it from strict equality (but still require
 //? the template counterpart to EXIST). Shrink this set to empty once the template
 //? catches up — that's the desired lockstep end state.
-//?   - settings/_api/updateUser_v1.ts : name/theme/language validation (SEC-L3)
 //?   - _components/LoginForm.tsx : asset + template carry two genuinely different
 //?     login implementations (asset reads `providers` from config; template fetches
 //?     `GET /auth/providers` with a loading-gated `showCredentials`). This is
 //?     pre-existing cross-package drift, not a lockstep-able single change —
 //?     exempt until the two are deliberately reconciled into one source.
 const ASSET_AHEAD_OF_TEMPLATE = new Set<string>([
-  'settings/_api/updateUser_v1.ts',
-  '_components/LoginForm.tsx',
+  'src/_components/LoginForm.tsx',
 ]);
 
 //? Walk every file under `dir`, returning paths relative to it (posix slashes).
@@ -76,19 +79,15 @@ describe('asset ↔ template parity (audit QUA-021)', () => {
 });
 
 describe('feature registry ↔ optional packages (audit QUA-021)', () => {
-  it('every asset-injecting FEATURE (minus sync) is a known optional package', () => {
-    //? Derive the feature list from the REAL `FEATURES` registry in index.ts
-    //? (scraped the same way OPTIONAL_PACKAGES is, below) rather than hardcoding —
-    //? so adding a feature to FEATURES without mirroring it into OPTIONAL_PACKAGES
-    //? trips this test. `sync` is intentionally excluded from OPTIONAL_PACKAGES
-    //? (client-bridge only, no server register), so exclude it here too — mirrors
-    //? the comment in server/src/capabilities.ts.
-    const indexSrc = readFileSync(CLI_INDEX, 'utf8');
-    const featuresBlock = /const FEATURES:[^{]*\{([\s\S]*?)\n\};/.exec(indexSrc);
-    expect(featuresBlock, 'could not find FEATURES registry in index.ts').not.toBeNull();
-    const featureKeys = [...(featuresBlock?.[1] ?? '').matchAll(/^\s*'?([\w-]+)'?\s*:/gm)]
-      .map((m) => m[1])
-      .filter((key) => key !== 'sync');
+  it('every registry FEATURE (minus sync) is a known server OPTIONAL_PACKAGE', () => {
+    //? Derive the feature list from the REAL `REGISTRY` (imported directly) rather
+    //? than scraping source — so adding a registry entry without mirroring it into
+    //? OPTIONAL_PACKAGES trips this test. Some entries are intentionally NOT in
+    //? server OPTIONAL_PACKAGES (which lists boot-auto-detected `./register`
+    //? packages): `sync` (client bridge), `secret-manager` (config-gated init in
+    //? server.ts), `router` (separate process), `mcp` (dev tool). Exclude those.
+    const NOT_BOOT_AUTODETECTED = new Set(['sync', 'secret-manager', 'router', 'mcp']);
+    const featureKeys = REGISTRY.map((entry) => entry.id).filter((key) => !NOT_BOOT_AUTODETECTED.has(key));
 
     const capsSrc = readFileSync(SERVER_CAPABILITIES, 'utf8');
     const block = /OPTIONAL_PACKAGES\s*=\s*\[([^\]]*)\]/.exec(capsSrc);
@@ -98,7 +97,45 @@ describe('feature registry ↔ optional packages (audit QUA-021)', () => {
     );
 
     const orphaned = featureKeys.filter((key) => !optional.has(key));
-    expect(orphaned, `FEATURES not in OPTIONAL_PACKAGES: ${orphaned.join(', ')}`).toEqual([]);
+    expect(orphaned, `REGISTRY ids not in OPTIONAL_PACKAGES: ${orphaned.join(', ')}`).toEqual([]);
+  });
+
+  it('every registry entry pkg name matches `@luckystack/<id>`', () => {
+    const mismatched = REGISTRY.filter((entry) => entry.pkg !== `@luckystack/${entry.id}`);
+    expect(mismatched.map((e) => e.id), 'registry id/pkg mismatch').toEqual([]);
+  });
+});
+
+//? ADR 0014 D3: featureOptions.ts is the CLI's own copy of the reconfigurable
+//? PROVIDER_OPTIONS. This guards it against drift from the scaffolder's source —
+//? add a provider/mode in one place without the other and this trips.
+describe('featureOptions ↔ scaffolder PROVIDER_OPTIONS parity (ADR 0014 D3)', () => {
+  const src = readFileSync(SCAFFOLDER_INDEX, 'utf8');
+  //? NOTE: this non-greedy capture assumes PROVIDER_OPTIONS stays a FLAT object of
+  //? arrays (no nested braces). If a value ever becomes a nested object, the regex
+  //? truncates at the first `}` — the per-list extract() calls below would return
+  //? null and trip the it.each tests, surfacing the need to update this matcher.
+  const block = /const PROVIDER_OPTIONS\s*=\s*\{([\s\S]*?)\}\s*as const;/.exec(src);
+
+  it('PROVIDER_OPTIONS block is present in the scaffolder', () => {
+    expect(block, 'could not find PROVIDER_OPTIONS in create-luckystack-app/src/index.ts').not.toBeNull();
+  });
+
+  const extract = (key: string): string[] | null => {
+    //? Escape the key before interpolating into a RegExp (defensive — keys are known
+    //? identifiers today, but a future key with a metacharacter must not corrupt the pattern).
+    const safeKey = key.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+    const m = new RegExp(`${safeKey}:\\s*\\[([^\\]]*)\\]`).exec(block?.[1] ?? '');
+    return m ? [...(m[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] ?? '') : null;
+  };
+
+  it.each([
+    ['authMode', [...AUTH_MODES]],
+    ['oauthProviders', [...OAUTH_PROVIDERS]],
+    ['emailProvider', [...EMAIL_PROVIDERS]],
+    ['monitoringProvider', [...MONITORING_PROVIDERS]],
+  ])('CLI %s matches the scaffolder list', (key, cliList) => {
+    expect(extract(key), `${key} not found in PROVIDER_OPTIONS`).toEqual(cliList);
   });
 });
 

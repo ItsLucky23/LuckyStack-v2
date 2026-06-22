@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (11)
+## Decisions (13)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -24,6 +24,8 @@
 | 0010 | Store one-time tokens (password-reset, email-change) hashed at rest; never the raw token | 🟢 accepted | security, login, core, redis | — | `docs/decisions/0010-one-time-tokens-hashed-at-rest.md` |
 | 0011 | Add graceful server shutdown (stop/close + prod signals) and a preServerStop hook | 🟢 accepted | server, lifecycle, error-tracking, feature | — | `docs/decisions/0011-graceful-shutdown-and-onshutdown-hook.md` |
 | 0012 | Password-policy validation failures must not increment the per-account login lockout | 🟢 accepted | security, login, dos | — | `docs/decisions/0012-login-lockout-excludes-policy-failures.md` |
+| 0013 | Admit origin-less Socket.io handshakes at the CORS layer (fixes 400 code:3 in dev + prod-with-router) | 🟢 accepted | security, sockets, cors, dev-experience, regression | — | `docs/decisions/0013-admit-originless-socketio-handshake.md` |
+| 0014 | CLI `manage` becomes a step-based reconfiguration wizard with consequence previews | 🟢 accepted | cli, scaffolder, dx, env, oauth | — | `docs/decisions/0014-cli-reconfigure-wizard.md` |
 
 ## Summaries
 
@@ -114,3 +116,19 @@ Add a `preServerStop` (onShutdown) hook to `@luckystack/core`'s augmentable `Hoo
 Password-policy validation is gated to the REGISTER path only (`validateCredentialsShape` runs the policy when `mode === 'register'`); the login branch skips it. The lockout counter excludes policy/validation reasons (`NON_COUNTING_REASONS`) and only records on a genuine `login.wrongPassword`. So a policy-invalid login attempt no longer trips the lockout, while a real wrong-password attempt still does.
 
 → `docs/decisions/0012-login-lockout-excludes-policy-failures.md`
+
+### 0013 — Admit origin-less Socket.io handshakes at the CORS layer (fixes 400 code:3 in dev + prod-with-router)
+
+**0013** · accepted · tags: security, sockets, cors, dev-experience, regression · 2026-06-18
+
+The CORS `origin` callback now **admits origin-less requests unconditionally** (`callback(null, true)`). Requests that DO carry an `Origin` header are still gated by `allowedOrigin(...)` exactly as before. The `allowOriginless` config flag is retained for type-compatibility but no longer gates anything (documented as deprecated).
+
+→ `docs/decisions/0013-admit-originless-socketio-handshake.md`
+
+### 0014 — CLI `manage` becomes a step-based reconfiguration wizard with consequence previews
+
+**0014** · accepted · tags: cli, scaffolder, dx, env, oauth · 2026-06-19
+
+`manage` becomes a **step-based reconfiguration wizard** that mirrors the scaffold wizard, operating on an existing project:
+
+→ `docs/decisions/0014-cli-reconfigure-wizard.md`

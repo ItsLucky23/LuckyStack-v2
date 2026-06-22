@@ -3,7 +3,7 @@
 //? combined summary. Consumers call this from their own thin script that
 //? imports the generated `apiMethodMap` + `apiInputSchemas`.
 
-import { clearAllRateLimits, getProjectConfig } from '@luckystack/core';
+import { clearAllRateLimits, getCsrfConfig, getProjectConfig } from '@luckystack/core';
 
 import { sampleSchemaInput } from './schemaSampleInput';
 import { runContractTests } from './runContractTests';
@@ -12,7 +12,7 @@ import { runRateLimitTests } from './runRateLimitTests';
 import { runCsrfEnforcementTests } from './runCsrfEnforcementTests';
 import { runFuzzTests } from './runFuzzTests';
 import { runCustomTests } from './customTests';
-import { calculateSummary } from './testLayerHelpers';
+import { calculateSummary, LAYER_KEYS } from './testLayerHelpers';
 import type { CustomTestResult, RunCustomTestsSummary } from './customTests';
 import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 import type { ZodType } from 'zod';
@@ -75,15 +75,40 @@ const cloneSummary = (summary: RunContractSummary, filter: string | undefined): 
   return calculateSummary(filterResults(summary.results, filter));
 };
 
-//? Build the `Cookie` header sweep layers send when an `authToken` is supplied.
-//? Returns an empty object when no token is set (the auth-enforcement layer
-//? deliberately sends no cookie regardless).
-const buildAuthHeaders = (input: RunAllTestsInput): Record<string, string> => {
+//? Build the Cookie (and CSRF) headers sweep layers send when an `authToken`
+//? is supplied. In cookie-mode the server's CSRF middleware rejects POST/PUT/DELETE
+//? without a matching CSRF token, so we look up the session record and attach the
+//? token the same way customTests.ts does: call getSession(authToken) and read
+//? csrfToken off the persisted record. Token-mode sweeps (no Cookie header) and
+//? runs without authToken are unaffected — the CSRF header is never added.
+const buildAuthHeaders = async (input: RunAllTestsInput): Promise<Record<string, string>> => {
   const headers: Record<string, string> = {};
-  if (input.authToken) {
-    const cookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
-    headers.Cookie = `${cookieName}=${input.authToken}`;
+  if (!input.authToken) return headers;
+
+  const cookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
+  headers.Cookie = `${cookieName}=${input.authToken}`;
+
+  //? Resolve the CSRF token lazily — import @luckystack/login at call time so
+  //? projects that run the test-runner without login installed don't crash on
+  //? import. Mirror the same dynamic import pattern used in customTests.ts.
+  try {
+    const { getSession } = await import('@luckystack/login');
+    const session = await getSession(input.authToken);
+    if (session?.csrfToken) {
+      headers[getCsrfConfig().headerName] = session.csrfToken;
+    }
+  } catch (error) {
+    //? @luckystack/login not installed or session lookup failed.
+    //? Warn so the operator knows the sweep is running without a CSRF header
+    //? (degraded mode) — the sweep continues, but CSRF-protected state-changing
+    //? endpoints will be unreachable in cookie-mode.
+    console.warn(
+      '[test-runner] buildAuthHeaders: could not resolve CSRF token —',
+      error instanceof Error ? error.message : String(error),
+      '— sweep will run without the CSRF header (degraded mode).',
+    );
   }
+
   return headers;
 };
 
@@ -125,6 +150,11 @@ const runSweepLayers = async (
       skip: input.skip,
       headers,
       inputFor,
+      //? Reset the shared per-IP rate-limit bucket between endpoints so a
+      //? neighbour saturating the window doesn't cause false pass/fail on the
+      //? next endpoint. Requires the server to expose /_test/reset (allowed in
+      //? NODE_ENV !== production or behind TEST_RESET_TOKEN).
+      resetBetweenEndpoints: true,
     });
     summary.rateLimit = cloneSummary(rateLimit, input.filter);
   }
@@ -183,26 +213,75 @@ const runCustomLayer = async (input: RunAllTestsInput, summary: RunAllTestsSumma
   summary.custom = custom;
 };
 
-//? Sum the per-layer passed/failed counts into the top-level totals. Identical
-//? arithmetic to the prior inline block (missing layers contribute 0 via `?? 0`).
+//? The ordered list of sweep-layer keys that map to `RunContractSummary`
+//? slots on `RunAllTestsSummary`. Drives `computeTotals` and the reporter so
+//? adding a new sweep layer only requires adding it here + to the summary type.
+const SWEEP_LAYER_ORDER = [
+  LAYER_KEYS.contract,
+  LAYER_KEYS.auth,
+  LAYER_KEYS.rateLimit,
+  LAYER_KEYS.csrf,
+  LAYER_KEYS.fuzz,
+] as const;
+
+type SweepLayerKey = typeof SWEEP_LAYER_ORDER[number];
+
+//? Map from each canonical layer key to the matching summary property name on
+//? `RunAllTestsSummary`. Property names diverged from LAYER_KEYS values early
+//? (LAYER_KEYS uses display strings like `'auth-enforcement'`); keeping this
+//? map here means neither the reporter nor computeTotals need to hand-code the
+//? mapping.
+const SWEEP_SUMMARY_PROP: Record<SweepLayerKey, keyof Pick<RunAllTestsSummary, 'contract' | 'auth' | 'rateLimit' | 'csrf' | 'fuzz'>> = {
+  [LAYER_KEYS.contract]: 'contract',
+  [LAYER_KEYS.auth]: 'auth',
+  [LAYER_KEYS.rateLimit]: 'rateLimit',
+  [LAYER_KEYS.csrf]: 'csrf',
+  [LAYER_KEYS.fuzz]: 'fuzz',
+};
+
+//? Iterate every sweep layer + the custom layer to sum passed/failed.
+//? DD-TR-various — xpass exit-code policy (documented decision):
+//? `xpass` (a case marked `expectedToFail` that unexpectedly passes) is NOT
+//? counted in `totalFailed`. Rationale: an xpass is a positive signal — the
+//? known issue is gone and the marker just needs removing. Treating it as a
+//? failure would make CI red when a bug is fixed, which is backwards.
+//? It IS shown prominently in the summary line and the "Unexpectedly passed"
+//? section so the stale marker can't rot silently behind a green run.
+//? To opt into strict mode (xpass = CI failure), inspect `summary.custom?.xpassed`
+//? in your own script and `process.exit(1)` when it is > 0.
 const computeTotals = (summary: RunAllTestsSummary): void => {
-  summary.totalPassed = (summary.contract?.passed ?? 0)
-    + (summary.auth?.passed ?? 0)
-    + (summary.rateLimit?.passed ?? 0)
-    + (summary.csrf?.passed ?? 0)
-    + (summary.fuzz?.passed ?? 0)
-    + (summary.custom?.passed ?? 0);
-  summary.totalFailed = (summary.contract?.failed ?? 0)
-    + (summary.auth?.failed ?? 0)
-    + (summary.rateLimit?.failed ?? 0)
-    + (summary.csrf?.failed ?? 0)
-    + (summary.fuzz?.failed ?? 0)
-    + (summary.custom?.failed ?? 0);
+  let passed = 0;
+  let failed = 0;
+  for (const key of SWEEP_LAYER_ORDER) {
+    const s = summary[SWEEP_SUMMARY_PROP[key]];
+    passed += s?.passed ?? 0;
+    failed += s?.failed ?? 0;
+  }
+  summary.totalPassed = passed + (summary.custom?.passed ?? 0);
+  summary.totalFailed = failed + (summary.custom?.failed ?? 0);
 };
 
 export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsSummary> => {
   const summary: RunAllTestsSummary = { totalPassed: 0, totalFailed: 0 };
-  const headers = buildAuthHeaders(input);
+
+  //? Warn when a non-empty apiMethodMap is paired with an empty apiMetaMap.
+  //? The auth-enforcement and rate-limit layers both use the meta map to decide
+  //? which routes require login and which have declared rate limits. An absent
+  //? or stale map silently skips every auth/rate-limit check — the run looks
+  //? green but provides no real coverage.
+  if (!input.noSweep) {
+    const hasRoutes = Object.keys(input.apiMethodMap).length > 0;
+    const hasMeta = Object.keys(input.apiMetaMap).length > 0;
+    if (hasRoutes && !hasMeta) {
+      console.warn(
+        '[test-runner] runAllTests: apiMetaMap is empty but apiMethodMap has routes. '
+        + 'The auth-enforcement and rate-limit layers will skip every route. '
+        + 'Pass the generated apiMetaMap to enable those checks.',
+      );
+    }
+  }
+
+  const headers = await buildAuthHeaders(input);
   const inputFor = inputForEndpoint(input.apiInputSchemas);
 
   if (!input.noSweep) {
@@ -238,15 +317,31 @@ interface ReportRow {
   reason?: string;
 }
 
-const xfailOf = (s: RunContractSummary | RunCustomTestsSummary | undefined): number =>
-  s && 'xfailed' in s ? s.xfailed : 0;
-const skippedOf = (s: RunContractSummary | RunCustomTestsSummary | undefined): number =>
-  s && 'skipped' in s ? s.skipped : 0;
+//? DD-TR-various — leaky summary union tightened:
+//? `LayerSummary` is the minimal shape the reporter cares about — the fields
+//? every layer summary has in common. The extra-field helpers discriminate via
+//? `in` to stay type-safe without widening callers to `unknown`.
+interface LayerSummary {
+  total: number;
+  passed: number;
+  failed: number;
+}
+
+const xfailOf = (s: LayerSummary | undefined): number => {
+  if (s === undefined || !('xfailed' in s)) return 0;
+  const v = (s as Record<string, unknown>).xfailed;
+  return typeof v === 'number' ? v : 0;
+};
+const skippedOf = (s: LayerSummary | undefined): number => {
+  if (s === undefined || !('skipped' in s)) return 0;
+  const v = (s as Record<string, unknown>).skipped;
+  return typeof v === 'number' ? v : 0;
+};
 
 //? Per-layer headline: green "X/Y passed" when clean, red "Z failed" when not,
 //? plus dim xfail / skipped counts. This is the "14/20 in groen, 6/20 in rood"
 //? the report leads with.
-const formatLayerLine = (label: string, s: RunContractSummary | RunCustomTestsSummary | undefined): string => {
+const formatLayerLine = (label: string, s: LayerSummary | undefined): string => {
   if (!s) return `  ${dim('–')} ${label.padEnd(18)} ${dim('(layer skipped)')}`;
   const clean = s.failed === 0;
   const mark = clean ? green('✓') : red('✗');
@@ -295,21 +390,17 @@ const printSection = (title: (t: string) => string, heading: string, rows: Repor
 
 export const logRunAllSummary = (summary: RunAllTestsSummary): void => {
   console.log('');
-  console.log(formatLayerLine('contract', summary.contract));
-  console.log(formatLayerLine('auth-enforcement', summary.auth));
-  console.log(formatLayerLine('rate-limit', summary.rateLimit));
-  console.log(formatLayerLine('csrf-enforcement', summary.csrf));
-  console.log(formatLayerLine('fuzz', summary.fuzz));
-  console.log(formatLayerLine('custom', summary.custom));
+
+  //? Print a headline line for every sweep layer (ordered) then the custom layer.
+  for (const key of SWEEP_LAYER_ORDER) {
+    console.log(formatLayerLine(key, summary[SWEEP_SUMMARY_PROP[key]]));
+  }
+  console.log(formatLayerLine(LAYER_KEYS.custom, summary.custom));
 
   //? Real failures across every layer — these MUST be fixed (a green test that
   //? went red, or a wrong test). Sweep failures + un-marked custom failures.
   const failed: ReportRow[] = [
-    ...sweepFailRows(summary.contract),
-    ...sweepFailRows(summary.auth),
-    ...sweepFailRows(summary.rateLimit),
-    ...sweepFailRows(summary.csrf),
-    ...sweepFailRows(summary.fuzz),
+    ...SWEEP_LAYER_ORDER.flatMap((key) => sweepFailRows(summary[SWEEP_SUMMARY_PROP[key]])),
     ...customRows(summary.custom, 'fail'),
   ];
   printSection(red, 'Failed — must be fixed (real bugs / wrong tests)', failed, '✗');
@@ -321,19 +412,22 @@ export const logRunAllSummary = (summary: RunAllTestsSummary): void => {
   printSection(yellow, 'Unexpectedly passed — remove the expectedToFail marker', customRows(summary.custom, 'xpass'), '?');
 
   //? Skipped with reason — not run in this mode (login-gated, high rate-limit, …).
-  const skipped: ReportRow[] = [
-    ...sweepSkipRows('contract', summary.contract),
-    ...sweepSkipRows('auth', summary.auth),
-    ...sweepSkipRows('rate-limit', summary.rateLimit),
-    ...sweepSkipRows('csrf', summary.csrf),
-    ...sweepSkipRows('fuzz', summary.fuzz),
-  ];
+  const skipped: ReportRow[] = SWEEP_LAYER_ORDER.flatMap((key) =>
+    sweepSkipRows(key, summary[SWEEP_SUMMARY_PROP[key]]),
+  );
   printSection(dim, 'Skipped — not run (with reason)', skipped, '–');
 
-  const totalXfail = xfailOf(summary.contract) + xfailOf(summary.auth) + xfailOf(summary.rateLimit)
-    + xfailOf(summary.csrf) + xfailOf(summary.fuzz) + xfailOf(summary.custom);
-  const totalSkipped = skippedOf(summary.contract) + skippedOf(summary.auth) + skippedOf(summary.rateLimit)
-    + skippedOf(summary.csrf) + skippedOf(summary.fuzz) + skippedOf(summary.custom);
+  //? Sum xfail and skipped across all layers (sweep + custom) in one pass.
+  let totalXfail = 0;
+  let totalSkipped = 0;
+  for (const key of SWEEP_LAYER_ORDER) {
+    const s = summary[SWEEP_SUMMARY_PROP[key]];
+    totalXfail += xfailOf(s);
+    totalSkipped += skippedOf(s);
+  }
+  totalXfail += xfailOf(summary.custom);
+  totalSkipped += skippedOf(summary.custom);
+
   //? `xpass` (a case still marked expectedToFail that now passes) is NOT a
   //? failure, so it doesn't move the exit code — but it MUST be visible in the
   //? final line, otherwise a stale marker rots silently behind a green run.

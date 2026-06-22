@@ -123,4 +123,15 @@ describe("validatePassword", () => {
     expect(validatePassword("short")).toBe("login.passwordCharacterMinimum");
     expect(customValidator).not.toHaveBeenCalled();
   });
+
+  it("rejects passwords over 72 utf8-encoded bytes (bcrypt truncation cap)", () => {
+    // 73 ASCII chars = 73 bytes — one over the bcrypt silent-truncation boundary.
+    setPolicy({ maxLength: 1000 });
+    expect(validatePassword("a".repeat(73))).toBe("login.passwordCharacterLimit");
+  });
+
+  it("accepts a password exactly at the 72-byte bcrypt boundary", () => {
+    setPolicy({ maxLength: 1000 });
+    expect(validatePassword("a".repeat(72))).toBeNull();
+  });
 });

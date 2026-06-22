@@ -87,6 +87,11 @@ const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const isCsrfMismatchResponse = async (response: Response): Promise<boolean> => {
   if (response.status !== 403) return false;
   const [error, isMismatch] = await tryCatch<boolean, undefined>(async () => {
+    //? `response.clone()` is used here so the ORIGINAL response body stream is
+    //? preserved for the caller (the clone is consumed, the original is not).
+    //? This is important: `httpFetch` returns the original `response` reference
+    //? to the caller so it can read its body, and cloning before reading is the
+    //? correct way to peek at the body without consuming it.
     const cloned = response.clone();
     const body = (await cloned.json()) as { errorCode?: string };
     return body.errorCode === 'auth.csrfMismatch';
@@ -145,8 +150,10 @@ export const httpFetch: typeof fetch = async (input, init = {}) => {
   let response = await send(token);
 
   //? On csrfMismatch, the cached token is stale (session rotated). Clear and
-  //? retry once with a fresh fetch — covers the case where the user logged
-  //? back in while a tab was idle.
+  //? retry ONCE with a fresh fetch — covers the case where the user logged
+  //? back in while a tab was idle. The retry is intentionally limited to one
+  //? attempt: a second csrfMismatch means the session is broken in a way a
+  //? fresh token won't fix (e.g. session expired), and retrying would loop.
   if (await isCsrfMismatchResponse(response)) {
     clearCsrfToken();
     const refreshed = await getCsrfToken();

@@ -70,15 +70,31 @@
 ### `cli`
 | Export / file | One-liner |
 |---|---|
-| `src/index.ts` (bin entry) | Parse `add <feature> [--no-install]`, locate the project, dispatch. |
-| `commands/addLogin.ts` | Copy auth UI assets into `src/` (skip-if-exists) + add `@luckystack/login` + install. |
+| `src/index.ts` (bin entry) | Parse `list` / `manage` / `add` / `remove` / `check-*`, locate the project, dispatch. |
+| `src/registry.ts` | `REGISTRY` — the single typed source of truth for CLI-manageable optional packages (`id`, `pkg`, `kind`, `description`, `removable`, `note`). `add`/`list`/`manage`/`remove` all derive from it; mirror against server `OPTIONAL_PACKAGES`. |
+| `commands/list.ts` | `list` — read-only: registry packages `installed (vRANGE)` vs `available` + core/other @luckystack deps. `installedRegistryIds` (pure). |
+| `commands/reconfigure.ts` | `runReconfigureWizard` — the interactive STEP wizard for `manage`: detect state (`lib/state.ts`) → edit per-setting → preview (`transitions.ts` `planChanges`) → confirm → apply → one install. |
+| `commands/manage.ts` | Single-feature plan helpers used by `add <feature>` / `remove <feature>`: `computeManagePlan` (PURE diff, test-only) + `applyManagePlan` (run the plan, then ONE install). NOT the interactive wizard (that's reconfigure.ts). |
+| `transitions.ts` | `planChanges(current, desired)` → granular `Change[]` each with a consequence preview + `apply`. `configFromState`, `TOGGLE_IDS`. The reconfigure engine. |
+| `lib/state.ts` / `lib/envKeys.ts` / `lib/envFile.ts` | `detectProjectState` (authMode/oauth/email/monitoring/packages from deps + env KEY names) · value-blind env-key reader (`.env.local` then `.env`) · value-safe env-block add/remove + EXTERNAL_ORIGINS edits. |
+| `featureOptions.ts` | Reconfigurable option lists (authMode/oauth/email/monitoring) + provider→env-key/origin/dep maps. Mirrors the scaffolder's PROVIDER_OPTIONS (parity-tested). |
+| `commands/remove.ts` | `removeFeature` — inverse of add by kind: backend = drop dep; presence = reverse JSX; login = GUARDED (keep files, warn); error-tracking = drop dep + delete `functions/sentry.ts`; secret-manager = re-comment blocks; router = drop dep + script; ai-docs = drop mcp + `.mcp.json` entry. |
+| `commands/addDispatch.ts` | `runAddByKind` — single source of truth mapping a `FeatureKind` to its add handler (used by `add <feature>`, manage, and reconfigure toggles; exhaustive). |
+| `lib/wizard.ts` | `runSingleSelect` (radio) + `runCheckbox` (multi) — ZERO-dep readline-keypress prompts (↑/↓ · space/enter · ctrl-c), non-TTY + empty guards. |
+| `commands/addLogin.ts` | Copy the WHOLE auth bundle (UI + `functions/session.ts` + `server/hooks/notifications.ts`) into the project + add `@luckystack/login` + restore config.ts auth flags + register notification hooks (best-effort). `AUTH_SERVER_HOOKS` / `AUTH_NONE_SERVER_PLACEHOLDER` exported for the reverse. |
 | `commands/addPresence.ts` | Re-add `@luckystack/presence` + inject `<LocationProvider/>` / `<SocketStatusIndicator/>` (inverse of the pruner) + install. |
-| `commands/addBackendOnly.ts` | Generic handler for `sync` / `email` / `error-tracking` / `docs-ui`: add dep + install (they self-wire at boot). |
+| `commands/addDocsUi.ts` | Add `@luckystack/docs-ui` + copy the React API explorer into `src/docs/page.tsx`. Removal deletes the page. |
+| `commands/addErrorTracking.ts` | Add `@luckystack/error-tracking` + copy the `functions/sentry.ts` shim. `copySentryShim` / `removeSentryShim` shared with planMonitoring. |
+| `commands/addSecretManager.ts` | Add `@luckystack/secret-manager` + uncomment the config.ts + server/server.ts blocks (mirror of `wireSecretManager`); `removeSecretManager` re-comments. |
+| `commands/addRouter.ts` | Add `@luckystack/router` + the `router` npm script; `removeRouter` drops both. |
+| `commands/addAiDocs.ts` | Add `@luckystack/mcp` (devDep) + register the graph server in `.mcp.json`; `removeAiDocs` reverses. (The doc tree is NOT bundled — re-scaffold for that.) |
+| `commands/addBackendOnly.ts` | Generic handler for `sync` / `email`: add dep + install (self-wire at boot). |
 | `commands/checkEnv.ts` | `check-env` — A: unused `.env` keys; B: env vars used but undefined. DEV_-aware; framework-key ignore list; env files via `getEnvFiles()` semantics (`LUCKYSTACK_ENV_FILES` else `.env`,`.env.local`). |
 | `commands/checkI18n.ts` | `check-i18n` — C: unused locale keys; D: used keys missing per-language. Used-set = literal `{ key: '...' }` + `errorCode: '...'` (dotted) harvested repo-wide; dynamic `key:<var>` sites listed for review. |
 | `lib/scan.ts` | Shared regex scanner: `collectSourceFiles` (skips node_modules/dist/tests/generated), `matchAll` (capture+line), `groupLocations`, `writeDumpLog` (`dump/<KIND>_<hash>.log`). |
-| `lib/project.ts` | `findProjectRoot` (consumer dep OR framework `packages/core`), `addDependency`, `editFile` (CRLF-safe), `copyDirIfAbsent` (idempotent), `assetPath`, `runNpmInstall`. |
+| `lib/project.ts` | `findProjectRoot` (consumer dep OR framework `packages/core`), `addDependency` / `dropDependency`, `hasDependency` / `dependencyRange`, `editFile` (CRLF-safe), `copyDirIfAbsent` (idempotent), `assetPath`, `runNpmInstall`. |
 | `assets/login/src/**` | The shipped auth UI bundle copied by `add login` (login/register/reset-password/settings pages + `_api` + `LoginForm`). |
+| `assets/docs-ui/src/**` | The React API-explorer page (`src/docs/page.tsx`) copied by `add docs-ui`. |
 
 ### `core`
 | Function / Export | 1-line | Deep doc |
@@ -130,8 +146,8 @@
 | `setIoInstance(io: SocketIOServer \| null): void` | Module-level slot for the running Socket.io server. | -> docs/socket-bootstrap.md |
 | `getIoInstance(): SocketIOServer \| null` | Read the slot from framework code that needs to broadcast. | -> docs/socket-bootstrap.md |
 | `socket`, `setSocket`, `incrementResponseIndex`, `waitForSocket` | Client-side socket singleton + response-index counter. | -> docs/socket-bootstrap.md |
-| `extractTokenFromSocket(socket): string \| null` | Read session token from Socket.io handshake (cookie + header). | -> docs/socket-bootstrap.md |
-| `extractTokenFromRequest(request): string \| null` | Read session token from a Node IncomingMessage (cookie + `Authorization: Bearer`). | -> docs/socket-bootstrap.md |
+| `extractTokenFromSocket(socket): string \| null` | Read session token from Socket.io handshake. Token-mode reads `handshake.auth.token` then cookie; cookie-mode reads ONLY the cookie unless `http.acceptBearerInCookieMode` is true (CORE-O10). | -> docs/socket-bootstrap.md |
+| `extractTokenFromRequest(request): string \| null` | Read session token from a Node IncomingMessage. Token-mode reads `Authorization: Bearer` then cookie; cookie-mode reads ONLY the cookie unless `http.acceptBearerInCookieMode` is true (CORE-O10). | -> docs/socket-bootstrap.md |
 | `allowedOrigin(origin: string): boolean` | Same-origin + project-configured allow-list CORS check; dispatches `corsRejected` hook on miss. | -> docs/socket-bootstrap.md |
 | `validateRequest({ auth, user }): ValidationResult` | Evaluates the `auth.additional[]` predicates against the session; returns success immediately when `additional` is absent. Does NOT check `auth.login` — login is enforced by the surrounding API/sync handler, not by this function. | -> docs/session-types.md |
 | `isFalsy(value): boolean` | Helper used inside `validateRequest`. | -> docs/session-types.md |
@@ -237,7 +253,7 @@
 | `tryCatchSync<T>(fn): [Error \| null, T \| null]` | Synchronous tuple-style error handling (sync counterpart to `tryCatch`). | -> docs/app-bootstrap.md |
 | `deepMerge<T>(base, override)` / `isPlainObject(value)` (`configUtils`) | Shared config deep-merge primitive (every registry routes through it) + plain-object guard. Skips `__proto__`/`constructor`/`prototype` keys. | -> docs/config-registry.md |
 | `createRegistry(...)` | Generic DI-slot registry factory backing the config/client/strategy registries. | -> docs/config-registry.md |
-| `resolveClientIp({ rawAddress, headers, trustProxy })` / `UNKNOWN_CLIENT_IP` | Resolve the real client IP for per-IP rate-limit keying (XFF/x-real-ip only when `trustProxy`). | -> docs/app-bootstrap.md |
+| `resolveClientIp({ rawAddress, headers, trustProxy, trustedProxyHopCount })` / `UNKNOWN_CLIENT_IP` | Resolve the real client IP for per-IP rate-limit keying (XFF/x-real-ip only when `trustProxy`). Skips `trustedProxyHopCount` hops from the RIGHT of XFF (default 1 = immediate upstream proxy); never trusts the leftmost client-controlled hop (CORE-O3). | -> docs/app-bootstrap.md |
 | `isLoopbackIp(ip: string): boolean` | True for `127.0.0.0/8` / `::1` / `localhost`. Used for `rateLimiting.skipLoopbackInDev` keying (skip the cross-route IP abuse cap for loopback in non-prod). | -> docs/app-bootstrap.md |
 | `registerStrayPrefixCommand(...commands)` | Opt a custom single-key Redis command into the `redis` proxy's stray-prefix net. | -> docs/redis-adapter.md |
 | `attachSocketRedisAdapter(io, options?)` | Now accepts `{ adapterOptions, pubClient, subClient }` to tune `createAdapter` / supply pre-built clients. | -> docs/redis-adapter.md |
@@ -250,9 +266,9 @@
 | Function / Export | One-liner | Deep doc |
 | --- | --- | --- |
 | `main()` (CLI entrypoint, auto-invoked at bottom of `src/index.ts`) | Orchestrates the full scaffold flow: parse argv -> validate target dir -> optional prompts -> `copyTree` -> framework-docs copy (E.2) -> optional `npm install` + `npx prisma generate` -> print next-step block. | -> docs/scaffold-flow.md |
-| `parseArgs(argv)` | Strict argv parser. Recognises `--no-install`, `--no-prompt`, `--no-presence`, `--ai-browser=<all\|agent-browser\|none>`, `--help` / `-h` (the `VALID_FLAGS` list), plus the first non-flag token as the project name. Any other `-`/`--` token (or a bad `--ai-browser` value) causes `process.exit(2)`. Returns `CliArgs`. | -> docs/cli-flags.md |
+| `parseArgs(argv)` | Strict argv parser. Recognises `--no-install`, `--no-prompt`, the opt-in package flags `--presence` / `--error-tracking` / `--docs-ui` / `--secret-manager` / `--router`, `--db=` / `--auth=` / `--oauth=` / `--email=` / `--monitoring=`, `--ai-docs` / `--no-ai-docs`, `--ai-browser=<all\|agent-browser\|none>`, `--help` / `-h` (the `VALID_FLAGS` list), plus the first non-flag token as the project name. Any other `-`/`--` token (or a bad value) causes `process.exit(2)`. Returns `CliArgs`. | -> docs/cli-flags.md |
 | `printHelp()` | Prints the human-readable usage banner. Triggered by `--help` / `-h` and on missing project name. | -> docs/cli-flags.md |
-| `runPrompts()` | Opens a `readline` interface and walks the user through `dbProvider`, `authMode`, `oauthProviders` (conditional), `emailProvider`, `monitoringProvider`, `i18n`. Returns a fully populated `ScaffoldChoices`. Skipped when `--no-prompt` is passed. | -> docs/scaffold-flow.md |
+| `runPrompts()` | Arrow-key TTY wizard (an `(x/y)` progress counter, a one-line description + a `?`-toggle `details` block on EVERY step, and a final **review screen** listing all choices with `← back to edit` before commit) walking `dbProvider`, `authMode`, `oauthProviders` (conditional), `emailProvider`, `monitoringProvider`, then the per-package opt-IN toggles `presence` / `errorTracking` / `docsUi` / `secretManager` / `router` (all default off), `aiInstructions` (default on), `aiBrowserTooling` (conditional). (i18n is NOT a choice — it always ships.) Falls back to `runPromptsFallback` (numbered prompts) on a non-TTY. Returns a fully populated `ScaffoldChoices`. Skipped when `--no-prompt` is passed. | -> docs/scaffold-flow.md |
 | `pickFromList(rl, label, options, defaultValue)` | Single-choice prompt helper. Accepts either a numeric index or a case-insensitive option name. Blank input returns the default. | -> docs/scaffold-flow.md |
 | `pickMulti(rl, label, options)` | Multi-choice prompt helper. Parses a comma-separated list of indices / option names; blank input returns `[]`. | -> docs/scaffold-flow.md |
 | `askYesNo(rl, label, defaultValue)` | Boolean prompt helper. Treats blank input as the default; `y` / `yes` -> `true`, anything else -> `false`. | -> docs/scaffold-flow.md |
@@ -267,8 +283,9 @@
 | `runPrismaGenerate(cwd)` | Spawns `npx prisma generate` after `npm install` so first-build types resolve. Does NOT run `prisma db push` or `prisma migrate` — those require a populated `DATABASE_URL`. | -> docs/post-scaffold-suggestions.md |
 | Framework-docs copy block (inside `main`) | After the template copy, recursively copies root `CLAUDE.md`, `docs/` (-> `docs/luckystack/` in the scaffold), `skills/`, `.claude/commands/`, and `branch-logs/README.md` from the repo root into the target. Each source is optional — missing sources are skipped silently. | -> docs/framework-docs-copy.md |
 | Type: `CliArgs` | `{ projectName: string; install: boolean; prompt: boolean; help: boolean }`. Output of `parseArgs`. | -> docs/cli-flags.md |
-| Type: `ScaffoldChoices` | `{ dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, presence, i18n, aiInstructions, aiBrowserTooling }`. Output of `runPrompts` / `DEFAULT_CHOICES`. `aiBrowserTooling: 'all' \| 'agent-browser' \| 'none'` is forced to `'none'` when `aiInstructions` is off. | -> docs/scaffold-flow.md |
-| Constant: `DEFAULT_CHOICES` | Sane defaults used when `--no-prompt` is passed (Mongo + credentials + console email + no monitoring + presence on + i18n on + AI instructions on + `aiBrowserTooling: 'agent-browser'`). | -> docs/scaffold-flow.md |
+| Type: `ScaffoldChoices` | `{ dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, presence, errorTracking, docsUi, secretManager, router, aiInstructions, aiBrowserTooling }`. Output of `runPrompts` / `DEFAULT_CHOICES`. **Lean-by-default**: every optional package/feature is OFF unless opted in. `presence` / `errorTracking` are pruned from the (full) template when off; `docsUi` / `secretManager` / `router` are injected when on (`secretManager` also uncomments its config.ts + server.ts blocks via `wireSecretManager`; `router` adds the dep + a `npm run router` script via `wireRouter`). `aiBrowserTooling: 'all' \| 'agent-browser' \| 'none'` is forced to `'none'` when `aiInstructions` is off. i18n is NOT a choice — the full multi-language setup always ships (translator is core). | -> docs/scaffold-flow.md |
+| Constant: `DEFAULT_CHOICES` | Lean defaults applied under `--no-prompt`: Mongo + `auth: 'none'` + `email: 'none'` + no monitoring + presence/error-tracking/docs-ui/secret-manager/router all OFF + AI instructions ON + `aiBrowserTooling: 'agent-browser'`. The ONE on-by-default optional is `aiInstructions` (docs only, no app-runtime weight). i18n always ships (not a choice). | -> docs/scaffold-flow.md |
+| `wireRouter()` / `wireGraphMcp()` | `wireRouter` (opt-in `router`) adds `@luckystack/router` + a `router` npm script (separate-process load-balancer; topology in deploy.config.ts). `wireGraphMcp` (rides on `aiInstructions`) adds `@luckystack/mcp` as a devDep + registers it in `.mcp.json` so AI agents query the project dependency graph. `@luckystack/cli` ships as a template devDep so `npx luckystack add` resolves locally. | -> docs/scaffold-flow.md |
 | Constant: `TEMPLATE_DIR` | Resolved absolute path to the bundled `template/` folder (`../template` from `dist/index.js`). The scaffold aborts with a packaging-bug message when this directory is missing at runtime. | -> docs/scaffold-flow.md |
 
 ### `devkit`
@@ -379,6 +396,9 @@
 | `EmailSender`, `EmailMessage`, `EmailResult`, `EmailSenderRegistry` | Re-exported from `@luckystack/core` | Adapter contract + result tuple. |
 | `PreEmailSendPayload`, `PostEmailSendPayload` | `./hookPayloads` | Hook payload shapes (also augmented onto `HookPayloads`). |
 
+### `env-resolver`
+- _(no `CLAUDE.md` yet)_
+
 ### `error-tracking`
 | Function / Export | One-liner | Deep doc |
 |---|---|---|
@@ -402,7 +422,7 @@
 | `registerSentryConfig(input)` | Register Sentry-specific sample rates + ignoreErrors. Owned by this package, not part of `ProjectConfig`. | -> docs/sentry-integration.md |
 | `getSentryConfig()` | Read the merged active `SentryConfig`. | -> docs/sentry-integration.md |
 | `DEFAULT_SENTRY_CONFIG` | Default sample-rate + ignoreErrors values used until `registerSentryConfig` runs. | -> docs/sentry-integration.md |
-| Types: `ErrorTracker`, `ErrorTrackerContext`, `ErrorTrackerUser`, `ErrorTrackerEvent`, `SpanResult<T>` | Adapter contract types (re-exported from `@luckystack/core`). | -> docs/adapter-pattern.md |
+| Types: `ErrorTracker`, `ErrorTrackerContext`, `ErrorTrackerUser`, `ErrorTrackerEvent`, `SpanResult<T>` | Adapter contract types (re-exported from `@luckystack/core`). `SpanResult<T>` is now a pass-through alias for `T` (no conditional unwrapping — kept for annotation intent only; ET-O11). | -> docs/adapter-pattern.md |
 | Types: `SentryAdapterOptions`, `DatadogAdapterOptions`, `PostHogAdapterOptions` | Per-adapter option shapes. | -> docs/adapter-pattern.md |
 | Types: `SentryConfig`, `SentryConfigInput`, `SentryClientConfig`, `SentryServerConfig`, `SentrySampleRates` | Sentry config registry types. | -> docs/sentry-integration.md |
 
@@ -486,7 +506,7 @@
 | `clearActivity(socketId)` | Drop a socket's last-activity record + its refractory-throttle entries (called by the server on disconnect) | → docs/activity-broadcaster.md |
 | `clearActivityThrottle(socketId)` | Purge a socket's refractory-throttle timestamps from the activity-event registry (called by `clearActivity`) | → docs/activity-broadcaster.md |
 | `getLastActivity(socketId)` | Read a socket's last-activity timestamp (ms epoch) or `undefined` — for consumer roster/AFK queries | → docs/activity-broadcaster.md |
-| `getRoomPresence(roomCode, { io? })` | Snapshot a room's peers (`socketId`, `token`, `lastActivity`, `afk`) for a late joiner; adapter-aware (spans instances) | → docs/activity-broadcaster.md |
+| `getRoomPresence(roomCode, { io? })` | Snapshot a room's peers (`socketId`, `token`, `lastActivity`, `afk`) for a late joiner; peer list is adapter-aware (spans instances). `afk` is `boolean` for local sockets, `'unknown'` for remote peers (activity is tracked in a local-only Map). Routes `roomCode` through `formatRoomName` (same as the broadcast side) so the snapshot targets the same physical room. | — (source: `src/activity/activitySampler.ts`) |
 | `startActivitySampler({ io?, intervalMs? })` | Start the single interval that walks every socket and feeds `dispatchActivitySample` every `activitySampleIntervalMs`. Idempotent; returns the stop fn. Auto-started by `@luckystack/server` on first connect when `socketActivityBroadcaster` is on | → docs/activity-broadcaster.md |
 | `stopActivitySampler()` | Stop the sampler interval (shutdown / test reset) | → docs/activity-broadcaster.md |
 | `registerPresenceConfig(input)` | Override disconnect timers, ignore/allow reasons, AFK timeout, activity-sample interval | → docs/disconnect-grace.md |
@@ -539,14 +559,17 @@
 ### `secret-manager`
 | Function / Export | One-liner | Deep doc |
 | --- | --- | --- |
-| `initSecretManager(config)` | Boot-time entry. Scans `process.env` for pointer-shaped values, `POST /resolve`s them, overwrites `process.env` with real values. No-op in `'local'`. Starts dev hot reload when `config.dev` is set. | -> docs/architecture.md |
-| `refreshSecretManager()` | Re-resolve the captured pointers against the server (the dev **poll** channel). Call manually after an admin rotates a secret on a long-running process. | -> docs/architecture.md |
-| `reloadSecretManagerFromFiles()` | Re-parse the configured env files (`dev.envFiles`, default `.env` + `.env.local`) and apply them: plain values injected into `process.env` (live config reload), pointer-shaped values re-resolved. The dev **file-watch** channel; callable manually. | -> docs/architecture.md |
-| `getCachedResolution()` | Returns the last `{ fetchedAt, values }` (pointer -> value) for diagnostics, or `null`. | -> docs/architecture.md |
-| `resetSecretManagerForTests()` | Test-only — clears module state and tears down dev watchers / timers. | -> docs/architecture.md |
-| Type `SecretManagerConfig` | `{ url; token; source?; pointerPattern?; fetchImpl?; dev? }` where `dev` is `{ watch?; pollIntervalMs?; envFiles? }`. | -> docs/architecture.md |
+| `initSecretManager(config)` | Boot-time entry. Scans `process.env` for pointer-shaped values, `POST /resolve`s them, overwrites `process.env` with real values. No-op in `'local'`. Starts dev hot reload when `config.dev` is set. Starts the production rotation poll when `config.pollIntervalMs` is set. | -> docs/architecture.md |
+| `refreshSecretManager()` | Re-resolve the captured pointers against the server (the production rotation poll channel). Call manually after an admin rotates a secret on a long-running process. No-op in `'local'` mode. | -> docs/architecture.md |
+| `reloadSecretManagerFromFiles()` | Re-parse the configured env files (`dev.envFiles`, default `.env` + `.env.local`) and apply them: plain values injected into `process.env` (live config reload), pointer-shaped values re-resolved. The dev **file-watch** channel; callable manually. No-op before init or in `'local'` mode. | -> docs/architecture.md |
+| `stopSecretManager()` | Tear down all dev watchers, debounce timers, and rotation-poll intervals started by `initSecretManager`. Call on process shutdown if you need deterministic cleanup; otherwise timers are `unref`'d and won't block exit. | -> docs/architecture.md |
+| `getCachedResolution()` | Returns a shallow copy of the last `{ fetchedAt, values }` (pointer -> resolved secret) for diagnostics, or `null`. **Sensitive** — never serialize into HTTP responses, health payloads, or logs. | -> docs/architecture.md |
+| `getCachedResolutionMeta()` | Values-free diagnostic view: `{ fetchedAt, pointerNames, pointerCount }` — the resolved pointer names only, never the secret values. Safe for logs and health endpoints. | -> docs/architecture.md |
+| `resetSecretManagerForTests()` | Test-only — clears all module state and tears down dev watchers / timers. | -> docs/architecture.md |
+| Type `SecretManagerConfig` | `{ url; token; source?; pointerPattern?; envNames?; allowInsecureHttp?; timeoutMs?; retries?; resolvePath?; headers?; onApplied?; onResolveError?; fetchImpl?; pollIntervalMs?; dev? }` where `dev` is `{ watch?; pollIntervalMs?; envFiles? }`. | -> docs/architecture.md |
 | Type `SecretManagerToken` | `string \| { fromFile: string }`. | -> docs/architecture.md |
 | Type `CachedResolution` | `{ fetchedAt: number; values: Record<string, string> }`. | -> docs/architecture.md |
+| Type `CachedResolutionMeta` | `{ fetchedAt: number; pointerNames: string[]; pointerCount: number }`. | -> docs/architecture.md |
 - ### Internal helpers (not exported, listed for AI context)
 | Helper | Role |
 | --- | --- |
@@ -697,6 +720,7 @@
 | devkit | 8 | 8 | 0 |
 | docs-ui | 4 | 4 | 0 |
 | email | 5 | 5 | 0 |
+| env-resolver | 0 | 0 | 0 |
 | error-tracking | 4 | 4 | 0 |
 | login | 8 | 8 | 0 |
 | mcp | 0 | 0 | 0 |

@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 import {
   ensurePeerDepInstalled,
   getCurrentErrorTrackerIdentity,
+  sanitizeErrorStrings,
   type ErrorTracker,
   type ErrorTrackerEvent,
 } from '@luckystack/core';
@@ -76,12 +77,18 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
       const resolved = resolveExceptionEvent(options.beforeSend, error, context);
       if (!resolved) return;
       const { error: fwdError, context: fwdContext } = resolved;
+      //? ET-O2: scrub secrets interpolated into error.message / error.stack
+      //? before they reach PostHog. The context-level key-based scrub already
+      //? covers the `context` object; this covers the free-text string fields.
+      const scrubbed = sanitizeErrorStrings(fwdError);
+      const errorMessage = scrubbed?.message ?? (fwdError instanceof Error ? fwdError.message : String(fwdError));
+      const errorStack = scrubbed?.stack ?? (fwdError instanceof Error ? fwdError.stack : undefined);
       const properties: Record<string, unknown> = {
         'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
-        'error.message': fwdError instanceof Error ? fwdError.message : String(fwdError),
+        'error.message': errorMessage,
         //? Only emit `error.stack` when a stack actually exists — a non-Error
         //? throw would otherwise add a noisy explicit-`undefined` field.
-        ...(fwdError instanceof Error && fwdError.stack ? { 'error.stack': fwdError.stack } : {}),
+        ...(errorStack === undefined ? {} : { 'error.stack': errorStack }),
         ...fwdContext,
       };
       //? Prefer the dedicated `captureException` API when the installed

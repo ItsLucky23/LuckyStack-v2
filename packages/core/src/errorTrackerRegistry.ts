@@ -8,8 +8,15 @@
 //? every event fans out to all of them. Per-adapter errors are swallowed
 //? so one buggy tracker can't break the chain.
 
+//? SERVER-ONLY import. This static import of `node:async_hooks` is intentional
+//? and MUST remain externalized in any client-bundle build config (Vite/esbuild
+//? `external: ['node:async_hooks']`). Although AsyncLocalStorage is never
+//? constructed at module-eval time (the lazy `getIdentityStore()` guard handles
+//? that), the import itself will cause a runtime error in the browser if the
+//? bundler does not externalize it. Do NOT statically import this file from
+//? browser-bundle entry points — use `@luckystack/core/client` instead.
 import * as nodeAsyncHooks from 'node:async_hooks';
-import { sanitizeForLog } from './redactedLogKeys';
+import { getRedactedLogKeys, REDACTED_PLACEHOLDER, sanitizeForLog } from './redactedLogKeys';
 import { getLogger } from './loggerRegistry';
 
 export type ErrorTrackerContext = Record<string, unknown>;
@@ -22,6 +29,74 @@ export type ErrorTrackerContext = Record<string, unknown>;
 const sanitizeContext = (context?: ErrorTrackerContext): ErrorTrackerContext | undefined => {
   if (!context) return context;
   return sanitizeForLog(context) as ErrorTrackerContext;
+};
+
+//? ET-O2 value-level scrub: error.message and error.stack can contain
+//? interpolated secrets ("token=abc123") that bypass the key-based context
+//? scrub. Replace `key=value` and `key: value` patterns for every registered
+//? redacted key so the string never reaches an adapter verbatim.
+//? Runs at capture time (not on every Error construction) to stay off the
+//? hot path; the result is cached on the sanitized context so each adapter
+//? fan-out step reads the same pre-scrubbed string.
+//? BOOT-TIME ONLY: `registerRedactedLogKeys` must be called at boot with a
+//? static key set (framework package init / project boot). Calling it with
+//? dynamically generated strings (route names, tenant IDs, etc.) at request
+//? time will cause this cache to grow without bound. A hard cap (200 entries)
+//? logs a warning when exceeded so misuse is immediately diagnosable.
+const REDACTED_VALUE_RE_CACHE_MAX = 200;
+interface ScrubPatternPair {
+  urlParam: RegExp;   // matches <key>=<value> (URL-param style)
+  logLabel: RegExp;   // matches <key>: <value> (log-label style)
+}
+const REDACTED_VALUE_RE_CACHE = new Map<string, ScrubPatternPair>();
+
+const buildScrubPattern = (key: string): ScrubPatternPair => {
+  const cached = REDACTED_VALUE_RE_CACHE.get(key);
+  if (cached) return cached;
+  if (REDACTED_VALUE_RE_CACHE.size >= REDACTED_VALUE_RE_CACHE_MAX) {
+    try {
+      getLogger().warn(`errorTracker: REDACTED_VALUE_RE_CACHE exceeded ${String(REDACTED_VALUE_RE_CACHE_MAX)} entries — registerRedactedLogKeys must only be called at boot with a static key set, not with dynamic/runtime-varying strings.`);
+    } catch {
+      // last-resort swallow
+    }
+  }
+  const escaped = key.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  //? Two separate passes — one for `key=value` (URL-param style), one for
+  //? `key: value` (log-label style) — to avoid alternation complexity and the
+  //? subtle behaviours that arise when mixing capturing and non-capturing groups
+  //? inside a single pattern (ET-O2 alternation fix).
+  //? `+` (not `*`) for the value portion so `key=` with an empty value is NOT
+  //? replaced (empty parameters are not secrets worth scrubbing and a `*` match
+  //? would turn innocent `foo=` markers into `[redacted]`).
+  const pair: ScrubPatternPair = {
+    urlParam: new RegExp(String.raw`${escaped}=[^\s,;"'&]+`, 'gi'),
+    logLabel: new RegExp(String.raw`${escaped}:\s*[^\s,;"']+`, 'gi'),
+  };
+  REDACTED_VALUE_RE_CACHE.set(key, pair);
+  return pair;
+};
+
+export const sanitizeErrorString = (value: string): string => {
+  let result = value;
+  // Scrub matching `key=value` / `key: value` patterns for every registered
+  // redacted key so interpolated secrets (e.g. "token=abc") never reach an adapter.
+  for (const key of getRedactedLogKeys()) {
+    const { urlParam, logLabel } = buildScrubPattern(key);
+    result = result.replace(urlParam, REDACTED_PLACEHOLDER).replace(logLabel, REDACTED_PLACEHOLDER);
+  }
+  return result;
+};
+
+//? Produce a sanitized version of an Error's message and stack so adapters
+//? can emit pre-scrubbed strings without touching the original Error object.
+export const sanitizeErrorStrings = (
+  error: unknown,
+): { message: string; stack: string | undefined } | null => {
+  if (!(error instanceof Error)) return null;
+  return {
+    message: sanitizeErrorString(error.message),
+    stack: error.stack === undefined ? undefined : sanitizeErrorString(error.stack),
+  };
 };
 
 export interface ErrorTrackerUser {
@@ -97,8 +172,11 @@ type IdentityStore = nodeAsyncHooks.AsyncLocalStorage<IdentityBox>;
 let resolvedIdentityStore: IdentityStore | null | undefined;
 const getIdentityStore = (): IdentityStore | null => {
   if (resolvedIdentityStore !== undefined) return resolvedIdentityStore;
+  //? Server detection via property presence — `'window' in globalThis` is false
+  //? in Node and avoids the DOM-lib typing that makes `globalThis.window === undefined`
+  //? a "no-overlap" lint error (and avoids a ReferenceError on a bare `window`).
   resolvedIdentityStore =
-    typeof window === 'undefined' ? new nodeAsyncHooks.AsyncLocalStorage<IdentityBox>() : null;
+    'window' in globalThis ? null : new nodeAsyncHooks.AsyncLocalStorage<IdentityBox>();
   return resolvedIdentityStore;
 };
 
@@ -159,6 +237,20 @@ const passesPreCaptureFilter = (kind: 'exception' | 'message', payload: Record<s
   }
 };
 
+//? ET-O6: the pre-capture filter payload now includes the error / message
+//? so filters can drop noisy errors by type/message (the documented use case).
+//? Separate helpers per kind so the call site stays type-safe.
+const exceptionFilterPayload = (
+  error: unknown,
+  context: ErrorTrackerContext | undefined,
+): Record<string, unknown> => ({ error, context: context ?? null });
+
+const messageFilterPayload = (
+  message: string,
+  level: string,
+  context: ErrorTrackerContext | undefined,
+): Record<string, unknown> => ({ message, level, context: context ?? null });
+
 let activeTrackers: ErrorTracker[] = [];
 
 //? REPLACE semantics — last-write-wins (ET-24 confirmed standard). Use
@@ -197,8 +289,10 @@ export const flushErrorTrackers = async (): Promise<void> => {
       if (!tracker.flush) return;
       try {
         await tracker.flush();
-      } catch {
-        // Swallow — a failing flush must not block shutdown.
+      } catch (error) {
+        //? ET-O7: route to the shared failure logger (but never re-throw — a
+        //? failing flush must not block graceful shutdown).
+        logTrackerFailure(tracker.name, 'flush', error);
       }
     }),
   );
@@ -209,7 +303,7 @@ export const captureExceptionAcrossTrackers = (
   context?: ErrorTrackerContext,
 ): void => {
   const safeContext = sanitizeContext(context);
-  if (!passesPreCaptureFilter('exception', safeContext ?? {})) return;
+  if (!passesPreCaptureFilter('exception', exceptionFilterPayload(error, safeContext))) return;
   for (const tracker of activeTrackers) {
     try {
       tracker.captureException(error, safeContext);
@@ -228,7 +322,7 @@ export const captureMessageAcrossTrackers = (
   context?: ErrorTrackerContext,
 ): void => {
   const safeContext = sanitizeContext(context);
-  if (!passesPreCaptureFilter('message', safeContext ?? {})) return;
+  if (!passesPreCaptureFilter('message', messageFilterPayload(message, level, safeContext))) return;
   for (const tracker of activeTrackers) {
     try {
       tracker.captureMessage(message, level, safeContext);
@@ -253,8 +347,9 @@ export const setErrorTrackerUser = (user: ErrorTrackerUser | null): void => {
   for (const tracker of activeTrackers) {
     try {
       tracker.setUser(user);
-    } catch {
-      // Swallow.
+    } catch (error) {
+      //? ET-O7: route to the shared failure logger so a misbehaving tracker is diagnosable.
+      logTrackerFailure(tracker.name, 'setUser', error);
     }
   }
 };
@@ -268,8 +363,9 @@ export const recordMetricAcrossTrackers = (
     if (tracker.recordMetric) {
       try {
         tracker.recordMetric(name, value, tags);
-      } catch {
-        // Swallow.
+      } catch (error) {
+        //? ET-O7: route to the shared failure logger so a misbehaving tracker is diagnosable.
+        logTrackerFailure(tracker.name, 'recordMetric', error);
       }
     }
   }
@@ -300,10 +396,15 @@ export interface SpanHandle {
   readonly durationMs: number;
 }
 
-export const startSpanHandle = (name: string, op: string): SpanHandle => {
+//? `_name`/`_op` are retained in the public signature for call-site documentation
+//? (and forward-compat) even though ET-O9 removed the per-call metric that read them.
+export const startSpanHandle = (_name: string, _op: string): SpanHandle => {
   const startedAt = Date.now();
   let finishedAt: number | null = null;
-  recordMetricAcrossTrackers(`span.start.${op}`, 1, { name });
+  //? ET-O9: removed the per-call `recordMetricAcrossTrackers` that fired on every
+  //? startSpanHandle invocation. With zero prod callers this was pure overhead and
+  //? produced noisy `span.start.*` metrics nobody reads. The finish wall-clock time
+  //? is available via `durationMs` for callers that emit their own metric.
   return {
     finish: () => {
       finishedAt ??= Date.now();

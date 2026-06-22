@@ -24,12 +24,20 @@ export const extractTokenFromRequest = (req: IncomingMessage): string | null => 
     ? authHeader.slice(7)
     : null;
 
-  const cookieToken = getCookieValue(req.headers.cookie, getProjectConfig().http.sessionCookieName);
+  const config = getProjectConfig();
+  const cookieToken = getCookieValue(req.headers.cookie, config.http.sessionCookieName);
 
-  // Prefer the configured mode, but fall back to the other transport.
-  if (getProjectConfig().session.basedToken) {
+  // Token-mode: bearer is canonical, cookie is the fallback.
+  if (config.session.basedToken) {
     return bearerToken ?? cookieToken;
   }
 
-  return cookieToken ?? bearerToken;
+  // Cookie-mode (CORE-O10): only accept the bearer fallback when explicitly
+  // opted in, otherwise a stolen token replayed via `Authorization: Bearer`
+  // would defeat the cookie/CSRF model.
+  if (config.http.acceptBearerInCookieMode) {
+    return cookieToken ?? bearerToken;
+  }
+
+  return cookieToken;
 };

@@ -66,3 +66,8 @@ dump/
 test-results/
 playwright-report/
 .claude/settings.local.json
+# Stale scaffold-output artifact (SCAF-N6) — regenerate in CI into a temp dir if needed
+packages/create-luckystack-app/ls-np/
+
+# Dev scratch scripts in server/ (should never be committed)
+server/**/*.py

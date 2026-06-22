@@ -43,6 +43,13 @@ The command is **idempotent**: copied files are skipped if they already exist (y
 - [ ] `@luckystack/login` is in `package.json`; `npm install` ran.
 - [ ] `src/login/`, `src/register/`, `src/reset-password/`, `src/settings/**` pages + their `_api` exist; `src/_components/LoginForm.tsx` exists.
 - [ ] `config.ts` — `auth.credentials` reflects whether you want the email/password form; OAuth buttons appear iff a provider's `*_CLIENT_ID` + `*_CLIENT_SECRET` (DEV_-prefixed in dev) are set.
+- [ ] **Route guards** (NOT auto-wired — consumer-owned). `add login` installs the backend + pages but does not edit your page guards, so a project scaffolded `auth: 'none'` still routes `/` → `/dashboard` and leaves the dashboard ungated. To auth-gate routing, add a per-page `export const middleware` to the pages you want protected:
+  ```ts
+  // src/dashboard/page.tsx
+  export const middleware: PageMiddleware<SessionLayout> = ({ session }) =>
+    session ? { success: true } : { success: false, redirect: '/login' };
+  ```
+  and have `src/page.tsx` redirect `/` to `/login` (or your entry) when there's no session.
 - [ ] Restart the server; visit `/login`.
 
 **presence**

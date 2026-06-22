@@ -7,10 +7,12 @@
 //? non-reversible prefix that is still useful for correlating log lines /
 //? error events without exposing a usable credential.
 
-const VISIBLE_PREFIX = 8;
+//? 4 chars is sufficient for log-line correlation while preventing partial
+//? brute-force of low-entropy tokens (audit finding SYNC-medium-5).
+const VISIBLE_PREFIX = 4;
 
 /**
- * Truncate a session token to `<first 8 chars>…` for safe logging. Returns the
+ * Truncate a session token to `<first 4 chars>…` for safe logging. Returns the
  * value unchanged when it is null/empty (nothing to redact) or already shorter
  * than the visible prefix.
  */

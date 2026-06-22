@@ -3,10 +3,14 @@
 //?
 //? Topology:
 //?   wave 1 → core                                         (no @luckystack deps)
-//?   wave 2 → error-tracking, email, login, devkit, router,
-//?            test-runner, create-luckystack-app, docs-ui  (depend on core only — or nothing)
-//?   wave 3 → api, sync, presence                          (depend on login + core)
-//?   wave 4 → server                                       (depends on api, sync, presence, login, core)
+//?   wave 2 → email, login, devkit, router,
+//?            create-luckystack-app, secret-manager, mcp  (depend on core only — or nothing)
+//?   wave 3 → error-tracking, test-runner                  (type-check against login's dist —
+//?                                                         error-tracking: PostLogoutPayload;
+//?                                                         test-runner: dynamic import())
+//?   wave 4 → api, sync, presence                          (depend on login + core)
+//?   wave 5 → server                                       (depends on api, sync, presence, login, core)
+//?   wave 6 → docs-ui, cli                                 (docs-ui's ./register imports server; cli is a leaf)
 //?
 //? Within a wave packages build in parallel. Across waves we wait so the next
 //? wave can resolve dts paths against freshly-emitted dist files.
@@ -28,12 +32,17 @@ const WAVES = [
   ['core'],
   // mcp is a standalone stdio server (only deps: @modelcontextprotocol/sdk + zod);
   // no @luckystack/* runtime imports, so its placement is free — kept here as a leaf.
-  ['email', 'login', 'devkit', 'router', 'test-runner', 'create-luckystack-app', 'secret-manager', 'mcp'],
-  // error-tracking depends on @luckystack/login for the postLogout hook
-  // payload augmentation (auto-instrumentation type-checks 'postLogout' as
-  // a keyof HookPayloads, which is only populated when login is in scope).
-  // Place it AFTER login is built so its dist/index.d.ts is resolvable.
-  ['error-tracking'],
+  ['email', 'login', 'devkit', 'router', 'create-luckystack-app', 'secret-manager', 'mcp'],
+  // Both of these type-check against @luckystack/login's freshly-built
+  // dist/index.d.ts, so they MUST run in a wave after login:
+  //  - error-tracking: `import type { PostLogoutPayload } from '@luckystack/login'`
+  //    (auto-instrumentation type-checks 'postLogout' as a keyof HookPayloads,
+  //    which is only populated when login is in scope).
+  //  - test-runner: `await import('@luckystack/login')` in customTests/runAllTests;
+  //    tsup's DTS pass resolves it against login's dist (dist/ is gitignored, so a
+  //    fresh CI checkout has no stale dts to resolve against — TS7016 if built in
+  //    parallel with login).
+  ['error-tracking', 'test-runner'],
   ['api', 'sync', 'presence'],
   ['server'],
   // docs-ui's `./register` side-effect imports `@luckystack/server`

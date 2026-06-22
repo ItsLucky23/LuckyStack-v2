@@ -186,6 +186,196 @@ const wholeFileLines = async (relPaths) => {
 };
 
 // ---------------------------------------------------------------------------
+// H-TWIN: transport-parity structural check
+//
+// Asserts that the API and sync transport-twin file pairs remain behaviourally
+// aligned. Checked by static text scan (no TS compiler needed) — each twin is
+// read once and tested for the presence of the documented hook names, shared
+// helper calls, and rough pipeline ordering. A missing entry means a twin has
+// silently lost a stage; the wrong order means auth/rate-limit sequencing has
+// drifted. Violations are always BLOCK severity because divergence between
+// socket and HTTP transports is a security regression.
+//
+// Intentional divergences that are NOT asserted here:
+//   - preSocketMessage: socket-only hook (no HTTP equivalent)
+//   - applyApiRateLimits skipGlobalIpBucket: HTTP-transport-only param
+//   - ip field in apiAuthRejected payload: HTTP adds it, socket does not
+// ---------------------------------------------------------------------------
+
+// Hooks that BOTH api transport files must dispatch (billing order irrelevant
+// for presence; ordering is checked separately for the security-sensitive pair).
+const API_SHARED_HOOKS = [
+  'apiAuthRejected',
+  'preApiExecute',
+  'postApiExecute',
+  'preApiRespond',
+  'transformApiResponse',
+  'postApiRespond',
+];
+
+// Hooks that BOTH sync transport files must dispatch.
+const SYNC_SHARED_HOOKS = [
+  'preSyncAuthorize',
+  'postSyncAuthorize',
+  'preSyncValidate',
+  'postSyncValidate',
+  'preSyncExecute',
+  'postSyncExecute',
+  'preSyncFanout',
+  'postSyncFanout',
+  'preSyncRecipient',
+  'rateLimitExceeded',
+];
+
+// Returns the byte-offset of the FIRST occurrence of `needle` in `haystack`,
+// or -1 when not found.
+const indexOf = (haystack, needle) => haystack.indexOf(needle);
+
+// Returns true when `haystack` contains `needle`.
+const contains = (haystack, needle) => haystack.includes(needle);
+
+/** Checks one twin pair and returns any parity findings. */
+const checkTwinPair = async ({
+  socketFile,
+  httpFile,
+  sharedHooks,
+  // Shared helper that BOTH files must call (e.g. `applyApiRateLimits`).
+  sharedHelper,
+  // In each file, this token must appear BEFORE the rate-limit helper call.
+  // Used to verify auth → rate-limit ordering. May be undefined.
+  authBeforeToken,
+  // The rate-limit helper call token whose position we compare against authBeforeToken.
+  rateLimitToken,
+  rule,
+}) => {
+  const findings = [];
+
+  const socketAbs = path.join(REPO_ROOT, socketFile);
+  const httpAbs = path.join(REPO_ROOT, httpFile);
+
+  const [errA, socketSrc] = await safe(fs.readFile(socketAbs, 'utf8'));
+  const [errB, httpSrc] = await safe(fs.readFile(httpAbs, 'utf8'));
+
+  if (errA) {
+    findings.push({ file: socketFile, line: 1, rule, message: `transport-parity: cannot read file — ${errA.message}`, severity: 'block' });
+    return findings;
+  }
+  if (errB) {
+    findings.push({ file: httpFile, line: 1, rule, message: `transport-parity: cannot read file — ${errB.message}`, severity: 'block' });
+    return findings;
+  }
+
+  // 1. Hook presence: every shared hook must appear in both files.
+  for (const hook of sharedHooks) {
+    const pattern = `'${hook}'`;
+    if (!contains(socketSrc, pattern)) {
+      findings.push({ file: socketFile, line: 1, rule, message: `transport-parity: socket handler missing dispatchHook('${hook}') — hook must appear on both transports.`, severity: 'block' });
+    }
+    if (!contains(httpSrc, pattern)) {
+      findings.push({ file: httpFile, line: 1, rule, message: `transport-parity: HTTP handler missing dispatchHook('${hook}') — hook must appear on both transports.`, severity: 'block' });
+    }
+  }
+
+  // 2. Shared rate-limit helper: both files must call it.
+  if (sharedHelper) {
+    if (!contains(socketSrc, sharedHelper)) {
+      findings.push({ file: socketFile, line: 1, rule, message: `transport-parity: socket handler does not call shared helper '${sharedHelper}' — both transports must use it.`, severity: 'block' });
+    }
+    if (!contains(httpSrc, sharedHelper)) {
+      findings.push({ file: httpFile, line: 1, rule, message: `transport-parity: HTTP handler does not call shared helper '${sharedHelper}' — both transports must use it.`, severity: 'block' });
+    }
+  }
+
+  // 3. Pipeline-ordering check: authBeforeToken must appear before rateLimitToken.
+  //    Only asserted when both tokens are present (a missing token is already caught above).
+  if (authBeforeToken && rateLimitToken) {
+    for (const [src, file] of [[socketSrc, socketFile], [httpSrc, httpFile]]) {
+      const authPos = indexOf(src, authBeforeToken);
+      const rlPos = indexOf(src, rateLimitToken);
+      if (authPos !== -1 && rlPos !== -1 && authPos > rlPos) {
+        findings.push({ file, line: 1, rule, message: `transport-parity: rate-limit helper '${rateLimitToken}' appears before auth token '${authBeforeToken}' — pipeline order must be auth → rate-limit.`, severity: 'block' });
+      }
+    }
+  }
+
+  return findings;
+};
+
+/** Top-level runner called from main(). Returns all parity findings. */
+export const checkTransportParity = async () => {
+  const all = [];
+
+  // API twin pair: handleApiRequest.ts (socket) vs handleHttpApiRequest.ts (HTTP).
+  //
+  // Auth token: `apiAuthRejected` is dispatched in the auth stage on both
+  // transports; it is a reliable anchor because no other stage fires it.
+  // Rate-limit anchor: `applyApiRateLimits` is the shared helper; it always
+  // appears AFTER the auth block in both files.
+  const apiFindings = await checkTwinPair({
+    socketFile: 'packages/api/src/handleApiRequest.ts',
+    httpFile:   'packages/api/src/handleHttpApiRequest.ts',
+    sharedHooks: API_SHARED_HOOKS,
+    sharedHelper: 'applyApiRateLimits',
+    authBeforeToken: "'apiAuthRejected'",
+    rateLimitToken:  'applyApiRateLimits(',
+    rule: 'transport-parity-api',
+  });
+  all.push(...apiFindings);
+
+  // Sync twin pair: handleSyncRequest.ts (socket) vs handleHttpSyncRequest.ts (HTTP).
+  //
+  // The sync rate-limit helpers are per-transport inline functions, not a
+  // shared module (inline twins of equivalent logic). We verify each contains
+  // `checkRateLimit` (the core primitive both delegate to) rather than a named
+  // shared helper.
+  //
+  // For pipeline-ordering we compare CALL SITE positions, not definition
+  // positions. The function definitions appear early in the file but the actual
+  // invocations are what determine pipeline order:
+  //   socket: runSyncAuth( must precede applySyncRateLimits(
+  //   http:   stageCheckAuth( must precede applyHttpSyncRateLimits(
+  // We run two targeted checkTwinPair calls (one per ordering anchor pair)
+  // then merge the presence-check results.
+  const syncBaseFindings = await checkTwinPair({
+    socketFile: 'packages/sync/src/handleSyncRequest.ts',
+    httpFile:   'packages/sync/src/handleHttpSyncRequest.ts',
+    sharedHooks: SYNC_SHARED_HOOKS,
+    sharedHelper: 'checkRateLimit',
+    // No cross-file ordering here — ordering is checked per-file below.
+    authBeforeToken: undefined,
+    rateLimitToken:  undefined,
+    rule: 'transport-parity-sync',
+  });
+  all.push(...syncBaseFindings);
+
+  // Socket handler: auth call site before rate-limit call site.
+  const syncSocketOrder = await checkTwinPair({
+    socketFile: 'packages/sync/src/handleSyncRequest.ts',
+    httpFile:   'packages/sync/src/handleSyncRequest.ts',  // same file, order-only check
+    sharedHooks: [],
+    sharedHelper: undefined,
+    authBeforeToken: 'runSyncAuth(',
+    rateLimitToken:  'applySyncRateLimits(',
+    rule: 'transport-parity-sync',
+  });
+  all.push(...syncSocketOrder);
+
+  // HTTP handler: auth call site before rate-limit call site.
+  const syncHttpOrder = await checkTwinPair({
+    socketFile: 'packages/sync/src/handleHttpSyncRequest.ts',
+    httpFile:   'packages/sync/src/handleHttpSyncRequest.ts',  // same file, order-only check
+    sharedHooks: [],
+    sharedHelper: undefined,
+    authBeforeToken: 'stageCheckAuth(',
+    rateLimitToken:  'applyHttpSyncRateLimits(',
+    rule: 'transport-parity-sync',
+  });
+  all.push(...syncHttpOrder);
+
+  return all;
+};
+
+// ---------------------------------------------------------------------------
 // Run
 // ---------------------------------------------------------------------------
 
@@ -227,6 +417,11 @@ const main = async () => {
       findings.push({ file, line, rule: f.rule, message: f.message, severity });
     }
   }
+
+  // H-TWIN: transport-parity structural check — always runs, not diff-scoped.
+  // A missing hook or wrong pipeline order on either twin is a BLOCK violation.
+  const parityFindings = await checkTransportParity();
+  findings.push(...parityFindings);
 
   if (findings.length === 0) {
     console.log("[ai:lint] no invariant violations in scope.");

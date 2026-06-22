@@ -48,6 +48,10 @@ export const serveFavicon = (res: ServerResponse) => {
 }
 
 export const serveFile = async (req: IncomingMessage | { url: string }, res: ServerResponse) => {
+  //? Set nosniff on all responses from this handler (including 4xx/5xx)
+  //? so the header is present even when serveFile is called outside the
+  //? framework HTTP handler (e.g. in tests) which normally sets it globally.
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 
   //? if request is / (root) we serve the index.html
   const url = req.url ? (req.url == '/' ? 'index.html' : req.url) : 'index.html';
@@ -63,7 +67,9 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
   const safePath = path.normalize(decodedUrl).replace(/^(\.\.[/\\])+/, '');
   const filePath = path.join(rootFolder, safePath);
 
-  if (!filePath.startsWith(rootFolder)) {
+  //? Append the platform separator so a rootFolder of `/foo/dist` does not
+  //? accidentally permit `/foo/dist-evil/` via prefix match.
+  if (!filePath.startsWith(rootFolder + path.sep)) {
     //! here we avoid directory traversal attacks
     res.writeHead(403, { "Content-Type": "text/plain" });
     return res.end("Forbidden");
@@ -72,35 +78,37 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
   //? here we check if the file extension or just the filename is in the list of files we dont want to serve
   //? a file that is in the list below should not be able to run this function in the first place cause we filter the routePath using zod before calling this function
   //? but if it passes somehow, we avoid it being served
-  if (filePath.includes('.env') ||
-    filePath.endsWith('.map') ||
-    path.basename(filePath) === 'server.js' ||
-    filePath.includes('.ts') ||
-    filePath.includes('.tsx') ||
-    filePath.includes('.py') ||
-    filePath.includes('package.json') ||
-    filePath.includes('package-lock.json') ||
-    filePath.includes('.gitignore') ||
-    filePath.includes('eslint.config.js') ||
-    filePath.includes('postcss.config.mjs') ||
-    filePath.includes('README.md') ||
-    filePath.includes('redis.conf') ||
-    filePath.includes('tailwind.config.js') ||
-    filePath.includes('tsconfig.client.json') ||
-    filePath.includes('tsconfig.node.json') ||
-    filePath.includes('vite.config.ts') ||
-    filePath.includes('schema.prisma')
-  ) {
+  //? Use path.extname / path.basename (not .includes) to avoid false positives on
+  //? directory or file names that coincidentally contain the blocked substring.
+  const fileExt = path.extname(filePath);
+  const fileName = path.basename(filePath);
+  const BLOCKED_EXTENSIONS = new Set(['.env', '.map', '.ts', '.tsx', '.py']);
+  const BLOCKED_BASENAMES = new Set([
+    'server.js',
+    'package.json',
+    'package-lock.json',
+    '.gitignore',
+    'eslint.config.js',
+    'postcss.config.mjs',
+    'README.md',
+    'redis.conf',
+    'tailwind.config.js',
+    'tsconfig.client.json',
+    'tsconfig.node.json',
+    'vite.config.ts',
+    'schema.prisma',
+  ]);
+  if (BLOCKED_EXTENSIONS.has(fileExt) || BLOCKED_BASENAMES.has(fileName) || fileName.startsWith('.env')) {
+    res.writeHead(403, { "Content-Type": "text/plain" });
     return res.end("Forbidden");
   }
 
 
-  const extname = path.extname(filePath);
   let contentType: string | null = 'text/html';
 
   //? here we get the content type of the file and serve it to the client
   //? if the file extension is not in the list below, we serve the index.html file
-  switch (extname) {
+  switch (fileExt) {
     case '.html': { contentType = 'text/html'; break;
     }
     case '.css': { contentType = 'text/css'; break;
@@ -116,7 +124,12 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
     }
     case '.gif': { contentType = 'image/gif'; break;
     }
-    case '.svg': { contentType = 'image/svg+xml'; break;
+    case '.svg': {
+      //? SVGs can contain embedded <script> tags. Serving with a
+      //? `sandbox` CSP blocks script execution when loaded directly.
+      res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+      contentType = 'image/svg+xml';
+      break;
     }
     case '.ico': { contentType = 'image/x-icon'; break;
     }
@@ -130,19 +143,18 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
     return res.end("Not Found");
   }
 
-  //? Attempt to read the file and serve it; on failure return the
-  //? build-prompt for index.html or a 404 for any other asset.
   const [readError, content] = await tryCatch(() => fs.promises.readFile(filePath));
   if (readError || !content) {
     if (url == 'index.html') {
-      res.end("-_- you have to run the 'npm run build' command first -_-")
+      //? Dev hint: no build output yet. 503 (not 200) so healthchecks notice.
+      res.writeHead(503, { "Content-Type": "text/plain" });
+      res.end("Run 'npm run build' first.");
     } else {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not Found");
     }
     return;
   }
-  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.writeHead(200, { 'Content-Type': contentType });
   res.end(content);
 };

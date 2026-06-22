@@ -3,6 +3,7 @@ import https from 'node:https';
 import { URL } from 'node:url';
 import type { IncomingMessage, ClientRequest } from 'node:http';
 import type { Socket } from 'node:net';
+import { dispatchHook } from '@luckystack/core';
 import type { ServiceTargetResolver } from './resolveTarget';
 import {
   WS_HOP_BY_HOP_HEADERS,
@@ -65,17 +66,18 @@ export const createWsProxy = ({ resolver, wsTargetService, upstreamHandshakeTime
     //? upstream request to avoid a half-open upstream socket leak.
     let upgraded = false;
     //? Guards the pre-101 rejection paths (handshake timeout, non-101 `'response'`,
-    //? upstream `'error'`, client-gone) so only the FIRST one writes the status +
-    //? tears both legs down. Without it, the timeout path destroys the upstream
-    //? request which re-emits `'error'`, double-running the teardown.
+    //? upstream `'error'`, client-gone, gate rejection) so only the FIRST one
+    //? writes the status + tears both legs down.
     let settled = false;
     let upstreamRequest: ClientRequest | null = null;
 
-    //? CRITICAL: attach client-socket listeners BEFORE any IO. A client RST /
-    //? disconnect mid-handshake emits `'error'` on the raw `net.Socket`; with no
-    //? listener that throws an uncaught exception and crashes the whole router
-    //? process (remote, unauthenticated DoS). The guard also reaps the in-flight
-    //? upstream handshake so a disconnecting client cannot leak upstream sockets.
+    //? CRITICAL: attach client-socket listeners BEFORE any IO or awaiting.
+    //? A client RST / disconnect mid-handshake emits `'error'` on the raw
+    //? `net.Socket`; with no listener that throws an uncaught exception and
+    //? crashes the whole router process (remote, unauthenticated DoS). The guard
+    //? also reaps the in-flight upstream handshake so a disconnecting client
+    //? cannot leak upstream sockets. This must run synchronously before the async
+    //? gate check below so the socket is guarded during the await.
     const onClientGone = (): void => {
       settled = true;
       if (!upgraded && upstreamRequest) upstreamRequest.destroy();
@@ -89,12 +91,14 @@ export const createWsProxy = ({ resolver, wsTargetService, upstreamHandshakeTime
     //? targets would let `new URL(pathname, target)` re-host the upstream to an
     //? attacker-chosen host:port (SSRF / open TCP tunnel).
     if (!isOriginFormTarget(pathname)) {
+      settled = true;
       writeStatusAndDestroy(clientSocket, 400, 'Bad Request');
       return;
     }
 
     const resolved = resolver.resolve(service);
     if (!resolved) {
+      settled = true;
       writeStatusAndDestroy(clientSocket, 502, 'Bad Gateway');
       return;
     }
@@ -105,105 +109,196 @@ export const createWsProxy = ({ resolver, wsTargetService, upstreamHandshakeTime
     //? backend the resolver chose. A custom `ServiceResolver` or a malformed
     //? path must never move the upstream off the chosen backend.
     if (!isHostPinned(targetUrl, resolved.target)) {
+      settled = true;
       writeStatusAndDestroy(clientSocket, 502, 'Bad Gateway');
       return;
     }
 
-    const transport = targetUrl.protocol === 'https:' ? https : http;
-    const forwardHeaders = stripForwardedHeaders(
-      stripHopByHopHeaders(req.headers, WS_HOP_BY_HOP_HEADERS),
-    );
-
-    upstreamRequest = transport.request({
-      hostname: targetUrl.hostname,
-      //? Boot-time guard in `resolveTarget.ts` ensures every binding URL has
-      //? an explicit port. `targetUrl.port` is always a non-empty numeric
-      //? string at this point.
-      port: Number(targetUrl.port),
-      path: targetUrl.pathname + targetUrl.search,
-      method: req.method,
-      headers: {
-        ...forwardHeaders,
-        //? These two must be preserved verbatim to complete the WS handshake.
-        connection: 'Upgrade',
-        upgrade: 'websocket',
-        //? Router-authoritative forwarding values. The client's copies were
-        //? stripped above; XFF is the router's own peer view of the client so a
-        //? client cannot forge its source IP, and the scheme is normalized
-        //? rather than trusted from the inbound header.
-        'x-forwarded-for': buildForwardedFor(req.socket.remoteAddress),
-        'x-forwarded-host': req.headers.host ?? '',
-        'x-forwarded-proto': normalizeForwardedProto(req.headers['x-forwarded-proto']),
-        'x-luckystack-resolved-env': resolved.resolvedEnvKey,
-        'x-luckystack-via-fallback': resolved.viaFallback ? '1' : '0',
-      },
+    //? The async gate check runs AFTER the synchronous safety guards above.
+    //? `clientSocket` is already guarded by `onClientGone`; if the client RSTs
+    //? while we await, `settled` is flipped and the continuation below is a no-op.
+    void openUpstream(req, clientSocket, head, {
+      pathname,
+      resolved,
+      targetUrl,
+      service,
+      transport: targetUrl.protocol === 'https:' ? https : http,
+      handshakeTimeoutMs,
+      onClientGone,
+      getSettled: () => settled,
+      setSettled: (v) => { settled = v; },
+      getUpgraded: () => upgraded,
+      setUpgraded: (v) => { upgraded = v; },
+      setUpstreamRequest: (r) => { upstreamRequest = r; },
     });
-
-    //? Reap the upstream leg if the backend accepts TCP but never completes the
-    //? upgrade handshake. `setTimeout` only schedules the `'timeout'` event — it
-    //? does not destroy the socket — so we destroy the request (which surfaces
-    //? on the `'error'` handler below, writing 504 + tearing down the client) and
-    //? guard against firing after a successful upgrade, where the piped sockets
-    //? own their own teardown.
-    upstreamRequest.setTimeout(handshakeTimeoutMs, () => {
-      if (upgraded || settled) return;
-      settled = true;
-      writeStatusAndDestroy(clientSocket, 504, 'Gateway Timeout');
-      upstreamRequest.destroy();
-    });
-
-    upstreamRequest.on('upgrade', (upstreamRes, upstreamSocket, upstreamHead) => {
-      upgraded = true;
-      //? Forward the 101 Switching Protocols response and any trailing bytes
-      //? the upstream already sent, then bidirectionally pipe the raw sockets.
-      const statusLine = `HTTP/1.1 ${upstreamRes.statusCode ?? 101} ${upstreamRes.statusMessage ?? 'Switching Protocols'}`;
-      const headerLines: string[] = [statusLine];
-      for (const [key, value] of Object.entries(upstreamRes.headers)) {
-        if (value === undefined) continue;
-        if (Array.isArray(value)) {
-          for (const v of value) headerLines.push(`${key}: ${v}`);
-        } else {
-          headerLines.push(`${key}: ${value}`);
-        }
-      }
-      clientSocket.write(`${headerLines.join('\r\n')}\r\n\r\n`);
-      if (upstreamHead.length > 0) clientSocket.write(upstreamHead);
-
-      upstreamSocket.pipe(clientSocket);
-      clientSocket.pipe(upstreamSocket);
-
-      const teardown = (): void => {
-        safeDestroy(upstreamSocket);
-        safeDestroy(clientSocket);
-      };
-      upstreamSocket.on('error', teardown);
-      upstreamSocket.on('close', teardown);
-      clientSocket.on('error', teardown);
-      clientSocket.on('close', teardown);
-    });
-
-    //? `http.request` only emits `'upgrade'` on a 101. A reachable backend that
-    //? answers the upgrade with a normal HTTP response (200/400/404/500 — common
-    //? on misroute / mid-boot / edge-auth) emits `'response'` instead. Without a
-    //? handler the client socket would leak (never written or destroyed).
-    upstreamRequest.on('response', (upstreamRes) => {
-      if (upgraded || settled) { upstreamRes.resume(); return; }
-      settled = true;
-      const statusCode = upstreamRes.statusCode ?? 502;
-      writeStatusAndDestroy(clientSocket, statusCode, upstreamRes.statusMessage ?? 'Bad Gateway');
-      //? Drain + reap the upstream leg. Without consuming the body the upstream
-      //? socket stays open (paused) until the handshake timeout reaps it ~30s
-      //? later; resume() lets it close now and destroy() releases the request.
-      upstreamRes.resume();
-      upstreamRequest.destroy();
-    });
-
-    upstreamRequest.on('error', () => {
-      if (settled) return;
-      settled = true;
-      writeStatusAndDestroy(clientSocket, 502, 'Bad Gateway');
-    });
-
-    upstreamRequest.end(head);
   };
+};
+
+interface OpenUpstreamCtx {
+  pathname: string;
+  resolved: { target: string; viaFallback: boolean; resolvedEnvKey: string };
+  targetUrl: URL;
+  service: string;
+  transport: typeof http | typeof https;
+  handshakeTimeoutMs: number;
+  onClientGone: () => void;
+  getSettled: () => boolean;
+  setSettled: (v: boolean) => void;
+  getUpgraded: () => boolean;
+  setUpgraded: (v: boolean) => void;
+  setUpstreamRequest: (r: ClientRequest) => void;
+}
+
+const openUpstream = async (
+  req: IncomingMessage,
+  clientSocket: Socket,
+  head: Buffer,
+  ctx: OpenUpstreamCtx,
+): Promise<void> => {
+  const {
+    pathname, resolved, targetUrl, service, transport, handshakeTimeoutMs,
+    onClientGone, getSettled, setSettled, getUpgraded, setUpgraded, setUpstreamRequest,
+  } = ctx;
+
+  //? `proxyRequestGate` is the fail-CLOSED deny gate for WebSocket upgrades.
+  //? Any registered handler that returns a stop signal rejects the connection
+  //? here, before the upstream leg is opened. Absence of handlers = allow.
+  const gateResult = await dispatchHook('proxyRequestGate', {
+    service,
+    pathname,
+    method: 'UPGRADE',
+    target: resolved.target,
+    viaFallback: resolved.viaFallback,
+    remoteAddress: req.socket.remoteAddress,
+  });
+
+  //? If the client disconnected while we were awaiting the gate, bail out.
+  if (getSettled()) return;
+
+  if (gateResult.stopped) {
+    setSettled(true);
+    writeStatusAndDestroy(clientSocket, gateResult.signal.httpStatus ?? 403, 'Forbidden');
+    return;
+  }
+
+  const forwardHeaders = stripForwardedHeaders(
+    stripHopByHopHeaders(req.headers, WS_HOP_BY_HOP_HEADERS),
+  );
+
+  const upstreamRequest = transport.request({
+    hostname: targetUrl.hostname,
+    //? Boot-time guard in `resolveTarget.ts` ensures every binding URL has
+    //? an explicit port. `targetUrl.port` is always a non-empty numeric
+    //? string at this point.
+    port: Number(targetUrl.port),
+    path: targetUrl.pathname + targetUrl.search,
+    method: req.method,
+    headers: {
+      ...forwardHeaders,
+      //? These two must be preserved verbatim to complete the WS handshake.
+      connection: 'Upgrade',
+      upgrade: 'websocket',
+      //? Router-authoritative forwarding values. The client's copies were
+      //? stripped above; XFF is the router's own peer view of the client so a
+      //? client cannot forge its source IP, and the scheme is normalized
+      //? rather than trusted from the inbound header.
+      'x-forwarded-for': buildForwardedFor(req.socket.remoteAddress),
+      'x-forwarded-host': req.headers.host ?? '',
+      'x-forwarded-proto': normalizeForwardedProto(req.headers['x-forwarded-proto']),
+      'x-luckystack-resolved-env': resolved.resolvedEnvKey,
+      'x-luckystack-via-fallback': resolved.viaFallback ? '1' : '0',
+    },
+  });
+
+  //? Expose the upstream request to the `onClientGone` closure so a client
+  //? RST after the gate but before the upgrade completes tears down the
+  //? upstream too.
+  setUpstreamRequest(upstreamRequest);
+
+  //? Reap the upstream leg if the backend accepts TCP but never completes the
+  //? upgrade handshake. `setTimeout` only schedules the `'timeout'` event — it
+  //? does not destroy the socket — so we destroy the request (which surfaces
+  //? on the `'error'` handler below, writing 504 + tearing down the client) and
+  //? guard against firing after a successful upgrade, where the piped sockets
+  //? own their own teardown.
+  upstreamRequest.setTimeout(handshakeTimeoutMs, () => {
+    if (getUpgraded() || getSettled()) return;
+    setSettled(true);
+    writeStatusAndDestroy(clientSocket, 504, 'Gateway Timeout');
+    upstreamRequest.destroy();
+  });
+
+  upstreamRequest.on('upgrade', (upstreamRes, upstreamSocket, upstreamHead) => {
+    setUpgraded(true);
+
+    //? Forward the 101 Switching Protocols response and any trailing bytes
+    //? the upstream already sent, then bidirectionally pipe the raw sockets.
+    //? Strip hop-by-hop and internal `x-luckystack-*` headers from the upstream
+    //? 101 response before writing to the client — a backend must not be able to
+    //? inject Set-Cookie, x-luckystack-* routing markers, or other internal headers
+    //? through the WS upgrade response into the browser's header context.
+    const statusLine = `HTTP/1.1 ${upstreamRes.statusCode ?? 101} ${upstreamRes.statusMessage ?? 'Switching Protocols'}`;
+    const headerLines: string[] = [statusLine];
+    for (const [key, value] of Object.entries(upstreamRes.headers)) {
+      if (value === undefined) continue;
+      const lower = key.toLowerCase();
+      if (lower === 'set-cookie') continue;
+      if (WS_HOP_BY_HOP_HEADERS.has(lower)) continue;
+      if (lower.startsWith('x-luckystack-')) continue;
+      if (Array.isArray(value)) {
+        for (const v of value) headerLines.push(`${key}: ${v}`);
+      } else {
+        headerLines.push(`${key}: ${value}`);
+      }
+    }
+    clientSocket.write(`${headerLines.join('\r\n')}\r\n\r\n`);
+    if (upstreamHead.length > 0) clientSocket.write(upstreamHead);
+
+    upstreamSocket.pipe(clientSocket);
+    clientSocket.pipe(upstreamSocket);
+
+    const teardown = (): void => {
+      safeDestroy(upstreamSocket);
+      safeDestroy(clientSocket);
+    };
+    upstreamSocket.on('error', teardown);
+    upstreamSocket.on('close', teardown);
+    //? Add post-upgrade teardown listeners BEFORE removing the pre-upgrade
+    //? `onClientGone` listeners. An atomic swap ensures no window where the
+    //? client socket has no error/close handler — a client RST between the two
+    //? operations would otherwise be an uncaught exception that crashes the router.
+    clientSocket.on('error', teardown);
+    clientSocket.on('close', teardown);
+
+    //? The pre-101 `onClientGone` handler has served its purpose (no upstream
+    //? socket to leak anymore). Remove it now that the post-upgrade teardown
+    //? is in place, so the same socket doesn't accumulate duplicate handlers on
+    //? every connection (listener count grows unboundedly without this).
+    clientSocket.off('error', onClientGone);
+    clientSocket.off('close', onClientGone);
+  });
+
+  //? `http.request` only emits `'upgrade'` on a 101. A reachable backend that
+  //? answers the upgrade with a normal HTTP response (200/400/404/500 — common
+  //? on misroute / mid-boot / edge-auth) emits `'response'` instead. Without a
+  //? handler the client socket would leak (never written or destroyed).
+  upstreamRequest.on('response', (upstreamRes) => {
+    if (getUpgraded() || getSettled()) { upstreamRes.resume(); return; }
+    setSettled(true);
+    const statusCode = upstreamRes.statusCode ?? 502;
+    writeStatusAndDestroy(clientSocket, statusCode, upstreamRes.statusMessage ?? 'Bad Gateway');
+    //? Drain + reap the upstream leg. Without consuming the body the upstream
+    //? socket stays open (paused) until the handshake timeout reaps it ~30s
+    //? later; resume() lets it close now and destroy() releases the request.
+    upstreamRes.resume();
+    upstreamRequest.destroy();
+  });
+
+  upstreamRequest.on('error', () => {
+    if (getSettled()) return;
+    setSettled(true);
+    writeStatusAndDestroy(clientSocket, 502, 'Bad Gateway');
+  });
+
+  upstreamRequest.end(head);
 };

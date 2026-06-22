@@ -6,6 +6,13 @@ export const disconnectTimers = new Map<string, NodeJS.Timeout>();
 export const tempDisconnectedSockets = new Set<string>();
 export const clientSwitchedTab = new Set<string>();
 
+//? Token-level AFK refractory — prevents a multi-tab user from receiving
+//? double-AFK broadcasts within the refractory window when two idle sockets
+//? for the same token both pass the trigger in the same sampler tick (PRESENCE-4).
+//? Stored here (not in afkEvent.ts) so `activitySampler.ts` can clear it on
+//? disconnect without creating a circular import with afkEvent.ts.
+export const lastAfkFireByToken = new Map<string, number>();
+
 //? `disconnectReasonsWeIgnore` and `disconnectReasonsWeAllow` were removed.
 //? Earlier they were `string[]` constants captured at module-load (ignored
 //? `registerPresenceConfig()` overrides), then briefly switched to

@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/mcp",
-  "version": "0.2.0",
+  "version": "0.2.7",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -15,11 +15,17 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/mcp"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/mcp#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/main/packages/mcp#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
-  "keywords": ["luckystack", "mcp", "claude", "ai", "context"],
+  "keywords": [
+    "luckystack",
+    "mcp",
+    "claude",
+    "ai",
+    "context"
+  ],
   "engines": {
     "node": ">=20.0.0"
   },
@@ -32,14 +38,13 @@
     }
   },
   "bin": {
-    "luckystack-mcp": "dist/index.js"
+    "luckystack-mcp": "./dist/index.js"
   },
   "files": [
     "dist",
     "README.md",
     "CLAUDE.md",
-    "LICENSE",
-    "CHANGELOG.md"
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",

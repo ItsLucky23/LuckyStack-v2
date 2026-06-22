@@ -9,7 +9,7 @@ interface AppEnvironmentConfig {
   backendUrl: string;
   dev: boolean;
   sessionBasedToken?: boolean;
-  allowMultipleSessions?: boolean;
+  sessionPerUser?: 'single' | 'multiple';
 }
 
 const normalizeDns = (dns: string): string => dns.replace(/\/+$/, "");
@@ -29,7 +29,7 @@ const fallbackEnvironment: AppEnvironmentConfig = {
   backendUrl: "http://localhost:80",
   dev: true,
   sessionBasedToken: false,
-  allowMultipleSessions: true,
+  sessionPerUser: 'multiple',
 };
 
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
@@ -38,19 +38,19 @@ const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
     backendUrl: "http://localhost:80",
     dev: true,
     sessionBasedToken: false,
-    allowMultipleSessions: true
+    sessionPerUser: 'multiple'
   },
   "https://staging.server.com": {
     backendUrl: "https://staging.server.com",
     dev: false,
     sessionBasedToken: false,
-    allowMultipleSessions: false
+    sessionPerUser: 'single'
   },
   "https://app.server.com": {
     backendUrl: "https://app.server.com",
     dev: false,
     sessionBasedToken: false,
-    allowMultipleSessions: false
+    sessionPerUser: 'single'
   },
 };
 
@@ -129,10 +129,10 @@ const config = {
   loginRedirectUrl: '/playground',
  
   /**
-   * If false, logging in on a new device will automatically sign out all other sessions for the user.
-   * Useful for security-sensitive apps. Set to true to allow multiple simultaneous sessions.
+   * 'single': logging in on a new device automatically signs out all other sessions for the user
+   * (useful for security-sensitive apps). 'multiple': allow multiple simultaneous sessions.
    */
-  allowMultipleSessions: resolvedEnvironment.allowMultipleSessions ?? false,
+  sessionPerUser: resolvedEnvironment.sessionPerUser ?? 'single',
  
   /** 
     * Controls where auth tokens are read/written.
@@ -234,6 +234,12 @@ const config = {
      * Read server-side only — the client bundle never sends email, so the value
      * is just a placeholder there. `typeof process` guard keeps the browser
      * bundle from blowing up on a `process is not defined` ReferenceError.
+     *
+     * DEV-WARN: EMAIL_FROM (and DNS / EXTERNAL_ORIGINS below) are read at
+     * module-load time, BEFORE @luckystack/secret-manager can overwrite
+     * process.env. If these values come from the secret manager, move them
+     * into a factory function that is called AFTER `resolveSecretsIfConfigured`
+     * completes in server.ts.
      */
     from: env('EMAIL_FROM') ?? 'onboarding@resend.dev',
     /** Public app URL — used to build absolute reset-password / verification links. */
@@ -354,7 +360,7 @@ registerProjectConfig({
   session: {
     basedToken: config.sessionBasedToken,
     expiryDays: config.sessionExpiryDays,
-    allowMultiple: config.allowMultipleSessions,
+    perUser: config.sessionPerUser,
   },
   http: {
     cors: {
@@ -368,7 +374,16 @@ registerProjectConfig({
   defaultLanguage: config.defaultLanguage,
   //? Backend origin for OAuth callback redirect URIs, read by
   //? @luckystack/login/register's env-driven provider scan.
-  oauthCallbackBase: resolvedEnvironment.backendUrl,
+  //?
+  //? In dev: derive from the actual SERVER_PORT env var so that starting the
+  //? server on a non-standard port (e.g. SERVER_PORT=8080 for parallel instances)
+  //? produces the correct redirect_uri automatically. `resolvedEnvironment.backendUrl`
+  //? is a static DNS-map value (always :80) and is NOT overridden by ?backend=,
+  //? so it cannot be used here for multi-port dev setups.
+  //? In prod: use the static backendUrl from the DNS map (the public domain).
+  oauthCallbackBase: resolvedEnvironment.dev
+    ? `http://localhost:${env('SERVER_PORT') ?? '80'}`
+    : resolvedEnvironment.backendUrl,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
   socketStatusIndicator: config.socketStatusIndicator,
   locationProviderEnabled: config.locationProviderEnabled,
@@ -386,7 +401,7 @@ export const {
   loginRedirectUrl,
   defaultLanguage,
   mobileConsole,
-  allowMultipleSessions,
+  sessionPerUser,
   sessionBasedToken,
   sessionExpiryDays,
   socketActivityBroadcaster,

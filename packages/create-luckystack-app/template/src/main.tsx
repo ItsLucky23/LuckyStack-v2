@@ -148,6 +148,11 @@ const prodPages = import.meta.glob([
   '!./**/_sync/**',
   '!./**/_server/**',
   '!./**/*_server.tsx',
+  //? The @luckystack/docs-ui API explorer (`src/docs/page.tsx`, present only when
+  //? you opted into docs-ui) is dev-only: it imports the dev-generated
+  //? `apiDocs.generated.json` and exposes every endpoint, so it must NOT ship in
+  //? a production bundle. Excluded here; in dev it loads via `devPages` below.
+  '!./**/docs/**',
 ]);
 
 const devPages = import.meta.glob([

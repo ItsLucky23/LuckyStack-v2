@@ -11,6 +11,11 @@ const ALLOWED_THEMES = new Set<string>(['light', 'dark']);
 //? `nl`, `pt-BR`). We don't have the consumer's locale list in a handler, so
 //? bound the shape instead of letting an arbitrary string into the session.
 const LANGUAGE_RE = /^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/;
+//? Avatar upload guards: only raster image types sharp can decode, and a hard
+//? byte cap applied BEFORE the sharp decode so a hostile data: URL can't drive
+//? a decompression-bomb / memory-exhaustion attack.
+const ALLOWED_AVATAR_TYPES = new Set<string>(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export const rateLimit: number | false = 20;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -42,7 +47,13 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       return { status: "error", errorCode: 'avatar.invalidFormat' };
     }
     const contentType = matches[1];
+    if (!ALLOWED_AVATAR_TYPES.has(contentType)) {
+      return { status: 'error', errorCode: 'avatar.invalidFormat' };
+    }
     const buffer = Buffer.from(matches[2], "base64");
+    if (buffer.byteLength > AVATAR_MAX_BYTES) {
+      return { status: 'error', errorCode: 'avatar.uploadFailed' };
+    }
     const fileName = `${user.id}.webp`;
     const filePath = path.join(UPLOADS_DIR, fileName);
 

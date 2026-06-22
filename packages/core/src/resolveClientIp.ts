@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 
 import { getLogger } from './loggerRegistry';
@@ -26,6 +27,15 @@ export interface ResolveClientIpParams {
    * otherwise a client can spoof its own IP via those headers.
    */
   trustProxy?: boolean;
+  /**
+   * Number of proxy hops to skip from the RIGHT of `X-Forwarded-For` when
+   * `trustProxy` is on (CORE-O3). The rightmost entries are appended by your own
+   * trusted proxies; the resolved client IP is the entry that many hops in from
+   * the end. The leftmost hop is client-controlled and is never trusted. DEFAULT
+   * 1 (the immediate upstream proxy). Clamped to the list length so an over-large
+   * count falls back to the leftmost trusted hop rather than the spoofable entry.
+   */
+  trustedProxyHopCount?: number;
 }
 
 /**
@@ -62,6 +72,21 @@ const firstHeaderValue = (raw: string | string[] | undefined): string | undefine
 };
 
 /**
+ * Flatten an `X-Forwarded-For` header into its ordered list of non-empty,
+ * trimmed hops. Handles both the comma-joined list form ("client, proxy1") and
+ * the repeated-header (string[]) form, and a mix of the two. Order is preserved:
+ * leftmost (client-controlled) first, rightmost (closest trusted proxy) last.
+ */
+const forwardedForHops = (raw: string | string[] | undefined): string[] => {
+  if (raw === undefined) return [];
+  const parts = Array.isArray(raw) ? raw : [raw];
+  return parts
+    .flatMap((part) => (typeof part === 'string' ? part.split(',') : []))
+    .map((hop) => hop.trim())
+    .filter((hop) => hop.length > 0);
+};
+
+/**
  * Resolve the real client IP for per-IP rate-limit keying.
  *
  * - `trustProxy === false` (default): returns the raw peer address with only
@@ -69,25 +94,31 @@ const firstHeaderValue = (raw: string | string[] | undefined): string | undefine
  *   {@link UNKNOWN_CLIENT_IP} when the raw address is missing. This preserves
  *   the framework's historical behaviour (`address ?? 'unknown'`) byte-for-byte
  *   for non-mapped addresses.
- * - `trustProxy === true`: prefers the leftmost (originating) entry of
- *   `X-Forwarded-For`, then `X-Real-IP`, and only then the raw peer address.
+ * - `trustProxy === true`: skips `trustedProxyHopCount` hops from the RIGHT of
+ *   `X-Forwarded-For` (the rightmost entries are appended by YOUR trusted
+ *   proxies), then `X-Real-IP`, and only then the raw peer address.
  *
- * The leftmost `X-Forwarded-For` hop is the original client when exactly one
- * trusted proxy populates the header (the documented deployment topology).
+ * CORE-O3: the leftmost `X-Forwarded-For` hop is CLIENT-CONTROLLED and is never
+ * trusted (it enables per-IP rate-limit evasion + audit-IP spoofing). With the
+ * default `trustedProxyHopCount: 1` and a single trusted proxy, the resolved IP
+ * is the immediate upstream peer (the rightmost real hop).
  */
-const resolveRaw = ({ rawAddress, headers, trustProxy }: ResolveClientIpParams & { trustProxy: boolean }): string => {
+const resolveRaw = ({ rawAddress, headers, trustProxy, trustedProxyHopCount }: ResolveClientIpParams & { trustProxy: boolean; trustedProxyHopCount: number }): string => {
   const rawFallback = rawAddress && rawAddress.length > 0
     ? canonicalizeIp(rawAddress)
     : UNKNOWN_CLIENT_IP;
 
   if (!trustProxy) return rawFallback;
 
-  const forwardedFor = firstHeaderValue(headers['x-forwarded-for']);
-  if (forwardedFor) {
-    //? Leftmost hop = the originating client when a single trusted proxy
-    //? prepends. Split on comma to handle the comma-joined list form.
-    const leftmost = forwardedFor.split(',')[0]?.trim();
-    if (leftmost && leftmost.length > 0) return canonicalizeIp(leftmost);
+  const hops = forwardedForHops(headers['x-forwarded-for']);
+  if (hops.length > 0) {
+    //? Count from the RIGHT — the rightmost entry is the one your own trusted
+    //? proxy appended. Clamp so an over-large count lands on the leftmost
+    //? available trusted hop instead of underflowing past the start.
+    const skip = Math.max(1, Math.floor(trustedProxyHopCount));
+    const index = Math.max(0, hops.length - skip);
+    const chosen = hops[index];
+    if (chosen && chosen.length > 0) return canonicalizeIp(chosen);
   }
 
   const realIp = firstHeaderValue(headers['x-real-ip']);
@@ -110,14 +141,37 @@ export const isLoopbackIp = (ip: string): boolean => {
   return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(canonical);
 };
 
-export const resolveClientIp = ({ rawAddress, headers, trustProxy = false }: ResolveClientIpParams): string => {
-  const resolved = resolveRaw({ rawAddress, headers, trustProxy });
+const TOKEN_HASH_LENGTH = 32;
+
+/**
+ * Derive the deterministic, non-reversible bucket component for a session
+ * token. The same token always yields the same value (bucket identity is
+ * preserved) while the raw token never appears in the returned string.
+ * Used by api AND sync rate-limit key builders — lives in core so both
+ * packages can share one implementation without a cross-package dependency.
+ */
+export const deriveTokenBucketId = (token: string): string =>
+  createHash('sha256').update(token).digest('hex').slice(0, TOKEN_HASH_LENGTH);
+
+//? Re-armable cooldown latch for the UNKNOWN_CLIENT_IP warning so a
+//? misconfigured deployment (e.g. `trustProxy: false` behind a reverse proxy)
+//? does not flood the log sink — one log entry per 60-second window. The first
+//? occurrence is always emitted, then suppressed until the window resets.
+const UNKNOWN_IP_WARN_COOLDOWN_MS = 60_000;
+let unknownIpLastWarnedAt = 0;
+
+export const resolveClientIp = ({ rawAddress, headers, trustProxy = false, trustedProxyHopCount = 1 }: ResolveClientIpParams): string => {
+  const resolved = resolveRaw({ rawAddress, headers, trustProxy, trustedProxyHopCount });
   if (resolved === UNKNOWN_CLIENT_IP) {
     //? M-8 — surface the shared fallback bucket. A burst of these usually means
     //? a reverse proxy is in front but `trustProxy` is off (every request then
-    //? collapses here), or the connection was torn down before keying. Rare in
-    //? a correctly-configured deployment, so a plain warn is not spammy.
-    getLogger().warn('rate-limit: client IP unresolved — keyed into the shared "unknown" bucket', { trustProxy });
+    //? collapses here), or the connection was torn down before keying.
+    //? Rate-suppressed to one log entry per 60 s to avoid log-sink flooding.
+    const now = Date.now();
+    if (now - unknownIpLastWarnedAt >= UNKNOWN_IP_WARN_COOLDOWN_MS) {
+      unknownIpLastWarnedAt = now;
+      getLogger().warn('rate-limit: client IP unresolved — keyed into the shared "unknown" bucket', { trustProxy });
+    }
   }
   return resolved;
 };

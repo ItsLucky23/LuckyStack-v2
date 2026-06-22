@@ -21,20 +21,59 @@ const splitTopLevel = (value: string, splitter: '|' | '&'): string[] => {
   let depthParen = 0;
   let depthBrace = 0;
   let depthBracket = 0;
+  //? Track whether we are inside a string literal (single or double quote) so
+  //? a `|` or `&` character appearing in `"a|b"` is not treated as a splitter.
+  //? Escaped quotes (`\"`, `\'`) extend the literal rather than ending it.
+  let inString: '"' | "'" | null = null;
   let token = '';
 
-  for (const char of value) {
-    if (char === '(') depthParen += 1;
-    if (char === ')') depthParen -= 1;
-    if (char === '{') depthBrace += 1;
-    if (char === '}') depthBrace -= 1;
-    if (char === '[') depthBracket += 1;
-    if (char === ']') depthBracket -= 1;
+  //? Iterate as code-unit pairs so we can peek-and-skip the character after
+  //? a backslash inside a string literal. We work on the spread array of
+  //? code-points so that multi-byte characters are treated as single tokens.
+  //? Code-point iteration is intentional (multi-byte chars as single tokens); type
+  //? strings are ASCII syntax so emoji decomposition is a non-issue here.
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread -- intentional code-point split of an ASCII type string
+  const codePoints = [...value];
+  let i = 0;
+  while (i < codePoints.length) {
+    const char = codePoints[i] ?? '';
+    i += 1;
 
-    if (char === splitter && depthParen === 0 && depthBrace === 0 && depthBracket === 0) {
-      items.push(token.trim());
-      token = '';
+    //? Handle escape sequences inside string literals: consume the next
+    //? code-point as part of the current literal without toggling inString.
+    if (inString && char === '\\') {
+      token += char;
+      const next = codePoints[i] ?? '';
+      token += next;
+      i += 1;
       continue;
+    }
+
+    //? Toggle string-literal tracking on opening/closing quote.
+    if (char === '"' || char === "'") {
+      if (inString === char) {
+        inString = null;
+      } else {
+        inString ??= char;
+      }
+      token += char;
+      continue;
+    }
+
+    //? Only track nesting depth and split when we are not inside a string.
+    if (!inString) {
+      if (char === '(') depthParen += 1;
+      if (char === ')') depthParen -= 1;
+      if (char === '{') depthBrace += 1;
+      if (char === '}') depthBrace -= 1;
+      if (char === '[') depthBracket += 1;
+      if (char === ']') depthBracket -= 1;
+
+      if (char === splitter && depthParen === 0 && depthBrace === 0 && depthBracket === 0) {
+        items.push(token.trim());
+        token = '';
+        continue;
+      }
     }
 
     token += char;
@@ -42,6 +81,50 @@ const splitTopLevel = (value: string, splitter: '|' | '&'): string[] => {
 
   if (token.trim()) items.push(token.trim());
   return items;
+};
+
+//? Match a quoted key that may contain any characters (including hyphens,
+//? dots, spaces) — TypeScript allows `'foo-bar'?: string` as a valid field.
+//? Group 1 = quote char, group 2 = raw key text, group 3 = optional `?`.
+const QUOTED_FIELD_RE = /^("|')((?:[^\\]|\\.)*?)\1(\?)?\s*:\s*([\s\S]+)$/;
+//? Plain identifier key: `myField?: string`.
+const PLAIN_FIELD_RE = /^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*([\s\S]+)$/;
+const INDEX_SIG_RE = /^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/;
+
+//? Parse one semicolon-separated token from a TS object-type body.
+//? Supports quoted keys like `'foo-bar'?: string` in addition to plain
+//? identifiers — previously those were silently dropped (CORE-N3).
+const parseFieldOrIndex = (
+  trimmed: string,
+  fields: ParsedObjectField[],
+  indexSignatures: ParsedObjectIndexSignature[],
+): void => {
+  const quotedMatch = QUOTED_FIELD_RE.exec(trimmed);
+  if (quotedMatch) {
+    fields.push({
+      key: (quotedMatch[2] ?? '').replaceAll(String.raw`\'`, "'").replaceAll(String.raw`\"`, '"'),
+      optional: Boolean(quotedMatch[3]),
+      type: (quotedMatch[4] ?? '').trim(),
+    });
+    return;
+  }
+  const plainMatch = PLAIN_FIELD_RE.exec(trimmed);
+  if (plainMatch) {
+    fields.push({
+      key: plainMatch[1] ?? '',
+      optional: Boolean(plainMatch[2]),
+      type: (plainMatch[3] ?? '').trim(),
+    });
+    return;
+  }
+  const indexMatch = INDEX_SIG_RE.exec(trimmed);
+  if (indexMatch) {
+    indexSignatures.push({
+      keyName: (indexMatch[1] ?? '').trim(),
+      keyType: (indexMatch[2] ?? '').trim(),
+      type: (indexMatch[3] ?? '').trim(),
+    });
+  }
 };
 
 const parseObjectFields = (typeText: string): {
@@ -59,35 +142,57 @@ const parseObjectFields = (typeText: string): {
 
   let part = '';
   let depth = 0;
-  for (const char of inner) {
-    if (char === '{' || char === '[' || char === '(' || char === '<') depth += 1;
-    if (char === '}' || char === ']' || char === ')' || char === '>') depth -= 1;
+  //? Track string literals (single and double quote) so a `;`, `{`, or `}`
+  //? character appearing inside a quoted type value (e.g. `name: 'a{b}'`) is not
+  //? treated as a field delimiter or nesting marker. Same logic as `splitTopLevel`.
+  let inString: '"' | "'" | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread -- intentional code-point split of an ASCII type string
+  const codePoints = [...inner];
+  let i = 0;
+  while (i < codePoints.length) {
+    const char = codePoints[i] ?? '';
+    i += 1;
 
-    if (char === ';' && depth === 0) {
-      const trimmed = part.trim();
-      if (trimmed) {
-        const fieldMatch = /^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?(\?)?\s*:\s*([\s\S]+)$/.exec(trimmed);
-        if (fieldMatch) {
-          const keyMatch = /^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?/.exec(trimmed);
-          const rawKey = keyMatch?.[0] ?? '';
-          fields.push({
-            key: rawKey.replaceAll(/^['"]|['"]$/g, ''),
-            optional: Boolean(fieldMatch[3]),
-            type: (fieldMatch[4] ?? '').trim(),
-          });
-        } else {
-          const indexMatch = /^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/.exec(trimmed);
-          if (indexMatch) {
-            indexSignatures.push({
-              keyName: (indexMatch[1] ?? '').trim(),
-              keyType: (indexMatch[2] ?? '').trim(),
-              type: (indexMatch[3] ?? '').trim(),
-            });
-          }
-        }
-      }
-      part = '';
+    if (inString && char === '\\') {
+      part += char;
+      const next = codePoints[i] ?? '';
+      part += next;
+      i += 1;
       continue;
+    }
+
+    if (char === '"' || char === "'") {
+      if (inString === char) {
+        inString = null;
+      } else {
+        inString ??= char;
+      }
+      part += char;
+      continue;
+    }
+
+    if (!inString) {
+      //? Nesting depth tracks `{}[]()<>` to find field boundaries at `;`.
+      //? Supported field value types: primitives, object literals, arrays, unions,
+      //? intersections, Record<K,V>, and generics like Array<T> / Promise<T>.
+      //? NOT supported: conditional types (`T extends U ? A : B`), mapped types,
+      //? template-literal types, and function types (`() => void`). Those fall
+      //? through to the fail-closed terminal branch of `validateType` which
+      //? rejects with an "unvalidatable type" message rather than silently passing.
+      //? NOTE: `<` and `>` are used for generic delimiters (Array<T>, Record<K,V>)
+      //? but also appear as comparison operators in conditional types. For the
+      //? supported type set (no conditionals) this depth tracking is sufficient.
+      if (char === '{' || char === '[' || char === '(' || char === '<') depth += 1;
+      if (char === '}' || char === ']' || char === ')' || char === '>') depth -= 1;
+
+      if (char === ';' && depth === 0) {
+        const trimmed = part.trim();
+        if (trimmed) {
+          parseFieldOrIndex(trimmed, fields, indexSignatures);
+        }
+        part = '';
+        continue;
+      }
     }
 
     part += char;
@@ -95,25 +200,7 @@ const parseObjectFields = (typeText: string): {
 
   const final = part.trim();
   if (final) {
-    const fieldMatch = /^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?(\?)?\s*:\s*([\s\S]+)$/.exec(final);
-    if (fieldMatch) {
-      const keyMatch = /^("|')?[A-Za-z_][A-Za-z0-9_]*("|')?/.exec(final);
-      const rawKey = keyMatch?.[0] ?? '';
-      fields.push({
-        key: rawKey.replaceAll(/^['"]|['"]$/g, ''),
-        optional: Boolean(fieldMatch[3]),
-        type: (fieldMatch[4] ?? '').trim(),
-      });
-    } else {
-      const indexMatch = /^\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^\]]+)\]\s*:\s*([\s\S]+)$/.exec(final);
-      if (indexMatch) {
-        indexSignatures.push({
-          keyName: (indexMatch[1] ?? '').trim(),
-          keyType: (indexMatch[2] ?? '').trim(),
-          type: (indexMatch[3] ?? '').trim(),
-        });
-      }
-    }
+    parseFieldOrIndex(final, fields, indexSignatures);
   }
 
   return { fields, indexSignatures };
@@ -141,7 +228,10 @@ const isPrimitiveMatch = (type: string, value: unknown): boolean => {
   if (type === 'false') return value === false;
   if (type === 'null') return value === null;
   if (type === 'undefined') return value === undefined;
-  if (type === 'Date') return typeof value === 'string' || value instanceof Date;
+  //? Accept a Date instance directly, or a string that parses to a valid date.
+  //? Rejecting non-parseable strings prevents `new Date(x).toISOString()` from
+  //? returning "Invalid Date" when a handler trusts the validator's pass.
+  if (type === 'Date') return value instanceof Date || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
   return false;
 };
 
@@ -208,6 +298,12 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
       }
       return { status: 'error', message: `${path} does not match union type ${type}` };
     }
+    //? A single-member "union" (e.g. a parenthesised type `(string)` where the
+    //? outer `()` was already stripped) must still recurse so the inner type
+    //? is validated rather than falling through to the fail-closed terminal.
+    if (unionParts.length === 1) {
+      return validateType(unionParts[0] ?? type, value, path, depth + 1);
+    }
   }
 
   if (type.includes('&')) {
@@ -218,6 +314,10 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
         if (result.status === 'error') return result;
       }
       return { status: 'success' };
+    }
+    //? Same as the union case — a single-member intersection should recurse.
+    if (intersectionParts.length === 1) {
+      return validateType(intersectionParts[0] ?? type, value, path, depth + 1);
     }
   }
 
@@ -255,6 +355,14 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
     return { status: 'error', message: `${path} should be ${expectedType}` };
   }
 
+  //? `any` and `unknown` typed fields pass validation unconditionally.
+  //? SECURITY NOTE: a route input field typed `any` or `unknown` accepts ANY
+  //? value from the caller without structural checking. In practice this occurs
+  //? in legacy routes, utility handlers, or pass-through relay fields.
+  //? To tighten: narrow the field type explicitly in `ApiParams.data`, or set
+  //? `validation: 'relaxed'` / `{ input: 'skip' }` on the route as a conscious
+  //? opt-out (which short-circuits before this validator runs rather than silently
+  //? admitting arbitrary values here).
   if (type === 'any' || type === 'unknown') {
     return { status: 'success' };
   }
@@ -267,13 +375,18 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
     const record = value as Record<string, unknown>;
     const recordParts = parseRecordParts(type);
 
+    //? CORE-N4: if the Record<K,V> type string can't be parsed we fail closed
+    //? rather than silently skipping value validation. An unrecognized generic
+    //? shape must not pass arbitrary values unchecked.
+    if (!recordParts) {
+      return { status: 'error', message: `${path}: unvalidatable Record type ${type} — model it explicitly` };
+    }
+
     for (const key of Object.keys(record)) {
       //? Reject prototype-polluting own-keys unconditionally.
       if (PROTO_POLLUTION_KEYS.has(key)) {
         return { status: 'error', message: `${path}.${key} is not allowed` };
       }
-
-      if (!recordParts) continue;
 
       //? Validate the key against K (only the cheap string/number/literal forms
       //? `matchesIndexKeyType` understands; an unrecognized K leaves the key

@@ -3,7 +3,9 @@
   "common": {
     "404": "Something went wrong, try again later.",
     "whiteSpace": " ",
-    "error": "ERROR"
+    "error": "ERROR",
+    "unexpectedError": "Something went wrong.",
+    "refreshPage": "Refresh page"
   },
   "middleware": {
     "notAdmin": "You are not an admin."
@@ -85,7 +87,25 @@
     "resetSuccess": "Your password has been updated. You can now log in with the new one.",
     "resetGoLogin": "Go to log in",
     "resetInvalidToken": "This reset link is invalid or has expired.",
-    "resetPasswordUpdated": "Password updated."
+    "resetPasswordUpdated": "Password updated.",
+    "signInTitle": "Sign in to your account",
+    "createAccountTitle": "Create a new account",
+    "noAccountYet": "Don't have an account yet?",
+    "alreadyHaveAccount": "Already have an account?",
+    "createAccount": "Create one now",
+    "logIn": "Log in",
+    "signUp": "Sign up",
+    "loading": "Loading..."
+  },
+  "navbar": {
+    "closeSidebar": "Close sidebar",
+    "showSidebar": "Show sidebar",
+    "playground": "Playground",
+    "settings": "Settings",
+    "admin": "Admin",
+    "logout": "Logout",
+    "closeMenu": "Close menu",
+    "openMenu": "Open menu"
   },
   "settings": {
     "changeAvatar": "Change avatar",
@@ -116,6 +136,8 @@
       "label": "Enter a new email address and we'll send a confirmation link to it. Clicking the link signs you out of all devices.",
       "button": "Send confirmation",
       "checkInbox": "Check the new inbox for a confirmation link.",
+      "confirmPrompt": "Click the button below to confirm your new email address.",
+      "confirmButton": "Confirm email change",
       "confirming": "Confirming your new email...",
       "confirmedTitle": "Email updated",
       "confirmedBody": "Your email address has been changed. All sessions have been signed out — please log in with the new email.",

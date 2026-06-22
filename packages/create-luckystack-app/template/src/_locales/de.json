@@ -2,8 +2,15 @@
   "test": "Hallo {{name}}",
   "common": {
     "404": "Etwas ist schiefgelaufen, versuche es später erneut.",
+    "500": "Ein Serverfehler ist aufgetreten. Versuche es später erneut.",
     "whiteSpace": " ",
-    "error": "FEHLER"
+    "error": "FEHLER",
+    "connectionError": "Verbindungsfehler. Prüfe dein Netzwerk und versuche es erneut.",
+    "sessionReplacedElsewhere": "Deine Sitzung wurde auf einem anderen Gerät geöffnet.",
+    "logoutFailed": "Abmelden fehlgeschlagen. Versuche es erneut.",
+    "invalidGroup": "Ungültiger Raum.",
+    "invalidLocation": "Ungültiger Standort.",
+    "unknownError": "Ein unbekannter Fehler ist aufgetreten."
   },
   "middleware": {
     "notAdmin": "Du bist kein Admin."
@@ -66,6 +73,14 @@
     "providerNotFound": "Provider nicht gefunden.",
     "oauthStateInitFailed": "OAuth-Sicherheitsstatus konnte nicht initialisiert werden.",
     "noReason": "Kein Grund angegeben.",
+    "signInTitle": "Bei deinem Konto anmelden",
+    "registerTitle": "Neues Konto erstellen",
+    "noAccount": "Noch kein Konto? ",
+    "haveAccount": "Bereits ein Konto? ",
+    "createAccount": "Jetzt eines erstellen",
+    "logIn": "Anmelden",
+    "signUp": "Registrieren",
+    "loading": "Laden...",
     "name": "Name",
     "emailAddress": "E-Mail-Adresse",
     "password": "Passwort",
@@ -89,6 +104,7 @@
   },
   "settings": {
     "changeAvatar": "Avatar ändern",
+    "deleteAvatar": "Avatar löschen",
     "changeAvatarDescription": "JPG, GIF oder PNG. Max 4 MB.",
     "language": {
       "title": "Sprache",
@@ -123,7 +139,9 @@
       "emailTaken": "Diese E-Mail-Adresse ist bereits in Verwendung.",
       "invalidEmail": "Das sieht nicht nach einer gültigen E-Mail-Adresse aus.",
       "emailSameAsCurrent": "Die neue E-Mail-Adresse ist mit der aktuellen identisch.",
-      "emailSendFailed": "Bestätigungs-E-Mail konnte nicht gesendet werden. Versuche es später erneut."
+      "emailSendFailed": "Bestätigungs-E-Mail konnte nicht gesendet werden. Versuche es später erneut.",
+      "currentPasswordRequired": "Gib dein aktuelles Passwort ein, um deine E-Mail-Adresse zu ändern.",
+      "wrongCurrentPassword": "Dein aktuelles Passwort ist falsch."
     },
     "passwordSection": "Passwort",
     "currentPassword": "Aktuelles Passwort",

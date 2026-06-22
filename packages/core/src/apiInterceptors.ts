@@ -48,6 +48,8 @@ export type ApiResponseInterceptor = (
   ctx: ApiResponseInterceptorContext,
 ) => void | Promise<void>;
 
+import { getLogger } from './loggerRegistry';
+
 const requestInterceptors = new Set<ApiRequestInterceptor>();
 const responseInterceptors = new Set<ApiResponseInterceptor>();
 
@@ -86,7 +88,7 @@ export async function dispatchApiRequestInterceptors(
     try {
       await interceptor(ctx);
     } catch (error) {
-      console.error('[apiRequestInterceptor] handler threw:', error);
+      getLogger().error('[apiRequestInterceptor] handler threw', error);
     }
   }
 }
@@ -105,11 +107,11 @@ export function dispatchApiResponseInterceptors(
       const result = interceptor(ctx);
       if (result && typeof (result as Promise<unknown>).catch === 'function') {
         (result as Promise<unknown>).catch((error: unknown) => {
-          console.error('[apiResponseInterceptor] async handler rejected:', error);
+          getLogger().error('[apiResponseInterceptor] async handler rejected', error);
         });
       }
     } catch (error) {
-      console.error('[apiResponseInterceptor] handler threw:', error);
+      getLogger().error('[apiResponseInterceptor] handler threw', error);
     }
   }
 }

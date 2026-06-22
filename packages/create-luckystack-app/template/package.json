@@ -25,8 +25,10 @@
     "test": "npm run generateArtifacts && tsx --tsconfig tsconfig.server.json scripts/testAll.ts",
     "scaffold:test": "node scripts/scaffoldRouteTest.mjs",
     "scaffold:page": "node scripts/scaffoldPage.mjs",
+    "test:e2e": "playwright test",
     "prisma:generate": "dotenv -e .env.local -- prisma generate",
     "prisma:db:push": "dotenv -e .env.local -- prisma db push",
+    "prisma:migrate:dev": "dotenv -e .env.local -- prisma migrate dev",
     "help": "node scripts/help.mjs"
   },
   "dependencies": {
@@ -58,6 +60,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@luckystack/cli": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/devkit": "^{{LUCKYSTACK_VERSION}}",
     "@luckystack/test-runner": "^{{LUCKYSTACK_VERSION}}",
     "@eslint/js": "^9.39.4",

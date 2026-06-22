@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/test-runner",
-  "version": "0.2.0",
+  "version": "0.2.7",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -15,7 +15,7 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/test-runner"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/test-runner#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/main/packages/test-runner#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
@@ -54,10 +54,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.2.0"
+    "@luckystack/core": "^0.2.7"
   },
   "peerDependencies": {
-    "@luckystack/login": "^0.2.0",
+    "@luckystack/login": "^0.2.7",
     "socket.io-client": "^4.8.0",
     "zod": "^4.0.0"
   },

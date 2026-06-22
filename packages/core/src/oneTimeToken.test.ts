@@ -24,8 +24,14 @@ const { store, fakeRedis } = vi.hoisted(() => {
         },
         exec(): Promise<[Error | null, unknown][]> {
           const value = store.get(pendingKey);
+          const existed = store.has(pendingKey);
           store.delete(pendingKey);
-          return Promise.resolve([[null, value ?? null]]);
+          //? Real ioredis returns one [err, result] tuple PER queued command:
+          //? GET then DEL (DEL result = number of keys removed).
+          return Promise.resolve([
+            [null, value ?? null],
+            [null, existed ? 1 : 0],
+          ]);
         },
       };
       return chain;

@@ -19,6 +19,10 @@ export const getCookieValue = (cookieHeader: string | undefined, cookieName: str
   try {
     return decodeURIComponent(rawValue);
   } catch {
+    //? CORE-O21: returning the raw bytes on decode failure is by-design.
+    //? A lone `%` or malformed percent-sequence is unusual but not grounds to
+    //? treat the cookie as absent — the caller receives the exact bytes the
+    //? browser sent and can decide whether to accept or reject them.
     return rawValue;
   }
 };

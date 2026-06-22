@@ -3,6 +3,7 @@
 //? builds a route-bound `TestContext`, runs the exported `customTests`
 //? cases. Spec: docs/ARCHITECTURE_TESTING.md.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -249,10 +250,10 @@ const buildSessionHelpers = (state: TestSessionState): TestContext['session'] =>
   return {
     login: async (user) => {
       const { saveSession, getSession } = await import('@luckystack/login');
-      const userId = user?.id ?? `test-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const email = user?.email ?? `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+      const userId = user?.id ?? `test-user-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+      const email = user?.email ?? `test-${Date.now()}-${crypto.randomBytes(8).toString('hex')}@example.com`;
       const name = user?.name ?? 'Test User';
-      const token = `test-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const token = `test-${Date.now()}-${crypto.randomBytes(16).toString('hex')}`;
       const sessionData = {
         id: userId,
         email,
@@ -312,7 +313,8 @@ const buildCallApi = (
   //? always sent POST.
   method: string,
 ): TestContext['callApi'] => {
-  return async (input) => {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- must match TestContext['callApi'] generic signature
+  return async <TInput = unknown, TOutput = unknown>(input: TInput): Promise<TOutput> => {
     const url = `${baseUrl.replace(/\/$/, '')}/api/${routePath}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
@@ -329,7 +331,11 @@ const buildCallApi = (
       state.lastResponse = null;
       throw new Error(`callApi ${method} ${routePath} failed: ${fetchError?.message ?? 'no response'}`);
     }
-    return await parseResponse(response, state) as never;
+    //? `parseResponse` returns `unknown`; TOutput is the caller-supplied expectation.
+    //? The runtime shape is unverifiable here — the route's own validator owns that
+    //? contract. The cast is required because parseResponse must return `unknown`.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, no-restricted-syntax -- parseResponse returns unknown; TOutput is the caller's type contract, verified at the call site
+    return await parseResponse(response, state) as TOutput;
   };
 };
 
@@ -339,7 +345,8 @@ const buildCallSync = (
   state: TestSessionState,
   cookieName: string,
 ): TestContext['callSync'] => {
-  return async (input, opts) => {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- must match TestContext['callSync'] generic signature
+  return async <TInput = unknown, TOutput = unknown>(input: TInput, opts?: { receiver?: string }): Promise<TOutput> => {
     const url = `${baseUrl.replace(/\/$/, '')}/sync/${routePath}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
@@ -358,7 +365,9 @@ const buildCallSync = (
       state.lastResponse = null;
       throw new Error(`callSync ${routePath} failed: ${fetchError?.message ?? 'no response'}`);
     }
-    return await parseResponse(response, state) as never;
+    //? parseResponse returns unknown; TOutput is the caller's type contract, verified at the call site
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, no-restricted-syntax -- parseResponse returns unknown; cast to TOutput is the boundary
+    return await parseResponse(response, state) as TOutput;
   };
 };
 
@@ -431,15 +440,32 @@ const buildContext = (
 };
 
 export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCustomTestsSummary> => {
-  const files = discoverCustomTestFiles();
+  const srcDir = getSrcDir();
+  const files = discoverCustomTestFiles(srcDir);
   const results: CustomTestResult[] = [];
 
   for (const discovery of files) {
     const routePath = `${discovery.route.page}/${discovery.route.name}/${discovery.route.version}`;
     if (input.filter && !routePath.includes(input.filter)) continue;
 
+    //? Canonical-path containment guard: resolve to the real path and verify
+    //? it is still inside srcDir. Protects against symlink-escaped paths or
+    //? an adversarially crafted filePath that slipped through the walker.
+    const [realPathErr, realFilePath] = tryCatchSync(() => fs.realpathSync(discovery.filePath));
+    const resolvedPath = realPathErr ? discovery.filePath : (realFilePath ?? discovery.filePath);
+    const relToSrc = path.relative(srcDir, resolvedPath);
+    if (relToSrc.startsWith('..') || path.isAbsolute(relToSrc)) {
+      const r: CustomTestResult = {
+        routePath, caseName: '(import)', status: 'fail', durationMs: 0,
+        reason: `test file path escapes srcDir and was rejected: ${discovery.filePath}`,
+      };
+      results.push(r);
+      input.onResult?.(r);
+      continue;
+    }
+
     const [importError, mod] = await tryCatch(
-      () => import(pathToFileURL(discovery.filePath).href) as Promise<Record<string, unknown>>,
+      () => import(pathToFileURL(resolvedPath).href) as Promise<Record<string, unknown>>,
     );
     if (importError || !mod) {
       const r: CustomTestResult = {
@@ -452,8 +478,15 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
     }
 
     const exported = (mod as { customTests?: unknown }).customTests;
+    //? DD-TR-various — empty-stub contract (documented decision):
+    //? A test file that exports an empty array (or no `customTests` export) is
+    //? silently skipped, NOT emitted as a `skipped` result. Rationale: AI-generated
+    //? stub files start life empty; surfacing them as "skipped" every run adds noise
+    //? before the author fills them in. The `CustomTestResult` status union therefore
+    //? stays `'pass' | 'fail' | 'xfail' | 'xpass'` — no `'skipped'` variant.
+    //? If you need to track unfilled stubs, scan `discoverCustomTestFiles()` and
+    //? compare against the results array.
     if (!Array.isArray(exported) || exported.length === 0) {
-      //? File present but no cases — treat as silent skip; the AI hasn't filled it in yet.
       continue;
     }
 
@@ -468,6 +501,17 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
       //? starts clean. tryCatch on the cleanup itself prevents a teardown
       //? throw from masking the original failure.
       await tryCatch(() => built.closeAllWatchers());
+      //? Best-effort session cleanup: if `session.login()` minted a Redis
+      //? session but the case didn't call `session.logout()`, the token
+      //? accumulates until its TTL expires. Delete it now to avoid a slow
+      //? session-key leak across a full sweep run.
+      const residualToken = built.state.token;
+      if (residualToken) {
+        await tryCatch(async () => {
+          const { deleteSession } = await import('@luckystack/login');
+          await deleteSession(residualToken);
+        });
+      }
       const durationMs = Date.now() - started;
 
       let r: CustomTestResult;

@@ -1,7 +1,7 @@
 import { walkEndpoints } from './walkEndpoints';
 import { runRateLimitCheck } from './rateLimitCheck';
 import { resetServerState } from './resetServerState';
-import { shouldSkip, requiresLogin, getRateLimit, calculateSummary } from './testLayerHelpers';
+import { shouldSkip, requiresLogin, getRateLimit, calculateSummary, STATE_CHANGING_METHODS } from './testLayerHelpers';
 import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
 export interface RunRateLimitTestsInput {
@@ -55,6 +55,23 @@ export const runRateLimitTests = async (
         status: 'skipped',
         durationMs: 0,
         reason: 'login-required route — set TEST_AUTH_TOKEN to rate-limit-test it (unauthenticated calls hit auth.required before the limiter)',
+      };
+      results.push(skipped);
+      input.onResult?.(skipped);
+      continue;
+    }
+
+    //? In cookie-mode the rate-limit check fires the endpoint `rateLimit + 1`
+    //? times with junk input. State-changing routes (POST/PUT/DELETE) execute
+    //? real mutation handlers on each hit — skip them to avoid side-effects on
+    //? the test database. Their rate limits are better covered by a custom test
+    //? that supplies valid input.
+    if (isAuthenticatedSweep && STATE_CHANGING_METHODS.has(endpoint.method)) {
+      const skipped: ContractCheckResult = {
+        endpoint,
+        status: 'skipped',
+        durationMs: 0,
+        reason: 'state-changing route skipped in cookie-mode rate-limit sweep (mutation risk with junk bodies)',
       };
       results.push(skipped);
       input.onResult?.(skipped);

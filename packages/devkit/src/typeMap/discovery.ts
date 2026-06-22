@@ -1,7 +1,5 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import { ROOT_DIR } from '@luckystack/core';
 import {
   getRoutingRules,
@@ -20,8 +18,19 @@ const toForwardSlashRelative = (absolute: string): string => {
 const walkFiles = (
   dir: string,
   matcher: (fullPath: string, entryName: string) => boolean,
-  results: string[] = []
+  results: string[] = [],
+  visited = new Set<string>()
 ): string[] => {
+  // Resolve the real path to detect symlink cycles before descending.
+  let realDir: string;
+  try {
+    realDir = fs.realpathSync(dir);
+  } catch {
+    return results;
+  }
+  if (visited.has(realDir)) return results;
+  visited.add(realDir);
+
   const { ignore } = getRoutingRules();
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -32,9 +41,16 @@ const walkFiles = (
 
       if (ignore(relativePath)) continue;
 
-      if (entry.isDirectory()) {
+      if (entry.isDirectory() || entry.isSymbolicLink()) {
         if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
-        walkFiles(fullPath, matcher, results);
+        // Only recurse if this is actually a directory (resolves symlinks).
+        try {
+          if (fs.statSync(fullPath).isDirectory()) {
+            walkFiles(fullPath, matcher, results, visited);
+          }
+        } catch {
+          // Broken symlink — skip.
+        }
         continue;
       }
 
@@ -52,7 +68,7 @@ const walkFiles = (
 export const findAllApiFiles = (srcDir: string): string[] => {
   const apiSegment = apiMarkerSegment();
   return walkFiles(srcDir, (fullPath, entryName) => {
-    const normalized = fullPath.replace(/\\/g, '/');
+    const normalized = fullPath.replaceAll('\\', '/');
     return isApiFileName(entryName) && normalized.includes(apiSegment);
   });
 };
@@ -60,7 +76,7 @@ export const findAllApiFiles = (srcDir: string): string[] => {
 export const findAllSyncServerFiles = (srcDir: string): string[] => {
   const syncSegment = syncMarkerSegment();
   return walkFiles(srcDir, (fullPath, entryName) => {
-    const normalized = fullPath.replace(/\\/g, '/');
+    const normalized = fullPath.replaceAll('\\', '/');
     return isSyncServerFileName(entryName) && normalized.includes(syncSegment);
   });
 };
@@ -68,7 +84,7 @@ export const findAllSyncServerFiles = (srcDir: string): string[] => {
 export const findAllSyncClientFiles = (srcDir: string): string[] => {
   const syncSegment = syncMarkerSegment();
   return walkFiles(srcDir, (fullPath, entryName) => {
-    const normalized = fullPath.replace(/\\/g, '/');
+    const normalized = fullPath.replaceAll('\\', '/');
     return isSyncClientFileName(entryName) && normalized.includes(syncSegment);
   });
 };

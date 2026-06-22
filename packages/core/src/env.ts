@@ -105,5 +105,26 @@ export const bootstrapEnv = (): RuntimeEnv => {
   return cachedEnv;
 };
 
+//? DD-CORE-D2 — eager-load decision (back-compat, kept for 0.x):
+//? `env` is evaluated at MODULE IMPORT time. This is intentional for the 0.x
+//? public API: every file that does `import { env } from '@luckystack/core'`
+//? gets the same frozen, Zod-validated snapshot, and the dotenv layering runs
+//? exactly once at the package boundary regardless of import order.
+//?
+//? Migration path to lazy consumption (0.2+ recommendation):
+//? Use `getEnv()` instead of `env` at call sites where you need to read env
+//? values inside a function body rather than at module scope. `getEnv()` is
+//? identical to `env` (it returns the same cached singleton after the first
+//? call) but it avoids capturing a stale snapshot when `bootstrapEnv` is
+//? called before dotenv files are fully loaded — a common footgun in test
+//? runners that reset `process.env` between cases. New framework code and
+//? consumer code should prefer `getEnv()` at call-time over the `env`
+//? top-level binding.
 export const env = bootstrapEnv();
 export const isProduction = env.NODE_ENV === 'production';
+
+//? Lazy accessor that returns the same cached singleton as `env` but defers
+//? the bootstrap to first call. Prefer this over the top-level `env` binding
+//? in functions, class constructors, and anywhere `bootstrapEnv` must not run
+//? at module evaluation time (e.g. unit tests that reset `process.env`).
+export const getEnv = (): RuntimeEnv => bootstrapEnv();

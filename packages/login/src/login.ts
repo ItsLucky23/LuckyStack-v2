@@ -13,7 +13,7 @@ import { resolveUserByEmail } from './accountStrategy';
 import { validatePassword } from './passwordPolicy';
 import { isAccountLocked, clearAuthFailures } from './authLockout';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { promises as fsPromises } from 'node:fs';
 
 //? Combined login/register request body. When `name` + `confirmPassword` are
 //? both present the dispatcher registers; otherwise it logs in.
@@ -49,16 +49,24 @@ const uploadsFolder = (): string => getUploadsDir();
 const isDevMode = (): boolean => getProjectConfig().logging.devLogs;
 const { compare, genSalt, hash } = bcrypt;
 
-//? Fixed bcrypt hash of a random throwaway string, used ONLY to spend ~one
-//? bcrypt-compare worth of CPU on the user-not-found / null-hash login path so
-//? its timing is indistinguishable from a real wrong-password compare (closes
-//? the timing side channel that complements the shared `login.wrongPassword`
-//? reason key). It must never match any real password — it is the hash of a
-//? value no user will ever submit. Cost factor 10 matches the default
-//? `auth.bcryptRounds`; a small cost mismatch with a consumer-tuned value does
-//? not reopen the channel meaningfully (the dominant signal — early return with
-//? zero bcrypt work — is what mattered).
-const DUMMY_BCRYPT_HASH = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
+//? LOGIN-F22: the dummy hash used on the user-not-found path must be generated
+//? at the CONFIGURED bcrypt rounds, not hard-pinned to cost 10. If the consumer
+//? raises `auth.bcryptRounds` (e.g. to 12), a cost-10 dummy compare finishes in
+//? ~80 ms while a real compare takes ~400 ms — the 5× difference reopens the
+//? user-enumeration timing channel we closed with the dummy compare. We lazily
+//? generate one hash per unique rounds value (cached so the per-request compare
+//? stays O(1) after the first login at a given cost) and use that hash for all
+//? subsequent not-found compares at the same cost.
+const dummyHashCache = new Map<number, string>();
+const getDummyBcryptHash = async (): Promise<string> => {
+  const rounds = getProjectConfig().auth.bcryptRounds;
+  const cached = dummyHashCache.get(rounds);
+  if (cached) return cached;
+  const salt = await genSalt(rounds);
+  const generated = await hash(randomBytes(16).toString('hex'), salt);
+  dummyHashCache.set(rounds, generated);
+  return generated;
+};
 //? `validator` is a CommonJS module whose helpers hang off the default export;
 //? destructuring the default is the documented usage. The named-export warning
 //? is a false positive for this CJS interop shape.
@@ -107,6 +115,12 @@ const generatePkcePair = (): { verifier: string; challenge: string } => {
 interface OAuthStateEntry {
   nonceHash: string;
   codeVerifier?: string;
+  //? Frontend URL to redirect to after the OAuth callback completes. Stored
+  //? server-side in Redis (never echoed from the client at callback time) so it
+  //? is tamper-proof. Validated against allowedOrigins + allowLocalhost before
+  //? use — see isAllowedRedirectUrl. Absent when the auth initiation did not
+  //? carry a return_url param (falls back to the configured loginRedirectUrl).
+  returnUrl?: string;
 }
 
 export interface CreateOAuthStateResult {
@@ -128,7 +142,7 @@ export interface CreateOAuthStateResult {
 
 export const createOAuthState = async (
   providerName: string,
-  options?: { usePkce?: boolean },
+  options?: { usePkce?: boolean; returnUrl?: string },
 ): Promise<CreateOAuthStateResult | null> => {
   const state = randomBytes(32).toString('hex');
   const nonce = randomBytes(32).toString('hex');
@@ -138,6 +152,7 @@ export const createOAuthState = async (
   const entry: OAuthStateEntry = {
     nonceHash: hashStateNonce(nonce),
     ...(pkce ? { codeVerifier: pkce.verifier } : {}),
+    ...(options?.returnUrl ? { returnUrl: options.returnUrl } : {}),
   };
 
   //? State TTL is consumer-configurable via `auth.oauthStateTtlSeconds`
@@ -195,6 +210,15 @@ const consumeOAuthState = async (
     return null;
   }
 
+  //? Verify the DEL also succeeded (txResult[1][0] is the per-command error slot).
+  //? If DEL failed the state key was not consumed — fail closed so the OAuth state
+  //? cannot be replayed with the same nonce before its TTL expires (mirrors the
+  //? consumeOneTimeToken hardening in @luckystack/core).
+  const delResult = txResult[1];
+  if (!delResult || delResult[0]) {
+    return null;
+  }
+
   const rawValue = getResult[1];
   if (typeof rawValue !== 'string') {
     return null;
@@ -243,6 +267,15 @@ const readStringField = (record: Record<string, unknown>, key: string, fallback 
 const generateAvatarFallbackColor = (): string =>
   `#${Math.floor(Math.random() * 0xFF_FF_FF).toString(16).padStart(6, "0")}`;
 
+//? LOGIN-F18: check whether a user has an uploaded webp avatar on disk and
+//? return the filename when found. Used by both the credentials and OAuth login
+//? paths to avoid duplicating the async stat pattern.
+const resolveUploadedAvatar = async (userId: string): Promise<string | null> => {
+  const filePath = path.join(uploadsFolder(), `${userId}.webp`);
+  const [, avatarStat] = await tryCatch(() => fsPromises.stat(filePath));
+  return avatarStat ? `${userId}.webp` : null;
+};
+
 const sanitizeUserForSession = <T extends { password?: unknown }>(user: T): Omit<T, 'password'> => {
   const { password: _password, ...safeUser } = user;
   return safeUser;
@@ -258,6 +291,9 @@ const emitLoginFailed = (payload: {
   provider: string;
   reason: string;
   stage: 'login' | 'register' | 'oauth';
+  //? DD-LOGIN-F5: optional resolved client IP — threaded from the HTTP auth
+  //? route so the per-account lockout can build an IP+account composite key.
+  requesterIp?: string;
 }): void => {
   void dispatchHook('loginFailed', payload);
 };
@@ -360,6 +396,18 @@ const registerWithCredentials = async (
     return { status: false, reason: preRegisterResult.signal.errorCode };
   }
 
+  //? LOGIN-F15: apply the per-account lockout check before the email-existence
+  //? lookup. Without this an attacker can call the register endpoint repeatedly
+  //? for a victim's email and perform unbounded `resolveUserByEmail` probes —
+  //? effectively bypassing the lockout by choosing the register code path. A
+  //? locked account means the credentials flow is temporarily suspended for that
+  //? email; the same sentinel applies regardless of which surface (login vs
+  //? register) is being used. No-op when `rateLimiting.auth.enabled` is false.
+  if (await isAccountLocked(email)) {
+    emitLoginFailed({ email, provider: 'credentials', reason: 'login.accountLocked', stage: 'register' });
+    return { status: false, reason: 'login.accountLocked' };
+  }
+
   const userAdapter = getUserAdapter();
   const [checkEmailError, checkEmailResponse] = await tryCatch(() =>
     resolveUserByEmail(userAdapter, { email, provider: 'credentials' })
@@ -391,6 +439,22 @@ const registerWithCredentials = async (
 
   const [createNewUserError, createNewUserResponse] = await tryCatch(createNewUser);
   if (createNewUserError) {
+    //? LOGIN-F7: treat a unique-constraint violation as a TOCTOU race — another
+    //? concurrent request created this row between our findFirst and our create.
+    //? Under the `'unified'` strategy (where `email @unique` is recommended) this
+    //? is the expected concurrent-registration signal; return `login.emailExists`
+    //? so the client can prompt the user to log in instead.
+    const errorMessage =
+      createNewUserError instanceof Error ? createNewUserError.message : String(createNewUserError);
+    const isUniqueViolation =
+      errorMessage.includes('Unique constraint') ||
+      errorMessage.includes('unique constraint') ||
+      // Prisma error code P2002 covers all DB engines
+      (createNewUserError as { code?: unknown }).code === 'P2002';
+    if (isUniqueViolation) {
+      emitLoginFailed({ email, provider: 'credentials', reason: 'login.emailExists', stage: 'register' });
+      return { status: false, reason: 'login.emailExists' };
+    }
     const reason = toReasonKey(createNewUserError);
     emitLoginFailed({ email, provider: 'credentials', reason, stage: 'register' });
     return { status: false, reason };
@@ -435,11 +499,15 @@ const registerWithCredentials = async (
 
 const loginWithCredentialsCore = async (
   { email, password }: { email: string; password: string },
-  options?: { supersedeToken?: string },
+  //? DD-LOGIN-F5: `requesterIp` is optional so all existing callers stay
+  //? compatible. The HTTP auth route resolves and passes the IP; socket paths
+  //? omit it and fall back to the pure-account lockout bucket.
+  options?: { supersedeToken?: string; requesterIp?: string },
 ): Promise<CredentialsLoginResult> => {
+  const requesterIp = options?.requesterIp;
   const preLoginResult = await dispatchHook('preLogin', { email, provider: 'credentials' });
   if (preLoginResult.stopped) {
-    emitLoginFailed({ email, provider: 'credentials', reason: preLoginResult.signal.errorCode, stage: 'login' });
+    emitLoginFailed({ email, provider: 'credentials', reason: preLoginResult.signal.errorCode, stage: 'login', requesterIp });
     return { status: false, reason: preLoginResult.signal.errorCode };
   }
 
@@ -450,8 +518,8 @@ const loginWithCredentialsCore = async (
   //? per-account here. The counter is incremented by the registered `loginFailed`
   //? handler (see `registerAuthLockoutHook`); merely checking the lock does not
   //? increment it. No-op when `rateLimiting.auth.enabled` is false (default).
-  if (await isAccountLocked(email)) {
-    emitLoginFailed({ email, provider: 'credentials', reason: 'login.accountLocked', stage: 'login' });
+  if (await isAccountLocked(email, requesterIp)) {
+    emitLoginFailed({ email, provider: 'credentials', reason: 'login.accountLocked', stage: 'login', requesterIp });
     return { status: false, reason: 'login.accountLocked' };
   }
 
@@ -462,7 +530,7 @@ const loginWithCredentialsCore = async (
   if (findUserError) {
     getLogger().error('login: findByEmail failed', findUserError);
     const reason = toReasonKey(findUserError);
-    emitLoginFailed({ email, provider: 'credentials', reason, stage: 'login' });
+    emitLoginFailed({ email, provider: 'credentials', reason, stage: 'login', requesterIp });
     return { status: false, reason };
   }
   //? Anti-enumeration: a missing account and a missing/invalid password hash
@@ -475,8 +543,9 @@ const loginWithCredentialsCore = async (
   //? CPU as a real wrong-password compare, then return the shared key.
   const passwordHash = findUserResponse?.password ?? null;
   if (!findUserResponse || !passwordHash) {
-    await tryCatch(() => compare(password, DUMMY_BCRYPT_HASH));
-    emitLoginFailed({ email, userId: findUserResponse?.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login' });
+    const dummyHash = await getDummyBcryptHash();
+    await tryCatch(() => compare(password, dummyHash));
+    emitLoginFailed({ email, userId: findUserResponse?.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login', requesterIp });
     return { status: false, reason: 'login.wrongPassword' };
   }
 
@@ -486,11 +555,11 @@ const loginWithCredentialsCore = async (
   if (checkPasswordError) {
     getLogger().error('login: bcrypt compare failed', checkPasswordError);
     const reason = toReasonKey(checkPasswordError);
-    emitLoginFailed({ email, userId: findUserResponse.id, provider: 'credentials', reason, stage: 'login' });
+    emitLoginFailed({ email, userId: findUserResponse.id, provider: 'credentials', reason, stage: 'login', requesterIp });
     return { status: false, reason };
   }
   if (!checkPasswordResponse) {
-    emitLoginFailed({ email, userId: findUserResponse.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login' });
+    emitLoginFailed({ email, userId: findUserResponse.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login', requesterIp });
     return { status: false, reason: 'login.wrongPassword' };
   }
 
@@ -509,9 +578,9 @@ const loginWithCredentialsCore = async (
     previousLogin,
   };
 
-  const filePath = path.join(uploadsFolder(), `${newUser.id}.webp`);
-  if (existsSync(filePath)) {
-    newUser.avatar = `${newUser.id}.webp`;
+  const uploadedAvatar = await resolveUploadedAvatar(newUser.id);
+  if (uploadedAvatar) {
+    newUser.avatar = uploadedAvatar;
   }
 
   const saved = await saveSession(newToken, newUser, true, { supersedeToken: options?.supersedeToken });
@@ -519,13 +588,17 @@ const loginWithCredentialsCore = async (
     //? Session never persisted (adapter blip / preSessionCreate veto). Fail the
     //? login so the route does NOT set a cookie or delete the prior session for
     //? a token that getSession() can't resolve.
-    emitLoginFailed({ email, userId: newUser.id, provider: 'credentials', reason: saved.errorCode, stage: 'login' });
+    emitLoginFailed({ email, userId: newUser.id, provider: 'credentials', reason: saved.errorCode, stage: 'login', requesterIp });
     return { status: false, reason: saved.errorCode };
   }
   await dispatchHook('postLogin', { userId: newUser.id, provider: 'credentials', isNewUser: false, token: newToken });
   //? Reset the brute-force counter on success so earlier typos don't keep a
   //? legitimate user locked out (F7). No-op when the feature is disabled.
-  void clearAuthFailures(email);
+  //? Clear the IP+account composite key (DD-LOGIN-F5) AND the bare account key
+  //? so that failures recorded without an IP (e.g. from a different surface) are
+  //? also cleared after a confirmed legitimate login.
+  void clearAuthFailures(email, requesterIp);
+  if (requesterIp) void clearAuthFailures(email);
   if (isDevMode()) {
     getLogger().debug(`credentials login success for user ${newUser.id}`);
   }
@@ -538,7 +611,9 @@ const loginWithCredentialsCore = async (
 //? login.
 const loginWithCredentials = async (
   params: LoginOrRegisterParams,
-  options?: { supersedeToken?: string },
+  //? DD-LOGIN-F5: `requesterIp` forwarded to `loginWithCredentialsCore` to
+  //? enable IP+account composite lockout keys on the HTTP auth path.
+  options?: { supersedeToken?: string; requesterIp?: string },
 ): Promise<CredentialsLoginResult> => {
   const creds = normalizeCredentials(params);
 
@@ -605,8 +680,13 @@ const isAllowedRedirectUrl = (url: string): boolean => {
   //? Defensive default at a security boundary (redirect-origin validation):
   //? the type is non-nullable, but a malformed consumer config could still
   //? hand us `undefined` at runtime, so the `?? []` fail-closed guard stays.
+  //? `allowLocalhost` is the dev convenience that accepts any http://localhost:*
+  //? origin without needing an explicit allowedOrigins entry. Safe in production
+  //? because allowLocalhost defaults to false there.
+  const cfg = getProjectConfig();
+  if (cfg.http.cors.allowLocalhost && parsed.hostname === 'localhost') return true;
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime-defensive guard at a security boundary
-  const allowed = getProjectConfig().http.cors.allowedOrigins ?? [];
+  const allowed = cfg.http.cors.allowedOrigins ?? [];
   if (typeof allowed === 'function') {
     return allowed(parsed.origin);
   }
@@ -878,9 +958,10 @@ const findOrCreateOAuthUser = async (
       return null;
     }
 
-    const filePath = path.join(uploadsFolder(), `${findResponse.id}.webp`);
-    if (existsSync(filePath)) {
-      findResponse.avatar = `${findResponse.id}.webp`;
+    //? LOGIN-F18 (OAuth path): same async stat lookup via the shared helper.
+    const uploadedAvatar = await resolveUploadedAvatar(findResponse.id);
+    if (uploadedAvatar) {
+      findResponse.avatar = uploadedAvatar;
     }
 
     const previousLogin = findResponse.lastLogin ?? null;
@@ -959,6 +1040,85 @@ const resolvePostLoginRedirect = async ({
   return fallbackUrl;
 };
 
+//? Whitelist the URL path segment against registered providers and verify the
+//? request carries a URL. Returns the matched full provider + its canonical name,
+//? or null when the segment is absent, unregistered, or an incomplete provider
+//? shape. Separating this keeps the callback routing concern out of the main flow.
+const resolveProviderFromCallback = (
+  pathname: string,
+  url: string | undefined,
+): { provider: FullOAuthProvider; providerName: string } | null => {
+  const rawProviderSegment = pathname.split('/')[3]; // google/github/etc.
+  if (!rawProviderSegment || !url) return null;
+  const found = getOAuthProviders().find(p => p.name === rawProviderSegment);
+  if (!found || !isFullOAuthProvider(found)) return null;
+  return { provider: found, providerName: found.name };
+};
+
+//? Merge per-provider runtime extras (calendar tokens, tenant ids, etc.) into
+//? the session object IN PLACE before it is persisted. Errors are non-fatal —
+//? a failing or absent hook must not block the user from signing in (SEC-10).
+const applyExtraSessionFields = async (
+  user: SessionLayout,
+  provider: FullOAuthProvider,
+  profile: OAuthProfile,
+  accessToken: string,
+): Promise<void> => {
+  const { extraSessionFields } = provider;
+  if (!extraSessionFields) return;
+
+  //? Pass the RAW provider userData (SEC-3) so the hook sees every provider
+  //? claim (`sub`, tenant id, custom claims) rather than the trimmed projection.
+  const [extraErr, extra] = await tryCatch(async () =>
+    extraSessionFields({ userData: profile.rawUserData, accessToken }),
+  );
+  if (extraErr) {
+    getLogger().warn(`[oauth:${provider.name}] extraSessionFields hook threw — continuing without extras`, { err: extraErr });
+    return;
+  }
+  if (!extra) return;
+
+  //? Strip framework-owned session keys before merging (SEC-10).
+  const { id, token, csrfToken, password, ...safeExtra } = extra;
+  if (id !== undefined || token !== undefined || csrfToken !== undefined || password !== undefined) {
+    getLogger().warn(
+      `[oauth:${provider.name}] extraSessionFields returned framework-owned key(s) (id/token/csrfToken/password) — dropped`,
+    );
+  }
+  //? SEC: warn when extra fields appear to contain bearer credentials. Access
+  //? tokens stored in the Redis session are broadcast to connected sockets via
+  //? updateSession — they should not be in session fields unless intentional.
+  //? The stripped set above already removes "token"; this covers other key names.
+  const CREDENTIAL_PATTERN = /token|secret|key|auth/i;
+  const suspiciousKeys = Object.keys(safeExtra).filter(k => CREDENTIAL_PATTERN.test(k));
+  if (suspiciousKeys.length > 0) {
+    getLogger().warn(
+      `[oauth:${provider.name}] extraSessionFields contains field(s) that look like credentials (${suspiciousKeys.join(', ')}) — these will be stored in the Redis session and broadcast to connected sockets. Consider keeping them server-side only.`,
+    );
+  }
+  Object.assign(user, safeExtra);
+};
+
+//? Assemble the fallback redirect URL for the OAuth callback by preferring the
+//? tamper-proof return URL stored server-side with the OAuth state, then the
+//? caller-supplied default, then the configured `loginRedirectUrl`, then '/'.
+const resolveOAuthFallbackUrl = (
+  stateEntry: OAuthStateEntry,
+  options: { defaultRedirectUrl?: string },
+): string => {
+  const stateReturnUrl =
+    stateEntry.returnUrl && isAllowedRedirectUrl(stateEntry.returnUrl)
+      ? stateEntry.returnUrl
+      : undefined;
+
+  return (
+    stateReturnUrl
+    ?? options.defaultRedirectUrl
+    ?? getProjectConfig().loginRedirectUrl
+    ?? '/'
+  );
+};
+
 // Route that handles the callback from the OAuth provider
 const loginCallback = async (
   pathname: string,
@@ -966,18 +1126,12 @@ const loginCallback = async (
   _res: ServerResponse,
   options: { defaultRedirectUrl?: string; supersedeToken?: string } = {},
 ): Promise<OAuthCallbackResult | false> => {
-  const rawProviderSegment = pathname.split('/')[3]; // google/github/etc.
-  if (!rawProviderSegment) return false;
-  //? Whitelist the raw path segment against the registered provider list BEFORE
-  //? it is used in any string op / log line. From here on we use the canonical
-  //? `provider.name` (a known, registered value) rather than the attacker-
-  //? controllable URL segment, so logs/keys can never carry unvalidated input.
-  const provider = getOAuthProviders().find(p => p.name === rawProviderSegment);
-  if (!provider || !req.url) return false;
-  if (!isFullOAuthProvider(provider)) return false;
-  const providerName = provider.name;
+  const providerResolution = resolveProviderFromCallback(pathname, req.url);
+  if (!providerResolution) return false;
+  const { provider, providerName } = providerResolution;
 
-  const queryString = req.url.split('?')[1] ?? '';
+  // req.url is guaranteed non-null here: resolveProviderFromCallback returns null when url is absent
+  const queryString = (req.url ?? '').split('?')[1] ?? '';
   const params = new URLSearchParams(queryString);
   const code = params.get('code');
   const state = params.get('state');
@@ -1024,37 +1178,9 @@ const loginCallback = async (
   const newToken = randomBytes(32).toString('hex');
   resolved.user.token = newToken;
 
-  //? Per-provider runtime extras (calendar tokens, tenant ids, etc.) are
-  //? merged into the session BEFORE save so saveSession + the resulting
-  //? sessionStorage broadcast see the final shape. Errors are logged but
-  //? do not block login — a missing extra is not worth keeping the user
-  //? from signing in.
-  const extraSessionFields = provider.extraSessionFields;
-  if (extraSessionFields) {
-    //? Pass the RAW provider userData (SEC-3) so the hook sees every provider
-    //? claim (`sub`, tenant id, custom claims) — not the trimmed
-    //? `{email,name,avatar}` projection it used to get, which silently made
-    //? every other field `undefined` and broke the documented contract.
-    const [extraErr, extra] = await tryCatch(async () =>
-      extraSessionFields({ userData: profile.rawUserData, accessToken }),
-    );
-    if (extraErr) {
-      getLogger().warn(`[oauth:${providerName}] extraSessionFields hook threw — continuing without extras`, { err: extraErr });
-    } else if (extra) {
-      //? Strip framework-owned session keys before merging (SEC-10): a buggy /
-      //? typo'd provider config returning `{ id, token, csrfToken, password,
-      //? admin }` would otherwise overwrite the freshly-minted token / user id /
-      //? CSRF token / privilege flags. Drop any reserved key and warn so the
-      //? misconfiguration surfaces instead of silently escalating privilege.
-      const { id, token, csrfToken, password, ...safeExtra } = extra;
-      if (id !== undefined || token !== undefined || csrfToken !== undefined || password !== undefined) {
-        getLogger().warn(
-          `[oauth:${providerName}] extraSessionFields returned framework-owned key(s) (id/token/csrfToken/password) — dropped`,
-        );
-      }
-      Object.assign(resolved.user, safeExtra);
-    }
-  }
+  //? Per-provider runtime extras (calendar tokens, tenant ids, etc.) are merged
+  //? into the session BEFORE save. Errors are non-fatal — see applyExtraSessionFields.
+  await applyExtraSessionFields(resolved.user, provider, profile, accessToken);
 
   const saved = await saveSession(newToken, resolved.user, true, { supersedeToken: options.supersedeToken });
   if (!saved.ok) {
@@ -1079,11 +1205,7 @@ const loginCallback = async (
     getLogger().debug(`oauth login success for user ${resolved.user.id}`);
   }
 
-  const fallbackUrl =
-    options.defaultRedirectUrl
-    ?? getProjectConfig().loginRedirectUrl
-    ?? '/';
-
+  const fallbackUrl = resolveOAuthFallbackUrl(stateEntry, options);
   const redirectUrl = await resolvePostLoginRedirect({
     fallbackUrl,
     userId: resolved.user.id,

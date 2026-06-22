@@ -30,12 +30,18 @@ describe('deepMerge', () => {
     expect(Object.getPrototypeOf(merged)).toBe(Object.prototype);
   });
 
-  it('does not copy a constructor/prototype key onto the result', () => {
-    const override: Record<string, unknown> = { constructor: 'evil', prototype: 'evil' };
+  //? CORE-N5: only `__proto__` is blocked (it can silently mutate the prototype
+  //? chain via spread/assign). `constructor` and `prototype` are valid config key
+  //? names and must be copied through; blocking them silently dropped legitimate
+  //? consumer config (CORE-N5 fix).
+  it('copies constructor/prototype keys (only __proto__ is blocked — CORE-N5)', () => {
+    const override: Record<string, unknown> = { constructor: 'legit', prototype: 'legit' };
     const merged: Record<string, unknown> = deepMerge<Record<string, unknown>>({ safe: true }, override);
     expect(merged.safe).toBe(true);
-    expect(Object.prototype.hasOwnProperty.call(merged, 'constructor')).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(merged, 'prototype')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(merged, 'constructor')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(merged, 'prototype')).toBe(true);
+    expect(merged.constructor).toBe('legit');
+    expect(merged.prototype).toBe('legit');
   });
 });
 

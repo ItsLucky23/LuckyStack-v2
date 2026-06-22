@@ -2,6 +2,7 @@
 /* eslint-disable */
 import { deleteSession, getAllSessions, getSession } from "../../functions/session"
 import repl from 'node:repl';
+import { sanitizeForLog } from '@luckystack/core';
 import { getRuntimeReplMaps } from "../prod/runtimeMaps";
 
 const getActiveApiMap = async (): Promise<Record<string, unknown>> => {
@@ -41,29 +42,30 @@ export const initRepl = () => {
   })
   
   replInstance.context.getAllSessions = async () => {
-    console.log(await getAllSessions())
+    //? Sanitize before logging — sessions carry csrfToken, token, and
+    //? other sensitive fields that must never appear in plaintext logs.
+    console.log(sanitizeForLog(await getAllSessions()))
   }
 
   replInstance.context.getSession = async (token: string) => {
-  
     const session = await getSession(token)
     if (session && typeof session == 'object' && Object.keys(session).length > 0) {
-      console.log(session) 
+      console.log(sanitizeForLog(session))
     } else {
       console.log('no session found')
     }
   }
   
   replInstance.context.deleteSession = async (token: string) => {
-  
+
     const result = await deleteSession(token)
-    console.log(result)
+    console.log(sanitizeForLog(result))
   }
   
   replInstance.context.commands = () => {
     console.log('commands:')
     console.log('getSession(token) -- if no token provided then it will return all sessions')
-    console.log('deleteSession(token) -- if no token provided then it will delete all sessions')
+    console.log('deleteSession(token) -- deletes the session for the given token')
     console.log('listApiUrls() -- prints all discovered API urls')
     console.log('listSyncUrls() -- prints all discovered sync urls')
   }

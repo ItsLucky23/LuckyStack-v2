@@ -1,5 +1,5 @@
-import { tryCatch } from '@luckystack/core';
 import type { ContractCheckResult, EndpointDescriptor } from './types';
+import { sendProbe } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -27,53 +27,36 @@ export const runAuthEnforcementCheck = async (
   const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}`;
   const body = input.inputFor ? input.inputFor(endpoint) : {};
   const started = Date.now();
-  const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => { controller.abort(); }, requestTimeoutMs);
-
-  const [fetchError, response] = await tryCatch(() => fetch(url, {
+  //? No session cookie, no auth header — deliberately. Origin IS sent so the
+  //? server's origin policy doesn't 403 before the auth check can run.
+  const result = await sendProbe({
+    url,
     method: endpoint.method,
-    //? No session cookie, no auth header — deliberately. Origin IS sent so the
-    //? server's origin policy doesn't 403 before the auth check can run.
-    headers: { 'Content-Type': 'application/json', 'Origin': new URL(baseUrl).origin },
-    body: endpoint.method === 'GET' ? undefined : JSON.stringify(body),
-    signal: controller.signal,
-  }));
-  clearTimeout(timeoutHandle);
+    baseUrl,
+    body,
+    requestTimeoutMs: input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+  });
 
-  if (fetchError || !response) {
+  if (!result) {
     return {
       endpoint,
       status: 'fail',
-      reason: fetchError?.message ?? 'fetch returned no response',
+      reason: 'fetch returned no response',
       durationMs: Date.now() - started,
     };
   }
 
-  const [parseError, parsed] = await tryCatch<{ status?: 'success' | 'error'; errorCode?: string } | null, undefined>(
-    async () => await response.json() as { status?: 'success' | 'error'; errorCode?: string },
-  );
+  const { httpStatus, parsed } = result;
   const durationMs = Date.now() - started;
-
-  if (parseError) {
-    return {
-      endpoint,
-      status: 'fail',
-      httpStatus: response.status,
-      responseStatus: 'unknown',
-      reason: `JSON parse failed: ${parseError.message}`,
-      durationMs,
-    };
-  }
 
   if (parsed?.status === 'success') {
     return {
       endpoint,
       status: 'fail',
-      httpStatus: response.status,
+      httpStatus,
       responseStatus: 'success',
-      reason: `auth.login endpoint returned success without a session`,
+      reason: 'auth.login endpoint returned success without a session',
       durationMs,
     };
   }
@@ -82,7 +65,7 @@ export const runAuthEnforcementCheck = async (
     return {
       endpoint,
       status: 'fail',
-      httpStatus: response.status,
+      httpStatus,
       responseStatus: 'unknown',
       reason: 'Response missing standard `status` envelope',
       durationMs,
@@ -93,7 +76,7 @@ export const runAuthEnforcementCheck = async (
     return {
       endpoint,
       status: 'fail',
-      httpStatus: response.status,
+      httpStatus,
       responseStatus: 'error',
       errorCode: parsed.errorCode,
       reason: `expected errorCode '${EXPECTED_ERROR_CODE}' but got '${parsed.errorCode ?? '(missing)'}'`,
@@ -104,7 +87,7 @@ export const runAuthEnforcementCheck = async (
   return {
     endpoint,
     status: 'pass',
-    httpStatus: response.status,
+    httpStatus,
     responseStatus: 'error',
     errorCode: parsed.errorCode,
     durationMs,

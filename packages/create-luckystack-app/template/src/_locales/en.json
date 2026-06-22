@@ -2,8 +2,15 @@
   "test": "Hallo {{name}}",
   "common": {
     "404": "Something went wrong, try again later.",
+    "500": "A server error occurred. Try again later.",
     "whiteSpace": " ",
-    "error": "ERROR"
+    "error": "ERROR",
+    "connectionError": "Connection error. Check your network and try again.",
+    "sessionReplacedElsewhere": "Your session was opened on another device.",
+    "logoutFailed": "Could not sign you out. Try again.",
+    "invalidGroup": "Invalid room.",
+    "invalidLocation": "Invalid location.",
+    "unknownError": "An unknown error occurred."
   },
   "middleware": {
     "notAdmin": "You are not an admin."
@@ -66,6 +73,14 @@
     "providerNotFound": "Provider not found.",
     "oauthStateInitFailed": "Failed to initialize OAuth security state.",
     "noReason": "No reason provided.",
+    "signInTitle": "Sign in to your account",
+    "registerTitle": "Create a new account",
+    "noAccount": "Don't have an account yet? ",
+    "haveAccount": "Already have an account? ",
+    "createAccount": "Create one now",
+    "logIn": "Log in",
+    "signUp": "Sign up",
+    "loading": "Loading...",
     "name": "Name",
     "emailAddress": "Email address",
     "password": "Password",
@@ -124,7 +139,9 @@
       "emailTaken": "That email address is already in use.",
       "invalidEmail": "That doesn't look like a valid email address.",
       "emailSameAsCurrent": "The new email is the same as the current one.",
-      "emailSendFailed": "Could not send the confirmation email. Try again later."
+      "emailSendFailed": "Could not send the confirmation email. Try again later.",
+      "currentPasswordRequired": "Enter your current password to change your email.",
+      "wrongCurrentPassword": "Your current password is incorrect."
     },
     "passwordSection": "Password",
     "currentPassword": "Current password",

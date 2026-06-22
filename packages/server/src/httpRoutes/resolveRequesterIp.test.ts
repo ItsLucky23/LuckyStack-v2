@@ -54,9 +54,12 @@ describe('resolveRequesterIp — trustProxy true', () => {
     trustProxyRef.value = true;
   });
 
-  it('prefers the leftmost X-Forwarded-For hop', () => {
+  //? CORE-O3: XFF resolution now counts from the RIGHT (trusted-proxy hop), not
+  //? the leftmost client-controlled hop. With trustedProxyHopCount=1 (default)
+  //? the resolved IP is hops[length-1] — the immediate upstream proxy entry.
+  it('prefers the rightmost X-Forwarded-For hop (trusted-proxy semantics, CORE-O3)', () => {
     const ip = resolveRequesterIp(makeReq('10.0.0.1', { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }));
-    expect(ip).toBe('203.0.113.7');
+    expect(ip).toBe('10.0.0.1');
   });
 
   it('falls back to X-Real-IP when no X-Forwarded-For', () => {

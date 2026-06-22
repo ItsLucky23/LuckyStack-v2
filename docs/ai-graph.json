@@ -2,10 +2,10 @@
   "version": 2,
   "note": "Dependency graph, ids relative to src/. File level: blastRadius[file] = files transitively importing it. Symbol level: callEdges are function->function calls; symbolBlastRadius['file::fn'] = symbols transitively calling it. <module> = file top-level scope. functions.* injection-proxy / dynamic-import / interface-typed calls are intentionally not resolved. See docs/decisions/0002,0004,0006.",
   "counts": {
-    "nodes": 84,
-    "edges": 49,
-    "symbols": 121,
-    "callEdges": 28
+    "nodes": 92,
+    "edges": 65,
+    "symbols": 122,
+    "callEdges": 30
   },
   "nodes": [
     {
@@ -145,6 +145,11 @@
     },
     {
       "id": "_providers/socketStatusProvider.tsx",
+      "kind": "other",
+      "route": null
+    },
+    {
+      "id": "_sockets/_socketSetup.ts",
       "kind": "other",
       "route": null
     },
@@ -419,6 +424,41 @@
       "route": "api/settings/updateUser/v1"
     },
     {
+      "id": "settings/_components/DangerSection.tsx",
+      "kind": "other",
+      "route": null
+    },
+    {
+      "id": "settings/_components/PasswordSection.tsx",
+      "kind": "other",
+      "route": null
+    },
+    {
+      "id": "settings/_components/PreferencesSection.tsx",
+      "kind": "other",
+      "route": null
+    },
+    {
+      "id": "settings/_components/PreferenceToggle.tsx",
+      "kind": "other",
+      "route": null
+    },
+    {
+      "id": "settings/_components/ProfileSection.tsx",
+      "kind": "other",
+      "route": null
+    },
+    {
+      "id": "settings/_components/Section.tsx",
+      "kind": "other",
+      "route": null
+    },
+    {
+      "id": "settings/_components/SessionsSection.tsx",
+      "kind": "other",
+      "route": null
+    },
+    {
       "id": "settings/confirm-email/page.tsx",
       "kind": "page",
       "route": null
@@ -495,16 +535,20 @@
       "to": "_sockets/socketInitializer.ts"
     },
     {
-      "from": "_sockets/socketInitializer.ts",
+      "from": "_sockets/_socketSetup.ts",
       "to": "_providers/socketStatusProvider.tsx"
     },
     {
-      "from": "_sockets/socketInitializer.ts",
+      "from": "_sockets/_socketSetup.ts",
       "to": "_sockets/offlineQueue.ts"
     },
     {
-      "from": "_sockets/socketInitializer.ts",
+      "from": "_sockets/_socketSetup.ts",
       "to": "_sockets/syncRequest.ts"
+    },
+    {
+      "from": "_sockets/socketInitializer.ts",
+      "to": "_providers/socketStatusProvider.tsx"
     },
     {
       "from": "docs/page.tsx",
@@ -607,24 +651,84 @@
       "to": "_sockets/apiRequest.ts"
     },
     {
+      "from": "settings/_api/revokeSession_v1.ts",
+      "to": "settings/_api/listSessions_v1.ts"
+    },
+    {
+      "from": "settings/_components/DangerSection.tsx",
+      "to": "_functions/menuHandler.ts"
+    },
+    {
+      "from": "settings/_components/DangerSection.tsx",
+      "to": "_sockets/apiRequest.ts"
+    },
+    {
+      "from": "settings/_components/DangerSection.tsx",
+      "to": "settings/_components/Section.tsx"
+    },
+    {
+      "from": "settings/_components/PasswordSection.tsx",
+      "to": "_sockets/apiRequest.ts"
+    },
+    {
+      "from": "settings/_components/PasswordSection.tsx",
+      "to": "settings/_components/Section.tsx"
+    },
+    {
+      "from": "settings/_components/PreferencesSection.tsx",
+      "to": "settings/_components/PreferenceToggle.tsx"
+    },
+    {
+      "from": "settings/_components/PreferencesSection.tsx",
+      "to": "settings/_components/Section.tsx"
+    },
+    {
+      "from": "settings/_components/ProfileSection.tsx",
+      "to": "_components/Avatar.tsx"
+    },
+    {
+      "from": "settings/_components/ProfileSection.tsx",
+      "to": "_components/Dropdown.tsx"
+    },
+    {
+      "from": "settings/_components/ProfileSection.tsx",
+      "to": "settings/_components/Section.tsx"
+    },
+    {
+      "from": "settings/_components/SessionsSection.tsx",
+      "to": "_sockets/apiRequest.ts"
+    },
+    {
+      "from": "settings/_components/SessionsSection.tsx",
+      "to": "settings/_components/Section.tsx"
+    },
+    {
       "from": "settings/confirm-email/page.tsx",
       "to": "_sockets/apiRequest.ts"
     },
     {
       "from": "settings/page.tsx",
-      "to": "_components/Avatar.tsx"
-    },
-    {
-      "from": "settings/page.tsx",
-      "to": "_components/Dropdown.tsx"
-    },
-    {
-      "from": "settings/page.tsx",
-      "to": "_functions/menuHandler.ts"
-    },
-    {
-      "from": "settings/page.tsx",
       "to": "_sockets/apiRequest.ts"
+    },
+    {
+      "from": "settings/page.tsx",
+      "to": "settings/_components/DangerSection.tsx"
+    },
+    {
+      "from": "settings/page.tsx",
+      "to": "settings/_components/PasswordSection.tsx"
+    },
+    {
+      "from": "settings/page.tsx",
+      "to": "settings/_components/PreferencesSection.tsx"
+    },
+    {
+      "from": "settings/page.tsx",
+      "to": "settings/_components/ProfileSection.tsx"
+    },
+    {
+      "from": "settings/page.tsx",
+      "to": "settings/_components/SessionsSection.tsx"
     }
   ],
   "blastRadius": {
@@ -633,6 +737,7 @@
       "_components/TemplateProvider.tsx",
       "main.tsx",
       "playground/page.tsx",
+      "settings/_components/ProfileSection.tsx",
       "settings/page.tsx"
     ],
     "_components/ConfirmMenu.tsx": [
@@ -640,16 +745,19 @@
       "_functions/menuHandler.ts",
       "main.tsx",
       "playground/page.tsx",
+      "settings/_components/DangerSection.tsx",
       "settings/page.tsx"
     ],
     "_components/Dropdown.tsx": [
       "playground/page.tsx",
+      "settings/_components/ProfileSection.tsx",
       "settings/page.tsx"
     ],
     "_components/dropdownInternals.tsx": [
       "_components/Dropdown.tsx",
       "_components/MultiSelectDropdown.tsx",
       "playground/page.tsx",
+      "settings/_components/ProfileSection.tsx",
       "settings/page.tsx"
     ],
     "_components/ErrorPage.tsx": [
@@ -703,6 +811,7 @@
       "_functions/menuHandler.ts",
       "main.tsx",
       "playground/page.tsx",
+      "settings/_components/DangerSection.tsx",
       "settings/page.tsx"
     ],
     "_functions/sentry.ts": [
@@ -717,6 +826,7 @@
     "_providers/socketStatusProvider.tsx": [
       "_components/TemplateProvider.tsx",
       "_providers/SessionProvider.tsx",
+      "_sockets/_socketSetup.ts",
       "_sockets/socketInitializer.ts",
       "docs/page.tsx",
       "main.tsx",
@@ -732,16 +842,14 @@
       "page.tsx",
       "playground/page.tsx",
       "reset-password/page.tsx",
+      "settings/_components/DangerSection.tsx",
+      "settings/_components/PasswordSection.tsx",
+      "settings/_components/SessionsSection.tsx",
       "settings/confirm-email/page.tsx",
       "settings/page.tsx"
     ],
     "_sockets/offlineQueue.ts": [
-      "_providers/SessionProvider.tsx",
-      "_sockets/socketInitializer.ts",
-      "docs/page.tsx",
-      "main.tsx",
-      "page.tsx",
-      "playground/page.tsx"
+      "_sockets/_socketSetup.ts"
     ],
     "_sockets/socketInitializer.ts": [
       "_providers/SessionProvider.tsx",
@@ -751,56 +859,83 @@
       "playground/page.tsx"
     ],
     "_sockets/syncRequest.ts": [
-      "_providers/SessionProvider.tsx",
-      "_sockets/socketInitializer.ts",
+      "_sockets/_socketSetup.ts",
       "docs/page.tsx",
-      "main.tsx",
-      "page.tsx",
       "playground/page.tsx"
+    ],
+    "settings/_api/listSessions_v1.ts": [
+      "settings/_api/revokeSession_v1.ts"
+    ],
+    "settings/_components/DangerSection.tsx": [
+      "settings/page.tsx"
+    ],
+    "settings/_components/PasswordSection.tsx": [
+      "settings/page.tsx"
+    ],
+    "settings/_components/PreferencesSection.tsx": [
+      "settings/page.tsx"
+    ],
+    "settings/_components/PreferenceToggle.tsx": [
+      "settings/_components/PreferencesSection.tsx",
+      "settings/page.tsx"
+    ],
+    "settings/_components/ProfileSection.tsx": [
+      "settings/page.tsx"
+    ],
+    "settings/_components/Section.tsx": [
+      "settings/_components/DangerSection.tsx",
+      "settings/_components/PasswordSection.tsx",
+      "settings/_components/PreferencesSection.tsx",
+      "settings/_components/ProfileSection.tsx",
+      "settings/_components/SessionsSection.tsx",
+      "settings/page.tsx"
+    ],
+    "settings/_components/SessionsSection.tsx": [
+      "settings/page.tsx"
     ]
   },
   "godNodes": [
     {
       "id": "_sockets/apiRequest.ts",
       "kind": "other",
-      "dependents": 10,
-      "directDependents": 7
+      "dependents": 13,
+      "directDependents": 10
     },
     {
       "id": "_providers/socketStatusProvider.tsx",
       "kind": "other",
-      "dependents": 7,
-      "directDependents": 3
-    },
-    {
-      "id": "_sockets/offlineQueue.ts",
-      "kind": "other",
-      "dependents": 6,
-      "directDependents": 1
-    },
-    {
-      "id": "_sockets/syncRequest.ts",
-      "kind": "other",
-      "dependents": 6,
-      "directDependents": 3
+      "dependents": 8,
+      "directDependents": 4
     },
     {
       "id": "_components/Avatar.tsx",
       "kind": "component",
-      "dependents": 5,
+      "dependents": 6,
       "directDependents": 3
     },
     {
       "id": "_components/ConfirmMenu.tsx",
       "kind": "component",
-      "dependents": 5,
+      "dependents": 6,
       "directDependents": 1
     },
     {
       "id": "_functions/menuHandler.ts",
       "kind": "helper",
-      "dependents": 5,
+      "dependents": 6,
       "directDependents": 3
+    },
+    {
+      "id": "settings/_components/Section.tsx",
+      "kind": "other",
+      "dependents": 6,
+      "directDependents": 5
+    },
+    {
+      "id": "_components/dropdownInternals.tsx",
+      "kind": "component",
+      "dependents": 5,
+      "directDependents": 2
     },
     {
       "id": "_sockets/socketInitializer.ts",
@@ -809,9 +944,9 @@
       "directDependents": 3
     },
     {
-      "id": "_components/dropdownInternals.tsx",
+      "id": "_components/Dropdown.tsx",
       "kind": "component",
-      "dependents": 4,
+      "dependents": 3,
       "directDependents": 2
     },
     {
@@ -827,10 +962,10 @@
       "directDependents": 2
     },
     {
-      "id": "_components/Dropdown.tsx",
-      "kind": "component",
-      "dependents": 2,
-      "directDependents": 2
+      "id": "_sockets/syncRequest.ts",
+      "kind": "other",
+      "dependents": 3,
+      "directDependents": 3
     },
     {
       "id": "_components/inputs/floatingLayer.tsx",
@@ -869,6 +1004,12 @@
       "directDependents": 2
     },
     {
+      "id": "settings/_components/PreferenceToggle.tsx",
+      "kind": "other",
+      "dependents": 2,
+      "directDependents": 1
+    },
+    {
       "id": "_components/ErrorPage.tsx",
       "kind": "component",
       "dependents": 1,
@@ -900,12 +1041,6 @@
     },
     {
       "id": "_components/MultiSelectDropdown.tsx",
-      "kind": "component",
-      "dependents": 1,
-      "directDependents": 1
-    },
-    {
-      "id": "_components/TemplateProvider.tsx",
       "kind": "component",
       "dependents": 1,
       "directDependents": 1
@@ -1465,6 +1600,12 @@
       "kind": "function"
     },
     {
+      "id": "settings/_api/listSessions_v1.ts::sessionHandle",
+      "file": "settings/_api/listSessions_v1.ts",
+      "name": "sessionHandle",
+      "kind": "function"
+    },
+    {
       "id": "settings/_api/requestEmailChange_v1.tests.ts::<module>",
       "file": "settings/_api/requestEmailChange_v1.tests.ts",
       "name": "<module>",
@@ -1721,6 +1862,10 @@
       "to": "settings/_api/listSessions_v1.tests.ts::idOf"
     },
     {
+      "from": "settings/_api/listSessions_v1.ts::main",
+      "to": "settings/_api/listSessions_v1.ts::sessionHandle"
+    },
+    {
       "from": "settings/_api/requestEmailChange_v1.tests.ts::run",
       "to": "settings/_api/requestEmailChange_v1.tests.ts::uniqueEmail"
     },
@@ -1731,6 +1876,10 @@
     {
       "from": "settings/_api/revokeSession_v1.tests.ts::run",
       "to": "settings/_api/revokeSession_v1.tests.ts::idOf"
+    },
+    {
+      "from": "settings/_api/revokeSession_v1.ts::main",
+      "to": "settings/_api/listSessions_v1.ts::sessionHandle"
     },
     {
       "from": "settings/_api/signOutEverywhere_v1.tests.ts::run",
@@ -1815,6 +1964,10 @@
     ],
     "settings/_api/listSessions_v1.tests.ts::idOf": [
       "settings/_api/listSessions_v1.tests.ts::run"
+    ],
+    "settings/_api/listSessions_v1.ts::sessionHandle": [
+      "settings/_api/listSessions_v1.ts::main",
+      "settings/_api/revokeSession_v1.ts::main"
     ],
     "settings/_api/requestEmailChange_v1.tests.ts::uniqueEmail": [
       "settings/_api/requestEmailChange_v1.tests.ts::run"

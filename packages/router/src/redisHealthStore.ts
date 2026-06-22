@@ -81,11 +81,15 @@ export const createRedisHealthStore = async (
     throw subscriberError;
   }
 
+  //? Compute once; `input.envKey` never changes after construction, so
+  //? recomputing the channel string on every pub/sub call is a gratuitous
+  //? allocation. All four call sites below use this cached value.
+  const channel = healthChannel(input.envKey);
   const cache = new Map<string, boolean>();
 
-  await subscriber.subscribe(healthChannel(input.envKey));
-  subscriber.on('message', (channel, raw) => {
-    if (channel !== healthChannel(input.envKey)) return;
+  await subscriber.subscribe(channel);
+  subscriber.on('message', (msg, raw) => {
+    if (msg !== channel) return;
     //? Ignore malformed messages. Another router's bug shouldn't crash us.
     const [parseError, parsed] = tryCatchSync(
       () => JSON.parse(raw) as { service?: string; healthy?: boolean },
@@ -101,6 +105,10 @@ export const createRedisHealthStore = async (
     const keys = services.map(service => healthKey(input.envKey, service));
     const values = await client.mget(...keys);
     for (const [i, service] of services.entries()) {
+      //? Skip services already in cache — a pub/sub notification could have
+      //? arrived between `subscribe()` and the mget response (TOCTOU). The
+      //? notification carries a more recent value; do not overwrite it.
+      if (cache.has(service)) continue;
       const value = values[i];
       //? Default to healthy when the key is absent — pessimistic unhealthy
       //? would route every first request to fallback until the next poll.
@@ -109,27 +117,39 @@ export const createRedisHealthStore = async (
   };
 
   const set = async (service: string, healthy: boolean): Promise<void> => {
-    cache.set(service, healthy);
-    //? EX <ttl> stamps an expiry on every write so stale health self-heals.
-    await client.set(
-      healthKey(input.envKey, service),
-      healthy ? 'healthy' : 'unhealthy',
-      'EX',
-      ttlSeconds,
-    );
-    await client.publish(
-      healthChannel(input.envKey),
-      JSON.stringify({ service, healthy }),
-    );
+    //? Atomic MULTI/EXEC: the SET and PUBLISH must land together so a sibling
+    //? router can never read the key before the pub/sub notification arrives
+    //? (or vice-versa). Without the pipeline a partial failure (SET ok, then
+    //? Redis drops the connection before PUBLISH) leaves siblings with a stale
+    //? in-memory view that no future notification ever corrects.
+    const results = await client
+      .multi()
+      .set(healthKey(input.envKey, service), healthy ? 'healthy' : 'unhealthy', 'EX', ttlSeconds)
+      .publish(channel, JSON.stringify({ service, healthy }))
+      .exec();
+    //? Update local cache only after the durable write commits so a sibling
+    //? querying our in-memory view (via getLocalHealth) agrees with Redis.
+    //? MULTI/EXEC returns null when the transaction is aborted (EXECABORT —
+    //? e.g. a WATCH-triggered optimistic concurrency failure on some Redis
+    //? configurations). In that case the SET and PUBLISH were never executed:
+    //? log the failure so operators can see it; do NOT update the local cache
+    //? (which would disagree with Redis and potentially never self-correct).
+    if (results === null) {
+      getLogger().error('[router] health-store MULTI/EXEC aborted (EXECABORT) — health state may be stale', { service, healthy });
+    } else {
+      cache.set(service, healthy);
+    }
   };
 
   const get = (service: string): boolean => cache.get(service) ?? true;
 
   const close = async (): Promise<void> => {
-    //? Best-effort unsubscribe; a failure here must not block teardown.
-    await tryCatch(() => subscriber.unsubscribe(healthChannel(input.envKey)));
-    subscriber.disconnect();
-    client.disconnect();
+    //? Best-effort unsubscribe before quitting so Redis cleans up the
+    //? subscriber slot. `quit()` sends a graceful QUIT command vs the
+    //? hard-disconnect of `disconnect()` — prefer it on the shutdown path.
+    await tryCatch(() => subscriber.unsubscribe(channel));
+    await tryCatch(() => subscriber.quit());
+    await tryCatch(() => client.quit());
   };
 
   return { hydrate, set, get, close };

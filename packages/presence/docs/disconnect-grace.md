@@ -156,12 +156,13 @@ Internal helper, exported via the state module. Returns the grace duration in mi
 export const getDisconnectTime = ({ token, reason }) => {
   const config = getPresenceConfig();
   if (clientSwitchedTab.has(token)) return config.disconnectTimers.tabSwitchMs;
-  if (config.allowReasons.includes(reason ?? 'NULL')) return config.disconnectTimers.transportCloseMs;
+  if (reason === undefined) return config.disconnectTimers.defaultMs;
+  if (config.allowReasons.includes(reason)) return config.disconnectTimers.transportCloseMs;
   return config.disconnectTimers.defaultMs;
 };
 ```
 
-The `reason ?? 'NULL'` fallback is for callers passing `undefined` (notably `initActivityBroadcaster`, which calls before the socket has a disconnect reason). `'NULL'` is never in `allowReasons` by default, so undefined-reason callers fall through to `defaultMs` — except for the tab-switch path, which is checked first.
+`reason === undefined` is handled explicitly before the `allowReasons` check — this guards callers (notably `initActivityBroadcaster`) that invoke `getDisconnectTime` before the socket has a disconnect reason. Undefined-reason callers always fall through to `defaultMs` except on the tab-switch path (checked first).
 
 ## Race conditions handled
 

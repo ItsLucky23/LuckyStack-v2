@@ -10,6 +10,7 @@ import nlJson from '../../src/_locales/nl.json';
 import {
   ErrorParam,
   createLocalizedNormalizer,
+  getLogger,
   registerLocalizedNormalizer,
   registerLocaleReloader,
   tryCatch,
@@ -37,13 +38,13 @@ export const reloadLocaleTranslations = async () => {
   const nextTranslations: Record<LanguageCode, TranslationRecord> = { ...translationsByLanguage };
 
   for (const language of Object.keys(localePaths) as LanguageCode[]) {
-    const [error, parsed] = await tryCatch(() => {
+    const [error, parsed] = await tryCatch(async () => {
       const filePath = localePaths[language];
-      const rawJson = fs.readFileSync(filePath, 'utf8');
+      const rawJson = await fs.promises.readFile(filePath, 'utf8');
       return JSON.parse(rawJson) as TranslationRecord;
     });
     if (error || !parsed) {
-      console.log(`Failed to reload locale ${language}:`, error, 'yellow');
+      getLogger().warn(`Failed to reload locale ${language}`, { err: error });
       continue;
     }
     nextTranslations[language] = parsed;
@@ -84,8 +85,8 @@ const translate = ({
 
   let finalResult = result;
   for (const param of params) {
-    const regex = new RegExp(`{{${param.key}}}`, 'g');
-    finalResult = finalResult.replace(regex, String(param.value));
+    // Use a function replacer to prevent $-sequence interpretation in the replacement value.
+    finalResult = finalResult.replaceAll(`{{${param.key}}}`, () => String(param.value));
   }
 
   return finalResult;

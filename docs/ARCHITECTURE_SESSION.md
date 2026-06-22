@@ -111,7 +111,7 @@ export interface SessionLayout {
 // config.ts
 const config = {
   // Session behavior
-  allowMultipleSessions: false, // false = new login kicks other sessions
+  sessionPerUser: 'single', // 'single' = new login kicks other sessions
   sessionExpiryDays: 7,
 
   // Redirects
@@ -202,9 +202,9 @@ function UserProfile() {
 
 ```typescript
 // config.ts
-allowMultipleSessions: false; // Default
+sessionPerUser: 'single'; // Default
 
-// When false:
+// When 'single':
 // - User logs in on device A → Session A created
 // - User logs in on device B → Session A deleted, Session B created
 // - Device A's socket receives 'logout' event

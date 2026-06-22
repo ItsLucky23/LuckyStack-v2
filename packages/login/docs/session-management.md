@@ -133,7 +133,7 @@ The return value is the number of sessions revoked, which lets the caller surfac
 When a `newUser: true` `saveSession` runs, the function decides which (if any) previous sessions to kick. The decision tree:
 
 ```
-let effectivePerUser = sessionCfg.allowMultiple ? 'multiple' : sessionCfg.perUser;
+let effectivePerUser = sessionCfg.perUser;
 const cap = sessionCfg.maxConcurrentPerUser;
 const previousTokens = (await adapter.listActive(userId)).filter(t => t !== token);
 
@@ -156,7 +156,6 @@ Reading the config:
 | Slot                                  | Possible values                | Behavior                                                                                                |
 | ------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | `session.perUser`                     | `'single'` / `'multiple'`      | `'single'` (default) — only one session at a time. `'multiple'` — pair with `maxConcurrentPerUser`.     |
-| `session.allowMultiple` (legacy)      | `boolean`                      | When `false`, collapses to `'single'` regardless of `perUser`. Backward-compat shim.                    |
 | `session.maxConcurrentPerUser`        | `number \| null`               | Cap on simultaneous sessions when `perUser === 'multiple'`. `null` = unlimited.                          |
 | `session.onConflict`                  | `'revokeOld'` / `'rejectNew'`  | What to do when the cap is reached. `'revokeOld'` kicks oldest; `'rejectNew'` refuses the new login.    |
 | `session.notifyOldDeviceOnRevoke`     | `boolean`                      | Emit `socketEventNames.sessionReplaced` to the kicked socket before the disconnect.                     |

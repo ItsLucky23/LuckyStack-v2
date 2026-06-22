@@ -25,22 +25,57 @@ describe('resolveClientIp', () => {
     expect(resolved).toBe('203.0.113.5');
   });
 
-  it('prefers the leftmost XFF hop when trustProxy is on', () => {
+  it('skips one hop from the RIGHT by default (CORE-O3) — the rightmost trusted-proxy entry', () => {
+    //? `client, proxy1` — the rightmost entry is the one our own trusted proxy
+    //? appended, so the default trustedProxyHopCount:1 selects it.
     const resolved = resolveClientIp({
       rawAddress: '10.0.0.1',
-      headers: { 'x-forwarded-for': '198.51.100.2, 10.0.0.1' },
+      headers: { 'x-forwarded-for': '198.51.100.2, 203.0.113.7' },
       trustProxy: true,
+    });
+    expect(resolved).toBe('203.0.113.7');
+  });
+
+  it('does NOT trust the leftmost (client-controlled) XFF entry — spoof rejected (CORE-O3)', () => {
+    //? An attacker prepends a forged IP; the genuine hops appended by our proxies
+    //? follow. The default rightmost-hop resolution must NOT return the spoofed
+    //? leftmost value.
+    const resolved = resolveClientIp({
+      rawAddress: '10.0.0.1',
+      headers: { 'x-forwarded-for': '6.6.6.6, 198.51.100.2, 203.0.113.7' },
+      trustProxy: true,
+    });
+    expect(resolved).not.toBe('6.6.6.6');
+    expect(resolved).toBe('203.0.113.7');
+  });
+
+  it('honors trustedProxyHopCount by skipping N hops from the right (CORE-O3)', () => {
+    const resolved = resolveClientIp({
+      rawAddress: '10.0.0.1',
+      headers: { 'x-forwarded-for': '6.6.6.6, 198.51.100.2, 203.0.113.7' },
+      trustProxy: true,
+      trustedProxyHopCount: 2,
     });
     expect(resolved).toBe('198.51.100.2');
   });
 
-  it('handles a repeated XFF header (array form)', () => {
+  it('clamps an over-large trustedProxyHopCount to the leftmost trusted hop, never underflowing (CORE-O3)', () => {
     const resolved = resolveClientIp({
       rawAddress: '10.0.0.1',
-      headers: { 'x-forwarded-for': ['198.51.100.9', '10.0.0.1'] },
+      headers: { 'x-forwarded-for': '198.51.100.2, 203.0.113.7' },
+      trustProxy: true,
+      trustedProxyHopCount: 99,
+    });
+    expect(resolved).toBe('198.51.100.2');
+  });
+
+  it('handles a repeated XFF header (array form) — rightmost hop by default', () => {
+    const resolved = resolveClientIp({
+      rawAddress: '10.0.0.1',
+      headers: { 'x-forwarded-for': ['198.51.100.9', '203.0.113.8'] },
       trustProxy: true,
     });
-    expect(resolved).toBe('198.51.100.9');
+    expect(resolved).toBe('203.0.113.8');
   });
 
   it('falls back to X-Real-IP when XFF is absent (trustProxy on)', () => {

@@ -1,1 +1,2 @@
-export { extractTokenFromSocket } from '../../packages/core/src/extractToken';
+// re-export only
+export { extractTokenFromSocket } from '@luckystack/core';

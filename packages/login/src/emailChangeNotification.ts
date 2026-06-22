@@ -40,6 +40,11 @@ export const sendEmailChangeConfirmation = async (
 
   const token = await createEmailChangeToken(userId, newEmail);
   const baseUrl = (config.app.publicUrl || '').replace(/\/+$/, '');
+  //? ADR — DD-ROOTSRC-O8: same query-string tradeoff as the password-reset
+  //? flow (see `forgotPassword.ts`). Tokens are one-time + hashed at rest;
+  //? the raw token is never persisted. The confirm URL is only sent to the
+  //? NEW address (verifying mailbox ownership), so it never appears in an
+  //? access log that an attacker of the OLD address could read.
   const confirmUrl = `${baseUrl}/settings/confirm-email?token=${encodeURIComponent(token)}`;
   const ttlMinutes = Math.round(config.auth.emailChangeTtlSeconds / 60);
 

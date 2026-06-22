@@ -357,6 +357,10 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
   //? a browser <img> would 401. Fetch the bytes and inline as a data URL.
   getAvatar: async ({ avatarId, accessToken }) => {
     if (!avatarId) return;
+    // 200 KB base64 cap: a data-URI is inlined into the Redis session record.
+    // An unbounded photo (multi-MB) would bloat every session read and could
+    // exhaust memory or hit Redis value-size limits on large tenants.
+    const MAX_PHOTO_BYTES = 200 * 1024;
     const fetchPhoto = async () => {
       //? `encodeURIComponent` the provider-supplied id before interpolating it
       //? into the path: a malicious / malformed id could otherwise inject `../`
@@ -368,8 +372,13 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
         { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
       );
       if (!response.ok) return;
-      const contentType = response.headers.get('content-type') ?? 'image/jpeg';
+      const rawContentType = response.headers.get('content-type') ?? 'image/jpeg';
+      //? SEC: allowlist content-type to safe image MIME types before embedding in
+      //? a data-URI that is stored in Redis and later served to the browser.
+      const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+      const contentType = SAFE_IMAGE_TYPES.has(rawContentType) ? rawContentType : 'image/jpeg';
       const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.byteLength > MAX_PHOTO_BYTES) return;
       return `data:${contentType};base64,${buffer.toString('base64')}`;
     };
     const [error, dataUrl] = await tryCatch(fetchPhoto);
@@ -411,13 +420,37 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
 };
 
 let registeredProviders: OAuthProvider[] = [{ name: 'credentials' }];
+//? LOGIN-01: optional factory that builds the provider list lazily on first
+//? `getOAuthProviders()` call. This lets `register.ts` (the package auto-wire
+//? side-effect) defer all config/env reads to request time rather than baking
+//? them at module-load time. Once resolved the factory is discarded and the
+//? static list is used on every subsequent call (same performance as before).
+let providerFactory: (() => OAuthProvider[]) | null = null;
 
 //? Always returns the active list. The default value contains only the
 //? `credentials` entry so calls into `loginWithCredentials` keep working in
 //? environments that never register OAuth providers (tests, CLI, etc.).
-export const getOAuthProviders = (): OAuthProvider[] => registeredProviders;
+export const getOAuthProviders = (): OAuthProvider[] => {
+  if (providerFactory) {
+    registeredProviders = providerFactory();
+    providerFactory = null;
+  }
+  return registeredProviders;
+};
 
 export const registerOAuthProviders = (providers: OAuthProvider[]): OAuthProvider[] => {
+  providerFactory = null;
   registeredProviders = providers;
   return registeredProviders;
+};
+
+/**
+ * Register a factory function that builds the provider list on first use.
+ * Prefer this over `registerOAuthProviders` from the package `register` side-
+ * effect so config/env reads are deferred to request time and survive any
+ * `registerProjectConfig` call that happens after package import.
+ * A subsequent `registerOAuthProviders` call replaces the factory.
+ */
+export const registerOAuthProviderFactory = (factory: () => OAuthProvider[]): void => {
+  providerFactory = factory;
 };

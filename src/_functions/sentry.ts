@@ -89,7 +89,8 @@ export const initializeSentry = () => {
     },
   });
 
-  // Initialize shared Sentry instance
+  // Initialize shared Sentry instance (legacy DI bridge — the deprecation targets external callers)
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- legacy-Sentry DI bridge
   initSharedSentry({
     captureException: (exception, context) => Sentry.captureException(
       exception,

@@ -1,7 +1,8 @@
 export interface PrePresenceUpdatePayload {
   token: string;
   userId: string | null;
-  kind: 'afk' | 'back';
+  /** `'left'` is fired by `informRoomPeersLeft` (departure / grace-expiry fan-out). */
+  kind: 'afk' | 'back' | 'left';
   roomCodes: string[];
 }
 

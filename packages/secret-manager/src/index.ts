@@ -31,7 +31,15 @@ import path from 'node:path';
 
 import { sleep, tryCatchSync } from '@luckystack/core';
 
-/** Bearer token: a literal string, or a file whose entire contents are the token. */
+/**
+ * Bearer token: a literal string, or a file whose entire contents are the token.
+ *
+ * When using `{ fromFile }`, the path MUST NOT be derived from untrusted input.
+ * No path-traversal check is applied — the caller is responsible for ensuring
+ * the path is a fixed, gitignored file (e.g. `.secret-manager-token`) next to
+ * the project root. Paths like `/etc/passwd` or `../../.ssh/id_rsa` would be
+ * read without error.
+ */
 export type SecretManagerToken = string | { fromFile: string };
 
 export interface SecretManagerConfig {
@@ -140,13 +148,24 @@ const DEFAULT_ENV_FILES = ['.env', '.env.local'];
 
 //? Dev hot-reload reads these files and injects their values into `process.env`.
 //? `dev.envFiles` is consumer config (not runtime user input), so an ABSOLUTE
-//? path is treated as an explicit, allowed choice (e.g. a shared secrets file).
-//? A RELATIVE path, however, must stay within the project root — reject `..`
-//? traversal (the plausible "injected via a relative path" escape). The caller
-//? skips + warns on a rejected entry (fail-open, consistent with the package's
-//? swallow-on-missing-file behaviour).
-const isSafeEnvFile = (file: string): boolean => {
-  if (path.isAbsolute(file)) return true;
+//? path is treated as an explicit, allowed choice (e.g. a shared secrets file on
+//? a developer machine). A RELATIVE path, however, must stay within the project
+//? root — reject `..` traversal (the plausible "injected via a relative path"
+//? escape). The caller skips + warns on a rejected entry (fail-open, consistent
+//? with the package's swallow-on-missing-file behaviour).
+//? Note: absolute paths are accepted without further validation. Consumers who
+//? configure `dev.envFiles` with absolute paths take responsibility for ensuring
+//? those paths are appropriate (e.g. a shared developer-machine secrets file).
+//? A loud warn is emitted so the choice is never silent in logs.
+const isSafeEnvFile = (file: string, warnAbsolute = false): boolean => {
+  if (path.isAbsolute(file)) {
+    if (warnAbsolute) {
+      console.warn(
+        `[secret-manager] dev.envFiles contains an absolute path: "${file}". Absolute paths are permitted as an explicit choice (e.g. a shared secrets file) but are not checked for safety. Ensure this path is intentional.`,
+      );
+    }
+    return true;
+  }
   const rel = path.relative(process.cwd(), path.resolve(process.cwd(), file));
   return !rel.startsWith('..');
 };
@@ -317,27 +336,40 @@ const validateToken = (token: string): string => {
   if (trimmed.length === 0) {
     throw new Error('[secret-manager] Bearer token is empty or whitespace-only.');
   }
-  //? The `Bearer ` scheme is added at the call site; a token that already carries
-  //? it produces a malformed `Bearer Bearer <...>` header — warn but don't mutate.
+  //? The `Bearer ` scheme is added at the call site. A token that already carries
+  //? it would produce a malformed double-prefix `Bearer Bearer <...>` header —
+  //? strip the redundant prefix (case-insensitive) and warn so the operator knows
+  //? their config is wrong. Stripping is the forgiving path: a warn-but-pass-through
+  //? would silently break every request, making this a very hard-to-debug boot issue.
   if (/^bearer\s/i.test(trimmed)) {
-    console.warn('[secret-manager] Token starts with a "Bearer " prefix; the scheme is added automatically — drop the prefix from the configured token.');
+    const stripped = trimmed.replace(/^bearer\s+/i, '');
+    console.warn(
+      '[secret-manager] Token starts with a "Bearer " prefix; the scheme is added automatically — the prefix was stripped. Drop it from your configured token to silence this warning.',
+    );
+    return stripped;
   }
   return trimmed;
 };
 
 const resolveToken = (token: SecretManagerToken): string => {
   if (typeof token === 'string') return validateToken(token);
-  let raw: string;
-  try {
-    raw = readFileSync(token.fromFile, 'utf8');
-  } catch (error) {
-    //? Distinguish a missing/deleted file from other I/O errors so a dev
-    //? hot-reload poll over a transiently-absent token file gives a clear log.
-    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  //? Distinguish a missing/deleted file from other I/O errors so a dev
+  //? hot-reload poll over a transiently-absent token file gives a clear log.
+  //? Note: error messages include `token.fromFile`. In hybrid mode these propagate
+  //? to console.warn via `errorMessage(error)` (line ~597). If the path contains
+  //? sensitive directory names (e.g. /home/admin/.keys/prod-token), those names
+  //? will appear in log aggregators. Treat the token file path as infrastructure
+  //? metadata and ensure your log sink is appropriately access-controlled.
+  const [readError, raw] = tryCatchSync(() => readFileSync(token.fromFile, 'utf8'));
+  if (readError) {
+    const code = readError instanceof Error && 'code' in readError ? (readError as { code?: string }).code : undefined;
     if (code === 'ENOENT') {
       throw new Error(`[secret-manager] Token file not found: "${token.fromFile}".`);
     }
-    throw new Error(`[secret-manager] Failed to read token file "${token.fromFile}": ${String((error as Error | undefined)?.message ?? error)}`);
+    throw new Error(`[secret-manager] Failed to read token file "${token.fromFile}": ${errorMessage(readError)}`);
+  }
+  if (raw === null) {
+    throw new Error(`[secret-manager] Token file "${token.fromFile}" could not be read.`);
   }
   return validateToken(raw);
 };
@@ -463,9 +495,11 @@ const fetchResolve = async (
   config: SecretManagerConfig,
   pointers: string[],
 ): Promise<Record<string, string>> => {
-  //? `?? 0` only guards null/undefined — a configured `NaN` would survive and make
-  //? `0 <= NaN` false, so the loop body never runs, `lastError` stays undefined,
-  //? and we'd `throw undefined`. Coerce to a finite, non-negative count/delay.
+  //? Defensive normalization: a configured `NaN` would make `attempt <= NaN` always
+  //? false, so the loop body would never run. `lastError` is now pre-initialized
+  //? (below) so we wouldn't `throw undefined` anymore, but coercing to a finite
+  //? non-negative value is still the right guard — NaN retries is a config bug, not
+  //? a valid "zero retries" signal.
   const rawRetryCount = config.retries?.count ?? 0;
   const retryCount = Number.isFinite(rawRetryCount) ? Math.max(0, rawRetryCount) : 0;
   const rawDelayMs = config.retries?.delayMs ?? 0;
@@ -619,8 +653,25 @@ const parseEnvFile = (content: string): Record<string, string> => {
     }
     let value = line.slice(eq + 1).trim();
     const quote = value[0];
-    if ((quote === '"' || quote === "'") && value.length >= 2 && value.endsWith(quote)) {
-      value = value.slice(1, -1);
+    if (quote === '"' || quote === "'") {
+      //? Quoted value. The closing quote is the LAST occurrence of the same quote
+      //? char; anything after it (whitespace + `# ...`) is an inline comment and is
+      //? dropped (`KEY="v" # note` → `v`). A `#` BEFORE the closing quote is literal
+      //? and preserved (`KEY="a#b"` → `a#b`).
+      const closeIdx = value.lastIndexOf(quote);
+      if (closeIdx > 0) {
+        value = value.slice(1, closeIdx);
+      } else {
+        //? Opening quote with no matching closing quote on this line means a
+        //? multi-line value (dotenv supports it, this parser does not). Warn so the
+        //? value isn't silently truncated, then strip any inline comment from the
+        //? raw remainder so a trailing `# ...` doesn't leak into the value.
+        console.warn(
+          `[secret-manager] parseEnvFile: "${key}" starts with a quote but has no matching closing quote on the same line. Multi-line values are not supported — the raw text will be used as-is. If this is a multi-line value (e.g. a PEM key), do not rely on this parser.`,
+        );
+        const commentAt = value.indexOf(' #');
+        if (commentAt !== -1) value = value.slice(0, commentAt).trim();
+      }
     } else {
       const commentAt = value.indexOf(' #');
       if (commentAt !== -1) value = value.slice(0, commentAt).trim();
@@ -658,7 +709,7 @@ const startDevReload = (config: SecretManagerConfig): void => {
 
   if (watch) {
     for (const file of config.dev.envFiles ?? DEFAULT_ENV_FILES) {
-      if (!isSafeEnvFile(file)) {
+      if (!isSafeEnvFile(file, true)) {
         console.warn(`[secret-manager] ignoring unsafe dev envFile path (must be relative + within the project): ${file}`);
         continue;
       }
@@ -744,9 +795,12 @@ export const reloadSecretManagerFromFiles = async (): Promise<void> => {
   const pattern = stripStatefulFlags(config.pointerPattern ?? DEFAULT_POINTER_PATTERN);
 
   //? Re-read every file in load order; later files (e.g. .env.local) override.
+  //? `warnAbsolute=false`: the absolute-path notice already fired once at boot
+  //? (startDevReload). Repeating it on every debounced hot-reload would flood the
+  //? dev log for anyone legitimately using an absolute envFile path.
   const merged: Record<string, string> = {};
   for (const file of files) {
-    if (!isSafeEnvFile(file)) {
+    if (!isSafeEnvFile(file, false)) {
       console.warn(`[secret-manager] ignoring unsafe dev envFile path: ${file}`);
       continue;
     }
@@ -774,12 +828,22 @@ export const reloadSecretManagerFromFiles = async (): Promise<void> => {
   //? a pointer captured at boot from the inherited shell/CI env that isn't in a
   //? watched file would otherwise be dropped and stop rotating. A file-sourced
   //? pointer with the same name still wins.
+  //? Build the merged map locally and commit it ONLY after a successful resolve so
+  //? a failed remote reload can't permanently poison the in-memory pointer map and
+  //? cause every subsequent refreshSecretManager / poll to resolve the bad set.
+  const previousPointerMap = pointerMap;
   pointerMap = { ...pointerMap, ...freshPointerMap };
 
   //? Resolve the pointers FIRST. In 'remote' mode an unresolved pointer throws —
   //? mirror the atomic boot path and inject the plain values only AFTER a
-  //? successful resolve, so a throw never leaves half-applied state.
-  await doResolve(config, 'file-reload');
+  //? successful resolve, so a throw never leaves half-applied state. On failure
+  //? roll back the pointer map to its pre-reload snapshot.
+  try {
+    await doResolve(config, 'file-reload');
+  } catch (error) {
+    pointerMap = previousPointerMap;
+    throw error;
+  }
   for (const [name, value] of Object.entries(plainValues)) {
     process.env[name] = value;
   }
@@ -794,6 +858,11 @@ export const reloadSecretManagerFromFiles = async (): Promise<void> => {
  * serialize the result into an HTTP response, a `/health` payload, or a log line.
  * For a safe diagnostic use {@link getCachedResolutionMeta}, which never exposes
  * the values.
+ *
+ * If you need to act on changed secrets (e.g. to rebuild a DB pool after rotation),
+ * use the `onApplied` callback in `SecretManagerConfig` instead — it receives only
+ * the changed env NAMES, never the secret values, and is called automatically after
+ * each successful resolve.
  */
 export const getCachedResolution = (): CachedResolution | null =>
   cachedResolution === null
@@ -827,6 +896,13 @@ export const getCachedResolutionMeta = (): CachedResolutionMeta | null => {
  * debounce timer WITHOUT wiping the resolved cache / active config. Use for a
  * graceful shutdown of an embedded resolver (worker / CLI) so no timers keep
  * firing; the last resolved `process.env` values stay in place.
+ *
+ * **Note:** `activeConfig` is intentionally left set after `stopSecretManager`,
+ * so that `reloadSecretManagerFromFiles` can still use it for a final manual
+ * reload. As a consequence, calling `refreshSecretManager()` after `stop` will
+ * issue a live network request (the `!activeConfig` no-op guard is not met).
+ * If you want to prevent ANY further resolution after `stop`, call
+ * `resetSecretManagerForTests()` instead (which also clears `activeConfig`).
  */
 export const stopSecretManager = (): void => {
   devReloadStarted = false;
@@ -846,6 +922,11 @@ export const stopSecretManager = (): void => {
     watcher.close();
   }
   fileWatchers.length = 0;
+  //? Reset the "warned once" guard so a subsequent initSecretManager() call that
+  //? also omits envNames re-emits the boot warning rather than silently silencing it
+  //? (the first, valid config could have set envNames correctly while the second,
+  //? broken one doesn't — the guard must not carry across a full stop-and-reinit).
+  warnedEnvNamesUnset = false;
 };
 
 /** Test-only — clear module state and tear down any dev watchers / timers. */

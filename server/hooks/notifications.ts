@@ -13,6 +13,12 @@ interface UserPreferencesShape {
   notifyOnPasswordChange?: boolean;
 }
 
+interface NotifiableUser {
+  email: string | null | undefined;
+  name: string | null | undefined;
+  preferences: unknown;
+}
+
 const isPreferences = (value: unknown): value is UserPreferencesShape =>
   typeof value === 'object' && value !== null;
 
@@ -28,6 +34,18 @@ const lazyEmail = async () => {
   return mod;
 };
 
+// Single place that touches the Prisma client so the cast is not duplicated.
+const loadNotifiableUser = async (userId: string): Promise<NotifiableUser | null> => {
+  const prisma = getPrismaClient();
+  const typedPrisma = prisma as {
+    user: { findUnique: (q: unknown) => Promise<NotifiableUser | null> };
+  };
+  return typedPrisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true, name: true, preferences: true },
+  });
+};
+
 export const registerNotificationHooks = (): void => {
   registerHook('postLogin', ({ userId, provider, isNewUser }): undefined => {
     // Fire-and-forget — don't block the login response on email delivery.
@@ -35,11 +53,7 @@ export const registerNotificationHooks = (): void => {
       const [, ] = await tryCatch(async () => {
         if (isNewUser) return; // welcome flows belong elsewhere — only notify on returning sign-ins
 
-        const prisma = getPrismaClient();
-
-        const user = await (prisma as { user: { findUnique: (q: unknown) => Promise<unknown> } })
-          .user.findUnique({ where: { id: userId }, select: { email: true, name: true, preferences: true } }) as
-          { email?: string | null; name?: string | null; preferences?: unknown } | null;
+        const user = await loadNotifiableUser(userId);
 
         if (!user?.email) return;
         const prefs = isPreferences(user.preferences) ? user.preferences : {};
@@ -75,11 +89,7 @@ export const registerNotificationHooks = (): void => {
  */
 export const sendPasswordChangedNotification = async (userId: string): Promise<void> => {
   await tryCatch(async () => {
-    const prisma = getPrismaClient();
-
-    const user = await (prisma as { user: { findUnique: (q: unknown) => Promise<unknown> } })
-      .user.findUnique({ where: { id: userId }, select: { email: true, name: true, preferences: true } }) as
-      { email?: string | null; name?: string | null; preferences?: unknown } | null;
+    const user = await loadNotifiableUser(userId);
 
     if (!user?.email) return;
     const prefs = isPreferences(user.preferences) ? user.preferences : {};

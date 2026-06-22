@@ -24,9 +24,18 @@ import {
   registerHook,
 } from '@luckystack/core';
 
-//? Lower-case + trim the account identifier so `Alice@x.com` and `alice@x.com`
-//? share one lockout bucket (matches the credentials email normalization).
-const lockoutKey = (accountKey: string): string => `auth:${accountKey.trim().toLowerCase()}`;
+//? DD-LOGIN-F5: build the lockout bucket key. When `requesterIp` is supplied
+//? the key is an IP+account composite (`auth:<email>:<ip>`) so a remote attacker
+//? from one IP cannot lock out an account for legitimate users on different IPs.
+//? Without an IP the key is the bare account key (`auth:<email>`) — same
+//? behaviour as before. The composite bucket is cleared on success the same way
+//? (same key is used in `clearAuthFailures`). Lower-case + trim the account
+//? identifier so `Alice@x.com` and `alice@x.com` share one lockout bucket
+//? (matches the credentials email normalization).
+const lockoutKey = (accountKey: string, requesterIp?: string): string => {
+  const base = `auth:${accountKey.trim().toLowerCase()}`;
+  return requesterIp ? `${base}:${requesterIp}` : base;
+};
 
 /** Read the active auth-lockout config (returns null when the feature is off). */
 const getAuthLockoutConfig = (): { maxAttempts: number; windowMs: number } | null => {
@@ -39,23 +48,25 @@ const getAuthLockoutConfig = (): { maxAttempts: number; windowMs: number } | nul
  * Whether `accountKey` is currently locked out (failed-attempt counter already
  * at/over the cap). Non-incrementing — safe to call on every login attempt.
  * Always `false` when the feature is disabled.
+ * Pass `requesterIp` to check the IP+account composite bucket (DD-LOGIN-F5).
  */
-export const isAccountLocked = async (accountKey: string): Promise<boolean> => {
+export const isAccountLocked = async (accountKey: string, requesterIp?: string): Promise<boolean> => {
   const cfg = getAuthLockoutConfig();
   if (!cfg || !accountKey) return false;
-  const { remaining } = await getRateLimitStatus(lockoutKey(accountKey), cfg.maxAttempts);
+  const { remaining } = await getRateLimitStatus(lockoutKey(accountKey, requesterIp), cfg.maxAttempts);
   return remaining <= 0;
 };
 
 /**
  * Increment the failed-attempt counter for `accountKey`. Call on every failed
  * credentials login for a known/looked-up account. No-op when disabled.
+ * Pass `requesterIp` to increment the IP+account composite bucket (DD-LOGIN-F5).
  */
-export const recordAuthFailure = async (accountKey: string): Promise<void> => {
+export const recordAuthFailure = async (accountKey: string, requesterIp?: string): Promise<void> => {
   const cfg = getAuthLockoutConfig();
   if (!cfg || !accountKey) return;
   const { allowed, remaining } = await checkRateLimit({
-    key: lockoutKey(accountKey),
+    key: lockoutKey(accountKey, requesterIp),
     limit: cfg.maxAttempts,
     windowMs: cfg.windowMs,
   });
@@ -71,11 +82,12 @@ export const recordAuthFailure = async (accountKey: string): Promise<void> => {
  * Reset the failed-attempt counter for `accountKey` (call after a SUCCESSFUL
  * login so a user who eventually gets their password right isn't penalised by
  * earlier typos). No-op when disabled.
+ * Pass `requesterIp` to clear the IP+account composite bucket (DD-LOGIN-F5).
  */
-export const clearAuthFailures = async (accountKey: string): Promise<void> => {
+export const clearAuthFailures = async (accountKey: string, requesterIp?: string): Promise<void> => {
   const cfg = getAuthLockoutConfig();
   if (!cfg || !accountKey) return;
-  await clearRateLimit(lockoutKey(accountKey));
+  await clearRateLimit(lockoutKey(accountKey, requesterIp));
 };
 
 //? ADR 0012 — the lockout counter must reflect GENUINE credential failures only.
@@ -106,9 +118,10 @@ let lockoutHookRegistered = false;
 export const registerAuthLockoutHook = (): void => {
   if (lockoutHookRegistered) return;
   lockoutHookRegistered = true;
-  registerHook('loginFailed', async ({ email, provider, reason, stage }) => {
+  registerHook('loginFailed', async ({ email, provider, reason, stage, requesterIp }) => {
     if (stage !== 'login' || provider !== 'credentials') return;
     if (!email || !COUNTING_REASONS.has(reason)) return;
-    await recordAuthFailure(email);
+    //? DD-LOGIN-F5: use the IP+account composite key when an IP was threaded in.
+    await recordAuthFailure(email, requesterIp);
   });
 };

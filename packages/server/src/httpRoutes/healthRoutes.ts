@@ -58,6 +58,11 @@ export const handleLivezRoute: HttpRouteHandler = ({ res, routePath }) => {
 export const handleReadyzRoute: HttpRouteHandler = async ({ res, routePath }) => {
   if (routePath !== getProjectConfig().http.readyEndpoint) return false;
 
+  //? SEC: this endpoint is intentionally unauthenticated (orchestrators and load
+  //? balancers probe it without credentials). Each call pings Redis + Prisma, so
+  //? callers can trigger non-trivial backend load. Mitigate at the infra layer
+  //? (network policy, rate-limiting ingress) rather than here, to keep the probe
+  //? surface simple and avoid circular-dependency on session/auth bootstrap.
   const bootUuid = await readBootUuid();
 
   const [redisError, pong] = await tryCatch(() => redis.ping());
@@ -78,6 +83,10 @@ export const handleReadyzRoute: HttpRouteHandler = async ({ res, routePath }) =>
 export const handleHealthRoute: HttpRouteHandler = async ({ res, routePath }) => {
   if (routePath !== getProjectConfig().http.healthEndpoint) return false;
 
+  //? SEC: unauthenticated by design (router and monitoring systems probe without
+  //? session tokens). Consider binding this to an internal/loopback interface only
+  //? in production, or protecting it with `registerCustomRoute` + a probe token,
+  //? to prevent external amplification of the Prisma + Redis ping path.
   const bootUuid = await readBootUuid();
   //? SEC-13: pass the boot UUID so the `'@bootUuid'` salt sentinel (the 0.2.0
   //? default `http.healthHash` = `{ mode: 'hmac', salt: '@bootUuid' }`) resolves

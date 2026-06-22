@@ -1,13 +1,11 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
-import type { apiMessage, PostApiExecutePayload } from '@luckystack/core';
-import { readSession, performLogout } from '@luckystack/core';
-import { runWithErrorTrackerIdentityScope, setCurrentErrorTrackerIdentity } from '@luckystack/core';
-import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
-import { getProjectConfig } from '@luckystack/core';
-import { Socket } from 'socket.io';
-import { getRuntimeApiMaps } from '@luckystack/core';
+import type { apiMessage, PostApiExecutePayload, BaseSessionLayout as SessionLayout, ErrorFormatter } from '@luckystack/core';
 import {
+  readSession,
+  performLogout,
+  runWithErrorTrackerIdentityScope,
+  setCurrentErrorTrackerIdentity,
+  getProjectConfig,
+  getRuntimeApiMaps,
   validateRequest,
   checkRateLimit,
   tryCatch,
@@ -16,19 +14,20 @@ import {
   dispatchHook,
   getLogger,
   resolveClientIp,
-} from '@luckystack/core';
-import {
   extractLanguageFromHeader,
   normalizeErrorResponse,
   applyErrorFormatter,
 } from '@luckystack/core';
-import type { ErrorFormatter } from '@luckystack/core';
+//? checkRateLimit and resolveClientIp are still used directly for the logout
+//? global-IP bucket (which doesn't go through the shared applyApiRateLimits helper
+//? because the logout shortcut bypasses the per-route bucket entirely).
+import { Socket } from 'socket.io';
 import type { ApiStreamPayload, ApiFlushPressure, RuntimeApiResponse, RuntimeApiEntry } from './_shared/apiTypes';
 import { shouldLogDev } from './_shared/logFlags';
 import { normalizeApiResponse } from './_shared/responseEnvelope';
 import { createApiRequestLifecycle } from './_shared/requestLifecycle';
 import { runSocketApiValidation } from './_shared/socketValidationStage';
-import { deriveTokenBucketId } from './_shared/rateLimitIdentity';
+import { applyApiRateLimits } from './_shared/applyApiRateLimits';
 
 interface handleApiRequestType {
   msg: apiMessage,
@@ -67,6 +66,7 @@ const validateApiMessage = ({ msg, emitApiError }: {
   //? excludes `null`; `Array.isArray` rejects an ARRAY payload that
   //? `typeof === 'object'` would otherwise admit to a handler expecting an
   //? object.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: msg arrives from an untyped socket frame
   if (!name || !data || typeof name != 'string' || typeof data != 'object' || Array.isArray(data)) {
     emitApiError({
       response: { status: 'error', errorCode: 'api.invalidRequest' },
@@ -88,6 +88,12 @@ const checkApiAuth = ({ apiEntry, user, name, emitApiError }: {
     if (shouldLogDev()) {
       getLogger().warn(`api: ${name} requires login`, { route: name });
     }
+    void dispatchHook('apiAuthRejected', {
+      routeName: name,
+      reason: 'login-required',
+      userId: null,
+      transport: 'socket',
+    });
     emitApiError({
       response: { status: 'error', errorCode: 'auth.required' },
       fallbackHttpStatus: 401,
@@ -95,14 +101,23 @@ const checkApiAuth = ({ apiEntry, user, name, emitApiError }: {
     return false;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const authResult = validateRequest({ auth: apiEntry.auth, user: user! });
   if (authResult.status === 'error') {
     if (shouldLogDev()) {
       getLogger().warn(`api: auth failed for ${name}`, { route: name, errorCode: authResult.errorCode });
     }
+    void dispatchHook('apiAuthRejected', {
+      routeName: name,
+      reason: authResult.errorCode === 'auth.misconfiguredPredicate' ? 'invalid-condition' : 'additional-failed',
+      userId: user?.id ?? null,
+      transport: 'socket',
+      failedKey: authResult.errorCode,
+    });
     emitApiError({
       response: {
         status: 'error',
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- empty string errorCode must still fall back
         errorCode: authResult.errorCode || 'auth.forbidden',
         errorParams: authResult.errorParams,
         httpStatus: authResult.httpStatus,
@@ -115,7 +130,10 @@ const checkApiAuth = ({ apiEntry, user, name, emitApiError }: {
   return true;
 };
 
-const applyApiRateLimits = async ({ apiEntry, resolvedName, token, socket, user, emitApiError }: {
+//? API-O8 — rate-limit logic extracted to `_shared/applyApiRateLimits.ts` so
+//? both transports share one implementation. The socket transport resolves the
+//? effective IP here (once, from socket internals) before delegating to the helper.
+const runSocketRateLimits = async ({ apiEntry, resolvedName, token, socket, user, emitApiError }: {
   apiEntry: RuntimeApiEntry;
   resolvedName: string;
   token: string | null;
@@ -123,101 +141,41 @@ const applyApiRateLimits = async ({ apiEntry, resolvedName, token, socket, user,
   user: SessionLayout | null;
   emitApiError: EmitApiError;
 }): Promise<boolean> => {
-  const apiRateLimit = apiEntry.rateLimit;
-  const effectiveApiLimit = apiRateLimit === undefined
-    ? getProjectConfig().rateLimiting.defaultApiLimit
-    : apiRateLimit;
-
-  //? Resolve the real client IP once for both buckets. With the default
-  //? `http.trustProxy: false` this returns `socket.handshake.address` verbatim
-  //? (only IPv4-mapped IPv6 is canonicalized), preserving historical keys;
-  //? when a trusted proxy is configured it honors X-Forwarded-For / X-Real-IP.
+  //? Resolve the real client IP once. With the default `http.trustProxy: false`
+  //? this returns `socket.handshake.address` verbatim (only IPv4-mapped IPv6 is
+  //? canonicalized). When a trusted proxy is configured it honors XFF / X-Real-IP.
   const resolvedIp = resolveClientIp({
     rawAddress: socket.handshake.address,
     headers: socket.handshake.headers,
     trustProxy: getProjectConfig().http.trustProxy,
+    trustedProxyHopCount: getProjectConfig().http.trustedProxyHopCount,
   });
 
-  if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
-    const requesterIdentity = token ? deriveTokenBucketId(token) : resolvedIp;
-    const keyPrefix = token ? 'token' : 'ip';
-    const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${resolvedName}`;
+  const result = await applyApiRateLimits({
+    resolvedIp,
+    token,
+    user,
+    resolvedName,
+    rateLimit: apiEntry.rateLimit,
+    transport: 'socket',
+  });
 
-    const { allowed, resetIn } = await checkRateLimit({
-      key: rateLimitKey,
-      limit: effectiveApiLimit,
-      windowMs: getProjectConfig().rateLimiting.windowMs,
+  if (!result.allowed) {
+    emitApiError({
+      response: {
+        status: 'error',
+        errorCode: result.errorCode ?? 'api.rateLimitExceeded',
+        errorParams: [{ key: 'seconds', value: result.resetIn ?? 0 }],
+      },
+      fallbackHttpStatus: 429,
     });
-
-    if (!allowed) {
-      void dispatchHook('rateLimitExceeded', {
-        //? The per-route bucket is keyed by the validated user when a token is
-        //? present, else by the resolved IP (keyPrefix `ip`). Report the scope
-        //? that matches the bucket's actual identity — an anonymous per-route
-        //? bucket is IP-keyed, so it is `ip` (with `route` still set to mark it
-        //? a per-route bucket vs the global `:api:all` IP bucket), never `route`.
-        scope: token ? 'user' : 'ip',
-        key: rateLimitKey,
-        limit: effectiveApiLimit,
-        windowMs: getProjectConfig().rateLimiting.windowMs,
-        count: effectiveApiLimit + 1,
-        route: resolvedName,
-        userId: user?.id,
-        ip: token ? undefined : resolvedIp,
-      });
-      if (shouldLogDev()) {
-        getLogger().warn(`api: rate limit exceeded for ${resolvedName}`, { route: resolvedName, key: rateLimitKey });
-      }
-      emitApiError({
-        response: {
-          status: 'error',
-          errorCode: 'api.rateLimitExceeded',
-          errorParams: [{ key: 'seconds', value: resetIn }],
-        },
-        fallbackHttpStatus: 429,
-      });
-      return false;
-    }
-  }
-
-  const defaultIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
-  if (defaultIpLimit !== false && defaultIpLimit > 0) {
-    const requesterIp = resolvedIp;
-
-    const { allowed, resetIn } = await checkRateLimit({
-      key: `ip:${requesterIp}:api:all`,
-      limit: defaultIpLimit,
-      windowMs: getProjectConfig().rateLimiting.windowMs,
-    });
-
-    if (!allowed) {
-      void dispatchHook('rateLimitExceeded', {
-        scope: 'ip',
-        key: `ip:${requesterIp}:api:all`,
-        limit: defaultIpLimit,
-        windowMs: getProjectConfig().rateLimiting.windowMs,
-        count: defaultIpLimit + 1,
-        ip: requesterIp,
-      });
-      if (shouldLogDev()) {
-        getLogger().warn(`api: global IP rate limit exceeded`, { ip: requesterIp });
-      }
-      emitApiError({
-        response: {
-          status: 'error',
-          errorCode: 'api.rateLimitExceeded',
-          errorParams: [{ key: 'seconds', value: resetIn }],
-        },
-        fallbackHttpStatus: 429,
-      });
-      return false;
-    }
+    return false;
   }
 
   return true;
 };
 
-const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObject, resolvedName, emitStream, abortSignal, flushPressure }: {
+const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObject, resolvedName, emitStream, abortSignal, abortController, flushPressure }: {
   apiEntry: RuntimeApiEntry;
   normalizedData: Record<string, unknown>;
   user: SessionLayout | null;
@@ -225,13 +183,32 @@ const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObje
   resolvedName: string;
   emitStream: (payload?: ApiStreamPayload) => void;
   abortSignal: AbortSignal;
+  abortController: AbortController;
   flushPressure: ApiFlushPressure;
-}): Promise<{ error: Error | null; result: RuntimeApiResponse | undefined; durationMs: number }> => {
+}): Promise<{ error: Error | null; result: RuntimeApiResponse | undefined; durationMs: number; timedOut?: boolean }> => {
   //? Span open/close + identity propagation moved to hook subscribers in
   //? `@luckystack/error-tracking` (preApiExecute / postApiExecute). This
   //? handler is now transport-agnostic instrumentation-wise.
   const executeStart = Date.now();
-  const [error, result] = await tryCatch(
+
+  //? API-O10 — race `main()` against a server-side timeout derived from
+  //? `api.requestTimeoutMs`. When the timeout fires first we abort the
+  //? AbortController (propagates to the handler's `abortSignal`) and resolve
+  //? a sentinel so the orchestrator can emit a localized 504 envelope.
+  const timeoutMs = getProjectConfig().api.requestTimeoutMs;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const timeoutPromise = timeoutMs === false
+    ? null
+    : new Promise<void>((resolve) => {
+        timeoutHandle = setTimeout(() => {
+          timedOut = true;
+          abortController.abort();
+          resolve();
+        }, timeoutMs);
+      });
+
+  const handlerPromise = tryCatch(
     async () => await apiEntry.main({ data: normalizedData, user, functions: functionsObject, stream: emitStream, abortSignal, flushPressure }),
     undefined,
     {
@@ -241,6 +218,18 @@ const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObje
       transport: 'socket',
     },
   );
+
+  if (timeoutPromise) {
+    await Promise.race([handlerPromise, timeoutPromise]);
+  }
+  clearTimeout(timeoutHandle);
+
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- timedOut is mutated by the async timeout callback via Promise.race
+  if (timedOut) {
+    return { error: null, result: undefined, durationMs: Date.now() - executeStart, timedOut: true };
+  }
+
+  const [error, result] = await handlerPromise;
   return { error: error ?? null, result: result ?? undefined, durationMs: Date.now() - executeStart };
 };
 
@@ -263,6 +252,7 @@ const runSocketApiExecution = async ({
   functionsObject,
   emitStream,
   abortSignal,
+  abortController,
   flushPressure,
 }: {
   apiEntry: RuntimeApiEntry;
@@ -272,6 +262,7 @@ const runSocketApiExecution = async ({
   functionsObject: Record<string, unknown>;
   emitStream: (payload?: ApiStreamPayload) => void;
   abortSignal: AbortSignal;
+  abortController: AbortController;
   flushPressure: ApiFlushPressure;
 }): Promise<SocketApiExecutionOutcome> => {
   //? Single payload reference reused by pre/post — auto-instrumentation
@@ -292,7 +283,7 @@ const runSocketApiExecution = async ({
     return { stopped: true, errorCode: preExecuteResult.signal.errorCode, httpStatus: preExecuteResult.signal.httpStatus };
   }
 
-  const { error, result, durationMs } = await executeApiHandler({
+  const { error, result, durationMs, timedOut } = await executeApiHandler({
     apiEntry,
     normalizedData,
     user,
@@ -300,8 +291,15 @@ const runSocketApiExecution = async ({
     resolvedName,
     emitStream,
     abortSignal,
+    abortController,
     flushPressure,
   });
+
+  //? API-O10 — a server-side timeout aborted the handler. Skip postApiExecute
+  //? (no meaningful result to report) and surface a 504 to the client.
+  if (timedOut) {
+    return { stopped: true, errorCode: 'api.timeout', httpStatus: 504 };
+  }
 
   executePayload.result = result;
   executePayload.error = error ?? null;
@@ -337,7 +335,7 @@ const emitApiResult = async ({
   //? A handler may also return a stop signal — when that happens we build a
   //? fresh error envelope from the signal's `errorCode` / `httpStatus` and
   //? emit that instead of the original.
-  const preRespond = { routeName: resolvedName, user, response: envelope as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } };
+  const preRespond = { routeName: resolvedName, user, response: envelope };
   const preRespondResult = await dispatchHook('preApiRespond', preRespond);
 
   const finalResponse = preRespondResult.stopped
@@ -365,7 +363,7 @@ const emitApiResult = async ({
     transport: 'socket',
     userId: user?.id,
     perRouteFormatter,
-  }) as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown };
+  });
 
   socket.emit(buildApiResponseEventName(responseIndex), formattedResponse);
 
@@ -398,6 +396,27 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   }
 
   const { responseIndex } = msg;
+
+  //? EXT-02 — per-message socket interception seam (counterpart to preHttpRequest
+  //? in the HTTP pipeline and preSocketMessage in the sync handler). Fires before
+  //? session lookup / route resolution / auth so a consumer can gate, throttle, or
+  //? audit individual api messages. A stop signal rejects the message.
+  const preMsgResult = await dispatchHook('preSocketMessage', {
+    channel: 'api',
+    socketId: socket.id,
+    ip: socket.handshake.address,
+    authenticated: Boolean(token),
+    routeName: typeof msg.name === 'string' ? msg.name : undefined,
+  });
+  if (preMsgResult.stopped) {
+    socket.emit(buildApiResponseEventName(responseIndex), {
+      status: 'error',
+      errorCode: preMsgResult.signal.errorCode,
+      httpStatus: preMsgResult.signal.httpStatus ?? 403,
+    });
+    return;
+  }
+
   const user = await readSession(token);
   //? ET-02 — bind the resolved session into the active per-request ALS identity
   //? box so every subsequent capture attributes to this user. Identity also still
@@ -406,15 +425,17 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   setCurrentErrorTrackerIdentity(user?.id ? { id: user.id, email: user.email ?? undefined, username: user.name ?? undefined } : null);
   const preferredLocale =
     extractLanguageFromHeader(socket.handshake.headers['x-language'])
-    || extractLanguageFromHeader(socket.handshake.headers['accept-language'])
-    || undefined;
+    ?? extractLanguageFromHeader(socket.handshake.headers['accept-language'])
+    ?? undefined;
 
   //? Per-route formatter ref + resolved-name ref. Both start undefined and
   //? get set once the route is parsed + the apiEntry looked up — pre-lookup
   //? errors (invalid message shape, unknown route) emit with global formatter
   //? only because there's no apiEntry to read per-route formatter from. After
   //? lookup, every emit through `emitApiError` flows through the same chain.
+  // eslint-disable-next-line prefer-const -- captured by emitApiError closure; assigned later after route resolution
   let currentRouteName: string | undefined;
+  // eslint-disable-next-line prefer-const -- captured by emitApiError closure; assigned later after apiEntry lookup
   let currentPerRouteFormatter: ErrorFormatter | undefined;
 
   const emitApiError: EmitApiError = ({ response, fallbackHttpStatus }) => {
@@ -425,6 +446,8 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
       fallbackHttpStatus,
     });
     const formatted = applyErrorFormatter({
+      // luckystack-allow no-as-unknown: formatter boundary — normalizeErrorResponse returns a narrower type than applyErrorFormatter accepts; fix requires @luckystack/core type alignment
+      // eslint-disable-next-line no-restricted-syntax -- formatter boundary cast, mirrors handleHttpApiRequest
       response: normalized as unknown as Record<string, unknown> & { status?: string },
       routeName: currentRouteName ?? 'api/unknown',
       transport: 'socket',
@@ -440,7 +463,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
 
   const parsedRoute = parseTransportRouteName({ value: name, prefix: 'api' });
   if (parsedRoute.status === 'error') {
-    return emitApiError({
+    emitApiError({
       response: {
         status: 'error',
         errorCode: 'routing.invalidServiceRouteName',
@@ -448,6 +471,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
       },
       fallbackHttpStatus: 400,
     });
+    return;
   }
 
   const resolvedName = parsedRoute.normalizedFullName;
@@ -457,12 +481,56 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   //? Match the full normalized route to avoid hijacking consumer routes whose final
   //? segment happens to be 'logout' (e.g. 'admin/logout/vN').
   if (parsedRoute.serviceRoute.normalizedRouteName === 'system/logout') {
-    await performLogout({ token, socket, userId: user?.id || null });
-    return socket.emit(buildApiResponseEventName(responseIndex), {
-      status: 'success',
-      httpStatus: 200,
-      result: true,
+    //? Apply the global per-IP bucket before logout so the shortcut can't be
+    //? spammed uncapped — it bypasses applyApiRateLimits entirely.
+    const logoutIpLimit = getProjectConfig().rateLimiting.defaultIpLimit;
+    if (logoutIpLimit !== false && logoutIpLimit > 0) {
+      const logoutIp = resolveClientIp({
+        rawAddress: socket.handshake.address,
+        headers: socket.handshake.headers,
+        trustProxy: getProjectConfig().http.trustProxy,
+        trustedProxyHopCount: getProjectConfig().http.trustedProxyHopCount,
+      });
+      const { allowed, resetIn } = await checkRateLimit({
+        key: `ip:${logoutIp}:api:all`,
+        limit: logoutIpLimit,
+        windowMs: getProjectConfig().rateLimiting.windowMs,
+      });
+      if (!allowed) {
+        void dispatchHook('rateLimitExceeded', {
+          scope: 'ip',
+          key: `ip:${logoutIp}:api:all`,
+          limit: logoutIpLimit,
+          windowMs: getProjectConfig().rateLimiting.windowMs,
+          count: logoutIpLimit + 1,
+          ip: logoutIp,
+        });
+        emitApiError({
+          response: {
+            status: 'error',
+            errorCode: 'api.rateLimitExceeded',
+            errorParams: [{ key: 'seconds', value: resetIn }],
+          },
+          fallbackHttpStatus: 429,
+        });
+        return;
+      }
+    }
+    //? API-O6 — route through `emitApiResult` so the respond-hook chain
+    //? (preApiRespond, transformApiResponse, postApiRespond) fires for logout,
+    //? matching all other routes. The return value of `performLogout` is void
+    //? (success is implied by non-throw), so we pass a fixed success result.
+    await performLogout({ token, socket, userId: user?.id ?? null });
+    await emitApiResult({
+      socket,
+      responseIndex,
+      resolvedName,
+      error: null,
+      result: { status: 'success', httpStatus: 200, result: true },
+      preferredLocale,
+      user,
     });
+    return;
   }
 
   if (shouldLogDev()) {
@@ -472,7 +540,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   const { apisObject, functionsObject } = await getRuntimeApiMaps();
 
   if (!apisObject[resolvedName]) {
-    return emitApiError({
+    emitApiError({
       response: {
         status: 'error',
         errorCode: 'api.notFound',
@@ -480,17 +548,25 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
       },
       fallbackHttpStatus: 404,
     });
+    return;
   }
 
   const apiEntry = apisObject[resolvedName] as RuntimeApiEntry;
   currentPerRouteFormatter = apiEntry.errorFormatter;
+
+  //? API-O4 — `httpMethod` (and the `inferHttpMethod` heuristic) is HTTP-ONLY.
+  //? The socket transport does NOT enforce the declared HTTP method — all routes
+  //? are callable over WebSocket regardless of method declaration. This is by
+  //? design: socket.io has no HTTP-method concept and enforcing it would break
+  //? existing consumers. If you need to restrict a route to HTTP only, do not
+  //? expose it as a socket route, or gate it in `preSocketMessage`.
 
   //? Per-request lifecycle bundle (B1 abortController + cleanup, B2
   //? backpressure, abort-aware emitStream). Extracted to `_shared/
   //? requestLifecycle.ts`; the closures stay intact and the orchestrator
   //? threads the returned handles through the pipeline. `cleanupRequest`
   //? runs in every exit path below.
-  const { abortSignal, emitStream, flushPressure, cleanupRequest } = createApiRequestLifecycle({
+  const { abortController, abortSignal, emitStream, flushPressure, cleanupRequest } = createApiRequestLifecycle({
     socket,
     responseIndex,
     resolvedName,
@@ -499,9 +575,16 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   //? Auth → rate-limit → validate → execute → respond.
   //? Auth runs before validate so unauthenticated probes can't enumerate
   //? routes or learn input shape from `inputValidation.message`.
+  //? API-O7 — failed-auth requests do NOT consume a rate-limit bucket here.
+  //? This is an explicit design choice: brute-force lockout is the
+  //? responsibility of `@luckystack/login` (per-account lockout counter via
+  //? `authLockout.ts`), and the `apiAuthRejected` hook lets consumers add
+  //? additional throttles. Consuming the global-IP bucket on auth-fail would
+  //? allow an attacker to trigger DoS for a victim account's IP by deliberately
+  //? sending bad credentials.
   if (!checkApiAuth({ apiEntry, user, name, emitApiError })) { cleanupRequest(); return; }
 
-  const rateLimitOk = await applyApiRateLimits({ apiEntry, resolvedName, token, socket, user, emitApiError });
+  const rateLimitOk = await runSocketRateLimits({ apiEntry, resolvedName, token, socket, user, emitApiError });
   if (!rateLimitOk) { cleanupRequest(); return; }
 
   //? Validation stage (mode resolve + preApiValidate -> validateInputByType ->
@@ -514,10 +597,10 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
     normalizedData,
     user,
     cleanupRequest,
-    emitInvalidInputType: () => emitApiError({
+    emitInvalidInputType: () => { emitApiError({
       response: { status: 'error', errorCode: 'api.invalidInputType' },
       fallbackHttpStatus: 400,
-    }),
+    }); },
   });
   if (!validationOk) return;
 
@@ -531,14 +614,16 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
     functionsObject,
     emitStream,
     abortSignal,
+    abortController,
     flushPressure,
   });
   if (execution.stopped) {
     cleanupRequest();
-    return emitApiError({
+    emitApiError({
       response: { status: 'error', errorCode: execution.errorCode },
       fallbackHttpStatus: execution.httpStatus ?? 403,
     });
+    return;
   }
 
   await emitApiResult({ socket, responseIndex, resolvedName, error: execution.error, result: execution.result, preferredLocale, user, perRouteFormatter: apiEntry.errorFormatter });

@@ -75,8 +75,15 @@ export interface RateLimitingConfig {
   /**
    * Per-account brute-force lockout slot, keyed independently from the general
    * api/ip limits so credential endpoints (login, password-reset) can apply a
-   * stricter window without affecting normal traffic. The login package reads
-   * these when keying a per-account attempt counter (`auth:<accountKey>`).
+   * stricter window without affecting normal traffic.
+   *
+   * NOTE — DD-CORE-D3: **core does NOT consume this slot**. The core package
+   * only declares and stores the config; the `@luckystack/login` package reads
+   * `rateLimiting.auth` when keying a per-account attempt counter
+   * (`auth:<accountKey>`). If you search the core source for usages of this
+   * field and find none, that is expected — it is not dead config; it is login-
+   * owned config that lives here for a single source of truth.
+   *
    * DEFAULT `{ enabled: false }` — a missing/disabled slot keeps today's
    * behavior (no per-account lockout; only the per-IP throttle applies).
    */
@@ -115,13 +122,6 @@ export interface AuthRateLimitConfig {
 export interface SessionConfig {
   basedToken: boolean;
   expiryDays: number;
-  /**
-   * @deprecated Use `perUser: 'multiple'` instead. Kept for backwards
-   * compatibility; when set, maps to `perUser: 'multiple'` with no concurrent
-   * cap. The framework emits a one-shot deprecation warning at boot when
-   * `allowMultiple` is explicitly set.
-   */
-  allowMultiple: boolean;
   /**
    * Whether multiple parallel logins per browser are permitted.
    * `'single'` (default): one active login per browser; opening a second tab
@@ -213,6 +213,18 @@ export interface CorsConfig {
    */
   allowLocalhost: boolean;
   /**
+   * Historical opt-in kept for symmetry. Origin-less requests are ALWAYS
+   * admitted at the CORS layer now (see `loadSocket.ts`): browsers omit the
+   * `Origin` header on same-origin GETs, which is exactly the initial Socket.io
+   * polling handshake in both dev (Vite proxy) and prod-with-router (single
+   * origin) topologies — rejecting it broke every connection with
+   * `400 code:3 MIDDLEWARE_FAILURE`. The real auth gate is the session token
+   * in the handshake, not the Origin header. This flag no longer gates
+   * anything and is retained only so existing configs that set it keep
+   * type-checking; it may be removed in a future major version.
+   */
+  allowOriginless?: boolean;
+  /**
    * Optional per-route override hook. When a `_api/*` file exports
    * `export const cors = { allowedOrigins, allowedHeaders, ... }` the
    * framework merges that on top of the global config for THAT route only.
@@ -274,11 +286,37 @@ export interface HttpConfig {
    * Whether a known reverse proxy sits in front of this server. DEFAULT false.
    * When false, per-IP rate-limit keys derive from the raw transport peer
    * address (historical behaviour). When true, the framework resolves the real
-   * client IP from `X-Forwarded-For` (leftmost hop) / `X-Real-IP` before keying
-   * — so per-IP limits stay meaningful behind nginx/HAProxy. Only enable when a
-   * trusted proxy populates those headers, otherwise clients can spoof their IP.
+   * client IP from `X-Forwarded-For` / `X-Real-IP` before keying — so per-IP
+   * limits stay meaningful behind nginx/HAProxy. Only enable when a trusted
+   * proxy populates those headers, otherwise clients can spoof their IP.
    */
   trustProxy?: boolean;
+  /**
+   * How many proxy hops to skip from the RIGHT of `X-Forwarded-For` when
+   * `trustProxy` is on (CORE-O3). The rightmost entries are the ones appended by
+   * YOUR trusted proxies, so the resolved client IP is the entry that many hops
+   * in from the end. The LEFTMOST hop is client-controlled and must never be
+   * trusted (it enables per-IP rate-limit evasion + audit-IP spoofing).
+   *
+   * DEFAULT 1 — with the standard single-trusted-proxy topology this selects the
+   * immediate upstream peer (the rightmost real hop), i.e. the IP the proxy saw
+   * the connection arrive from. Raise it to match the number of trusted proxies
+   * in the chain. Clamped to the list length so an over-large count falls back
+   * to the leftmost available trusted hop rather than the spoofable client entry.
+   * IGNORED when `trustProxy` is false (raw peer address is used verbatim).
+   */
+  trustedProxyHopCount?: number;
+  /**
+   * Whether cookie-mode sessions (`session.basedToken === false`) also accept a
+   * token supplied via `Authorization: Bearer` / `handshake.auth.token` as a
+   * fallback (CORE-O10). DEFAULT false — in cookie-mode the framework reads ONLY
+   * the session cookie and ignores any bearer/handshake-auth token, so a stolen
+   * token replayed through a header can no longer defeat the cookie/CSRF model.
+   * Set true to restore the legacy behaviour (cookie-then-bearer fallback).
+   * IGNORED in token-mode (`session.basedToken === true`), which is unaffected:
+   * it always reads the bearer/handshake token first, cookie as fallback.
+   */
+  acceptBearerInCookieMode?: boolean;
   /**
    * Controls how `/_health` exposes synchronized-env-var hashes (SEC-13).
    * Previously `/_health` returned an UNSALTED `sha256(value)` of each
@@ -680,6 +718,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     cleanupIntervalMs: 60_000,
     onStoreError: 'memory',
     skipLoopbackInDev: false,
+    //? DD-CORE-D3: consumed exclusively by @luckystack/login, not by core itself.
     auth: {
       enabled: false,
       maxAttempts: 5,
@@ -689,7 +728,6 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   session: {
     basedToken: false,
     expiryDays: 7,
-    allowMultiple: false,
     perBrowser: 'single',
     perUser: 'single',
     maxConcurrentPerUser: null,
@@ -710,6 +748,15 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     readyEndpoint: '/readyz',
     testResetEndpoint: '/_test/reset',
     trustProxy: false,
+    //? CORE-O3: skip 1 hop from the RIGHT of X-Forwarded-For (the rightmost
+    //? entry is appended by your own trusted proxy) instead of trusting the
+    //? leftmost, client-controlled hop. Only consulted when `trustProxy` is on.
+    trustedProxyHopCount: 1,
+    //? CORE-O10 secure default: in cookie-mode, ignore any `Authorization: Bearer`
+    //? / `handshake.auth.token` fallback so a stolen token cannot bypass the
+    //? cookie/CSRF model. Set true to restore the legacy cookie-then-bearer
+    //? fallback. Token-mode (`basedToken: true`) is unaffected.
+    acceptBearerInCookieMode: false,
     //? 0.2.0 secure-default flip (SEC-13): `/_health` no longer exposes a stable,
     //? unsalted `sha256(secret)` fingerprint. Default mode is `'hmac'` keyed on
     //? the `'@bootUuid'` sentinel — the per-boot UUID both server + router already
@@ -729,7 +776,10 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     securityHeaders: {
       frameOptions: 'SAMEORIGIN',
       referrerPolicy: 'no-referrer',
-      xssProtection: '1; mode=block',
+      //? '1; mode=block' is deprecated (Chrome 78+ ignores it; can trigger
+      //? reflected-XSS in older IE/Edge auditors). '0' disables the legacy
+      //? auditor and defers to CSP, which is the modern defence.
+      xssProtection: '0',
       contentTypeOptions: 'nosniff',
     },
     cors: {
@@ -739,6 +789,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
       credentials: true,
       allowedOrigins: [],
       allowLocalhost: false,
+      allowOriginless: false,
     },
   },
   auth: {

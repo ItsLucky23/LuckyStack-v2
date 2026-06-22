@@ -1,6 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import http, { type IncomingMessage } from 'node:http';
 import { type AddressInfo } from 'node:net';
+import { clearAllHooks, registerHook } from '@luckystack/core';
 
 import { createHttpProxy } from './httpProxy';
 import type { ServiceTargetResolver, ResolveTargetResult } from './resolveTarget';
@@ -26,12 +27,25 @@ afterEach(() => {
   for (const c of cleanups.splice(0)) c();
 });
 
+beforeEach(() => {
+  clearAllHooks();
+});
+
 //? Boot a router HTTP server fronting an upstream that accepts the request but
 //? never responds, simulating a backend that pins the socket without the
 //? upstream timeout under test.
-const boot = async (options: { upstreamRequestTimeoutMs: number }): Promise<Harness> => {
-  const upstream = http.createServer((_req: IncomingMessage) => {
-    //? Deliberately never call `res.end()` — the request hangs open.
+const boot = async (options: {
+  upstreamRequestTimeoutMs?: number;
+  maxRequestBodyBytes?: number;
+  //? When true, the upstream answers every request with a 200.
+  upstreamResponds?: boolean;
+}): Promise<Harness> => {
+  const upstream = http.createServer((_req: IncomingMessage, res) => {
+    if (options.upstreamResponds) {
+      res.statusCode = 200;
+      res.end('ok');
+    }
+    //? Default: deliberately never call `res.end()` — the request hangs open.
   });
   await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
   const upstreamPort = (upstream.address() as AddressInfo).port;
@@ -44,7 +58,8 @@ const boot = async (options: { upstreamRequestTimeoutMs: number }): Promise<Harn
   const proxy = createHttpProxy({
     resolver,
     missingServiceErrorCode: 'serviceNotAssigned',
-    upstreamRequestTimeoutMs: options.upstreamRequestTimeoutMs,
+    upstreamRequestTimeoutMs: options.upstreamRequestTimeoutMs ?? 30_000,
+    maxRequestBodyBytes: options.maxRequestBodyBytes,
   });
   const server = http.createServer(proxy);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -53,6 +68,23 @@ const boot = async (options: { upstreamRequestTimeoutMs: number }): Promise<Harn
   cleanups.push(() => { server.close(); upstream.close(); });
   return { server, port, upstream };
 };
+
+//? Helper: send a POST request with the given body and collect the response.
+const postRequest = (port: number, body: string | Buffer, headers?: Record<string, string>): Promise<{ statusCode: number; body: string }> =>
+  new Promise((resolve, reject) => {
+    const bodyBuf = typeof body === 'string' ? Buffer.from(body, 'utf8') : body;
+    const req = http.request(
+      { method: 'POST', host: '127.0.0.1', port, path: '/api/system/upload/v1', headers: { 'content-length': String(bodyBuf.length), ...headers } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => { chunks.push(chunk); });
+        res.on('end', () => { resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }); });
+      },
+    );
+    req.on('error', reject);
+    req.setTimeout(5000, () => { req.destroy(); reject(new Error('client timeout')); });
+    req.end(bodyBuf);
+  });
 
 describe('httpProxy', () => {
   it('fails with 502 routing.upstreamUnreachable when the upstream accepts TCP but never responds', async () => {
@@ -70,5 +102,108 @@ describe('httpProxy', () => {
 
     expect(statusCode).toBe(502);
     expect(body).toContain('routing.upstreamUnreachable');
+  });
+
+  // --- DD-ROUTER-DD1: body size cap ---
+
+  it('rejects with 413 routing.requestBodyTooLarge when content-length exceeds the cap', async () => {
+    //? Use a very small cap (10 bytes) so the test body (20 bytes) trips it.
+    const h = await boot({ maxRequestBodyBytes: 10, upstreamResponds: true });
+
+    const { statusCode, body } = await postRequest(h.port, 'x'.repeat(20));
+
+    expect(statusCode).toBe(413);
+    expect(body).toContain('routing.requestBodyTooLarge');
+  });
+
+  it('forwards requests within the body size cap to the upstream', async () => {
+    const h = await boot({ maxRequestBodyBytes: 100, upstreamResponds: true });
+
+    const { statusCode } = await postRequest(h.port, 'x'.repeat(50));
+
+    expect(statusCode).toBe(200);
+  });
+
+  // --- DD-ROUTER-DD2: proxyRequestGate hook ---
+
+  it('allows the request when no proxyRequestGate handler is registered', async () => {
+    const h = await boot({ upstreamResponds: true });
+
+    const { statusCode } = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const req = http.get(`http://127.0.0.1:${String(h.port)}/api/system/ping/v1`, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => { chunks.push(chunk); });
+        res.on('end', () => { resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }); });
+      });
+      req.on('error', reject);
+      req.setTimeout(2000, () => { req.destroy(); reject(new Error('client timeout')); });
+    });
+
+    expect(statusCode).toBe(200);
+  });
+
+  it('rejects with 403 when a proxyRequestGate handler returns a stop signal', async () => {
+    registerHook('proxyRequestGate', () => ({
+      stop: true as const,
+      errorCode: 'routing.gateDenied',
+      httpStatus: 403,
+    }));
+
+    const h = await boot({ upstreamResponds: true });
+
+    const { statusCode, body } = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const req = http.get(`http://127.0.0.1:${String(h.port)}/api/system/ping/v1`, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => { chunks.push(chunk); });
+        res.on('end', () => { resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }); });
+      });
+      req.on('error', reject);
+      req.setTimeout(2000, () => { req.destroy(); reject(new Error('client timeout')); });
+    });
+
+    expect(statusCode).toBe(403);
+    expect(body).toContain('routing.gateDenied');
+  });
+
+  it('rejects with a custom httpStatus from the gate stop signal', async () => {
+    registerHook('proxyRequestGate', () => ({
+      stop: true as const,
+      errorCode: 'routing.tenantDenied',
+      httpStatus: 451,
+    }));
+
+    const h = await boot({ upstreamResponds: true });
+
+    const { statusCode, body } = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const req = http.get(`http://127.0.0.1:${String(h.port)}/api/system/ping/v1`, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => { chunks.push(chunk); });
+        res.on('end', () => { resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }); });
+      });
+      req.on('error', reject);
+      req.setTimeout(2000, () => { req.destroy(); reject(new Error('client timeout')); });
+    });
+
+    expect(statusCode).toBe(451);
+    expect(body).toContain('routing.tenantDenied');
+  });
+
+  it('passes service and pathname to the gate handler', async () => {
+    let capturedService: string | undefined;
+    let capturedPathname: string | undefined;
+    registerHook('proxyRequestGate', ({ service, pathname }) => {
+      capturedService = service;
+      capturedPathname = pathname;
+    });
+
+    const h = await boot({ upstreamResponds: true });
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get(`http://127.0.0.1:${String(h.port)}/api/system/ping/v1`, (res) => { res.resume(); resolve(); });
+      req.on('error', reject);
+      req.setTimeout(2000, () => { req.destroy(); reject(new Error('client timeout')); });
+    });
+
+    expect(capturedService).toBe('system');
+    expect(capturedPathname).toBe('/api/system/ping/v1');
   });
 });

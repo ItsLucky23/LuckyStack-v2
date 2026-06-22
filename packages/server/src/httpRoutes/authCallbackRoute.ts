@@ -33,13 +33,13 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
   //? lives on the public origin, so we join it onto `publicUrl` to land the user
   //? where credentials login also lands them — not the bare public root. An
   //? already-absolute `loginRedirectUrl` is used as-is; an empty result falls
-  //? through to '/'.
+  //? through to '/dashboard' or whichever path the consumer configured.
   const publicOrigin = (config.app.publicUrl || '').replace(/\/+$/, '');
   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- empty string must fall through
   const loginRedirect = config.loginRedirectUrl || '/';
   const baseLocation = /^https?:\/\//i.test(loginRedirect)
     ? loginRedirect
-    : `${publicOrigin}${loginRedirect.startsWith('/') ? loginRedirect : `/${loginRedirect}`}` || '/';
+    : `${publicOrigin}${loginRedirect.startsWith('/') ? loginRedirect : `/${loginRedirect}`}`;
   const callbackResult = await login.loginCallback(routePath, req, res, {
     defaultRedirectUrl: baseLocation,
     supersedeToken: token ?? undefined,

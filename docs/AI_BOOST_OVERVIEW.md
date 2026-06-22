@@ -31,7 +31,6 @@ This is a *map*, not the docs themselves. Follow the links to the artifact you a
 | JSDoc `@docs` tags | (in route files, parsed by devkit) | `owner` / `tags` / `deprecated` metadata surfaced in apiDocs UI + `AI_PROJECT_INDEX.md` |
 | Type generation | `src/_sockets/apiTypes.generated.ts`, `apiInputSchemas.generated.ts`, `apiDocs.generated.json` | Exact input/output typing per route, Zod schemas, docs JSON |
 | AI browser testing | `docs/AI_BROWSER_TESTING.md` + `agent-browser.json` / `.mcp.json` / `.claude/settings.json` | agent-browser (CLI) + Playwright/Chrome DevTools MCP; cheapest-first ladder + suggest→approve protocol (opt-in via `--ai-browser`) |
-| Optional upgrade path | `docs/GRAPHIFY_INTEGRATION.md` | Graphify (Python tool) for call-graph + community detection + MCP server mode |
 
 ---
 
@@ -48,7 +47,7 @@ npm run ai:graph           # file/import + symbol graph   → docs/ai-graph.json
 npm run ai:lint            # CLAUDE.md invariant check (staged diff; report-only by default)
 ```
 
-The generators are autonomous per root `CLAUDE.md` rule 8 (no permission prompt). `.githooks/pre-commit` re-runs the five generators (+ the invariant linter) on every commit as a safety net, but AI agents should refresh in-session after relevant changes (per rules 12 and 15) so subsequent work in the same session sees the new state. The hook is the safety net, not the primary path. Decisions are captured automatically by the AI during sessions (no slash command) — see `docs/DECISION_MEMORY_PROTOCOL.md`. The full AI-boost roadmap (incl. the MCP server + native call-graph + RAG rungs) lives in `docs/AI_BOOST_PLAN.md`.
+The generators are autonomous per root `CLAUDE.md` rule 8 (no permission prompt). `.githooks/pre-commit` re-runs the five generators (+ the invariant linter) on every commit as a safety net, but AI agents should refresh in-session after relevant changes (per rules 12 and 15) so subsequent work in the same session sees the new state. The hook is the safety net, not the primary path. Decisions are captured automatically by the AI during sessions (no slash command) — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
 ---
 
@@ -98,10 +97,6 @@ Three tags parsed from the top-of-file JSDoc block in route files: `@docs owner 
 
 The devkit type-map emitter (`npm run generateArtifacts`) walks every `_api/` and `_sync/` file and produces three generated files: `apiTypes.generated.ts` (request/response types per route), `apiInputSchemas.generated.ts` (runtime Zod), and `apiDocs.generated.json` (UI + AI introspection). Files are gitignored — regenerated on dev server start and postinstall.
 
-### Optional upgrade — graphify
-
-`docs/GRAPHIFY_INTEGRATION.md` documents how to add graphify (Python CLI) to a consumer project as the upgrade path beyond `AI_PROJECT_INDEX.md`. Adds call-graph traversal, community detection ("god nodes"), interactive HTML visualization, and MCP-server query mode. Not part of LuckyStack; comparison table in the doc makes the trade-offs explicit.
-
 ---
 
 ## Where to start, by persona
@@ -132,8 +127,8 @@ The devkit type-map emitter (`npm run generateArtifacts`) walks every `_api/` an
 The auto-generated indexes are deterministic markdown — they cover the vast majority of projects. Climb a rung only when the cheaper one stops fitting:
 
 1. **Default — the committed indexes + decision log + runbooks (`AI_QUICK_INDEX` / `AI_CAPABILITIES` / `AI_PROJECT_INDEX` / `AI_DECISIONS_INDEX` / `AI_RUNBOOKS`).** Sufficient for most apps. Zero setup, regenerated on every commit, always in context.
-2. **Structural queries → the native dependency graph (`docs/ai-graph.json`) + `@luckystack/mcp`.** When the project sprawls and the AI needs transitive "what depends on this / blast-radius / god-nodes" rather than a flat inventory, `npm run ai:graph` emits a deterministic committed graph and the MCP server exposes `blast_radius` / `who_imports` / `god_nodes` (plus decision/route/runbook lookups) as tools — no full-file reads. This is **native, file/import-level, shipped** (ADR 0004). Symbol-level call edges via the TypeScript compiler are the next increment (ADR 0002); the external Python `graphify` (`docs/GRAPHIFY_INTEGRATION.md`) remains an optional add-on for interactive HTML visualization only.
-3. **Escalate → a vector/RAG layer (optional, the last rung — ADR 0003).** Only when natural-language retrieval over a large corpus (docs, prior decisions, large data models) beats structured lookup — e.g. "find everywhere we handle refunds" across hundreds of files. It needs an external embeddings model (the only third-party dependency in the stack), so it stays gated: build it only after measuring that grep + the graph + the decision log fall short. See `docs/AI_BOOST_PLAN.md` Wave 4.
+2. **Structural queries → the native dependency graph (`docs/ai-graph.json`) + `@luckystack/mcp`.** When the project sprawls and the AI needs transitive "what depends on this / blast-radius / god-nodes" rather than a flat inventory, `npm run ai:graph` emits a deterministic committed graph and the MCP server exposes `blast_radius` / `who_imports` / `who_calls` / `god_nodes` (plus decision/route/runbook lookups) as tools — no full-file reads. This is **native and shipped**: file/import-level (ADR 0004) plus symbol-level call edges via the TypeScript compiler (ADR 0002 + 0006). Built in TypeScript on `@luckystack/devkit`'s `ts.Program` — deliberately not the external Python graphify tool (ADR 0002 records that rejection).
+3. **Escalate → a vector/RAG layer (optional, the last rung — ADR 0003).** Only when natural-language retrieval over a large corpus (docs, prior decisions, large data models) beats structured lookup — e.g. "find everywhere we handle refunds" across hundreds of files. It needs an external embeddings model (the only third-party dependency in the stack), so it stays gated: build it only after measuring that grep + the graph + the decision log fall short.
 
 > Rule of thumb: structured questions (routes, exports, deps, "what depends on X") → indexes + graph + the MCP server; fuzzy semantic questions over a big corpus → RAG (last rung). Don't add a vector store to dodge a stale index — regenerate the index.
 
@@ -145,4 +140,3 @@ The auto-generated indexes are deterministic markdown — they cover the vast ma
 - Branch-log protocol: [`docs/BRANCH_LOG_PROTOCOL.md`](./BRANCH_LOG_PROTOCOL.md)
 - Per-package use-cases: [`docs/PACKAGE_OVERVIEW.md`](./PACKAGE_OVERVIEW.md)
 - Framework contract: [`CLAUDE.md`](../CLAUDE.md)
-- Optional graphify upgrade path: [`docs/GRAPHIFY_INTEGRATION.md`](./GRAPHIFY_INTEGRATION.md)

@@ -41,6 +41,8 @@ It is **separate from** the `playwright` / `chrome-devtools` MCP servers (browse
 | `blast_radius(file)` | Files affected by changing `file` (transitive reverse-deps) | `docs/ai-graph.json` |
 | `who_imports(file)` | Direct importers of `file` (one hop) | `docs/ai-graph.json` |
 | `god_nodes(limit?)` | Most-depended-upon files (risky-to-change hubs) | `docs/ai-graph.json` |
+| `who_calls(symbol)` | Functions that transitively call a given function (call-graph blast-radius) | `docs/ai-graph.json` |
+| `graph_status()` | Freshness check — compares graph artifact mtime to newest `src/` file; surfaces FRESH / STALE verdict | `docs/ai-graph.json` + filesystem |
 | `list_decisions(tag?)` | Recorded ADRs (the committed "why"), optional tag filter | `docs/AI_DECISIONS_INDEX.md` |
 | `get_decision(id)` | Full ADR by number or slug | `docs/decisions/NNNN-*.md` |
 | `find_route(query)` | API/sync routes matching a query (method/auth/summary) | `docs/AI_PROJECT_INDEX.md` |
@@ -48,6 +50,8 @@ It is **separate from** the `playwright` / `chrome-devtools` MCP servers (browse
 | `get_capability(name)` | Find existing helpers/components/exports by name | `docs/AI_CAPABILITIES.md` |
 
 Each tool returns a helpful "generate it with `npm run ai:*`" message when its artifact is absent, so a cold project degrades gracefully.
+
+**Staleness note**: `docs/ai-graph.json` intentionally contains NO embedded timestamp (the generator strips all timestamps to guarantee deterministic committed diffs — every regeneration from the same source produces a byte-identical file). Graph freshness is therefore signalled via filesystem mtime comparison (`graph_status` tool) rather than a `generatedAt` field. The `who_calls` tool is available when `docs/ai-graph.json` is version ≥ 2 (symbol-level edges present).
 
 ## Config keys
 
@@ -61,5 +65,5 @@ None. The server reads committed files relative to the project root (resolved by
 ## Related
 
 - The artifacts it serves are produced by `scripts/generateGraph.mjs` (ai:graph), `generateDecisionsIndex.mjs` (ai:decisions), `generateProjectIndex.mjs` (ai:project-index), `generateRunbooks.mjs` (ai:runbooks), `generateAiCapabilities.mjs` (ai:capabilities).
-- Decision protocol: `docs/DECISION_MEMORY_PROTOCOL.md`. AI-tooling overview: `docs/AI_BOOST_OVERVIEW.md`. Roadmap: `docs/AI_BOOST_PLAN.md`.
+- Decision protocol: `docs/DECISION_MEMORY_PROTOCOL.md`. AI-tooling overview: `docs/AI_BOOST_OVERVIEW.md`.
 - Call-graph design: `docs/decisions/0002-*` + `0004-*`.

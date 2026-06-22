@@ -2,30 +2,19 @@ import {
   dispatchHook,
   getIoInstance,
   getLogger,
+  getProjectConfig,
   socketEventNames,
 } from '@luckystack/core';
 import type { Socket } from 'socket.io';
 import { shouldLogStream } from './logFlags';
 import { redactTokens } from './redactToken';
 
-//? Counter of chunks per (routeName, recipient) pair so postSyncStream
-//? consumers can index streams. Cleared on receiver-room teardown.
-const chunkCounters = new Map<string, number>();
-const counterKey = (routeName: string, recipient: string): string => `${routeName}|${recipient}`;
-const bumpChunkIndex = (routeName: string, recipient: string): number => {
-  const key = counterKey(routeName, recipient);
-  const next = (chunkCounters.get(key) ?? 0) + 1;
-  chunkCounters.set(key, next);
-  return next;
-};
-const dispatchStreamHooks = (routeName: string, recipient: string, chunk: unknown): void => {
-  //? Fire-and-forget — stream emitters are sync and consumer hooks must
-  //? not block chunk delivery. Errors inside hooks are swallowed by the
-  //? hook dispatcher's own tryCatch.
-  void dispatchHook('preSyncStream', { routeName, chunk, recipient });
-  const chunkIndex = bumpChunkIndex(routeName, recipient);
-  void dispatchHook('postSyncStream', { routeName, chunk, recipient, chunkIndex });
-};
+//? Chunk-index counters are intentionally per-request (built inside
+//? `buildSyncStreamEmitters`) so they are garbage-collected with the
+//? closure when the request ends. A module-level Map keyed on
+//? `routeName|recipient` would grow unbounded for the process lifetime
+//? because `bumpChunkIndex` only ever `set`s — there is no teardown
+//? hook that reliably fires per room. (SYNC-N4)
 
 export type SyncStreamPayload = Record<string, unknown>;
 
@@ -41,7 +30,8 @@ export interface FlushPressureOptions {
    * Drain threshold in bytes. Used as a packet-count approximation —
    * we assume an average packet size of ~1024 bytes and resolve once the
    * engine.io writeBuffer length is below `thresholdBytes / 1024`.
-   * Default: 1_048_576 (1 MB).
+   * When omitted, falls back to `projectConfig.sync.flushPressure.maxBufferedBytes`
+   * (default 5 MiB as configured in the framework defaults).
    */
   thresholdBytes?: number;
 }
@@ -101,6 +91,15 @@ const waitUntilSocketDrained = async (
   }
 };
 
+//? SYNC-O13 / SYNC-O5 — LOCAL-ONLY. Uses `io.sockets.adapter.rooms` which
+//? is the per-process room view. In a multi-instance cluster (Redis adapter)
+//? members connected to OTHER instances are not visible here, so `flushPressure`
+//? only drains the LOCAL subset (up to MAX_SOCKETS_FOR_PRESSURE_SAMPLE sockets).
+//? Cross-instance backpressure cannot be measured via this API; callers should
+//? treat a resolved `flushPressure()` as "local buffer cleared" not "all
+//? recipients drained". For `streamTo` use cases the sampled room is the
+//? ORIGINAL `receiver`, not the token-named rooms; the caller's own socket
+//? (originatorSocket) is the primary pressure signal in that case.
 const collectRoomSocketsForPressure = (receiver: string): Socket[] => {
   const io = getIoInstance();
   if (!io) return [];
@@ -166,6 +165,23 @@ export const buildSyncStreamEmitters = ({
   signal,
   originatorSocket,
 }: BuildSyncStreamEmittersArgs): SyncStreamEmitters => {
+  //? Per-request chunk counters keyed by recipient. Scoped to this closure
+  //? so they are released when the request ends — no process-lifetime leak.
+  const chunkCounters = new Map<string, number>();
+  const bumpChunkIndex = (recipient: string): number => {
+    const next = (chunkCounters.get(recipient) ?? 0) + 1;
+    chunkCounters.set(recipient, next);
+    return next;
+  };
+  const dispatchStreamHooks = (recipient: string, chunk: unknown): void => {
+    //? Fire-and-forget — stream emitters are sync and consumer hooks must
+    //? not block chunk delivery. Errors inside hooks are swallowed by the
+    //? hook dispatcher's own tryCatch.
+    void dispatchHook('preSyncStream', { routeName: resolvedName, chunk, recipient });
+    const chunkIndex = bumpChunkIndex(recipient);
+    void dispatchHook('postSyncStream', { routeName: resolvedName, chunk, recipient, chunkIndex });
+  };
+
   const buildBroadcastFrame = (payload: SyncStreamPayload) => ({
     ...payload,
     cb,
@@ -185,7 +201,7 @@ export const buildSyncStreamEmitters = ({
     if (shouldLogStream()) {
       getLogger().debug(`${logLabel}: ${resolvedName} server stream`, { payload });
     }
-    dispatchStreamHooks(resolvedName, 'originator', payload);
+    dispatchStreamHooks('originator', payload);
     emitOriginatorChunk(payload);
   };
 
@@ -198,7 +214,7 @@ export const buildSyncStreamEmitters = ({
     const io = getIoInstance();
     if (!io) return;
 
-    dispatchStreamHooks(resolvedName, receiver, payload);
+    dispatchStreamHooks(receiver, payload);
 
     //? `io.to(room).emit` fans the chunk out across EVERY server instance via
     //? the Redis adapter, so room members connected to a different instance get
@@ -228,8 +244,12 @@ export const buildSyncStreamEmitters = ({
     }
     const io = getIoInstance();
     if (!io) return;
+    //? SYNC-N8 — hooks fire before `io.to(tokens).emit()` which is a cross-instance
+    //? Redis broadcast; there is no local way to know whether any socket actually
+    //? received the frame (the remote instance may have the token-holder). Hooks
+    //? are therefore fire-and-forget observers, not delivery confirmations.
     for (const recipient of filtered) {
-      dispatchStreamHooks(resolvedName, recipient, payload);
+      dispatchStreamHooks(recipient, payload);
     }
     const frame = buildBroadcastFrame(payload);
     io.to(filtered).emit(socketEventNames.sync, frame);
@@ -246,9 +266,14 @@ export const buildSyncStreamEmitters = ({
   //? measure pressure on (e.g. HTTP/SSE only, empty room).
   const flushPressure: FlushPressure = async ({ thresholdBytes } = {}) => {
     if (isAborted()) return;
+    //? SYNC-N1 — honour `sync.flushPressure.maxBufferedBytes` from projectConfig
+    //? as the fallback so consumer tuning is not silently ignored. Caller-supplied
+    //? `thresholdBytes` still wins; the hard-coded DEFAULT_THRESHOLD_BYTES is the
+    //? last resort when config is not yet registered (early-boot / test context).
+    const configuredBytes = getProjectConfig().sync.flushPressure.maxBufferedBytes;
     const effectiveThresholdBytes = typeof thresholdBytes === 'number' && thresholdBytes > 0
       ? thresholdBytes
-      : DEFAULT_THRESHOLD_BYTES;
+      : (typeof configuredBytes === 'number' && configuredBytes > 0 ? configuredBytes : DEFAULT_THRESHOLD_BYTES);
     const packetThreshold = Math.max(1, Math.ceil(effectiveThresholdBytes / AVG_PACKET_BYTES));
 
     const targets: Socket[] = [];

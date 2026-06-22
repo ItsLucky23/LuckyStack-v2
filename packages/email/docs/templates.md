@@ -299,8 +299,8 @@ When you skip `renderEmailLayout`, you own the inline-styles discipline yourself
 | Situation | Behaviour |
 | --- | --- |
 | `sendEmail({ template: 'foo', ... })` and `'foo'` is not registered | Returns `{ ok: false, reason: 'no-template' }`. The configured `from` is *not* applied (no message is built). `logging.errors` warns in terminal. |
-| `data` omitted on a template call | Treated as `{}`. The template's `subject` / `render` must tolerate empty data or you'll see a runtime crash when accessing fields. |
-| `render` throws | The throw bubbles up out of `sendEmail` (no `tryCatch` wrap on template rendering itself). Catch in the call site if you want soft failure. |
+| `data` omitted on a template call | Treated as `{}`. The template's `subject` / `render` must tolerate empty data — if they throw, `sendEmail` catches the throw and returns `{ ok: false, reason: 'template-render-failed' }`. |
+| `render` or `subject` throws | `sendEmail` catches it (via `tryCatchSync`) and returns `{ ok: false, reason: 'template-render-failed' }`. No try/catch is needed at the call site — the failure is already a typed result. |
 | `subject` returns empty string | Sent as-is. Some providers reject empty subjects — verify in your adapter test. |
 | Template registered twice under the same name | Last `registerEmailTemplate` wins. Returning the previous registration lets you chain (see "Overriding a template" above). |
 | `resetEmailTemplatesForTests` in production | Removes *all* registrations, including framework-internal ones. Test-only — never call from production code paths. |

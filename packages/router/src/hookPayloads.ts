@@ -11,6 +11,33 @@ export interface PreProxyRequestPayload {
   viaFallback: boolean;
 }
 
+/**
+ * Payload for the fail-CLOSED `proxyRequestGate` hook.
+ *
+ * Dispatched BEFORE the upstream request is opened (after path validation,
+ * service resolution, and host-pin checks pass). A handler that returns a
+ * `HookStopSignal` rejects the request with the signal's `httpStatus`
+ * (default 403) and `errorCode`. No stop signal = proxy proceeds.
+ *
+ * Use for: IP allowlists, auth-token gates, per-service quota, abuse
+ * detection, tenant isolation — any check that must hard-block proxying
+ * rather than merely observe it.
+ */
+export interface ProxyRequestGatePayload {
+  /** Resolved service key. */
+  service: string;
+  /** Validated origin-form request path. */
+  pathname: string;
+  /** Uppercase HTTP method, or `'UPGRADE'` for WebSocket upgrade requests. */
+  method: string;
+  /** Resolved upstream target URL. */
+  target: string;
+  /** True when routed via fallback env. */
+  viaFallback: boolean;
+  /** Client's remote address as seen by the router socket. */
+  remoteAddress: string | undefined;
+}
+
 /** Coarse classification of upstream failures, derived from the underlying error. */
 export type PostProxyResponseErrorCause = 'network' | 'timeout' | 'upstream-throw' | 'unknown';
 
@@ -44,5 +71,6 @@ declare module '@luckystack/core' {
   interface HookPayloads {
     preProxyRequest: PreProxyRequestPayload;
     postProxyResponse: PostProxyResponsePayload;
+    proxyRequestGate: ProxyRequestGatePayload;
   }
 }

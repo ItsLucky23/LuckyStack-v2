@@ -1,4 +1,4 @@
-import { tryCatchSync } from '@luckystack/core';
+import { getLogger, tryCatchSync } from '@luckystack/core';
 import type {
   DeployConfigShape,
   DeployEnvironmentShape,
@@ -68,9 +68,12 @@ export interface ServiceTargetResolver {
 const parseFirstSegment = (pathname: string): string | null => {
   const trimmed = pathname.startsWith('/') ? pathname.slice(1) : pathname;
   const firstSlash = trimmed.indexOf('/');
-  const segment = firstSlash === -1 ? trimmed : trimmed.slice(0, firstSlash);
-  if (!segment) return null;
-  return segment;
+  const rawSegment = firstSlash === -1 ? trimmed : trimmed.slice(0, firstSlash);
+  if (!rawSegment) return null;
+  //? Percent-encoded service names (e.g. `my%2Dservice`) must decode to their
+  //? registered keys. `tryCatchSync` guards against malformed sequences like `%ZZ`.
+  const [decodeError, segment] = tryCatchSync(() => decodeURIComponent(rawSegment));
+  return decodeError ? null : (segment ?? null);
 };
 
 /**
@@ -207,6 +210,15 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
 
   // Services owned by the local bundle. When a preset is passed, only those
   // services count as local; otherwise every known service does.
+  if (localPresetKey && !services.presets[localPresetKey]) {
+    const known = Object.keys(services.presets);
+    throw new Error(
+      `[router] Preset '${localPresetKey}' is not defined in services.config.ts. ` +
+      (known.length > 0
+        ? `Known presets: ${known.join(', ')}.`
+        : 'No presets are registered.'),
+    );
+  }
   const locallyOwnedServices = localPresetKey
     ? (services.presets[localPresetKey]?.services ?? [])
     : Object.keys(currentEnv.bindings);
@@ -247,14 +259,15 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
 
   const setLocalHealth = (service: string, healthy: boolean): void => {
     if (!locallyOwnedSet.has(service)) return;
-    healthState.set(service, healthy);
-    //? Fire-and-forget Redis write + publish. The in-memory cache already has
-    //? the new value, so local reads stay fast; sibling routers get notified
-    //? via pub/sub in the next event loop tick.
     if (healthStore) {
+      //? Delegate to the shared store; `readHealth` reads from it so the
+      //? in-memory `healthState` map is irrelevant when a store is wired.
+      //? Writing `healthState` too would be a dead write.
       void healthStore.set(service, healthy).catch((error: unknown) => {
-        console.error('[router] failed to publish health change:', error);
+        getLogger().error('[router] failed to publish health change:', { error });
       });
+    } else {
+      healthState.set(service, healthy);
     }
   };
 

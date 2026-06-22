@@ -4,6 +4,7 @@ export type {
   PostProxyResponsePayload,
   PostProxyResponseError,
   PostProxyResponseErrorCause,
+  ProxyRequestGatePayload,
 } from './hookPayloads';
 export { startRouter } from './startRouter';
 export type { StartRouterInput, RunningRouter } from './startRouter';

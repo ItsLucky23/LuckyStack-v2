@@ -230,11 +230,7 @@ Strict stream typing note:
 
 This repository no longer ships the standalone `src/streaming` demo route. (The kept `src/playground` dev tool is unrelated — it is an in-repo surface for testing core features and is never shipped to consumers.)
 
-To recreate the exact previous demo route and handlers, use:
-
-- `docs/STREAMING_RECONSTRUCTION.md`
-
-That guide contains copy-paste source templates for the removed files and the validation checklist.
+The previous `/streaming` demo was removed, but the streaming capability is fully documented in [`docs/ARCHITECTURE_SYNC.md`](./ARCHITECTURE_SYNC.md#streaming) (the four stream primitives, `createStreamThrottle`, and SSE) and [`packages/sync/docs/streaming.md`](../packages/sync/docs/streaming.md).
 
 ---
 

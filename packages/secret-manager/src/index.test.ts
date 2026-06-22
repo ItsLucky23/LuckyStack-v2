@@ -412,12 +412,16 @@ describe('token validation (validateToken)', () => {
     );
   });
 
-  it('warns when the token already carries a Bearer prefix', async () => {
+  it('strips a Bearer prefix and warns — the resulting header must not be double-prefixed', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
     process.env.K = 'SECRET_V1';
     const fetchImpl = okFetch({ SECRET_V1: 'v' });
     await initSecretManager(baseConfig({ token: 'Bearer abc', fetchImpl }));
     expect(warn).toHaveBeenCalled();
+    //? The stripped token must NOT produce `Bearer Bearer abc`.
+    const init = callsOf(fetchImpl)[0]?.[1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer abc');
   });
 });
 
@@ -436,6 +440,40 @@ describe('parseEnvFile — env-key regex (SM-07)', () => {
       expect(process.env.GOOD_KEY).toBe('ok');
       expect(process.env['BAD-KEY']).toBeUndefined();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('Ignoring env key "BAD-KEY"'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('strips quotes AND a trailing inline comment from quoted values', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(swallowWarn);
+    const dir = mkdtempSync(join(tmpdir(), 'sm-quote-'));
+    const envFile = join(dir, 'env');
+    writeFileSync(
+      envFile,
+      [
+        'Q_PLAIN="quoted value"',
+        'Q_COMMENT="quoted with comment" # trailing note',
+        "Q_SINGLE='single quoted' # note",
+        'Q_HASH="has#hash inside"',
+        'Q_BARE=plain value # inline',
+      ].join('\n') + '\n',
+    );
+    process.env.NODE_ENV = 'production'; //? avoid real fs.watchers
+    const fetchImpl = okFetch({});
+
+    try {
+      await initSecretManager(baseConfig({ fetchImpl, dev: { envFiles: [envFile] } }));
+      await reloadSecretManagerFromFiles();
+      expect(process.env.Q_PLAIN).toBe('quoted value');
+      //? Regression: a quoted value followed by an inline comment must keep only
+      //? the quoted content (the `endsWith(quote)` check used to misclassify these
+      //? as unterminated and store the raw `"..." # ...` text).
+      expect(process.env.Q_COMMENT).toBe('quoted with comment');
+      expect(process.env.Q_SINGLE).toBe('single quoted');
+      //? A `#` INSIDE the quotes is literal, not a comment.
+      expect(process.env.Q_HASH).toBe('has#hash inside');
+      expect(process.env.Q_BARE).toBe('plain value');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

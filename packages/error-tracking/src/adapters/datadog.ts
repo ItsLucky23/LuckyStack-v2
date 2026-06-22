@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import {
   ensurePeerDepInstalled,
   getCurrentErrorTrackerIdentity,
+  sanitizeErrorStrings,
   type ErrorTracker,
   type ErrorTrackerEvent,
   type ErrorTrackerUser,
@@ -43,8 +44,20 @@ interface DdStatsd {
   increment: (stat: string, value?: number, tags?: string[]) => void;
   gauge: (stat: string, value: number, tags?: string[]) => void;
   histogram: (stat: string, value: number, tags?: string[]) => void;
+  //? ET-O13: hot-shots exposes `close` to flush the UDP send buffer and
+  //? release the socket. Optional so the interface works without hot-shots.
+  close?: (callback?: () => void) => void;
 }
 
+/**
+ * @security PII note — user identity fields (`id`, `email`, `username`) passed
+ * via `setErrorTrackerUser` are tagged onto APM spans as `usr.id`, `usr.email`,
+ * `usr.name`. Sentry's `builtinBeforeSend` does NOT apply here: the Datadog
+ * adapter bypasses the Sentry scrubbing pipeline entirely. If your organisation
+ * requires that email addresses never leave the process boundary in plain text,
+ * hash or omit the `email` field before calling `setErrorTrackerUser`.
+ * There is no framework-level redaction of these span tags.
+ */
 export interface DatadogAdapterOptions {
   /**
    * Live dd-trace instance. Consumer-initialised because dd-trace MUST
@@ -122,20 +135,30 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
       const resolved = resolveExceptionEvent(options.beforeSend, error, context);
       if (!resolved) return;
       const { error: fwdError, context: fwdContext } = resolved;
+      //? ET-O2: scrub secrets interpolated into error.message / error.stack
+      //? before they reach Datadog. The context-level key-based scrub covers
+      //? the `context` object; this covers the free-text string fields.
+      const scrubbed = sanitizeErrorStrings(fwdError);
+      const errorMessage = scrubbed?.message ?? (fwdError instanceof Error ? fwdError.message : String(fwdError));
+      const errorStack = scrubbed?.stack ?? (fwdError instanceof Error ? fwdError.stack : undefined);
       const span = options.tracer.startSpan('luckystack.error', {
         tags: {
           'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
-          'error.msg': fwdError instanceof Error ? fwdError.message : String(fwdError),
+          'error.msg': errorMessage,
           ...userTags(),
           ...fwdContext,
         },
       });
       span.setTag('error', true);
-      if (fwdError instanceof Error && fwdError.stack) {
-        span.setTag('error.stack', fwdError.stack);
+      if (errorStack !== undefined) {
+        span.setTag('error.stack', errorStack);
       }
-      span.finish();
+      //? ET-N4: increment the counter BEFORE finishing the span so Datadog can
+      //? correlate the StatsD metric with the active trace span. Emitting after
+      //? `span.finish()` caused the metric timestamp to lag the span close, which
+      //? broke APM-to-metrics correlation in Datadog dashboards.
       options.statsd?.increment(`${prefix}error.exception`, 1, formatTags(fwdContext));
+      span.finish();
     },
 
     captureMessage(message, level, context) {
@@ -150,8 +173,9 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
           ...fwdContext,
         },
       });
-      span.finish();
+      //? ET-N4: same pattern as captureException — counter before finish for correlation.
       options.statsd?.increment(`${prefix}error.message`, 1, [`level:${fwdLevel}`, ...formatTags(fwdContext)]);
+      span.finish();
     },
 
     setUser(user) {
@@ -175,6 +199,20 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
       } finally {
         span.finish();
       }
+    },
+
+    //? ET-O13: flush the hot-shots UDP send buffer on graceful shutdown so
+    //? in-flight StatsD metrics are not silently dropped. `dd-trace` itself
+    //? does not require an explicit flush (traces are sent synchronously in
+    //? the APM agent).
+    flush() {
+      return new Promise<void>((resolve) => {
+        if (options.statsd?.close) {
+          options.statsd.close(resolve);
+        } else {
+          resolve();
+        }
+      });
     },
 
     beforeSend: options.beforeSend,

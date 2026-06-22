@@ -9,14 +9,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 //? constructor records instances in call order (client first, subscriber
 //? second — matching the source).
 
+interface FakePipeline {
+  set: ReturnType<typeof vi.fn>;
+  publish: ReturnType<typeof vi.fn>;
+  exec: ReturnType<typeof vi.fn>;
+}
+
 interface FakeRedis {
   connect: ReturnType<typeof vi.fn>;
   disconnect: ReturnType<typeof vi.fn>;
+  quit: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
   unsubscribe: ReturnType<typeof vi.fn>;
-  set: ReturnType<typeof vi.fn>;
-  publish: ReturnType<typeof vi.fn>;
+  //? multi() returns a chainable pipeline; we track pipelines per client so
+  //? tests can inspect .set()/.publish()/.exec() calls on the right pipeline.
+  multi: ReturnType<typeof vi.fn>;
+  _pipeline: FakePipeline;
   mget: ReturnType<typeof vi.fn>;
 }
 
@@ -27,22 +36,38 @@ const noop = (): undefined => undefined;
 const resolveNoop = (): Promise<void> => Promise.resolve();
 const resolveEmptyMget = (): Promise<(string | null)[]> => Promise.resolve([]);
 
+//? Build a fresh chainable pipeline mock for each Redis instance.
+const makePipeline = (): FakePipeline => {
+  const pipeline: FakePipeline = {
+    set: vi.fn(),
+    publish: vi.fn(),
+    exec: vi.fn(() => Promise.resolve([[null, 'OK'], [null, 1]])),
+  };
+  //? Chainable: each method returns the pipeline itself so .set().publish().exec() works.
+  pipeline.set.mockReturnValue(pipeline);
+  pipeline.publish.mockReturnValue(pipeline);
+  return pipeline;
+};
+
 vi.mock('ioredis', () => {
   return {
     default: class {
       connect: ReturnType<typeof vi.fn>;
-      disconnect = vi.fn();
+      disconnect = vi.fn(resolveNoop);
+      quit = vi.fn(resolveNoop);
       on = vi.fn();
       subscribe = vi.fn(resolveNoop);
       unsubscribe = vi.fn(resolveNoop);
-      set = vi.fn(resolveNoop);
-      publish = vi.fn(resolveNoop);
       mget = vi.fn(resolveEmptyMget);
+      _pipeline: FakePipeline;
+      multi: ReturnType<typeof vi.fn>;
 
       constructor() {
         const impl = connectImpls[instances.length] ?? resolveNoop;
         this.connect = vi.fn(impl);
-        instances.push(this);
+        this._pipeline = makePipeline();
+        this.multi = vi.fn(() => this._pipeline);
+        instances.push(this as unknown as FakeRedis);
       }
     },
   };
@@ -129,12 +154,19 @@ describe('createRedisHealthStore — health-key TTL (self-healing stale health)'
     const client = expectInstance(0);
     //? The key MUST carry an expiry so a router that dies without flipping the
     //? service back can't pin the 'unhealthy' verdict forever.
-    expect(client.set).toHaveBeenCalledWith(
+    //? set() now goes through multi().set().publish().exec() atomically.
+    expect(client.multi).toHaveBeenCalledTimes(1);
+    expect(client._pipeline.set).toHaveBeenCalledWith(
       'router:health:staging:api',
       'unhealthy',
       'EX',
       60,
     );
+    expect(client._pipeline.publish).toHaveBeenCalledWith(
+      'router:health:events:staging',
+      JSON.stringify({ service: 'api', healthy: false }),
+    );
+    expect(client._pipeline.exec).toHaveBeenCalledTimes(1);
 
     await store.close();
   });
@@ -152,7 +184,7 @@ describe('createRedisHealthStore — health-key TTL (self-healing stale health)'
     await store.set('api', true);
 
     const client = expectInstance(0);
-    expect(client.set).toHaveBeenCalledWith(
+    expect(client._pipeline.set).toHaveBeenCalledWith(
       'router:health:staging:api',
       'healthy',
       'EX',
@@ -175,7 +207,7 @@ describe('createRedisHealthStore — health-key TTL (self-healing stale health)'
     await store.set('api', true);
 
     const client = expectInstance(0);
-    expect(client.set).toHaveBeenCalledWith(
+    expect(client._pipeline.set).toHaveBeenCalledWith(
       'router:health:staging:api',
       'healthy',
       'EX',

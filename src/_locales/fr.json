@@ -3,7 +3,9 @@
   "common": {
     "404": "Un problème est survenu, réessayez plus tard.",
     "whiteSpace": " ",
-    "error": "ERREUR"
+    "error": "ERREUR",
+    "unexpectedError": "Un problème est survenu.",
+    "refreshPage": "Actualiser la page"
   },
   "middleware": {
     "notAdmin": "Vous n'êtes pas administrateur."
@@ -85,7 +87,25 @@
     "resetSuccess": "Votre mot de passe a été mis à jour. Vous pouvez maintenant vous connecter avec le nouveau.",
     "resetGoLogin": "Aller à la connexion",
     "resetInvalidToken": "Ce lien est invalide ou a expiré.",
-    "resetPasswordUpdated": "Mot de passe mis à jour."
+    "resetPasswordUpdated": "Mot de passe mis à jour.",
+    "signInTitle": "Se connecter à votre compte",
+    "createAccountTitle": "Créer un nouveau compte",
+    "noAccountYet": "Pas encore de compte ?",
+    "alreadyHaveAccount": "Déjà un compte ?",
+    "createAccount": "En créer un",
+    "logIn": "Se connecter",
+    "signUp": "S'inscrire",
+    "loading": "Chargement..."
+  },
+  "navbar": {
+    "closeSidebar": "Fermer la barre latérale",
+    "showSidebar": "Afficher la barre latérale",
+    "playground": "Playground",
+    "settings": "Paramètres",
+    "admin": "Admin",
+    "logout": "Déconnexion",
+    "closeMenu": "Fermer le menu",
+    "openMenu": "Ouvrir le menu"
   },
   "settings": {
     "changeAvatar": "Changer d'avatar",
@@ -115,6 +135,8 @@
       "label": "Entrez une nouvelle adresse e-mail ; nous y enverrons un lien de confirmation. En confirmant, vous serez déconnecté sur tous les appareils.",
       "button": "Envoyer la confirmation",
       "checkInbox": "Vérifiez la nouvelle boîte de réception pour le lien de confirmation.",
+      "confirmPrompt": "Cliquez sur le bouton ci-dessous pour confirmer votre nouvelle adresse e-mail.",
+      "confirmButton": "Confirmer le changement d'e-mail",
       "confirming": "Confirmation de la nouvelle adresse en cours...",
       "confirmedTitle": "E-mail mis à jour",
       "confirmedBody": "Votre adresse e-mail a été modifiée. Toutes les sessions ont été déconnectées — veuillez vous reconnecter avec la nouvelle adresse.",

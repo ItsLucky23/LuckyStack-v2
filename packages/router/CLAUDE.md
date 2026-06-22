@@ -88,6 +88,7 @@ Read from `getDeployConfig()` (registered by the consumer's `deploy.config.ts`):
 - `routing.strictBootHandshake?: boolean` — when true, boot handshake throws instead of warning on mismatch.
 - `routing.healthProbeTimeoutMs?: number` — fallback `/_health` probe timeout (default `3000`).
 - `routing.bootKeyTtlSeconds?: number` — TTL for the Redis boot UUID key (default `3600`).
+- `routing.maxRequestBodyBytes?: number` — max request body size (bytes) the HTTP proxy rejects before forwarding (413 `routing.requestBodyTooLarge`). DEFAULT undefined → 100 MiB. Set to `Infinity` to disable edge enforcement.
 - `development.enableFallbackRouting?: boolean` — turn on the dev-mode `local → staging fallback` flow.
 - `development.healthPollMs?: number` — dev health-poll override.
 
@@ -109,12 +110,25 @@ Env vars:
 
 ## Hooks emitted
 
-| Hook | Payload | Fired when |
-|---|---|---|
-| `preProxyRequest` | `{ service, pathname, method, target, viaFallback }` | Just before the upstream request is sent. |
-| `postProxyResponse` | `preProxyRequest` payload + `{ statusCode, latencyMs, error? }` | Upstream response begins streaming back to the client (happy path) **or** the upstream transport emits `'error'` (failure path — `statusCode: 0`, `error` populated). |
+| Hook | Payload | When | Stop signal? |
+|---|---|---|---|
+| `proxyRequestGate` | `{ service, pathname, method, target, viaFallback, remoteAddress }` | After path validation + service resolution + host-pin check, **before** the upstream leg opens. HTTP: `method` is the actual HTTP verb; WS upgrades: `method = 'UPGRADE'`. | YES — fail-CLOSED deny gate. Return a `HookStopSignal` to reject with `httpStatus` (default 403) + `errorCode`. No handlers = allow. |
+| `preProxyRequest` | `{ service, pathname, method, target, viaFallback }` | Just before the upstream request is sent (after the gate passes). | No (observational). |
+| `postProxyResponse` | `preProxyRequest` payload + `{ statusCode, latencyMs, error? }` | Upstream response begins streaming back to the client (happy path) **or** the upstream transport emits `'error'` (failure path — `statusCode: 0`, `error` populated). | No (observational). |
 
 Register handlers via `@luckystack/core`'s hook bus on the consumer side. Consumers distinguish success from failure by inspecting `payload.error` (or `payload.statusCode === 0`).
+
+**Example — IP allowlist gate:**
+
+```ts
+import { registerHook } from '@luckystack/core';
+
+registerHook('proxyRequestGate', ({ remoteAddress }) => {
+  if (remoteAddress !== undefined && !ALLOWED_IPS.has(remoteAddress)) {
+    return { stop: true, errorCode: 'routing.ipDenied', httpStatus: 403 };
+  }
+});
+```
 
 ## Conventions for this package
 

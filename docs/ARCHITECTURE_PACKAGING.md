@@ -787,10 +787,10 @@ Step-by-step plan:
 
 Parked items that are intentionally out of scope for the current packaging push. Revisit when the core package split has shipped.
 
-- **`@luckystack/monitoring`** — full request-forensics package sketched in `docs/MONITORING.md` (dual-stream: Sentry for "why", monitoring package for "what"; OpenSearch-backed audit trail; P95/P99 metrics; RUM). Parked pending a decision on whether we self-host a search engine for this or consume an external one. The package would hang off `postApiExecute` / `postSyncFanout` hooks (now live in §4), so no core design changes are blocked on it.
+- **`@luckystack/monitoring`** — full request-forensics package (dual-stream: Sentry for "why", monitoring package for "what"; OpenSearch-backed audit trail; P95/P99 metrics; RUM), to live in its own repo. Tracked in `docs/ROADMAP.md`. Parked pending a decision on whether we self-host a search engine for this or consume an external one. The package would hang off `postApiExecute` / `postSyncFanout` hooks (now live in §4), so no core design changes are blocked on it.
 - **Phase 2 function pruning** — import-graph-based pruning of the per-preset function registry (§9.8 point 6). Current Phase 1 bundles all functions in every preset for safety; optimize only after measurement.
 - **Frontend typegen scope in split deployments** — define whether `apiTypes.generated.ts` should include all presets' routes or be preset-scoped when projects split frontend per domain. Currently aggregate.
-- **`@luckystack/web-vitals`** — client-side RUM package (from `docs/MONITORING.md` §4C). Lower priority than backend observability.
+- **`@luckystack/web-vitals`** — client-side RUM package (LCP/INP/CLS, etc.). Lower priority than backend observability; will fold into the `@luckystack/monitoring` repo as a subpath rather than ship standalone.
 
 ---
 
@@ -1387,7 +1387,7 @@ Publishability audit findings (not fixed this sitting):
 
 The remaining deep-relative imports from `packages/**` into project files fall into four categories:
 
-**A. Config reach** (11 files) — packages read `rateLimiting`, `logging`, `sessionBasedToken`, `sessionExpiryDays`, `allowMultipleSessions`, `defaultLanguage`, `sentry`, and the `SessionLayout` type from `../../../config`. Affected: `@luckystack/api`, `@luckystack/sync`, `@luckystack/core` (`apiRequest`, `rateLimiter`, `extractToken`, `extractTokenFromRequest`), `@luckystack/login`, `@luckystack/sentry`. Fix pattern: framework exposes a `configure*` setter per concern, project calls once at boot. Each fix is small but multiplies across call sites that read the config at every request — consider a single `registerProjectConfig({...})` call in core and a shared getter.
+**A. Config reach** (11 files) — packages read `rateLimiting`, `logging`, `sessionBasedToken`, `sessionExpiryDays`, `session.perUser`, `defaultLanguage`, `sentry`, and the `SessionLayout` type from `../../../config`. Affected: `@luckystack/api`, `@luckystack/sync`, `@luckystack/core` (`apiRequest`, `rateLimiter`, `extractToken`, `extractTokenFromRequest`), `@luckystack/login`, `@luckystack/sentry`. Fix pattern: framework exposes a `configure*` setter per concern, project calls once at boot. Each fix is small but multiplies across call sites that read the config at every request — consider a single `registerProjectConfig({...})` call in core and a shared getter.
 
 **B. Runtime-maps reach** (4 files) — `packages/{api,sync}/src/handle*Request.ts` imports from `../../../server/prod/runtimeMaps`. That file loads per-preset generated map files that the project emits. Fix: framework exposes a `registerRuntimeMaps({ apis, syncs })` DI surface; project's `server.ts` wires generated maps at boot.
 

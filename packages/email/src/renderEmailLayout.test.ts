@@ -93,15 +93,51 @@ describe('renderEmailLayout', () => {
     expect(text).toContain('a & b');
   });
 
-  it('does not interpolate the ctaUrl through the HTML escaper (URL is used verbatim in href)', () => {
-    //? The CTA href uses the raw `ctaUrl` (not escaped), so ampersands in
-    //? query strings survive intact for the click-through.
+  it('HTML-escapes the ctaUrl in the href attribute (ampersands become &amp;)', () => {
+    //? After EMAIL-O3 the href is passed through escapeHtml so `&` in query
+    //? strings becomes `&amp;` — correct HTML, still correct for click-through.
     const { html } = renderEmailLayout({
       title: 'T',
       intro: 'I',
       ctaLabel: 'Go',
       ctaUrl: 'https://x.test/?a=1&b=2',
     });
-    expect(html).toContain('href="https://x.test/?a=1&b=2"');
+    expect(html).toContain('href="https://x.test/?a=1&amp;b=2"');
+    expect(html).not.toContain('href="https://x.test/?a=1&b=2"');
+  });
+
+  it('suppresses the CTA block when ctaUrl has a disallowed scheme (EMAIL-O3)', () => {
+    const { html, text } = renderEmailLayout({
+      title: 'T',
+      intro: 'I',
+      ctaLabel: 'Click me',
+      ctaUrl: 'javascript:alert(1)',
+    });
+    expect(html).not.toContain('Click me');
+    expect(html).not.toContain('javascript:');
+    expect(text).not.toContain('Click me');
+  });
+
+  it('suppresses the CTA block when ctaUrl is not a parseable URL (EMAIL-O3)', () => {
+    const { html } = renderEmailLayout({
+      title: 'T',
+      intro: 'I',
+      ctaLabel: 'Click',
+      ctaUrl: 'not a url at all',
+    });
+    expect(html).not.toContain('Click');
+  });
+
+  it('falls back to the default accent when accent contains CSS injection characters (EMAIL-O3)', () => {
+    const { html } = renderEmailLayout({
+      title: 'T',
+      intro: 'I',
+      ctaLabel: 'Go',
+      ctaUrl: 'https://x.test',
+      accent: 'red;color:black',
+    });
+    // Malicious value is replaced with the safe default.
+    expect(html).not.toContain('red;color:black');
+    expect(html).toContain('background:#3B82F6');
   });
 });

@@ -5,7 +5,7 @@ import { getLogger } from './loggerRegistry';
 import { dispatchHook } from './hooks/registry';
 import { getBindAddress } from './bindAddress';
 
-const normalizeOrigin = ({ value, secure }: { value: string; secure: boolean }): string => {
+export const normalizeOrigin = ({ value, secure }: { value: string; secure: boolean }): string => {
   const trimmedValue = value.trim().toLowerCase();
   if (!trimmedValue) { return ''; }
 
@@ -65,9 +65,12 @@ const allowedOrigin = (origin: string): boolean => {
 
   //? Resolver-function mode: defer entirely to the consumer's logic. The
   //? framework keeps the normalized same-origin bind address always-allowed.
+  //? Pass the NORMALIZED origin so that a naïve `startsWith`-style resolver
+  //? cannot be bypassed by appending a path, port alias, or mixed casing —
+  //? the same normalization the static-array branch applies (CORE-O16).
   if (typeof configured === 'function') {
     if (normalizedOrigin && normalizedOrigin === location) return true;
-    if (configured(origin)) return true;
+    if (configured(normalizedOrigin)) return true;
     // Fall through to the rejection path below.
   } else {
     const normalizedAllowedOrigins = new Set(
@@ -90,16 +93,21 @@ const allowedOrigin = (origin: string): boolean => {
         .map((value) => normalizeOrigin({ value, secure }))
         .filter(Boolean);
 
+  //? Sanitize the caller-supplied origin before including it in any log or hook
+  //? payload: cap length and strip non-printable characters so an attacker cannot
+  //? inject arbitrary bytes into log sinks or external alerting hooks.
+  const safeOrigin = origin.slice(0, 512).replaceAll(/[^ -~]/g, '');
+
   if (getProjectConfig().logging.devLogs) {
     getLogger().warn('cors: origin not allowed', {
-      origin,
+      origin: safeOrigin,
       normalizedOrigin,
       allowedOrigins: debugAllowedOrigins,
       allowLocalhost: cors.allowLocalhost,
     });
   }
   void dispatchHook('corsRejected', {
-    origin,
+    origin: safeOrigin,
     normalizedOrigin,
     allowedOrigins: debugAllowedOrigins,
     allowLocalhost: cors.allowLocalhost,

@@ -16,7 +16,7 @@ import { useLocation } from "react-router-dom";
 import { SessionLayout } from "config";
 import { apiRequest } from "src/_sockets/apiRequest";
 
-import { useSession, useRouter } from "@luckystack/core/client";
+import { useSession, useRouter, useTranslator } from "@luckystack/core/client";
 
 import Avatar from "./Avatar";
 
@@ -43,36 +43,41 @@ export interface NavbarItem {
   hideOnExpanded?: boolean;
 }
 
-const DEFAULT_ITEMS: NavbarItem[] = [
-  {
-    init: ({ session, state }) => {
-      if (!session) return null;
-      return (
-        <>
-          <div className="w-6 h-6 flex-shrink-0">
-            <Avatar user={session} />
-          </div>
-          {state === 'expanded' && (
-            <div className="line-clamp-1 select-none text-sm font-medium text-title">
-              {session.name}
+//? Produces the default sidebar items with translated labels.
+//? Defined as a factory so labels resolve through the active locale
+//? rather than being baked in as English at module-load time.
+function buildDefaultItems(translate: ReturnType<typeof useTranslator>): NavbarItem[] {
+  return [
+    {
+      init: ({ session, state }) => {
+        if (!session) return null;
+        return (
+          <>
+            <div className="w-6 h-6 flex-shrink-0">
+              <Avatar user={session} />
             </div>
-          )}
-        </>
-      );
+            {state === 'expanded' && (
+              <div className="line-clamp-1 select-none text-sm font-medium text-title">
+                {session.name}
+              </div>
+            )}
+          </>
+        );
+      },
     },
-  },
-  { icon: faAngleLeft,  label: 'Close sidebar', action: ({ setState }) => { setState('folded'); }, hideOnFolded: true },
-  { icon: faAngleRight, label: 'Show sidebar',  action: ({ setState }) => { setState('expanded'); }, hideOnExpanded: true },
-  { icon: faFlask,       label: 'Playground',    path: '/playground' },
-  { icon: faGear,        label: 'Settings',      path: '/settings' },
-  { icon: faUserShield,  label: 'Admin',         path: '/admin' },
-  {
-    icon: faRightFromBracket,
-    label: 'Logout',
-    bottom: true,
-    action: () => { void apiRequest({ name: 'system/logout', version: 'v1' }); },
-  },
-];
+    { icon: faAngleLeft,  label: translate({ key: 'navbar.closeSidebar' }), action: ({ setState }) => { setState('folded'); }, hideOnFolded: true },
+    { icon: faAngleRight, label: translate({ key: 'navbar.showSidebar' }),  action: ({ setState }) => { setState('expanded'); }, hideOnExpanded: true },
+    { icon: faFlask,       label: translate({ key: 'navbar.playground' }),    path: '/playground' },
+    { icon: faGear,        label: translate({ key: 'navbar.settings' }),      path: '/settings' },
+    { icon: faUserShield,  label: translate({ key: 'navbar.admin' }),         path: '/admin' },
+    {
+      icon: faRightFromBracket,
+      label: translate({ key: 'navbar.logout' }),
+      bottom: true,
+      action: () => { void apiRequest({ name: 'system/logout', version: 'v1' }); },
+    },
+  ];
+}
 
 interface NavbarItemViewProps {
   item: NavbarItem;
@@ -144,11 +149,15 @@ export interface NavbarProps {
   items?: NavbarItem[];
 }
 
-export default function Navbar({ items = DEFAULT_ITEMS }: NavbarProps = {}) {
+export default function Navbar({ items }: NavbarProps = {}) {
   const [state, setState] = useState<NavbarState>('folded');
   const location = useLocation();
   const router = useRouter();
   const { session } = useSession<SessionLayout>();
+  const translate = useTranslator();
+  //? Compute default items inside the component so labels resolve through the
+  //? active locale (useTranslator is a hook; cannot be called at module level).
+  const resolvedItems = items ?? buildDefaultItems(translate);
 
   // Auto-collapse on route change so the mobile drawer doesn't stay open.
   useEffect(() => {
@@ -165,7 +174,7 @@ export default function Navbar({ items = DEFAULT_ITEMS }: NavbarProps = {}) {
     router,
   };
 
-  const renderableItems = items.filter((item) => item.init !== undefined || (item.icon && item.label));
+  const renderableItems = resolvedItems.filter((item) => item.init !== undefined || (item.icon && item.label));
   const topItems = renderableItems.filter((item) => !item.bottom);
   const bottomItems = renderableItems.filter((item) => item.bottom === true);
 
@@ -180,7 +189,7 @@ export default function Navbar({ items = DEFAULT_ITEMS }: NavbarProps = {}) {
         </div>
         <button
           type="button"
-          aria-label={isOpen ? 'Close menu' : 'Open menu'}
+          aria-label={isOpen ? translate({ key: 'navbar.closeMenu' }) : translate({ key: 'navbar.openMenu' })}
           className="w-9 h-9 flex items-center justify-center rounded-md hover:bg-container1-hover transition-colors cursor-pointer"
           onClick={() => { setState(isOpen ? 'folded' : 'expanded'); }}
         >

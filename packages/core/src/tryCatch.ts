@@ -10,6 +10,6 @@ export default async function tryCatch<T, P = void>(
     return [null, response];
   } catch (error) {
     captureException(error, context);
-    return [error as Error, null];
+    return [error instanceof Error ? error : new Error(String(error)), null];
   }
 }

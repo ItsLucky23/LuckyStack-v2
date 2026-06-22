@@ -20,6 +20,10 @@ const ioStub = {
     lastInRoom = room;
     return { fetchSockets: (): Promise<{ id: string }[]> => Promise.resolve(fetchSocketsResult) };
   },
+  //? Required so `getRoomPresence` can check whether each fetched socket is
+  //? local (in the local Map) or remote (on another instance). Tests use an
+  //? empty Map so all fetched sockets are treated as remote → afk: 'unknown'.
+  sockets: { sockets: new Map<string, unknown>() },
 };
 
 vi.mock('@luckystack/core', async (importOriginal) => ({

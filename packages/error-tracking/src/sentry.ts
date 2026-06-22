@@ -10,15 +10,21 @@
 import { createRequire } from 'node:module';
 
 import {
+  appendErrorTracker,
   getLogger,
   getProjectName,
+  getRedactedLogKeys,
   initSharedSentry,
   loadPeer,
+  REDACTED_PLACEHOLDER,
+  sanitizeForLog,
   captureException as sharedCaptureException,
   captureMessage as sharedCaptureMessage,
   setSentryUser as sharedSetSentryUser,
   startSpan as sharedStartSpan,
 } from '@luckystack/core';
+
+import { createSentryAdapter } from './adapters/sentry';
 
 import { getSentryConfig } from './sentryConfig';
 import { enableErrorTrackingAutoInstrumentation } from './autoInstrumentation';
@@ -34,6 +40,12 @@ const localRequire = createRequire(import.meta.url);
 type SentryModule = typeof import('@sentry/node');
 
 let cachedSentry: SentryModule | null = null;
+
+//? One-time guard for the dev "installed but inactive" info line emitted when no
+//? DSN is set (see `resolveSentryInitConfig`). `initializeSentry()` is idempotent
+//? boot wiring that may run more than once, so without this the notice would log
+//? on every call.
+let noDsnNoticeShown = false;
 
 //? `localRequire` (built from THIS module's `import.meta.url`) is passed so
 //? resolution + load happen from the package's perspective, not core's
@@ -62,16 +74,22 @@ interface ResolvedSentryInitConfig {
 //? Config-build step extracted verbatim from `initializeSentry`. Reads env +
 //? the package-owned `getSentryConfig().server` and resolves the same derived
 //? values. Returns `null` when no DSN is set (the early-return branch); the
-//? production-only warning side-effect is preserved here so call-time behavior
-//? is unchanged.
+//? no-DSN notice side-effect (production warning + a one-time dev info line) is
+//? emitted here so call-time behavior is centralised.
 const resolveSentryInitConfig = (): ResolvedSentryInitConfig | null => {
   const dsn = process.env.SENTRY_DSN ?? process.env.VITE_SENTRY_DSN;
   const isProduction = process.env.NODE_ENV === 'production';
   const enabledOverride = process.env.SENTRY_ENABLED ?? process.env.VITE_SENTRY_ENABLED;
 
   if (!dsn) {
-    if (process.env.NODE_ENV === 'production') {
+    if (isProduction) {
       getLogger().warn('SENTRY_DSN not configured. Error monitoring disabled.');
+    } else if (!noDsnNoticeShown) {
+      //? Dev-friendly nudge so a developer who installed the package but hasn't
+      //? set a DSN isn't met with silence. One-time so it doesn't spam repeated
+      //? `initializeSentry()` calls (idempotent boot wiring).
+      noDsnNoticeShown = true;
+      getLogger().info('@luckystack/error-tracking installed but inactive — set SENTRY_DSN to capture.');
     }
     return null;
   }
@@ -85,15 +103,58 @@ const resolveSentryInitConfig = (): ResolvedSentryInitConfig | null => {
   return { dsn, isProduction, enabledOverride, tracesSampleRate, ignoreErrors };
 };
 
-//? beforeSend-assembly step. Strips sensitive cookies before an event is sent —
-//? identical body to the inline closure it replaces. Defined at module scope as
-//? a plain handler (rather than a factory returning a closure) so it carries no
-//? hidden state and is reused as-is for every init.
+//? ET-O5: redact sensitive headers, cookies, request.data, query_string,
+//? extra, and breadcrumb data in Sentry events using the same denylist
+//? as `sanitizeForLog`. Previously only `request.cookies` was removed.
+//? `sanitizeForLog` deep-scrubs objects by key; raw header maps and extra
+//? dicts are passed through it so all registered redacted keys are masked.
 type SentryBeforeSend = NonNullable<Parameters<SentryModule['init']>[0]>['beforeSend'];
+
+const redactSentryHeaders = (
+  headers: Record<string, string | string[] | undefined> | undefined,
+): Record<string, string | string[] | undefined> | undefined => {
+  if (!headers) return headers;
+  const denylist = new Set(getRedactedLogKeys().map((k) => k.toLowerCase()));
+  const out: Record<string, string | string[] | undefined> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    out[key] = denylist.has(key.toLowerCase()) ? REDACTED_PLACEHOLDER : value;
+  }
+  return out;
+};
+
 const builtinBeforeSend: SentryBeforeSend = (event) => {
-  // Remove sensitive data if needed
-  if (event.request?.cookies) {
-    delete event.request.cookies;
+  if (event.request) {
+    //? Wipe the entire cookies object (session tokens live here).
+    if (event.request.cookies) {
+      delete event.request.cookies;
+    }
+    //? Scrub sensitive authorization / cookie header values.
+    if (event.request.headers) {
+      event.request.headers = redactSentryHeaders(
+        event.request.headers,
+      ) as typeof event.request.headers;
+    }
+    //? request.data may carry POST body or JSON-encoded form fields.
+    if (event.request.data !== undefined && event.request.data !== null && typeof event.request.data === 'object') {
+      event.request.data = sanitizeForLog(event.request.data);
+    }
+    //? query_string may be a string ("token=abc") or a parsed object.
+    //? ET-O5: scrub both forms. String form is redacted wholesale to avoid
+    //? the complexity of re-serialising after partial key-by-key scrubbing
+    //? (URLSearchParams-based scrub would leave the "?" separator and key
+    //? order inconsistent with what Sentry captured). The object form goes
+    //? through sanitizeForLog so individual key redaction is preserved.
+    if (event.request.query_string !== undefined) {
+      if (typeof event.request.query_string === 'string') {
+        event.request.query_string = '[redacted:query_string]';
+      } else if (typeof event.request.query_string === 'object') {
+        event.request.query_string = sanitizeForLog(event.request.query_string) as typeof event.request.query_string;
+      }
+    }
+  }
+  //? extra dict is the framework's per-capture context map (CORE-O4 fix extended).
+  if (event.extra) {
+    event.extra = sanitizeForLog(event.extra) as typeof event.extra;
   }
   return event;
 };
@@ -113,8 +174,10 @@ const buildSentryInitOptions = (
   // honors projectConfig overrides, not just the raw env var.
   serverName: getProjectName(),
 
-  // Only send errors in production by default
-  enabled: config.isProduction || config.enabledOverride === 'true',
+  // DSN is set ⇒ capture is ON in every environment (dev + prod) so installing
+  // the package + setting SENTRY_DSN "just works". Explicit opt-out only:
+  // SENTRY_ENABLED=false disables capture without unsetting the DSN.
+  enabled: config.enabledOverride !== 'false',
 
   // Ignore certain errors
   ignoreErrors: config.ignoreErrors,
@@ -125,18 +188,31 @@ const buildSentryInitOptions = (
 
 //? Integration-wiring step: bridge the live `@sentry/node` SDK onto the shared
 //? DI surface exposed from `@luckystack/core` so framework code can report
-//? errors without a direct dep on `@sentry/node`. Body is byte-for-byte the
-//? same `initSharedSentry({...})` call that was inline.
+//? errors without a direct dep on `@sentry/node`.
+//? ET-O3: captureException / captureMessage are now no-ops in the legacy DI
+//? slot because `createSentryAdapter()` (registered below in `initializeSentry`)
+//? handles them via `captureExceptionAcrossTrackers` with per-event ALS identity
+//? (`withIdentity`). Keeping direct calls here would double-fire every Sentry
+//? event. setUser / setContext / startInactiveSpan are kept for legacy callers
+//? that bypass the adapter path.
+//? ET-N5 (mixed-mode double-capture): calling both `initializeSentry()` AND
+//? `appendErrorTracker(createSentryAdapter())` is safe — `appendErrorTracker`
+//? de-dupes by name and replaces the existing 'sentry' entry. Calling
+//? `registerErrorTracker(createSentryAdapter())` after `initializeSentry()`
+//? replaces ALL adapters (not append), so the original adapter is removed.
+//? Do NOT add a second `Sentry.init()` call — only one SDK init is supported.
 const wireSharedSentryDI = (Sentry: SentryModule): void => {
+  //? ET-O12: the `SentryInstance` contract in `@luckystack/core/sentrySetup` uses
+  //? `unknown` params so core stays dep-free of `@sentry/node`. The casts below
+  //? are therefore required at the boundary: the values are always valid Sentry
+  //? types (they're passed straight through from framework call sites) but TS
+  //? cannot infer that through the `unknown` slot. Document rather than eliminate.
+  //? `initSharedSentry` is deprecated for EXTERNAL callers (use registerErrorTracker);
+  //? this is the one legitimate internal legacy-Sentry DI bridge, so the warning is suppressed.
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- internal legacy-Sentry DI bridge
   initSharedSentry({
-    captureException: (exception, context) => Sentry.captureException(
-      exception,
-      context as Parameters<typeof Sentry.captureException>[1],
-    ),
-    captureMessage: (message, level) => Sentry.captureMessage(
-      message,
-      level as Parameters<typeof Sentry.captureMessage>[1],
-    ),
+    captureException: () => '',
+    captureMessage: () => '',
     setUser: (user) => {
       Sentry.setUser(user as Parameters<typeof Sentry.setUser>[0]);
     },
@@ -169,6 +245,14 @@ export const initializeSentry = () => {
   // Wire the shared DI surface exposed from @luckystack/core so framework code
   // can report errors without taking a direct dependency on @sentry/node.
   wireSharedSentryDI(Sentry);
+
+  //? ET-O3: register the adapter so per-event identity comes from ALS
+  //? (`withIdentity` in `createSentryAdapter`) rather than the process-global
+  //? `Sentry.setUser()` scope that `wireSharedSentryDI` sets. The adapter uses
+  //? `getCurrentErrorTrackerIdentity()` per-capture so concurrent requests can't
+  //? bleed their user identity across events. `appendErrorTracker` de-dupes by
+  //? name (`'sentry'`) so repeated `initializeSentry()` calls stay idempotent.
+  appendErrorTracker(createSentryAdapter());
 
   //? Register the hook subscribers that previously lived as direct imports
   //? in `@luckystack/api` and `@luckystack/sync`. Idempotent — calling

@@ -90,6 +90,7 @@ export { sendEmailChangeConfirmation } from './emailChangeNotification';
 // OAuth provider registry + composable helpers.
 export {
   registerOAuthProviders,
+  registerOAuthProviderFactory,
   getOAuthProviders,
   isFullOAuthProvider,
   asOAuthUserData,

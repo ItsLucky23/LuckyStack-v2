@@ -28,8 +28,9 @@ interface SeamState {
   projectConfig: {
     logging: { devLogs: boolean; stream: boolean };
     dev: { warnOnMissingInputType: boolean };
-    rateLimiting: { defaultApiLimit: number | false; defaultIpLimit: number | false; windowMs: number };
+    rateLimiting: { defaultApiLimit: number | false; defaultIpLimit: number | false; windowMs: number; skipLoopbackInDev: boolean };
     http: { trustProxy: boolean };
+    api: { requestTimeoutMs: number | false };
   };
   session: { id: string; language?: string } | null;
   apisObject: Record<string, unknown>;
@@ -48,8 +49,9 @@ const defaultSeam = (): SeamState => ({
   projectConfig: {
     logging: { devLogs: false, stream: false },
     dev: { warnOnMissingInputType: false },
-    rateLimiting: { defaultApiLimit: false, defaultIpLimit: false, windowMs: 60_000 },
+    rateLimiting: { defaultApiLimit: false, defaultIpLimit: false, windowMs: 60_000, skipLoopbackInDev: false },
     http: { trustProxy: false },
+    api: { requestTimeoutMs: false },
   },
   session: { id: 'user-1' },
   apisObject: {},
@@ -96,6 +98,9 @@ vi.mock('@luckystack/core', () => ({
   getLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   //? IP resolution seam the socket handler funnels rate-limit keys through.
   resolveClientIp: () => '127.0.0.1',
+  //? Loopback detection used to skip the global IP bucket in dev; always false
+  //? so both transports run their full bucket logic in these tests.
+  isLoopbackIp: (_ip: string) => false,
   //? Socket lifecycle seams (consumed via _shared/requestLifecycle.ts).
   registerApiAbortController: () => 'abort-key',
   // eslint-disable-next-line @typescript-eslint/no-empty-function -- no-op unregister seam
@@ -395,5 +400,98 @@ describe('transport parity — per-route validation:relaxed skips Zod on BOTH tr
     const socket = await driveSocket();
     expect(socket.status).toBe('success');
     expect(validateInputByTypeMock).not.toHaveBeenCalled();
+  });
+});
+
+//? --- socket-only paths not present on HTTP transport ---
+
+describe('socket-only paths', () => {
+  it('silently drops a message with no responseIndex instead of emitting a response', async () => {
+    //? API-O18 — the socket handler returns early (no emit) when `responseIndex`
+    //? is not a number. There is no HTTP equivalent; the HTTP route always has
+    //? a response channel. Pin the silent-drop so regressions are caught.
+    seam = defaultSeam();
+    registerRoute();
+    let emitted: Record<string, unknown> | undefined;
+    const noopReturnSocket = (): unknown => socket;
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- fake-socket boundary
+    const socket = {
+      id: 'sock-1',
+      handshake: { address: '127.0.0.1', headers: {} },
+      emit: (_event: string, payload: Record<string, unknown>) => { emitted = payload; return socket; },
+      once: noopReturnSocket,
+      off: noopReturnSocket,
+    } as unknown as Socket;
+
+    await handleApiRequest({
+      msg: { name: 'api/examples/doThing/v1', data: { foo: 'bar' } } as Parameters<typeof handleApiRequest>[0]['msg'],
+      socket,
+      token: 'tok-1',
+    });
+
+    //? No response emitted — the handler drops the message silently.
+    expect(emitted).toBeUndefined();
+  });
+
+  it('preSocketMessage stop signal rejects before route resolution', async () => {
+    //? API-O18 — `preSocketMessage` is socket-only (no HTTP equivalent).
+    //? A stop signal must short-circuit before readSession / route lookup.
+    seam = defaultSeam();
+    seam.hookResults.preSocketMessage = { stopped: true, signal: { errorCode: 'socket.gated', httpStatus: 403 } };
+    let emitted: Record<string, unknown> | undefined;
+    const noopReturnSocket = (): unknown => socket;
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- fake-socket boundary
+    const socket = {
+      id: 'sock-1',
+      handshake: { address: '127.0.0.1', headers: {} },
+      emit: (_event: string, payload: Record<string, unknown>) => { emitted = payload; return socket; },
+      once: noopReturnSocket,
+      off: noopReturnSocket,
+    } as unknown as Socket;
+
+    await handleApiRequest({
+      msg: { name: 'api/examples/doThing/v1', data: { foo: 'bar' }, responseIndex: 0 },
+      socket,
+      token: 'tok-1',
+    });
+
+    expect(emitted?.status).toBe('error');
+    expect(emitted?.errorCode).toBe('socket.gated');
+    //? Route lookup must NOT have happened — the stop fires before readSession.
+    expect(getSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('system/logout shortcut routes through emitApiResult so respond hooks fire', async () => {
+    //? API-O6 — logout routes through `emitApiResult`, which dispatches
+    //? `preApiRespond` / `transformApiResponse` / `postApiRespond`. Pin the
+    //? hook sequence so a future refactor can't silently regress it.
+    seam = defaultSeam();
+    seam.parsedRoute = {
+      status: 'success',
+      normalizedFullName: 'system/logout/v1',
+      serviceRoute: { normalizedRouteName: 'system/logout' },
+    };
+    let emitted: Record<string, unknown> | undefined;
+    const noopReturnSocket = (): unknown => socket;
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- fake-socket boundary
+    const socket = {
+      id: 'sock-1',
+      handshake: { address: '127.0.0.1', headers: {} },
+      emit: (_event: string, payload: Record<string, unknown>) => { emitted = payload; return socket; },
+      once: noopReturnSocket,
+      off: noopReturnSocket,
+    } as unknown as Socket;
+
+    await handleApiRequest({
+      msg: { name: 'system/logout', data: {}, responseIndex: 0 },
+      socket,
+      token: 'tok-1',
+    });
+
+    expect(emitted?.status).toBe('success');
+    //? Respond-phase hooks must have fired.
+    const hookNames = dispatchHookMock.mock.calls.map((c) => c[0] as string);
+    expect(hookNames).toContain('preApiRespond');
+    expect(hookNames).toContain('postApiRespond');
   });
 });

@@ -1,6 +1,6 @@
 import { walkEndpoints } from './walkEndpoints';
 import { runCsrfEnforcementCheck } from './csrfEnforcementCheck';
-import { shouldSkip, requiresLogin, hasMetaEntry, calculateSummary } from './testLayerHelpers';
+import { shouldSkip, requiresLogin, hasMetaEntry, calculateSummary, STATE_CHANGING_METHODS } from './testLayerHelpers';
 import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
 export interface RunCsrfEnforcementTestsInput {
@@ -19,10 +19,6 @@ export interface RunCsrfEnforcementTestsInput {
   expectedHttpStatus?: number | false;
   onResult?: (result: ContractCheckResult) => void;
 }
-
-//? CSRF only applies to STATE-CHANGING framework routes — GET is exempt by the
-//? server's middleware, so probing it would always (correctly) be accepted.
-const STATE_CHANGING_METHODS = new Set<EndpointDescriptor['method']>(['POST', 'PUT', 'DELETE']);
 
 export const runCsrfEnforcementTests = async (
   input: RunCsrfEnforcementTestsInput,

@@ -2,10 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 
 //? `routeMeta.ts` imports the version-token regexes from `../routeConventions`,
 //? which transitively pulls `../routingRules` -> `@luckystack/core` (a value
-//? import of `validatePagePath`). None of the parsers under test invoke it, so
-//? we stub the single bound symbol to keep the test free of a core build.
+//? import of `validatePagePath`). The extractors also call `getSrcDir()` to
+//? anchor relative path matching, so we stub both to keep the test free of a
+//? real core build and a filesystem read.
 vi.mock("@luckystack/core", () => ({
   validatePagePath: vi.fn(() => ({ valid: true })),
+  getSrcDir: vi.fn(() => "project/src"),
 }));
 
 import {
@@ -36,7 +38,9 @@ describe("routeMeta filename parsing", () => {
     });
 
     it("normalizes Windows backslashes before matching", () => {
-      expect(extractPagePath("C:\\project\\src\\billing\\_api\\charge_v1.ts")).toBe(
+      // Use a path rooted under the mocked srcDir ("project/src") with Windows
+      // separators so the backslash-to-forwardslash normalization is exercised.
+      expect(extractPagePath(String.raw`project\src\billing\_api\charge_v1.ts`)).toBe(
         "billing",
       );
     });
@@ -47,6 +51,12 @@ describe("routeMeta filename parsing", () => {
 
     it("returns an empty string when no _api segment is present", () => {
       expect(extractPagePath("project/src/dashboard/page.tsx")).toBe("");
+    });
+
+    it("throws when the file is outside the configured srcDir", () => {
+      // Files outside srcDir have no valid page path — throwing prevents
+      // the generator from silently dropping the route entry.
+      expect(() => extractPagePath("/unrelated/path/_api/something_v1.ts")).toThrow();
     });
   });
 

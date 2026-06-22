@@ -26,9 +26,25 @@ export interface EmailAttachment {
   filename: string;
   /** Inline bytes or base64 string. Mutually exclusive with `path`/`href`. */
   content?: Buffer | Uint8Array | string;
-  /** Local file path the adapter reads (when it supports path-based sends). */
+  /**
+   * Local file path the adapter reads (when it supports path-based sends).
+   *
+   * @security Trusted-input field — do NOT derive from client-supplied data
+   * without validation. Framework-level path-traversal or safe-directory checks
+   * are NOT applied automatically; callers must reject paths that escape the
+   * intended directory (e.g. containing `..` or absolute paths outside a known
+   * root) before passing them here.
+   */
   path?: string;
-  /** Remote URL the adapter fetches (when it supports href-based sends). */
+  /**
+   * Remote URL the adapter fetches (when it supports href-based sends).
+   *
+   * @security Trusted-input field — do NOT derive from client-supplied data
+   * without validation. Only `https:` and `http:` URLs are safe for
+   * framework-internal use; arbitrary schemes (e.g. `file:`, `data:`) may be
+   * forwarded to nodemailer/Resend without restriction. Validate against an
+   * allowlist before passing here.
+   */
   href?: string;
   /** MIME type (e.g. `application/pdf`). Adapter may infer from `filename` if omitted. */
   contentType?: string;
@@ -57,6 +73,11 @@ export interface EmailMessage {
    * `List-Unsubscribe`, idempotency keys. Adapters merge these over the headers
    * they set themselves (adapter-reserved headers win to avoid breaking
    * delivery). Optional.
+   *
+   * @security CR and LF characters in header keys or values enable SMTP header
+   * injection. `sendEmail` strips `\r` and `\n` from every key and value before
+   * passing them to the adapter (EMAIL-O7). Do NOT derive keys or values from
+   * unsanitized client input.
    */
   headers?: Record<string, string>;
 }

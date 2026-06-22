@@ -15,6 +15,7 @@ import {
   setErrorTrackerUser,
   startSpanAcrossTrackers,
 } from './errorTrackerRegistry';
+import { sanitizeForLog } from './redactedLogKeys';
 
 interface SentryInstance {
   captureException: (exception: unknown, ...args: unknown[]) => string;
@@ -26,6 +27,10 @@ interface SentryInstance {
 
 let sentry: SentryInstance | undefined;
 
+/**
+ * @deprecated Use `registerErrorTracker` from `@luckystack/error-tracking` instead.
+ * Will be removed in a future major version.
+ */
 export const initSharedSentry = (instance: SentryInstance): void => {
   sentry = instance;
 };
@@ -35,13 +40,17 @@ export const initSharedSentry = (instance: SentryInstance): void => {
 //? `sentry.setContext('additional', context)` which is process-global until
 //? cleared — under concurrent captures the first context could leak into the
 //? second's report.
+//? CORE-O4: sanitize context before passing to the legacy Sentry slot so raw
+//? tokens/passwords don't reach `extra` when a consumer mixes initSharedSentry
+//? with framework capture. The multi-adapter path already sanitizes in
+//? errorTrackerRegistry.ts; this brings the legacy path into parity.
 export const captureException = (
   error: unknown,
   context?: Record<string, unknown>,
 ): void => {
   if (sentry) {
     if (context) {
-      sentry.captureException(error, { extra: context });
+      sentry.captureException(error, { extra: sanitizeForLog(context) as Record<string, unknown> });
     } else {
       sentry.captureException(error);
     }
@@ -57,7 +66,7 @@ export const captureMessage = (
 ): void => {
   if (sentry) {
     if (context) {
-      sentry.captureMessage(message, { level, extra: context });
+      sentry.captureMessage(message, { level, extra: sanitizeForLog(context) as Record<string, unknown> });
     } else {
       sentry.captureMessage(message, level);
     }

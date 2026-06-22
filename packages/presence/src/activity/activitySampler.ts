@@ -15,6 +15,7 @@ import { extractTokenFromSocket, formatRoomName, getIoInstance, getLogger, tryCa
 
 import { getPresenceConfig } from '../presenceConfig';
 import { clearActivityThrottle, dispatchActivitySample } from '../activityEvents';
+import { lastAfkFireByToken } from './state';
 
 const lastActivityBySocket = new Map<string, number>();
 
@@ -23,13 +24,31 @@ export const recordActivity = (socketId: string): void => {
   lastActivityBySocket.set(socketId, Date.now());
 };
 
-/** Drop a socket's activity record. Called on disconnect. */
-export const clearActivity = (socketId: string): void => {
+/**
+ * Drop a socket's activity record. Called on disconnect.
+ * `token` is optional but should be passed when available so the token-level
+ * AFK refractory entry is cleared once the last socket for that token leaves
+ * (prevents stale "last fired" timestamps surviving across sessions).
+ */
+export const clearActivity = (socketId: string, token?: string): void => {
   lastActivityBySocket.delete(socketId);
-  //? Also purge the socket's refractory-throttle timestamps so the
-  //? `activityEvents` `lastFired` map doesn't leak one entry per throttled
-  //? event per (per-connection) socket id forever.
+  //? Purge the socket's refractory-throttle timestamps so the `activityEvents`
+  //? `lastFired` map doesn't leak one entry per throttled event per socket forever.
   clearActivityThrottle(socketId);
+  //? Clear the token-level AFK refractory only when no other local socket for
+  //? this token remains — a multi-tab user closing one tab must not reset the
+  //? refractory for their still-open tabs (PRESENCE-4).
+  if (token) {
+    const io = getIoInstance();
+    const hasOtherSocket = io
+      ? [...io.sockets.sockets.values()].some(
+          (s) => s.id !== socketId && extractTokenFromSocket(s) === token,
+        )
+      : false;
+    if (!hasOtherSocket) {
+      lastAfkFireByToken.delete(token);
+    }
+  }
 };
 
 /**
@@ -44,10 +63,14 @@ export const getLastActivity = (socketId: string): number | undefined =>
 export interface RoomPresenceEntry {
   socketId: string;
   token: string | null;
-  /** Last recorded activity (ms epoch), or `undefined` if never recorded. */
+  /** Last recorded activity (ms epoch), or `undefined` if the socket is remote or has never been recorded. */
   lastActivity: number | undefined;
-  /** Idle longer than `afkTimeoutMs` at snapshot time. */
-  afk: boolean;
+  /**
+   * Idle longer than `afkTimeoutMs` at snapshot time, or `'unknown'` when the
+   * socket lives on a different instance and this node has no activity record
+   * for it (last-activity is tracked in a local-only Map).
+   */
+  afk: boolean | 'unknown';
 }
 
 /**
@@ -55,7 +78,12 @@ export interface RoomPresenceEntry {
  * is delta-only (`userAfk`/`userBack`), so a client joining mid-session needs
  * this to render "who is here and who is idle" before the next delta. Walks the
  * socket.io adapter for `roomCode` (adapter-aware: with the Redis adapter
- * attached it spans instances) and tags each peer with its activity + AFK state.
+ * attached the peer list spans instances) and tags each peer with its activity
+ * + AFK state.
+ *
+ * Sockets on OTHER instances are returned with `afk: 'unknown'` because
+ * `lastActivityBySocket` is a local-only Map — no activity data exists for
+ * remote peers on this node.
  */
 export const getRoomPresence = async (
   roomCode: string,
@@ -79,6 +107,19 @@ export const getRoomPresence = async (
   const roomSockets = await io.in(physicalRoom).fetchSockets();
 
   return roomSockets.map((socket) => {
+    //? `lastActivityBySocket` is local-only. If this socket is not in the local
+    //? io.sockets.sockets Map it lives on a different instance and we have no
+    //? activity record for it — return `afk: 'unknown'` instead of the
+    //? misleading `false` that a missing Map entry would produce.
+    const isLocal = io.sockets.sockets.has(socket.id);
+    if (!isLocal) {
+      return {
+        socketId: socket.id,
+        token: extractTokenFromSocket(socket),
+        lastActivity: undefined,
+        afk: 'unknown' as const,
+      };
+    }
     const lastActivity = lastActivityBySocket.get(socket.id);
     const afk = afkTimeoutMs > 0 && lastActivity !== undefined && now - lastActivity > afkTimeoutMs;
     return {
@@ -116,6 +157,15 @@ export const startActivitySampler = (
 
   const effectiveInterval = intervalMs ?? getPresenceConfig().activitySampleIntervalMs;
   if (effectiveInterval <= 0) return stopActivitySampler;
+  //? dev-warn: if `afkTimeoutMs` is 0 (AFK detection disabled) but
+  //? `activitySampleIntervalMs` is still positive, the sampler starts and cycles
+  //? every socket every tick but no built-in event fires. Set
+  //? `activitySampleIntervalMs: 0` alongside `afkTimeoutMs: 0` to disable the
+  //? sampler entirely — unless custom activity events are registered (in which
+  //? case the sampler is still needed).
+  if (getPresenceConfig().afkTimeoutMs <= 0) {
+    getLogger().debug('presence: activity sampler started but afkTimeoutMs is 0 — built-in AFK detection is disabled. Set activitySampleIntervalMs: 0 too if no custom activity events are registered.');
+  }
 
   samplerHandle = setInterval(() => {
     const now = Date.now();

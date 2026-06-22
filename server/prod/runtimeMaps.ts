@@ -41,7 +41,13 @@ const loadProdMaps = async (): Promise<LoadedRuntimeMaps> => {
     const merged: LoadedRuntimeMaps = { apisObject: {}, syncObject: {}, functionsObject: {} };
     for (const bundle of presets) {
       const target = `./generatedApis.${bundle}`;
-      const mod: unknown = await (import(target) as Promise<unknown>).catch(() => null);
+      const mod: unknown = await (import(target) as Promise<unknown>).catch((error: unknown) => {
+        //? Warn in dev so a missing generatedApis.*.ts is visible in the REPL.
+        //? In prod, failing to load a bundle means routes simply won't appear —
+        //? the server already validates maps at boot, so this is a diagnostic aid.
+        console.warn(`[runtimeMaps] Failed to load bundle "${bundle}":`, error);
+        return null;
+      });
       if (!mod) continue;
       const moduleRecord = typeof mod === 'object' ? (mod as Record<string, unknown>) : {};
       if (isRuntimeMapRecord(moduleRecord.apis)) Object.assign(merged.apisObject, moduleRecord.apis);

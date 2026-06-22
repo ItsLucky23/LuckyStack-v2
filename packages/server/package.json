@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/server",
-  "version": "0.2.0",
+  "version": "0.2.7",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -15,7 +15,7 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/server"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/server#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/main/packages/server#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
@@ -57,19 +57,19 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/api": "^0.2.0",
-    "@luckystack/core": "^0.2.0"
+    "@luckystack/api": "^0.2.7",
+    "@luckystack/core": "^0.2.7"
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",
     "socket.io": "^4.8.0",
-    "@luckystack/devkit": "^0.2.0",
-    "@luckystack/docs-ui": "^0.2.0",
-    "@luckystack/email": "^0.2.0",
-    "@luckystack/error-tracking": "^0.2.0",
-    "@luckystack/login": "^0.2.0",
-    "@luckystack/presence": "^0.2.0",
-    "@luckystack/sync": "^0.2.0"
+    "@luckystack/devkit": "^0.2.7",
+    "@luckystack/docs-ui": "^0.2.7",
+    "@luckystack/email": "^0.2.7",
+    "@luckystack/error-tracking": "^0.2.7",
+    "@luckystack/login": "^0.2.7",
+    "@luckystack/presence": "^0.2.7",
+    "@luckystack/sync": "^0.2.7"
   },
   "peerDependenciesMeta": {
     "@luckystack/devkit": {

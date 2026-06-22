@@ -208,7 +208,8 @@ const prodPages = import.meta.glob([
   '!./**/_server/**',
   '!./**/docs/**',
   '!./**/*_server.tsx',
-  '!./**/*_server.jsx'
+  '!./**/*_server.jsx',
+  '!./playground/**'
 ]);
 
 const devPages = import.meta.glob([
@@ -252,17 +253,21 @@ if (mobileConsole) {
 }
 
 const ErrorFallback = () => {
-  const title = enJson.common['404'];
+  //? ErrorFallback is rendered outside the React provider tree (Sentry boundary),
+  //? so useTranslator is unavailable. Access the English JSON directly — the
+  //? user's language preference cannot be resolved during a crash.
+  const title = enJson.common.unexpectedError;
   const message = enJson.api.internalServerError;
-  const btnText = "Refresh Page";
+  const btnText = enJson.common.refreshPage;
 
   return (
-    <div className="w-full h-screen flex flex-col items-center justify-center bg-background text-foreground">
+    <div className="w-full h-screen flex flex-col items-center justify-center bg-background text-title">
       <h1 className="text-2xl font-bold mb-4">{title}</h1>
-      <p className="text-muted-foreground mb-4">{message}</p>
+      <p className="text-common mb-4">{message}</p>
       <button
+        type="button"
         onClick={() => { globalThis.location.reload(); }}
-        className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:opacity-90"
+        className="px-4 py-2 bg-primary text-title-primary rounded-md hover:bg-primary-hover transition-colors cursor-pointer"
       >
         {btnText}
       </button>

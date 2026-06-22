@@ -95,7 +95,8 @@ Payload:
 export interface PrePresenceUpdatePayload {
   token: string;
   userId: string | null;
-  kind: 'afk' | 'back';
+  /** 'left' is fired by informRoomPeersLeft (departure / grace-expiry fan-out). */
+  kind: 'afk' | 'back' | 'left';
   roomCodes: string[];
 }
 ```
@@ -163,7 +164,9 @@ Per-peer payload: `{ userId: string }`. Clients restore the peer's avatar to nor
 ```ts
 const handledSockets = new Set<string>();
 for (const room of roomCodes) {
-  const roomSockets = await io.in(room).fetchSockets(); // adapter-aware (spans instances)
+  // formatter applied first so broadcast targets the SAME physical room the peers joined
+  const physicalRoom = formatRoomName(room, { purpose: 'presence', userId });
+  const roomSockets = await io.in(physicalRoom).fetchSockets(); // adapter-aware (spans instances)
   for (const peerSocket of roomSockets) {
     if (handledSockets.has(peerSocket.id)) continue;
     handledSockets.add(peerSocket.id);
@@ -180,7 +183,7 @@ The set is per-`informRoomPeers` call; it does not persist between calls. Across
 - **Stale socket id in the adapter** — `io.sockets.sockets.get(socketKey)` returns `undefined`; the iteration continues. No emit, no increment.
 - **Room exists but has zero members** — `fetchSockets()` returns an empty array; the loop is a no-op for that room.
 - **Multi-tenancy / room-code collision** — `informRoomPeers` routes each `session.roomCodes` string through core's `formatRoomName(room, { purpose: 'presence', userId })` before fan-out, so a registered `registerRoomNameFormatter` (the socket.io counterpart to `registerRedisKeyFormatter`) applies its tenant prefix here. By default the formatter is identity, so two tenants that both use the raw room code `"general"` still share one socket.io room (and one fan-out) unless you either register a non-identity formatter OR tenant-prefix the codes yourself (e.g. `join("acme:general")`) before `joinRoom`.
-  > **Known asymmetry (presence report finding #2):** the fan-out + `getRoomPresence` snapshot apply the formatter, but the server-side room *join* sites (`@luckystack/server` `loadSocket`) currently join the RAW code. Under a NON-identity `registerRoomNameFormatter` the broadcast would target a room nobody joined → presence deltas reach 0 peers. Until the join sites are reconciled to the same transform, run multi-tenant presence via raw tenant-prefixed room codes (identity formatter), not via a non-identity `registerRoomNameFormatter`. See `/docs/ARCHITECTURE_MULTI_TENANCY.md`.
+  > **Known asymmetry (presence report finding #2):** the fan-out + `getRoomPresence` snapshot apply the formatter, but the server-side room *join* sites (`@luckystack/server` `loadSocket`) currently join the RAW code. Under a NON-identity `registerRoomNameFormatter` the broadcast would target a room nobody joined → presence deltas reach 0 peers. Until the join sites are reconciled to the same transform, run multi-tenant presence via raw tenant-prefixed room codes (identity formatter), not via a non-identity `registerRoomNameFormatter`. For multi-tenancy primitives (key formatters, Prisma per-tenant clients, per-workspace secrets) see `/docs/ARCHITECTURE_MULTI_TENANCY.md`; that doc covers the Redis key isolation layer (`registerRedisKeyFormatter`) — the room-name formatter used by presence is its socket.io counterpart (`registerRoomNameFormatter` in `@luckystack/core`).
 - **Single-instance vs Redis adapter** — `informRoomPeers` resolves peers via `await io.in(room).fetchSockets()`, which is **adapter-aware**: with the Redis adapter attached (always, under `@luckystack/server`) it returns `RemoteSocket`s for peers on OTHER instances too, and `peerSocket.emit(...)` routes the event across the adapter to that remote socket. So presence broadcasts (`userBack` / `userAfk`, including the default AFK event) reach roommates on every instance, not just the local one. (The earlier `io.sockets.adapter.rooms.get(room)` + `tempSocket.emit(...)` path was local-only; `fetchSockets()` replaced it precisely to cross the instance boundary.)
 
 ## Why `informRoomPeers` is not in the public barrel

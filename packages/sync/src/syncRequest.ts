@@ -981,10 +981,19 @@ export const attachSyncReceiver = (socketInstance: Socket): void => {
     if (status === 'stream') {
       if (routeKeys.length === 0) return;
 
+      //? SYNC-N7 — strip all reserved envelope keys from the forwarded stream
+      //? payload so a consumer handler that accidentally emits `errorCode`,
+      //? `errorParams`, `httpStatus`, or `message` in a stream chunk doesn't
+      //? pollute the client callback's stream argument with error-envelope fields.
+      //? `status`, `fullName`, `cb` were already stripped; the others are added here.
       const streamPayload = { ...payload };
       delete streamPayload.status;
       delete streamPayload.fullName;
       delete streamPayload.cb;
+      delete streamPayload.errorCode;
+      delete streamPayload.errorParams;
+      delete streamPayload.httpStatus;
+      delete streamPayload.message;
 
       if (shouldLogStream()) {
         getLogger().debug('Server Sync Stream', { routeKeys, streamPayload });
@@ -1089,6 +1098,15 @@ const buildConnectErrorHandler = ({ setSocketStatus }: { setSocketStatus: Socket
   if (shouldNotifyDev()) notify.error({ key: 'common.connectionError' });
 };
 
+//? SYNC-N6 — `initSyncRequest` owns the canonical lifecycle listeners
+//? (`connect`, `disconnect`, `reconnect_attempt`, `userAfk`, `userBack`,
+//? `connect_error`). A consumer's `socketInitializer.ts` that also registers
+//? `disconnect`/`reconnect_attempt` on the same socket instance creates
+//? duplicate handlers — both fire on every event. Since `initSyncRequest` is
+//? idempotent (tears down the previous set before re-binding), consumer code
+//? should delegate lifecycle status updates here and avoid re-registering
+//? those events directly. Duplicate `console.log` in the consumer is harmless
+//? but produces double log lines.
 export const initSyncRequest = async ({
   setSocketStatus,
   sessionRef

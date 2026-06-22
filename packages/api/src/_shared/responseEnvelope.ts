@@ -83,6 +83,11 @@ export const normalizeApiResponse = ({
     };
   }
 
+  //? API-O16 — the success envelope spreads ALL handler result fields directly
+  //? onto the wire envelope. Handlers are responsible for not including sensitive
+  //? data (e.g. `passwordHash`, raw session tokens) in their return value. There
+  //? is no framework-level field allowlist; if your route aggregates a Prisma row
+  //? with sensitive columns, pick explicit fields before returning.
   return {
     ...result,
     status: 'success',

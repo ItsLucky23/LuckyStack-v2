@@ -96,8 +96,29 @@ EXAMPLES
 `);
 };
 
+const ALLOWED_CONFIG_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.mts', '.cts']);
+
 const importConfig = async (file: string, label: string): Promise<void> => {
   const abs = path.isAbsolute(file) ? file : path.join(process.cwd(), file);
+
+  //? Guard: resolved path must stay inside cwd (or the resolved project root)
+  //? to prevent `--deploy ../../../../etc/shadow` style path injection.
+  const root = path.resolve(process.cwd());
+  const resolved = path.resolve(abs);
+  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
+    throw new Error(
+      `[luckystack-validate-deploy] ${label} path "${file}" resolves outside the project root — aborting`,
+    );
+  }
+
+  //? Guard: only load known JS/TS module extensions.
+  const ext = path.extname(resolved).toLowerCase();
+  if (!ALLOWED_CONFIG_EXTENSIONS.has(ext)) {
+    throw new Error(
+      `[luckystack-validate-deploy] ${label} path "${file}" has disallowed extension "${ext}" — expected one of ${[...ALLOWED_CONFIG_EXTENSIONS].join(', ')}`,
+    );
+  }
+
   try {
     await import(pathToFileURL(abs).href);
   } catch (error) {

@@ -57,6 +57,14 @@ interface RateLimitEntry {
   resetAt: number;
 }
 
+//? CORE-O7: cap the in-memory store so a key-varying flood (e.g. path-parameter
+//? spray) can't grow the Map to OOM between cleanup ticks. When the cap is hit,
+//? the oldest entry is evicted (Map preserves insertion order; the first key is
+//? the oldest). Evicting the oldest is the least-harm choice: the victim can
+//? retry (now capped to 1) while the attacker's own keys are the new ones,
+//? making them the hardest to evict. In memory mode this is a single-instance
+//? soft limit; for multi-instance deployments use Redis mode.
+const MAX_MEMORY_STORE_SIZE = 50_000;
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
 //? Resolved at call time so `registerProjectConfig` can run after this
@@ -89,8 +97,8 @@ local ttl = redis.call('PTTL', KEYS[1])
 return { current, ttl }
 `;
 
-const normalizeWindowMs = (windowMs: number): number => {
-  if (!Number.isFinite(windowMs) || windowMs <= 0) {
+const normalizeWindowMs = (windowMs: number | undefined): number => {
+  if (windowMs === undefined || !Number.isFinite(windowMs) || windowMs <= 0) {
     return getProjectConfig().rateLimiting.windowMs;
   }
   return windowMs;
@@ -101,13 +109,29 @@ const getRedisRateLimitKey = (key: string): string => `${getRedisPrefix()}:${key
 const checkRateLimitInMemory = ({
   key,
   limit,
-  windowMs = 60_000,
+  //? No default here — `normalizeWindowMs` reads `projectConfig.rateLimiting.windowMs`
+  //? when `windowMs` is undefined or non-finite, so a hardcoded `60_000` would
+  //? shadow the configured value (CORE-N6).
+  windowMs,
 }: CheckRateLimitParams): RateLimitResult => {
   const safeWindowMs = normalizeWindowMs(windowMs);
   const now = Date.now();
   const entry = rateLimitStore.get(key);
 
   if (!entry || entry.resetAt < now) {
+    //? CORE-O7: evict before inserting a new key to keep the store bounded.
+    //? Prefer evicting an EXPIRED entry (rate limit already reset, no security
+    //? cost) over evicting the oldest ACTIVE entry (which could let a rate-limited
+    //? key bypass the limit by resetting its counter). Only when no expired entry
+    //? exists do we fall back to the insertion-order oldest (least-harm choice).
+    if (rateLimitStore.size >= MAX_MEMORY_STORE_SIZE) {
+      let evictKey: string | undefined;
+      for (const [k, e] of rateLimitStore) {
+        if (e.resetAt < now) { evictKey = k; break; }
+      }
+      evictKey ??= rateLimitStore.keys().next().value;
+      if (evictKey !== undefined) rateLimitStore.delete(evictKey);
+    }
     rateLimitStore.set(key, { count: 1, resetAt: now + safeWindowMs });
     return { allowed: true, remaining: limit - 1, resetIn: Math.ceil(safeWindowMs / 1000) };
   }
@@ -123,7 +147,8 @@ const checkRateLimitInMemory = ({
 const checkRateLimitInRedis = async ({
   key,
   limit,
-  windowMs = 60_000,
+  //? No default — same reasoning as `checkRateLimitInMemory` (CORE-N6).
+  windowMs,
 }: CheckRateLimitParams): Promise<RateLimitResult | null> => {
   const safeWindowMs = normalizeWindowMs(windowMs);
   const redisKey = getRedisRateLimitKey(key);
@@ -330,9 +355,20 @@ export const clearRateLimit = async (key: string): Promise<void> => strategyRegi
 
 /**
  * Clear all rate limits.
- * Useful for testing or server restart.
+ * Intended for testing or dev-mode server reset only.
+ * CORE-O8: throws in production to prevent accidental global counter wipe across
+ * all tenants. If you need a production-safe reset, pass a scoped key to
+ * `clearRateLimit` or implement a tenant-namespaced strategy.
  */
-export const clearAllRateLimits = async (): Promise<void> => strategyRegistry.get().clearAll();
+export const clearAllRateLimits = async (): Promise<void> => {
+  if (process.env.NODE_ENV === 'production') {
+    //? Throw (not warn-and-return) so callers that catch the rejection know the
+    //? operation was skipped. A silent `return` makes integration test scaffolding
+    //? proceed with stale counters, producing flaky results (CORE-O8 logic-gap fix).
+    throw new Error('[RateLimiter] clearAllRateLimits() is not allowed in production. Use clearRateLimit(key) for scoped resets.');
+  }
+  return strategyRegistry.get().clearAll();
+};
 
 //? Cleanup expired entries from the in-memory store on a configurable
 //? interval. Only relevant for the default strategy; custom strategies
@@ -344,6 +380,15 @@ export const clearAllRateLimits = async (): Promise<void> => strategyRegistry.ge
 //? than at module load, so any tool/CLI/test that merely type-imports core does
 //? NOT inherit a recurring timer it never asked for (the package's "no import-
 //? time side effects" doctrine).
+//? NOTE: `cleanupStarted` is never reset, even when a custom strategy is
+//? registered via `registerRateLimitStrategy()`. The cleanup timer runs on the
+//? built-in `rateLimitStore` only — it is harmless but wasteful when a custom
+//? strategy takes over (the store stays empty). If your custom strategy needs
+//? its own cleanup, schedule it in the strategy's own `clearAll` / a separate
+//? boot hook. The one-shot `onStoreError='deny'-in-memory-mode` warning (below)
+//? will also NOT fire for a strategy registered after the first request; call
+//? `registerRateLimitStrategy` before the first request to ensure the warning
+//? check fires with the intended strategy in place.
 let cleanupStarted = false;
 const scheduleCleanup = (): void => {
   const intervalMs = getProjectConfig().rateLimiting.cleanupIntervalMs;
@@ -367,5 +412,13 @@ const scheduleCleanup = (): void => {
 const ensureCleanupScheduled = (): void => {
   if (cleanupStarted) return;
   cleanupStarted = true;
+  //? CORE-O6: warn once at the first request if `onStoreError:'deny'` is set
+  //? in non-Redis mode. In memory mode there is no "store error" path to honor,
+  //? so the setting is a silent no-op — log it so operators aren't surprised.
+  if (!isRedisMode() && getOnStoreError() === 'deny') {
+    getLogger().warn(
+      '[RateLimiter] onStoreError="deny" has no effect in memory mode (only Redis mode has a fallback path). Switch to store:"redis" or remove the setting.',
+    );
+  }
   scheduleCleanup();
 };

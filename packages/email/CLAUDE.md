@@ -73,6 +73,8 @@ Configured via `registerEmailConfig({...})` (deep-merged on top of `DEFAULT_EMAI
 | `envVars.smtpHost` / `smtpPort` / `smtpSecure` / `smtpUser` / `smtpPass` | `'SMTP_HOST'` / `'SMTP_PORT'` / `'SMTP_SECURE'` / `'SMTP_USER'` / `'SMTP_PASS'` | Env vars read by `autoSelectEmailSender` for SMTP. |
 | `envVars.emailFrom` | `'EMAIL_FROM'` | Env var fallback for the default `from` address. |
 | `defaults.smtpPort` | `587` | Fallback SMTP port when the env var is unset. |
+| `sendTimeoutMs` | `30_000` | Max ms for a single `sender.send()` call; returns `{ ok:false, reason:'send-timeout' }` on expiry. Set to `false` to disable (EMAIL-O8). |
+| `recipientHmacKey` | `undefined` | HMAC-SHA-256 key for recipient hashing in error-tracker + log contexts. When unset, falls back to un-keyed SHA-256 with a one-time dev warning. Set to `''` to silence the warning and keep un-keyed hashing (document the tradeoff). (EMAIL-O5). |
 
 Environment variables read at adapter-selection time (names overridable via `envVars` above):
 

@@ -26,19 +26,25 @@ Key behaviours:
 
 ## The full variable set
 
-Constructed in `main()` (src/index.ts:319) right after prompts settle:
+Constructed in `main()` right after prompts settle. Only vars that appear as
+`{{TOKEN}}` in at least one template file are listed — unused entries would be
+silently dropped by `replacePlaceholders` without error, so we keep the map
+lean. Scaffold choices that don't map to a placeholder (authMode, oauthProviders,
+emailProvider, monitoringProvider, i18n) drive code-prune paths in
+`pruneOptionalPackages` instead of template substitution.
 
 ```ts
 const vars: Record<string, string> = {
   PROJECT_NAME: slug,
   PROJECT_TITLE: titleCase(args.projectName),
-  LUCKYSTACK_VERSION: readSelfVersion(),
+  LUCKYSTACK_VERSION: luckystackVersion,
   DB_PROVIDER: choices.dbProvider,
-  AUTH_MODE: choices.authMode,
-  OAUTH_PROVIDERS: choices.oauthProviders.join(','),
-  EMAIL_PROVIDER: choices.emailProvider,
-  MONITORING_PROVIDER: choices.monitoringProvider,
-  I18N_ENABLED: choices.i18n ? 'true' : 'false',
+  USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '...',
+  DATABASE_URL: DATABASE_URL_BY_PROVIDER[choices.dbProvider] ?? '...',
+  OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders, choices.authMode),
+  EXTERNAL_ORIGINS: externalOrigins,
+  EMAIL_ENV_VARS: buildEmailEnvVars(choices.emailProvider),
+  MONITORING_ENV_VARS: buildMonitoringEnvVars(choices.monitoringProvider),
 };
 ```
 
@@ -101,37 +107,49 @@ Rationale for the throw (from the inline comment): silently falling back to `'0.
 - **Type**: `'mongodb' | 'postgresql' | 'mysql' | 'sqlite'`.
 - **Used for**: the `provider` field in `prisma/schema.prisma`, the conditional database-init script in the next-steps block (`prisma:db:push` vs `prisma:migrate:dev`).
 
-### `{{AUTH_MODE}}`
+### `{{USER_ID_ATTRS}}`
 
-- **Source**: `choices.authMode`.
-- **Type**: `'none' | 'credentials' | 'credentials+oauth'`.
-- **Used for**: feature flag in the scaffolded `luckystack/login/userAdapter.ts` and `luckystack/login/oauthProviders.ts` to enable/disable auth wiring.
+- **Source**: `USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider]`.
+- **Type**: Prisma field attribute string, e.g. `@id @default(auto()) @map("_id") @db.ObjectId` (MongoDB) or `@id @default(cuid())` (SQL).
+- **Used for**: the `id` field declaration in `prisma/schema.prisma`.
 
-### `{{OAUTH_PROVIDERS}}`
+### `{{DATABASE_URL}}`
 
-- **Source**: `choices.oauthProviders.join(',')`.
-- **Type**: comma-joined string. Empty string when no providers are picked.
-- **Used for**: list of OAuth provider keys to register in `luckystack/login/oauthProviders.ts`. The template parses the comma-separated list at scaffold time.
+- **Source**: `DATABASE_URL_BY_PROVIDER[choices.dbProvider]`.
+- **Type**: provider-specific example connection string (dev defaults pre-filled).
+- **Used for**: the `DATABASE_URL` line in `.env.local_template` so the developer only needs to adjust credentials, not format.
 
-The fact that this is a STRING (not an array literal) is significant — the value is interpolated into source code that itself runs `.split(',')`. Consumers should treat the empty string as "no providers".
+### `{{OAUTH_ENV_VARS}}`
 
-### `{{EMAIL_PROVIDER}}`
+- **Source**: `buildOAuthEnvVars(choices.oauthProviders, choices.authMode)`.
+- **Type**: multi-line string. Selected providers are uncommented; unselected providers are comment-stubs. Under `authMode: 'none'` (no `@luckystack/login` installed) it collapses to a one-line `npx luckystack add login` pointer instead.
+- **Used for**: the OAuth block in `.env.local_template`.
 
-- **Source**: `choices.emailProvider`.
-- **Type**: `'none' | 'console' | 'resend' | 'smtp'`.
-- **Used for**: which `@luckystack/email` adapter to instantiate in the overlay.
+### `{{EXTERNAL_ORIGINS}}`
 
-### `{{MONITORING_PROVIDER}}`
+- **Source**: comma-joined `OAUTH_PROVIDER_ORIGINS[provider]` for each selected OAuth provider.
+- **Type**: comma-separated origin string, e.g. `https://accounts.google.com,https://github.com`.
+- **Used for**: the `EXTERNAL_ORIGINS` line in `.env_template` (CORS allow-list for OAuth callbacks).
 
-- **Source**: `choices.monitoringProvider`.
-- **Type**: `'none' | 'sentry' | 'datadog' | 'posthog'`.
-- **Used for**: which monitoring adapter to wire into `bootstrapLuckyStack` (or to leave unwired when `'none'`).
+### `{{EMAIL_ENV_VARS}}`
 
-### `{{I18N_ENABLED}}`
+- **Source**: `buildEmailEnvVars(choices.emailProvider)`.
+- **Type**: multi-line string (env lines for selected adapter, commented stubs for others).
+- **Used for**: the email block in `.env.local_template`.
 
-- **Source**: `choices.i18n ? 'true' : 'false'`.
-- **Type**: literal string `'true'` or `'false'` (NOT a boolean — the regex substitutes raw text).
-- **Used for**: feature flag in `luckystack/i18n/locales.ts` to short-circuit translator initialisation when the user opted out.
+### `{{MONITORING_ENV_VARS}}`
+
+- **Source**: `buildMonitoringEnvVars(choices.monitoringProvider)`.
+- **Type**: multi-line string.
+- **Used for**: the monitoring block in `.env.local_template`.
+
+---
+
+**Scaffold choices with NO template placeholder**: `authMode`, `oauthProviders`,
+`emailProvider`, `monitoringProvider`, and `i18n` drive `pruneOptionalPackages`
+(file/import removal) and `injectOptionalDeps` (npm dep injection) instead of
+placeholder substitution. Do not add `{{AUTH_MODE}}` etc. to template files —
+use the prune/inject path instead.
 
 ## Text vs binary detection
 
@@ -171,17 +189,18 @@ Always use SCREAMING_SNAKE_CASE for keys — the regex requires `\w+`, and the c
 
 The lookup below was generated by grepping the `template/` tree. It is illustrative — when files are added, the list will grow.
 
-| Placeholder | Files that reference it (representative) |
+| Placeholder | Files that reference it |
 | --- | --- |
-| `{{PROJECT_NAME}}` | `package.json`, `index.html`, `src/_locales/*.json`, `README.md` |
-| `{{PROJECT_TITLE}}` | `index.html`, `src/_locales/*.json`, `README.md`, login / register pages |
+| `{{PROJECT_NAME}}` | `package.json` (`"name"`), `.env_template` (`PROJECT_NAME=`), `README.md` |
+| `{{PROJECT_TITLE}}` | `config.ts` (`pageTitle`), `index.html` (`<title>`), `README.md`, `docs/PRODUCT.md` |
 | `{{LUCKYSTACK_VERSION}}` | `package.json` (every `@luckystack/*` dependency range) |
-| `{{DB_PROVIDER}}` | `prisma/schema.prisma`, `package.json` scripts |
-| `{{AUTH_MODE}}` | `luckystack/login/userAdapter.ts`, `luckystack/login/oauthProviders.ts` |
-| `{{OAUTH_PROVIDERS}}` | `luckystack/login/oauthProviders.ts` |
-| `{{EMAIL_PROVIDER}}` | `luckystack/server/index.ts`, `services.config.ts` |
-| `{{MONITORING_PROVIDER}}` | `luckystack/server/index.ts` |
-| `{{I18N_ENABLED}}` | `luckystack/i18n/locales.ts`, `src/main.tsx` |
+| `{{DB_PROVIDER}}` | `prisma/schema.prisma` (`provider =`) |
+| `{{USER_ID_ATTRS}}` | `prisma/schema.prisma` (`id String {{USER_ID_ATTRS}}`) |
+| `{{DATABASE_URL}}` | `.env.local_template` (`DATABASE_URL=`) |
+| `{{OAUTH_ENV_VARS}}` | `.env.local_template` (OAuth block) |
+| `{{EXTERNAL_ORIGINS}}` | `.env_template` (`EXTERNAL_ORIGINS=`) |
+| `{{EMAIL_ENV_VARS}}` | `.env.local_template` (email block) |
+| `{{MONITORING_ENV_VARS}}` | `.env.local_template` (monitoring block) |
 
 ## Related
 

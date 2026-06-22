@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/sync",
-  "version": "0.2.0",
+  "version": "0.2.7",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -15,7 +15,7 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/sync"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/sync#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/main/packages/sync#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
@@ -60,8 +60,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.2.0",
-    "@luckystack/error-tracking": "^0.2.0"
+    "@luckystack/core": "^0.2.7",
+    "@luckystack/error-tracking": "^0.2.7"
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",

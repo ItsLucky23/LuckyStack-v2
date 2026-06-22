@@ -3301,3 +3301,131 @@ Rewrote `SESSION_STATE.md` from scratch to capture the entire 2026-06-10 session
 **Follow-up flagged (NOT yet done)**: the @luckystack/core client/server module boundary is leaky — a `node:`-only import in a client-reachable module silently broke everything and only the dev runtime caught it. Recommend a guard (e.g. a test that imports `@luckystack/core/client` under a browser-like env and fails on `node:` externalization) so this class can't recur. Also: broader runtime smoke-tests (sync/streaming, email, OAuth) before any npm publish, since "ship-safe" proved unreliable.
 
 **Files**: `packages/core/src/errorTrackerRegistry.ts`.
+
+## 2026-06-16 13:00 — codebase-scan HIGH items gefixed (9 items, 2 sessies)
+
+**User prompt**: "ga over alle items heen en check of ze echt nog gefixt moeten worden en dat de file dus niet outdated is en fix alles wat je kan fixen waar je zeker van bent dat het gefixt moet worden" — gevolgd door beslissingen op API-O1 (hooks implementeren), H22 (error union breaking change), H-TWIN (raw token in Redis keys, nu fixen).
+
+**Wat gedaan** (sessie 1 + 2 samen):
+
+- **SRV-O1** — `apiRoute.ts` SSE stream lifecycle: four-listener pattern (close/error/aborted/res.error) gespiegeld van syncRoute.ts
+- **ERRPAGE-H** — `create-luckystack-app` template `ErrorPage.tsx`: `import.meta.env.DEV` guard op stack trace (pariteit met framework copy)
+- **SCAF-N3** — `create-luckystack-app/src/index.ts`: docs/ subtree kopieert nu met `{}` vars zodat `{{…}}` tokens in framework-docs niet overschreven worden
+- **API-O2** — `handleHttpApiRequest.ts`: loopback check vervangen door `isLoopbackIp()` + `skipLoopbackInDev` config flag (was inline `startsWith('127.')`, spoofbaar)
+- **H-TWIN** — raw token in Redis rate-limit keys: `deriveTokenBucketId()` (SHA-256 prefix, 32 hex) toegevoegd aan `@luckystack/core` + geëxporteerd; `rateLimitIdentity.ts` in api is nu thin re-export; beide sync handlers (socket + HTTP) gebruiken nu `deriveTokenBucketId(token)` i.p.v. raw token
+- **API-O1 preSocketMessage** — socket API handler had `preSocketMessage` dispatch niet (sync handler al wel); toegevoegd met stop-signal support
+- **API-O1 apiAuthRejected** — beide api handlers (socket + HTTP) dispatchen nu `apiAuthRejected` hook op alle auth-fail paden (login-required + additional-failed + invalid-condition); was volledig afwezig
+- **API-O1 rateLimiting.identity** — callback support geïmplementeerd in alle 4 rate-limit secties (api socket, api HTTP, sync socket, sync HTTP): de callback overschrijft de per-route bucket basis (tenant/api-key); default fallback naar token-hash/IP blijft intact
+- **API-O1 system/logout global IP limit** — logout shortcut bypaste `applyApiRateLimits` volledig; globale IP bucket nu ook toegepast voor logout (kan niet gespammd worden)
+- **API-O1 handleHttpSyncRequest loopback** — zelfde loopback fix als API-O2 maar voor HTTP sync handler: `isLoopbackIp()` + `skipLoopbackInDev` (was inline array-check zonder config-flag)
+- **H22** — `apiRequest()` return type: van `Promise<Prettify<OutputForFullName<F, V>>>` naar `Promise<Prettify<OutputForFullName<F, V>> | ApiErrorResponse>`; `ApiErrorResponse` geëxporteerd vanuit `@luckystack/core/client`
+
+**Gate**: `npm run lint && npm run build` — 0 errors, 0 warnings (16/16 packages OK, vite build OK, server bundle OK).
+
+**Files**: `packages/server/src/httpRoutes/apiRoute.ts`, `packages/create-luckystack-app/template/src/_components/ErrorPage.tsx`, `packages/create-luckystack-app/src/index.ts`, `packages/api/src/handleHttpApiRequest.ts`, `packages/core/src/resolveClientIp.ts`, `packages/core/src/index.ts`, `packages/api/src/_shared/rateLimitIdentity.ts`, `packages/sync/src/handleSyncRequest.ts`, `packages/sync/src/handleHttpSyncRequest.ts`, `packages/api/src/handleApiRequest.ts`, `packages/core/src/apiRequest.ts`, `packages/core/src/client.ts`.
+
+## 2026-06-16 — HIGH fix sweep (verify → fix → verify): 4 gefixt, 12 al-gefixt geverifieerd, 2 false-positives
+
+**User prompt (summary)**: 3-fase loop over de codebase-scan HIGH/CRITICAL items — fase 1 read-only verify of elk item nog aanwezig is, fase 2 fix wat echt aanwezig is (ultracode), fase 3 re-verify + roadmap/branch-log bijwerken. SRV-O1, ERRPAGE-H, SCAF-N3, API-O2, API-O3/H-TWIN, API-O1, H22 waren al deze sessie gefixt en uitgesloten van her-verificatie.
+
+**Verify-resultaat (read-only Explore agents, file:line bewijs)**:
+- **Nog aanwezig (4)** → gefixt deze sessie: DOCSUI-3, TR-2, ROUTER-O1, ROOTSRC-O3.
+- **Al gefixt in tree (12, geen actie)**: DOCSUI-1, DOCSUI-2, RS-01, CORE-O1, TR-1, ET-O1, SERVER-O18, SYNC-N2, EMAIL-O1, ROOTSRC-O2, + DD SYNC-O1, H17.
+- **False-positive (2)**: LOGIN-03 (policy wordt op het login-pad overgeslagen via `mode`; lockout-counter is een allowlist zonder `login.password*`), DELETE-H (wachtwoord wél verzameld via aparte `deletePasswordRef` + server-side geverifieerd; ConfirmMenu gate alleen de "DELETE"-tekst).
+- **DD nog OPEN (3, NIET gefixt — beslissing user nodig)**: CORE-O3, CORE-O10, RS-F1.
+
+**Fixes**:
+- **DOCSUI-3** — dead shadow-module `packages/docs-ui/src/renderCore.ts` + `renderCore.test.ts` verwijderd (nooit door productie geïmporteerd; module-header claimde valselijk `Function.prototype.toString()`-serialisatie). De daadwerkelijk verscheepte inline renderer in `docsHtml.ts` blijft gedekt door `liveRenderCore.test.ts` + `docsHtml.test.ts`.
+- **TR-2** — `buildAuthHeaders` in `runAllTests.ts` is nu async: haalt in cookie-mode de CSRF-token op via `getSession(authToken)` (identiek aan het pad in `customTests.ts`) en zet die onder `getCsrfConfig().headerName`; dynamische import van `@luckystack/login` in try/catch zodat token-mode setups ongewijzigd blijven. `STATE_CHANGING_METHODS` nu single-source in `testLayerHelpers.ts`; fuzz- en rate-limit-sweep slaan state-changing routes (POST/PUT/DELETE) over in de authenticated (cookie) sweep — voorkomt junk-body-mutaties op de test-DB.
+- **ROUTER-O1** — `startRouter.ts` leest `deployConfig.routing?.upstreamTimeoutMs` en geeft die door als `upstreamRequestTimeoutMs` (HTTP-proxy) + `upstreamHandshakeTimeoutMs` (WS-proxy); beide factories vallen terug op hun ingebouwde 30s default wanneer de knob niet gezet is.
+- **ROOTSRC-O3** — consumer `src/settings/_api/*` her-gesynchroniseerd met de geharde CLI-asset: `deleteAccount_v1` draait nu `preAccountDelete` (vetoable) + `getUserAdapter().delete()` + avatar-unlink (GDPR) + `postAccountDelete`, met behoud van de bestaande wachtwoord-verificatie (DELETE-H) en `activeUsersKeyFor` (ROOTSRC-O2); `listSessions_v1` exporteert `sessionHandle` (16-char) en retourneert `handle` i.p.v. de 64-char `id`; `revokeSession_v1` matcht op `sessionHandle` + valideert eigendom via `sessionKeyFor` + `functions.tryCatch.tryCatch` JSON-parse; `page.tsx` `ActiveSession.id`→`handle` overal. Avatar-unlink via `functions.tryCatch.tryCatch` (geen raw `.catch()`; voldoet aan no-useless-undefined/no-empty-function).
+
+**Gate (eigen run)**: `npm run lint` 0 errors · `npm run build` 0 errors (16 packages + `tsc -b` + vite + server bundle). `lint:packages` toonde enkel pre-existing issues in `packages/server/src/loadSocket.ts` + `packages/sync/*` — bestanden die deze sessie NIET zijn aangeraakt.
+
+**Beslissing user nodig (DD, niet gefixt)**: CORE-O3 (XFF leftmost-hop trust onder opt-in `trustProxy:true`), CORE-O10 (cookie-mode accepteert `Authorization: Bearer`-fallback), RS-F1 (`shared/tryCatch.ts` sleept de `node:async_hooks`-variant in de client-bundle).
+
+**Files**: `docs/REFACTOR_ROADMAP.md`, `packages/docs-ui/src/renderCore.ts` (deleted), `packages/docs-ui/src/renderCore.test.ts` (deleted), `packages/test-runner/src/{runAllTests,testLayerHelpers,runCsrfEnforcementTests,runFuzzTests,runRateLimitTests}.ts`, `packages/router/src/startRouter.ts`, `src/settings/_api/{deleteAccount,listSessions,revokeSession}_v1.ts`, `src/settings/page.tsx`.
+
+## 2026-06-16 — DEFERRED-DECISION items gefixt (CORE-O3, CORE-O10, RS-F1, user-approved)
+
+**User prompt (summary)**: na de HIGH-sweep de 3 nog-open DD-items (CORE-O3, CORE-O10, RS-F1) ter beslissing voorgelegd; user koos alle drie te fixen.
+
+**Fixes** (allemaal off-by-default exposures → veilige default geflipt, opt-in behouden):
+- **CORE-O3** (XFF leftmost-hop trust) — `resolveClientIp` vertrouwt niet langer de leftmost, client-gecontroleerde `X-Forwarded-For`-hop bij `trustProxy:true`. Nieuwe config `http.trustedProxyHopCount` (default 1) telt N hops vanaf RECHTS (de entries die je eigen trusted proxies appenden), geclampt op de lijstlengte. X-Real-IP + raw peer blijven secundaire fallbacks. `trustProxy:false`-gedrag ongewijzigd. Doorgedraad in alle call sites (api socket + logout, sync socket, server `resolveRequesterIp`, `authApiRoute`). Tests in `resolveClientIp.test.ts` (default rightmost, leftmost-spoof NIET vertrouwd, hopCount=2, clamp, array-vorm).
+- **CORE-O10** (Bearer-fallback in cookie-mode = CSRF-bypass) — `extractTokenFromRequest` (HTTP) + `extractTokenFromSocket` (socket) accepteren in cookie-mode (`session.basedToken:false`) standaard ALLEEN de cookie-token; de `Authorization: Bearer` / `handshake.auth.token`-fallback is nu opt-in via nieuwe config `http.acceptBearerInCookieMode` (default false). Token-mode ongewijzigd. Nieuwe `extractToken.test.ts` dekt beide extractors × beide flag-standen × token-mode.
+- **RS-F1** (node:async_hooks-leak in client-bundle) — nieuwe browser-safe `packages/core/src/tryCatchClient.ts` die de capture-seam (`sentrySetup` → `errorTrackerRegistry` → `node:async_hooks`) alleen LAZY via `import()` op de error-branch laadt, zodat de node-bearing module niet meer in de statische client-graph zit. Beide client-entrypoints — `shared/tryCatch.ts` (LoginForm/playground) én de `@luckystack/core/client`-barrel `tryCatch`-re-export (10+ client-files via main.tsx/ErrorPage/ConfirmMenu) — wijzen nu naar `tryCatchClient`. Server `tryCatch.ts` byte-for-byte ongewijzigd → server-capture-pad (synchroon, statisch gelinkt) intact. De 2026-06-15 browser-safe ALS-guard in `errorTrackerRegistry.ts` NIET aangeraakt (blank-page-regressie niet herintroduceerd).
+
+**Config-keys toegevoegd** (`HttpConfig`, veilige defaults, gedocumenteerd in `packages/core/CLAUDE.md` + `packages/core/docs/socket-bootstrap.md`): `http.trustedProxyHopCount` (default 1), `http.acceptBearerInCookieMode` (default false).
+
+**Gate (eigen run)**: `npm run lint` 0 errors · `npm run build` 0 errors — **build bevestigt geen `node:`-externalization-warning voor de client-entry** (RS-F1 authoritatief geverifieerd). `lint:packages` ongewijzigd op 4 errors/8 warnings, allemaal pre-existing in `errorTrackerRegistry.ts` (prefer-global-this), `email/adapters/resend.ts` (empty-function), `loadSocket.ts` (await-thenable/void-expr) + sync import-x warnings — geen NIEUWE issues in de aangeraakte bestanden.
+
+**Opmerking**: `docs/AI_QUICK_INDEX.md`-rijen voor resolveClientIp/extractToken zijn auto-generated (`npm run ai:index` / pre-commit hook) en niet handmatig bijgewerkt.
+
+**Files**: `packages/core/src/{projectConfig,resolveClientIp,extractTokenFromRequest,extractToken,tryCatchClient,client}.ts`, `packages/core/src/{resolveClientIp.test,extractToken.test}.ts`, `packages/api/src/handleApiRequest.ts`, `packages/sync/src/handleSyncRequest.ts`, `packages/server/src/httpRoutes/{resolveRequesterIp,authApiRoute}.ts`, `shared/tryCatch.ts`, `packages/core/CLAUDE.md`, `packages/core/docs/socket-bootstrap.md`, `docs/REFACTOR_ROADMAP.md`.
+
+## 2026-06-16 14:00 — Bugfixes browser-test: admin template + OAuth callback port
+
+**User prompt**: Browser-test van de hele src/ app + Google OAuth flow. Daarna: "de callback moet toch naar 8080 gaan" en "kijk hier eens goed naar" (OAuth routing werkt niet op non-standaard ports).
+
+**Wat ik deed**:
+
+1. **Admin page security bug** (`src/admin/page.tsx`): `export const template = 'dashboard'` ontbrak. Zonder dit gebruikt `TemplateProvider` `PlainTemplate` (geen `<Middleware>`-component in de tree), waardoor de per-page middleware-guard nooit draaide → unauthenticated users konden de admin pagina direct openen. Fix: `export const template = 'dashboard'` toegevoegd vóór de middleware export.
+
+2. **OAuth callback port bug** (`config.ts`): `oauthCallbackBase` was hardcoded als `resolvedEnvironment.backendUrl = "http://localhost:80"` vanuit de statische DNS-map. De `?backend=8080` override beïnvloedt alleen de client-side `resolveBackendUrl()` — nooit de server-side OAuth config. Gevolg: Google stuurde de callback altijd naar `:80`, ook als de server op `:8080` draaide. Fix: in dev-mode leest `oauthCallbackBase` nu `SERVER_PORT` uit de env var — `http://localhost:${env('SERVER_PORT') ?? '80'}`. In prod blijft `resolvedEnvironment.backendUrl` (de statische public domain).
+
+**Root cause OAuth**: `oauthCallbackBase` is een server-side static boot-time waarde. `?backend=<port>` is browser-only (sessionStorage, `resolveBackendUrl()`). Ze zijn volledig onafhankelijk — de fix was om de server-side callback te laten verwijzen naar de werkelijke listen-port via `SERVER_PORT`.
+
+**Wat testen**: Start server met `SERVER_PORT=8080` → `oauthCallbackBase` = `http://localhost:8080`. Voeg `http://localhost:8080/auth/callback/google` toe aan Google Cloud Console. OAuth flow werkt dan ook op niet-standaard ports.
+
+**Files**: `src/admin/page.tsx`, `config.ts`.
+
+## 2026-06-16 — Roadmap-reconciliatie: 19 stale rijen geflipt naar FIXED + count-tabel als stale gemarkeerd
+
+**User prompt**: "wat moet er nu nog allemaal gebeuren volgens jou?" (review van `docs/REFACTOR_ROADMAP.md`) → ik signaleerde dat ~19 rijen nog NEW/OPEN stonden terwijl ze deze sessie (of in eerdere sessies) al gefixt/geverifieerd waren; daarna autonome tick om die reconciliatie door te voeren.
+
+**Wat gedaan** (alleen docs, geen code; reversibel):
+- 19 tabelrijen in `docs/REFACTOR_ROADMAP.md` geflipt van NEW/OPEN naar `**FIXED** (reconciled 2026-06-16)`. Verify-bevestigd deze sessie (file:line): DOCSUI-1, DOCSUI-2, RS-01, CORE-O1, TR-1, SYNC-N2, ET-O1, SERVER-O18, EMAIL-O1, ROOTSRC-O2, SYNC-O1, H17. Gefixt in eerdere sessie deze dag (per opdracht-uitsluitlijst): SRV-O1, ERRPAGE-H, SCAF-N3, API-O1, API-O2, API-O3, H22. (DOCSUI-3, TR-2, ROUTER-O1, ROOTSRC-O3, CORE-O3, CORE-O10, RS-F1 waren al eerder deze dag geflipt; LOGIN-03 + DELETE-H staan al op FALSE-POSITIVE.)
+- Status-count-tabel bovenaan voorzien van een **STALE**-banner: de getallen dateren van vóór deze reconciliatie en zijn NIET herrekend. Reden: dual-labeled rijen ("OPEN / DD", "High (disputed Med)") mappen niet schoon op één bucket — bewust niet gegokt. De per-rij STATUS-cellen zijn nu de bron van waarheid.
+
+**Nog ECHT open (HIGH, niet aangeraakt door enige sessie)**: H-TWIN (systemische transport-twin drift + ai:lint parity-gate), PRESENCE-1 (room-name formatter eenzijdig, cross-pkg DD), DEVKIT-O8 (regex template-injector → TS AST). Plus de MEDIUM/LOW-backlog (niet geverifieerd) en de twee terugkerend aanbevolen gates: ai:lint shadow-surface check + transport-parity check.
+
+**Geen gate gedraaid** (docs-only change, geen lint/build nodig). Niet gecommit/gepusht.
+
+**Files**: `docs/REFACTOR_ROADMAP.md`.
+
+## 2026-06-16 — Roadmap-completion campaign: VOLLEDIGE roadmap weggewerkt (alle MEDIUM/LOW/HIGH + refactors + DEFERRED-DECISION)
+
+**User goal (/goal)**: "fix all points mentioned in de roadmap until all is fixed or figured out they are false detections, use ultracode met sonnet/haiku voor fixes, ik (Opus) doe verificatie/detectie." Aangepakt als ultracode-golven: per gebied agents die verify-then-fix-or-FP deden tegen de roadmap-rij; ik gatete elke golf (lint + lint:packages + ai:lint + build + test:unit) en loste regressies op.
+
+**Golven (allemaal geverifieerd groen na afloop)**:
+- **Wave 1 — MEDIUM api/sync/core/server/router** (6 agents): ~37 fixed + 5 already-fixed. API-O4..O10, SYNC-O2/O4/O8/O9/N1/N3/N4, CORE-O2/O4/O5/O6/O7/O8/O9/O12..O16/O22/O23/N1/N2/N3, SERVER-O3..O8, ROUTER-O2/O3/O4/O8/O13/O15.
+- **Wave 2 — MEDIUM rest** (11 agents): 39 resolved. error-tracking ET-O2/O3/O5/O6/O10/N1/N2, EMAIL-O2/O3, DEVKIT-O1/O2/O10/O11, MCP-1/2, DOCSUI-7/8, TR-3..8, SCAF-N4..N9 (N6 = `ls-np/` 115-file artefact verwijderd + gitignored), PRESENCE-3, SECRET-O1/N1, RS-4/6/7/02, ROOTSRC-O7/O13/O15.
+- **Wave 3 — login MEDIUM (sequentieel) + ROOTSRC-O9 generator** (3 agents): LOGIN-01/02/EMAILCHG/F2/F4/F7/F9/F14/F15/F16/F18/F22/M7/M9/04 + ROOTSRC-O9 (devkit emitter unie van error-envelope → cast weg in SessionProvider).
+- **Wave 4a/4b — LOW backlog** (7 + 10 agents): ~142 fixed/already-fixed/false-positive over alle gebieden (api/core/sync/server/root-server/error-tracking/router + devkit/mcp/docs-ui/test-runner/cli/presence/scaffolder-SCAF-K/email/root-src). DEVKIT-O3 shadow `emitter.ts` bleek NIET orphaned (root `server/dev/typeMap/emitter.ts` re-exporteert het) → behouden.
+- **Refactor R1** (5 agents, behavior-preserving god-function decomposities, test-geverifieerd): API-O11, SYNC-O6, SYNC-O7, SERVER-GOD, login.ts.
+- **Refactor R2** (5 agents): PRESENCE-1 (alle room-join/broadcast via `formatRoomName`), DEVKIT-O8 (regex→TS-AST client-input rewrite) + DEVKIT-O19 (blanket eslint-disables weg) + DEVKIT-O21 (templateInjector/hotReload decompositie), SCAF-K god-functions, ROOTSRC-O17 (settings/page.tsx → 7 componenten) + ROOTSRC-O18 (socket god-effect → _socketSetup helpers), TR-11/13/15.
+- **Test-fix golf** (4 agents): 45 unit-test failures opgelost — grotendeels vi.mock-gaten (nieuwe core-imports: resolveClientIp, redis, isLoopbackIp, formatKey, oneTimeTokenKey, formatRoomName), stale tests bijgewerkt naar nieuw gedrag (CORE-O3 rightmost-XFF, CORE-N5 deepMerge, ET-O3 sentry), asset↔template parity her-gesynchroniseerd, cookies.ts by-design raw-on-decode-throw hersteld.
+- **Finale golf — H-TWIN + DEFERRED-DECISION** (9 agents): H-TWIN → nieuwe `checkTransportParity()` invariant in `scripts/lintInvariants.mjs` (BLOCK-severity, eist dat beide api- én sync-transport-twins dezelfde hooks in dezelfde volgorde dispatchen + gedeelde rate-limit helper). Alle DD-items beslist: secure-default geïmplementeerd waar contained (EMAIL-O4 fail-closed explicit-adapter + EMAIL-O5 HMAC-recipient-hash + O7 CRLF-strip + O8 send-timeout, LOGIN-F5 IP+account composite lockout-key, ROUTER-DD1 body-cap + DD2 fail-closed proxyRequestGate, MCP graph staleness-signal, ROOTSRC-O6 no-enumeration email-change) of stance gedocumenteerd waar het een policy/ADR is (CORE env eager-load, SECRET advanced-keys, DEVKIT codegen-strictness, TR xpass/stub-policy). PostEmailChangeRequestedPayload kreeg `sent?: boolean`.
+
+**Door mij (coordinator) opgeloste gate-regressies**: ~10 lint-fouten na Wave 1 + losse na elke golf (eigen edits of een toegewijde lint-cleanup-agent per golf); build-race (server DTS tegen niet-klare core dist — geen echte fout); test-runner csrf `'HEAD'` no-overlap + generic `TOutput` op callApi/callSync; updatePreferences Prisma-JSON-type; **tsProgram.ts:59 `type.symbol.name` → `?.` (devkit O19-regressie die type-generatie sloopte → gedegradeerde generated types → app-tsc-fouten; gevonden via generateTypeMaps-run)**; PostEmailChangeRequestedPayload `sent?`.
+
+**Eindstaat (geverifieerd)**: `npm run lint` 0 · `npm run lint:packages` 0 · `npm run ai:lint` 0 violations (incl. nieuwe transport-parity invariant) · `npm run build` 16/16 · `npm run test:unit` **1281 passed** (was 1207 aan begin van de dag; +74 nieuwe tests). 0 OPEN/NEW rijen in de MEDIUM/HIGH-tabellen; LOW + DD secties voorzien van completion-banners die naar deze entry verwijzen. Niet gecommit/gepusht (wacht op user).
+
+**Files**: roadmap-breed — packages/{api,sync,core,server,router,login,email,error-tracking,devkit,mcp,docs-ui,test-runner,presence,secret-manager,create-luckystack-app,cli}/src/**, src/** (settings, providers, sockets, components), server/**, scripts/lintInvariants.mjs, docs/REFACTOR_ROADMAP.md, diverse package CLAUDE.md's. (Volledige per-bestand-lijst is te groot voor één entry; zie `git status`.)
+
+## 2026-06-18 — CI groen maken voor v0.2.0 publish: build-wave fix + test:unit switch
+
+**User goal**: vorige sessie meldde dat CI op `npm run test` zou falen omdat er in CI nooit een server draait → switch naar de unit-test command. Bevestigd + doorgevoerd, commit + push, daarna publish-instructies.
+
+**Wat ik deed**:
+- **Bevestigd** dat `npm run test` (`scripts/testAll.ts`) een live server op `http://localhost:80` aanroept en die NIET zelf boot (header zegt dit expliciet). In CI draait geen server → alle sweep-layers falen op connection-refused → `totalFailed > 0` → exit 1. Switch naar `npm run test:unit` (vitest, self-contained) is correct.
+- **`scripts/buildPackages.mjs`** (uit vorige sessie, was uncommitted): `test-runner` van wave 2 → wave 3 (na `login`), naast `error-tracking`. Beide type-checken hun DTS-pass tegen `login`'s `dist/index.d.ts`; in een verse CI-checkout (dist gitignored) bestond die nog niet als ze parallel met login bouwden → TS7016. Topologie-comment bijgewerkt.
+- **`.github/workflows/ci.yml` + `publish.yml`**: stap `Test sweep` (`npm run test`) → `Unit tests` (`npm run test:unit`), met comment waarom de live-server sweep een lokale/dev-gate blijft.
+
+**Verificatie**: `npm run test:unit` lokaal → **1281 passed / 0 failed** (113 files, 9.6s).
+
+**Commits**: `701ff9a` (build-wave fix) + `ea70eed` (CI test:unit switch), gepusht naar `origin/chore/package-split-prep`.
+
+**Open**: v0.2.0 tag wijst nog naar oude `66c6df1` (vóór de fixes, lokaal+remote). Moet her-getagd naar `ea70eed` om publish met de fixes te triggeren — outward-facing, wacht op user. master (`2912280`) loopt achter op de branch.
+
+**Files**: scripts/buildPackages.mjs, .github/workflows/ci.yml, .github/workflows/publish.yml, src/docs/apiTypeDiagnostics.generated.json (regen-timestamp).

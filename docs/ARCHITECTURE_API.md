@@ -306,7 +306,6 @@ This matches how final return output typing is already generated from route retu
 Repository note:
 
 - The previous `/streaming` demo page and demo handlers were intentionally removed from source.
-- Use `docs/STREAMING_RECONSTRUCTION.md` to recreate that exact demo implementation when needed.
 
 ## Offline Request Queue
 

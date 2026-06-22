@@ -76,7 +76,7 @@ export const isUserAdapterRegistered = (): boolean => registeredAdapter !== null
 //? register their own `UserAdapter` via `registerUserAdapter(...)` rather
 //? than relying on this default.
 interface PrismaUserDelegate {
-  findFirst: (args: { where: { email: string; provider?: string } }) => Promise<UserRecord | null>;
+  findFirst: (args: { where: { email: string; provider?: string }; orderBy?: { createdAt?: 'asc' | 'desc' } }) => Promise<UserRecord | null>;
   findUnique: (args: { where: { id: string } }) => Promise<UserRecord | null>;
   create: (args: { data: Record<string, unknown> }) => Promise<UserRecord>;
   update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<UserRecord>;
@@ -95,8 +95,13 @@ export const defaultPrismaUserAdapter = (): UserAdapter => {
   return {
     findByEmail: async ({ email, provider }) =>
       getPrismaUser().findFirst({ where: { email, provider } }),
+    //? LOGIN-04: add a deterministic tiebreak so duplicate-email rows (possible
+    //? under the 'unified' strategy before `email @unique` is enforced) always
+    //? resolve to the OLDEST account. Without orderBy the row returned is
+    //? engine-defined — two concurrent logins for the same email can resolve to
+    //? different User rows AND the cross-provider link guard flips non-deterministically.
     findByEmailAnyProvider: async ({ email }) =>
-      getPrismaUser().findFirst({ where: { email } }),
+      getPrismaUser().findFirst({ where: { email }, orderBy: { createdAt: 'asc' } }),
     findById: async (id) =>
       getPrismaUser().findUnique({ where: { id } }),
     create: async (input) =>

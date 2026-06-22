@@ -1,6 +1,6 @@
 {
   "name": "create-luckystack-app",
-  "version": "0.2.0",
+  "version": "0.2.7",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -15,7 +15,7 @@
     "url": "git+https://github.com/ItsLucky23/LuckyStack-v2.git",
     "directory": "packages/create-luckystack-app"
   },
-  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/master/packages/create-luckystack-app#readme",
+  "homepage": "https://github.com/ItsLucky23/LuckyStack-v2/tree/main/packages/create-luckystack-app#readme",
   "bugs": {
     "url": "https://github.com/ItsLucky23/LuckyStack-v2/issues"
   },
@@ -31,7 +31,7 @@
   },
   "main": "./dist/index.js",
   "bin": {
-    "create-luckystack-app": "dist/index.js"
+    "create-luckystack-app": "./dist/index.js"
   },
   "files": [
     "dist",

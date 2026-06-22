@@ -6,8 +6,27 @@ import type {
   ApiMetaMap,
   ContractCheckResult,
   EndpointDescriptor,
+  HttpMethod,
   RunContractSummary,
 } from './types';
+
+//? Single source of truth for the canonical layer names used in both the
+//? orchestrator (`runAllTests`) and the reporter (`logRunAllSummary`). Keeping
+//? them here prevents silent drift between the reporting labels and the summary
+//? property keys when layers are added or renamed.
+export const LAYER_KEYS = {
+  contract: 'contract',
+  auth: 'auth-enforcement',
+  rateLimit: 'rate-limit',
+  csrf: 'csrf-enforcement',
+  fuzz: 'fuzz',
+  custom: 'custom',
+} as const;
+
+//? HTTP methods that carry a body and mutate server state. The CSRF middleware
+//? enforces a token only on these. Fuzz / rate-limit layers share this set to
+//? avoid firing junk bodies at mutating authenticated routes in cookie-mode.
+export const STATE_CHANGING_METHODS = new Set<HttpMethod>(['POST', 'PUT', 'DELETE']);
 
 /**
  * Whether an endpoint is in the explicit skip list. Matched against

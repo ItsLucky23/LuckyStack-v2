@@ -63,6 +63,13 @@ jobs:
           test -s src/docs/apiDocs.generated.json
           ls server/prod/generatedApis.*.ts
 
+      # Build packages before linting: eslint.luckystack.config.js imports
+      # @luckystack/core/eslint (the custom-rules subpath, resolved from core's
+      # dist). Without the dist, eslint can't load its config and exits with
+      # code 2 — so both lint steps MUST run after the package dist exists.
+      - name: Build packages (lint depends on @luckystack/* dist)
+        run: npm run build:packages
+
       - name: Lint
         run: npm run lint
 
@@ -72,8 +79,12 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test sweep
-        run: npm run test
+      # `npm run test` (testAll.ts) is the live-server sweep — it hits
+      # http://localhost:80 and does NOT boot a server, so it can only run
+      # against a manually-started dev server. CI has no server, so it runs the
+      # self-contained vitest suite instead. The sweep stays a local/dev gate.
+      - name: Unit tests
+        run: npm run test:unit
 
       - name: Security audit (production deps, high+)
         run: npm audit --omit=dev --audit-level=high

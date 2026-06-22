@@ -22,6 +22,14 @@ Source: `packages/router/src/httpProxy.ts`, `packages/router/src/wsProxy.ts`.
 7. **Pipe.** `req.pipe(forwardRequest)` streams the client body upstream. On upstream response, `upstream.pipe(res)` streams the response body back. No buffering, so large uploads/downloads do not multiply memory.
 8. **Dispatch `postProxyResponse`.** Fires once the upstream response headers arrive (right when the body starts streaming) on the happy path, **or** when the upstream transport emits `'error'` before a response (`statusCode: 0`, `error` field populated). `latencyMs` is measured from step 1 (proxy entry) to whichever happens. Consumers branch on `payload.error` to distinguish failure events.
 
+## SSRF / host-pinning guards
+
+Two defense-in-depth checks prevent the proxy from being used as an open relay:
+
+**`isOriginFormTarget(pathname)`** (step 1 of the lifecycle) — rejects any request URL that is not a strict origin-form path (a single leading `/`). Absolute-form (`http://host/...`), protocol-relative (`//host`), and authority-form targets would cause `new URL(pathname, resolved.target)` to re-host the upstream to an attacker-supplied origin. These are rejected with `400 routing.invalidRequestPath` before service resolution begins.
+
+**`isHostPinned(targetUrl, resolved.target)`** (after service resolution) — re-validates that the `hostname`+`port` in the assembled upstream URL still matches the binding the resolver returned. A custom `ServiceResolver` that ignores the path could theoretically move the upstream; this guard catches that. Mismatches are rejected with `502`.
+
 ## Hop-by-hop header stripping
 
 The proxy strips these headers from both the upstream request and the response (per RFC 7230 §6.1):
@@ -45,8 +53,8 @@ The proxy adds the following on every forwarded HTTP request:
 
 | Header | Value | Purpose |
 | --- | --- | --- |
-| `x-forwarded-host` | `req.headers.host ?? ''` | Lets the backend know the public hostname even though it sees the router's internal `Host`. |
-| `x-forwarded-proto` | `req.headers['x-forwarded-proto'] ?? 'http'` | Preserves a higher-trust value if a TLS-terminating proxy already set it; otherwise defaults to `http`. The router itself does not terminate TLS. |
+| `x-forwarded-host` | `req.headers.host ?? ''` | Lets the backend know the public hostname even though it sees the router's internal `Host`. Reflected verbatim from the inbound `Host` header; backends building absolute URLs from it should validate the value against an allowlist. |
+| `x-forwarded-proto` | `normalizeForwardedProto(req.headers['x-forwarded-proto'])` | Strips any inbound `x-forwarded-proto` and emits a normalized single value (`'https'` or `'http'`). The inbound header is never trusted or forwarded verbatim — a multi-hop chain cannot spoof the scheme seen by the backend. |
 | `x-luckystack-resolved-env` | `resolved.resolvedEnvKey` | Which env owns the binding (current env or the fallback env key). Useful for audit logs and per-env metrics on the backend side. |
 | `x-luckystack-via-fallback` | `'1'` when `viaFallback`, else `'0'` | `1` means the local binding was missing or unhealthy and the request was routed to the fallback env. |
 

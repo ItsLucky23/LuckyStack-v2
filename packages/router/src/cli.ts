@@ -23,6 +23,7 @@
 
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { tryCatch } from '@luckystack/core';
 import { startRouter } from './startRouter';
 
 interface CliArgs {
@@ -138,9 +139,8 @@ EXAMPLES
 
 const importConfig = async (file: string, label: string): Promise<void> => {
   const abs = path.isAbsolute(file) ? file : path.join(process.cwd(), file);
-  try {
-    await import(pathToFileURL(abs).href);
-  } catch (error) {
+  const [error] = await tryCatch(() => import(pathToFileURL(abs).href));
+  if (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`[luckystack-router] failed to import ${label} at ${abs}: ${message}`);
   }

@@ -1,5 +1,7 @@
 import type { Socket } from 'socket.io';
+import { getLogger } from '@luckystack/core';
 import type { ApiFlushPressure, ApiFlushPressureOptions } from './apiTypes';
+import { shouldLogDev } from './logFlags';
 
 //? B2 — backpressure helper factory for the SOCKET API transport. Same shape
 //? as the sync variant; resolves once the originator socket's pending write
@@ -25,8 +27,15 @@ export const createApiFlushPressure = (socket: Socket, abortSignal: AbortSignal)
       //? only way to measure socket backpressure; the cast is the documented
       //? boundary to those untyped internals. Moved verbatim from the socket
       //? handler — same access pattern, no behavioral change.
+      // luckystack-allow no-as-unknown: engine.io internal — `conn` is not typed on Socket; this is the documented access pattern
       // eslint-disable-next-line no-restricted-syntax -- engine.io internals boundary
       const conn = (socket as unknown as { conn?: EngineIoConnLike }).conn;
+      //? API-O15 — if engine.io renames `conn` this silently becomes a no-op
+      //? (buffer always 0, writable always true). Warn in dev so a rename is
+      //? caught before backpressure is broken in production.
+      if (shouldLogDev() && !conn) {
+        getLogger().warn('api: socket.conn absent — engine.io internal may have been renamed; backpressure is a no-op');
+      }
       const packets = conn?.writeBuffer?.length ?? 0;
       const writable = conn?.transport?.writable ?? true;
       if (!writable) return;

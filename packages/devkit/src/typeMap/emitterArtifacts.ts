@@ -188,6 +188,65 @@ const validateGeneratedTypeIdentifiers = (content: string): void => {
 	}
 };
 
+export interface DiagnosticsEntry {
+	route: string;
+	kind: 'api' | 'sync';
+	field: string;
+	fallback: string;
+	reason: string;
+}
+
+export interface GeneratedDiagnosticsData {
+	generatedAt: string;
+	totalRoutes: number;
+	fallbackCount: number;
+	fallbacks: DiagnosticsEntry[];
+}
+
+//? Detects type fields that fell back to a degraded default. Three signals:
+//? 1. `{ }` on input/clientInput — getSourceFile miss or missing ApiParams.data.
+//? 2. `{ status: string }` on output — main function has no typed return shape.
+//? 3. `z.any()` in the Zod schema source — zodEmitter hit an unsupported TypeNode.
+//? These are not hard errors but lose type safety on the affected routes.
+const collectFallbacks = (
+	typesByPage: Map<string, Map<string, ApiTypeEntry>>,
+	syncTypesByPage: Map<string, Map<string, SyncTypeEntry>>,
+): DiagnosticsEntry[] => {
+	const entries: DiagnosticsEntry[] = [];
+
+	const flagField = (route: string, kind: 'api' | 'sync', field: string, value: string): void => {
+		if (value === '{ }' || value === '{ status: string }') {
+			entries.push({ route, kind, field, fallback: value, reason: 'default-fallback' });
+			return;
+		}
+		const zodSrc = typeTextToZodSource(value);
+		if (zodSrc?.includes('z.any()')) {
+			entries.push({ route, kind, field, fallback: value.slice(0, 80), reason: 'zod-any-fallback' });
+		}
+	};
+
+	for (const [pagePath, apis] of typesByPage) {
+		for (const [apiKey, entry] of apis) {
+			const { name, version } = splitVersionedKey(apiKey);
+			const route = `${pagePath}/${name}@${version}`;
+			flagField(route, 'api', 'input', entry.input);
+			flagField(route, 'api', 'output', entry.output);
+		}
+	}
+
+	for (const [pagePath, syncs] of syncTypesByPage) {
+		for (const [syncKey, entry] of syncs) {
+			const { name, version } = splitVersionedKey(syncKey);
+			const route = `${pagePath}/${name}@${version}`;
+			flagField(route, 'sync', 'clientInput', entry.clientInput);
+			flagField(route, 'sync', 'serverOutput', entry.serverOutput);
+			flagField(route, 'sync', 'clientOutput', entry.clientOutput);
+		}
+	}
+
+	return entries;
+};
+
 export const buildTypeMapArtifacts = ({
 	typesByPage,
 	syncTypesByPage,
@@ -294,7 +353,11 @@ type _ProjectApiTypeMap = {
 
 				content += `      '${version}': {\n`;
 				content += `        input: ${indentStr(entry.input, '        ')};\n`;
-				content += `        output: ${indentStr(entry.output, '        ')};\n`;
+				//? Union the framework error envelope so ApiOutput<P,N,V> covers the
+				//? error branch without a Rule-21-forbidden cast at every call site.
+				//? The index signature mirrors ApiErrorResponse so property accesses
+				//? that do not narrow on status first remain compile-clean.
+				content += `        output: ${indentStr(entry.output, '        ')} | { status: 'error'; errorCode: string; [key: string]: unknown };\n`;
 				content += `        stream: ${indentStr(entry.stream, '        ')};\n`;
 				content += `        method: '${entry.method}';\n`;
 				if (entry.rateLimit !== undefined) {
@@ -452,8 +515,10 @@ type _ProjectSyncTypeMap = {
 
 				content += `      '${version}': {\n`;
 				content += `        clientInput: ${indentStr(entry.clientInput, '        ')};\n`;
-				content += `        serverOutput: ${indentStr(entry.serverOutput, '        ')};\n`;
-				content += `        clientOutput: ${indentStr(entry.clientOutput, '        ')};\n`;
+				//? Same error-envelope union as API output — makes SyncServerOutput /
+				//? SyncClientOutput cover the error branch without casts.
+				content += `        serverOutput: ${indentStr(entry.serverOutput, '        ')} | { status: 'error'; errorCode: string; [key: string]: unknown };\n`;
+				content += `        clientOutput: ${indentStr(entry.clientOutput, '        ')} | { status: 'error'; errorCode: string; [key: string]: unknown };\n`;
 				content += `        serverStream: ${indentStr(entry.serverStream, '        ')};\n`;
 				content += `        clientStream: ${indentStr(entry.clientStream, '        ')};\n`;
 				content += `      };\n`;
@@ -497,7 +562,21 @@ declare module '@luckystack/core/typemap' {
 	//? use this file. Emitted alongside the type map so the two always track.
 	const schemasContent = buildSchemasContent({ typesByPage });
 
-	return { content, docsData, schemasContent };
+	//? Diagnostics: collect routes with degraded type extraction so the
+	//? generator exposes them in a machine-readable file rather than only
+	//? logging to stderr. Consumers and CI can grep this file for fallbacks
+	//? without parsing the generated TS source.
+	const fallbacks = collectFallbacks(typesByPage, syncTypesByPage);
+	const totalRoutes = [...typesByPage.values()].reduce((n, m) => n + m.size, 0)
+		+ [...syncTypesByPage.values()].reduce((n, m) => n + m.size, 0);
+	const diagnosticsData: GeneratedDiagnosticsData = {
+		generatedAt: new Date().toISOString(),
+		totalRoutes,
+		fallbackCount: fallbacks.length,
+		fallbacks,
+	};
+
+	return { content, docsData, schemasContent, diagnosticsData };
 };
 
 const buildSchemasContent = ({
@@ -560,10 +639,12 @@ export const writeTypeMapArtifacts = ({
 	content,
 	docsData,
 	schemasContent,
+	diagnosticsData,
 }: {
 	content: string;
 	docsData: GeneratedDocsData;
 	schemasContent?: string;
+	diagnosticsData?: GeneratedDiagnosticsData;
 }) => {
 	try {
 		const outputPath = getGeneratedSocketTypesPath();
@@ -588,6 +669,20 @@ export const writeTypeMapArtifacts = ({
 		const hasUpdatedDocs = writeFileIfChanged(docsPath, docsContent);
 		if (hasUpdatedDocs) {
 			console.log('[TypeMapGenerator] Generated apiDocs.generated.json');
+		}
+
+		if (diagnosticsData !== undefined) {
+			//? Placed next to apiDocs.generated.json so the same docs dir is reused.
+			//? Routes listed here have degraded type extraction (see DiagnosticsEntry.reason).
+			const diagnosticsPath = path.join(path.dirname(docsPath), 'apiTypeDiagnostics.generated.json');
+			const diagnosticsContent = JSON.stringify(diagnosticsData, null, 2);
+			const hasUpdatedDiagnostics = writeFileIfChanged(diagnosticsPath, diagnosticsContent);
+			if (hasUpdatedDiagnostics) {
+				console.log('[TypeMapGenerator] Generated apiTypeDiagnostics.generated.json');
+			}
+			if (diagnosticsData.fallbackCount > 0) {
+				console.warn(`[TypeMapGenerator] ${diagnosticsData.fallbackCount} route(s) have degraded type extraction (see apiTypeDiagnostics.generated.json)`);
+			}
 		}
 	} catch (error) {
 		console.error('[TypeMapGenerator] Error writing type map or docs:', error);

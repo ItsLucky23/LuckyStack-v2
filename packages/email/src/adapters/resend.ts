@@ -57,7 +57,7 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
   //? `unhandledRejection` and crash the process. `send` still awaits the
   //? original `clientPromise`, which still rejects identically — this only
   //? marks the floating branch handled, it changes no failure semantics.
-  void clientPromise.catch(() => {});
+  void clientPromise.catch(() => { /* intentional no-op: prevents unhandledRejection before first send() */ });
 
   return {
     name: 'resend',

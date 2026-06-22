@@ -100,7 +100,7 @@ describe("templateRegistry", () => {
       //? `/admin/` boundary matches on Windows-style absolute paths.
       expect(
         resolveTemplateKind(
-          ctx({ fileKind: "page", filePath: "C:\\proj\\src\\Dashboard\\page.tsx" }),
+          ctx({ fileKind: "page", filePath: String.raw`C:\proj\src\Dashboard\page.tsx` }),
         ),
       ).toBe("page_dashboard");
     });
@@ -218,7 +218,7 @@ describe("templateRegistry", () => {
     it("listRegisteredTemplateKinds reflects every override", () => {
       registerTemplate("api", "a");
       registerTemplate("page_plain", "p");
-      expect([...listRegisteredTemplateKinds()].sort()).toEqual(["api", "page_plain"]);
+      expect([...listRegisteredTemplateKinds()].toSorted()).toEqual(["api", "page_plain"]);
     });
 
     it("clearTemplateOverrides drops content but leaves selection rules intact", () => {

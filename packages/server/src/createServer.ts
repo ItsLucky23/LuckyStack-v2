@@ -1,11 +1,12 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch } from '@luckystack/core';
+import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, isProduction } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
 import { registerProdRuntimeMapsProvider } from './runtimeMapsLoader';
 import { getParsedPort } from './argv';
 import { runGracefulShutdown } from './stopServer';
+import { writeDevServerInfo, clearDevServerInfo } from './devServerInfo';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -85,15 +86,23 @@ export const listenLuckyStackServer = (
 ): Promise<HttpServer> =>
   new Promise<HttpServer>((resolve, reject) => {
     const startPort = typeof port === 'string' ? Number.parseInt(port, 10) : port;
-    //? Opt-in: only auto-pick the next free port when explicitly enabled.
-    //? Off by default because `SERVER_PORT` also drives `config.ts`'s
-    //? `backendOrigin` / OAuth callback base and the Vite dev proxy target —
-    //? silently moving the listen port would leave the frontend talking to the
-    //? old one. Safe to enable for standalone / `npm run cluster` use where
-    //? nothing else hardcodes the port.
-    const autoIncrement = ['1', 'true'].includes(
-      (process.env.SERVER_PORT_AUTO_INCREMENT ?? '').toLowerCase(),
-    );
+    //? Auto-pick the next free port resolution:
+    //? - When `SERVER_PORT_AUTO_INCREMENT` is set EXPLICITLY it always wins
+    //?   (`1`/`true` -> on, `0`/`false` -> off), so a consumer can force either
+    //?   behaviour in any environment.
+    //? - When it is NOT set we default to ON in dev and OFF in production. The
+    //?   dev-vs-prod signal is `isProduction` from `@luckystack/core` (NODE_ENV)
+    //?   — the same canonical flag this file already uses to gate dev tooling.
+    //? Prod stays OFF by default because `SERVER_PORT` also drives `config.ts`'s
+    //? `backendOrigin` / OAuth callback base; silently moving the listen port
+    //? there would leave clients talking to the old one. In dev a port clash is
+    //? almost always a leftover `npm run server`, so quietly hopping to the next
+    //? free port is the friendlier default.
+    const autoIncrementEnv = (process.env.SERVER_PORT_AUTO_INCREMENT ?? '').toLowerCase();
+    let autoIncrement: boolean;
+    if (['0', 'false'].includes(autoIncrementEnv)) autoIncrement = false;
+    else if (['1', 'true'].includes(autoIncrementEnv)) autoIncrement = true;
+    else autoIncrement = !isProduction;
 
     const tryListen = (attemptPort: number): void => {
       const onError = (err: NodeJS.ErrnoException): void => {
@@ -103,7 +112,7 @@ export const listenLuckyStackServer = (
         }
         if (autoIncrement) {
           getLogger().warn(
-            `Port ${String(attemptPort)} is in use — trying ${String(attemptPort + 1)} (SERVER_PORT_AUTO_INCREMENT=1)`,
+            `Port ${String(attemptPort)} is in use — trying ${String(attemptPort + 1)} (auto-increment; set SERVER_PORT_AUTO_INCREMENT=0 to disable)`,
           );
           tryListen(attemptPort + 1);
           return;
@@ -123,6 +132,14 @@ export const listenLuckyStackServer = (
       httpServer.once('error', onError);
       httpServer.listen(attemptPort, ip, () => {
         httpServer.off('error', onError);
+        //? Dev only: advertise the ACTUALLY-bound port so the Vite proxy follows
+        //? us when auto-increment moved the listen off `SERVER_PORT`. Skipped in
+        //? production (no proxy) and under the test runner (avoid stray files +
+        //? exit handlers in unit tests). Best-effort — never blocks the boot.
+        if (!isProduction && process.env.NODE_ENV !== 'test') {
+          writeDevServerInfo(ip, attemptPort);
+          process.once('exit', clearDevServerInfo);
+        }
         const config = getProjectConfig();
         if (config.logging.socketStartup || config.logging.devLogs) {
           getLogger().info(`Server is running on http://${ip}:${String(attemptPort)}/`);

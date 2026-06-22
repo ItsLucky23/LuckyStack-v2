@@ -1,18 +1,17 @@
-/* eslint-disable unicorn/no-abusive-eslint-disable */
-/* eslint-disable */
 import * as ts from 'typescript';
 import path from 'node:path';
-import { ROOT_DIR } from '@luckystack/core';
+import { ROOT_DIR, getGeneratedSocketTypesPath } from '@luckystack/core';
 
 let cachedProgram: ts.Program | null = null;
 
 export const getServerProgram = (): ts.Program => {
   if (cachedProgram) return cachedProgram;
 
-  const tsconfigPath = ts.findConfigFile(ROOT_DIR, ts.sys.fileExists, 'tsconfig.server.json');
+  const tsconfigPath = ts.findConfigFile(ROOT_DIR, ts.sys.fileExists.bind(ts.sys), 'tsconfig.server.json');
   if (!tsconfigPath) throw new Error('[TypeProgram] tsconfig.server.json not found');
 
-  const { config } = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- ts.readConfigFile returns { config: any }
+  const { config } = ts.readConfigFile(tsconfigPath, ts.sys.readFile.bind(ts.sys));
   const { options, fileNames } = ts.parseJsonConfigFileContent(
     config,
     ts.sys,
@@ -57,8 +56,9 @@ const SKIP_EXPANSION = new Set([
 ]);
 
 const isJsonLikeType = (type: ts.Type, checker: ts.TypeChecker): boolean => {
-  const symbolName = type.symbol?.name || '';
-  const aliasName = type.aliasSymbol?.name || '';
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but absent at runtime for primitive types
+  const symbolName = type.symbol?.name ?? '';
+  const aliasName = type.aliasSymbol?.name ?? '';
 
   if (JSON_TYPE_NAMES.has(symbolName) || JSON_TYPE_NAMES.has(aliasName)) return true;
 
@@ -143,7 +143,9 @@ const getLiteralTypeFromPropertySymbol = (
 };
 
 const normalizeImportPath = (targetFilePath: string): string => {
-  const fromDir = path.join(ROOT_DIR, 'src', '_sockets');
+  // Derive fromDir from the configured generated socket types path so
+  // non-`src` srcDir layouts produce correct relative import paths.
+  const fromDir = path.dirname(getGeneratedSocketTypesPath());
   const from = fromDir.replaceAll('\\', '/');
   const to = targetFilePath.replaceAll('\\', '/');
 
@@ -291,7 +293,7 @@ export const expandTypeDetailed = (
 
     if (objectType.objectFlags & ts.ObjectFlags.Reference) {
       const refType = objectType as ts.TypeReference;
-      const targetName = refType.target?.symbol?.name ?? '';
+      const targetName = refType.target.symbol.name;
 
       // Array<T> / ReadonlyArray<T>  T[]
       if (targetName === 'Array' || targetName === 'ReadonlyArray') {
@@ -316,7 +318,7 @@ export const expandTypeDetailed = (
     }
 
     // Known non-generic opaque containers (Date, Error, Buffer, etc.)
-    const symbolName = type.symbol?.name || type.aliasSymbol?.name || '';
+    const symbolName = type.symbol.name || (type.aliasSymbol?.name ?? '');
     if (SKIP_EXPANSION.has(symbolName)) {
       return { text: checker.typeToString(type), unresolvedSymbols: [] };
     }

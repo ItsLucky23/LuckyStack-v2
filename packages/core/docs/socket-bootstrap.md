@@ -17,7 +17,7 @@ This topic covers the wiring around the LuckyStack socket transport:
 - **Cookie helpers** — `getCookieValue`, `hasCookie`.
 - **HTTP helpers** — `inferHttpMethod`, `getEffectiveHttpMethod`, `isMethodAllowed`.
 
-Token extraction respects `projectConfig.session.basedToken`: when `true` the framework prefers `socket.handshake.auth.token` / `Authorization: Bearer ...`, otherwise the configured session cookie wins (with the other transport as fallback).
+Token extraction respects `projectConfig.session.basedToken`: when `true` (token-mode) the framework prefers `socket.handshake.auth.token` / `Authorization: Bearer ...` with the cookie as fallback. When `false` (cookie-mode) the configured session cookie is read; the bearer / handshake-auth fallback is IGNORED by default (CORE-O10 — a stolen token replayed through a header can't bypass the cookie/CSRF model) unless `projectConfig.http.acceptBearerInCookieMode` is set `true` to restore the legacy cookie-then-bearer fallback.
 
 ## API Reference — IO Instance
 

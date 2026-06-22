@@ -9,7 +9,7 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? caller's own session, and the route NEVER returns a raw bearer token —
 //? only an opaque SHA-256 fingerprint (`id`) of it.
 //?
-//? Test environment runs with `allowMultipleSessions: true`, so a user can
+//? Test environment runs with `sessionPerUser: 'multiple'`, so a user can
 //? hold several live tokens at once — that is what the multi-session case
 //? exercises.
 //?

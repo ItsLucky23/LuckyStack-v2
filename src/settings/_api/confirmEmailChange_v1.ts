@@ -46,9 +46,10 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   const oldEmail = before?.email ?? '';
 
   //? Race protection: between minting and clicking, the new address could have
-  //? been claimed by another sign-up. Re-check the collision before writing.
+  //? been claimed by another sign-up (any provider). Check across all providers
+  //? so an OAuth account with the same email is not silently aliased.
   const collision = await functions.db.prisma.user.findFirst({
-    where: { email: newEmail, provider: 'credentials', NOT: { id: userId } },
+    where: { email: newEmail, NOT: { id: userId } },
     select: { id: true },
   });
   if (collision) {

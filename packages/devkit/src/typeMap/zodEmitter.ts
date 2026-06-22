@@ -21,6 +21,14 @@ import * as ts from 'typescript';
 //? expression string, not a file with declarations. ts-to-zod expects the
 //? latter. Also: no codegen tool handles `{ [key: string]: never }` — the
 //? LuckyStack "no input" convention — without special-casing.
+//?
+//? Strict-vs-loose policy (DD-DEVKIT-D2 decision):
+//?   Object literals → `.strict()` (rejects unknown keys, fail-closed posture).
+//?   Routes that need to accept extra keys can declare `export const validation
+//?   = 'relaxed'` (stripped by the Zod layer, future opt-out hook). All other
+//?   fallback paths (`z.any()`, `z.record(...)`) remain loose because we have
+//?   no structural shape to enforce. The `z.any()` fallback count is surfaced
+//?   in `apiTypeDiagnostics.generated.json` so degraded routes are visible.
 
 const wrapOptional = (inner: string): string => `${inner}.optional()`;
 const anyFallback = (reason: string): string => `z.any() /* ${reason} */`;
@@ -152,7 +160,10 @@ const convertTypeNode = (node: ts.TypeNode): string => {
       return `${JSON.stringify(name)}: ${schema}`;
     }).filter((entry): entry is string => entry !== null);
 
-    return `z.object({ ${entries.join(', ')} })`;
+    //? `.strict()` rejects unknown keys, matching the framework's fail-closed
+    //? input validation posture. Consumers can opt out per-route via
+    //? `export const validation = 'relaxed'`.
+    return `z.object({ ${entries.join(', ')} }).strict()`;
   }
 
   // Parenthesized: (T)

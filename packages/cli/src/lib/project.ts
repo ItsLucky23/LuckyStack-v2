@@ -19,6 +19,7 @@ export interface ConsumerProject {
 export interface PackageJson {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
   [key: string]: unknown;
 }
 
@@ -31,6 +32,12 @@ export type Result<T, E = Error> = { ok: true; value: T } | { ok: false; error: 
 //? which the `no-useless-undefined` lint rule rejects). Defaults `T` to `void`.
 export const ok = <T = void>(value?: T): Result<T, never> => ({ ok: true, value: value as T });
 export const err = <E>(error: E): Result<never, E> => ({ ok: false, error });
+
+//? Normalize a caught `unknown` throw into a real Error. `catch` gives `unknown`;
+//? casting with `as Error` is forbidden (strict-typing policy) — callers must use
+//? this helper instead of `error as Error` so a thrown string or number never
+//? produces `err.error.message = undefined`.
+export const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
 
 //? Shared "not a LuckyStack project" message — kept as one const so the scan and
 //? add paths can't drift.
@@ -128,9 +135,26 @@ export const resolveLuckyStackRange = (pkg: PackageJson, cliVersion: string): st
   return `^${cliVersion}`;
 };
 
+//? Detect the indentation used in a JSON file: look for the first property line
+//? (leading whitespace before `"`), return its whitespace prefix. Falls back to
+//? 2-space when the file is one-line or has no detectable indent, so the output
+//? is always valid JSON and matches the common convention. Exported so callers
+//? (e.g. addAiDocs patching .mcp.json) can preserve a file's original indentation.
+export const detectJsonIndent = (raw: string): number | string => {
+  for (const line of raw.replaceAll('\r\n', '\n').split('\n').slice(1)) {
+    const match = /^(\s+)"/.exec(line);
+    if (match) return match[1] ?? 2;
+  }
+  return 2;
+};
+
 //? Add a dependency to package.json if absent. Returns true when it was added,
 //? false when it was already present (idempotent).
+//? DD-CLI-D1: an empty `name` is a caller bug — guard it so an accidental ''
+//? key never silently writes to dependencies['']. DD-CLI-D2: preserve the file's
+//? original indentation instead of always emitting 2-space.
 export const addDependency = (project: ConsumerProject, name: string, range: string): boolean => {
+  if (!name) throw new Error('addDependency: name must be a non-empty string');
   project.pkg.dependencies ??= {};
   if (project.pkg.dependencies[name]) return false;
   project.pkg.dependencies[name] = range;
@@ -138,7 +162,86 @@ export const addDependency = (project: ConsumerProject, name: string, range: str
   project.pkg.dependencies = Object.fromEntries(
     Object.entries(project.pkg.dependencies).toSorted(([a], [b]) => a.localeCompare(b)),
   );
-  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, 2)}\n`);
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  const indent = detectJsonIndent(raw);
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, indent)}\n`);
+  return true;
+};
+
+//? Add a DEV dependency (idempotent). Used for dev-only tooling like @luckystack/mcp.
+export const addDevDependency = (project: ConsumerProject, name: string, range: string): boolean => {
+  if (!name) throw new Error('addDevDependency: name must be a non-empty string');
+  project.pkg.devDependencies ??= {};
+  if (project.pkg.devDependencies[name]) return false;
+  project.pkg.devDependencies[name] = range;
+  project.pkg.devDependencies = Object.fromEntries(
+    Object.entries(project.pkg.devDependencies).toSorted(([a], [b]) => a.localeCompare(b)),
+  );
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, detectJsonIndent(raw))}\n`);
+  return true;
+};
+
+//? Drop a dependency from package.json if present. Returns true when it was
+//? removed, false when it was already absent (idempotent — the inverse of
+//? addDependency). Preserves the file's original indentation, same as the add
+//? path. Only touches `dependencies` (the add path only ever writes there).
+export const dropDependency = (project: ConsumerProject, name: string): boolean => {
+  if (!name) throw new Error('dropDependency: name must be a non-empty string');
+  //? Remove from BOTH dependencies and devDependencies — `hasDependency` checks
+  //? both, so leaving a dep in devDependencies would make state detection report
+  //? the feature as still installed after a removal (an infinite "remove" loop).
+  let removed = false;
+  if (project.pkg.dependencies && name in project.pkg.dependencies) {
+    const { [name]: _removed, ...rest } = project.pkg.dependencies;
+    project.pkg.dependencies = rest;
+    removed = true;
+  }
+  if (project.pkg.devDependencies && name in project.pkg.devDependencies) {
+    const { [name]: _removedDev, ...rest } = project.pkg.devDependencies;
+    project.pkg.devDependencies = rest;
+    removed = true;
+  }
+  if (!removed) return false;
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  const indent = detectJsonIndent(raw);
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, indent)}\n`);
+  return true;
+};
+
+//? True when the consumer's package.json lists `name` in dependencies OR
+//? devDependencies. Used by `list` / `manage` to detect the installed set from
+//? the manifest (the package.json is the consumer's declared intent — cheaper +
+//? mutation-aligned than resolving node_modules, which `add`/`remove` edit here).
+export const hasDependency = (pkg: PackageJson, name: string): boolean =>
+  Boolean(pkg.dependencies?.[name]) || Boolean(pkg.devDependencies?.[name]);
+
+//? The version range a dependency is pinned to (dependencies first, then
+//? devDependencies), or null when absent. Drives the `installed (vRANGE)` column.
+export const dependencyRange = (pkg: PackageJson, name: string): string | null => {
+  const range = pkg.dependencies?.[name] ?? pkg.devDependencies?.[name];
+  return typeof range === 'string' && range.length > 0 ? range : null;
+};
+
+//? Add/overwrite a `scripts.<name>` entry in package.json (idempotent: returns
+//? false when already set to the same command). Preserves indentation.
+export const setScript = (project: ConsumerProject, name: string, command: string): boolean => {
+  if (!name) throw new Error('setScript: name must be a non-empty string');
+  project.pkg.scripts ??= {};
+  if (project.pkg.scripts[name] === command) return false;
+  project.pkg.scripts[name] = command;
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, detectJsonIndent(raw))}\n`);
+  return true;
+};
+
+//? Drop a `scripts.<name>` entry if present (inverse of setScript).
+export const dropScript = (project: ConsumerProject, name: string): boolean => {
+  if (!name || !project.pkg.scripts || !(name in project.pkg.scripts)) return false;
+  const { [name]: _removed, ...rest } = project.pkg.scripts;
+  project.pkg.scripts = rest;
+  const raw = fs.readFileSync(project.pkgPath, 'utf8');
+  fs.writeFileSync(project.pkgPath, `${JSON.stringify(project.pkg, null, detectJsonIndent(raw))}\n`);
   return true;
 };
 
@@ -167,7 +270,10 @@ export const editFile = (filePath: string, edits: readonly FileEdit[]): void => 
     if (!content.includes(find)) {
       throw new Error(`edit failed — token not found in ${filePath}:\n${find}`);
     }
-    content = content.replaceAll(find, replace);
+    //? Replace only the FIRST occurrence so a token that appears more than once
+    //? in a drifted file does not cause a double-edit (would corrupt the output).
+    //? String.prototype.replace with a string needle replaces the first match only.
+    content = content.replace(find, replace);
   }
   if (wasCrlf) content = content.replaceAll('\n', '\r\n');
   fs.writeFileSync(filePath, content);
@@ -227,13 +333,28 @@ const resolveCommandPath = (command: string): string | null => {
   return null;
 };
 
-export const runNpmInstall = (root: string): boolean => {
+//? Detect the package manager in use by checking for lockfiles and the
+//? `packageManager` field in package.json. Checked in priority order so a
+//? project that committed multiple lockfiles still picks the right one.
+const detectPackageManager = (root: string, pkg: PackageJson): string => {
+  const pm = typeof pkg.packageManager === 'string' ? pkg.packageManager : '';
+  if (pm.startsWith('pnpm')) return 'pnpm';
+  if (pm.startsWith('yarn')) return 'yarn';
+  if (pm.startsWith('bun')) return 'bun';
+  if (fs.existsSync(path.join(root, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (fs.existsSync(path.join(root, 'yarn.lock'))) return 'yarn';
+  if (fs.existsSync(path.join(root, 'bun.lockb')) || fs.existsSync(path.join(root, 'bun.lock'))) return 'bun';
+  return 'npm';
+};
+
+export const runNpmInstall = (root: string, pkg: PackageJson = {}): boolean => {
   //? Security (Windows): `spawnSync('npm.cmd', …, { shell: true, cwd: root })` lets
   //? cmd.exe resolve `npm.cmd` against the CWD BEFORE PATH — a malicious `npm.cmd`
-  //? dropped at the project root would run with the user's privileges. Resolve npm
-  //? to an ABSOLUTE path via PATH (PATHEXT-aware, cwd excluded) and spawn THAT, so
-  //? the command is never resolved relative to `root`.
-  const resolved = resolveCommandPath('npm');
+  //? dropped at the project root would run with the user's privileges. Resolve the
+  //? detected package manager to an ABSOLUTE path via PATH (PATHEXT-aware, cwd
+  //? excluded) and spawn THAT, so the command is never resolved relative to `root`.
+  const manager = detectPackageManager(root, pkg);
+  const resolved = resolveCommandPath(manager);
   if (!resolved) return false;
   //? A `.cmd`/`.bat` shim still needs cmd.exe to interpret it, but we now hand the
   //? shell an ABSOLUTE path, so it is never resolved relative to `cwd`.
