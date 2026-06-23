@@ -28,12 +28,12 @@ export interface ApiParams {
 export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
   const token = data.token.trim();
   if (!token) {
-    return { status: 'error', errorCode: 'auth.invalidToken' };
+    return { status: 'error', errorCode: 'settings.emailChange.invalidToken' };
   }
 
   const payload = await consumeEmailChangeToken(token);
   if (!payload) {
-    return { status: 'error', errorCode: 'auth.invalidToken' };
+    return { status: 'error', errorCode: 'settings.emailChange.invalidToken' };
   }
 
   const { userId, newEmail } = payload;
@@ -53,7 +53,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     select: { id: true },
   });
   if (collision) {
-    return { status: 'error', errorCode: 'auth.emailTaken' };
+    return { status: 'error', errorCode: 'settings.emailChange.emailTaken' };
   }
 
   const patch: Record<string, unknown> = { email: newEmail };

@@ -46,6 +46,9 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
   });
 
   if (!callbackResult) {
+    //? Clear the one-time OAuth state-binding cookie on failure too — the Redis
+    //? state is single-use, so don't leave a spent credential-shaped cookie around.
+    res.setHeader('Set-Cookie', `${login.OAUTH_STATE_COOKIE_NAME}=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax`);
     res.writeHead(401, { 'Content-Type': 'text/plain' });
     res.end('Login failed');
     return true;
@@ -61,6 +64,10 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
   if (shouldLogDev) getLogger().debug('http: setting cookie or redirect with new token');
 
   const { token: newToken, redirectUrl } = callbackResult;
+  //? The OAuth state-binding cookie is single-use — clear it now that the callback
+  //? has consumed the state, so a spent credential-shaped cookie doesn't linger in
+  //? the browser until its Max-Age expires.
+  const clearStateCookie = `${login.OAUTH_STATE_COOKIE_NAME}=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax`;
   if (config.session.basedToken) {
     //? Deliver the based-token in the URL fragment, never the query string: a
     //? `#token=` fragment is not sent to the server, not logged, and not leaked
@@ -68,9 +75,10 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
     //? fragment on the redirect target so we never emit a double-`#`.
     const hashIndex = redirectUrl.indexOf('#');
     const baseUrl = hashIndex === -1 ? redirectUrl : redirectUrl.slice(0, hashIndex);
+    res.setHeader('Set-Cookie', clearStateCookie);
     res.writeHead(302, { Location: `${baseUrl}#token=${newToken}` });
   } else {
-    res.setHeader('Set-Cookie', `${sessionCookieName}=${newToken}; ${sessionCookieOptions}`);
+    res.setHeader('Set-Cookie', [clearStateCookie, `${sessionCookieName}=${newToken}; ${sessionCookieOptions}`]);
     res.writeHead(302, { Location: redirectUrl });
   }
   res.end();

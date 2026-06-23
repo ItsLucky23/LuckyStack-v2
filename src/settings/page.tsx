@@ -56,6 +56,7 @@ export default function Home() {
   const [newTheme, setNewTheme] = useState<Theme>(session?.theme ?? 'dark');
   const [newEmail, setNewEmail] = useState<string>(session?.email ?? '');
   const [emailChangePending, setEmailChangePending] = useState<boolean>(false);
+  const [emailChangePassword, setEmailChangePassword] = useState<string>('');
   const [saving, setSaving] = useState<boolean>(false);
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const [preferences, setPreferences] = useState<UserPreferences>(
@@ -71,20 +72,30 @@ export default function Home() {
     const trimmed = newEmail.trim();
     if (!trimmed || trimmed.toLowerCase() === session.email.toLowerCase()) return;
 
+    //? Credentials accounts must confirm their current password — the route
+    //? rejects the change without it. OAuth accounts have no password; the field
+    //? isn't shown and the empty value is ignored server-side.
+    const isCredentials = session.provider === 'credentials';
+    if (isCredentials && !emailChangePassword) {
+      notify.error({ key: 'settings.emailChange.currentPasswordRequired' });
+      return;
+    }
+
     setEmailChangePending(true);
     const response = await apiRequest({
       name: 'settings/requestEmailChange',
       version: 'v1',
-      data: { newEmail: trimmed },
+      data: { newEmail: trimmed, currentPassword: emailChangePassword },
     });
     setEmailChangePending(false);
 
     if (response.status === 'success') {
+      setEmailChangePassword('');
       notify.info({ key: 'settings.emailChange.checkInbox' });
     } else {
       notify.error({ key: response.errorCode });
     }
-  }, [newEmail, session]);
+  }, [newEmail, session, emailChangePassword]);
 
   const saveProfile = useCallback(async (newAvatar?: string) => {
     if (!session || saving) return;
@@ -217,8 +228,11 @@ export default function Home() {
           languageItems={languageItems}
           selectedLanguageItem={selectedLanguageItem}
           sessionEmail={session.email}
+          requiresEmailPassword={session.provider === 'credentials'}
+          emailChangePassword={emailChangePassword}
           onNameChange={setNewName}
           onEmailChange={setNewEmail}
+          onEmailChangePasswordChange={setEmailChangePassword}
           onLanguageChange={handleLanguageChange}
           onThemeChange={handleThemeChange}
           onSave={() => { void saveProfile(); }}

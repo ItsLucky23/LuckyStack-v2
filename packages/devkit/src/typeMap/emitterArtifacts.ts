@@ -347,7 +347,11 @@ type _ProjectApiTypeMap = {
 					stream: entry.stream,
 					rateLimit: entry.rateLimit,
 					auth: entry.auth,
-					path: pagePath === 'root' ? `api/${apiName}/${version}` : `api/${pagePath}/${apiName}/${version}`,
+					//? extractPagePath never yields 'root' for the src-root (it yields 'system'),
+					//? and a page folder literally named `root` must route as `api/root/...` — so
+					//? the old `pagePath === 'root'` special-case emitted a non-matching docs path.
+					//? Always use the full path (mirrors the already-fixed sync side).
+					path: `api/${pagePath}/${apiName}/${version}`,
 					...(entry.meta ? { meta: entry.meta } : {}),
 				});
 
@@ -419,7 +423,7 @@ export const getApiMethod = (pagePath: string, apiName: string, version: string)
 
 export interface ApiMetaEntry {
 	method: HttpMethod;
-	auth: { login: boolean; additional?: Record<string, unknown>[] };
+	auth: { login: boolean; additional?: Record<string, unknown>[]; hasAdditional?: boolean };
 	rateLimit?: number | false;
 }
 
@@ -441,15 +445,15 @@ export const apiMetaMap: Record<string, Record<string, Record<string, ApiMetaEnt
 			content += `    '${apiName}': {\n`;
 			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').toSorted((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
 				const auth = entry.auth && typeof entry.auth === 'object'
-					? entry.auth as { login: boolean; additional?: Record<string, unknown>[] }
-					: { login: true };
+					? entry.auth as { login: boolean; additional?: Record<string, unknown>[]; hasAdditional?: boolean }
+					: { login: false, hasAdditional: false };
 				const rateLimitPart = entry.rateLimit === undefined
 					? ''
 					: `, rateLimit: ${entry.rateLimit === false ? 'false' : String(entry.rateLimit)}`;
 				const additionalPart = auth.additional && auth.additional.length > 0
 					? `, additional: ${JSON.stringify(auth.additional)}`
 					: '';
-				content += `      '${version}': { method: '${entry.method}', auth: { login: ${auth.login ? 'true' : 'false'}${additionalPart} }${rateLimitPart} },\n`;
+				content += `      '${version}': { method: '${entry.method}', auth: { login: ${auth.login ? 'true' : 'false'}${additionalPart}${auth.hasAdditional ? ', hasAdditional: true' : ''} }${rateLimitPart} },\n`;
 			}
 			content += `    },\n`;
 		}

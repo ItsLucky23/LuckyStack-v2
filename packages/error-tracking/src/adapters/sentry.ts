@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import {
   getCurrentErrorTrackerIdentity,
   loadPeer,
+  sanitizeErrorString,
   type ErrorTracker,
   type ErrorTrackerEvent,
   type ErrorTrackerUser,
@@ -83,11 +84,17 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
     captureException(error, context) {
       const resolved = resolveExceptionEvent(options.beforeSend, error, context);
       if (!resolved) return;
+      //? A NON-Error throw (e.g. `throw 'auth failed token=abc'`) is handed to the
+      //? SDK as a message string with NO scrubbing (the Error-string scrubber only
+      //? handles Error objects, and Sentry's request-scrub beforeSend never touches
+      //? the value). Scrub the stringified value at the boundary so an interpolated
+      //? secret can't reach Sentry (ET-O2). Real Error objects pass through intact.
+      const payload = resolved.error instanceof Error ? resolved.error : sanitizeErrorString(String(resolved.error));
       const hint = withIdentity(resolved.context ? { extra: resolved.context } : undefined);
       if (hint) {
-        sentry.captureException(resolved.error, hint);
+        sentry.captureException(payload, hint);
       } else {
-        sentry.captureException(resolved.error);
+        sentry.captureException(payload);
       }
     },
 
@@ -99,7 +106,10 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
           ? { level: resolved.level, extra: resolved.context }
           : { level: resolved.level },
       );
-      sentry.captureMessage(resolved.message, hint);
+      //? ET-O2: scrub secrets interpolated into a free-text message string before
+      //? it reaches Sentry (captureMessage never ran through the scrubber, and the
+      //? request-scrub beforeSend doesn't cover event.message).
+      sentry.captureMessage(sanitizeErrorString(resolved.message), hint);
     },
 
     setUser(user) {

@@ -20,23 +20,20 @@ const ASSET_ROOT = path.resolve(here, '..', 'assets', 'login');
 const TEMPLATE_ROOT = path.join(repoRoot, 'packages', 'create-luckystack-app', 'template');
 const SERVER_CAPABILITIES = path.join(repoRoot, 'packages', 'server', 'src', 'capabilities.ts');
 const SCAFFOLDER_INDEX = path.join(repoRoot, 'packages', 'create-luckystack-app', 'src', 'index.ts');
+const ADD_SECRET_MANAGER = path.join(here, 'commands', 'addSecretManager.ts');
 
 const normalize = (text: string): string => text.replaceAll('\r\n', '\n');
 
-//? Files where the ASSET is intentionally AHEAD of the template: a security fix
-//? landed in the asset (this audit) but the template + consumer copies still
-//? need the same change applied cross-package. Until that sync lands the file
-//? legitimately differs, so we exempt it from strict equality (but still require
-//? the template counterpart to EXIST). Shrink this set to empty once the template
-//? catches up — that's the desired lockstep end state.
-//?   - _components/LoginForm.tsx : asset + template carry two genuinely different
-//?     login implementations (asset reads `providers` from config; template fetches
-//?     `GET /auth/providers` with a loading-gated `showCredentials`). This is
-//?     pre-existing cross-package drift, not a lockstep-able single change —
-//?     exempt until the two are deliberately reconciled into one source.
-const ASSET_AHEAD_OF_TEMPLATE = new Set<string>([
-  'src/_components/LoginForm.tsx',
-]);
+//? Files where the ASSET is intentionally AHEAD of the template (CONTENTS may
+//? differ temporarily while a cross-package fix is mid-sync; the template
+//? counterpart must still EXIST). EMPTY = the desired lockstep end state: every
+//? shipped auth file is byte-identical across the `add login` asset bundle and the
+//? scaffold template. LoginForm.tsx WAS the exception — the asset still read the
+//? removed `providers` config export while the template fetched `GET /auth/providers`
+//? — and that drift shipped a non-compiling LoginForm via `add login`. The asset is
+//? now reconciled to the template, so this set is empty again. Add an entry ONLY for
+//? a deliberate, temporary divergence and shrink it back to empty ASAP.
+const ASSET_AHEAD_OF_TEMPLATE = new Set<string>([]);
 
 //? Walk every file under `dir`, returning paths relative to it (posix slashes).
 const relFilesUnder = (dir: string): string[] => {
@@ -136,6 +133,36 @@ describe('featureOptions ↔ scaffolder PROVIDER_OPTIONS parity (ADR 0014 D3)', 
     ['monitoringProvider', [...MONITORING_PROVIDERS]],
   ])('CLI %s matches the scaffolder list', (key, cliList) => {
     expect(extract(key), `${key} not found in PROVIDER_OPTIONS`).toEqual(cliList);
+  });
+});
+
+//? The secret-manager enable-blocks are duplicated in the CLI (addSecretManager.ts
+//? CONFIG_ACTIVE / SERVER_ACTIVE) and the scaffolder (wireSecretManager). Crucially,
+//? `removeSecretManager` re-comments them by matching the CLI's verbatim ACTIVE
+//? strings, so ANY scaffolder-side edit to those blocks silently turns
+//? `remove secret-manager` / manage→off into a no-op on a `--secret-manager`
+//? scaffolded project (dep dropped, but the active `await import(...)` block stays).
+//? Assert the scaffolder source still contains the exact ACTIVE blocks the CLI matches.
+describe('secret-manager block parity (CLI ↔ scaffolder)', () => {
+  const scaffolder = normalize(readFileSync(SCAFFOLDER_INDEX, 'utf8'));
+  const cliSrc = normalize(readFileSync(ADD_SECRET_MANAGER, 'utf8'));
+
+  //? Extract a top-level template-literal const BODY from the CLI source as RAW
+  //? source text (with `\``-escapes intact) so it can be substring-matched against
+  //? the scaffolder source — which stores the same block the same way. Comparing
+  //? the SOURCE forms (not the runtime-evaluated strings) keeps escaping identical.
+  const literalBody = (name: string): string => {
+    const m = new RegExp('const ' + name + ' = `([\\s\\S]*?)`;').exec(cliSrc);
+    expect(m, `${name} template literal not found in addSecretManager.ts`).not.toBeNull();
+    return m?.[1] ?? '';
+  };
+
+  it('scaffolder wireSecretManager contains the CLI CONFIG_ACTIVE block verbatim', () => {
+    expect(scaffolder.includes(literalBody('CONFIG_ACTIVE'))).toBe(true);
+  });
+
+  it('scaffolder wireSecretManager contains the CLI SERVER_ACTIVE block verbatim', () => {
+    expect(scaffolder.includes(literalBody('SERVER_ACTIVE'))).toBe(true);
   });
 });
 

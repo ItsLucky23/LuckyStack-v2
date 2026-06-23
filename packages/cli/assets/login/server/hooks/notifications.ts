@@ -2,9 +2,10 @@
 //? owned by the project's Prisma schema) to decide whether to fire a
 //? transactional email on a given lifecycle event.
 //?
-//? Wiring: `registerNotificationHooks()` is called once in `server/server.ts`,
-//? after the email sender is registered. Hooks are no-ops if the email
-//? package isn't loaded (sendEmail returns { ok: false, reason: 'no-sender' }).
+//? Wiring: `registerNotificationHooks()` is called once in
+//? `luckystack/server/index.ts` (the server overlay), after the other overlays
+//? have populated the registries. Hooks are no-ops if the email package isn't
+//? loaded (sendEmail returns { ok: false, reason: 'no-sender' }).
 
 import { getProjectConfig, registerHook, tryCatch, getPrismaClient } from '@luckystack/core';
 

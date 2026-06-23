@@ -37,6 +37,12 @@ const walkSrcFiles = (dir: string, results: string[] = []) => {
     const stat = fs.statSync(fullPath);
 
     if (stat.isDirectory()) {
+      //? `src/playground/**` is a DEV-ONLY fixture tree (unauthenticated demo +
+      //? resource-amplifying stream endpoints). Never bake it into the PRODUCTION
+      //? route maps — dev still serves it via the live devkit loader. Keeping it
+      //? out here is the structural gate so a forgotten manual deletion can't ship
+      //? the playground to prod.
+      if (file === 'playground') continue;
       walkSrcFiles(fullPath, results);
     } else if (file.endsWith(".ts") && !file.endsWith(".tests.ts") && (fullPath.includes("_api") || fullPath.includes("_sync"))) {
       results.push(fullPath);

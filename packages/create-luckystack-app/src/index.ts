@@ -1229,6 +1229,26 @@ const resolveCommandPath = (command: string): string | null => {
   return null;
 };
 
+//? Windows-safe spawn of a resolved `.cmd`/`.bat` shim (npm/npx). A bare
+//? `spawnSync(resolved, args, { shell: true })` joins `resolved` + args into ONE
+//? cmd string and cmd splits the standard `C:\Program Files\nodejs\npm.cmd` on
+//? its space ("'C:\Program' is not recognized" → install/generate silently fail).
+//? Invoke comspec with the path in an OUTER+INNER quote pair: with `/s`, cmd
+//? strips the OUTER pair and runs the rest verbatim, so the inner pair keeps the
+//? spaced path intact. `windowsVerbatimArguments` stops cmd from re-quoting.
+const spawnResolved = (resolved: string, args: readonly string[], cwd: string): ReturnType<typeof spawnSync> => {
+  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
+  if (needsShell) {
+    const comspec = process.env.ComSpec ?? 'cmd.exe';
+    return spawnSync(comspec, ['/d', '/s', '/c', `""${resolved}" ${args.join(' ')}"`], {
+      cwd,
+      stdio: 'inherit',
+      windowsVerbatimArguments: true,
+    });
+  }
+  return spawnSync(resolved, [...args], { cwd, stdio: 'inherit' });
+};
+
 const runNpmInstall = (cwd: string): void => {
   console.log('\nInstalling dependencies (this may take a minute)...\n');
   const resolved = resolveCommandPath('npm');
@@ -1236,10 +1256,7 @@ const runNpmInstall = (cwd: string): void => {
     console.error('\n[create-luckystack-app] Could not locate `npm` on PATH. Run `npm install` manually in the project directory.');
     return;
   }
-  //? A `.cmd`/`.bat` shim still needs cmd.exe to interpret it, but we now hand the
-  //? shell an ABSOLUTE path, so it is never resolved relative to `cwd`.
-  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
-  const result = spawnSync(resolved, ['install'], { cwd, stdio: 'inherit', shell: needsShell });
+  const result = spawnResolved(resolved, ['install'], cwd);
   if (result.status !== 0) {
     console.error('\n[create-luckystack-app] npm install failed. You can run it manually in the project directory.');
   }
@@ -1256,8 +1273,7 @@ const runPrismaGenerate = (cwd: string): void => {
     console.error('\n[create-luckystack-app] Could not locate `npx` on PATH. Run `npx prisma generate` manually after setting DATABASE_URL.');
     return;
   }
-  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
-  const result = spawnSync(resolved, ['prisma', 'generate'], { cwd, stdio: 'inherit', shell: needsShell });
+  const result = spawnResolved(resolved, ['prisma', 'generate'], cwd);
   if (result.status !== 0) {
     console.error('\n[create-luckystack-app] `npx prisma generate` failed. Run it manually after setting DATABASE_URL.');
   }
@@ -1288,8 +1304,6 @@ fi
 set -e
 echo "[pre-commit] Checking CLAUDE.md invariants on staged changes..."
 npm run ai:lint --silent
-echo "[pre-commit] Regenerating docs/AI_QUICK_INDEX.md..."
-npm run ai:index --silent
 echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
 npm run ai:capabilities --silent
 echo "[pre-commit] Regenerating docs/AI_PROJECT_INDEX.md..."
@@ -1302,7 +1316,7 @@ echo "[pre-commit] Regenerating docs/AI_PRODUCT_OVERVIEW.md..."
 npm run ai:product --silent
 echo "[pre-commit] Regenerating docs/ai-graph.json..."
 npm run ai:graph --silent
-git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json
+git add docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json
 git add docs/ai-product 2>/dev/null || true
 `;
 
@@ -1779,8 +1793,10 @@ export default Dashboard;`,
   editScaffoldFile(targetDir, 'config.ts', [
     [
       `  auth: {
-    //? Framework-mode forgot-password (needs @luckystack/email installed + a
-    //? sender registered in server.ts). Set to 'disabled' or 'custom' to opt out.
+    //? forgot-password is a @luckystack/login feature: it ONLY works with
+    //? @luckystack/login installed. 'framework' mode ALSO needs @luckystack/email
+    //? installed + a sender registered in server.ts to deliver the reset mail.
+    //? Set to 'disabled' or 'custom' to opt out.
     forgotPassword: 'framework',
     //? Email+password auth. Set \`false\` for an OAuth-only app — the login form
     //? hides the email/password fields and the credentials route rejects.
@@ -2023,6 +2039,10 @@ const buildTemplateVars = (
     PROJECT_TITLE: titleCase(args.projectName),
     LUCKYSTACK_VERSION: luckystackVersion,
     DB_PROVIDER: choices.dbProvider,
+    //? MongoDB's Prisma connector does NOT support `migrate dev` — it needs
+    //? `db push`. Keep this in step with `printNextSteps`' prismaCmd so the
+    //? README's first DB command matches the chosen provider.
+    PRISMA_INIT_CMD: choices.dbProvider === 'mongodb' ? 'npm run prisma:db:push' : 'npm run prisma:migrate:dev',
     USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '@id @default(cuid())',
     DATABASE_URL: databaseUrlByProvider[choices.dbProvider] ?? `postgresql://user:password@localhost:5432/${slug}`,
     OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders, choices.authMode),
@@ -2131,7 +2151,8 @@ Next steps:
   cp .env_template .env
   cp .env.local_template .env.local   # fill in DATABASE_URL, etc.
   ${prismaCmd}
-  npm run server                       # starts the dev server
+  npm run server                       # terminal 1 — backend (HTTP + Socket.io)
+  npm run client                       # terminal 2 — frontend (Vite, opens http://localhost:5173)
 
 Docs:
   https://github.com/ItsLucky23/LuckyStack-v2#readme

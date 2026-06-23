@@ -7,7 +7,7 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? business logic the sweep cannot reach: the returned set is scoped to the
 //? caller (no other user's session leaks), `isCurrent` flags exactly the
 //? caller's own session, and the route NEVER returns a raw bearer token —
-//? only an opaque SHA-256 fingerprint (`id`) of it.
+//? only an opaque 16-char fingerprint (`handle`) of it.
 //?
 //? Test environment runs with `sessionPerUser: 'multiple'`, so a user can
 //? hold several live tokens at once — that is what the multi-session case
@@ -16,16 +16,16 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? Input shape (from the route source `listSessions_v1.ts`):
 //?   {}  // no fields
 //? Output envelope:
-//?   { status: 'success', result: { sessions: Array<{ id: string;
+//?   { status: 'success', result: { sessions: Array<{ handle: string;
 //?       expiresInSeconds: number | null; isCurrent: boolean }> } }
 //?   | { status: 'error', errorCode: 'common.500' }
 
-//? Mirror of the route's opaque-id derivation — the client only ever sees this,
-//? never the raw token.
-const idOf = (token: string): string => createHash('sha256').update(token).digest('hex');
+//? Mirror of the route's opaque-handle derivation (sha256 sliced to 16 chars) —
+//? the client only ever sees this, never the raw token.
+const handleOf = (token: string): string => createHash('sha256').update(token).digest('hex').slice(0, 16);
 
 interface SessionEntry {
-  id: string;
+  handle: string;
   expiresInSeconds: number | null;
   isCurrent: boolean;
 }
@@ -41,7 +41,7 @@ type ListResponse = ListSuccess | ListError;
 
 export const customTests: CustomTestCase[] = [
   {
-    name: 'happy path lists the callers current session by opaque id, flagged isCurrent',
+    name: 'happy path lists the callers current session by opaque handle, flagged isCurrent',
     run: async (ctx: TestContext) => {
       const { token } = await ctx.session.login();
       const result = await ctx.callApi<unknown, ListResponse>({});
@@ -49,11 +49,11 @@ export const customTests: CustomTestCase[] = [
       if (result.status !== 'success') return;
 
       //? The raw token must NEVER appear; the opaque fingerprint of it must.
-      const ids = new Set(result.result.sessions.map((s) => s.id));
-      ctx.expect.ok(!ids.has(token), 'raw session token must never be returned to the client');
+      const handles = new Set(result.result.sessions.map((s) => s.handle));
+      ctx.expect.ok(!handles.has(token), 'raw session token must never be returned to the client');
 
-      const current = result.result.sessions.find((s) => s.id === idOf(token));
-      ctx.expect.ok(current !== undefined, 'caller session (by opaque id) must appear in its own list');
+      const current = result.result.sessions.find((s) => s.handle === handleOf(token));
+      ctx.expect.ok(current !== undefined, 'caller session (by opaque handle) must appear in its own list');
       ctx.expect.eq(current?.isCurrent, true);
     },
   },
@@ -72,14 +72,14 @@ export const customTests: CustomTestCase[] = [
       ctx.expect.eq(result.status, 'success');
       if (result.status !== 'success') return;
 
-      const ids = new Set(result.result.sessions.map((s) => s.id));
-      ctx.expect.ok(ids.has(idOf(other.token)), 'other-device session (by id) must be listed');
-      ctx.expect.ok(ids.has(idOf(current.token)), 'current session (by id) must be listed');
+      const handles = new Set(result.result.sessions.map((s) => s.handle));
+      ctx.expect.ok(handles.has(handleOf(other.token)), 'other-device session (by handle) must be listed');
+      ctx.expect.ok(handles.has(handleOf(current.token)), 'current session (by handle) must be listed');
 
       //? Exactly one entry — the caller's current session — is flagged isCurrent.
       const currentFlagged = result.result.sessions.filter((s) => s.isCurrent);
       ctx.expect.eq(currentFlagged.length, 1);
-      ctx.expect.eq(currentFlagged[0]?.id, idOf(current.token));
+      ctx.expect.eq(currentFlagged[0]?.handle, handleOf(current.token));
     },
   },
   {
@@ -97,9 +97,9 @@ export const customTests: CustomTestCase[] = [
       ctx.expect.eq(result.status, 'success');
       if (result.status !== 'success') return;
 
-      const ids = new Set(result.result.sessions.map((s) => s.id));
-      ctx.expect.ok(!ids.has(victimToken), 'victim raw token must never appear');
-      ctx.expect.ok(!ids.has(idOf(victimToken)), 'victim session must not leak into another users list');
+      const handles = new Set(result.result.sessions.map((s) => s.handle));
+      ctx.expect.ok(!handles.has(victimToken), 'victim raw token must never appear');
+      ctx.expect.ok(!handles.has(handleOf(victimToken)), 'victim session must not leak into another users list');
     },
   },
 ];

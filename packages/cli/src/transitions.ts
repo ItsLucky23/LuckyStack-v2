@@ -176,8 +176,23 @@ const removeLoginChange = (): Change => ({
     dropDependency(ctx.project, LOGIN_PKG);
     //? Reverse addLogin's config + server-index wiring (best-effort, line-level so it
     //? matches both a verbose auth-scaffold block and the short add-login block).
-    tryEdit(ctx.project.root, 'config.ts', "forgotPassword: 'framework',", "forgotPassword: 'disabled',");
-    tryEdit(ctx.project.root, 'config.ts', 'credentials: true,', 'credentials: false,');
+    //? Restore the EXACT auth-none block (incl. the comment line) that `addLogin`'s
+    //? re-enable token expects — a true inverse of addLogin.ts:96-107. Two separate
+    //? single-line edits produced a comment-LESS block, so a later `add login`
+    //? token-missed and left credentials:false (login re-added but disabled).
+    tryEdit(
+      ctx.project.root,
+      'config.ts',
+      `  auth: {
+    forgotPassword: 'framework',
+    credentials: true,
+  },`,
+      `  auth: {
+    //? authMode 'none': no built-in auth UI/flows are scaffolded.
+    forgotPassword: 'disabled',
+    credentials: false,
+  },`,
+    );
     tryEdit(ctx.project.root, 'luckystack/server/index.ts', AUTH_SERVER_HOOKS, AUTH_NONE_SERVER_PLACEHOLDER);
     //? If the server overlay was hand-edited, the tryEdit above couldn't revert it —
     //? but we just deleted server/hooks/notifications.ts, so a lingering import would

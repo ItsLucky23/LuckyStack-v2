@@ -17,6 +17,20 @@ const parseSessionBasedTokenHeader = (headerValue: string | string[] | undefined
   return null;
 };
 
+//? Reserved OAuth authorize-query params owned by the framework — a provider's
+//? `extraAuthorizationParams` (CFG-21) can override any OTHER key (e.g. `prompt`,
+//? `access_type`, `login_hint`) but never these, so a consumer config can't break
+//? the state / PKCE / redirect-URI binding the callback relies on.
+const RESERVED_OAUTH_PARAMS = new Set([
+  'client_id',
+  'redirect_uri',
+  'scope',
+  'response_type',
+  'state',
+  'code_challenge',
+  'code_challenge_method',
+]);
+
 export const handleAuthApiRoute: HttpRouteHandler = async ({
   req,
   res,
@@ -66,11 +80,6 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
       return true;
     }
 
-    const clientId = encodeURIComponent(provider.clientID);
-    const callbackUrl = encodeURIComponent(provider.callbackURL);
-    const scope = encodeURIComponent((provider.scope).join(' '));
-    const state = encodeURIComponent(oauthState.state);
-
     //? Bind the OAuth flow to THIS browser: the callback only accepts the flow
     //? when the same browser presents back the nonce we stash in the
     //? short-lived state cookie. Same Secure derivation as the session-token
@@ -83,14 +92,31 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
       `${login.OAUTH_STATE_COOKIE_NAME}=${oauthState.stateCookie}; Path=/; HttpOnly;${secureFlag} SameSite=Lax; Max-Age=${stateTtl}`,
     );
 
-    //? Append the PKCE S256 challenge when the provider opted into PKCE — the
-    //? callback redeems the matching verifier stashed in the state entry.
-    const pkceParams = oauthState.codeChallenge
-      ? `&code_challenge=${encodeURIComponent(oauthState.codeChallenge)}&code_challenge_method=S256`
-      : '';
+    //? Build the authorize-redirect query via URLSearchParams so a provider's
+    //? `extraAuthorizationParams` (CFG-21) merges OVER the framework defaults —
+    //? e.g. `access_type=offline` for Google refresh tokens, `login_hint`, or
+    //? overriding the default `prompt=select_account`. Reserved OAuth params are
+    //? framework-owned (skipped in the merge); `state` + the PKCE S256 challenge
+    //? are set LAST so a consumer key can never clobber the browser binding.
+    const authParams = new URLSearchParams({
+      client_id: provider.clientID,
+      redirect_uri: provider.callbackURL,
+      scope: provider.scope.join(' '),
+      response_type: 'code',
+      prompt: 'select_account',
+    });
+    for (const [key, value] of Object.entries(provider.extraAuthorizationParams ?? {})) {
+      if (RESERVED_OAUTH_PARAMS.has(key)) continue;
+      authParams.set(key, value);
+    }
+    authParams.set('state', oauthState.state);
+    if (oauthState.codeChallenge) {
+      authParams.set('code_challenge', oauthState.codeChallenge);
+      authParams.set('code_challenge_method', 'S256');
+    }
 
     res.writeHead(302, {
-      Location: `${provider.authorizationURL}?client_id=${clientId}&redirect_uri=${callbackUrl}&scope=${scope}&response_type=code&prompt=select_account&state=${state}${pkceParams}`,
+      Location: `${provider.authorizationURL}?${authParams.toString()}`,
     });
     res.end();
     return true;

@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { backendUrl, loginRedirectUrl, loginPageUrl, providers, SessionLayout, sessionBasedToken } from "config";
+import { backendUrl, loginRedirectUrl, loginPageUrl, SessionLayout, sessionBasedToken } from "config";
 import tryCatch from "shared/tryCatch";
 
 import { i18nNotify as notify, useTranslator } from "@luckystack/core/client";
@@ -27,13 +27,17 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [loading, setLoading] = useState(false);
 
-  //? OAuth buttons are driven by the server's env-based registry (a provider is
-  //? active only when its credentials env vars are set). We ask the server which
-  //? providers are enabled — secrets never reach the browser. `credentials` is
-  //? filtered out here; the email/password form is gated by config instead.
+  //? The login form is driven entirely by the server's env-based registry
+  //? (`GET /auth/providers`) — the single source of truth. A provider is active
+  //? only when its credentials env vars are set; `credentials` (email+password)
+  //? is present when `auth.credentials` is enabled. Secrets never reach the
+  //? browser. We split the returned list: `credentials` gates the form fields,
+  //? everything else becomes an OAuth button.
   const [oauthProviders, setOauthProviders] = useState<string[]>([]);
-  //? Gate the OAuth buttons on the providers fetch so they render once, together,
-  //? instead of popping in after the form (a visible layout shift on every mount).
+  const [showCredentials, setShowCredentials] = useState(false);
+  //? Gate the whole form on the providers fetch so the OAuth buttons + credential
+  //? fields render once, fully-formed, instead of popping in after the rest
+  //? (which caused a visible layout shift on every mount / login↔register nav).
   const [ready, setReady] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -44,6 +48,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
       if (error || !response?.ok) { setReady(true); return; }
       const [parseError, body] = await tryCatch(() => response.json() as Promise<{ providers?: string[] }>);
       if (parseError || !Array.isArray(body?.providers)) { setReady(true); return; }
+      setShowCredentials(body.providers.includes("credentials"));
       setOauthProviders(body.providers.filter((name) => name !== "credentials"));
       setReady(true);
     })();
@@ -178,7 +183,13 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
           </div>
         </div>
 
-        {providers.includes("credentials") && (
+        {!ready && (
+          <div className="flex items-center justify-center py-8">
+            <div className="w-6 h-6 rounded-full border-2 border-container1-border border-t-primary animate-spin" />
+          </div>
+        )}
+
+        {ready && showCredentials && (
           <>
             <div className="flex flex-col gap-3">
               {!isLogin && (
@@ -236,7 +247,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
               <button
                 type="button"
                 ref={buttonRef}
-                className="mt-1 h-9 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60"
+                className="mt-1 h-9 rounded-md bg-primary text-title-primary text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60"
                 onClick={(e) => void handleSubmit(e, "credentials")}
                 disabled={loading}
               >
@@ -244,7 +255,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
               </button>
             </div>
 
-            {ready && oauthProviders.length > 0 && (
+            {oauthProviders.length > 0 && (
               <div className="flex items-center w-full text-common text-xs before:flex-1 before:border-t before:border-container1-border before:content-[''] after:flex-1 after:border-t after:border-container1-border after:content-['']">
                 <span className="px-3">{translate({ key: 'login.orContinueWith' })}</span>
               </div>
@@ -261,7 +272,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 onClick={(e) => void handleSubmit(e, provider)}
                 className="h-9 rounded-md cursor-pointer bg-container1 text-title text-sm border border-container1-border flex gap-2 items-center justify-center hover:bg-container1-hover transition-colors"
               >
-                <img src={`/${provider}.png`} alt={provider} className="w-4 h-4" />
+                <img src={`/${provider}.png`} alt={provider} className="w-4 h-4" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                 <span>{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
               </button>
             ))}

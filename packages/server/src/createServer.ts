@@ -5,6 +5,7 @@ import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
 import { registerProdRuntimeMapsProvider } from './runtimeMapsLoader';
 import { getParsedPort } from './argv';
+import { canResolve } from './capabilities';
 import { runGracefulShutdown } from './stopServer';
 import { writeDevServerInfo, clearDevServerInfo } from './devServerInfo';
 import type {
@@ -60,18 +61,36 @@ const initDevTools = async (): Promise<void> => {
   //? typescript compiler API or chokidar's filesystem watchers.
   const { initConsolelog } = await import('@luckystack/core');
   initConsolelog();
-  const devkitModuleId = '@luckystack/devkit';
-  const devkit = (await import(devkitModuleId)) as {
-    initializeAll: () => Promise<void>;
-    setupWatchers: () => void;
-  };
-  await devkit.initializeAll();
-  devkit.setupWatchers();
-  //? Belt-and-braces: explicit SIGINT/SIGTERM handler so Ctrl+C is honored
-  //? even if a sync CPU burst (TS Program build, large require chain) is
-  //? still in flight when the signal arrives.
+  //? Belt-and-braces: explicit SIGINT/SIGTERM handler so Ctrl+C is honored even
+  //? if a sync CPU burst (TS Program build, large require chain) is still in
+  //? flight when the signal arrives. Installed BEFORE the guarded devkit import
+  //? so Ctrl+C still works when devkit is absent and we early-return below.
   process.once('SIGINT', () => process.exit(0));
   process.once('SIGTERM', () => process.exit(0));
+  //? @luckystack/devkit is an OPTIONAL peer, normally ABSENT in production. If a
+  //? deploy forgets `NODE_ENV=production`, enableDevTools stays true and an
+  //? unguarded `import('@luckystack/devkit')` would crash boot with
+  //? ERR_MODULE_NOT_FOUND. Resolve-guard + tryCatch (mirroring bootstrap.ts's
+  //? optional-package imports) so a missing/broken devkit logs an actionable
+  //? warning and boot continues instead of taking the whole server down.
+  const devkitModuleId = '@luckystack/devkit';
+  if (!canResolve(devkitModuleId)) {
+    getLogger().warn(
+      'dev tooling unavailable — @luckystack/devkit is not installed, so hot reload + type-map generation are off. Install it as a devDependency for dev, or set NODE_ENV=production to run in production mode.',
+    );
+    return;
+  }
+  const [devkitError] = await tryCatch(async () => {
+    const devkit = (await import(devkitModuleId)) as {
+      initializeAll: () => Promise<void>;
+      setupWatchers: () => void;
+    };
+    await devkit.initializeAll();
+    devkit.setupWatchers();
+  });
+  if (devkitError) {
+    getLogger().warn('dev tooling failed to initialize — continuing without hot reload.', { error: devkitError.message });
+  }
 };
 
 //? Extracted verbatim from the previous inline `listen` closure. Same

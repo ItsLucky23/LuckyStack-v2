@@ -50,6 +50,13 @@ REDIS_PORT=6379
 # removing a key from just one file lets the other file's value resurface.
 # LUCKYSTACK_ENV_DEBUG=1
 
+# Auto-pick the next free port when SERVER_PORT is already taken (dev convenience).
+# Defaults ON in dev, OFF in prod. Set to 0 to force-fail on a busy port instead.
+# SERVER_PORT_AUTO_INCREMENT=1
+# Grace window (ms) the dev supervisor waits for a clean child exit before SIGKILL
+# on restart. Default 1500 — raise it for a slow-shutting-down server.
+# LUCKYSTACK_SUPERVISOR_GRACE_MS=1500
+
 # Optional @luckystack/secret-manager (opt-in): commit POINTERS instead of secrets.
 # A value of the shape <BASE>_V<n> is resolved at boot against the server at
 # LUCKYSTACK_SECRET_MANAGER_URL. See config.ts + server.ts opt-in + the docs.

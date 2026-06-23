@@ -7,8 +7,9 @@
 //? (sessions, rate-limiting, presence) imports the redis singleton directly
 //? from `@luckystack/core` and is NOT affected.
 //?
-//? For framework-wide Redis backend override: build a custom Redis adapter
-//? in `luckystack/core/clients.ts` before bootstrap.
+//? For a framework-WIDE override (so framework internals use it too), the native
+//? hook is `registerRedisClient(client)` from '@luckystack/core' — call it at boot
+//? in the editable `luckystack/core/clients.ts` overlay (it ships with ready examples).
 //? Re-export via module-specifier (`export … from`) so the codegen can
 //? resolve the real type at compile time. The locally-bound
 //? `import { redis }; export { redis }` form falls back to `any` because

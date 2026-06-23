@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 //? drives the framework rate limiter (`checkRateLimit` / `getRateLimitStatus` /
 //? `clearRateLimit`). Mock @luckystack/core so the feature flag + the limiter
 //? calls are fully test-controlled and no real config/Redis is touched.
-interface AuthCfg { enabled: boolean; maxAttempts: number; windowMs: number }
+interface AuthCfg { enabled: boolean; maxAttempts: number; maxAttemptsPerAccount: number; windowMs: number }
 
 interface RateResult { allowed: boolean; remaining: number; resetIn: number }
 
@@ -44,7 +44,7 @@ import { isAccountLocked, recordAuthFailure, clearAuthFailures, registerAuthLock
 
 const setAuth = (auth: Partial<AuthCfg> & { enabled: boolean }): void => {
   getProjectConfigMock.mockReturnValue({
-    rateLimiting: { auth: { maxAttempts: 5, windowMs: 900_000, ...auth } },
+    rateLimiting: { auth: { maxAttempts: 5, maxAttemptsPerAccount: 50, windowMs: 900_000, ...auth } },
   });
 };
 
@@ -66,11 +66,12 @@ describe('authLockout', () => {
     expect(clearRateLimitMock).not.toHaveBeenCalled();
   });
 
-  it('reports locked when the per-account budget is exhausted (non-incrementing)', async () => {
-    setAuth({ enabled: true, maxAttempts: 5 });
+  it('reports locked when the cross-IP per-account budget is exhausted (non-incrementing)', async () => {
+    setAuth({ enabled: true, maxAttempts: 5, maxAttemptsPerAccount: 50 });
     getRateLimitStatusMock.mockResolvedValue({ allowed: false, remaining: 0, resetIn: 60 });
     expect(await isAccountLocked('a@x.com')).toBe(true);
-    expect(getRateLimitStatusMock).toHaveBeenCalledWith('auth:a@x.com', 5);
+    //? No IP → only the bare-account bucket is checked, against the cross-IP cap.
+    expect(getRateLimitStatusMock).toHaveBeenCalledWith('auth:a@x.com', 50);
     //? checking the lock must NOT increment the counter
     expect(checkRateLimitMock).not.toHaveBeenCalled();
   });
@@ -81,13 +82,14 @@ describe('authLockout', () => {
     expect(await isAccountLocked('a@x.com')).toBe(false);
   });
 
-  it('records a failure by incrementing the counter, lower-cased + trimmed key', async () => {
-    setAuth({ enabled: true, maxAttempts: 5, windowMs: 900_000 });
+  it('records a failure by incrementing the bare-account counter, lower-cased + trimmed key', async () => {
+    setAuth({ enabled: true, maxAttempts: 5, maxAttemptsPerAccount: 50, windowMs: 900_000 });
     checkRateLimitMock.mockResolvedValue({ allowed: true, remaining: 4, resetIn: 0 });
     await recordAuthFailure('  Alice@X.com ');
+    //? No IP → only the bare-account bucket increments, against the cross-IP cap.
     expect(checkRateLimitMock).toHaveBeenCalledWith({
       key: 'auth:alice@x.com',
-      limit: 5,
+      limit: 50,
       windowMs: 900_000,
     });
   });
@@ -105,11 +107,34 @@ describe('authLockout', () => {
     });
   });
 
-  it('isAccountLocked uses composite key when requesterIp is provided', async () => {
-    setAuth({ enabled: true, maxAttempts: 5 });
-    getRateLimitStatusMock.mockResolvedValue({ allowed: false, remaining: 0, resetIn: 60 });
+  it('isAccountLocked checks the per-IP composite key when requesterIp is provided', async () => {
+    setAuth({ enabled: true, maxAttempts: 5, maxAttemptsPerAccount: 50 });
+    //? Bare-account bucket still has budget; the per-IP composite is exhausted —
+    //? so the lock decision must come from the composite key.
+    getRateLimitStatusMock.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === 'auth:a@x.com:10.0.0.1'
+          ? { allowed: false, remaining: 0, resetIn: 60 }
+          : { allowed: true, remaining: 3, resetIn: 0 },
+      ),
+    );
     expect(await isAccountLocked('a@x.com', '10.0.0.1')).toBe(true);
     expect(getRateLimitStatusMock).toHaveBeenCalledWith('auth:a@x.com:10.0.0.1', 5);
+  });
+
+  it('isAccountLocked locks across IPs when the cross-IP per-account cap is hit', async () => {
+    setAuth({ enabled: true, maxAttempts: 5, maxAttemptsPerAccount: 50 });
+    //? Bare-account (cross-IP) bucket exhausted → locked regardless of this IP's
+    //? own composite budget — the distributed-credential-stuffing defense.
+    getRateLimitStatusMock.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === 'auth:a@x.com'
+          ? { allowed: false, remaining: 0, resetIn: 60 }
+          : { allowed: true, remaining: 5, resetIn: 0 },
+      ),
+    );
+    expect(await isAccountLocked('a@x.com', '9.9.9.9')).toBe(true);
+    expect(getRateLimitStatusMock).toHaveBeenCalledWith('auth:a@x.com', 50);
   });
 
   it('clears the counter on success', async () => {
@@ -166,7 +191,8 @@ describe('registerAuthLockoutHook — COUNTING_REASONS allow-list (M-15 / ADR 00
 
   it('counts a genuine wrong-password attempt (bare account key when no IP)', async () => {
     await fire({ reason: 'login.wrongPassword' });
-    expect(checkRateLimitMock).toHaveBeenCalledWith({ key: 'auth:victim@x.com', limit: 5, windowMs: 900_000 });
+    //? No IP → only the bare-account (cross-IP) bucket increments, against the cross-IP cap.
+    expect(checkRateLimitMock).toHaveBeenCalledWith({ key: 'auth:victim@x.com', limit: 50, windowMs: 900_000 });
   });
 
   //? DD-LOGIN-F5: composite key used when `requesterIp` is present in the payload.

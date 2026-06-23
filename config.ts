@@ -242,8 +242,6 @@ const config = {
      * completes in server.ts.
      */
     from: env('EMAIL_FROM') ?? 'onboarding@resend.dev',
-    /** Public app URL — used to build absolute reset-password / verification links. */
-    appUrl: resolvedEnvironment.backendUrl,
     /** Throw if sendEmail() runs with no sender registered. False = silent no-op. */
     required: false,
     logging: {
@@ -389,6 +387,11 @@ registerProjectConfig({
   locationProviderEnabled: config.locationProviderEnabled,
   loginRedirectUrl: config.loginRedirectUrl,
   auth: {
+    //? forgot-password is a @luckystack/login feature: it ONLY works when
+    //? @luckystack/login is installed (no login package ⇒ no auth surface ⇒ this key
+    //? does nothing). 'framework' mode ALSO needs @luckystack/email installed + a
+    //? sender registered in server.ts to deliver the reset mail; without a sender it
+    //? silently no-ops (anti-enumeration). Use 'disabled' / 'custom' to opt out.
     forgotPassword: 'framework',
   },
 });

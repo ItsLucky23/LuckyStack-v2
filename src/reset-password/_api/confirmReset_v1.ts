@@ -1,5 +1,5 @@
 import { dispatchHook, getProjectConfig } from '@luckystack/core';
-import { consumePasswordResetToken, revokeUserSessions, updatePasswordHash } from '@luckystack/login';
+import { consumePasswordResetToken, revokeUserSessions, updatePasswordHash, validatePassword } from '@luckystack/login';
 import { AuthProps } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
@@ -17,7 +17,7 @@ export interface ApiParams {
 }
 
 export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
-  const { forgotPassword, passwordPolicy } = getProjectConfig().auth;
+  const { forgotPassword } = getProjectConfig().auth;
   if (forgotPassword !== 'framework') {
     return { status: 'error', errorCode: 'login.forgotPasswordDisabled' };
   }
@@ -28,14 +28,18 @@ export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
   if (!token) {
     return { status: 'error', errorCode: 'login.resetInvalidToken' };
   }
-  if (password.length < passwordPolicy.minLength) {
-    return { status: 'error', errorCode: 'login.passwordCharacterMinimum' };
-  }
-  if (password.length > passwordPolicy.maxLength) {
-    return { status: 'error', errorCode: 'login.passwordCharacterLimit' };
-  }
   if (password !== confirmPassword) {
     return { status: 'error', errorCode: 'login.passwordNotMatch' };
+  }
+
+  //? Run the FULL password policy (length + complexity + common-list) BEFORE
+  //? consuming the one-time token, so a policy failure returns its SPECIFIC reason
+  //? AND leaves the reset link redeemable for a corrected retry. Otherwise
+  //? updatePasswordHash throws PasswordPolicyError post-consume → a generic 500
+  //? with the token already burned.
+  const policyFailure = validatePassword(password);
+  if (policyFailure) {
+    return { status: 'error', errorCode: policyFailure };
   }
 
   const userId = await consumePasswordResetToken(token);

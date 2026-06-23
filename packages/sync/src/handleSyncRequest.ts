@@ -224,7 +224,13 @@ function validateSyncMessage({
   socket: Socket;
   preferredLocale: string | null;
 }): boolean {
-  if (typeof msg != 'object') {
+  //? `typeof null === 'object'` and arrays are objects too, so the bare
+  //? `typeof != 'object'` guard let a `null`/array payload through to the field
+  //? access below (`const { responseIndex } = msg`), throwing before the top-level
+  //? tryCatch → unhandledRejection → process kill. Any connected socket could
+  //? trigger it pre-auth via `socket.emit('sync', null)` (remote DoS). Reject
+  //? non-plain-object payloads here, matching this guard's documented contract.
+  if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) {
     if (shouldLogDev()) {
       getLogger().warn('sync: socket message was not a json object');
     }
@@ -542,7 +548,16 @@ function runReceiverAuth({
     receiver,
     allowClientReceiverAll: syncConfig.allowClientReceiverAll,
     requireRoomMembership: syncConfig.requireRoomMembership,
-    isMember: () => socket.rooms.has(receiver),
+    //? Sockets physically JOIN the FORMATTED room (loadSocket runs the room name
+    //? through formatRoomName at join time), so membership must be tested against
+    //? the SAME physical name the fanout fetch uses (see physicalReceiver below) —
+    //? NOT the raw client `receiver`. Otherwise a non-identity
+    //? registerRoomNameFormatter (multi-tenant) makes every joined member fail the
+    //? check on the socket transport while HTTP still works.
+    isMember: () =>
+      socket.rooms.has(
+        receiver === 'all' ? 'all' : formatRoomName(receiver, { purpose: 'broadcast', userId: user?.id ?? null }),
+      ),
   });
   if (!receiverAuth.allowed) {
     if (shouldLogDev()) {

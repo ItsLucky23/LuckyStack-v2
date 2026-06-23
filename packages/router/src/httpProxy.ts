@@ -275,12 +275,17 @@ const handleRequest = async (
     }
     res.statusCode = 502;
     res.setHeader('content-type', 'application/json');
+    //? Do NOT expose err.message to the unauthenticated client: for
+    //? ECONNREFUSED/ENOTFOUND/EHOSTUNREACH it carries the INTERNAL upstream IP:port
+    //? and DNS/cluster name (e.g. "connect ECONNREFUSED 127.0.0.1:4001" /
+    //? "getaddrinfo ENOTFOUND internal-api.svc.cluster.local") — free internal-
+    //? network reconnaissance for lateral movement / SSRF targeting. The full
+    //? message is still on the postProxyResponse hook + logger above.
     res.end(JSON.stringify({
       status: 'error',
       errorCode: 'routing.upstreamUnreachable',
       errorParams: [
         { key: 'service', value: service },
-        { key: 'message', value: err.message },
       ],
     }));
   });

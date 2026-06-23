@@ -63,15 +63,22 @@ export const verifyBootstrap = async (requirements: BootstrapRequirements = {}):
 
   if (requirements.requireOAuthProviders) {
     const login = await getLogin();
-    if (!login) {
+    if (login) {
+      //? Fail only when the registry is empty OR holds ONLY the default
+      //? `{ name: 'credentials' }` entry. A plain count check (`<= 1`) wrongly
+      //? rejected a valid single-OAuth-provider, no-credentials app
+      //? (e.g. `registerOAuthProviders([googleProvider({...})])`) — also length 1.
+      const providers = login.getOAuthProviders();
+      const onlyDefaultCredentials =
+        providers.length === 0 || (providers.length === 1 && providers[0]?.name === 'credentials');
+      if (onlyDefaultCredentials) {
+        missing.push(
+          'OAuth providers — call `registerOAuthProviders([...])` from `luckystack/login/oauthProviders.ts` (or skip this check if your app uses credentials only).'
+        );
+      }
+    } else {
       missing.push(
         'OAuth providers required (`requireOAuthProviders`) but `@luckystack/login` is not installed. Install it, or drop the requirement if this app has no auth.'
-      );
-    } else if (login.getOAuthProviders().length <= 1) {
-      // Default registry is `[{ name: 'credentials' }]` — anything ≤1 means
-      // the consumer never registered providers.
-      missing.push(
-        'OAuth providers — call `registerOAuthProviders([...])` from `luckystack/login/oauthProviders.ts` (or skip this check if your app uses credentials only).'
       );
     }
   }
@@ -105,13 +112,15 @@ export const verifyBootstrap = async (requirements: BootstrapRequirements = {}):
     }
   }
 
-  //? SEC-13: the unauthenticated `/_health` endpoint emits `sha256(<secret>)`
-  //? fingerprints of every `synchronizedEnvKeys` value so the router can detect
-  //? cross-env drift. With the default `healthHash.mode` of `'plain'` those
-  //? digests are UNSALTED — a public, offline-bruteforceable fingerprint of
-  //? production secrets. Loudly warn (not hard-fail, to preserve boot behavior)
-  //? so the operator opts into `http.healthHash.mode: 'hmac'` (or `'salted'`
-  //? with salt `'@bootUuid'`) when synchronized secrets are in play.
+  //? SEC-13: the unauthenticated `/_health` endpoint emits per-`synchronizedEnvKeys`
+  //? fingerprints so the router can detect cross-env drift. The 0.2.0 default is
+  //? `healthHash.mode: 'hmac'` (salt `'@bootUuid'`), NOT `'plain'` — so this warning
+  //? fires ONLY when a consumer EXPLICITLY downgrades to `mode: 'plain'`, which emits
+  //? UNSALTED `sha256(<secret>)`: a public, offline-bruteforceable fingerprint.
+  //? CAVEAT: the hmac default keys on the bootUuid, which /_health ALSO publishes,
+  //? so it resists cross-boot rainbow tables but not a same-boot dictionary attack
+  //? on low-entropy synchronized values — keep synchronized keys high-entropy or
+  //? gate /_health. Warn, not hard-fail, to preserve boot behavior.
   if (isProjectConfigRegistered()) {
     const synchronizedKeyCount = collectSynchronizedEnvKeys().length;
     const healthHashMode = getProjectConfig().http.healthHash.mode;

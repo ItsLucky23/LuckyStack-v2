@@ -23,6 +23,17 @@ export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePa
     res.end(JSON.stringify({ status: 'error', errorCode: 'notFound' }));
     return true;
   }
+  //? Only POST performs the destructive reset (the documented contract). A GET/HEAD
+  //? would also sidestep the origin gate's state-changing fail-closed branch, so
+  //? reject any non-POST method. Runs AFTER the env check so prod still 404s rather
+  //? than revealing the endpoint via a 405.
+  if (req.method !== 'POST') {
+    res.statusCode = 405;
+    res.setHeader('Allow', 'POST');
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ status: 'error', errorCode: 'api.methodNotAllowed' }));
+    return true;
+  }
   const requiredToken = process.env.TEST_RESET_TOKEN;
   const providedToken = req.headers['x-test-reset-token'];
   const tokenValue = Array.isArray(providedToken) ? providedToken[0] : providedToken;

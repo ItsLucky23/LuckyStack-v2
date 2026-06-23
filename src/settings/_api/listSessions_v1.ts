@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-import { redis } from '@luckystack/core';
-import { sessionKeyFor, activeUsersKeyFor } from '@luckystack/login';
+import { getSessionAdapter } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
@@ -26,22 +25,23 @@ export const sessionHandle = (token: string): string =>
   createHash('sha256').update(token).digest('hex').slice(0, 16);
 
 export const main = async ({ user }: ApiParams): Promise<ApiResponse> => {
-  //? Use the framework key builders (which route through `formatKey`) so a
-  //? registered custom Redis key formatter — multi-tenancy / migration — reads
-  //? the SAME keys @luckystack/login writes, instead of a hardcoded shape.
-  const tokens = await redis.smembers(activeUsersKeyFor(user.id)).catch(() => null);
+  //? Route through the registered SessionAdapter (NOT raw Redis) so this works
+  //? under any backend the framework supports — Redis / DynamoDB / Postgres /
+  //? JWT-stateless. `listActive`/`getRaw`/`ttl` are the adapter's documented
+  //? per-user enumeration surface.
+  const adapter = getSessionAdapter();
+  const tokens = await adapter.listActive(user.id).catch(() => null);
   if (tokens === null) {
     return { status: 'error', errorCode: 'common.500' };
   }
 
   const sessions = await Promise.all(tokens.map(async (token) => {
-    const sessionKey = sessionKeyFor(token);
-    const raw = await redis.get(sessionKey);
+    const raw = await adapter.getRaw(token);
     if (!raw) return null;
-    const ttl = await redis.ttl(sessionKey);
+    const ttl = await adapter.ttl(token);
     return {
       handle: sessionHandle(token),
-      expiresInSeconds: ttl >= 0 ? ttl : null,
+      expiresInSeconds: typeof ttl === 'number' && ttl >= 0 ? ttl : null,
       isCurrent: token === user.token,
     };
   }));

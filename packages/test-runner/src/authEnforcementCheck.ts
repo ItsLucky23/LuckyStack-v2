@@ -3,9 +3,13 @@ import { sendProbe } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
-//? Canonical error code the framework emits for unauthenticated requests
-//? to `auth.login: true` endpoints. See packages/api/src/handleHttpApiRequest.ts.
-const EXPECTED_ERROR_CODE = 'auth.required';
+//? Canonical error codes the framework emits when an unauthenticated request hits
+//? a protected endpoint: `auth.required` for an `auth.login: true` route, and
+//? `auth.forbidden` for a route guarded ONLY by `auth.additional[]` predicates
+//? (login: false) — validateRequest forbids the anonymous caller. Either is a PASS;
+//? both mean the guard fired. See packages/api/src/handleHttpApiRequest.ts +
+//? packages/core/src/validateRequest.ts.
+const EXPECTED_ERROR_CODES = new Set(['auth.required', 'auth.forbidden']);
 
 export interface AuthEnforcementCheckInput {
   endpoint: EndpointDescriptor;
@@ -72,14 +76,14 @@ export const runAuthEnforcementCheck = async (
     };
   }
 
-  if (parsed.errorCode !== EXPECTED_ERROR_CODE) {
+  if (parsed.errorCode === undefined || !EXPECTED_ERROR_CODES.has(parsed.errorCode)) {
     return {
       endpoint,
       status: 'fail',
       httpStatus,
       responseStatus: 'error',
       errorCode: parsed.errorCode,
-      reason: `expected errorCode '${EXPECTED_ERROR_CODE}' but got '${parsed.errorCode ?? '(missing)'}'`,
+      reason: `expected an auth-rejection errorCode (${[...EXPECTED_ERROR_CODES].join(' | ')}) but got '${parsed.errorCode ?? '(missing)'}'`,
       durationMs,
     };
   }

@@ -109,7 +109,7 @@ const checkApiAuth = ({ apiEntry, user, name, emitApiError }: {
     }
     void dispatchHook('apiAuthRejected', {
       routeName: name,
-      reason: authResult.errorCode === 'auth.misconfiguredPredicate' ? 'invalid-condition' : 'additional-failed',
+      reason: authResult.errorCode === 'auth.invalidCondition' ? 'invalid-condition' : 'additional-failed',
       userId: user?.id ?? null,
       transport: 'socket',
       failedKey: authResult.errorCode,
@@ -381,14 +381,41 @@ const emitApiResult = async ({
 //? subscriber, fanout) reads THIS request's identity from the AsyncLocalStorage
 //? box, never another concurrent request's. Each request gets its own box.
 export default async function handleApiRequest(args: handleApiRequestType): Promise<void> {
-  await runWithErrorTrackerIdentityScope(() => handleApiRequestInner(args));
+  //? handleApiRequestInner runs un-.catch()'d from loadSocket (a bare `void`
+  //? call), so ANY throw from an unguarded dependency (readSession, the rate-limit
+  //? Redis calls, getRuntimeApiMaps, the session store) would surface as a fatal
+  //? unhandledRejection → worker crash on modern Node. Wrap the whole run (mirrors
+  //? the sync handler's top-level tryCatch) and emit a generic error envelope on
+  //? the response channel so the request fails cleanly instead of killing the worker.
+  const [error] = await tryCatch(() => runWithErrorTrackerIdentityScope(() => handleApiRequestInner(args)));
+  if (error) {
+    getLogger().error('api: unhandled error in socket request handler', { error: error.message });
+    const msg = args.msg as apiMessage | null;
+    const responseIndex = msg?.responseIndex;
+    if (typeof responseIndex === 'number') {
+      args.socket.emit(buildApiResponseEventName(responseIndex), {
+        status: 'error',
+        errorCode: 'api.serverExecutionFailed',
+        httpStatus: 500,
+      });
+    }
+  }
 }
 
 async function handleApiRequestInner({ msg, socket, token }: handleApiRequestType) {
   //? This event gets triggered when the client uses the apiRequest function.
   //? Validate the message, check auth, then execute the registered handler.
 
-  if (typeof msg != 'object') {
+  //? `msg` is TYPED as apiMessage but the socket transport can deliver ANYTHING at
+  //? runtime (null / array / primitive), so view it as `unknown` for the guard.
+  //? `typeof null === 'object'` and arrays are objects, so the bare object check
+  //? would let null/array through to `const { responseIndex } = msg` below —
+  //? throwing before any handler. That throw, running un-.catch()'d from loadSocket,
+  //? becomes a fatal unhandledRejection → worker crash; a connected socket could
+  //? trigger it pre-auth via `socket.emit('api', null)` (remote DoS). Mirrors the
+  //? sync handler's validateSyncMessage guard.
+  const rawMsg: unknown = msg;
+  if (typeof rawMsg !== 'object' || rawMsg === null || Array.isArray(rawMsg)) {
     if (shouldLogDev()) {
       getLogger().warn('api: socket message was not a json object');
     }

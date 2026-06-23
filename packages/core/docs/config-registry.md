@@ -139,7 +139,6 @@ Notable defaults (verbatim from `projectConfig.ts`):
 | `rateLimiting.defaultIpLimit` | `100` |
 | `rateLimiting.windowMs` | `60_000` |
 | `session.expiryDays` | `7` |
-| `session.perBrowser` | `'single'` |
 | `session.perUser` | `'single'` |
 | `session.onConflict` | `'revokeOld'` |
 | `session.notifyOldDeviceOnRevoke` | `true` |
@@ -317,8 +316,7 @@ Deprecated module-level constants exist for backwards compatibility (`SRC_DIR`, 
 | `rateLimiting.windowMs` | `number` | `60000` | Default sliding window. |
 | `session.basedToken` | `boolean` | `false` | When `true`, tokens are stored in sessionStorage + handshake auth instead of cookies. |
 | `session.expiryDays` | `number` | `7` | Session TTL. |
-| `session.perBrowser` | `'single' \| 'multiple'` | `'single'` | Whether a single browser may hold multiple parallel logins. |
-| `session.perUser` | `'single' \| 'multiple'` | `'single'` | Whether a single user may be logged in on multiple devices concurrently. |
+| `session.perUser` | `'single' \| 'multiple'` | `'single'` | Whether a single user may be logged in on multiple devices/browsers concurrently. |
 | `session.maxConcurrentPerUser` | `number \| null` | `null` | Cap when `perUser === 'multiple'`. |
 | `session.onConflict` | `'revokeOld' \| 'rejectNew'` | `'revokeOld'` | Policy when the cap is hit. |
 | `session.projectName` | `string` | `''` | Explicit Redis prefix; empty means fall back to `PROJECT_NAME` env. |

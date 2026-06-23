@@ -8,10 +8,10 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? revoke a session that belongs to THEM, and may never revoke their own
 //? current session through this route (they must log out instead).
 //?
-//? The client passes an opaque SHA-256 `id` (the fingerprint from
-//? listSessions), never the raw token. The route resolves the id back to a
+//? The client passes an opaque `handle` (the 16-char fingerprint from
+//? listSessions), never the raw token. The route resolves the handle back to a
 //? real token by scanning the CALLER'S own active-session set — so a foreign
-//? or unknown id simply doesn't resolve and yields `session.invalid` (no
+//? or unknown handle simply doesn't resolve and yields `session.invalid` (no
 //? `auth.forbidden`, no existence signal that would enable enumeration).
 //?
 //? Test environment runs with `sessionPerUser: 'multiple'` (config.ts dev/
@@ -19,13 +19,13 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? live in Redis — that is how the happy-path case obtains an "other device".
 //?
 //? Input shape (from the route source `revokeSession_v1.ts`):
-//?   { id: string }   // opaque SHA-256 fingerprint of the target token
+//?   { handle: string }   // opaque 16-char fingerprint of the target token
 //? Output envelope:
 //?   { status: 'success', result: {} }
 //?   | { status: 'error', errorCode: 'session.invalid' | 'common.500' }
 
-//? Mirror of the route's opaque-id derivation.
-const idOf = (token: string): string => createHash('sha256').update(token).digest('hex');
+//? Mirror of the route's opaque-handle derivation (sha256 sliced to 16 chars).
+const handleOf = (token: string): string => createHash('sha256').update(token).digest('hex').slice(0, 16);
 
 interface RevokeSuccess {
   status: 'success';
@@ -39,7 +39,7 @@ type RevokeResponse = RevokeSuccess | RevokeError;
 
 export const customTests: CustomTestCase[] = [
   {
-    name: 'happy path revokes another of the callers own sessions by opaque id',
+    name: 'happy path revokes another of the callers own sessions by opaque handle',
     run: async (ctx: TestContext) => {
       const { getSession } = await import('@luckystack/login');
       //? First login = the "other device" we will revoke. Capture its token.
@@ -56,7 +56,7 @@ export const customTests: CustomTestCase[] = [
       const before = await getSession(otherToken);
       ctx.expect.ok(before !== null, 'precondition: other-device session must be live');
 
-      const result = await ctx.callApi<unknown, RevokeResponse>({ id: idOf(otherToken) });
+      const result = await ctx.callApi<unknown, RevokeResponse>({ handle: handleOf(otherToken) });
       ctx.expect.eq(result.status, 'success');
 
       //? Post-condition: the revoked token must no longer resolve to a session.
@@ -70,7 +70,7 @@ export const customTests: CustomTestCase[] = [
       const { token } = await ctx.session.login();
       //? Passing the fingerprint of the caller's OWN token short-circuits with
       //? session.invalid (the route tells the user to log out instead).
-      const result = await ctx.callApi<unknown, RevokeResponse>({ id: idOf(token) });
+      const result = await ctx.callApi<unknown, RevokeResponse>({ handle: handleOf(token) });
       ctx.expect.eq(result.status, 'error');
       if (result.status === 'error') ctx.expect.eq(result.errorCode, 'session.invalid');
 
@@ -93,7 +93,7 @@ export const customTests: CustomTestCase[] = [
       //? signal that the token exists for someone else).
       await ctx.session.login({ email: 'attacker@example.com' });
 
-      const result = await ctx.callApi<unknown, RevokeResponse>({ id: idOf(victimToken) });
+      const result = await ctx.callApi<unknown, RevokeResponse>({ handle: handleOf(victimToken) });
       ctx.expect.eq(result.status, 'error');
       if (result.status === 'error') ctx.expect.eq(result.errorCode, 'session.invalid');
 

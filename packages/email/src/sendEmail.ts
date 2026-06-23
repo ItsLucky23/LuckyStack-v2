@@ -133,6 +133,14 @@ const sanitizeMessageHeaders = (message: EmailMessage): EmailMessage => ({
     : Object.fromEntries(
         Object.entries(message.headers).map(([k, v]) => [stripCrlf(k), stripCrlf(v)]),
       ),
+  //? EMAIL-O7 extension: strip CR/LF from each attachment filename — it renders
+  //? into a Content-Disposition/Content-Type MIME header, so a `\r\n`-bearing
+  //? filename (e.g. a user-derived upload name) could inject extra MIME headers
+  //? at the nodemailer boundary the rest of this function defends against.
+  attachments: message.attachments?.map((a) => ({
+    ...a,
+    filename: typeof a.filename === 'string' ? stripCrlf(a.filename) : a.filename,
+  })),
 });
 
 const isTemplateInput = (
@@ -159,7 +167,7 @@ const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMes
     const template = getEmailTemplate(input.template) ?? getBuiltInEmailTemplate(input.template);
     if (!template) {
       if (config.logging.errors) {
-        getLogger().warn(`[email] template '${input.template}' not registered`, { to: String(input.to) });
+        getLogger().warn(`[email] template '${input.template}' not registered`, { to: redactRecipients(input.to) });
       }
       return { failure: { ok: false, reason: 'no-template' } };
     }
@@ -270,9 +278,9 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
         //? EMAIL-O4: explicit adapter slot requested but not registered.
         //? Warn clearly so operators know the message was dropped, not silently
         //? rerouted to an unintended adapter.
-        getLogger().warn(`[email] adapter slot '${input.adapter}' not registered — dropping message`, { to: String(input.to) });
+        getLogger().warn(`[email] adapter slot '${input.adapter}' not registered — dropping message`, { to: redactRecipients(input.to) });
       } else {
-        getLogger().warn(`[email] no sender registered — dropping message`, { to: String(input.to) });
+        getLogger().warn(`[email] no sender registered — dropping message`, { to: redactRecipients(input.to) });
       }
     }
 

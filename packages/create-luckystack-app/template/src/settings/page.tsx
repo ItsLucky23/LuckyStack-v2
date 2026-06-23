@@ -81,6 +81,7 @@ export default function Home() {
   const [newTheme, setNewTheme] = useState<Theme>(session?.theme ?? 'dark');
   const [newEmail, setNewEmail] = useState<string>(session?.email ?? '');
   const [emailChangePending, setEmailChangePending] = useState<boolean>(false);
+  const [emailChangePassword, setEmailChangePassword] = useState<string>('');
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const [preferences, setPreferences] = useState<UserPreferences>(
     (session?.preferences as UserPreferences | undefined) ?? {},
@@ -94,20 +95,30 @@ export default function Home() {
     const trimmed = newEmail.trim();
     if (!trimmed || trimmed.toLowerCase() === session.email.toLowerCase()) return;
 
+    //? Credentials accounts must confirm their current password — the route
+    //? rejects the change without it. OAuth accounts have no password; the field
+    //? isn't shown and the empty value is ignored server-side.
+    const isCredentials = session.provider === 'credentials';
+    if (isCredentials && !emailChangePassword) {
+      notify.error({ key: 'settings.emailChange.currentPasswordRequired' });
+      return;
+    }
+
     setEmailChangePending(true);
     const response = await apiRequest({
       name: 'settings/requestEmailChange',
       version: 'v1',
-      data: { newEmail: trimmed },
+      data: { newEmail: trimmed, currentPassword: emailChangePassword },
     });
     setEmailChangePending(false);
 
     if (response.status === 'success') {
+      setEmailChangePassword('');
       notify.info({ key: 'settings.emailChange.checkInbox' });
     } else {
       notify.error({ key: response.errorCode });
     }
-  }, [newEmail, session]);
+  }, [newEmail, session, emailChangePassword]);
 
   const saveProfile = useCallback(async (newAvatar?: string) => {
     if (!session) return;
@@ -366,12 +377,24 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => void handleRequestEmailChange()}
-                disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === session.email.toLowerCase()}
+                disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === session.email.toLowerCase() || (session.provider === 'credentials' && !emailChangePassword)}
                 className="h-9 px-3 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
               >
                 {translate({ key: 'settings.emailChange.button' })}
               </button>
             </div>
+            {session.provider === 'credentials' && (
+              <input
+                id="settings-email-password"
+                type="password"
+                autoComplete="current-password"
+                className={inputClass}
+                placeholder={translate({ key: 'settings.currentPassword' })}
+                value={emailChangePassword}
+                onChange={(e) => { setEmailChangePassword(e.target.value); }}
+                disabled={emailChangePending}
+              />
+            )}
             <p className="text-xs text-common">{translate({ key: 'settings.emailChange.label' })}</p>
           </div>
 

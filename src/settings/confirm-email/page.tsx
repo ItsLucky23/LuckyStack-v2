@@ -16,7 +16,7 @@ export default function ConfirmEmailPage() {
   //? Start idle so link-prefetchers and mail-client preview panes cannot
   //? consume the one-shot token before the human clicks confirm.
   const [status, setStatus] = useState<Status>(token ? 'idle' : 'error');
-  const [errorKey, setErrorKey] = useState<string>('auth.invalidToken');
+  const [errorKey, setErrorKey] = useState<string>('settings.emailChange.invalidToken');
 
   const handleConfirm = async () => {
     if (status === 'loading') return;

@@ -146,7 +146,9 @@
       "emailTaken": "That email address is already in use.",
       "invalidEmail": "That doesn't look like a valid email address.",
       "emailSameAsCurrent": "The new email is the same as the current one.",
-      "emailSendFailed": "Could not send the confirmation email. Try again later."
+      "emailSendFailed": "Could not send the confirmation email. Try again later.",
+      "currentPasswordRequired": "Enter your current password to change your email.",
+      "wrongCurrentPassword": "That password is incorrect."
     },
     "passwordSection": "Password",
     "currentPassword": "Current password",

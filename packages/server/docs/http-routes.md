@@ -188,7 +188,7 @@ A handler returns `true` (or simply ends `res`) to short-circuit dispatch; retur
 
 **Behavior:**
 
-- `/assets/*` paths: slice from the first `/assets/` occurrence, temporarily rewrite `req.url` to the asset path, call `options.serveFile`, restore `req.url`. Without `serveFile`, returns `404 Not Found`.
+- `/assets/*` paths: matched via `startsWith('/assets/')`; the (percent-decoded) routePath is rejected with `404` when it contains `..` (path-traversal guard at the framework boundary), then `req.url` is temporarily rewritten to the routePath, `options.serveFile` is called, and `req.url` restored. Without `serveFile`, returns `404 Not Found`.
 - Paths matching `KNOWN_STATIC_FILE_REGEX` (`/^\/(assets\/[a-zA-Z0-9_\-/]+|[a-zA-Z0-9_\-]+)\.(png|jpg|jpeg|gif|svg|html|css|js)$/`): call `serveFile` directly without URL rewrite.
 - Other paths that have an extension `path.extname(routePath)`: `404 Not Found` (text/plain).
 - Extensionless paths (SPA routes): rewrite `req.url` to `/`, call `serveFile`. Without `serveFile`, returns `404 Not Found`.

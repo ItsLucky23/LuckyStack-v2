@@ -7,6 +7,8 @@
 //? parameter. Framework-internal code (`@luckystack/login`, `@luckystack/sync`, etc.)
 //? imports the prisma singleton directly from `@luckystack/core` and is NOT affected.
 //?
-//? For framework-wide DB override: there is no native hook — Prisma's own
-//? `$extends` API in `luckystack/core/clients.ts` is the canonical path.
+//? For a framework-WIDE override (so framework internals use it too), the native
+//? hook is `registerPrismaClient(client)` from '@luckystack/core' — call it at
+//? boot in the editable `luckystack/core/clients.ts` overlay (it ships with ready
+//? examples). Use Prisma's `$extends` there for behavior tweaks on that client.
 export { prisma } from '@luckystack/core';

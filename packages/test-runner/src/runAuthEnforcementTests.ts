@@ -1,6 +1,6 @@
 import { walkEndpoints } from './walkEndpoints';
 import { runAuthEnforcementCheck } from './authEnforcementCheck';
-import { shouldSkip, requiresLogin, calculateSummary } from './testLayerHelpers';
+import { shouldSkip, hasAuthRequirement, calculateSummary } from './testLayerHelpers';
 import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
 export interface RunAuthEnforcementTestsInput {
@@ -20,12 +20,14 @@ export const runAuthEnforcementTests = async (
   const results: ContractCheckResult[] = [];
 
   for (const endpoint of endpoints) {
-    //? Order matters: requiresLogin must run BEFORE shouldSkip so that a
-    //? login-required endpoint in the explicit skip list is still recorded as
+    //? Order matters: the auth-requirement check must run BEFORE shouldSkip so a
+    //? protected endpoint in the explicit skip list is still recorded as
     //? `skipped` in the results (not silently dropped as a public route).
-    //? Reversing the order would hide the skip from the summary.
-    if (!requiresLogin(input.apiMetaMap, endpoint)) {
-      //? Public endpoints can't be tested by this layer — skip silently, no
+    //? Reversing the order would hide the skip from the summary. We gate on
+    //? `hasAuthRequirement` (login OR additional[]-predicates) so role/tenant/
+    //? ownership-guarded routes with `login: false` are also probed.
+    if (!hasAuthRequirement(input.apiMetaMap, endpoint)) {
+      //? Truly-public endpoints can't be tested by this layer — skip silently, no
       //? noise. They're still covered by the contract layer.
       continue;
     }

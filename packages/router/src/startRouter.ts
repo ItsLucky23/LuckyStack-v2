@@ -86,6 +86,11 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   const upstreamTimeoutMs = deployConfig.routing?.upstreamTimeoutMs;
   //? Pass-through: undefined → httpProxy uses its built-in 100 MiB default.
   const maxRequestBodyBytes = deployConfig.routing?.maxRequestBodyBytes;
+  //? WS upgrades pin to this service when set (else createWsProxy's
+  //? DEFAULT_WS_SERVICE = 'system'). The key was declared + documented in
+  //? deploy.config.routing but never threaded into createWsProxy — so a consumer
+  //? terminating Socket.io on a non-system service was silently ignored.
+  const websocketService = deployConfig.routing?.websocketService;
 
   const envMap = (deployConfig.environments ?? {}) as Record<string, EnvironmentDefinition | undefined>;
   const currentEnv = envMap[input.currentEnvKey];
@@ -154,7 +159,7 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   }
 
   const proxy = createHttpProxy({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs: upstreamTimeoutMs, maxRequestBodyBytes });
-  const wsProxy = createWsProxy({ resolver, upstreamHandshakeTimeoutMs: upstreamTimeoutMs });
+  const wsProxy = createWsProxy({ resolver, upstreamHandshakeTimeoutMs: upstreamTimeoutMs, wsTargetService: websocketService });
   const server = http.createServer(proxy);
 
   //? Slow-loris / idle-hold hardening for an internet-facing edge. Node's `http`

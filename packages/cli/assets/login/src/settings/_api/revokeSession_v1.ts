@@ -1,5 +1,4 @@
-import { redis } from '@luckystack/core';
-import { deleteSession, sessionKeyFor, activeUsersKeyFor } from '@luckystack/login';
+import { deleteSession, getSessionAdapter } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { sessionHandle } from './listSessions_v1';
@@ -27,11 +26,12 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'error', errorCode: 'session.invalid' };
   }
 
-  //? Resolve the opaque handle back to a real token by re-hashing THIS user's own
-  //? active tokens — so a caller can only ever target a session they own, and the
-  //? token itself never travels over the wire. Use the framework key builders so
-  //? a custom Redis key formatter is honored.
-  const tokens = await redis.smembers(activeUsersKeyFor(user.id)).catch(() => null);
+  //? Route through the registered SessionAdapter (NOT raw Redis) so revoke works
+  //? under any session backend. Resolve the opaque handle back to a real token by
+  //? re-hashing THIS user's own active tokens — so a caller can only ever target a
+  //? session they own, and the token itself never travels over the wire.
+  const adapter = getSessionAdapter();
+  const tokens = await adapter.listActive(user.id).catch(() => null);
   if (tokens === null) {
     return { status: 'error', errorCode: 'common.500' };
   }
@@ -41,7 +41,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   }
 
   // Validate the target token still belongs to this user.
-  const sessionRaw = await redis.get(sessionKeyFor(targetToken));
+  const sessionRaw = await adapter.getRaw(targetToken);
   if (!sessionRaw) {
     return { status: 'error', errorCode: 'session.invalid' };
   }

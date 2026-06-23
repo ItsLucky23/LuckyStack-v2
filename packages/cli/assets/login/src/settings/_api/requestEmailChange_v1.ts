@@ -72,8 +72,9 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   //? `sendPasswordResetEmail` returns `{ ok: true }` for unknown addresses.
   //? We apply the same anti-enumeration posture here: silently succeed without
   //? sending a token when the address is owned by another user. The
-  //? `confirmEmailChange` step is the hard guard — it re-checks ownership
-  //? under a DB transaction and rejects at that point. The real user sees
+  //? `confirmEmailChange` step is the hard guard — it re-checks the address is
+  //? still free and rejects at that point (the DB unique index on email is the real
+  //? race backstop; the check itself is not transactional). The real user sees
   //? "email change requested" in the UI; no confirmation arrives (the email
   //? simply isn't sent), which is sufficient UX signal. A GDPR / abuse-report
   //? handler can hook `postEmailChangeRequested` where `sent: false` flags the
@@ -88,6 +89,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     //? can't distinguish "taken" from "sent" at the HTTP layer.
     void dispatchHook('postEmailChangeRequested', {
       userId: user.id,
+      currentEmail: user.email,
       newEmail,
       sent: false,
     });
@@ -118,6 +120,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   //? file. The hook receives `currentEmail` for that purpose.
   void dispatchHook('postEmailChangeRequested', {
     userId: user.id,
+    currentEmail: user.email,
     newEmail,
   });
 

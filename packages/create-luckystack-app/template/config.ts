@@ -65,6 +65,16 @@ const config = {
     socketStartup: true,
     stream: dev,
   },
+  //? Rate limiting for API requests (Redis-backed so counters are shared across
+  //? instances). Per-route override: `export const rateLimit = 60;` (or `false`)
+  //? in any `_api/*.ts`. Read by the framework limiter + the docs-ui explorer.
+  rateLimiting: {
+    store: 'redis' as 'memory' | 'redis',
+    redisKeyPrefix: 'rate-limit',
+    defaultApiLimit: 60 as number | false,
+    defaultIpLimit: 100 as number | false,
+    windowMs: 60_000,
+  },
   //? Optional @luckystack/secret-manager (opt-in). Uncomment + set
   //? LUCKYSTACK_SECRET_MANAGER_URL to resolve `.env` pointers (NAME=BASE_V<n>)
   //? against an external secret server at boot (see server.ts + the docs).
@@ -77,6 +87,7 @@ const config = {
 registerProjectConfig({
   app: { publicUrl },
   logging: config.logging,
+  rateLimiting: config.rateLimiting,
   session: {
     basedToken: config.sessionBasedToken,
     expiryDays: config.sessionExpiryDays,
@@ -112,8 +123,10 @@ registerProjectConfig({
   socketStatusIndicator: config.socketStatusIndicator,
   locationProviderEnabled: config.locationProviderEnabled,
   auth: {
-    //? Framework-mode forgot-password (needs @luckystack/email installed + a
-    //? sender registered in server.ts). Set to 'disabled' or 'custom' to opt out.
+    //? forgot-password is a @luckystack/login feature: it ONLY works with
+    //? @luckystack/login installed. 'framework' mode ALSO needs @luckystack/email
+    //? installed + a sender registered in server.ts to deliver the reset mail.
+    //? Set to 'disabled' or 'custom' to opt out.
     forgotPassword: 'framework',
     //? Email+password auth. Set `false` for an OAuth-only app — the login form
     //? hides the email/password fields and the credentials route rejects.
@@ -135,6 +148,7 @@ export const {
   socketStatusIndicator,
   locationProviderEnabled,
   logging,
+  rateLimiting,
 } = config;
 
 // Project-specific session shape. Extend the framework's BaseSessionLayout

@@ -114,7 +114,10 @@ const resolveRaw = ({ rawAddress, headers, trustProxy, trustedProxyHopCount }: R
   if (hops.length > 0) {
     //? Count from the RIGHT — the rightmost entry is the one your own trusted
     //? proxy appended. Clamp so an over-large count lands on the leftmost
-    //? available trusted hop instead of underflowing past the start.
+    //? available trusted hop instead of underflowing past the start. A configured
+    //? value < 1 (e.g. 0) is also clamped UP to 1 — the leftmost, client-controlled
+    //? hop is never selectable by design (CORE-O3), so `0` cannot mean "trust the
+    //? whole XFF". Document this on `http.trustedProxyHopCount`.
     const skip = Math.max(1, Math.floor(trustedProxyHopCount));
     const index = Math.max(0, hops.length - skip);
     const chosen = hops[index];

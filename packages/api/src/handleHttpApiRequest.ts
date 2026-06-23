@@ -314,7 +314,7 @@ function runHttpApiAuth(
     }
     void dispatchHook('apiAuthRejected', {
       routeName: resolvedName,
-      reason: authResult.errorCode === 'auth.misconfiguredPredicate' ? 'invalid-condition' : 'additional-failed',
+      reason: authResult.errorCode === 'auth.invalidCondition' ? 'invalid-condition' : 'additional-failed',
       userId: ctx.user?.id ?? null,
       transport: 'http',
       ip: requesterIp,

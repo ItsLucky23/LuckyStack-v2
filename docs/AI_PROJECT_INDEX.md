@@ -7,10 +7,11 @@
 >
 > Cross-reference detection uses static `import` statements. Dynamic imports (`await import(...)`) and string-key access are NOT counted — so the "unused" list may include exports that are actually used dynamically.
 
-## API routes (16)
+## API routes (18)
 
 | Path | Method | Auth | Rate limit | Owner | Tested | Tags | Summary |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `api/billing/listInvoices/v1` | POST | login | 60 | — | **no** | — | Example `billing` service route. Makes the `billing` service declared in |
 | `api/playground/echo/v1` | POST | public | 60 | mathijs | yes | playground, smoke-test | Playground: simple echo. Returns the message sent + the caller's session |
 | `api/playground/spam/v1` | POST | public | 3 | — | yes | — | Playground: low rate-limit endpoint for demoing the rate-limiter. Hit it |
 | `api/playground/streamCounter/v1` | POST | public | 30 | — | yes | — | Playground: streams a fake counter to the originator over a configurable |
@@ -27,6 +28,7 @@
 | `api/settings/signOutEverywhere/v1` | POST | login | 5 | — | yes | — | — |
 | `api/settings/updatePreferences/v1` | POST | login | 30 | — | yes | — | — |
 | `api/settings/updateUser/v1` | POST | login | 20 | — | yes | — | — |
+| `api/vehicles/listVehicles/v1` | POST | login | 60 | — | **no** | — | Example `vehicles` service route. Makes the `vehicles` service declared in |
 
 ## Sync routes (5)
 
@@ -45,9 +47,14 @@
 | Owner | Routes |
 | --- | --- |
 | `mathijs` | 1 |
-| _(unowned)_ | 20 |
+| _(unowned)_ | 22 |
 
-**Test coverage**: 21/21 routes have a per-route `.tests.ts`.
+**Test coverage**: 21/23 routes have a per-route `.tests.ts`.
+
+_Untested routes — flag these to the user (Prioritize-tests rule), don't bulk-add unasked:_
+
+- `api/billing/listInvoices/v1`
+- `api/vehicles/listVehicles/v1`
 
 ## Pages (9)
 

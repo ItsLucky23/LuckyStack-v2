@@ -135,6 +135,11 @@ export interface PreEmailChangePayload {
 
 export interface PostEmailChangeRequestedPayload {
   userId: string;
+  //? The user's CURRENT (pre-change) address — provided so a subscriber can
+  //? alert the real owner that a change was requested (LOGIN-EMAILCHG). Mirrors
+  //? `PreEmailChangePayload.currentEmail`. The framework does NOT email the old
+  //? address by default; this hook is the opt-in seam to do so.
+  currentEmail: string;
   newEmail: string;
   //? `false` when the request was silently dropped (anti-enumeration: the new
   //? address is already taken so no token is minted / no email sent), `true`/absent

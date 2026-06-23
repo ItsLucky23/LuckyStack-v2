@@ -37,11 +37,29 @@ const lockoutKey = (accountKey: string, requesterIp?: string): string => {
   return requesterIp ? `${base}:${requesterIp}` : base;
 };
 
+//? One-shot guard so the inert-config warning below fires once per process, not
+//? on every login attempt.
+let warnedLockoutInert = false;
+
 /** Read the active auth-lockout config (returns null when the feature is off). */
-const getAuthLockoutConfig = (): { maxAttempts: number; windowMs: number } | null => {
-  const auth = getProjectConfig().rateLimiting.auth;
-  if (!auth.enabled) return null;
-  return { maxAttempts: auth.maxAttempts, windowMs: auth.windowMs };
+const getAuthLockoutConfig = (): { maxAttempts: number; maxAttemptsPerAccount: number; windowMs: number } | null => {
+  const rateLimiting = getProjectConfig().rateLimiting;
+  if (!rateLimiting.auth.enabled) return null;
+  //? The counter rides the framework rate limiter, which short-circuits when the
+  //? GLOBAL `rateLimiting.enabled` is false — so `auth.enabled:true` +
+  //? `enabled:false` makes recordAuthFailure/isAccountLocked silent no-ops, i.e. a
+  //? believed-on-but-INERT brute-force defense. Warn once so the conflict surfaces.
+  if (!rateLimiting.enabled && !warnedLockoutInert) {
+    warnedLockoutInert = true;
+    getLogger().warn(
+      '[LuckyStack] rateLimiting.auth.enabled is true but rateLimiting.enabled is false — the per-account brute-force lockout is INERT (it rides the global rate limiter, which is off). Set rateLimiting.enabled to true for the lockout to take effect.',
+    );
+  }
+  return {
+    maxAttempts: rateLimiting.auth.maxAttempts,
+    maxAttemptsPerAccount: rateLimiting.auth.maxAttemptsPerAccount,
+    windowMs: rateLimiting.auth.windowMs,
+  };
 };
 
 /**
@@ -53,8 +71,18 @@ const getAuthLockoutConfig = (): { maxAttempts: number; windowMs: number } | nul
 export const isAccountLocked = async (accountKey: string, requesterIp?: string): Promise<boolean> => {
   const cfg = getAuthLockoutConfig();
   if (!cfg || !accountKey) return false;
-  const { remaining } = await getRateLimitStatus(lockoutKey(accountKey, requesterIp), cfg.maxAttempts);
-  return remaining <= 0;
+  //? DUAL counter (DD-LOGIN-F5 + the cross-IP fix). Lock if EITHER trips:
+  //?  - the bare-account bucket (`auth:<email>`) against the cross-IP cap
+  //?    (`maxAttemptsPerAccount`) — the distributed-credential-stuffing defense, and
+  //?  - the IP+account composite (`auth:<email>:<ip>`) against the per-IP cap
+  //?    (`maxAttempts`) — bounds one IP + shields other IPs from a victim-lock DoS.
+  const accountStatus = await getRateLimitStatus(lockoutKey(accountKey), cfg.maxAttemptsPerAccount);
+  if (accountStatus.remaining <= 0) return true;
+  if (requesterIp) {
+    const ipStatus = await getRateLimitStatus(lockoutKey(accountKey, requesterIp), cfg.maxAttempts);
+    if (ipStatus.remaining <= 0) return true;
+  }
+  return false;
 };
 
 /**
@@ -65,15 +93,27 @@ export const isAccountLocked = async (accountKey: string, requesterIp?: string):
 export const recordAuthFailure = async (accountKey: string, requesterIp?: string): Promise<void> => {
   const cfg = getAuthLockoutConfig();
   if (!cfg || !accountKey) return;
-  const { allowed, remaining } = await checkRateLimit({
-    key: lockoutKey(accountKey, requesterIp),
-    limit: cfg.maxAttempts,
+  //? Increment BOTH the cross-IP bare-account counter and (when an IP is known)
+  //? the per-IP composite counter — mirrors the dual gate in isAccountLocked.
+  const account = await checkRateLimit({
+    key: lockoutKey(accountKey),
+    limit: cfg.maxAttemptsPerAccount,
     windowMs: cfg.windowMs,
   });
-  if (!allowed) {
+  let ipBlocked = false;
+  if (requesterIp) {
+    const ip = await checkRateLimit({
+      key: lockoutKey(accountKey, requesterIp),
+      limit: cfg.maxAttempts,
+      windowMs: cfg.windowMs,
+    });
+    ipBlocked = !ip.allowed;
+  }
+  if (!account.allowed || ipBlocked) {
     getLogger().warn('[authLockout] account temporarily locked after repeated failures', {
-      remaining,
       maxAttempts: cfg.maxAttempts,
+      maxAttemptsPerAccount: cfg.maxAttemptsPerAccount,
+      crossIp: !account.allowed,
     });
   }
 };
@@ -87,7 +127,10 @@ export const recordAuthFailure = async (accountKey: string, requesterIp?: string
 export const clearAuthFailures = async (accountKey: string, requesterIp?: string): Promise<void> => {
   const cfg = getAuthLockoutConfig();
   if (!cfg || !accountKey) return;
-  await clearRateLimit(lockoutKey(accountKey, requesterIp));
+  //? Clear BOTH counters on a successful login so earlier typos don't penalise the
+  //? user — the cross-IP bare-account bucket and the per-IP composite bucket.
+  await clearRateLimit(lockoutKey(accountKey));
+  if (requesterIp) await clearRateLimit(lockoutKey(accountKey, requesterIp));
 };
 
 //? ADR 0012 — the lockout counter must reflect GENUINE credential failures only.

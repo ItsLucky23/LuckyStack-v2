@@ -23,6 +23,12 @@ const FRAMEWORK_ENV_KEYS = new Set([
   'REDIS_HOST', 'REDIS_USER', 'REDIS_PASSWORD', 'REDIS_PORT',
   'EXTERNAL_ORIGINS', 'DNS', 'LUCKYSTACK_ENV', 'LUCKYSTACK_ENV_FILES',
   'LUCKYSTACK_PRESET', 'ROUTER_PORT', 'LUCKYSTACK_SECRET_MANAGER_URL',
+  //? Framework diagnostics + dev-server knobs (read inside @luckystack/* at boot):
+  //? server port-hop, supervisor restart grace, env-dup tracing, scan/session
+  //? tracing. Optional + zero-default-survivable, so a consumer scan must not flag
+  //? them as "missing definition".
+  'SERVER_PORT_AUTO_INCREMENT', 'LUCKYSTACK_SUPERVISOR_GRACE_MS',
+  'LUCKYSTACK_ENV_DEBUG', 'LUCKYSTACK_DEBUG', 'LUCKYSTACK_TRACE_SESSION_DELETES',
   'DATABASE_URL',
   'EMAIL_FROM', 'RESEND_API_KEY', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS',
   'SENTRY_DSN', 'SENTRY_ENABLED', 'POSTHOG_KEY', 'POSTHOG_HOST', 'BCRYPT_ROUNDS',

@@ -119,7 +119,7 @@ Type-only module that augments `@luckystack/core`'s `HookPayloads` interface. Ex
 Email-change hook payloads (new):
 
 - `PreEmailChangePayload` — `{ userId, currentEmail, newEmail }`. Vetoable; returning a stop-signal from a handler aborts the change before any token is minted.
-- `PostEmailChangeRequestedPayload` — `{ userId, newEmail }`. Observational. Fires after the confirmation token is minted and the email has been queued to the new address.
+- `PostEmailChangeRequestedPayload` — `{ userId, currentEmail, newEmail, sent? }`. Observational. Fires after the confirmation token is minted and the email has been queued to the NEW address. The framework does NOT alert the old address by default — subscribe to this hook (it carries `currentEmail`) to send your own "change requested" notice to the old owner. `sent: false` marks an anti-enumeration silent drop (new address already taken).
 - `PostEmailChangedPayload` — `{ userId, oldEmail, newEmail }`. Observational. Fires after the user's address is persisted via the `UserAdapter` AND all of the user's sessions have been revoked (forced re-login on the next request).
 
 ---

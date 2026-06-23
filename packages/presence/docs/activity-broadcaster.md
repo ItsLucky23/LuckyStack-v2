@@ -135,7 +135,7 @@ Evaluates every registered event against the sample. For each event:
 
 1. Run `event.trigger(sample)`. If falsy, skip.
 2. If `event.refractoryMs > 0`, check the per-`(name, socketId)` last-fired timestamp. If `sample.now - last < refractoryMs`, skip. Otherwise record `sample.now` as the new last-fired.
-3. `await event.onTrigger(sample)`. Errors are swallowed — one buggy event must not break the chain.
+3. `await event.onTrigger(sample)`. Errors are ISOLATED per event — wrapped in the framework `tryCatch` (auto-captured to the error tracker) plus an explicit `getLogger().error` — so one buggy event can't break the chain, while failures stay VISIBLE (not silently swallowed).
 
 Call this from anywhere you collect activity signals: a route change, a websocket heartbeat, a key-press throttle, or a server-side cron that scans `io.sockets`:
 
@@ -194,7 +194,7 @@ without forking presence or stacking parallel listeners. The framework still own
 
 - Calling `dispatchActivitySample` with `token: null` works, but the default AFK event short-circuits (`if (!io || !sample.token) return;`). Anonymous sockets cannot be marked AFK.
 - Forgetting `refractoryMs` will fire `onTrigger` on every tick while `trigger` stays true. Set it to at least your activity-sample cadence.
-- Throwing inside `onTrigger` is swallowed silently. Log inside the callback if you need observability.
+- Throwing inside `onTrigger` is isolated per event and routed through the framework `tryCatch` (captured to the error tracker + an explicit `getLogger().error` line) — NOT silently swallowed. One buggy event cannot break the chain, and the failure is visible without extra in-callback logging.
 - Replacing `'afk'` without restoring the framework's `refractoryMs` (60s) often causes "AFK spam" — peers receive a `userAfk` event every dispatch tick.
 
 ## See also

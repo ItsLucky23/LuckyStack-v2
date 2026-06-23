@@ -856,12 +856,18 @@ const fetchOAuthProfile = async (
   //? against account-linking takeover under `'unified'` (SEC-21).
   if (email && provider.emailVerifiedKey) {
     const verifiedFlag = userData[provider.emailVerifiedKey];
-    if (verifiedFlag === false) {
+    //? Only a STRICT boolean `true` counts as verified. A present-but-not-true
+    //? value (`false`, the strings "false"/"0", `0`, `null`) is an explicit
+    //? not-verified signal → reject. This hardens against a CUSTOM provider that
+    //? encodes the flag as a string/number (a truthy `"false"` previously slipped
+    //? through as verified, re-opening cross-provider account-linking takeover).
+    //? A MISSING flag (undefined) is "no signal" — not verified, not rejected here;
+    //? the cross-provider link guard in findOrCreateOAuthUser handles it (SEC-21).
+    if (verifiedFlag !== undefined && verifiedFlag !== true) {
       getLogger().warn('oauth: provider email is not verified — rejecting', { provider: provider.name });
       return null;
     }
-    //? Key present-and-not-false ⇒ provider positively confirmed verification.
-    if (verifiedFlag !== undefined) emailVerified = true;
+    if (verifiedFlag === true) emailVerified = true;
   }
 
   const avatarId = provider.avatarCodeKey ? userData[provider.avatarCodeKey] : undefined;
@@ -949,7 +955,12 @@ const findOrCreateOAuthUser = async (
     //? working. `'per-provider'` always matches within the same provider, so the
     //? cross-provider condition is never met there (no behaviour change).
     const existingProvider = findResponse.provider ?? null;
-    const isCrossProviderLink = existingProvider !== null && existingProvider !== provider.name;
+    //? Fail CLOSED on a missing provider field: treat unknown (null/undefined) as a
+    //? cross-provider link so an unverified provider email can't link into an
+    //? existing account whose record omits `provider` (a custom UserAdapter may not
+    //? populate it). Same-provider re-login still matches (=== provider.name → not
+    //? cross), and first-time creation is unaffected (this branch needs an existing id).
+    const isCrossProviderLink = existingProvider !== provider.name;
     if (isCrossProviderLink && !emailVerified) {
       getLogger().warn(
         'oauth: refusing to link an unverified provider email to an existing account created by a different provider (account-takeover guard)',

@@ -10,7 +10,7 @@ cp .env.local_template .env.local
 # Edit .env.local with your DATABASE_URL and (optional) OAuth secrets
 
 npm run prisma:generate
-npm run prisma:migrate:dev   # creates the User table
+{{PRISMA_INIT_CMD}}   # initialize the database schema (creates the User table)
 
 # In one terminal — backend (HTTP + Socket.io):
 npm run server

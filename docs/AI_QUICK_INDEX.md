@@ -12,7 +12,7 @@
 | H2 section | First line |
 | --- | --- |
 | Quick Links | \| Topic \| Framework dev path \| Consumer (post-install) path \| |
-| Project Snapshot | LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 5.7, Vite, Redis. The repo publishes as 15 `@luckystack/*` packages (+ `create-luckystack-app`) — see `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map. |
+| Project Snapshot | LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 6, Vite, Redis. The repo publishes as 15 `@luckystack/*` packages (+ `create-luckystack-app`); a 16th package dir, `env-resolver`, is a reserved, not-yet-published placeholder (no `package.json`, excluded from build/publish). See `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map. |
 | Core Rules (28) | 1. **Plan first for medium/high difficulty work.** Use tables or bullets, not wall-of-text. Skip planning only for trivial single-file changes. |
 | Branch Log Protocol | AI MUST append an entry to `branch-logs/<sanitized-branch>.md` after every prompt that produces **real code or architecture changes**. Skip for lint-only fixes, typo fixes, or translation-string-only edits. **When in doubt, log.** |
 | Decision Memory Protocol | This is **automatic AI behavior — there is no command for the user to run** (just like the branch-log protocol). The AI fills and reads the decision memory itself as a normal part of working in a session. |
@@ -479,7 +479,7 @@
 - Type-only module that augments `@luckystack/core`'s `HookPayloads` interface. Exported payload types: `PreLoginPayload`, `PostLoginPayload`, `PreRegisterPayload`, `PostRegisterPayload`, `PreLogoutPayload`, `PostLogoutPayload`, `PreSessionCreatePayload`, `PostSessionCreatePayload`, `PreSessionDeletePayload`, `PostSessionDeletePayload`, `PasswordResetRequestedPayload`, `PasswordResetCompletedPayload`, `PasswordChangedPayload`, `PreEmailChangePayload`, `PostEmailChangeRequestedPayload`, `PostEmailChangedPayload`.
 - Email-change hook payloads (new):
 - `PreEmailChangePayload` — `{ userId, currentEmail, newEmail }`. Vetoable; returning a stop-signal from a handler aborts the change before any token is minted.
-- `PostEmailChangeRequestedPayload` — `{ userId, newEmail }`. Observational. Fires after the confirmation token is minted and the email has been queued to the new address.
+- `PostEmailChangeRequestedPayload` — `{ userId, currentEmail, newEmail, sent? }`. Observational. Fires after the confirmation token is minted and the email has been queued to the NEW address. The framework does NOT alert the old address by default — subscribe to this hook (it carries `currentEmail`) to send your own "change requested" notice to the old owner. `sent: false` marks an anti-enumeration silent drop (new address already taken).
 - `PostEmailChangedPayload` — `{ userId, oldEmail, newEmail }`. Observational. Fires after the user's address is persisted via the `UserAdapter` AND all of the user's sessions have been revoked (forced re-login on the next request).
 ---
 

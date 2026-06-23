@@ -50,6 +50,17 @@ export const handleStaticAndSpaFallback: HttpRouteHandler = async ({
   //? `startsWith` not `includes` — avoids matching `/other/assets/foo` and
   //? prevents the indexOf slice from drifting to an interior segment.
   if (routePath.startsWith('/assets/')) {
+    //? Reject path-traversal at the framework boundary BEFORE handing the path to
+    //? the consumer-supplied serveFile. routePath is already percent-DECODED, so
+    //? `/assets/%2e%2e/server.js` arrives as `/assets/../server.js` and would
+    //? otherwise reach a naive `path.join(dir, req.url)` static handler (source
+    //? disclosure). The leading denylist only blocks the literal `/server.js`, not
+    //? a traversal to it — so this `..` reject makes the protection structural.
+    if (routePath.includes('..')) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
+      return true;
+    }
     if (!options.serveFile) {
       res.writeHead(404);
       res.end('Not Found');

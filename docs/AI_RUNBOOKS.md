@@ -13,7 +13,7 @@
 
 **Goal:** a new endpoint at `api/{page}/{name}/v{N}`, auth-gated.
 
-1. copy the existing `playground/_api/testEmail_v1.ts` as your starting point.
+1. copy the existing `billing/_api/listInvoices_v1.ts` as your starting point.
 2. Create `src/{page}/_api/{name}_v1.ts` exporting `httpMethod`, `rateLimit`, `auth`, `ApiParams`, and `main`.
    - Auth: `export const auth: AuthProps = { login: true, additional: [] };` (or `login: false` for public).
    - In `main`, prefer the injected `functions.tryCatch.tryCatch(...)` over raw try/catch (Rule 21).

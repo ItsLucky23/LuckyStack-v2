@@ -44,17 +44,17 @@ afterEach(() => {
 describe("extractAuth — public-by-default (DK-05)", () => {
   it("honors an explicit login: true", () => {
     const file = writeTmp(`export const auth = { login: true };`);
-    expect(extractAuth(file)).toEqual({ login: true });
+    expect(extractAuth(file)).toEqual({ login: true, hasAdditional: false });
   });
 
   it("honors an explicit login: false (public route)", () => {
     const file = writeTmp(`export const auth = { login: false };`);
-    expect(extractAuth(file)).toEqual({ login: false });
+    expect(extractAuth(file)).toEqual({ login: false, hasAdditional: false });
   });
 
   it("defaults to public when the auth export is missing", () => {
     const file = writeTmp(`export const main = async () => ({ status: 'success' });`);
-    expect(extractAuth(file)).toEqual({ login: false });
+    expect(extractAuth(file)).toEqual({ login: false, hasAdditional: false });
   });
 
   it("treats a non-boolean-literal login initializer as public (auth-indeterminate)", () => {
@@ -64,16 +64,29 @@ describe("extractAuth — public-by-default (DK-05)", () => {
     const file = writeTmp(
       `import { needsLogin } from './cfg';\nexport const auth = { login: needsLogin };`,
     );
-    expect(extractAuth(file)).toEqual({ login: false });
+    expect(extractAuth(file)).toEqual({ login: false, hasAdditional: false });
   });
 
   it("treats a ternary login initializer as public", () => {
     const file = writeTmp(`export const auth = { login: 1 > 0 ? true : false };`);
-    expect(extractAuth(file)).toEqual({ login: false });
+    expect(extractAuth(file)).toEqual({ login: false, hasAdditional: false });
   });
 
   it("unwraps `as const` on an explicit literal", () => {
     const file = writeTmp(`export const auth = { login: false as const };`);
-    expect(extractAuth(file)).toEqual({ login: false });
+    expect(extractAuth(file)).toEqual({ login: false, hasAdditional: false });
+  });
+
+  it("flags hasAdditional for a non-empty additional[] even with non-object (function) predicates", () => {
+    //? `adminOnly` is an identifier, not an object literal, so it is NOT parsed
+    //? into `additional` — but `hasAdditional` must still be true so the auth sweep
+    //? probes this (login:false but authz-protected) route.
+    const file = writeTmp(`export const auth = { login: false, additional: [adminOnly] };`);
+    expect(extractAuth(file)).toEqual({ login: false, hasAdditional: true });
+  });
+
+  it("does not flag hasAdditional for an empty additional[]", () => {
+    const file = writeTmp(`export const auth = { login: true, additional: [] };`);
+    expect(extractAuth(file)).toEqual({ login: true, hasAdditional: false });
   });
 });

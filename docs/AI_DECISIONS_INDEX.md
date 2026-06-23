@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (13)
+## Decisions (14)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -26,6 +26,7 @@
 | 0012 | Password-policy validation failures must not increment the per-account login lockout | 🟢 accepted | security, login, dos | — | `docs/decisions/0012-login-lockout-excludes-policy-failures.md` |
 | 0013 | Admit origin-less Socket.io handshakes at the CORS layer (fixes 400 code:3 in dev + prod-with-router) | 🟢 accepted | security, sockets, cors, dev-experience, regression | — | `docs/decisions/0013-admit-originless-socketio-handshake.md` |
 | 0014 | CLI `manage` becomes a step-based reconfiguration wizard with consequence previews | 🟢 accepted | cli, scaffolder, dx, env, oauth | — | `docs/decisions/0014-cli-reconfigure-wizard.md` |
+| 0015 | Per-account login lockout uses a dual counter (per-IP + cross-IP) to actually stop distributed credential stuffing | 🟢 accepted | security, login, dos, brute-force | — | `docs/decisions/0015-login-lockout-dual-counter-cross-ip.md` |
 
 ## Summaries
 
@@ -132,3 +133,11 @@ The CORS `origin` callback now **admits origin-less requests unconditionally** (
 `manage` becomes a **step-based reconfiguration wizard** that mirrors the scaffold wizard, operating on an existing project:
 
 → `docs/decisions/0014-cli-reconfigure-wizard.md`
+
+### 0015 — Per-account login lockout uses a dual counter (per-IP + cross-IP) to actually stop distributed credential stuffing
+
+**0015** · accepted · tags: security, login, dos, brute-force · 2026-06-23
+
+Maintain **TWO** counters and lock when **EITHER** trips:
+
+→ `docs/decisions/0015-login-lockout-dual-counter-cross-ip.md`

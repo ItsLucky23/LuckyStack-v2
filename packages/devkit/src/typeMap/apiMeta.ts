@@ -232,8 +232,8 @@ export const extractDocsMeta = (filePath: string): DocsMeta | undefined => {
   return docsMeta ?? undefined;
 };
 
-export const extractAuth = (filePath: string): { login: boolean; additional?: Record<string, unknown>[] } => {
-  const [, auth] = tryCatchSync((): { login: boolean; additional?: Record<string, unknown>[] } => {
+export const extractAuth = (filePath: string): { login: boolean; additional?: Record<string, unknown>[]; hasAdditional: boolean } => {
+  const [, auth] = tryCatchSync((): { login: boolean; additional?: Record<string, unknown>[]; hasAdditional: boolean } => {
     const content = fs.readFileSync(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const decl = findExportedConst(sourceFile, 'auth');
@@ -246,10 +246,16 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
     //? public while this extractor defaulted to protected, so the generated meta
     //? + auth sweep disagreed with what actually ran. A route that needs auth
     //? MUST declare a literal `auth: { login: true }`.
-    if (!authInitializer || !ts.isObjectLiteralExpression(authInitializer)) return { login: false };
+    if (!authInitializer || !ts.isObjectLiteralExpression(authInitializer)) return { login: false, hasAdditional: false };
 
     let login = false;
     let additional: Record<string, unknown>[] | undefined;
+    //? Whether the route DECLARED a non-empty `additional: [...]` array — tracked
+    //? from the raw element count BEFORE parseAdditionalItem (which drops non-object
+    //? predicates like `additional: [adminOnly]` function refs). The test-runner's
+    //? auth sweep gates on this so additional[]-only (login:false) authz routes are
+    //? still probed, even when the predicates aren't serialisable into `additional`.
+    let hasAdditional = false;
 
     for (const prop of authInitializer.properties) {
       if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
@@ -260,6 +266,7 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
       }
 
       if (prop.name.text === 'additional' && ts.isArrayLiteralExpression(propInit)) {
+        hasAdditional = propInit.elements.length > 0;
         additional = [];
         for (const element of propInit.elements) {
           if (!ts.isObjectLiteralExpression(element)) continue;
@@ -269,12 +276,14 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
       }
     }
 
-    return additional && additional.length > 0 ? { login, additional } : { login };
+    return additional && additional.length > 0
+      ? { login, additional, hasAdditional }
+      : { login, hasAdditional };
   });
 
   //? Parse failure falls through to PUBLIC, consistent with the public-by-default
   //? policy above (and the runtime loader). A route needing auth declares a
   //? literal `auth: { login: true }`.
-  return auth ?? { login: false };
+  return auth ?? { login: false, hasAdditional: false };
 };
 

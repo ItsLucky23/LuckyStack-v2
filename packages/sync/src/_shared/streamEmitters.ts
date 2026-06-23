@@ -23,7 +23,9 @@ export type SyncStreamPayload = Record<string, unknown>;
 //? Socket.io transport's pending write buffer drops below `thresholdBytes`
 //? (measured in packets, not bytes — engine.io exposes a writeBuffer of
 //? packet objects, not byte length, so we approximate via packet count).
-//? Default threshold = 1 MB ≈ 1024 packets at ~1KB each. Handlers opt in;
+//? Fallback threshold (used only before config is registered) = 1 MB ≈ 1024
+//? packets at ~1KB each; the EFFECTIVE default is `sync.flushPressure.maxBufferedBytes`
+//? (5 MiB). Handlers opt in;
 //? omitting the call is fine for handlers that don't stream a lot.
 export interface FlushPressureOptions {
   /**
@@ -46,7 +48,8 @@ export interface SyncStreamEmitters {
   flushPressure: FlushPressure;
 }
 
-//? Default 1 MB threshold (per spec B2). Packet count = bytes / avg-packet-size.
+//? Fallback 1 MB threshold (per spec B2) — effective default is
+//? `sync.flushPressure.maxBufferedBytes` (5 MiB). Packet count = bytes / avg-packet-size.
 const DEFAULT_THRESHOLD_BYTES = 1_048_576;
 const AVG_PACKET_BYTES = 1024;
 const POLL_INTERVAL_MS = 10;

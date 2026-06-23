@@ -55,23 +55,32 @@ const deepMergeInternal = <T>(
     return (override as T) ?? base;
   }
   seen.add(override);
-
-  const result: Record<string, unknown> = { ...(base as Record<string, unknown>) };
-  for (const [key, overrideValue] of Object.entries(override as Record<string, unknown>)) {
-    if (overrideValue === undefined) continue;
-    //? Prototype-pollution guard: only `__proto__` can silently mutate the
-    //? prototype chain via object spread/assign. `constructor` and `prototype`
-    //? are valid config key names (e.g. a config section named `prototype` or a
-    //? field called `constructor`) and must be allowed through; blocking them
-    //? silently dropped legitimate consumer config keys (CORE-N5).
-    if (key === '__proto__') continue;
-    const baseValue = (base as Record<string, unknown>)[key];
-    result[key] =
-      isPlainObject(baseValue) && isPlainObject(overrideValue)
-        ? deepMergeInternal(baseValue, overrideValue as DeepPartial<unknown>, depth + 1, seen)
-        : overrideValue;
+  try {
+    const result: Record<string, unknown> = { ...(base as Record<string, unknown>) };
+    for (const [key, overrideValue] of Object.entries(override as Record<string, unknown>)) {
+      if (overrideValue === undefined) continue;
+      //? Prototype-pollution guard: only `__proto__` can silently mutate the
+      //? prototype chain via object spread/assign. `constructor` and `prototype`
+      //? are valid config key names (e.g. a config section named `prototype` or a
+      //? field called `constructor`) and must be allowed through; blocking them
+      //? silently dropped legitimate consumer config keys (CORE-N5).
+      if (key === '__proto__') continue;
+      const baseValue = (base as Record<string, unknown>)[key];
+      result[key] =
+        isPlainObject(baseValue) && isPlainObject(overrideValue)
+          ? deepMergeInternal(baseValue, overrideValue as DeepPartial<unknown>, depth + 1, seen)
+          : overrideValue;
+    }
+    return result as T;
+  } finally {
+    //? Remove on the way back UP so the visited-set tracks only the ACTIVE branch
+    //? (ancestor cycle), not the whole tree. Without this, a shared (DAG) object
+    //? reference reused at two sibling config positions hit `seen.has()` on its
+    //? 2nd occurrence and was replaced wholesale — silently dropping that
+    //? sub-tree's base defaults (could relax a security default). Per-branch
+    //? tracking still catches a genuine self-reference (object on the live path).
+    seen.delete(override);
   }
-  return result as T;
 };
 
 /**

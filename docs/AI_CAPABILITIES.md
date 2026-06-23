@@ -36,6 +36,7 @@ Every typed API route in this project. Sourced from `_ProjectApiTypeMap` in `src
 
 | Route | Method | Rate limit | Has stream | Tests |
 | --- | --- | --- | --- | --- |
+| `billing/listInvoices/v1` | GET | 60 | — | — |
 | `playground/echo/v1` | POST | 60 | — | ✓ |
 | `playground/spam/v1` | POST | 3 | — | ✓ |
 | `playground/streamCounter/v1` | POST | 30 | yes | ✓ |
@@ -54,6 +55,7 @@ Every typed API route in this project. Sourced from `_ProjectApiTypeMap` in `src
 | `settings/updateUser/v1` | POST | 20 | — | ✓ |
 | `system/logout/v1` | DELETE | 30 | — | — |
 | `system/session/v1` | POST | 60 | — | — |
+| `vehicles/listVehicles/v1` | GET | 60 | — | — |
 
 ### Sync routes (`_sync/`)
 

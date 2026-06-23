@@ -20,7 +20,7 @@ export type SyncMethodMap = Partial<Record<string, Partial<Record<string, Partia
 
 export interface ApiMetaEntry {
   method: string;
-  auth: { login: boolean; additional?: Record<string, unknown>[] };
+  auth: { login: boolean; additional?: Record<string, unknown>[]; hasAdditional?: boolean };
   rateLimit?: number | false;
 }
 

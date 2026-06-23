@@ -351,7 +351,10 @@ const registerDisconnectEvent = (ctx: SocketContext): void => {
     void dispatchHook('onSocketDisconnect', { socketId: socket.id, token, reason });
 
     if (activityBroadcasterEnabled) {
-      void getPresence().then((presence) => { presence?.clearActivity(socket.id); });
+      //? Pass the token so presence can clear the token-level AFK refractory entry
+      //? once the last socket for that token leaves — without it, lastAfkFireByToken
+      //? grew unbounded (one stale entry per token that ever went AFK).
+      void getPresence().then((presence) => { presence?.clearActivity(socket.id, token ?? undefined); });
     }
 
     if (activityBroadcasterEnabled && token) {

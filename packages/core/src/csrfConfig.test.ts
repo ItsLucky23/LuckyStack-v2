@@ -18,7 +18,10 @@ describe('csrfConfig', () => {
     expect(config.headerName).toBe('x-csrf-token');
     expect(config.tokenLength).toBe(32);
     expect(config.cookieOptions.sameSite).toBe('lax');
-    expect(config.cookieOptions.secure).toBe(true);
+    //? `secure` is intentionally UNSET in the default so it resolves per-env at
+    //? serialize time (csrfRoute.ts) — emit Secure in prod, not over plain HTTP in
+    //? dev (a hardcoded `true` made the browser drop the dev cookie → 403 on POST).
+    expect(config.cookieOptions.secure).toBeUndefined();
     expect(config.cookieOptions.httpOnly).toBe(false);
     expect(config.cookieOptions.path).toBe('/');
   });

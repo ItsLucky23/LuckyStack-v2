@@ -320,9 +320,9 @@ The right mental model: `isAllowedRedirectUrl` is the "I trust this URL enough t
 
 ## Validation gotchas
 
-### `localhost` is NOT auto-allowed
+### `localhost` is auto-allowed ONLY when `http.cors.allowLocalhost` is on
 
-The validation does not give `localhost` / `127.0.0.1` a free pass. If your resolver wants to return an absolute `http://localhost:5173/...` URL during dev, add it to `allowedOrigins`:
+When `http.cors.allowLocalhost` is `true` (a dev convenience; defaults `false` in prod), an absolute redirect whose hostname is exactly `localhost` IS auto-allowed (note: only the `localhost` hostname — `127.0.0.1` is NOT covered by this branch). With `allowLocalhost` off (the prod default) `localhost` gets no free pass. To allow a specific loopback origin regardless, add it to `allowedOrigins`:
 
 ```ts
 registerProjectConfig({

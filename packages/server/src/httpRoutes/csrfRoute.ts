@@ -30,9 +30,11 @@ export const handleCsrfRoute: HttpRouteHandler = async ({ res, routePath, token 
   if (!capabilities.login) {
     //? Stateless double-submit: the SAME random value is set as the CSRF cookie
     //? and echoed in the JSON body. `enforceCsrfOnStateChangingRequest` later
-    //? compares the cookie against the `x-csrf-token` request header. A
-    //? cross-site attacker cannot read the cookie (SameSite + HttpOnly) or
-    //? the body (CORS), so they cannot forge a matching header.
+    //? compares the cookie against the `x-csrf-token` request header. The cookie
+    //? is deliberately NOT HttpOnly (the client JS must read it to echo it as the
+    //? header); cross-site protection rests on SameSite + same-origin/CORS — an
+    //? attacker on another origin can neither read the cookie nor the JSON body,
+    //? so they cannot forge a matching header.
     //?
     //? KNOWN LIMITATION: without HMAC binding to a server secret this token
     //? cannot survive a subdomain compromise (an attacker on sub.example.com
@@ -41,7 +43,15 @@ export const handleCsrfRoute: HttpRouteHandler = async ({ res, routePath, token 
     //? when that threat model applies.
     const doubleSubmit = randomBytes(csrfConfig.tokenLength).toString('hex');
     res.statusCode = 200;
-    res.setHeader('Set-Cookie', serializeCsrfCookie(csrfConfig.cookieName, doubleSubmit, csrfConfig.cookieOptions));
+    //? Resolve `Secure` per-environment (env SECURE) when the config leaves it
+    //? unset — mirrors the session cookie so the double-submit cookie isn't
+    //? dropped over plain HTTP in dev (which would 403 every POST). An explicit
+    //? config `secure` (true/false) always wins.
+    const cookieOptions: CsrfCookieOptions = {
+      ...csrfConfig.cookieOptions,
+      secure: csrfConfig.cookieOptions.secure ?? (process.env.SECURE === 'true'),
+    };
+    res.setHeader('Set-Cookie', serializeCsrfCookie(csrfConfig.cookieName, doubleSubmit, cookieOptions));
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ status: 'success', csrfToken: doubleSubmit }));
     return true;

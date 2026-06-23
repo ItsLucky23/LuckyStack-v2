@@ -41,7 +41,12 @@ export const DEFAULT_CSRF_CONFIG: CsrfConfig = {
   tokenLength: 32,
   cookieOptions: {
     sameSite: 'lax',
-    secure: true,
+    //? `secure` intentionally UNSET so it resolves per-environment at serialize
+    //? time (csrfRoute.ts) the SAME way the session cookie does — emit `Secure` in
+    //? prod (SECURE=true) but NOT over plain HTTP in dev. A hardcoded `true` made
+    //? the browser drop the login-absent double-submit cookie over http://, so
+    //? every state-changing request 403'd. Force it on explicitly via
+    //? `registerCsrfConfig({ cookieOptions: { secure: true } })` if desired.
     httpOnly: false,
     path: '/',
     maxAgeMs: 24 * 60 * 60 * 1000,

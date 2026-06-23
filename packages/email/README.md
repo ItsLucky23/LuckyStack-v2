@@ -98,7 +98,6 @@ Add an `email` block to `registerProjectConfig({...})`:
 {
   email: {
     from: 'noreply@yourdomain.com', // default sender used if a message omits `from`
-    appUrl: 'https://app.example.com', // base URL used in absolute links inside emails
     required: false, // throw if `sendEmail` is called and no sender is registered
     logging: {
       errors: true,  // log a warning when send fails

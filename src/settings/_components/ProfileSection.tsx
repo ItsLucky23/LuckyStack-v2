@@ -31,8 +31,13 @@ interface ProfileSectionProps {
   languageItems: DropdownItem[];
   selectedLanguageItem: DropdownItem | undefined;
   sessionEmail: string;
+  //? Credentials accounts must confirm their current password to change email
+  //? (the route hard-requires it). OAuth accounts skip this field.
+  requiresEmailPassword: boolean;
+  emailChangePassword: string;
   onNameChange: (name: string) => void;
   onEmailChange: (email: string) => void;
+  onEmailChangePasswordChange: (password: string) => void;
   onLanguageChange: (lang: string) => void;
   onThemeChange: (theme: Theme) => void;
   onSave: () => void;
@@ -52,8 +57,11 @@ export function ProfileSection({
   languageItems,
   selectedLanguageItem,
   sessionEmail,
+  requiresEmailPassword,
+  emailChangePassword,
   onNameChange,
   onEmailChange,
+  onEmailChangePasswordChange,
   onLanguageChange,
   onThemeChange,
   onSave,
@@ -114,12 +122,24 @@ export function ProfileSection({
           <button
             type="button"
             onClick={onRequestEmailChange}
-            disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === sessionEmail.toLowerCase()}
+            disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === sessionEmail.toLowerCase() || (requiresEmailPassword && !emailChangePassword)}
             className="h-9 px-3 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
           >
             {translate({ key: 'settings.emailChange.button' })}
           </button>
         </div>
+        {requiresEmailPassword && (
+          <input
+            id="settings-email-password"
+            type="password"
+            autoComplete="current-password"
+            className={inputClass}
+            placeholder={translate({ key: 'settings.currentPassword' })}
+            value={emailChangePassword}
+            onChange={(e) => { onEmailChangePasswordChange(e.target.value); }}
+            disabled={emailChangePending}
+          />
+        )}
         <p className="text-xs text-common">{translate({ key: 'settings.emailChange.label' })}</p>
       </div>
 

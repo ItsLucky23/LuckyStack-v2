@@ -8,6 +8,7 @@ import {
   getParams,
   getProjectConfig,
   hasCookie,
+  normalizeOrigin,
   readSession,
   tryCatch,
   tryCatchSync,
@@ -119,7 +120,15 @@ const enforceOriginPolicy = (
   //? Do NOT fall back to `req.headers.host` — host always equals the bound
   //? origin so non-browser callers (curl, native apps) would silently bypass
   //? `allowedOrigin()`. Only browsers attach Origin/Referer.
-  const origin = req.headers.origin ?? req.headers.referer ?? '';
+  //? Normalize at the source: a Referer fallback is a FULL URL (with path/query),
+  //? so reduce it to scheme+host before it's both allowlist-checked AND reflected
+  //? into `Access-Control-Allow-Origin`. A raw referer would otherwise produce an
+  //? invalid ACAO (containing a path) that the browser rejects — silently breaking
+  //? credentialed cross-origin clients that send Referer but no Origin header.
+  const origin = normalizeOrigin({
+    value: req.headers.origin ?? req.headers.referer ?? '',
+    secure: process.env.SECURE === 'true',
+  });
   const isStateChangingMethod = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
 
   //? Registered webhook / server-to-server prefixes opt out of the browser

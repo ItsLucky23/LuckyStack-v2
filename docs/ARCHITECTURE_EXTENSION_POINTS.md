@@ -102,7 +102,6 @@ declare module '@luckystack/core' {
 
 ```typescript
 projectConfig.session = {
-  perBrowser: 'single' | 'multiple',
   perUser: 'single' | 'multiple',
   maxConcurrentPerUser: number | null,
   onConflict: 'revokeOld' | 'rejectNew',

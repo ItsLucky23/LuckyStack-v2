@@ -33,7 +33,9 @@ const CONFIG_COMMENTED = `  // secretManager: {
 //? luckystack-app/src/index.ts) so `add secret-manager` produces the SAME block a
 //? `--secret-manager` scaffold does — AND so `removeSecretManager` (which matches
 //? this verbatim) can re-comment a scaffolder-wired project too, not just a
-//? CLI-added one. Keep these two in sync (a parity test guards it).
+//? CLI-added one. The "secret-manager block parity" test in assetParity.test.ts
+//? guards it (asserts the scaffolder source contains these blocks verbatim), so a
+//? scaffolder-side edit that would break `remove`/manage→off trips CI.
 const CONFIG_ACTIVE = `  secretManager: {
     url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
     token: { fromFile: '.secret-manager-token' },

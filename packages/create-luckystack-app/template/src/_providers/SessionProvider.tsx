@@ -65,8 +65,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void (async () => {
       const response = await apiRequest({ name: 'system/session', version: 'v1' });
-      if (!response.result) return;
-      setSession(response.result);
+      //? Discriminate on the success branch before reading `.result`: on the
+      //? raw union the error branch's `[key: string]: unknown` widens `.result`
+      //? to `{}` (a tsc error). A successful response with a null result is the
+      //? anonymous session — still mark loaded so Middleware doesn't hang.
+      if (response.status !== 'success') return;
+      if (response.result) setSession(response.result);
       setSessionLoaded(true);
     })();
   }, []);

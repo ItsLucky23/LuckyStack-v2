@@ -14,12 +14,12 @@ export default function ConfirmEmailPage() {
   const token = useMemo(() => params.get('token') ?? '', [params]);
   const translate = useTranslator();
   const [status, setStatus] = useState<Status>('loading');
-  const [errorKey, setErrorKey] = useState<string>('auth.invalidToken');
+  const [errorKey, setErrorKey] = useState<string>('settings.emailChange.invalidToken');
 
   useEffect(() => {
     if (!token) {
       setStatus('error');
-      setErrorKey('auth.invalidToken');
+      setErrorKey('settings.emailChange.invalidToken');
       return;
     }
     //? `cancel` is a small mutable holder so the closure stays in sync with

@@ -67,7 +67,8 @@ export interface RuntimeSyncServerEntry {
     abortSignal: AbortSignal;
     //? B2 — backpressure helper. Awaitable; resolves when the worst-case
     //? Socket.io write-buffer across the affected sockets drops below the
-    //? configured threshold (default 1 MB).
+    //? configured threshold (effective default `sync.flushPressure.maxBufferedBytes`
+    //? = 5 MiB; the 1 MB constant is only the pre-config-registration fallback).
     flushPressure: FlushPressure;
   }) => Promise<RuntimeSyncResponse>;
   inputType?: string;

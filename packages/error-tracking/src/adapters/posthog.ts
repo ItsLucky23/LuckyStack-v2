@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 import {
   ensurePeerDepInstalled,
   getCurrentErrorTrackerIdentity,
+  sanitizeErrorString,
   sanitizeErrorStrings,
   type ErrorTracker,
   type ErrorTrackerEvent,
@@ -81,7 +82,10 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
       //? before they reach PostHog. The context-level key-based scrub already
       //? covers the `context` object; this covers the free-text string fields.
       const scrubbed = sanitizeErrorStrings(fwdError);
-      const errorMessage = scrubbed?.message ?? (fwdError instanceof Error ? fwdError.message : String(fwdError));
+      //? sanitizeErrorStrings returns null for a NON-Error throw, so scrub the
+      //? stringified value too (ET-O2) — a `throw 'token=abc'` would otherwise ship
+      //? the raw secret to PostHog unscrubbed.
+      const errorMessage = scrubbed?.message ?? (fwdError instanceof Error ? fwdError.message : sanitizeErrorString(String(fwdError)));
       const errorStack = scrubbed?.stack ?? (fwdError instanceof Error ? fwdError.stack : undefined);
       const properties: Record<string, unknown> = {
         'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
@@ -112,7 +116,9 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
       options.client.capture({
         distinctId: resolveDistinctId(),
         event: 'log_message',
-        properties: { message: resolved.message, level: resolved.level, ...resolved.context },
+        //? ET-O2: scrub secrets interpolated into a free-text message string before
+        //? it reaches PostHog (captureMessage never ran through the scrubber).
+        properties: { message: sanitizeErrorString(resolved.message), level: resolved.level, ...resolved.context },
       });
     },
 

@@ -68,7 +68,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   //? Remove the avatar the user uploaded (updateUser writes `${id}.webp` under
   //? the uploads dir) so no PII file survives the account (GDPR residue).
-  await unlink(path.join(getUploadsDir(), `${user.id}.webp`)).catch(() => undefined);
+  await functions.tryCatch.tryCatch(() => unlink(path.join(getUploadsDir(), `${user.id}.webp`)));
 
   //? Observational post-hook — cascade-clean external state (Stripe / S3),
   //? audit, goodbye email.

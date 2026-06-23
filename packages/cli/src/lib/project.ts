@@ -128,7 +128,19 @@ export const validateProject = (startDir: string, extraHint?: string): ConsumerP
 export const resolveLuckyStackRange = (pkg: PackageJson, cliVersion: string): string => {
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   for (const [name, range] of Object.entries(deps)) {
-    if (name.startsWith('@luckystack/') && typeof range === 'string' && range.length > 0) {
+    //? Reuse an existing @luckystack dep's range so the new package version
+    //? matches the rest — but ONLY a plain semver/dist-tag range. A protocol
+    //? spec (`file:`/`link:`/`git`/`http`/`workspace:`/`portal:`) points at a
+    //? SPECIFIC package's location, so reusing it for a DIFFERENT package mis-
+    //? points the install (e.g. `@luckystack/login: file:…/luckystack-api.tgz`,
+    //? which npm then can't resolve as login). Skip those and fall back to the
+    //? CLI's own version range, which install overrides / the registry resolve.
+    if (
+      name.startsWith('@luckystack/')
+      && typeof range === 'string'
+      && range.length > 0
+      && !/^(file:|link:|git\+|git:|https?:|workspace:|portal:)/.test(range)
+    ) {
       return range;
     }
   }
@@ -359,6 +371,28 @@ export const runNpmInstall = (root: string, pkg: PackageJson = {}): boolean => {
   //? A `.cmd`/`.bat` shim still needs cmd.exe to interpret it, but we now hand the
   //? shell an ABSOLUTE path, so it is never resolved relative to `cwd`.
   const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
-  const result = spawnSync(resolved, ['install'], { cwd: root, stdio: 'inherit', shell: needsShell });
+  if (needsShell) {
+    //? `shell: true` would hand cmd.exe a single joined command string and cmd
+    //? re-splits it on spaces — so the standard Windows layout
+    //? `C:\Program Files\nodejs\npm.cmd` breaks ("'C:\Program' is not recognized")
+    //? and the install SILENTLY no-ops (callers only warn). Invoke the comspec
+    //? explicitly with the path QUOTED + `windowsVerbatimArguments` so cmd does not
+    //? re-parse/auto-quote it. (`/d` skips AutoRun, `/c` runs then exits.)
+    //? CRITICAL: with `/s`, cmd strips the FIRST and LAST quote of the whole
+    //? string after `/c` and runs the rest verbatim. A single quote-pair
+    //? (`"<path>" install`) is therefore WRONG — cmd strips those two quotes,
+    //? leaving `C:\Program Files\...\npm.cmd install` which splits on the space
+    //? ("'C:\Program' is not recognized"). The path must be wrapped in an OUTER
+    //? quote pair too: `""<path>" install"` — `/s` strips the outer pair, the
+    //? inner pair keeps the spaced path intact.
+    const comspec = process.env.ComSpec ?? 'cmd.exe';
+    const shellResult = spawnSync(comspec, ['/d', '/s', '/c', `""${resolved}" install"`], {
+      cwd: root,
+      stdio: 'inherit',
+      windowsVerbatimArguments: true,
+    });
+    return shellResult.status === 0;
+  }
+  const result = spawnSync(resolved, ['install'], { cwd: root, stdio: 'inherit' });
   return result.status === 0;
 };

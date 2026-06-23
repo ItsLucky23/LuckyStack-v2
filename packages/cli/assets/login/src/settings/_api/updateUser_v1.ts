@@ -86,10 +86,8 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   //? are compile-time-only on SessionLayout, so a hijacked session could POST
   //? arbitrary values; `name` would otherwise bypass the register-path
   //? `auth.nameMaxLength` policy. Mirror updatePreferences' allow-list shape.
-  if (name !== undefined) {
-    if (typeof name !== 'string' || name.length > getProjectConfig().auth.nameMaxLength) {
-      return { status: 'error', errorCode: 'login.nameCharacterLimit' };
-    }
+  if (name !== undefined && (typeof name !== 'string' || name.length > getProjectConfig().auth.nameMaxLength)) {
+    return { status: 'error', errorCode: 'login.nameCharacterLimit' };
   }
   if (theme !== undefined && (typeof theme !== 'string' || !ALLOWED_THEMES.has(theme))) {
     return { status: 'error', errorCode: 'api.invalidInputType' };

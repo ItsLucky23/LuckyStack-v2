@@ -233,8 +233,19 @@ const renderDocsCss = (accent: string, fontFamily: string): string => `<style>
 //? string — it cannot import from `@luckystack/core`, so it carries its own
 //? minimal `escapeHtml` mirror of core's escaping. Output is byte-identical
 //? to the previously inlined script.
+//? Escaping the embedded JSON path's less-than sign to its unicode escape so a
+//? jsonPath (consumer-configured routePath) containing a closing script-tag
+//? sequence cannot terminate this inline script block and inject markup.
+//? JSON.stringify alone escapes quotes but not that sequence — standard
+//? JSON-in-HTML hardening. (Comment kept OUTSIDE the template literal so it
+//? doesn't itself land in the emitted HTML.)
+//? The 6-char sequence backslash-u-003c (the backslash built from code point 0x5c
+//? to avoid an escaped-backslash string literal). Emitted into the JS so the browser
+//? parses it back to `<` at runtime while the HTML parser never sees a literal `<`
+//? (so a closing script-tag sequence inside jsonPath can't break out of the block).
+const LT_UNICODE_ESCAPE = String.fromCodePoint(0x5C) + 'u003c';
 const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<script>
-  const JSON_PATH = ${JSON.stringify(jsonPath)};
+  const JSON_PATH = ${JSON.stringify(jsonPath).replaceAll('<', LT_UNICODE_ESCAPE)};
   const ENABLE_TRY_IT_OUT = ${tryItOutData};
   const stateByKey = new Map();
 

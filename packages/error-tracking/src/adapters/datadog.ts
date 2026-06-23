@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import {
   ensurePeerDepInstalled,
   getCurrentErrorTrackerIdentity,
+  sanitizeErrorString,
   sanitizeErrorStrings,
   type ErrorTracker,
   type ErrorTrackerEvent,
@@ -139,7 +140,10 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
       //? before they reach Datadog. The context-level key-based scrub covers
       //? the `context` object; this covers the free-text string fields.
       const scrubbed = sanitizeErrorStrings(fwdError);
-      const errorMessage = scrubbed?.message ?? (fwdError instanceof Error ? fwdError.message : String(fwdError));
+      //? sanitizeErrorStrings returns null for a NON-Error throw, so scrub the
+      //? stringified value too (ET-O2) — a `throw 'token=abc'` would otherwise tag
+      //? the raw secret onto the span unscrubbed.
+      const errorMessage = scrubbed?.message ?? (fwdError instanceof Error ? fwdError.message : sanitizeErrorString(String(fwdError)));
       const errorStack = scrubbed?.stack ?? (fwdError instanceof Error ? fwdError.stack : undefined);
       const span = options.tracer.startSpan('luckystack.error', {
         tags: {
@@ -167,7 +171,9 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
       const { message: fwdMessage, level: fwdLevel, context: fwdContext } = resolved;
       const span = options.tracer.startSpan('luckystack.message', {
         tags: {
-          'message.text': fwdMessage,
+          //? ET-O2: scrub secrets interpolated into a free-text message string
+          //? (e.g. captureMessage(`reset token=${t}`)) before it reaches Datadog.
+          'message.text': sanitizeErrorString(fwdMessage),
           'message.level': fwdLevel,
           ...userTags(),
           ...fwdContext,

@@ -41,7 +41,7 @@
 
 | Package | Use case | Required peers | Optional peers |
 |---|---|---|---|
-| `@luckystack/devkit` | Dev-time file-based route discovery, hot reload, TypeScript-program-backed type-map + Zod schema emission (including the multi-directory function-injection map — spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`), supervisor process restart, and `luckystack-validate-deploy` CLI. | `typescript@^6.0.0`, `zod@^4.0.0`, `@prisma/client@^6.19.0` | `tsx` (supervisor child process) |
+| `@luckystack/devkit` | Dev-time file-based route discovery, hot reload, TypeScript-program-backed type-map + Zod schema emission (including the multi-directory function-injection map — spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`), supervisor process restart, and `luckystack-validate-deploy` CLI. | `typescript@>=5.7.3 <7.0.0`, `zod@^4.0.0`, `@prisma/client@^6.19.0` | `tsx` (supervisor child process) |
 | `@luckystack/test-runner` | Generated-type-driven sweep that walks every API endpoint and runs five progressive layers: contract smoke, auth enforcement, rate-limit, crash-resistance fuzz, and per-route custom tests. | `zod@^4.0.0`, `socket.io-client@^4.8.0` | none |
 | `@luckystack/docs-ui` | Dev-only Swagger-style browser at `/_docs` that renders `apiDocs.generated.json` with method, auth, rate limit, input/output shape, and optional inline try-it-out. | none (composes with `@luckystack/server` `customRoutes`) | none |
 | `@luckystack/mcp` | Read-only MCP server exposing the project's committed AI context (decisions, dependency graph, routes, runbooks, capabilities) to Claude Code as queryable tools (`blast_radius`, `who_imports`, `god_nodes`, `list_decisions`, `get_decision`, `find_route`, `get_runbook`, `get_capability`). Runs via `npx` (no app dependency); add a `luckystack` entry to `.mcp.json`. | none (uses `@modelcontextprotocol/sdk` + `zod`, bundled via `npx`) | none |
@@ -86,6 +86,10 @@ Quick lookup: feature -> which package(s) to suggest.
 | Full social app | `core` + `server` + `api` + `sync` + `login` + `presence` | `email`, `error-tracking` |
 | Public REST API | `core` + `server` + `api` | `error-tracking`, `docs-ui` |
 | Multi-tenant SaaS | `core` + `server` + `api` + `sync` + `login` + `email` | `error-tracking`, `presence`, `router` |
+
+---
+
+> **Reserved slot:** `packages/` also contains an `env-resolver` directory — an intentionally-reserved, **not-yet-implemented** placeholder (no `package.json`, no `src/`, excluded from `buildPackages.mjs` / `publishPackages.mjs`). It is NOT published, so it's deliberately absent from the tables above. The published count is 15 `@luckystack/*` packages (+ `create-luckystack-app`).
 
 ---
 

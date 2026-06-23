@@ -113,22 +113,25 @@ export interface RateLimitIdentity {
 export interface AuthRateLimitConfig {
   /** When false (default), no per-account lockout is applied. */
   enabled: boolean;
-  /** Max failed attempts per account within `windowMs` before lockout. Default 5. */
+  /** Max failed attempts per account FROM ONE IP within `windowMs` before that
+   * IP+account bucket locks (per-IP cap; also bounds a single IP and protects other
+   * IPs from a victim-lock DoS). Default 5. */
   maxAttempts: number;
-  /** Rolling window in ms over which `maxAttempts` is counted. Default 900000 (15 min). */
+  /**
+   * Cross-IP cap: max failed attempts against a SINGLE account from ALL IPs
+   * combined within `windowMs` before the account locks. This is the
+   * distributed-credential-stuffing defense — `maxAttempts` alone is per-IP, so N
+   * attacker IPs would otherwise each get a fresh `maxAttempts` budget. Should be
+   * HIGHER than `maxAttempts` (it counts every IP). Default 50.
+   */
+  maxAttemptsPerAccount: number;
+  /** Rolling window in ms over which both caps are counted. Default 900000 (15 min). */
   windowMs: number;
 }
 
 export interface SessionConfig {
   basedToken: boolean;
   expiryDays: number;
-  /**
-   * Whether multiple parallel logins per browser are permitted.
-   * `'single'` (default): one active login per browser; opening a second tab
-   *   and logging in elsewhere replaces the first. `'multiple'`: each tab/window
-   *   can hold its own session independently.
-   */
-  perBrowser: 'single' | 'multiple';
   /**
    * Whether a single user can hold multiple active sessions across devices.
    * `'single'` (default): logging in on a new device kicks the previous one.
@@ -266,7 +269,14 @@ export interface HttpConfig {
    * forces `Secure: true` regardless.
    */
   sessionCookieSecure?: boolean;
-  /** Maximum body size accepted on `/api/*` and `/sync/*` POSTs. */
+  /**
+   * Maximum body size (bytes) accepted on the HTTP transport for `/api/*` and
+   * `/sync/*` POSTs. DEFAULT 1 MiB (1024 * 1024). This is the HTTP-body cap; the
+   * SOCKET transport has a SEPARATE, independently-configurable frame cap
+   * (`socket.maxHttpBufferSize`, default 5 MiB) — the two are deliberately distinct
+   * knobs (HTTP body parser vs Socket.io whole-frame buffer). Set both to the same
+   * value if you want a uniform per-call payload ceiling across transports.
+   */
   requestBodyMaxBytes: number;
   /** Path of the router boot-handshake endpoint. */
   healthEndpoint: string;
@@ -585,7 +595,13 @@ export interface SyncFlushPressureConfig {
 }
 
 export interface SocketConfig {
-  /** Maximum payload size for any single Socket.io message (bytes). */
+  /**
+   * Maximum payload size (bytes) for any single Socket.io message (whole-frame
+   * buffer). DEFAULT 5 MiB (5 * 1024 * 1024). This is the SOCKET-transport cap; the
+   * HTTP transport has a SEPARATE, independently-configurable body cap
+   * (`http.requestBodyMaxBytes`, default 1 MiB). The two are intentionally distinct —
+   * set both to the same value for a uniform per-call ceiling across transports.
+   */
   maxHttpBufferSize: number;
   /** ms with no pong response before the server considers the client gone. */
   pingTimeout: number;
@@ -722,13 +738,13 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     auth: {
       enabled: false,
       maxAttempts: 5,
+      maxAttemptsPerAccount: 50,
       windowMs: 15 * 60 * 1000,
     },
   },
   session: {
     basedToken: false,
     expiryDays: 7,
-    perBrowser: 'single',
     perUser: 'single',
     maxConcurrentPerUser: null,
     onConflict: 'revokeOld',

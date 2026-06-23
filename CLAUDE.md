@@ -27,7 +27,7 @@
 
 ## Project Snapshot
 
-LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 5.7, Vite, Redis. The repo publishes as 15 `@luckystack/*` packages (+ `create-luckystack-app`) — see `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map.
+LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 6, Vite, Redis. The repo publishes as 15 `@luckystack/*` packages (+ `create-luckystack-app`); a 16th package dir, `env-resolver`, is a reserved, not-yet-published placeholder (no `package.json`, excluded from build/publish). See `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map.
 
 ---
 
@@ -166,7 +166,7 @@ Each token gets `bg-`, `text-`, `border-` utility variants. Dark mode auto-switc
 ```typescript
 // src/{page}/_api/{name}_v1.ts
 export const rateLimit: number | false = 60;
-export const method: "GET" | "POST" | "PUT" | "DELETE" = "POST";
+export const httpMethod: "GET" | "POST" | "PUT" | "DELETE" = "POST";
 export const auth: AuthProps = { login: true, additional: [] };
 
 export interface ApiParams {

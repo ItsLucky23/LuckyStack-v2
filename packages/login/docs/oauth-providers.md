@@ -86,6 +86,15 @@ const consumeOAuthState = async (provider, state) => {
 
 This is a one-time-use redemption — replaying the same `state` on a second callback fails. Combined with the short TTL it defeats both CSRF and replay attacks on the callback.
 
+> **Implementation note (current):** the two snippets above are simplified. The
+> real `createOAuthState` stores a JSON envelope `{ nonceHash, codeVerifier?,
+> returnUrl? }` (not the literal `'1'`), and the authorize route sets a short-lived
+> HttpOnly `ls-oauth-state` browser-binding cookie holding the nonce. `consumeOAuthState`
+> does the atomic `GET`+`DEL`, then timing-safe-compares the cookie's nonce hash
+> against the stored `nonceHash` (browser binding, F1); for PKCE providers (`usePkce`)
+> it also returns the stored `codeVerifier` for the S256 token exchange (F11). So the
+> flow defends against CSRF, replay, AND cross-browser state theft.
+
 ## `OAuthProvider` discriminated union
 
 ```ts
@@ -236,7 +245,7 @@ Defaults:
 | `nameKey`             | `'login'` (GitHub username — `name` can be null for users who never set one)                   |
 | `emailKey`            | `'email'`                                                                                      |
 | `avatarKey`           | `'avatar_url'`                                                                                 |
-| `getEmail`            | Falls back to `GET /user/emails` and picks the entry with `primary: true`, then the first one. |
+| `getEmail`            | Falls back to `GET /user/emails`, filters to `verified === true`, then prefers the `primary` verified address (else the first verified one). Unverified addresses are never used. |
 
 GitHub returns `email: null` from `/user` when the user has hidden their email from their profile. `getEmail` fetches `/user/emails` (which requires the `user:email` scope) and selects an address.
 

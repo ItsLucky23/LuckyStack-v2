@@ -7,11 +7,12 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //?
 //? Input shape: Record<string, never> (no body).
 //?
-//? Behavioral note: this route's `main` is a tiny `{ status: 'success', result: true }`
-//? — the actual session-teardown work happens in the server's transport
-//? layer (cookie clearing + redirect via the HTTP route handler in
-//? `@luckystack/server`). For the JSON-only fetch this test layer uses, we
-//? therefore assert the API-shape contract: success + idempotent across calls.
+//? Behavioral note: this route's `main` is an INTENTIONAL no-op
+//? `{ status: 'success', result: true }`. The real session teardown runs via the
+//? framework's built-in `system/logout` shortcut + the `/auth/logout` HTTP route,
+//? NOT this route (see src/_api/logout_v1.ts). This route exists only so a stray
+//? `api/logout/v1` call returns a clean success instead of 404. These cases assert
+//? that no-op API-shape contract: success + idempotent across calls.
 
 export const customTests: CustomTestCase[] = [
   {

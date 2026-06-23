@@ -52,6 +52,16 @@ export const requiresLogin = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescript
   return meta?.auth?.login ?? false;
 };
 
+/** Whether the endpoint requires ANY authorization: `auth.login: true` OR a
+ *  declared non-empty `auth.additional[]` predicate list (role/tenant/ownership
+ *  guards). The auth sweep must probe BOTH — an additional[]-only route (login:
+ *  false) is still authz-protected and an unauth call must be rejected. */
+export const hasAuthRequirement = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): boolean => {
+  const meta = apiMetaMap[endpoint.page]?.[endpoint.name]?.[endpoint.version];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime-defensive read of a generated artifact
+  return (meta?.auth?.login ?? false) || (meta?.auth?.hasAdditional ?? false);
+};
+
 /** Whether the meta map carries an entry for this endpoint at all. */
 export const hasMetaEntry = (apiMetaMap: ApiMetaMap, endpoint: EndpointDescriptor): boolean =>
   apiMetaMap[endpoint.page]?.[endpoint.name]?.[endpoint.version] !== undefined;

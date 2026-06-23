@@ -2,9 +2,9 @@
   "version": 2,
   "note": "Dependency graph, ids relative to src/. File level: blastRadius[file] = files transitively importing it. Symbol level: callEdges are function->function calls; symbolBlastRadius['file::fn'] = symbols transitively calling it. <module> = file top-level scope. functions.* injection-proxy / dynamic-import / interface-typed calls are intentionally not resolved. See docs/decisions/0002,0004,0006.",
   "counts": {
-    "nodes": 92,
+    "nodes": 94,
     "edges": 65,
-    "symbols": 122,
+    "symbols": 126,
     "callEdges": 30
   },
   "nodes": [
@@ -177,6 +177,11 @@
       "id": "admin/page.tsx",
       "kind": "page",
       "route": null
+    },
+    {
+      "id": "billing/_api/listInvoices_v1.ts",
+      "kind": "api",
+      "route": "api/billing/listInvoices/v1"
     },
     {
       "id": "docs/page.tsx",
@@ -467,6 +472,11 @@
       "id": "settings/page.tsx",
       "kind": "page",
       "route": null
+    },
+    {
+      "id": "vehicles/_api/listVehicles_v1.ts",
+      "kind": "api",
+      "route": "api/vehicles/listVehicles/v1"
     }
   ],
   "edges": [
@@ -1096,6 +1106,18 @@
       "kind": "function"
     },
     {
+      "id": "billing/_api/listInvoices_v1.ts::<module>",
+      "file": "billing/_api/listInvoices_v1.ts",
+      "name": "<module>",
+      "kind": "module"
+    },
+    {
+      "id": "billing/_api/listInvoices_v1.ts::main",
+      "file": "billing/_api/listInvoices_v1.ts",
+      "name": "main",
+      "kind": "function"
+    },
+    {
       "id": "playground/_api/echo_v1.tests.ts::<module>",
       "file": "playground/_api/echo_v1.tests.ts",
       "name": "<module>",
@@ -1576,9 +1598,9 @@
       "kind": "module"
     },
     {
-      "id": "settings/_api/listSessions_v1.tests.ts::idOf",
+      "id": "settings/_api/listSessions_v1.tests.ts::handleOf",
       "file": "settings/_api/listSessions_v1.tests.ts",
-      "name": "idOf",
+      "name": "handleOf",
       "kind": "function"
     },
     {
@@ -1648,9 +1670,9 @@
       "kind": "fn"
     },
     {
-      "id": "settings/_api/revokeSession_v1.tests.ts::idOf",
+      "id": "settings/_api/revokeSession_v1.tests.ts::handleOf",
       "file": "settings/_api/revokeSession_v1.tests.ts",
-      "name": "idOf",
+      "name": "handleOf",
       "kind": "function"
     },
     {
@@ -1778,6 +1800,18 @@
       "file": "settings/_api/updateUser_v1.ts",
       "name": "main",
       "kind": "function"
+    },
+    {
+      "id": "vehicles/_api/listVehicles_v1.ts::<module>",
+      "file": "vehicles/_api/listVehicles_v1.ts",
+      "name": "<module>",
+      "kind": "module"
+    },
+    {
+      "id": "vehicles/_api/listVehicles_v1.ts::main",
+      "file": "vehicles/_api/listVehicles_v1.ts",
+      "name": "main",
+      "kind": "function"
     }
   ],
   "callEdges": [
@@ -1859,7 +1893,7 @@
     },
     {
       "from": "settings/_api/listSessions_v1.tests.ts::run",
-      "to": "settings/_api/listSessions_v1.tests.ts::idOf"
+      "to": "settings/_api/listSessions_v1.tests.ts::handleOf"
     },
     {
       "from": "settings/_api/listSessions_v1.ts::main",
@@ -1875,7 +1909,7 @@
     },
     {
       "from": "settings/_api/revokeSession_v1.tests.ts::run",
-      "to": "settings/_api/revokeSession_v1.tests.ts::idOf"
+      "to": "settings/_api/revokeSession_v1.tests.ts::handleOf"
     },
     {
       "from": "settings/_api/revokeSession_v1.ts::main",
@@ -1962,7 +1996,7 @@
       "settings/_api/deleteAccount_v1.tests.ts::run",
       "settings/_api/deleteAccount_v1.tests.ts::seedCredentialsUser"
     ],
-    "settings/_api/listSessions_v1.tests.ts::idOf": [
+    "settings/_api/listSessions_v1.tests.ts::handleOf": [
       "settings/_api/listSessions_v1.tests.ts::run"
     ],
     "settings/_api/listSessions_v1.ts::sessionHandle": [
@@ -1975,7 +2009,7 @@
     "settings/_api/revokeSession_v1.tests.ts::getSession": [
       "settings/_api/revokeSession_v1.tests.ts::run"
     ],
-    "settings/_api/revokeSession_v1.tests.ts::idOf": [
+    "settings/_api/revokeSession_v1.tests.ts::handleOf": [
       "settings/_api/revokeSession_v1.tests.ts::run"
     ],
     "settings/_api/signOutEverywhere_v1.tests.ts::getSession": [
