@@ -21,3 +21,18 @@ Branched off `main` @ 7f24021 for an autonomous overnight audit (`/goal`): full 
 - 125 report-only findings (0C/2H/25M/98L) in `to_report.json` — 2 highs flagged for user review (api rate-limit keying = likely FP per CLAUDE.md; template session endpoint returning token+CSRF = design call).
 - **Round-2 convergence audit blocked by Claude session limit (resets 04:00 Europe/Amsterdam); scheduled to resume.**
 - Subagents auto-editing files (despite a verify-only prompt) is a workflow-design lesson: give re-verify agents read-only tooling next time.
+
+## 2026-06-24 09:30 — E2E (matrix + verdaccio) + Round-2 convergence pass
+
+**What I did:**
+- Repacked 16 fresh 0.2.7 tarballs (with the round-1 fixes) and ran the wizard matrix: **14/14 PASS** (scaffold→install→generateArtifacts→build→tsc→lint→ships-only-needed) across every db × auth × email × monitoring × optional-package combo.
+- Verdaccio: republished the fixed code, ran the real **semver** consumer flow — both scaffolds (credentials + auth=none) green through install/prisma/gen/tsc/lint/build; `luckystack add login` auto-installs + postadd green; repo root untouched (hard guards held).
+- Round-2 deep re-audit (read-only finders + adversarial verify) over the 8 security-critical packages (core/api/server/login/sync/router/secret-manager/email): 29 raw → 23 real-new → 5 to_fix + 18 to_report (incl. 2 HIGH). Round 1 was NOT exhaustive — the deeper pass found real items.
+- Applied + committed (`4aff69c`, gate green 1387 tests): **login OAuth `allowRegistration` gate (HIGH security — invite-only was OAuth-bypassable)**, secret-manager `timeoutMs` finite-guard, login/redirectResolver docstring, api/README login-dep parity.
+
+**Files touched:** packages/login/src/login.ts, packages/secret-manager/src/index.ts, packages/login/src/redirectResolver.ts, packages/api/README.md.
+
+**Notes / open:**
+- Report-only (user review): HIGH sync `cb`-routing spoofing (needs a deliberate, tested fix — legit client cb shape differs from resolvedName, high blast radius); + ~16 medium/low (server SSE 200-before-auth, router fallback boot-UUID Redis, email PII-in-error, email template-send drops attachments, etc.). Full list: `.runtime-test/audit-2026-06-24/findings/round2a_to_report.json` + `HANDOFF_REPORT.md`.
+- Deferred-to-report (real, risky/narrow): sync listener-leak when `requestTimeoutMs:false`; router health-store leak on strict boot-handshake throw.
+- **Convergence NOT reached:** round 2 found real issues (so not dry). Remaining tail: round-2b deep-pass over the OTHER 8 packages (kept hitting the transient agent rate-limit), a round-3 dry-check, and the live-server browser-login smoke. Infra (Redis/Mongo/verdaccio) is up for whoever resumes.
