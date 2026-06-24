@@ -2143,6 +2143,10 @@ Choices:
   email:       ${choices.emailProvider}
   monitoring:  ${choices.monitoringProvider}
   presence:    ${choices.presence ? 'installed' : 'skipped'}
+  error-track: ${choices.errorTracking ? 'installed' : 'skipped'}
+  docs-ui:     ${choices.docsUi ? 'installed' : 'skipped'}
+  secret-mgr:  ${choices.secretManager ? 'installed' : 'skipped'}
+  router:      ${choices.router ? 'installed' : 'skipped'}
   ai-docs:     ${choices.aiInstructions ? 'included (+ pre-commit AI-index hook)' : 'skipped'}
   ai-browser:  ${choices.aiBrowserTooling}
 

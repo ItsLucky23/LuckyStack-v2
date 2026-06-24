@@ -8,16 +8,17 @@ interface ConsoleSenderOptions {
 //? Dev-mode adapter — never sends a real email. Logs the rendered subject,
 //? recipient list, and the plain-text body (or first 400 chars of HTML if
 //? no text fallback). Returns a deterministic fake id.
-export const ConsoleSender = (_options: ConsoleSenderOptions = {}): EmailSender => ({
+export const ConsoleSender = (options: ConsoleSenderOptions = {}): EmailSender => ({
   name: 'console',
   send: (message) => {
+    const { from: defaultFrom } = options;
     const recipients = Array.isArray(message.to) ? message.to.join(', ') : message.to;
     const body = message.text ?? message.html.replaceAll(/<[^>]+>/g, '').trim().slice(0, 400);
 
     console.log(
       [
         '╭─ [email:console] ──────────────────────────',
-        `│ from:    ${message.from ?? '(default)'}`,
+        `│ from:    ${message.from ?? defaultFrom ?? '(default)'}`,
         `│ to:      ${recipients}`,
         `│ subject: ${message.subject}`,
         '├──────────────────────────────────────',

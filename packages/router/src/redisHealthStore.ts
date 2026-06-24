@@ -136,9 +136,21 @@ export const createRedisHealthStore = async (
     //? (which would disagree with Redis and potentially never self-correct).
     if (results === null) {
       getLogger().error('[router] health-store MULTI/EXEC aborted (EXECABORT) — health state may be stale', { service, healthy });
-    } else {
-      cache.set(service, healthy);
+      return;
     }
+    //? A non-null result is an array of [error, value] tuples — one per queued
+    //? command. exec() resolves (not rejects) even when an individual command
+    //? errors (e.g. SET under an OOM/maxmemory condition), surfacing the failure
+    //? in that tuple's error slot. The durable write may not have landed, so
+    //? treat a per-command error exactly like EXECABORT: log it and do NOT
+    //? update the local cache, which would otherwise disagree with Redis and
+    //? never self-correct.
+    const commandError = results.find(([err]) => err)?.[0];
+    if (commandError) {
+      getLogger().error('[router] health-store MULTI/EXEC command failed — health state may be stale', { service, healthy, error: commandError });
+      return;
+    }
+    cache.set(service, healthy);
   };
 
   const get = (service: string): boolean => cache.get(service) ?? true;

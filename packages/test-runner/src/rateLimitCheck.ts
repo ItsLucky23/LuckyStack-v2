@@ -4,19 +4,24 @@ import { sendProbe } from './probeRequest';
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const EXPECTED_ERROR_CODE = 'api.rateLimitExceeded';
 
-//? Error codes the server emits BEFORE the rate-limit pipeline runs (CSRF gate,
-//? auth guard, schema validation). When a drain response carries one of these, the
-//? bucket was never incremented — the final probe will fail for the wrong reason
-//? and should be classified as `skipped` rather than a real failure.
+//? Error codes the server emits BEFORE the rate-limit pipeline runs (auth guard
+//? + server-level CSRF middleware). When a drain response carries one of these,
+//? the bucket was never incremented — the final probe will fail for the wrong
+//? reason and should be classified as `skipped` rather than a real failure.
+//? These MUST match the framework's actual pre-limiter codes (pipeline order:
+//? auth → rateLimit, CSRF middleware before the limiter):
+//?   - `auth.required`   — login:true route called without a session
+//?     (handleHttpApiRequest.ts).
+//?   - `auth.forbidden`  — additional[]-predicate failed / login:false guard
+//?     (handleHttpApiRequest.ts).
+//?   - `auth.csrfMismatch` — cookie-mode state-changing route, CSRF gate
+//?     (server/httpRoutes/csrfMiddleware.ts).
+//? Validation (`api.invalidInputType`) runs AFTER the limiter, so it is NOT a
+//? pre-limiter code and is deliberately excluded.
 const PRE_LIMITER_ERROR_CODES = new Set([
   'auth.required',
-  'auth.csrfTokenMissing',
-  'auth.csrfTokenInvalid',
-  'auth.unauthorized',
-  'api.csrfTokenMissing',
-  'api.csrfTokenInvalid',
-  'api.unauthorized',
-  'api.validationError',
+  'auth.forbidden',
+  'auth.csrfMismatch',
 ]);
 
 export interface RateLimitCheckInput {

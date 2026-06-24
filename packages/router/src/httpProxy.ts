@@ -316,6 +316,11 @@ const handleRequest = async (
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify({ status: 'error', errorCode: 'routing.requestBodyTooLarge' }));
       }
+      //? Tear down the inbound request too: `forwardRequest` (the pipe target)
+      //? is now destroyed, so without this the client could keep streaming an
+      //? unbounded body and pin the connection until the server `requestTimeout`.
+      //? The `'error'`/`'aborted'` handlers registered above absorb the abort.
+      req.destroy();
     }
   });
 

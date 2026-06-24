@@ -133,13 +133,16 @@ const sanitizeMessageHeaders = (message: EmailMessage): EmailMessage => ({
     : Object.fromEntries(
         Object.entries(message.headers).map(([k, v]) => [stripCrlf(k), stripCrlf(v)]),
       ),
-  //? EMAIL-O7 extension: strip CR/LF from each attachment filename — it renders
-  //? into a Content-Disposition/Content-Type MIME header, so a `\r\n`-bearing
-  //? filename (e.g. a user-derived upload name) could inject extra MIME headers
-  //? at the nodemailer boundary the rest of this function defends against.
+  //? EMAIL-O7 extension: strip CR/LF from each attachment's header-bound fields —
+  //? `filename`/`contentType` render into a Content-Disposition/Content-Type MIME
+  //? header and `cid` into a Content-ID header, so a `\r\n`-bearing value (e.g. a
+  //? user-derived upload name or mime) could inject extra MIME headers at the
+  //? nodemailer boundary the rest of this function defends against.
   attachments: message.attachments?.map((a) => ({
     ...a,
     filename: typeof a.filename === 'string' ? stripCrlf(a.filename) : a.filename,
+    cid: typeof a.cid === 'string' ? stripCrlf(a.cid) : a.cid,
+    contentType: typeof a.contentType === 'string' ? stripCrlf(a.contentType) : a.contentType,
   })),
 });
 
@@ -183,7 +186,7 @@ const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMes
       return { failure: { ok: false, reason: 'template-render-failed' } };
     }
     const [subjectError, resolvedSubject] = tryCatchSync(() => template.subject(data));
-    if (subjectError || resolvedSubject === null) {
+    if (subjectError || typeof resolvedSubject !== 'string') {
       if (config.logging.errors) {
         getLogger().warn(`[email] template '${input.template}' subject threw`, { error: subjectError?.message ?? 'unknown' });
       }

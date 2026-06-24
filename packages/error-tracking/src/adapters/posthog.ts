@@ -56,7 +56,12 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
   //? from the adapter's perspective, not core's node_modules.
   ensurePeerDepInstalled('posthog-node', 'Run `npm install posthog-node`.', localRequire);
 
-  const anonymousDistinctId = options.anonymousDistinctId ?? 'anonymous';
+  //? Treat empty/whitespace as absent (an unset-env-var read can yield `''`,
+  //? which `??` would pass straight through). PostHog requires a NON-empty
+  //? distinctId, so a blank value would silently drop/mis-bucket every
+  //? anonymous capture — fall back to 'anonymous' instead.
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- `||` is intentional: an empty/whitespace value must fall back to 'anonymous' (`??` would let `''` through, and PostHog rejects an empty distinctId).
+  const anonymousDistinctId = options.anonymousDistinctId?.trim() || 'anonymous';
   //? Closure fallback identity, set by `setUser`. Used ONLY for non-request /
   //? background captures that run outside any per-request ALS scope. Per-request
   //? captures resolve the distinctId from the ALS at capture time (ET-02).

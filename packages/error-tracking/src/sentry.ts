@@ -13,7 +13,7 @@ import {
   appendErrorTracker,
   getLogger,
   getProjectName,
-  getRedactedLogKeys,
+  isRedactedLogKey,
   initSharedSentry,
   loadPeer,
   REDACTED_PLACEHOLDER,
@@ -104,20 +104,30 @@ const resolveSentryInitConfig = (): ResolvedSentryInitConfig | null => {
 };
 
 //? ET-O5: redact sensitive headers, cookies, request.data, query_string,
-//? extra, and breadcrumb data in Sentry events using the same denylist
-//? as `sanitizeForLog`. Previously only `request.cookies` was removed.
-//? `sanitizeForLog` deep-scrubs objects by key; raw header maps and extra
-//? dicts are passed through it so all registered redacted keys are masked.
+//? and extra in Sentry events using the same denylist as `sanitizeForLog`.
+//? Previously only `request.cookies` was removed. `sanitizeForLog` deep-scrubs
+//? objects by key; raw header maps and extra dicts are passed through it so all
+//? registered redacted keys are masked.
+//? NOTE: this hook does NOT scrub `event.breadcrumbs`. Framework-emitted
+//? breadcrumbs (API/sync context logging) are redacted at SOURCE via
+//? `isRedactedLogKey` / `sanitizeForLog` before they ever become a breadcrumb
+//? (see docs/auto-instrumentation.md). Sentry's own auto-instrumented HTTP /
+//? fetch / console breadcrumbs are out of scope here — register sensitive keys
+//? with `registerRedactedLogKeys(...)` and/or a project `beforeBreadcrumb` if
+//? those auto-captured payloads need masking.
 type SentryBeforeSend = NonNullable<Parameters<SentryModule['init']>[0]>['beforeSend'];
 
 const redactSentryHeaders = (
   headers: Record<string, string | string[] | undefined> | undefined,
 ): Record<string, string | string[] | undefined> | undefined => {
   if (!headers) return headers;
-  const denylist = new Set(getRedactedLogKeys().map((k) => k.toLowerCase()));
   const out: Record<string, string | string[] | undefined> = {};
   for (const [key, value] of Object.entries(headers)) {
-    out[key] = denylist.has(key.toLowerCase()) ? REDACTED_PLACEHOLDER : value;
+    //? ET-O5: use core's suffix-aware `isRedactedLogKey` (the same policy
+    //? `sanitizeForLog` applies to request.data / query_string) rather than an
+    //? exact-match denylist — so a compound sensitive header (`x-api-token`,
+    //? `x-session-secret`) is masked, not just the exact registered names.
+    out[key] = isRedactedLogKey(key) ? REDACTED_PLACEHOLDER : value;
   }
   return out;
 };

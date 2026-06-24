@@ -214,7 +214,7 @@ export const validateDeploy = ({
   //? environment will never receive traffic. Warning, not error — that's a
   //? valid intermediate state during a rollout.
   for (const service of serviceNames) {
-    const boundIn = Object.entries(environments).filter(([, env]) => service in env.bindings);
+    const boundIn = Object.entries(environments).filter(([, envDef]) => service in envDef.bindings);
     if (boundIn.length === 0) {
       findings.push({
         severity: 'warning',

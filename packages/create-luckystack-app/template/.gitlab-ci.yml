@@ -25,7 +25,11 @@ prepare_artifacts:
         - node_modules/
         - .npm/
   script:
-    - npm ci --prefer-offline
+    # Use npm install rather than npm ci because the scaffold ships no
+    # package-lock.json — the lockfile is created on the user's first
+    # `npm install` and should be committed before CI runs. Once the
+    # lockfile is committed, switch this line to: npm ci --prefer-offline
+    - npm install
     - npm run generateArtifacts
     - test -s src/_sockets/apiTypes.generated.ts
     - test -s src/docs/apiDocs.generated.json
@@ -57,7 +61,9 @@ lint:
         - node_modules/
         - .npm/
   script:
-    - npm ci --prefer-offline
+    # See prepare_artifacts: npm install because the scaffold ships no
+    # lockfile. Switch to `npm ci --prefer-offline` once it is committed.
+    - npm install
     - npm run lint
   rules:
     - if: '$PIPELINE_RUN_LINT == "true"'
@@ -76,7 +82,9 @@ build:
         - node_modules/
         - .npm/
   script:
-    - npm ci --prefer-offline
+    # See prepare_artifacts: npm install because the scaffold ships no
+    # lockfile. Switch to `npm ci --prefer-offline` once it is committed.
+    - npm install
     - npm run build
   artifacts:
     name: "dist-$CI_COMMIT_SHORT_SHA"
@@ -88,7 +96,7 @@ build:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. TEST STAGE
-#    Runs the test-runner sweep + E2E (when @vercel-labs/agent-browser installed).
+#    Runs the test-runner sweep + E2E (when @playwright/test installed).
 # ─────────────────────────────────────────────────────────────────────────────
 test:sweep:
   stage: test
@@ -104,7 +112,9 @@ test:sweep:
         - node_modules/
         - .npm/
   script:
-    - npm ci --prefer-offline
+    # See prepare_artifacts: npm install because the scaffold ships no
+    # lockfile. Switch to `npm ci --prefer-offline` once it is committed.
+    - npm install
     - npm run test
 
 test:e2e:
@@ -121,8 +131,10 @@ test:e2e:
         - node_modules/
         - .npm/
   script:
-    - npm ci --prefer-offline
-    - if [ -f "node_modules/@vercel-labs/agent-browser/package.json" ]; then npm run test:e2e; else echo "Skipping e2e — @vercel-labs/agent-browser not installed."; fi
+    # See prepare_artifacts: npm install because the scaffold ships no
+    # lockfile. Switch to `npm ci --prefer-offline` once it is committed.
+    - npm install
+    - if [ -f "node_modules/@playwright/test/package.json" ]; then npm run test:e2e; else echo "Skipping e2e — @playwright/test not installed."; fi
   allow_failure: true
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -92,7 +92,7 @@ server.registerTool(
     const graph = await loadGraph();
     if (!graph) return text(missing('docs/ai-graph.json', 'npm run ai:graph'));
     const resolved = resolveNodeId(graph, file);
-    if (resolved === null) return text(`No graph node matches "${file}".`);
+    if (resolved === null) return text(`No graph node matches "${file}". Use a src-relative path (e.g. "_functions/foo.ts"). Run \`npm run ai:graph\` if the file is new.`);
     if (Array.isArray(resolved)) return text(`"${file}" matches multiple nodes — be more specific:\n${bulletList(resolved)}`);
     const id = resolved;
     const importers = graph.edges.filter((e) => e.to === id).map((e) => e.from).toSorted();
@@ -185,7 +185,7 @@ server.registerTool(
       return text(missing('docs/decisions/', 'the AI records decisions automatically; see docs/DECISION_MEMORY_PROTOCOL.md'));
     }
     const padded = /^\d+$/.test(id) ? id.padStart(4, '0') : null;
-    const match = entries.find((f) => {
+    const matches = entries.filter((f) => {
       if (!f.endsWith('.md') || f === '0000-template.md') return false;
       //? Numeric ids match ONLY the zero-padded prefix (so "2" -> 0002-*, never
       //? every ADR whose number/slug merely contains "2"). Slug ids fall back to
@@ -193,7 +193,13 @@ server.registerTool(
       if (padded !== null) return f.startsWith(`${padded}-`);
       return f.includes(id);
     });
-    if (!match) return text(`No decision matches "${id}". Use \`list_decisions\` to see them.`);
+    if (matches.length === 0) return text(`No decision matches "${id}". Use \`list_decisions\` to see them.`);
+    //? A slug substring can hit more than one ADR (e.g. "callgraph" -> 0002 + 0004).
+    //? Mirror who_calls / blast_radius: disambiguate rather than silently take the
+    //? first. The numeric branch can only match one zero-padded prefix, so this is
+    //? reached solely by ambiguous slugs.
+    if (matches.length > 1) return text(`"${id}" is ambiguous — pick one (by number or a more specific slug):\n${bulletList(matches.toSorted())}`);
+    const match = matches[0];
     const body = await readDocFile(`docs/decisions/${match}`);
     return text(body ?? `Could not read docs/decisions/${match}.`);
   },

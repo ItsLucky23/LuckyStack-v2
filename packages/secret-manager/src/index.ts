@@ -427,6 +427,12 @@ const fetchResolveOnce = async (
   const signal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
 
   //? Consumer `headers` are merged first so they can never override Authorization.
+  //? `redirect: 'error'` fails closed on any 30x: `validateUrl` pins only the
+  //? configured host, so following a redirect would carry the bearer token +
+  //? request body to — and consume the resolved secrets from — an origin that was
+  //? never validated (scheme/loopback/https checks don't re-apply to the hop). A
+  //? legitimate `/resolve` endpoint never redirects; a 30x is a misconfig or an
+  //? attack, and rejecting it keeps the whole exchange pinned to the checked origin.
   const response = await fetchFn(endpoint, {
     method: 'POST',
     headers: {
@@ -436,6 +442,7 @@ const fetchResolveOnce = async (
       'Accept': 'application/json',
     },
     body: JSON.stringify({ keys: pointers }),
+    redirect: 'error',
     signal,
   });
 

@@ -13,10 +13,12 @@ import { AUTH_MODES, OAUTH_PROVIDERS, EMAIL_PROVIDERS, MONITORING_PROVIDERS } fr
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
-//? Walk the WHOLE login bundle (src/ UI + functions/session.ts + server/hooks)
-//? against the template ROOT so every shipped auth file is parity-checked, not
-//? just src/.
-const ASSET_ROOT = path.resolve(here, '..', 'assets', 'login');
+//? Walk EVERY shipped asset bundle (the `add <feature>` payloads: login auth UI +
+//? functions/session.ts + server/hooks, docs-ui API-explorer page, error-tracking
+//? sentry shim) against the template ROOT so every shipped file is parity-checked,
+//? not just login's. Drift here is what shipped a non-compiling LoginForm / docs
+//? page via `add` (audit HB1/QUA-003 + the docs-ui blocker).
+const ASSET_BUNDLES = ['login', 'docs-ui', 'error-tracking'] as const;
 const TEMPLATE_ROOT = path.join(repoRoot, 'packages', 'create-luckystack-app', 'template');
 const SERVER_CAPABILITIES = path.join(repoRoot, 'packages', 'server', 'src', 'capabilities.ts');
 const SCAFFOLDER_INDEX = path.join(repoRoot, 'packages', 'create-luckystack-app', 'src', 'index.ts');
@@ -50,8 +52,9 @@ const relFilesUnder = (dir: string): string[] => {
   return out.toSorted();
 };
 
-describe('asset ↔ template parity (audit QUA-021)', () => {
-  const assetFiles = relFilesUnder(ASSET_ROOT);
+describe.each(ASSET_BUNDLES)('asset ↔ template parity: %s (audit QUA-021)', (bundle) => {
+  const assetRoot = path.resolve(here, '..', 'assets', bundle);
+  const assetFiles = relFilesUnder(assetRoot);
 
   it('every asset file exists in the template tree', () => {
     const missing = assetFiles.filter((rel) => !existsSync(path.join(TEMPLATE_ROOT, rel)));
@@ -62,7 +65,7 @@ describe('asset ↔ template parity (audit QUA-021)', () => {
   it.each(strictFiles)('asset/%s matches the template copy (CRLF-normalized)', (rel) => {
     const templatePath = path.join(TEMPLATE_ROOT, rel);
     expect(existsSync(templatePath)).toBe(true);
-    const asset = normalize(readFileSync(path.join(ASSET_ROOT, rel), 'utf8'));
+    const asset = normalize(readFileSync(path.join(assetRoot, rel), 'utf8'));
     const template = normalize(readFileSync(templatePath, 'utf8'));
     expect(asset).toBe(template);
   });
@@ -167,8 +170,8 @@ describe('secret-manager block parity (CLI ↔ scaffolder)', () => {
 });
 
 //? Tiny sanity guard: the bundle the parity suite walks must actually exist.
-describe('asset bundle present', () => {
-  it('assets/login/src is a directory', () => {
-    expect(statSync(ASSET_ROOT).isDirectory()).toBe(true);
+describe.each(ASSET_BUNDLES)('asset bundle present: %s', (bundle) => {
+  it('the assets bundle dir exists', () => {
+    expect(statSync(path.resolve(here, '..', 'assets', bundle)).isDirectory()).toBe(true);
   });
 });

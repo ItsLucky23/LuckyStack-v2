@@ -217,6 +217,7 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
     }
   }
 
+  res.setHeader('content-type', 'application/json; charset=utf-8');
   res.end(JSON.stringify({
     status: result.status,
     reason: result.reason,

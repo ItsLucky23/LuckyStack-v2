@@ -75,7 +75,7 @@ export const renderEmailLayout = ({
       <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="left" style="margin:24px 0;">
         <tr>
           <td style="border-radius:6px;background:${safeAccentValue};">
-            <a href="${safeCtaHref}" target="_blank" style="display:inline-block;padding:10px 18px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">${safeCtaLabel}</a>
+            <a href="${safeCtaHref}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:10px 18px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">${safeCtaLabel}</a>
           </td>
         </tr>
       </table>`

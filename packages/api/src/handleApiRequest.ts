@@ -436,11 +436,18 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
     routeName: typeof msg.name === 'string' ? msg.name : undefined,
   });
   if (preMsgResult.stopped) {
-    socket.emit(buildApiResponseEventName(responseIndex), {
-      status: 'error',
-      errorCode: preMsgResult.signal.errorCode,
-      httpStatus: preMsgResult.signal.httpStatus ?? 403,
-    });
+    //? Guard the emit on a numeric responseIndex (mirrors the sync handler +
+    //? validateApiMessage's own no-index branch below): this stop path runs
+    //? BEFORE validateApiMessage, so a malformed frame lacking responseIndex
+    //? would otherwise emit to the dead 'apiResponse-undefined' channel and
+    //? leave the client hanging until its own ack timeout. Drop it silently.
+    if (typeof responseIndex === 'number') {
+      socket.emit(buildApiResponseEventName(responseIndex), {
+        status: 'error',
+        errorCode: preMsgResult.signal.errorCode,
+        httpStatus: preMsgResult.signal.httpStatus ?? 403,
+      });
+    }
     return;
   }
 
