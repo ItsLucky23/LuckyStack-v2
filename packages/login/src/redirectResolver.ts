@@ -7,9 +7,9 @@
 //?   handler must RETURN a string, so it lives in its own registry.
 //?
 //? Validation: the resolved URL is checked against
-//? `ProjectConfig.http.cors.allowedOrigins` (plus localhost + the bound
-//? SERVER_IP) before being used. An invalid URL falls back to
-//? `ProjectConfig.loginRedirectUrl`.
+//? `ProjectConfig.http.cors.allowedOrigins` (plus the localhost convenience when
+//? `http.cors.allowLocalhost` is on) before being used. An invalid URL falls back
+//? to `ProjectConfig.loginRedirectUrl`.
 
 export interface PostLoginRedirectInput {
   userId: string;

@@ -990,6 +990,18 @@ const findOrCreateOAuthUser = async (
     };
   }
 
+  //? Gate OAuth first-login account CREATION on the same `auth.allowRegistration`
+  //? flag the credentials register branch enforces. Without this, invite-only /
+  //? admin-provisioned deployments (allowRegistration:false) are silently
+  //? bypassable: anyone with an enabled provider's account completes the OAuth
+  //? flow and gets a fresh account. Existing users hit the find-branch above and
+  //? are unaffected; only NEW-account creation is refused. A consumer preRegister
+  //? hook can still veto, but the documented gate must hold by construction.
+  if (!getProjectConfig().auth.allowRegistration) {
+    getLogger().warn('oauth: registration disabled — refusing first-login account creation');
+    return null;
+  }
+
   const preRegisterResult = await dispatchHook('preRegister', { email, provider: provider.name, name });
   if (preRegisterResult.stopped) {
     getLogger().warn(`oauth register aborted by preRegister hook`, { errorCode: preRegisterResult.signal.errorCode });

@@ -423,7 +423,12 @@ const fetchResolveOnce = async (
   //? Abort a black-hole server (accepts the TCP connection, never responds) so a
   //? hang surfaces as a rejection — boot can't freeze, and 'hybrid' reaches its
   //? warn-and-keep-local fallback. `timeoutMs: 0` disables the abort entirely.
-  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  //? Coerce defensively: a NaN/Infinity timeoutMs (e.g. a bad env parse) would
+  //? make `timeoutMs > 0` false and silently DISABLE the black-hole abort,
+  //? reintroducing the boot hang this guard exists to prevent. Mirror the retry
+  //? path's finite-coercion.
+  const rawTimeout = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = Number.isFinite(rawTimeout) ? Math.max(0, rawTimeout) : DEFAULT_TIMEOUT_MS;
   const signal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
 
   //? Consumer `headers` are merged first so they can never override Authorization.

@@ -5,7 +5,7 @@
 ## Install
 
 ```bash
-npm install @luckystack/api @luckystack/core @luckystack/login @luckystack/error-tracking socket.io
+npm install @luckystack/api @luckystack/core @luckystack/error-tracking socket.io
 ```
 
 ## Quickstart
@@ -57,7 +57,7 @@ You typically don't call these yourself — `createLuckyStackServer` does. Use t
 
 1. **Validates** the inbound payload against the Zod schema generated from your `ApiParams['data']` interface (via `@luckystack/devkit`).
 2. **Rate-limits** by IP + token using `checkRateLimit` from `@luckystack/core`.
-3. **Authenticates** via `getSession` from `@luckystack/login` when `auth.login === true`.
+3. **Authenticates** via `readSession` from `@luckystack/core` (the session-provider registry; `@luckystack/login` is the optional default provider, not a hard dependency) when `auth.login === true`.
 4. **Dispatches** the `preApiExecute` hook (may abort with a stop signal).
 5. **Calls** your `main(...)` and captures errors via `tryCatch` (auto-forwarded to Sentry).
 6. **Dispatches** the `postApiExecute` hook with the result + duration.
@@ -96,7 +96,7 @@ Do not wrap `apiRequest` in `unknown` / `any` shims (see `.claude/CLAUDE.md` rul
 
 ## Dependencies
 
-- Runtime: `@luckystack/core`, `@luckystack/login`, `@luckystack/error-tracking`
+- Runtime: `@luckystack/core`, `@luckystack/error-tracking` (`@luckystack/login` is NOT a runtime dependency — sessions resolve through core's session-provider registry; login is the optional default provider)
 - Peer (canonical ranges, standardized 2026-05-07):
   - `@prisma/client@^6.19.0` (transitively required via `@luckystack/core`)
   - `socket.io@^4.8.0`
