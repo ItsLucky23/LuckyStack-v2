@@ -76,7 +76,7 @@ server.registerTool(
     if (resolved === null) return text(`No graph node matches "${file}". Use a src-relative path (e.g. "_functions/foo.ts"). Run \`npm run ai:graph\` if the file is new.`);
     if (Array.isArray(resolved)) return text(`"${file}" matches multiple nodes — be more specific:\n${bulletList(resolved)}`);
     const id = resolved;
-    const affected = graph.blastRadius[id] ?? [];
+    const affected = Object.hasOwn(graph.blastRadius, id) ? graph.blastRadius[id] ?? [] : [];
     if (affected.length === 0) return text(`Nothing imports \`${id}\` (transitively). Changing it has no in-project blast radius.`);
     return text(`Changing \`${id}\` can affect ${affected.length} file(s) (transitive importers):\n${bulletList(affected)}`);
   },
@@ -115,10 +115,12 @@ server.registerTool(
     const requested = limit ?? 15;
     const top = graph.godNodes.slice(0, requested);
     if (top.length === 0) return text('No god-nodes — nothing has in-project dependents yet.');
-    //? The generator caps the stored god-node list (GOD_NODE_LIMIT); if the
-    //? caller asked for more than the artifact holds, say so rather than imply
-    //? these are the only hubs that exist.
-    const capNote = requested > graph.godNodes.length ? `\n\n(Only ${graph.godNodes.length} god-node(s) are stored in the graph; the artifact caps this list. Asking for more returns all of them.)` : '';
+    //? Signal truncation whenever fewer hubs are returned than are stored — both
+    //? the default (15 < 25 stored) and any partial limit — so the caller knows
+    //? more risky-to-change hubs exist rather than assuming these are all of them.
+    //? The generator caps the stored list at GOD_NODE_LIMIT, so this never implies
+    //? more exist beyond the artifact.
+    const capNote = top.length < graph.godNodes.length ? `\n\n(Showing top ${top.length} of ${graph.godNodes.length} stored god-node(s); pass \`limit\` (max 25) to see more.)` : '';
     return text(`Most-depended-upon files:\n${bulletList(top.map((n) => `${n.id} (${n.kind}) — ${n.dependents} transitive, ${n.directDependents} direct`))}${capNote}`);
   },
 );

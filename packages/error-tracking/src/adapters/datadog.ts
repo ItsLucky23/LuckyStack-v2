@@ -146,11 +146,13 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
       const errorMessage = scrubbed?.message ?? (fwdError instanceof Error ? fwdError.message : sanitizeErrorString(String(fwdError)));
       const errorStack = scrubbed?.stack ?? (fwdError instanceof Error ? fwdError.stack : undefined);
       const span = options.tracer.startSpan('luckystack.error', {
+        //? Spread consumer `fwdContext` FIRST so the framework-owned error.* and
+        //? usr.* identity tags below cannot be shadowed by arbitrary capture context.
         tags: {
+          ...fwdContext,
           'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
           'error.msg': errorMessage,
           ...userTags(),
-          ...fwdContext,
         },
       });
       span.setTag('error', true);

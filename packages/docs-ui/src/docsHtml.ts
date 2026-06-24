@@ -46,7 +46,9 @@ const isSafeLogoUrl = (url: string): boolean => {
     return parsed.protocol === 'https:' || parsed.protocol === 'http:';
   } catch {
     // Relative URLs (no scheme) are safe — they resolve on the same origin.
-    return !url.includes(':');
+    // Reject protocol-relative URLs (`//host/...`): they parse-fail here yet the
+    // browser loads them from an arbitrary external host over the page scheme.
+    return !url.includes(':') && !url.startsWith('//');
   }
 };
 

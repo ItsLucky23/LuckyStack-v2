@@ -144,7 +144,7 @@ import { LocationProvider } from '@luckystack/presence/client';
 1. Renders `<Outlet />` from `react-router-dom`. It is a transparent wrapper — mount it inside the route tree wherever you want path-change tracking to start.
 2. Listens to `useLocation().pathname`. On every change:
    - If `getProjectConfig().locationProviderEnabled === false`, returns immediately. No emit.
-   - Builds `searchParams` from `globalThis.location.search` **filtered by `searchParamFilter`** — by default this is empty (no query keys forwarded).
+   - Builds `searchParams` from React Router's `useLocation().search` **filtered by `searchParamFilter`** — by default this is empty (no query keys forwarded).
    - Awaits `waitForSocket()` (from `@luckystack/core/client`). If the socket never connects, returns.
    - Emits `socket.emit(socketEventNames.updateLocation, { pathName, searchParams })`.
 
