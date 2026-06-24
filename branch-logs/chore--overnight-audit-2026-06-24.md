@@ -35,4 +35,14 @@ Branched off `main` @ 7f24021 for an autonomous overnight audit (`/goal`): full 
 **Notes / open:**
 - Report-only (user review): HIGH sync `cb`-routing spoofing (needs a deliberate, tested fix — legit client cb shape differs from resolvedName, high blast radius); + ~16 medium/low (server SSE 200-before-auth, router fallback boot-UUID Redis, email PII-in-error, email template-send drops attachments, etc.). Full list: `.runtime-test/audit-2026-06-24/findings/round2a_to_report.json` + `HANDOFF_REPORT.md`.
 - Deferred-to-report (real, risky/narrow): sync listener-leak when `requestTimeoutMs:false`; router health-store leak on strict boot-handshake throw.
-- **Convergence NOT reached:** round 2 found real issues (so not dry). Remaining tail: round-2b deep-pass over the OTHER 8 packages (kept hitting the transient agent rate-limit), a round-3 dry-check, and the live-server browser-login smoke. Infra (Redis/Mongo/verdaccio) is up for whoever resumes.
+- **Convergence NOT reached (literal):** round 2 found real issues. Remaining tail: round-2b + live-server browser-login smoke (now both done — see next entry).
+
+## 2026-06-24 10:00 — Round-2b + runtime login smoke + convergence verdict
+
+**What I did:**
+- Runtime login smoke (sqlite + real Redis) on the verdaccio-installed vregcreds scaffold: started the live server, `prisma db push`, ran loginSmoke → register/login/wrong-password/csrf-401 ALL PASS. The fixed framework boots + credentials auth works end-to-end.
+- Round-2b deep re-audit over the other 8 packages (cli/devkit/docs-ui/mcp/presence/test-runner/error-tracking/create-luckystack-app): 36 raw → 31 real-new → 7 to_fix + 24 to_report (**0 HIGH**). Applied 5 (`e527abc`, gate green 1387 tests): docs-ui protocol-relative logo-URL reject, mcp god_nodes truncation note + blast_radius Object.hasOwn guard, datadog context-shadowing, presence doc. Reported 2 (sentry lazy-proxy toString, scaffolder test:e2e script).
+
+**Files touched:** packages/docs-ui/src/docsHtml.ts, packages/mcp/src/index.ts, packages/error-tracking/src/adapters/datadog.ts, packages/presence/docs/client-component.md.
+
+**Convergence verdict:** SEVERITY converged — round-2b found ZERO new HIGH (only medium/low). The substantive security well is dry (the OAuth allowRegistration HIGH was the big one, fixed). A literal "2 dry rounds" isn't a realistic terminal state (each pass finds more low-sev doc/edge nits). ~40 reviewed fixes committed across rounds; ~60 report-only catalogued (1 report-only HIGH worth a deliberate fix: sync `cb` routing). Full detail: `.runtime-test/audit-2026-06-24/HANDOFF_REPORT.md`.

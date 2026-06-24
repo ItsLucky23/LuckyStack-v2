@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | main | (none) | 2026-06-19 19:20 | active | 18 |
 | chore/package-split-prep | (none) | 2026-06-23 | active (wizard+manage verified incl. verdaccio; 5 release-blockers fixed incl. Windows install) | 137 |
-| chore/overnight-audit-2026-06-24 | (none) | 2026-06-24 09:30 | active (round-1+2 audit: ~35 reviewed fixes incl. OAuth allowRegistration HIGH; matrix 14/14 + verdaccio green; convergence tail + browser-smoke remain) | 2 |
+| chore/overnight-audit-2026-06-24 | (none) | 2026-06-24 10:00 | active (rounds 1+2a+2b: ~40 reviewed fixes incl. OAuth allowRegistration HIGH; matrix 14/14 + verdaccio + runtime-login green; severity-converged, ~60 report-only) | 3 |
 
 ## Columns
 
