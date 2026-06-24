@@ -6,6 +6,7 @@
 |---|---|---|---|---|
 | main | (none) | 2026-06-19 19:20 | active | 18 |
 | chore/package-split-prep | (none) | 2026-06-23 | active (wizard+manage verified incl. verdaccio; 5 release-blockers fixed incl. Windows install) | 137 |
+| chore/overnight-audit-2026-06-24 | (none) | 2026-06-24 02:00 | active (round-1 audit: ~31 reviewed fixes in 2 commits, gate green; round-2 pending session-reset; e2e matrix running) | 1 |
 
 ## Columns
 
