@@ -7,7 +7,7 @@
 This document covers:
 
 - The top-level JSON shape (including the legacy fallback).
-- Core fields the renderer reads from each endpoint's `meta` object.
+- Core fields the renderer reads at the top level of each endpoint entry.
 - Optional extension fields rendered when present (`stream`, `owner`, `tags`, `deprecated`).
 - How to add your own metadata via the devkit emitter hooks.
 
@@ -46,11 +46,11 @@ These are the fields used to build the always-visible row + the default expanded
 
 | Field | Type | Default in renderer | Purpose |
 | --- | --- | --- | --- |
-| `meta.method` | `'GET' \| 'POST' \| 'PUT' \| 'DELETE'` (any string, uppercased) | `'POST'` | Method pill text + CSS class on `.method`. |
-| `meta.rateLimit` | `number \| false \| undefined` | `'default rate'` label | Numeric ⇒ `"<n>/min"`. `false` ⇒ `"no rate limit"`. `undefined` ⇒ `"default rate"`. |
-| `meta.auth` | `{ login?: boolean; additional?: Array<{ key: string; value?: unknown }> }` | `'public'` badge | `auth.login` becomes a `"login required"` badge. Each `additional[]` entry becomes a `"<key>"` or `"<key>=<JSON-stringified value>"` badge. Empty / missing ⇒ single `"public"` badge. |
-| `meta.input` | `string` (already-stringified TS shape) | `'{}'` | Rendered inside `<pre>` in the expanded panel. |
-| `meta.output` | `string` (already-stringified TS shape) | `'unknown'` | Rendered inside `<pre>` in the expanded panel. |
+| `method` | `'GET' \| 'POST' \| 'PUT' \| 'DELETE'` (any string, uppercased) | `'POST'` | Method pill text + CSS class on `.method`. |
+| `rateLimit` | `number \| false \| undefined` | `'default rate'` label | Numeric ⇒ `"<n>/min"`. `false` ⇒ `"no rate limit"`. `undefined` ⇒ `"default rate"`. |
+| `auth` | `{ login?: boolean; additional?: Array<{ key: string; value?: unknown }> }` | `'public'` badge | `auth.login` becomes a `"login required"` badge. Each `additional[]` entry becomes a `"<key>"` or `"<key>=<JSON-stringified value>"` badge. Empty / missing ⇒ single `"public"` badge. |
+| `input` | `string` (already-stringified TS shape) | `'{}'` | Rendered inside `<pre>` in the expanded panel. |
+| `output` | `string` (already-stringified TS shape) | `'unknown'` | Rendered inside `<pre>` in the expanded panel. |
 
 The renderer does not try to JSON-parse `input` / `output`. They are emitted as pre-formatted strings by the devkit emitter so the docs page can display the original TypeScript shape verbatim — including unions, mapped types, and template-literal types — without re-stringifying.
 

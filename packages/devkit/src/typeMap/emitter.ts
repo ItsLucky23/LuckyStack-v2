@@ -4,7 +4,7 @@ import { getGeneratedApiDocsPath, getGeneratedSocketTypesPath } from '@luckystac
 
 import { mustGet } from '../internal/mapUtils';
 
-//? `auth` is consumer-defined â€” each project exports its own `AuthProps`
+//? `auth` is consumer-defined — each project exports its own `AuthProps`
 //? shape from `config.ts`. The emitter just passes the parsed value through
 //? to the generated JSON; treat as opaque.
 export interface ApiTypeEntry {

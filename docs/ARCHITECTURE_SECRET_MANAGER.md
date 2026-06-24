@@ -38,9 +38,18 @@ const config = {
   secretManager: {
     url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
     token: { fromFile: '.secret-manager-token' },
+    // Which `.env` names are eligible for off-host resolution. SECURE DEFAULT:
+    // omitting this resolves NOTHING (deny-all) and emits a one-time boot warning,
+    // so the server is never contacted and no pointer is sent off-host. `() => true`
+    // opts in to resolving every pointer-shaped (`NAME=BASE_V<n>`) value — the
+    // "install secret-manager → it just works" path. Restrict by passing an
+    // allowlist array instead, e.g. `['OPENAI_KEY', 'DB_URL']`.
+    envNames: () => true,
   },
 };
 ```
+
+> **`envNames` is the gate.** Without it the resolver is deny-all: `initSecretManager` captures zero pointers, returns early before any network call, and the `'remote'` fail-fast below CANNOT fire (you only get the boot warning). The scaffolder and `luckystack add secret-manager` inject `envNames: () => true` for exactly this reason — keep it (or replace it with an allowlist) when wiring by hand.
 
 Second, `server.ts` resolves it through the boot seam in `server/bootstrap/initSecrets.ts`, right after the `.env` files load and before any secret is read (the email sender reads `RESEND_API_KEY`, Sentry reads `SENTRY_DSN`, Prisma/Redis/JWT read theirs lazily):
 
@@ -59,7 +68,8 @@ The seam decides remote-vs-local for you, so a project without the package — o
 | --- | --- |
 | `url` empty | Skip resolution — boot on the plain local env files. |
 | `url` set, package **not** installed | Warn + skip — boot on local env files (no crash). |
-| `url` set, package installed | `initSecretManager` in `'remote'` mode — **fail-fast**: an unresolved pointer or an unreachable server throws and stops the boot. |
+| `url` set, package installed, `envNames` **unset** | Deny-all no-op: NO pointer captured, the server is never contacted, a one-time boot warning is logged — the fail-fast below cannot fire. |
+| `url` set, package installed, `envNames` set | `initSecretManager` in `'remote'` mode — **fail-fast**: an unresolved pointer or an unreachable server throws and stops the boot. |
 
 > A top-level `await` in `server.ts` is fine — it is an ESM entry and the prod bundle emits `format: esm`. Resolution finishes before `bootstrapLuckyStack` / any `process.env` secret read. `@luckystack/secret-manager` is marked external in `scripts/bundleServer.mjs`, so the prod bundle builds and boots whether or not the package is installed.
 

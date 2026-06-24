@@ -1,6 +1,6 @@
 # @luckystack/error-tracking
 
-> Optional error-tracking integration for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Auto-wires error/performance capture into the framework's hook surface and request transports. Currently Sentry-backed; the package name is implementation-agnostic so future adapters (Datadog, etc.) can slot in without renaming consumers' imports. No-op when `SENTRY_DSN` is missing.
+> Optional error-tracking integration for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Auto-wires error/performance capture into the framework's hook surface and request transports. Ships a backend-agnostic `ErrorTracker` adapter contract plus three built-in adapters — Sentry (`@sentry/node`), Datadog (`dd-trace` + `hot-shots`), and PostHog (`posthog-node`) — that can be registered together with fan-out. The package name is implementation-agnostic so further backends (CloudWatch, New Relic, ...) can slot in without renaming consumers' imports. The legacy single-Sentry entry is a no-op when `SENTRY_DSN` is missing.
 
 ## Install
 
@@ -41,9 +41,11 @@ Set `SENTRY_DSN` in your environment to enable. Without it, every export is a sa
 
 `initializeSentry()` registers handlers on the framework's hook surface:
 
-- `apiError`, `syncError` — capture exceptions thrown from `_api/*.ts` and `_sync/*.ts` handlers (already `tryCatch`-wrapped at the call site).
+- `preApiValidate` / `preSyncAuthorize` — attach session identity (`setSentryUser` / `setCurrentErrorTrackerIdentity`) as early as each pipeline carries `user`.
 - `preApiExecute` / `postApiExecute` and `preSyncFanout` / `postSyncFanout` — performance spans + breadcrumbs with redacted input/output.
-- `postLogin` / `postLogout` — call `setSentryUser` to attach session identity to subsequent events.
+- `postLogout` — clear the identity so a subsequent anonymous request is not attributed to the logged-out user.
+
+Handler exceptions are NOT captured via an `apiError`/`syncError` hook subscription — they flow through `tryCatch` -> `captureException` (see below).
 
 `tryCatch` (from `@luckystack/core` server entry) calls `captureException` automatically, so consumer-code errors flow into Sentry without explicit wiring.
 
@@ -56,8 +58,11 @@ Sample rates and ignore-list come from this package's own `registerSentryConfig(
 ## Dependencies
 
 - Runtime: `@luckystack/core`
-- Peer (canonical ranges, standardized 2026-05-07):
-  - `@sentry/node@^10.48.0`
+- Peer (canonical ranges, standardized 2026-05-07; all optional — install only what the adapters you use need):
+  - `@sentry/node@^10.48.0` — required only when `createSentryAdapter()` or `initializeSentry()` is called.
+  - `dd-trace@^5.0.0` — required only when `createDatadogAdapter(...)` is called. Import dd-trace as the FIRST require in your server entry.
+  - `hot-shots@^10.0.0` — optional StatsD companion for the Datadog adapter (metrics). The adapter still captures exceptions without it.
+  - `posthog-node@^4.0.0` — required only when `createPostHogAdapter(...)` is called.
 
 ## License
 

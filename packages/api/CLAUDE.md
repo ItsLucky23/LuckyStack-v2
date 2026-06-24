@@ -77,7 +77,7 @@ Read at request time via `getProjectConfig()` (from `@luckystack/core`). All liv
 - `rateLimiting.skipLoopbackInDev` — when `true` (default `false`), skips ONLY the global per-IP ABUSE bucket for loopback IPs in non-production (per-route bucket still applies). Lets a dev / the test runner hammer localhost without tripping the cross-route cap. Gated on this explicit flag (not inferred from `NODE_ENV` + a spoofable address) and on `isLoopbackIp(resolvedIp)`.
 - `rateLimiting.identity` — optional `(params) => { scope: 'user'|'ip'|'custom'; id } | null` callback that overrides the per-route bucket BASIS (api-key / tenant). Returning `null` falls back to the default (validated `user.id`, else resolved IP — NEVER the raw token).
 
-No environment variables are read directly by this package — secrets and toggles travel through `@luckystack/core`'s config layer.
+No project env vars or secrets are read directly by this package — only the ambient `process.env.NODE_ENV` (for the dev-only loopback rate-limit skip in `handleHttpApiRequest`); all other toggles travel through `@luckystack/core`'s config layer.
 
 ## Peer dependencies
 

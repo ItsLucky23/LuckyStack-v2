@@ -192,7 +192,7 @@ without forking presence or stacking parallel listeners. The framework still own
 
 ## Common mistakes
 
-- Calling `dispatchActivitySample` with `token: null` works, but the default AFK event short-circuits (`if (!io || !sample.token) return;`). Anonymous sockets cannot be marked AFK.
+- Calling `dispatchActivitySample` with `token: null` works, but the default AFK event short-circuits (`if (!sample.token) return;`). Anonymous sockets cannot be marked AFK. (A missing `io` does NOT short-circuit — it only skips the multi-tab freshness scan; the AFK broadcast still proceeds.)
 - Forgetting `refractoryMs` will fire `onTrigger` on every tick while `trigger` stays true. Set it to at least your activity-sample cadence.
 - Throwing inside `onTrigger` is isolated per event and routed through the framework `tryCatch` (captured to the error tracker + an explicit `getLogger().error` line) — NOT silently swallowed. One buggy event cannot break the chain, and the failure is visible without extra in-callback logging.
 - Replacing `'afk'` without restoring the framework's `refractoryMs` (60s) often causes "AFK spam" — peers receive a `userAfk` event every dispatch tick.

@@ -30,6 +30,7 @@ export interface MountDocsUiOptions {
   branding?: DocsBranding;
   template?: DocsTemplateBuilder;
   enableTryItOut?: boolean;
+  authorize?: (req: IncomingMessage) => boolean | Promise<boolean>;
 }
 ```
 
@@ -44,6 +45,7 @@ export interface MountDocsUiOptions {
 | `branding` | `DocsBranding` | `{}` | Optional logo / accent color / font family. Applied by the default template only. See `./theming.md`. |
 | `template` | `DocsTemplateBuilder` | `undefined` | Custom HTML builder. When provided, the default `renderDocsHtml` is bypassed entirely. See `./html-generation.md` and `./theming.md`. |
 | `enableTryItOut` | `boolean` | `false` | Renders an inline request runner under each endpoint. Off by default — the runner needs a logged-in browser session because it hits the live server with `credentials: 'include'`. |
+| `authorize` | `(req: IncomingMessage) => boolean \| Promise<boolean>` | `undefined` | Optional per-request authorization hook. Called after the env/bind-address gate passes (so it only runs when the route is being served). Return `true` to allow the request, `false` to serve `403 Forbidden`. Use to restrict docs access to authenticated or IP-allowlisted callers on non-loopback deployments (e.g. an internal developer-portal opened with `enabledInProd: true`). |
 
 All options are individually optional; calling `mountDocsUi()` with no arguments is valid and produces the default behavior.
 
@@ -119,14 +121,15 @@ The handler's branches map directly to the request shape. The order is exactly a
 | Step | Condition | Result |
 | --- | --- | --- |
 | 1 | `pathOnly !== routePath && pathOnly !== ${routePath}/api.json` | Returns `false` (pass-through). No response written. |
-| 2 | `NODE_ENV === 'production'` and `!options.enabledInProd` | `404 Not Found` (`text/plain`). Returns `true`. |
-| 3 | `req.method !== 'GET'` | `405 Method Not Allowed` (`text/plain`). Returns `true`. |
-| 4 | `pathOnly === ${routePath}/api.json` and the file is readable | `200 OK` (`application/json`, `Cache-Control: no-store`) with the raw file contents. Returns `true`. |
-| 5 | `pathOnly === ${routePath}/api.json` and the file is missing/unreadable | `404 Not Found` (`application/json`) with `{ error, expectedAt, hint }`. Returns `true`. |
-| 6 | `pathOnly === routePath` and `options.template` is set | `200 OK` (`text/html; charset=utf-8`) with the template builder's output. Returns `true`. |
-| 7 | `pathOnly === routePath` and no template | `200 OK` (`text/html; charset=utf-8`) with `renderDocsHtml(...)`. Returns `true`. |
+| 2 | (`NODE_ENV === 'production'` **or** `!isLoopbackIp(getBindAddress().ip)`) and `!options.enabledInProd` | `404 Not Found` (`text/plain`). Returns `true`. The non-loopback bind-address check means a server bound to a public interface is gated even outside `NODE_ENV=production`. |
+| 3 | `options.authorize` is set and returns/resolves `false` | `403 Forbidden` (`text/plain`). Returns `true`. Runs only after the env/bind gate (step 2) passes. |
+| 4 | `req.method !== 'GET'` | `405 Method Not Allowed` (`text/plain`). Returns `true`. |
+| 5 | `pathOnly === ${routePath}/api.json` and the file is readable | `200 OK` (`application/json`, `Cache-Control: no-store`) with the raw file contents. Returns `true`. |
+| 6 | `pathOnly === ${routePath}/api.json` and the file is missing/unreadable | `404 Not Found` (`application/json`) with `{ error, expectedAt, hint }`. Returns `true`. |
+| 7 | `pathOnly === routePath` and `options.template` is set | `200 OK` (`text/html; charset=utf-8`) with the template builder's output. Returns `true`. |
+| 8 | `pathOnly === routePath` and no template | `200 OK` (`text/html; charset=utf-8`) with `renderDocsHtml(...)`. Returns `true`. |
 
-The order is critical: prod-gating runs before method-checking, so a `POST /_docs` in production still returns `404` (it's gated by env first), not `405`. The match itself ignores query strings (the path is split on `?` before comparing) and is strict on trailing slashes — `/_docs/` does NOT match the default route.
+The order is critical: the env/bind gate runs before the `authorize` hook and before method-checking, so a `POST /_docs` in production (or on a public-bind server) still returns `404` — it's gated first — not `405`, and `authorize` is never consulted on a gated request. The gate fires on `NODE_ENV === 'production'` **or** a non-loopback bind address (`!isLoopbackIp(getBindAddress().ip)`), so a staging/preview server bound to a public interface is locked down even when `NODE_ENV` is not `production`; set `enabledInProd: true` to serve the route there. The match itself ignores query strings (the path is split on `?` before comparing) and is strict on trailing slashes — `/_docs/` does NOT match the default route.
 
 ## Response shapes
 
@@ -168,6 +171,8 @@ Content-Type: application/json
 ```
 
 This is intentionally a structured payload so the client-side renderer can surface a helpful empty state. `Cache-Control` is omitted on the error path — the request should be retried after running the artifact generator.
+
+`expectedAt` is **dev-only**: it exposes the absolute filesystem path and is omitted when `NODE_ENV === 'production'` to avoid leaking internal directory structure (DOCSUI-8). In production the payload contains only `error` and `hint`.
 
 ### Production lockdown (`enabledInProd: false`)
 

@@ -25,7 +25,9 @@ server with your project root as the working directory.
 | --- | --- |
 | `blast_radius(file)` | "What breaks if I change this file?" (transitive importers) |
 | `who_imports(file)` | "What directly imports this?" |
+| `who_calls(symbol)` | "What functions transitively call this one?" (call-graph blast-radius) |
 | `god_nodes(limit?)` | "Which files are risky hubs everything depends on?" |
+| `graph_status()` | "Is the dependency graph fresh or stale?" (mtime freshness check) |
 | `list_decisions(tag?)` | "What did we decide, and about what?" |
 | `get_decision(id)` | "Why did we decide X?" (full ADR) |
 | `find_route(query)` | "Which API/sync routes match this?" |

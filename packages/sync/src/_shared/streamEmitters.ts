@@ -242,7 +242,7 @@ export const buildSyncStreamEmitters = ({
     if (shouldLogStream()) {
       //? Redact the raw bearer session tokens before they reach the stream
       //? debug log — a verbatim token in logs is a usable credential. The
-      //? 8-char prefix still correlates log lines.
+      //? 4-char prefix still correlates log lines.
       getLogger().debug(`${logLabel}: ${resolvedName} streamTo`, { tokens: redactTokens(filtered), payload });
     }
     const io = getIoInstance();

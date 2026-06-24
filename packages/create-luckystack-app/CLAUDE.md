@@ -73,6 +73,7 @@ Template variables substituted into every text file by `replacePlaceholders` (on
 - `{{PROJECT_TITLE}}` — Title-Cased project name (from `titleCase`); used in `config.ts`, `index.html`, `README.md`, `docs/PRODUCT.md`.
 - `{{LUCKYSTACK_VERSION}}` — this package's own version (from `readSelfVersion`); used to pin `@luckystack/*` dependency ranges in the scaffolded `package.json`.
 - `{{DB_PROVIDER}}` — `'mongodb' | 'postgresql' | 'mysql' | 'sqlite'`; used in `prisma/schema.prisma`.
+- `{{PRISMA_INIT_CMD}}` — provider-conditional DB-init command (`npm run prisma:db:push` for MongoDB, else `npm run prisma:migrate:dev`); used in `README.md`'s "Get started" block.
 - `{{USER_ID_ATTRS}}` — provider-specific Prisma `id` field attributes; used in `prisma/schema.prisma`.
 - `{{DATABASE_URL}}` — provider-specific example connection string; used in `.env.local_template`.
 - `{{OAUTH_ENV_VARS}}` — rendered OAuth env block (all providers, active/commented); used in `.env.local_template`.

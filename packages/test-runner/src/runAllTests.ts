@@ -24,7 +24,7 @@ export interface RunAllTestsInput {
   apiMetaMap: ApiMetaMap;
   apiInputSchemas: ApiInputSchemas;
   baseUrl: string;
-  /** Cookie name for the session token. Defaults to `luckystack_token`. */
+  /** Cookie name for the session token. Defaults to the project's configured session cookie name (`projectConfig.http.sessionCookieName`). */
   sessionCookieName?: string;
   /** Auth token applied as a `Cookie` header to sweep-layer requests that need a session. */
   authToken?: string;
@@ -152,8 +152,8 @@ const runSweepLayers = async (
       inputFor,
       //? Reset the shared per-IP rate-limit bucket between endpoints so a
       //? neighbour saturating the window doesn't cause false pass/fail on the
-      //? next endpoint. Requires the server to expose /_test/reset (allowed in
-      //? NODE_ENV !== production or behind TEST_RESET_TOKEN).
+      //? next endpoint. Requires the server to expose /_test/reset (NODE_ENV in
+      //? { 'development', 'test' } AND TEST_RESET_TOKEN set + matching header).
       resetBetweenEndpoints: true,
     });
     summary.rateLimit = cloneSummary(rateLimit, input.filter);

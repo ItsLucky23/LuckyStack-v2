@@ -18,9 +18,10 @@ export interface RunRateLimitTestsInput {
   maxRateLimitToTest?: number;
   /**
    * When true, hit `/_test/reset` before each endpoint so limiter state is
-   * clean. Requires the server to allow the endpoint (NODE_ENV !== production
-   * or `TEST_RESET_TOKEN` configured). Without resetting, the shared IP bucket
-   * leaks state between endpoints.
+   * clean. Requires the server to allow the endpoint: `NODE_ENV` in
+   * { 'development', 'test' } AND `TEST_RESET_TOKEN` set on the server with a
+   * matching `resetToken` here (an unset token is 403, never open). Without
+   * resetting, the shared IP bucket leaks state between endpoints.
    */
   resetBetweenEndpoints?: boolean;
   /**

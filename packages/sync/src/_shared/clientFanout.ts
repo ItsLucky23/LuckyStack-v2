@@ -117,7 +117,7 @@ export const processClientSyncForRecipient = async <TError extends object>({
       sourceUserId,
       //? Redact the raw bearer session token before it lands in the
       //? error-tracker context (`captureException`) — a verbatim token there is
-      //? a usable credential (defeats HttpOnly-cookie mode). The 8-char prefix
+      //? a usable credential (defeats HttpOnly-cookie mode). The 4-char prefix
       //? still correlates error events.
       targetToken: redactToken(tempToken),
       receiver,

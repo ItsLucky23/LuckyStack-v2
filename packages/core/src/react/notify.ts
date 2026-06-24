@@ -5,8 +5,8 @@
 //? syncRequest) automatically emit toasts in the consumer's locale.
 //?
 //? Importing this module triggers the registration as a side effect —
-//? add `import '@luckystack/core/client/notify';` to the consumer's
-//? main entry once.
+//? add `import { i18nNotify } from '@luckystack/core/client';` to the
+//? consumer's main entry once.
 
 import { toast } from 'sonner';
 import { registerNotifier } from '../notifier';

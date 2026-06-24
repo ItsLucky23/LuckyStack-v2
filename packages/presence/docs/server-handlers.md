@@ -24,7 +24,7 @@ socketDisconnecting(args: {
   token: string;
   reason: string;
   socket: Socket;
-}): Promise<void>;
+}): void;
 
 socketLeaveRoom(args: {
   token: string | null;
@@ -70,6 +70,8 @@ io.on(socketEventNames.connect, (socket) => {
 ## `socketDisconnecting({ token, reason, socket })`
 
 Wire this to `socket.on(socketEventNames.disconnect, reason => ...)`. It opens the disconnect grace window so a network blip / browser refresh / tab switch does not immediately tear down session state.
+
+This function is **synchronous** — it returns `void`, not a promise. It only *schedules* the grace teardown in a detached `setTimeout` (the actual teardown runs later in `handleGraceExpiry`, fire-and-forget), so `await socketDisconnecting(...)` does not wait for the grace window to settle — it resolves immediately and tells you nothing about whether the timer expired or the session was torn down. Call it without `await`.
 
 What it does:
 

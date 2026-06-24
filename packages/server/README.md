@@ -153,7 +153,7 @@ Top-level `handleHttpRequest` + `dispatchRoutes(handlers, ctx)` are the only orc
 | Export | Purpose |
 | --- | --- |
 | `bootstrapLuckyStack(options)` | High-level entry: verifies config, auto-imports overlay, then calls `createLuckyStackServer`. |
-| `createLuckyStackServer(options)` | Lower-level factory that returns `{ httpServer, ioServer, listen }`. |
+| `createLuckyStackServer(options)` | Lower-level factory that returns `{ httpServer, ioServer, listen, stop, close }` (`stop`/`close` = graceful MIS-016 shutdown). |
 | `verifyBootstrap(requirements?)` | Pre-flight check for project/deploy/services config and required env keys. |
 | `registerCustomRoute(handler)` / `getCustomRoutes()` / `clearCustomRoutes()` | Global custom-route registry composed by `bootstrapLuckyStack`. |
 | Hook payload types: `OnSocketConnectPayload`, `OnSocketDisconnectPayload`, `PreRoomJoinPayload`, `PostRoomJoinPayload`, `PreRoomLeavePayload`, `PostRoomLeavePayload`, `OnLocationUpdatePayload` | For socket-lifecycle hook handlers. |

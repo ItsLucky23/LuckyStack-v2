@@ -6,7 +6,7 @@ import { getGeneratedApiDocsPath, getGeneratedApiSchemasPath, getGeneratedSocket
 import { mustGet } from '../internal/mapUtils';
 import { typeTextToZodSource } from './zodEmitter';
 
-//? `auth` is consumer-defined opaque â€” each project exports its own
+//? `auth` is consumer-defined opaque — each project exports its own
 //? `AuthProps` shape from `config.ts`. The emitter passes the parsed value
 //? through to the generated JSON.
 //? Forward declaration mirrored from `apiMeta.ts:DocsMeta`. Kept local to
@@ -290,9 +290,9 @@ export type StreamPayload = {
 export type ApiStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
 export type SyncServerStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
 export type SyncClientStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void | Promise<void>;
-//? Broadcast â€” fan-out to every socket in the receiver room (cross-instance via the Redis adapter).
+//? Broadcast — fan-out to every socket in the receiver room (cross-instance via the Redis adapter).
 export type SyncBroadcastStreamEmitter<T extends StreamPayload = StreamPayload> = (payload?: T) => void;
-//? Targeted â€” emit only to the listed session tokens (each token is its own room).
+//? Targeted — emit only to the listed session tokens (each token is its own room).
 export type SyncStreamToEmitter<T extends StreamPayload = StreamPayload> = (
 	tokens: string | string[],
 	payload?: T,
@@ -548,7 +548,7 @@ export type SyncClientStream<P extends SyncPagePath, N extends SyncName<P>, V ex
 export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N>> = \`sync/\${P}/\${N & string}/\${V & string}\`;
 
 //
-// Type-level augmentation â€” merges the project's concrete ApiTypeMap / SyncTypeMap
+// Type-level augmentation — merges the project's concrete ApiTypeMap / SyncTypeMap
 // into the @luckystack/core/typemap stub-declaration module so framework code
 // (apiRequest / syncRequest) sees the project routes without deep-relative
 // imports. Augmenting the module that DECLARES the stubs (not the re-exporting

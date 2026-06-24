@@ -79,7 +79,8 @@ So `.env` (plain config) and `.env.local` (pointers/secrets) both live-reload �
 | `initSecretManager(config)` | Boot-time entry point. Resolves pointer-shaped env values and writes the real values into `process.env`. |
 | `refreshSecretManager()` | Re-resolve the captured pointers against the server (the poll channel; call manually after an admin rotates a secret). |
 | `reloadSecretManagerFromFiles()` | Re-parse the configured env files and apply them — plain values injected, pointers resolved. The file-watch channel; callable manually. |
-| `getCachedResolution()` | Returns the last `{ fetchedAt, values }` resolution (pointer -> value) for diagnostics, or `null`. |
+| `getCachedResolution()` | Returns a shallow copy of the last `{ fetchedAt, values }` resolution (pointer -> value), or `null`. **⚠️ SENSITIVE** — `values` are the RAW resolved secrets; never serialize into an HTTP response, a `/health` payload, or a log line. For a safe diagnostic use `getCachedResolutionMeta()`. |
+| `getCachedResolutionMeta()` | Values-free diagnostic view: `{ fetchedAt, pointerNames, pointerCount }` — resolved pointer NAMES only, never the secret values. Safe for logs and `/health` endpoints. |
 | `resetSecretManagerForTests()` | Test-only — clears module state and tears down dev watchers / timers. |
 
 ## The token file

@@ -207,9 +207,8 @@ export type { TranslationRecord, TranslateParam } from './react/TranslationProvi
 //? `registerNotifier(...)` so framework packages emit through it.
 //? Re-exported separately from the no-op `notify` higher in this file
 //? so consumers can opt into the i18n implementation explicitly:
-//?   `import '@luckystack/core/client/notify';`
-//? (Actually re-exported here as well for convenience; importing this
-//? barrel triggers the registration.)
+//?   `import { i18nNotify } from '@luckystack/core/client';`
+//? Importing this barrel triggers the registration as a side effect.
 export { default as i18nNotify } from './react/notify';
 
 export { default as Middleware } from './react/Middleware';
