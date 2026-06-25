@@ -57,11 +57,24 @@ export const runPrismaGenerate = async (): Promise<[Error | null, number | null]
 					? [localBin, ['generate']]
 					: [process.platform === 'win32' ? 'npx.cmd' : 'npx', ['prisma', 'generate']];
 
-				const child = spawn(cmd, args, {
-					cwd: ROOT_DIR,
-					stdio: 'inherit',
-					shell: false,
-				});
+				//? On Windows a `.cmd`/`.bat` shim can no longer be spawned with
+				//? shell:false (Node's CVE-2024-27980 mitigation throws EINVAL). Invoke
+				//? comspec with the resolved path in an OUTER+INNER quote pair (with
+				//? `/s` cmd strips the outer pair and runs the rest verbatim, keeping any
+				//? spaced path intact) and `windowsVerbatimArguments` so cmd does not
+				//? re-quote. Mirrors create-luckystack-app's `spawnResolved`.
+				const isWinShim = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd);
+				const child = isWinShim
+					? spawn(
+							process.env.ComSpec ?? 'cmd.exe',
+							['/d', '/s', '/c', `""${cmd}" ${args.join(' ')}"`],
+							{ cwd: ROOT_DIR, stdio: 'inherit', windowsVerbatimArguments: true },
+					  )
+					: spawn(cmd, args, {
+							cwd: ROOT_DIR,
+							stdio: 'inherit',
+							shell: false,
+						});
 				child.on('error', reject);
 				child.on('exit', (code) => { resolve(code ?? 0); });
 			}),

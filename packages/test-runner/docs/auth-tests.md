@@ -2,7 +2,7 @@
 
 The auth-enforcement layer answers one question per endpoint: "If a logged-out caller hits this route, does the framework reject them?" It is the cheapest insurance policy against a `_api/*` file that forgets to set `auth.login: true`, an `auth.login` guard that was silently swapped to `false` during a refactor, or a middleware change in `@luckystack/api` that stops short-circuiting unauthenticated requests.
 
-Pass criterion: the endpoint returns `{ status: 'error', errorCode: 'auth.required' }`. Anything else — `success`, a different `errorCode`, a missing envelope, a network error — is a failure.
+Pass criterion: the endpoint returns `{ status: 'error', errorCode }` where `errorCode` is one of the auth-rejection codes — `auth.required` (an `auth.login: true` route) or `auth.forbidden` (a route guarded only by `auth.additional[]` predicates). Anything else — `success`, a different `errorCode`, a missing envelope, a network error — is a failure.
 
 ## Functions
 
@@ -39,7 +39,7 @@ The canonical error code is imported from the framework constant `auth.required`
 
 ### `runAuthEnforcementTests(input)`
 
-Full sweep. Iterates `walkEndpoints(input.apiMethodMap)` and only checks endpoints where `apiMetaMap[page][name][version].auth.login === true`. Public endpoints (`auth.login: false` or missing meta) are skipped **silently** — they do not appear in the summary at all. This keeps the report focused on what this layer actually covers; public endpoints are already exercised by the contract layer.
+Full sweep. Iterates `walkEndpoints(input.apiMethodMap)` and checks every endpoint that declares an authorization requirement — `apiMetaMap[page][name][version].auth.login === true` OR a non-empty `auth.additional[]` predicate list (`hasAdditional`). Truly-public endpoints (`auth.login: false` AND no `additional[]`, or missing meta) are skipped **silently** — they do not appear in the summary at all. This keeps the report focused on what this layer actually covers; public endpoints are already exercised by the contract layer.
 
 Signature:
 
@@ -66,7 +66,7 @@ Behavior notes:
 
 - **`skip` uses the same two-tier matching as `runContractTests`**: pass `'<page>/<name>'` for version-agnostic skip, or `'<page>/<name>/<version>'` for a specific version.
 - **`onResult` fires only for endpoints that pass `requiresLogin`.** Public endpoints don't trigger it; they don't exist for this layer.
-- **`additional` auth checks (e.g. role-based gates) are NOT covered.** Only the `login: true` flag is read. An endpoint with `auth.login: true, additional: [{ role: 'admin' }]` is asserted by this layer to reject unauthenticated requests with `auth.required`; the role check is out of scope and lives in a custom layer (see `extension-hooks.md`).
+- **Unauthenticated enforcement covers `additional[]`-only routes too.** An endpoint guarded only by `auth.additional[]` predicates (`login: false`) is probed and must reject an anonymous caller with `auth.forbidden`. The DEEPER role/scope *value* assertion (e.g. "this admin-only route rejects a logged-in non-admin") is out of scope and lives in a custom layer (see `extension-hooks.md`).
 
 Returns the same `RunContractSummary` shape as the contract layer; `total` is the number of protected endpoints actually probed (after public-endpoint filtering).
 
@@ -187,8 +187,8 @@ Prefer fixing the meta over skipping — a wrong `auth.login` flag breaks runtim
 ## Edge cases and gotchas
 
 - **CSRF.** The framework enforces CSRF on state-changing requests. The runner sends no `X-CSRF-Token`, so for a brief window the request can be rejected on CSRF grounds before reaching auth. The current framework returns `auth.required` ahead of CSRF for unauthenticated sessions, so this layer passes; if you reorder middleware to CSRF-first, this layer will need updating.
-- **`additional` auth checks** are not covered here. Put role/scope checks in a `registerTestLayer({ name: 'role-enforcement', run })` plug-in (see `extension-hooks.md`).
-- **Endpoints absent from `apiMetaMap`.** The runner reads `apiMetaMap[page]?.[name]?.[version]?.auth.login`. If any link in that chain is missing, `requiresLogin` returns `false` and the endpoint is silently skipped. Regenerate the meta map if your sweep reports `total: 0`.
+- **Deeper `additional` role/scope *value* checks** are not covered here (the layer only asserts an anonymous caller is rejected with `auth.forbidden`). Put authenticated-but-wrong-role checks in a `registerTestLayer({ name: 'role-enforcement', run })` plug-in (see `extension-hooks.md`).
+- **Endpoints absent from `apiMetaMap`.** The runner reads `apiMetaMap[page]?.[name]?.[version]?.auth`. If any link in that chain is missing, `hasAuthRequirement` returns `false` and the endpoint is silently skipped. Regenerate the meta map if your sweep reports `total: 0`.
 - **Session-cookie names are project-specific.** This layer never sets one, so the name doesn't matter to the runner. It does matter for the auth layer's mirror image: a custom "logged-in sweep" you might write to confirm protected endpoints work *with* a valid session.
 - **Wrong errorCode is a real signal.** When you see `expected 'auth.required' but got 'auth.sessionExpired'`, the framework is detecting and reporting the missing session — just with a stricter code. Either align the runner expectation (fork or PR) or align the framework code. Do not skip.
 - **`@luckystack/login` session-token interaction.** Sessions live in Redis under `${projectName}-session:*` keys. The runner does not touch them. If a logged-in regression suite must run before this layer, use `resetServerState()` to clear sessions and rate limits in one shot (see `rate-limit-tests.md`).

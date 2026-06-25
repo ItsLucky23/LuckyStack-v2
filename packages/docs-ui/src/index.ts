@@ -17,7 +17,7 @@
 
 import fs from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { getBindAddress, getGeneratedApiDocsPath, isLoopbackIp, tryCatch } from '@luckystack/core';
+import { getBindAddress, getGeneratedApiDocsPath, isLoopbackIp, resolveEnvKey, tryCatch } from '@luckystack/core';
 import { renderDocsHtml } from './docsHtml';
 
 export interface DocsBranding {
@@ -119,7 +119,7 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
     //? consumer explicitly opts in. Staging/preview servers that bind to a public
     //? interface must set `enabledInProd` to avoid exposing the docs route.
     const isPublicBind = !isLoopbackIp(getBindAddress().ip);
-    if ((process.env.NODE_ENV === 'production' || isPublicBind) && !options.enabledInProd) {
+    if ((resolveEnvKey() === 'production' || isPublicBind) && !options.enabledInProd) {
       res.statusCode = 404;
       res.setHeader('Content-Type', 'text/plain');
       res.end('Not Found');

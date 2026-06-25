@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as ts from 'typescript';
-import { ROOT_DIR, getGeneratedSocketTypesPath, getSrcDir, validatePagePath } from '@luckystack/core';
+import { ROOT_DIR, getGeneratedSocketTypesPath, getSrcDir } from '@luckystack/core';
 import {
   ROUTE_NAMING_EXAMPLES,
   ROUTE_NAMING_RULES,
@@ -11,7 +11,7 @@ import {
   isVersionedSyncFileName,
   isVersionedSyncServerFileName,
 } from './routeConventions';
-import { getRoutingRules, isRouteTestFile } from './routingRules';
+import { getRoutingRules, isRouteTestFile, validatePagePath } from './routingRules';
 import {
   BUILT_IN_TEMPLATE_FILENAMES,
   getRegisteredTemplate,

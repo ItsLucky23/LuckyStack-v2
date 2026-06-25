@@ -55,9 +55,9 @@ You typically don't call these yourself — `createLuckyStackServer` does. Use t
 
 ## How it integrates
 
-1. **Validates** the inbound payload against the Zod schema generated from your `ApiParams['data']` interface (via `@luckystack/devkit`).
+1. **Authenticates** via `readSession` from `@luckystack/core` (the session-provider registry; `@luckystack/login` is the optional default provider, not a hard dependency) when `auth.login === true`. Auth runs first so unauthenticated probes can't enumerate routes or learn input shape from the validation message.
 2. **Rate-limits** by IP + token using `checkRateLimit` from `@luckystack/core`.
-3. **Authenticates** via `readSession` from `@luckystack/core` (the session-provider registry; `@luckystack/login` is the optional default provider, not a hard dependency) when `auth.login === true`.
+3. **Validates** the inbound payload against the Zod schema generated from your `ApiParams['data']` interface (via `@luckystack/devkit`).
 4. **Dispatches** the `preApiExecute` hook (may abort with a stop signal).
 5. **Calls** your `main(...)` and captures errors via `tryCatch` (auto-forwarded to Sentry).
 6. **Dispatches** the `postApiExecute` hook with the result + duration.

@@ -1,4 +1,4 @@
-import { tryCatch } from '@luckystack/core';
+import { getProjectConfig, tryCatch } from '@luckystack/core';
 
 //? Calls the server's /_test/reset endpoint. Used between rate-limit test
 //? endpoints to drain the shared IP-based limiter bucket so one endpoint's
@@ -18,7 +18,7 @@ export interface ResetServerStateInput {
 }
 
 export const resetServerState = async ({ baseUrl, token, requestTimeoutMs }: ResetServerStateInput): Promise<boolean> => {
-  const url = `${baseUrl.replace(/\/$/, '')}/_test/reset`;
+  const url = `${baseUrl.replace(/\/$/, '')}${getProjectConfig().http.testResetEndpoint}`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['X-Test-Reset-Token'] = token;
 

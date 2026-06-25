@@ -238,6 +238,12 @@ server.registerTool(
     const doc = await readDocFile('docs/AI_RUNBOOKS.md');
     if (doc === null) return text(missing('docs/AI_RUNBOOKS.md', 'npm run ai:runbooks'));
     if (!task) return text(`Available runbooks:\n${bulletList(headings(doc))}`);
+    //? When more than one runbook heading matches the keyword, disambiguate
+    //? rather than silently returning the first (mirrors get_decision / who_calls
+    //? / blast_radius). A unique match falls through to sectionMatching unchanged.
+    const low = task.toLowerCase();
+    const matchingHeadings = headings(doc).filter((h) => h.toLowerCase().includes(low));
+    if (matchingHeadings.length > 1) return text(`"${task}" matches multiple runbooks — pick one (use a more specific keyword):\n${bulletList(matchingHeadings)}`);
     const section = sectionMatching(doc, task);
     return text(section ?? `No runbook matches "${task}". Available:\n${bulletList(headings(doc))}`);
   },

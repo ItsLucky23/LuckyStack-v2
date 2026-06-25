@@ -152,7 +152,7 @@ HTTP/1.1 200 OK
 Content-Type: application/json
 Cache-Control: no-store
 
-{ "apis": { "<page>": { "<name>": { "<version>": { ... } } } } }
+{ "apis": { "<page>": [ { "name": "<name>", "version": "<version>", "method": "POST", ... } ] }, "syncs": { "<page>": [ { ... } ] } }
 ```
 
 The file is streamed as-is from disk; the handler does not parse, validate, or transform it. Forward-compatible extension fields (see `./extension-fields.md`) pass through unchanged.

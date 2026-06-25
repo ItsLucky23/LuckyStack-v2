@@ -702,7 +702,17 @@ async function stageFanout(
     : await ioInstance!.in(physicalReceiver).fetchSockets();
 
   let recipientCount = 0;
+  //? Yield to the event loop periodically so a giant `receiver: 'all'` fanout
+  //? doesn't starve other requests (parity with the socket handler). Tunables
+  //? live in projectConfig.sync. Clamp to >= 1 so a misconfigured
+  //? `fanoutYieldEvery: 0` doesn't produce `n % 0 === NaN` (never truthy).
+  const { fanoutYieldEvery, fanoutYieldMs } = getProjectConfig().sync;
+  const yieldEvery = Math.max(1, fanoutYieldEvery);
+  let fanoutIterCount = 1;
   for (const tempSocket of sockets) {
+    fanoutIterCount++;
+    if (fanoutIterCount % yieldEvery === 0) { await new Promise(resolve => setTimeout(resolve, fanoutYieldMs)); }
+
     const tempToken = extractTokenFromSocket(tempSocket);
 
     //? SYNC-O10 — `token &&` guard: an anonymous (token-less) originator is

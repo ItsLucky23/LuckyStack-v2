@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT_DIR, validatePagePath } from '@luckystack/core';
+import { ROOT_DIR } from '@luckystack/core';
 import {
   isVersionedApiFileName,
   isVersionedSyncFileName,
@@ -11,6 +11,7 @@ import {
   syncMarkerSegment,
   getRoutingRules,
   isRouteTestFile,
+  validatePagePath,
 } from './routingRules';
 import { getOrInit } from './internal/mapUtils';
 

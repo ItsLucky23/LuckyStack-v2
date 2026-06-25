@@ -85,6 +85,8 @@ export type SendEmailInput =
       replyTo?: string;
       cc?: string | string[];
       bcc?: string | string[];
+      attachments?: EmailMessage['attachments'];
+      headers?: EmailMessage['headers'];
     };
 
 //? EMAIL-O4: distinguish an EXPLICITLY-requested adapter from a best-effort
@@ -202,6 +204,8 @@ const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMes
         replyTo: input.replyTo,
         cc: input.cc,
         bcc: input.bcc,
+        attachments: input.attachments,
+        headers: input.headers,
       },
     };
   }

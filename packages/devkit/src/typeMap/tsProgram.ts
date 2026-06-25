@@ -293,7 +293,8 @@ export const expandTypeDetailed = (
 
     if (objectType.objectFlags & ts.ObjectFlags.Reference) {
       const refType = objectType as ts.TypeReference;
-      const targetName = refType.target.symbol.name;
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but absent at runtime for anonymous reference targets
+      const targetName = refType.target.symbol?.name ?? '';
 
       // Array<T> / ReadonlyArray<T>  T[]
       if (targetName === 'Array' || targetName === 'ReadonlyArray') {
