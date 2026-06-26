@@ -491,7 +491,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
     //? preApiRespond may mutate the envelope or stop. A stop on an already-error
     //? response rebuilds a fresh error envelope from the signal (parity with
     //? `emitApiResult` + the HTTP path).
-    // luckystack-allow no-as-unknown: hook payload boundary — normalizeErrorResponse returns a narrower type than the preApiRespond payload shape; fix requires @luckystack/core type alignment
+    // luckystack-allow no-as-any: hook payload boundary — normalizeErrorResponse returns a narrower type than the preApiRespond payload shape; fix requires @luckystack/core type alignment
     // eslint-disable-next-line no-restricted-syntax -- hook payload boundary, mirrors handleHttpApiRequest
     const preRespond = { routeName: routeNameForHook, user, response: normalized as unknown as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } };
     const preRespondResult = await dispatchHook('preApiRespond', preRespond);
@@ -504,7 +504,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
         userLanguage: user?.language,
         fallbackHttpStatus: preRespondResult.signal.httpStatus ?? 403,
       });
-      // luckystack-allow no-as-unknown: hook payload boundary — normalizeErrorResponse is narrower than the hook payload shape; fix requires @luckystack/core type alignment
+      // luckystack-allow no-as-any: hook payload boundary — normalizeErrorResponse is narrower than the hook payload shape; fix requires @luckystack/core type alignment
       // eslint-disable-next-line no-restricted-syntax -- hook payload boundary, mirrors handleHttpApiRequest
       finalResponse = stoppedEnvelope as unknown as typeof preRespond.response;
     }
