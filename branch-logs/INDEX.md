@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | main | (none) | 2026-06-19 19:20 | active | 18 |
 | chore/package-split-prep | (none) | 2026-06-23 | active (wizard+manage verified incl. verdaccio; 5 release-blockers fixed incl. Windows install) | 137 |
-| chore/overnight-audit-2026-06-24 | (none) | 2026-06-25 | active (rounds 1-3: ~51 reviewed fixes incl. OAuth-allowRegistration HIGH + devkit Windows-prisma; matrix/verdaccio/runtime green; 23 hi/med report-only remain) | 4 |
+| chore/overnight-audit-2026-06-24 | (none) | 2026-06-26 | active (rounds 1-4: ~51 reviewed fixes + round-4 verify-and-fix of the 16 to_fix items → 8 new fixes [api#1/#6/#27, sync#1/#2, presence#3/#4, error-tracking#7, router#8, server#5], 11 already-fixed in tree, 1 flagged-fork [devkit routeNamingValidation]; + ADR 0016 single-source ports + opt-in router topology) | 6 |
 
 ## Columns
 
