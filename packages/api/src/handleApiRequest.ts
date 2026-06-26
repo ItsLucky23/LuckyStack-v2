@@ -42,12 +42,12 @@ interface ApiErrorResponse {
   errorParams?: { key: string; value: string | number | boolean; }[];
 }
 
-type EmitApiError = (args: { response: ApiErrorResponse; fallbackHttpStatus?: number; }) => void;
+type EmitApiError = (args: { response: ApiErrorResponse; fallbackHttpStatus?: number; }) => Promise<void>;
 
-const validateApiMessage = ({ msg, emitApiError }: {
+const validateApiMessage = async ({ msg, emitApiError }: {
   msg: apiMessage;
   emitApiError: EmitApiError;
-}): { name: string; data: Record<string, unknown> } | null => {
+}): Promise<{ name: string; data: Record<string, unknown> } | null> => {
   const { name, data, responseIndex } = msg;
 
   //? Drop a message with no usable response channel. Written as a single
@@ -68,7 +68,7 @@ const validateApiMessage = ({ msg, emitApiError }: {
   //? object.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: msg arrives from an untyped socket frame
   if (!name || !data || typeof name != 'string' || typeof data != 'object' || Array.isArray(data)) {
-    emitApiError({
+    await emitApiError({
       response: { status: 'error', errorCode: 'api.invalidRequest' },
       fallbackHttpStatus: 400,
     });
@@ -78,12 +78,12 @@ const validateApiMessage = ({ msg, emitApiError }: {
   return { name, data: data as Record<string, unknown> };
 };
 
-const checkApiAuth = ({ apiEntry, user, name, emitApiError }: {
+const checkApiAuth = async ({ apiEntry, user, name, emitApiError }: {
   apiEntry: RuntimeApiEntry;
   user: SessionLayout | null;
   name: string;
   emitApiError: EmitApiError;
-}): boolean => {
+}): Promise<boolean> => {
   if (apiEntry.auth.login && !user?.id) {
     if (shouldLogDev()) {
       getLogger().warn(`api: ${name} requires login`, { route: name });
@@ -94,7 +94,7 @@ const checkApiAuth = ({ apiEntry, user, name, emitApiError }: {
       userId: null,
       transport: 'socket',
     });
-    emitApiError({
+    await emitApiError({
       response: { status: 'error', errorCode: 'auth.required' },
       fallbackHttpStatus: 401,
     });
@@ -114,7 +114,7 @@ const checkApiAuth = ({ apiEntry, user, name, emitApiError }: {
       transport: 'socket',
       failedKey: authResult.errorCode,
     });
-    emitApiError({
+    await emitApiError({
       response: {
         status: 'error',
         // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- empty string errorCode must still fall back
@@ -161,7 +161,7 @@ const runSocketRateLimits = async ({ apiEntry, resolvedName, token, socket, user
   });
 
   if (!result.allowed) {
-    emitApiError({
+    await emitApiError({
       response: {
         status: 'error',
         errorCode: result.errorCode ?? 'api.rateLimitExceeded',
@@ -472,32 +472,66 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   // eslint-disable-next-line prefer-const -- captured by emitApiError closure; assigned later after apiEntry lookup
   let currentPerRouteFormatter: ErrorFormatter | undefined;
 
-  const emitApiError: EmitApiError = ({ response, fallbackHttpStatus }) => {
+  //? API-O6 parity — socket ERROR responses now run the SAME respond-hook chain
+  //? as success responses (`emitApiResult`) and as the HTTP transport: preApiRespond
+  //? (may rewrite/stop) → transformApiResponse (mutate) → error formatter → emit →
+  //? postApiRespond (observe). Previously `emitApiError` emitted directly, so
+  //? consumer respond hooks (PII redaction, response signing, audit logging) never
+  //? fired on auth / rate-limit / validation / not-found rejections over WebSocket —
+  //? a parity gap with HTTP, where every response (success AND error) runs them.
+  const emitApiError: EmitApiError = async ({ response, fallbackHttpStatus }) => {
     const normalized = normalizeErrorResponse({
       response,
       preferredLocale,
       userLanguage: user?.language,
       fallbackHttpStatus,
     });
+    const routeNameForHook = currentRouteName ?? 'api/unknown';
+
+    //? preApiRespond may mutate the envelope or stop. A stop on an already-error
+    //? response rebuilds a fresh error envelope from the signal (parity with
+    //? `emitApiResult` + the HTTP path).
+    // luckystack-allow no-as-unknown: hook payload boundary — normalizeErrorResponse returns a narrower type than the preApiRespond payload shape; fix requires @luckystack/core type alignment
+    // eslint-disable-next-line no-restricted-syntax -- hook payload boundary, mirrors handleHttpApiRequest
+    const preRespond = { routeName: routeNameForHook, user, response: normalized as unknown as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } };
+    const preRespondResult = await dispatchHook('preApiRespond', preRespond);
+
+    let finalResponse = preRespond.response;
+    if (preRespondResult.stopped) {
+      const stoppedEnvelope = normalizeErrorResponse({
+        response: { status: 'error', errorCode: preRespondResult.signal.errorCode },
+        preferredLocale,
+        userLanguage: user?.language,
+        fallbackHttpStatus: preRespondResult.signal.httpStatus ?? 403,
+      });
+      // luckystack-allow no-as-unknown: hook payload boundary — normalizeErrorResponse is narrower than the hook payload shape; fix requires @luckystack/core type alignment
+      // eslint-disable-next-line no-restricted-syntax -- hook payload boundary, mirrors handleHttpApiRequest
+      finalResponse = stoppedEnvelope as unknown as typeof preRespond.response;
+    }
+
+    const transformPayload = { routeName: routeNameForHook, user, response: finalResponse };
+    await dispatchHook('transformApiResponse', transformPayload);
+
     const formatted = applyErrorFormatter({
-      // luckystack-allow no-as-unknown: formatter boundary — normalizeErrorResponse returns a narrower type than applyErrorFormatter accepts; fix requires @luckystack/core type alignment
-      // eslint-disable-next-line no-restricted-syntax -- formatter boundary cast, mirrors handleHttpApiRequest
-      response: normalized as unknown as Record<string, unknown> & { status?: string },
-      routeName: currentRouteName ?? 'api/unknown',
+      response: transformPayload.response,
+      routeName: routeNameForHook,
       transport: 'socket',
       userId: user?.id,
       perRouteFormatter: currentPerRouteFormatter,
     });
     socket.emit(buildApiResponseEventName(responseIndex), formatted);
+
+    //? postApiRespond is observation-only — the response is already on the wire.
+    await dispatchHook('postApiRespond', { routeName: routeNameForHook, user, response: formatted });
   };
 
-  const validated = validateApiMessage({ msg, emitApiError });
+  const validated = await validateApiMessage({ msg, emitApiError });
   if (!validated) return;
   const { name, data: normalizedData } = validated;
 
   const parsedRoute = parseTransportRouteName({ value: name, prefix: 'api' });
   if (parsedRoute.status === 'error') {
-    emitApiError({
+    await emitApiError({
       response: {
         status: 'error',
         errorCode: 'routing.invalidServiceRouteName',
@@ -539,7 +573,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
           count: logoutIpLimit + 1,
           ip: logoutIp,
         });
-        emitApiError({
+        await emitApiError({
           response: {
             status: 'error',
             errorCode: 'api.rateLimitExceeded',
@@ -574,7 +608,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   const { apisObject, functionsObject } = await getRuntimeApiMaps();
 
   if (!apisObject[resolvedName]) {
-    emitApiError({
+    await emitApiError({
       response: {
         status: 'error',
         errorCode: 'api.notFound',
@@ -616,7 +650,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   //? additional throttles. Consuming the global-IP bucket on auth-fail would
   //? allow an attacker to trigger DoS for a victim account's IP by deliberately
   //? sending bad credentials.
-  if (!checkApiAuth({ apiEntry, user, name, emitApiError })) { cleanupRequest(); return; }
+  if (!(await checkApiAuth({ apiEntry, user, name, emitApiError }))) { cleanupRequest(); return; }
 
   const rateLimitOk = await runSocketRateLimits({ apiEntry, resolvedName, token, socket, user, emitApiError });
   if (!rateLimitOk) { cleanupRequest(); return; }
@@ -631,7 +665,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
     normalizedData,
     user,
     cleanupRequest,
-    emitInvalidInputType: () => { emitApiError({
+    emitInvalidInputType: async () => { await emitApiError({
       response: { status: 'error', errorCode: 'api.invalidInputType' },
       fallbackHttpStatus: 400,
     }); },
@@ -653,7 +687,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   });
   if (execution.stopped) {
     cleanupRequest();
-    emitApiError({
+    await emitApiError({
       response: { status: 'error', errorCode: execution.errorCode },
       fallbackHttpStatus: execution.httpStatus ?? 403,
     });

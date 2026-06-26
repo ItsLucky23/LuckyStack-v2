@@ -17,7 +17,7 @@ import { warnIfInputTypeMissing } from './inputTypeWarning';
 //? Error emission + per-request cleanup are delegated to the caller's closures
 //? so the orchestrator keeps ownership of the abort/cleanup/emitError refs.
 
-type EmitInvalidInputType = () => void;
+type EmitInvalidInputType = () => void | Promise<void>;
 
 export const resolveValidationMode = (validation: RuntimeApiEntry['validation']): 'strict' | 'relaxed' => {
   if (!validation) return 'strict';
@@ -84,7 +84,7 @@ export const runSocketApiValidation = async ({
         getLogger().warn(`api: input validation failed for ${resolvedName}`, { route: resolvedName, message: inputValidation.message });
       }
       cleanupRequest();
-      emitInvalidInputType();
+      await emitInvalidInputType();
       return false;
     }
   } else {

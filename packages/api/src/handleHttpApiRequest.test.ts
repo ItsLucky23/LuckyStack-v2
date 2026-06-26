@@ -114,10 +114,6 @@ vi.mock('@luckystack/core', () => ({
   //? API-O2: loopback detection used to optionally skip the global IP bucket.
   //? Always returns false in tests so the bucket logic runs normally.
   isLoopbackIp: (_ip: string) => false,
-  //? Faithful stub: derives the token's rate-limit bucket id via SHA-256 hash,
-  //? matching the real implementation so the N-3 hash-key test can assert on it.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- mock factory cannot import from outer scope
-  deriveTokenBucketId: (token: string) => require('node:crypto').createHash('sha256').update(token).digest('hex').slice(0, 32),
 }));
 
 //? Imported AFTER the mocks are registered so the handler binds to them.
