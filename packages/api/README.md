@@ -56,7 +56,7 @@ You typically don't call these yourself — `createLuckyStackServer` does. Use t
 ## How it integrates
 
 1. **Authenticates** via `readSession` from `@luckystack/core` (the session-provider registry; `@luckystack/login` is the optional default provider, not a hard dependency) when `auth.login === true`. Auth runs first so unauthenticated probes can't enumerate routes or learn input shape from the validation message.
-2. **Rate-limits** by IP + token using `checkRateLimit` from `@luckystack/core`.
+2. **Rate-limits** with two buckets via `checkRateLimit` from `@luckystack/core`: a per-route bucket keyed on the validated `user.id` (anonymous callers fall back to the resolved IP — never the raw session token, so re-login can't reset the limit; the basis is overridable via `rateLimiting.identity`) plus a global per-IP abuse bucket.
 3. **Validates** the inbound payload against the Zod schema generated from your `ApiParams['data']` interface (via `@luckystack/devkit`).
 4. **Dispatches** the `preApiExecute` hook (may abort with a stop signal).
 5. **Calls** your `main(...)` and captures errors via `tryCatch` (auto-forwarded to Sentry).
