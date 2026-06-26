@@ -180,6 +180,29 @@ const removeLoginChange = (): Change => ({
     //? re-enable token expects — a true inverse of addLogin.ts:96-107. Two separate
     //? single-line edits produced a comment-LESS block, so a later `add login`
     //? token-missed and left credentials:false (login re-added but disabled).
+    //? A normally-scaffolded credentials app ships the COMMENT-FULL auth block
+    //? (create-luckystack-app/template/config.ts) — match it first, mirroring the
+    //? scaffolder's own prune token. tryEdit swallows a miss, so on a config that
+    //? `add login` wrote (comment-LESS) this is a no-op and the block below runs.
+    tryEdit(
+      ctx.project.root,
+      'config.ts',
+      `  auth: {
+    //? forgot-password is a @luckystack/login feature: it ONLY works with
+    //? @luckystack/login installed. 'framework' mode ALSO needs @luckystack/email
+    //? installed + a sender registered in server.ts to deliver the reset mail.
+    //? Set to 'disabled' or 'custom' to opt out.
+    forgotPassword: 'framework',
+    //? Email+password auth. Set \`false\` for an OAuth-only app — the login form
+    //? hides the email/password fields and the credentials route rejects.
+    credentials: true,
+  },`,
+      `  auth: {
+    //? authMode 'none': no built-in auth UI/flows are scaffolded.
+    forgotPassword: 'disabled',
+    credentials: false,
+  },`,
+    );
     tryEdit(
       ctx.project.root,
       'config.ts',

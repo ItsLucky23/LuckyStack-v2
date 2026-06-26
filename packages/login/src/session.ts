@@ -394,6 +394,15 @@ const deleteSession = async (
       return false;
     }
 
+    //? Delete the session KEY before untracking it from the activeUsers set. If
+    //? `delete` threw transiently AFTER untrackActive, the token would stay
+    //? readable (still in Redis) yet enumerable-as-gone — a stolen token could
+    //? ride past a sign-out-everywhere. Deleting first means a transient throw
+    //? leaves the token tracked + retried by the next `revokeUserSessions` sweep
+    //? instead of orphaning a still-readable session. `delete` was already
+    //? unconditional (ran even when `raw` was missing), so it just moves earlier.
+    await adapter.delete(token);
+
     if (raw && resolvedUserId) {
       const { getIoInstance } = await import('@luckystack/core');
       const ioInstance = getIoInstance();
@@ -420,8 +429,6 @@ const deleteSession = async (
 
       await adapter.untrackActive(resolvedUserId, token);
     }
-
-    await adapter.delete(token);
     await dispatchHook('postSessionDelete', { token, userId: resolvedUserId });
     //? Core-level observational session-lifecycle hook (CORE-40), the revoke
     //? counterpart to `sessionCreated`. Lets consumers react to a revoked
