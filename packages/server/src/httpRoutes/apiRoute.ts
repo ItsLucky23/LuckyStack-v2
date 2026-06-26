@@ -23,12 +23,27 @@ export const handleApiRoute: HttpRouteHandler = async ({
 
   const useHttpStream = shouldUseHttpStream({ acceptHeader: req.headers.accept, queryString });
   let streamClosed = false;
-  if (useHttpStream) {
+  let sseInitialized = false;
+  //? SRV-O5 — open the SSE response LAZILY (first stream chunk, or a SUCCESSFUL
+  //? final), NEVER eagerly. The eager `initSseResponse` committed HTTP 200 +
+  //? event-stream headers BEFORE `handleHttpApiRequest` ran its auth / rate-limit /
+  //? route / method gates, so an unauthenticated or rate-limited caller hitting a
+  //? streaming endpoint received 200 with the real error buried in the SSE body
+  //? instead of a 401 / 403 / 404 / 429 status. Deferring the open lets a
+  //? pre-execution gate failure (which never emits a stream chunk) fall through to
+  //? a proper-status JSON response below; the stream is only opened once the
+  //? request has actually passed the gates and is streaming or succeeding.
+  const ensureSseOpen = () => {
+    if (sseInitialized || res.writableEnded) return;
     initSseResponse(res);
+    sseInitialized = true;
+  };
+  if (useHttpStream) {
     //? SRV-O1 — mirror the four-listener pattern from syncRoute: req 'error' and
     //? 'aborted' + res 'error' must all flip streamClosed so a broken client or
     //? a write error on the ServerResponse doesn't crash the worker with an
-    //? unhandled 'error' event.
+    //? unhandled 'error' event. Attached eagerly (independent of the SSE headers)
+    //? so a client abort flips streamClosed even before the stream opens.
     const markClosed = () => {
       streamClosed = true;
     };
@@ -49,11 +64,7 @@ export const handleApiRoute: HttpRouteHandler = async ({
         message: 'api.invalidName',
         errorCode: 'api.invalidName',
       };
-      if (useHttpStream) {
-        if (!streamClosed) sendSseEvent({ res, event: 'final', data: response });
-        res.end();
-        return true;
-      }
+      //? Pre-gate failure: SSE is never opened, so emit a real 400 status.
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(400);
       res.end(JSON.stringify(response));
@@ -81,12 +92,19 @@ export const handleApiRoute: HttpRouteHandler = async ({
       stream: useHttpStream
         ? (payload) => {
             if (streamClosed || res.writableEnded) return;
+            ensureSseOpen();
             sendSseEvent({ res, event: 'stream', data: payload });
           }
         : undefined,
     });
 
-    if (useHttpStream) {
+    //? Stream the final envelope only when the request actually qualifies: SSE was
+    //? already opened mid-stream, OR the result is a success (open it now, even if
+    //? the handler emitted zero chunks). A gate-rejection result (auth / rate-limit
+    //? / not-found / method) that never opened the stream falls through to the
+    //? proper-status JSON write below instead of a 200 + SSE-wrapped error.
+    if (useHttpStream && (sseInitialized || result.status === 'success')) {
+      ensureSseOpen();
       if (!streamClosed) sendSseEvent({ res, event: 'final', data: result });
       res.end();
       return true;
@@ -118,7 +136,13 @@ export const handleApiRoute: HttpRouteHandler = async ({
     errorCode: 'api.invalidRequestFormat',
   };
 
-  if (useHttpStream) {
+  //? Only route the 500 through SSE when the response was actually committed (the
+  //? stream opened). `res.headersSent` is the authoritative signal here — in the
+  //? streaming path only `initSseResponse` writes headers before this catch — and
+  //? it sidesteps the closure-narrowing of `sseInitialized` at this scope. When
+  //? headers are still unwritten (gate/parse failure before any chunk), emit a real
+  //? 500 status rather than an SSE error event on a non-SSE response.
+  if (useHttpStream && res.headersSent) {
     if (!res.writableEnded) sendSseEvent({ res, event: 'error', data: errResponse });
     res.end();
     return true;
