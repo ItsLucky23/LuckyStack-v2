@@ -47,23 +47,6 @@ export interface RunBootHandshakeInput {
    * strictBootHandshake`.
    */
   strict?: boolean;
-  /**
-   * Override Redis connection options for the **fallback** env's Redis client.
-   * When omitted, the fallback client reuses the same options as the primary
-   * client (i.e. the current env's Redis, derived from `getRedisConnectionOptions()`).
-   *
-   * Supply this when the fallback env uses a different Redis instance
-   * (different host / port / password / TLS config) from the current env.
-   * Without it, a cross-credential mismatch will cause the Redis compare step
-   * to fail or silently succeed against the wrong instance — logged as a
-   * warning (or thrown in strict mode) via `reportIssue`.
-   */
-  fallbackRedisOptions?: {
-    host?: string;
-    port?: number;
-    password?: string;
-    tls?: boolean;
-  };
 }
 
 interface FallbackHealthResponse {
@@ -156,13 +139,6 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   //? Centralized connection options so a Redis env-rename touches one file
   //? in core, not both core and router.
   const redisOptions = getRedisConnectionOptions();
-  //? When the fallback env uses a different Redis instance, the caller supplies
-  //? `fallbackRedisOptions` to override. Without it we reuse `redisOptions`
-  //? (current-env Redis) — this is correct when both envs share one Redis, but
-  //? will produce a misleading mismatch report when they use separate instances.
-  const fallbackRedisOptions = input.fallbackRedisOptions
-    ? { ...redisOptions, ...input.fallbackRedisOptions }
-    : redisOptions;
 
   const client = new Redis({ ...redisOptions, lazyConnect: true });
   //? An ioredis client that emits 'error' with no listener throws as an
@@ -211,18 +187,21 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
     return;
   }
 
-  //? Write our UUID, then read fallback's UUID (should be fallback's own boot
-  //? value). If the two envs truly share Redis, fallback's key would be
-  //? readable from here too. Check that separately.
-  const fallbackClient = new Redis({ ...fallbackRedisOptions, lazyConnect: true });
-  fallbackClient.on('error', (err) => {
-    getLogger().error('[router] boot handshake fallback Redis error', err);
+  //? Read the fallback env's boot key from the ROUTER's OWN Redis (`redisOptions`),
+  //? NOT the fallback's. The detection question is "is the fallback's reported
+  //? bootUuid visible in MY Redis?" — i.e. do the two envs truly share ONE Redis.
+  //? Reading the key from the fallback's own Redis would trivially find the value
+  //? the fallback just wrote there and ALWAYS "verify", silently defeating the
+  //? cross-cluster ("two Redis URLs that both respond") detection this exists for.
+  const compareClient = new Redis({ ...redisOptions, lazyConnect: true });
+  compareClient.on('error', (err) => {
+    getLogger().error('[router] boot handshake compare Redis error', err);
   });
   const [compareError, localReadOfFallbackKey] = await tryCatch(async () => {
-    await fallbackClient.connect();
-    return await fallbackClient.get(`${BOOT_KEY_PREFIX}${input.fallbackEnvKey}`);
+    await compareClient.connect();
+    return await compareClient.get(`${BOOT_KEY_PREFIX}${input.fallbackEnvKey}`);
   });
-  fallbackClient.disconnect();
+  compareClient.disconnect();
 
   if (compareError) {
     reportIssue(`boot handshake: Redis compare failed: ${compareError.message}`);
