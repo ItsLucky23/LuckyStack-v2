@@ -11,7 +11,7 @@ import { extractTokenFromSocket, getIoInstance, socketEventNames } from '@luckys
 import { getPresenceConfig } from '../presenceConfig';
 import { informRoomPeers } from './peerNotifier';
 import { registerActivityEvent, type ActivitySample } from '../activityEvents';
-import { getLastActivity } from './activitySampler';
+import { getSharedLastActivity } from './activitySampler';
 import { lastAfkFireByToken } from './state';
 
 const fireAfkPresence = async (sample: ActivitySample): Promise<void> => {
@@ -25,11 +25,17 @@ const fireAfkPresence = async (sample: ActivitySample): Promise<void> => {
   const afkTimeoutMs = getPresenceConfig().afkTimeoutMs;
   const io = getIoInstance();
   if (io) {
-    for (const [otherId, otherSocket] of io.sockets.sockets) {
-      if (otherId === sample.socketId) continue;
+    //? Adapter-aware: `fetchSockets()` spans ALL instances (Redis adapter) and
+    //? `getSharedLastActivity` reads the cross-instance Redis mirror — so a fresh
+    //? tab for this user on ANOTHER instance correctly suppresses the AFK fire.
+    //? The old local-only `io.sockets.sockets` walk missed cross-instance tabs and
+    //? produced a false `userAfk` for a multi-instance user (PRESENCE-5).
+    const allSockets = await io.fetchSockets();
+    for (const otherSocket of allSockets) {
+      if (otherSocket.id === sample.socketId) continue;
       //? Only check sockets that belong to the same user (same session token).
       if (extractTokenFromSocket(otherSocket) !== sample.token) continue;
-      const otherActivity = getLastActivity(otherId);
+      const otherActivity = await getSharedLastActivity(otherSocket.id);
       if (otherActivity !== undefined && sample.now - otherActivity <= afkTimeoutMs) {
         //? Another tab for this user is still active — do not mark AFK overall.
         return;

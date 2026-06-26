@@ -31,6 +31,11 @@ vi.mock('@luckystack/core', async (importOriginal) => ({
   extractTokenFromSocket: (socket: unknown) => extractTokenFromSocketMock(socket),
   getIoInstance: () => ioStub,
   getLogger: () => ({ debug: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn() }),
+  //? `getRoomPresence` now resolves each peer's userId via readSession and reads
+  //? the cross-instance activity mirror via the `redis` proxy — stub both so the
+  //? snapshot resolves without touching a real session store / Redis connection.
+  readSession: vi.fn(async () => null),
+  redis: { get: vi.fn(async () => null), set: vi.fn(async () => 'OK'), del: vi.fn(async () => 1) },
 }));
 
 import { getRoomPresence } from './activitySampler';

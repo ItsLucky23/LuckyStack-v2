@@ -865,7 +865,6 @@ async function runSyncFanout({
   cleanupRequest,
   ignoreSelf,
   token,
-  cb,
   syncObject,
   functionsObject,
 }: {
@@ -1023,7 +1022,13 @@ async function runSyncFanout({
         serverOutput: effectiveServerOutput,
         receiver,
         resolvedName,
-        callbackKey: cb,
+        //? Server-authoritative callback key (SYNC security): route recipient
+        //? callbacks off the SERVER-resolved route, never the client-supplied
+        //? `cb`. Otherwise a room co-member could send a legit `name` but a `cb`
+        //? for a DIFFERENT route and fire other clients' handlers for that route
+        //? (cross-route callback spoofing). The client `cb` stays only for the
+        //? originator's own cancel handshake.
+        callbackKey: resolvedName,
         transport: 'socket',
         handlerName: 'handleSyncRequest',
         logLabel: 'sync',
@@ -1041,7 +1046,10 @@ async function runSyncFanout({
       //? No _client file — broadcast serverOutput (or the per-recipient
       //? override when the preSyncRecipient hook supplied one) to this socket.
       const result = {
-        cb,
+        //? Server-authoritative cb (SYNC security): emit the SERVER-resolved
+        //? route so a spoofed client `cb` can't route this payload to a different
+        //? route's callbacks on recipients. Mirrors the _client-path callbackKey.
+        cb: resolvedName,
         fullName: resolvedName,
         serverOutput: effectiveServerOutput,
         clientOutput: {},

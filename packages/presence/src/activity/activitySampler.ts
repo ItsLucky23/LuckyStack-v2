@@ -11,7 +11,7 @@
 
 import { Server } from 'socket.io';
 
-import { extractTokenFromSocket, formatRoomName, getIoInstance, getLogger, tryCatchSync } from '@luckystack/core';
+import { extractTokenFromSocket, formatKey, formatRoomName, getIoInstance, getLogger, readSession, redis, tryCatch, tryCatchSync } from '@luckystack/core';
 
 import { getPresenceConfig } from '../presenceConfig';
 import { clearActivityThrottle, dispatchActivitySample } from '../activityEvents';
@@ -19,9 +19,35 @@ import { lastAfkFireByToken } from './state';
 
 const lastActivityBySocket = new Map<string, number>();
 
+//? Per-socket last-activity is ALSO mirrored to Redis so OTHER instances can read
+//? it — the local Map only sees this node's sockets, but the multi-tab AFK guard
+//? (PRESENCE-5) + `getRoomPresence` remote peers need a cross-instance view. The
+//? TTL is a backstop for a crashed instance (refreshed on every heartbeat; deleted
+//? on disconnect); it is generous enough that an idle socket's timestamp survives
+//? long enough to be read as AFK rather than vanishing.
+const activityKey = (socketId: string): string => formatKey('-presence-activity', socketId);
+const activityTtlMs = (): number => Math.max(getPresenceConfig().afkTimeoutMs, 60_000) * 2;
+
 /** Mark a socket as active right now. Called on connect + every `activity` heartbeat. */
 export const recordActivity = (socketId: string): void => {
-  lastActivityBySocket.set(socketId, Date.now());
+  const now = Date.now();
+  lastActivityBySocket.set(socketId, now);
+  //? Fire-and-forget cross-instance mirror; a Redis blip must never break the
+  //? local heartbeat path (the local Map still works single-instance).
+  void tryCatch(() => redis.set(activityKey(socketId), String(now), 'PX', activityTtlMs()));
+};
+
+/**
+ * Cross-instance last-activity read: the local Map first (this node's sockets),
+ * else the Redis mirror (a socket living on another instance). Returns ms-epoch
+ * or `undefined`. Used by the multi-tab AFK guard + `getRoomPresence`.
+ */
+export const getSharedLastActivity = async (socketId: string): Promise<number | undefined> => {
+  const local = lastActivityBySocket.get(socketId);
+  if (local !== undefined) return local;
+  const [, raw] = await tryCatch(() => redis.get(activityKey(socketId)));
+  const parsed = typeof raw === 'string' ? Number(raw) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : undefined;
 };
 
 /**
@@ -32,6 +58,8 @@ export const recordActivity = (socketId: string): void => {
  */
 export const clearActivity = (socketId: string, token?: string): void => {
   lastActivityBySocket.delete(socketId);
+  //? Drop the Redis mirror too — a disconnected socket is no longer active anywhere.
+  void tryCatch(() => redis.del(activityKey(socketId)));
   //? Purge the socket's refractory-throttle timestamps so the `activityEvents`
   //? `lastFired` map doesn't leak one entry per throttled event per socket forever.
   clearActivityThrottle(socketId);
@@ -62,7 +90,9 @@ export const getLastActivity = (socketId: string): number | undefined =>
 /** A single peer in a room-presence snapshot (see `getRoomPresence`). */
 export interface RoomPresenceEntry {
   socketId: string;
-  token: string | null;
+  //? The peer's userId (resolved from its session). NEVER the raw session token
+  //? — a token is a usable credential and must not leak into a public snapshot.
+  userId: string | null;
   /** Last recorded activity (ms epoch), or `undefined` if the socket is remote or has never been recorded. */
   lastActivity: number | undefined;
   /**
@@ -106,29 +136,25 @@ export const getRoomPresence = async (
   const physicalRoom = formatRoomName(roomCode, { purpose: 'presence', userId: null });
   const roomSockets = await io.in(physicalRoom).fetchSockets();
 
-  return roomSockets.map((socket) => {
-    //? `lastActivityBySocket` is local-only. If this socket is not in the local
-    //? io.sockets.sockets Map it lives on a different instance and we have no
-    //? activity record for it — return `afk: 'unknown'` instead of the
-    //? misleading `false` that a missing Map entry would produce.
-    const isLocal = io.sockets.sockets.has(socket.id);
-    if (!isLocal) {
-      return {
-        socketId: socket.id,
-        token: extractTokenFromSocket(socket),
-        lastActivity: undefined,
-        afk: 'unknown' as const,
-      };
-    }
-    const lastActivity = lastActivityBySocket.get(socket.id);
-    const afk = afkTimeoutMs > 0 && lastActivity !== undefined && now - lastActivity > afkTimeoutMs;
+  return Promise.all(roomSockets.map(async (socket) => {
+    //? Resolve the peer's userId from its session — never expose the raw token.
+    const peerSession = await readSession(extractTokenFromSocket(socket));
+    const userId = peerSession?.id ?? null;
+    //? Cross-instance activity read (local Map first, else the Redis mirror), so a
+    //? peer on ANOTHER instance gets a real AFK verdict instead of always
+    //? `'unknown'`. `undefined` (no activity recorded anywhere — a never-recorded
+    //? or long-expired socket) still maps to `'unknown'`.
+    const lastActivity = await getSharedLastActivity(socket.id);
+    const afk = lastActivity === undefined
+      ? ('unknown' as const)
+      : (afkTimeoutMs > 0 && now - lastActivity > afkTimeoutMs);
     return {
       socketId: socket.id,
-      token: extractTokenFromSocket(socket),
+      userId,
       lastActivity,
       afk,
     };
-  });
+  }));
 };
 
 let samplerHandle: ReturnType<typeof setInterval> | null = null;
