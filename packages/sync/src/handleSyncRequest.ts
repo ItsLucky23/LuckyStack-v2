@@ -35,7 +35,6 @@ import {
   setCurrentErrorTrackerIdentity,
   registerSyncAbortController,
   unregisterSyncAbortController,
-  deriveTokenBucketId,
 } from "@luckystack/core";
 import { buildSyncStreamEmitters } from './_shared/streamEmitters';
 
@@ -63,7 +62,6 @@ type SyncErrorBuilder = (args: {
 //? other guard returns.
 const applySyncRateLimits = async ({
   resolvedName,
-  token,
   socket,
   user,
   responseIndex,
@@ -96,12 +94,15 @@ const applySyncRateLimits = async ({
   });
   const defaultApiLimit = routeLimit === undefined ? config.rateLimiting.defaultApiLimit : routeLimit;
   if (defaultApiLimit !== false && defaultApiLimit > 0) {
-    //? H-TWIN: use deriveTokenBucketId (shared with api transport) so the raw
-    //? session token never lands in a Redis key name or log line.
+    //? H-TWIN with the api transport: key the per-route bucket on the VALIDATED
+    //? user.id (never the token). A token is per-session, so token-keying let an
+    //? authenticated abuser reset the bucket by re-logging-in (new token = fresh
+    //? counter); user.id ties all of a user's sessions to one bucket. Anonymous
+    //? callers fall back to the resolved IP.
     const identityCb = config.rateLimiting.identity;
     const customIdentity = identityCb?.({ routeName: resolvedName, userId: user?.id ?? null, ip: resolvedIp, transport: 'socket' }) ?? null;
-    const requesterIdentity = customIdentity?.id ?? (token ? deriveTokenBucketId(token) : resolvedIp);
-    const keyPrefix = customIdentity?.scope ?? (token ? 'token' : 'ip');
+    const requesterIdentity = customIdentity?.id ?? user?.id ?? resolvedIp;
+    const keyPrefix = customIdentity?.scope ?? (user?.id ? 'user' : 'ip');
     const rateLimitKey = `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`;
     const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
@@ -113,14 +114,14 @@ const applySyncRateLimits = async ({
         //? Parity with the API handler: an anonymous per-route bucket is IP-keyed,
         //? so the scope is `ip` (with `route` still set to mark it a per-route
         //? bucket vs the global `:sync:all` IP bucket), never `route`.
-        scope: token ? 'user' : 'ip',
+        scope: user?.id ? 'user' : 'ip',
         key: rateLimitKey,
         limit: defaultApiLimit,
         windowMs: config.rateLimiting.windowMs,
         count: defaultApiLimit + 1,
         route: resolvedName,
         userId: user?.id,
-        ip: token ? undefined : resolvedIp,
+        ip: user?.id ? undefined : resolvedIp,
       });
       if (typeof responseIndex === 'number') {
         socket.emit(buildSyncResponseEventName(responseIndex), buildSyncError({

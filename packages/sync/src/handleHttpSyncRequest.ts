@@ -22,7 +22,6 @@ import {
   getLogger,
   runWithErrorTrackerIdentityScope,
   setCurrentErrorTrackerIdentity,
-  deriveTokenBucketId,
   isLoopbackIp,
   extractLanguageFromHeader,
 } from '@luckystack/core';
@@ -86,7 +85,6 @@ type HttpSyncErrorBuilder = (args: {
 //? return it directly), or null when both buckets passed.
 const applyHttpSyncRateLimits = async ({
   resolvedName,
-  token,
   requesterIp,
   user,
   buildSyncError,
@@ -105,8 +103,9 @@ const applyHttpSyncRateLimits = async ({
   const config = getProjectConfig();
   const effectiveSyncLimit = routeLimit === undefined ? config.rateLimiting.defaultApiLimit : routeLimit;
   if (effectiveSyncLimit !== false && effectiveSyncLimit > 0) {
-    //? H-TWIN: use deriveTokenBucketId (shared with api transport) so the raw
-    //? session token never lands in a Redis key name or log line.
+    //? H-TWIN with the api transport: key the per-route bucket on the VALIDATED
+    //? user.id (never the token) so an authenticated abuser can't reset the bucket
+    //? by re-logging-in. Anonymous callers fall back to the IP ('unknown' sentinel).
     const identityCb = config.rateLimiting.identity;
     const customIdentity = identityCb?.({ routeName: resolvedName, userId: user?.id ?? null, ip: requesterIp ?? '', transport: 'http' }) ?? null;
     //? SYNC-O11 — use 'unknown' (not 'anonymous') when requesterIp is absent,
@@ -114,8 +113,8 @@ const applyHttpSyncRateLimits = async ({
     //? all unauthenticated callers with no IP into one shared per-route bucket;
     //? 'unknown' is the established sentinel that also signals a missing IP to
     //? hook subscribers (rateLimitExceeded ip field).
-    const requesterIdentity = customIdentity?.id ?? (token ? deriveTokenBucketId(token) : (requesterIp ?? 'unknown'));
-    const keyPrefix = customIdentity?.scope ?? (token ? 'token' : 'ip');
+    const requesterIdentity = customIdentity?.id ?? user?.id ?? (requesterIp ?? 'unknown');
+    const keyPrefix = customIdentity?.scope ?? (user?.id ? 'user' : 'ip');
     const rateLimitKey = `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`;
     const { allowed, resetIn } = await checkRateLimit({
       key: rateLimitKey,
@@ -127,14 +126,14 @@ const applyHttpSyncRateLimits = async ({
         //? Parity with the API handler: an anonymous per-route bucket is IP-keyed,
         //? so the scope is `ip` (with `route` still set to mark it a per-route
         //? bucket vs the global `:sync:all` IP bucket), never `route`.
-        scope: token ? 'user' : 'ip',
+        scope: user?.id ? 'user' : 'ip',
         key: rateLimitKey,
         limit: effectiveSyncLimit,
         windowMs: config.rateLimiting.windowMs,
         count: effectiveSyncLimit + 1,
         route: resolvedName,
         userId: user?.id,
-        ip: token ? undefined : requesterIp,
+        ip: user?.id ? undefined : requesterIp,
       });
       return buildSyncError({
         response: {
