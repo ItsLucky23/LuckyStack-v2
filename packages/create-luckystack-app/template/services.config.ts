@@ -1,6 +1,11 @@
-//? Services topology. A simple single-service app maps `system` -> 'root'
-//? (i.e. the project's `src/_api/` and `src/_sync/`). Add more services and
-//? presets later if you split into multi-instance deployments.
+//? Services topology — added by `npx luckystack add router`. A single-service app
+//? maps `system` -> 'root' (the project's `src/_api` + `src/_sync`) and bundles it
+//? into one `default` preset, so a bare `npm run server` (prod) keeps working.
+//? Scale to multi-instance by adding services + a preset per backend bundle, then
+//? run `npm run server -- <preset>`:
+//?
+//?   services: { system: { source: 'root' }, vehicles: { source: 'vehicles' } },
+//?   presets:  { default: { services: ['system'] }, fleet: { services: ['vehicles'] } },
 
 import { registerServicesConfig } from '@luckystack/core';
 
@@ -25,7 +30,7 @@ const servicesConfig: ServicesConfig = {
     system: { source: 'root' },
   },
   presets: {
-    'core-preset': {
+    default: {
       description: 'Default bundle — every API/sync route in src/_api and src/_sync.',
       services: ['system'],
     },

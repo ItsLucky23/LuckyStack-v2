@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createHash } from 'node:crypto';
 
 //? Unit tests for the @luckystack/api HTTP transport adapter. The handler is
 //? built around DI registry seams in @luckystack/core / @luckystack/login, so
@@ -299,6 +298,8 @@ describe('handleHttpApiRequest — rate limiting', () => {
     //? `:api:all` IP bucket. The old code mislabeled this anon bucket as `route`.
     registerRoute({ rateLimit: 5 });
     seam.rateLimitResults = [{ allowed: false, resetIn: 30 }];
+    //? Anonymous: no token resolves no session, so the per-route bucket is IP-keyed.
+    seam.session = null;
 
     const result = await handleHttpApiRequest({ ...baseParams(), token: null, requesterIp: '9.9.9.9' });
 
@@ -313,22 +314,22 @@ describe('handleHttpApiRequest — rate limiting', () => {
     expect(dispatchHookMock).not.toHaveBeenCalledWith('rateLimitExceeded', expect.objectContaining({ scope: 'route' }));
   });
 
-  it('keys the per-route bucket on a SHA-256 hash of the token, never the raw token (N-3)', async () => {
+  it('keys the per-route bucket on the validated user.id, never the token (N-3)', async () => {
     registerRoute({ rateLimit: 5 });
 
     await handleHttpApiRequest(baseParams());
 
     const routeBucketCall = checkRateLimitMock.mock.calls.find(([args]) =>
       typeof (args as { key?: string }).key === 'string' &&
-      (args as { key: string }).key.startsWith('token:'),
+      (args as { key: string }).key.startsWith('user:'),
     );
     expect(routeBucketCall).toBeDefined();
     const key = (routeBucketCall![0] as { key: string }).key;
     //? raw token never leaks into the Redis key name…
     expect(key).not.toContain('tok-1');
-    //? …but the same token deterministically maps to the same hashed bucket.
-    const expectedHash = createHash('sha256').update('tok-1').digest('hex').slice(0, 32);
-    expect(key).toBe(`token:${expectedHash}:api:examples/doThing/v1`);
+    //? …the bucket is keyed by the validated user, so ALL of a user's sessions
+    //? share one per-route bucket — a re-login (new token) can't reset it.
+    expect(key).toBe('user:user-1:api:examples/doThing/v1');
   });
 
   it('skips the per-route bucket entirely when rateLimit is explicitly false', async () => {

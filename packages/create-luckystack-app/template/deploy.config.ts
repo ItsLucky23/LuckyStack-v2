@@ -1,8 +1,9 @@
-//? Deploy-time topology. Single-instance projects can leave `environments`
-//? empty — only `resources` is consumed by the framework's
-//? synchronizedEnvHashes check. `environments` / `routing` / `development`
-//? are read by the optional `@luckystack/router` for split/multi-instance
-//? deployments; populate them when you add a router.
+//? Deploy-time topology — added by `npx luckystack add router`. Single-instance
+//? projects can leave `environments` empty — only `resources` is consumed by the
+//? framework's synchronizedEnvHashes check. `environments` / `routing` /
+//? `development` are read by `@luckystack/router` for split/multi-instance
+//? deployments; populate them (per-service URL bindings, the router listen port
+//? via `routing.defaultRouterPort`, an optional `fallback` env) when you scale out.
 
 import { registerDeployConfig } from '@luckystack/core';
 
@@ -42,6 +43,8 @@ export interface DeployConfig<TEnvKey extends string = string> {
     missingServiceErrorCode?: string;
     enableUnhealthyFallback?: boolean;
     strictBootHandshake?: boolean;
+    /** TCP port the router listens on (default 4000). Also overridable via ROUTER_PORT env. */
+    defaultRouterPort?: number;
   };
   development?: {
     enableFallbackRouting?: boolean;
@@ -63,8 +66,16 @@ const deployConfig: DeployConfig = {
     },
   },
   //? Single-instance default: no cross-environment routing. Add entries here
-  //? (development / staging / production with their resource + service URL
-  //? bindings) once you front the app with @luckystack/router.
+  //? (development / staging / production with their resource + per-service URL
+  //? bindings) once you run the app behind `npm run router`. Example:
+  //?
+  //?   environments: {
+  //?     development: {
+  //?       redis: 'redisShared', mongo: 'mongoShared',
+  //?       bindings: { system: 'http://localhost:4100' },
+  //?     },
+  //?   },
+  //?   routing: { defaultRouterPort: 4000 },
   environments: {},
 };
 

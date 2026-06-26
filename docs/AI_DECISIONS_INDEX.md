@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (14)
+## Decisions (15)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -27,6 +27,7 @@
 | 0013 | Admit origin-less Socket.io handshakes at the CORS layer (fixes 400 code:3 in dev + prod-with-router) | 🟢 accepted | security, sockets, cors, dev-experience, regression | — | `docs/decisions/0013-admit-originless-socketio-handshake.md` |
 | 0014 | CLI `manage` becomes a step-based reconfiguration wizard with consequence previews | 🟢 accepted | cli, scaffolder, dx, env, oauth | — | `docs/decisions/0014-cli-reconfigure-wizard.md` |
 | 0015 | Per-account login lockout uses a dual counter (per-IP + cross-IP) to actually stop distributed credential stuffing | 🟢 accepted | security, login, dos, brute-force | — | `docs/decisions/0015-login-lockout-dual-counter-cross-ip.md` |
+| 0016 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0016-single-source-ports-and-optin-router-topology.md` |
 
 ## Summaries
 
@@ -141,3 +142,11 @@ The CORS `origin` callback now **admits origin-less requests unconditionally** (
 Maintain **TWO** counters and lock when **EITHER** trips:
 
 → `docs/decisions/0015-login-lockout-dual-counter-cross-ip.md`
+
+### 0016 — Single-source frontend/backend ports + router topology config is opt-in (not shipped by default)
+
+**0016** · accepted · tags: config, ports, scaffold, cli, router, packaging, dx · 2026-06-26
+
+*1. A pure-data `config.ports.ts` is the single source of truth for ports.** It exports `const ports = { frontend, backend }` with **no side-effects**. `config.ts` re-exports `ports`, and `vite.config.ts` imports `config.ports.ts` *directly** — so Vite reads the ports without evaluating `config.ts`'s side-effects (`registerProjectConfig`, server-only core imports). `server.ts` passes `defaultPort: ports.backend` to `bootstrapLuckyStack`.
+
+→ `docs/decisions/0016-single-source-ports-and-optin-router-topology.md`

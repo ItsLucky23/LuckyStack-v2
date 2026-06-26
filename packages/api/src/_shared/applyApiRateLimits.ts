@@ -1,6 +1,5 @@
 import type { BaseSessionLayout as SessionLayout } from '@luckystack/core';
 import { checkRateLimit, getProjectConfig, dispatchHook, getLogger } from '@luckystack/core';
-import { deriveTokenBucketId } from './rateLimitIdentity';
 import { shouldLogDev } from './logFlags';
 
 //? API-O8 — shared rate-limit apply helper for BOTH API transports (socket +
@@ -39,7 +38,6 @@ export interface ApplyApiRateLimitsResult {
  */
 export const applyApiRateLimits = async ({
   resolvedIp,
-  token,
   user,
   resolvedName,
   rateLimit,
@@ -52,8 +50,12 @@ export const applyApiRateLimits = async ({
   if (effectiveApiLimit !== false && effectiveApiLimit > 0) {
     const identityCb = config.rateLimiting.identity;
     const customIdentity = identityCb?.({ routeName: resolvedName, userId: user?.id ?? null, ip: resolvedIp, transport }) ?? null;
-    const requesterIdentity = customIdentity?.id ?? (token ? deriveTokenBucketId(token) : resolvedIp);
-    const keyPrefix = customIdentity?.scope ?? (token ? 'token' : 'ip');
+    //? Per-route bucket keyed on the VALIDATED user.id (never the token): a token
+    //? is per-session, so token-keying let an authenticated abuser reset their
+    //? bucket by re-logging-in (new token = fresh counter). user.id ties all of a
+    //? user's sessions to one bucket; anonymous callers fall back to the IP.
+    const requesterIdentity = customIdentity?.id ?? user?.id ?? resolvedIp;
+    const keyPrefix = customIdentity?.scope ?? (user?.id ? 'user' : 'ip');
     const rateLimitKey = `${keyPrefix}:${requesterIdentity}:api:${resolvedName}`;
 
     const { allowed, resetIn } = await checkRateLimit({
@@ -69,14 +71,15 @@ export const applyApiRateLimits = async ({
       //? bucket is IP-keyed, so it is `ip` (with `route` still set to mark it
       //? a per-route bucket vs the global `:api:all` IP bucket), never `route`.
       void dispatchHook('rateLimitExceeded', {
-        scope: token ? 'user' : 'ip',
+        scope: user?.id ? 'user' : 'ip',
         key: rateLimitKey,
         limit: effectiveApiLimit,
         windowMs: config.rateLimiting.windowMs,
         count: effectiveApiLimit + 1,
         route: resolvedName,
         userId: user?.id,
-        ip: token ? undefined : resolvedIp,
+        //? IP only for an IP-keyed (anonymous) bucket; a user-keyed bucket omits it.
+        ip: user?.id ? undefined : resolvedIp,
       });
       if (shouldLogDev()) {
         getLogger().warn(`api: rate limit exceeded for ${resolvedName}`, { route: resolvedName, key: rateLimitKey, transport });
