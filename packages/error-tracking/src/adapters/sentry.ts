@@ -17,6 +17,7 @@ import {
   getCurrentErrorTrackerIdentity,
   loadPeer,
   sanitizeErrorString,
+  sanitizeErrorStrings,
   type ErrorTracker,
   type ErrorTrackerEvent,
   type ErrorTrackerUser,
@@ -84,12 +85,22 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
     captureException(error, context) {
       const resolved = resolveExceptionEvent(options.beforeSend, error, context);
       if (!resolved) return;
-      //? A NON-Error throw (e.g. `throw 'auth failed token=abc'`) is handed to the
-      //? SDK as a message string with NO scrubbing (the Error-string scrubber only
-      //? handles Error objects, and Sentry's request-scrub beforeSend never touches
-      //? the value). Scrub the stringified value at the boundary so an interpolated
-      //? secret can't reach Sentry (ET-O2). Real Error objects pass through intact.
-      const payload = resolved.error instanceof Error ? resolved.error : sanitizeErrorString(String(resolved.error));
+      //? Scrub secrets interpolated into the error before it reaches Sentry (ET-O2,
+      //? parity with the Datadog/PostHog adapters). A real Error gets its message +
+      //? stack rebuilt scrubbed onto a same-named Error (so Sentry's type-based
+      //? grouping is preserved); a NON-Error throw (e.g. `throw 'auth token=abc'`)
+      //? is scrubbed as a string. Previously a real Error passed through with its
+      //? RAW message/stack — an interpolated secret reached Sentry unscrubbed.
+      let payload: Error | string;
+      if (resolved.error instanceof Error) {
+        const scrubbed = sanitizeErrorStrings(resolved.error);
+        const rebuilt = new Error(scrubbed?.message ?? resolved.error.message);
+        rebuilt.name = resolved.error.name;
+        rebuilt.stack = scrubbed?.stack ?? resolved.error.stack;
+        payload = rebuilt;
+      } else {
+        payload = sanitizeErrorString(String(resolved.error));
+      }
       const hint = withIdentity(resolved.context ? { extra: resolved.context } : undefined);
       if (hint) {
         sentry.captureException(payload, hint);
