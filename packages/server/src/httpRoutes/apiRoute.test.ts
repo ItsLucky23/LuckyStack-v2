@@ -78,6 +78,7 @@ const makeReqRes = (): { args: Parameters<HttpRouteHandler>[0]; cap: FakeResCapt
     method: 'POST',
     params: {},
     requestId: 'req-1',
+  // luckystack-allow no-as-any: test fake-req/res boundary — supplies only the members handleApiRoute touches, not the full IncomingMessage/ServerResponse surface (mirrors healthRoutes.test.ts)
   } as unknown as Parameters<HttpRouteHandler>[0];
   return { args, cap };
 };
