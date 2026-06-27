@@ -118,3 +118,24 @@ User asked to verify + fix everything real from the ~43 high/medium report-only 
 **User prompt:** (after I explained the finding) "ja fix maar".
 
 **What I did:** `template/src/_api/session_v1.ts` (`system/session`, `auth.login:false`) returned `result: user` verbatim, leaking the raw session `token` (HttpOnly-cookie-backed → JS must never read it; returning it defeats the XSS defence) and `csrfToken` to client JS. `main` now returns a projection stripping both (mirrors `_stripToken` in login/session.ts). Verified: only ONE copy (no cli-asset drift); no template client code reads `user.token`/`.csrfToken` (all uses are server-side `_api/` handlers via server injection). ai:lint clean. Template isn't in build:packages/lint:packages (generated imports only exist post-scaffold), so gated by the login precedent + ai:lint + logic review.
+
+## 2026-06-27 13:00 — Round-6: full report-only backlog verification sweep + safe fixes
+
+**User prompt:** "doe eens een sweep waar je alles gaat nachecken/verifiëren" → then "doe eerst alle updates die je veilig kan doen op het gebied van code en docs en stel daarna alle vragen".
+
+**Sweep:** consolidated 101 deduped report-only findings (docs + medium/high code) and verified EACH against current bytes via 8 parallel read-only Explore agents. Result: ~24 already-FIXED, ~6 false-positive, 1 intentional (#101 envNames deny-all), ~18 OPEN docs, ~30 OPEN code. Verdict map: `.runtime-test/audit-2026-06-24/sweep_verdicts.md`. Corrected my own earlier mistakes: #42 routeNamingValidation = FP (already uses routingRules wrapper); #91 sync cb = already fixed; #100 runRegisteredLayers DOES now exist (other AI added it) but was unexported → real bug.
+
+**Safe fixes (9 parallel general-purpose agents, one per package; I reviewed every diff + re-gated + fixed two agent slips):**
+- docs-ui: try-it-out CSRF header + GET/DELETE query serialization, path-disclosure resolveEnvKey; docs (extension-fields/html-generation/README flat-shape).
+- error-tracking: sentry event.message scrub, posthog context-override order; README wording.
+- router: redisHealthStore → getRedisConnectionOptions (REDIS_USER), resolveTarget percent-decode (+4 tests). [fixed agent's 3 no-negated-condition lint slips]
+- devkit: loader RoutingRules.ignore, templateInjector markers + scoped strip-regex, routeMeta markers; CLAUDE.
+- sync: broadcastStream formatRoomName (+userId threading), HTTP null/non-object data guard. [fixed agent's missing formatRoomName test-mock → 17 failures]
+- secret-manager: strip case-variant Authorization, onApplied 30s timeout; README+architecture envNames.
+- email: raw-branch attachments/headers + PII scrub. login: emailChangeConfirmPath config.
+- server: safeHeaders denylist (test-reset/session tokens). mcp: cap-before-filter (find_route+list_decisions). [fixed my own apiRoute.test.ts abortSignal mock tsc error]
+- test-runner: export runRegisteredLayers; 5 stale docs. presence/create-app: peer-dep + import + line-ref docs.
+
+**Gate:** build:packages 16/16, lint:packages clean, 923 tests pass across 12 packages. 9 per-package commits, pushed. 42 commits ahead of main, NOT merged.
+
+**DEFERRED → user decision (see next message):** #62 (adapter-only span no-op — needs new core span API), #26 (wall-clock timeout vs streaming), #76/#77 (wsProxy caps), #86 (max-rooms-per-session), #98 (contract layer mutations on auth'd sweep), #73 (router synchronized-env secrets), #93/#94 (sync ack-timeout never emits syncCancel).

@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | main | (none) | 2026-06-19 19:20 | active | 18 |
 | chore/package-split-prep | (none) | 2026-06-23 | active (wizard+manage verified incl. verdaccio; 5 release-blockers fixed incl. Windows install) | 137 |
-| chore/overnight-audit-2026-06-24 | (none) | 2026-06-27 | active (rounds 1-5 + session-leak fix: ~51 reviewed fixes + round-4 (16 to_fix → 8 new) + round-5 (🟡 backlog: chokidar-v5, HTTP abortSignal, syncRoute lazy-SSE, sync ARRAY guard, test-runner reset-token, dead-code, fuzz doc) + create-app session-endpoint token+csrf strip + regression tests; + ADR 0016 ports) | 8 |
+| chore/overnight-audit-2026-06-24 | (none) | 2026-06-27 | active (rounds 1-6: audit + 4 fix-rounds + session-leak + round-6 full report-only verification sweep [101 findings] with ~40 safe doc+code fixes across 12 packages via parallel agents; 7 design-decisions deferred to user) | 9 |
 
 ## Columns
 
