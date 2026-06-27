@@ -15,30 +15,48 @@ For the rendering pipeline that consumes these fields see `./html-generation.md`
 
 ## Top-level JSON shape
 
-The current artifact is:
+The current artifact has two top-level maps — `apis` and `syncs` — each keyed by `page`. The value under each page is a **flat array** of endpoint entries (not a nested `name → version` object). Every entry carries its own `name`, `version`, and `path`:
 
 ```jsonc
 {
   "apis": {
-    "<page>": {
-      "<name>": {
-        "<version>": {
-          "method": "POST",
-          "auth": { "login": true, "additional": [] },
-          "rateLimit": 60,
-          "input": "{ userId: string }",
-          "output": "{ status: 'success', result: { ... } }",
-          // ...optional extension fields...
-        }
+    "<page>": [
+      {
+        "page": "<page>",
+        "name": "<name>",
+        "version": "<version>",
+        "method": "POST",
+        "auth": { "login": true, "additional": [] },
+        "rateLimit": 60,
+        "input": "{ userId: string }",
+        "output": "{ status: 'success', result: { ... } }",
+        "stream": "never",
+        "path": "api/<page>/<name>/<version>",
+        "meta": { "owner": "@team", "tags": ["internal"] }
       }
-    }
+    ]
+  },
+  "syncs": {
+    "<page>": [
+      {
+        "page": "<page>",
+        "name": "<name>",
+        "version": "<version>",
+        "clientInput": "{ ... }",
+        "serverOutput": "{ ... }",
+        "clientOutput": "{ ... }",
+        "serverStream": "never",
+        "clientStream": "never",
+        "path": "sync/<page>/<name>/<version>"
+      }
+    ]
   }
 }
 ```
 
 Legacy/forward fallback: if the root object is the apis map itself (no `apis` wrapper), the renderer normalizes via `data && data.apis ? data.apis : data`. Both shapes are accepted; new code should always emit the wrapped form.
 
-The grouping levels — `page` → `name` → `version` — match the file-based routing convention (`src/<page>/_api/<name>_v<version>.ts`). The renderer iterates these in object-iteration order; the emitter is responsible for any sorting.
+The grouping is `page` → array of entries; `name`, `version`, `method`, `path`, etc. are fields ON each entry. This matches the file-based routing convention (`src/<page>/_api/<name>_v<version>.ts`). The renderer iterates the pages in object-iteration order and each page's array in array order; the emitter is responsible for any sorting.
 
 ## Core fields (always read by the renderer)
 
@@ -60,8 +78,9 @@ Unknown core fields fall through to their defaults silently; emit a missing `met
 
 The default template renders these only when present. They are additive: omit any of them and the corresponding section is left out of the expanded panel.
 
-### `meta.stream`
+### `stream` (top-level)
 
+- Where: a **top-level** field on the entry (a sibling of `input` / `output`), **not** under `meta`. The renderer reads `entry.stream` and shows the section only when the value is truthy and not the `"never"` sentinel.
 - Type: `string` (already-stringified TS shape, same convention as `input` / `output`).
 - Renders as: a `stream` detail section with the value inside a `<pre>` block.
 - Use for endpoints that stream chunks back to the client (e.g. SSE or chunked-transfer responses). The string typically describes the shape of a single chunk.
@@ -130,7 +149,7 @@ Emission steps the devkit performs per endpoint:
 1. Read the route file (`src/<page>/_api/<name>_v<version>.ts`) and extract exports: `method`, `rateLimit`, `auth`, the `ApiParams.data` interface (rendered into `input`), and the `main` return type (rendered into `output`).
 2. Stringify the types into source-faithful strings — no re-stringification, no JSON.stringify of types.
 3. Run the emitter's `emitterArtifacts` extension hooks (`packages/devkit/src/typeMap/emitterArtifacts.ts`). Hooks can attach `stream`, `owner`, `tags`, `deprecated`, or any new field.
-4. Group by `page` → `name` → `version` and write the JSON.
+4. Group by `page` (one flat array of entries per page, each entry carrying its own `name` / `version` / `path`) and write the JSON.
 
 Consumer-side extension (e.g. reading a `@deprecated` JSDoc tag and mapping it to `meta.deprecated`) belongs in an emitter artifact hook, not in `@luckystack/docs-ui`. The docs-ui package only renders what the emitter writes.
 

@@ -93,21 +93,22 @@ The embedded `<script>` runs the following sequence after the HTML parses:
 
 ### `render(data, filter)`
 
-- Accepts either `{ apis: { ... } }` (current shape) or a bare `{ [page]: { ... } }` (legacy shape) — the renderer normalizes via `data && data.apis ? data.apis : data`.
-- Iterates pages → names → versions, increments `total`, applies `passesFilter`, and accumulates HTML rows.
+- Accepts either `{ apis, syncs }` (current shape) or a bare `{ [page]: Entry[] }` (legacy shape) — the renderer normalizes via `data && data.apis ? data.apis : data` (and `data.syncs` ?? `{}`), then delegates to `buildGroups(apis, syncs, filter)`.
+- `buildGroups` walks each page's flat array of entries (and the parallel `syncs` map the same way), increments `total`, applies `passesFilter`, and accumulates HTML rows via `renderEndpoint` / `renderSyncEntry`.
 - Pages that have zero matching rows are omitted entirely (no empty `.group` boxes).
 - Writes the `summary-pill` counts (`visible of total`, `pages count`) and the joined `.group` HTML into `<div id="content">`.
-- After write, binds a `click` listener on every `.endpoint` to toggle the `.open` class and persist the state in `stateByKey` (keyed by `page + '/' + name + '@' + version`). The state is in-memory only; a hard reload resets all panels to closed.
+- Open/closed state is toggled by a single delegated `click` listener on `#content` (registered once via `bindEndpointToggles`, not re-bound per render), persisting state in `stateByKey` (keyed by `page + '/' + name + '@' + version`). The state is in-memory only; a hard reload resets all panels to closed.
 
-### `renderEndpoint(page, name, version, meta)`
+### `renderEndpoint(entry)`
 
-Each row pulls these fields from `meta`:
+Takes a single entry object and pulls these fields directly off it:
 
 - `method` — uppercased and used as both the class and the label of the pill. Falls back to `POST` when undefined.
 - `rateLimit` — `false` ⇒ "no rate limit"; `undefined` ⇒ "default rate"; number ⇒ "`<n>`/min".
 - `auth` — passed to `renderAuth`. `auth.login` becomes `"login required"`. Each `auth.additional[]` entry contributes a `"<key>"` or `"<key>=<value>"` badge (value is `JSON.stringify`'d). Empty auth renders a `"public"` badge.
 - `input`, `output` — already-stringified shapes from the type-map emitter. Rendered inside `<pre>` blocks. The fallbacks are `'{}'` and `'unknown'` respectively.
-- `stream`, `owner`, `tags`, `deprecated` — optional extension fields, rendered conditionally. See `./extension-fields.md`.
+- `stream` — a top-level field on the entry, rendered when truthy and not `'never'`.
+- `meta.owner`, `meta.tags`, `meta.deprecated` — optional fields under the entry's `meta` object, rendered conditionally. See `./extension-fields.md`.
 
 The displayed endpoint path is `/api/<page>/<name>/<version>`; the path used by the runner is `<page>/<name>/<version>` posted to `/<route>?stream=false` (no leading `/api/`).
 

@@ -152,7 +152,9 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         //? Only expose the absolute filesystem path in non-production envs to
         //? avoid leaking internal directory structure to callers (DOCSUI-8).
-        const isDev = process.env.NODE_ENV !== 'production';
+        //? Use the framework-canonical env resolver (honors LUCKYSTACK_ENV),
+        //? mirroring the production gate above — not raw process.env.NODE_ENV.
+        const isDev = resolveEnvKey() !== 'production';
         res.end(JSON.stringify({
           error: 'apiDocs.generated.json not found',
           ...(isDev ? { expectedAt: docsPath } : {}),

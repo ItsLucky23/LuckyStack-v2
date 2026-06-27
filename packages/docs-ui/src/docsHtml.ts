@@ -251,6 +251,25 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
   const ENABLE_TRY_IT_OUT = ${tryItOutData};
   const stateByKey = new Map();
 
+  //? Page-session CSRF token cache. In the default cookie-mode every
+  //? state-changing request (POST/PUT/DELETE) must echo the token from
+  //? GET /auth/csrf as the x-csrf-token header, or the server 403s it. We
+  //? fetch once and reuse; a failed fetch leaves the cache null so a later
+  //? attempt can retry rather than poisoning the session.
+  let cachedCsrfToken = null;
+  const getCsrfToken = async () => {
+    if (cachedCsrfToken !== null) return cachedCsrfToken;
+    try {
+      const r = await fetch('/auth/csrf', { credentials: 'include' });
+      if (!r.ok) return null;
+      const body = await r.json();
+      cachedCsrfToken = (body && body.csrfToken) ? body.csrfToken : null;
+    } catch {
+      cachedCsrfToken = null;
+    }
+    return cachedCsrfToken;
+  };
+
   //? Inline runner: hits the live server using the same fetch transport
   //? that the framework apiRequest helper uses. Auth comes from the
   //? browser's existing session cookie or sessionStorage; no token prompt.
@@ -259,6 +278,7 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     //? mismatch), so the runner must send that method, not a hardcoded POST.
     const httpMethod = (method || 'POST').toUpperCase();
     const hasBody = httpMethod !== 'GET' && httpMethod !== 'DELETE';
+    const isStateChanging = httpMethod !== 'GET';
     let parsed;
     try {
       parsed = dataField.value.trim().length === 0 ? {} : JSON.parse(dataField.value);
@@ -271,9 +291,25 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     const resultEl = button.parentElement.querySelector('pre.result');
     resultEl.textContent = 'Sending...';
     try {
-      const response = await fetch('/' + route + '?stream=false', {
+      //? GET/DELETE carry no body — serialize the parsed input into the query
+      //? string instead so the user's input is not silently dropped. Non-string
+      //? values are JSON-encoded so objects/numbers survive the round-trip.
+      const params = new URLSearchParams();
+      params.set('stream', 'false');
+      if (!hasBody) {
+        for (const [k, v] of Object.entries(parsed)) {
+          params.set(k, typeof v === 'string' ? v : JSON.stringify(v));
+        }
+      }
+      const headers = hasBody ? { 'Content-Type': 'application/json' } : {};
+      //? Attach the CSRF token to state-changing requests (cookie-mode default).
+      if (isStateChanging) {
+        const csrf = await getCsrfToken();
+        if (csrf) headers['x-csrf-token'] = csrf;
+      }
+      const response = await fetch('/' + route + '?' + params.toString(), {
         method: httpMethod,
-        headers: hasBody ? { 'Content-Type': 'application/json' } : {},
+        headers,
         credentials: 'include',
         body: hasBody ? JSON.stringify(parsed) : undefined,
       });

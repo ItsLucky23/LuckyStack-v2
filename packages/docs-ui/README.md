@@ -63,6 +63,10 @@ your APIs are intentionally documented to the world.
 | `pageTitle` | `LuckyStack — API docs` | Shown in the header + browser tab. Pass your project name explicitly — there is no implicit lookup from `ProjectConfig`. |
 | `enabledInProd` | `false` | Set to `true` to render the docs in production. |
 | `apiDocsPath` | `getGeneratedApiDocsPath()` | Override the JSON file path. Default reads from `ProjectConfig.paths.generatedApiDocs`. |
+| `branding` | `{}` | `{ logoUrl?, brandColor?, fontFamily? }` applied by the default template (logo in the header, accent color, font). Ignored when a custom `template` is supplied. |
+| `template` | `undefined` | `DocsTemplateBuilder` — a custom HTML builder `({ jsonPath, pageTitle, branding }) => string`. When set, the default `renderDocsHtml` is bypassed entirely. |
+| `enableTryItOut` | `false` | Renders an inline request runner (textarea + Send) under each endpoint that calls the live server with `credentials: 'include'`. Needs a logged-in browser session. |
+| `authorize` | `undefined` | `(req) => boolean \| Promise<boolean>` per-request hook, run after the env/bind-address gate. Return `false` to serve `403`. Use to restrict docs access on non-loopback deployments. |
 
 ## How it works
 
