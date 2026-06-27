@@ -90,3 +90,25 @@ User asked to verify + fix everything real from the ~43 high/medium report-only 
 **Gate:** full `build:packages` 16/16 OK + `lint:packages` clean on the combined tree (my commits + the other AI's uncommitted router/ports work). 19 commits ahead of main. Branch NOT merged.
 
 **Notes:** the other AI's uncommitted work (config.ports.ts, ADR 0016, router assets/`addRouter`, server `createServer`) was left untouched — I only `git add`-ed my own files per commit. Most code-level to_fix items were already resolved in the tree exactly as the user anticipated ("of het moet niet meer nodig zijn door de andere AI zijn changes").
+
+## 2026-06-27 11:55 — Round-5: the 🟡 report-only backlog + regression tests
+
+**User prompt:** (after reviewing the HIGH report-only list) "chokidar v5 glob fixen, abortsignal fixen, test-runner fixen, verifiëer de http sync array clientinput bug, remove dead code, fix docs". Earlier in the same exchange the user also approved writing regression tests for the round-4 behaviour fixes.
+
+**Regression tests added (round-4 fixes were untested):**
+- `api/src/transportParity.test.ts` — error responses run the respond-hook chain on the SOCKET transport too (#6) + preApiRespond-stop rewrite. (+3)
+- `presence/.../activitySampler.test.ts` — `getSharedLastActivity` local-first + Redis fallback + clearActivity (#3/#4). (+4)
+- `server/.../apiRoute.test.ts` (new) — streaming gate-reject → real status JSON, SSE lazy-opens on success/chunk, pre-chunk throw → real 500 (#5). (+5/+abort)
+
+**🟡 backlog fixes (each gated tsc + lint:packages + vitest, committed, pushed):**
+- **devkit supervisor chokidar v5** — globs (`server/bootstrap/**/*.ts`, `…/auth/**`) are no longer expanded in chokidar v5; they were watched as literal non-existent paths so those changes never restarted the dev server. Now watches the concrete files + the bootstrap/auth DIRECTORIES (recursive) and filters events to `.ts` (+ `.env*`). hotReload.ts already watched plain dirs — no glob bug there.
+- **server abortSignal (#7/#8)** — apiRoute + syncRoute now create an AbortController, abort on client disconnect (req close/error/aborted, res error), and pass `abortSignal` to the handler (which already raced `main()` against it). For streaming + non-streaming. + abort regression tests on both.
+- **syncRoute lazy-SSE (#5 twin)** — the #5 finding named /sync/* too but round-4 only fixed apiRoute; applied the same defer-initSseResponse-until-gates-pass fix to syncRoute. + new `syncRoute.test.ts`.
+- **sync HTTP ARRAY clientInput (#9)** — VERIFIED real: socket rejects `Array.isArray(data)` but the HTTP normalize let an array through (`typeof []==='object'`). Added the guard to `stageResolveRoute` (sync.invalidRequest). + parity test.
+- **test-runner reset token (#10)** — `runAllTests` set `resetBetweenEndpoints:true` but threaded no token, so `/_test/reset` 403'd; now passes `resetToken` (input, else `TEST_RESET_TOKEN` env).
+- **dead code** — removed the fully-orphaned `devkit/src/typeMap/emitter.ts` (superseded by `emitterArtifacts.ts`, imported by typeMapGenerator.ts; verified zero references).
+- **docs** — `test-runner/docs/fuzz-tests.md` corrected: a 5xx that still returns a valid `{status:'error',errorCode}` envelope PASSES (fuzzCheck only fails on no-response / non-envelope / missing errorCode). `extension-hooks.md` finding (#20 `runRegisteredLayers ships wired`) = FALSE POSITIVE (the function doesn't exist; the doc correctly calls it roadmap) → left as-is.
+
+**Gate:** full `build:packages` 16/16 + `lint:packages` clean; affected-package suites green (devkit/server/sync/test-runner 356 tests; api/presence/server 238). 28 commits ahead of main, branch NOT merged.
+
+**Not done (deliberate):** create-luckystack-app session-endpoint returning token+CSRF to client JS — a template design decision the user did not greenlight this round.
