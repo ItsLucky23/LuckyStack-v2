@@ -65,15 +65,11 @@ export interface ServiceTargetResolver {
   getLocallyOwnedServices: () => string[];
 }
 
-const parseFirstSegment = (pathname: string): string | null => {
+const firstSegment = (pathname: string): string | null => {
   const trimmed = pathname.startsWith('/') ? pathname.slice(1) : pathname;
   const firstSlash = trimmed.indexOf('/');
-  const rawSegment = firstSlash === -1 ? trimmed : trimmed.slice(0, firstSlash);
-  if (!rawSegment) return null;
-  //? Percent-encoded service names (e.g. `my%2Dservice`) must decode to their
-  //? registered keys. `tryCatchSync` guards against malformed sequences like `%ZZ`.
-  const [decodeError, segment] = tryCatchSync(() => decodeURIComponent(rawSegment));
-  return decodeError ? null : (segment ?? null);
+  const segment = firstSlash === -1 ? trimmed : trimmed.slice(0, firstSlash);
+  return segment || null;
 };
 
 /**
@@ -86,13 +82,24 @@ const parseFirstSegment = (pathname: string): string | null => {
  * resolver via `registerServiceResolver(...)`.
  */
 export const parseServiceFromPath = (pathname: string): string | null => {
-  const first = parseFirstSegment(pathname);
+  //? Decode the FULL pathname ONCE up front, then parse + slice on the decoded
+  //? string. Decoding only the first segment but slicing the still-ENCODED
+  //? remainder by the DECODED length misroutes a percent-encoded transport
+  //? prefix (e.g. `/%73ync/billing/foo` decodes to `sync` (4 chars) but the
+  //? slice ran over `%73ync...` (6 chars)), so the router and backend would
+  //? disagree on the service key. Decoding once keeps the slice index
+  //? consistent with what was decoded. `tryCatchSync` guards malformed
+  //? sequences like `%ZZ` — those resolve to no service (null).
+  const [decodeError, decoded] = tryCatchSync(() => decodeURIComponent(pathname));
+  if (decodeError || decoded === null) return null;
+
+  const first = firstSegment(decoded);
   if (!first) return null;
 
   if (first === 'api' || first === 'sync') {
-    const afterTransport = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+    const afterTransport = decoded.startsWith('/') ? decoded.slice(1) : decoded;
     const remainder = afterTransport.slice(first.length + 1);
-    return parseFirstSegment(remainder);
+    return firstSegment(remainder);
   }
 
   return first;

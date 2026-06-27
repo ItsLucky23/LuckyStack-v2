@@ -1,5 +1,5 @@
 import Redis from 'ioredis';
-import { getLogger, tryCatch, tryCatchSync } from '@luckystack/core';
+import { getLogger, getRedisConnectionOptions, tryCatch, tryCatchSync } from '@luckystack/core';
 import { getHealthStoreTtlSeconds } from './healthConfig';
 
 //? Shared health state across multiple router instances.
@@ -44,9 +44,16 @@ const healthChannel = (envKey: string): string =>
 export const createRedisHealthStore = async (
   input: RedisHealthStoreInput,
 ): Promise<RedisHealthStore> => {
-  const host = input.redisHost ?? process.env.REDIS_HOST ?? '127.0.0.1';
-  const port = input.redisPort ?? Number.parseInt(process.env.REDIS_PORT ?? '6379', 10);
-  const password = input.redisPassword ?? process.env.REDIS_PASSWORD;
+  //? Build the connection from core's single source of truth so the health
+  //? store honors REDIS_USER (and any future connection option) the rest of
+  //? the framework reads — reading REDIS_HOST/PORT/PASSWORD directly here used
+  //? to silently drop REDIS_USER. Per-call overrides still win when supplied.
+  const connectionOptions = {
+    ...getRedisConnectionOptions(),
+    ...(input.redisHost === undefined ? {} : { host: input.redisHost }),
+    ...(input.redisPort === undefined ? {} : { port: input.redisPort }),
+    ...(input.redisPassword === undefined ? {} : { password: input.redisPassword }),
+  };
   //? Every health key gets a TTL so a router that dies without flipping a
   //? service back to healthy can't pin a stale verdict forever — the key
   //? expires and siblings revert to the absent-key default on the next read.
@@ -56,8 +63,8 @@ export const createRedisHealthStore = async (
     ? input.ttlSeconds
     : getHealthStoreTtlSeconds();
 
-  const client = new Redis({ host, port, password, lazyConnect: true });
-  const subscriber = new Redis({ host, port, password, lazyConnect: true });
+  const client = new Redis({ ...connectionOptions, lazyConnect: true });
+  const subscriber = new Redis({ ...connectionOptions, lazyConnect: true });
 
   //? Attach 'error' listeners before connecting: an ioredis client that emits
   //? 'error' with no listener throws as an unhandled exception and crashes the

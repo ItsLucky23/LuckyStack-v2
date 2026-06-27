@@ -109,6 +109,25 @@ describe("parseServiceFromPath", () => {
   it("returns null for a bare /sync with no service after it", () => {
     expect(parseServiceFromPath("/sync")).toBeNull();
   });
+
+  it("decodes a percent-encoded transport prefix and still extracts the service", () => {
+    //? `%73ync` decodes to `sync`. Slicing the still-encoded remainder by the
+    //? decoded length (4) used to misroute to `nc/...`; decoding the whole path
+    //? once keeps the slice index consistent with what was decoded.
+    expect(parseServiceFromPath("/%73ync/billing/foo")).toBe("billing");
+  });
+
+  it("decodes a percent-encoded /api prefix and still extracts the service", () => {
+    expect(parseServiceFromPath("/%61pi/vehicles/getAll")).toBe("vehicles");
+  });
+
+  it("decodes a percent-encoded service name under a transport prefix", () => {
+    expect(parseServiceFromPath("/api/my%2Dservice/x")).toBe("my-service");
+  });
+
+  it("returns null for a malformed percent-encoded path", () => {
+    expect(parseServiceFromPath("/api/%ZZ")).toBeNull();
+  });
 });
 
 describe("registerServiceResolver + resolveServiceKey", () => {
