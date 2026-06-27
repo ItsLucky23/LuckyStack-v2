@@ -272,8 +272,7 @@ describe("HTTP transport rejects an ARRAY clientInput (socket parity)", () => {
     //? `_server` handler expecting an object).
     const result = await handleHttpSyncRequest({
       name: "sync/chat/send/v1",
-      // luckystack-allow no-as-any: test simulates an untyped wire array payload the runtime guard must reject
-      data: [1, 2, 3] as unknown as Record<string, unknown>,
+      data: [1, 2, 3] as unknown as Record<string, unknown>, // luckystack-allow no-as-any: test simulates an untyped wire array payload the runtime guard must reject
       receiver: "chat-room",
       token: "tokenA",
       requesterIp: "127.0.0.1",

@@ -82,8 +82,7 @@ const makeReqRes = (method = 'POST'): {
     method,
     params: { data: { hello: 'world' }, receiver: 'room-1' },
     requestId: 'req-1',
-  // luckystack-allow no-as-any: test fake-req/res boundary — supplies only the members handleSyncRoute touches (mirrors apiRoute.test.ts / healthRoutes.test.ts)
-  } as unknown as Parameters<HttpRouteHandler>[0];
+  } as unknown as Parameters<HttpRouteHandler>[0]; // luckystack-allow no-as-any: test fake-req/res boundary — supplies only the members handleSyncRoute touches (mirrors apiRoute.test.ts / healthRoutes.test.ts)
   return { args, cap, fireReq };
 };
 
