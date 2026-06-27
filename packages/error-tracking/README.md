@@ -33,7 +33,7 @@ Set `SENTRY_DSN` in your environment to enable. Without it, every export is a sa
 | `initializeSentry()` | Read `SENTRY_DSN`, sample rates, and init the SDK. Idempotent. |
 | `captureException(error, context?)` | Forward to Sentry; called by `tryCatch` automatically. |
 | `captureMessage(msg, level?, context?)` | Manual breadcrumb-style logging. |
-| `setSentryUser(user \| null)` | Attach session identity (called by `@luckystack/login` on login/logout). |
+| `setSentryUser(user \| null)` | Attach session identity. Not called by `@luckystack/login` directly — identity is propagated by this package's auto-instrumentation hooks (`preApiValidate` / `preSyncAuthorize` set it; `postLogout` clears it). |
 | `startSpan(name, op)` | Performance tracing wrapper — used by API/sync request handlers. |
 | `registerSentryConfig(input)` / `getSentryConfig()` | Per-package config registry. Owned by this package; not part of `@luckystack/core`'s `ProjectConfig`. |
 

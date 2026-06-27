@@ -17,6 +17,7 @@ import {
   initSharedSentry,
   loadPeer,
   REDACTED_PLACEHOLDER,
+  sanitizeErrorString,
   sanitizeForLog,
   captureException as sharedCaptureException,
   captureMessage as sharedCaptureMessage,
@@ -165,6 +166,21 @@ const builtinBeforeSend: SentryBeforeSend = (event) => {
   //? extra dict is the framework's per-capture context map (CORE-O4 fix extended).
   if (event.extra) {
     event.extra = sanitizeForLog(event.extra) as typeof event.extra;
+  }
+  //? ET-O5: scrub the free-text `event.message` (set by manual `captureMessage`
+  //? and some integrations) and each exception `values[].value` through the same
+  //? `key=value` / `key: value` scrubber the adapters use, so an interpolated
+  //? secret in a message/exception string can't bypass redaction on this legacy
+  //? SDK path. Null-safe: only touches string fields that exist.
+  if (typeof event.message === 'string') {
+    event.message = sanitizeErrorString(event.message);
+  }
+  if (event.exception?.values) {
+    for (const exceptionValue of event.exception.values) {
+      if (typeof exceptionValue.value === 'string') {
+        exceptionValue.value = sanitizeErrorString(exceptionValue.value);
+      }
+    }
   }
   return event;
 };

@@ -92,13 +92,16 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
       //? the raw secret to PostHog unscrubbed.
       const errorMessage = scrubbed?.message ?? (fwdError instanceof Error ? fwdError.message : sanitizeErrorString(String(fwdError)));
       const errorStack = scrubbed?.stack ?? (fwdError instanceof Error ? fwdError.stack : undefined);
+      //? ET-O2: spread caller context FIRST so the scrubbed `error.*` fields set
+      //? below always win — otherwise a caller-supplied `error.message`/`error.stack`
+      //? in `fwdContext` could override (and un-scrub) the redacted values.
       const properties: Record<string, unknown> = {
+        ...fwdContext,
         'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
         'error.message': errorMessage,
         //? Only emit `error.stack` when a stack actually exists — a non-Error
         //? throw would otherwise add a noisy explicit-`undefined` field.
         ...(errorStack === undefined ? {} : { 'error.stack': errorStack }),
-        ...fwdContext,
       };
       //? Prefer the dedicated `captureException` API when the installed
       //? posthog-node version supports it; fall back to a custom
