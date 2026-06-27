@@ -126,8 +126,9 @@ The badge color uses theme tokens (`bg-correct` / `bg-warning` / `bg-wrong` pair
 
 ## Dependencies
 
-- Runtime: `@luckystack/core`, `@luckystack/login`
+- Runtime: `@luckystack/core`
 - Peer (canonical ranges, standardized 2026-05-07):
+  - `@luckystack/login@^0.2.7` (optional peer — session lookup + token extraction + hook registry)
   - `socket.io@^4.8.0` (server entry only)
   - `react@^19.2.0` (`/client` entry only)
 

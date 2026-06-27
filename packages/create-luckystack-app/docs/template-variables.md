@@ -4,7 +4,7 @@ Reference for every `{{KEY}}` placeholder substituted into the scaffolded projec
 
 ## Substitution engine
 
-`replacePlaceholders(content, vars)` (src/index.ts:223) walks the text content of every file flagged as text by `isTextFile`, looking for the literal pattern `{{KEY}}` (one or more word characters between two curly-brace pairs).
+`replacePlaceholders(content, vars)` (src/index.ts:1166) walks the text content of every file flagged as text by `isTextFile`, looking for the literal pattern `{{KEY}}` (one or more word characters between two curly-brace pairs).
 
 ```ts
 const replacePlaceholders = (
@@ -50,7 +50,7 @@ const vars: Record<string, string> = {
 
 ### `{{PROJECT_NAME}}`
 
-- **Source**: `slugify(args.projectName)` (src/index.ts:184).
+- **Source**: `slugify(args.projectName)` (src/index.ts:936).
 - **Type**: kebab-case ASCII slug.
 - **Used for**: directory name, `package.json` `"name"` field, default header label in the scaffolded UI.
 
@@ -73,7 +73,7 @@ Unicode handling is deliberately strict: only `[a-z0-9]` survives. If a user wan
 
 ### `{{PROJECT_TITLE}}`
 
-- **Source**: `titleCase(args.projectName)` (src/index.ts:191).
+- **Source**: `titleCase(args.projectName)` (src/index.ts:943).
 - **Type**: human-readable Title Case string.
 - **Used for**: page titles, headings in landing / login pages, README banner.
 
@@ -93,7 +93,7 @@ Note: `titleCase` is applied to the ORIGINAL `args.projectName`, not to the slug
 
 ### `{{LUCKYSTACK_VERSION}}`
 
-- **Source**: `readSelfVersion()` (src/index.ts:198).
+- **Source**: `readSelfVersion()` (src/index.ts:950).
 - **Type**: semver string, e.g. `"0.4.2"`.
 - **Used for**: pinning `@luckystack/*` ranges in the generated `package.json`. The template ships these as `"^{{LUCKYSTACK_VERSION}}"` so the scaffolded app installs matching versions of every framework package.
 
@@ -159,7 +159,7 @@ use the prune/inject path instead.
 
 ## Text vs binary detection
 
-`isTextFile(filePath)` (src/index.ts:232) decides whether `copyTree` runs `replacePlaceholders` or falls back to a binary copy.
+`isTextFile(filePath)` (src/index.ts:1175) decides whether `copyTree` runs `replacePlaceholders` or falls back to a binary copy.
 
 ```ts
 const isTextFile = (filePath: string): boolean => {

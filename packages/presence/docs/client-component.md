@@ -128,8 +128,6 @@ Route wrapper that emits `socketEventNames.updateLocation` on every `react-route
 ### Import
 
 ```tsx
-import LocationProvider from '@luckystack/presence/client';
-// or as a named import:
 import { LocationProvider } from '@luckystack/presence/client';
 ```
 
@@ -168,7 +166,7 @@ The server-side handler (in `@luckystack/server`'s `loadSocket.ts`) updates the 
 
 ```tsx
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import LocationProvider from '@luckystack/presence/client';
+import { LocationProvider } from '@luckystack/presence/client';
 
 export default function App() {
   return (
