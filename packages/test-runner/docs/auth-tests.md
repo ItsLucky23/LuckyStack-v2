@@ -32,10 +32,10 @@ Flow:
 5. Branch on `parsed.status`:
    - `'success'` -> fail with `reason: 'auth.login endpoint returned success without a session'`. This is the headline case: the endpoint is open when it should be closed.
    - Not `'error'` (missing, weird) -> fail with `'Response missing standard `status` envelope'`.
-   - `'error'` with `errorCode !== 'auth.required'` -> fail with the expected/actual codes inline in the `reason`. A different error code (e.g. validation rejecting `{}`) means the auth guard never ran — the request was killed earlier in the pipeline.
-   - `'error'` with `errorCode === 'auth.required'` -> pass.
+   - `'error'` with an `errorCode` outside the auth-rejection set (`auth.required` | `auth.forbidden`) -> fail with the expected/actual codes inline in the `reason` (`expected an auth-rejection errorCode (auth.required | auth.forbidden) but got '<actual>'`). A different error code (e.g. validation rejecting `{}`) means the auth guard never ran — the request was killed earlier in the pipeline.
+   - `'error'` with `errorCode === 'auth.required'` OR `errorCode === 'auth.forbidden'` -> pass.
 
-The canonical error code is imported from the framework constant `auth.required` (see `packages/api/src/handleHttpApiRequest.ts`). It is intentionally hard-coded in the runner rather than fed from config because the whole point is to detect drift: if `@luckystack/api` ever renames the code, this layer should fail every protected endpoint until consumers acknowledge the change.
+The accepted error codes are the framework's auth-rejection set, hard-coded in the runner as `EXPECTED_ERROR_CODES = new Set(['auth.required', 'auth.forbidden'])` (see `packages/api/src/handleHttpApiRequest.ts` + `packages/core/src/validateRequest.ts`). `auth.required` is what an `auth.login: true` route emits for an anonymous caller; `auth.forbidden` is what an `auth.additional[]`-only route (`login: false`) emits when the predicate rejects the anonymous caller. Either one is a PASS — both mean the guard fired. They are intentionally hard-coded rather than fed from config because the whole point is to detect drift: if `@luckystack/api` ever renames a code, this layer should fail every protected endpoint until consumers acknowledge the change.
 
 ### `runAuthEnforcementTests(input)`
 
@@ -94,12 +94,12 @@ interface RunAuthEnforcementTestsInput {
 
 ## Result shapes by branch
 
-- **Pass**: `{ status: 'pass', httpStatus, responseStatus: 'error', errorCode: 'auth.required', durationMs }`.
+- **Pass (`auth.login` route)**: `{ status: 'pass', httpStatus, responseStatus: 'error', errorCode: 'auth.required', durationMs }`.
+- **Pass (`additional[]`-only route)**: `{ status: 'pass', httpStatus, responseStatus: 'error', errorCode: 'auth.forbidden', durationMs }`.
 - **Fail / open endpoint**: `{ status: 'fail', httpStatus, responseStatus: 'success', reason: 'auth.login endpoint returned success without a session', durationMs }`.
-- **Fail / wrong errorCode**: `{ status: 'fail', httpStatus, responseStatus: 'error', errorCode: '<actual>', reason: "expected errorCode 'auth.required' but got '<actual>'", durationMs }`.
+- **Fail / wrong errorCode**: `{ status: 'fail', httpStatus, responseStatus: 'error', errorCode: '<actual>', reason: "expected an auth-rejection errorCode (auth.required | auth.forbidden) but got '<actual>'", durationMs }`.
 - **Fail / non-envelope**: `{ status: 'fail', httpStatus, responseStatus: 'unknown', reason: 'Response missing standard `status` envelope', durationMs }`.
-- **Fail / JSON parse**: `{ status: 'fail', httpStatus, responseStatus: 'unknown', reason: 'JSON parse failed: ...', durationMs }`.
-- **Fail / fetch error**: `{ status: 'fail', reason: <Error.message>, durationMs }`.
+- **Fail / fetch no response**: `{ status: 'fail', reason: 'fetch returned no response', durationMs }`.
 - **Skip**: `{ status: 'skipped', durationMs: 0, reason: 'Explicitly skipped' }`.
 
 ## Examples

@@ -25,14 +25,14 @@ interface RateLimitCheckInput {
 
 Flow:
 
-1. Fire `rateLimit` requests back-to-back. Their responses are ignored — they exist only to drain the bucket. The framework records each one against the limiter, regardless of whether the request itself succeeded or failed.
+1. Fire `rateLimit` requests back-to-back to drain the bucket. Each drain response IS inspected — not for success/failure, but for a *pre-limiter* rejection. If any drain response carries an `errorCode` of `auth.required`, `auth.forbidden`, or `auth.csrfMismatch` (codes the server emits *before* the rate-limit pipeline runs: the auth guard and the CSRF middleware), the limiter bucket was never incremented for that request, so the check short-circuits to `status: 'skipped'` with `reason: 'drain request ${i+1} rejected pre-limiter (${errorCode}); bucket was never incremented — check CSRF/auth headers'`. Otherwise the drain response value is not asserted — the framework records every non-pre-limiter request against the limiter regardless of whether it succeeded or failed (e.g. validation errors, which run AFTER the limiter, still consume budget).
 2. Fire one final request. This is the probe.
 3. Parse the probe response. If `status === 'error'` AND `errorCode === 'api.rateLimitExceeded'`, pass. Anything else — including a `success` response, a different error code, or a network failure on the final probe — is a fail.
 
 Important details:
 
 - **Serial, not parallel.** Concurrent requests would race and the limiter could see them in any order. Serial keeps the math predictable: request N+1 is the one that crosses the threshold.
-- **The first `rateLimit` requests are not asserted.** They can be `success`, validation-errors, anything. The whole point is to count, not to validate intermediate behavior. The contract layer already covers correctness of those.
+- **The first `rateLimit` requests are not asserted for success** — but each is checked for a *pre-limiter* rejection (`auth.required` / `auth.forbidden` / `auth.csrfMismatch`). Such a rejection means the limiter bucket never incremented, so the check returns `skipped` rather than a misleading fail on the final probe. Any other response (`success`, a validation error, etc.) is fine — the point is to count, not to validate intermediate behavior; the contract layer already covers correctness of those. (Validation, `api.invalidInputType`, runs AFTER the limiter and is deliberately NOT treated as pre-limiter.)
 - **Default timeout is 10 seconds**, double the contract layer. Rate limiters at the upper bound of `maxRateLimitToTest` (default 50) generate ~50 requests per endpoint, which adds latency.
 - **Headers and `inputFor` are forwarded to every request**, including the drain requests. Use them when the validator rejects empty input and you want every probe to hit the limiter rather than fail at validation. (Validation failures still consume rate-limit budget in the framework.)
 
@@ -143,6 +143,7 @@ interface ResetServerStateInput {
 ## Result shapes by branch
 
 - **Pass**: `{ status: 'pass', httpStatus, responseStatus: 'error', errorCode: 'api.rateLimitExceeded', durationMs }`.
+- **Skip / pre-limiter rejection**: `{ status: 'skipped', durationMs, reason: 'drain request ${i+1} rejected pre-limiter (${errorCode}); bucket was never incremented — check CSRF/auth headers' }`. Emitted when a drain request is rejected by the auth guard or CSRF middleware (`auth.required` / `auth.forbidden` / `auth.csrfMismatch`) before the limiter runs — the bucket never filled, so the `N+1` assertion would be meaningless.
 - **Fail / final probe never returned**: `{ status: 'fail', reason: 'Final rate-limit probe request failed to return a response', durationMs }`.
 - **Fail / wrong status or code**: `{ status: 'fail', httpStatus, responseStatus, errorCode, reason: "expected 'api.rateLimitExceeded' on request ${N+1} but got <status>/<code>", durationMs }`.
 - **Skip / over max**: `{ status: 'skipped', durationMs: 0, reason: 'rateLimit ${N} exceeds maxRateLimitToTest=${max}' }`.

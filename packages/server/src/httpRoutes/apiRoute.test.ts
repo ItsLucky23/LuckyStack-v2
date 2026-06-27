@@ -20,7 +20,7 @@ const seam: {
   throwInHandler: false,
 };
 
-const handleHttpApiRequestMock = vi.fn(async (args: { stream?: (p: unknown) => void }) => {
+const handleHttpApiRequestMock = vi.fn(async (args: { stream?: (p: unknown) => void; abortSignal?: AbortSignal }) => {
   if (seam.throwInHandler) throw new Error('boom');
   if (seam.emitChunk) args.stream?.({ chunk: 'tok' });
   return seam.apiResult;
@@ -29,7 +29,7 @@ const initSseResponseMock = vi.fn();
 const sendSseEventMock = vi.fn();
 
 vi.mock('@luckystack/api', () => ({
-  handleHttpApiRequest: (args: unknown) => handleHttpApiRequestMock(args as { stream?: (p: unknown) => void }),
+  handleHttpApiRequest: (args: unknown) => handleHttpApiRequestMock(args as { stream?: (p: unknown) => void; abortSignal?: AbortSignal }),
 }));
 
 vi.mock('../sse', () => ({

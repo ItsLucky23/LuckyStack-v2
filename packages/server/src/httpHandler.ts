@@ -271,7 +271,7 @@ const handleHttpRequestInner = async (
   //? specific paths with a custom error. Header subset excludes auth/cookie.
   const safeHeaders: Record<string, string> = {};
   for (const [k, v] of Object.entries(req.headers)) {
-    if (k === 'authorization' || k === 'cookie' || k === 'set-cookie' || k === 'x-csrf-token') continue;
+    if (k === 'authorization' || k === 'cookie' || k === 'set-cookie' || k === 'x-csrf-token' || k === 'x-test-reset-token' || k === 'x-session-based-token') continue;
     safeHeaders[k] = Array.isArray(v) ? v.join(', ') : (v ?? '');
   }
   const preHttpResult = await dispatchHook('preHttpRequest', {

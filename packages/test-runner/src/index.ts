@@ -67,6 +67,9 @@ export {
   resetTestExtensionsForTests,
 } from './extensionRegistry';
 
+export { runRegisteredLayers } from './runRegisteredLayers';
+export type { RunRegisteredLayersInput } from './runRegisteredLayers';
+
 export { LAYER_KEYS } from './testLayerHelpers';
 export type {
   TestLayer,

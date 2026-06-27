@@ -144,8 +144,7 @@ interface TestFixture<TPayload = unknown> {
 
 - **Pass**: `{ status: 'pass', durationMs }`. No `httpStatus` — the layer does not report which payloads passed, only that none failed.
 - **Fail / crash**: `{ status: 'fail', reason: 'fuzz probe crashed (no response) with payload: <preview>', durationMs }`.
-- **Fail / 5xx**: `{ status: 'fail', httpStatus, reason: 'fuzz payload produced 5xx: <preview>', durationMs }`.
-- **Fail / non-envelope**: `{ status: 'fail', httpStatus, reason: 'fuzz payload produced non-envelope response: <preview>', durationMs }`.
+- **Fail / non-envelope**: `{ status: 'fail', httpStatus, reason: 'fuzz payload produced non-envelope response: <preview>', durationMs }`. A bare 5xx (raw stack, HTML error page, truncated body) lands here — a 5xx is NOT a fail on its own; only the missing/invalid envelope is.
 - **Fail / error missing code**: `{ status: 'fail', httpStatus, reason: 'fuzz error response missing errorCode for payload: <preview>', durationMs }`.
 - **Skip**: `{ status: 'skipped', durationMs: 0, reason: 'Explicitly skipped' }`.
 

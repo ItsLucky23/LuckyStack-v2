@@ -29,7 +29,7 @@ Output format:
 - Pass success: `[PASS] POST /api/billing/getInvoice/v1 12ms http=200`
 - Pass typed error: `[PASS] POST /api/auth/login/v1 8ms http=200 (error: auth.required)`
 - Skip: `[SKIP] POST /api/uploads/fileUpload/v1 0ms Explicitly skipped`
-- Fail: `[FAIL] POST /api/billing/cancelSubscription/v1 14ms http=500 reason=fuzz payload produced 5xx: ...`
+- Fail: `[FAIL] POST /api/billing/cancelSubscription/v1 14ms http=500 reason=fuzz payload produced non-envelope response: ...`
 
 Status tag is one of `[PASS]`, `[FAIL]`, `[SKIP]`. `http=-` appears when no HTTP status is captured (network error, abort). `durationMs` is always present.
 
@@ -49,7 +49,7 @@ Output:
 Contract tests: 47/50 passed, 2 failed, 1 skipped
 
 Failures:
-  - /api/billing/cancelSubscription/v1: fuzz payload produced 5xx: { nested: ...
+  - /api/billing/cancelSubscription/v1: fuzz payload produced non-envelope response: { nested: ...
   - /api/integrations/stripeWebhook/v1: Response missing standard `status` envelope
 ```
 
@@ -84,7 +84,7 @@ interface TestLayerResult {
 
 Replace-by-name: registering a layer with a name that already exists overwrites the previous entry. Use this to update a layer mid-run, e.g. after fetching a fresh auth token.
 
-The runner does **not** currently wire registered layers into the built-in sweeps automatically. Today they live in the registry as a coordination surface for custom test harnesses — read them with `listTestLayers()`, iterate `walkEndpoints`, and call `layer.run(input)` per endpoint. The roadmap is for a future `runRegisteredLayers({ apiMethodMap, baseUrl })` entry point to walk the registry as a fifth (or N-th) built-in layer.
+The built-in sweeps (contract/auth/rate-limit/fuzz) do **not** run registered layers — they only cover the framework envelope, and `runAllTests` does not call into the registry. To execute the registered layers, call **`runRegisteredLayers({ apiMethodMap })`** (documented below): it walks every registered layer against every endpoint, fans each result through the registered reporter, and POSTs the webhook. You can still drive the registry by hand — read it with `listTestLayers()`, iterate `walkEndpoints`, and call `layer.run(input)` per endpoint — but `runRegisteredLayers` is the supported entry point and adds error-isolation the manual loop does not.
 
 ### `listTestLayers()`
 
@@ -97,6 +97,30 @@ listTestLayers(): TestLayer[]
 ```
 
 Order is registration order (Map iteration order). The returned array is a fresh copy — mutating it does not affect the registry.
+
+### `runRegisteredLayers(input)`
+
+Run every registered layer against every endpoint in `apiMethodMap` and emit the aggregate through the registered reporter. This is the shipped entry point for the layer registry — the built-in sweeps never touch it, and it never runs the built-in sweeps.
+
+Signature:
+
+```ts
+runRegisteredLayers(input: RunRegisteredLayersInput): Promise<TestSummary>
+
+interface RunRegisteredLayersInput {
+  apiMethodMap: ApiMethodMap;
+  authToken?: string;   // forwarded to each layer's run({ authToken })
+  skip?: string[];      // '<page>/<name>' or '<page>/<name>/<version>'
+}
+```
+
+Behavior (read from `src/runRegisteredLayers.ts`):
+
+- **Cartesian walk.** For each layer from `listTestLayers()` (registration order) × each endpoint from `walkEndpoints(apiMethodMap)`, it calls `layer.run({ endpoint: endpoint.fullPath, method: endpoint.method, authToken })`. `skip` uses the same two-tier matching as the built-in sweeps; skipped endpoints produce no result.
+- **Error isolation.** Each `layer.run` is wrapped in `tryCatch`. A throwing layer (or one returning a falsy result) does not abort the walk — it is recorded as a failed `TestResult` whose `message` is the thrown error's message, or `'layer returned no result'`. Each result's `durationMs` is measured around the call. This is the behavior the manual `listTestLayers()` loop lacks, where a throw propagates and skips the rest.
+- **Reporter fan-out.** After each result it calls `reporter.onResult?.(result)`; after the walk it calls `reporter.onSummary?.(summary)`. Both are wrapped in `tryCatch`, so a throwing reporter callback never fails the run — unlike the built-in sweeps, whose `onResult` is called un-wrapped.
+- **Webhook.** If the reporter declares a `webhookUrl`, the summary is POSTed to it: `Content-Type: application/json`, plus `Authorization: Bearer <token>` when `webhookAuth?.type === 'bearer'`, body `JSON.stringify(summary)`, with a 10s `AbortController` timeout. The POST is best-effort (`tryCatch`-wrapped) — a failure never fails the run. A plaintext-`http:` URL pointed at a non-loopback host logs a `console.warn` (the summary carries endpoint paths, error codes, and any bearer token in clear) but is never blocked, since the URL is consumer-self-registered.
+- **Result.** Returns the `TestSummary` (`totalLayers`, `totalEndpoints`, `passed`, `failed`, `results`). Unlike the built-in sweeps, the per-result shape here is `TestResult` (the registry shape), not `ContractCheckResult`.
 
 ### `registerTestReporter(reporter)`
 
@@ -134,7 +158,7 @@ interface TestSummary {
 
 Replace-by-overwrite: only one reporter is active. To compose multiple sinks, write a single reporter that fans out internally.
 
-Like layers, the reporter is a coordination surface today: the built-in sweeps emit `ContractCheckResult` shapes, not `TestResult`. The registered reporter is intended for the cross-layer aggregator that lives in your test harness — collect results from each built-in sweep, map them into `TestResult`, and emit through this reporter so all sinks see one stream.
+`runRegisteredLayers` drives this reporter directly: it emits a `TestResult` per layer×endpoint through `onResult`, calls `onSummary` once at the end, and POSTs `webhookUrl`. The built-in sweeps do NOT — they emit `ContractCheckResult` shapes, not `TestResult`, so for them the reporter is a coordination surface your cross-layer aggregator consumes: collect each built-in sweep's results, map them into `TestResult`, and emit through this reporter so all sinks see one stream.
 
 ### `getTestReporter()`
 
@@ -160,13 +184,14 @@ The name advertises the intent: do not import this from production paths. There 
 
 ## Webhook contract
 
-When `reporter.webhookUrl` is set, the harness that drives the reporter is expected to POST the JSON-serialised `TestSummary` to that URL at the end of the sweep. The runner's own built-in sweeps do not call the webhook themselves — that's the job of the consumer's aggregator. Recommended client behavior:
+When `reporter.webhookUrl` is set, **`runRegisteredLayers` POSTs the JSON-serialised `TestSummary` to that URL automatically** at the end of its run — you do not wire it yourself. The built-in sweeps (contract/auth/rate-limit/fuzz) do NOT: if you drive only those, the POST is your aggregator's job. The behavior `runRegisteredLayers` implements (and a hand-rolled aggregator should mirror):
 
 - **Method:** `POST`.
 - **Headers:** `Content-Type: application/json`, plus `Authorization: Bearer <token>` when `webhookAuth?.type === 'bearer'`.
 - **Body:** `JSON.stringify(summary)`. `TestSummary.results` can be large — clip or compress on the producer side if the receiver has body limits.
-- **Timeout:** wrap the POST in `tryCatch` with a sensible per-call timeout (e.g. 5s). A webhook failure should not fail the sweep.
-- **Retries:** none by default. Add idempotency at the receiver if you want retries; the runner is a one-shot test driver, not a queue.
+- **Timeout:** a 10s `AbortController` timeout, with the POST wrapped in `tryCatch`. A webhook failure does not fail the run.
+- **Plaintext warning:** a `webhookUrl` whose protocol is `http:` and whose host is not loopback logs a `console.warn` before POSTing — the summary (endpoint paths, error codes, metadata) and any bearer token go over the wire unencrypted. The warning never blocks the POST.
+- **Retries:** none. Add idempotency at the receiver if you want retries; the runner is a one-shot test driver, not a queue.
 
 Concrete example of a webhook-emitting reporter:
 

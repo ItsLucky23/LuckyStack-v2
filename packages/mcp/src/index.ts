@@ -163,10 +163,13 @@ server.registerTool(
     const index = await readDocFile('docs/AI_DECISIONS_INDEX.md');
     if (index === null) return text(missing('docs/AI_DECISIONS_INDEX.md', 'npm run ai:decisions'));
     if (!tag) return text(index);
-    const { lines, total } = grepLines(index, tag);
-    const rows = lines.filter((l) => l.trim().startsWith('|'));
-    if (rows.length === 0) return text(`No decisions match "${tag}".`);
-    const truncNote = total > rows.length ? `\n\n(showing first ${rows.length} of ${total} matching lines)` : '';
+    //? Filter to table rows FIRST, then cap — otherwise the line-cap can drop
+    //? matching rows that sit past the cap and the truncation note miscounts.
+    const { lines } = grepLines(index, tag, Infinity);
+    const allRows = lines.filter((l) => l.trim().startsWith('|'));
+    if (allRows.length === 0) return text(`No decisions match "${tag}".`);
+    const rows = allRows.slice(0, 60);
+    const truncNote = allRows.length > rows.length ? `\n\n(showing first ${rows.length} of ${allRows.length} matching rows)` : '';
     return text(`Decisions matching "${tag}":\n${rows.join('\n')}${truncNote}`);
   },
 );
@@ -220,10 +223,13 @@ server.registerTool(
   async ({ query }) => {
     const index = await readDocFile('docs/AI_PROJECT_INDEX.md');
     if (index === null) return text(missing('docs/AI_PROJECT_INDEX.md', 'npm run ai:project-index'));
-    const { lines, total } = grepLines(index, query);
-    const rows = lines.filter((l) => l.trim().startsWith('|') && (l.includes('`api/') || l.includes('`sync/')));
-    if (rows.length === 0) return text(`No routes match "${query}".`);
-    const truncNote = total > rows.length ? `\n\n(showing first ${rows.length} of ${total} matching lines)` : '';
+    //? Filter to route rows FIRST, then cap — otherwise the line-cap can drop
+    //? matching routes that sit past the cap and the truncation note miscounts.
+    const { lines } = grepLines(index, query, Infinity);
+    const allRows = lines.filter((l) => l.trim().startsWith('|') && (l.includes('`api/') || l.includes('`sync/')));
+    if (allRows.length === 0) return text(`No routes match "${query}".`);
+    const rows = allRows.slice(0, 60);
+    const truncNote = allRows.length > rows.length ? `\n\n(showing first ${rows.length} of ${allRows.length} matching rows)` : '';
     return text(`Routes matching "${query}":\n${rows.join('\n')}${truncNote}`);
   },
 );
