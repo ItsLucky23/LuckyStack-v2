@@ -216,9 +216,24 @@ interface HttpSyncContext {
 async function stageResolveRoute(
   ctx: HttpSyncContext,
 ): Promise<{ resolvedName: string; callbackName: string; error?: never } | { error: HttpSyncResponse; resolvedName?: never; callbackName?: never }> {
-  const { name, cb, normalizedReceiver, user, buildSyncError, preferredLocale } = ctx;
+  const { name, cb, data, normalizedReceiver, user, buildSyncError, preferredLocale } = ctx;
 
   if (!name || typeof name !== 'string') {
+    return {
+      error: buildSyncError({
+        response: { status: 'error', errorCode: 'sync.invalidRequest' },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }),
+    };
+  }
+
+  //? Parity with the socket transport (handleSyncRequest's validateSyncMessage,
+  //? which rejects `Array.isArray(data)`). `typeof [] === 'object'` slips past the
+  //? HTTP route's `normalizeHttpSyncParams` coercion, so without this an ARRAY
+  //? clientInput would reach a `_server` handler expecting an object — the socket
+  //? path rejects it outright, so the HTTP path must too.
+  if (Array.isArray(data)) {
     return {
       error: buildSyncError({
         response: { status: 'error', errorCode: 'sync.invalidRequest' },

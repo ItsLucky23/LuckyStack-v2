@@ -259,6 +259,30 @@ describe("S22 — unified response envelope across transports", () => {
   });
 });
 
+// ─── HTTP transport rejects an ARRAY clientInput (parity with socket) ─────────
+
+describe("HTTP transport rejects an ARRAY clientInput (socket parity)", () => {
+  it("HTTP: array data → sync.invalidRequest, matching the socket Array.isArray guard", async () => {
+    state.syncObject = {
+      "sync/chat/send/v1_server": serverEntry({ status: "success" as const, message: "ok" }),
+    };
+    //? `typeof [] === 'object'` lets an array slip past the route's normalize step;
+    //? the socket transport rejects it via validateSyncMessage's Array.isArray
+    //? check, so the HTTP transport must reject it identically (not pass it to a
+    //? `_server` handler expecting an object).
+    const result = await handleHttpSyncRequest({
+      name: "sync/chat/send/v1",
+      // luckystack-allow no-as-any: test simulates an untyped wire array payload the runtime guard must reject
+      data: [1, 2, 3] as unknown as Record<string, unknown>,
+      receiver: "chat-room",
+      token: "tokenA",
+      requesterIp: "127.0.0.1",
+    });
+    expect(result.status).toBe("error");
+    expect((result as { errorCode?: string }).errorCode).toBe("sync.invalidRequest");
+  });
+});
+
 // ─── S13: syncCancel keyed on a server-issued id ─────────────────────────────
 
 describe("S13 — abort registry keyed on a server-issued cancel id", () => {
