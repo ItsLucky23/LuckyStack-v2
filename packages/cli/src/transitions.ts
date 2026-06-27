@@ -360,8 +360,8 @@ const TOGGLE_EFFECTS: Record<ToggleId, { on: string[]; off: string[] }> = {
     off: ['- @luckystack/secret-manager + re-comment both blocks'],
   },
   router: {
-    on: ['+ @luckystack/router + the `router` npm script (npm run router)'],
-    off: ['- @luckystack/router + the `router` npm script'],
+    on: ['+ @luckystack/router + the `router` npm script + the topology config (services.config.ts / deploy.config.ts / server/config/presetLoader.ts) + wire their server.ts imports'],
+    off: ['- @luckystack/router + the `router` npm script + delete the topology config files + un-wire their server.ts imports'],
   },
   mcp: {
     on: ['+ @luckystack/mcp (devDep) + register the graph server in .mcp.json'],
