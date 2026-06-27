@@ -56,6 +56,15 @@ npm run server:direct
 
 The dev frontend port and the single-instance backend listen port live in **`config.ports.ts`** (`export const ports = { frontend, backend }`) — the single source of truth. `config.ts` re-exports `ports`, `server.ts` passes `ports.backend` to the server as its `defaultPort`, and `vite.config.ts` reads `ports.frontend`, so a port only ever changes in one place. There is **no `SERVER_PORT` in `.env`** anymore — to run a one-off / multi-instance boot on another port, pass it as the positional argv (`npm run server -- <preset> <port>`), which overrides `config.ports.ts`. `SERVER_IP` stays in `.env`.
 
+**How the client follows the backend port (dev).** In dev the browser talks to the app **same-origin**: Vite serves the frontend on `ports.frontend` and **proxies** `/api`, `/sync`, `/auth`, `/socket.io`, … to the backend — so the client never needs to know the backend port. If `ports.backend` is already in use, the server **auto-increments** to the next free port (`SERVER_PORT_AUTO_INCREMENT`, default ON in dev) and writes the *actually-bound* port to `node_modules/.luckystack/dev-server.json`. The Vite proxy re-reads that file per request and follows the hop automatically. Net effect: starting the server while `:80` is taken Just Works, transparently to the client.
+
+This auto-follow only works **through the Vite dev proxy** (the default single-instance model). It is **not** picked up by:
+
+- A client that talks **directly** to a fixed `backendUrl` (no proxy — e.g. a cross-origin or remote-backend setup): it keeps using the configured port, so a hop would break the connection. Run such a setup on a known-free fixed port, or disable hopping with `SERVER_PORT_AUTO_INCREMENT=0`.
+- The **router** (cluster / multi-instance): it routes by the fixed per-service `bindings` in `deploy.config.ts`, not `dev-server.json` — so each backend must listen on the exact port its binding declares (pass it via `npm run server -- <preset> <port>`), never an auto-incremented one.
+
+Auto-increment is dev-only (OFF in prod by default), so production binds exactly `ports.backend` (or the argv port).
+
 The router topology (`services.config.ts` + `deploy.config.ts`) is **not** part of a base install; opt in later with `npx luckystack add router` (and `npx luckystack remove router` to undo).
 
 ### 3. Create Your First API
