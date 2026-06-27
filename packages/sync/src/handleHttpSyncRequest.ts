@@ -228,12 +228,15 @@ async function stageResolveRoute(
     };
   }
 
-  //? Parity with the socket transport (handleSyncRequest's validateSyncMessage,
-  //? which rejects `Array.isArray(data)`). `typeof [] === 'object'` slips past the
-  //? HTTP route's `normalizeHttpSyncParams` coercion, so without this an ARRAY
-  //? clientInput would reach a `_server` handler expecting an object — the socket
-  //? path rejects it outright, so the HTTP path must too.
-  if (Array.isArray(data)) {
+  //? Parity with the socket transport (handleSyncRequest's parseSyncFields, which
+  //? rejects `!data || typeof data != 'object' || Array.isArray(data)`). A null /
+  //? non-object / array `clientInput` slips past the HTTP route's
+  //? `normalizeHttpSyncParams` coercion; `typeof null === 'object'` and
+  //? `typeof [] === 'object'` mean the bare object check is insufficient. Without
+  //? this a non-object would reach a `_server` handler expecting an object — and
+  //? under `validation: 'relaxed'` there is no further runtime shape check. The
+  //? socket path rejects it outright, so the HTTP path must too.
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
     return {
       error: buildSyncError({
         response: { status: 'error', errorCode: 'sync.invalidRequest' },
@@ -546,6 +549,7 @@ async function stageExecuteServer(
     buildSyncStreamEmitters({
       cb,
       receiver: normalizedReceiver,
+      userId: user?.id ?? null,
       resolvedName,
       logLabel: 'http sync',
       signal: effectiveAbortSignal,

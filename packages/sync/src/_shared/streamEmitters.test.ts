@@ -62,6 +62,10 @@ vi.mock("@luckystack/core", () => ({
   getLogger: () => ({ debug: loggerDebug, info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   dispatchHook: vi.fn(),
   socketEventNames: { sync: "sync" },
+  //? Identity formatter (matches the default `defaultRoomNameFormatter`) so the
+  //? broadcast-room assertions below still target the raw room code; the real
+  //? formatter only diverges when a consumer registers a custom one.
+  formatRoomName: (room: string) => room,
 }));
 
 import { buildSyncStreamEmitters } from "./streamEmitters";

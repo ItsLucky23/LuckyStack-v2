@@ -1204,6 +1204,7 @@ async function handleSyncRequestInner({ msg, socket, token }: {
     buildSyncStreamEmitters({
       cb,
       receiver,
+      userId: user?.id ?? null,
       resolvedName,
       logLabel: 'sync',
       signal: abortController.signal,

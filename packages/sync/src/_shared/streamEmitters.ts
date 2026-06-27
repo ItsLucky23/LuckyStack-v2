@@ -1,5 +1,6 @@
 import {
   dispatchHook,
+  formatRoomName,
   getIoInstance,
   getLogger,
   getProjectConfig,
@@ -135,6 +136,15 @@ const collectRoomSocketsForPressure = (receiver: string): Socket[] => {
 interface BuildSyncStreamEmittersArgs {
   cb: string | undefined;
   receiver: string;
+  /**
+   * Session user id of the request originator (or null when anonymous). Threaded
+   * through so `broadcastStream` / `flushPressure` can route the receiver room
+   * through `formatRoomName` with the SAME `{ purpose: 'broadcast', userId }`
+   * context the fanout in `handleSyncRequest` / `handleHttpSyncRequest` uses —
+   * otherwise a non-identity `registerRoomNameFormatter` (multi-tenant) makes
+   * broadcast streams target the UNFORMATTED room and miss every recipient.
+   */
+  userId?: string | null;
   resolvedName: string;
   emitOriginatorChunk: (payload: SyncStreamPayload) => void;
   logLabel: string;
@@ -162,12 +172,24 @@ interface BuildSyncStreamEmittersArgs {
 export const buildSyncStreamEmitters = ({
   cb,
   receiver,
+  userId,
   resolvedName,
   emitOriginatorChunk,
   logLabel,
   signal,
   originatorSocket,
 }: BuildSyncStreamEmittersArgs): SyncStreamEmitters => {
+  //? Route the receiver room through the core room-name formatter, matching how
+  //? `handleSyncRequest` (runSyncFanout) + `handleHttpSyncRequest` (stageFanout)
+  //? resolve the physical room before `fetchSockets()`. Sockets physically JOIN
+  //? the FORMATTED room, so a non-identity formatter (multi-tenant key) means the
+  //? RAW `receiver` is the wrong physical room. `'all'` and the empty-string
+  //? sentinel are passed through unchanged (matching the fanout's `=== 'all'`
+  //? branch + the broadcast/pressure guards on the raw `receiver` below).
+  const physicalReceiver =
+    !receiver || receiver === 'all'
+      ? receiver
+      : formatRoomName(receiver, { purpose: 'broadcast', userId: userId ?? null });
   //? Per-request chunk counters keyed by recipient. Scoped to this closure
   //? so they are released when the request ends — no process-lifetime leak.
   const chunkCounters = new Map<string, number>();
@@ -228,7 +250,7 @@ export const buildSyncStreamEmitters = ({
     //? another instance and collapsed broadcastStream into an originator-only
     //? stream. `streamTo` always used `io.to(...).emit` and never had this bug;
     //? this aligns broadcastStream with it.
-    io.to(receiver).emit(socketEventNames.sync, buildBroadcastFrame(payload));
+    io.to(physicalReceiver).emit(socketEventNames.sync, buildBroadcastFrame(payload));
   };
 
   const emitStreamToTokens = (
@@ -281,7 +303,7 @@ export const buildSyncStreamEmitters = ({
 
     const targets: Socket[] = [];
     if (originatorSocket) targets.push(originatorSocket);
-    for (const sock of collectRoomSocketsForPressure(receiver)) {
+    for (const sock of collectRoomSocketsForPressure(physicalReceiver)) {
       //? Avoid duplicating the originator if it's also in the receiver room.
       if (sock !== originatorSocket) targets.push(sock);
     }
