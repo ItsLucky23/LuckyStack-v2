@@ -14,8 +14,14 @@ export interface ApiParams {
 }
 
 export const main = ({ user }: ApiParams): MaybePromise<ApiResponse> => {
-  return {
-    status: 'success',
-    result: user
-  };
+  if (!user) return { status: 'success', result: null };
+  //? Strip server-only credential fields before returning the session to the
+  //? browser. `token` is the raw session credential — in the default mode it's an
+  //? HttpOnly cookie precisely so client JS can NOT read it (XSS protection), so
+  //? returning it here would defeat that. `csrfToken` is a CSRF secret attached at
+  //? runtime by @luckystack/login (not declared on SessionLayout, hence the
+  //? widening) with its own delivery channel (GET /auth/csrf). The frontend only
+  //? needs the non-secret session info (id, name, email, roles, roomCodes, ...).
+  const { token: _stripToken, csrfToken: _stripCsrf, ...safe } = user as SessionLayout & { csrfToken?: string };
+  return { status: 'success', result: safe };
 };
