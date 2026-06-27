@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from 'node:url';
-import { tryCatch, getServerFunctionDirs, getSrcDir } from '@luckystack/core';
+import { tryCatch, getServerFunctionDirs, getSrcDir, ROOT_DIR } from '@luckystack/core';
 import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
@@ -18,6 +18,16 @@ export const devSyncs: Record<string, unknown> = {};
 export const devFunctions: Record<string, unknown> = {};
 
 const normalizePath = (value: string): string => value.replaceAll('\\', '/');
+
+//? Mirror build-time discovery (`typeMap/discovery.ts`): consult the active
+//? `RoutingRules.ignore` predicate so the dev loader (boot scan, hot reload,
+//? functions) skips the SAME paths the type-map generator skips. The predicate
+//? receives a forward-slash path relative to the workspace root. The default
+//? rule is `() => false`, so default discovery is unchanged.
+const isIgnoredPath = (absolutePath: string): boolean => {
+  const relativeFromRoot = normalizePath(path.relative(ROOT_DIR, absolutePath));
+  return getRoutingRules().ignore(relativeFromRoot);
+};
 
 const mapApiPageLocation = (pageLocation: string): string => {
   return pageLocation || 'system';
@@ -146,6 +156,7 @@ const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
     // the src dir contains symlinked packages or nested node_modules trees).
     if (entry === 'node_modules') continue;
     const entryPath = path.join(dir, entry);
+    if (isIgnoredPath(entryPath)) continue;
     const relPath = relativeTo ? `${relativeTo}/${entry}` : entry;
     if (fs.statSync(entryPath).isDirectory()) {
       results.push(...collectTsFiles(entryPath, relPath));
@@ -199,6 +210,7 @@ export const initializeApis = async () => {
 };
 
 export const upsertApiFromFile = async (filePath: string): Promise<void> => {
+  if (isIgnoredPath(path.resolve(filePath))) return;
   const routeMeta = resolveApiRouteMetaFromPath(filePath);
   if (!routeMeta) {
     const normalized = normalizePath(path.resolve(filePath));
@@ -259,6 +271,7 @@ export const removeApiFromFile = (filePath: string): void => {
 
 const scanApiFolder = async (file: string, basePath = "") => {
   const fullPath = path.join(getSrcDir(), basePath, file);
+  if (isIgnoredPath(fullPath)) return;
   if (!fs.statSync(fullPath).isDirectory()) return;
 
   if (!file.toLowerCase().endsWith("api")) {
@@ -332,6 +345,7 @@ export const initializeSyncs = async () => {
 };
 
 export const upsertSyncFromFile = async (filePath: string): Promise<void> => {
+  if (isIgnoredPath(path.resolve(filePath))) return;
   const routeMeta = resolveSyncRouteMetaFromPath(filePath);
   if (!routeMeta) {
     const normalized = normalizePath(path.resolve(filePath));
@@ -402,6 +416,7 @@ export const removeSyncFromFile = (filePath: string): void => {
 
 const scanSyncFolder = async (file: string, basePath = "") => {
   const fullPath = path.join(getSrcDir(), basePath, file);
+  if (isIgnoredPath(fullPath)) return;
   if (!fs.statSync(fullPath).isDirectory()) return;
 
   if (!file.toLowerCase().endsWith("sync")) {
@@ -485,6 +500,7 @@ const scanFunctionsFolder = async (dir: string, rootDir: string, basePath: strin
 
   for (const entry of entries) {
     const fullPath = path.join(dir, entry);
+    if (isIgnoredPath(fullPath)) continue;
     const stat = fs.statSync(fullPath);
 
     if (stat.isDirectory()) {

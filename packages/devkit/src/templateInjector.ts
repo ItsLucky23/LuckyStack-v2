@@ -11,7 +11,7 @@ import {
   isVersionedSyncFileName,
   isVersionedSyncServerFileName,
 } from './routeConventions';
-import { getRoutingRules, isRouteTestFile, validatePagePath } from './routingRules';
+import { apiMarkerSegment, getRoutingRules, isRouteTestFile, syncMarkerSegment, validatePagePath } from './routingRules';
 import {
   BUILT_IN_TEMPLATE_FILENAMES,
   getRegisteredTemplate,
@@ -144,12 +144,12 @@ const isCommentOnlyFile = (filePath: string): boolean => {
 
 export const isInApiFolder = (filePath: string): boolean => {
   const normalized = filePath.replaceAll('\\', '/');
-  return normalized.includes('/_api/') && filePath.endsWith('.ts') && !isRouteTestFile(filePath);
+  return normalized.includes(apiMarkerSegment()) && filePath.endsWith('.ts') && !isRouteTestFile(filePath);
 };
 
 export const isInSyncFolder = (filePath: string): boolean => {
   const normalized = filePath.replaceAll('\\', '/');
-  return normalized.includes('/_sync/') && filePath.endsWith('.ts') && !isRouteTestFile(filePath);
+  return normalized.includes(syncMarkerSegment()) && filePath.endsWith('.ts') && !isRouteTestFile(filePath);
 };
 
 export const isPageFile = (filePath: string): boolean => {
@@ -987,6 +987,25 @@ const removeTypeAliases = (content: string): string => {
 };
 
 /**
+ * Splits a sync-client file into `[header, body]` at the start of `main`'s
+ * function body (the `=> {` opener). `serverOutput` only legitimately appears
+ * in the `SyncParams` interface and in `main`'s parameter destructuring — both
+ * of which live in the header. Scoping the serverOutput-stripping regexes to
+ * the header keeps user body code that coincidentally contains `serverOutput`
+ * (e.g. `{ x: serverOutput, y }`) untouched. If the `: SyncParams` annotation
+ * or the body opener can't be found, falls back to treating the whole file as
+ * header (the previous whole-file behavior).
+ */
+const splitAtMainBody = (content: string): [header: string, body: string] => {
+  const paramsAnchor = content.indexOf(': SyncParams');
+  if (paramsAnchor === -1) return [content, ''];
+  const bodyOpener = content.indexOf('=> {', paramsAnchor);
+  if (bodyOpener === -1) return [content, ''];
+  const splitIndex = bodyOpener + '=> {'.length;
+  return [content.slice(0, splitIndex), content.slice(splitIndex)];
+};
+
+/**
  * Update a client file when the paired server file is deleted
  * Preserves user's main function code while:
  * - Inlining clientInput types
@@ -1002,8 +1021,11 @@ export const updateClientFileForDeletedServer = async (
 
     // Order matters: replace type references BEFORE removing imports/aliases.
     content = inlineClientInputType(content, clientInputTypes);
-    content = removeServerOutputFromParams(content);
-    content = removeServerOutputFromDestructuring(content);
+    // Scope serverOutput removal to the header (interface + main's params) so
+    // it can never corrupt user body code that mentions `serverOutput`.
+    const [header, body] = splitAtMainBody(content);
+    const cleanedHeader = removeServerOutputFromDestructuring(removeServerOutputFromParams(header));
+    content = `${cleanedHeader}${body}`;
     content = removeGeneratedTypeImports(content);
     content = removeTypeAliases(content);
 

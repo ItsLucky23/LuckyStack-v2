@@ -1,8 +1,16 @@
 import path from 'node:path';
 import { getSrcDir } from '@luckystack/core';
 import { API_VERSION_TOKEN_REGEX, SYNC_VERSION_TOKEN_REGEX } from '../routeConventions';
+import { getRoutingRules } from '../routingRules';
 
 const VERSION_SUFFIX_REGEX = API_VERSION_TOKEN_REGEX;
+
+//? Marker segments are configurable via `registerRoutingRules`; escape the
+//? active marker before splicing it into a RegExp so a marker containing regex
+//? metacharacters can't change the pattern's meaning. For the default markers
+//? (`_api` / `_sync`) escaping is a no-op, so the compiled patterns are
+//? byte-identical to the previous literal regexes.
+const escapeRegExp = (value: string): string => value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 
 const stripVersionSuffix = (name: string): string => {
   // VERSION_SUFFIX_REGEX is anchored (`$`) so it matches at most once — `.replace` is correct here.
@@ -26,11 +34,12 @@ export const extractPagePath = (filePath: string): string => {
   if (rel.startsWith('..')) {
     throw new Error(`[routeMeta] file is outside srcDir — cannot extract page path: ${filePath}`);
   }
-  const match = /^(?:(.+?)\/)_api\//.exec(rel);
+  const { apiMarker } = getRoutingRules();
+  const match = new RegExp(String.raw`^(?:(.+?)\/)${escapeRegExp(apiMarker)}\/`).exec(rel);
   if (match) {
     return match[1] ?? 'system';
   }
-  if (rel.startsWith('_api/')) {
+  if (rel.startsWith(`${apiMarker}/`)) {
     return 'system';
   }
   return '';
@@ -38,14 +47,16 @@ export const extractPagePath = (filePath: string): string => {
 
 export const extractApiName = (filePath: string): string => {
   const normalized = filePath.replaceAll('\\', '/');
-  const match = /_api\/(.+)\.ts$/.exec(normalized);
+  const { apiMarker } = getRoutingRules();
+  const match = new RegExp(String.raw`${escapeRegExp(apiMarker)}\/(.+)\.ts$`).exec(normalized);
   const rawName = match?.[1] ?? path.basename(filePath, '.ts');
   return stripVersionSuffix(rawName);
 };
 
 export const extractApiVersion = (filePath: string): string => {
   const normalized = filePath.replaceAll('\\', '/');
-  const match = /_api\/(.+)\.ts$/.exec(normalized);
+  const { apiMarker } = getRoutingRules();
+  const match = new RegExp(String.raw`${escapeRegExp(apiMarker)}\/(.+)\.ts$`).exec(normalized);
   const rawName = match?.[1] ?? path.basename(filePath, '.ts');
   return extractVersionFromName(rawName) ?? 'v1';
 };
@@ -60,11 +71,12 @@ export const extractSyncPagePath = (filePath: string): string => {
   //? (`sync/system/<name>/v1`) — so a root sync silently never dispatched.
   const srcDirNormalized = getSrcDir().replaceAll('\\', '/');
   const rel = path.posix.relative(srcDirNormalized, normalized);
-  const match = /^(?:(.+?)\/)_sync\//.exec(rel);
+  const { syncMarker } = getRoutingRules();
+  const match = new RegExp(String.raw`^(?:(.+?)\/)${escapeRegExp(syncMarker)}\/`).exec(rel);
   if (match) {
     return match[1] ?? 'system';
   }
-  if (rel.startsWith('_sync/')) {
+  if (rel.startsWith(`${syncMarker}/`)) {
     return 'system';
   }
   return '';
@@ -72,7 +84,8 @@ export const extractSyncPagePath = (filePath: string): string => {
 
 export const extractSyncName = (filePath: string): string => {
   const normalized = filePath.replaceAll('\\', '/');
-  const match = /_sync\/(.+)\.ts$/.exec(normalized);
+  const { syncMarker } = getRoutingRules();
+  const match = new RegExp(String.raw`${escapeRegExp(syncMarker)}\/(.+)\.ts$`).exec(normalized);
   if (!match) {
     const basename = path.basename(filePath, '.ts');
     // SYNC_VERSION_TOKEN_REGEX is anchored (`$`) — matches at most once.
@@ -86,7 +99,8 @@ export const extractSyncName = (filePath: string): string => {
 
 export const extractSyncVersion = (filePath: string): string => {
   const normalized = filePath.replaceAll('\\', '/');
-  const match = /_sync\/(.+)\.ts$/.exec(normalized);
+  const { syncMarker } = getRoutingRules();
+  const match = new RegExp(String.raw`${escapeRegExp(syncMarker)}\/(.+)\.ts$`).exec(normalized);
   if (!match) {
     const basename = path.basename(filePath, '.ts');
     const versionMatch = SYNC_VERSION_TOKEN_REGEX.exec(basename);
