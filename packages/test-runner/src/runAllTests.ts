@@ -43,6 +43,15 @@ export interface RunAllTestsInput {
    */
   noCsrf?: boolean;
   noCustom?: boolean;
+  /**
+   * Token sent as `X-Test-Reset-Token` when the rate-limit layer resets the
+   * shared bucket between endpoints. The server's `/_test/reset` requires
+   * `TEST_RESET_TOKEN` to be set and matching — an unset/wrong token is 403, so
+   * `resetBetweenEndpoints` would silently no-op. Defaults to
+   * `process.env.TEST_RESET_TOKEN` so a CI run with the env set works with no
+   * extra wiring; pass explicitly to override.
+   */
+  resetToken?: string;
 }
 
 export interface RunAllTestsSummary {
@@ -155,6 +164,10 @@ const runSweepLayers = async (
       //? next endpoint. Requires the server to expose /_test/reset (NODE_ENV in
       //? { 'development', 'test' } AND TEST_RESET_TOKEN set + matching header).
       resetBetweenEndpoints: true,
+      //? Thread the reset token (explicit input, else the TEST_RESET_TOKEN env the
+      //? server validates against) — without it `/_test/reset` returns 403 and the
+      //? between-endpoint reset silently never happens.
+      resetToken: input.resetToken ?? process.env.TEST_RESET_TOKEN,
     });
     summary.rateLimit = cloneSummary(rateLimit, input.filter);
   }

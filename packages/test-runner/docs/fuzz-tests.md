@@ -1,8 +1,8 @@
 # Fuzz Tests
 
-The fuzz layer is the crash-resistance net. It feeds every endpoint a fixed catalogue of malformed payloads — wrong types, oversized strings, deeply nested objects, prototype-pollution attempts — and asserts the server never returns 5xx with a stack and never returns a body that escapes the framework envelope. It is intentionally exhaustive and slow; wire it into nightly CI, not into every PR.
+The fuzz layer is the crash-resistance net. It feeds every endpoint a fixed catalogue of malformed payloads — wrong types, oversized strings, deeply nested objects, prototype-pollution attempts — and asserts the server never *crashes* (returns no response at all) and never returns a body that escapes the framework envelope. A 5xx status is **tolerated as long as it still carries a valid `{ status: 'error', errorCode }` envelope** — what the layer pins is that the framework caught and shaped the error, not the numeric status code. It is intentionally exhaustive and slow; wire it into nightly CI, not into every PR.
 
-Pass criterion: across every probe, the server replies with a 1xx/2xx/3xx/4xx status code AND a JSON body of `{ status: 'success' | 'error', errorCode? }`. Any 5xx, any non-JSON body, any non-envelope JSON, or any `error` without an `errorCode` is a fail and the probe loop short-circuits to report the offending payload.
+Pass criterion: across every probe, the server returns *some* response (no fetch crash) whose body is a valid framework envelope `{ status: 'success' | 'error', errorCode? }` (with `errorCode` a string whenever `status === 'error'`). The HTTP status code itself is NOT asserted — a 5xx that still returns a valid envelope passes. A crashed connection (no response at all), a non-JSON / non-envelope body, or an `error` envelope missing a string `errorCode` is a fail, and the probe loop short-circuits to report the offending payload.
 
 ## Functions
 
@@ -29,8 +29,8 @@ Flow:
 2. For each payload, POST/PUT/DELETE it to `${baseUrl}/${endpoint.fullPath}` (or send no body on GET). The body is `JSON.stringify(payload)` so values that lose information under stringify (e.g. `undefined` keys, `NaN`) round-trip through the wire encoding the same as in production.
 3. After each request:
    - **No response (fetch error, abort, DNS):** fail with `reason: 'fuzz probe crashed (no response) with payload: ...'`. The reason includes the first 80 chars of the payload JSON.
-   - **`httpStatus >= 500`:** fail with `reason: 'fuzz payload produced 5xx: ...'`. Concrete: the server threw an unhandled error and the HTTP layer surfaced it as 500.
-   - **Body fails JSON parse or `status` is not `'success' | 'error'`:** fail with `reason: 'fuzz payload produced non-envelope response: ...'`.
+   - **`httpStatus >= 500` WITH a valid envelope:** **pass**. A 5xx is deliberately tolerated as long as the body is still a `{ status: 'error', errorCode }` envelope — that means the framework caught the error and shaped it, which is exactly the crash-resistance property this layer checks. Only the envelope checks below can fail a probe; the status code alone never does.
+   - **Body fails JSON parse or `status` is not `'success' | 'error'`:** fail with `reason: 'fuzz payload produced non-envelope response: ...'`. This is the check that actually catches a raw 5xx stack — an unhandled error that escaped the envelope arrives as a non-JSON / non-envelope body.
    - **`status === 'error'` and `errorCode` is not a string:** fail with `reason: 'fuzz error response missing errorCode for payload: ...'`.
 4. If every payload passes, return pass.
 
