@@ -495,3 +495,47 @@ describe('socket-only paths', () => {
     expect(hookNames).toContain('postApiRespond');
   });
 });
+
+//? --- API #6 regression: ERROR responses run the respond-hook chain on BOTH
+//? transports. Before the fix, the socket handler's `emitApiError` emitted the
+//? error envelope DIRECTLY, bypassing preApiRespond / transformApiResponse /
+//? postApiRespond, while HTTP ran them on every response (success AND error).
+//? Consumer respond hooks (PII redaction, response signing, audit) therefore
+//? never fired on a WebSocket auth / rate-limit / validation rejection. Pin that
+//? all three now fire on an error response on socket too, matching HTTP. ---
+describe('transport parity — error responses run the respond-hook chain (#6)', () => {
+  const respondHooks = ['preApiRespond', 'transformApiResponse', 'postApiRespond'] as const;
+
+  it('socket: an auth-rejected error response dispatches all three respond hooks', async () => {
+    seam = defaultSeam();
+    seam.session = null; // anonymous → auth.required on a login route
+    registerRoute({ auth: { login: true, additional: [] } });
+    const socket = await driveSocket();
+    expect(socket.status).toBe('error');
+    expect(socket.errorCode).toBe('auth.required');
+    const names = dispatchHookMock.mock.calls.map((c) => c[0] as string);
+    for (const hook of respondHooks) expect(names).toContain(hook);
+  });
+
+  it('HTTP: the same auth-rejected error response dispatches the same three hooks', async () => {
+    seam = defaultSeam();
+    seam.session = null;
+    registerRoute({ auth: { login: true, additional: [] } });
+    const http = await driveHttp();
+    expect(http.status).toBe('error');
+    expect(http.errorCode).toBe('auth.required');
+    const names = dispatchHookMock.mock.calls.map((c) => c[0] as string);
+    for (const hook of respondHooks) expect(names).toContain(hook);
+  });
+
+  it('socket: a preApiRespond stop on an error response rewrites the envelope (parity with HTTP)', async () => {
+    seam = defaultSeam();
+    seam.session = null;
+    seam.hookResults.preApiRespond = { stopped: true, signal: { errorCode: 'respond.blocked', httpStatus: 409 } };
+    registerRoute({ auth: { login: true, additional: [] } });
+    const socket = await driveSocket();
+    expect(socket.status).toBe('error');
+    //? The stop signal's errorCode supersedes the original auth.required.
+    expect(socket.errorCode).toBe('respond.blocked');
+  });
+});
