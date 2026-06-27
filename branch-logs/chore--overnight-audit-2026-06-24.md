@@ -112,3 +112,9 @@ User asked to verify + fix everything real from the ~43 high/medium report-only 
 **Gate:** full `build:packages` 16/16 + `lint:packages` clean; affected-package suites green (devkit/server/sync/test-runner 356 tests; api/presence/server 238). 28 commits ahead of main, branch NOT merged.
 
 **Not done (deliberate):** create-luckystack-app session-endpoint returning token+CSRF to client JS — a template design decision the user did not greenlight this round.
+
+## 2026-06-27 12:30 — create-app session-endpoint credential leak (the deferred design call)
+
+**User prompt:** (after I explained the finding) "ja fix maar".
+
+**What I did:** `template/src/_api/session_v1.ts` (`system/session`, `auth.login:false`) returned `result: user` verbatim, leaking the raw session `token` (HttpOnly-cookie-backed → JS must never read it; returning it defeats the XSS defence) and `csrfToken` to client JS. `main` now returns a projection stripping both (mirrors `_stripToken` in login/session.ts). Verified: only ONE copy (no cli-asset drift); no template client code reads `user.token`/`.csrfToken` (all uses are server-side `_api/` handlers via server injection). ai:lint clean. Template isn't in build:packages/lint:packages (generated imports only exist post-scaffold), so gated by the login precedent + ai:lint + logic review.
