@@ -23,6 +23,17 @@
 - The env **name** is decoupled from the secret **base name**: `OPENAI_KEY` (name) -> `OPENAI_AUTHORIZATION_KEY_V5` (value) -> base `OPENAI_AUTHORIZATION_KEY`, version `5`.
 - The client sends the **full pointer string** to the server and overwrites the env name with the resolved value. The base/version split is the server's job.
 - A non-pointer value (`NODE_ENV=production`, or a real secret pasted locally) is a literal: never sent, never overwritten. Local overrides win for free.
+- Scanning is gated by `envNames` (a name allowlist — `string[]` or `(name) => boolean`). **This is required to resolve anything**, and the secure default is deny-all: see [Name scoping](#name-scoping-envnames) below.
+
+## Name scoping (`envNames`)
+
+Pointer detection runs **only** over the env NAMES allowed by `config.envNames`:
+
+- `string[]` — resolve exactly these names.
+- `(name) => boolean` — a predicate (e.g. `(n) => n.endsWith('_KEY')`).
+- `() => true` — deliberately scan every name.
+
+**Secure default: when `envNames` is unset, NOTHING is resolved off-host.** The client emits a one-time boot warning and leaves `process.env` untouched (a deny-all no-op), in every mode. This prevents the resolver from POSTing an unrelated, pointer-shaped inherited value (a CI `RELEASE_TAG=build_2024_V2`) to the server — an explicit allowlist (or `() => true`) is mandatory to opt in. The same allowlist gates the dev file-reload channel, so a name excluded by `envNames` is never POSTed as a pointer nor injected as a plain value.
 
 ## Boot flow
 
@@ -30,7 +41,8 @@
 process start
   -> dotenv loads .env / .env.local        (consumer's server.ts)
   -> initSecretManager(...)                 <-- THIS CLIENT, first line of server.ts
-       1. capture { envName -> pointer } from process.env (once)
+       0. require an `envNames` allowlist (unset = deny-all + boot warning)
+       1. capture { envName -> pointer } from the allowed names in process.env (once)
        2. POST /resolve { keys: [unique pointers] }
        3. overwrite process.env[envName] = values[pointer]
   -> framework boot (reads the resolved process.env)

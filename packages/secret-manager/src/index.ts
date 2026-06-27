@@ -220,16 +220,50 @@ const runHook = (fn: () => void, label: string): void => {
   if (error) console.warn(`[secret-manager] ${label} callback threw (ignored):`, errorMessage(error));
 };
 
+//? Bound how long an async consumer hook may run before the resolve chain stops
+//? waiting on it. A hook that NEVER resolves (a stuck `onApplied` awaiting a dead
+//? pool) would otherwise wedge `resolveChain` forever, so every later resolve
+//? (boot poll, dev watch, manual refresh) deadlocks behind it.
+const HOOK_TIMEOUT_MS = 30_000;
+
 //? Async sibling of `runHook` for a callback that may return a Promise (onApplied
-//? re-creates pools/SDK clients). Awaited but isolated — a rejection/throw is
-//? warned, never propagated, so the resolve that already applied stays successful.
+//? re-creates pools/SDK clients). Awaited but isolated AND time-bounded — a
+//? rejection/throw is warned (never propagated, so the resolve that already
+//? applied stays successful), and a hook that HANGS is abandoned after
+//? `timeoutMs` via a `Promise.race` (mirrors the fetch `AbortSignal.timeout`
+//? black-hole guard) so a stuck hook can't deadlock the serialized resolve chain.
+//? The race only stops AWAITING the hook — it cannot cancel the consumer's
+//? promise, so a still-running hook keeps going in the background; we just no
+//? longer block on it. `timeoutMs <= 0` disables the bound.
 //? CC-7 exemption (no-raw-try-catch): `tryCatchSync` can't wrap an `await`, and
 //? the async framework `tryCatch` would auto-capture to the error tracker — a
 //? deliberate non-goal here (a consumer hook failure must stay a local warn in
 //? this dependency-light client, not a tracked event).
-const runHookAsync = async (fn: () => void | Promise<void>, label: string): Promise<void> => {
+const runHookAsync = async (
+  fn: () => void | Promise<void>,
+  label: string,
+  timeoutMs = HOOK_TIMEOUT_MS,
+): Promise<void> => {
   try {
-    await fn();
+    if (timeoutMs <= 0) {
+      await fn();
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        console.warn(
+          `[secret-manager] ${label} callback did not settle within ${String(timeoutMs)}ms; continuing without waiting (the hook may still be running in the background).`,
+        );
+        resolve();
+      }, timeoutMs);
+      timer.unref();
+    });
+    try {
+      await Promise.race([Promise.resolve(fn()), timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   } catch (error) {
     console.warn(`[secret-manager] ${label} callback threw (ignored):`, errorMessage(error));
   }
@@ -407,6 +441,26 @@ const readBodyCapped = async (response: Response, maxBytes: number): Promise<str
   return out;
 };
 
+//? Drop any case-variant of `authorization` from consumer-supplied headers so the
+//? framework bearer token always wins. A plain record passed as `fetch` `headers`
+//? is filled with `append` (per the Fetch spec), so a lowercase `authorization`
+//? key would NOT be overwritten by the later `Authorization` entry — both survive
+//? and combine into `Bearer <consumer>, Bearer <framework>`. A server reading the
+//? first token would then honour the consumer's value, bypassing the documented
+//? "cannot override Authorization" guard. Stripping here makes the guard real for
+//? every casing; all other consumer headers are preserved untouched.
+const stripAuthorizationHeaders = (
+  headers: Record<string, string> | undefined,
+): Record<string, string> => {
+  const out: Record<string, string> = {};
+  if (!headers) return out;
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === 'authorization') continue;
+    out[key] = value;
+  }
+  return out;
+};
+
 //? One resolve round-trip: POST the pointers, validate the response, return the
 //? filtered `{ pointer -> value }` map. No retry/timeout orchestration here — the
 //? caller (`fetchResolve`) owns that so a hang can't slip past the abort signal.
@@ -431,7 +485,9 @@ const fetchResolveOnce = async (
   const timeoutMs = Number.isFinite(rawTimeout) ? Math.max(0, rawTimeout) : DEFAULT_TIMEOUT_MS;
   const signal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
 
-  //? Consumer `headers` are merged first so they can never override Authorization.
+  //? Consumer `headers` are merged first, with any case-variant of `authorization`
+  //? stripped (`stripAuthorizationHeaders`) so the framework bearer token always
+  //? wins — see that helper for why a lowercase key would otherwise leak through.
   //? `redirect: 'error'` fails closed on any 30x: `validateUrl` pins only the
   //? configured host, so following a redirect would carry the bearer token +
   //? request body to — and consume the resolved secrets from — an origin that was
@@ -441,7 +497,7 @@ const fetchResolveOnce = async (
   const response = await fetchFn(endpoint, {
     method: 'POST',
     headers: {
-      ...config.headers,
+      ...stripAuthorizationHeaders(config.headers),
       'Authorization': `Bearer ${resolveToken(config.token)}`,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -640,9 +696,11 @@ const doResolveInner = async (
   }
 
   //? Notify AFTER the cache + process.env are coherent so a consumer that reads
-  //? process.env inside the callback sees the applied values. Isolated so a
-  //? throwing/hanging `onApplied` can't abort an otherwise-successful resolve
-  //? (it has already written process.env + the cache).
+  //? process.env inside the callback sees the applied values. Isolated AND
+  //? time-bounded by `runHookAsync` so a throwing `onApplied` can't abort an
+  //? otherwise-successful resolve, AND a HANGING `onApplied` can't wedge the
+  //? serialized resolve chain forever (it is abandoned after `HOOK_TIMEOUT_MS`,
+  //? with a warn) — process.env + the cache are already written by this point.
   if (changes.length > 0) await runHookAsync(() => config.onApplied?.(changes), 'onApplied');
 };
 

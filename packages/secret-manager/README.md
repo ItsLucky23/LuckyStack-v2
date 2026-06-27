@@ -26,11 +26,19 @@ await initSecretManager({
   url: process.env.LUCKYSTACK_SECRET_MANAGER_URL!,
   token: { fromFile: '.secret-manager-token' }, // gitignored file, one line = the token
   source: 'hybrid', // try the server, keep local env on failure
+  envNames: ['OPENAI_KEY', 'STRIPE_KEY'], // REQUIRED — allowlist of names to resolve
 });
 
 const server = await bootstrapLuckyStack({ /* ... */ });
 await server.listen();
 ```
+
+> **`envNames` is required to resolve anything.** It is the allowlist of `process.env`
+> NAMES that are eligible for resolution. **Secure default: when `envNames` is unset,
+> NOTHING is resolved off-host** — the client logs a one-time boot warning and leaves
+> every value as-is (a deny-all no-op). This prevents the client from POSTing an
+> unrelated, pointer-shaped inherited value (e.g. a CI `RELEASE_TAG=build_2024_V2`) to
+> the server. See [Scoping resolution with `envNames`](#scoping-resolution-with-envnames).
 
 In your committed `.env`:
 
@@ -50,6 +58,20 @@ After `initSecretManager` resolves, `process.env.OPENAI_KEY` holds the real `sk-
 | `'hybrid'` | Try the server; on failure warn and leave whatever `process.env` already holds. |
 
 A value that is **not** pointer-shaped (e.g. `NODE_ENV=production`, or a real secret you pasted locally) is treated as a literal and never sent to the server — so local overrides win automatically.
+
+## Scoping resolution with `envNames`
+
+`envNames` is the allowlist of `process.env` NAMES the client is allowed to resolve. **It is required to resolve anything** — pass an array of names or a predicate:
+
+```ts
+envNames: ['OPENAI_KEY', 'STRIPE_KEY']     // explicit allowlist (recommended)
+envNames: (name) => name.endsWith('_KEY')  // or a predicate
+envNames: () => true                        // deliberately scan EVERY env name
+```
+
+**Secure default — deny-all.** When `envNames` is unset, **nothing is resolved off-host**: the client emits a one-time boot warning and leaves every value as-is. This is intentional. Without a name allowlist the resolver would scan the entire inherited environment and POST any unrelated, pointer-shaped value (a CI `RELEASE_TAG=build_2024_V2`, a shell `TERM`-like `..._V2`) to the secret-manager server. So you must opt in explicitly — either list the names you control, or pass `() => true` as a deliberate, auditable choice to scan everything.
+
+> If you call `initSecretManager` and see `[secret-manager] \`envNames\` is not set: NO environment values will be resolved off-host`, that is this guard: add `envNames`.
 
 ## Dev hot reload (opt-in)
 
