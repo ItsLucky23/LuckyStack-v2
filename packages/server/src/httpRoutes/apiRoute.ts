@@ -38,20 +38,24 @@ export const handleApiRoute: HttpRouteHandler = async ({
     initSseResponse(res);
     sseInitialized = true;
   };
-  if (useHttpStream) {
-    //? SRV-O1 — mirror the four-listener pattern from syncRoute: req 'error' and
-    //? 'aborted' + res 'error' must all flip streamClosed so a broken client or
-    //? a write error on the ServerResponse doesn't crash the worker with an
-    //? unhandled 'error' event. Attached eagerly (independent of the SSE headers)
-    //? so a client abort flips streamClosed even before the stream opens.
-    const markClosed = () => {
-      streamClosed = true;
-    };
-    req.on('close', markClosed);
-    req.on('error', markClosed);
-    req.on('aborted', markClosed);
-    res.on('error', markClosed);
-  }
+  //? SRV-O6 — wire the handler's abortSignal to client disconnect. The api
+  //? pipeline accepts an `abortSignal` and races `main()` against it, but the HTTP
+  //? route never supplied one, so a slow handler kept running after the caller went
+  //? away (wasted DB/CPU work, no cancellation). Abort on any terminal connection
+  //? event, for BOTH streaming and non-streaming requests.
+  const abortController = new AbortController();
+  //? Mirror the four-listener pattern: req 'error' + 'aborted' + 'close' and res
+  //? 'error' all (1) flip streamClosed so subsequent SSE writes become no-ops and
+  //? a broken socket can't crash the worker with an unhandled 'error', and (2)
+  //? abort the in-flight handler. Harmless once the request has already completed.
+  const markClosed = () => {
+    streamClosed = true;
+    if (!abortController.signal.aborted) abortController.abort();
+  };
+  req.on('close', markClosed);
+  req.on('error', markClosed);
+  req.on('aborted', markClosed);
+  res.on('error', markClosed);
 
   const [error, handled] = await tryCatch(async () => {
     const httpToken = extractTokenFromRequest(req);
@@ -89,6 +93,7 @@ export const handleApiRoute: HttpRouteHandler = async ({
       xLanguageHeader: req.headers['x-language'],
       acceptLanguageHeader: req.headers['accept-language'],
       method,
+      abortSignal: abortController.signal,
       stream: useHttpStream
         ? (payload) => {
             if (streamClosed || res.writableEnded) return;

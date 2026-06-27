@@ -54,20 +54,33 @@ export const handleSyncRoute: HttpRouteHandler = async ({
 
   const useHttpStream = shouldUseHttpStream({ acceptHeader: req.headers.accept, queryString });
   let streamClosed = false;
-  if (useHttpStream) {
+  let sseInitialized = false;
+  //? SRV-O5 (parity with apiRoute) — open the SSE response LAZILY (first stream
+  //? chunk, or a SUCCESSFUL final), NEVER eagerly. The eager `initSseResponse`
+  //? committed HTTP 200 + event-stream headers BEFORE handleHttpSyncRequest ran its
+  //? method / auth / rate-limit / route / membership gates, so a rejected caller
+  //? hitting a streaming sync endpoint got 200 with the real error buried in the
+  //? SSE body instead of a 405 / 401 / 403 / 404 status.
+  const ensureSseOpen = () => {
+    if (sseInitialized || res.writableEnded) return;
     initSseResponse(res);
-    //? Mark the SSE stream closed on EVERY terminal connection event, not just
-    //? 'close': an aborted or errored client (or a write error on res) must
-    //? also flip the flag so subsequent `sendSseEvent` calls become no-ops and
-    //? the connection can't leak or crash the worker with an unhandled 'error'.
-    const markClosed = () => {
-      streamClosed = true;
-    };
-    req.on('close', markClosed);
-    req.on('error', markClosed);
-    req.on('aborted', markClosed);
-    res.on('error', markClosed);
-  }
+    sseInitialized = true;
+  };
+  //? SRV-O6 — wire the handler's abortSignal to client disconnect (the sync
+  //? pipeline accepts an `abortSignal` and races the `_server` run against it, but
+  //? the route never supplied one). Mark the SSE stream closed on EVERY terminal
+  //? connection event (so subsequent `sendSseEvent` calls become no-ops and a
+  //? broken socket can't crash the worker with an unhandled 'error') AND abort the
+  //? in-flight handler. Attached for both streaming and non-streaming requests.
+  const abortController = new AbortController();
+  const markClosed = () => {
+    streamClosed = true;
+    if (!abortController.signal.aborted) abortController.abort();
+  };
+  req.on('close', markClosed);
+  req.on('error', markClosed);
+  req.on('aborted', markClosed);
+  res.on('error', markClosed);
 
   const [error, handled] = await tryCatch(async () => {
     if (method !== 'POST') {
@@ -76,11 +89,7 @@ export const handleSyncRoute: HttpRouteHandler = async ({
         message: 'sync.methodNotAllowed',
         errorCode: 'sync.methodNotAllowed',
       };
-      if (useHttpStream) {
-        if (!streamClosed) sendSseEvent({ res, event: 'final', data: response });
-        res.end();
-        return true;
-      }
+      //? Pre-gate failure: SSE is never opened, so emit a real 405 status.
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(405);
       res.end(JSON.stringify(response));
@@ -96,11 +105,7 @@ export const handleSyncRoute: HttpRouteHandler = async ({
         message: 'sync.invalidName',
         errorCode: 'sync.invalidName',
       };
-      if (useHttpStream) {
-        if (!streamClosed) sendSseEvent({ res, event: 'final', data: response });
-        res.end();
-        return true;
-      }
+      //? Pre-gate failure: SSE is never opened, so emit a real 400 status.
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(400);
       res.end(JSON.stringify(response));
@@ -124,15 +129,22 @@ export const handleSyncRoute: HttpRouteHandler = async ({
       requesterIp,
       xLanguageHeader: req.headers['x-language'],
       acceptLanguageHeader: req.headers['accept-language'],
+      abortSignal: abortController.signal,
       stream: useHttpStream
         ? (payload: HttpSyncStreamEvent) => {
             if (streamClosed || res.writableEnded) return;
+            ensureSseOpen();
             sendSseEvent({ res, event: 'stream', data: payload });
           }
         : undefined,
     });
 
-    if (useHttpStream) {
+    //? Stream the final envelope only when the request actually qualifies: SSE was
+    //? already opened mid-stream, OR the result is a success (open it now). A
+    //? gate-rejection result that never opened the stream falls through to the
+    //? proper-status JSON write below instead of a 200 + SSE-wrapped error.
+    if (useHttpStream && (sseInitialized || result.status === 'success')) {
+      ensureSseOpen();
       if (!streamClosed) sendSseEvent({ res, event: 'final', data: result });
       res.end();
       return true;
@@ -163,7 +175,11 @@ export const handleSyncRoute: HttpRouteHandler = async ({
     errorCode: 'sync.invalidRequestFormat',
   };
 
-  if (useHttpStream) {
+  //? Only route the 500 through SSE when the response was actually committed (the
+  //? stream opened). `res.headersSent` is authoritative — in the streaming path
+  //? only `initSseResponse` writes headers before this catch. When headers are
+  //? still unwritten (gate/parse failure before any chunk), emit a real 500 status.
+  if (useHttpStream && res.headersSent) {
     if (!res.writableEnded) sendSseEvent({ res, event: 'error', data: errResponse });
     res.end();
     return true;

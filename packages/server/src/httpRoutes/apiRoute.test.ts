@@ -60,7 +60,11 @@ interface FakeResCapture {
   headers: Record<string, string>;
 }
 
-const makeReqRes = (): { args: Parameters<HttpRouteHandler>[0]; cap: FakeResCapture } => {
+const makeReqRes = (): {
+  args: Parameters<HttpRouteHandler>[0];
+  cap: FakeResCapture;
+  fireReq: (event: string) => void;
+} => {
   const cap: FakeResCapture = { ended: false, headers: {} };
   const res = {
     get writableEnded() { return cap.ended; },
@@ -69,7 +73,13 @@ const makeReqRes = (): { args: Parameters<HttpRouteHandler>[0]; cap: FakeResCapt
     end: (chunk?: string) => { cap.ended = true; cap.body = chunk; },
     on: () => res,
   };
-  const req = { headers: {} as Record<string, unknown>, on: () => req };
+  //? Capture req listeners so a test can simulate a client disconnect ('close').
+  const reqListeners: Record<string, (() => void)[]> = {};
+  const req = {
+    headers: {} as Record<string, unknown>,
+    on: (event: string, cb: () => void) => { (reqListeners[event] ??= []).push(cb); return req; },
+  };
+  const fireReq = (event: string): void => { for (const cb of reqListeners[event] ?? []) cb(); };
   const args = {
     req,
     res,
@@ -80,7 +90,7 @@ const makeReqRes = (): { args: Parameters<HttpRouteHandler>[0]; cap: FakeResCapt
     requestId: 'req-1',
   // luckystack-allow no-as-any: test fake-req/res boundary — supplies only the members handleApiRoute touches, not the full IncomingMessage/ServerResponse surface (mirrors healthRoutes.test.ts)
   } as unknown as Parameters<HttpRouteHandler>[0];
-  return { args, cap };
+  return { args, cap, fireReq };
 };
 
 beforeEach(() => {
@@ -144,6 +154,26 @@ describe('handleApiRoute — SSE opens only after the gates pass (#5)', () => {
     expect(initSseResponseMock).not.toHaveBeenCalled();
     expect(cap.writeHeadStatus).toBe(429);
     expect(JSON.parse(cap.body ?? '{}')).toMatchObject({ status: 'error', errorCode: 'api.rateLimitExceeded' });
+  });
+
+  it('passes an abortSignal to the handler that aborts on client disconnect (#7)', async () => {
+    seam.useHttpStream = false;
+    let capturedSignal: AbortSignal | undefined;
+    handleHttpApiRequestMock.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
+      capturedSignal = args.abortSignal;
+      return seam.apiResult;
+    });
+
+    const { args, fireReq } = makeReqRes();
+    await handleApiRoute(args);
+
+    //? The route must supply a real AbortSignal (was previously unwired → handlers
+    //? kept running after the client left).
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal?.aborted).toBe(false);
+    //? A client disconnect ('close') aborts it.
+    fireReq('close');
+    expect(capturedSignal?.aborted).toBe(true);
   });
 
   it('streaming request whose handler throws BEFORE any chunk → real 500 JSON, not an SSE error', async () => {
