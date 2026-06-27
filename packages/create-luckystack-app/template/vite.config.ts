@@ -4,11 +4,12 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { ports } from './config.ports';
 
 //? The dev backend writes its ACTUALLY-bound port to
 //? `node_modules/.luckystack/dev-server.json` (it may have auto-incremented off
-//? a busy `SERVER_PORT`). Read it so the proxy targets the real port; fall back
-//? to `SERVER_PORT` from `.env` when the file is absent (backend not up yet, or
+//? a busy port). Read it so the proxy targets the real port; fall back to the
+//? `config.ports.ts` backend port when the file is absent (backend not up yet, or
 //? a production build). Re-read per request via `bypass` (below) so a backend
 //? that hops ports mid-session is followed live.
 const readBackendPort = (fallback: string): string => {
@@ -27,8 +28,15 @@ const readBackendPort = (fallback: string): string => {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const ip = env.SERVER_IP || '127.0.0.1';
-  const envPort = env.SERVER_PORT || '80';
-  const backendTarget = (): string => `http://${ip}:${readBackendPort(envPort)}`;
+  //? Backend port comes from config.ports.ts (the single source) — SERVER_PORT is
+  //? no longer read. In cluster-dev (the @luckystack/router topology) set
+  //? ROUTER_PORT so the proxy targets the router instead of a single backend; the
+  //? router then fans out per service-key (see deploy.config.ts bindings).
+  const routerPort = env.ROUTER_PORT && /^\d+$/.test(env.ROUTER_PORT) ? env.ROUTER_PORT : undefined;
+  const backendTarget = (): string =>
+    routerPort
+      ? `http://${ip}:${routerPort}`
+      : `http://${ip}:${readBackendPort(String(ports.backend))}`;
 
   //? Vite's proxy (node-http-proxy) has NO `router` option, but `bypass` runs per
   //? request with the live options object — set `target` there so every proxied
@@ -69,12 +77,13 @@ export default defineConfig(({ mode }) => {
       ],
     },
     server: {
-      port: 5173,
+      port: ports.frontend,
       host: true,
       proxy: {
         // Forward API + sync + auth + uploads + framework dev endpoints to the
-        // backend declared by SERVER_IP/SERVER_PORT (or its auto-incremented port
-        // advertised in node_modules/.luckystack/dev-server.json).
+        // backend on SERVER_IP + config.ports.ts `backend` (or its auto-incremented
+        // port advertised in node_modules/.luckystack/dev-server.json), or to the
+        // router when ROUTER_PORT is set (cluster-dev).
         '/api': entry(),
         '/sync': entry(),
         '/auth': entry(),

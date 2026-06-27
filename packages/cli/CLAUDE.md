@@ -46,7 +46,7 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 | `transitions.ts` | `planChanges(current, desired)` → granular `Change[]` each with a consequence preview + `apply`. `configFromState`, `TOGGLE_IDS`. The reconfigure engine. |
 | `lib/state.ts` / `lib/envKeys.ts` / `lib/envFile.ts` | `detectProjectState` (authMode/oauth/email/monitoring/packages from deps + env KEY names) · value-blind env-key reader (`.env.local` then `.env`) · value-safe env-block add/remove + EXTERNAL_ORIGINS edits. |
 | `featureOptions.ts` | Reconfigurable option lists (authMode/oauth/email/monitoring) + provider→env-key/origin/dep maps. Mirrors the scaffolder's PROVIDER_OPTIONS (parity-tested). |
-| `commands/remove.ts` | `removeFeature` — inverse of add by kind: backend = drop dep; presence = reverse JSX; login = GUARDED (keep files, warn); error-tracking = drop dep + delete `functions/sentry.ts`; secret-manager = re-comment blocks; router = drop dep + script; ai-docs = drop mcp + `.mcp.json` entry. |
+| `commands/remove.ts` | `removeFeature` — inverse of add by kind: backend = drop dep; presence = reverse JSX; login = GUARDED (keep files, warn); error-tracking = drop dep + delete `functions/sentry.ts`; secret-manager = re-comment blocks; router = drop dep + script + delete the topology config files (`services.config.ts` / `deploy.config.ts` / `server/config/presetLoader.ts`) + un-wire their two `server.ts` imports; ai-docs = drop mcp + `.mcp.json` entry. |
 | `commands/addDispatch.ts` | `runAddByKind` — single source of truth mapping a `FeatureKind` to its add handler (used by `add <feature>`, manage, and reconfigure toggles; exhaustive). |
 | `lib/wizard.ts` | `runSingleSelect` (radio) + `runCheckbox` (multi) — ZERO-dep readline-keypress prompts (↑/↓ · space/enter · ctrl-c), non-TTY + empty guards. |
 | `commands/addLogin.ts` | Copy the WHOLE auth bundle (UI + `functions/session.ts` + `server/hooks/notifications.ts`) into the project + add `@luckystack/login` + restore config.ts auth flags + register notification hooks (best-effort). `AUTH_SERVER_HOOKS` / `AUTH_NONE_SERVER_PLACEHOLDER` exported for the reverse. |
@@ -54,7 +54,7 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 | `commands/addDocsUi.ts` | Add `@luckystack/docs-ui` + copy the React API explorer into `src/docs/page.tsx`. Removal deletes the page. |
 | `commands/addErrorTracking.ts` | Add `@luckystack/error-tracking` + copy the `functions/sentry.ts` shim. `copySentryShim` / `removeSentryShim` shared with planMonitoring. |
 | `commands/addSecretManager.ts` | Add `@luckystack/secret-manager` + uncomment the config.ts + server/server.ts blocks (mirror of `wireSecretManager`); `removeSecretManager` re-comments. |
-| `commands/addRouter.ts` | Add `@luckystack/router` + the `router` npm script; `removeRouter` drops both. |
+| `commands/addRouter.ts` | Add `@luckystack/router` + the `router` npm script AND copy the topology config files (`services.config.ts` + `deploy.config.ts` + `server/config/presetLoader.ts`) from `assets/router/` (idempotent) + wire their two `server.ts` side-effect imports (`import '../deploy.config';` / `import '../services.config';` after `import '../config';`). `removeRouter` drops the dep + script, un-wires those imports, and deletes the three config files. These files are NOT in a base install — `pruneRouter` strips them from a no-router scaffold; this is the inverse. |
 | `commands/addAiDocs.ts` | Add `@luckystack/mcp` (devDep) + register the graph server in `.mcp.json`; `removeAiDocs` reverses. (The doc tree is NOT bundled — re-scaffold for that.) |
 | `commands/addBackendOnly.ts` | Generic handler for `sync` / `email`: add dep + install (self-wire at boot). |
 | `commands/checkEnv.ts` | `check-env` — A: unused `.env` keys; B: env vars used but undefined. DEV_-aware; framework-key ignore list; env files via `getEnvFiles()` semantics (`LUCKYSTACK_ENV_FILES` else `.env`,`.env.local`). |
@@ -63,6 +63,7 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 | `lib/project.ts` | `findProjectRoot` (consumer dep OR framework `packages/core`), `addDependency` / `dropDependency`, `hasDependency` / `dependencyRange`, `editFile` (CRLF-safe), `copyDirIfAbsent` (idempotent), `assetPath`, `runNpmInstall`. |
 | `assets/login/src/**` | The shipped auth UI bundle copied by `add login` (login/register/reset-password/settings pages + `_api` + `LoginForm`). |
 | `assets/docs-ui/src/**` | The React API-explorer page (`src/docs/page.tsx`) copied by `add docs-ui`. |
+| `assets/router/**` | The router topology config files (`services.config.ts` + `deploy.config.ts` + `server/config/presetLoader.ts`) copied by `add router` (the inverse of the scaffold's `pruneRouter`). |
 
 ## Notes
 
@@ -72,6 +73,10 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
   `index.ts` dispatch + `list`/`manage`/`remove` all derive from it). Mirror it against
   `OPTIONAL_PACKAGES` in `@luckystack/server` when adding a new optional package — the
   `assetParity.test.ts` parity test enforces this.
+- The `assetParity.test.ts` parity check now also covers `router`: the files under
+  `assets/router/**` (copied by `add router`) must match the scaffold template's router
+  config files (the ones `pruneRouter` strips when router is OFF), so the add-asset and
+  template copies can't drift.
 
 ## Peer dependencies
 

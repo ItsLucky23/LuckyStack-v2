@@ -5,13 +5,15 @@
 # `.env.local` is loaded after `.env` and overrides it, so a key in both makes
 # edits behave confusingly (run LUCKYSTACK_ENV_DEBUG=1 to list any duplicates).
 #
-# Listen port and preset bundle are positional argv, not env-vars:
-#   npm run server                              (default preset, port 80)
-#   npm run server -- billing                   (one bundle, port 80)
+# Frontend + backend ports live in config.ts (`config.ports.ts`) — the single
+# source of truth. A preset bundle + an optional override port are positional
+# argv, not env-vars:
+#   npm run server                              (default bundle, config.ports backend)
+#   npm run server -- billing                   (one bundle)
 #   npm run server -- billing,vehicles 4001     (merge bundles, listen on 4001)
+# SERVER_IP is the bind ADDRESS only (127.0.0.1 local, 0.0.0.0 in containers).
 NODE_ENV=development
 SERVER_IP=127.0.0.1
-SERVER_PORT=80
 SECURE=false
 
 # Public app URL — the origin where users BROWSE the app (post-login landing,
@@ -21,9 +23,10 @@ SECURE=false
 # PUBLIC_URL=https://your-domain.com
 #
 # The backend origin (where the OAuth `/auth/callback/<provider>` route lives) is
-# derived from SERVER_IP:SERVER_PORT — in dev that's http://localhost:80. Register
-# THAT as the provider's redirect URI: http://localhost:80/auth/callback/<provider>
-# in dev, https://your-domain.com/auth/callback/<provider> in prod.
+# localhost + the `backend` port from config.ports.ts — in dev that's
+# http://localhost:80. Register THAT as the provider's redirect URI:
+# http://localhost:80/auth/callback/<provider> in dev,
+# https://your-domain.com/auth/callback/<provider> in prod.
 
 # Comma-separated list of additional origins permitted by the CORS layer. The
 # public + backend origins are auto-included. OAuth callbacks arrive with the
@@ -50,8 +53,9 @@ REDIS_PORT=6379
 # removing a key from just one file lets the other file's value resurface.
 # LUCKYSTACK_ENV_DEBUG=1
 
-# Auto-pick the next free port when SERVER_PORT is already taken (dev convenience).
-# Defaults ON in dev, OFF in prod. Set to 0 to force-fail on a busy port instead.
+# Auto-pick the next free port when the backend port (config.ports.ts) is already
+# taken (dev convenience). Defaults ON in dev, OFF in prod. Set to 0 to force-fail
+# on a busy port instead.
 # SERVER_PORT_AUTO_INCREMENT=1
 # Grace window (ms) the dev supervisor waits for a clean child exit before SIGKILL
 # on restart. Default 1500 — raise it for a slow-shutting-down server.

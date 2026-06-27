@@ -4,6 +4,10 @@ import type { BaseSessionLayout } from '@luckystack/core';
 //? doesn't drag server-only core modules (bootUuid, ioredis, etc.) into the
 //? browser. Same rule we use in apiRequest/syncRequest.
 import { registerProjectConfig } from './packages/core/src/projectConfig';
+//? Single source of truth for frontend + backend ports (pure data; see
+//? config.ports.ts). Re-exported below so vite/app code + server share one source.
+import { ports } from './config.ports';
+export { ports } from './config.ports';
 
 interface AppEnvironmentConfig {
   backendUrl: string;
@@ -26,7 +30,7 @@ const env = (key: string): string | undefined =>
 //? when the detected DNS isn't in the map. Pulled out so the fallback path is
 //? guaranteed non-undefined under `noUncheckedIndexedAccess`.
 const fallbackEnvironment: AppEnvironmentConfig = {
-  backendUrl: "http://localhost:80",
+  backendUrl: `http://localhost:${ports.backend}`,
   dev: true,
   sessionBasedToken: false,
   sessionPerUser: 'multiple',
@@ -35,7 +39,7 @@ const fallbackEnvironment: AppEnvironmentConfig = {
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
   "http://localhost:5173": fallbackEnvironment,
   "http://localhost:5174": {
-    backendUrl: "http://localhost:80",
+    backendUrl: `http://localhost:${ports.backend}`,
     dev: true,
     sessionBasedToken: false,
     sessionPerUser: 'multiple'
@@ -380,7 +384,7 @@ registerProjectConfig({
   //? so it cannot be used here for multi-port dev setups.
   //? In prod: use the static backendUrl from the DNS map (the public domain).
   oauthCallbackBase: resolvedEnvironment.dev
-    ? `http://localhost:${env('SERVER_PORT') ?? '80'}`
+    ? `http://localhost:${env('SERVER_PORT') ?? ports.backend}`
     : resolvedEnvironment.backendUrl,
   socketActivityBroadcaster: config.socketActivityBroadcaster,
   socketStatusIndicator: config.socketStatusIndicator,

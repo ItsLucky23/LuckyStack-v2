@@ -17,6 +17,7 @@ loadEnvFiles();
 import '../config';
 import '../deploy.config';
 import '../services.config';
+import { ports } from '../config.ports';
 import './utils/responseNormalizer';
 
 // Validate topology invariants at boot so that a `deploy.config.ts` edit
@@ -90,6 +91,9 @@ registerEmailSender(autoSelectEmailSender({ from: projectConfig.email.from }));
   //? RuntimeMapsProvider plumbing (dev/prod branching, devkit lookup,
   //? caching, registration) from a single callback.
   const server = await bootstrapLuckyStack({
+    //? Single-instance backend default from config.ports.ts; a positional argv
+    //? port still wins for multi-instance (`npm run server -- <preset> <port>`).
+    defaultPort: ports.backend,
     serveFile,
     serveFavicon,
     loadGeneratedMaps: (preset: string) => import(`./prod/generatedApis.${preset}`),

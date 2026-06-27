@@ -521,12 +521,16 @@ All helpers must use same package-level initialization and respect enabled/disab
 
 ## 10) Configuration Examples
 
-Canonical shape is TypeScript, split into two files at project root:
+> **Opt-in — not shipped by default.** The two topology files below (`services.config.ts` + `deploy.config.ts`) and their build-time validator (`server/config/presetLoader.ts`) are **only present when the router is installed**. A base / single-instance scaffold PRUNES all three; `npx luckystack add router` copies them in (and wires the two `server.ts` side-effect imports `import '../deploy.config'` + `import '../services.config'`), `npx luckystack remove router` deletes them again. When the files are absent, `scripts/generateServerRequests.ts` falls back to a single `default` bundle, so a bare `npm run server` still works (see §10.1a). A single-instance app never needs them.
+
+> **Ports are single-sourced in `config.ports.ts`.** Frontend (Vite dev) + backend listen ports live in one pure-data file — `export const ports = { frontend, backend } as const` — with no imports or side-effects, so `vite.config.ts` can read it without pulling in server-only `@luckystack/core`. `config.ts` re-exports `ports` and derives `publicUrl` / `backendOrigin` from it; `vite.config.ts` reads it for `server.port` + the dev-proxy target; `server.ts` passes `defaultPort: ports.backend` to `bootstrapLuckyStack`. So there is exactly ONE place to change a port. `SERVER_PORT` is no longer in the scaffold `.env` — the listen port defaults to `config.ports.backend`, and a positional argv port (`npm run server -- <preset> <port>`) still overrides it for a multi-instance boot. (`SERVER_IP` stays in `.env` as the bind address.) Multi-instance setups define per-service ports in `deploy.config.ts` bindings instead.
+
+Canonical shape for the router topology is TypeScript, split into two files at project root (added by `npx luckystack add router`):
 
 - `services.config.ts` — services + preset grouping. Stable build-time source of truth. Changes when services are added/renamed/regrouped.
 - `deploy.config.ts` — resources (named redis/mongo handles) + environments (resource refs, per-service URL bindings, optional typed `fallback`). Changes when infra changes.
 
-Validator (in `server/config/presetLoader.ts`) enforces:
+Validator (in `server/config/presetLoader.ts`, also added by `add router`) enforces:
 
 1. `system` service must have `source: 'root'`; `src/system` is reserved.
 2. A service belongs to exactly one preset.
@@ -588,10 +592,12 @@ npm run server -- billing,vehicles          # loads both, runtime-merged into on
 npm run server -- billing,vehicles 4001     # same, listening on port 4001 (second positional)
 ```
 
-- No args: loads `server/prod/generatedApis.default.ts` (aggregate build).
+- No args: loads `server/prod/generatedApis.default.ts` (aggregate build). This is the **only** bundle in a base install — when `services.config.ts` is absent (no router), `scripts/generateServerRequests.ts` emits just the `default` preset, so a bare `npm run server` always resolves.
 - One preset name: loads `server/prod/generatedApis.{preset}.ts`.
 - Comma-separated list: loads each preset's map and shallow-merges `apis` / `syncs` / `functions`. **Key collisions across presets throw at boot** — services must own exactly one preset (§10.1 ownership rule).
-- The files are emitted by `scripts/generateServerRequests.ts` for every preset defined in `services.config.ts`.
+- The files are emitted by `scripts/generateServerRequests.ts`: the single `default` bundle when no router config is present, or one file per preset defined in `services.config.ts` once `npx luckystack add router` adds it.
+
+**Port (second positional argv).** The listen port comes from `defaultPort: ports.backend` (from `config.ports.ts`), which `server.ts` passes to `bootstrapLuckyStack`. A second positional argv port (`npm run server -- <preset> <port>`) sits ABOVE it and still wins — required for booting multiple instances behind the router on one host. `SERVER_PORT` is no longer read from `.env`.
 
 ### 10.1b Boot-time shared-resource handshake (recommended)
 

@@ -35,7 +35,7 @@
 
 | Package | Use case | Required peers | Optional peers |
 |---|---|---|---|
-| `@luckystack/router` | Optional standalone HTTP + WebSocket load-balancer for multi-instance / preset-bundle deploys with boot-UUID handshake, Redis-backed health state, and dev-to-staging fallback proxy. | `ioredis@^5.10.0` | none |
+| `@luckystack/router` | Optional standalone HTTP + WebSocket load-balancer for multi-instance / preset-bundle deploys with boot-UUID handshake, Redis-backed health state, and dev-to-staging fallback proxy. The router's topology config files (`services.config.ts` + `deploy.config.ts`, plus the build-time `server/config/presetLoader.ts`) are **NOT** in a default install — they ship via `npx luckystack add router` (which also wires their two `server.ts` side-effect imports) and are removed again by `npx luckystack remove router`. | `ioredis@^5.10.0` | none |
 
 ## Dev Tools
 

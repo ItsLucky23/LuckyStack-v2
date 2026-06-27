@@ -513,8 +513,8 @@ docker-compose up -d --build
 | `NODE_ENV`                 | Yes      | `development` | `development` or `production`            |
 | `PROJECT_NAME`             | Yes      | -             | Unique name for Redis key prefixing      |
 | `SERVER_IP`                | Yes      | `localhost`   | Server bind address                      |
-| _(listen port)_            | No       | `80`          | Second positional argv (`node server.js <bundles> <port>`), not an env-var |
-| `PUBLIC_URL`               | Prod     | (dev: auto)   | Public origin — post-login landing, email links, CORS. Dev derives the Vite origin; set to your domain in prod. OAuth callback uses the backend origin (SERVER_IP/SERVER_PORT). |
+| _(listen port)_            | No       | `config.ports.ts` `backend` (80) | Single-instance listen port lives in `config.ports.ts` (`ports.backend`), passed to the server as `defaultPort` — there is no `SERVER_PORT` env-var. Override per-boot with the second positional argv (`node server.js <bundles> <port>`). |
+| `PUBLIC_URL`               | Prod     | (dev: auto)   | Public origin — post-login landing, email links, CORS. Dev derives the Vite origin; set to your domain in prod. OAuth callback uses the backend origin (`SERVER_IP` + the `config.ports.ts` `backend` port / argv override). |
 | `SECURE`                   | Yes      | `false`       | Enable HTTPS cookies                     |
 | `REDIS_HOST`               | Yes      | `127.0.0.1`   | Redis server host                        |
 | `REDIS_PORT`               | Yes      | `6379`        | Redis server port                        |

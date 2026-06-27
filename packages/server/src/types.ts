@@ -38,10 +38,20 @@ export interface CreateLuckyStackServerOptions {
    *   1. This option (`options.port`)
    *   2. Second positional argv (`npm run server -- <bundles> <port>`), parsed
    *      by `@luckystack/server/parseArgv`
-   *   3. `process.env.SERVER_PORT` (back-compat for boots that skip `parseArgv`)
-   *   4. `80`
+   *   3. `options.defaultPort` (the project's single-instance default, e.g. the
+   *      `backend` port from `config.ports.ts`)
+   *   4. `process.env.SERVER_PORT` (back-compat for boots that skip `parseArgv`)
+   *   5. `80`
    */
   port?: number | string;
+  /**
+   * Project's single-instance default backend port. Sits BELOW positional argv
+   * so a multi-instance boot (`npm run server -- <preset> <port>`) still wins,
+   * but ABOVE the legacy `SERVER_PORT` env. The scaffold passes the `backend`
+   * value from `config.ports.ts` here, so the listen port has ONE source of
+   * truth without re-introducing `SERVER_PORT` to `.env`.
+   */
+  defaultPort?: number;
   /** Bind address. Defaults to process.env.SERVER_IP or '127.0.0.1'. */
   ip?: string;
   /** Project-side static file handler (Vite output, etc.). Used as the catch-all. */

@@ -18,7 +18,7 @@ const repoRoot = path.resolve(here, '..', '..', '..');
 //? sentry shim) against the template ROOT so every shipped file is parity-checked,
 //? not just login's. Drift here is what shipped a non-compiling LoginForm / docs
 //? page via `add` (audit HB1/QUA-003 + the docs-ui blocker).
-const ASSET_BUNDLES = ['login', 'docs-ui', 'error-tracking'] as const;
+const ASSET_BUNDLES = ['login', 'docs-ui', 'error-tracking', 'router'] as const;
 const TEMPLATE_ROOT = path.join(repoRoot, 'packages', 'create-luckystack-app', 'template');
 const SERVER_CAPABILITIES = path.join(repoRoot, 'packages', 'server', 'src', 'capabilities.ts');
 const SCAFFOLDER_INDEX = path.join(repoRoot, 'packages', 'create-luckystack-app', 'src', 'index.ts');

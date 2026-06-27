@@ -3,6 +3,11 @@
 //? `getProjectConfig()`. Edit values here to tune the framework's behavior.
 
 import { registerProjectConfig } from '@luckystack/core';
+//? Frontend + backend ports live in ONE pure-data file (no side-effects) so
+//? `vite.config.ts` can read them without importing this config. Re-exported so
+//? app code + `server.ts` share the same single source of truth.
+import { ports } from './config.ports';
+export { ports } from './config.ports';
 
 //? This file is imported by BOTH the Node server and the Vite browser bundle.
 //? `process` is a Node global — referencing `process.env.X` directly in the
@@ -17,16 +22,18 @@ export const dev = env('NODE_ENV') !== 'production';
 //? routes live (notably the OAuth `/auth/callback/<provider>` handler). We use
 //? `localhost` for the host (NOT SERVER_IP, which is just the bind address) so it
 //? shares a host with the frontend on localhost — the session cookie set during
-//? the OAuth callback is then visible to the app. The port is SERVER_PORT, so in
-//? dev this is http://localhost:80.
-const backendOrigin = `http://localhost:${env('SERVER_PORT') ?? '80'}`;
+//? the OAuth callback is then visible to the app. The port defaults to
+//? `config.ports.ts` (`backend`) — so in dev this is http://localhost:80 — but a
+//? positional argv port (`npm run server -- <preset> <port>`, which parseArgv
+//? writes to process.env.SERVER_PORT) overrides it, mirroring createServer.
+const backendOrigin = `http://localhost:${env('SERVER_PORT') ?? ports.backend}`;
 
 //? Public origin — where users actually browse the app. Drives post-login
 //? redirects, transactional email links, and the CORS allow-list. In dev that's
-//? the Vite dev server (keep in sync with vite.config.ts `server.port`); in
-//? production set PUBLIC_URL to your deployed domain (frontend + backend share
-//? one origin there, so PUBLIC_URL also covers the OAuth callback host).
-const publicUrl = dev ? 'http://localhost:5173' : (env('PUBLIC_URL') ?? backendOrigin);
+//? the Vite dev server on `config.ports.ts` `frontend`; in production set
+//? PUBLIC_URL to your deployed domain (frontend + backend share one origin
+//? there, so PUBLIC_URL also covers the OAuth callback host).
+const publicUrl = dev ? `http://localhost:${ports.frontend}` : (env('PUBLIC_URL') ?? backendOrigin);
 
 //? In the browser the app talks to its API surface same-origin — the Vite dev
 //? proxy forwards /api, /sync, /auth, /socket.io, … to the backend in dev, and in

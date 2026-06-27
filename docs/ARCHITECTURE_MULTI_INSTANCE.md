@@ -45,8 +45,22 @@ Two config files drive it:
   + healthy, else the `fallback` env, else `502 serviceNotAssigned`). See
   `packages/router/src/resolveTarget.ts`.
 
+> **These two files are opt-in.** Both — plus the build-time validator
+> `server/config/presetLoader.ts` — are **pruned from a default (single-instance) scaffold** and
+> installed by **`npx luckystack add router`**, which copies them in and wires their two
+> side-effect imports (`import '../deploy.config'` + `import '../services.config'`) into
+> `server/server.ts`; `npx luckystack remove router` deletes them and un-wires the imports. With
+> the files absent, `scripts/generateServerRequests.ts` emits a single `default` bundle, so a base
+> install runs single-instance without them. See `docs/ARCHITECTURE_PACKAGING.md` §10.
+
 Run a backend per preset: `npm run server -- core-preset 4100`. Run the router:
 `npm run router` (port 4000, or `ROUTER_PORT`).
+
+> **Dev proxy → router.** In cluster-dev set `ROUTER_PORT` in `.env`: the Vite dev proxy then
+> targets the router (`http://SERVER_IP:ROUTER_PORT`) instead of a single backend, so one frontend
+> origin fans out across the per-service backends. With `ROUTER_PORT` unset the proxy targets the
+> single backend on `config.ports.ts` `backend` (its actually-bound port via
+> `node_modules/.luckystack/dev-server.json`). See `vite.config.ts`.
 
 ---
 
@@ -133,13 +147,16 @@ Guards:
 
 ## `services.config.ts` reality check
 
-The shipped `services.config.ts` declares `vehicles` and `billing` services, but **there are no
-`src/vehicles/` or `src/billing/` folders** — they are **placeholders** illustrating the
-multi-service shape. The real routes live in `src/playground`, `src/settings`,
-`src/reset-password`, and `src/_api`/`src/_sync` (`system`). In **dev** every route loads
-regardless of preset, so this is harmless locally; for a real split deploy, make
-`services.config.ts` match the folders that actually exist (add real service folders, or remove
-the placeholders). `npm run luckystack-validate-deploy` flags service/preset mismatches.
+The framework's **own root app** is the multi-service / with-router reference: its
+`services.config.ts` declares `vehicles` and `billing` services and those folders **really exist** —
+`src/vehicles/_api/listVehicles_v1.ts` and `src/billing/_api/listInvoices_v1.ts` are real example
+routes, alongside `src/playground`, `src/settings`, `src/reset-password`, and `src/_api`/`src/_sync`
+(`system`). So in this repo the config matches the folders that exist. Note that a freshly
+**scaffolded** consumer project does NOT ship these files at all until `npx luckystack add router`
+(see the opt-in note above) — and when you do add the router, make `services.config.ts` match YOUR
+project's actual `src/` service folders (add real service folders, or trim the example services). In
+**dev** every route loads regardless of preset, so a mismatch is harmless locally; it only bites a
+real split deploy. `npm run luckystack-validate-deploy` flags service/preset mismatches.
 
 ---
 

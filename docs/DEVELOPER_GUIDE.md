@@ -52,6 +52,12 @@ If you need to run without the supervisor, use:
 npm run server:direct
 ```
 
+#### Ports & config
+
+The dev frontend port and the single-instance backend listen port live in **`config.ports.ts`** (`export const ports = { frontend, backend }`) — the single source of truth. `config.ts` re-exports `ports`, `server.ts` passes `ports.backend` to the server as its `defaultPort`, and `vite.config.ts` reads `ports.frontend`, so a port only ever changes in one place. There is **no `SERVER_PORT` in `.env`** anymore — to run a one-off / multi-instance boot on another port, pass it as the positional argv (`npm run server -- <preset> <port>`), which overrides `config.ports.ts`. `SERVER_IP` stays in `.env`.
+
+The router topology (`services.config.ts` + `deploy.config.ts`) is **not** part of a base install; opt in later with `npx luckystack add router` (and `npx luckystack remove router` to undo).
+
 ### 3. Create Your First API
 
 ```typescript

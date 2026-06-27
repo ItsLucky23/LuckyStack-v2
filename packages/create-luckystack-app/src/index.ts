@@ -1879,11 +1879,13 @@ const wirePresence = (targetDir: string): void => {
 };
 
 //? Wire @luckystack/router (opt-in): a multi-instance load-balancer that runs as
-//? a SEPARATE process (`npm run router`) and reads the project's deploy.config.ts
-//? (already scaffolded) for its routing topology. Adds the dependency + the run
-//? script; env (ROUTER_PORT / LUCKYSTACK_ENV / LUCKYSTACK_PRESET) is documented in
-//? docs/luckystack/ARCHITECTURE_MULTI_INSTANCE.md. A single-instance app never
-//? runs it — it's here so scaling out later is `npm run router`, no rewiring.
+//? a SEPARATE process (`npm run router`) and reads the project's deploy.config.ts +
+//? services.config.ts for its routing topology. Those files (and their server.ts
+//? side-effect imports) ship in the template and are KEPT here because router was
+//? chosen — `pruneRouter` only strips them when router is OFF. So this just adds the
+//? dependency + the run script. Env (ROUTER_PORT / LUCKYSTACK_ENV) is documented in
+//? docs/luckystack/ARCHITECTURE_MULTI_INSTANCE.md. A single-instance app never runs
+//? it — it's here so scaling out later is `npm run router`, no rewiring.
 const wireRouter = (targetDir: string, luckystackVersion: string): void => {
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
@@ -1932,6 +1934,23 @@ const pruneDocsUi = (targetDir: string): void => {
   removeScaffoldPath(targetDir, 'src/docs');
 };
 
+//? Remove the @luckystack/router topology when router was NOT chosen. The template
+//? ships services.config.ts + deploy.config.ts + server/config/presetLoader.ts (so a
+//? --router scaffold keeps them AND the cli's assetParity test has a counterpart);
+//? a base / single-instance scaffold drops the three files + the two side-effect
+//? imports in server/server.ts. `generateServerRequests` then falls back to a single
+//? `default` bundle (presetLoader is not needed). `npx luckystack add router` restores
+//? all of this post-install (and `remove router` re-prunes it). Mirrors the
+//? prunePresence / pruneDocsUi opt-OUT pattern.
+const pruneRouter = (targetDir: string): void => {
+  removeScaffoldPath(targetDir, 'services.config.ts');
+  removeScaffoldPath(targetDir, 'deploy.config.ts');
+  removeScaffoldPath(targetDir, 'server/config/presetLoader.ts');
+  editScaffoldFile(targetDir, 'server/server.ts', [
+    ["import '../deploy.config';\nimport '../services.config';\n", ''],
+  ]);
+};
+
 //? Remove OPT-OUT packages from a freshly-copied scaffold. Bounded packages:
 //? presence + error-tracking (drop dep + the few files/lines that referenced them),
 //? and docs-ui's explorer page. login/sync are more deeply woven (login is a whole
@@ -1942,6 +1961,7 @@ const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): voi
   if (!choices.presence) prunePresence(targetDir);
   if (!choices.errorTracking) pruneErrorTracking(targetDir);
   if (!choices.docsUi) pruneDocsUi(targetDir);
+  if (!choices.router) pruneRouter(targetDir);
   if (choices.authMode === 'none') pruneAuthNone(targetDir);
 };
 
