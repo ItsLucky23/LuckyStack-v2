@@ -219,17 +219,43 @@ const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMes
       replyTo: input.replyTo,
       cc: input.cc,
       bcc: input.bcc,
+      //? #56: the raw branch must carry attachments + custom headers too —
+      //? mirroring the template branch. Without these the raw send silently
+      //? dropped them AND bypassed the EMAIL-O7 CRLF sanitization (which only
+      //? runs over fields present on the built message).
+      attachments: input.attachments,
+      headers: input.headers,
     },
   };
 };
 
+//? #57: a raw provider error can echo the recipient address back verbatim
+//? (e.g. "Invalid recipient bob@acme.com" or an SMTP envelope) — that PII then
+//? flows into the result `reason`, the server log, and the EXTERNAL error
+//? tracker, defeating the recipient-hashing applied everywhere else in this
+//? file. No existing helper fits arbitrary error text (the recipient utils hash
+//? a KNOWN address), so scrub any email-address-shaped substring with a minimal
+//? regex before the error escapes.
+const EMAIL_ADDRESS_PATTERN = /[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+/g;
+const scrubEmailPii = (value: string): string => value.replaceAll(EMAIL_ADDRESS_PATTERN, '[redacted-email]');
+
 //? Normalize the `sender.send` tuple into an `EmailResult`. Mirrors the inline
 //? mapping exactly: a thrown error → `send-threw` (or its message); a
 //? null/undefined result → `send-no-result`; otherwise the adapter's result.
-const normalizeSendResult = (sendError: Error | null, sendResult: EmailResult | null): EmailResult =>
-  sendError
-    ? { ok: false, reason: sendError.message || 'send-threw', cause: sendError }
-    : (sendResult ?? { ok: false, reason: 'send-no-result' });
+//? The thrown-error path scrubs recipient PII from the message AND the nested
+//? `cause` in place, so the same Error reference (with its original stack)
+//? reaches `captureException` already redacted (#57).
+const normalizeSendResult = (sendError: Error | null, sendResult: EmailResult | null): EmailResult => {
+  if (!sendError) return sendResult ?? { ok: false, reason: 'send-no-result' };
+  const scrubbedMessage = scrubEmailPii(sendError.message || '');
+  sendError.message = scrubbedMessage;
+  if (typeof sendError.cause === 'string') {
+    sendError.cause = scrubEmailPii(sendError.cause);
+  } else if (sendError.cause instanceof Error) {
+    sendError.cause.message = scrubEmailPii(sendError.cause.message || '');
+  }
+  return { ok: false, reason: scrubbedMessage || 'send-threw', cause: sendError };
+};
 
 //? Terminal logging + Sentry capture for a completed send. Mirrors the inline
 //? tail exactly: success logs an info line (when enabled); failure logs a

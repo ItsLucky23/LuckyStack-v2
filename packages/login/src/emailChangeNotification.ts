@@ -45,7 +45,11 @@ export const sendEmailChangeConfirmation = async (
   //? the raw token is never persisted. The confirm URL is only sent to the
   //? NEW address (verifying mailbox ownership), so it never appears in an
   //? access log that an attacker of the OLD address could read.
-  const confirmUrl = `${baseUrl}/settings/confirm-email?token=${encodeURIComponent(token)}`;
+  //? #64: honor the configurable `auth.emailChangeConfirmPath` (where the
+  //? consumer's confirm-email page lives) instead of a hardcoded path; the
+  //? prior hardcoded value is the fallback when the key is empty.
+  const confirmPath = config.auth.emailChangeConfirmPath || '/settings/confirm-email';
+  const confirmUrl = `${baseUrl}${confirmPath}?token=${encodeURIComponent(token)}`;
   const ttlMinutes = Math.round(config.auth.emailChangeTtlSeconds / 60);
 
   //? Dispatch via the built-in `'email-change'` template so consumers can
