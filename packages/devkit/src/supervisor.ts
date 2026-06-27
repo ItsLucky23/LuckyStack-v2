@@ -61,16 +61,26 @@ const resolveNodeEnv = (): string => {
   return fromFiles ?? 'development';
 };
 
-const CORE_WATCH_GLOBS = [
+//? chokidar v5 removed glob support — a `server/bootstrap/**/*.ts` pattern is no
+//? longer expanded; it is watched as a LITERAL path that never exists, so changes
+//? under `server/bootstrap` / `server/auth` silently never triggered a restart.
+//? Watch the concrete files directly, and the bootstrap/auth DIRECTORIES
+//? recursively (chokidar's default for a directory), then filter events down to
+//? the file types the old globs targeted in the `all` handler below.
+const CORE_WATCH_FILES = [
   'config.ts',
   ...getEnvFiles(),
   'server/server.ts',
-  'server/bootstrap/**/*.ts',
-  'server/auth/**/*.ts',
   'server/functions/db.ts',
   'server/functions/redis.ts',
   'server/functions/sentry.ts',
 ];
+//? Only watch dirs that exist — chokidar watching a recursive non-existent
+//? directory is wasteful/odd; a dir created later is picked up on next boot.
+const CORE_WATCH_DIRS = ['server/bootstrap', 'server/auth'].filter((dir) =>
+  existsSync(path.resolve(process.cwd(), dir)),
+);
+const CORE_WATCH_TARGETS = [...CORE_WATCH_FILES, ...CORE_WATCH_DIRS];
 
 const tsxCliPath = path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
 //? Scaffolded projects carry a dedicated server tsconfig — pass it when present
@@ -259,7 +269,7 @@ if (resolveNodeEnv() === 'production') {
   });
   startChild();
 } else {
-  const watcher = watch(CORE_WATCH_GLOBS, {
+  const watcher = watch(CORE_WATCH_TARGETS, {
     ignoreInitial: true,
     awaitWriteFinish: {
       stabilityThreshold: 120,
@@ -268,6 +278,16 @@ if (resolveNodeEnv() === 'production') {
   });
 
   watcher.on('all', (event, changedPath) => {
+    //? Ignore pure directory churn from the recursively-watched bootstrap/auth dirs.
+    if (event === 'addDir' || event === 'unlinkDir') return;
+    //? Restore the old `**/*.ts` glob intent: within the watched directories only
+    //? TS sources matter. A `.ts` suffix covers every concrete watched TS file too
+    //? (config.ts, server.ts, functions/*.ts); the non-TS watched files are the
+    //? `.env*` set, matched explicitly. A stray non-TS file under a watched dir is
+    //? correctly ignored.
+    const normalized = changedPath.replaceAll('\\', '/');
+    const relevant = normalized.endsWith('.ts') || CORE_WATCH_FILES.some((file) => normalized.endsWith(file));
+    if (!relevant) return;
     scheduleRestart({ event, changedPath });
   });
 
