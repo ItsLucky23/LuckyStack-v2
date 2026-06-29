@@ -18,6 +18,8 @@
 import {
   registerHook,
   setCurrentErrorTrackerIdentity,
+  startSpanHandle,
+  type SpanHandle,
   type PreApiExecutePayload,
   type PostApiExecutePayload,
   type PreApiValidatePayload,
@@ -34,7 +36,7 @@ import {
 //? resolvable during the DTS emit step.
 import type { PostLogoutPayload } from '@luckystack/login';
 
-import { setSentryUser, startSpan } from './sentry';
+import { setSentryUser } from './sentry';
 
 //? WeakMap-pinning so a span opened in `preApiExecute` can be closed in
 //? `postApiExecute` without globals. Works because the framework handlers
@@ -43,12 +45,11 @@ import { setSentryUser, startSpan } from './sentry';
 //? reference through both pre/post dispatches. If a future handler ever
 //? clones the payload between the two, the span would leak — verify by
 //? running the existing manual smoke tests in `packages/server/docs/`.
-interface SpanHandle { end?: () => void }
+//? #62: spans are now core's delegating `SpanHandle` (`{ finish(), durationMs }`)
+//? instead of the legacy raw Sentry span — so the request span reaches an
+//? adapter-only backend (Datadog/PostHog/custom), not just the legacy Sentry SDK.
 const apiSpans = new WeakMap<PreApiExecutePayload, SpanHandle>();
 const syncSpans = new WeakMap<PreSyncFanoutPayload, SpanHandle>();
-
-const isSpanHandle = (value: unknown): value is SpanHandle =>
-  typeof value === 'object' && value !== null && 'end' in value && typeof (value as SpanHandle).end === 'function';
 
 //? Identity propagation maps the same `user` shape from both the API and sync
 //? pipelines into the error-tracker's user context (or `null` when anonymous).
@@ -103,13 +104,11 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
   //? object — the framework reuses the same reference for `postApiExecute`.
   registerHook('preApiExecute', (payload: PreApiExecutePayload): void => {
     const op = payload.transport === 'http' ? 'api.request.http' : 'api.request';
-    const span = startSpan(payload.routeName, op);
-    if (isSpanHandle(span)) apiSpans.set(payload, span);
+    apiSpans.set(payload, startSpanHandle(payload.routeName, op));
   });
 
   registerHook('postApiExecute', (payload: PostApiExecutePayload): void => {
-    const span = apiSpans.get(payload);
-    span?.end?.();
+    apiSpans.get(payload)?.finish();
   });
 
   //? Sync identity propagation. `preSyncAuthorize` is the first sync hook
@@ -123,13 +122,11 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
   //? both behaviors — only open a span when transport is `http`.
   registerHook('preSyncFanout', (payload: PreSyncFanoutPayload): void => {
     if (payload.transport !== 'http') return;
-    const span = startSpan(payload.routeName, 'sync.request.http');
-    if (isSpanHandle(span)) syncSpans.set(payload, span);
+    syncSpans.set(payload, startSpanHandle(payload.routeName, 'sync.request.http'));
   });
 
   registerHook('postSyncFanout', (payload: PostSyncFanoutPayload): void => {
-    const span = syncSpans.get(payload);
-    span?.end?.();
+    syncSpans.get(payload)?.finish();
   });
 
   //? Clear identity immediately on logout. Without this the next anonymous

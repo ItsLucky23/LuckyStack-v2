@@ -209,6 +209,19 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
       }
     },
 
+    //? #62: handle-style span for the request lifecycle (open at preApiExecute,
+    //? close at postApiExecute). dd-trace's `startSpan().finish()` maps directly,
+    //? so an adapter-only Datadog consumer gets real APM request-timing spans
+    //? through the registry's `startSpanHandle` delegation.
+    startSpanHandle(name, op) {
+      const span = options.tracer.startSpan(name, { tags: { op } });
+      return {
+        finish: () => {
+          span.finish();
+        },
+      };
+    },
+
     //? ET-O13: flush the hot-shots UDP send buffer on graceful shutdown so
     //? in-flight StatsD metrics are not silently dropped. `dd-trace` itself
     //? does not require an explicit flush (traces are sent synchronously in

@@ -16,6 +16,7 @@ import {
   setErrorTrackerUser,
   recordMetricAcrossTrackers,
   startSpanAcrossTrackers,
+  startSpanHandle,
 } from "./adapter";
 import type { ErrorTracker } from "./adapter";
 
@@ -256,6 +257,55 @@ describe("error-tracker registry fan-out", () => {
       const fn = vi.fn(() => "empty");
       expect(startSpanAcrossTrackers("n", "op", fn)).toBe("empty");
       expect(fn).toHaveBeenCalledOnce();
+    });
+  });
+
+  //? #62: handle-style span must DELEGATE to a registered adapter's
+  //? `startSpanHandle` so an adapter-only consumer (Datadog/PostHog/custom, no
+  //? legacy Sentry SDK) actually gets request-timing spans — not just a
+  //? wall-clock-only no-op.
+  describe("startSpanHandle delegation", () => {
+    it("invokes the first adapter that implements startSpanHandle and closes it on finish()", () => {
+      const finish = vi.fn();
+      const open = vi.fn((_name: string, _op: string) => ({ finish }));
+      registerErrorTrackers([
+        makeTracker("a"), // no startSpanHandle
+        makeTracker("b", { startSpanHandle: open }),
+      ]);
+
+      const handle = startSpanHandle("route-name", "api.request");
+
+      expect(open).toHaveBeenCalledWith("route-name", "api.request");
+      expect(finish).not.toHaveBeenCalled();
+
+      handle.finish();
+      expect(finish).toHaveBeenCalledOnce();
+
+      //? finish() is idempotent — the delegated span is closed exactly once.
+      handle.finish();
+      expect(finish).toHaveBeenCalledOnce();
+    });
+
+    it("falls back to the wall-clock handle when no adapter supports startSpanHandle", () => {
+      registerErrorTrackers([makeTracker("a"), makeTracker("b")]);
+      const handle = startSpanHandle("n", "op");
+      expect(handle.durationMs).toBe(0);
+      handle.finish();
+      expect(handle.durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("swallows a throwing adapter startSpanHandle and still returns a usable handle", () => {
+      const open = vi.fn(() => {
+        throw new Error("boom");
+      });
+      registerErrorTrackers([makeTracker("a", { startSpanHandle: open })]);
+
+      const handle = startSpanHandle("n", "op");
+      expect(open).toHaveBeenCalledOnce();
+      //? No delegate captured, but the wall-clock fallback still works.
+      expect(() => {
+        handle.finish();
+      }).not.toThrow();
     });
   });
 });

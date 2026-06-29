@@ -132,6 +132,16 @@ export interface ErrorTracker {
   setUser: (user: ErrorTrackerUser | null) => void;
   setContext?: (key: string, context: ErrorTrackerContext | null) => void;
   startSpan?: <T>(name: string, op: string, fn: () => T) => T;
+  /**
+   * Optional handle-style span (#62): open a span NOW and close it later via the
+   * returned handle's `finish()`. Unlike {@link startSpan} (which wraps a single
+   * synchronous `fn`), this fits an open-at-preExecute / close-at-postExecute
+   * request lifecycle that spans awaits. When present, the registry-level
+   * {@link startSpanHandle} delegates to the FIRST registered adapter that
+   * implements it so the request span reaches an adapter-only backend
+   * (Datadog/PostHog/custom), not just the legacy Sentry SDK path.
+   */
+  startSpanHandle?: (name: string, op: string) => { finish: () => void };
   recordMetric?: (name: string, value: number, tags?: Record<string, string>) => void;
   beforeSend?: (event: ErrorTrackerEvent) => ErrorTrackerEvent | null;
   /**
@@ -396,18 +406,44 @@ export interface SpanHandle {
   readonly durationMs: number;
 }
 
-//? `_name`/`_op` are retained in the public signature for call-site documentation
-//? (and forward-compat) even though ET-O9 removed the per-call metric that read them.
-export const startSpanHandle = (_name: string, _op: string): SpanHandle => {
+//? #62: open a handle-style span on the FIRST registered adapter that implements
+//? `startSpanHandle`, swallowing a throwing adapter so the wall-clock handle still
+//? works (telemetry must never break the request path). Returns `null` when no
+//? adapter supports handle-style spans.
+const openDelegateSpanHandle = (name: string, op: string): { finish: () => void } | null => {
+  const tracker = activeTrackers.find((t) => t.startSpanHandle);
+  if (!tracker?.startSpanHandle) return null;
+  try {
+    return tracker.startSpanHandle(name, op);
+  } catch (error) {
+    logTrackerFailure(tracker.name, 'startSpanHandle', error);
+    return null;
+  }
+};
+
+//? #62: delegate the handle to the first adapter that supports `startSpanHandle`
+//? (so an adapter-only consumer — Datadog/PostHog/custom, no legacy Sentry SDK —
+//? actually gets request-timing spans), and ALWAYS keep the wall-clock timer as a
+//? backend-agnostic fallback + `durationMs` source. `finish()` is idempotent and
+//? closes the delegated span exactly once.
+//? ET-O9: removed the per-call `recordMetricAcrossTrackers` that fired on every
+//? startSpanHandle invocation — `durationMs` is available for callers that want to
+//? emit their own metric.
+export const startSpanHandle = (name: string, op: string): SpanHandle => {
   const startedAt = Date.now();
   let finishedAt: number | null = null;
-  //? ET-O9: removed the per-call `recordMetricAcrossTrackers` that fired on every
-  //? startSpanHandle invocation. With zero prod callers this was pure overhead and
-  //? produced noisy `span.start.*` metrics nobody reads. The finish wall-clock time
-  //? is available via `durationMs` for callers that emit their own metric.
+  const delegate = openDelegateSpanHandle(name, op);
   return {
     finish: () => {
-      finishedAt ??= Date.now();
+      if (finishedAt !== null) return;
+      finishedAt = Date.now();
+      if (delegate) {
+        try {
+          delegate.finish();
+        } catch (error) {
+          logTrackerFailure('startSpanHandle', 'finish', error);
+        }
+      }
     },
     get durationMs() {
       return finishedAt === null ? 0 : finishedAt - startedAt;

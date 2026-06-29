@@ -43,6 +43,10 @@ interface SentrySDK {
   setUser: (user: unknown) => void;
   setContext: (name: string, context: Record<string, unknown> | null) => void;
   startSpan: <T>(context: { name: string; op: string }, fn: () => T) => T;
+  //? #62: `startInactiveSpan` returns a span that is NOT auto-finished, so the
+  //? framework controls its lifetime (open at preApiExecute, close at postApiExecute
+  //? via `.end()`). Used by the adapter's `startSpanHandle`.
+  startInactiveSpan: (context: { name: string; op: string }) => { end: () => void };
   //? ET-O13: `close` drains the Sentry transport before process exit so buffered
   //? events are not lost on graceful shutdown. `timeout` is in milliseconds.
   close: (timeout?: number) => Promise<boolean>;
@@ -133,6 +137,20 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
 
     startSpan(name, op, fn) {
       return sentry.startSpan({ name, op }, fn);
+    },
+
+    //? #62: handle-style span for the request lifecycle (open at preApiExecute,
+    //? close at postApiExecute). `startInactiveSpan` returns a span the framework
+    //? finishes itself via `.end()`, so an adapter-only consumer (no legacy Sentry
+    //? init path) still gets request-timing spans through the registry's
+    //? `startSpanHandle` delegation.
+    startSpanHandle(name, op) {
+      const span = sentry.startInactiveSpan({ name, op });
+      return {
+        finish: () => {
+          span.end();
+        },
+      };
     },
 
     //? ET-O13: drain the Sentry transport on graceful shutdown via `Sentry.close()`.
