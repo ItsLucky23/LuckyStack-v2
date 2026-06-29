@@ -290,6 +290,7 @@ const registerRoomEvents = (ctx: SocketContext): void => {
           if (maxRooms !== false && maxRooms > 0 && !existingCodes.includes(rawGroup)) {
             while (kept.length >= maxRooms) {
               const oldest = kept[0];
+              if (oldest === undefined) break; // unreachable (length >= maxRooms >= 1) but narrows for noUncheckedIndexedAccess
               kept = kept.slice(1);
               await sock.leave(formatRoomName(oldest, { purpose: 'join', userId }));
             }

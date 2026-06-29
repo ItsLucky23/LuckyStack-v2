@@ -16,6 +16,9 @@
 | Core Rules (28) | 1. **Plan first for medium/high difficulty work.** Use tables or bullets, not wall-of-text. Skip planning only for trivial single-file changes. |
 | Branch Log Protocol | AI MUST append an entry to `branch-logs/<sanitized-branch>.md` after every prompt that produces **real code or architecture changes**. Skip for lint-only fixes, typo fixes, or translation-string-only edits. **When in doubt, log.** |
 | Decision Memory Protocol | This is **automatic AI behavior — there is no command for the user to run** (just like the branch-log protocol). The AI fills and reads the decision memory itself as a normal part of working in a session. |
+| Lessons Protocol (the pitfalls layer) | Same shape as the Decision Memory Protocol — **automatic AI behavior, no user command**. Where decisions record *why a choice was made*, lessons record *what was tried, what FAILED, and the takeaway*, so the same dead-end isn't rediscovered every few sessions (branch-logs are per-branch; the per-dev `~/.claude` memory is private + uncommitted; neither is a shared, searchable pitfalls layer). |
+| Canonical Example Corpus | `docs/examples/<slug>.md` holds curated, reviewed reference implementations per pattern (a rate-limited auth route, a sync server+client pair, the `tryCatch` pattern, a protected page+component+middleware). When building one of these, **copy the canonical shape** (`get_example('<pattern>')` / `list_examples`) instead of an arbitrary first match. `npm run ai:examples` regenerates `docs/AI_EXAMPLES_INDEX.md`. On an existing project with a bare corpus, OFFER to seed it from the real, reviewed routes/pages (same backfill etiquette as above) — never fabricate an "approved" example. |
+| Doc-coverage gate, staleness, code→ADR, context budget, eval | These keep the layers above honest and current — all opt-in / report-only so they never block an existing codebase retroactively: |
 | Inherited Patterns (from old `.claude/CLAUDE.md`, user-confirmed) | Before building any UI primitive, check this table. Extend the existing component or add a prop — never roll a parallel implementation. |
 | Inherited Rules (user-confirmed) | When analysis surfaces potential mistakes, unhandled errors, or improvement opportunities OUTSIDE the current task scope, **report them — do not fix them**. The user decides what to act on. |
 | Type Generation & Template Injection Contract | Preferred direction: route literals + generated maps + inferred `serverOutput` / `clientOutput` typing. |
@@ -29,7 +32,7 @@
 
 | Doc file | Summary | Location |
 | --- | --- | --- |
-| ARCHITECTURE_API.md | Type-safe API request system with WebSocket-first architecture and HTTP fallback. | docs/ARCHITECTURE_API.md |
+| ARCHITECTURE_API.md | <!-- @covers packages/api/src --> | docs/ARCHITECTURE_API.md |
 | ARCHITECTURE_AUTH.md | OAuth and credentials-based authentication system. | docs/ARCHITECTURE_AUTH.md |
 | ARCHITECTURE_EMAIL.md | See also: [`packages/email/README.md`](../packages/email/README.md) for the full public API and adapter setup. | docs/ARCHITECTURE_EMAIL.md |
 | ARCHITECTURE_EXTENSION_POINTS.md | Every registry, adapter slot, and hook a consumer can use to customise | docs/ARCHITECTURE_EXTENSION_POINTS.md |
@@ -43,7 +46,7 @@
 | ARCHITECTURE_SECRET_MANAGER.md | Replaces the older `ARCHITECTURE_SECRETS.md` design. The client (`@luckystack/secret-manager`) is implemented; the companion server lives in a separate repo (`luckystack-secret-manager`) and only its wire contract is captured here. | docs/ARCHITECTURE_SECRET_MANAGER.md |
 | ARCHITECTURE_SESSION.md | Session management using Redis with OAuth provider support. | docs/ARCHITECTURE_SESSION.md |
 | ARCHITECTURE_SOCKET.md | Socket.io-based real-time communication layer. | docs/ARCHITECTURE_SOCKET.md |
-| ARCHITECTURE_SYNC.md | Real-time event broadcasting between clients using rooms. | docs/ARCHITECTURE_SYNC.md |
+| ARCHITECTURE_SYNC.md | <!-- @covers packages/sync/src --> | docs/ARCHITECTURE_SYNC.md |
 | ARCHITECTURE_TESTING.md | Spec for LuckyStack's two test systems: vitest **unit tests** (package internals) and the `@luckystack/test-runner` **integration** layers. Last updated 2026-06-02. | docs/ARCHITECTURE_TESTING.md |
 
 ## Function inventory across packages
@@ -677,7 +680,8 @@
 | `runFuzzCheck({ endpoint, baseUrl, headers? })` | Single-endpoint crash-resistance fuzz | → docs/fuzz-tests.md |
 | `runFuzzTests({ apiMethodMap, baseUrl, skip?, headers?, onResult? })` | Sweep fuzz layer (nightly CI) | → docs/fuzz-tests.md |
 | `resetServerState({ baseUrl, token? })` | POST naar `/_test/reset` om DB+Redis schoon te maken | → docs/rate-limit-tests.md |
-| `sampleSchemaInput(schema)` | Genereert Zod-valid sample payload uit een schema | → docs/contract-tests.md |
+| `sampleSchemaInput(schema, options?)` | Genereert Zod-valid sample payload uit een schema. `options.stringPrefix` tagt UNCONSTRAINED strings (finding #98) — format/checked strings blijven ongeprefixt zodat ze valid blijven. | → docs/contract-tests.md |
+| `createTestDataMarker()` / `TEST_DATA_PREFIX` | Run-unique `lstest_<uuid>_` marker (+ vaste `lstest_` prefix-constant) waarmee `runAllTests` gegenereerde test-strings identificeerbaar maakt. | → docs/contract-tests.md |
 | `logContractResult(result)` | Pretty-print één `ContractCheckResult` | → docs/extension-hooks.md |
 | `logContractSummary(summary)` | Pretty-print aggregate `RunContractSummary` | → docs/extension-hooks.md |
 | `registerTestLayer(layer)` | Plug-in custom test-layer (CORS, business rules, multi-tenant) | → docs/extension-hooks.md |
