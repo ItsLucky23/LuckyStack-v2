@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
+import { registerDeployConfig } from '@luckystack/core';
 
 import { createWsProxy } from './wsProxy';
 import type { ServiceTargetResolver, ResolveTargetResult } from './resolveTarget';
@@ -25,6 +26,9 @@ const cleanups: (() => void)[] = [];
 
 afterEach(() => {
   for (const c of cleanups.splice(0)) c();
+  //? Restore the default (empty) deploy config so a test that registered WS-cap
+  //? overrides doesn't leak into the next test's `getDeployConfig()` read.
+  registerDeployConfig({ resources: {} });
 });
 
 //? Boot a router HTTP server whose `upgrade` handler is the WS proxy under test,
@@ -82,6 +86,46 @@ const sendUpgrade = (port: number, requestTarget: string): Promise<string> =>
     socket.setTimeout(2000, () => { socket.destroy(); reject(new Error('timeout')); });
   });
 
+//? Open a raw upgrade connection, optionally appending `headPayload` bytes after
+//? the request terminator (they surface as the server's upgrade `head` buffer).
+//? Returns the live socket plus a promise for the first response status line, so
+//? a caller can both assert the status AND observe the proxy tearing the pipe down.
+const openUpgrade = (
+  port: number,
+  requestTarget: string,
+  headPayload?: Buffer,
+): { socket: net.Socket; firstLine: Promise<string> } => {
+  const socket = net.connect(port, '127.0.0.1', () => {
+    const reqBuf = Buffer.from(
+      `GET ${requestTarget} HTTP/1.1\r\n`
+      + `Host: 127.0.0.1:${String(port)}\r\n`
+      + 'Connection: Upgrade\r\n'
+      + 'Upgrade: websocket\r\n'
+      + 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+      + 'Sec-WebSocket-Version: 13\r\n\r\n',
+      'utf8',
+    );
+    socket.write(headPayload ? Buffer.concat([reqBuf, headPayload]) : reqBuf);
+  });
+  const firstLine = new Promise<string>((resolve, reject) => {
+    let buf = '';
+    socket.on('data', (chunk: Buffer) => {
+      buf += chunk.toString('utf8');
+      if (buf.includes('\r\n')) resolve(buf.split('\r\n')[0] ?? '');
+    });
+    socket.on('error', reject);
+    socket.setTimeout(2000, () => { reject(new Error('timeout')); });
+  });
+  return { socket, firstLine };
+};
+
+//? Resolve true if the socket closes within `ms`, false otherwise.
+const closesWithin = (socket: net.Socket, ms: number): Promise<boolean> =>
+  new Promise<boolean>((resolve) => {
+    socket.on('close', () => { resolve(true); });
+    setTimeout(() => { resolve(false); }, ms);
+  });
+
 describe('wsProxy', () => {
   it('completes a 101 upgrade for an origin-form path against a reachable upstream', async () => {
     const h = await boot((upstreamPort) => ({
@@ -135,6 +179,51 @@ describe('wsProxy', () => {
     const statusLine = await sendUpgrade(h.port, '/socket.io/?EIO=4');
     expect(statusLine).toContain('504');
     expect(statusLine).not.toContain('101');
+  });
+
+  it('rejects an upgrade whose head buffer exceeds wsMaxHeadBytes (431) without upgrading', async () => {
+    //? #77 — an over-cap pre-101 head buffer is rejected before the upstream leg
+    //? opens, so a client cannot push an unbounded buffer through the router.
+    registerDeployConfig({ resources: {}, routing: { wsMaxHeadBytes: 8 } });
+    const h = await boot((upstreamPort) => ({
+      target: `http://127.0.0.1:${String(upstreamPort)}`,
+      viaFallback: false,
+      resolvedEnvKey: 'test',
+    }));
+    const { firstLine } = openUpgrade(h.port, '/socket.io/?EIO=4', Buffer.alloc(64, 0x78));
+    const statusLine = await firstLine;
+    expect(statusLine).toContain('431');
+    expect(statusLine).not.toContain('101');
+  });
+
+  it('tears down an upgraded pipe once wsMaxBytesPerConnection is exceeded', async () => {
+    //? #76 — the byte budget bounds how much a single upgraded connection can
+    //? push through the router. The client floods 5000 bytes past a 1000-byte cap.
+    registerDeployConfig({ resources: {}, routing: { wsMaxBytesPerConnection: 1000 } });
+    const h = await boot((upstreamPort) => ({
+      target: `http://127.0.0.1:${String(upstreamPort)}`,
+      viaFallback: false,
+      resolvedEnvKey: 'test',
+    }));
+    const { socket, firstLine } = openUpgrade(h.port, '/socket.io/?EIO=4');
+    expect(await firstLine).toContain('101');
+    //? Post-upgrade client flood — surfaces as `'data'` on the router's client
+    //? socket, which the meter counts toward the per-connection budget.
+    socket.write(Buffer.alloc(5000, 0x78));
+    expect(await closesWithin(socket, 2000)).toBe(true);
+  });
+
+  it('tears down an upgraded pipe after wsIdleTimeoutMs of inactivity', async () => {
+    //? #76 — an idle (post-upgrade) pipe is reaped instead of being held open.
+    registerDeployConfig({ resources: {}, routing: { wsIdleTimeoutMs: 120 } });
+    const h = await boot((upstreamPort) => ({
+      target: `http://127.0.0.1:${String(upstreamPort)}`,
+      viaFallback: false,
+      resolvedEnvKey: 'test',
+    }));
+    const { socket, firstLine } = openUpgrade(h.port, '/socket.io/?EIO=4');
+    expect(await firstLine).toContain('101');
+    expect(await closesWithin(socket, 2000)).toBe(true);
   });
 
   it('survives a client RST mid-handshake without crashing the process', async () => {

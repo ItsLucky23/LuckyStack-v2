@@ -73,6 +73,30 @@ export interface DeployRoutingShape {
    * rejecting with 413. DEFAULT undefined → router uses its built-in default.
    */
   maxRequestBodyBytes?: number;
+  /**
+   * Max size (bytes) of the upgrade `head` buffer the WS proxy forwards to the
+   * upstream during a WebSocket handshake. An over-cap head is rejected (the
+   * client socket is destroyed) BEFORE the upstream leg opens, so a client
+   * cannot push an unbounded pre-upgrade buffer through the router. DEFAULT
+   * undefined → router uses its built-in default (64 KiB).
+   */
+  wsMaxHeadBytes?: number;
+  /**
+   * Idle-timeout (ms) for an UPGRADED WebSocket pipe: when no bytes flow in
+   * either direction for this long, the router tears the proxied pair down.
+   * Bounds an otherwise-unbounded pre/post-auth pipe a client could hold open
+   * against the router. The timer resets on any activity. DEFAULT undefined →
+   * router uses its built-in default (120000 ms = 2 min). Set `0` to disable.
+   */
+  wsIdleTimeoutMs?: number;
+  /**
+   * Per-connection byte budget for an UPGRADED WebSocket pipe: when the total
+   * bytes piped across both legs exceed this cap, the router tears the proxied
+   * pair down. Bounds how much a single connection can stream through the
+   * router. DEFAULT undefined → router uses its built-in default (100 MiB). Set
+   * `false` to disable the cap (unbounded).
+   */
+  wsMaxBytesPerConnection?: number | false;
 }
 
 export interface DeployDevelopmentShape {

@@ -3,7 +3,7 @@ import https from 'node:https';
 import { URL } from 'node:url';
 import type { IncomingMessage, ClientRequest } from 'node:http';
 import type { Socket } from 'node:net';
-import { dispatchHook } from '@luckystack/core';
+import { dispatchHook, getDeployConfig } from '@luckystack/core';
 import type { ServiceTargetResolver } from './resolveTarget';
 import {
   WS_HOP_BY_HOP_HEADERS,
@@ -30,6 +30,18 @@ const DEFAULT_WS_SERVICE = 'system';
 //? leg. Built-in (not a deploy-config knob) to keep the change inside this
 //? package, mirroring the slow-loris timeouts in `startRouter.ts`.
 const UPSTREAM_HANDSHAKE_TIMEOUT_MS = 30_000;
+
+//? Conservative configurable defaults for the WS resource caps. All three are
+//? overridable via `deploy.routing.{wsMaxHeadBytes,wsIdleTimeoutMs,
+//? wsMaxBytesPerConnection}` (read through `getDeployConfig()`), mirroring how
+//? the HTTP proxy reads `upstreamTimeoutMs` / `maxRequestBodyBytes`.
+//? Reject an upgrade whose pre-101 `head` buffer exceeds this many bytes (#77).
+const DEFAULT_WS_MAX_HEAD_BYTES = 64 * 1024; // 64 KiB
+//? Tear down an upgraded pipe after this many ms with no traffic either way (#76).
+const DEFAULT_WS_IDLE_TIMEOUT_MS = 120_000; // 2 min
+//? Tear down an upgraded pipe once this many total bytes have flowed across both
+//? legs (#76). Generous enough for normal sync traffic but bounded; `false` off.
+const DEFAULT_WS_MAX_BYTES_PER_CONNECTION: number | false = 100 * 1024 * 1024; // 100 MiB
 
 export interface CreateWsProxyInput {
   resolver: ServiceTargetResolver;
@@ -85,6 +97,18 @@ export const createWsProxy = ({ resolver, wsTargetService, upstreamHandshakeTime
     };
     clientSocket.on('error', onClientGone);
     clientSocket.on('close', onClientGone);
+
+    //? Head-buffer size cap (#77). The upgrade `head` is bytes the client already
+    //? sent past the request line; it is forwarded verbatim to the upstream
+    //? (`upstreamRequest.end(head)`). Reject an over-cap head BEFORE opening the
+    //? upstream leg so a client can't push an unbounded pre-upgrade buffer through
+    //? the router. The socket is already guarded by `onClientGone` above.
+    const maxHeadBytes = getDeployConfig().routing?.wsMaxHeadBytes ?? DEFAULT_WS_MAX_HEAD_BYTES;
+    if (head.length > maxHeadBytes) {
+      settled = true;
+      writeStatusAndDestroy(clientSocket, 431, 'Request Header Fields Too Large');
+      return;
+    }
 
     //? Reject anything but strict origin-form before building the upstream URL.
     //? Absolute-form (`GET http://evil:port/...`) or protocol-relative (`//evil`)
@@ -263,6 +287,37 @@ const openUpstream = async (
     };
     upstreamSocket.on('error', teardown);
     upstreamSocket.on('close', teardown);
+
+    //? Idle-timeout (#76). Once upgraded the proxy pipes raw bytes with no
+    //? lifetime bound; a client could hold an idle pipe open against the router
+    //? indefinitely. `socket.setTimeout` auto-RESETS on read/write activity, so an
+    //? active connection never trips it while a silent pipe is reaped after the
+    //? window. `'timeout'` does NOT destroy the socket on its own — we tear the
+    //? pair down. DEFAULT 120000 ms; `deploy.routing.wsIdleTimeoutMs = 0` disables.
+    const idleTimeoutMs = getDeployConfig().routing?.wsIdleTimeoutMs ?? DEFAULT_WS_IDLE_TIMEOUT_MS;
+    if (idleTimeoutMs > 0) {
+      upstreamSocket.setTimeout(idleTimeoutMs);
+      clientSocket.setTimeout(idleTimeoutMs);
+      upstreamSocket.on('timeout', teardown);
+      clientSocket.on('timeout', teardown);
+    }
+
+    //? Per-connection byte budget (#76). Cap the total bytes piped across BOTH
+    //? legs so a single upgraded connection can't stream the router out of
+    //? resources. The `'data'` listeners are observers — `.pipe()` keeps owning
+    //? the actual transfer, they don't consume/steal the stream. DEFAULT 100 MiB;
+    //? `deploy.routing.wsMaxBytesPerConnection = false` disables the cap.
+    const maxBytesPerConnection = getDeployConfig().routing?.wsMaxBytesPerConnection ?? DEFAULT_WS_MAX_BYTES_PER_CONNECTION;
+    if (maxBytesPerConnection !== false) {
+      let bytesPiped = 0;
+      const meter = (chunk: Buffer): void => {
+        bytesPiped += chunk.length;
+        if (bytesPiped > maxBytesPerConnection) teardown();
+      };
+      upstreamSocket.on('data', meter);
+      clientSocket.on('data', meter);
+    }
+
     //? Add post-upgrade teardown listeners BEFORE removing the pre-upgrade
     //? `onClientGone` listeners. An atomic swap ensures no window where the
     //? client socket has no error/close handler — a client RST between the two
