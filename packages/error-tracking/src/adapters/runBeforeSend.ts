@@ -9,7 +9,7 @@
 //? RESOLVED payload returned below, never the original arguments — so a
 //? redacting `beforeSend` actually redacts what reaches the backend.
 
-import { getLogger } from '@luckystack/core';
+import { getLogger, resolveEnvKey } from '@luckystack/core';
 import type { ErrorTrackerContext, ErrorTrackerEvent } from '@luckystack/core';
 
 export type BeforeSendHook = (event: ErrorTrackerEvent) => ErrorTrackerEvent | null;
@@ -50,7 +50,7 @@ const resolveEvent = (
   //? ET-O8: if the hook returned a non-null object that lacks `forwarded: true`
   //? the event is silently dropped — likely a bug in the hook. Warn in dev so the
   //? author can add `forwarded: true` or return `null` to drop intentionally.
-  if (result !== null && !result.forwarded && process.env.NODE_ENV !== 'production') {
+  if (result !== null && !result.forwarded && resolveEnvKey() !== 'production') {
     getLogger().warn(
       '[error-tracking] beforeSend returned an event without forwarded:true — event dropped. ' +
       'Return { ...event, forwarded: true } to keep or null to drop intentionally.',

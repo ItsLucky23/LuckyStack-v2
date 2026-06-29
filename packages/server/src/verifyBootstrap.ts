@@ -16,6 +16,7 @@ import {
   isLocalizedNormalizerRegistered,
   isProjectConfigRegistered,
   isRuntimeMapsProviderRegistered,
+  resolveEnvKey,
 } from '@luckystack/core';
 import { getLogin } from './capabilities';
 
@@ -87,7 +88,7 @@ export const verifyBootstrap = async (requirements: BootstrapRequirements = {}):
   //? returns `notFound`. Hard-fail in production; loud-warn in dev because
   //? tests and the bare-server dev mode legitimately boot without one.
   if (!isRuntimeMapsProviderRegistered()) {
-    if (process.env.NODE_ENV === 'production') {
+    if (resolveEnvKey() === 'production') {
       missing.push(
         'RuntimeMapsProvider — call `registerRuntimeMapsProvider({...})` from `server/prod/runtimeMaps.ts`. Without it, every api/sync request returns notFound.'
       );
@@ -101,7 +102,7 @@ export const verifyBootstrap = async (requirements: BootstrapRequirements = {}):
   //? Localized normalizer — without it, error responses degrade to
   //? errorCode-as-message (no i18n). Hard-fail in production; warn in dev.
   if (!isLocalizedNormalizerRegistered()) {
-    if (process.env.NODE_ENV === 'production') {
+    if (resolveEnvKey() === 'production') {
       missing.push(
         'LocalizedNormalizer — call `registerLocalizedNormalizer({...})` from your bootstrap. Without it, error response messages will be the raw errorCode (no i18n).'
       );

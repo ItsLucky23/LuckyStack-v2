@@ -29,7 +29,7 @@
 import { readFileSync, watch as fsWatch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 
-import { sleep, tryCatchSync } from '@luckystack/core';
+import { resolveEnvKey, sleep, tryCatchSync } from '@luckystack/core';
 
 /**
  * Bearer token: a literal string, or a file whose entire contents are the token.
@@ -765,11 +765,12 @@ const scheduleReload = (): void => {
 
 const startDevReload = (config: SecretManagerConfig): void => {
   if (devReloadStarted || config.dev === undefined) return;
-  //? Allowlist the dev environments rather than exact-matching 'production': an
-  //? unset / 'prod' / 'staging' NODE_ENV must NOT silently start fs watchers + a
-  //? poll on a host the operator believes is production. Only an explicit
-  //? 'development' or 'test' enables dev hot reload.
-  const nodeEnv = process.env.NODE_ENV;
+  //? Allowlist the dev environments rather than exact-matching 'production': a
+  //? 'prod' / 'staging' env must NOT silently start fs watchers + a poll on a
+  //? host the operator believes is production. Only an explicit 'development' or
+  //? 'test' enables dev hot reload (an unset env resolves to 'development' via
+  //? the canonical `resolveEnvKey()`, so it counts as dev).
+  const nodeEnv = resolveEnvKey();
   if (nodeEnv !== 'development' && nodeEnv !== 'test') return;
 
   const watch = config.dev.watch ?? true;

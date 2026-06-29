@@ -15,6 +15,7 @@ import tryCatch from './tryCatch';
 import { redis } from './redis';
 import { formatKey } from './redisKeyFormatter';
 import { getLogger } from './loggerRegistry';
+import { resolveEnvKey } from './bootUuid';
 
 export interface CheckRateLimitParams {
   /** Unique key for rate limiting (e.g., "user:123:api:getData") */
@@ -361,7 +362,7 @@ export const clearRateLimit = async (key: string): Promise<void> => strategyRegi
  * `clearRateLimit` or implement a tenant-namespaced strategy.
  */
 export const clearAllRateLimits = async (): Promise<void> => {
-  if (process.env.NODE_ENV === 'production') {
+  if (resolveEnvKey() === 'production') {
     //? Throw (not warn-and-return) so callers that catch the rejection know the
     //? operation was skipped. A silent `return` makes integration test scaffolding
     //? proceed with stale counters, producing flaky results (CORE-O8 logic-gap fix).

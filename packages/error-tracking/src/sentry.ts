@@ -17,6 +17,7 @@ import {
   initSharedSentry,
   loadPeer,
   REDACTED_PLACEHOLDER,
+  resolveEnvKey,
   sanitizeErrorString,
   sanitizeForLog,
   captureException as sharedCaptureException,
@@ -79,7 +80,7 @@ interface ResolvedSentryInitConfig {
 //? emitted here so call-time behavior is centralised.
 const resolveSentryInitConfig = (): ResolvedSentryInitConfig | null => {
   const dsn = process.env.SENTRY_DSN ?? process.env.VITE_SENTRY_DSN;
-  const isProduction = process.env.NODE_ENV === 'production';
+  const isProduction = resolveEnvKey() === 'production';
   const enabledOverride = process.env.SENTRY_ENABLED ?? process.env.VITE_SENTRY_ENABLED;
 
   if (!dsn) {
@@ -191,7 +192,7 @@ const buildSentryInitOptions = (
   config: ResolvedSentryInitConfig,
 ): Parameters<SentryModule['init']>[0] => ({
   dsn: config.dsn,
-  environment: process.env.NODE_ENV ?? 'development',
+  environment: resolveEnvKey(),
 
   // Performance monitoring
   tracesSampleRate: config.tracesSampleRate,

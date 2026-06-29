@@ -20,7 +20,7 @@
 //? hand-written `registerOAuthProviders(...)` / `registerUserAdapter(...)` still
 //? wins (last writer).
 
-import { getProjectConfig } from '@luckystack/core';
+import { getProjectConfig, resolveEnvKey } from '@luckystack/core';
 import {
   registerOAuthProviderFactory,
   credentialsProvider,
@@ -50,7 +50,7 @@ if (!isUserAdapterRegistered()) {
 //? in the block below are now limited to adapter registration (which is safe
 //? because the adapter registry itself does not depend on project config).
 const buildProviders = (): OAuthProvider[] => {
-  const dev = process.env.NODE_ENV !== 'production';
+  const dev = resolveEnvKey() !== 'production';
 
   //? Reads `DEV_<key>` in dev, the unprefixed `<key>` in prod. Empty when unset.
   const env = (key: string): string => (dev ? process.env[`DEV_${key}`] : process.env[key]) ?? '';

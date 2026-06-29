@@ -9,7 +9,7 @@ import { getProjectConfig, readSession, getRuntimeApiMaps as getRuntimeApiMapsFr
   parseTransportRouteName,
   dispatchHook,
   getLogger, extractLanguageFromHeader, normalizeErrorResponse, applyErrorFormatter,
-  isLoopbackIp, resolveClientIp } from '@luckystack/core';
+  isLoopbackIp, resolveClientIp, resolveEnvKey } from '@luckystack/core';
 import type { ApiStreamPayload, RuntimeApiEntry } from './_shared/apiTypes';
 import { shouldLogDev, shouldLogStream } from './_shared/logFlags';
 import { normalizeApiResponse } from './_shared/responseEnvelope';
@@ -366,7 +366,7 @@ async function applyHttpApiRateLimits(
   //? still apply. Pass the raw `requesterIp` (undefined → '') so only real
   //? loopback addresses qualify — avoids skipping for every unresolvable caller.
   const skipGlobalIpForLoopback = getProjectConfig().rateLimiting.skipLoopbackInDev
-    && process.env.NODE_ENV !== 'production'
+    && resolveEnvKey() !== 'production'
     && isLoopbackIp(requesterIp ?? '');
 
   const rateLimitResult = await applyApiRateLimits({

@@ -889,11 +889,17 @@ describe('production rotation poll (SM-14)', () => {
 });
 
 describe('dev hot-reload env gate (SM-04)', () => {
-  it('does not start the dev poll when NODE_ENV is unset', async () => {
+  it('does not start the dev poll in a non-dev env', async () => {
     vi.useFakeTimers();
-    const prev = process.env.NODE_ENV;
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevLuckyEnv = process.env.LUCKYSTACK_ENV;
     try {
-      Reflect.deleteProperty(process.env, 'NODE_ENV');
+      //? Resolve a non-dev env through the canonical `resolveEnvKey()`
+      //? (`LUCKYSTACK_ENV ?? NODE_ENV ?? 'development'`): clear the higher-priority
+      //? override and set an explicit 'staging' so the gate sees non-dev. An UNSET
+      //? env would resolve to 'development' and (correctly) start the poll.
+      Reflect.deleteProperty(process.env, 'LUCKYSTACK_ENV');
+      process.env.NODE_ENV = 'staging';
       process.env.DG_KEY = 'DG_SECRET_V1';
       const fetchImpl = okFetch({ DG_SECRET_V1: 'v' });
 
@@ -903,11 +909,13 @@ describe('dev hot-reload env gate (SM-04)', () => {
       expect(fetchImpl).toHaveBeenCalledOnce();
 
       await vi.advanceTimersByTimeAsync(5000);
-      //? Unset NODE_ENV is treated as non-dev — poll never starts.
+      //? Non-dev env is gated out — poll never starts.
       expect(fetchImpl).toHaveBeenCalledOnce();
     } finally {
-      if (prev === undefined) Reflect.deleteProperty(process.env, 'NODE_ENV');
-      else process.env.NODE_ENV = prev;
+      if (prevNodeEnv === undefined) Reflect.deleteProperty(process.env, 'NODE_ENV');
+      else process.env.NODE_ENV = prevNodeEnv;
+      if (prevLuckyEnv === undefined) Reflect.deleteProperty(process.env, 'LUCKYSTACK_ENV');
+      else process.env.LUCKYSTACK_ENV = prevLuckyEnv;
       vi.useRealTimers();
     }
   });

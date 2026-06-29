@@ -23,7 +23,7 @@
 
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { tryCatch } from '@luckystack/core';
+import { resolveEnvKey, tryCatch } from '@luckystack/core';
 import { startRouter } from './startRouter';
 
 interface CliArgs {
@@ -53,7 +53,7 @@ const parseArgs = (argv: readonly string[]): CliArgs => {
   const args: CliArgs = {
     deploy: null,
     services: null,
-    env: process.env.NODE_ENV ?? 'development',
+    env: resolveEnvKey(),
     preset: null,
     port: null,
     sharedHealth: true,
@@ -125,7 +125,7 @@ REQUIRED
   --services, -s <file>    Path to compiled services.config.js (registers ServicesConfig).
 
 OPTIONS
-  --env, -e <key>          Environment key to run as. Default: NODE_ENV or 'development'.
+  --env, -e <key>          Environment key to run as. Default: LUCKYSTACK_ENV, NODE_ENV, or 'development'.
   --preset, -p <key>       Preset key for the locally-running backend bundle. Optional.
   --port <number>          Listen port. Default: ROUTER_PORT env or routing.defaultRouterPort.
   --no-shared-health       Opt out of the Redis-backed health store (ignored in split/fallback mode).

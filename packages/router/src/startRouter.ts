@@ -37,8 +37,9 @@ const ROUTER_REQUEST_TIMEOUT_MS = 300_000;
 export interface StartRouterInput {
   /**
    * Which `deploy.config.ts -> environments` key describes the environment
-   * this router instance runs in. Typically mirrors `process.env.NODE_ENV`
-   * but can be overridden for staging/preview deploys.
+   * this router instance runs in. Typically mirrors the resolved env mode
+   * (`LUCKYSTACK_ENV ?? NODE_ENV`, via `resolveEnvKey()` in the CLI) but can be
+   * overridden for staging/preview deploys.
    */
   currentEnvKey: string;
   /**

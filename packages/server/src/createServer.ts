@@ -1,5 +1,5 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, isProduction } from '@luckystack/core';
+import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, isProduction, resolveEnvKey } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
@@ -198,7 +198,7 @@ export const createLuckyStackServer = async (
 
   const port = options.port ?? getParsedPort() ?? options.defaultPort ?? process.env.SERVER_PORT ?? 80;
   const ip = options.ip ?? process.env.SERVER_IP ?? '127.0.0.1';
-  const enableDevTools = options.enableDevTools ?? process.env.NODE_ENV !== 'production';
+  const enableDevTools = options.enableDevTools ?? resolveEnvKey() !== 'production';
 
   //? Register the resolved bind address so framework code that needs it
   //? (e.g. `checkOrigin` building the same-origin entry) doesn't drift when
