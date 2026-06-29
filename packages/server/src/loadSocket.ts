@@ -159,7 +159,7 @@ interface RoomMutationOptions {
   postHook: 'postRoomJoin' | 'postRoomLeave';
   blockedErrorCode: string;
   logVerb: string;
-  mutate: (socket: Socket, physicalRoom: string, rawGroup: string, existingRoomCodes: string[]) => Promise<string[]>;
+  mutate: (socket: Socket, physicalRoom: string, rawGroup: string, existingRoomCodes: string[], userId: string | undefined) => Promise<string[]>;
 }
 
 const executeRoomMutation = async (opts: RoomMutationOptions): Promise<void> => {
@@ -197,7 +197,7 @@ const executeRoomMutation = async (opts: RoomMutationOptions): Promise<void> => 
   //? stores the RAW code; only the Socket.io room name uses the physical form.
   const roomPurpose = preHook === 'preRoomJoin' ? 'join' as const : 'leave' as const;
   const physicalRoom = formatRoomName(group, { purpose: roomPurpose, userId: session.id });
-  const nextRoomCodes = await mutate(socket, physicalRoom, group, existingRoomCodes);
+  const nextRoomCodes = await mutate(socket, physicalRoom, group, existingRoomCodes, session.id);
 
   const sanitizedSession = sanitizeSessionRoomKeys(session);
   await writeSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
@@ -279,10 +279,23 @@ const registerRoomEvents = (ctx: SocketContext): void => {
         postHook: 'postRoomJoin',
         blockedErrorCode: 'room.joinBlocked',
         logVerb: 'joined',
-        mutate: async (sock, physicalRoom, rawGroup, existingCodes) => {
-          const nextCodes = [...new Set([...existingCodes, rawGroup])];
+        mutate: async (sock, physicalRoom, rawGroup, existingCodes, userId) => {
+          //? Enforce the per-session room cap (socket.maxRoomsPerSession, default
+          //? 50) with FIFO eviction: joining a NEW room beyond the cap leaves the
+          //? OLDEST joined room first, so `roomCodes` can't grow unbounded in Redis
+          //? (session-bloat DoS). Re-joining an already-joined room never grows the
+          //? set, so it never evicts.
+          const maxRooms = getProjectConfig().socket.maxRoomsPerSession;
+          let kept = existingCodes;
+          if (maxRooms !== false && maxRooms > 0 && !existingCodes.includes(rawGroup)) {
+            while (kept.length >= maxRooms) {
+              const oldest = kept[0];
+              kept = kept.slice(1);
+              await sock.leave(formatRoomName(oldest, { purpose: 'join', userId }));
+            }
+          }
           await sock.join(physicalRoom);
-          return nextCodes;
+          return [...new Set([...kept, rawGroup])];
         },
       });
     });
@@ -309,7 +322,7 @@ const registerRoomEvents = (ctx: SocketContext): void => {
         postHook: 'postRoomLeave',
         blockedErrorCode: 'room.leaveBlocked',
         logVerb: 'left',
-        mutate: async (sock, physicalRoom, rawGroup, existingCodes) => {
+        mutate: async (sock, physicalRoom, rawGroup, existingCodes, _userId) => {
           const nextCodes = existingCodes.filter((c) => c !== rawGroup);
           await sock.leave(physicalRoom);
           return nextCodes;

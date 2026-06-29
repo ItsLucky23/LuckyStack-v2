@@ -615,6 +615,13 @@ export interface SocketConfig {
    * historical cadence.
    */
   activityHeartbeatThrottleMs: number;
+  /**
+   * Hard cap on how many rooms a single session may be joined to at once. When a
+   * join would exceed the cap the OLDEST joined room is left first (FIFO eviction)
+   * so `session.roomCodes` can't grow unbounded in Redis (session-bloat DoS).
+   * DEFAULT 50. Set to `false` to disable the cap (unbounded — legacy behavior).
+   */
+  maxRoomsPerSession: number | false;
 }
 
 export interface DevConfig {
@@ -838,6 +845,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     pingTimeout: 20_000,
     pingInterval: 25_000,
     activityHeartbeatThrottleMs: 10_000,
+    maxRoomsPerSession: 50,
   },
   api: {
     requestTimeoutMs: 30_000,
