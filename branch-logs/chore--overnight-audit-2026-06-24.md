@@ -152,3 +152,20 @@ User asked to verify + fix everything real from the ~43 high/medium report-only 
 - **#5 (test-runner mutation safety):** DEFERRED — awaiting user confirmation of approach (prefix `lstest_<uuid>` + reset-bookends full test-DB wipe vs targeted record cleanup).
 
 50 commits ahead of main, NOT merged.
+
+## 2026-06-29 — Round-8: NODE_ENV detection unified on resolveEnvKey() + #5 built
+
+**User prompt:** approved "resolveEnvKey() overal" — found env-detection was inconsistent (9 sites via resolveEnvKey, 24 raw `process.env.NODE_ENV`). Also approved #5 reset-bookends.
+
+**Env-unification (6 parallel agents per package, all reviewed + re-gated):** routed every framework env-MODE gate through the canonical `resolveEnvKey()` (LUCKYSTACK_ENV ?? NODE_ENV ?? 'development') so LUCKYSTACK_ENV is honored consistently. 17 sites across api, core (rateLimiter/runtimeTypeValidation), server (createServer/runtimeMapsLoader/verifyBootstrap/types), sync (both http+socket), login/register, error-tracking (sentry/runBeforeSend), secret-manager, devkit/hotReload, router (cli/startRouter). Semantics preserved per-site.
+- LEFT (judgment): core/bootUuid (the resolver), devkit/supervisor (reads .env FILES + must not import core), scaffold CLI (pre-install, no core dep).
+- CONSEQUENCE: secret-manager dev-poll now treats UNSET env as 'development' (resolveEnvKey default; was non-dev) — test updated.
+- Fixed a latent #3 bug: loadSocket FIFO-evict indexed kept[0] (string|undefined under noUncheckedIndexedAccess) — build:packages's looser tsconfig missed it, consumer `tsc -p server` caught it. Added an undefined-break guard.
+
+**#5 test-runner mutation safety (#98):** generated unconstrained strings tagged `lstest_<run-uuid>_` (constrained fields stay valid); reset bookends (POST /_test/reset before+after the sweep when a token is available, skip+warn without) so updates can't touch real records + no test data persists; opt-out `resetBookends:false`. Method-ordering deferred.
+
+**Gate:** build:packages 16/16, lint:packages clean, 1122 tests across 11 packages. 3 commits pushed (loadSocket fix, framework env-unify, test-runner #5).
+
+**DEFERRED — consumer-template env-unify (4 files staged in working tree, NOT committed):** template/config.ts (made LUCKYSTACK_ENV-aware via the browser-safe `env()` helper — resolveEnvKey() can't be used: it does unguarded process.env access → would crash the Vite client bundle), template/luckystack/server/index.ts + cli/addLogin AUTH_SERVER_HOOKS (consumer example hooks → resolveEnvKey) + create-luckystack-app/src/index.ts prune-token (must match the template). Blocked: create-app/src/index.ts is entangled with the CONCURRENT feat/ai-docs-layers AI's uncommitted pre-commit-hook additions, so it can't be cleanly committed in isolation. The env-unify edits are DONE in the working tree; they land once that AI's create-app/src/index.ts work commits.
+
+55 commits ahead of main, NOT merged.
