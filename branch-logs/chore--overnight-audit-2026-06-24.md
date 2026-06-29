@@ -139,3 +139,16 @@ User asked to verify + fix everything real from the ~43 high/medium report-only 
 **Gate:** build:packages 16/16, lint:packages clean, 923 tests pass across 12 packages. 9 per-package commits, pushed. 42 commits ahead of main, NOT merged.
 
 **DEFERRED → user decision (see next message):** #62 (adapter-only span no-op — needs new core span API), #26 (wall-clock timeout vs streaming), #76/#77 (wsProxy caps), #86 (max-rooms-per-session), #98 (contract layer mutations on auth'd sweep), #73 (router synchronized-env secrets), #93/#94 (sync ack-timeout never emits syncCancel).
+
+## 2026-06-29 — Round-7: the 7 deferred design-decisions (user-greenlit)
+
+**User prompt:** per-item go/no-go on the 7 deferred items. Decisions + outcomes (each gated build:packages 16/16 + lint:packages + vitest, committed, pushed):
+- **#1 (sync ack-timeout):** FIX — the client ack-timeout now emits `syncCancel { cb: serverCancelId }` before teardown so the server stops the timed-out `_server` work (was: server ran to completion). #94's sub-RTT fallback stays best-effort (closing it would reintroduce the cb-collision the cancelId design fixed).
+- **#2 (api wall-clock timeout):** user wants legit multi-minute calls (e.g. deep image parse) → `api.requestTimeoutMs` default flipped 30_000→**false**; streaming requests exempt even when a consumer opts back in. Disconnect-abort (#82) is the remaining safety net. (sync's separate CLIENT ack-timeout left as-is.)
+- **#3 (room cap):** `socket.maxRoomsPerSession` default **50** (configurable, false disables) with **FIFO eviction** — joining a new room beyond the cap leaves the OLDEST first. Threaded session userId into the room-mutation helper for the evicted physical room.
+- **#4 (wsProxy caps):** added wsMaxHeadBytes (64 KiB→431), wsIdleTimeoutMs (120s, 0 disables), wsMaxBytesPerConnection (100 MiB, false disables) — all configurable via deploy.routing. (agent, reviewed+gated.)
+- **#6 (adapter-only spans):** added optional `ErrorTracker.startSpanHandle`; core's startSpanHandle delegates to the first adapter implementing it (Sentry startInactiveSpan, Datadog tracer.startSpan) with the wall-clock timer as fallback; autoInstrumentation rewired. PostHog has no span concept → skipped. (agent, reviewed+gated.)
+- **#7 (router stays dumb):** the boot-handshake synchronized-env (secret) hash drift check is now gated behind `routing.verifySynchronizedEnv` (default **false**) — the router needs NO backend secrets by default; the shared-Redis handshake is unaffected.
+- **#5 (test-runner mutation safety):** DEFERRED — awaiting user confirmation of approach (prefix `lstest_<uuid>` + reset-bookends full test-DB wipe vs targeted record cleanup).
+
+50 commits ahead of main, NOT merged.
