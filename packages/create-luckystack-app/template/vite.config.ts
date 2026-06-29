@@ -28,15 +28,22 @@ const readBackendPort = (fallback: string): string => {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const ip = env.SERVER_IP || '127.0.0.1';
-  //? Backend port comes from config.ports.ts (the single source) — SERVER_PORT is
-  //? no longer read. In cluster-dev (the @luckystack/router topology) set
-  //? ROUTER_PORT so the proxy targets the router instead of a single backend; the
-  //? router then fans out per service-key (see deploy.config.ts bindings).
+  //? Proxy target resolution (config-driven, single source = config.ports.ts):
+  //?   1. ports.devBackendUrl — develop against a REMOTE backend (deployed/staging).
+  //?      The browser stays same-origin (localhost), the proxy makes the cross-origin
+  //?      hop with changeOrigin, so cookies stay first-party + no CORS needed.
+  //?   2. ROUTER_PORT (env) — cluster-dev: proxy the @luckystack/router, which fans
+  //?      out per service-key (deploy.config.ts bindings).
+  //?   3. the local backend on ports.backend (following an auto-incremented port via
+  //?      node_modules/.luckystack/dev-server.json). SERVER_PORT is no longer read.
+  const remoteBackend = ports.devBackendUrl?.trim() || undefined;
   const routerPort = env.ROUTER_PORT && /^\d+$/.test(env.ROUTER_PORT) ? env.ROUTER_PORT : undefined;
   const backendTarget = (): string =>
-    routerPort
-      ? `http://${ip}:${routerPort}`
-      : `http://${ip}:${readBackendPort(String(ports.backend))}`;
+    remoteBackend
+      ? remoteBackend
+      : routerPort
+        ? `http://${ip}:${routerPort}`
+        : `http://${ip}:${readBackendPort(String(ports.backend))}`;
 
   //? Vite's proxy (node-http-proxy) has NO `router` option, but `bypass` runs per
   //? request with the live options object — set `target` there so every proxied
@@ -54,6 +61,10 @@ export default defineConfig(({ mode }) => {
   //? own `target` and routes never cross-contaminate.
   const entry = (extra: ProxyOptions = {}): ProxyOptions => ({
     target: backendTarget(),
+    //? A remote backend (ports.devBackendUrl) sits on a different host, so rewrite
+    //? the Host header to match it (vhost routing + TLS SNI); the local/router
+    //? target is same-host so it stays off.
+    changeOrigin: Boolean(remoteBackend),
     bypass: followBackend,
     ...extra,
   });
