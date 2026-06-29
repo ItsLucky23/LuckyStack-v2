@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import type { RunContractSummary } from './types';
 import type { RunCustomTestsSummary } from './customTests';
@@ -38,7 +38,9 @@ const runFuzzTests = vi.fn((_input: unknown): Promise<RunContractSummary> => { o
 const runCustomTests = vi.fn((_input: unknown): Promise<RunCustomTestsSummary> => { order.push('custom'); return Promise.resolve(customSummaryOf(6, 3)); });
 const clearAllRateLimits = vi.fn((): Promise<void> => { order.push('clear'); return Promise.resolve(); });
 const getProjectConfig = vi.fn(() => ({ http: { sessionCookieName: 'cfg_cookie' } }));
+const resetServerState = vi.fn((_input: unknown): Promise<boolean> => { order.push('reset'); return Promise.resolve(true); });
 
+vi.mock('./resetServerState', () => ({ resetServerState: (i: unknown) => resetServerState(i) }));
 vi.mock('./runContractTests', () => ({ runContractTests: (i: unknown) => runContractTests(i) }));
 vi.mock('./runAuthEnforcementTests', () => ({ runAuthEnforcementTests: (i: unknown) => runAuthEnforcementTests(i) }));
 vi.mock('./runRateLimitTests', () => ({ runRateLimitTests: (i: unknown) => runRateLimitTests(i) }));
@@ -60,9 +62,19 @@ const baseInput = {
   baseUrl: 'http://localhost:3000',
 };
 
+const originalResetToken = process.env.TEST_RESET_TOKEN;
+
 beforeEach(() => {
   order.length = 0;
   vi.clearAllMocks();
+  //? The reset bookends are gated on a token; clear it so the existing
+  //? characterization tests see no bookend resets (the bookend tests set it).
+  delete process.env.TEST_RESET_TOKEN;
+});
+
+afterEach(() => {
+  if (originalResetToken === undefined) delete process.env.TEST_RESET_TOKEN;
+  else process.env.TEST_RESET_TOKEN = originalResetToken;
 });
 
 describe('runAllTests orchestration (characterization)', () => {
@@ -161,5 +173,47 @@ describe('runAllTests orchestration (characterization)', () => {
     const summary = await runAllTests({ ...baseInput });
     expect(order).toContain('custom');
     expect(summary.custom).toStrictEqual(customSummaryOf(6, 3));
+  });
+});
+
+describe('runAllTests reset bookends (mutation safety, finding #98)', () => {
+  it('skips both bookend resets when no reset token is available', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { /* swallow expected warning */ });
+    await runAllTests({ ...baseInput });
+    expect(resetServerState).not.toHaveBeenCalled();
+    expect(order).not.toContain('reset');
+    //? Skipping is logged, not failed — the sweep still runs every layer.
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('resets once before the first sweep layer and once after the last when a token is supplied', async () => {
+    await runAllTests({ ...baseInput, resetToken: 'reset-secret' });
+    //? Bookends wrap the whole sweep: reset → (contract … fuzz) → reset → clear → custom.
+    expect(order).toStrictEqual(['reset', 'contract', 'auth', 'rateLimit', 'fuzz', 'reset', 'clear', 'custom']);
+    expect(resetServerState).toHaveBeenCalledTimes(2);
+    expect(resetServerState.mock.calls[0]?.[0]).toMatchObject({ baseUrl: baseInput.baseUrl, token: 'reset-secret' });
+  });
+
+  it('picks up the reset token from TEST_RESET_TOKEN when not passed explicitly', async () => {
+    process.env.TEST_RESET_TOKEN = 'env-secret';
+    await runAllTests({ ...baseInput });
+    expect(resetServerState).toHaveBeenCalledTimes(2);
+    expect(resetServerState.mock.calls[0]?.[0]).toMatchObject({ token: 'env-secret' });
+  });
+
+  it('resetBookends:false opts out even when a token is available', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { /* swallow expected warning */ });
+    await runAllTests({ ...baseInput, resetToken: 'reset-secret', resetBookends: false });
+    expect(resetServerState).not.toHaveBeenCalled();
+    expect(order).not.toContain('reset');
+    //? Opt-out is a deliberate choice, not a missing-token degrade — no warning.
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('does not run bookends when the whole sweep is disabled (noSweep)', async () => {
+    await runAllTests({ ...baseInput, resetToken: 'reset-secret', noSweep: true });
+    expect(resetServerState).not.toHaveBeenCalled();
   });
 });

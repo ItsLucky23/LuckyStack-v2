@@ -40,7 +40,8 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 | `runFuzzCheck({ endpoint, baseUrl, headers? })` | Single-endpoint crash-resistance fuzz | → docs/fuzz-tests.md |
 | `runFuzzTests({ apiMethodMap, baseUrl, skip?, headers?, onResult? })` | Sweep fuzz layer (nightly CI) | → docs/fuzz-tests.md |
 | `resetServerState({ baseUrl, token? })` | POST naar `/_test/reset` om DB+Redis schoon te maken | → docs/rate-limit-tests.md |
-| `sampleSchemaInput(schema)` | Genereert Zod-valid sample payload uit een schema | → docs/contract-tests.md |
+| `sampleSchemaInput(schema, options?)` | Genereert Zod-valid sample payload uit een schema. `options.stringPrefix` tagt UNCONSTRAINED strings (finding #98) — format/checked strings blijven ongeprefixt zodat ze valid blijven. | → docs/contract-tests.md |
+| `createTestDataMarker()` / `TEST_DATA_PREFIX` | Run-unique `lstest_<uuid>_` marker (+ vaste `lstest_` prefix-constant) waarmee `runAllTests` gegenereerde test-strings identificeerbaar maakt. | → docs/contract-tests.md |
 | `logContractResult(result)` | Pretty-print één `ContractCheckResult` | → docs/extension-hooks.md |
 | `logContractSummary(summary)` | Pretty-print aggregate `RunContractSummary` | → docs/extension-hooks.md |
 | `registerTestLayer(layer)` | Plug-in custom test-layer (CORS, business rules, multi-tenant) | → docs/extension-hooks.md |
@@ -79,6 +80,7 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 - `TEST_RESET_TOKEN` (env, optional, server-side) — wanneer gezet moet `resetServerState({ token })` deze meesturen als `X-Test-Reset-Token`. Verplicht voor staging/preview deploys die het endpoint over het netwerk exposen.
 - `RunRateLimitTestsInput.maxRateLimitToTest` (default `50`) — endpoints met hogere `rateLimit` worden geskipt om duizenden requests in CI te vermijden.
 - `RunRateLimitTestsInput.resetBetweenEndpoints` (default `false`) — hit `/_test/reset` voor elke endpoint zodat het shared IP-bucket schoon is.
+- `RunAllTestsInput.resetBookends` (default `true` wanneer een reset-token beschikbaar is) — POST `/_test/reset` één keer vóór en één keer ná de auto-sweep (finding #98: clean slate + cleanup zodat geen echte rows worden geëdit en geen `lstest_*` testdata achterblijft). Zonder token (`resetToken`/`TEST_RESET_TOKEN`) worden de bookends met een logregel geskipt, niet gefaald.
 - `registerTestLayer({ name, run })` — custom check per endpoint (CORS, business rules, custom auth-schemes, multi-tenant isolation).
 - `registerTestFixture(typeKey, { valid, invalid })` — realistic payloads die de fuzz layer prefereert boven schema-random.
 - `registerTestReporter({ onResult?, onSummary?, webhookUrl?, webhookAuth? })` — wire per-result/per-summary callbacks of POST de summary naar een webhook.

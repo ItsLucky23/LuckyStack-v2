@@ -6,6 +6,8 @@
 import { clearAllRateLimits, getCsrfConfig, getProjectConfig } from '@luckystack/core';
 
 import { sampleSchemaInput } from './schemaSampleInput';
+import { createTestDataMarker } from './testDataMarker';
+import { resetServerState } from './resetServerState';
 import { runContractTests } from './runContractTests';
 import { runAuthEnforcementTests } from './runAuthEnforcementTests';
 import { runRateLimitTests } from './runRateLimitTests';
@@ -52,6 +54,15 @@ export interface RunAllTestsInput {
    * extra wiring; pass explicitly to override.
    */
   resetToken?: string;
+  /**
+   * Contract-test mutation safety (finding #98). When a reset token is
+   * available, the sweep POSTs `/_test/reset` ONCE before the first layer
+   * (clean slate — no real row the generated payloads could clobber) and ONCE
+   * after the last (drop whatever the sweep created, so no test data persists).
+   * Defaults to ON; set `false` to opt out. With no token the bookends are
+   * silently skipped with a logged note (they can't run — `/_test/reset` 403s).
+   */
+  resetBookends?: boolean;
 }
 
 export interface RunAllTestsSummary {
@@ -65,11 +76,31 @@ export interface RunAllTestsSummary {
   totalFailed: number;
 }
 
-const inputForEndpoint = (apiInputSchemas: ApiInputSchemas) =>
+const inputForEndpoint = (apiInputSchemas: ApiInputSchemas, stringPrefix: string) =>
   (endpoint: EndpointDescriptor): unknown => {
     const schema = apiInputSchemas[endpoint.page]?.[endpoint.name]?.[endpoint.version];
-    return schema ? sampleSchemaInput(schema) : {};
+    //? Tag generated strings with the run-unique test-data marker so any rows
+    //? the sweep creates are identifiable + collision-free (finding #98).
+    return schema ? sampleSchemaInput(schema, { stringPrefix }) : {};
   };
+
+//? Decide whether the contract-sweep reset bookends should run. Returns the
+//? token to use, or null to skip. When the bookends are requested (the default)
+//? but no token is available, warn once — `/_test/reset` requires the token and
+//? would 403, so the bookends silently can't run; the sweep proceeds unguarded.
+const resolveResetBookendToken = (input: RunAllTestsInput): string | null => {
+  if (input.resetBookends === false) return null;
+  const token = input.resetToken ?? process.env.TEST_RESET_TOKEN;
+  if (!token) {
+    console.warn(
+      '[test-runner] runAllTests: reset bookends skipped — no reset token '
+      + '(set TEST_RESET_TOKEN or pass resetToken/resetBookends). /_test/reset '
+      + 'requires it, so the clean-slate + cleanup resets around the sweep are skipped.',
+    );
+    return null;
+  }
+  return token;
+};
 
 const matchesFilter = (endpoint: EndpointDescriptor, filter: string | undefined): boolean => {
   if (!filter) return true;
@@ -133,6 +164,13 @@ const runSweepLayers = async (
   headers: Record<string, string>,
   inputFor: (endpoint: EndpointDescriptor) => unknown,
 ): Promise<void> => {
+  //? Reset bookend — BEFORE the sweep. With a clean DB no real record exists for
+  //? the generated sample payloads to accidentally edit/delete (finding #98).
+  const resetBookendToken = resolveResetBookendToken(input);
+  if (resetBookendToken) {
+    await resetServerState({ baseUrl: input.baseUrl, token: resetBookendToken });
+  }
+
   const contract = await runContractTests({
     apiMethodMap: input.apiMethodMap,
     baseUrl: input.baseUrl,
@@ -198,6 +236,12 @@ const runSweepLayers = async (
       headers,
     });
     summary.fuzz = cloneSummary(fuzz, input.filter);
+  }
+
+  //? Reset bookend — AFTER the sweep. Drops every row the sweep's generated
+  //? payloads created so no `lstest_*` test data persists in the DB (finding #98).
+  if (resetBookendToken) {
+    await resetServerState({ baseUrl: input.baseUrl, token: resetBookendToken });
   }
 };
 
@@ -295,7 +339,9 @@ export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsS
   }
 
   const headers = await buildAuthHeaders(input);
-  const inputFor = inputForEndpoint(input.apiInputSchemas);
+  //? One marker per run so every generated string this sweep posts is tagged
+  //? with the same recognizable `lstest_<uuid>_` prefix (finding #98).
+  const inputFor = inputForEndpoint(input.apiInputSchemas, createTestDataMarker());
 
   if (!input.noSweep) {
     await runSweepLayers(input, summary, headers, inputFor);

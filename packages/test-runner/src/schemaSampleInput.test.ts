@@ -191,6 +191,44 @@ describe('sampleSchemaInput', () => {
     });
   });
 
+  describe('stringPrefix (test-data marker, finding #98)', () => {
+    const PREFIX = 'lstest_abc12345_';
+
+    it('prefixes a plain unconstrained string and keeps it schema-valid', () => {
+      const sample = sampleSchemaInput(z.string(), { stringPrefix: PREFIX });
+      expect(sample).toBe(`${PREFIX}test`);
+      expect(() => z.string().parse(sample)).not.toThrow();
+    });
+
+    it('prefixes nested string fields inside an object', () => {
+      const schema = z.object({ title: z.string(), count: z.number() });
+      const sample = sampleSchemaInput(schema, { stringPrefix: PREFIX });
+      expect(sample).toEqual({ title: `${PREFIX}test`, count: 0 });
+      expect(() => schema.parse(sample)).not.toThrow();
+    });
+
+    it('does NOT prefix a format-constrained string (email stays valid)', () => {
+      const schema = z.email();
+      const sample = sampleSchemaInput(schema, { stringPrefix: PREFIX });
+      //? An email field keeps the plain value — a prefixed value would fail the
+      //? format check and turn the happy-path probe into a validation error.
+      expect(sample).toBe('test');
+    });
+
+    it('does NOT prefix a checked string (min/max) so length bounds survive', () => {
+      const maxed = z.string().max(6);
+      const sample = sampleSchemaInput(maxed, { stringPrefix: PREFIX });
+      expect(sample).toBe('test');
+      //? Sanity: had we prefixed, the value would have blown past max(6).
+      expect((sample as string).length).toBeLessThanOrEqual(6);
+    });
+
+    it('leaves strings untouched when no prefix is supplied (backwards-compatible)', () => {
+      expect(sampleSchemaInput(z.string())).toBe('test');
+      expect(sampleSchemaInput(z.string(), {})).toBe('test');
+    });
+  });
+
   describe('fallback', () => {
     it('omits an unrecognised schema kind (returns undefined, not null)', () => {
       //? `z.bigint()` is not in the handled switch; the walker hits the

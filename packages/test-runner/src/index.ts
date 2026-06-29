@@ -11,6 +11,8 @@ export { runFuzzCheck } from './fuzzCheck';
 export { runFuzzTests } from './runFuzzTests';
 export { resetServerState } from './resetServerState';
 export { sampleSchemaInput } from './schemaSampleInput';
+export type { SampleSchemaOptions } from './schemaSampleInput';
+export { TEST_DATA_PREFIX, createTestDataMarker } from './testDataMarker';
 export { logContractResult, logContractSummary } from './reporter';
 export type {
   EndpointDescriptor,
