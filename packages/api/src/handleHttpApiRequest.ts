@@ -499,7 +499,12 @@ async function runHttpApiExecution(
   //? effectiveAbortSignal chain and return a localized 504 envelope.
   //? A combined AbortController merges the caller's close signal and the
   //? timeout so the handler sees one unified abort.
-  const timeoutMs = getProjectConfig().api.requestTimeoutMs;
+  //? Streaming requests are EXEMPT from the wall-clock timeout even when one is
+  //? configured: an SSE/stream endpoint is long-lived by design (live LLM tokens,
+  //? progress) and a total-duration race would truncate it mid-stream. The
+  //? abortSignal (wired to client disconnect) still tears it down when the caller
+  //? leaves. Non-streaming requests honor `api.requestTimeoutMs` (default false).
+  const timeoutMs = stream ? false : getProjectConfig().api.requestTimeoutMs;
   const combinedController = new AbortController();
   //? Forward the caller's abort (connection close) into the combined signal.
   if (effectiveAbortSignal.aborted) {

@@ -848,7 +848,12 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     maxRoomsPerSession: 50,
   },
   api: {
-    requestTimeoutMs: 30_000,
+    //? Default OFF (was 30_000): a legit handler may run for minutes (e.g. a deep
+    //? image parse / long upstream call) and must not be aborted by a wall-clock
+    //? race. A disconnecting client still aborts the handler via the wired
+    //? abortSignal; set a number to opt back into a hard per-request ceiling
+    //? (streaming requests are exempt even then — see runHttpApiExecution).
+    requestTimeoutMs: false,
   },
   validation: {
     runtimeMode: 'enforce',
