@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | main | (none) | 2026-06-19 19:20 | active | 18 |
 | chore/package-split-prep | (none) | 2026-06-23 | active (wizard+manage verified incl. verdaccio; 5 release-blockers fixed incl. Windows install) | 137 |
-| chore/overnight-audit-2026-06-24 | (none) | 2026-06-27 | active (rounds 1-6: audit + 4 fix-rounds + session-leak + round-6 full report-only verification sweep [101 findings] with ~40 safe doc+code fixes across 12 packages via parallel agents; 7 design-decisions deferred to user) | 9 |
+| chore/overnight-audit-2026-06-24 | (none) | 2026-06-29 | active (rounds 1-7: audit + verification sweep + ~40 safe fixes + 6 of 7 deferred design-decisions done: sync-cancel, api-timeout-off, room-cap, wsProxy-caps, adapter-spans, router-dumb; #5 test-runner mutation-safety awaiting user) | 10 |
 
 ## Columns
 
