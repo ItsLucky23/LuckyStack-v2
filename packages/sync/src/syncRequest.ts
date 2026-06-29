@@ -589,6 +589,14 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         if (typeof effectiveTimeoutMs === 'number' && effectiveTimeoutMs > 0) {
           responseTimeout = setTimeout(() => {
             responseTimeout = null;
+            //? SYNC — on ack-timeout, tell the server to STOP the in-flight work
+            //? before tearing down locally. Previously the timeout only cleaned up
+            //? the client listeners + settled 504, leaving the `_server` handler
+            //? (and any fanout/streaming) running to completion uncancelled. The
+            //? `__cancelId` handshake has long since arrived by the timeout window
+            //? (the server emits it immediately), so `serverCancelId` is the
+            //? authoritative key here; `syncCb` is only the sub-RTT fallback.
+            socketInstance.emit(socketEventNames.syncCancel, { cb: serverCancelId ?? syncCb });
             cleanupProgressListener?.();
             cleanupProgressListener = null;
             cleanupResponseListener?.();
