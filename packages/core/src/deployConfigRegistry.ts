@@ -31,6 +31,15 @@ export interface DeployRoutingShape {
   missingServiceErrorCode?: string;
   enableUnhealthyFallback?: boolean;
   strictBootHandshake?: boolean;
+  /**
+   * Opt INTO the boot-handshake's synchronized-env (cookie/session secret) drift
+   * check. DEFAULT false — the router stays a dumb proxy that holds NO backend
+   * secrets. Comparing synchronized-env hashes requires the router process to
+   * carry the same SESSION_SECRET etc. as the backends, which most deployments
+   * deliberately avoid; the always-on shared-Redis handshake is unaffected. Set
+   * true only when you intentionally give the router the synchronized secrets.
+   */
+  verifySynchronizedEnv?: boolean;
   /** Default port the router listens on when ROUTER_PORT env var is unset (default 4000). */
   defaultRouterPort?: number;
   /** Default ms between health polls when not specified per-call (default 5000). */

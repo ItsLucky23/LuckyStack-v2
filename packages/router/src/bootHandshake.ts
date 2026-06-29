@@ -215,14 +215,19 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
     return;
   }
 
-  //? Once shared Redis is verified, also check that synchronized env vars
-  //? (cookie secrets, project-level config) match by hash across the two
-  //? envs. Mismatch means sessions minted by one side can't be decrypted
-  //? by the other — a subtle failure mode worth catching at boot.
-  compareSynchronizedHashes(
-    fallbackHealth.synchronizedHashes,
-    fallbackHealth.bootUuid,
-    fallbackHealth.healthHash,
-    (msg) => { reportIssue(msg); },
-  );
+  //? Once shared Redis is verified, OPTIONALLY check that synchronized env vars
+  //? (cookie secrets, project-level config) match by hash across the two envs.
+  //? OFF by default (`routing.verifySynchronizedEnv`): the comparison requires the
+  //? router to hold the same SESSION_SECRET etc. as the backends, which defeats
+  //? the "router is a dumb, secret-less proxy" model most deployments want. The
+  //? shared-Redis handshake above runs regardless. Opt in only when the router is
+  //? intentionally given the synchronized secrets.
+  if (getDeployConfig().routing?.verifySynchronizedEnv === true) {
+    compareSynchronizedHashes(
+      fallbackHealth.synchronizedHashes,
+      fallbackHealth.bootUuid,
+      fallbackHealth.healthHash,
+      (msg) => { reportIssue(msg); },
+    );
+  }
 };
