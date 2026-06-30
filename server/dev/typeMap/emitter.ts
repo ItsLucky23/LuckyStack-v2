@@ -1,1 +1,1 @@
-export * from '../../../packages/devkit/src/typeMap/emitter';
+export * from '../../../packages/devkit/src/typeMap/emitterArtifacts';
