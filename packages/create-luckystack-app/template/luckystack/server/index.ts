@@ -3,7 +3,7 @@
 //? registry is populated. Put framework-hook registrations
 //? (`registerHook('postLogin', ...)`, `registerCustomRoute(...)`) here.
 
-import { registerHook } from '@luckystack/core';
+import { registerHook, resolveEnvKey } from '@luckystack/core';
 import { registerNotificationHooks } from '../../server/hooks/notifications';
 
 //? Wires the transactional notification hooks (new sign-in email,
@@ -14,7 +14,7 @@ registerNotificationHooks();
 
 //? Example dev-only logger — delete or replace with your own audit hook.
 registerHook('postLogin', ({ userId, provider, isNewUser }) => {
-  if (process.env.NODE_ENV !== 'production') {
+  if (resolveEnvKey() !== 'production') {
     console.log(`[hooks] login: user=${userId}, provider=${provider}, new=${String(isNewUser)}`);
   }
   return undefined;

@@ -31,7 +31,7 @@ import type { AddOptions } from './addPresence';
 
 //? The auth-hooks block a credentials scaffold ships in luckystack/server/index.ts.
 //? Mirror of the scaffolder's pre-prune content (so add+prune are inverse).
-export const AUTH_SERVER_HOOKS = `import { registerHook } from '@luckystack/core';
+export const AUTH_SERVER_HOOKS = `import { registerHook, resolveEnvKey } from '@luckystack/core';
 import { registerNotificationHooks } from '../../server/hooks/notifications';
 
 //? Wires the transactional notification hooks (new sign-in email,
@@ -42,7 +42,7 @@ registerNotificationHooks();
 
 //? Example dev-only logger — delete or replace with your own audit hook.
 registerHook('postLogin', ({ userId, provider, isNewUser }) => {
-  if (process.env.NODE_ENV !== 'production') {
+  if (resolveEnvKey() !== 'production') {
     console.log(\`[hooks] login: user=\${userId}, provider=\${provider}, new=\${String(isNewUser)}\`);
   }
   return undefined;
