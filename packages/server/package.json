@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/server",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -57,19 +57,19 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/api": "^0.2.7",
-    "@luckystack/core": "^0.2.7"
+    "@luckystack/api": "^0.3.0",
+    "@luckystack/core": "^0.3.0"
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",
     "socket.io": "^4.8.0",
-    "@luckystack/devkit": "^0.2.7",
-    "@luckystack/docs-ui": "^0.2.7",
-    "@luckystack/email": "^0.2.7",
-    "@luckystack/error-tracking": "^0.2.7",
-    "@luckystack/login": "^0.2.7",
-    "@luckystack/presence": "^0.2.7",
-    "@luckystack/sync": "^0.2.7"
+    "@luckystack/devkit": "^0.3.0",
+    "@luckystack/docs-ui": "^0.3.0",
+    "@luckystack/email": "^0.3.0",
+    "@luckystack/error-tracking": "^0.3.0",
+    "@luckystack/login": "^0.3.0",
+    "@luckystack/presence": "^0.3.0",
+    "@luckystack/sync": "^0.3.0"
   },
   "peerDependenciesMeta": {
     "@luckystack/devkit": {
