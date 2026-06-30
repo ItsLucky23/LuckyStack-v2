@@ -1,5 +1,7 @@
 # API Architecture
 
+<!-- @covers packages/api/src -->
+
 > Type-safe API request system with WebSocket-first architecture and HTTP fallback.
 
 > **Where the code lives (post-package-split):** the runtime described below is implemented in `@luckystack/api` (`packages/api/src/handleApiRequest.ts`, `handleHttpApiRequest.ts`) and shared utilities in `@luckystack/core` (`packages/core/src/`). The `server/` directory in this repo is the *consumer* of those packages — most files referenced here have moved into `packages/`. See the [Runtime Function Reference](#runtime-function-reference) at the bottom for current paths.

@@ -11,6 +11,9 @@
 //? Distinct from the playwright / chrome-devtools MCP servers (browser testing):
 //? this one answers questions about the repo, not the browser. They coexist as
 //? separate entries in the same .mcp.json.
+//?
+//? @adr 0016 — the lessons / examples / decision-reverse query tools below were
+//? added as part of the AI-context-layers-before-rag decision.
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -268,6 +271,127 @@ server.registerTool(
     if (hits.length === 0) return text(`"${name}" not found in docs/AI_CAPABILITIES.md — it may not exist yet.`);
     const truncNote = total > hits.length ? `\n\n(showing first ${hits.length} of ${total} matching lines)` : '';
     return text(`"${name}" found in capabilities:\n${hits.join('\n')}${truncNote}`);
+  },
+);
+
+server.registerTool(
+  'decision_for_file',
+  {
+    description: 'Reverse decision lookup: which ADR (if any) governs a given source file, from the `//? @adr NNNN` tags surfaced in the committed decisions index. Use BEFORE "cleaning up" a deliberate-looking construct to check a decision does not depend on it.',
+    inputSchema: { file: z.string().min(1).describe('Source file path (repo-relative or a basename) to find governing decisions for.') },
+  },
+  async ({ file }) => {
+    const index = await readDocFile('docs/AI_DECISIONS_INDEX.md');
+    if (index === null) return text(missing('docs/AI_DECISIONS_INDEX.md', 'npm run ai:decisions'));
+    //? The reverse rows live under "## Code governed by decisions" as
+    //? `| \`<path>\` | <adr> | <title> |`. Grep the path; keep only those rows.
+    const { lines } = grepLines(index, file, Infinity);
+    const rows = lines.filter((l) => l.trim().startsWith('|') && l.includes('`'));
+    if (rows.length === 0) return text(`No decision is tagged as governing "${file}". (A file opts in with a \`//? @adr NNNN\` tag; none was found for this path.)`);
+    return text(`Decisions governing "${file}":\n${rows.join('\n')}\n\nRead the full rationale with \`get_decision(<number>)\`.`);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Lessons (pitfalls) — docs/lessons/ + docs/AI_LESSONS_INDEX.md
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  'find_lesson',
+  {
+    description: 'Search the project\'s recorded lessons (pitfalls — "what failed and why") for a keyword. Consult BEFORE retrying something tricky so a known dead-end is not rediscovered. Omit query to list all lessons.',
+    inputSchema: { query: z.string().optional().describe('Keyword to match against lesson titles/takeaways/tags.') },
+  },
+  async ({ query }) => {
+    const index = await readDocFile('docs/AI_LESSONS_INDEX.md');
+    if (index === null) return text(missing('docs/AI_LESSONS_INDEX.md', 'npm run ai:lessons'));
+    if (!query) return text(index);
+    const { lines } = grepLines(index, query, Infinity);
+    const rows = lines.filter((l) => l.trim().startsWith('|'));
+    if (rows.length === 0) return text(`No lessons match "${query}".`);
+    const capped = rows.slice(0, 60);
+    const note = rows.length > capped.length ? `\n\n(showing first ${capped.length} of ${rows.length} matching rows)` : '';
+    return text(`Lessons matching "${query}":\n${capped.join('\n')}${note}`);
+  },
+);
+
+server.registerTool(
+  'get_lesson',
+  {
+    description: 'Read a full lesson (What happened / Root cause / How to avoid) by number or slug.',
+    inputSchema: { id: z.string().min(1).describe('Lesson number ("3" or "0003") or slug.') },
+  },
+  async ({ id }) => {
+    const root = await projectRoot();
+    const dir = path.join(root, 'docs', 'lessons');
+    let entries: string[];
+    try {
+      entries = await fs.readdir(dir);
+    } catch {
+      return text(missing('docs/lessons/', 'the AI records lessons automatically; see docs/LESSONS_PROTOCOL.md'));
+    }
+    const padded = /^\d+$/.test(id) ? id.padStart(4, '0') : null;
+    const matches = entries.filter((f) => {
+      if (!f.endsWith('.md') || f === '0000-template.md') return false;
+      if (padded !== null) return f.startsWith(`${padded}-`);
+      return f.includes(id);
+    });
+    if (matches.length === 0) return text(`No lesson matches "${id}". Use \`find_lesson\` to list them.`);
+    if (matches.length > 1) return text(`"${id}" is ambiguous — pick one:\n${bulletList(matches.toSorted())}`);
+    const body = await readDocFile(`docs/lessons/${matches[0]}`);
+    return text(body ?? `Could not read docs/lessons/${matches[0]}.`);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Canonical examples — docs/examples/ + docs/AI_EXAMPLES_INDEX.md
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  'list_examples',
+  {
+    description: 'List the curated canonical example corpus (reviewed reference implementations per pattern). Use to discover which pattern to copy before authoring.',
+    inputSchema: {},
+  },
+  async () => {
+    const index = await readDocFile('docs/AI_EXAMPLES_INDEX.md');
+    if (index === null) return text(missing('docs/AI_EXAMPLES_INDEX.md', 'npm run ai:examples'));
+    return text(index);
+  },
+);
+
+server.registerTool(
+  'get_example',
+  {
+    description: 'Read a full canonical example (When to use / Canonical example code / Why this shape) by its pattern key or slug — copy this SHAPE when building the pattern.',
+    inputSchema: { pattern: z.string().min(1).describe('Example pattern key (e.g. "auth-api-route", "sync-pair", "trycatch") or file slug.') },
+  },
+  async ({ pattern }) => {
+    const root = await projectRoot();
+    const dir = path.join(root, 'docs', 'examples');
+    let entries: string[];
+    try {
+      entries = await fs.readdir(dir);
+    } catch {
+      return text(missing('docs/examples/', 'npm run ai:examples'));
+    }
+    const candidates = entries.filter((f) => f.endsWith('.md') && f !== '0000-template.md' && f !== 'README.md');
+    const low = pattern.toLowerCase();
+    //? Match by slug first, then by the `pattern:` frontmatter inside each file.
+    let hit = candidates.find((f) => f.replace(/\.md$/, '').toLowerCase() === low)
+      ?? candidates.find((f) => f.replace(/\.md$/, '').toLowerCase().includes(low));
+    if (!hit) {
+      for (const f of candidates) {
+        const body = await readDocFile(`docs/examples/${f}`);
+        //? Compare the `pattern:` frontmatter value literally (no regex from user
+        //? input) — avoids both regex injection and the escaped-backslash lint.
+        const val = body?.match(/^pattern:\s*(.+)$/mi)?.[1]?.trim().toLowerCase();
+        if (val === low) { hit = f; break; }
+      }
+    }
+    if (!hit) return text(`No example matches "${pattern}". Use \`list_examples\` to see available patterns.`);
+    const body = await readDocFile(`docs/examples/${hit}`);
+    return text(body ?? `Could not read docs/examples/${hit}.`);
   },
 );
 

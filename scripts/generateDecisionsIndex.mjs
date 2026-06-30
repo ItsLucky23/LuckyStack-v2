@@ -130,6 +130,53 @@ const scanDecisions = async () => {
 };
 
 // ---------------------------------------------------------------------------
+// Reverse links: code → ADR (DD-adr-reverse)
+//
+// Closes the open loop in the decision memory. The ADR records "why / why-not-Y",
+// but from a line of code there was no way back to the decision that governs it,
+// so an AI (or human) "cleaning up" a deliberate fail-open default or parity
+// construct would silently undo a conscious choice. A file opts in with a tag:
+//   //? @adr 0007            (one or more, anywhere in the first ~40 lines)
+// We scan the source tree for those tags and build an "ADR → governed files"
+// reverse map. The MCP tool `decision_for_file(path)` reads this section.
+// ---------------------------------------------------------------------------
+
+const ADR_TAG_RE = /@adr\s+(\d{1,4})/g;
+const SOURCE_ROOTS = ["src", "packages", "server", "shared", "scripts"];
+const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
+
+const scanAdrRefs = async () => {
+  const refs = new Map(); // padded number -> Set(relPath)
+  const walk = async (dir) => {
+    const [, entries] = await safe(fs.readdir(dir, { withFileTypes: true }));
+    if (!entries) return;
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith(".")) continue;
+        await walk(full);
+      } else if (SOURCE_EXT_RE.test(entry.name) && !entry.name.endsWith(".generated.ts")) {
+        const [, src] = await safe(fs.readFile(full, "utf8"));
+        if (!src) continue;
+        const head = src.split(/\r?\n/).slice(0, 40).join("\n");
+        for (const m of head.matchAll(ADR_TAG_RE)) {
+          const padded = m[1].padStart(4, "0");
+          if (!refs.has(padded)) refs.set(padded, new Set());
+          refs.get(padded).add(relFromRepo(full));
+        }
+      }
+    }
+  };
+  for (const root of SOURCE_ROOTS) await walk(path.join(REPO_ROOT, root));
+  // Materialise to sorted arrays for deterministic output.
+  const out = new Map();
+  for (const [num, set] of [...refs.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    out.set(num, [...set].sort());
+  }
+  return out;
+};
+
+// ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
 
@@ -142,7 +189,7 @@ const STATUS_BADGE = {
   deprecated: "🔴 deprecated",
 };
 
-const buildDocument = (rows) => {
+const buildDocument = (rows, refs) => {
   const parts = [];
   parts.push("# Decision Index");
   parts.push("");
@@ -191,9 +238,35 @@ const buildDocument = (rows) => {
     parts.push("");
     parts.push(r.decision ? r.decision : "_(no Decision section found — fill it in)_");
     parts.push("");
+    const governed = refs.get(r.number) ?? [];
+    if (governed.length > 0) {
+      parts.push(`**Governs** (\`//? @adr ${r.number}\`): ${governed.map((f) => `\`${f}\``).join(", ")}`);
+      parts.push("");
+    }
     parts.push(`→ \`${r.file}\``);
     parts.push("");
   }
+
+  // Reverse map section — flat, grep-friendly (one row per governed file) so the
+  // MCP `decision_for_file` tool can answer "which ADR governs this file?".
+  parts.push("## Code governed by decisions");
+  parts.push("");
+  parts.push("> Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.");
+  parts.push("> Add the tag atop a file that embodies a deliberate decision so a future change can't undo it blindly.");
+  parts.push("");
+  const reverseRows = [];
+  for (const [num, files] of refs.entries()) {
+    const row = rows.find((r) => r.number === num);
+    const title = row ? row.title : "_(unknown ADR — tag references a missing decision file)_";
+    for (const f of files) reverseRows.push([`\`${f}\``, num, title]);
+  }
+  reverseRows.sort((a, b) => a[0].localeCompare(b[0]));
+  if (reverseRows.length === 0) {
+    parts.push("_(none yet — tag a file with `//? @adr NNNN` to record which decision governs it.)_");
+  } else {
+    parts.push(renderTable(["File", "ADR", "Decision"], reverseRows));
+  }
+  parts.push("");
   return parts.join("\n");
 };
 
@@ -212,7 +285,8 @@ const renderTable = (header, rows) => {
 
 const main = async () => {
   const rows = await scanDecisions();
-  const document = buildDocument(rows);
+  const refs = await scanAdrRefs();
+  const document = buildDocument(rows, refs);
 
   const [mkErr] = await safe(fs.mkdir(path.dirname(OUTPUT_FILE), { recursive: true }));
   if (mkErr) {

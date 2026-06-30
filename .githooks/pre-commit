@@ -48,6 +48,12 @@ npm run ai:project-index --silent
 echo "[pre-commit] Regenerating docs/AI_DECISIONS_INDEX.md..."
 npm run ai:decisions --silent
 
+echo "[pre-commit] Regenerating docs/AI_LESSONS_INDEX.md..."
+npm run ai:lessons --silent
+
+echo "[pre-commit] Regenerating docs/AI_EXAMPLES_INDEX.md..."
+npm run ai:examples --silent
+
 echo "[pre-commit] Regenerating docs/AI_RUNBOOKS.md..."
 npm run ai:runbooks --silent
 
@@ -57,5 +63,11 @@ npm run ai:product --silent
 echo "[pre-commit] Regenerating docs/ai-graph.json..."
 npm run ai:graph --silent
 
-git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json
+echo "[pre-commit] Regenerating docs/AI_CONTEXT_BUDGET.md..."
+npm run ai:context-budget --silent
+
+echo "[pre-commit] Checking hand-written doc staleness (report-only)..."
+npm run ai:doc-staleness --silent || true
+
+git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_LESSONS_INDEX.md docs/AI_EXAMPLES_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json docs/AI_CONTEXT_BUDGET.md
 git add docs/ai-product 2>/dev/null || true   # per-area product shards (only exist when docs.sharding splits)

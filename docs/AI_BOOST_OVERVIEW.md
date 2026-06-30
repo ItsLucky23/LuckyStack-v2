@@ -17,10 +17,17 @@ This is a *map*, not the docs themselves. Follow the links to the artifact you a
 | Auto-generated project index | `docs/AI_PROJECT_INDEX.md` | Routes, pages, helpers, components, cross-refs in the consumer project |
 | Auto-generated decision index | `docs/AI_DECISIONS_INDEX.md` | The committed "why" record — `docs/decisions/` ADRs (title, status, tags, summary); the AI auto-fills + reads it |
 | Auto-generated runbooks | `docs/AI_RUNBOOKS.md` | Task-shaped golden paths (add API/page/sync/helper, verify, decide) grounded in the project's real files |
+| Auto-generated lessons index | `docs/AI_LESSONS_INDEX.md` (`npm run ai:lessons`) | The pitfalls layer — `docs/lessons/` "what failed + how to avoid"; AI auto-fills + reads it (see `docs/LESSONS_PROTOCOL.md`) |
+| Canonical example corpus | `docs/examples/` + `docs/AI_EXAMPLES_INDEX.md` (`npm run ai:examples`) | Curated, reviewed reference implementations per pattern — copy these shapes (`get_example`) instead of guessing |
+| Context budget | `docs/AI_CONTEXT_BUDGET.md` (`npm run ai:context-budget`) | Per-task retrieval profiles + measured artifact token sizes — what-to-load-when instead of reading every index |
+| Doc-coverage gate | `scripts/lintInvariants.mjs` rule `doc-coverage` | New route needs summary + `@docs owner`; new page needs `//? intent` — enforces Rules 12/15 at diff-time (warn-default) |
+| Doc-staleness nudge | `scripts/checkDocStaleness.mjs` (`npm run ai:doc-staleness`) | Reports when a hand-written doc (one with an `<!-- @covers … -->` marker) falls behind its code (report-only) |
+| Code→ADR reverse link | `//? @adr NNNN` tags → `decision_for_file` | From a line of code back to the decision that governs it, so a deliberate construct isn't undone blindly |
+| Eval harness | `eval/` (`npm run ai:eval`) | Deterministic with/without measurement of whether the artifacts improve AI output — the gate ADR 0003 requires before RAG |
 | Product / intent layer | `docs/PRODUCT.md` + `docs/AI_PRODUCT_OVERVIEW.md` (`npm run ai:product`) | Plain-language "what the app + each page is FOR" (intent), distinct from the structural "what exists" |
-| Invariant linter | `scripts/lintInvariants.mjs` (`npm run ai:lint`) | Diff-time enforcement of the machine-checkable contract (no as-any, arbitrary colors, untranslated JSX) |
+| Invariant linter | `scripts/lintInvariants.mjs` (`npm run ai:lint`) | Diff-time enforcement of the machine-checkable contract (no as-any, arbitrary colors, untranslated JSX, doc-coverage) |
 | Dependency graph | `docs/ai-graph.json` (`npm run ai:graph`) | File/import graph: transitive blast-radius (change-impact) + god-nodes |
-| Project MCP server | `@luckystack/mcp` (`.mcp.json` entry, runs via `npx`) | Exposes the committed artifacts above to Claude Code as queryable tools (blast_radius, who_imports, god_nodes, list/get_decision, find_route, get_runbook, get_capability) |
+| Project MCP server | `@luckystack/mcp` (`.mcp.json` entry, runs via `npx`) | Exposes the committed artifacts above to Claude Code as queryable tools (blast_radius, who_imports, who_calls, god_nodes, list/get_decision, decision_for_file, find_route, get_runbook, get_capability, find_lesson/get_lesson, list/get_example) |
 | Per-package contracts | `node_modules/@luckystack/*/CLAUDE.md` | Function INDEX + when-to-use per framework package (14 packages) |
 | Architecture deep-dives | `docs/ARCHITECTURE_*.md` | 12 per-topic specs (API, AUTH, SESSION, SOCKET, SYNC, ROUTING, LOGGING, EMAIL, PACKAGING, FUNCTION_INJECTION, EXTENSION_POINTS, TESTING) |
 | AI behavior contract | `CLAUDE.md` (repo root) | 26 rules + inherited patterns (component table, color tokens, provider hierarchy, JSX micro-conventions) |

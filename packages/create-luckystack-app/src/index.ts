@@ -1310,13 +1310,21 @@ echo "[pre-commit] Regenerating docs/AI_PROJECT_INDEX.md..."
 npm run ai:project-index --silent
 echo "[pre-commit] Regenerating docs/AI_DECISIONS_INDEX.md..."
 npm run ai:decisions --silent
+echo "[pre-commit] Regenerating docs/AI_LESSONS_INDEX.md..."
+npm run ai:lessons --silent
+echo "[pre-commit] Regenerating docs/AI_EXAMPLES_INDEX.md..."
+npm run ai:examples --silent
 echo "[pre-commit] Regenerating docs/AI_RUNBOOKS.md..."
 npm run ai:runbooks --silent
 echo "[pre-commit] Regenerating docs/AI_PRODUCT_OVERVIEW.md..."
 npm run ai:product --silent
 echo "[pre-commit] Regenerating docs/ai-graph.json..."
 npm run ai:graph --silent
-git add docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json
+echo "[pre-commit] Regenerating docs/AI_CONTEXT_BUDGET.md..."
+npm run ai:context-budget --silent
+echo "[pre-commit] Checking hand-written doc staleness (report-only)..."
+npm run ai:doc-staleness --silent || true
+git add docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_LESSONS_INDEX.md docs/AI_EXAMPLES_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json docs/AI_CONTEXT_BUDGET.md
 git add docs/ai-product 2>/dev/null || true
 `;
 
@@ -1697,7 +1705,7 @@ const pruneAuthNone = (targetDir: string): void => {
   //? overlay compiles without @luckystack/login (leave a minimal placeholder).
   editScaffoldFile(targetDir, 'luckystack/server/index.ts', [
     [
-      `import { registerHook } from '@luckystack/core';
+      `import { registerHook, resolveEnvKey } from '@luckystack/core';
 import { registerNotificationHooks } from '../../server/hooks/notifications';
 
 //? Wires the transactional notification hooks (new sign-in email,
@@ -1708,7 +1716,7 @@ registerNotificationHooks();
 
 //? Example dev-only logger — delete or replace with your own audit hook.
 registerHook('postLogin', ({ userId, provider, isNewUser }) => {
-  if (process.env.NODE_ENV !== 'production') {
+  if (resolveEnvKey() !== 'production') {
     console.log(\`[hooks] login: user=\${userId}, provider=\${provider}, new=\${String(isNewUser)}\`);
   }
   return undefined;

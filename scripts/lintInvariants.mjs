@@ -100,6 +100,65 @@ const RULES = [
 const RULES_BY_ID = new Map(RULES.map((r) => [r.id, r]));
 
 // ---------------------------------------------------------------------------
+// Doc-coverage extractors (shared with generateProjectIndex.mjs /
+// generateProductOverview.mjs — kept inline here to preserve this script's
+// zero-import, pure-Node contract). A NEW route/page that lands without its
+// mandated doc lines (Rules 12 / 15a / 15b) is the silent-drift failure the
+// auto-generated indexes render as "—" but never block on. The coverage gate
+// turns that into a diff-time finding — but ONLY for files this change ADDS,
+// so a pre-existing undocumented codebase is never retroactively blocked.
+// ---------------------------------------------------------------------------
+
+// First top-of-file summary line: `//? text`, `// text`, or a JSDoc first line.
+const extractFileSummary = (src) => {
+  const lines = src.split(/\r?\n/);
+  for (let i = 0; i < Math.min(lines.length, 20); i++) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    if (raw.startsWith("/**")) {
+      const single = raw.match(/^\/\*\*\s*(.+?)\s*\*\/$/);
+      if (single) return single[1];
+      for (let j = i + 1; j < Math.min(lines.length, i + 15); j++) {
+        const inner = lines[j].trim().replace(/^\*\s?/, "").trim();
+        if (!inner || inner.startsWith("@") || inner === "*/") {
+          if (inner === "*/") break;
+          continue;
+        }
+        return inner;
+      }
+      return null;
+    }
+    if (raw.startsWith("//?")) return raw.replace(/^\/\/\?\s*/, "").trim();
+    if (raw.startsWith("//")) return raw.replace(/^\/\/+\s*/, "").trim();
+    return null;
+  }
+  return null;
+};
+
+// `@docs owner <name>` from the first JSDoc block (Rule 15b).
+const extractDocsOwner = (src) => {
+  const block = src.match(/\/\*\*([\s\S]*?)\*\//);
+  if (!block) return null;
+  const m = block[1].match(/@docs\s+owner\s+([^\n*]+)/);
+  return m ? m[1].trim() : null;
+};
+
+// `//? intent: <text>` line atop a page.tsx (Rule 15a).
+const extractIntent = (src) => {
+  const lines = src.split(/\r?\n/);
+  for (let i = 0; i < Math.min(lines.length, 20); i++) {
+    if (/^\s*\/\/\??\s*intent:\s*\S/i.test(lines[i])) return lines[i].replace(/^\s*\/\/\??\s*intent:\s*/i, "").trim();
+  }
+  return null;
+};
+
+// Classify an added file path → which doc-coverage requirements apply, or null.
+const ROUTE_API_RE = /(^|\/)_api\/[^/]+_v\d+\.ts$/;
+const ROUTE_SYNC_RE = /(^|\/)_sync\/[^/]+_(server|client)_v\d+\.ts$/;
+const PAGE_RE = /(^|\/)page\.tsx$/;
+const isRouteFile = (p) => (ROUTE_API_RE.test(p) || ROUTE_SYNC_RE.test(p)) && !p.endsWith(".tests.ts") && !p.endsWith(".generated.ts");
+
+// ---------------------------------------------------------------------------
 // Per-line scan (exported for tests). Honors an inline suppression:
 //   ... // luckystack-allow <rule>: <reason>   (or `*` for all rules)
 // ---------------------------------------------------------------------------
@@ -376,6 +435,62 @@ export const checkTransportParity = async () => {
 };
 
 // ---------------------------------------------------------------------------
+// Doc-coverage gate (DD-doc-coverage)
+//
+// Asserts that a NEWLY-ADDED route/page carries the docs its CLAUDE.md rule
+// mandates, so documentation can't silently drift to optional:
+//   - _api/<name>_v<N>.ts / _sync/<name>_(server|client)_v<N>.ts
+//       → a top-of-file summary line (Rule 12) AND an `@docs owner` tag (Rule 15b)
+//   - page.tsx
+//       → a `//? intent: …` line (Rule 15a)
+// Diff-scoped to ADDED files (git --diff-filter=A) so existing undocumented
+// code is never retroactively blocked — the gate only guards new surface.
+// WARN by default; opt a project into blocking via luckystack.invariants.json.
+// The per-line `// luckystack-allow doc-coverage: <reason>` escape hatch works
+// when placed on the file's first line.
+// ---------------------------------------------------------------------------
+
+// Files added by the staged change (git diff-filter=A), repo-relative POSIX.
+const stagedAddedFiles = () => {
+  try {
+    const raw = execFileSync("git", ["diff", "--cached", "--name-only", "--diff-filter=A", "--no-color"], { cwd: REPO_ROOT, encoding: "utf8" });
+    return raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+};
+
+export const checkDocCoverageFile = (relPath, src) => {
+  const findings = [];
+  const firstLine = src.split(/\r?\n/, 1)[0] ?? "";
+  if (suppressedRules(firstLine).has("doc-coverage") || suppressedRules(firstLine).has("*")) return findings;
+  if (isRouteFile(relPath)) {
+    if (extractFileSummary(src) === null) {
+      findings.push({ file: relPath, line: 1, rule: "doc-coverage", message: "new route has no top-of-file summary — add a `//?` or `//` one-liner describing what it does (Rule 12)." });
+    }
+    if (extractDocsOwner(src) === null) {
+      findings.push({ file: relPath, line: 1, rule: "doc-coverage", message: "new route has no `@docs owner <name>` JSDoc tag — record ownership from day one (Rule 15b)." });
+    }
+  } else if (PAGE_RE.test(relPath)) {
+    if (extractIntent(src) === null) {
+      findings.push({ file: relPath, line: 1, rule: "doc-coverage", message: "new page.tsx has no `//? intent: …` line — state in plain language what the page is FOR (Rule 15a)." });
+    }
+  }
+  return findings;
+};
+
+export const checkDocCoverage = async () => {
+  const added = stagedAddedFiles().filter((p) => isRouteFile(p) || PAGE_RE.test(p));
+  const findings = [];
+  for (const rel of added) {
+    const [err, src] = await safe(fs.readFile(path.join(REPO_ROOT, rel), "utf8"));
+    if (err || src === null) continue;
+    findings.push(...checkDocCoverageFile(rel, src));
+  }
+  return findings;
+};
+
+// ---------------------------------------------------------------------------
 // Run
 // ---------------------------------------------------------------------------
 
@@ -393,6 +508,12 @@ const runSelfTest = () => {
     ["theme token ok", checkLine("src/p.tsx", "className={`bg-primary text-title p-4`}").every((f) => f.rule !== "no-arbitrary-color")],
     ["generated file skipped", checkLine("src/_sockets/apiTypes.generated.ts", "const x = y as any;").length === 0],
     ["request-wrapper message", checkLine("src/foo.ts", "apiRequest({ name: n as any });").some((f) => f.rule === "no-as-any" && /wrap/.test(f.message))],
+    ["doc-coverage: api missing summary+owner", checkDocCoverageFile("src/x/_api/get_v1.ts", "export const main = () => {};").length === 2],
+    ["doc-coverage: api complete ok", checkDocCoverageFile("src/x/_api/get_v1.ts", "//? Fetch a user.\n/** @docs owner alice */\nexport const main = () => {};").length === 0],
+    ["doc-coverage: page missing intent", checkDocCoverageFile("src/x/page.tsx", "export default function Page() { return null; }").some((f) => f.rule === "doc-coverage")],
+    ["doc-coverage: page with intent ok", checkDocCoverageFile("src/x/page.tsx", "//? intent: the user dashboard\nexport default function Page() {}").length === 0],
+    ["doc-coverage: suppression works", checkDocCoverageFile("src/x/_api/get_v1.ts", "// luckystack-allow doc-coverage: scaffold stub\nexport const main = () => {};").length === 0],
+    ["doc-coverage: non-route ignored", checkDocCoverageFile("src/x/_functions/foo.ts", "export const foo = 1;").length === 0],
   ];
   let failed = 0;
   for (const [name, ok] of cases) { if (!ok) { failed++; console.error(`[ai:lint] selftest FAIL: ${name}`); } }
@@ -422,6 +543,15 @@ const main = async () => {
   // A missing hook or wrong pipeline order on either twin is a BLOCK violation.
   const parityFindings = await checkTransportParity();
   findings.push(...parityFindings);
+
+  // DD-doc-coverage: new route/page must carry its mandated doc lines. Diff-based
+  // (added files), so only runs in the default staged-diff mode, not --paths.
+  if (pathsIdx === -1) {
+    const coverageFindings = await checkDocCoverage();
+    for (const f of coverageFindings) {
+      findings.push({ ...f, severity: config.block.includes(f.rule) ? "block" : "warn" });
+    }
+  }
 
   if (findings.length === 0) {
     console.log("[ai:lint] no invariant violations in scope.");
