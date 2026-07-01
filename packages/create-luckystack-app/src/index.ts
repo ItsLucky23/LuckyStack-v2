@@ -1868,6 +1868,23 @@ const wireSecretManager = (targetDir: string): void => {
   }`,
     ],
   ]);
+  //? Same enable-later block in scripts/prismaWithSecrets.ts — so `prisma:*`
+  //? resolves DATABASE_URL pointers before running prisma. Byte-identical to the
+  //? server/server.ts block above (CLI `removeSecretManager` re-comments both).
+  editScaffoldFile(targetDir, 'scripts/prismaWithSecrets.ts', [
+    [
+      `  // const projectConfig = (await import('../config')).default;
+  // if (projectConfig.secretManager?.url) {
+  //   const sm = await import('@luckystack/secret-manager');
+  //   await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
+  // }`,
+      `  const projectConfig = (await import('../config')).default;
+  if (projectConfig.secretManager?.url) {
+    const sm = await import('@luckystack/secret-manager');
+    await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
+  }`,
+    ],
+  ]);
 };
 
 //? Activate @luckystack/presence when opted IN (presence is KEPT, not pruned).

@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (16)
+## Decisions (17)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -29,6 +29,7 @@
 | 0015 | Per-account login lockout uses a dual counter (per-IP + cross-IP) to actually stop distributed credential stuffing | 🟢 accepted | security, login, dos, brute-force | — | `docs/decisions/0015-login-lockout-dual-counter-cross-ip.md` |
 | 0016 | Expand the AI-context system with lessons / examples / coverage gates / eval before any RAG rung | 🟢 accepted | ai-context, docs, tooling, rag | — | `docs/decisions/0016-ai-context-layers-before-rag.md` |
 | 0016 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0016-single-source-ports-and-optin-router-topology.md` |
+| 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot | 🟢 accepted | secret-manager, prisma, cli, scaffold, dx, packaging | — | `docs/decisions/0017-prisma-cli-resolves-secret-manager-pointers.md` |
 
 ## Summaries
 
@@ -164,6 +165,16 @@ Build seven layers on the existing rails (generator → committed artifact → M
 
 → `docs/decisions/0016-single-source-ports-and-optin-router-topology.md`
 
+### 0017 — Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot
+
+**0017** · accepted · tags: secret-manager, prisma, cli, scaffold, dx, packaging · 2026-07-01
+
+Route every `prisma:*` script through a small wrapper, `scripts/prismaWithSecrets.ts`, that runs the boot **prefix** — `loadEnvFiles()` (`.env` + `.env.local`), then, if a secret-manager URL is configured, resolve pointers into `process.env` — and then `spawnSync('prisma', argv)` inheriting the resolved env. It does NOT start the HTTP/socket server: Prisma only needs the env and opens its own DB connection, so there are no ports to bind or connections to tear down.
+
+**Governs** (`//? @adr 0017`): `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts`, `scripts/prismaWithSecrets.ts`
+
+→ `docs/decisions/0017-prisma-cli-resolves-secret-manager-pointers.md`
+
 ## Code governed by decisions
 
 > Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.
@@ -171,4 +182,6 @@ Build seven layers on the existing rails (generator → committed artifact → M
 
 | File | ADR | Decision |
 | --- | --- | --- |
+| `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
 | `packages/mcp/src/index.ts` | 0016 | Expand the AI-context system with lessons / examples / coverage gates / eval before any RAG rung |
+| `scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |

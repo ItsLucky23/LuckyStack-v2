@@ -73,6 +73,23 @@ The seam decides remote-vs-local for you, so a project without the package — o
 
 > A top-level `await` in `server.ts` is fine — it is an ESM entry and the prod bundle emits `format: esm`. Resolution finishes before `bootstrapLuckyStack` / any `process.env` secret read. `@luckystack/secret-manager` is marked external in `scripts/bundleServer.mjs`, so the prod bundle builds and boots whether or not the package is installed.
 
+## Prisma & other CLI tools (`prisma:*`)
+
+`prisma/schema.prisma` reads its connection string from `url = env("DATABASE_URL")`. Once `DATABASE_URL` is a **pointer** (`DATABASE_URL=DB_CONNECTION_STRING_V3`) that value only becomes a real connection string *at boot*, inside `process.env`, after `resolveSecretsIfConfigured` runs. A Prisma CLI command run standalone never boots the server, so it would hand Prisma the raw pointer and fail.
+
+The scaffold therefore routes every `prisma:*` script through a tiny wrapper, `scripts/prismaWithSecrets.ts`, instead of `dotenv -e .env.local`:
+
+```jsonc
+"prisma:db:push": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts db push",
+```
+
+The wrapper does exactly the boot **prefix** — `loadEnvFiles()` (`.env` + `.env.local`, a superset of the old `dotenv -e .env.local`), then, if a secret-manager URL is configured, `initSecretManager({ ...secretManager, source: 'remote' })` — and then spawns `prisma` with the now-resolved `process.env`. It does **not** start the HTTP/socket server (Prisma only needs the env, and Prisma opens its own DB connection), so there are no ports to bind or connections to tear down.
+
+- **Without secret-manager** the resolve step is a commented-out no-op: the wrapper is just `loadEnvFiles()` + prisma. Zero behaviour change for a base project.
+- **`npx luckystack add secret-manager`** (and a `--secret-manager` scaffold) uncomment the resolve block in `scripts/prismaWithSecrets.ts` — the *same* enable-later block, byte-identical, that it uncomments in `server/server.ts`. `remove secret-manager` re-comments it.
+
+Any other CLI tool that needs resolved secrets (a one-off migration script, a data backfill) can follow the same shape: `loadEnvFiles()` → `resolveSecretsIfConfigured(config.secretManager)` → do the work.
+
 ## Modes
 
 The boot seam pins `source: 'remote'` (fail-fast) and treats an empty `url` as "off" (plain local env) — the recommended setup. The package itself supports three modes; call `initSecretManager` directly if you need `'local'` / `'hybrid'`:

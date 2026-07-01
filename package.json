@@ -63,8 +63,8 @@
     "bun:check": "node scripts/checkBunCompat.mjs",
     "bun:server": "bun --bun server/server.ts",
     "bun:prod": "bun --bun dist/server.js",
-    "prisma:generate": "dotenv -e .env.local -- prisma generate",
-    "prisma:db:push": "dotenv -e .env.local -- prisma db push",
+    "prisma:generate": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts generate",
+    "prisma:db:push": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts db push",
     "help": "node scripts/help.mjs",
     "postinstall": "node -e \"try{require('fs').statSync('src/_sockets/apiTypes.generated.ts')}catch{require('child_process').execSync('npm run generateArtifacts',{stdio:'inherit'})}\"",
     "prepare": "node -e \"try{require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})}catch{}\""

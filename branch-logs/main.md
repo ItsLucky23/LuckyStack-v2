@@ -351,3 +351,21 @@
 **Niet gecommit** (per user-instructie).
 
 **Files**: packages/sync/src/handleHttpSyncRequest.ts, packages/cli/src/{featureOptions.ts,lib/envFile.ts,lib/envFile.test.ts,transitions.ts,package.json}, packages/secret-manager/src/{index.ts,index.test.ts}, packages/server/src/httpRoutes/authLogoutRoute.ts, packages/create-luckystack-app/src/index.ts, packages/cli/assets/login/src/settings/_api/updateUser_v1.ts, packages/create-luckystack-app/template/src/settings/_api/updateUser_v1.ts, src/settings/_api/updateUser_v1.ts, packages/mcp/package.json.
+
+## 2026-07-01 22:58 — prisma:* resolven secret-manager pointers via wrapper
+
+**User prompt**: "als we de secret manager gebruiken en dan prisma:db:push willen runnen gaat dit niet als de database url geresolved word op runtime" → maak de `prisma:*` commands secret-manager-aware.
+
+**Probleem**: `schema.prisma` leest `url = env("DATABASE_URL")`; de scripts deden `dotenv -e .env.local -- prisma …`. Met secret-manager is `DATABASE_URL` een pointer (`DB_URL_V3`) die pas op boot via `initSecretManager` de echte connection-string wordt → prisma standalone krijgt de pointer → faalt.
+
+**Aanpak (ADR 0017)**: elke `prisma:*` loopt nu via een wrapper `scripts/prismaWithSecrets.ts` die exact het boot-prefix draait — `loadEnvFiles()` (.env + .env.local) → indien `config.secretManager?.url`: `initSecretManager({...cfg, source:'remote'})` → `spawnSync('prisma', argv)` met geresolvede env. GEEN volledige server-start (prisma heeft alleen de env nodig + opent zelf de DB-connectie). **Always-on** wrapper met het secret-blok **gecommentarieerd** (byte-identiek aan `server/server.ts`); `add/remove secret-manager` un-/re-comment het via dezelfde `SERVER_COMMENTED`/`SERVER_ACTIVE` find/replace → geen script-rewrite, geen nieuwe parity-surface.
+
+**Verworpen**: (a) volledige server booten (bindt poorten/connecties voor niets), (b) inject-only-bij-opt-in (4e byte-identiek-te-houden plek = de #1 drift-klasse). Zie ADR 0017.
+
+**Files**: packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts (nieuw), packages/create-luckystack-app/template/package.json (3 scripts), packages/create-luckystack-app/src/index.ts (wireSecretManager +1 uncomment-target), packages/cli/src/commands/addSecretManager.ts (add+remove +1 tryEdit), packages/cli/src/assetParity.test.ts (+2 parity-tests), scripts/prismaWithSecrets.ts (nieuw, root — via resolveSecretsIfConfigured), package.json (2 scripts), docs/ARCHITECTURE_SECRET_MANAGER.md (nieuwe sectie), docs/decisions/0017-*.md (nieuw).
+
+**Gate (groen)**: build:packages 16/16, lint:packages 0, cli-suite 133/133 (incl. 2 nieuwe parity-tests), root `prisma:generate` end-to-end via de wrapper ✔ (Prisma Client gegenereerd, beide env-files geladen, secret-resolution correct overgeslagen zonder URL).
+
+**Flag (niet auto-gefixt, Rule 27)**: `dotenv-cli` (^11) is nu een orphaned devDep in template + root (geen script gebruikt nog `dotenv -e`) — user beslist drop/keep.
+
+**Nog niet geverifieerd**: verse verdaccio-scaffold-smoke van de TEMPLATE-wrapper typecheck (base + na `add secret-manager`) — laag risico (2 triviale imports, al elders in de template gebruikt), maar de definitieve check vóór de volgende publish.

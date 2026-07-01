@@ -1,7 +1,8 @@
 //? `luckystack add secret-manager` / `remove` — mirror of the scaffolder's
-//? `wireSecretManager`: adds @luckystack/secret-manager AND uncomments the two
-//? enable-later blocks the template ships (the `secretManager` slot in config.ts +
-//? the `initSecretManager` block in server/server.ts). It stays dormant until
+//? `wireSecretManager`: adds @luckystack/secret-manager AND uncomments the three
+//? enable-later blocks the template ships (the `secretManager` slot in config.ts,
+//? the `initSecretManager` block in server/server.ts, and the identical block in
+//? scripts/prismaWithSecrets.ts so the `prisma:*` scripts resolve pointers). It stays dormant until
 //? LUCKYSTACK_SECRET_MANAGER_URL is set, so the project still boots without an
 //? external secret server. Remove re-comments both blocks + drops the dep.
 //? Edits are best-effort (idempotent): a project already in the target shape skips.
@@ -84,6 +85,11 @@ export const addSecretManager = (project: ConsumerProject, options: AddOptions):
   if (tryEdit(project.root, 'server/server.ts', SERVER_COMMENTED, SERVER_ACTIVE)) {
     console.log('• uncommented the initSecretManager block in server/server.ts');
   }
+  //? Same enable-later block lives in scripts/prismaWithSecrets.ts so the
+  //? `prisma:*` scripts resolve DATABASE_URL pointers before running prisma.
+  if (tryEdit(project.root, 'scripts/prismaWithSecrets.ts', SERVER_COMMENTED, SERVER_ACTIVE)) {
+    console.log('• uncommented the secret-resolution block in scripts/prismaWithSecrets.ts');
+  }
   if (options.install) {
     console.log('• running npm install …');
     if (!runNpmInstall(project.root, project.pkg)) console.warn('  npm install failed — run it manually to finish.');
@@ -109,6 +115,9 @@ export const removeSecretManager = (project: ConsumerProject): Result<void> => {
   }
   if (tryEdit(project.root, 'server/server.ts', SERVER_ACTIVE, SERVER_COMMENTED)) {
     console.log('• re-commented the initSecretManager block in server/server.ts');
+  }
+  if (tryEdit(project.root, 'scripts/prismaWithSecrets.ts', SERVER_ACTIVE, SERVER_COMMENTED)) {
+    console.log('• re-commented the secret-resolution block in scripts/prismaWithSecrets.ts');
   }
   try {
     if (dropDependency(project, PKG)) console.log(`• removed ${PKG} from package.json`);

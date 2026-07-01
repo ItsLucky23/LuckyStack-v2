@@ -31,9 +31,9 @@
     "scaffold:test": "node scripts/scaffoldRouteTest.mjs",
     "scaffold:page": "node scripts/scaffoldPage.mjs",
     "test:e2e": "playwright test",
-    "prisma:generate": "dotenv -e .env.local -- prisma generate",
-    "prisma:db:push": "dotenv -e .env.local -- prisma db push",
-    "prisma:migrate:dev": "dotenv -e .env.local -- prisma migrate dev",
+    "prisma:generate": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts generate",
+    "prisma:db:push": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts db push",
+    "prisma:migrate:dev": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts migrate dev",
     "help": "node scripts/help.mjs"
   },
   "dependencies": {

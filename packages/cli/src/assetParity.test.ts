@@ -167,6 +167,22 @@ describe('secret-manager block parity (CLI ↔ scaffolder)', () => {
   it('scaffolder wireSecretManager contains the CLI SERVER_ACTIVE block verbatim', () => {
     expect(scaffolder.includes(literalBody('SERVER_ACTIVE'))).toBe(true);
   });
+
+  //? The same enable-later block ALSO lives in the template's
+  //? scripts/prismaWithSecrets.ts (so `prisma:*` resolves DATABASE_URL pointers).
+  //? add/remove toggle it with the CLI's SERVER_COMMENTED/SERVER_ACTIVE strings, so
+  //? the shipped template file must contain the COMMENTED form verbatim, and the
+  //? scaffolder must uncomment that same file for a `--secret-manager` scaffold.
+  it('template scripts/prismaWithSecrets.ts ships the CLI SERVER_COMMENTED block verbatim', () => {
+    const wrapper = normalize(
+      readFileSync(path.join(TEMPLATE_ROOT, 'scripts', 'prismaWithSecrets.ts'), 'utf8'),
+    );
+    expect(wrapper.includes(literalBody('SERVER_COMMENTED'))).toBe(true);
+  });
+
+  it('scaffolder wireSecretManager uncomments scripts/prismaWithSecrets.ts', () => {
+    expect(scaffolder.includes("editScaffoldFile(targetDir, 'scripts/prismaWithSecrets.ts'")).toBe(true);
+  });
 });
 
 //? Tiny sanity guard: the bundle the parity suite walks must actually exist.
