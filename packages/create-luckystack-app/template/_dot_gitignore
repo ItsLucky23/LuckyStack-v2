@@ -13,7 +13,10 @@ dist
 src/_sockets/apiTypes.generated.ts
 src/_sockets/apiInputSchemas.generated.ts
 src/docs/apiDocs.generated.json
+src/docs/apiTypeDiagnostics.generated.json
 server/prod/generatedApis*.ts
+# Catch-all so no future *.generated.* artifact leaks into git.
+*.generated.*
 
 # `luckystack check-env` / `check-i18n` scan reports.
 dump/

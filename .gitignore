@@ -49,8 +49,11 @@ uploads/*
 apiTypes.generated.ts
 apiInputSchemas.generated.ts
 apiDocs.generated.json
+apiTypeDiagnostics.generated.json
 server/prod/generatedApis.ts
 server/prod/generatedApis.*.ts
+# Catch-all so no future *.generated.* artifact leaks into git.
+*.generated.*
 
 # Repomix
 repomix-output.xml
