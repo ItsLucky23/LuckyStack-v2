@@ -81,6 +81,7 @@
   "include": [
     "vite.config.ts",
     "config.ts",
+    "scripts/prismaWithSecrets.ts",
     "server/**/*",
     "shared/**/*",
     "packages/core/src/**/*",
