@@ -20,6 +20,7 @@ import {
   buildJoinRoomResponseEventName,
   socketEventNames,
   tryCatch,
+  getProjectConfig,
 } from '@luckystack/core';
 
 export interface StreamChunkFrame {
@@ -140,11 +141,20 @@ export const openStreamWatcher = async <TChunk extends StreamChunkFrame = Stream
   const chunks: TChunk[] = [];
   const waiters: { predicate: (chunks: TChunk[]) => boolean; resolve: () => void }[] = [];
 
+  //? Authenticate the observer socket in BOTH token modes. `auth.token` is the
+  //? sessionBasedToken (sessionStorage) path; in the DEFAULT cookie mode the
+  //? server reads the token ONLY from the session cookie (extractTokenFromSocket
+  //? ignores handshake.auth.token unless `acceptBearerInCookieMode`), so without
+  //? the Cookie header the observer socket connects anonymously and every
+  //? `joinRoom` is rejected with `auth.required`. In Node, socket.io-client honours
+  //? `extraHeaders` on the websocket handshake, so we set the cookie there.
+  const sessionCookieName = getProjectConfig().http.sessionCookieName;
   const socket: Socket = createSocketIoClient(input.baseUrl, {
     transports: ['websocket'],
     forceNew: true,
     reconnection: false,
     auth: input.token ? { token: input.token } : undefined,
+    extraHeaders: input.token ? { Cookie: `${sessionCookieName}=${input.token}` } : undefined,
   });
 
   const handleChunk = (raw: unknown): void => {

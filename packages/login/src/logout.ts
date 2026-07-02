@@ -25,7 +25,7 @@ export const logout = async ({ token, socket, userId, skipSessionDelete }: {
       return;
     }
 
-    getLogger().debug(`logout: user ${userId ?? '?'}`, { token });
+    getLogger().debug(`logout: user ${userId ?? '?'}`, { tokenPrefix: token ? token.slice(0, 8) : null });
 
     if (!skipSessionDelete) {
       //? `deleteSession` handles both the key delete AND `adapter.untrackActive`

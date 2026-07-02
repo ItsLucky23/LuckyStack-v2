@@ -57,6 +57,15 @@ export interface FullOAuthProvider {
    * preserving behaviour for providers that don't expose the flag.
    */
   emailVerifiedKey?: string;
+  /**
+   * Set `true` for a provider whose userinfo ONLY returns an email once the
+   * address is confirmed with the provider (e.g. Facebook Graph `/me` omits
+   * unconfirmed emails). Such a provider exposes no separate verified flag, so
+   * the mere PRESENCE of the email is the verified signal — this opts it in so
+   * both first-login CREATION and cross-provider LINK treat it as verified.
+   * Mutually exclusive in practice with `emailVerifiedKey`.
+   */
+  emailImpliesVerified?: boolean;
   avatarKey?: string;
   avatarCodeKey: string;
   getEmail?: (accessToken: string) => Promise<string | false | undefined>;
@@ -293,8 +302,11 @@ export const facebookProvider = (input: FacebookProviderInput): FullOAuthProvide
   //? Facebook's Graph `/me` only returns `email` for an address the user has
   //? CONFIRMED with Facebook (unconfirmed emails are omitted), so there is no
   //? separate verified flag to gate on — the presence of `email` IS the verified
-  //? signal. If a consumer opts into receiving unverified emails via a future
-  //? Graph field, set `emailVerifiedKey` on the returned provider (SEC-21).
+  //? signal. `emailImpliesVerified` encodes that so a Facebook sign-in counts as
+  //? verified for BOTH first-login creation and cross-provider linking (SEC-21 /
+  //? M2 creation guard). If a consumer opts into receiving unverified emails via
+  //? a future Graph field, set `emailVerifiedKey` on the returned provider instead.
+  emailImpliesVerified: true,
   avatarCodeKey: '',
   extraSessionFields: input.extraSessionFields,
   extraAuthorizationParams: input.extraAuthorizationParams,

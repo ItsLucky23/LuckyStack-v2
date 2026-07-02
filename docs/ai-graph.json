@@ -4,8 +4,8 @@
   "counts": {
     "nodes": 94,
     "edges": 65,
-    "symbols": 126,
-    "callEdges": 30
+    "symbols": 127,
+    "callEdges": 31
   },
   "nodes": [
     {
@@ -1646,6 +1646,12 @@
       "kind": "function"
     },
     {
+      "id": "settings/_api/requestEmailChange_v1.tests.ts::updatePasswordHash",
+      "file": "settings/_api/requestEmailChange_v1.tests.ts",
+      "name": "updatePasswordHash",
+      "kind": "fn"
+    },
+    {
       "id": "settings/_api/requestEmailChange_v1.ts::<module>",
       "file": "settings/_api/requestEmailChange_v1.ts",
       "name": "<module>",
@@ -1904,6 +1910,10 @@
       "to": "settings/_api/requestEmailChange_v1.tests.ts::uniqueEmail"
     },
     {
+      "from": "settings/_api/requestEmailChange_v1.tests.ts::run",
+      "to": "settings/_api/requestEmailChange_v1.tests.ts::updatePasswordHash"
+    },
+    {
       "from": "settings/_api/revokeSession_v1.tests.ts::run",
       "to": "settings/_api/revokeSession_v1.tests.ts::getSession"
     },
@@ -2004,6 +2014,9 @@
       "settings/_api/revokeSession_v1.ts::main"
     ],
     "settings/_api/requestEmailChange_v1.tests.ts::uniqueEmail": [
+      "settings/_api/requestEmailChange_v1.tests.ts::run"
+    ],
+    "settings/_api/requestEmailChange_v1.tests.ts::updatePasswordHash": [
       "settings/_api/requestEmailChange_v1.tests.ts::run"
     ],
     "settings/_api/revokeSession_v1.tests.ts::getSession": [

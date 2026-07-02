@@ -1,3 +1,9 @@
+//? @adr 0019 — Email uniqueness is opt-in and governed by this knob: the default
+//? `'per-provider'` strategy INTENTIONALLY does not require `email @unique`
+//? (same address across providers = separate rows); only `'unified'` needs the
+//? consumer to add the constraint. A missing `@unique` on `User.email` is
+//? by-design, not a bug — see ADR 0019 before flagging it.
+//?
 //? Implements `auth.providerAccountStrategy` (CFG-04). The knob was declared
 //? and documented but no code read it — every lookup was provider-scoped, so
 //? `'unified'` silently behaved like `'per-provider'` and produced duplicate

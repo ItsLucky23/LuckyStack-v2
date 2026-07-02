@@ -13,7 +13,19 @@
 import { createRegistry } from './createRegistry';
 
 export interface RoomNameFormatterContext {
-  /** Why the room name is being formatted — so a formatter can branch if needed. */
+  /**
+   * Which room FAMILY the name is being formatted for — a formatter may branch on
+   * this to isolate genuinely-separate families, but MUST NOT use it to give the
+   * same raw room code different physical names across a single family's
+   * operations. A content room is joined, left, membership-checked, broadcast to,
+   * and streamed to under the SINGLE canonical `'broadcast'` purpose (M5); the
+   * framework never varies a content room's physical name by operation, because a
+   * socket physically IN `f(R,'join')` could never receive a fanout targeting
+   * `f(R,'broadcast')`. `'presence'` is the one genuinely-separate family (its own
+   * rooms). `'join'`/`'leave'` remain in the union for backward-compat but the
+   * framework no longer emits them for room-NAME formatting — treat them, if ever
+   * seen, identically to `'broadcast'`.
+   */
   purpose: 'join' | 'leave' | 'broadcast' | 'presence';
   /** Session user id when known (join/leave by an authenticated socket), else null. */
   userId?: string | null;

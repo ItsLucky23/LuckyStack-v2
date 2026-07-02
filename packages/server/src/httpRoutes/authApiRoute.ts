@@ -63,6 +63,55 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
   }
 
   if (login.isFullOAuthProvider(provider)) {
+    //? Throttle OAuth-init BEFORE the Redis state write (M4). This branch runs on
+    //? a plain unauthenticated GET navigation and calls `createOAuthState` (a Redis
+    //? write) on every hit; the origin gate does not stop a header-less GET, so
+    //? without a per-IP cap an anonymous caller can loop it for Redis write-
+    //? amplification. Same limit derivation as the credentials branch below (own
+    //? `oauth-init` bucket) so it degrades to a no-op unless a limit is configured.
+    const oauthRateLimiting = config.rateLimiting;
+    const oauthRequesterIp = resolveClientIp({
+      rawAddress: req.socket.remoteAddress,
+      headers: req.headers,
+      trustProxy: config.http.trustProxy,
+      trustedProxyHopCount: config.http.trustedProxyHopCount,
+    });
+    const oauthInitLimit =
+      oauthRateLimiting.defaultApiLimit !== false && oauthRateLimiting.defaultApiLimit > 0
+        ? oauthRateLimiting.defaultApiLimit
+        : (oauthRateLimiting.auth.enabled && oauthRateLimiting.auth.maxAttempts > 0
+          ? oauthRateLimiting.auth.maxAttempts
+          : null);
+    if (oauthInitLimit !== null) {
+      const oauthInitWindowMs =
+        oauthRateLimiting.defaultApiLimit === false
+          ? oauthRateLimiting.auth.windowMs
+          : oauthRateLimiting.windowMs;
+      const { allowed, resetIn } = await checkRateLimit({
+        key: `ip:${oauthRequesterIp}:auth:oauth-init`,
+        limit: oauthInitLimit,
+        windowMs: oauthInitWindowMs,
+      });
+      if (!allowed) {
+        void dispatchHook('rateLimitExceeded', {
+          scope: 'auth',
+          key: `ip:${oauthRequesterIp}:auth:oauth-init`,
+          limit: oauthInitLimit,
+          windowMs: oauthInitWindowMs,
+          count: oauthInitLimit + 1,
+          route: routePath,
+          ip: oauthRequesterIp,
+        });
+        res.writeHead(429, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+          status: false,
+          reason: 'api.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+        }));
+        return true;
+      }
+    }
+
     //? Read the optional `return_url` query param set by the frontend when it
     //? initiates the OAuth flow. The value is the full URL the browser should
     //? land on AFTER the callback (e.g. http://localhost:5174/playground).

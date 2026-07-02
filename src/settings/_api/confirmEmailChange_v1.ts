@@ -1,3 +1,6 @@
+//? @adr 0019 — Email uniqueness is opt-in via `providerAccountStrategy`. The
+//? cross-provider collision check below is app-level; the default per-provider
+//? strategy intentionally omits `email @unique`. See ADR 0019 before flagging.
 import { dispatchHook } from '@luckystack/core';
 import {
   consumeEmailChangeToken,
@@ -45,9 +48,12 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   });
   const oldEmail = before?.email ?? '';
 
-  //? Race protection: between minting and clicking, the new address could have
-  //? been claimed by another sign-up (any provider). Check across all providers
-  //? so an OAuth account with the same email is not silently aliased.
+  //? Race protection (@adr 0019): between minting and clicking, the new address
+  //? could have been claimed by another sign-up (any provider). This app-level
+  //? cross-provider check catches it; a residual TOCTOU window (two concurrent
+  //? confirms) is closed only when the project opts into `email @unique` under
+  //? `providerAccountStrategy: 'unified'` — the default per-provider strategy
+  //? intentionally allows the same email on multiple rows, so no DB index here.
   const collision = await functions.db.prisma.user.findFirst({
     where: { email: newEmail, NOT: { id: userId } },
     select: { id: true },

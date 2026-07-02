@@ -395,6 +395,23 @@ describe("createServiceTargetResolver — resolve() order", () => {
     resolver.setLocalHealth("vehicles", false);
     expect(resolver.resolve("vehicles")).toBeNull();
   });
+
+  //? Regression: a service key derived from an attacker-controlled URL segment
+  //? must never resolve an INHERITED object member. `bindings['__proto__']` /
+  //? `['constructor']` / `['toString']` would otherwise return a truthy
+  //? non-string that becomes a bogus `target`, crashing `new URL()` in the HTTP
+  //? proxy. Own-property guarding makes all of these resolve to null.
+  it.each(["__proto__", "constructor", "toString", "hasOwnProperty", "valueOf"])(
+    "returns null for the inherited-property key %s (proto-pollution guard)",
+    (key) => {
+      const resolver = createServiceTargetResolver({
+        deploy: buildDeploy(),
+        services: makeServices(),
+        currentEnvKey: "dev",
+      });
+      expect(resolver.resolve(key)).toBeNull();
+    },
+  );
 });
 
 describe("createServiceTargetResolver — preset-scoped ownership", () => {

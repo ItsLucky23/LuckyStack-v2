@@ -8,15 +8,17 @@ import { getSession, saveSession } from '@luckystack/login';
 //?
 //? Input shape: Record<string, never> (no body).
 //?
-//? The route returns the `user` (SessionLayout | null) the framework resolved
-//? from the session cookie. We assert it round-trips for an authenticated
-//? caller and is null for an anonymous one.
+//? The route returns the CLIENT-facing session (`ClientSessionLayout | null`) the
+//? framework resolved from the session cookie. We assert it round-trips for an
+//? authenticated caller, is null for an anonymous one, and — critically (@adr
+//? 0018) — that it NEVER carries the raw `token` / `csrfToken` to page JS.
 
 interface SessionResultShape {
   id?: string;
   email?: string;
   name?: string;
   token?: string;
+  csrfToken?: string;
   provider?: string;
 }
 
@@ -38,7 +40,12 @@ export const customTests: CustomTestCase[] = [
       const session = result.result ?? {};
       ctx.expect.eq(session.id, userId);
       ctx.expect.eq(session.email, email);
-      ctx.expect.eq(session.token, token);
+      //? @adr 0018 regression: the raw session token (and csrfToken) must NEVER be
+      //? returned to page JS — the route serves `ClientSessionLayout`. `token` is
+      //? referenced only to prove the response does NOT echo it back.
+      void token;
+      ctx.expect.eq(session.token, undefined, 'session/v1 must not leak the raw token to page JS');
+      ctx.expect.eq(session.csrfToken, undefined, 'session/v1 must not leak the csrfToken to page JS');
     },
   },
   {

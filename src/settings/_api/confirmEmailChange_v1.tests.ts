@@ -16,7 +16,7 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //?   { token: string }
 //? Output envelope:
 //?   { status: 'success', result: { revokedSessions: number } }
-//?   | { status: 'error', errorCode: 'auth.invalidToken' | 'auth.emailTaken' }
+//?   | { status: 'error', errorCode: 'settings.emailChange.invalidToken' | 'settings.emailChange.emailTaken' }
 
 interface ConfirmSuccess {
   status: 'success';
@@ -83,7 +83,7 @@ export const customTests: CustomTestCase[] = [
       //? with auth.invalidToken (no double email-change from one link).
       const second = await ctx.callApi<unknown, ConfirmResponse>({ token });
       ctx.expect.eq(second.status, 'error');
-      if (second.status === 'error') ctx.expect.eq(second.errorCode, 'auth.invalidToken');
+      if (second.status === 'error') ctx.expect.eq(second.errorCode, 'settings.emailChange.invalidToken');
     },
   },
   {
@@ -93,7 +93,7 @@ export const customTests: CustomTestCase[] = [
         token: 'this-token-was-never-minted',
       });
       ctx.expect.eq(result.status, 'error');
-      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'auth.invalidToken');
+      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'settings.emailChange.invalidToken');
     },
   },
   {
@@ -113,7 +113,7 @@ export const customTests: CustomTestCase[] = [
 
       const result = await ctx.callApi<unknown, ConfirmResponse>({ token });
       ctx.expect.eq(result.status, 'error');
-      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'auth.emailTaken');
+      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'settings.emailChange.emailTaken');
 
       //? The original user's email must be unchanged after the rejection.
       const unchanged = await ctx.prisma.user.findUnique({ where: { id: userId } });

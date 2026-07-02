@@ -108,7 +108,23 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
       //? `$exception` event for older clients.
       const distinctId = resolveDistinctId();
       if (options.client.captureException) {
-        options.client.captureException(fwdError, distinctId, properties);
+        //? ET-O2 parity with the Sentry adapter: posthog-node's
+        //? `captureException` extracts message/stack from the passed error
+        //? ITSELF, so forwarding the raw `fwdError` would ship the UNSCRUBBED
+        //? message/stack even though `properties` already carries scrubbed
+        //? copies. Rebuild a same-named Error with the scrubbed message/stack
+        //? (or pass the scrubbed string for a non-Error throw) so nothing
+        //? unscrubbed reaches PostHog.
+        let payload: Error | string;
+        if (fwdError instanceof Error) {
+          const rebuilt = new Error(errorMessage);
+          rebuilt.name = fwdError.name;
+          if (errorStack !== undefined) rebuilt.stack = errorStack;
+          payload = rebuilt;
+        } else {
+          payload = errorMessage;
+        }
+        options.client.captureException(payload, distinctId, properties);
         return;
       }
       options.client.capture({

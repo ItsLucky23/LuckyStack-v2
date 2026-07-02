@@ -16,12 +16,19 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? and exposes the chunk frames pushed by `broadcastStream` so the test
 //? can assert chunk count, ordering and (with throttle on) batching.
 
+//? S22 transport-parity: over the HTTP `callSync` path the envelope is the
+//? canonical `{ status, message, result: serverOutput }` — the route's fields
+//? (message/senderId/tokenCount/throttled) live under `result`, not at the top.
 interface BroadcastResponse {
   status: string;
   message: string;
-  senderId: string;
-  tokenCount: number;
-  throttled: boolean;
+  result?: {
+    status: string;
+    message: string;
+    senderId: string;
+    tokenCount: number;
+    throttled: boolean;
+  };
 }
 
 interface BroadcastChunkFrame {
@@ -49,9 +56,9 @@ export const customTests: CustomTestCase[] = [
         { receiver: ctx.session.current().token ?? 'test-room' },
       );
       ctx.expect.eq(result.status, 'success');
-      ctx.expect.eq(result.message, SHORT_TEXT);
-      ctx.expect.eq(result.throttled, false);
-      ctx.expect.ok(result.tokenCount > 0, 'expected tokenCount > 0');
+      ctx.expect.eq(result.result?.message, SHORT_TEXT);
+      ctx.expect.eq(result.result?.throttled, false);
+      ctx.expect.ok((result.result?.tokenCount ?? 0) > 0, 'expected tokenCount > 0');
     },
   },
   {
@@ -63,7 +70,7 @@ export const customTests: CustomTestCase[] = [
         { receiver: ctx.session.current().token ?? 'test-room' },
       );
       ctx.expect.eq(result.status, 'success');
-      ctx.expect.eq(result.throttled, true);
+      ctx.expect.eq(result.result?.throttled, true);
     },
   },
   {
@@ -78,13 +85,14 @@ export const customTests: CustomTestCase[] = [
         { receiver: room },
       );
       ctx.expect.eq(result.status, 'success');
-      ctx.expect.ok(result.tokenCount > 0, 'expected tokenCount > 0');
+      const tokenCount = result.result?.tokenCount ?? 0;
+      ctx.expect.ok(tokenCount > 0, 'expected tokenCount > 0');
 
       //? Wait for at least the tokenCount the server reported. The
       //? broadcast emit happens during the request — by the time the
       //? envelope resolves, most chunks have flown. Allow up to 3s for
       //? the last few in-flight frames to arrive.
-      await watcher.waitForCount(result.tokenCount, 3000);
+      await watcher.waitForCount(tokenCount, 3000);
 
       //? Every observed chunk MUST carry the route's full name + stream
       //? status. The watcher already filters by `fullName`, but assert
@@ -118,7 +126,7 @@ export const customTests: CustomTestCase[] = [
         { receiver: room },
       );
       ctx.expect.eq(throttled.status, 'success');
-      ctx.expect.eq(throttled.throttled, true);
+      ctx.expect.eq(throttled.result?.throttled, true);
 
       //? Wait for chunks to settle — throttled runs emit fewer frames than
       //? `tokenCount`, so we wait on a steady-state heuristic instead:
@@ -129,9 +137,10 @@ export const customTests: CustomTestCase[] = [
       await watcher.waitForCount(1, 2000);
       await new Promise<void>((resolve) => setTimeout(resolve, 250));
 
+      const throttledTokenCount = throttled.result?.tokenCount ?? 0;
       ctx.expect.ok(
-        watcher.chunks.length < throttled.tokenCount,
-        `expected throttled chunks (${String(watcher.chunks.length)}) < tokenCount (${String(throttled.tokenCount)})`,
+        watcher.chunks.length < throttledTokenCount,
+        `expected throttled chunks (${String(watcher.chunks.length)}) < tokenCount (${String(throttledTokenCount)})`,
       );
 
       await watcher.close();

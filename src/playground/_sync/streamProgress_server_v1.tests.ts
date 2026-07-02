@@ -17,10 +17,17 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? instead: a watcher joined to the receiver room MUST observe zero
 //? progress chunks for this route.
 
+//? S22 transport-parity: the HTTP `callSync` envelope is the canonical
+//? `{ status, message, result: serverOutput }` — the route's `completedSteps` /
+//? `senderId` live under `result`, not at the top level.
 interface ProgressResponse {
   status: string;
-  senderId: string;
-  completedSteps: number;
+  message?: string;
+  result?: {
+    status: string;
+    senderId: string;
+    completedSteps: number;
+  };
 }
 
 interface ProgressChunkFrame {
@@ -44,7 +51,7 @@ export const customTests: CustomTestCase[] = [
         { receiver: ctx.session.current().token ?? 'test-room' },
       );
       ctx.expect.eq(result.status, 'success');
-      ctx.expect.eq(result.completedSteps, 3);
+      ctx.expect.eq(result.result?.completedSteps, 3);
     },
   },
   {
@@ -58,7 +65,7 @@ export const customTests: CustomTestCase[] = [
         { steps: 999, intervalMs: 30 },
         { receiver: ctx.session.current().token ?? 'test-room' },
       );
-      ctx.expect.eq(high.completedSteps, 50);
+      ctx.expect.eq(high.result?.completedSteps, 50);
     },
   },
   {
@@ -78,7 +85,7 @@ export const customTests: CustomTestCase[] = [
         { receiver: room },
       );
       ctx.expect.eq(result.status, 'success');
-      ctx.expect.eq(result.completedSteps, 3);
+      ctx.expect.eq(result.result?.completedSteps, 3);
 
       //? Allow a generous settling window — 3 steps × 30ms = ~90ms of
       //? emit activity. Wait 250ms past that so any rogue late frame would

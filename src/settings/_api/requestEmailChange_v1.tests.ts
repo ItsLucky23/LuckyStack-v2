@@ -21,7 +21,7 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //?   { newEmail: string }
 //? Output envelope:
 //?   { status: 'success' }
-//?   | { status: 'error', errorCode: 'auth.invalidEmail' | 'auth.emailSameAsCurrent'
+//?   | { status: 'error', errorCode: 'settings.emailChange.invalidEmail' | 'settings.emailChange.emailSameAsCurrent'
 //?       | 'auth.emailTaken' | 'auth.emailSendFailed' | <preEmailChange veto code> }
 
 interface RequestSuccess {
@@ -43,7 +43,7 @@ export const customTests: CustomTestCase[] = [
       await ctx.session.login({ email: uniqueEmail('req-current') });
       const result = await ctx.callApi<unknown, RequestResponse>({ newEmail: 'not-an-email' });
       ctx.expect.eq(result.status, 'error');
-      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'auth.invalidEmail');
+      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'settings.emailChange.invalidEmail');
     },
   },
   {
@@ -57,7 +57,7 @@ export const customTests: CustomTestCase[] = [
         newEmail: currentEmail.toUpperCase(),
       });
       ctx.expect.eq(result.status, 'error');
-      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'auth.emailSameAsCurrent');
+      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'settings.emailChange.emailSameAsCurrent');
     },
   },
   {
@@ -67,6 +67,7 @@ export const customTests: CustomTestCase[] = [
     //? otherwise enumerate every credentials account with a trivial loop.
     name: 'address owned by another credentials user returns success (anti-enumeration — no email sent)',
     run: async (ctx: TestContext) => {
+      const { updatePasswordHash } = await import('@luckystack/login');
       //? Another credentials user already owns the target address.
       const takenEmail = uniqueEmail('req-taken');
       await ctx.prisma.user.create({
@@ -78,12 +79,27 @@ export const customTests: CustomTestCase[] = [
         },
       });
 
-      //? Caller is a different user (distinct session email).
-      await ctx.session.login({ email: uniqueEmail('req-caller') });
+      //? LOGIN-EMAILCHG: initiating an email change for a credentials account now
+      //? requires the current password (re-auth). Create a REAL caller user, set a
+      //? known password, then log in as them and pass it — otherwise the route
+      //? correctly short-circuits with `currentPasswordRequired` before the
+      //? anti-enumeration branch under test is ever reached.
+      const callerEmail = uniqueEmail('req-caller');
+      const password = 'CallerReAuth#2026';
+      const caller = await ctx.prisma.user.create({
+        data: {
+          email: callerEmail,
+          name: 'Caller',
+          provider: 'credentials',
+          avatarFallback: 'C',
+        },
+      });
+      await updatePasswordHash(caller.id, password);
+      await ctx.session.login({ id: caller.id, email: callerEmail });
 
       //? Anti-enumeration: the response is identical to the "address available"
       //? success path so the caller cannot tell whether the address is taken.
-      const result = await ctx.callApi<unknown, RequestResponse>({ newEmail: takenEmail });
+      const result = await ctx.callApi<unknown, RequestResponse>({ newEmail: takenEmail, currentPassword: password });
       ctx.expect.eq(result.status, 'success');
     },
   },

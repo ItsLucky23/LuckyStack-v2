@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (17)
+## Decisions (19)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -30,6 +30,8 @@
 | 0016 | Expand the AI-context system with lessons / examples / coverage gates / eval before any RAG rung | 🟢 accepted | ai-context, docs, tooling, rag | — | `docs/decisions/0016-ai-context-layers-before-rag.md` |
 | 0016 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0016-single-source-ports-and-optin-router-topology.md` |
 | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot | 🟢 accepted | secret-manager, prisma, cli, scaffold, dx, packaging | — | `docs/decisions/0017-prisma-cli-resolves-secret-manager-pointers.md` |
+| 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode | 🟢 accepted | security, session, auth, config | — | `docs/decisions/0018-session-token-to-client-only-in-sessionbasedtoken-mode.md` |
+| 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant | 🟢 accepted | auth, schema, config, oauth | — | `docs/decisions/0019-email-uniqueness-is-optin-via-provideraccountstrategy.md` |
 
 ## Summaries
 
@@ -175,6 +177,26 @@ Route every `prisma:*` script through a small wrapper, `scripts/prismaWithSecret
 
 → `docs/decisions/0017-prisma-cli-resolves-secret-manager-pointers.md`
 
+### 0018 — The session token reaches page JS only in sessionBasedToken (sessionStorage) mode
+
+**0018** · accepted · tags: security, session, auth, config · 2026-07-02
+
+The raw session `token` **never reaches page JS through the session object** — not via the `session_v1` bootstrap and not via the `updateSession` broadcast, in either mode. This is enforced by TYPE, not just discipline:
+
+**Governs** (`//? @adr 0018`): `packages/core/src/hooks/types.ts`, `packages/core/src/sessionTypes.ts`, `packages/login/src/session.ts`, `src/_api/session_v1.ts`, `src/_providers/SessionProvider.tsx`
+
+→ `docs/decisions/0018-session-token-to-client-only-in-sessionbasedtoken-mode.md`
+
+### 0019 — Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant
+
+**0019** · accepted · tags: auth, schema, config, oauth · 2026-07-02
+
+Email uniqueness is opt-in. The default schema correctly omits `@unique` (per-provider strategy). Adding `@unique` is a consumer action tied to selecting `providerAccountStrategy: 'unified'`, performed via a Prisma migration on the consumer's own schema — never shipped as a framework default, because it would break the per-provider model and fail to migrate on any existing per-provider dataset that already has duplicate emails.
+
+**Governs** (`//? @adr 0019`): `packages/login/src/accountStrategy.ts`, `src/settings/_api/confirmEmailChange_v1.ts`
+
+→ `docs/decisions/0019-email-uniqueness-is-optin-via-provideraccountstrategy.md`
+
 ## Code governed by decisions
 
 > Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.
@@ -182,6 +204,13 @@ Route every `prisma:*` script through a small wrapper, `scripts/prismaWithSecret
 
 | File | ADR | Decision |
 | --- | --- | --- |
+| `packages/core/src/hooks/types.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
+| `packages/core/src/sessionTypes.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
 | `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
+| `packages/login/src/accountStrategy.ts` | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant |
+| `packages/login/src/session.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
 | `packages/mcp/src/index.ts` | 0016 | Expand the AI-context system with lessons / examples / coverage gates / eval before any RAG rung |
 | `scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
+| `src/_api/session_v1.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
+| `src/_providers/SessionProvider.tsx` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
+| `src/settings/_api/confirmEmailChange_v1.ts` | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant |

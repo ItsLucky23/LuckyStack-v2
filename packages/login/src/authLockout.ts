@@ -41,6 +41,12 @@ const lockoutKey = (accountKey: string, requesterIp?: string): string => {
 //? on every login attempt.
 let warnedLockoutInert = false;
 
+//? One-shot guard for the M1 warning: surfaces the silent gap where credentials
+//? logins are FAILING but the per-account lockout is disabled entirely, so only
+//? the proxy-fragile per-IP cap stands between an attacker and distributed
+//? credential stuffing. Fires once, on the first real credentials-login failure.
+let warnedLockoutDisabled = false;
+
 /** Read the active auth-lockout config (returns null when the feature is off). */
 const getAuthLockoutConfig = (): { maxAttempts: number; maxAttemptsPerAccount: number; windowMs: number } | null => {
   const rateLimiting = getProjectConfig().rateLimiting;
@@ -163,6 +169,18 @@ export const registerAuthLockoutHook = (): void => {
   lockoutHookRegistered = true;
   registerHook('loginFailed', async ({ email, provider, reason, stage, requesterIp }) => {
     if (stage !== 'login' || provider !== 'credentials') return;
+    //? M1: a credentials login is failing while the per-account lockout is OFF.
+    //? Warn ONCE so operators of a credentials app don't ship with distributed
+    //? credential stuffing unthrottled beyond the (proxy-fragile) per-IP cap. Kept
+    //? as a loud default rather than force-enabling the lockout, because enabling
+    //? the cross-IP counter also introduces a victim-account-lock DoS tradeoff the
+    //? operator should opt into consciously (set rateLimiting.auth.enabled:true).
+    if (!getProjectConfig().rateLimiting.auth.enabled && !warnedLockoutDisabled) {
+      warnedLockoutDisabled = true;
+      getLogger().warn(
+        '[LuckyStack] a credentials login failed but the per-account brute-force lockout is DISABLED (rateLimiting.auth.enabled:false). Only the per-IP API cap protects credentials login, so distributed credential stuffing against one account (many IPs) is unthrottled. Set rateLimiting.auth.enabled:true to enable the per-account lockout (note: the cross-IP counter also enables a bounded victim-account-lock DoS — see docs/ARCHITECTURE_AUTH.md).',
+      );
+    }
     if (!email || !COUNTING_REASONS.has(reason)) return;
     //? DD-LOGIN-F5: use the IP+account composite key when an IP was threaded in.
     await recordAuthFailure(email, requesterIp);

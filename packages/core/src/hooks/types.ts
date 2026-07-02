@@ -30,7 +30,11 @@ import type { ErrorResponseInput, NormalizedErrorResponse } from '../responseNor
  */
 export interface HookSessionShape {
   id: string;
-  token: string;
+  //? @adr 0018 — optional to match `BaseSessionLayout` (a CLIENT-facing session
+  //? type may omit the server-only token). Server-side hook payloads still carry a
+  //? real token at runtime; no framework hook handler reads it off this minimal
+  //? shape as a guaranteed string.
+  token?: string;
   email?: string | null;
   name?: string | null;
   avatar?: string | null;

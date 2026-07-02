@@ -2,7 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { URL } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { dispatchHook } from '@luckystack/core';
+import { dispatchHook, getLogger } from '@luckystack/core';
 
 import type { ServiceTargetResolver } from './resolveTarget';
 import { resolveServiceKey } from './resolveTarget';
@@ -55,11 +55,22 @@ export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamReq
 
   //? The handler returned to `http.createServer` must be `void`-returning so
   //? Node's HTTP internals do not see an unhandled promise. The real work is
-  //? in `handleRequest` (async for the `proxyRequestGate` await); the `void`
-  //? here is intentional — errors are handled inside `handleRequest` via the
-  //? per-stream `'error'` listeners that are registered before any I/O.
+  //? in `handleRequest` (async for the `proxyRequestGate` await). The per-stream
+  //? `'error'` listeners inside cover I/O failures, but a synchronous throw
+  //? BEFORE they are attached (e.g. a malformed resolved target reaching
+  //? `new URL(...)`) would otherwise become an unhandled rejection and crash the
+  //? process. This last-resort `.catch` closes that window.
   return (req: IncomingMessage, res: ServerResponse): void => {
-    void handleRequest(req, res, { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap });
+    void handleRequest(req, res, { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap }).catch((error: unknown) => {
+      getLogger().error('[router] unhandled error while handling request:', { error });
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
+      res.statusCode = 500;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ status: 'error', errorCode: 'routing.internalError' }));
+    });
   };
 };
 

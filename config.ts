@@ -330,6 +330,16 @@ export interface SessionLayout extends SessionLayoutBase {
 // Verify SessionLayout is structurally compatible with BaseSessionLayout at compile time.
 export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true : never;
 
+//? @adr 0018 — CLIENT-facing session shape: a copy of `SessionLayout` WITHOUT the
+//? server-only credential fields (`token` = the HttpOnly-cookie credential;
+//? `csrfToken` = fetched separately via `/auth/csrf`, never needed off the session
+//? object). Server-side API/sync handlers keep using the full `SessionLayout`
+//? (they legitimately need `user.token` for revoke/sign-out flows); page JS uses
+//? this. `session_v1` returns this shape and `SessionProvider` holds it, so the
+//? token can never reach page JS in cookie mode by construction — while the
+//? server-side typing is untouched.
+export type ClientSessionLayout = Omit<SessionLayout, 'token' | 'csrfToken'>;
+
 //? OAuth providers + the credentials form are now ENV-DRIVEN and read from the
 //? live registry via `GET /auth/providers` (a provider registers in
 //? `@luckystack/login/register` only when its *_CLIENT_ID + *_CLIENT_SECRET are

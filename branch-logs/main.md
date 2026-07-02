@@ -369,3 +369,65 @@
 **Flag (niet auto-gefixt, Rule 27)**: `dotenv-cli` (^11) is nu een orphaned devDep in template + root (geen script gebruikt nog `dotenv -e`) — user beslist drop/keep.
 
 **Nog niet geverifieerd**: verse verdaccio-scaffold-smoke van de TEMPLATE-wrapper typecheck (base + na `add secret-manager`) — laag risico (2 triviale imports, al elders in de template gebruikt), maar de definitieve check vóór de volgende publish.
+
+## 2026-07-02 15:55 — Security/correctness scan (report) + 3 obvious fixes
+
+**User prompt**: scan de codebase op security-vulnerabilities + kapotte config/bugs/wizard-flows (alleen rapporteren, niks fixen) → daarna: "als er voorderhand liggende fixes zijn waar je zeker van bent, pas die toe; stel vragen bij twijfel".
+
+**Scan**: 10 parallelle audit-agents (router, server, auth/login, api/sync, cli+scaffold, config, core, infra-packages, consumer-src, small-packages). Volledig gerangschikt rapport in `codebase-scan-02-07/SCAN_REPORT.md`, per-area detail in `codebase-scan-02-07/findings/*.md`. Alle eerder gevlagde criticals GEVERIFIEERD gefixt (wsProxy, server.js-disclosure, OAuth-linking, validateType, MT-3, npm.cmd, DOCSUI-01). Netto: 1 nieuwe CRITICAL (router proto-pollution crash) + 1 HIGH (session-token naar page JS) + 8 MEDIUM + ~30 LOW.
+
+**Fixes toegepast (geverifieerd, getest — 182 pkg-tests groen)**:
+- **C1 (CRITICAL) router proto-pollution DoS**: `packages/router/src/resolveTarget.ts` — `ownBinding()` hasOwnProperty-guard op beide binding-lookups (`__proto__`/`constructor`/`toString` → null → schone 502 i.p.v. bogus non-string target). `packages/router/src/httpProxy.ts` — last-resort `.catch` op `void handleRequest(...)` (pre-listener throw → 500 i.p.v. unhandled rejection/process-exit) + `getLogger` import + comment gecorrigeerd. Regressietest: `resolveTarget.test.ts` (5 inherited-key cases).
+- **Auth LOW**: `packages/login/src/logout.ts:28` — volledig token in debug-log → `tokenPrefix` (conventie-parity).
+- **M7**: `packages/error-tracking/src/adapters/posthog.ts` — `captureException` krijgt rebuilt scrubbed Error i.p.v. raw error (ET-O2-parity met Sentry-adapter).
+
+**Bewust NIET gefixt (open vragen aan user)**: H1 session-token-contract (verweven met framework `session.ts:244` updateSession-broadcast die token bewust naar client stuurt), M6 email `@unique` (schema-migratie, niet-autonoom + multi-tenancy-semantiek), M1/M2 auth-posture-defaults (lockout default-off, OAuth-creation checkt `emailVerified` niet), M5 purpose-formatter multi-tenant mismatch (framework-semantiek te bevestigen). Rest van MEDIUM/LOW in het rapport.
+
+**Files**: packages/router/src/{resolveTarget.ts,httpProxy.ts,resolveTarget.test.ts}, packages/login/src/logout.ts, packages/error-tracking/src/adapters/posthog.ts, codebase-scan-02-07/ (rapport + findings, nieuw).
+
+## 2026-07-02 17:05 — H1/M6 as by-design (ADR 0018/0019) + token-broadcast gate
+
+**User prompt**: unique-email flag moet weg (toggleable in config), token→session mag alleen in sessionStorage-mode (dev config-optie); beide worden vaker geflagd → documenteren waarom. + "wat is er nog over aan punten die gefixt moeten worden?".
+
+**Bevinding (geverifieerd)**: (H1) framework strip't token al bij persist (session.ts:157, LOGIN-M9) maar de `updateSession`-broadcast op :244 stuurde `persisted` mét token ONVOORWAARDELIJK — ook in cookie-mode. Client gebruikt payload-token nergens (socket leest sessionStorage; SessionProvider schrijft token nooit naar sessionStorage). (M6) `confirmEmailChange` doet al een app-level cross-provider collision-check; `email @unique` is opt-in via `auth.providerAccountStrategy` ('per-provider' default = geen @unique, 'unified' = consumer voegt toe).
+
+**Fix toegepast**: `packages/login/src/session.ts:244` — broadcast nu `basedToken ? persisted : persistedWithoutToken` (cookie-mode lekt token niet meer naar page JS; veilig, geen client-gedragswijziging). Login-tests 103/103 groen, tsc+lint clean.
+
+**Docs (zodat scans niet herflaggen)**: ADR 0018 (token-exposure contract) + ADR 0019 (email-uniqueness opt-in), beide accepted; `//? @adr`-tags op session.ts/session_v1.ts/SessionProvider.tsx (0018) en accountStrategy.ts/confirmEmailChange_v1.ts (0019) → `decision_for_file` reverse-map compleet; `ARCHITECTURE_SESSION.md` token-exposure-sectie; `npm run ai:decisions` geregenereerd (19).
+
+**Bewust NIET gefixt (gemeld, Rule 3b)**: session_v1 initial-load geeft token nog steeds terug in cookie-mode — volledig sluiten vergt client session-type wijziging (token niet langer required) = type-generation change, follow-up in ADR 0018. Nog open to-fix: M2/M3 (auth OAuth-creation emailVerified + lockout TOCTOU/default), M4 (unauth OAuth-init Redis DoS), M5 (purpose-formatter multi-tenant), M8 (test-runner silent drop).
+
+**Files**: packages/login/src/session.ts, src/_api/session_v1.ts, src/_providers/SessionProvider.tsx, packages/login/src/accountStrategy.ts, src/settings/_api/confirmEmailChange_v1.ts, docs/decisions/0018-*.md (nieuw), docs/decisions/0019-*.md (nieuw), docs/ARCHITECTURE_SESSION.md, docs/AI_DECISIONS_INDEX.md, codebase-scan-02-07/SCAN_REPORT.md.
+
+## 2026-07-02 17:45 — Fix all remaining scan findings (M1-M5, M8) + H1 client session-type
+
+**User prompt**: "fix alle punten maar bij H1-restant willen we een client-side copy van het user-type zodat de server-sided typing niet beïnvloed wordt."
+
+**Alles geverifieerd: 1451 tests groen, tsc/lint/build:packages (16/16)/vite build allemaal clean.**
+
+- **M4 (server) — unauth OAuth-init Redis write-amp DoS**: per-IP `checkRateLimit` (`ip:<ip>:auth:oauth-init` bucket) toegevoegd vóór `createOAuthState` in `authApiRoute.ts` (spiegelt de credentials-branch; no-op tenzij een limit geconfigureerd is).
+- **M8 (test-runner) — silent route drop**: `runAuthEnforcementTests` gebruikt nu `hasMetaEntry`; een route in `apiMethodMap` maar niet in `apiMetaMap` levert een `skipped`-result ("auth unverifiable") i.p.v. stil door te gaan.
+- **M2 (login) — OAuth account-CREATIE checkt emailVerified niet**: fail-closed guard toegevoegd in `findOrCreateOAuthUser` (symmetrisch met de link-guard) — creatie geweigerd bij `!emailVerified`. Nieuwe provider-flag `emailImpliesVerified` (generiek, SOLID) + op `facebookProvider` gezet zodat Facebook (dat geen verified-flag heeft maar alleen bevestigde emails teruggeeft; L3) niet breekt; `fetchOAuthProfile` honoreert de flag.
+- **M1/M3 (login) — lockout default-off + TOCTOU**: M1 = one-shot boot-warning in de `loginFailed`-handler wanneer een credentials-login faalt terwijl `rateLimiting.auth.enabled:false` (default NIET geflipt — cross-IP lockout introduceert een victim-lock DoS-tradeoff die de operator bewust moet kiezen). M3 = de twee wrong-password-paden `await`en nu `dispatchHook('loginFailed')` zodat de increment vóór de response landt (sluit de sequentiële check-then-increment TOCTOU; residual concurrent window gedocumenteerd).
+- **M5 (server/sync/core) — purpose-formatter join≠broadcast mismatch (multi-tenant)**: alle content-room-operaties (join/leave/evict/rejoin in `loadSocket.ts`) gebruiken nu de canonieke `'broadcast'` purpose i.p.v. `'join'`/`'leave'`, zodat ze byte-identiek matchen met de sync membership-check + fanout. `roomNameFormatterRegistry` type-doc codificeert de regel (alleen `'presence'` is een aparte room-familie).
+- **H1-restant (config/core/consumer) — token nooit meer naar page JS**: nieuw client-type `ClientSessionLayout = Omit<SessionLayout,'token'|'csrfToken'>` in `config.ts`. `session_v1` strip't token+csrfToken en retourneert `ClientSessionLayout` (generated result-type draagt geen token meer); `updateSession`-broadcast stuurt nu ALTIJD `persistedWithoutToken` (mode-gate verwijderd). `BaseSessionLayout.token` + `HookSessionShape.token` OPTIONEEL gemaakt zodat de client-generics een token-loos type accepteren — de consumer `SessionLayout` herdeclareert `token: string` (required), dus **server-side typing onaangetast**. `SessionProvider` + socket-chain (`socketInitializer`/`_socketSetup`) op `ClientSessionLayout`. `generateArtifacts` gedraaid. `session_v1.tests.ts` regressie: assert token+csrfToken == undefined (was: assert token aanwezig).
+
+**Docs**: ADR 0018 herschreven naar de definitieve (type-enforced) beslissing; `ai:decisions` + `ai:capabilities` geregenereerd.
+
+**Files**: packages/server/src/httpRoutes/authApiRoute.ts, packages/server/src/loadSocket.ts, packages/test-runner/src/runAuthEnforcementTests.ts, packages/login/src/{login.ts,oauthProviders.ts,authLockout.ts,session.ts}, packages/core/src/{sessionTypes.ts,hooks/types.ts,roomNameFormatterRegistry.ts}, config.ts, src/_api/session_v1.ts(+.tests.ts), src/_providers/SessionProvider.tsx, src/_sockets/{socketInitializer.ts,_socketSetup.ts}, src/_sockets/apiTypes.generated.ts (+ server/prod/generatedApis.*), docs/decisions/0018-*.md, docs/AI_DECISIONS_INDEX.md, docs/AI_CAPABILITIES.md.
+
+## 2026-07-02 21:15 — Fix all live-test errors (validateType prod bug + sync self-token + harness + stale tests)
+
+**User prompt**: "fix alle errors" — de 34 pre-existing custom-test-fouten die de browser/live-test-ronde blootlegde.
+
+**Resultaat: custom-laag 30/64 → 64/64; volledige test-runner-suite 112 passed / 0 failed / 23 skipped; 1451 unit-tests + tsc + lint clean.**
+
+Root-causes + fixes:
+- **CRIT framework bug — `validateType` union-recursie** (`packages/core/src/runtimeTypeValidation.ts`): elk object-type-text met een `|` IN een property (bv. `theme?: 'dark'|'light'`) triggerde de union-branch; `splitTopLevel` vond geen top-level `|` → 1 part == de hele type → recursie op de IDENTIEKE string, `depth+1` per pass tot MAX_VALIDATION_DEPTH(64) → bogus "input nesting exceeds max depth" op een depth-1 waarde. Met `validation.runtimeMode:'enforce'` (default) faalde dit ook in PRODUCTIE: elke route met een union in z'n input-type was on-callable. Fix: single-member-union recurset alleen als `singleMember !== type`, anders fall-through. Regressietest toegevoegd. (~15 tests) → docs/lessons/0002.
+- **Framework gap — HTTP sync self-token membership** (`packages/sync/src/handleHttpSyncRequest.ts`): met `requireRoomMembership:true` (default) mocht een HTTP-caller z'n EIGEN token-room niet targeten (socket-transport auto-joint `socket.join(token)`, HTTP checkt alleen `roomCodes`). Fix: `isMember` staat `receiver === user.token` toe (veilig — je eigen room; symmetrisch met socket-pad). (~5 tests + downstream)
+- **Test-runner harness — watchStream cookie-auth** (`packages/test-runner/src/streamWatcher.ts`): de observer-socket gaf de token als `handshake.auth.token` (token-mode), maar cookie-mode (default) leest 'm uit de cookie → anonieme socket → `joinRoom` auth.required. Fix: ook `extraHeaders: { Cookie }` meesturen. (~6 tests)
+- **Stale test-expectations (consumer)**: settings error-codes `auth.*` → `settings.emailChange.*` (confirm/requestEmailChange); requestEmailChange "success"-test stuurt nu `currentPassword` (route vereist re-auth); playground sync-tests lezen serverOutput nu onder `.result` (S22 canonical envelope i.p.v. oude flattened shape). (~8 tests)
+
+**Diagnose-gotcha**: eerste live-runs gaven non-deterministische pass-counts (30 vs 7 vs 45) door LEFTOVER server-processen op :80 van stash-cycles → de test hitte een stale server. Altijd één schone server. Layer-5 `*.tests.ts` draaien tegen een LIVE server, niet in `vitest run`.
+
+**Files**: packages/core/src/{runtimeTypeValidation.ts,runtimeTypeValidation.test.ts}, packages/sync/src/handleHttpSyncRequest.ts, packages/test-runner/src/streamWatcher.ts, src/settings/_api/{confirmEmailChange,requestEmailChange}_v1.tests.ts, src/playground/_sync/{streamBroadcast,streamProgress,streamToToken}_server_v1.tests.ts, docs/lessons/0002-*.md, docs/AI_LESSONS_INDEX.md.

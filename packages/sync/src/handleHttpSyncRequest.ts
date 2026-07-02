@@ -384,7 +384,16 @@ function stageAuthorizeReceiver(
     receiver: normalizedReceiver,
     allowClientReceiverAll: syncConfig.allowClientReceiverAll,
     requireRoomMembership: syncConfig.requireRoomMembership,
-    isMember: user ? () => Boolean(user.roomCodes?.includes(normalizedReceiver)) : null,
+    //? A session is ALWAYS an implicit member of its OWN token-room: on the socket
+    //? transport `loadSocket` auto-joins `socket.join(token)` on connect, so the
+    //? socket path's `socket.rooms.has(token)` is true for the caller's own token.
+    //? The HTTP path derives membership from persisted `roomCodes`, which never
+    //? contains the token-room — so without this self-token allowance a client
+    //? could stream to its own session over websockets but NOT over the HTTP
+    //? fallback (`sync.notRoomMember`). Targeting your OWN token is safe (you own
+    //? it) and grants no access to anyone else's room. Keeps the two transports
+    //? symmetric under `requireRoomMembership`.
+    isMember: user ? () => normalizedReceiver === user.token || Boolean(user.roomCodes?.includes(normalizedReceiver)) : null,
   });
 
   if (!receiverAuth.allowed) {

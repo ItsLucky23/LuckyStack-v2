@@ -195,8 +195,16 @@ const executeRoomMutation = async (opts: RoomMutationOptions): Promise<void> => 
   //? non-identity `registerRoomNameFormatter` (e.g. per-tenant prefixing) applies
   //? to the socket.io room name the socket physically joins/leaves. The session
   //? stores the RAW code; only the Socket.io room name uses the physical form.
-  const roomPurpose = preHook === 'preRoomJoin' ? 'join' as const : 'leave' as const;
-  const physicalRoom = formatRoomName(group, { purpose: roomPurpose, userId: session.id });
+  //? M5: a content room's physical name MUST be identical across join, leave,
+  //? membership-check, and broadcast/fanout — otherwise a `purpose`-branching
+  //? formatter (multi-tenant prefixing) would place the socket in one physical
+  //? room (`join:R`) but the sync membership check + fanout would target another
+  //? (`broadcast:R`), so legit members get rejected and fanout reaches nobody. All
+  //? content-room operations therefore use the single canonical `'broadcast'`
+  //? purpose; only a genuinely-separate room family (presence) uses a different
+  //? one. `preHook` still distinguishes the join vs leave OPERATION for the hooks
+  //? and `mutate` below — it just no longer changes the physical room NAME.
+  const physicalRoom = formatRoomName(group, { purpose: 'broadcast', userId: session.id });
   const nextRoomCodes = await mutate(socket, physicalRoom, group, existingRoomCodes, session.id);
 
   const sanitizedSession = sanitizeSessionRoomKeys(session);
@@ -292,7 +300,9 @@ const registerRoomEvents = (ctx: SocketContext): void => {
               const oldest = kept[0];
               if (oldest === undefined) break; // unreachable (length >= maxRooms >= 1) but narrows for noUncheckedIndexedAccess
               kept = kept.slice(1);
-              await sock.leave(formatRoomName(oldest, { purpose: 'join', userId }));
+              //? M5: canonical content-room purpose (see the join site above) so the
+              //? FIFO-evict leaves the SAME physical room the socket actually joined.
+              await sock.leave(formatRoomName(oldest, { purpose: 'broadcast', userId }));
             }
           }
           await sock.join(physicalRoom);
@@ -494,8 +504,10 @@ const rejoinPersistedRooms = (ctx: SocketContext): void => {
       const userId = session?.id ?? null;
       for (const roomCode of roomCodes) {
         //? Route through the formatter so a multi-tenant prefix applies on
-        //? reconnect exactly as it did on the original join (PRESENCE-1).
-        await socket.join(formatRoomName(roomCode, { purpose: 'join', userId }));
+        //? reconnect exactly as it did on the original join (PRESENCE-1). Canonical
+        //? content-room purpose (M5) so the rejoined physical room matches the sync
+        //? membership check + fanout target.
+        await socket.join(formatRoomName(roomCode, { purpose: 'broadcast', userId }));
       }
       return roomCodes;
     });

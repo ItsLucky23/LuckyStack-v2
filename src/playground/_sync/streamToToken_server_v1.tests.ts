@@ -12,13 +12,21 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? Output envelope: { status, message, senderId, targetCount, chunkCount }
 //?    OR on missing targets: { status: 'error', errorCode: 'playground.streamTo.missingTargets' }
 
+//? S22 transport-parity: the HTTP `callSync` success envelope is the canonical
+//? `{ status, message, result: serverOutput }` — the route's `targetCount` /
+//? `chunkCount` / `senderId` live under `result`. The ERROR envelope keeps
+//? `errorCode` at the top level.
 interface ToTokenResponse {
   status: string;
   message?: string;
-  senderId?: string;
-  targetCount?: number;
-  chunkCount?: number;
   errorCode?: string;
+  result?: {
+    status?: string;
+    message?: string;
+    senderId?: string;
+    targetCount?: number;
+    chunkCount?: number;
+  };
 }
 
 interface StreamToChunkFrame {
@@ -53,9 +61,9 @@ export const customTests: CustomTestCase[] = [
         { receiver: session.token },
       );
       ctx.expect.eq(result.status, 'success');
-      ctx.expect.eq(result.targetCount, 1);
+      ctx.expect.eq(result.result?.targetCount, 1);
       //? "one two three" tokenizes (split on /(\s+)/) to 5 entries — 3 words + 2 whitespace separators.
-      ctx.expect.ok((result.chunkCount ?? 0) >= 3, 'expected at least 3 chunks');
+      ctx.expect.ok((result.result?.chunkCount ?? 0) >= 3, 'expected at least 3 chunks');
     },
   },
   {
@@ -73,9 +81,9 @@ export const customTests: CustomTestCase[] = [
         { receiver: token },
       );
       ctx.expect.eq(result.status, 'success');
-      ctx.expect.eq(result.targetCount, 1);
+      ctx.expect.eq(result.result?.targetCount, 1);
 
-      await watcher.waitForCount(result.chunkCount ?? 1, 3000);
+      await watcher.waitForCount(result.result?.chunkCount ?? 1, 3000);
 
       const first = watcher.chunks[0];
       ctx.expect.ok(first !== undefined, 'expected at least one chunk');
@@ -113,7 +121,7 @@ export const customTests: CustomTestCase[] = [
         { receiver: observerToken },
       );
       ctx.expect.eq(result.status, 'success');
-      ctx.expect.eq(result.targetCount, 1);
+      ctx.expect.eq(result.result?.targetCount, 1);
 
       //? Wait past the emit window before asserting zero chunks.
       await new Promise<void>((resolve) => setTimeout(resolve, 200));

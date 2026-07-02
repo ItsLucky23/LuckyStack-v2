@@ -9,11 +9,12 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (1)
+## Lessons (2)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
 | 0001 | A node:* server import in shared/client code blanks the whole frontend | 🔴 critical | packages/core (client/server boundary) | runtime, bundling, client-server-boundary | `docs/lessons/0001-node-modules-leak-into-client-bundle.md` |
+| 0002 | A nested union in a route's input type made runtime validation reject ALL input with a bogus depth error | 🟠 high | packages/core (runtimeTypeValidation) | runtime, validation, type-text, production | `docs/lessons/0002-validatetype-union-depth-false-positive.md` |
 
 ## Takeaways
 
@@ -24,3 +25,11 @@
 Never import a `node:*` module (or anything that transitively does — `async_hooks`, `fs`, `child_process`) from code the client bundle can reach; use the `@luckystack/core/client` entry, which is built to keep Node built-ins out (see the `tryCatchClient` lazy-capture pattern). And ALWAYS smoke-test the real browser before calling a change "ship-safe" — a green build + green tests do not prove the page renders. Related: `docs/examples/trycatch-error-handling.md`.
 
 → `docs/lessons/0001-node-modules-leak-into-client-bundle.md`
+
+### 0002 — A nested union in a route's input type made runtime validation reject ALL input with a bogus depth error
+
+**0002** · high · packages/core (runtimeTypeValidation) · tags: runtime, validation, type-text, production · 2026-07-02
+
+The single-member union recursion must only happen when `splitTopLevel` actually isolated a DIFFERENT sub-type (a trimmed leading/trailing `|`, or a stripped paren) — `unionParts.length === 1 && singleMember !== type`. When the single part equals the whole type, there is no top-level union; fall through to the object/array/primitive handling instead of recursing. Regression test: `runtimeTypeValidation.test.ts` — "accepts a shallow value against an object type whose properties contain nested unions". General takeaway: a "max depth exceeded" on a shallow value is almost never real nesting — suspect a recursion that doesn't consume input. And run the per-route (`*.tests.ts`) suite against a live server after any change to input types or the validator; `npx vitest run` does NOT exercise the HTTP validation path.
+
+→ `docs/lessons/0002-validatetype-union-depth-false-positive.md`

@@ -1,6 +1,6 @@
 import { walkEndpoints } from './walkEndpoints';
 import { runAuthEnforcementCheck } from './authEnforcementCheck';
-import { shouldSkip, hasAuthRequirement, calculateSummary } from './testLayerHelpers';
+import { shouldSkip, hasAuthRequirement, hasMetaEntry, calculateSummary } from './testLayerHelpers';
 import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
 
 export interface RunAuthEnforcementTestsInput {
@@ -26,9 +26,27 @@ export const runAuthEnforcementTests = async (
     //? Reversing the order would hide the skip from the summary. We gate on
     //? `hasAuthRequirement` (login OR additional[]-predicates) so role/tenant/
     //? ownership-guarded routes with `login: false` are also probed.
+    if (!hasMetaEntry(input.apiMetaMap, endpoint)) {
+      //? Route is in `apiMethodMap` but ABSENT from `apiMetaMap` (partial drift /
+      //? hand-trimmed map / generator bug). Its auth requirement is unknowable, so
+      //? this layer can't assert it. Record a `skipped` result (NOT a silent
+      //? continue) so the gap is visible per-route in the summary instead of the
+      //? route masquerading as a verified-public endpoint. (M8)
+      const skipped: ContractCheckResult = {
+        endpoint,
+        status: 'skipped',
+        durationMs: 0,
+        reason: 'No apiMetaMap entry — auth requirement unverifiable',
+      };
+      results.push(skipped);
+      input.onResult?.(skipped);
+      continue;
+    }
+
     if (!hasAuthRequirement(input.apiMetaMap, endpoint)) {
-      //? Truly-public endpoints can't be tested by this layer — skip silently, no
-      //? noise. They're still covered by the contract layer.
+      //? Truly-public endpoints (meta entry present, login:false, no additional[])
+      //? can't be tested by this layer — skip silently, no noise. They're still
+      //? covered by the contract layer.
       continue;
     }
 

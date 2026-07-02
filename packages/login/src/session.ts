@@ -1,3 +1,6 @@
+//? @adr 0018 — Token-exposure contract: `saveSession`'s `updateSession`
+//? broadcast surfaces the session token to page JS only in `sessionBasedToken`
+//? mode; cookie mode gets the token-stripped projection. See ADR 0018.
 import type { BaseSessionLayout as SessionLayout } from "./sessionLayout";
 import { randomBytes } from 'node:crypto';
 import {
@@ -240,8 +243,15 @@ const saveSession = async (
     }
 
     // Broadcast session updates to connected clients (sanitized copy).
+    //? @adr 0018 — Token-exposure contract: NEVER broadcast the session token to
+    //? page JS. In cookie mode it is the HttpOnly-cookie credential; in
+    //? `sessionBasedToken` mode the client already holds it in sessionStorage
+    //? (set at login / OAuth handoff). The client never consumes the token from
+    //? this payload in either mode (the socket handshake reads sessionStorage /
+    //? the cookie), so we always send the token-stripped projection — the same one
+    //? persisted to the adapter at LOGIN-M9 — matching the CLIENT `ClientSessionLayout`.
     if (io.sockets.adapter.rooms.has(token)) {
-      io.to(token).emit(socketEventNames.updateSession, JSON.stringify(persisted));
+      io.to(token).emit(socketEventNames.updateSession, JSON.stringify(persistedWithoutToken));
     }
 
     if (newUser) {

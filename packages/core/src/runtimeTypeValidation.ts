@@ -299,11 +299,18 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
       }
       return { status: 'error', message: `${path} does not match union type ${type}` };
     }
-    //? A single-member "union" (e.g. a parenthesised type `(string)` where the
-    //? outer `()` was already stripped) must still recurse so the inner type
-    //? is validated rather than falling through to the fail-closed terminal.
-    if (unionParts.length === 1) {
-      return validateType(unionParts[0] ?? type, value, path, depth + 1);
+    //? A single-member "union" recurses ONLY when `splitTopLevel` actually
+    //? isolated a DIFFERENT sub-type (e.g. a leading/trailing `|` was trimmed, or
+    //? a parenthesised `(string)` inner remains). If the single part is the WHOLE
+    //? type unchanged, there is NO top-level `|` at all — the `|` lives INSIDE a
+    //? nested `{...}` / `[...]` / `<...>` (e.g. `{ theme?: 'a' | 'b' }`). Recursing
+    //? on the identical string here would loop, incrementing `depth` on every pass
+    //? until `MAX_VALIDATION_DEPTH` false-positives with a bogus "input nesting
+    //? exceeds the maximum depth" on a perfectly shallow value. So fall through to
+    //? the structural (object/array/primitive) handling below instead.
+    const singleMember = unionParts[0] ?? type;
+    if (unionParts.length === 1 && singleMember !== type) {
+      return validateType(singleMember, value, path, depth + 1);
     }
   }
 

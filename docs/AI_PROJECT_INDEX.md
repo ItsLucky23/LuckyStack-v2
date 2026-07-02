@@ -20,7 +20,7 @@
 | `api/reset-password/confirmReset/v1` | POST | public | 5 | — | yes | — | — |
 | `api/reset-password/sendReset/v1` | POST | public | 5 | — | yes | — | `validator` is CommonJS; its .d.ts does not declare a default export but |
 | `api/settings/changePassword/v1` | POST | login | 10 | — | yes | — | — |
-| `api/settings/confirmEmailChange/v1` | POST | public | 10 | — | yes | — | — |
+| `api/settings/confirmEmailChange/v1` | POST | public | 10 | — | yes | — | @adr 0019 — Email uniqueness is opt-in via `providerAccountStrategy`. The |
 | `api/settings/deleteAccount/v1` | POST | login | 3 | — | yes | — | — |
 | `api/settings/listSessions/v1` | POST | login | 30 | — | yes | — | — |
 | `api/settings/requestEmailChange/v1` | POST | login | 5 | — | yes | — | `validator` is CommonJS; its .d.ts does not declare a default export but |

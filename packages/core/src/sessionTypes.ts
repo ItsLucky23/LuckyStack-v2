@@ -14,7 +14,14 @@ export interface SessionLocation {
 
 export interface BaseSessionLayout {
   id: string;
-  token: string;
+  //? @adr 0018 — OPTIONAL on the base so a CLIENT-facing session type
+  //? (`ClientSessionLayout` = the project session minus the server-only
+  //? credential fields) still satisfies the `T extends BaseSessionLayout` bound
+  //? used by the client session context / hooks / `useSocket`. Server-side session
+  //? types (the project's own `SessionLayout`) redeclare `token: string` as
+  //? REQUIRED, so server handlers keep their strict typing — the base is relaxed,
+  //? not the server contract. Core never reads `token` off a base-typed value.
+  token?: string;
   email?: string | null;
   name?: string | null;
   avatar?: string | null;

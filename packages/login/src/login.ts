@@ -545,7 +545,15 @@ const loginWithCredentialsCore = async (
   if (!findUserResponse || !passwordHash) {
     const dummyHash = await getDummyBcryptHash();
     await tryCatch(() => compare(password, dummyHash));
-    emitLoginFailed({ email, userId: findUserResponse?.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login', requesterIp });
+    //? M3: AWAIT the failure dispatch on the counting (wrong-password) path so the
+    //? per-account lockout increment (registered on `loginFailed`) lands BEFORE we
+    //? respond — unlike the fire-and-forget `emitLoginFailed` used for observational
+    //? failures. This closes the sequential check-then-increment TOCTOU (a retry now
+    //? sees the updated counter). `dispatchHook` isolates handler errors, so this
+    //? still can't change the auth outcome. A residual window remains for requests
+    //? already in flight concurrently (bounded by the atomic per-IP cap) — inherent
+    //? to any check-then-act gate.
+    await dispatchHook('loginFailed', { email, userId: findUserResponse?.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login', requesterIp });
     return { status: false, reason: 'login.wrongPassword' };
   }
 
@@ -559,7 +567,9 @@ const loginWithCredentialsCore = async (
     return { status: false, reason };
   }
   if (!checkPasswordResponse) {
-    emitLoginFailed({ email, userId: findUserResponse.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login', requesterIp });
+    //? M3: awaited on the counting path (see the no-account branch above) so the
+    //? lockout increment lands before the response — closes the sequential TOCTOU.
+    await dispatchHook('loginFailed', { email, userId: findUserResponse.id, provider: 'credentials', reason: 'login.wrongPassword', stage: 'login', requesterIp });
     return { status: false, reason: 'login.wrongPassword' };
   }
 
@@ -870,6 +880,14 @@ const fetchOAuthProfile = async (
     if (verifiedFlag === true) emailVerified = true;
   }
 
+  //? Providers whose userinfo only returns an email once it is CONFIRMED (e.g.
+  //? Facebook Graph /me) expose no separate verified flag — the presence of the
+  //? email IS the verified signal. `emailImpliesVerified` opts such a provider in
+  //? so cross-provider LINK + first-login CREATION both treat it as verified.
+  if (email && provider.emailImpliesVerified) {
+    emailVerified = true;
+  }
+
   const avatarId = provider.avatarCodeKey ? userData[provider.avatarCodeKey] : undefined;
   const avatarValue = provider.avatarKey
     ? readStringField(userData, provider.avatarKey)
@@ -988,6 +1006,26 @@ const findOrCreateOAuthUser = async (
       },
       isNewUser: false,
     };
+  }
+
+  //? Fail-closed account-CREATION guard (M2), symmetric with the cross-provider
+  //? LINK guard above. When NO account exists, a provider that did not positively
+  //? verify the email (no `emailVerifiedKey === true` / `getEmail` /
+  //? `emailImpliesVerified`) must not be able to seed a brand-new account bound to
+  //? an address the signer-in may not own — a custom, non-verifying provider would
+  //? otherwise let an attacker SQUAT a victim's email (blocking the victim's later
+  //? signup with `login.emailExists` and, under `'unified'`, absorbing the victim's
+  //? later verified sign-in into the attacker-seeded row). All built-in providers
+  //? set `emailVerified` (Google/GitHub/Microsoft/Discord/Facebook), so this only
+  //? refuses genuinely-unverified CUSTOM providers; such a provider must verify the
+  //? email (set `emailVerifiedKey` / `getEmail` / `emailImpliesVerified`) to enable
+  //? OAuth signup, rather than the framework trusting it by default.
+  if (!emailVerified) {
+    getLogger().warn(
+      'oauth: refusing first-login account creation for an unverified provider email (account-squatting guard)',
+      { provider: provider.name },
+    );
+    return null;
   }
 
   //? Gate OAuth first-login account CREATION on the same `auth.allowRegistration`

@@ -32,6 +32,27 @@ describe('validateInputByType — production enforce wiring (CORE-01)', () => {
     expect(bad.status).toBe('error');
   });
 
+  it('accepts a shallow value against an object type whose properties contain nested unions (union-depth regression)', async () => {
+    //? Regression: an object type text that CONTAINS `|` INSIDE its properties but
+    //? has NO top-level union must not enter the union branch and recurse on the
+    //? IDENTICAL string, inflating `depth` on every pass until MAX_VALIDATION_DEPTH
+    //? false-positives with a bogus "input nesting exceeds the maximum depth" on a
+    //? perfectly shallow value. Before the fix, ANY route whose input type carried
+    //? a union (e.g. a `theme: 'dark' | 'light'` field) always failed validation —
+    //? and with `validation.runtimeMode: 'enforce'` the default, in production too.
+    const typeText =
+      "{ name?: undefined | string; theme?: undefined | 'dark' | 'light'; language?: undefined | 'nl' | 'en' | 'de' | 'fr'; avatar?: undefined | string }";
+
+    const shallow = await validateInputByType({ typeText, value: { name: 'New Name' }, rootKey: 'data' });
+    expect(shallow.status).toBe('success');
+
+    //? The nested union is still ENFORCED: a valid member passes, an invalid one fails.
+    const validMember = await validateInputByType({ typeText, value: { theme: 'dark' }, rootKey: 'data' });
+    expect(validMember.status).toBe('success');
+    const invalidMember = await validateInputByType({ typeText, value: { theme: 'purple' }, rootKey: 'data' });
+    expect(invalidMember.status).toBe('error');
+  });
+
   it("becomes a no-op in production when validation.runtimeMode is 'off'", async () => {
     registerProjectConfig({ validation: { runtimeMode: 'off' } });
     const result = await validateInputByType({

@@ -242,10 +242,21 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
     return healthState.get(service) ?? true;
   };
 
+  //? Own-property-only binding lookup. `service` is derived from an
+  //? attacker-controlled URL segment, so a plain `bindings[service]` would
+  //? resolve inherited members: `bindings['__proto__']` yields Object.prototype
+  //? and `bindings['constructor']` the Object function — both truthy non-strings
+  //? that pass the `if (binding)` check and are returned as a bogus `target`.
+  //? Downstream `new URL(pathname, target)` in the HTTP proxy then throws on the
+  //? non-string base, crashing the process. Guarding with `hasOwnProperty` makes
+  //? an unrecognized service resolve to `undefined` -> clean 502.
+  const ownBinding = (bindings: Record<string, string>, service: string): string | undefined =>
+    Object.prototype.hasOwnProperty.call(bindings, service) ? bindings[service] : undefined;
+
   const resolve = (service: string): ResolveTargetResult | null => {
     // Try the local env binding first when this service is owned locally.
     if (locallyOwnedSet.has(service)) {
-      const localBinding = currentEnv.bindings[service];
+      const localBinding = ownBinding(currentEnv.bindings, service);
       const isHealthy = readHealth(service);
 
       if (localBinding && (isHealthy || !enableUnhealthyFallback)) {
@@ -255,7 +266,7 @@ export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceT
 
     // Fall through to the fallback env.
     if (fallbackEnv && fallbackEnvKey) {
-      const fallbackBinding = fallbackEnv.bindings[service];
+      const fallbackBinding = ownBinding(fallbackEnv.bindings, service);
       if (fallbackBinding) {
         return { target: fallbackBinding, viaFallback: true, resolvedEnvKey: fallbackEnvKey };
       }
