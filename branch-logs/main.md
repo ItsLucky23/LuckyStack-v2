@@ -431,3 +431,22 @@ Root-causes + fixes:
 **Diagnose-gotcha**: eerste live-runs gaven non-deterministische pass-counts (30 vs 7 vs 45) door LEFTOVER server-processen op :80 van stash-cycles → de test hitte een stale server. Altijd één schone server. Layer-5 `*.tests.ts` draaien tegen een LIVE server, niet in `vitest run`.
 
 **Files**: packages/core/src/{runtimeTypeValidation.ts,runtimeTypeValidation.test.ts}, packages/sync/src/handleHttpSyncRequest.ts, packages/test-runner/src/streamWatcher.ts, src/settings/_api/{confirmEmailChange,requestEmailChange}_v1.tests.ts, src/playground/_sync/{streamBroadcast,streamProgress,streamToToken}_server_v1.tests.ts, docs/lessons/0002-*.md, docs/AI_LESSONS_INDEX.md.
+
+## 2026-07-02 22:55 — Report-only LOW hardening round (7 fixes) + release v0.4.1
+
+**User prompt**: "ja ga er maar eens overheen" — nog een ronde over de resterende open punten (M1 + report-only LOW-findings).
+
+**7 security-relevante LOW-fixes** (1452 unit + 112 test-runner groen, tsc/lint/ai:lint clean, full build ✓):
+- server L1 — exempt-paths reflecteren geen ongevalideerde Origin meer in ACAO+credentials (httpHandler.ts: lege origin voor exempt routes).
+- server L5 — origin-exempt matching nu segment-boundary-aware (`/webhooks` exempt niet meer `/webhooksadmin` van origin+CSRF).
+- server L4 — auth rate-limit window uit dezelfde "general-limit-active" predikaat als de count (fix `defaultApiLimit:0` window/count-mismatch, beide blokken).
+- auth L2 — verifyBootstrap waarschuwt als `sessionCookieSameSite !== 'Strict'` in cookie-mode (CSRF-exempt auth-endpoints leunen op Strict tegen login-CSRF).
+- auth L5 — session/OAuth-state cookie `Secure` default nu AAN in productie (resolveCookieSecure); plain-HTTP prod moet expliciet opt-out.
+- auth L6 — clearAuthFailures in tryCatch (fire-and-forget `void` kan geen unhandled rejection meer lekken).
+- infra L2 — autoSelectEmailSender waarschuwt luid bij ConsoleSender-fallback in productie (zou reset-URLs/tokens loggen i.p.v. mailen).
+
+**M1**: bewust OPT-IN gehouden (warning staat; flippen = victim-lock DoS + breaking). Rest van LOW = accepted tradeoffs/cosmetisch, report-only.
+
+**Tests-fixes**: authLockout.test.ts (tryCatch-mock) + authLogoutRoute.test.ts (resolveEnvKey-mock) bijgewerkt voor de nieuwe core-imports.
+
+**Files**: packages/server/src/{httpHandler.ts,originExemptRegistry.ts,verifyBootstrap.ts,httpRoutes/{authApiRoute.ts,sessionCookie.ts,authLogoutRoute.test.ts}}, packages/login/src/{authLockout.ts,authLockout.test.ts}, packages/email/src/autoSelect.ts, codebase-scan-02-07/SCAN_REPORT.md.

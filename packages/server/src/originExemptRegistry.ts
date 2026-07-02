@@ -14,7 +14,12 @@
 //? docs/ARCHITECTURE_HTTP.md.
 
 export interface OriginExemptMatcher {
-  /** A route is exempt when its path starts with this prefix. */
+  /**
+   * A route is exempt when its path equals this prefix OR continues past it on a
+   * path-SEGMENT boundary (i.e. `<prefix>/...`). Matching is boundary-aware so a
+   * prefix can't bleed into a sibling route — `/webhooks` exempts `/webhooks` and
+   * `/webhooks/stripe` but NOT `/webhooksadmin`.
+   */
   pathPrefix: string;
 }
 
@@ -31,6 +36,14 @@ export const clearOriginExemptPaths = (): void => {
 };
 
 //? True when `routePath` matches a registered exempt prefix. Consulted by
-//? `enforceOriginPolicy` before it can 403 a header-less request.
+//? `enforceOriginPolicy` before it can 403 a header-less request AND by the CSRF
+//? middleware — so a single mis-matching prefix would drop BOTH protections.
+//? Match on a path-SEGMENT boundary (exact, or `<prefix>/...`) so a prefix like
+//? `/webhooks` can't silently exempt a sibling like `/webhooksadmin` (L5).
 export const isOriginExemptPath = (routePath: string): boolean =>
-  exemptPaths.some((matcher) => routePath.startsWith(matcher.pathPrefix));
+  exemptPaths.some(({ pathPrefix }) => {
+    if (!pathPrefix) return false;
+    if (routePath === pathPrefix) return true;
+    const boundary = pathPrefix.endsWith('/') ? pathPrefix : `${pathPrefix}/`;
+    return routePath.startsWith(boundary);
+  });

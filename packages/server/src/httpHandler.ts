@@ -136,7 +136,14 @@ const enforceOriginPolicy = (
   //? Origin (which they never send). Empty by default; opt-in only. The handler
   //? is still responsible for verifying the caller. See originExemptRegistry.
   if (isOriginExemptPath(routePath)) {
-    return { origin, rejected: false };
+    //? L1 (CORS hardening): exempt paths skip the origin GATE — server-to-server
+    //? callers send no Origin and authenticate via signature/HMAC in the handler.
+    //? But the raw, unvalidated Origin must NOT be reflected into
+    //? `Access-Control-Allow-Origin` alongside `Access-Control-Allow-Credentials`
+    //? — that is a CORS misconfig the moment an exempt prefix serves any
+    //? browser-readable, cookie-authenticated data. Return an empty origin so no
+    //? cross-origin ACAO is emitted for exempt routes (they don't need CORS).
+    return { origin: '', rejected: false };
   }
 
   if (!origin) {

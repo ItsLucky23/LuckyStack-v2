@@ -83,10 +83,13 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
           ? oauthRateLimiting.auth.maxAttempts
           : null);
     if (oauthInitLimit !== null) {
+      //? L4: derive the window from the SAME "is the general limit active?" test
+      //? as the count above (`!== false && > 0`), so `defaultApiLimit: 0` doesn't
+      //? pair the auth COUNT with the general WINDOW (an inconsistent bucket).
       const oauthInitWindowMs =
-        oauthRateLimiting.defaultApiLimit === false
-          ? oauthRateLimiting.auth.windowMs
-          : oauthRateLimiting.windowMs;
+        oauthRateLimiting.defaultApiLimit !== false && oauthRateLimiting.defaultApiLimit > 0
+          ? oauthRateLimiting.windowMs
+          : oauthRateLimiting.auth.windowMs;
       const { allowed, resetIn } = await checkRateLimit({
         key: `ip:${oauthRequesterIp}:auth:oauth-init`,
         limit: oauthInitLimit,
@@ -196,10 +199,12 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
         ? rateLimiting.auth.maxAttempts
         : null);
   if (ipLimitCount !== null) {
+    //? L4: window derived from the SAME predicate as `ipLimitCount` so
+    //? `defaultApiLimit: 0` doesn't mix the auth count with the general window.
     const ipWindowMs =
-      rateLimiting.defaultApiLimit === false
-        ? rateLimiting.auth.windowMs
-        : rateLimiting.windowMs;
+      rateLimiting.defaultApiLimit !== false && rateLimiting.defaultApiLimit > 0
+        ? rateLimiting.windowMs
+        : rateLimiting.auth.windowMs;
     const { allowed, resetIn } = await checkRateLimit({
       key: `ip:${requesterIp}:auth:credentials`,
       limit: ipLimitCount,

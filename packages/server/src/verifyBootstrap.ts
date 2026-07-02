@@ -135,6 +135,24 @@ export const verifyBootstrap = async (requirements: BootstrapRequirements = {}):
     }
   }
 
+  //? L2: the credentials login/register + OAuth-callback endpoints are CSRF-EXEMPT
+  //? (a same-site session bootstrap can't present a pre-existing CSRF token). That
+  //? exemption's safety rests on the session cookie being `SameSite=Strict` — a
+  //? cross-site POST then never carries it, so login-CSRF is impossible. If a
+  //? consumer relaxes `http.sessionCookieSameSite` to 'Lax'/'None' in cookie mode,
+  //? a cross-site POST DOES carry the cookie and login-CSRF becomes possible. Warn
+  //? so the coupling isn't a silent dependency on a mutable config value.
+  if (isProjectConfigRegistered()) {
+    const cfg = getProjectConfig();
+    if (!cfg.session.basedToken && cfg.http.sessionCookieSameSite !== 'Strict') {
+      getLogger().warn(
+        `[LuckyStack] SECURITY: http.sessionCookieSameSite is '${cfg.http.sessionCookieSameSite}', not 'Strict', `
+        + 'but the CSRF-exempt auth-bootstrap endpoints (/auth/api/credentials, /auth/callback/*) rely on '
+        + "SameSite=Strict to block cross-site login-CSRF. Use 'Strict', or add your own CSRF/origin check on those routes.",
+      );
+    }
+  }
+
   if (missing.length === 0) return;
 
   const detail = missing.map((line, idx) => `  ${idx + 1}. ${line}`).join('\n');

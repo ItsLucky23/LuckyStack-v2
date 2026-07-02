@@ -34,6 +34,12 @@ vi.mock('@luckystack/core', () => ({
   checkRateLimit: (params: unknown) => checkRateLimitMock(params),
   getRateLimitStatus: (key: string, limit: number) => getRateLimitStatusMock(key, limit),
   clearRateLimit: (key: string) => clearRateLimitMock(key),
+  //? `clearAuthFailures` now wraps its `clearRateLimit` calls in `tryCatch` (L6)
+  //? so a fire-and-forget `void` call can't leak an unhandled rejection. Mirror
+  //? the real [error, result] tuple contract so the callback actually runs.
+  tryCatch: async (fn: () => Promise<unknown>) => {
+    try { return [null, await fn()]; } catch (error) { return [error, null]; }
+  },
   getLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   registerHook: (name: string, handler: (p: LoginFailedPayload) => Promise<void>) => {
     registerHookMock(name, handler);

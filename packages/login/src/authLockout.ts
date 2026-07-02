@@ -22,6 +22,7 @@ import {
   clearRateLimit,
   getLogger,
   registerHook,
+  tryCatch,
 } from '@luckystack/core';
 
 //? DD-LOGIN-F5: build the lockout bucket key. When `requesterIp` is supplied
@@ -135,8 +136,17 @@ export const clearAuthFailures = async (accountKey: string, requesterIp?: string
   if (!cfg || !accountKey) return;
   //? Clear BOTH counters on a successful login so earlier typos don't penalise the
   //? user — the cross-IP bare-account bucket and the per-IP composite bucket.
-  await clearRateLimit(lockoutKey(accountKey));
-  if (requesterIp) await clearRateLimit(lockoutKey(accountKey, requesterIp));
+  //? L6: callers invoke this fire-and-forget (`void clearAuthFailures(...)`) on the
+  //? success path, so a transient Redis error must NOT become an unhandled
+  //? rejection. Swallow + log; a stale lockout counter self-expires within the
+  //? window, so a missed clear is non-fatal.
+  const [error] = await tryCatch(async () => {
+    await clearRateLimit(lockoutKey(accountKey));
+    if (requesterIp) await clearRateLimit(lockoutKey(accountKey, requesterIp));
+  });
+  if (error) {
+    getLogger().warn('[authLockout] clearAuthFailures failed (non-fatal — counter self-expires)', { error });
+  }
 };
 
 //? ADR 0012 — the lockout counter must reflect GENUINE credential failures only.

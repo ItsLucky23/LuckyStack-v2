@@ -129,3 +129,18 @@ Sockets JOIN with `formatRoomName(..., {purpose:'join'})` (`loadSocket.ts:199/29
 ## Verified-clean (prior criticals re-checked today, confirmed fixed)
 
 wsProxy mid-handshake crash · HTTP/WS SSRF · `server.js` source-disclosure · OAuth unverified-email linking · `validateType` fail-open · MT-3 sync room bypass · Windows `npm.cmd` space-in-path install bug (source + `dist`) · PM `.includes()` detection · `resolveLuckyStackRange` `file:`-spec footgun · stale-LoginForm scaffold asset drift · DOCSUI-01 emitter↔renderer shape drift · MCP tools (read-only, path-contained). Core has no `eval`/`child_process`/XSS sinks and no `Math.random()` on any security path.
+
+## Third follow-up (2026-07-02): report-only LOW hardening round
+
+User asked for another pass over the deferred items. Fixed the security-relevant LOW findings (verified against code; 1452 unit + 112 test-runner green, tsc/lint/ai:lint clean):
+- **server L1** — exempt paths no longer reflect an unvalidated Origin into `Access-Control-Allow-Origin` + credentials (httpHandler.ts returns empty origin for exempt routes).
+- **server L5** — origin-exempt matching is now path-segment-boundary aware (`/webhooks` no longer exempts `/webhooksadmin` from origin + CSRF).
+- **server L4** — auth rate-limit window derived from the same "general limit active" predicate as the count (fixes the `defaultApiLimit: 0` window/count mismatch, in both the credentials and OAuth-init blocks).
+- **auth L2** — `verifyBootstrap` warns when `sessionCookieSameSite !== 'Strict'` in cookie mode (the CSRF-exempt auth endpoints rely on Strict against login-CSRF).
+- **auth L5** — session/OAuth-state cookie `Secure` now defaults ON in production (`resolveCookieSecure`); a plain-HTTP prod deploy must opt out explicitly.
+- **auth L6** — `clearAuthFailures` wrapped in tryCatch so the fire-and-forget `void` calls can't leak an unhandled rejection.
+- **infra L2** — `autoSelectEmailSender` warns loudly when it falls back to ConsoleSender in production (which would log password-reset URLs/tokens instead of sending mail).
+
+**M1 (lockout default)**: kept OPT-IN. The finding offered "flip default OR boot warning"; the warning is in place. Flipping `rateLimiting.auth.enabled` to true by default introduces a bounded victim-account-lock DoS (cross-IP counter) and is breaking for consumers — a conscious opt-in, not a silent default.
+
+Remaining LOW items left as report-only (accepted tradeoffs / cosmetic): registration enumeration oracle (inherent UX), pre-params body-cap (by design for streaming uploads), health-probe amplification (infra-layer mitigation, documented), error-tracker PII plaintext (standard), prismaWithSecrets shell (trusted dev input), docs-ui CSS `image-set`/`cross-fade`, resolveSyncRouteKey system-sentinel (cosmetic dup-report), zodEmitter intersection fail-open (diagnostics-gated).

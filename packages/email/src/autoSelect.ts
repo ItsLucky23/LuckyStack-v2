@@ -1,4 +1,4 @@
-import { type EmailSender } from '@luckystack/core';
+import { type EmailSender, getLogger, resolveEnvKey } from '@luckystack/core';
 
 import { ConsoleSender } from './adapters/console';
 import { ResendSender } from './adapters/resend';
@@ -85,6 +85,20 @@ export const autoSelectEmailSender = (options: AutoSelectEmailSenderOptions = {}
   }
   if (smtpHost) {
     return buildSmtp(smtpHost);
+  }
+  //? L2: ConsoleSender is a DEV fallback — it `console.log`s the full rendered
+  //? body instead of sending. In production that silently means (a) users never
+  //? receive mail and (b) any body containing a secret (a password-reset URL
+  //? carries a live reset token) lands in the log sink until TTL expiry. Warn
+  //? loudly so this common prod-misconfig (no RESEND_API_KEY / SMTP_HOST) is
+  //? visible; a real prod deploy MUST configure a real adapter.
+  if (resolveEnvKey() === 'production') {
+    getLogger().warn(
+      '[LuckyStack] EMAIL: no email adapter configured (neither RESEND_API_KEY nor SMTP_HOST set) — '
+      + 'falling back to ConsoleSender in PRODUCTION. Outbound mail is NOT sent, and any email body '
+      + '(incl. password-reset URLs with live tokens) is written to the server log. Configure a real '
+      + 'adapter for production.',
+    );
   }
   return ConsoleSender({ from });
 };
