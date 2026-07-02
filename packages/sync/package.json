@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/sync",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -60,8 +60,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.4.0",
-    "@luckystack/error-tracking": "^0.4.0"
+    "@luckystack/core": "^0.4.1",
+    "@luckystack/error-tracking": "^0.4.1"
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",
