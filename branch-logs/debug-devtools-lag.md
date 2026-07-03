@@ -15,6 +15,22 @@
 
 ---
 
+## 2026-07-03 — Iteratie 1: createTask-fix aangebracht + logging-experiment (§5.1)
+
+*User prompt:* /loop — onderzoek + los de DevTools-lag op (autonoom).
+
+*Wat ik deed:*
+1. **createTask-fix** (uit handoff §2) aangebracht in `index.html` én `packages/create-luckystack-app/template/index.html`: dev-only inline `<script>` dat `console.createTask = undefined` zet vóór de module-graph laadt, zodat React 19.2's jsx-dev-runtime de no-op-tak bindt.
+2. **§5.1 logging-experiment**: `config.ts` `logging.devLogs` en `logging.stream` hard op `false` (was `resolvedEnvironment.dev`), met comment-markering als experiment. DevTools houdt elk gelogd object vast (retentie) → kandidaat voor de restlag.
+3. `npm run lint && npm run build` → groen.
+4. Verdachten §5.4 gecheckt: géén IntersectionObserver/MutationObserver/ResizeObserver in eigen src/packages-clientcode (de 770× uit de trace kwamen dus van extensies); client-side timers = alleen de 250ms taalpoll (TranslationProvider) — te goedkoop; activitySampler is server-side.
+
+*Files touched:* `index.html`, `packages/create-luckystack-app/template/index.html`, `config.ts`, deze log.
+
+*Notes:* volgende stap = servers starten + trace via Chrome DevTools MCP, en de production-build-test (§5.2). Kanttekening: het MCP-Chrome-profiel is schoon (geen extensies) en tijdens een Performance-recording staat de debugger-async-tracking uit (handoff §1), dus de subjectieve "console open = lag"-check blijft uiteindelijk een handmatige test voor de gebruiker.
+
+---
+
 ## HANDOFF vorige sessie (2026-07-02, andere machine) — integraal
 
 # DevTools-lag onderzoek (client)

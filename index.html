@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/x-icon" href="./favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      React 19.2 dev-runtime calls console.createTask() for EVERY JSX element (owner stacks).
+      With Chrome DevTools open each call becomes a real V8 debugger async task (~130k per
+      interaction burst), saturating the main thread. Disabling it before the module graph
+      loads makes React bind its no-op branch. Only cost: component labels in *async* stack
+      traces. Production/profiler/React DevTools unaffected. See branch-logs/debug-devtools-lag.md.
+    -->
+    <script>
+      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        console.createTask = undefined;
+      }
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <!-- <script src="https://unpkg.com/react-scan/dist/auto.global.js"></script> -->
     <title>Vite + React + TS</title>

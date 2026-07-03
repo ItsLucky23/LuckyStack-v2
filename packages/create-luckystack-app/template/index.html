@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{PROJECT_TITLE}}</title>
+    <!--
+      React 19.2 dev-runtime calls console.createTask() for EVERY JSX element (owner stacks).
+      With Chrome DevTools open each call becomes a real V8 debugger async task, saturating
+      the main thread on large trees. Disabling it before the module graph loads makes React
+      bind its no-op branch. Only cost: component labels in *async* stack traces.
+      Production/profiler/React DevTools unaffected.
+    -->
+    <script>
+      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        console.createTask = undefined;
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
