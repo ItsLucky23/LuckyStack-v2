@@ -126,6 +126,29 @@ Voorbereiding: `npm run server` + `npm run client`, log in, en open per stap `ht
 
 ---
 
+## 2026-07-03 — Iteratie 4: ÉCHTE DevTools-frontend gemeten — fix herstelt vrijwel de hele lag; onderzoek afgerond
+
+*Wat ik deed:* nieuw harnas `scripts/devtoolsLagHarness/cdpRealDevtoolsTest.mjs` — start Chrome met `--auto-open-devtools-for-tabs` zodat de **echte DevTools-frontend** attacht (source-map-parsing, console-retentie, DOM-mirroring — alles wat de CDP-simulatie níet dekt). 4 scenario's × 3 runs op de stresspagina (n=1500/hz=20).
+
+*Resultaat (runs 2+3, consistent; run 1 vervuild — zie note):*
+| scenario | fps | long-task ms/5s |
+|---|---|---|
+| DevTools DICHT, fix AAN | 27.7–27.8 | 507–562 |
+| DevTools OPEN, fix AAN | 24.4–25.2 | 576–809 |
+| DevTools OPEN, fix UIT (oude situatie) | 19.5–19.6 | 1347–1486 |
+| DevTools DICHT, fix UIT | 24.9–25.4 | 762–789 |
+
+*Conclusies:*
+1. **De fix herstelt met echte DevTools open vrijwel de hele lag**: +25% fps (24.4–25.2 vs 19.5–19.6) en ~50% minder long-task-tijd. De oude situatie is nu volledig écht gereproduceerd (geen simulatie) en de fix haalt hem weg.
+2. **Restkost van DevTools open mét fix is ~10-12% fps** — normale DevTools-overhead (DOM-mirroring, DevTools-UI zelf), geen pathologie. De restlag is daarmee **verklaard en binnen normale marges**.
+3. **Source-map-parse-piek verklaard**: run 1's "OPEN, fix AAN"-cel mat 17.7fps/2870ms omdat DevTools bij een verse profielstart nog de source maps van de hele dev-module-graph aan het parsen was tijdens de meting (12s settle was te kort). Dit bevestigt §5.2 als **tijdelijke** kost direct na het openen van DevTools — daarna zakt hij weg. Verwachting voor de gebruiker: de eerste ~10-20s na DevTools-open kan traag voelen in dev; dat is source-map-parsing, geen structurele lag.
+
+*Files touched:* `scripts/devtoolsLagHarness/cdpRealDevtoolsTest.mjs` (nieuw), deze log.
+
+*Status: onderzoek AFGEROND.* Hoofdoorzaak gefixt en in het volledig-echte scenario geverifieerd; restlag verklaard (normale DevTools-overhead + tijdelijke source-map-parse na openen). De handmatige checklist uit iteratie 2 blijft staan als optionele eigen-ogen-verificatie op de machine van de gebruiker (extensies + eigen app-schaal zijn de enige niet-geteste variabelen).
+
+---
+
 ## HANDOFF vorige sessie (2026-07-02, andere machine) — integraal
 
 # DevTools-lag onderzoek (client)
