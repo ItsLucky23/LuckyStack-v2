@@ -32,42 +32,11 @@ Each row links to that package's CLAUDE.md (the canonical function INDEX) if it 
 
 ### API routes (`_api/`)
 
-Every typed API route in this project. Sourced from `_ProjectApiTypeMap` in `src/_sockets/apiTypes.generated.ts`. Files live at `src/<page>/_api/<name>_v<version>.ts`. Check here **before** authoring a new endpoint — the route might already exist. The `Tests` column shows whether a per-route business-logic test stub exists (`npm run scaffold:test <route>` to create one).
-
-| Route | Method | Rate limit | Has stream | Tests |
-| --- | --- | --- | --- | --- |
-| `billing/listInvoices/v1` | GET | 60 | — | — |
-| `playground/echo/v1` | POST | 60 | — | ✓ |
-| `playground/spam/v1` | POST | 3 | — | ✓ |
-| `playground/streamCounter/v1` | POST | 30 | yes | ✓ |
-| `playground/testEmail/v1` | POST | 3 | — | ✓ |
-| `playground/throwError/v1` | POST | 60 | — | ✓ |
-| `reset-password/confirmReset/v1` | POST | 5 | — | ✓ |
-| `reset-password/sendReset/v1` | POST | 5 | — | ✓ |
-| `settings/changePassword/v1` | POST | 10 | — | ✓ |
-| `settings/confirmEmailChange/v1` | POST | 10 | — | ✓ |
-| `settings/deleteAccount/v1` | POST | 3 | — | ✓ |
-| `settings/listSessions/v1` | POST | 30 | — | ✓ |
-| `settings/requestEmailChange/v1` | POST | 5 | — | ✓ |
-| `settings/revokeSession/v1` | POST | 20 | — | ✓ |
-| `settings/signOutEverywhere/v1` | POST | 5 | — | ✓ |
-| `settings/updatePreferences/v1` | POST | 30 | — | ✓ |
-| `settings/updateUser/v1` | POST | 20 | — | ✓ |
-| `system/logout/v1` | DELETE | 30 | — | — |
-| `system/session/v1` | POST | 60 | — | — |
-| `vehicles/listVehicles/v1` | GET | 60 | — | — |
+No project API routes detected in the generated type map.
 
 ### Sync routes (`_sync/`)
 
-Every typed sync route in this project. Sourced from `_ProjectSyncTypeMap` in `src/_sockets/apiTypes.generated.ts`. Files live at `src/<page>/_sync/<name>_server_v<version>.ts` (+ optional `_client_v<version>.ts`). The `Tests` column shows whether a per-route business-logic test stub exists.
-
-| Route | Server stream | Client stream | Tests |
-| --- | --- | --- | --- |
-| `playground/echo/v1` | — | — | ✓ |
-| `playground/streamBroadcast/v1` | yes | — | ✓ |
-| `playground/streamProgress/v1` | yes | — | ✓ |
-| `playground/streamToToken/v1` | yes | — | ✓ |
-| `playground/throwSync/v1` | — | — | ✓ |
+No project sync routes detected in the generated type map.
 
 ### Server-injected `functions.*` map
 
@@ -75,24 +44,24 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 
 | Access path | Signature |
 | --- | --- |
-| `functions.db.prisma` | `(typeof import("@luckystack/core"))["prisma"]` |
-| `functions.redis.redis` | `(typeof import("@luckystack/core"))["redis"]` |
-| `functions.sentry.initializeSentry` | `(typeof import("@luckystack/error-tracking"))["initializeSentry"]` |
-| `functions.sentry.captureException` | `(typeof import("@luckystack/error-tracking"))["captureException"]` |
-| `functions.sentry.captureMessage` | `(typeof import("@luckystack/error-tracking"))["captureMessage"]` |
-| `functions.sentry.setSentryUser` | `(typeof import("@luckystack/error-tracking"))["setSentryUser"]` |
-| `functions.sentry.startSpan` | `(typeof import("@luckystack/error-tracking"))["startSpan"]` |
-| `functions.session.saveSession` | `(typeof import("@luckystack/login"))["saveSession"]` |
-| `functions.session.getSession` | `(typeof import("@luckystack/login"))["getSession"]` |
-| `functions.session.deleteSession` | `(typeof import("@luckystack/login"))["deleteSession"]` |
-| `functions.session.getAllSessions` | `(typeof import("@luckystack/login"))["getAllSessions"]` |
-| `functions.session.revokeUserSessions` | `(typeof import("@luckystack/login"))["revokeUserSessions"]` |
-| `functions.responseNormalizer` | `typeof import("../../packages/core/src/responseNormalizer")` |
-| `functions.sentrySetup` | `typeof import("../../packages/core/src/sentrySetup")` |
-| `functions.serviceRoute` | `typeof import("../../packages/core/src/serviceRoute")` |
-| `functions.sleep.sleep` | `(typeof import("../../packages/core/src/sleep"))["default"]` |
-| `functions.socketEvents` | `typeof import("../../packages/core/src/socketEvents")` |
-| `functions.tryCatch.tryCatch` | `(typeof import("../../packages/core/src/tryCatchClient"))["default"]` |
+| `functions.db.prisma` | `typeof import('@luckystack/core')['prisma']` |
+| `functions.redis.redis` | `typeof import('@luckystack/core')['redis']` |
+| `functions.sentry.initializeSentry` | `typeof import('@luckystack/error-tracking')['initializeSentry']` |
+| `functions.sentry.captureException` | `typeof import('@luckystack/error-tracking')['captureException']` |
+| `functions.sentry.captureMessage` | `typeof import('@luckystack/error-tracking')['captureMessage']` |
+| `functions.sentry.setSentryUser` | `typeof import('@luckystack/error-tracking')['setSentryUser']` |
+| `functions.sentry.startSpan` | `typeof import('@luckystack/error-tracking')['startSpan']` |
+| `functions.session.saveSession` | `typeof import('@luckystack/login')['saveSession']` |
+| `functions.session.getSession` | `typeof import('@luckystack/login')['getSession']` |
+| `functions.session.deleteSession` | `typeof import('@luckystack/login')['deleteSession']` |
+| `functions.session.getAllSessions` | `typeof import('@luckystack/login')['getAllSessions']` |
+| `functions.session.revokeUserSessions` | `typeof import('@luckystack/login')['revokeUserSessions']` |
+| `functions.responseNormalizer` | `typeof import('../../packages/core/src/responseNormalizer')` |
+| `functions.sentrySetup` | `typeof import('../../packages/core/src/sentrySetup')` |
+| `functions.serviceRoute` | `typeof import('../../packages/core/src/serviceRoute')` |
+| `functions.sleep.sleep` | `typeof import('../../packages/core/src/sleep')['default']` |
+| `functions.socketEvents` | `typeof import('../../packages/core/src/socketEvents')` |
+| `functions.tryCatch.tryCatch` | `typeof import('../../packages/core/src/tryCatchClient')['default']` |
 
 ### Server-function shims in `functions/` (source for the injection map)
 

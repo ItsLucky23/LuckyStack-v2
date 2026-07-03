@@ -7,10 +7,11 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "client": "vite --host",
+    "client": "vite --host 0.0.0.0",
+    "client:port": "vite --host 0.0.0.0 --port",
     "server": "luckystack-dev",
     "server:once": "tsx --tsconfig tsconfig.server.json server/server.ts",
-    "build": "vite build",
+    "build": "vite build && node scripts/bundleServer.mjs",
     "prod": "node dist/server.js",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"server/**/*.ts\" --cache --cache-location .eslintcache --ignore-pattern \"**/*.generated.*\" --ignore-pattern \"server/prod/**\"",
     "typecheck": "tsc --noEmit",

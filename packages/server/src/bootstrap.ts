@@ -60,6 +60,21 @@ const importIfExists = async (filePath: string): Promise<void> => {
   await import(pathToFileURL(filePath).href);
 };
 
+//? Production-bundle seam. `loadOverlayFolder` imports raw `luckystack/**/*.ts`
+//? files at runtime — fine under tsx in dev, but a bundled server runs under
+//? plain `node`, where importing a `.ts` file is a hard crash
+//? (ERR_UNKNOWN_FILE_EXTENSION). The server bundler (`scripts/bundleServer.mjs`)
+//? therefore generates an entry that statically imports the overlay files
+//? (so esbuild compiles them into the bundle) and registers a loader here.
+//? When a loader is registered, `bootstrapLuckyStack` runs it INSTEAD of the
+//? filesystem walk — same files, same order, but resolved at build time.
+type OverlayLoader = () => Promise<void>;
+let registeredOverlayLoader: OverlayLoader | null = null;
+
+export const registerOverlayLoader = (loader: OverlayLoader): void => {
+  registeredOverlayLoader = loader;
+};
+
 const loadOverlayFolder = async (overlayRoot: string): Promise<void> => {
   const overlayAbs = path.isAbsolute(overlayRoot)
     ? overlayRoot
@@ -126,7 +141,13 @@ export const bootstrapLuckyStack = async (
   if (!options.skipOverlayLoad) {
     //? Package self-wiring first, consumer overlay second (overlay overrides).
     await importOptionalPackageRegisters();
-    await loadOverlayFolder(overlayRoot);
+    if (registeredOverlayLoader) {
+      //? Production bundle: overlay files were compiled into the bundle and the
+      //? generated entry registered this loader — never touch raw .ts on disk.
+      await registeredOverlayLoader();
+    } else {
+      await loadOverlayFolder(overlayRoot);
+    }
   }
 
   //? Force login to load when installed so its session provider registers into

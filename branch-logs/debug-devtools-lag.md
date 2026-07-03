@@ -103,6 +103,29 @@ Voorbereiding: `npm run server` + `npm run client`, log in, en open per stap `ht
 
 ---
 
+## 2026-07-03 — Iteratie 3: prod-bundel gefixt (overlay-bundling), client:port-script, Playwright-verificatie
+
+*User prompt:* fix de 2 gemelde issues (npm run prod + npm run client -- --port X) en voer de test uit via Playwright/agent-browser.
+
+*Wat ik deed:*
+
+1. **`npm run prod` gefixt — de overlay wordt nu in de bundel gecompileerd.** Oorzaak: `bootstrapLuckyStack` walkt `luckystack/` op runtime en importeert rauwe `.ts`-bestanden — onder tsx (dev) prima, onder kale `node` = `ERR_UNKNOWN_FILE_EXTENSION`. Fix in drie delen:
+   - `packages/server/src/bootstrap.ts`: nieuw export `registerOverlayLoader(loader)` — als geregistreerd slaat `bootstrapLuckyStack` de filesystem-walk over en draait de loader (zelfde volgorde-semantiek, registers eerst).
+   - `scripts/bundleServer.mjs`: genereert `node_modules/.luckystack/bundleServerEntry.mjs` met statische imports van alle overlay-bestanden (OVERLAY_ORDER + index-first + alfabetisch) + `registerOverlayLoader`, en bundelt vanaf die entry.
+   - Mirror naar `packages/create-luckystack-app/template/scripts/bundleServer.mjs` (parity). Bijvangst daar: de template-`build` riep bundleServer **helemaal nooit** aan (`"build": "vite build"`) → `npm run prod` kon in een gescaffold project sowieso niet werken; nu `"build": "vite build && node scripts/bundleServer.mjs"`.
+   - Doc-updates: `docs/HOSTING.md` (overlay-note: prod-bundel pakt overlay-wijzigingen NIET van disk — rebuild nodig) + `packages/server/CLAUDE.md` (function index).
+2. **`npm run client -- --port X` gefixt in twee lagen.** Laag 1 (origineel gemeld): `vite --host` at `--port` op als host-waarde → script is nu `vite --host 0.0.0.0`. Laag 2 (nieuw ontdekt): **npm 11.6.1 op Windows eet `--port <n>` én `--port=<n>` volledig op, óók na `--`** (positionele args komen wél door). Oplossing: nieuw script `"client:port": "vite --host 0.0.0.0 --port"` → gebruik `npm run client:port -- 5174`. Beide package.json's (root + template). LET OP eerste poging via PowerShell-regex brak de encoding (BOM + em-dash) — teruggedraaid en met Edit gedaan (rule 9 bevestigd).
+3. **Playwright-verificatie (MCP; geen agent-browser CLI in dit project aanwezig):**
+   - **Prod** (`node dist/server.js default 4200`, NODE_ENV=production): boot zonder crash, login-pagina rendert, socket CONNECTED, `console.createTask === undefined`, **credentials-login werkt → /playground** (bewijst dat de overlay-userAdapter uit de bundel actief is). 0 echte console-errors.
+   - **Dev** (backend :83 — 80/81/82 bezet door Workspace-project; Vite via `npm run client:port -- 5174`): login → /playground; stresspagina n=1500/hz=20 → **32.8 fps, 6 long tasks (437ms/5s)**, consistent met de beste harnas-cel; de 2 console-errors op /playground zijn de bewuste `example.invalid`-avatar-demo.
+4. Kanttekening: `SERVER_PORT=4200 npm run prod` luistert alsnog op `ports.backend` (=80) omdat `config.ports.ts` de single source of truth is en SERVER_PORT slechts fallback — port override in prod = positional argv (`node dist/server.js default 4200`). Gedocumenteerd gedrag (HOSTING.md Docker-voorbeeld gebruikt al argv), geen bug.
+
+*Files touched:* `packages/server/src/bootstrap.ts`, `packages/server/src/index.ts`, `packages/server/CLAUDE.md`, `scripts/bundleServer.mjs`, `packages/create-luckystack-app/template/scripts/bundleServer.mjs`, `packages/create-luckystack-app/template/package.json`, `package.json`, `docs/HOSTING.md`, deze log.
+
+*Notes:* lint + volledige build groen; prod-boot + beide login-flows runtime-geverifieerd via Playwright. De handmatige DevTools-open-eindcheck (iteratie 2) blijft open voor de gebruiker.
+
+---
+
 ## HANDOFF vorige sessie (2026-07-02, andere machine) — integraal
 
 # DevTools-lag onderzoek (client)
