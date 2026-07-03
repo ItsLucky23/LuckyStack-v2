@@ -31,6 +31,39 @@
 
 ---
 
+## 2026-07-03 — Iteratie 1 (vervolg): CDP-meetharnas + stresspagina — fix gekwantificeerd
+
+*Wat ik deed:*
+
+1. **Runtime-verificatie**: dev-servers gestart (backend :81 — :80 was bezet door C:\code\Workspace; Vite op :5174 — :5173 was bezet door C:\code\portfolio op [::1]). Testaccount `devtools-lag@test.local` / `DevTools!Lag42x` geregistreerd. LET OP: 127.0.0.1:5173 → localhost:81 is cross-site → sessie-cookie doet niet mee; gebruik localhost:5174 (staat al in dnsEnvironmentMap) met `?backend=81`.
+2. **Fix live geverifieerd**: `console.createTask === undefined` op onze app; React bindt de no-op-tak.
+3. **Performance-trace via Chrome DevTools MCP** op /playground (835 nodes): 60fps, 0 long tasks, **0 AsyncTask\*-events** (waren er ~136k in de oude traces).
+4. **Eigen CDP-harnas gebouwd** (`scripts/devtoolsLagHarness/` — dependency-vrij, Node≥22): spawnt Chrome met remote-debugging-port en zet `Debugger.setAsyncCallStackDepth(32)` aan — exact wat DevTools-open doet — en meet 4 cellen: {fix aan/geneutraliseerd} × {tracking uit/aan}.
+   - **/playground (835 nodes)**: alle cellen 60fps. Maar promise-churn-microbench: tracking aan = **25-35× tragere promises** (1.5ms → 36-42ms per 20k links). Mechanisme bevestigd, schaal te klein voor voelbare lag.
+   - **Productiebuild (vite preview :4173)**: identiek aan dev → Vite-dev/source-maps op page-niveau NIET de boosdoener (§5.2 beantwoord, met kanttekening: de echte DevTools-frontend parseert wél source maps; dat deel simuleer ik niet).
+5. **Stresspagina gemaakt**: `src/devtools-lag-test/page.tsx` (publiek, plain; `?n=1500&hz=20` tunable) — grote boom die continu re-rendert (re-renders zijn wat per-element `createTask` triggert; pointermoves alléén deden dat niet — dáárom zag de eerste meting niets).
+6. **Resultaat 4-cellen op stresspagina (6030 nodes, 20Hz)**:
+   | cel | fps | long-task ms/5s |
+   |---|---|---|
+   | fix AAN, tracking UIT | 29.6 | 423 |
+   | fix AAN, tracking AAN | 25.1 | 749 |
+   | fix UIT, tracking UIT | 24.7 | 786 |
+   | fix UIT, tracking AAN (oude situatie) | 20.0 | 1380 |
+   → fix = **-45% long-task-tijd** met tracking aan; native `createTask` aanroepen kost óók zonder DevTools ~17% fps. Op deze pagina: 1500 tiles × ~6 elementen × 20Hz ≈ **180k createTask-calls/s** in de oude situatie.
+
+*Bevindingen buiten scope (NIET gefixt — Report Without Auto-Fixing):*
+- **`npm run prod` crasht**: `dist/server.js` importeert runtime een rauw `.ts`-bestand (`C:\code\LuckyStack-v2\luckystack\core\clients.ts`) → `ERR_UNKNOWN_FILE_EXTENSION`. Prod-bundel is kapot op deze branch/main.
+- **Socket blijft op polling**: in dev upgradet socket.io nooit naar websocket (alle frames via `transport=polling`). Mogelijk relevant voor perf, zeker het onderzoeken waard.
+- **`npm run client -- --port X` faalt**: het script is `vite --host` en `--host` slokt `--port` op als waarde (`getaddrinfo ENOTFOUND 5174`).
+
+*Files touched:* `src/devtools-lag-test/page.tsx` (nieuw), harnas-scripts (scratchpad → gecommit onder `scripts/devtoolsLagHarness/`), deze log.
+
+*Open / volgende iteratie:*
+- Restlag met échte DevTools-frontend (console-retentie, source-map-parsing in de DevTools-renderer, Elements-mirroring) is niet CDP-simuleerbaar → handmatige checklist voor de gebruiker staat klaar (zie sessie-samenvatting).
+- Kandidaat-experimenten: n=4000/hz=30 extreme cel; echte DevTools open naast het harnas (handmatig); socket-polling-bevinding onderzoeken.
+
+---
+
 ## HANDOFF vorige sessie (2026-07-02, andere machine) — integraal
 
 # DevTools-lag onderzoek (client)

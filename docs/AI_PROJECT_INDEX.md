@@ -56,12 +56,13 @@ _Untested routes — flag these to the user (Prioritize-tests rule), don't bulk-
 - `api/billing/listInvoices/v1`
 - `api/vehicles/listVehicles/v1`
 
-## Pages (9)
+## Pages (10)
 
 | Route | Template | Per-page middleware | File | Summary |
 | --- | --- | --- | --- | --- |
 | `/` | plain | — | `page.tsx` | — |
 | `/admin` | dashboard | yes | `admin/page.tsx` | — |
+| `/devtools-lag-test` | plain | — | `devtools-lag-test/page.tsx` | luckystack-allow i18n: dev-only diagnostic stress page, never user-facing |
 | `/docs` | plain | — | `docs/page.tsx` | — |
 | `/login` | plain | — | `login/page.tsx` | — |
 | `/playground` | dashboard | yes | `playground/page.tsx` | — |
