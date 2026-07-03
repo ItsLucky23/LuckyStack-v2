@@ -22,6 +22,11 @@ const isIgnoredDevWatchPath = (filePath: string): boolean => {
     || normalizedPath.includes('/.smoke-test/')
     || normalizedPath.includes('/dist/')
     || normalizedPath.includes('/.cache/')
+    //? Regenerated wholesale by `build:packages` (copyFrameworkDocs) WHILE the
+    //? dev server runs; chokidar's scandir then races the delete/recreate and
+    //? the resulting FSWatcher error is UNHANDLED in Vite → the whole dev
+    //? server process dies. Never watch generated publish artifacts.
+    || normalizedPath.includes('/framework-docs/')
     || normalizedPath.endsWith('/src/_sockets/apiTypes.generated.ts')
     || normalizedPath.endsWith('/src/docs/apiDocs.generated.json')
   );

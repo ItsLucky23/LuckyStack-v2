@@ -5,7 +5,7 @@
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
 | main | (none) | 2026-07-02 22:55 | active | 24 |
-| debug/devtools-lag | (none) | 2026-07-03 | active (createTask-fix gekwantificeerd via CDP-harnas: -45% long-task met tracking aan; stresspagina + harnas gecommit; 3 out-of-scope bevindingen incl. kapotte prod-bundel) | 3 |
+| debug/devtools-lag | (none) | 2026-07-03 | active (fix gekwantificeerd: +56% fps vs oude situatie; FULL-DevTools-simulatie toegevoegd; Vite-watcher-crash gefixt; polling-bevinding ingetrokken; handmatige eindcheck-checklist klaar) | 4 |
 | chore/package-split-prep | (none) | 2026-06-23 | active (wizard+manage verified incl. verdaccio; 5 release-blockers fixed incl. Windows install) | 137 |
 | chore/overnight-audit-2026-06-24 | (none) | 2026-06-29 | active (rounds 1-8: audit + verification sweep + ~40 safe fixes + all 7 design-decisions done [+#5 mutation-safety] + NODE_ENV detection unified on resolveEnvKey() across 17 framework sites; consumer-template env-unify [4 files] staged-deferred behind concurrent feat/ai-docs-layers entanglement) | 11 |
 | feat/ai-docs-layers-2026-06-29 | (none) | 2026-06-29 | active (7 new AI-context layers: doc-coverage gate, staleness, lessons, example corpus, code→ADR, context budget, eval; CLAUDE.md + consumer propagation + parity test; ADR 0016; verified, not committed) | 1 |

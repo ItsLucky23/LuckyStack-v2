@@ -72,14 +72,33 @@ const NEUTRALIZE_JS = `(() => {
   Object.defineProperty(console, 'createTask', { configurable: false, get: () => orig, set: () => {} });
 })()`;
 
-async function measureCell(label, { asyncDepth }) {
-  if (asyncDepth > 0) {
-    await send('Debugger.enable');
-    await send('Debugger.setAsyncCallStackDepth', { maxDepth: asyncDepth });
-  } else {
+//? mode 'off'   = geen instrumentatie
+//? mode 'async' = alleen Debugger + async-stack-depth (de bewezen hoofdboosdoener)
+//? mode 'full'  = alle domeinen die de echte DevTools-frontend bij openen enable't:
+//?                DOM-mirror (getDocument), CSS, Overlay, Log, Network, Profiler + async-tracking.
+async function setMode(mode) {
+  if (mode === 'off') {
     await send('Debugger.setAsyncCallStackDepth', { maxDepth: 0 }).catch(() => {});
-    await send('Debugger.disable').catch(() => {});
+    for (const d of ['Debugger', 'DOM', 'CSS', 'Overlay', 'Log', 'Network', 'Profiler']) {
+      await send(`${d}.disable`).catch(() => {});
+    }
+    return;
   }
+  await send('Debugger.enable');
+  await send('Debugger.setAsyncCallStackDepth', { maxDepth: 32 });
+  if (mode === 'full') {
+    await send('DOM.enable').catch(() => {});
+    await send('DOM.getDocument', { depth: -1, pierce: true }).catch(() => {});
+    await send('CSS.enable').catch(() => {});
+    await send('Overlay.enable').catch(() => {});
+    await send('Log.enable').catch(() => {});
+    await send('Network.enable').catch(() => {});
+    await send('Profiler.enable').catch(() => {});
+  }
+}
+
+async function measureCell(label, mode) {
+  await setMode(mode);
   await sleep(700);
   const m = await evalInPage(MEASURE_JS);
   console.log(`--- ${label}`);
@@ -92,9 +111,11 @@ async function runVariant(name, { neutralizeFix }) {
   if (neutralizeFix) await send('Page.addScriptToEvaluateOnNewDocument', { source: NEUTRALIZE_JS });
   await send('Page.navigate', { url: PAGE });
   await sleep(3500);
-  const off = await measureCell('async-tracking OFF', { asyncDepth: 0 });
-  const on = await measureCell('async-tracking ON (= DevTools open)', { asyncDepth: 32 });
-  return { off, on };
+  const off = await measureCell('instrumentatie OFF', 'off');
+  const asyncOnly = await measureCell('async-tracking ON', 'async');
+  const full = await measureCell('FULL DevTools-domeinen ON', 'full');
+  await setMode('off');
+  return { off, async: asyncOnly, full };
 }
 
 fs.rmSync(PROFILE, { recursive: true, force: true });
@@ -125,10 +146,12 @@ try {
   const row = (label, m) => console.log(
     `${label.padEnd(42)} fps=${String(m.fps).padStart(5)}  ticks/s=${String(m.ticksPerSec).padStart(5)}  longTasks=${String(m.longTasks).padStart(4)} (${String(m.longTaskMs).padStart(7)}ms)`
   );
-  row('fix ON,  tracking OFF', withFix.off);
-  row('fix ON,  tracking ON', withFix.on);
-  row('fix OFF, tracking OFF', noFix.off);
-  row('fix OFF, tracking ON   <== oude situatie', noFix.on);
+  row('fix ON,  instrumentatie OFF', withFix.off);
+  row('fix ON,  async-tracking ON', withFix.async);
+  row('fix ON,  FULL DevTools ON', withFix.full);
+  row('fix OFF, instrumentatie OFF', noFix.off);
+  row('fix OFF, async-tracking ON', noFix.async);
+  row('fix OFF, FULL DevTools ON  <== oude situatie', noFix.full);
 } finally {
   chrome.kill();
 }

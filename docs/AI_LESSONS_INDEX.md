@@ -9,12 +9,13 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (2)
+## Lessons (3)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
 | 0001 | A node:* server import in shared/client code blanks the whole frontend | 🔴 critical | packages/core (client/server boundary) | runtime, bundling, client-server-boundary | `docs/lessons/0001-node-modules-leak-into-client-bundle.md` |
 | 0002 | A nested union in a route's input type made runtime validation reject ALL input with a bogus depth error | 🟠 high | packages/core (runtimeTypeValidation) | runtime, validation, type-text, production | `docs/lessons/0002-validatetype-union-depth-false-positive.md` |
+| 0003 | Measuring DevTools-open lag — three pitfalls that produce wrong conclusions | 🟡 medium | performance diagnostics (scripts/devtoolsLagHarness) | performance, devtools, react, measurement, cdp | `docs/lessons/0003-devtools-lag-measurement-pitfalls.md` |
 
 ## Takeaways
 
@@ -33,3 +34,11 @@ Never import a `node:*` module (or anything that transitively does — `async_ho
 The single-member union recursion must only happen when `splitTopLevel` actually isolated a DIFFERENT sub-type (a trimmed leading/trailing `|`, or a stripped paren) — `unionParts.length === 1 && singleMember !== type`. When the single part equals the whole type, there is no top-level union; fall through to the object/array/primitive handling instead of recursing. Regression test: `runtimeTypeValidation.test.ts` — "accepts a shallow value against an object type whose properties contain nested unions". General takeaway: a "max depth exceeded" on a shallow value is almost never real nesting — suspect a recursion that doesn't consume input. And run the per-route (`*.tests.ts`) suite against a live server after any change to input types or the validator; `npx vitest run` does NOT exercise the HTTP validation path.
 
 → `docs/lessons/0002-validatetype-union-depth-false-positive.md`
+
+### 0003 — Measuring DevTools-open lag — three pitfalls that produce wrong conclusions
+
+**0003** · medium · performance diagnostics (scripts/devtoolsLagHarness) · tags: performance, devtools, react, measurement, cdp · 2026-07-03
+
+Use `scripts/devtoolsLagHarness/cdpStressTest.mjs` with the committed `/devtools-lag-test` page at a NON-saturated point (n=1500, hz=20 → ~27fps baseline is the validated regime). Drive re-renders (setState on an interval), not synthetic pointer events. For socket-transport questions, read `socket.io.engine.transport.name` from the live module — never conclude from the request list. And remember `Debugger.setAsyncCallStackDepth` only approximates an open DevTools; console-object retention and source-map parsing exist only in the real DevTools frontend, so the final verdict needs a manual check.
+
+→ `docs/lessons/0003-devtools-lag-measurement-pitfalls.md`

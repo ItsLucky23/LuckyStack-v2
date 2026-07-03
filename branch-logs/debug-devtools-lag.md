@@ -64,6 +64,45 @@
 
 ---
 
+## 2026-07-03 — Iteratie 2: FULL-DevTools-simulatie, Vite-watcher-crash gefixt, polling-bevinding INGETROKKEN
+
+*Wat ik deed:*
+
+1. **Harnas uitgebreid** (`cdpStressTest.mjs`): derde modus `full` die alle domeinen enable't die de echte DevTools-frontend bij openen aanzet (DOM-mirror via `DOM.getDocument`, CSS, Overlay, Log, Network, Profiler + async-tracking).
+2. **6-cellen-resultaat op n=1500/hz=20** (het gevalideerde meetpunt):
+   | cel | fps | long-task ms/5s |
+   |---|---|---|
+   | fix AAN, instrumentatie UIT | 27.1 | 381 |
+   | fix AAN, async-tracking AAN | 23.0 | 1070 |
+   | fix AAN, FULL DevTools AAN | 22.9 | 949 |
+   | fix UIT, instrumentatie UIT | 20.2 | 1367 |
+   | fix UIT, async-tracking AAN | 20.6 | 1152 |
+   | fix UIT, FULL DevTools AAN (oude situatie) | 17.4 | 1718 |
+   → De extra DevTools-domeinen voegen vrijwel niets toe zodra de fix actief is: **async-tracking × createTask is de dominante term**. Fix aan + DevTools dicht vs oude situatie = 27.1 vs 17.4 fps (+56%) en 4.5× minder long-task-tijd.
+3. **Extreme cel (n=4000/hz=30, 16k nodes) is ONBRUIKBAAR**: 9fps baseline = oversatureerd; warmup-noise domineert (cellen kwamen zelfs omgekeerd uit). Meetregime bewaken: baseline moet headroom houden. → Lesson `docs/lessons/0003-devtools-lag-measurement-pitfalls.md`.
+4. **Vite-dev-server-crash gevonden + gefixt**: `build:packages` regenereert `packages/create-luckystack-app/framework-docs/` terwijl Vite hem watched → chokidar scandir-race → **onafgehandelde FSWatcher-error killt het hele Vite-proces**. Fix: `/framework-docs/` toegevoegd aan `isIgnoredDevWatchPath` in `vite.config.ts`.
+5. **Bevinding "socket blijft op polling" INGETROKKEN**: vals alarm — websockets verschijnen niet in xhr/fetch-filters noch in resource-timing. Live gecheckt: `socket.io.engine.transport.name === 'websocket'`, upgrade werkt gewoon. (In de lesson opgenomen.)
+
+*Files touched:* `scripts/devtoolsLagHarness/cdpStressTest.mjs`, `vite.config.ts`, `docs/lessons/0003-devtools-lag-measurement-pitfalls.md`, deze log.
+
+*Status onderzoek:* mechanisme + fix zijn volledig gekwantificeerd en gecommit. Wat overblijft is niet CDP-simuleerbaar (console-object-retentie + source-map-parsing gebeuren in de echte DevTools-frontend) → handmatige eindcheck door de gebruiker, checklist hieronder.
+
+### HANDMATIGE EINDCHECK (voor de gebruiker, ~5 min)
+
+Voorbereiding: `npm run server` + `npm run client`, log in, en open per stap `http://localhost:5173/devtools-lag-test?n=1500&hz=20` (pas poort aan; op deze machine draaide het onderzoek op :5174 met `?backend=81`).
+
+1. **DevTools dicht** — pagina moet vlot voelen (~27fps tick-animatie). Dit is de baseline.
+2. **DevTools open (Console-tab)** — verwacht: merkbaar trager maar werkbaar (~23fps). Was dit vóór de fix onwerkbaar? Dan is de hoofdklacht opgelost.
+3. **DevTools open + in Console: `console.createTask` intypen** — moet `undefined` tonen (fix actief). Toont het een native function → verkeerde poort/oude build.
+4. **Restlag-check**: voelt de app met DevTools open nóg steeds veel te traag (niet "iets trager" maar "seconden vertraging")? Test dan in deze volgorde:
+   a. Console-tab → rechtsklik → "Clear console" + zet in Console-settings "Preserve log" UIT → verschil?
+   b. DevTools Settings (F1) → "Disable JavaScript source maps" + "Disable CSS source maps" aanvinken → DevTools herladen (Ctrl+R in DevTools) → verschil? Zo ja: source-map-parsing is de restfactor (alleen-dev-probleem).
+   c. Ander DevTools-tabblad actief (Elements vs Console vs Network) — welke tab lagt? Elements = DOM-mirroring, Network = request-buffering.
+   d. Zelfde test in een **schoon Chrome-profiel zonder extensies** (`chrome --user-data-dir=%TEMP%\clean-profile`) → verschil? Zo ja: extensies (1Password/Ghostery injecteren content-scripts óók met DevTools dicht, maar DevTools versterkt hun overhead).
+5. Rapporteer per stap: beter/slechter/gelijk — dan kan de volgende sessie gericht verder.
+
+---
+
 ## HANDOFF vorige sessie (2026-07-02, andere machine) — integraal
 
 # DevTools-lag onderzoek (client)
