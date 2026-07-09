@@ -20,8 +20,8 @@ Beyond the bare template copy, the CLI also copies the framework's AI-facing doc
 
 ## When to NOT suggest this (yet)
 
-- Existing LuckyStack projects: the CLI refuses to write into a directory that already exists. Do not run it inside an existing project to "refresh" files. Pull individual updates manually instead.
-- Upgrading framework dependencies in an existing project: bump `@luckystack/*` versions in the consumer's `package.json` directly.
+- Existing LuckyStack projects: the CLI refuses to write into a directory that already exists. Do not run it inside an existing project to "refresh" files — use `npx luckystack update` (the `@luckystack/cli` command) to refresh the framework-owned copied files; it re-renders via this scaffolder under the hood using the recorded `.luckystack/scaffold.json` choices.
+- Upgrading framework dependencies in an existing project: bump `@luckystack/*` versions in the consumer's `package.json` directly (then run `npx luckystack update` for the copied files).
 - Producing a non-LuckyStack starter (different framework, different stack): nothing here is framework-agnostic.
 - Anything that is not a one-shot fresh-checkout scaffold.
 

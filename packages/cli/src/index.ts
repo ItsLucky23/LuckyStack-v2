@@ -21,6 +21,7 @@ import { checkI18n } from './commands/checkI18n';
 import { listFeatures } from './commands/list';
 import { applyManagePlan } from './commands/manage';
 import { runReconfigureWizard } from './commands/reconfigure';
+import { runUpdate } from './commands/update';
 import { REGISTRY, findRegistryEntry } from './registry';
 
 const HELP = `luckystack — LuckyStack project CLI
@@ -30,6 +31,7 @@ Usage:
   npx luckystack manage [--no-install]
   npx luckystack add [<feature>] [--no-install]
   npx luckystack remove [<feature>] [--no-install]
+  npx luckystack update
   npx luckystack check-env
   npx luckystack check-i18n
 
@@ -43,6 +45,15 @@ manage            Step-based reconfiguration wizard: pick a setting (auth + OAut
                   (no feature) opens the same wizard.
 add <feature>     Install one optional package + inject its consumer-src assets.
 remove <feature>  Drop one optional package (reverses add; login removal is guarded).
+
+update            Refresh the framework-owned files the scaffold copied into this
+                  project (docs/luckystack, CLAUDE.md, skills, .claude/commands,
+                  generator scripts, shared eslint configs, route templates) from
+                  the current framework version. Pristine files (hash matches the
+                  .luckystack/scaffold.json baseline) are replaced; files YOU edited
+                  get a \`<file>.new\` sidecar + a merge report in dump/ — nothing you
+                  changed is ever overwritten. Never touches src/, functions/,
+                  config, prisma, or .env*.
 
 check-env         Scan for .env keys unused in code + env vars used but undefined.
 check-i18n        Scan for translation keys unused in code + used but missing from locales.
@@ -120,8 +131,19 @@ const main = async (): Promise<void> => {
     return;
   }
 
+  //? Framework-owned-files refresh (ADR 0021 phase 1a).
+  if (command === 'update') {
+    const project = validateProject(process.cwd(), 'Run this inside your project directory.');
+    if (!project) {
+      process.exit(1);
+    }
+    console.log(`luckystack update — ${project.root}`);
+    finish(runUpdate(project, { cliVersion }));
+    return;
+  }
+
   if (command !== 'add' && command !== 'remove' && command !== 'manage') {
-    console.error(`Unknown command: "${command ?? ''}". Commands: list, manage, add, remove, check-env, check-i18n.\n`);
+    console.error(`Unknown command: "${command ?? ''}". Commands: list, manage, add, remove, update, check-env, check-i18n.\n`);
     console.log(HELP);
     process.exit(2);
   }

@@ -17,3 +17,20 @@
 **Files touched:** packages/create-luckystack-app/src/scaffoldManifest.ts (nieuw), src/scaffoldManifest.test.ts (nieuw), src/index.ts (import + aanroep in main), packages/create-luckystack-app/CLAUDE.md.
 
 **Notes:** ADR 0021 (de "why") staat op branch debug/devtools-lag en merget onafhankelijk. Backfill-verhaal voor bestaande stempel-loze projecten hoort bij fase 1a (`luckystack update`): manifest afwezig ⇒ nooit blind overschrijven, sidecar-only. Fase 1a (update-command) en 1b (ORM-wizard) bouwen hierop voort.
+
+
+## 2026-07-09 09:20 — Fase 1a: `luckystack update` (framework-owned files verversen)
+
+**User prompt:** vervolg fasering ADR 0021: het expliciete update-command bovenop het fase-0-manifest.
+
+**Wat ik deed:**
+- Nieuw commando `luckystack update` (`packages/cli/src/commands/update.ts` + dispatch/help in `index.ts`). Scope = bucket-(a) allow-list: `docs/luckystack/`, `skills/`, `.claude/commands/`, `.luckystack/templates/`, `scripts/`, plus `CLAUDE.md`, `branch-logs/README.md`, beide gedeelde eslint-configs, `eval/README.md`+`scoreEval.mjs`. Raakt src/, functions/, config, prisma en .env* per definitie NIET.
+- Template-bron = de scaffolder zelf: `npx create-luckystack-app@<cli-versie>` in een temp-dir met de in het manifest OPGENOMEN keuzes (`choicesToFlags`), Windows-veilig gespawnd (zelfde cmd `/s /c ""<path>" …"`-patroon als runNpmInstall, Bug-H). De verse scaffold schrijft zijn eigen manifest → geen dubbele template-logica; hash-vergelijking leest beide manifesten.
+- Classificatie per file (pure `planUpdate`): ontbreekt→**add**; hash==vers→**unchanged**; hash==manifest-baseline→**pristine→overwrite**; anders→**user-modified→`<file>.new` sidecar** (nooit overschrijven). Manifest-loos project (pre-0.4.1) → sidecar-only. Na afloop: manifest-refresh (alleen geschreven files krijgen de nieuwe hash; sidecars houden de oude baseline; luckystackVersion+updatedAt bijgewerkt; nooit een manifest fabriceren) + rapport `dump/UPDATE_<hash>.log` met AI-merge-instructie voor de sidecars.
+- `renderFreshScaffold` injecteerbaar (DI) → 9 nieuwe unit-tests op fixtures (safe-surface allow/deny, flags-mapping incl. forward-compat, add/overwrite/sidecar/unchanged, CRLF-only=unchanged, stamp-less nooit-overschrijven, manifest-refresh, rapport, faal-pad). CLI-suite 142/142.
+- Kruis-check op ECHTE scaffolds: twee onafhankelijke `--no-prompt`-scaffolds → planUpdate classificeert alle 132 safe-surface files als `unchanged` → bewijs dat de cli-hashing (lokale kopie, sha256+CRLF→LF) byte-exact overeenkomt met de scaffolder-manifest-hashing.
+- Docs: cli/CLAUDE.md (command + Function Index-rij), create-luckystack-app/CLAUDE.md ("refresh" verwijst nu naar `luckystack update`), docs/ROADMAP.md §sync-docs-CLI VERWIJDERD (dit command vervangt het — protocol: geland item eruit).
+
+**Files touched:** packages/cli/src/commands/update.ts (nieuw), update.test.ts (nieuw), packages/cli/src/index.ts, packages/cli/CLAUDE.md, packages/create-luckystack-app/CLAUDE.md, docs/ROADMAP.md.
+
+**Notes:** De npx-registry-route (default render-pad) is bewust alleen via verdaccio-e2e te testen — staat gepland als slotverificatie samen met `luckystack add cron`. Hash-implementatie is bewust gedupliceerd in cli (zero-dep-policy); de kruis-check hierboven is de drift-bewaker — overweeg later een parity-test in CI.

@@ -21,6 +21,15 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
   per-change consequence preview, then applies (`commands/reconfigure.ts` + `transitions.ts`),
   then ONE `npm install`. Env edits are value-safe (key-presence only; `.env.local` placeholders
   appended on add, a filled block never deleted).
+- `luckystack update` — refresh the FRAMEWORK-OWNED files the scaffold copied into the
+  project (docs/luckystack, CLAUDE.md, skills, .claude/commands, generator scripts, shared
+  eslint configs, `.luckystack/templates`) from the current framework version (ADR 0021
+  phase 1a). Renders a fresh scaffold into a temp dir via
+  `npx create-luckystack-app@<cli version>` with the choices RECORDED in
+  `.luckystack/scaffold.json`, then per file: hash == manifest baseline → pristine →
+  replaced; hash differs → user-modified → `<file>.new` sidecar + AI-merge report in
+  `dump/UPDATE_<hash>.log` — user edits are NEVER overwritten. No manifest (pre-0.4.1
+  scaffold) → sidecar-only mode. Never touches src/, functions/, config, prisma, .env*.
 - `luckystack check-env` / `luckystack check-i18n` — codebase audits that write AI-feedable,
   per-run hashed logs to `dump/<KIND>_<hash>.log` (dead/missing env keys + i18n keys).
 
@@ -57,6 +66,7 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 | `commands/addRouter.ts` | Add `@luckystack/router` + the `router` npm script AND copy the topology config files (`services.config.ts` + `deploy.config.ts` + `server/config/presetLoader.ts`) from `assets/router/` (idempotent) + wire their two `server.ts` side-effect imports (`import '../deploy.config';` / `import '../services.config';` after `import '../config';`). `removeRouter` drops the dep + script, un-wires those imports, and deletes the three config files. These files are NOT in a base install — `pruneRouter` strips them from a no-router scaffold; this is the inverse. |
 | `commands/addAiDocs.ts` | Add `@luckystack/mcp` (devDep) + register the graph server in `.mcp.json`; `removeAiDocs` reverses. (The doc tree is NOT bundled — re-scaffold for that.) |
 | `commands/addBackendOnly.ts` | Generic handler for `sync` / `email`: add dep + install (self-wire at boot). |
+| `commands/update.ts` | `update` — framework-owned-files refresh (ADR 0021 phase 1a). Exports the pure pieces for tests/tooling: `readScaffoldManifest`, `choicesToFlags` (recorded choices → scaffolder flags), `isSafeSurfacePath` (the bucket-(a) allow-list), `planUpdate` (add/overwrite/sidecar/unchanged classification), `applyUpdate` (writes + manifest refresh + dump/ report), `runUpdate` (orchestrator; `renderFreshScaffold` injectable — default runs `npx create-luckystack-app@<version>` into a temp dir with the Windows-safe cmd /s /c quoting). Hash logic mirrors the scaffolder's `scaffoldManifest.ts` (sha256, CRLF→LF for text) — verified by a cross-scaffold check. |
 | `commands/checkEnv.ts` | `check-env` — A: unused `.env` keys; B: env vars used but undefined. DEV_-aware; framework-key ignore list; env files via `getEnvFiles()` semantics (`LUCKYSTACK_ENV_FILES` else `.env`,`.env.local`). |
 | `commands/checkI18n.ts` | `check-i18n` — C: unused locale keys; D: used keys missing per-language. Used-set = literal `{ key: '...' }` + `errorCode: '...'` (dotted) harvested repo-wide; dynamic `key:<var>` sites listed for review. |
 | `lib/scan.ts` | Shared regex scanner: `collectSourceFiles` (skips node_modules/dist/tests/generated), `matchAll` (capture+line), `groupLocations`, `writeDumpLog` (`dump/<KIND>_<hash>.log`). |

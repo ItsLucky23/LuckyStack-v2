@@ -50,7 +50,7 @@ export interface ScaffoldManifest {
 
 export const hashFileContent = (buffer: Buffer, isText: boolean): string => {
   const bytes = isText
-    ? Buffer.from(buffer.toString('utf8').replace(/\r\n/g, '\n'), 'utf8')
+    ? Buffer.from(buffer.toString('utf8').replaceAll('\r\n', '\n'), 'utf8')
     : buffer;
   return crypto.createHash('sha256').update(bytes).digest('hex');
 };
@@ -85,7 +85,7 @@ export const collectFileHashes = (
     }
   };
   walk(rootDir);
-  return entries.sort((a, b) => a.path.localeCompare(b.path));
+  return entries.toSorted((a, b) => a.path.localeCompare(b.path));
 };
 
 export interface WriteScaffoldManifestInput {
