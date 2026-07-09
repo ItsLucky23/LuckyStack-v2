@@ -51,6 +51,7 @@ export interface CliArgs {
   //? CFG-01 — every wizard choice now has a matching CLI flag so the scaffold is
   //? fully scriptable (CI / AI / `--no-prompt`). `null` = flag not passed → the
   //? wizard asks (interactive) or the default applies (`--no-prompt`).
+  orm: OrmProvider | null;
   dbProvider: DbProvider | null;
   authMode: AuthMode | null;
   /** From `--oauth=google,github,...`. `null` = not passed. Only used when authMode resolves to `credentials+oauth`. */
@@ -67,6 +68,7 @@ export interface CliArgs {
 //? are parsed in the default arm; they're listed here for the help/error banner.
 export const VALID_FLAGS = [
   '--no-install', '--no-prompt',
+  '--orm=<prisma|none>',
   '--db=<mongodb|postgresql|mysql|sqlite>',
   '--auth=<none|credentials|credentials+oauth>',
   '--oauth=<google,github,discord,facebook,microsoft>',
@@ -99,6 +101,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
   let secretManager = false;
   let router = false;
   let aiBrowserTooling: AiBrowserTooling | null = null;
+  let orm: OrmProvider | null = null;
   let dbProvider: DbProvider | null = null;
   let authMode: AuthMode | null = null;
   let oauthProviders: OAuthProvider[] | null = null;
@@ -150,6 +153,8 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
     default: { if (arg.startsWith('--ai-browser=')) {
       aiBrowserTooling = parseValueFlag('--ai-browser', arg.slice('--ai-browser='.length), PROVIDER_OPTIONS.aiBrowserTooling);
+    } else if (arg.startsWith('--orm=')) {
+      orm = parseValueFlag('--orm', arg.slice('--orm='.length), PROVIDER_OPTIONS.orm);
     } else if (arg.startsWith('--db=')) {
       dbProvider = parseValueFlag('--db', arg.slice('--db='.length), PROVIDER_OPTIONS.dbProvider);
     } else if (arg.startsWith('--auth=')) {
@@ -180,7 +185,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
   }
   return {
     projectName, install, prompt, help, presence, errorTracking, docsUi, secretManager, router, aiBrowserTooling,
-    dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, aiInstructions,
+    orm, dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, aiInstructions,
   };
 };
 
@@ -190,6 +195,12 @@ export const parseArgs = (argv: string[]): CliArgs => {
 //? one place. Declared `as const` so each list stays a readonly literal-union
 //? tuple (drives the `ScaffoldChoices` field types below).
 const PROVIDER_OPTIONS = {
+  //? ORM dimension (ADR 0020): 'prisma' = the classic full setup; 'none' =
+  //? bring-your-own data layer via the `luckystack/core/clients.ts` hook
+  //? (every DB access without a registration throws an actionable error).
+  //? 'drizzle' is the planned next entry — it slots in here + a template
+  //? variant, nothing architectural.
+  orm: ['prisma', 'none'],
   dbProvider: ['mongodb', 'postgresql', 'mysql', 'sqlite'],
   authMode: ['none', 'credentials', 'credentials+oauth'],
   oauthProviders: ['google', 'github', 'discord', 'facebook', 'microsoft'],
@@ -198,6 +209,7 @@ const PROVIDER_OPTIONS = {
   aiBrowserTooling: ['all', 'agent-browser', 'none'],
 } as const;
 
+type OrmProvider = (typeof PROVIDER_OPTIONS.orm)[number];
 type DbProvider = (typeof PROVIDER_OPTIONS.dbProvider)[number];
 type AuthMode = (typeof PROVIDER_OPTIONS.authMode)[number];
 type OAuthProvider = (typeof PROVIDER_OPTIONS.oauthProviders)[number];
@@ -206,7 +218,14 @@ type MonitoringProvider = (typeof PROVIDER_OPTIONS.monitoringProvider)[number];
 type AiBrowserTooling = (typeof PROVIDER_OPTIONS.aiBrowserTooling)[number];
 
 interface ScaffoldChoices {
-  /** Database provider used in `schema.prisma`. */
+  /**
+   * Data-layer choice (ADR 0020). `'prisma'` ships the full Prisma setup;
+   * `'none'` strips it and leaves the `luckystack/core/clients.ts`
+   * registration hook (auth is forced to `'none'` — the default UserAdapter
+   * is Prisma-backed).
+   */
+  orm: OrmProvider;
+  /** Database provider used in `schema.prisma`. Ignored when `orm: 'none'`. */
   dbProvider: DbProvider;
   /** Auth strategy. `'none'` skips auth wiring. */
   authMode: AuthMode;
@@ -249,6 +268,7 @@ interface ScaffoldChoices {
 //? docs + a git hook (no app-runtime weight) and is the framework's core dev value,
 //? so it stays on by default.
 const DEFAULT_CHOICES: ScaffoldChoices = {
+  orm: 'prisma',
   dbProvider: 'mongodb',
   authMode: 'none',
   oauthProviders: [],
@@ -334,13 +354,17 @@ const runPromptsFallback = async (
   const answers: Record<string, string | string[]> = { ...presets };
   const need = (key: string): boolean => !(key in presets);
   try {
-    if (need('dbProvider')) {
+    if (need('orm')) {
+      answers.orm = await pickFromList(rl, 'Which ORM / data layer? (none = bring your own via luckystack/core/clients.ts)', PROVIDER_OPTIONS.orm, 'prisma');
+    }
+    const orm = asOption(answers.orm, PROVIDER_OPTIONS.orm, 'prisma');
+    if (orm !== 'none' && need('dbProvider')) {
       answers.dbProvider = await pickFromList(rl, 'Which database provider do you want to use?', PROVIDER_OPTIONS.dbProvider, 'mongodb');
     }
-    if (need('authMode')) {
+    if (orm !== 'none' && need('authMode')) {
       answers.authMode = await pickFromList(rl, 'Authentication mode?', PROVIDER_OPTIONS.authMode, 'none');
     }
-    const authMode = asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
+    const authMode = orm === 'none' ? 'none' : asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
     if (authMode === 'credentials+oauth' && need('oauthProviders')) {
       answers.oauthProviders = await pickMulti(rl, 'Which OAuth providers to wire?', PROVIDER_OPTIONS.oauthProviders);
     }
@@ -661,11 +685,16 @@ const runWizard = (
 //? string). Centralizes the per-field `asOption` validation that used to be
 //? inlined at the return site.
 const convertAnswersToChoices = (answers: Record<string, string | string[]>): ScaffoldChoices => {
-  const authMode = asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
+  const orm = asOption(answers.orm, PROVIDER_OPTIONS.orm, 'prisma');
+  //? Constraint (ADR 0020): the default UserAdapter is Prisma-backed, so
+  //? `orm: 'none'` forces auth off — the wizard skips the auth steps and a
+  //? stale/preset auth value must not leak through here.
+  const authMode = orm === 'none' ? 'none' : asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
   const rawOauth = answers.oauthProviders;
   const oauthPicked = Array.isArray(rawOauth) ? rawOauth : [];
 
   return {
+    orm,
     dbProvider: asOption(answers.dbProvider, PROVIDER_OPTIONS.dbProvider, 'mongodb'),
     authMode,
     oauthProviders: authMode === 'credentials+oauth'
@@ -702,6 +731,20 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
 
   const answers = await runWizard([
     {
+      key: 'orm', type: 'select', label: 'Which ORM / data layer?',
+      description: '"prisma" = the full classic setup · "none" = bring your own (register it in luckystack/core/clients.ts).',
+      details: [
+        '"prisma" ships the classic setup: prisma/schema.prisma, generated client,',
+        'prisma:* scripts, and the next question picks the database provider.',
+        '"none" strips all of that and leaves a registration hook: register your',
+        'own database client in luckystack/core/clients.ts (any DB access without',
+        'a registration throws a clear error pointing at that file). With "none",',
+        'auth is forced off too — the built-in UserAdapter is Prisma-backed.',
+        'Redis stays required either way (sessions/rate-limiting run on it).',
+      ].join('\n'),
+      options: PROVIDER_OPTIONS.orm, defaultValue: 'prisma',
+    },
+    {
       key: 'dbProvider', type: 'select', label: 'Which database provider?',
       description: 'Your database via Prisma — sets prisma/schema.prisma + the @prisma/client types.',
       details: [
@@ -711,6 +754,7 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
         '`npm run prisma:generate`.',
       ].join('\n'),
       options: PROVIDER_OPTIONS.dbProvider, defaultValue: 'mongodb',
+      skip: (a) => a.orm === 'none',
     },
     {
       key: 'authMode', type: 'select', label: 'Authentication mode? (@luckystack/login)',
@@ -723,6 +767,8 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
         'Add later instead: npx luckystack add login.',
       ].join('\n'),
       options: PROVIDER_OPTIONS.authMode, defaultValue: 'none',
+      //? orm 'none' forces auth off (Prisma-backed default UserAdapter).
+      skip: (a) => a.orm === 'none',
     },
     {
       key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire? (@luckystack/login)',
@@ -733,7 +779,7 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
         'later with no code change — just set/unset the env. Pick the ones to',
         'pre-wire now.',
       ].join('\n'),
-      options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.authMode !== 'credentials+oauth',
+      options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.orm === 'none' || a.authMode !== 'credentials+oauth',
     },
     {
       key: 'emailProvider', type: 'select', label: 'Transactional email adapter? (@luckystack/email)',
@@ -855,6 +901,7 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
 //? to defaults under `--no-prompt`). Booleans map to the wizard's Yes/No vocab.
 const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> => {
   const presets: Record<string, string | string[]> = {};
+  if (args.orm) presets.orm = args.orm;
   if (args.dbProvider) presets.dbProvider = args.dbProvider;
   if (args.authMode) presets.authMode = args.authMode;
   if (args.oauthProviders) presets.oauthProviders = args.oauthProviders;
@@ -874,15 +921,21 @@ const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> =>
 //? guarantees, for the `--no-prompt` (flags-over-defaults) path: OAuth providers
 //? only matter under `credentials+oauth`, and browser tooling rides on the AI
 //? template. Keeps both choice-resolution paths consistent.
-const normalizeChoices = (choices: ScaffoldChoices): ScaffoldChoices => ({
-  ...choices,
-  oauthProviders: choices.authMode === 'credentials+oauth' ? choices.oauthProviders : [],
-  aiBrowserTooling: choices.aiInstructions ? choices.aiBrowserTooling : 'none',
-});
+const normalizeChoices = (choices: ScaffoldChoices): ScaffoldChoices => {
+  //? orm 'none' forces auth off (Prisma-backed default UserAdapter — ADR 0020).
+  const authMode = choices.orm === 'none' ? 'none' : choices.authMode;
+  return {
+    ...choices,
+    authMode,
+    oauthProviders: authMode === 'credentials+oauth' ? choices.oauthProviders : [],
+    aiBrowserTooling: choices.aiInstructions ? choices.aiBrowserTooling : 'none',
+  };
+};
 
 //? `--no-prompt` choice resolution: typed flag values layered over DEFAULT_CHOICES.
 const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
   const choices: ScaffoldChoices = { ...DEFAULT_CHOICES };
+  if (args.orm) choices.orm = args.orm;
   if (args.dbProvider) choices.dbProvider = args.dbProvider;
   if (args.authMode) choices.authMode = args.authMode;
   if (args.oauthProviders) choices.oauthProviders = args.oauthProviders;
@@ -911,6 +964,8 @@ Options:
 
   Scaffold choices (each pre-fills the matching wizard step, or applies under --no-prompt):
   Lean by default: every optional package/feature is OFF unless you opt in below.
+  --orm=<prisma|none>                         Data layer (default prisma). none = bring your own
+                                              client via luckystack/core/clients.ts (forces --auth=none).
   --db=<mongodb|postgresql|mysql|sqlite>      Database provider (default mongodb).
   --auth=<none|credentials|credentials+oauth> Authentication mode (default 'none' = no auth).
   --oauth=<google,github,discord,facebook,microsoft>  OAuth providers (comma list; needs --auth=credentials+oauth).
@@ -1977,6 +2032,102 @@ const pruneRouter = (targetDir: string): void => {
   ]);
 };
 
+//? The `functions/db.ts` shim shipped under orm: 'none' — the consumer exports
+//? THEIR client here and it becomes `functions.db.*` in every handler (no
+//? casts, no Prisma types involved).
+const ORM_NONE_DB_SHIM = `//? orm: 'none' — this project ships WITHOUT Prisma. Export your own database
+//? client from this file; whatever you export becomes \`functions.db.*\` inside
+//? every API + sync handler (function-injection, see
+//? docs/luckystack/ARCHITECTURE_FUNCTION_INJECTION.md).
+//?
+//? Example (drizzle + postgres):
+//?   import { drizzle } from 'drizzle-orm/node-postgres';
+//?   export const db = drizzle(process.env.DATABASE_URL ?? '');
+//?
+//? Until you export something, any \`functions.db\` access is simply an empty
+//? object — and framework-level DB access (unused with auth off) throws an
+//? actionable error pointing at luckystack/core/clients.ts.
+
+export {};
+`;
+
+//? The `luckystack/core/clients.ts` overlay shipped under orm: 'none'.
+const ORM_NONE_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'none' — this project ships WITHOUT
+//? Prisma). Two optional registrations belong here:
+//?
+//? 1) /readyz database probe — without it the readiness check reports the
+//?    database as 'skipped' (the project can still go ready):
+//?
+//?      import { registerDbHealthCheck } from '@luckystack/core';
+//?      registerDbHealthCheck(async () => { /* await yourClient.ping() */ return true; });
+//?
+//? 2) Redis overrides (unchanged from a normal scaffold) — Redis stays
+//?    REQUIRED: sessions, rate-limiting, and one-time tokens run on it:
+//?
+//?      import { registerRedisClient } from '@luckystack/core';
+//?      import Redis from 'ioredis';
+//?      registerRedisClient(new Redis({ host: '...', tls: {} }));
+//?
+//? Your handler-facing database client lives in functions/db.ts (export it
+//? there and it becomes \`functions.db.*\`). If you later add Prisma after all:
+//? npm i @prisma/client prisma, restore prisma/schema.prisma, and register the
+//? client here via registerPrismaClient(...).
+
+export {};
+`;
+
+//? A minimal local stand-in for the Prisma-generated `User` type that
+//? config.ts's `SessionLayout` derives from. The consumer reshapes it freely —
+//? it only feeds their own session typing.
+const ORM_NONE_CONFIG_USER_TYPE = `//? orm: 'none' — no Prisma-generated User type; shape your own session
+//? source type here (SessionLayout below derives from it).
+type User = { id: string; email: string; name: string; password: string };`;
+
+//? orm 'none' (ADR 0020): strip the scaffold's Prisma surface and leave the
+//? registration hooks. The runtime seam lives in @luckystack/core (lazy
+//? '@prisma/client' load + an actionable no-client error) — this prune only
+//? removes files/deps/scripts and swaps the two hook files' content.
+const pruneOrmNone = (targetDir: string): void => {
+  removeScaffoldPath(targetDir, 'prisma');
+  removeScaffoldPath(targetDir, 'scripts/prismaWithSecrets.ts');
+  fs.writeFileSync(path.join(targetDir, 'functions', 'db.ts'), ORM_NONE_DB_SHIM);
+  fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), ORM_NONE_CLIENTS_STUB);
+  editScaffoldFile(targetDir, 'config.ts', [
+    ["import type { User } from '@prisma/client';", ORM_NONE_CONFIG_USER_TYPE],
+  ]);
+
+  //? package.json: drop @prisma/client (deps) + prisma (devDeps) + the prisma:* scripts.
+  const pkgPath = path.join(targetDir, 'package.json');
+  if (!fs.existsSync(pkgPath)) return;
+  let pkg: {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+    scripts?: Record<string, string>;
+  };
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+  } catch {
+    console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping orm:none dependency prune.`);
+    return;
+  }
+  if (pkg.dependencies) {
+    const { '@prisma/client': _client, ...dependencies } = pkg.dependencies;
+    pkg.dependencies = dependencies;
+  }
+  if (pkg.devDependencies) {
+    const { prisma: _prismaCli, ...devDependencies } = pkg.devDependencies;
+    pkg.devDependencies = devDependencies;
+  }
+  if (pkg.scripts) {
+    const scripts = { ...pkg.scripts };
+    delete scripts['prisma:generate'];
+    delete scripts['prisma:db:push'];
+    delete scripts['prisma:migrate:dev'];
+    pkg.scripts = scripts;
+  }
+  fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+};
+
 //? Remove OPT-OUT packages from a freshly-copied scaffold. Bounded packages:
 //? presence + error-tracking (drop dep + the few files/lines that referenced them),
 //? and docs-ui's explorer page. login/sync are more deeply woven (login is a whole
@@ -1989,6 +2140,9 @@ const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): voi
   if (!choices.docsUi) pruneDocsUi(targetDir);
   if (!choices.router) pruneRouter(targetDir);
   if (choices.authMode === 'none') pruneAuthNone(targetDir);
+  //? After pruneAuthNone (orm:'none' implies auth:'none'): strips the Prisma
+  //? surface and swaps in the bring-your-own-data-layer hook files (ADR 0020).
+  if (choices.orm === 'none') pruneOrmNone(targetDir);
 };
 
 //? Static lookup tables — moved to module scope so they aren't rebuilt on
@@ -2088,7 +2242,9 @@ const buildTemplateVars = (
     //? MongoDB's Prisma connector does NOT support `migrate dev` — it needs
     //? `db push`. Keep this in step with `printNextSteps`' prismaCmd so the
     //? README's first DB command matches the chosen provider.
-    PRISMA_INIT_CMD: choices.dbProvider === 'mongodb' ? 'npm run prisma:db:push' : 'npm run prisma:migrate:dev',
+    PRISMA_INIT_CMD: choices.orm === 'none'
+      ? '# (orm: none — wire your own data layer; see functions/db.ts + luckystack/core/clients.ts)'
+      : (choices.dbProvider === 'mongodb' ? 'npm run prisma:db:push' : 'npm run prisma:migrate:dev'),
     USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '@id @default(cuid())',
     DATABASE_URL: databaseUrlByProvider[choices.dbProvider] ?? `postgresql://user:password@localhost:5432/${slug}`,
     OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders, choices.authMode),
@@ -2177,14 +2333,27 @@ const copyAiDocs = (
 
 //? Print the post-scaffold summary and next-step instructions.
 const printNextSteps = (choices: ScaffoldChoices, slug: string): void => {
-  const prismaCmd = choices.dbProvider === 'mongodb'
-    ? 'npm run prisma:db:push           # initializes the Mongo schema'
-    : 'npm run prisma:migrate:dev       # creates the User table + initial migration';
+  const prismaCmd = choices.orm === 'none'
+    ? '# no ORM scaffolded — wire your own data layer (see checklist below)'
+    : (choices.dbProvider === 'mongodb'
+      ? 'npm run prisma:db:push           # initializes the Mongo schema'
+      : 'npm run prisma:migrate:dev       # creates the User table + initial migration');
+  const ormNoneChecklist = choices.orm === 'none'
+    ? `
+orm: none — bring-your-own data layer checklist:
+  1. functions/db.ts        export your database client (becomes functions.db.* in handlers)
+  2. luckystack/core/clients.ts   optional: registerDbHealthCheck(...) so /readyz probes your DB
+  3. .env.local             set your own connection string (DATABASE_URL is just a suggestion)
+  4. Redis stays REQUIRED   sessions / rate-limiting / tokens run on Redis, not the ORM
+  5. Want auth later?       install Prisma (or register a custom UserAdapter) first —
+                            the built-in login UserAdapter is Prisma-backed.
+` : '';
   console.log(`
 Done — scaffold complete.
 
 Choices:
-  database:    ${choices.dbProvider}
+  orm:         ${choices.orm}
+  database:    ${choices.orm === 'none' ? '(none — bring your own)' : choices.dbProvider}
   auth:        ${choices.authMode}${choices.oauthProviders.length > 0 ? ' (' + choices.oauthProviders.join(', ') + ')' : ''}
   email:       ${choices.emailProvider}
   monitoring:  ${choices.monitoringProvider}
@@ -2203,7 +2372,7 @@ Next steps:
   ${prismaCmd}
   npm run server                       # terminal 1 — backend (HTTP + Socket.io)
   npm run client                       # terminal 2 — frontend (Vite, opens http://localhost:5173)
-
+${ormNoneChecklist}
 Docs:
   https://github.com/ItsLucky23/LuckyStack-v2#readme
 `);
@@ -2294,7 +2463,8 @@ const main = async (): Promise<void> => {
 
     if (args.install) {
       runNpmInstall(targetDir);
-      runPrismaGenerate(targetDir);
+      //? orm: 'none' has no schema.prisma — nothing to generate.
+      if (choices.orm !== 'none') runPrismaGenerate(targetDir);
     } else {
       console.log('\nSkipped npm install (--no-install).');
     }

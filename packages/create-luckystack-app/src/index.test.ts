@@ -227,6 +227,7 @@ describe("parseArgs", () => {
   //? wizard asks / default applies"). Shared so the full-shape assertions stay
   //? readable as projectName + overrides.
   const CFG01_NULLS = {
+    orm: null,
     dbProvider: null,
     authMode: null,
     oauthProviders: null,
@@ -325,6 +326,13 @@ describe("parseArgs", () => {
     expect(parseArgs(["my-app", "--auth=credentials+oauth"]).authMode).toBe("credentials+oauth");
     expect(parseArgs(["my-app", "--email=resend"]).emailProvider).toBe("resend");
     expect(parseArgs(["my-app", "--monitoring=sentry"]).monitoringProvider).toBe("sentry");
+  });
+
+  it("parses --orm and exits 2 on an invalid value (ADR 0020)", () => {
+    expect(parseArgs(["my-app"]).orm).toBeNull();
+    expect(parseArgs(["my-app", "--orm=prisma"]).orm).toBe("prisma");
+    expect(parseArgs(["my-app", "--orm=none"]).orm).toBe("none");
+    expect(() => parseArgs(["my-app", "--orm=hibernate"])).toThrow("process.exit:2");
   });
 
   it("parses --oauth as a validated comma-separated list", () => {

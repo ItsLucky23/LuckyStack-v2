@@ -82,6 +82,7 @@ describe('choicesToFlags', () => {
   it('maps recorded choices onto scaffolder flags', () => {
     expect(
       choicesToFlags({
+        orm: 'prisma',
         dbProvider: 'postgresql',
         authMode: 'credentials+oauth',
         oauthProviders: ['google', 'github'],
@@ -96,6 +97,7 @@ describe('choicesToFlags', () => {
         aiBrowserTooling: 'agent-browser',
       }),
     ).toEqual([
+      '--orm=prisma',
       '--db=postgresql',
       '--auth=credentials+oauth',
       '--oauth=google,github',

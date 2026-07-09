@@ -84,9 +84,11 @@ A handler returns `true` (or simply ends `res`) to short-circuit dispatch; retur
 **Behavior:**
 
 - Matches when `routePath === projectConfig.http.readyEndpoint` (default `/readyz`).
-- Sequentially checks: `readBootUuid()` (Redis), `redis.ping()`, and a Prisma probe.
-- Prisma probe is provider-agnostic: tries `$queryRaw\`SELECT 1\`` first, then `$runCommandRaw({ ping: 1 })`. Detecting the active provider via private fields drifts between Prisma majors, so the handler probes by capability.
-- Returns `200 { status: 'ready', checks }` only when all three pass; `503 { status: 'not-ready', checks: { bootUuid, redis, prisma } }` otherwise.
+- Sequentially checks: `readBootUuid()` (Redis), `redis.ping()`, and a database check (ADR 0020):
+  1. a consumer-registered `registerDbHealthCheck(...)` probe (from `@luckystack/core`) wins;
+  2. otherwise the built-in Prisma probe runs when Prisma is part of the install (`isPrismaClientRegistered()` or a resolvable `@prisma/client`) — provider-agnostic: tries `$queryRaw\`SELECT 1\`` first, then `$runCommandRaw({ ping: 1 })` (detecting the active provider via private fields drifts between Prisma majors, so it probes by capability);
+  3. otherwise the check reports `'skipped'` — a deliberately DB-less project (`orm: 'none'`) can still go ready.
+- Returns `200 { status: 'ready', checks }` when boot UUID + Redis pass and the database check is not `false`; `503 { status: 'not-ready', ... }` otherwise. `checks.database` carries the tri-state (`true | false | 'skipped'`); `checks.prisma` is kept for backward compatibility (`true` when the database check passed or was skipped).
 
 **Edge cases:**
 

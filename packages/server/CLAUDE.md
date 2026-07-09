@@ -47,7 +47,7 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 | `registerErrorFormatter(formatter)` | Override the JSON error shape returned by framework error responses. | -> docs/security-defaults.md |
 | `getErrorFormatter()` | Read the currently registered formatter. | -> docs/security-defaults.md |
 | Route handler: `handleLivezRoute` | Liveness probe at `projectConfig.http.liveEndpoint`. Always 200 when reachable. | -> docs/http-routes.md |
-| Route handler: `handleReadyzRoute` | Readiness probe: checks boot UUID + Redis ping + Prisma ping. 503 until all three pass. | -> docs/http-routes.md |
+| Route handler: `handleReadyzRoute` | Readiness probe: boot UUID + Redis ping + database check (ADR 0020: a registered `registerDbHealthCheck` probe wins; else the built-in Prisma ping when Prisma is registered/resolvable; else `'skipped'` so a deliberately DB-less project can go ready). Response `checks.database` = tri-state, `checks.prisma` kept for compat. | -> docs/http-routes.md |
 | Route handler: `handleHealthRoute` | Health endpoint: returns boot UUID + env hashes for router topology checks. | -> docs/http-routes.md |
 | Route handler: `handleTestResetRoute` | Destructive test reset. Fail-closed on `NODE_ENV` and `TEST_RESET_TOKEN`. | -> docs/security-defaults.md |
 | Hook payload: `OnSocketConnectPayload` | Payload type for `onSocketConnect` lifecycle hook handlers. | -> docs/create-server.md |

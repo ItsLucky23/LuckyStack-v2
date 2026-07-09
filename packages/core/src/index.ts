@@ -163,6 +163,13 @@ export type {
 } from './errorTrackerRegistry';
 export * from './env';
 export * from './db';
+export {
+  registerDbHealthCheck,
+  getDbHealthCheck,
+  isDbHealthCheckRegistered,
+  resetDbHealthCheckForTests,
+} from './dbHealthCheck';
+export type { DbHealthCheck, DbHealthResult } from './dbHealthCheck';
 export { redis, getRedisConnectionOptions, registerStrayPrefixCommand } from './redis';
 export type { RedisConnectionOptions } from './redis';
 export {

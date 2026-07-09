@@ -108,6 +108,8 @@ export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
     const value = choices[key];
     return typeof value === 'string' && value.length > 0 ? value : null;
   };
+  const orm = str('orm');
+  if (orm) flags.push(`--orm=${orm}`);
   const db = str('dbProvider');
   if (db) flags.push(`--db=${db}`);
   const auth = str('authMode');

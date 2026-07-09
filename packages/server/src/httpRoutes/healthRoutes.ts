@@ -1,7 +1,10 @@
 import {
   computeSynchronizedEnvHashes,
   describeHealthHashConfig,
+  getDbHealthCheck,
   getProjectConfig,
+  isPrismaClientRegistered,
+  isPrismaClientResolvable,
   prisma,
   readBootUuid,
   redis,
@@ -47,6 +50,22 @@ const pingPrisma = async (): Promise<boolean> => {
   return false;
 };
 
+//? Database readiness (ADR 0020): a registered custom probe wins; otherwise
+//? the built-in Prisma ping runs only when Prisma is actually part of this
+//? install (registered client or resolvable '@prisma/client'). A deliberately
+//? DB-less project (orm: 'none') reports 'skipped' and can still go ready —
+//? previously the hard-wired Prisma ping kept it 503 forever.
+const checkDatabaseReady = async (): Promise<boolean | 'skipped'> => {
+  const registered = getDbHealthCheck();
+  if (registered) {
+    const [error, result] = await tryCatch(async () => registered());
+    if (error || result === null) return false;
+    return result;
+  }
+  if (isPrismaClientRegistered() || isPrismaClientResolvable()) return pingPrisma();
+  return 'skipped';
+};
+
 export const handleLivezRoute: HttpRouteHandler = ({ res, routePath }) => {
   if (routePath !== getProjectConfig().http.liveEndpoint) return Promise.resolve(false);
   res.statusCode = 200;
@@ -68,14 +87,22 @@ export const handleReadyzRoute: HttpRouteHandler = async ({ res, routePath }) =>
   const [redisError, pong] = await tryCatch(() => redis.ping());
   const redisOk = !redisError && (pong === 'PONG' || Boolean(pong));
 
-  const prismaOk = await pingPrisma();
+  const databaseResult = await checkDatabaseReady();
 
-  const ready = Boolean(bootUuid) && redisOk && prismaOk;
+  const ready = Boolean(bootUuid) && redisOk && databaseResult !== false;
   res.statusCode = ready ? 200 : 503;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({
     status: ready ? 'ready' : 'not-ready',
-    checks: { bootUuid: Boolean(bootUuid), redis: redisOk, prisma: prismaOk },
+    //? `prisma` kept for backward compatibility with existing probes/dashboards
+    //? (true when the database check passed OR was deliberately skipped);
+    //? `database` carries the richer tri-state.
+    checks: {
+      bootUuid: Boolean(bootUuid),
+      redis: redisOk,
+      database: databaseResult,
+      prisma: databaseResult !== false,
+    },
   }));
   return true;
 };
