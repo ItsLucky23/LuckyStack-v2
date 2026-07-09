@@ -2076,12 +2076,28 @@ const ORM_NONE_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'none' �
 export {};
 `;
 
-//? A minimal local stand-in for the Prisma-generated `User` type that
-//? config.ts's `SessionLayout` derives from. The consumer reshapes it freely —
-//? it only feeds their own session typing.
+//? A local stand-in for the Prisma-generated `User` type that config.ts's
+//? `SessionLayout` derives from. Mirrors the template schema.prisma User model
+//? field-for-field (the shipped components read `theme`/`avatar`/`language`,
+//? so a minimal stub breaks the consumer tsc) — the consumer reshapes it
+//? freely; it only feeds their own session typing.
 const ORM_NONE_CONFIG_USER_TYPE = `//? orm: 'none' — no Prisma-generated User type; shape your own session
-//? source type here (SessionLayout below derives from it).
-type User = { id: string; email: string; name: string; password: string };`;
+//? source type here (SessionLayout below derives from it). This mirrors the
+//? default template's User model — adjust it to YOUR data layer's user shape.
+type User = {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  email: string;
+  password: string | null;
+  provider: 'credentials' | 'google' | 'github' | 'discord' | 'facebook' | 'microsoft';
+  name: string | null;
+  avatar: string;
+  avatarFallback: string;
+  admin: boolean;
+  language: 'en' | 'nl' | 'de' | 'fr';
+  theme: 'light' | 'dark';
+};`;
 
 //? orm 'none' (ADR 0020): strip the scaffold's Prisma surface and leave the
 //? registration hooks. The runtime seam lives in @luckystack/core (lazy
