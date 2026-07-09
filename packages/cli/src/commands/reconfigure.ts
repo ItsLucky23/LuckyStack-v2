@@ -28,6 +28,7 @@ const toggleLabel = (on: boolean): string => (on ? 'on' : 'off');
 const TOGGLE_META: Record<ToggleId, { title: string; description: string }> = {
   presence: { title: 'Presence', description: 'live presence + socket status' },
   sync: { title: 'Sync', description: 'real-time sync events' },
+  cron: { title: 'Cron', description: 'leader-elected recurring jobs' },
   'docs-ui': { title: 'Docs UI', description: 'API explorer at /docs + /_docs' },
   'secret-manager': { title: 'Secret manager', description: 'off-host secret resolution' },
   router: { title: 'Router', description: 'multi-instance load-balancer' },

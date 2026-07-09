@@ -86,6 +86,7 @@ export const OPTIONAL_PACKAGES = [
   'email',
   'error-tracking',
   'presence',
+  'cron',
   'docs-ui',
 ] as const;
 

@@ -17,7 +17,7 @@ const cfg = (over: Partial<DesiredConfig> = {}): DesiredConfig => ({
   oauthProviders: [],
   email: 'none',
   monitoring: 'none',
-  toggles: { presence: false, sync: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false },
+  toggles: { presence: false, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false },
   ...over,
 });
 
@@ -125,7 +125,7 @@ describe('configFromState', () => {
       email: 'resend',
       monitoring: 'sentry',
       //? toggles cover every TOGGLE_ID; ids absent from packages default to false.
-      toggles: { presence: true, sync: false, 'docs-ui': true, 'secret-manager': false, router: false, mcp: false },
+      toggles: { presence: true, sync: false, cron: false, 'docs-ui': true, 'secret-manager': false, router: false, mcp: false },
     });
   });
 });

@@ -44,7 +44,7 @@ import {
 } from './featureOptions';
 
 //? Pure on/off optional packages (auth/email/monitoring have their own dimensions).
-export const TOGGLE_IDS = ['presence', 'sync', 'docs-ui', 'secret-manager', 'router', 'mcp'] as const;
+export const TOGGLE_IDS = ['presence', 'sync', 'cron', 'docs-ui', 'secret-manager', 'router', 'mcp'] as const;
 export type ToggleId = (typeof TOGGLE_IDS)[number];
 
 //? The full reconfigurable surface. The wizard edits this; `configFromState`
@@ -350,6 +350,10 @@ const TOGGLE_EFFECTS: Record<ToggleId, { on: string[]; off: string[] }> = {
   sync: {
     on: ['+ @luckystack/sync (real-time sync events; client bridge auto-attaches)'],
     off: ['- @luckystack/sync'],
+  },
+  cron: {
+    on: ['+ @luckystack/cron (leader-elected recurring jobs; register them in luckystack/cron/*.ts)'],
+    off: ['- @luckystack/cron (job files in luckystack/cron/ stay behind — delete them by hand)'],
   },
   'docs-ui': {
     on: ['+ @luckystack/docs-ui + src/docs/page.tsx (the editable API explorer)'],

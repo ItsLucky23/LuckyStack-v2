@@ -32,7 +32,7 @@ const WAVES = [
   ['core'],
   // mcp is a standalone stdio server (only deps: @modelcontextprotocol/sdk + zod);
   // no @luckystack/* runtime imports, so its placement is free — kept here as a leaf.
-  ['email', 'login', 'devkit', 'router', 'create-luckystack-app', 'secret-manager', 'mcp'],
+  ['email', 'login', 'devkit', 'router', 'create-luckystack-app', 'secret-manager', 'mcp', 'cron'],
   // Both of these type-check against @luckystack/login's freshly-built
   // dist/index.d.ts, so they MUST run in a wave after login:
   //  - error-tracking: `import type { PostLogoutPayload } from '@luckystack/login'`

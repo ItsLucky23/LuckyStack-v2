@@ -56,6 +56,9 @@
       "@luckystack/presence": [
         "./packages/presence/src/index.ts"
       ],
+      "@luckystack/cron": [
+        "./packages/cron/src/index.ts"
+      ],
       "@luckystack/presence/client": [
         "./packages/presence/src/client/index.ts"
       ],
@@ -92,6 +95,7 @@
     "packages/devkit/src/**/*",
     "packages/email/src/**/*",
     "packages/presence/src/**/*",
+    "packages/cron/src/**/*",
     "packages/router/src/**/*",
     "packages/server/src/**/*",
     "packages/test-runner/src/**/*",

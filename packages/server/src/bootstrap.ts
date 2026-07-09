@@ -49,6 +49,9 @@ const OVERLAY_ORDER = [
   // Sentry / docs-ui / presence sit on top of core but don't block boot.
   'sentry',
   'presence',
+  // Cron jobs — `registerCronJob(...)` calls in `luckystack/cron/*.ts` lazily
+  // start the leader-elected scheduler (optional @luckystack/cron).
+  'cron',
   'docs-ui',
   // Server overlay last — typically empty, but a place to wire framework
   // hooks (`registerHook('onSocketConnect', ...)` etc.) before listen().

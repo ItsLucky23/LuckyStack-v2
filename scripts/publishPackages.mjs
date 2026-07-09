@@ -56,7 +56,7 @@ const isAlreadyPublished = (dir) => {
 //? scaffold references is already on the registry.
 const WAVES = [
   ['core'],
-  ['email', 'login', 'devkit', 'router', 'test-runner', 'secret-manager', 'mcp'],
+  ['email', 'login', 'devkit', 'router', 'test-runner', 'secret-manager', 'mcp', 'cron'],
   ['error-tracking'],
   ['api', 'sync', 'presence'],
   ['server'],

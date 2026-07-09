@@ -36,7 +36,7 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 ## When to USE
 
 - A consumer scaffolded a base/partial project and now wants `login`, `presence`, `sync`,
-  `email`, `error-tracking`, or `docs-ui`.
+  `email`, `cron`, `error-tracking`, or `docs-ui`.
 
 ## When to NOT suggest
 
