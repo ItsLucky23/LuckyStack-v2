@@ -74,6 +74,14 @@ export const REGISTRY: readonly RegistryEntry[] = [
     note: 'Set RESEND_API_KEY (or SMTP_HOST) to send real mail; otherwise mail logs to the console.',
   },
   {
+    id: 'cron',
+    pkg: '@luckystack/cron',
+    kind: 'backend',
+    description: 'Leader-elected recurring jobs (cron expressions / intervals; runs on exactly one instance)',
+    removable: 'safe',
+    note: 'Register jobs with registerCronJob(...) in luckystack/cron/*.ts; the scheduler starts on the first registration.',
+  },
+  {
     id: 'sync',
     pkg: '@luckystack/sync',
     kind: 'backend',

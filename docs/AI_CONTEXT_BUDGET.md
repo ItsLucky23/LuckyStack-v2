@@ -6,15 +6,15 @@
 > Don't read every index every session. Pick the profile matching your task, LOAD only its
 > artifacts, and QUERY the rest via the `@luckystack/mcp` tools instead of reading whole files.
 
-## Artifact sizes (total ≈ 69,444 tokens if all loaded)
+## Artifact sizes (total ≈ 70,567 tokens if all loaded)
 
 | Artifact | Est. tokens | Bytes | Purpose |
 | --- | --- | --- | --- |
 | `contract` — `CLAUDE.md` | 10,230 | 40,921 | Always-on rules (read every session). |
-| `quick-index` — `docs/AI_QUICK_INDEX.md` | 29,840 | 119,361 | Framework surfaces + package map. |
-| `capabilities` — `docs/AI_CAPABILITIES.md` | 3,673 | 14,690 | Existing helpers/exports — check before authoring. |
+| `quick-index` — `docs/AI_QUICK_INDEX.md` | 30,516 | 122,065 | Framework surfaces + package map. |
+| `capabilities` — `docs/AI_CAPABILITIES.md` | 3,742 | 14,966 | Existing helpers/exports — check before authoring. |
 | `project-index` — `docs/AI_PROJECT_INDEX.md` | 2,647 | 10,586 | Routes/pages/helpers/components + test coverage. |
-| `decisions` — `docs/AI_DECISIONS_INDEX.md` | 5,282 | 21,126 | Why-it-is-this-way (ADRs). |
+| `decisions` — `docs/AI_DECISIONS_INDEX.md` | 5,660 | 22,640 | Why-it-is-this-way (ADRs). |
 | `lessons` — `docs/AI_LESSONS_INDEX.md` | 782 | 3,128 | Known pitfalls (what failed). |
 | `runbooks` — `docs/AI_RUNBOOKS.md` | 1,171 | 4,684 | Task-shaped golden paths. |
 | `examples` — `docs/AI_EXAMPLES_INDEX.md` | 776 | 3,104 | Canonical example corpus index. |
@@ -29,7 +29,7 @@ Per task type: the minimal artifact set to load + the MCP tools to query for eve
 
 _Adding an API/sync route: reuse before authoring, copy the canonical shape._
 
-- **Load** (≈ 15,850 tokens): `contract`, `capabilities`, `examples`, `runbooks`
+- **Load** (≈ 15,919 tokens): `contract`, `capabilities`, `examples`, `runbooks`
 - **Query via MCP** (don't read whole): `find_route`, `get_capability`, `get_example('auth-api-route')`, `blast_radius`
 
 ### `new-page`
@@ -43,7 +43,7 @@ _Adding a page: match an existing template/component + state the intent._
 
 _Auditing: lean on the why-record + risky hubs, not every page intent._
 
-- **Load** (≈ 18,159 tokens): `contract`, `decisions`, `project-index`
+- **Load** (≈ 18,537 tokens): `contract`, `decisions`, `project-index`
 - **Query via MCP** (don't read whole): `god_nodes`, `blast_radius`, `get_decision`, `list_decisions('security')`
 
 ### `debug`

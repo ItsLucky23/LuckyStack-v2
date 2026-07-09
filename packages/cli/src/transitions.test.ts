@@ -6,7 +6,7 @@ const cfg = (over: Partial<DesiredConfig> = {}): DesiredConfig => ({
   oauthProviders: [],
   email: 'none',
   monitoring: 'none',
-  toggles: { presence: false, sync: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false },
+  toggles: { presence: false, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false },
   ...over,
 });
 
@@ -65,20 +65,20 @@ describe('planChanges — email & monitoring', () => {
 
 describe('planChanges — toggles', () => {
   it('presence off → on', () => {
-    expect(summaries(cfg(), cfg({ toggles: { presence: true, sync: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false } }))).toEqual(['presence: off → on']);
+    expect(summaries(cfg(), cfg({ toggles: { presence: true, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false } }))).toEqual(['presence: off → on']);
   });
   it('docs-ui on → off', () => {
-    const from = cfg({ toggles: { presence: false, sync: false, 'docs-ui': true, 'secret-manager': false, router: false, mcp: false } });
+    const from = cfg({ toggles: { presence: false, sync: false, cron: false, 'docs-ui': true, 'secret-manager': false, router: false, mcp: false } });
     expect(summaries(from, cfg())).toEqual(['docs-ui: on → off']);
   });
   it('secret-manager off → on', () => {
-    expect(summaries(cfg(), cfg({ toggles: { presence: false, sync: false, 'docs-ui': false, 'secret-manager': true, router: false, mcp: false } }))).toEqual(['secret-manager: off → on']);
+    expect(summaries(cfg(), cfg({ toggles: { presence: false, sync: false, cron: false, 'docs-ui': false, 'secret-manager': true, router: false, mcp: false } }))).toEqual(['secret-manager: off → on']);
   });
   it('router off → on', () => {
-    expect(summaries(cfg(), cfg({ toggles: { presence: false, sync: false, 'docs-ui': false, 'secret-manager': false, router: true, mcp: false } }))).toEqual(['router: off → on']);
+    expect(summaries(cfg(), cfg({ toggles: { presence: false, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: true, mcp: false } }))).toEqual(['router: off → on']);
   });
   it('mcp off → on', () => {
-    expect(summaries(cfg(), cfg({ toggles: { presence: false, sync: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: true } }))).toEqual(['mcp: off → on']);
+    expect(summaries(cfg(), cfg({ toggles: { presence: false, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: true } }))).toEqual(['mcp: off → on']);
   });
 });
 
@@ -104,7 +104,7 @@ describe('planChanges — preview ↔ apply parity (effects content)', () => {
 
 describe('planChanges — combined', () => {
   it('orders auth, email, monitoring, toggles', () => {
-    const to = cfg({ authMode: 'credentials', email: 'resend', monitoring: 'sentry', toggles: { presence: true, sync: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false } });
+    const to = cfg({ authMode: 'credentials', email: 'resend', monitoring: 'sentry', toggles: { presence: true, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false } });
     expect(summaries(cfg(), to)).toEqual([
       'Auth: enable credentials login',
       'Email: none → resend',

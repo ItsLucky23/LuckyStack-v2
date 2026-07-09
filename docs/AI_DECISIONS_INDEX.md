@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (19)
+## Decisions (20)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -32,6 +32,7 @@
 | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot | 🟢 accepted | secret-manager, prisma, cli, scaffold, dx, packaging | — | `docs/decisions/0017-prisma-cli-resolves-secret-manager-pointers.md` |
 | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode | 🟢 accepted | security, session, auth, config | — | `docs/decisions/0018-session-token-to-client-only-in-sessionbasedtoken-mode.md` |
 | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant | 🟢 accepted | auth, schema, config, oauth | — | `docs/decisions/0019-email-uniqueness-is-optin-via-provideraccountstrategy.md` |
+| 0022 | Ship @luckystack/cron (leader-elected scheduler) — reversing the "deliberately no cron" extension-points position | 🟢 accepted | cron, scheduler, packages, multi-instance, redis | — | `docs/decisions/0022-ship-luckystack-cron-reversing-no-cron.md` |
 
 ## Summaries
 
@@ -196,6 +197,14 @@ Email uniqueness is opt-in. The default schema correctly omits `@unique` (per-pr
 **Governs** (`//? @adr 0019`): `packages/login/src/accountStrategy.ts`, `src/settings/_api/confirmEmailChange_v1.ts`
 
 → `docs/decisions/0019-email-uniqueness-is-optin-via-provideraccountstrategy.md`
+
+### 0022 — Ship @luckystack/cron (leader-elected scheduler) — reversing the "deliberately no cron" extension-points position
+
+**0022** · accepted · tags: cron, scheduler, packages, multi-instance, redis · 2026-07-09
+
+Ship an optional `@luckystack/cron` package (NOT a core/server feature). It composes existing primitives: leadership via core's lease (single scheduler lease, renew loop; the lease header's "the renew loop is app code" contract fulfilled here), per-run dedup leases, `registerCronJob({ name, schedule, handler, ... })` with croner-parsed cron expressions (bundled dep — hand-rolling a cron parser is the classic DST/DOM-DOW footgun) or `{ everyMs }` intervals, per-tenant fan-out via a consumer-supplied `tenants()` callback, Redis stats hashes, `preCronRun` (veto) / `postCronRun` hooks, lazy start on first registration, teardown via `preServerStop` (ADR 0011). Auto-wired through `OPTIONAL_PACKAGES` + a `luckystack/cron/` overlay slot; manageable via the CLI as a toggle. The extension-points doc now recommends the package first, keeps bullmq (queues) and external schedulers (out-of-process) as the reach-past patterns, and records the reversal.
+
+→ `docs/decisions/0022-ship-luckystack-cron-reversing-no-cron.md`
 
 ## Code governed by decisions
 

@@ -12,7 +12,7 @@
 | H2 section | First line |
 | --- | --- |
 | Quick Links | \| Topic \| Framework dev path \| Consumer (post-install) path \| |
-| Project Snapshot | LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 6, Vite, Redis. The repo publishes as 15 `@luckystack/*` packages (+ `create-luckystack-app`); a 16th package dir, `env-resolver`, is a reserved, not-yet-published placeholder (no `package.json`, excluded from build/publish). See `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map. |
+| Project Snapshot | LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 6, Vite, Redis. The repo publishes as 16 `@luckystack/*` packages (+ `create-luckystack-app`); a 17th package dir, `env-resolver`, is a reserved, not-yet-published placeholder (no `package.json`, excluded from build/publish). See `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map. |
 | Core Rules (28) | 1. **Plan first for medium/high difficulty work.** Use tables or bullets, not wall-of-text. Skip planning only for trivial single-file changes. |
 | Branch Log Protocol | AI MUST append an entry to `branch-logs/<sanitized-branch>.md` after every prompt that produces **real code or architecture changes**. Skip for lint-only fixes, typo fixes, or translation-string-only edits. **When in doubt, log.** |
 | Decision Memory Protocol | This is **automatic AI behavior — there is no command for the user to run** (just like the branch-log protocol). The AI fills and reads the decision memory itself as a normal part of working in a session. |
@@ -291,6 +291,29 @@
 | Constant: `DEFAULT_CHOICES` | Lean defaults applied under `--no-prompt`: Mongo + `auth: 'none'` + `email: 'none'` + no monitoring + presence/error-tracking/docs-ui/secret-manager/router all OFF + AI instructions ON + `aiBrowserTooling: 'agent-browser'`. The ONE on-by-default optional is `aiInstructions` (docs only, no app-runtime weight). i18n always ships (not a choice). | -> docs/scaffold-flow.md |
 | `wireRouter()` / `wireGraphMcp()` | `wireRouter` (opt-in `router`) adds `@luckystack/router` + a `router` npm script (separate-process load-balancer; topology in deploy.config.ts). `wireGraphMcp` (rides on `aiInstructions`) adds `@luckystack/mcp` as a devDep + registers it in `.mcp.json` so AI agents query the project dependency graph. `@luckystack/cli` ships as a template devDep so `npx luckystack add` resolves locally. | -> docs/scaffold-flow.md |
 | Constant: `TEMPLATE_DIR` | Resolved absolute path to the bundled `template/` folder (`../template` from `dist/index.js`). The scaffold aborts with a packaging-bug message when this directory is missing at runtime. | -> docs/scaffold-flow.md |
+
+### `cron`
+| Function / Export | 1-line | Deep doc |
+| --- | --- | --- |
+| `registerCronJob(def): () => void` | Register (or replace) a recurring job; validates name/schedule eagerly, lazily starts the scheduler, returns an unregister fn. | -> docs/scheduler.md |
+| `unregisterCronJob(name): boolean` | Remove a job by name. | -> docs/scheduler.md |
+| `getCronJobNames(): string[]` | List registered job names in registration order. | -> docs/scheduler.md |
+| `runCronJobNow(name): Promise<Error \| null>` | Fire a job immediately, bypassing schedule + leadership (per-run lease still applies). Ops/test helper. | -> docs/scheduler.md |
+| `getCronJobStats(name): Promise<CronJobStats \| null>` | Read a job's Redis-backed run stats (last run/duration/status/error + run/fail/skip counters) from any instance. | -> docs/scheduler.md |
+| `registerCronConfig(input): void` | Override scheduler knobs (enabled, timezone, lease timings, tick interval). | -> docs/scheduler.md |
+| `getCronConfig(): CronConfig` | Read the merged active config (lazy, call-time). | -> docs/scheduler.md |
+| `DEFAULT_CRON_CONFIG: CronConfig` | Defaults: enabled, UTC, lease TTL 30s / renew 10s, tick 1s, run-lease 60s. | -> docs/scheduler.md |
+| `ensureCronSchedulerStarted(): void` | Idempotent manual start (normally implicit via `registerCronJob`). | -> docs/scheduler.md |
+| `stopCronScheduler(): Promise<void>` | Stop the loops + release the leader lease (auto-wired to `preServerStop`). | -> docs/scheduler.md |
+| `isCronLeader(): boolean` | Diagnostic — does THIS instance currently hold the scheduler lease? | -> docs/scheduler.md |
+| `registerCronTeardown(): void` | Idempotent `preServerStop` teardown registration (called by `./register`). | -> docs/scheduler.md |
+| `resetCronSchedulerForTests()` / `clearCronJobsForTests()` / `resetCronConfigForTests()` | Test-only state resets. | -> docs/scheduler.md |
+| Type: `CronJobDefinition<TTenant>` | `{ name, schedule, handler, timezone?, jitterMs?, runOnStart?, perTenant?, runLeaseTtlMs? }`. | -> docs/scheduler.md |
+| Type: `CronJobContext<TTenant>` | Handler arg: `{ jobName, scheduledFor, tenant? }`. | -> docs/scheduler.md |
+| Type: `CronScheduleInput` | `string` (croner 5/6-field expression) or `{ everyMs: number }` (min 1000). | -> docs/scheduler.md |
+| Type: `CronJobStats` | The stats shape returned by `getCronJobStats`. | -> docs/scheduler.md |
+| Hook: `preCronRun` (`PreCronRunPayload`) | Before every run — VETO seam (return a stop signal to skip: maintenance windows). | -> docs/scheduler.md |
+| Hook: `postCronRun` (`PostCronRunPayload`) | After every run with `durationMs` + `error` (null on success). | -> docs/scheduler.md |
 
 ### `devkit`
 | Function / Export | One-liner | Deep doc |
@@ -722,6 +745,7 @@
 | cli | 0 | 0 | 0 |
 | core | 9 | 9 | 0 |
 | create-luckystack-app | 5 | 5 | 0 |
+| cron | 1 | 1 | 0 |
 | devkit | 8 | 8 | 0 |
 | docs-ui | 4 | 4 | 0 |
 | email | 5 | 5 | 0 |
