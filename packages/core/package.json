@@ -83,6 +83,9 @@
     "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": true
+    },
     "eslint": {
       "optional": true
     },

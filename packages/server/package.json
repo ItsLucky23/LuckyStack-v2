@@ -72,6 +72,9 @@
     "@luckystack/sync": "^0.4.1"
   },
   "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": true
+    },
     "@luckystack/devkit": {
       "optional": true
     },

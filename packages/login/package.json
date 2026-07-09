@@ -70,6 +70,9 @@
     "@luckystack/email": "^0.4.1"
   },
   "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": true
+    },
     "@luckystack/email": {
       "optional": true
     }
