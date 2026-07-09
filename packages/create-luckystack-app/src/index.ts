@@ -24,6 +24,7 @@ import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { writeScaffoldManifest } from './scaffoldManifest';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2276,6 +2277,18 @@ const main = async (): Promise<void> => {
     //? AI browser-testing tooling (agent-browser CLI + optional MCP servers).
     //? Additive, user-approval-gated, dev-tools only. No-op when 'none'.
     wireAiBrowserTooling(targetDir, choices);
+
+    //? LAST file-producing step: record what this scaffold wrote (version +
+    //? resolved choices + per-file hashes) in `.luckystack/scaffold.json` —
+    //? the baseline `luckystack update` and future reconfigures diff against
+    //? (ADR 0021). Must run after every write/prune/wire above and before
+    //? `npm install` (node_modules is excluded defensively anyway).
+    writeScaffoldManifest(targetDir, {
+      luckystackVersion,
+      projectName: slug,
+      choices: { ...choices },
+      isTextFile,
+    });
 
     console.log('Files written.');
 

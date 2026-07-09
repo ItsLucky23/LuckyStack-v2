@@ -269,7 +269,8 @@
 ### `create-luckystack-app`
 | Function / Export | One-liner | Deep doc |
 | --- | --- | --- |
-| `main()` (CLI entrypoint, auto-invoked at bottom of `src/index.ts`) | Orchestrates the full scaffold flow: parse argv -> validate target dir -> optional prompts -> `copyTree` -> framework-docs copy (E.2) -> optional `npm install` + `npx prisma generate` -> print next-step block. | -> docs/scaffold-flow.md |
+| `main()` (CLI entrypoint, auto-invoked at bottom of `src/index.ts`) | Orchestrates the full scaffold flow: parse argv -> validate target dir -> optional prompts -> `copyTree` -> framework-docs copy (E.2) -> scaffold-manifest write -> optional `npm install` + `npx prisma generate` -> print next-step block. | -> docs/scaffold-flow.md |
+| `writeScaffoldManifest(targetDir, { luckystackVersion, projectName, choices, isTextFile })` (`src/scaffoldManifest.ts`) | LAST file-producing step of `main()`: writes `.luckystack/scaffold.json` = `{ schemaVersion, luckystackVersion, createdAt, projectName, choices, files: [{ path, sha256 }] }` — the committed baseline that lets a future `luckystack update` re-render the template with the SAME choices and tell pristine files (hash matches → safe overwrite) from user-modified ones (never overwrite). Hashes are CRLF→LF-normalized for text files; `node_modules`/`.git`/`.env`/`.env.local`/`.secret-manager-token`/the manifest itself are excluded. Companion helpers `collectFileHashes` / `hashFileContent` are exported for the update tooling. Rationale: ADR 0021. | (module header) |
 | `parseArgs(argv)` | Strict argv parser. Recognises `--no-install`, `--no-prompt`, the opt-in package flags `--presence` / `--error-tracking` / `--docs-ui` / `--secret-manager` / `--router`, `--db=` / `--auth=` / `--oauth=` / `--email=` / `--monitoring=`, `--ai-docs` / `--no-ai-docs`, `--ai-browser=<all\|agent-browser\|none>`, `--help` / `-h` (the `VALID_FLAGS` list), plus the first non-flag token as the project name. Any other `-`/`--` token (or a bad value) causes `process.exit(2)`. Returns `CliArgs`. | -> docs/cli-flags.md |
 | `printHelp()` | Prints the human-readable usage banner. Triggered by `--help` / `-h` and on missing project name. | -> docs/cli-flags.md |
 | `runPrompts()` | Arrow-key TTY wizard (an `(x/y)` progress counter, a one-line description + a `?`-toggle `details` block on EVERY step, and a final **review screen** listing all choices with `← back to edit` before commit) walking `dbProvider`, `authMode`, `oauthProviders` (conditional), `emailProvider`, `monitoringProvider`, then the per-package opt-IN toggles `presence` / `errorTracking` / `docsUi` / `secretManager` / `router` (all default off), `aiInstructions` (default on), `aiBrowserTooling` (conditional). (i18n is NOT a choice — it always ships.) Falls back to `runPromptsFallback` (numbered prompts) on a non-TTY. Returns a fully populated `ScaffoldChoices`. Skipped when `--no-prompt` is passed. | -> docs/scaffold-flow.md |
@@ -291,6 +292,9 @@
 | Constant: `DEFAULT_CHOICES` | Lean defaults applied under `--no-prompt`: Mongo + `auth: 'none'` + `email: 'none'` + no monitoring + presence/error-tracking/docs-ui/secret-manager/router all OFF + AI instructions ON + `aiBrowserTooling: 'agent-browser'`. The ONE on-by-default optional is `aiInstructions` (docs only, no app-runtime weight). i18n always ships (not a choice). | -> docs/scaffold-flow.md |
 | `wireRouter()` / `wireGraphMcp()` | `wireRouter` (opt-in `router`) adds `@luckystack/router` + a `router` npm script (separate-process load-balancer; topology in deploy.config.ts). `wireGraphMcp` (rides on `aiInstructions`) adds `@luckystack/mcp` as a devDep + registers it in `.mcp.json` so AI agents query the project dependency graph. `@luckystack/cli` ships as a template devDep so `npx luckystack add` resolves locally. | -> docs/scaffold-flow.md |
 | Constant: `TEMPLATE_DIR` | Resolved absolute path to the bundled `template/` folder (`../template` from `dist/index.js`). The scaffold aborts with a packaging-bug message when this directory is missing at runtime. | -> docs/scaffold-flow.md |
+
+### `cron`
+- _(no `CLAUDE.md` yet)_
 
 ### `devkit`
 | Function / Export | One-liner | Deep doc |
@@ -722,6 +726,7 @@
 | cli | 0 | 0 | 0 |
 | core | 9 | 9 | 0 |
 | create-luckystack-app | 5 | 5 | 0 |
+| cron | 0 | 0 | 0 |
 | devkit | 8 | 8 | 0 |
 | docs-ui | 4 | 4 | 0 |
 | email | 5 | 5 | 0 |
