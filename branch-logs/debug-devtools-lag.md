@@ -229,3 +229,19 @@ Chrome-traces zijn gzip-JSON. Decomprimeer met Node (`zlib.gunzipSync`), `JSON.p
 - Grep de ruwe tekst op `chrome-extension://<id>` → extensies identificeren.
 
 Analyse-scripts stonden in `/tmp/analyze*.mjs` tijdens het onderzoek (niet gecommit).
+
+
+## 2026-07-08 20:58 — Framework-planning (LOS van devtools-onderzoek): ADR 0020 + 0021 gelockt
+
+**User prompt:** drie feature-verkenningen (cron-helper, email-code login + 2FA, Prisma optioneel/andere ORMs) + later een vierde punt (update-pad voor gescaffolde files); na onderzoeksrapporten van 5 parallelle Explore-agents besloot de user: ORM-'none' via registration-hook + duidelijke error, en update-mechanisme via scaffold-manifest + expliciet `luckystack update` met AI-assisted merge — "lock maar in".
+
+**Wat ik deed:**
+- 5 parallelle Explore-agents: cron (bouwstenen bestaan: ongebruikte `core/src/lease.ts`, `_cron/`-discovery-seam, `preServerStop`; maar ARCHITECTURE_EXTENSION_POINTS.md:503 zegt bewust géén cron — herziening vergt eigen ADR t.z.t.), auth/2FA (alle primitieven bestaan behalve OTP-met-attempt-counter en pending-challenge-state; LoginForm 3× gedrifted), Prisma-koppeling (klein: core/db.ts, /readyz, UserAdapter-seam), wizard/CLI-integratie (ORM-dimensie = kloon van dbProvider/monitoring-patronen; geblokkeerd op ontbrekende persisted scaffold-state, ADR 0014 "infer don't store"), update-pad (niets bestaat; manifest + gefaseerd plan).
+- ADR **0020** geschreven: ORM-dimensie (prisma/drizzle/none) in scaffold; 'none' = hook via `luckystack/core/clients.ts`-stub + duidelijke runtime-error, boot-error alleen bij feature die DB vereist; /readyz pluggable; DB-opties gefilterd op ORM (drizzle ≠ mongo).
+- ADR **0021** geschreven: `.luckystack/scaffold.json` manifest (version+choices+templateVars+file-hashes); expliciet `luckystack update`-command — pristine=overwrite, user-modified=NOOIT overschrijven maar change-note die project-AI merged; CLAUDE.md sectie-merge; verfijnt ADR 0014 gedeeltelijk.
+- `npm run ai:decisions` gedraaid (21 decisions in index).
+- Taken #1-#4 aangemaakt/bijgewerkt met alle onderzoeksconclusies (cron wacht op extra info van user; auth geparkeerd).
+
+**Files touched:** `docs/decisions/0020-orm-choice-with-none-via-registration-hook.md` (nieuw), `docs/decisions/0021-scaffold-manifest-and-luckystack-update.md` (nieuw), `docs/AI_DECISIONS_INDEX.md` (regenerated), deze log + INDEX.
+
+**Notes:** Dit werk staat LOS van het devtools-lag-onderzoek van deze branch (implementatie start later op eigen feature-branches). Gemeld, niet gefixt: dubbel ADR-nummer `0016-*` (twee bestanden). INDEX-telling stond op 6 terwijl het bestand 13 `## `-koppen had (subsectie-koppen van de trace-analyse tellen mee volgens de kolomdefinitie) — telling in dezelfde pass hersteld naar 14.

@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (19)
+## Decisions (21)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -32,6 +32,8 @@
 | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot | 🟢 accepted | secret-manager, prisma, cli, scaffold, dx, packaging | — | `docs/decisions/0017-prisma-cli-resolves-secret-manager-pointers.md` |
 | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode | 🟢 accepted | security, session, auth, config | — | `docs/decisions/0018-session-token-to-client-only-in-sessionbasedtoken-mode.md` |
 | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant | 🟢 accepted | auth, schema, config, oauth | — | `docs/decisions/0019-email-uniqueness-is-optin-via-provideraccountstrategy.md` |
+| 0020 | Scaffold gets an ORM dimension (prisma/drizzle/none); 'none' is a registration hook with a clear runtime error, not a full prune | 🟢 accepted | scaffold, cli, database, orm, dx | — | `docs/decisions/0020-orm-choice-with-none-via-registration-hook.md` |
+| 0021 | Scaffold writes a manifest (.luckystack/scaffold.json); updates to copied files go through an explicit `luckystack update` that never overwrites user-modified files (AI-assisted merge via change-notes) | 🟢 accepted | scaffold, cli, updates, dx | — | `docs/decisions/0021-scaffold-manifest-and-luckystack-update.md` |
 
 ## Summaries
 
@@ -196,6 +198,22 @@ Email uniqueness is opt-in. The default schema correctly omits `@unique` (per-pr
 **Governs** (`//? @adr 0019`): `packages/login/src/accountStrategy.ts`, `src/settings/_api/confirmEmailChange_v1.ts`
 
 → `docs/decisions/0019-email-uniqueness-is-optin-via-provideraccountstrategy.md`
+
+### 0020 — Scaffold gets an ORM dimension (prisma/drizzle/none); 'none' is a registration hook with a clear runtime error, not a full prune
+
+**0020** · accepted · tags: scaffold, cli, database, orm, dx · 2026-07-08
+
+Add an `orm` dimension to the scaffold wizard and manage CLI: first round `prisma` / `drizzle` / `none` (MikroORM is the follow-up candidate because it covers MongoDB first-class). `orm: 'none'` is **hook-based, not prune-everything**: the scaffold ships the existing `luckystack/core/clients.ts` extension-point file as a stub ("register your own database client / UserAdapter here"); any DB access without a registration throws a clear LuckyStack error that names that exact file; a hard boot-time error fires only when an enabled feature demonstrably requires the DB (e.g. login with the default Prisma UserAdapter). The `/readyz` DB ping becomes pluggable so a DB-less project can report ready. The wizard filters DB options by ORM choice (e.g. Drizzle hides MongoDB).
+
+→ `docs/decisions/0020-orm-choice-with-none-via-registration-hook.md`
+
+### 0021 — Scaffold writes a manifest (.luckystack/scaffold.json); updates to copied files go through an explicit `luckystack update` that never overwrites user-modified files (AI-assisted merge via change-notes)
+
+**0021** · accepted · tags: scaffold, cli, updates, dx · 2026-07-08
+
+1. **Scaffold manifest**: `create-luckystack-app` writes `.luckystack/scaffold.json` at scaffold time = `{ version, choices, templateVars, files: [{ path, sha256 }] }` (hashes computed after `{{VAR}}` render). Recording choices/vars is non-negotiable — it is what makes any later re-render/diff valid, and it is the persisted state that unblocks ORM/dbProvider reconfigure in the manage CLI. 2. **Explicit `luckystack update` command** (never implicit on `npm update`): per file, hash-compare against the manifest. Pristine → safely overwritten with the new version's render. **User-modified → never overwritten**; the command emits a change-note (diff between the previous and new framework version of that file) that the project's AI merges into the user's modified copy; `.new` sidecars as the non-AI fallback. `CLAUDE.md` merges by section: the framework part is replaceable, the "User Project Rules" section below the fixed divider is user-owned. 3. **First scope**: the framework-owned, rarely-edited bucket (docs/luckystack/**, CLAUDE.md, skills/**, .claude/commands/**, generator scripts, eslint.luckystack/official configs, _dot_luckystack templates). Template source = run the scaffolder into a temp dir with the recorded choices and diff/copy from there (one source of truth). This subsumes the ROADMAP sync-docs item.
+
+→ `docs/decisions/0021-scaffold-manifest-and-luckystack-update.md`
 
 ## Code governed by decisions
 
