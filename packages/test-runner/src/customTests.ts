@@ -394,7 +394,6 @@ const buildContext = (
   //? wasn't threaded through).
   const apiMethod = input.apiMethodMap?.[discovery.route.page]?.[discovery.route.name]?.[discovery.route.version] ?? 'POST';
   const state: TestSessionState = { token: null, userId: null, csrfToken: null, lastResponse: null };
-  const prisma = getPrismaClient();
 
   //? Watchers are tracked per case so a missing explicit `close()` can't
   //? leak socket B between tests.
@@ -432,7 +431,12 @@ const buildContext = (
     callSync: buildCallSync(input.baseUrl, routePath, state, cookieName),
     watchStream,
     session: buildSessionHelpers(state),
-    prisma,
+    //? Lazy: only resolves when a case actually touches `ctx.prisma`, so an
+    //? orm:'none' project (no registered client) can still run DB-free custom
+    //? tests — the eager resolve used to abort the whole custom-test phase.
+    get prisma() {
+      return getPrismaClient();
+    },
     expect: buildExpect(),
   };
 

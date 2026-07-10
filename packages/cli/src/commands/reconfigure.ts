@@ -7,6 +7,7 @@
 import { runNpmInstall, type ConsumerProject, type Result } from '../lib/project';
 import { isInteractive, runSingleSelect, runCheckbox, confirmPrompt } from '../lib/wizard';
 import { detectProjectState } from '../lib/state';
+import { syncScaffoldManifestChoices } from '../lib/manifestSync';
 import { readDeclaredEnvKeys } from '../lib/envKeys';
 import { planChanges, configFromState, TOGGLE_IDS, type DesiredConfig, type ToggleId, type ApplyContext, type Change } from '../transitions';
 import { AUTH_MODES, EMAIL_PROVIDERS, MONITORING_PROVIDERS, OAUTH_PROVIDERS } from '../featureOptions';
@@ -185,6 +186,10 @@ export const runReconfigureWizard = async (
     const result = change.apply(ctx);
     if (!result.ok) return result;
   }
+
+  //? Keep the scaffold manifest's recorded choices in step with what was just
+  //? applied, so a later `luckystack update` re-renders with reality.
+  syncScaffoldManifestChoices(project);
 
   if (options.install) {
     console.log('\n• running npm install …');

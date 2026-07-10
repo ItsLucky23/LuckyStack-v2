@@ -11,7 +11,7 @@ export type {
   PostRoomLeavePayload,
   OnLocationUpdatePayload,
 } from './hookPayloads';
-export { bootstrapLuckyStack, registerOverlayLoader } from './bootstrap';
+export { bootstrapLuckyStack, registerOverlayLoader, OVERLAY_ORDER } from './bootstrap';
 export type { BootstrapLuckyStackOptions } from './bootstrap';
 export { verifyBootstrap } from './verifyBootstrap';
 export type { BootstrapRequirements } from './verifyBootstrap';

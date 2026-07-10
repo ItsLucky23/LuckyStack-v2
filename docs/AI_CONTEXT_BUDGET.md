@@ -6,12 +6,12 @@
 > Don't read every index every session. Pick the profile matching your task, LOAD only its
 > artifacts, and QUERY the rest via the `@luckystack/mcp` tools instead of reading whole files.
 
-## Artifact sizes (total ≈ 72,613 tokens if all loaded)
+## Artifact sizes (total ≈ 72,780 tokens if all loaded)
 
 | Artifact | Est. tokens | Bytes | Purpose |
 | --- | --- | --- | --- |
 | `contract` — `CLAUDE.md` | 10,230 | 40,921 | Always-on rules (read every session). |
-| `quick-index` — `docs/AI_QUICK_INDEX.md` | 31,290 | 125,161 | Framework surfaces + package map. |
+| `quick-index` — `docs/AI_QUICK_INDEX.md` | 31,458 | 125,830 | Framework surfaces + package map. |
 | `capabilities` — `docs/AI_CAPABILITIES.md` | 3,742 | 14,966 | Existing helpers/exports — check before authoring. |
 | `project-index` — `docs/AI_PROJECT_INDEX.md` | 2,683 | 10,733 | Routes/pages/helpers/components + test coverage. |
 | `decisions` — `docs/AI_DECISIONS_INDEX.md` | 6,500 | 26,001 | Why-it-is-this-way (ADRs). |

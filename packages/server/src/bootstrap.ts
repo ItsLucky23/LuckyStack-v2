@@ -13,7 +13,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { ROOT_DIR } from '@luckystack/core';
+import { ROOT_DIR, tryCatch } from '@luckystack/core';
 import { createLuckyStackServer } from './createServer';
 import { OPTIONAL_PACKAGES, canResolve, getLogin } from './capabilities';
 import type {
@@ -35,7 +35,10 @@ export interface BootstrapLuckyStackOptions extends CreateLuckyStackServerOption
   skipOverlayLoad?: boolean;
 }
 
-const OVERLAY_ORDER = [
+//? Exported (0.4.2): the consumer's `scripts/bundleServer.mjs` imports this at
+//? build time so the prod-bundle overlay walk can never drift from the dev
+//? walk — a hardcoded copy once silently dropped a slot (cron) from prod.
+export const OVERLAY_ORDER = [
   // Core registries first — clients, paths, routing rules. Anything below
   // depends on these being in place.
   'core',
@@ -60,7 +63,20 @@ const OVERLAY_ORDER = [
 
 const importIfExists = async (filePath: string): Promise<void> => {
   if (!fs.existsSync(filePath)) return;
-  await import(pathToFileURL(filePath).href);
+  const [error] = await tryCatch(async () => {
+    await import(pathToFileURL(filePath).href);
+  });
+  if (error) {
+    //? Fail fast, but ACTIONABLY: a raw ERR_MODULE_NOT_FOUND from an overlay
+    //? file (classic cause: `luckystack remove <pkg>` dropped a dependency
+    //? that `luckystack/<pkg>/*.ts` still imports) tells the consumer nothing
+    //? about WHICH of their files broke the boot.
+    throw new Error(
+      `[luckystack] failed to load overlay file ${filePath}: ${error.message}. ` +
+        'If you removed an optional package (e.g. via `luckystack remove <feature>` or `luckystack manage`), ' +
+        'delete or update the overlay files that still import it (the `luckystack/<feature>/` folder).',
+    );
+  }
 };
 
 //? Production-bundle seam. `loadOverlayFolder` imports raw `luckystack/**/*.ts`
@@ -144,13 +160,9 @@ export const bootstrapLuckyStack = async (
   if (!options.skipOverlayLoad) {
     //? Package self-wiring first, consumer overlay second (overlay overrides).
     await importOptionalPackageRegisters();
-    if (registeredOverlayLoader) {
-      //? Production bundle: overlay files were compiled into the bundle and the
-      //? generated entry registered this loader — never touch raw .ts on disk.
-      await registeredOverlayLoader();
-    } else {
-      await loadOverlayFolder(overlayRoot);
-    }
+    //? Production bundle: overlay files were compiled into the bundle and the
+    //? generated entry registered a loader — never touch raw .ts on disk then.
+    await (registeredOverlayLoader ? registeredOverlayLoader() : loadOverlayFolder(overlayRoot));
   }
 
   //? Force login to load when installed so its session provider registers into

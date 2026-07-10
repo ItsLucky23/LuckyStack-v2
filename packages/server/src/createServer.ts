@@ -1,5 +1,5 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, isProduction, resolveEnvKey } from '@luckystack/core';
+import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, isProduction, resolveEnvKey, dispatchHook } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
@@ -65,8 +65,25 @@ const initDevTools = async (): Promise<void> => {
   //? if a sync CPU burst (TS Program build, large require chain) is still in
   //? flight when the signal arrives. Installed BEFORE the guarded devkit import
   //? so Ctrl+C still works when devkit is absent and we early-return below.
-  process.once('SIGINT', () => process.exit(0));
-  process.once('SIGTERM', () => process.exit(0));
+  //? Give `preServerStop` subscribers (cron lease release, tracker flush) a
+  //? BOUNDED window before the hard exit — without it a dev Ctrl+C leaves the
+  //? cron leader lease dangling until its TTL, so no jobs fire for up to 30s
+  //? after every restart. Dev iteration speed still wins: 2s cap, then exit.
+  const devSignalExit = (reason: 'SIGINT' | 'SIGTERM'): void => {
+    void Promise.race([
+      dispatchHook('preServerStop', { reason, timeoutMs: 2000 }),
+      new Promise((resolve) => {
+        setTimeout(resolve, 2000);
+      }),
+      // eslint-disable-next-line unicorn/no-process-exit -- deliberate dev hard-exit once the bounded hook window closes (mirrors the original inline handler)
+    ]).finally(() => process.exit(0));
+  };
+  process.once('SIGINT', () => {
+    devSignalExit('SIGINT');
+  });
+  process.once('SIGTERM', () => {
+    devSignalExit('SIGTERM');
+  });
   //? @luckystack/devkit is an OPTIONAL peer, normally ABSENT in production. If a
   //? deploy forgets `NODE_ENV=production`, enableDevTools stays true and an
   //? unguarded `import('@luckystack/devkit')` would crash boot with

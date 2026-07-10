@@ -68,7 +68,25 @@ const enableSourcemap = process.env.BUNDLE_SERVER_SOURCEMAP === '1';
 //? `registerOverlayLoader` — `bootstrapLuckyStack` then skips the filesystem
 //? walk. Order mirrors `packages/server/src/bootstrap.ts` (OVERLAY_ORDER +
 //? index-first + alphabetical).
-const OVERLAY_ORDER = ['core', 'deploy', 'login', 'email', 'sentry', 'presence', 'docs-ui', 'server'];
+//?
+//? The walk order is OWNED by @luckystack/server (its exported OVERLAY_ORDER)
+//? and imported at build time, so the prod bundle can never drift from the
+//? dev walk — a hardcoded copy here once silently dropped the `cron` slot
+//? from production. The fallback list only applies when the server package
+//? isn't built/installed yet (fresh checkout); a parity test keeps it in
+//? lockstep with the canonical list.
+const FALLBACK_OVERLAY_ORDER = ['core', 'deploy', 'login', 'email', 'sentry', 'presence', 'cron', 'docs-ui', 'server'];
+const OVERLAY_ORDER = await (async () => {
+  try {
+    const server = await import('@luckystack/server');
+    if (Array.isArray(server.OVERLAY_ORDER) && server.OVERLAY_ORDER.length > 0) {
+      return server.OVERLAY_ORDER;
+    }
+  } catch {
+    // not built/installed yet — the parity-tested fallback below applies
+  }
+  return FALLBACK_OVERLAY_ORDER;
+})();
 
 const collectOverlayFiles = (overlayAbs) => {
   const files = [];

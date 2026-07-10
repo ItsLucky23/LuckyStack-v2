@@ -75,7 +75,7 @@ export const isSafeSurfacePath = (relativePath: string): boolean =>
 const TEXT_EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.css', '.html', '.prisma',
 ]);
-const isTextFile = (filePath: string): boolean => {
+export const isTextFile = (filePath: string): boolean => {
   const base = path.basename(filePath);
   if (base.startsWith('.')) return true;
   return TEXT_EXTENSIONS.has(path.extname(filePath).toLowerCase());
@@ -230,6 +230,19 @@ export const applyUpdate = (
     );
   }
 
+  //? Report-only: manifest-recorded safe-surface files the NEW framework
+  //? version no longer ships. Deleting is the consumer's call — an update must
+  //? never remove files — but silently leaving them reads as "still current".
+  const freshPaths = new Set(freshManifest.files.map((entry) => entry.path));
+  const noLongerShipped = (consumerManifest?.files ?? [])
+    .filter(
+      (entry) =>
+        isSafeSurfacePath(entry.path) &&
+        !freshPaths.has(entry.path) &&
+        fs.existsSync(path.join(project.root, entry.path)),
+    )
+    .map((entry) => entry.path);
+
   const lines: string[] = [
     `luckystack update — ${consumerManifest?.luckystackVersion ?? 'unknown (no manifest)'} -> ${freshManifest.luckystackVersion}`,
     '',
@@ -239,6 +252,13 @@ export const applyUpdate = (
     `unchanged:   ${String(counts.unchanged)}`,
     '',
   ];
+  if (noLongerShipped.length > 0) {
+    lines.push(
+      'No longer shipped by this framework version (left in place — delete manually if unused):',
+      ...noLongerShipped.map((p) => `  - ${p}`),
+      '',
+    );
+  }
   if (!plan.manifestPresent) {
     lines.push(
       'NOTE: no .luckystack/scaffold.json manifest was found (project scaffolded',
@@ -342,8 +362,32 @@ const defaultRenderFreshScaffold: NonNullable<UpdateOptions['renderFreshScaffold
   };
 };
 
+//? Version coherence: `update` re-renders at the CLI's own version, so a cli
+//? that lags (or leads) the installed @luckystack/* packages silently refreshes
+//? docs/scripts of a DIFFERENT framework version. Read-only check, warn-only.
+const readInstalledCoreVersion = (root: string): string | null => {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(root, 'node_modules', '@luckystack', 'core', 'package.json'), 'utf8'),
+    ) as { version?: unknown };
+    return typeof pkg.version === 'string' ? pkg.version : null;
+  } catch {
+    return null;
+  }
+};
+
 export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Result<void> => {
   const consumerManifest = readScaffoldManifest(project.root);
+
+  const installedCoreVersion = readInstalledCoreVersion(project.root);
+  if (installedCoreVersion !== null && installedCoreVersion !== options.cliVersion) {
+    console.warn(
+      `⚠ version mismatch: @luckystack/cli is ${options.cliVersion} but the installed @luckystack/core is ` +
+        `${installedCoreVersion}. \`update\` refreshes files at the CLI's version — bump your @luckystack/* ` +
+        'dependencies (including the @luckystack/cli devDependency) to the same version first, run ' +
+        '`npm install`, then re-run `npx luckystack update`.',
+    );
+  }
   if (!consumerManifest) {
     console.log(
       'No .luckystack/scaffold.json found (scaffolded before 0.4.1) — running in\n' +

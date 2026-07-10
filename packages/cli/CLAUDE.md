@@ -30,6 +30,11 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
   replaced; hash differs → user-modified → `<file>.new` sidecar + AI-merge report in
   `dump/UPDATE_<hash>.log` — user edits are NEVER overwritten. No manifest (pre-0.4.1
   scaffold) → sidecar-only mode. Never touches src/, functions/, config, prisma, .env*.
+  Also: warns when the cli version ≠ the installed `@luckystack/core` version (the
+  re-render happens at the CLI's version), and the report lists safe-surface files the
+  new framework version NO LONGER SHIPS (left in place — delete manually). After every
+  `add`/`remove`/`manage` apply, `lib/manifestSync.ts` re-derives the manifest's
+  recorded `choices` from the detected project state so update never replays stale ones.
 - `luckystack check-env` / `luckystack check-i18n` — codebase audits that write AI-feedable,
   per-run hashed logs to `dump/<KIND>_<hash>.log` (dead/missing env keys + i18n keys).
 

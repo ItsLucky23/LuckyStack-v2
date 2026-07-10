@@ -22,6 +22,7 @@ import { listFeatures } from './commands/list';
 import { applyManagePlan } from './commands/manage';
 import { runReconfigureWizard } from './commands/reconfigure';
 import { runUpdate } from './commands/update';
+import { syncScaffoldManifestChoices } from './lib/manifestSync';
 import { REGISTRY, findRegistryEntry } from './registry';
 
 const HELP = `luckystack — LuckyStack project CLI
@@ -77,12 +78,15 @@ const runSingle = (
   if (!entry) {
     return { ok: false, error: new Error(`Unknown feature: "${feature}". Known: ${REGISTRY.map((e) => e.id).join(', ')}.`) };
   }
-  if (mode === 'remove') {
+  const result = mode === 'remove'
     //? Remove batches no install of its own — reuse the manage apply path with a
     //? single-id plan so the install (and "nothing changed" semantics) match.
-    return applyManagePlan(project, { add: [], remove: [entry.id] }, options);
-  }
-  return runAddByKind(project, entry, options);
+    ? applyManagePlan(project, { add: [], remove: [entry.id] }, options)
+    : runAddByKind(project, entry, options);
+  //? Keep the scaffold manifest's recorded choices in step (ADR 0021) so a
+  //? later `luckystack update` re-renders with reality instead of stale choices.
+  if (result.ok) syncScaffoldManifestChoices(project);
+  return result;
 };
 
 const finish = (result: Result<void>): void => {

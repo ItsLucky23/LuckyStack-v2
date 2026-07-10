@@ -65,7 +65,35 @@ const tryEdit = (filePath: string, find: string, replace: string): boolean => {
   }
 };
 
+//? orm: 'none' guard (ADR 0020). The default UserAdapter is Prisma-backed, so
+//? adding login to a project scaffolded without Prisma boots into the "no
+//? database client available" error on the first login attempt. Warn loudly
+//? (non-blocking — a custom UserAdapter is a legitimate setup) instead of
+//? silently producing a broken auth flow.
+const warnWhenNoPrismaDataLayer = (project: ConsumerProject): void => {
+  let scaffoldOrm: unknown;
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(project.root, '.luckystack', 'scaffold.json'), 'utf8'),
+    ) as { choices?: { orm?: unknown } };
+    scaffoldOrm = manifest.choices?.orm;
+  } catch {
+    //? No manifest (pre-0.4.1 scaffold) — fall back to the dependency check.
+  }
+  const hasPrismaClient = Boolean(project.pkg.dependencies?.['@prisma/client']);
+  if (scaffoldOrm !== 'none' && hasPrismaClient) return;
+  console.warn(
+    '\n⚠ This project has no Prisma data layer' +
+      (scaffoldOrm === 'none' ? " (scaffolded with orm: 'none')" : ' (@prisma/client is not a dependency)') +
+      '. The built-in login UserAdapter is Prisma-backed, so auth will fail at the first login attempt.\n' +
+      '  Either install Prisma (`npm i @prisma/client prisma` + a prisma/schema.prisma + `npx prisma generate`)\n' +
+      '  or register a custom UserAdapter for your own data layer in `luckystack/login/*.ts`\n' +
+      '  (registerUserAdapter from @luckystack/login — see node_modules/@luckystack/login/docs/user-adapter.md).\n',
+  );
+};
+
 export const addLogin = (project: ConsumerProject, options: AddOptions): Result<void> => {
+  warnWhenNoPrismaDataLayer(project);
   //? Copy the WHOLE auth bundle (src/ UI + functions/session.ts + server/hooks)
   //? into the project (idempotent, skip-if-exists so consumer edits are kept).
   //? IMPORTANT: the list of files/dirs this copies is the authoritative surface that
