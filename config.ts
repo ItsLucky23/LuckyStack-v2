@@ -108,8 +108,12 @@ const config = {
    * Use these flags to avoid coupling all diagnostics to a single `dev` switch.
    */
   logging: {
+    //? DEVTOOLS-LAG EXPERIMENT (branch debug/devtools-lag, handoff §5.1): devLogs +
+    //? stream hard-off. Every object logged to the console is RETAINED by DevTools
+    //? while open → residual lag even when no new logs are visible. Revert to
+    //? `resolvedEnvironment.dev` if this makes no measurable difference.
     /** General debug logs in API/sync/client/server flows. */
-    devLogs: resolvedEnvironment.dev,
+    devLogs: false,
     /** Dev-only toast notifications for socket/API/sync errors. */
     devNotifications: resolvedEnvironment.dev,
     /** Client socket lifecycle status logs (connect/disconnect/reconnect). */
@@ -117,7 +121,7 @@ const config = {
     /** Server socket startup log line (SocketIO initialized). */
     socketStartup: true,
     /** Stream payload logs for API/Sync stream events. */
-    stream: resolvedEnvironment.dev,
+    stream: false,
   },
  
   /** Enable mobile-friendly console overlay (useful for debugging on phones) */
