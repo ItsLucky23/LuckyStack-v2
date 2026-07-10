@@ -331,8 +331,11 @@ describe("parseArgs", () => {
   it("parses --orm and exits 2 on an invalid value (ADR 0020)", () => {
     expect(parseArgs(["my-app"]).orm).toBeNull();
     expect(parseArgs(["my-app", "--orm=prisma"]).orm).toBe("prisma");
+    expect(parseArgs(["my-app", "--orm=drizzle"]).orm).toBe("drizzle");
+    expect(parseArgs(["my-app", "--orm=mikro-orm"]).orm).toBe("mikro-orm");
     expect(parseArgs(["my-app", "--orm=none"]).orm).toBe("none");
     expect(() => parseArgs(["my-app", "--orm=hibernate"])).toThrow("process.exit:2");
+    expect(() => parseArgs(["my-app", "--orm=typeorm"])).toThrow("process.exit:2");
   });
 
   it("parses --oauth as a validated comma-separated list", () => {

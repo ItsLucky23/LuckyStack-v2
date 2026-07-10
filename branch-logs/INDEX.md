@@ -5,6 +5,7 @@
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
 | main | (none) | 2026-07-02 22:55 | active | 24 |
+| test/e2e-integration | (none) | 2026-07-10 12:00 | active — MERGE-KANDIDAAT (alle feature-branches + devtools samengevoegd; gap-scan-fixes: OVERLAY_ORDER-export+parity, actionable overlay-error, manifest-choices-sync, lazy ctx.prisma, update versie-check+no-longer-shipped, add-login-guard, dev-preServerStop; ORM-uitbreiding drizzle+mikro-orm met per-dialect starters) | 1 |
 | feat/scaffold-manifest | (none) | 2026-07-09 09:20 | active (fase 0+1a ADR 0021: scaffold-manifest + `luckystack update` [pristine=overwrite, modified=.new-sidecar+AI-merge-rapport, stamp-less=sidecar-only]; 142 cli-tests + kruis-check 132 files hash-agreement; verdaccio-e2e pending) | 2 |
 | feat/orm-choice | (none) | 2026-07-09 10:40 | active (fase 1b ADR 0020 + verdaccio-e2e GROEN over cron+manifest/update+ORM [V1 onboarding, V2 orm=none boot database:'skipped', V3 add-cron leadership+stats, V4 update sidecar/add/manifest-refresh]; e2e-fixes: @prisma/client optional peer ×6 + volledig User-placeholder; drizzle + manage-ORM-wissel volgende pass) | 2 |
 | feat/cron-package | (none) | 2026-07-09 08:55 | active (@luckystack/cron gebouwd: leader-elected scheduler op core lease; 32 tests + wave-build groen; ADR 0022; verdaccio-e2e pending) | 1 |

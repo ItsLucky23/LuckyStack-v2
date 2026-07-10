@@ -68,7 +68,7 @@ export interface CliArgs {
 //? are parsed in the default arm; they're listed here for the help/error banner.
 export const VALID_FLAGS = [
   '--no-install', '--no-prompt',
-  '--orm=<prisma|none>',
+  '--orm=<prisma|drizzle|mikro-orm|none>',
   '--db=<mongodb|postgresql|mysql|sqlite>',
   '--auth=<none|credentials|credentials+oauth>',
   '--oauth=<google,github,discord,facebook,microsoft>',
@@ -195,12 +195,13 @@ export const parseArgs = (argv: string[]): CliArgs => {
 //? one place. Declared `as const` so each list stays a readonly literal-union
 //? tuple (drives the `ScaffoldChoices` field types below).
 const PROVIDER_OPTIONS = {
-  //? ORM dimension (ADR 0020): 'prisma' = the classic full setup; 'none' =
-  //? bring-your-own data layer via the `luckystack/core/clients.ts` hook
-  //? (every DB access without a registration throws an actionable error).
-  //? 'drizzle' is the planned next entry — it slots in here + a template
-  //? variant, nothing architectural.
-  orm: ['prisma', 'none'],
+  //? ORM dimension (ADR 0020): 'prisma' = the classic full setup (all 4 DBs);
+  //? 'drizzle' = TypeScript-first SQL ORM (postgresql/mysql/sqlite — NO
+  //? MongoDB, the db step filters it); 'mikro-orm' = TypeScript-first with
+  //? first-class MongoDB (all 4 DBs); 'none' = bring-your-own data layer via
+  //? the `functions/db.ts` + `luckystack/core/clients.ts` hooks. Non-prisma
+  //? choices force auth off — the built-in UserAdapter is Prisma-backed.
+  orm: ['prisma', 'drizzle', 'mikro-orm', 'none'],
   dbProvider: ['mongodb', 'postgresql', 'mysql', 'sqlite'],
   authMode: ['none', 'credentials', 'credentials+oauth'],
   oauthProviders: ['google', 'github', 'discord', 'facebook', 'microsoft'],
@@ -211,6 +212,16 @@ const PROVIDER_OPTIONS = {
 
 type OrmProvider = (typeof PROVIDER_OPTIONS.orm)[number];
 type DbProvider = (typeof PROVIDER_OPTIONS.dbProvider)[number];
+
+//? Drizzle is SQL-only — MongoDB (the scaffold default!) is not an option
+//? under it. The wizard swaps in this filtered list for the db step; the
+//? flag/no-prompt paths validate against it and exit(2) on an explicit
+//? invalid combo.
+const SQL_DB_PROVIDERS = PROVIDER_OPTIONS.dbProvider.filter(
+  (provider): provider is Exclude<DbProvider, 'mongodb'> => provider !== 'mongodb',
+);
+const ormSupportsDb = (orm: OrmProvider, dbProvider: DbProvider): boolean =>
+  orm !== 'drizzle' || dbProvider !== 'mongodb';
 type AuthMode = (typeof PROVIDER_OPTIONS.authMode)[number];
 type OAuthProvider = (typeof PROVIDER_OPTIONS.oauthProviders)[number];
 type EmailProvider = (typeof PROVIDER_OPTIONS.emailProvider)[number];
@@ -220,9 +231,10 @@ type AiBrowserTooling = (typeof PROVIDER_OPTIONS.aiBrowserTooling)[number];
 interface ScaffoldChoices {
   /**
    * Data-layer choice (ADR 0020). `'prisma'` ships the full Prisma setup;
-   * `'none'` strips it and leaves the `luckystack/core/clients.ts`
-   * registration hook (auth is forced to `'none'` — the default UserAdapter
-   * is Prisma-backed).
+   * `'drizzle'` (SQL-only) and `'mikro-orm'` (incl. MongoDB) ship
+   * TypeScript-first starters under `server/db/` + a live `functions/db.ts`
+   * client; `'none'` leaves the bring-your-own hooks. Every non-prisma value
+   * forces `authMode: 'none'` — the default UserAdapter is Prisma-backed.
    */
   orm: OrmProvider;
   /** Database provider used in `schema.prisma`. Ignored when `orm: 'none'`. */
@@ -355,16 +367,19 @@ const runPromptsFallback = async (
   const need = (key: string): boolean => !(key in presets);
   try {
     if (need('orm')) {
-      answers.orm = await pickFromList(rl, 'Which ORM / data layer? (none = bring your own via luckystack/core/clients.ts)', PROVIDER_OPTIONS.orm, 'prisma');
+      answers.orm = await pickFromList(rl, 'Which ORM / data layer? (prisma = classic · drizzle = TS-first SQL · mikro-orm = TS-first incl. MongoDB · none = bring your own)', PROVIDER_OPTIONS.orm, 'prisma');
     }
     const orm = asOption(answers.orm, PROVIDER_OPTIONS.orm, 'prisma');
     if (orm !== 'none' && need('dbProvider')) {
-      answers.dbProvider = await pickFromList(rl, 'Which database provider do you want to use?', PROVIDER_OPTIONS.dbProvider, 'mongodb');
+      //? Drizzle is SQL-only — offer the filtered list (and a matching default).
+      answers.dbProvider = orm === 'drizzle'
+        ? await pickFromList(rl, 'Which database provider? (drizzle is SQL-only)', SQL_DB_PROVIDERS, 'postgresql')
+        : await pickFromList(rl, 'Which database provider do you want to use?', PROVIDER_OPTIONS.dbProvider, 'mongodb');
     }
-    if (orm !== 'none' && need('authMode')) {
+    if (orm === 'prisma' && need('authMode')) {
       answers.authMode = await pickFromList(rl, 'Authentication mode?', PROVIDER_OPTIONS.authMode, 'none');
     }
-    const authMode = orm === 'none' ? 'none' : asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
+    const authMode = orm === 'prisma' ? asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none') : 'none';
     if (authMode === 'credentials+oauth' && need('oauthProviders')) {
       answers.oauthProviders = await pickMulti(rl, 'Which OAuth providers to wire?', PROVIDER_OPTIONS.oauthProviders);
     }
@@ -686,16 +701,30 @@ const runWizard = (
 //? inlined at the return site.
 const convertAnswersToChoices = (answers: Record<string, string | string[]>): ScaffoldChoices => {
   const orm = asOption(answers.orm, PROVIDER_OPTIONS.orm, 'prisma');
-  //? Constraint (ADR 0020): the default UserAdapter is Prisma-backed, so
-  //? `orm: 'none'` forces auth off — the wizard skips the auth steps and a
+  //? Constraint (ADR 0020): the default UserAdapter is Prisma-backed, so any
+  //? non-prisma orm forces auth off — the wizard skips the auth steps and a
   //? stale/preset auth value must not leak through here.
-  const authMode = orm === 'none' ? 'none' : asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
+  const authMode = orm === 'prisma' ? asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none') : 'none';
   const rawOauth = answers.oauthProviders;
   const oauthPicked = Array.isArray(rawOauth) ? rawOauth : [];
 
+  //? Drizzle is SQL-only. The wizard's twin db-step prevents this combo
+  //? interactively, so reaching it means an explicit `--db=mongodb --orm=drizzle`
+  //? flag preset — reject loudly rather than silently scaffolding a broken pair.
+  const dbProvider = asOption(
+    answers.dbProvider,
+    PROVIDER_OPTIONS.dbProvider,
+    orm === 'drizzle' ? 'postgresql' : 'mongodb',
+  );
+  if (!ormSupportsDb(orm, dbProvider)) {
+    console.error(`Invalid combination: --orm=${orm} does not support --db=${dbProvider} (drizzle is SQL-only).`);
+    console.error(`Pick one of: ${SQL_DB_PROVIDERS.join(', ')} — or use --orm=mikro-orm for a TypeScript-first ORM with MongoDB support.`);
+    process.exit(2);
+  }
+
   return {
     orm,
-    dbProvider: asOption(answers.dbProvider, PROVIDER_OPTIONS.dbProvider, 'mongodb'),
+    dbProvider,
     authMode,
     oauthProviders: authMode === 'credentials+oauth'
       ? PROVIDER_OPTIONS.oauthProviders.filter((provider) => oauthPicked.includes(provider))
@@ -732,29 +761,46 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
   const answers = await runWizard([
     {
       key: 'orm', type: 'select', label: 'Which ORM / data layer?',
-      description: '"prisma" = the full classic setup · "none" = bring your own (register it in luckystack/core/clients.ts).',
+      description: 'prisma = classic full setup · drizzle = TS-first SQL · mikro-orm = TS-first incl. MongoDB · none = bring your own.',
       details: [
         '"prisma" ships the classic setup: prisma/schema.prisma, generated client,',
-        'prisma:* scripts, and the next question picks the database provider.',
-        '"none" strips all of that and leaves a registration hook: register your',
-        'own database client in luckystack/core/clients.ts (any DB access without',
-        'a registration throws a clear error pointing at that file). With "none",',
-        'auth is forced off too — the built-in UserAdapter is Prisma-backed.',
-        'Redis stays required either way (sessions/rate-limiting run on it).',
+        'prisma:* scripts, all 4 databases, and built-in auth stays available.',
+        '"drizzle" = TypeScript-first SQL ORM (postgresql/mysql/sqlite — NO',
+        'MongoDB): ships server/db/schema.ts + drizzle.config.ts + drizzle-kit',
+        'scripts, and your client lands in functions/db.ts (functions.db.* in',
+        'handlers). "mikro-orm" = TypeScript-first with first-class MongoDB (all',
+        '4 databases): ships EntitySchema starters + the mikro-orm CLI wiring.',
+        '"none" strips every ORM trace and leaves the same hooks empty.',
+        'NOTE: everything except prisma forces auth off for now — the built-in',
+        'login UserAdapter is Prisma-backed (a custom UserAdapter re-enables it).',
+        'Redis stays required in all cases (sessions/rate-limiting run on it).',
       ].join('\n'),
       options: PROVIDER_OPTIONS.orm, defaultValue: 'prisma',
     },
     {
       key: 'dbProvider', type: 'select', label: 'Which database provider?',
-      description: 'Your database via Prisma — sets prisma/schema.prisma + the @prisma/client types.',
+      description: 'Your database — schema + client types come from the chosen ORM.',
       details: [
-        'Sets the `provider` in prisma/schema.prisma and the @prisma/client types',
-        'generated from it. This is Prisma (not a @luckystack package) — your data',
-        'layer. You can switch it later by editing schema.prisma and re-running',
-        '`npm run prisma:generate`.',
+        'Sets the database the chosen ORM connects to (schema file, generated',
+        'types, and the DATABASE_URL suggestion in .env.local). With Prisma you',
+        'can switch later by editing prisma/schema.prisma and re-running',
+        '`npm run prisma:generate`; drizzle/mikro-orm have their own schema files.',
       ].join('\n'),
       options: PROVIDER_OPTIONS.dbProvider, defaultValue: 'mongodb',
-      skip: (a) => a.orm === 'none',
+      //? Hidden for orm:'none' AND for drizzle — drizzle gets the SQL-only
+      //? twin step below (same answer key, complementary skips).
+      skip: (a) => a.orm === 'none' || a.orm === 'drizzle',
+    },
+    {
+      key: 'dbProvider', type: 'select', label: 'Which database provider? (drizzle is SQL-only)',
+      description: 'Drizzle has no MongoDB support — pick one of the SQL databases.',
+      details: [
+        'Drizzle ORM only speaks SQL dialects, so MongoDB (the usual default) is',
+        'not available under it. Need MongoDB with a TypeScript-first ORM? Go',
+        'back and pick mikro-orm instead.',
+      ].join('\n'),
+      options: SQL_DB_PROVIDERS, defaultValue: 'postgresql',
+      skip: (a) => a.orm !== 'drizzle',
     },
     {
       key: 'authMode', type: 'select', label: 'Authentication mode? (@luckystack/login)',
@@ -767,8 +813,8 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
         'Add later instead: npx luckystack add login.',
       ].join('\n'),
       options: PROVIDER_OPTIONS.authMode, defaultValue: 'none',
-      //? orm 'none' forces auth off (Prisma-backed default UserAdapter).
-      skip: (a) => a.orm === 'none',
+      //? Any non-prisma orm forces auth off (Prisma-backed default UserAdapter).
+      skip: (a) => a.orm !== 'prisma' && a.orm !== undefined,
     },
     {
       key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire? (@luckystack/login)',
@@ -779,7 +825,7 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
         'later with no code change — just set/unset the env. Pick the ones to',
         'pre-wire now.',
       ].join('\n'),
-      options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.orm === 'none' || a.authMode !== 'credentials+oauth',
+      options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => (a.orm !== 'prisma' && a.orm !== undefined) || a.authMode !== 'credentials+oauth',
     },
     {
       key: 'emailProvider', type: 'select', label: 'Transactional email adapter? (@luckystack/email)',
@@ -922,8 +968,8 @@ const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> =>
 //? only matter under `credentials+oauth`, and browser tooling rides on the AI
 //? template. Keeps both choice-resolution paths consistent.
 const normalizeChoices = (choices: ScaffoldChoices): ScaffoldChoices => {
-  //? orm 'none' forces auth off (Prisma-backed default UserAdapter — ADR 0020).
-  const authMode = choices.orm === 'none' ? 'none' : choices.authMode;
+  //? Any non-prisma orm forces auth off (Prisma-backed default UserAdapter — ADR 0020).
+  const authMode = choices.orm === 'prisma' ? choices.authMode : 'none';
   return {
     ...choices,
     authMode,
@@ -937,6 +983,18 @@ const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
   const choices: ScaffoldChoices = { ...DEFAULT_CHOICES };
   if (args.orm) choices.orm = args.orm;
   if (args.dbProvider) choices.dbProvider = args.dbProvider;
+  //? Drizzle is SQL-only: an EXPLICIT `--db=mongodb --orm=drizzle` is a hard
+  //? reject; the implicit case (mongodb only as the untouched default) falls
+  //? back to postgresql so `--no-prompt --orm=drizzle` works out of the box.
+  if (choices.orm === 'drizzle' && choices.dbProvider === 'mongodb') {
+    if (args.dbProvider) {
+      console.error('Invalid combination: --orm=drizzle does not support --db=mongodb (drizzle is SQL-only).');
+      console.error(`Pick one of: ${SQL_DB_PROVIDERS.join(', ')} — or use --orm=mikro-orm for a TypeScript-first ORM with MongoDB support.`);
+      process.exit(2);
+    }
+    choices.dbProvider = 'postgresql';
+    console.log("orm=drizzle has no MongoDB support — database defaulted to 'postgresql'.");
+  }
   if (args.authMode) choices.authMode = args.authMode;
   if (args.oauthProviders) choices.oauthProviders = args.oauthProviders;
   if (args.emailProvider) choices.emailProvider = args.emailProvider;
@@ -964,8 +1022,10 @@ Options:
 
   Scaffold choices (each pre-fills the matching wizard step, or applies under --no-prompt):
   Lean by default: every optional package/feature is OFF unless you opt in below.
-  --orm=<prisma|none>                         Data layer (default prisma). none = bring your own
-                                              client via luckystack/core/clients.ts (forces --auth=none).
+  --orm=<prisma|drizzle|mikro-orm|none>       Data layer (default prisma). drizzle = TypeScript-first
+                                              SQL ORM (no MongoDB); mikro-orm = TypeScript-first incl.
+                                              MongoDB; none = bring your own client via functions/db.ts.
+                                              Non-prisma forces --auth=none (Prisma-backed UserAdapter).
   --db=<mongodb|postgresql|mysql|sqlite>      Database provider (default mongodb).
   --auth=<none|credentials|credentials+oauth> Authentication mode (default 'none' = no auth).
   --oauth=<google,github,discord,facebook,microsoft>  OAuth providers (comma list; needs --auth=credentials+oauth).
@@ -2099,49 +2159,370 @@ type User = {
   theme: 'light' | 'dark';
 };`;
 
-//? orm 'none' (ADR 0020): strip the scaffold's Prisma surface and leave the
-//? registration hooks. The runtime seam lives in @luckystack/core (lazy
-//? '@prisma/client' load + an actionable no-client error) — this prune only
-//? removes files/deps/scripts and swaps the two hook files' content.
-const pruneOrmNone = (targetDir: string): void => {
+//? Generic scaffold package.json mutation (read → mutate → pretty-write).
+//? Shared by the per-ORM wirers below.
+interface ScaffoldPackageJson {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
+  [key: string]: unknown;
+}
+const mutateScaffoldPackageJson = (
+  targetDir: string,
+  mutate: (pkg: ScaffoldPackageJson) => void,
+): void => {
+  const pkgPath = path.join(targetDir, 'package.json');
+  if (!fs.existsSync(pkgPath)) return;
+  let pkg: ScaffoldPackageJson;
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as ScaffoldPackageJson;
+  } catch {
+    console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping package.json ORM edits.`);
+    return;
+  }
+  mutate(pkg);
+  fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+};
+
+//? Common to every non-prisma orm (ADR 0020): remove the scaffold's Prisma
+//? surface. The runtime seam lives in @luckystack/core (lazy '@prisma/client'
+//? load + an actionable no-client error) — this only removes files/deps/
+//? scripts and swaps the Prisma User type for a local placeholder.
+const stripPrismaSurface = (targetDir: string): void => {
   removeScaffoldPath(targetDir, 'prisma');
   removeScaffoldPath(targetDir, 'scripts/prismaWithSecrets.ts');
-  fs.writeFileSync(path.join(targetDir, 'functions', 'db.ts'), ORM_NONE_DB_SHIM);
-  fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), ORM_NONE_CLIENTS_STUB);
   editScaffoldFile(targetDir, 'config.ts', [
     ["import type { User } from '@prisma/client';", ORM_NONE_CONFIG_USER_TYPE],
   ]);
+  mutateScaffoldPackageJson(targetDir, (pkg) => {
+    if (pkg.dependencies) {
+      const { '@prisma/client': _client, ...dependencies } = pkg.dependencies;
+      pkg.dependencies = dependencies;
+    }
+    if (pkg.devDependencies) {
+      const { prisma: _prismaCli, ...devDependencies } = pkg.devDependencies;
+      pkg.devDependencies = devDependencies;
+    }
+    if (pkg.scripts) {
+      const scripts = { ...pkg.scripts };
+      delete scripts['prisma:generate'];
+      delete scripts['prisma:db:push'];
+      delete scripts['prisma:migrate:dev'];
+      pkg.scripts = scripts;
+    }
+  });
+};
 
-  //? package.json: drop @prisma/client (deps) + prisma (devDeps) + the prisma:* scripts.
-  const pkgPath = path.join(targetDir, 'package.json');
-  if (!fs.existsSync(pkgPath)) return;
-  let pkg: {
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-    scripts?: Record<string, string>;
-  };
-  try {
-    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
-  } catch {
-    console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping orm:none dependency prune.`);
+//? ─────────────── drizzle (TypeScript-first, SQL-only) ───────────────
+//? Starter shape: server/db/schema.ts (inside the tsconfig.server include
+//? tree — no tsconfig edits needed) + root drizzle.config.ts (read by
+//? drizzle-kit itself) + functions/db.ts exporting the live client.
+
+const DRIZZLE_DRIVER_DEPS: Record<
+  Exclude<DbProvider, 'mongodb'>,
+  { deps: Record<string, string>; devDeps: Record<string, string> }
+> = {
+  postgresql: { deps: { pg: '^8.16.0' }, devDeps: { '@types/pg': '^8.15.0' } },
+  mysql: { deps: { mysql2: '^3.15.0' }, devDeps: {} },
+  sqlite: { deps: { 'better-sqlite3': '^12.4.0' }, devDeps: { '@types/better-sqlite3': '^7.6.13' } },
+};
+
+const drizzleSchemaFor = (dbProvider: DbProvider): string => {
+  const header = `//? Drizzle schema — the single source your tables + generated types come
+//? from. Extend this file, then run \`npm run db:push\` (prototyping) or
+//? \`npm run db:generate\` + \`npm run db:migrate\` (versioned migrations).
+//? Docs: https://orm.drizzle.team/docs/sql-schema-declaration
+`;
+  if (dbProvider === 'mysql') {
+    return `${header}import { int, mysqlTable, timestamp, varchar } from 'drizzle-orm/mysql-core';
+
+export const items = mysqlTable('items', {
+  id: int('id').autoincrement().primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+`;
+  }
+  if (dbProvider === 'sqlite') {
+    return `${header}import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+
+export const items = sqliteTable('items', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+`;
+  }
+  return `${header}import { pgTable, serial, text, timestamp } from 'drizzle-orm/pg-core';
+
+export const items = pgTable('items', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+`;
+};
+
+const drizzleKitConfigFor = (dbProvider: DbProvider, databaseUrl: string): string => {
+  const dialect = dbProvider === 'postgresql' ? 'postgresql' : (dbProvider === 'mysql' ? 'mysql' : 'sqlite');
+  const urlExpression = dbProvider === 'sqlite'
+    ? `(process.env.DATABASE_URL ?? '${databaseUrl}').replace(/^file:/, '')`
+    : `process.env.DATABASE_URL ?? '${databaseUrl}'`;
+  return `//? drizzle-kit config (schema push/generate/migrate/studio). drizzle-kit
+//? does NOT load .env.local by itself — the fallback below keeps the dev
+//? default working; export DATABASE_URL (or load your env) for anything else.
+import { defineConfig } from 'drizzle-kit';
+
+export default defineConfig({
+  dialect: '${dialect}',
+  schema: './server/db/schema.ts',
+  out: './drizzle',
+  dbCredentials: {
+    url: ${urlExpression},
+  },
+});
+`;
+};
+
+const drizzleDbShimFor = (dbProvider: DbProvider, databaseUrl: string): string => {
+  const header = `//? Drizzle client shim. Whatever this file exports becomes \`functions.db.*\`
+//? inside every API + sync handler (function-injection — see
+//? docs/luckystack/ARCHITECTURE_FUNCTION_INJECTION.md). The schema lives in
+//? server/db/schema.ts.
+`;
+  if (dbProvider === 'mysql') {
+    return `${header}import { drizzle } from 'drizzle-orm/mysql2';
+import mysql from 'mysql2/promise';
+import * as schema from '../server/db/schema';
+
+const pool = mysql.createPool(process.env.DATABASE_URL ?? '${databaseUrl}');
+
+export const db = drizzle(pool, { schema, mode: 'default' });
+export { schema };
+`;
+  }
+  if (dbProvider === 'sqlite') {
+    return `${header}import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import * as schema from '../server/db/schema';
+
+const file = (process.env.DATABASE_URL ?? '${databaseUrl}').replace(/^file:/, '');
+
+export const db = drizzle(new Database(file), { schema });
+export { schema };
+`;
+  }
+  return `${header}import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import * as schema from '../server/db/schema';
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? '${databaseUrl}' });
+
+export const db = drizzle(pool, { schema });
+export { schema };
+`;
+};
+
+const DRIZZLE_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'drizzle'). Your handler-facing client
+//? lives in functions/db.ts (\`functions.db.db\` in handlers). Two optional
+//? registrations belong here:
+//?
+//? 1) /readyz database probe — without it the readiness check reports the
+//?    database as 'skipped' (the project can still go ready). Example
+//?    (postgres/mysql; for better-sqlite3 use \`db.run(...)\`):
+//?
+//?      import { registerDbHealthCheck } from '@luckystack/core';
+//?      import { sql } from 'drizzle-orm';
+//?      import { db } from '../../functions/db';
+//?      registerDbHealthCheck(async () => { await db.execute(sql\`select 1\`); return true; });
+//?
+//? 2) Redis overrides (unchanged from a normal scaffold) — Redis stays
+//?    REQUIRED: sessions, rate-limiting, and one-time tokens run on it.
+//?
+//? Auth was scaffolded OFF: the built-in login UserAdapter is Prisma-backed.
+//? To enable auth on drizzle, install @luckystack/login and register a custom
+//? UserAdapter here (node_modules/@luckystack/login/docs/user-adapter.md has a
+//? complete drizzle example).
+
+export {};
+`;
+
+//? ─────────────── mikro-orm (TypeScript-first, incl. MongoDB) ───────────────
+//? Starter shape uses EntitySchema (NOT decorators) so the template needs no
+//? experimentalDecorators/reflect-metadata changes.
+
+const MIKRO_DRIVER_PACKAGES: Record<DbProvider, string> = {
+  postgresql: '@mikro-orm/postgresql',
+  mysql: '@mikro-orm/mysql',
+  sqlite: '@mikro-orm/better-sqlite',
+  mongodb: '@mikro-orm/mongodb',
+};
+
+const mikroEntitiesFor = (dbProvider: DbProvider): string => {
+  const header = `//? MikroORM entities via EntitySchema (no decorators needed). Extend this
+//? file and run \`npm run db:schema:update\` to sync the database.
+//? Docs: https://mikro-orm.io/docs/entity-schema
+`;
+  if (dbProvider === 'mongodb') {
+    return `${header}import { EntitySchema } from '@mikro-orm/core';
+import type { ObjectId } from '@mikro-orm/mongodb';
+
+export interface Item {
+  _id: ObjectId;
+  id: string;
+  name: string;
+  createdAt: Date;
+}
+
+export const ItemSchema = new EntitySchema<Item>({
+  name: 'Item',
+  properties: {
+    _id: { type: 'ObjectId', primary: true },
+    id: { type: 'string', serializedPrimaryKey: true },
+    name: { type: 'string' },
+    createdAt: { type: 'Date', onCreate: () => new Date() },
+  },
+});
+`;
+  }
+  return `${header}import { EntitySchema } from '@mikro-orm/core';
+
+export interface Item {
+  id: number;
+  name: string;
+  createdAt: Date;
+}
+
+export const ItemSchema = new EntitySchema<Item>({
+  name: 'Item',
+  properties: {
+    id: { type: 'number', primary: true, autoincrement: true },
+    name: { type: 'string' },
+    createdAt: { type: 'Date', onCreate: () => new Date() },
+  },
+});
+`;
+};
+
+const mikroConfigFor = (dbProvider: DbProvider, databaseUrl: string): string => {
+  const driverPackage = MIKRO_DRIVER_PACKAGES[dbProvider];
+  const connection = dbProvider === 'sqlite'
+    ? `dbName: (process.env.DATABASE_URL ?? '${databaseUrl}').replace(/^file:/, ''),`
+    : `clientUrl: process.env.DATABASE_URL ?? '${databaseUrl}',`;
+  return `//? MikroORM config — consumed by functions/db.ts AND the mikro-orm CLI
+//? (\`npm run db:schema:update\`; the CLI finds this file via the "mikro-orm"
+//? entry in package.json). Entities are listed EXPLICITLY (EntitySchema), so
+//? no ts-morph discovery or decorator metadata is needed.
+import { defineConfig } from '${driverPackage}';
+import { ItemSchema } from './entities';
+
+export default defineConfig({
+  ${connection}
+  entities: [ItemSchema],
+});
+`;
+};
+
+const MIKRO_DB_SHIM = `//? MikroORM shim. Whatever this file exports becomes \`functions.db.*\` inside
+//? every API + sync handler (function-injection — see
+//? docs/luckystack/ARCHITECTURE_FUNCTION_INJECTION.md).
+//?
+//? MikroORM initializes ASYNCHRONOUSLY — use \`getEm()\` inside handlers:
+//?   const em = await functions.db.getEm();
+//?   const items = await em.find('Item', {});
+import { MikroORM, type EntityManager } from '@mikro-orm/core';
+import config from '../server/db/mikro-orm.config';
+
+let ormPromise: Promise<MikroORM> | undefined;
+
+export const getOrm = (): Promise<MikroORM> => {
+  ormPromise ??= MikroORM.init(config);
+  return ormPromise;
+};
+
+//? Always fork the global EntityManager per unit of work (request/job) —
+//? MikroORM's identity map is not safe to share across concurrent handlers.
+export const getEm = async (): Promise<EntityManager> => (await getOrm()).em.fork();
+`;
+
+const MIKRO_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'mikro-orm'). Your handler-facing
+//? helpers live in functions/db.ts (\`functions.db.getEm()\` in handlers).
+//? Two optional registrations belong here:
+//?
+//? 1) /readyz database probe — without it the readiness check reports the
+//?    database as 'skipped' (the project can still go ready):
+//?
+//?      import { registerDbHealthCheck } from '@luckystack/core';
+//?      import { getOrm } from '../../functions/db';
+//?      registerDbHealthCheck(async () => (await getOrm()).isConnected());
+//?
+//? 2) Redis overrides (unchanged from a normal scaffold) — Redis stays
+//?    REQUIRED: sessions, rate-limiting, and one-time tokens run on it.
+//?
+//? Auth was scaffolded OFF: the built-in login UserAdapter is Prisma-backed.
+//? To enable auth on mikro-orm, install @luckystack/login and register a
+//? custom UserAdapter here (implement the small UserAdapter interface with an
+//? EntityManager — node_modules/@luckystack/login/docs/user-adapter.md).
+
+export {};
+`;
+
+//? Apply the chosen non-prisma data layer (ADR 0020): strip Prisma, then wire
+//? the ORM-specific starter files + dependencies + scripts. `orm: 'prisma'`
+//? never reaches this function.
+const applyOrmChoice = (targetDir: string, choices: ScaffoldChoices, databaseUrl: string): void => {
+  stripPrismaSurface(targetDir);
+
+  if (choices.orm === 'none') {
+    fs.writeFileSync(path.join(targetDir, 'functions', 'db.ts'), ORM_NONE_DB_SHIM);
+    fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), ORM_NONE_CLIENTS_STUB);
     return;
   }
-  if (pkg.dependencies) {
-    const { '@prisma/client': _client, ...dependencies } = pkg.dependencies;
-    pkg.dependencies = dependencies;
+
+  const dbDir = path.join(targetDir, 'server', 'db');
+  fs.mkdirSync(dbDir, { recursive: true });
+
+  if (choices.orm === 'drizzle') {
+    fs.writeFileSync(path.join(dbDir, 'schema.ts'), drizzleSchemaFor(choices.dbProvider));
+    fs.writeFileSync(path.join(targetDir, 'drizzle.config.ts'), drizzleKitConfigFor(choices.dbProvider, databaseUrl));
+    fs.writeFileSync(path.join(targetDir, 'functions', 'db.ts'), drizzleDbShimFor(choices.dbProvider, databaseUrl));
+    fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), DRIZZLE_CLIENTS_STUB);
+    //? mongodb is unreachable here (rejected/coerced during choice resolution).
+    const sqlDb = choices.dbProvider === 'mongodb' ? 'postgresql' : choices.dbProvider;
+    const driver = DRIZZLE_DRIVER_DEPS[sqlDb];
+    mutateScaffoldPackageJson(targetDir, (pkg) => {
+      pkg.dependencies = { ...pkg.dependencies, 'drizzle-orm': '^0.44.0', ...driver.deps };
+      pkg.devDependencies = { ...pkg.devDependencies, 'drizzle-kit': '^0.31.0', ...driver.devDeps };
+      pkg.scripts = {
+        ...pkg.scripts,
+        'db:generate': 'drizzle-kit generate',
+        'db:migrate': 'drizzle-kit migrate',
+        'db:push': 'drizzle-kit push',
+        'db:studio': 'drizzle-kit studio',
+      };
+    });
+    return;
   }
-  if (pkg.devDependencies) {
-    const { prisma: _prismaCli, ...devDependencies } = pkg.devDependencies;
-    pkg.devDependencies = devDependencies;
-  }
-  if (pkg.scripts) {
-    const scripts = { ...pkg.scripts };
-    delete scripts['prisma:generate'];
-    delete scripts['prisma:db:push'];
-    delete scripts['prisma:migrate:dev'];
-    pkg.scripts = scripts;
-  }
-  fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+
+  //? mikro-orm
+  fs.writeFileSync(path.join(dbDir, 'entities.ts'), mikroEntitiesFor(choices.dbProvider));
+  fs.writeFileSync(path.join(dbDir, 'mikro-orm.config.ts'), mikroConfigFor(choices.dbProvider, databaseUrl));
+  fs.writeFileSync(path.join(targetDir, 'functions', 'db.ts'), MIKRO_DB_SHIM);
+  fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), MIKRO_CLIENTS_STUB);
+  const driverPackage = MIKRO_DRIVER_PACKAGES[choices.dbProvider];
+  mutateScaffoldPackageJson(targetDir, (pkg) => {
+    pkg.dependencies = {
+      ...pkg.dependencies,
+      '@mikro-orm/core': '^6.6.0',
+      [driverPackage]: '^6.6.0',
+    };
+    pkg.devDependencies = { ...pkg.devDependencies, '@mikro-orm/cli': '^6.6.0' };
+    pkg.scripts = { ...pkg.scripts, 'db:schema:update': 'mikro-orm schema:update --run' };
+    //? CLI config discovery — points `npm run db:schema:update` at the config.
+    pkg['mikro-orm'] = { configPaths: ['./server/db/mikro-orm.config.ts'] };
+  });
 };
 
 //? Remove OPT-OUT packages from a freshly-copied scaffold. Bounded packages:
@@ -2156,9 +2537,9 @@ const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): voi
   if (!choices.docsUi) pruneDocsUi(targetDir);
   if (!choices.router) pruneRouter(targetDir);
   if (choices.authMode === 'none') pruneAuthNone(targetDir);
-  //? After pruneAuthNone (orm:'none' implies auth:'none'): strips the Prisma
-  //? surface and swaps in the bring-your-own-data-layer hook files (ADR 0020).
-  if (choices.orm === 'none') pruneOrmNone(targetDir);
+  //? The non-prisma ORM wiring (applyOrmChoice) runs from main() AFTER this —
+  //? it needs the rendered DATABASE_URL default, which lives in the template
+  //? vars main() already computed.
 };
 
 //? Static lookup tables — moved to module scope so they aren't rebuilt on
@@ -2258,9 +2639,12 @@ const buildTemplateVars = (
     //? MongoDB's Prisma connector does NOT support `migrate dev` — it needs
     //? `db push`. Keep this in step with `printNextSteps`' prismaCmd so the
     //? README's first DB command matches the chosen provider.
-    PRISMA_INIT_CMD: choices.orm === 'none'
-      ? '# (orm: none — wire your own data layer; see functions/db.ts + luckystack/core/clients.ts)'
-      : (choices.dbProvider === 'mongodb' ? 'npm run prisma:db:push' : 'npm run prisma:migrate:dev'),
+    PRISMA_INIT_CMD: ((): string => {
+      if (choices.orm === 'none') return '# (orm: none — wire your own data layer; see functions/db.ts + luckystack/core/clients.ts)';
+      if (choices.orm === 'drizzle') return 'npm run db:push';
+      if (choices.orm === 'mikro-orm') return 'npm run db:schema:update';
+      return choices.dbProvider === 'mongodb' ? 'npm run prisma:db:push' : 'npm run prisma:migrate:dev';
+    })(),
     USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '@id @default(cuid())',
     DATABASE_URL: databaseUrlByProvider[choices.dbProvider] ?? `postgresql://user:password@localhost:5432/${slug}`,
     OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders, choices.authMode),
@@ -2349,13 +2733,36 @@ const copyAiDocs = (
 
 //? Print the post-scaffold summary and next-step instructions.
 const printNextSteps = (choices: ScaffoldChoices, slug: string): void => {
-  const prismaCmd = choices.orm === 'none'
-    ? '# no ORM scaffolded — wire your own data layer (see checklist below)'
-    : (choices.dbProvider === 'mongodb'
+  const dbInitCmds: Record<OrmProvider, string> = {
+    prisma: choices.dbProvider === 'mongodb'
       ? 'npm run prisma:db:push           # initializes the Mongo schema'
-      : 'npm run prisma:migrate:dev       # creates the User table + initial migration');
-  const ormNoneChecklist = choices.orm === 'none'
-    ? `
+      : 'npm run prisma:migrate:dev       # creates the User table + initial migration',
+    drizzle: 'npm run db:push                  # pushes server/db/schema.ts to the database',
+    'mikro-orm': 'npm run db:schema:update         # syncs server/db/entities.ts to the database',
+    none: '# no ORM scaffolded — wire your own data layer (see checklist below)',
+  };
+  const prismaCmd = dbInitCmds[choices.orm];
+  const ormChecklists: Record<OrmProvider, string> = {
+    prisma: '',
+    drizzle: `
+orm: drizzle — starter checklist:
+  1. server/db/schema.ts    your tables (drizzle-kit reads it via drizzle.config.ts)
+  2. functions/db.ts        exports the live client (functions.db.db in handlers)
+  3. .env.local             set DATABASE_URL for your ${choices.dbProvider} instance
+  4. luckystack/core/clients.ts   optional: registerDbHealthCheck(...) so /readyz probes your DB
+  5. Auth is OFF            the built-in UserAdapter is Prisma-backed; a custom drizzle
+                            UserAdapter re-enables it (see @luckystack/login docs/user-adapter.md)
+`,
+    'mikro-orm': `
+orm: mikro-orm — starter checklist:
+  1. server/db/entities.ts  your EntitySchema definitions (no decorators needed)
+  2. functions/db.ts        exports getOrm()/getEm() (await functions.db.getEm() in handlers)
+  3. .env.local             set DATABASE_URL for your ${choices.dbProvider} instance
+  4. luckystack/core/clients.ts   optional: registerDbHealthCheck(...) so /readyz probes your DB
+  5. Auth is OFF            the built-in UserAdapter is Prisma-backed; a custom mikro-orm
+                            UserAdapter re-enables it (see @luckystack/login docs/user-adapter.md)
+`,
+    none: `
 orm: none — bring-your-own data layer checklist:
   1. functions/db.ts        export your database client (becomes functions.db.* in handlers)
   2. luckystack/core/clients.ts   optional: registerDbHealthCheck(...) so /readyz probes your DB
@@ -2363,13 +2770,15 @@ orm: none — bring-your-own data layer checklist:
   4. Redis stays REQUIRED   sessions / rate-limiting / tokens run on Redis, not the ORM
   5. Want auth later?       install Prisma (or register a custom UserAdapter) first —
                             the built-in login UserAdapter is Prisma-backed.
-` : '';
+`,
+  };
+  const ormNoneChecklist = ormChecklists[choices.orm];
   console.log(`
 Done — scaffold complete.
 
 Choices:
   orm:         ${choices.orm}
-  database:    ${choices.orm === 'none' ? '(none — bring your own)' : choices.dbProvider}
+  database:    ${choices.orm === 'none' ? '(none — bring your own)' : choices.dbProvider}${choices.orm === 'drizzle' || choices.orm === 'mikro-orm' ? ' (starter in server/db/)' : ''}
   auth:        ${choices.authMode}${choices.oauthProviders.length > 0 ? ' (' + choices.oauthProviders.join(', ') + ')' : ''}
   email:       ${choices.emailProvider}
   monitoring:  ${choices.monitoringProvider}
@@ -2433,6 +2842,11 @@ const main = async (): Promise<void> => {
     //? the dependency AND the few files/lines that referenced it.
     pruneOptionalPackages(targetDir, choices);
 
+    //? Non-prisma data layer (ADR 0020): strip the Prisma surface and wire the
+    //? chosen ORM's starter files + deps + scripts (or the bring-your-own
+    //? hooks for 'none'). Needs the rendered DATABASE_URL default from vars.
+    if (choices.orm !== 'prisma') applyOrmChoice(targetDir, choices, vars.DATABASE_URL ?? '');
+
     //? Fully wire opt-IN packages that need more than a bare dependency. docs-ui
     //? self-wires via its `./register` subpath (dep alone is enough), so only
     //? secret-manager needs the enable-later code blocks uncommented here.
@@ -2479,8 +2893,8 @@ const main = async (): Promise<void> => {
 
     if (args.install) {
       runNpmInstall(targetDir);
-      //? orm: 'none' has no schema.prisma — nothing to generate.
-      if (choices.orm !== 'none') runPrismaGenerate(targetDir);
+      //? Only the prisma data layer has a schema.prisma to generate from.
+      if (choices.orm === 'prisma') runPrismaGenerate(targetDir);
     } else {
       console.log('\nSkipped npm install (--no-install).');
     }
