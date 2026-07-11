@@ -450,3 +450,16 @@ Root-causes + fixes:
 **Tests-fixes**: authLockout.test.ts (tryCatch-mock) + authLogoutRoute.test.ts (resolveEnvKey-mock) bijgewerkt voor de nieuwe core-imports.
 
 **Files**: packages/server/src/{httpHandler.ts,originExemptRegistry.ts,verifyBootstrap.ts,httpRoutes/{authApiRoute.ts,sessionCookie.ts,authLogoutRoute.test.ts}}, packages/login/src/{authLockout.ts,authLockout.test.ts}, packages/email/src/autoSelect.ts, codebase-scan-02-07/SCAN_REPORT.md.
+
+## 2026-07-11 17:00 — v0.5.1 gereleased naar npm (merge feat/orm-aware-cli)
+
+**User prompt:** "push en publiceer alles"
+
+**Wat ik deed:**
+- `feat/orm-aware-cli` (3 commits: 278a75a ORM-detectie overal, d80c051 bidirectionele ORM-switch als manage-stap 0, 3ab97e0 auth kiesbaar op drizzle/mikro-orm [ADR 0023]) via `--no-ff` gemerged naar main (b7ee295).
+- CHANGELOG-entries 0.5.1 voor @luckystack/cli en create-luckystack-app; lockstep-bump alle 17 packages naar 0.5.1 (`setPackageVersions.mjs`) + lockfile-refresh; release-commit 61ec674.
+- `scripts/publishPackages.mjs` kreeg een `--no-provenance` vlag (tweede lokale release die het nodig had; CI-releases blijven met provenance publiceren).
+- Gates op gemergde main: root build + volledige unit-suite groen vóór publish.
+- Publish naar npmjs met `--no-provenance` (lokaal, geen OIDC) → alle 17 packages @0.5.1; tag v0.5.1; main + tags gepusht naar origin.
+
+**Notes:** volgende release bij voorkeur via CI voor provenance-attestatie. Geparkeerde vervolgrondes ongewijzigd: settings-routes porten naar UserAdapter (login-interface-beslissing), email-code login + 2FA.
