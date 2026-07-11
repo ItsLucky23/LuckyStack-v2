@@ -110,7 +110,12 @@ export const runReconfigureWizard = async (
     email: current.email,
     monitoring: current.monitoring,
     toggles: { ...current.toggles },
+    orm: current.orm,
   };
+
+  //? Surface the detected data layer up front — orm-sensitive steps (auth)
+  //? annotate themselves against it instead of assuming Prisma (ADR 0020).
+  console.log(`Data layer: ${current.orm}${current.orm === 'prisma' ? '' : ' (non-Prisma — built-in auth needs a custom UserAdapter)'}\n`);
 
   for (;;) {
     const pending = planChanges(current, desired).length;
@@ -123,7 +128,12 @@ export const runReconfigureWizard = async (
       description: TOGGLE_META[id].description,
     }));
     const rows = [
-      { label: `Auth — ${authLabel(desired)}`, description: 'login / register / settings + OAuth providers' },
+      {
+        label: `Auth — ${authLabel(desired)}`,
+        description: current.orm === 'prisma'
+          ? 'login / register / settings + OAuth providers'
+          : `login / register / settings + OAuth providers — ⚠ data layer is '${current.orm}': needs a custom UserAdapter (a starter is generated on enable)`,
+      },
       { label: `Email — ${desired.email}`, description: 'transactional email adapter' },
       { label: `Monitoring — ${desired.monitoring}`, description: 'error tracking backend' },
       ...toggleRows,

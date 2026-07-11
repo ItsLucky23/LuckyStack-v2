@@ -5,6 +5,7 @@
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
 | main | (none) | 2026-07-11 13:50 | active — bevat v0.5.0 (npm-release ee8100b: cron + scaffold-manifest + luckystack update + ORM-dimensie prisma/drizzle/mikro-orm/none + devtools-fixes) | 24 |
+| feat/orm-aware-cli | (none) | 2026-07-11 15:00 | active (CLI overal ORM-bewust: deriveOrm-detectie in state/manage/list, ⚠-preview bij enable-auth op non-Prisma, per-ORM starter-UserAdapter bij add login + expliciete lijst Prisma-gebonden settings-routes; rest: routes zelf porten naar UserAdapter) | 1 |
 | test/e2e-integration | (none) | 2026-07-11 13:35 | merged 2026-07-11 — v0.5.0 GEPUBLICEERD naar npm (ee8100b; 17 packages incl. nieuw @luckystack/cron; multi-instance exactly-once + failover eerst bewezen via verdaccio; provenance-less lokale publish — volgende release via CI) | 2 |
 | feat/scaffold-manifest | (none) | 2026-07-09 09:20 | merged 2026-07-11 (via test/e2e-integration; fase 0+1a ADR 0021: scaffold-manifest + `luckystack update`) | 2 |
 | feat/orm-choice | (none) | 2026-07-09 10:40 | merged 2026-07-11 (via test/e2e-integration; fase 1b ADR 0020 + verdaccio-e2e + e2e-fixes) | 2 |

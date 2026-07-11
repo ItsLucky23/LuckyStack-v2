@@ -6,6 +6,7 @@
 //? install — it only reads package.json.
 
 import { dependencyRange, hasDependency, type ConsumerProject } from '../lib/project';
+import { deriveOrm, readScaffoldOrm } from '../lib/state';
 import { REGISTRY } from '../registry';
 
 //? Format one manageable-package row: a fixed-width id + status + description.
@@ -13,6 +14,13 @@ const formatRow = (id: string, status: string, description: string): string =>
   `  ${id.padEnd(16)} ${status.padEnd(20)} ${description}`;
 
 export const listFeatures = (project: ConsumerProject): void => {
+  //? Data layer first — orm-sensitive features (auth) depend on it (ADR 0020).
+  const orm = deriveOrm({
+    hasPackage: (pkg) => hasDependency(project.pkg, pkg),
+    scaffoldOrm: readScaffoldOrm(project.root),
+  });
+  console.log(`Data layer: ${orm}${orm === 'prisma' ? '' : ' (non-Prisma — built-in auth needs a custom UserAdapter)'}\n`);
+
   console.log('Manageable optional packages (npx luckystack manage):\n');
   console.log(formatRow('FEATURE', 'STATUS', 'DESCRIPTION'));
   for (const entry of REGISTRY) {

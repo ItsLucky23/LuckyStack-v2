@@ -7,6 +7,7 @@ const cfg = (over: Partial<DesiredConfig> = {}): DesiredConfig => ({
   email: 'none',
   monitoring: 'none',
   toggles: { presence: false, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false },
+  orm: 'prisma',
   ...over,
 });
 

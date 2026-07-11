@@ -20,7 +20,10 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
   setting (auth mode + OAuth providers, email, monitoring, presence, sync, docs-ui), shows a
   per-change consequence preview, then applies (`commands/reconfigure.ts` + `transitions.ts`),
   then ONE `npm install`. Env edits are value-safe (key-presence only; `.env.local` placeholders
-  appended on add, a filled block never deleted).
+  appended on add, a filled block never deleted). **ORM-aware (ADR 0020)**: the wizard header +
+  `list` print the detected data layer; on a non-Prisma layer the Auth row is annotated and the
+  enable-auth preview warns that a custom UserAdapter is required (a per-ORM starter is
+  generated on apply). `DesiredConfig.orm` carries the detection into `planAuth` (not editable).
 - `luckystack update` — refresh the FRAMEWORK-OWNED files the scaffold copied into the
   project (docs/luckystack, CLAUDE.md, skills, .claude/commands, generator scripts, shared
   eslint configs, `.luckystack/templates`) from the current framework version (ADR 0021
@@ -58,12 +61,12 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 | `commands/reconfigure.ts` | `runReconfigureWizard` — the interactive STEP wizard for `manage`: detect state (`lib/state.ts`) → edit per-setting → preview (`transitions.ts` `planChanges`) → confirm → apply → one install. |
 | `commands/manage.ts` | Single-feature plan helpers used by `add <feature>` / `remove <feature>`: `computeManagePlan` (PURE diff, test-only) + `applyManagePlan` (run the plan, then ONE install). NOT the interactive wizard (that's reconfigure.ts). |
 | `transitions.ts` | `planChanges(current, desired)` → granular `Change[]` each with a consequence preview + `apply`. `configFromState`, `TOGGLE_IDS`. The reconfigure engine. |
-| `lib/state.ts` / `lib/envKeys.ts` / `lib/envFile.ts` | `detectProjectState` (authMode/oauth/email/monitoring/packages from deps + env KEY names) · value-blind env-key reader (`.env.local` then `.env`) · value-safe env-block add/remove + EXTERNAL_ORIGINS edits. |
+| `lib/state.ts` / `lib/envKeys.ts` / `lib/envFile.ts` | `detectProjectState` (authMode/oauth/email/monitoring/**orm**/packages from deps + env KEY names + the scaffold manifest) · `deriveOrm`/`readScaffoldOrm` — the DATA-LAYER detector (`'prisma' \| 'drizzle' \| 'mikro-orm' \| 'none'`; manifest `choices.orm` wins, else dep inference) that every orm-sensitive CLI path reads instead of assuming Prisma (ADR 0020) · value-blind env-key reader (`.env.local` then `.env`) · value-safe env-block add/remove + EXTERNAL_ORIGINS edits. |
 | `featureOptions.ts` | Reconfigurable option lists (authMode/oauth/email/monitoring) + provider→env-key/origin/dep maps. Mirrors the scaffolder's PROVIDER_OPTIONS (parity-tested). |
 | `commands/remove.ts` | `removeFeature` — inverse of add by kind: backend = drop dep; presence = reverse JSX; login = GUARDED (keep files, warn); error-tracking = drop dep + delete `functions/sentry.ts`; secret-manager = re-comment blocks; router = drop dep + script + delete the topology config files (`services.config.ts` / `deploy.config.ts` / `server/config/presetLoader.ts`) + un-wire their two `server.ts` imports; ai-docs = drop mcp + `.mcp.json` entry. |
 | `commands/addDispatch.ts` | `runAddByKind` — single source of truth mapping a `FeatureKind` to its add handler (used by `add <feature>`, manage, and reconfigure toggles; exhaustive). |
 | `lib/wizard.ts` | `runSingleSelect` (radio) + `runCheckbox` (multi) — ZERO-dep readline-keypress prompts (↑/↓ · space/enter · ctrl-c), non-TTY + empty guards. |
-| `commands/addLogin.ts` | Copy the WHOLE auth bundle (UI + `functions/session.ts` + `server/hooks/notifications.ts`) into the project + add `@luckystack/login` + restore config.ts auth flags + register notification hooks (best-effort). `AUTH_SERVER_HOOKS` / `AUTH_NONE_SERVER_PLACEHOLDER` exported for the reverse. |
+| `commands/addLogin.ts` | Copy the WHOLE auth bundle (UI + `functions/session.ts` + `server/hooks/notifications.ts`) into the project + add `@luckystack/login` + restore config.ts auth flags + register notification hooks (best-effort). **ORM-aware (ADR 0020)**: on a non-Prisma data layer it writes a per-ORM starter `luckystack/login/userAdapter.ts` (drizzle/mikro-orm: commented-complete against the real UserAdapter interface; none: TODO skeleton — skip-if-exists) and warns which copied settings routes still call `functions.db.prisma` (`PRISMA_BOUND_SETTINGS_ROUTES`). `AUTH_SERVER_HOOKS` / `AUTH_NONE_SERVER_PLACEHOLDER` exported for the reverse. |
 | `commands/addPresence.ts` | Re-add `@luckystack/presence` + inject `<LocationProvider/>` / `<SocketStatusIndicator/>` (inverse of the pruner) + install. |
 | `commands/addDocsUi.ts` | Add `@luckystack/docs-ui` + copy the React API explorer into `src/docs/page.tsx`. Removal deletes the page. |
 | `commands/addErrorTracking.ts` | Add `@luckystack/error-tracking` + copy the `functions/sentry.ts` shim. `copySentryShim` / `removeSentryShim` shared with planMonitoring. |

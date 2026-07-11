@@ -4,6 +4,8 @@
 //? inferred from installed packages + declared env KEY NAMES (never values, Rule
 //? 16 / ADR 0014 D1).
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { hasDependency, type ConsumerProject } from './project';
 import { readDeclaredEnvKeys, anyKeyDeclared } from './envKeys';
 import { REGISTRY } from '../registry';
@@ -19,11 +21,19 @@ import {
   type MonitoringProvider,
 } from '../featureOptions';
 
+//? The project's data layer. EVERY orm-sensitive CLI path (manage wizard,
+//? add login, previews) reads this instead of assuming Prisma — the scaffold
+//? has shipped orm variants since 0.5.0 (ADR 0020).
+export type DetectedOrm = 'prisma' | 'drizzle' | 'mikro-orm' | 'none';
+const DETECTED_ORMS: readonly DetectedOrm[] = ['prisma', 'drizzle', 'mikro-orm', 'none'];
+
 export interface ProjectState {
   authMode: AuthMode;
   oauthProviders: OAuthProvider[];
   email: EmailProvider;
   monitoring: MonitoringProvider;
+  /** Data layer: scaffold-manifest value when present, else dep-inferred. */
+  orm: DetectedOrm;
   /** Registry id -> installed (from package.json). */
   packages: Record<string, boolean>;
 }
@@ -34,7 +44,20 @@ export interface StateInputs {
   hasPackage: (pkg: string) => boolean;
   /** Declared env key NAMES (value-blind). */
   declaredKeys: ReadonlySet<string>;
+  /** `.luckystack/scaffold.json` `choices.orm`, when a manifest exists. */
+  scaffoldOrm?: unknown;
 }
+
+//? Manifest value wins (it records the deliberate choice); dependency
+//? inference covers pre-manifest projects and hand-rolled setups.
+export const deriveOrm = (inputs: Pick<StateInputs, 'hasPackage' | 'scaffoldOrm'>): DetectedOrm => {
+  const recorded = DETECTED_ORMS.find((orm) => orm === inputs.scaffoldOrm);
+  if (recorded) return recorded;
+  if (inputs.hasPackage('@prisma/client')) return 'prisma';
+  if (inputs.hasPackage('drizzle-orm')) return 'drizzle';
+  if (inputs.hasPackage('@mikro-orm/core')) return 'mikro-orm';
+  return 'none';
+};
 
 const LOGIN_PKG = '@luckystack/login';
 const EMAIL_PKG = '@luckystack/email';
@@ -84,7 +107,27 @@ export const deriveState = (inputs: StateInputs): ProjectState => {
   const packages: Record<string, boolean> = {};
   for (const entry of REGISTRY) packages[entry.id] = hasPackage(entry.pkg);
 
-  return { authMode, oauthProviders, email, monitoring, packages };
+  return {
+    authMode,
+    oauthProviders,
+    email,
+    monitoring,
+    orm: deriveOrm(inputs),
+    packages,
+  };
+};
+
+//? Read `.luckystack/scaffold.json` `choices.orm` (best-effort; absent on
+//? pre-0.4.1 scaffolds and hand-rolled projects — dep inference covers those).
+export const readScaffoldOrm = (root: string): unknown => {
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(root, '.luckystack', 'scaffold.json'), 'utf8'),
+    ) as { choices?: { orm?: unknown } };
+    return manifest.choices?.orm;
+  } catch {
+    return undefined;
+  }
 };
 
 //? Gather the real inputs from a located project, then derive.
@@ -92,4 +135,5 @@ export const detectProjectState = (project: ConsumerProject): ProjectState =>
   deriveState({
     hasPackage: (pkg) => hasDependency(project.pkg, pkg),
     declaredKeys: readDeclaredEnvKeys(project.root),
+    scaffoldOrm: readScaffoldOrm(project.root),
   });

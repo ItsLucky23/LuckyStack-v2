@@ -26,7 +26,7 @@ import { runAddByKind } from './commands/addDispatch';
 import { addLogin, AUTH_SERVER_HOOKS, AUTH_NONE_SERVER_PLACEHOLDER } from './commands/addLogin';
 import { copySentryShim, removeSentryShim } from './commands/addErrorTracking';
 import { removeFeature, pruneLoginDocs, LOGIN_COPIED_PATHS } from './commands/remove';
-import type { ProjectState } from './lib/state';
+import type { DetectedOrm, ProjectState } from './lib/state';
 import {
   OAUTH_ORIGINS,
   oauthIdKeys,
@@ -55,6 +55,12 @@ export interface DesiredConfig {
   email: EmailProvider;
   monitoring: MonitoringProvider;
   toggles: Record<ToggleId, boolean>;
+  /**
+   * The project's data layer (NOT wizard-editable; carried so orm-sensitive
+   * plans adapt — e.g. enabling auth on a non-Prisma project previews the
+   * custom-UserAdapter requirement instead of assuming Prisma).
+   */
+  orm: DetectedOrm;
 }
 
 export const configFromState = (state: ProjectState): DesiredConfig => ({
@@ -63,6 +69,7 @@ export const configFromState = (state: ProjectState): DesiredConfig => ({
   email: state.email,
   monitoring: state.monitoring,
   toggles: Object.fromEntries(TOGGLE_IDS.map((id) => [id, state.packages[id] ?? false])) as Record<ToggleId, boolean>,
+  orm: state.orm,
 });
 
 export interface ApplyContext {
@@ -235,7 +242,19 @@ const planAuth = (current: DesiredConfig, desired: DesiredConfig): Change[] => {
   const changes: Change[] = [];
   const loginNow = current.authMode !== 'none';
   const loginWant = desired.authMode !== 'none';
-  if (!loginNow && loginWant) changes.push(addLoginChange());
+  if (!loginNow && loginWant) {
+    const change = addLoginChange();
+    //? ORM-aware preview (ADR 0020): the built-in UserAdapter is Prisma-backed.
+    //? On a non-Prisma data layer the apply also writes a per-ORM starter
+    //? adapter (addLogin does that) — surface it BEFORE the user confirms.
+    if (current.orm !== 'prisma') {
+      change.effects = [
+        `⚠ data layer is '${current.orm}' — the built-in login UserAdapter is Prisma-backed; a starter UserAdapter for ${current.orm} is written to luckystack/login/userAdapter.ts (finish its TODOs before logging in)`,
+        ...change.effects,
+      ];
+    }
+    changes.push(change);
+  }
 
   const currentProviders = current.authMode === 'credentials+oauth' ? current.oauthProviders : [];
   const desiredProviders = desired.authMode === 'credentials+oauth' ? desired.oauthProviders : [];

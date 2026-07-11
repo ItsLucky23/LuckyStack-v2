@@ -1,10 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { deriveState, type StateInputs } from './state';
+import { deriveOrm, deriveState, type StateInputs } from './state';
 
 const base = (over: Partial<StateInputs> = {}): StateInputs => ({
   hasPackage: () => false,
   declaredKeys: new Set<string>(),
   ...over,
+});
+
+describe('deriveOrm — data-layer detection (ADR 0020)', () => {
+  it('manifest value wins over dependency inference', () => {
+    expect(deriveOrm({ hasPackage: (p) => p === '@prisma/client', scaffoldOrm: 'drizzle' })).toBe('drizzle');
+    expect(deriveOrm({ hasPackage: () => false, scaffoldOrm: 'mikro-orm' })).toBe('mikro-orm');
+    expect(deriveOrm({ hasPackage: (p) => p === 'drizzle-orm', scaffoldOrm: 'none' })).toBe('none');
+  });
+
+  it('falls back to dependency inference (prisma > drizzle > mikro-orm > none)', () => {
+    expect(deriveOrm({ hasPackage: (p) => p === '@prisma/client' })).toBe('prisma');
+    expect(deriveOrm({ hasPackage: (p) => p === 'drizzle-orm' })).toBe('drizzle');
+    expect(deriveOrm({ hasPackage: (p) => p === '@mikro-orm/core' })).toBe('mikro-orm');
+    expect(deriveOrm({ hasPackage: () => false })).toBe('none');
+  });
+
+  it('ignores an invalid manifest value', () => {
+    expect(deriveOrm({ hasPackage: (p) => p === '@prisma/client', scaffoldOrm: 'hibernate' })).toBe('prisma');
+    expect(deriveOrm({ hasPackage: () => false, scaffoldOrm: 42 })).toBe('none');
+  });
+
+  it('lands on deriveState.orm', () => {
+    expect(deriveState(base({ scaffoldOrm: 'drizzle' })).orm).toBe('drizzle');
+    expect(deriveState(base()).orm).toBe('none');
+  });
 });
 
 describe('deriveState — authMode', () => {

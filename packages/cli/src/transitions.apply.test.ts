@@ -18,6 +18,7 @@ const cfg = (over: Partial<DesiredConfig> = {}): DesiredConfig => ({
   email: 'none',
   monitoring: 'none',
   toggles: { presence: false, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false },
+  orm: 'prisma',
   ...over,
 });
 
@@ -117,6 +118,7 @@ describe('configFromState', () => {
       oauthProviders: ['google'],
       email: 'resend',
       monitoring: 'sentry',
+      orm: 'prisma',
       packages: { presence: true, sync: false, 'docs-ui': true, login: true, email: true, 'error-tracking': true },
     };
     expect(configFromState(state)).toEqual({
@@ -124,6 +126,7 @@ describe('configFromState', () => {
       oauthProviders: ['google'],
       email: 'resend',
       monitoring: 'sentry',
+      orm: 'prisma',
       //? toggles cover every TOGGLE_ID; ids absent from packages default to false.
       toggles: { presence: true, sync: false, cron: false, 'docs-ui': true, 'secret-manager': false, router: false, mcp: false },
     });
