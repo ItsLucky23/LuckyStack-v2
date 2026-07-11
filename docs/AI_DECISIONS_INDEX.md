@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (22)
+## Decisions (23)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -35,6 +35,7 @@
 | 0020 | Scaffold gets an ORM dimension (prisma/drizzle/none); 'none' is a registration hook with a clear runtime error, not a full prune | 🟢 accepted | scaffold, cli, database, orm, dx | — | `docs/decisions/0020-orm-choice-with-none-via-registration-hook.md` |
 | 0021 | Scaffold writes a manifest (.luckystack/scaffold.json); updates to copied files go through an explicit `luckystack update` that never overwrites user-modified files (AI-assisted merge via change-notes) | 🟢 accepted | scaffold, cli, updates, dx | — | `docs/decisions/0021-scaffold-manifest-and-luckystack-update.md` |
 | 0022 | Ship @luckystack/cron (leader-elected scheduler) — reversing the "deliberately no cron" extension-points position | 🟢 accepted | cron, scheduler, packages, multi-instance, redis | — | `docs/decisions/0022-ship-luckystack-cron-reversing-no-cron.md` |
+| 0023 | auth selectable on ts first orms | 🟢 accepted | scaffold, auth, orm, cli | — | `docs/decisions/0023-auth-selectable-on-ts-first-orms.md` |
 
 ## Summaries
 
@@ -223,6 +224,14 @@ Add an `orm` dimension to the scaffold wizard and manage CLI: first round `prism
 Ship an optional `@luckystack/cron` package (NOT a core/server feature). It composes existing primitives: leadership via core's lease (single scheduler lease, renew loop; the lease header's "the renew loop is app code" contract fulfilled here), per-run dedup leases, `registerCronJob({ name, schedule, handler, ... })` with croner-parsed cron expressions (bundled dep — hand-rolling a cron parser is the classic DST/DOM-DOW footgun) or `{ everyMs }` intervals, per-tenant fan-out via a consumer-supplied `tenants()` callback, Redis stats hashes, `preCronRun` (veto) / `postCronRun` hooks, lazy start on first registration, teardown via `preServerStop` (ADR 0011). Auto-wired through `OPTIONAL_PACKAGES` + a `luckystack/cron/` overlay slot; manageable via the CLI as a toggle. The extension-points doc now recommends the package first, keeps bullmq (queues) and external schedulers (out-of-process) as the reach-past patterns, and records the reversal.
 
 → `docs/decisions/0022-ship-luckystack-cron-reversing-no-cron.md`
+
+### 0023 — auth selectable on ts first orms
+
+**0023** · accepted · tags: scaffold, auth, orm, cli · 2026-07-11
+
+The scaffold wizard shows the auth step for **prisma, drizzle and mikro-orm**; only `orm: 'none'` forces auth off (there is no data layer to write an adapter against). Explicit `--orm=none --auth=<mode>` exits 2 (mirrors the drizzle+mongodb hard reject). A non-prisma auth scaffold keeps the adapter-based flows (login/register/reset-password, LoginForm, functions/session.ts, @luckystack/login) and writes the per-ORM starter `luckystack/login/userAdapter.ts` (auto-imported at boot via the login overlay slot; consumer finishes 2 documented steps). The **Prisma-bound surface is pruned** to keep the scaffold buildable on first try: `src/settings` (6 `_api` routes call `functions.db.prisma` directly) and `server/hooks/notifications.ts` (`getPrismaClient()`; would fail silently inside its tryCatch on every login). README/Home.tsx/next-steps text is adjusted accordingly. `luckystack add login` behaves identically on a non-prisma project: it no longer copies the Prisma-bound files (previously it copied them and warned "port these" — leaving a project that could not compile). The starter strings are duplicated in create-luckystack-app and @luckystack/cli (they cannot import each other at runtime) and pinned byte-identical by a parity test.
+
+→ `docs/decisions/0023-auth-selectable-on-ts-first-orms.md`
 
 ## Code governed by decisions
 

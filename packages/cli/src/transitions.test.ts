@@ -7,7 +7,40 @@ const cfg = (over: Partial<DesiredConfig> = {}): DesiredConfig => ({
   email: 'none',
   monitoring: 'none',
   toggles: { presence: false, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false },
+  orm: 'prisma',
+  dbProvider: 'postgresql',
   ...over,
+});
+
+describe('planOrm — data-layer switch (ADR 0020)', () => {
+  it('plans a switch as the FIRST change so later steps land on the new layer', () => {
+    const changes = planChanges(
+      cfg(),
+      cfg({ orm: 'drizzle', authMode: 'credentials' }),
+    );
+    expect(changes[0]?.summary).toBe('ORM: prisma → drizzle');
+    expect(changes[1]?.summary).toContain('enable');
+  });
+
+  it('previews the full surface swap + the auth interplay warning', () => {
+    const [change] = planChanges(cfg({ authMode: 'credentials' }), cfg({ orm: 'mikro-orm', authMode: 'credentials' }));
+    const effects = change?.effects.join(' | ') ?? '';
+    expect(effects).toContain('drop prisma deps/scripts');
+    expect(effects).toContain('@mikro-orm/core');
+    expect(effects).toContain('.orm-prisma.bak');
+    expect(effects).toContain('LEFT IN PLACE');
+    expect(effects).toContain('starter UserAdapter');
+  });
+
+  it('no change when the orm stays the same', () => {
+    expect(planChanges(cfg(), cfg({ dbProvider: 'mysql' }))).toEqual([]);
+  });
+
+  it('auth-enable preview reads the DESIRED orm (post-switch)', () => {
+    const changes = planChanges(cfg(), cfg({ orm: 'drizzle', authMode: 'credentials' }));
+    const authChange = changes.find((c) => c.summary.includes('enable'));
+    expect(authChange?.effects.join(' ')).toContain("data layer is 'drizzle'");
+  });
 });
 
 const summaries = (c: DesiredConfig, d: DesiredConfig): string[] => planChanges(c, d).map((ch) => ch.summary);

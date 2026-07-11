@@ -4,6 +4,8 @@
 //? inferred from installed packages + declared env KEY NAMES (never values, Rule
 //? 16 / ADR 0014 D1).
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { hasDependency, type ConsumerProject } from './project';
 import { readDeclaredEnvKeys, anyKeyDeclared } from './envKeys';
 import { REGISTRY } from '../registry';
@@ -19,11 +21,26 @@ import {
   type MonitoringProvider,
 } from '../featureOptions';
 
+//? The project's data layer. EVERY orm-sensitive CLI path (manage wizard,
+//? add login, previews) reads this instead of assuming Prisma — the scaffold
+//? has shipped orm variants since 0.5.0 (ADR 0020).
+export type DetectedOrm = 'prisma' | 'drizzle' | 'mikro-orm' | 'none';
+const DETECTED_ORMS: readonly DetectedOrm[] = ['prisma', 'drizzle', 'mikro-orm', 'none'];
+
+//? Database provider — needed by the ORM switcher (drizzle is SQL-only) and
+//? to re-render starters for the right dialect.
+export type DetectedDbProvider = 'mongodb' | 'postgresql' | 'mysql' | 'sqlite';
+const DETECTED_DBS: readonly DetectedDbProvider[] = ['mongodb', 'postgresql', 'mysql', 'sqlite'];
+
 export interface ProjectState {
   authMode: AuthMode;
   oauthProviders: OAuthProvider[];
   email: EmailProvider;
   monitoring: MonitoringProvider;
+  /** Data layer: scaffold-manifest value when present, else dep-inferred. */
+  orm: DetectedOrm;
+  /** Database: manifest value, else schema.prisma `provider`, else postgresql. */
+  dbProvider: DetectedDbProvider;
   /** Registry id -> installed (from package.json). */
   packages: Record<string, boolean>;
 }
@@ -34,7 +51,31 @@ export interface StateInputs {
   hasPackage: (pkg: string) => boolean;
   /** Declared env key NAMES (value-blind). */
   declaredKeys: ReadonlySet<string>;
+  /** `.luckystack/scaffold.json` `choices.orm`, when a manifest exists. */
+  scaffoldOrm?: unknown;
+  /** `.luckystack/scaffold.json` `choices.dbProvider`, when a manifest exists. */
+  scaffoldDbProvider?: unknown;
+  /** `prisma/schema.prisma` datasource `provider`, when the file exists. */
+  prismaSchemaProvider?: unknown;
 }
+
+export const deriveDbProvider = (
+  inputs: Pick<StateInputs, 'scaffoldDbProvider' | 'prismaSchemaProvider'>,
+): DetectedDbProvider =>
+  DETECTED_DBS.find((db) => db === inputs.scaffoldDbProvider)
+  ?? DETECTED_DBS.find((db) => db === inputs.prismaSchemaProvider)
+  ?? 'postgresql';
+
+//? Manifest value wins (it records the deliberate choice); dependency
+//? inference covers pre-manifest projects and hand-rolled setups.
+export const deriveOrm = (inputs: Pick<StateInputs, 'hasPackage' | 'scaffoldOrm'>): DetectedOrm => {
+  const recorded = DETECTED_ORMS.find((orm) => orm === inputs.scaffoldOrm);
+  if (recorded) return recorded;
+  if (inputs.hasPackage('@prisma/client')) return 'prisma';
+  if (inputs.hasPackage('drizzle-orm')) return 'drizzle';
+  if (inputs.hasPackage('@mikro-orm/core')) return 'mikro-orm';
+  return 'none';
+};
 
 const LOGIN_PKG = '@luckystack/login';
 const EMAIL_PKG = '@luckystack/email';
@@ -84,12 +125,51 @@ export const deriveState = (inputs: StateInputs): ProjectState => {
   const packages: Record<string, boolean> = {};
   for (const entry of REGISTRY) packages[entry.id] = hasPackage(entry.pkg);
 
-  return { authMode, oauthProviders, email, monitoring, packages };
+  return {
+    authMode,
+    oauthProviders,
+    email,
+    monitoring,
+    orm: deriveOrm(inputs),
+    dbProvider: deriveDbProvider(inputs),
+    packages,
+  };
+};
+
+//? Read `.luckystack/scaffold.json` choices (best-effort; absent on pre-0.4.1
+//? scaffolds and hand-rolled projects — inference covers those).
+const readScaffoldChoices = (root: string): { orm?: unknown; dbProvider?: unknown } => {
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(root, '.luckystack', 'scaffold.json'), 'utf8'),
+    ) as { choices?: { orm?: unknown; dbProvider?: unknown } };
+    return manifest.choices ?? {};
+  } catch {
+    return {};
+  }
+};
+
+export const readScaffoldOrm = (root: string): unknown => readScaffoldChoices(root).orm;
+
+//? Parse `datasource { provider = "..." }` out of prisma/schema.prisma —
+//? a project FILE (not an env value), so the value-blind rule doesn't apply.
+export const readPrismaSchemaProvider = (root: string): unknown => {
+  try {
+    const schema = fs.readFileSync(path.join(root, 'prisma', 'schema.prisma'), 'utf8');
+    return /provider\s*=\s*"(mongodb|postgresql|mysql|sqlite)"/.exec(schema)?.[1];
+  } catch {
+    return undefined;
+  }
 };
 
 //? Gather the real inputs from a located project, then derive.
-export const detectProjectState = (project: ConsumerProject): ProjectState =>
-  deriveState({
+export const detectProjectState = (project: ConsumerProject): ProjectState => {
+  const choices = readScaffoldChoices(project.root);
+  return deriveState({
     hasPackage: (pkg) => hasDependency(project.pkg, pkg),
     declaredKeys: readDeclaredEnvKeys(project.root),
+    scaffoldOrm: choices.orm,
+    scaffoldDbProvider: choices.dbProvider,
+    prismaSchemaProvider: readPrismaSchemaProvider(project.root),
   });
+};

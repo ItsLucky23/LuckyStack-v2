@@ -36,6 +36,20 @@ const TOGGLE_META: Record<ToggleId, { title: string; description: string }> = {
   mcp: { title: 'AI graph MCP', description: '@luckystack/mcp dependency-graph server' },
 };
 
+//? ORM step (ADR 0020): pick the data layer; the actual switch is planned by
+//? `planOrm` and applied via `switchOrm` (fresh-render based). Drizzle is
+//? SQL-only, so a mongodb project picks its SQL dialect here too.
+const ORM_OPTIONS = ['prisma', 'drizzle', 'mikro-orm', 'none'] as const;
+const SQL_DB_OPTIONS = ['postgresql', 'mysql', 'sqlite'] as const;
+
+const editOrm = async (desired: DesiredConfig): Promise<void> => {
+  desired.orm = await editChoice('ORM / data layer:', ORM_OPTIONS, desired.orm);
+  if (desired.orm === 'drizzle' && desired.dbProvider === 'mongodb') {
+    console.log('drizzle has no MongoDB support — pick the SQL database to switch to:');
+    desired.dbProvider = await editChoice('Database:', SQL_DB_OPTIONS, 'postgresql');
+  }
+};
+
 //? Open the Auth step: pick the mode, then (for oauth) the providers.
 const editAuth = async (desired: DesiredConfig): Promise<void> => {
   const res = await runSingleSelect(
@@ -110,20 +124,36 @@ export const runReconfigureWizard = async (
     email: current.email,
     monitoring: current.monitoring,
     toggles: { ...current.toggles },
+    orm: current.orm,
+    dbProvider: current.dbProvider,
   };
+
+  //? Surface the detected data layer up front — orm-sensitive steps (auth)
+  //? annotate themselves against the DESIRED value so the steps react to each
+  //? other within one pass (switch orm → the auth row updates immediately).
+  console.log(`Data layer: ${current.orm} (${current.dbProvider})\n`);
 
   for (;;) {
     const pending = planChanges(current, desired).length;
-    //? Rows: 3 fixed dimension steps (auth/email/monitoring) + one row per TOGGLE_ID,
-    //? then Review + Cancel. Toggle rows are data-driven so a new toggle appears here
-    //? automatically (its index maps to TOGGLE_IDS[index - FIXED_STEPS]).
-    const FIXED_STEPS = 3;
+    //? Rows: 4 fixed dimension steps (orm/auth/email/monitoring) + one row per
+    //? TOGGLE_ID, then Review + Cancel. Toggle rows are data-driven so a new
+    //? toggle appears here automatically (index maps to TOGGLE_IDS[index - FIXED_STEPS]).
+    const FIXED_STEPS = 4;
     const toggleRows = TOGGLE_IDS.map((id) => ({
       label: `${TOGGLE_META[id].title} — ${toggleLabel(desired.toggles[id])}`,
       description: TOGGLE_META[id].description,
     }));
     const rows = [
-      { label: `Auth — ${authLabel(desired)}`, description: 'login / register / settings + OAuth providers' },
+      {
+        label: `ORM / data layer — ${desired.orm}${desired.orm === current.orm ? '' : ` (was ${current.orm})`}`,
+        description: 'switch prisma / drizzle / mikro-orm / none — swaps deps, scripts, shims + starters (fresh-render based)',
+      },
+      {
+        label: `Auth — ${authLabel(desired)}`,
+        description: desired.orm === 'prisma'
+          ? 'login / register / settings + OAuth providers'
+          : `login / register / settings + OAuth providers — ⚠ data layer is '${desired.orm}': needs a custom UserAdapter (a starter is generated on enable)`,
+      },
       { label: `Email — ${desired.email}`, description: 'transactional email adapter' },
       { label: `Monitoring — ${desired.monitoring}`, description: 'error tracking backend' },
       ...toggleRows,
@@ -141,9 +171,10 @@ export const runReconfigureWizard = async (
     }
     if (menu.index === reviewIdx) break; // Review & apply
     switch (menu.index) {
-      case 0: { await editAuth(desired); break; }
-      case 1: { desired.email = await editChoice('Transactional email adapter:', EMAIL_PROVIDERS, desired.email); break; }
-      case 2: { desired.monitoring = await editChoice('Observability backend:', MONITORING_PROVIDERS, desired.monitoring); break; }
+      case 0: { await editOrm(desired); break; }
+      case 1: { await editAuth(desired); break; }
+      case 2: { desired.email = await editChoice('Transactional email adapter:', EMAIL_PROVIDERS, desired.email); break; }
+      case 3: { desired.monitoring = await editChoice('Observability backend:', MONITORING_PROVIDERS, desired.monitoring); break; }
       default: {
         //? A toggle row: flip the corresponding TOGGLE_ID. `.at()` always returns
         //? `ToggleId | undefined`, so the `if (id)` guard is honest under both tsc
