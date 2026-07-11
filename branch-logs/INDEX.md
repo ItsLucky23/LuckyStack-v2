@@ -4,12 +4,12 @@
 
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
-| main | (none) | 2026-07-02 22:55 | active | 24 |
-| test/e2e-integration | (none) | 2026-07-11 13:35 | active — **v0.5.0 GEPUBLICEERD naar npm** (ee8100b; 17 packages incl. nieuw @luckystack/cron; multi-instance exactly-once + failover eerst bewezen via verdaccio; provenance-less lokale publish — volgende release via CI; main nog fast-forwarden + taggen) | 2 |
-| feat/scaffold-manifest | (none) | 2026-07-09 09:20 | active (fase 0+1a ADR 0021: scaffold-manifest + `luckystack update` [pristine=overwrite, modified=.new-sidecar+AI-merge-rapport, stamp-less=sidecar-only]; 142 cli-tests + kruis-check 132 files hash-agreement; verdaccio-e2e pending) | 2 |
-| feat/orm-choice | (none) | 2026-07-09 10:40 | active (fase 1b ADR 0020 + verdaccio-e2e GROEN over cron+manifest/update+ORM [V1 onboarding, V2 orm=none boot database:'skipped', V3 add-cron leadership+stats, V4 update sidecar/add/manifest-refresh]; e2e-fixes: @prisma/client optional peer ×6 + volledig User-placeholder; drizzle + manage-ORM-wissel volgende pass) | 2 |
-| feat/cron-package | (none) | 2026-07-09 08:55 | active (@luckystack/cron gebouwd: leader-elected scheduler op core lease; 32 tests + wave-build groen; ADR 0022; verdaccio-e2e pending) | 1 |
-| debug/devtools-lag | (none) | 2026-07-08 20:58 | active — devtools-onderzoek AFGEROND (echte-DevTools-meting: fix herstelt vrijwel hele lag, +25% fps); daarna framework-planning: ADR 0020 (ORM-keuze incl. none-hook) + 0021 (scaffold-manifest + luckystack update) gelockt | 14 |
+| main | (none) | 2026-07-11 13:50 | active — bevat v0.5.0 (npm-release ee8100b: cron + scaffold-manifest + luckystack update + ORM-dimensie prisma/drizzle/mikro-orm/none + devtools-fixes) | 24 |
+| test/e2e-integration | (none) | 2026-07-11 13:35 | merged 2026-07-11 — v0.5.0 GEPUBLICEERD naar npm (ee8100b; 17 packages incl. nieuw @luckystack/cron; multi-instance exactly-once + failover eerst bewezen via verdaccio; provenance-less lokale publish — volgende release via CI) | 2 |
+| feat/scaffold-manifest | (none) | 2026-07-09 09:20 | merged 2026-07-11 (via test/e2e-integration; fase 0+1a ADR 0021: scaffold-manifest + `luckystack update`) | 2 |
+| feat/orm-choice | (none) | 2026-07-09 10:40 | merged 2026-07-11 (via test/e2e-integration; fase 1b ADR 0020 + verdaccio-e2e + e2e-fixes) | 2 |
+| feat/cron-package | (none) | 2026-07-09 08:55 | merged 2026-07-11 (via test/e2e-integration; @luckystack/cron, ADR 0022) | 1 |
+| debug/devtools-lag | (none) | 2026-07-08 20:58 | merged 2026-07-11 (via test/e2e-integration; devtools-fix + prod-overlay-bundling + ADR 0020/0021) | 14 |
 | chore/package-split-prep | (none) | 2026-06-23 | active (wizard+manage verified incl. verdaccio; 5 release-blockers fixed incl. Windows install) | 137 |
 | chore/overnight-audit-2026-06-24 | (none) | 2026-06-29 | active (rounds 1-8: audit + verification sweep + ~40 safe fixes + all 7 design-decisions done [+#5 mutation-safety] + NODE_ENV detection unified on resolveEnvKey() across 17 framework sites; consumer-template env-unify [4 files] staged-deferred behind concurrent feat/ai-docs-layers entanglement) | 11 |
 | feat/ai-docs-layers-2026-06-29 | (none) | 2026-06-29 | active (7 new AI-context layers: doc-coverage gate, staleness, lessons, example corpus, code→ADR, context budget, eval; CLAUDE.md + consumer propagation + parity test; ADR 0016; verified, not committed) | 1 |
