@@ -2136,12 +2136,17 @@ const ORM_NONE_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'none' �
 export {};
 `;
 
+//? The exact config.ts import line the template ships (and stripPrismaSurface
+//? swaps out). Exported so the CLI's ORM switcher can pin the SAME token —
+//? the switchOrm parity test guards against drift.
+export const PRISMA_USER_TYPE_IMPORT = "import type { User } from '@prisma/client';";
+
 //? A local stand-in for the Prisma-generated `User` type that config.ts's
 //? `SessionLayout` derives from. Mirrors the template schema.prisma User model
 //? field-for-field (the shipped components read `theme`/`avatar`/`language`,
 //? so a minimal stub breaks the consumer tsc) — the consumer reshapes it
-//? freely; it only feeds their own session typing.
-const ORM_NONE_CONFIG_USER_TYPE = `//? orm: 'none' — no Prisma-generated User type; shape your own session
+//? freely; it only feeds their own session typing. Exported for the CLI parity test.
+export const ORM_NONE_CONFIG_USER_TYPE = `//? orm: 'none' — no Prisma-generated User type; shape your own session
 //? source type here (SessionLayout below derives from it). This mirrors the
 //? default template's User model — adjust it to YOUR data layer's user shape.
 type User = {
@@ -2192,7 +2197,7 @@ const stripPrismaSurface = (targetDir: string): void => {
   removeScaffoldPath(targetDir, 'prisma');
   removeScaffoldPath(targetDir, 'scripts/prismaWithSecrets.ts');
   editScaffoldFile(targetDir, 'config.ts', [
-    ["import type { User } from '@prisma/client';", ORM_NONE_CONFIG_USER_TYPE],
+    [PRISMA_USER_TYPE_IMPORT, ORM_NONE_CONFIG_USER_TYPE],
   ]);
   mutateScaffoldPackageJson(targetDir, (pkg) => {
     if (pkg.dependencies) {
@@ -2218,7 +2223,8 @@ const stripPrismaSurface = (targetDir: string): void => {
 //? tree — no tsconfig edits needed) + root drizzle.config.ts (read by
 //? drizzle-kit itself) + functions/db.ts exporting the live client.
 
-const DRIZZLE_DRIVER_DEPS: Record<
+//? Exported for CLI parity tests (the ORM switcher keeps name-only copies).
+export const DRIZZLE_DRIVER_DEPS: Record<
   Exclude<DbProvider, 'mongodb'>,
   { deps: Record<string, string>; devDeps: Record<string, string> }
 > = {
@@ -2353,7 +2359,8 @@ export {};
 //? Starter shape uses EntitySchema (NOT decorators) so the template needs no
 //? experimentalDecorators/reflect-metadata changes.
 
-const MIKRO_DRIVER_PACKAGES: Record<DbProvider, string> = {
+//? Exported for CLI parity tests (the ORM switcher keeps name-only copies).
+export const MIKRO_DRIVER_PACKAGES: Record<DbProvider, string> = {
   postgresql: '@mikro-orm/postgresql',
   mysql: '@mikro-orm/mysql',
   sqlite: '@mikro-orm/better-sqlite',

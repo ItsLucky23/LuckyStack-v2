@@ -26,7 +26,8 @@ import { runAddByKind } from './commands/addDispatch';
 import { addLogin, AUTH_SERVER_HOOKS, AUTH_NONE_SERVER_PLACEHOLDER } from './commands/addLogin';
 import { copySentryShim, removeSentryShim } from './commands/addErrorTracking';
 import { removeFeature, pruneLoginDocs, LOGIN_COPIED_PATHS } from './commands/remove';
-import type { DetectedOrm, ProjectState } from './lib/state';
+import type { DetectedDbProvider, DetectedOrm, ProjectState } from './lib/state';
+import { switchOrm, ORM_SURFACES } from './commands/switchOrm';
 import {
   OAUTH_ORIGINS,
   oauthIdKeys,
@@ -56,11 +57,14 @@ export interface DesiredConfig {
   monitoring: MonitoringProvider;
   toggles: Record<ToggleId, boolean>;
   /**
-   * The project's data layer (NOT wizard-editable; carried so orm-sensitive
-   * plans adapt — e.g. enabling auth on a non-Prisma project previews the
-   * custom-UserAdapter requirement instead of assuming Prisma).
+   * The project's data layer — WIZARD-EDITABLE since 0.5.1: `planOrm` turns a
+   * change into a full switch (deps/scripts/shims/starters via a fresh
+   * scaffold render). Other orm-sensitive plans (auth) read the DESIRED value
+   * so the steps react to each other within one wizard pass.
    */
   orm: DetectedOrm;
+  /** Target database — only consulted by the orm switch (drizzle is SQL-only). */
+  dbProvider: DetectedDbProvider;
 }
 
 export const configFromState = (state: ProjectState): DesiredConfig => ({
@@ -70,6 +74,7 @@ export const configFromState = (state: ProjectState): DesiredConfig => ({
   monitoring: state.monitoring,
   toggles: Object.fromEntries(TOGGLE_IDS.map((id) => [id, state.packages[id] ?? false])) as Record<ToggleId, boolean>,
   orm: state.orm,
+  dbProvider: state.dbProvider,
 });
 
 export interface ApplyContext {
@@ -245,11 +250,11 @@ const planAuth = (current: DesiredConfig, desired: DesiredConfig): Change[] => {
   if (!loginNow && loginWant) {
     const change = addLoginChange();
     //? ORM-aware preview (ADR 0020): the built-in UserAdapter is Prisma-backed.
-    //? On a non-Prisma data layer the apply also writes a per-ORM starter
-    //? adapter (addLogin does that) — surface it BEFORE the user confirms.
-    if (current.orm !== 'prisma') {
+    //? Reads the DESIRED orm — an orm switch planned in the same wizard pass
+    //? applies FIRST (planChanges order), so auth lands on the new data layer.
+    if (desired.orm !== 'prisma') {
       change.effects = [
-        `⚠ data layer is '${current.orm}' — the built-in login UserAdapter is Prisma-backed; a starter UserAdapter for ${current.orm} is written to luckystack/login/userAdapter.ts (finish its TODOs before logging in)`,
+        `⚠ data layer is '${desired.orm}' — the built-in login UserAdapter is Prisma-backed; a starter UserAdapter for ${desired.orm} is written to luckystack/login/userAdapter.ts (finish its TODOs before logging in)`,
         ...change.effects,
       ];
     }
@@ -412,8 +417,45 @@ const planToggles = (current: DesiredConfig, desired: DesiredConfig): Change[] =
   return changes;
 };
 
-//? Full diff current → desired as an ordered list of granular changes.
+// --- ORM / data-layer dimension (ADR 0020) --------------------------------
+
+const planOrm = (current: DesiredConfig, desired: DesiredConfig): Change[] => {
+  if (current.orm === desired.orm) return [];
+  const from = current.orm;
+  const to = desired.orm;
+  const toSurface = ORM_SURFACES[to];
+  const fromSurface = ORM_SURFACES[from];
+  const effects = [
+    `- drop ${from} deps/scripts (${[...fromSurface.deps, ...fromSurface.devDeps].join(', ') || 'none'})`,
+    `+ add ${to} deps/scripts (names: ${[...toSurface.deps, ...toSurface.devDeps].join(', ') || 'none'}; exact versions come from a fresh scaffold render at apply time)`,
+    `~ replace functions/db.ts + luckystack/core/clients.ts (previous versions saved as .orm-${from}.bak)`,
+    toSurface.starterFiles.length > 0
+      ? `+ copy ${to} starters when absent (${toSurface.starterFiles.join(', ')})`
+      : `• no starters for '${to}' — wire your own client in functions/db.ts`,
+    `• old ${from} files are LEFT IN PLACE and listed (never deleted)`,
+    `• update .luckystack/scaffold.json (orm: ${to}, db: ${desired.dbProvider}) — set DATABASE_URL in .env.local afterwards`,
+  ];
+  if (desired.authMode !== 'none' && to !== 'prisma') {
+    effects.push(`⚠ auth is enabled: a ${to} starter UserAdapter is written to luckystack/login/userAdapter.ts (built-in adapter is Prisma-backed)`);
+  }
+  return [{
+    summary: `ORM: ${from} → ${to}`,
+    effects,
+    apply: (ctx) =>
+      switchOrm(ctx.project, {
+        from,
+        to,
+        dbProvider: desired.dbProvider,
+        cliVersion: ctx.cliVersion,
+      }),
+  }];
+};
+
+//? Full diff current → desired as an ordered list of granular changes. The
+//? ORM switch runs FIRST so every later change (enable auth, …) lands on the
+//? NEW data layer — the dimensions react to each other.
 export const planChanges = (current: DesiredConfig, desired: DesiredConfig): Change[] => [
+  ...planOrm(current, desired),
   ...planAuth(current, desired),
   ...planEmail(current, desired),
   ...planMonitoring(current, desired),

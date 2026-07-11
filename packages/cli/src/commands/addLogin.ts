@@ -267,17 +267,11 @@ const USER_ADAPTER_STARTERS: Record<string, string> = {
   none: NONE_USER_ADAPTER_STARTER,
 };
 
-//? Detect the data layer and, when it is not Prisma, write the matching
-//? starter adapter (skip-if-exists — the consumer owns the file) + spell out
-//? what still needs porting. Non-blocking: a finished custom adapter is a
-//? fully supported setup.
-const adaptAuthToDataLayer = (project: ConsumerProject): void => {
-  const orm = deriveOrm({
-    hasPackage: (pkg) => hasDependency(project.pkg, pkg),
-    scaffoldOrm: readScaffoldOrm(project.root),
-  });
-  if (orm === 'prisma') return;
-
+//? Write the per-ORM starter adapter (skip-if-exists — the consumer owns the
+//? file). Exported for reuse by the ORM switcher: switching a login-enabled
+//? project to another data layer needs the same starter (cross-dimension
+//? interplay — the steps react to each other).
+export const writeUserAdapterStarterFor = (project: ConsumerProject, orm: string): void => {
   const adapterPath = path.join(project.root, 'luckystack', 'login', 'userAdapter.ts');
   const starter = USER_ADAPTER_STARTERS[orm];
   if (starter && !fs.existsSync(adapterPath)) {
@@ -285,6 +279,19 @@ const adaptAuthToDataLayer = (project: ConsumerProject): void => {
     fs.writeFileSync(adapterPath, starter);
     console.log(`• wrote a ${orm} UserAdapter starter to luckystack/login/userAdapter.ts (finish its two steps to activate auth)`);
   }
+};
+
+//? Detect the data layer and, when it is not Prisma, write the matching
+//? starter adapter + spell out what still needs porting. Non-blocking: a
+//? finished custom adapter is a fully supported setup.
+const adaptAuthToDataLayer = (project: ConsumerProject): void => {
+  const orm = deriveOrm({
+    hasPackage: (pkg) => hasDependency(project.pkg, pkg),
+    scaffoldOrm: readScaffoldOrm(project.root),
+  });
+  if (orm === 'prisma') return;
+
+  writeUserAdapterStarterFor(project, orm);
 
   console.warn(
     `\n⚠ Data layer is '${orm}' — the built-in login UserAdapter is Prisma-backed.\n` +

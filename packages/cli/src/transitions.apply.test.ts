@@ -19,6 +19,7 @@ const cfg = (over: Partial<DesiredConfig> = {}): DesiredConfig => ({
   monitoring: 'none',
   toggles: { presence: false, sync: false, cron: false, 'docs-ui': false, 'secret-manager': false, router: false, mcp: false },
   orm: 'prisma',
+  dbProvider: 'postgresql',
   ...over,
 });
 
@@ -119,6 +120,7 @@ describe('configFromState', () => {
       email: 'resend',
       monitoring: 'sentry',
       orm: 'prisma',
+      dbProvider: 'mongodb',
       packages: { presence: true, sync: false, 'docs-ui': true, login: true, email: true, 'error-tracking': true },
     };
     expect(configFromState(state)).toEqual({
@@ -127,6 +129,7 @@ describe('configFromState', () => {
       email: 'resend',
       monitoring: 'sentry',
       orm: 'prisma',
+      dbProvider: 'mongodb',
       //? toggles cover every TOGGLE_ID; ids absent from packages default to false.
       toggles: { presence: true, sync: false, cron: false, 'docs-ui': true, 'secret-manager': false, router: false, mcp: false },
     });

@@ -333,7 +333,9 @@ export interface UpdateOptions {
   }) => { projectDir: string; cleanup: () => void } | null;
 }
 
-const defaultRenderFreshScaffold: NonNullable<UpdateOptions['renderFreshScaffold']> = ({
+//? Exported for reuse by the ORM switcher (`switchOrm.ts`) — same pattern:
+//? a fresh scaffold render is the single source of truth for file content.
+export const renderScaffoldToTemp: NonNullable<UpdateOptions['renderFreshScaffold']> = ({
   cliVersion,
   projectName,
   choices,
@@ -401,7 +403,7 @@ export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Res
   const projectName = consumerManifest?.projectName ?? path.basename(project.root);
   const choices = consumerManifest?.choices ?? {};
 
-  const render = (options.renderFreshScaffold ?? defaultRenderFreshScaffold)({
+  const render = (options.renderFreshScaffold ?? renderScaffoldToTemp)({
     cliVersion: options.cliVersion,
     projectName,
     choices,
