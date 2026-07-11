@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err, ok, toError, type ConsumerProject, type Result } from '../lib/project';
 import type { DetectedDbProvider, DetectedOrm } from '../lib/state';
-import { writeUserAdapterStarterFor } from './addLogin';
+import { writeUserAdapterStarterFor, PRISMA_BOUND_SETTINGS_ROUTES } from './addLogin';
 import { renderScaffoldToTemp, readScaffoldManifest, MANIFEST_RELATIVE_PATH } from './update';
 
 //? Per-ORM surface (NAMES only; versions/content come from the fresh render).
@@ -195,8 +195,10 @@ export const switchOrm = (project: ConsumerProject, input: SwitchOrmInput): Resu
     ...manifest?.choices,
     orm: to,
     dbProvider: input.dbProvider,
-    //? Auth cannot ride along in the render on non-prisma targets (the
-    //?    scaffolder forces it off); the project's real auth stays untouched.
+    //? The auth surface is not part of the switch (we only take db files +
+    //?    deps from the render; the starter UserAdapter is written in step 6),
+    //?    so render non-prisma targets lean with auth off. The project's real
+    //?    auth stays untouched either way.
     ...(to === 'prisma' ? {} : { authMode: 'none', oauthProviders: [] }),
   };
   const render = (input.renderFreshScaffold ?? renderScaffoldToTemp)({
@@ -283,6 +285,16 @@ export const switchOrm = (project: ConsumerProject, input: SwitchOrmInput): Resu
     if (loginInstalled && to !== 'prisma') {
       writeUserAdapterStarterFor(project, to);
       console.warn(`⚠ auth is installed: finish luckystack/login/userAdapter.ts for '${to}' — the built-in UserAdapter is Prisma-backed.`);
+      //? Prisma-bound auth files that exist in THIS project will stop
+      //? compiling on the new layer — name them concretely, never delete them.
+      const prismaBound = [...PRISMA_BOUND_SETTINGS_ROUTES, 'server/hooks/notifications.ts']
+        .filter((relative) => fs.existsSync(path.join(project.root, relative)));
+      if (prismaBound.length > 0) {
+        console.warn(
+          '⚠ these files call functions.db.prisma / getPrismaClient() and will stop compiling — port them to your UserAdapter or remove them:\n' +
+            prismaBound.map((relative) => `    - ${relative}`).join('\n'),
+        );
+      }
     }
     if (loginInstalled && to === 'prisma') {
       console.log('• auth is installed: the built-in Prisma UserAdapter applies again — remove luckystack/login/userAdapter.ts if you no longer need the custom one.');

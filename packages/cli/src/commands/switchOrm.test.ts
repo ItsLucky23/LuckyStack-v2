@@ -4,11 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { switchOrm, ORM_SURFACES, PRISMA_USER_TYPE_IMPORT, NON_PRISMA_USER_TYPE_HEADER } from './switchOrm';
 import type { ConsumerProject } from '../lib/project';
+import { USER_ADAPTER_STARTERS as CLI_USER_ADAPTER_STARTERS } from './addLogin';
 import {
   PRISMA_USER_TYPE_IMPORT as SCAFFOLDER_PRISMA_IMPORT,
   ORM_NONE_CONFIG_USER_TYPE,
   DRIZZLE_DRIVER_DEPS,
   MIKRO_DRIVER_PACKAGES,
+  USER_ADAPTER_STARTERS as SCAFFOLDER_USER_ADAPTER_STARTERS,
 } from '../../../create-luckystack-app/src/index';
 
 let consumerDir: string;
@@ -226,6 +228,14 @@ describe('switchOrm parity with the scaffolder (drift guards)', () => {
   it('config.ts tokens are byte-identical to the scaffolder exports', () => {
     expect(PRISMA_USER_TYPE_IMPORT).toBe(SCAFFOLDER_PRISMA_IMPORT);
     expect(ORM_NONE_CONFIG_USER_TYPE.startsWith(NON_PRISMA_USER_TYPE_HEADER)).toBe(true);
+  });
+
+  it('UserAdapter starters are byte-identical to the scaffolder copies', () => {
+    //? Scaffold-time (auth on drizzle/mikro-orm) and add-login/switch-time must
+    //? generate the SAME starter — the two packages cannot import each other at
+    //? runtime, so the duplicated strings are pinned here.
+    expect(CLI_USER_ADAPTER_STARTERS.drizzle).toBe(SCAFFOLDER_USER_ADAPTER_STARTERS.drizzle);
+    expect(CLI_USER_ADAPTER_STARTERS['mikro-orm']).toBe(SCAFFOLDER_USER_ADAPTER_STARTERS['mikro-orm']);
   });
 
   it('dependency-name tables cover every scaffolder driver dep', () => {

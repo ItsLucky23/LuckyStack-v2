@@ -15,6 +15,8 @@ import {
   parseArgs,
   readSelfVersion,
   buildOAuthEnvVars,
+  normalizeChoices,
+  DEFAULT_CHOICES,
   VALID_FLAGS,
 } from "./index";
 
@@ -446,5 +448,37 @@ describe("buildOAuthEnvVars", () => {
     expect(out).toContain("npx luckystack add login");
     expect(out).not.toContain("DEV_GOOGLE_CLIENT_ID=");
     expect(out).not.toContain("(enable later)");
+  });
+});
+
+describe("normalizeChoices — auth × orm invariants (ADR 0020, relaxed)", () => {
+  it("keeps auth ON for drizzle and mikro-orm (starter UserAdapter path)", () => {
+    for (const orm of ["drizzle", "mikro-orm"] as const) {
+      const out = normalizeChoices({
+        ...DEFAULT_CHOICES,
+        orm,
+        dbProvider: "postgresql",
+        authMode: "credentials+oauth",
+        oauthProviders: ["google"],
+      });
+      expect(out.authMode).toBe("credentials+oauth");
+      expect(out.oauthProviders).toEqual(["google"]);
+    }
+  });
+
+  it("forces auth OFF for orm 'none' (no data layer for a UserAdapter)", () => {
+    const out = normalizeChoices({
+      ...DEFAULT_CHOICES,
+      orm: "none",
+      authMode: "credentials+oauth",
+      oauthProviders: ["google"],
+    });
+    expect(out.authMode).toBe("none");
+    expect(out.oauthProviders).toEqual([]);
+  });
+
+  it("keeps auth ON for prisma (unchanged behavior)", () => {
+    const out = normalizeChoices({ ...DEFAULT_CHOICES, authMode: "credentials" });
+    expect(out.authMode).toBe("credentials");
   });
 });

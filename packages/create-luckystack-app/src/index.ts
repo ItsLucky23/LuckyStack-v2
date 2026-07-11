@@ -279,7 +279,7 @@ interface ScaffoldChoices {
 //? the wizard or a CLI flag. The ONE exception is `aiInstructions` — it ships only
 //? docs + a git hook (no app-runtime weight) and is the framework's core dev value,
 //? so it stays on by default.
-const DEFAULT_CHOICES: ScaffoldChoices = {
+export const DEFAULT_CHOICES: ScaffoldChoices = {
   orm: 'prisma',
   dbProvider: 'mongodb',
   authMode: 'none',
@@ -376,10 +376,12 @@ const runPromptsFallback = async (
         ? await pickFromList(rl, 'Which database provider? (drizzle is SQL-only)', SQL_DB_PROVIDERS, 'postgresql')
         : await pickFromList(rl, 'Which database provider do you want to use?', PROVIDER_OPTIONS.dbProvider, 'mongodb');
     }
-    if (orm === 'prisma' && need('authMode')) {
+    //? orm 'none' has no data layer for a UserAdapter at all — auth stays off.
+    //? drizzle/mikro-orm DO support auth via the generated starter UserAdapter.
+    if (orm !== 'none' && need('authMode')) {
       answers.authMode = await pickFromList(rl, 'Authentication mode?', PROVIDER_OPTIONS.authMode, 'none');
     }
-    const authMode = orm === 'prisma' ? asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none') : 'none';
+    const authMode = orm === 'none' ? 'none' : asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
     if (authMode === 'credentials+oauth' && need('oauthProviders')) {
       answers.oauthProviders = await pickMulti(rl, 'Which OAuth providers to wire?', PROVIDER_OPTIONS.oauthProviders);
     }
@@ -701,10 +703,13 @@ const runWizard = (
 //? inlined at the return site.
 const convertAnswersToChoices = (answers: Record<string, string | string[]>): ScaffoldChoices => {
   const orm = asOption(answers.orm, PROVIDER_OPTIONS.orm, 'prisma');
-  //? Constraint (ADR 0020): the default UserAdapter is Prisma-backed, so any
-  //? non-prisma orm forces auth off — the wizard skips the auth steps and a
-  //? stale/preset auth value must not leak through here.
-  const authMode = orm === 'prisma' ? asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none') : 'none';
+  //? Constraint (ADR 0020, relaxed): only orm 'none' forces auth off (there is
+  //? no data layer to write a UserAdapter starter against). drizzle/mikro-orm
+  //? support auth — the scaffold ships a starter UserAdapter to finish.
+  const authMode = orm === 'none' ? 'none' : asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
+  if (orm === 'none' && typeof answers.authMode === 'string' && answers.authMode !== 'none' && answers.authMode !== '') {
+    console.log("orm=none has no data layer for a UserAdapter — auth disabled (add it later once functions/db.ts is wired: npx luckystack add login).");
+  }
   const rawOauth = answers.oauthProviders;
   const oauthPicked = Array.isArray(rawOauth) ? rawOauth : [];
 
@@ -771,8 +776,9 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
         'handlers). "mikro-orm" = TypeScript-first with first-class MongoDB (all',
         '4 databases): ships EntitySchema starters + the mikro-orm CLI wiring.',
         '"none" strips every ORM trace and leaves the same hooks empty.',
-        'NOTE: everything except prisma forces auth off for now — the built-in',
-        'login UserAdapter is Prisma-backed (a custom UserAdapter re-enables it).',
+        'NOTE: auth works on prisma out of the box; on drizzle/mikro-orm the',
+        'scaffold ships a starter UserAdapter you finish first (the built-in one',
+        'is Prisma-backed). orm "none" forces auth off — no data layer to adapt.',
         'Redis stays required in all cases (sessions/rate-limiting run on it).',
       ].join('\n'),
       options: PROVIDER_OPTIONS.orm, defaultValue: 'prisma',
@@ -810,11 +816,14 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
         '"credentials" = email/password sign-in + registration + password-reset',
         'pages. "credentials+oauth" = that plus social login (next question picks',
         'the providers). The auth pages/APIs are copied into your src/ to edit.',
+        'On drizzle/mikro-orm: a starter UserAdapter is generated (finish it',
+        'before sign-in works) and the Prisma-bound settings page is skipped.',
         'Add later instead: npx luckystack add login.',
       ].join('\n'),
       options: PROVIDER_OPTIONS.authMode, defaultValue: 'none',
-      //? Any non-prisma orm forces auth off (Prisma-backed default UserAdapter).
-      skip: (a) => a.orm !== 'prisma' && a.orm !== undefined,
+      //? Only orm 'none' forces auth off (no data layer for a UserAdapter).
+      //? drizzle/mikro-orm get a starter UserAdapter when an auth mode is picked.
+      skip: (a) => a.orm === 'none',
     },
     {
       key: 'oauthProviders', type: 'multi', label: 'Which OAuth providers to wire? (@luckystack/login)',
@@ -825,7 +834,7 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
         'later with no code change — just set/unset the env. Pick the ones to',
         'pre-wire now.',
       ].join('\n'),
-      options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => (a.orm !== 'prisma' && a.orm !== undefined) || a.authMode !== 'credentials+oauth',
+      options: PROVIDER_OPTIONS.oauthProviders, skip: (a) => a.orm === 'none' || a.authMode !== 'credentials+oauth',
     },
     {
       key: 'emailProvider', type: 'select', label: 'Transactional email adapter? (@luckystack/email)',
@@ -967,9 +976,10 @@ const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> =>
 //? guarantees, for the `--no-prompt` (flags-over-defaults) path: OAuth providers
 //? only matter under `credentials+oauth`, and browser tooling rides on the AI
 //? template. Keeps both choice-resolution paths consistent.
-const normalizeChoices = (choices: ScaffoldChoices): ScaffoldChoices => {
-  //? Any non-prisma orm forces auth off (Prisma-backed default UserAdapter — ADR 0020).
-  const authMode = choices.orm === 'prisma' ? choices.authMode : 'none';
+export const normalizeChoices = (choices: ScaffoldChoices): ScaffoldChoices => {
+  //? Only orm 'none' forces auth off (no data layer for a UserAdapter —
+  //? ADR 0020, relaxed). drizzle/mikro-orm ship a starter UserAdapter instead.
+  const authMode = choices.orm === 'none' ? 'none' : choices.authMode;
   return {
     ...choices,
     authMode,
@@ -994,6 +1004,14 @@ const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
     }
     choices.dbProvider = 'postgresql';
     console.log("orm=drizzle has no MongoDB support — database defaulted to 'postgresql'.");
+  }
+  //? Explicit `--orm=none --auth=<mode>` is a hard reject (mirrors the
+  //? drizzle+mongodb combo above): there is no data layer to write a
+  //? UserAdapter against, so silently scaffolding auth would ship a broken app.
+  if (choices.orm === 'none' && args.authMode && args.authMode !== 'none') {
+    console.error('Invalid combination: --orm=none does not support --auth (no data layer for a UserAdapter).');
+    console.error('Wire functions/db.ts first and add auth later with `npx luckystack add login`, or pick --orm=drizzle / --orm=mikro-orm.');
+    process.exit(2);
   }
   if (args.authMode) choices.authMode = args.authMode;
   if (args.oauthProviders) choices.oauthProviders = args.oauthProviders;
@@ -1025,7 +1043,8 @@ Options:
   --orm=<prisma|drizzle|mikro-orm|none>       Data layer (default prisma). drizzle = TypeScript-first
                                               SQL ORM (no MongoDB); mikro-orm = TypeScript-first incl.
                                               MongoDB; none = bring your own client via functions/db.ts.
-                                              Non-prisma forces --auth=none (Prisma-backed UserAdapter).
+                                              Auth on drizzle/mikro-orm ships a starter UserAdapter to
+                                              finish; --orm=none forces --auth=none (no data layer).
   --db=<mongodb|postgresql|mysql|sqlite>      Database provider (default mongodb).
   --auth=<none|credentials|credentials+oauth> Authentication mode (default 'none' = no auth).
   --oauth=<google,github,discord,facebook,microsoft>  OAuth providers (comma list; needs --auth=credentials+oauth).
@@ -1935,6 +1954,239 @@ export default Dashboard;`,
   ]);
 };
 
+//? ─────────── auth on a non-Prisma data layer (ADR 0020, relaxed) ───────────
+//? The template's login/register/reset-password flows go through
+//? @luckystack/login (UserAdapter-based) and STAY; only the settings surface is
+//? Prisma-bound (its 6 `_api` routes call functions.db.prisma directly), so it
+//? is pruned to keep the scaffold buildable on first try. A per-ORM starter
+//? UserAdapter is written for the consumer to finish — the luckystack/login/
+//? overlay slot auto-imports every .ts file at boot, so uncommenting the
+//? starter is all it takes to register it.
+//? MUST stay byte-identical to the CLI's USER_ADAPTER_STARTERS in
+//? @luckystack/cli commands/addLogin.ts (parity-tested) — the CLI cannot
+//? import this package at runtime.
+
+export const USER_ADAPTER_STARTERS: Record<'drizzle' | 'mikro-orm', string> = {
+  drizzle: `//? Custom UserAdapter starter — data layer: DRIZZLE (generated by LuckyStack tooling).
+//? The built-in login UserAdapter is Prisma-backed; this file wires auth to
+//? your drizzle client instead. Two steps to activate:
+//?
+//? 1. Add a users table to server/db/schema.ts (pg-core flavor shown — adjust
+//?    the imports/columns to your dialect, then \`npm run db:push\`):
+//?
+//?      export const users = pgTable('users', {
+//?        id: serial('id').primaryKey(),
+//?        createdAt: timestamp('created_at').defaultNow().notNull(),
+//?        email: text('email').notNull(),
+//?        password: text('password'),
+//?        provider: text('provider').notNull().default('credentials'),
+//?        name: text('name'),
+//?        avatar: text('avatar').notNull().default(''),
+//?        avatarFallback: text('avatar_fallback').notNull().default(''),
+//?        language: text('language').notNull().default('en'),
+//?        theme: text('theme').notNull().default('light'),
+//?      });
+//?
+//? 2. Uncomment everything below. (mysql2 note: \`.returning()\` is Postgres/
+//?    SQLite — on mysql re-select the row after insert/update instead.)
+
+// import { registerUserAdapter, type UserAdapter, type UserRecord } from '@luckystack/login';
+// import { and, asc, eq } from 'drizzle-orm';
+// import { db } from '../../functions/db';
+// import { users } from '../../server/db/schema';
+//
+// const toRecord = (row: typeof users.$inferSelect): UserRecord =>
+//   ({ ...row, id: String(row.id) }) as UserRecord;
+//
+// const adapter: UserAdapter = {
+//   findByEmail: async ({ email, provider }) => {
+//     const [row] = await db.select().from(users)
+//       .where(and(eq(users.email, email), eq(users.provider, provider))).limit(1);
+//     return row ? toRecord(row) : null;
+//   },
+//   findByEmailAnyProvider: async ({ email }) => {
+//     const [row] = await db.select().from(users)
+//       .where(eq(users.email, email)).orderBy(asc(users.createdAt)).limit(1);
+//     return row ? toRecord(row) : null;
+//   },
+//   findById: async (id) => {
+//     const [row] = await db.select().from(users).where(eq(users.id, Number(id))).limit(1);
+//     return row ? toRecord(row) : null;
+//   },
+//   create: async (input) => {
+//     const [row] = await db.insert(users).values({
+//       email: input.email,
+//       provider: input.provider,
+//       name: input.name ?? null,
+//       password: input.password ?? null,
+//       avatar: input.avatar ?? '',
+//       avatarFallback: input.avatarFallback ?? '',
+//       language: input.language ?? 'en',
+//     }).returning();
+//     return toRecord(row);
+//   },
+//   update: async (id, patch) => {
+//     const { id: _id, ...data } = patch;
+//     const [row] = await db.update(users).set(data).where(eq(users.id, Number(id))).returning();
+//     return toRecord(row);
+//   },
+//   delete: async (id) => {
+//     await db.delete(users).where(eq(users.id, Number(id)));
+//   },
+// };
+//
+// registerUserAdapter(adapter);
+
+export {};
+`,
+  'mikro-orm': `//? Custom UserAdapter starter — data layer: MIKRO-ORM (generated by LuckyStack tooling).
+//? The built-in login UserAdapter is Prisma-backed; this file wires auth to
+//? your MikroORM EntityManager instead. Two steps to activate:
+//?
+//? 1. Define the User entity (EntitySchema, no decorators) in
+//?    server/db/entities.ts and add it to \`entities\` in
+//?    server/db/mikro-orm.config.ts, then \`npm run db:schema:update\`:
+//?
+//?      export interface User {
+//?        id: number; createdAt: Date; email: string; password: string | null;
+//?        provider: string; name: string | null; avatar: string;
+//?        avatarFallback: string; language: string; theme: string;
+//?      }
+//?      export const UserSchema = new EntitySchema<User>({
+//?        name: 'User',
+//?        properties: {
+//?          id: { type: 'number', primary: true, autoincrement: true },
+//?          createdAt: { type: 'Date', onCreate: () => new Date() },
+//?          email: { type: 'string' },
+//?          password: { type: 'string', nullable: true },
+//?          provider: { type: 'string', default: 'credentials' },
+//?          name: { type: 'string', nullable: true },
+//?          avatar: { type: 'string', default: '' },
+//?          avatarFallback: { type: 'string', default: '' },
+//?          language: { type: 'string', default: 'en' },
+//?          theme: { type: 'string', default: 'light' },
+//?        },
+//?      });
+//?      (MongoDB: use \`_id: { type: 'ObjectId', primary: true }\` +
+//?       \`id: { type: 'string', serializedPrimaryKey: true }\` instead.)
+//?
+//? 2. Uncomment everything below.
+
+// import { registerUserAdapter, type UserAdapter, type UserRecord } from '@luckystack/login';
+// import { getEm } from '../../functions/db';
+// import type { User } from '../../server/db/entities';
+//
+// const toRecord = (user: User | null): UserRecord | null =>
+//   user ? ({ ...user, id: String(user.id) }) as UserRecord : null;
+//
+// const adapter: UserAdapter = {
+//   findByEmail: async ({ email, provider }) =>
+//     toRecord(await (await getEm()).findOne<User>('User', { email, provider })),
+//   findByEmailAnyProvider: async ({ email }) =>
+//     toRecord(await (await getEm()).findOne<User>('User', { email }, { orderBy: { createdAt: 'asc' } })),
+//   findById: async (id) =>
+//     toRecord(await (await getEm()).findOne<User>('User', { id: Number(id) })),
+//   create: async (input) => {
+//     const em = await getEm();
+//     const user = em.create<User>('User', {
+//       email: input.email,
+//       provider: input.provider,
+//       name: input.name ?? null,
+//       password: input.password ?? null,
+//       avatar: input.avatar ?? '',
+//       avatarFallback: input.avatarFallback ?? '',
+//       language: input.language ?? 'en',
+//     });
+//     await em.persistAndFlush(user);
+//     return toRecord(user) as UserRecord;
+//   },
+//   update: async (id, patch) => {
+//     const em = await getEm();
+//     const user = await em.findOneOrFail<User>('User', { id: Number(id) });
+//     const { id: _id, ...data } = patch;
+//     em.assign(user, data);
+//     await em.flush();
+//     return toRecord(user) as UserRecord;
+//   },
+//   delete: async (id) => {
+//     const em = await getEm();
+//     await em.nativeDelete('User', { id: Number(id) });
+//   },
+// };
+//
+// registerUserAdapter(adapter);
+
+export {};
+`,
+};
+
+//? Adapt an auth-enabled scaffold to a non-Prisma data layer: prune ONLY the
+//? Prisma-bound settings surface, fix the docs/links that referenced it, and
+//? write the starter UserAdapter. login/register/reset-password stay.
+const adaptAuthNonPrisma = (targetDir: string, orm: OrmProvider): void => {
+  //? 1. Settings page + its 6 Prisma-bound `_api` routes, and the notification
+  //?    hooks (they read the user via getPrismaClient() — on this layer they'd
+  //?    fail SILENTLY inside their tryCatch on every login; honest removal
+  //?    beats a silently-dead feature).
+  removeScaffoldPath(targetDir, 'src/settings');
+  removeScaffoldPath(targetDir, 'server/hooks/notifications.ts');
+  editScaffoldFile(targetDir, 'luckystack/server/index.ts', [
+    [
+      `import { registerHook, resolveEnvKey } from '@luckystack/core';
+import { registerNotificationHooks } from '../../server/hooks/notifications';
+
+//? Wires the transactional notification hooks (new sign-in email,
+//? password-change email). Reads \`user.preferences\` to respect opt-in. Safe
+//? to leave on even if @luckystack/email isn't installed — the email
+//? sender no-ops with \`{ ok: false, reason: 'no-sender' }\`.
+registerNotificationHooks();
+`,
+      `import { registerHook, resolveEnvKey } from '@luckystack/core';
+
+//? The template's notification hooks (new sign-in / password-change emails)
+//? read the user via Prisma and are not scaffolded on this data layer — add
+//? your own postLogin hook against your UserAdapter if you want them.
+`,
+    ],
+  ]);
+
+  //? 2. Home shell: drop ONLY the settings link (sign-out + translator stay).
+  editScaffoldFile(targetDir, 'src/_components/templates/Home.tsx', [
+    [
+      `          <Link to="/settings" className="text-sm text-common hover:text-primary transition-colors">
+            {translate({ key: 'home.settings' })}
+          </Link>
+`,
+      '',
+    ],
+  ]);
+
+  //? 3. README: rewrite the three login-as-installed paragraphs that mention
+  //?    the settings surface / the Prisma self-wiring adapter (exact-token
+  //?    edits — a miss means the template README drifted; editScaffoldFile throws).
+  editScaffoldFile(targetDir, 'README.md', [
+    [
+      "If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, `reset-password/page.tsx`, and an account-management `settings/page.tsx`. Scaffolded with `auth: 'none'`? Add them later with `npx luckystack add login`.",
+      "If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, and `reset-password/page.tsx`. The account-management settings page is NOT scaffolded on this data layer — its API routes are Prisma-bound; build your own against your UserAdapter.",
+    ],
+    [
+      "Selecting an **auth** mode also adds the auth-related API handlers — e.g. `logout_v1`, the `reset-password/_api/*` reset flow, and the `settings/_api/*` session / password / profile / account handlers. These ship alongside the auth pages above (and arrive together via `npx luckystack add login`).",
+      "Selecting an **auth** mode also adds the auth-related API handlers — e.g. `logout_v1` and the `reset-password/_api/*` reset flow. The Prisma-bound `settings/_api/*` handlers are not scaffolded on this data layer.",
+    ],
+    [
+      "With an **auth** mode selected, OAuth providers auto-wire from env at boot (set the vars in `.env.local`; no file needed), the user adapter self-wires via `defaultPrismaUserAdapter` (override with `registerUserAdapter()` in `luckystack/server/index.ts`), and `server/hooks/notifications.ts` wires the transactional new-sign-in / password-change emails.",
+      "With an **auth** mode selected, OAuth providers auto-wire from env at boot (set the vars in `.env.local`; no file needed). On this data layer the user adapter does NOT self-wire — finish `luckystack/login/userAdapter.ts` (starter included) to register yours. The transactional notification hooks (`server/hooks/notifications.ts`) are Prisma-bound and not scaffolded here — add your own `postLogin` hook against your UserAdapter if you want them.",
+    ],
+  ]);
+
+  //? 4. The starter UserAdapter (auto-imported at boot via the login overlay slot).
+  const starter = orm === 'drizzle' || orm === 'mikro-orm' ? USER_ADAPTER_STARTERS[orm] : null;
+  if (starter) {
+    fs.mkdirSync(path.join(targetDir, 'luckystack', 'login'), { recursive: true });
+    fs.writeFileSync(path.join(targetDir, 'luckystack', 'login', 'userAdapter.ts'), starter);
+  }
+};
+
 //? Strip @luckystack/error-tracking when the consumer opted out. The only active
 //? reference in the template is the `functions/sentry.ts` shim (which re-exports
 //? the package as `functions.sentry.*`); every other mention is a comment or the
@@ -2544,6 +2796,9 @@ const pruneOptionalPackages = (targetDir: string, choices: ScaffoldChoices): voi
   if (!choices.docsUi) pruneDocsUi(targetDir);
   if (!choices.router) pruneRouter(targetDir);
   if (choices.authMode === 'none') pruneAuthNone(targetDir);
+  //? Auth ON + a non-Prisma data layer: keep the adapter-based login flows,
+  //? prune only the Prisma-bound settings surface, write the starter adapter.
+  else if (choices.orm !== 'prisma') adaptAuthNonPrisma(targetDir, choices.orm);
   //? The non-prisma ORM wiring (applyOrmChoice) runs from main() AFTER this —
   //? it needs the rendered DATABASE_URL default, which lives in the template
   //? vars main() already computed.
@@ -2749,6 +3004,15 @@ const printNextSteps = (choices: ScaffoldChoices, slug: string): void => {
     none: '# no ORM scaffolded — wire your own data layer (see checklist below)',
   };
   const prismaCmd = dbInitCmds[choices.orm];
+  //? Line 5 of the drizzle/mikro checklist depends on the auth choice: OFF →
+  //? how to re-enable; ON → the starter UserAdapter that must be finished first.
+  const nonPrismaAuthLine = (orm: 'drizzle' | 'mikro-orm'): string =>
+    choices.authMode === 'none'
+      ? `  5. Auth is OFF            the built-in UserAdapter is Prisma-backed; a custom ${orm}
+                            UserAdapter re-enables it (see @luckystack/login docs/user-adapter.md)`
+      : `  5. Auth needs YOUR adapter   finish luckystack/login/userAdapter.ts (2 steps in the file
+                            header) before sign-in works. The settings page is not scaffolded
+                            on ${orm} (its routes are Prisma-bound).`;
   const ormChecklists: Record<OrmProvider, string> = {
     prisma: '',
     drizzle: `
@@ -2757,8 +3021,7 @@ orm: drizzle — starter checklist:
   2. functions/db.ts        exports the live client (functions.db.db in handlers)
   3. .env.local             set DATABASE_URL for your ${choices.dbProvider} instance
   4. luckystack/core/clients.ts   optional: registerDbHealthCheck(...) so /readyz probes your DB
-  5. Auth is OFF            the built-in UserAdapter is Prisma-backed; a custom drizzle
-                            UserAdapter re-enables it (see @luckystack/login docs/user-adapter.md)
+${nonPrismaAuthLine('drizzle')}
 `,
     'mikro-orm': `
 orm: mikro-orm — starter checklist:
@@ -2766,8 +3029,7 @@ orm: mikro-orm — starter checklist:
   2. functions/db.ts        exports getOrm()/getEm() (await functions.db.getEm() in handlers)
   3. .env.local             set DATABASE_URL for your ${choices.dbProvider} instance
   4. luckystack/core/clients.ts   optional: registerDbHealthCheck(...) so /readyz probes your DB
-  5. Auth is OFF            the built-in UserAdapter is Prisma-backed; a custom mikro-orm
-                            UserAdapter re-enables it (see @luckystack/login docs/user-adapter.md)
+${nonPrismaAuthLine('mikro-orm')}
 `,
     none: `
 orm: none — bring-your-own data layer checklist:
