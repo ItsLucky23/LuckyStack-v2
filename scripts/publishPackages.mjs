@@ -21,8 +21,10 @@
 //? OIDC token outside CI and npm would otherwise abort.
 //?
 //? Usage:
-//?   node scripts/publishPackages.mjs --dry-run   # `npm publish --dry-run` per package (no upload, no provenance)
-//?   node scripts/publishPackages.mjs             # real publish (with provenance)
+//?   node scripts/publishPackages.mjs --dry-run        # `npm publish --dry-run` per package (no upload, no provenance)
+//?   node scripts/publishPackages.mjs                  # real publish (with provenance — CI only)
+//?   node scripts/publishPackages.mjs --no-provenance  # real publish from a dev machine (no OIDC available;
+//?                                                     # overrides the package.json `publishConfig.provenance: true`)
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -66,7 +68,12 @@ const WAVES = [
   ['cli', 'create-luckystack-app'],
 ];
 
-const dryRun = new Set(process.argv.slice(2)).has('--dry-run');
+const flags = new Set(process.argv.slice(2));
+const dryRun = flags.has('--dry-run');
+//? Local machines have no OIDC token; `publishConfig.provenance: true` in every
+//? package.json would make plain `npm publish` abort, so an explicit override
+//? flag is needed for a non-CI release (same approach as the v0.5.0 release).
+const noProvenance = flags.has('--no-provenance');
 
 const run = (cmd, args, cwd) =>
   spawnSync(cmd, args, { cwd, stdio: 'inherit', shell: process.platform === 'win32' }).status === 0;
@@ -90,7 +97,8 @@ for (const wave of WAVES) {
       skipped.push(name);
       continue;
     }
-    const args = ['publish', '--access', 'public', ...(dryRun ? ['--dry-run'] : ['--provenance'])];
+    const provenanceArgs = noProvenance ? ['--provenance=false'] : ['--provenance'];
+    const args = ['publish', '--access', 'public', ...(dryRun ? ['--dry-run'] : provenanceArgs)];
     console.log(`\n→ (packages/${name}) npm ${args.join(' ')}`);
     if (!run('npm', args, path.join(ROOT, 'packages', name))) {
       console.error(`\nPublish FAILED for @luckystack/${name}. Done this run: ${done.join(', ') || '(none)'}; skipped (already published): ${skipped.join(', ') || '(none)'}.`);

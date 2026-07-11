@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-11
+
+### Added
+
+- **Auth is selectable on drizzle/mikro-orm** (ADR 0023): the wizard shows the
+  auth step again for TS-first ORMs. The scaffold keeps the adapter-based
+  login/register/reset-password flows and writes a per-ORM starter
+  `luckystack/login/userAdapter.ts` (finish its 2 documented steps to activate
+  sign-in; auto-imported at boot via the login overlay slot). Only `--orm=none`
+  still forces `--auth=none` — an explicit `--orm=none --auth=<mode>` combo
+  exits 2.
+
+### Changed
+
+- A non-Prisma auth scaffold prunes ONLY the Prisma-bound surface so it stays
+  buildable on first try: `src/settings` (its 6 `_api` routes call
+  `functions.db.prisma`) and `server/hooks/notifications.ts`
+  (`getPrismaClient()`), plus their wiring/README/Home.tsx mentions. The
+  next-steps checklist tells you what to finish before sign-in works.
+
 ## [0.5.0] - 2026-07-11
 
 ### Added
