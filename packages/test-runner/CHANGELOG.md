@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-11
+
+### Changed
+
+- `ctx.prisma` (Layer-5 custom tests) resolves lazily — projects without a
+  registered database client (orm: `none`/drizzle/mikro-orm) can run DB-free
+  custom tests; the eager resolve used to abort the whole custom-test phase.
+- `@prisma/client` peer dependency is now optional (ADR 0020).
+
 ## [0.1.0]
 
 ### Added

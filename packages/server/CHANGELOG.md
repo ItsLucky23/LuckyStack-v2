@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-11
+
+### Added
+
+- `OVERLAY_ORDER` exported (consumed by the consumer's `bundleServer.mjs` at
+  build time — kills the hardcoded-copy drift that silently dropped overlay
+  slots from prod bundles). New `cron` overlay slot + `@luckystack/cron` in
+  `OPTIONAL_PACKAGES` (boot auto-wiring).
+- `/readyz` database check is pluggable (core `registerDbHealthCheck`):
+  registered probe → built-in Prisma ping (when Prisma is present) →
+  `'skipped'` for deliberately DB-less projects. Response gains the
+  tri-state `checks.database`; `checks.prisma` kept for compatibility.
+
+### Changed
+
+- Overlay files that fail to import abort boot with an actionable error
+  naming the file (was: raw ERR_MODULE_NOT_FOUND).
+- Dev SIGINT/SIGTERM dispatches `preServerStop` (2s cap) before exiting so
+  subscribers (e.g. the cron leader lease) release cleanly.
+- `@prisma/client` peer dependency is now optional (ADR 0020).
+
 ## [0.1.5]
 
 ### Changed

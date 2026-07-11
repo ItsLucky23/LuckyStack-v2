@@ -4,7 +4,7 @@ All notable changes to `@luckystack/cron` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow the
 monorepo's lockstep versioning.
 
-## [0.4.1] - 2026-07-09
+## [0.5.0] - 2026-07-11
 
 ### Added
 

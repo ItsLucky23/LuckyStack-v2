@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-11
+
+### Added
+
+- **Scaffold manifest** (`.luckystack/scaffold.json`, ADR 0021): every scaffold
+  records its version, resolved choices, and per-file sha256 hashes — the
+  baseline `npx luckystack update` diffs against.
+- **ORM dimension** (`--orm=<prisma|drizzle|mikro-orm|none>`, ADR 0020):
+  drizzle (TypeScript-first, SQL-only — MongoDB filtered/rejected) and
+  mikro-orm (TypeScript-first incl. first-class MongoDB, EntitySchema-based)
+  ship per-dialect starters under `server/db/` + a live `functions/db.ts`
+  client + db scripts; `none` leaves bring-your-own hooks. Every non-prisma
+  value forces `--auth=none` (the built-in UserAdapter is Prisma-backed).
+
+### Changed
+
+- `scripts/bundleServer.mjs` (template) imports the overlay walk order from
+  `@luckystack/server` at build time (parity-tested fallback) so the prod
+  bundle can never drift from the dev overlay walk.
+
 ## [0.1.5]
 
 ### Fixed
