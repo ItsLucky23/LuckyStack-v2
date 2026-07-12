@@ -50,3 +50,29 @@
 - Gates: volledige unit-suite, build, lint, ai:lint groen.
 
 **Klaar voor user-review.** Volledige feature (backend + UI 3 trees + template + docs + runtime-bewijs) op feat/email-code-2fa. Open beslissing: merge + release (minor bump → 0.6.0 wegens nieuwe features?). Bewuste rest: dev-settings-page is verder gedrift van template (buiten 2FA om) — aparte verzoening; QR-code render is consumer-keuze (otpauth-URI wordt geleverd).
+
+## 2026-07-12 16:05 — Security-scan (5 adversariële lenzen) + fixes vóór 0.6.0
+
+**User prompt:** vóór 0.6.0-publish een security-scan op de nieuwe 2FA/email-code code + de vraag of missende session/user-model-waarden en config-keys geseed worden bij upgrade of onduidelijk breken.
+
+**Aanpak:** 5 parallelle review-agents (crypto/replay, auth-bypass/logic, brute-force/DoS, secret-exposure/CSRF, upgrade-compat). Elke HIGH/relevante bevinding zelf her-geverifieerd; fixes daarna bewezen tegen ECHTE Redis via de uitgebreide runtime-harness (30 asserts, incl. concurrency).
+
+**Bevestigde issues + fixes (allemaal in framework-packages, komt mee met dep-bump):**
+- **Re-enrollment zonder step-up (MEDIUM)** — gekaapte sessie kon 2FA overschrijven. Fix: `beginTotpEnrollment`/`confirmTotpEnrollment` weigeren als 2FA al aan is (disable-first vereist, dat vraagt een geldige code) of als de feature globaal uit staat; route relayt de union. Nieuwe reason-keys `twoFactorAlreadyEnabled`/`twoFactorDisabledByServer` (×4 talen ×2 trees).
+- **TOTP replay-guard TOCTOU (MEDIUM)** — niet-atomair get→set liet 2 gelijktijdige verifies met dezelfde code beide slagen. Fix: atomaire per-(user,timestep) `SET NX` claim.
+- **Recovery-code burn niet-atomair (MEDIUM)** — double-spend/lost-update. Fix: per-user Redis-lease (core acquire/releaseLease) + RE-READ via findById binnen de lease.
+- **Geen cross-IP per-account 2FA-verify-cap (MEDIUM)** — per-challenge-budget resetbaar door nieuwe challenge (wachtwoord-houder). Fix: identity-keyed account-lockout (10 fouten/15m) vóór de per-challenge-check.
+- **Recovery-codes 40-bit → 80-bit (MEDIUM)** — `randomBytes(5)`→`randomBytes(10)` (offline-kraakbaar bij DB-lek).
+- **Timing/reason-enumeratie-oracle in email-code request (MEDIUM)** — bestaande-account-pad awaitte de mail (traag + reason-lek). Fix: fire-and-forget send, altijd identiek `{ok:true}`, send-fout alleen server-log.
+- **`recoveryCodes` mist in log-redactie (LOW)** — toegevoegd aan `DEFAULT_REDACTED_LOG_KEYS` (`totpSecret` matchte al via `secret`-suffix).
+- **7/8-cijfer-codes geaccepteerd (LOW)** — `verifyTotpForUser` gepind op exact 6 (matcht de otpauth-URI); generieke `verifyTotp` blijft RFC-flexibel.
+- **Management-routes throttle (LOW-MED)** — per-IP shield `2fa-manage` op disable/recovery-codes.
+- **Counter-TTL-race (INFO)** — fallback-expire zodat een INCR'd counter nooit zonder TTL blijft.
+
+**Bewust NIET gewijzigd (gedocumenteerd i.p.v. gefixt):** plaintext TOTP-secret als default (opt-in encryptie via `TOTP_ENCRYPTION_KEY`, boot-warning bestaat) + KDF-note; `twoFactorEmailFallback` default `true` (mailbox = factor — user koos expliciet email-fallback; posture-note toegevoegd, flip mogelijk).
+
+**Upgrade-verdict (kernvraag):** config-keys → automatisch geseed via deepMerge, feature default UIT; session-waarden → `twoFactorEnabled` (bool) stroomt door, secrets altijd gestript; user-kolommen → handmatig (3 optionele Prisma-velden) maar de fout is LUID (log noemt exacte kolommen + `login.twoFactorPersistFailed`). Enige stille gaten: config-flag niet flippen (bedoeld) + UI hand-porten (geen auto-aflevering). ARCHITECTURE_AUTH.md kreeg een expliciete upgrade-runbook + posture-notes.
+
+**Verificatie:** unit-suite volledig groen (login 199 incl. nieuwe guard/concurrency/lockout-tests), build/pkg-lint/dev-lint/ai:lint groen, en de runtime-harness tegen echte Redis 30/30 — inclusief de atomaire NX-race (exact 1 winnaar), account-lockout en re-enroll-guard.
+
+**Files touched:** packages/login/src/{twoFactor.ts,twoFactor.test.ts,emailOtp.ts,emailCodeLogin.ts}, packages/core/src/redactedLogKeys.ts, packages/server/src/httpRoutes/authSecondFactorRoutes.ts + .test.ts, docs/ARCHITECTURE_AUTH.md, LoginForm/settings-locales (2 keys ×4×2). Runtime-harness: C:\code\ls-e2e\runtime-2fa-harness.mjs.

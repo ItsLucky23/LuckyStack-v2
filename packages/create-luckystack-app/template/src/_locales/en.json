@@ -98,6 +98,8 @@
     "twoFactorMethodUnavailable": "That verification method is not available.",
     "twoFactorEnrollmentExpired": "The setup session expired — start again.",
     "twoFactorPersistFailed": "Could not save the change — try again.",
+    "twoFactorAlreadyEnabled": "Two-factor authentication is already on — turn it off first to re-enroll.",
+    "twoFactorDisabledByServer": "Two-factor authentication is not available on this app.",
     "emailCodeTitle": "Sign in with an email code",
     "emailCodeIntro": "We'll email you a one-time code — no password needed.",
     "emailCodeTab": "Sign in with an email code instead",

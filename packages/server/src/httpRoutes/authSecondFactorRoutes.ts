@@ -174,13 +174,20 @@ export const handleAuthTwoFactorRoute: HttpRouteHandler = async (ctx) => {
   }
 
   //? ── authenticated: enrollment management ──
+  //? Per-IP throttle on the code-checking management actions too — disable /
+  //? recovery-codes verify a TOTP/recovery code and (unlike the login path)
+  //? are not behind the per-challenge budget; without this a hijacked session
+  //? could brute-force the current code unbounded.
+  if (await ipThrottled(ctx, '2fa-manage', 15)) return json(ctx, 429, { status: false, reason: 'api.rateLimitExceeded' });
   const user = await requireUser(ctx, login);
   if (!user) return json(ctx, 401, { status: false, reason: 'api.unauthorized' });
 
   switch (ctx.routePath) {
     case '/auth/api/2fa/setup': {
       const start = await login.beginTotpEnrollment(user);
-      return json(ctx, 200, { status: true, secret: start.secret, otpauthUri: start.otpauthUri });
+      return start.ok
+        ? json(ctx, 200, { status: true, secret: start.secret, otpauthUri: start.otpauthUri })
+        : json(ctx, 200, { status: false, reason: start.reason });
     }
     case '/auth/api/2fa/enable': {
       const confirmed = await login.confirmTotpEnrollment(user, str(params.code));

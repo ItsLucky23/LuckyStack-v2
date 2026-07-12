@@ -6,8 +6,11 @@ const { store, fakeRedis, getProjectConfigMock, finalizeLoginMock, adapterMock, 
     store: backing,
     fakeRedis: {
       get: async (key: string) => backing.get(key)?.value ?? null,
-      set: async (key: string, value: string, _ex: string, ttl: number) => {
-        backing.set(key, { value, ttl });
+      //? Supports the trailing `'NX'` flag: SET NX returns null when the key
+      //? already exists (used by the atomic per-timestep replay claim).
+      set: async (key: string, value: string, _ex?: string, ttl?: number, flag?: string) => {
+        if (flag === 'NX' && backing.has(key)) return null;
+        backing.set(key, { value, ttl: ttl ?? -1 });
         return 'OK';
       },
       del: async (key: string) => (backing.delete(key) ? 1 : 0),
@@ -43,6 +46,10 @@ vi.mock('@luckystack/core', () => ({
   getProjectName: () => 'testapp',
   getLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   dispatchHook: vi.fn(async () => ({ stopped: false })),
+  //? Lease is a no-op single-holder in the unit fake (real atomicity is
+  //? exercised by the real-Redis runtime harness).
+  acquireLease: async () => 'lease-token',
+  releaseLease: async () => true,
   tryCatch: async (fn: () => Promise<unknown>) => {
     try { return [null, await fn()]; } catch (error) { return [error, null]; }
   },
@@ -166,6 +173,32 @@ describe('verifyTwoFactorChallenge', () => {
     expect(replay.reason).toBe('login.twoFactorInvalidCode');
   });
 
+  it('CONCURRENT verifies of the same code: the atomic NX claim lets exactly one win', async () => {
+    const code = currentCode();
+    const a = await startChallenge();
+    const b = await startChallenge();
+    //? Fire both before either awaits the claim — the per-timestep NX marker
+    //? must serialize them so only one mints a session.
+    const [r1, r2] = await Promise.all([
+      verifyTwoFactorChallenge({ challengeToken: a, code }),
+      verifyTwoFactorChallenge({ challengeToken: b, code }),
+    ]);
+    expect([r1.status, r2.status].filter(Boolean)).toHaveLength(1);
+  });
+
+  it('cross-challenge account lockout: too many failures locks the second factor regardless of fresh challenges', async () => {
+    setAuthConfig({ twoFactorMaxAttempts: 100 }); //? isolate the ACCOUNT ceiling from the per-challenge budget
+    //? 10 failed attempts (ACCOUNT_FAIL_LIMIT) across fresh challenges…
+    for (let index = 0; index < 10; index++) {
+      const token = await startChallenge();
+      await verifyTwoFactorChallenge({ challengeToken: token, code: '000000' });
+    }
+    //? …now even a fresh challenge with the CORRECT code is refused (locked).
+    const token = await startChallenge();
+    const result = await verifyTwoFactorChallenge({ challengeToken: token, code: currentCode() });
+    expect(result).toEqual({ status: false, reason: 'login.twoFactorLocked' });
+  });
+
   it('an unknown/expired challenge token fails closed', async () => {
     const result = await verifyTwoFactorChallenge({ challengeToken: 'a'.repeat(64), code: currentCode() });
     expect(result).toEqual({ status: false, reason: 'login.twoFactorChallengeExpired' });
@@ -214,6 +247,8 @@ describe('verifyTwoFactorChallenge', () => {
 describe('enrollment', () => {
   it('begin → confirm with a valid first code enables 2FA + returns raw recovery codes once', async () => {
     const start = await beginTotpEnrollment(user({ twoFactorEnabled: false, totpSecret: null }));
+    expect(start.ok).toBe(true);
+    if (!start.ok) throw new Error('enrollment should start');
     expect(start.otpauthUri).toContain('otpauth://totp/');
     expect(start.otpauthUri).toContain('issuer=testapp');
     const key = base32Decode(start.secret);
@@ -223,12 +258,29 @@ describe('enrollment', () => {
     expect(confirmed.ok).toBe(true);
     if (confirmed.ok) {
       expect(confirmed.recoveryCodes).toHaveLength(10);
-      for (const raw of confirmed.recoveryCodes) expect(raw).toMatch(/^[a-f0-9]{5}-[a-f0-9]{5}$/);
+      //? 80-bit codes, grouped 5×4.
+      for (const raw of confirmed.recoveryCodes) expect(raw).toMatch(/^[a-f0-9]{5}-[a-f0-9]{5}-[a-f0-9]{5}-[a-f0-9]{5}$/);
     }
     expect(adapterMock.update).toHaveBeenCalledWith('u1', expect.objectContaining({ twoFactorEnabled: true }));
     //? The RAW codes are never persisted — only hashes.
     const patch = adapterMock.update.mock.calls[0]?.[1] as { recoveryCodes: string[] };
     for (const stored of patch.recoveryCodes) expect(stored).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('re-enrollment is refused while 2FA is already enabled (step-up required)', async () => {
+    //? Hijacked-session threat: an already-enrolled user cannot overwrite the
+    //? factor via setup+enable — they must disable first (which needs a code).
+    const started = await beginTotpEnrollment(user({ twoFactorEnabled: true }));
+    expect(started).toEqual({ ok: false, reason: 'login.twoFactorAlreadyEnabled' });
+    const confirmed = await confirmTotpEnrollment(user({ twoFactorEnabled: true }), currentCode());
+    expect(confirmed).toEqual({ ok: false, reason: 'login.twoFactorAlreadyEnabled' });
+    expect(adapterMock.update).not.toHaveBeenCalled();
+  });
+
+  it('enrollment is refused when the feature is globally disabled', async () => {
+    setAuthConfig({ twoFactor: 'disabled' });
+    const started = await beginTotpEnrollment(user({ twoFactorEnabled: false, totpSecret: null }));
+    expect(started).toEqual({ ok: false, reason: 'login.twoFactorDisabledByServer' });
   });
 
   it('confirm with a wrong code does not enable anything', async () => {
@@ -239,7 +291,7 @@ describe('enrollment', () => {
   });
 
   it('confirm without a pending enrollment reports expired', async () => {
-    const confirmed = await confirmTotpEnrollment(user(), '123456');
+    const confirmed = await confirmTotpEnrollment(user({ twoFactorEnabled: false, totpSecret: null }), '123456');
     expect(confirmed).toEqual({ ok: false, reason: 'login.twoFactorEnrollmentExpired' });
   });
 

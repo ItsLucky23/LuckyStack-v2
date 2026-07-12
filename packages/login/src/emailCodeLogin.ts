@@ -77,16 +77,21 @@ export const requestEmailLoginCode = async ({ email, requesterIp }: RequestEmail
     ttlSeconds: config.emailCodeTtlSeconds,
     digits: config.emailCodeLength,
   });
-  const sent = await sendCodeEmail(
+  //? Fire-and-forget the send. Awaiting it would (a) make the existing-account
+  //? path measurably slower than the immediate ghost-account return above — a
+  //? timing oracle — and (b) leak existence via a send-failure reason. So we
+  //? ALWAYS return the same `{ ok: true }` (identical to the unknown-address
+  //? path) and log a send failure server-side only. The user simply requests a
+  //? new code if it never arrives.
+  void sendCodeEmail(
     normalized,
     code,
     'Your sign-in code',
     `Use this code to sign in to ${getProjectName()}.`,
-  );
-  //? A failed SEND is surfaced (it's an ops problem, not an enumeration
-  //? signal — the failure is identical for existing and non-existing users
-  //? only when sending never happens; here the account exists).
-  return sent ? { ok: true } : { ok: false, reason: 'login.emailCodeSendFailed' };
+  ).then((sent) => {
+    if (!sent) getLogger().error('[email-code] login code send failed (account exists) — check the email adapter');
+  });
+  return { ok: true };
 };
 
 export interface VerifyEmailLoginCodeInput {

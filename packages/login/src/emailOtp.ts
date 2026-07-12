@@ -78,10 +78,13 @@ export const verifyEmailCode = async ({ purpose, identity, code, maxAttempts }: 
 
   //? Count the attempt FIRST (INCR is atomic across parallel verifies), and
   //? give the counter the code's own remaining TTL so it can't outlive it.
+  //? If the code expired between the GET above and this TTL read (`remaining`
+  //? <= 0), still bound the counter with a short fallback so a just-INCR'd
+  //? counter can never linger without a TTL.
   const counter = attemptsKey(purpose, identity);
   const attempts = await redis.incr(counter);
   const remaining = await redis.ttl(key);
-  if (remaining > 0) await redis.expire(counter, remaining);
+  await redis.expire(counter, remaining > 0 ? remaining : 600);
   if (attempts > maxAttempts) {
     await redis.del(key);
     await redis.del(counter);

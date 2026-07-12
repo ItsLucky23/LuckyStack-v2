@@ -98,6 +98,8 @@
     "twoFactorMethodUnavailable": "Die verificatiemethode is niet beschikbaar.",
     "twoFactorEnrollmentExpired": "De instelsessie is verlopen — begin opnieuw.",
     "twoFactorPersistFailed": "Kon de wijziging niet opslaan — probeer opnieuw.",
+    "twoFactorAlreadyEnabled": "Tweestapsverificatie staat al aan — zet het eerst uit om opnieuw in te stellen.",
+    "twoFactorDisabledByServer": "Tweestapsverificatie is niet beschikbaar in deze app.",
     "emailCodeTitle": "Inloggen met een e-mailcode",
     "emailCodeIntro": "We mailen je een eenmalige code — geen wachtwoord nodig.",
     "emailCodeTab": "Liever inloggen met een e-mailcode?",

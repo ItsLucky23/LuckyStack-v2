@@ -166,7 +166,7 @@ describe('handleAuthTwoFactorRoute', () => {
     const freshUser = { id: 'u1', email: 'sam@example.com' };
     loginModule.getSession.mockResolvedValue({ id: 'u1' });
     loginModule.getUserAdapter.mockReturnValue({ findById: vi.fn(async () => freshUser) });
-    loginModule.beginTotpEnrollment.mockResolvedValue({ secret: 'S', otpauthUri: 'otpauth://totp/x' });
+    loginModule.beginTotpEnrollment.mockResolvedValue({ ok: true, secret: 'S', otpauthUri: 'otpauth://totp/x' });
     const { ctx, out } = makeCtx('/auth/api/2fa/setup', {}, { token: 'session-token' });
     await handleAuthTwoFactorRoute(ctx);
     expect(loginModule.beginTotpEnrollment).toHaveBeenCalledWith(freshUser);

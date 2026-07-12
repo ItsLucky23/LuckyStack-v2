@@ -98,6 +98,8 @@
     "twoFactorMethodUnavailable": "Diese Verifizierungsmethode ist nicht verfügbar.",
     "twoFactorEnrollmentExpired": "Die Einrichtungssitzung ist abgelaufen — starte neu.",
     "twoFactorPersistFailed": "Änderung konnte nicht gespeichert werden — versuche es erneut.",
+    "twoFactorAlreadyEnabled": "Zwei-Faktor-Authentifizierung ist bereits an — schalte sie zuerst aus, um sie neu einzurichten.",
+    "twoFactorDisabledByServer": "Zwei-Faktor-Authentifizierung ist in dieser App nicht verfügbar.",
     "emailCodeTitle": "Mit E-Mail-Code anmelden",
     "emailCodeIntro": "Wir mailen dir einen Einmalcode — kein Passwort nötig.",
     "emailCodeTab": "Stattdessen mit E-Mail-Code anmelden",

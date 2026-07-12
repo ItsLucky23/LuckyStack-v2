@@ -18,7 +18,7 @@
 //? spent attempt budget does.
 
 import crypto from 'node:crypto';
-import { dispatchHook, formatKey, getLogger, getProjectConfig, getProjectName, redis, tryCatch } from '@luckystack/core';
+import { acquireLease, dispatchHook, formatKey, getLogger, getProjectConfig, getProjectName, redis, releaseLease, tryCatch } from '@luckystack/core';
 
 import { issueEmailCode, verifyEmailCode, clearEmailCode } from './emailOtp';
 import { loadEmailModule } from './emailModuleLoader';
@@ -92,12 +92,44 @@ interface ChallengeRecord {
 
 const challengeKey = (token: string): string => formatKey('-2fa-challenge', sha256(token));
 const challengeAttemptsKey = (token: string): string => formatKey('-2fa-challenge-attempts', sha256(token));
-//? Replay guard: highest accepted TOTP timestep per user. TTL comfortably
-//? covers the ±window drift so an intercepted code can't be replayed.
-const lastTimestepKey = (userId: string): string => formatKey('-2fa-laststep', userId);
+//? Replay guard: per-(user, timestep) used-marker. Set with `NX` so the
+//? claim is ATOMIC — two concurrent verifies of the same code race on the
+//? same key and exactly one wins (the earlier get-highest-step-then-set was a
+//? TOCTOU: both could read the old value and both pass). TTL covers the ±drift
+//? window; after it the timestep is already outside `now ± drift` so verifyTotp
+//? rejects it anyway.
+const usedTimestepKey = (userId: string, timestep: number): string => formatKey('-2fa-usedstep', `${userId}:${String(timestep)}`);
+//? Cross-challenge, identity-keyed 2FA failure counter. The per-challenge
+//? budget alone is resettable — a password-holding attacker mints a fresh
+//? challenge per try — so this account-level counter locks the second factor
+//? after too many failures in the window, independent of IP (a botnet can't
+//? scale past it).
+const accountFailureKey = (userId: string): string => formatKey('-2fa-accountfail', userId);
+const RECOVERY_LEASE_MS = 5000;
+const recoveryLeaseName = (userId: string): string => `2fa-recovery:${userId}`;
 //? Pending (unconfirmed) enrollment secret — only written to the user record
 //? once the user proves the app is set up by entering a first valid code.
 const pendingSecretKey = (userId: string): string => formatKey('-2fa-pending', userId);
+
+//? Account-level 2FA lockout window/limit. Fixed (not a new config key to keep
+//? the surface lean) — 10 failed second-factor attempts per 15 min per account
+//? across ALL challenges/IPs. Generous for a fat-fingered legit user, a hard
+//? ceiling for a grind.
+const ACCOUNT_FAIL_LIMIT = 10;
+const ACCOUNT_FAIL_WINDOW_SECONDS = 15 * 60;
+
+const isTwoFactorAccountLocked = async (userId: string): Promise<boolean> => {
+  const count = Number((await redis.get(accountFailureKey(userId))) ?? '0');
+  return count >= ACCOUNT_FAIL_LIMIT;
+};
+const recordTwoFactorAccountFailure = async (userId: string): Promise<void> => {
+  const key = accountFailureKey(userId);
+  const count = await redis.incr(key);
+  if (count === 1) await redis.expire(key, ACCOUNT_FAIL_WINDOW_SECONDS);
+};
+const clearTwoFactorAccountFailures = async (userId: string): Promise<void> => {
+  await redis.del(accountFailureKey(userId));
+};
 
 const twoFactorConfig = () => getProjectConfig().auth;
 
@@ -158,38 +190,65 @@ const burnChallenge = async (token: string): Promise<void> => {
 //? they couldn't already do with that session.
 const verifyTotpForUser = async (user: UserRecord, code: string, enforceSingleUse: boolean): Promise<boolean> => {
   if (!user.totpSecret) return false;
+  //? Pin to the 6 digits we provision (otpauth URI declares digits=6). The
+  //? generic verifyTotp accepts 6–8 for RFC completeness; the auth surface
+  //? must not (a longer guess is a spec deviation with no benefit).
+  if (!/^\d{6}$/.test(code.trim())) return false;
   const secret = decryptTotpSecret(user.totpSecret);
   if (!secret) return false;
   const result = verifyTotp({ secret, code });
   if (!result.valid || result.timestep === null) return false;
   if (!enforceSingleUse) return true;
 
-  //? Single-use across the drift window: refuse any timestep at or below the
-  //? highest one this user already redeemed on the login boundary.
-  const guardKey = lastTimestepKey(user.id);
-  const lastAccepted = Number((await redis.get(guardKey)) ?? '0');
-  if (result.timestep <= lastAccepted) return false;
-  await redis.set(guardKey, String(result.timestep), 'EX', 60 * 10);
-  return true;
+  //? Single-use on the login boundary: atomically CLAIM this (user, timestep)
+  //? with `NX`. If the marker already exists the code was already redeemed —
+  //? refuse. `NX` makes the claim race-free (fixes the earlier get-then-set
+  //? TOCTOU where two concurrent verifies of the same code both passed).
+  const claimed = await redis.set(usedTimestepKey(user.id, result.timestep), '1', 'EX', 60 * 2, 'NX');
+  return claimed !== null;
 };
 
-const consumeRecoveryCode = async (user: UserRecord, code: string): Promise<boolean> => {
-  const hashes = user.recoveryCodes ?? [];
-  const submitted = sha256(code.trim().toLowerCase());
-  const index = hashes.findIndex((hash) => {
-    const a = Buffer.from(hash);
-    const b = Buffer.from(submitted);
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
+const matchRecoveryHash = (hashes: string[], code: string): number => {
+  const submitted = Buffer.from(sha256(code.trim().toLowerCase()));
+  return hashes.findIndex((hash) => {
+    const stored = Buffer.from(hash);
+    return stored.length === submitted.length && crypto.timingSafeEqual(stored, submitted);
   });
-  if (index === -1) return false;
-  const remaining = hashes.filter((_, position) => position !== index);
-  const [updateError] = await tryCatch(() => getUserAdapter().update(user.id, { recoveryCodes: remaining }));
-  //? Fail CLOSED: if the burn can't be persisted the code stays reusable — refuse it.
-  if (updateError) {
-    getLogger().error('[2fa] could not persist recovery-code consumption — refusing the code', updateError);
+};
+
+//? Burning a recovery code is a read-modify-write on the user record's array,
+//? which the generic UserAdapter can't do atomically. Two concurrent uses of
+//? the SAME code could both match + both persist (double-spend), and two
+//? concurrent uses of DIFFERENT codes could last-writer-wins-overwrite each
+//? other (a lost update that resurrects a burned code). Serialize the whole
+//? read→match→burn per user with a short Redis lease, and RE-READ inside the
+//? lease so the burn always writes against fresh state. If the lease can't be
+//? taken (contention), fail closed — the caller can retry.
+const consumeRecoveryCode = async (user: UserRecord, code: string): Promise<boolean> => {
+  if ((user.recoveryCodes ?? []).length === 0) return false;
+  const leaseToken = await acquireLease(recoveryLeaseName(user.id), RECOVERY_LEASE_MS);
+  if (!leaseToken) {
+    getLogger().warn('[2fa] recovery-code burn is contended (lease busy) — refusing this attempt, retry');
     return false;
   }
-  return true;
+  try {
+    //? Re-read under the lease: `user` was fetched before the lease, so its
+    //? recoveryCodes array may be stale relative to a concurrent burn.
+    const fresh = await getUserAdapter().findById(user.id);
+    const hashes = fresh?.recoveryCodes ?? [];
+    const index = matchRecoveryHash(hashes, code);
+    if (index === -1) return false;
+    const remaining = hashes.filter((_, position) => position !== index);
+    const [updateError] = await tryCatch(() => getUserAdapter().update(user.id, { recoveryCodes: remaining }));
+    //? Fail CLOSED: if the burn can't be persisted the code stays reusable — refuse it.
+    if (updateError) {
+      getLogger().error('[2fa] could not persist recovery-code consumption — refusing the code', updateError);
+      return false;
+    }
+    return true;
+  } finally {
+    await releaseLease(recoveryLeaseName(user.id), leaseToken);
+  }
 };
 
 export interface VerifyTwoFactorInput {
@@ -204,6 +263,14 @@ export interface VerifyTwoFactorInput {
 export const verifyTwoFactorChallenge = async (input: VerifyTwoFactorInput): Promise<CredentialsLoginResult> => {
   const challenge = await readChallenge(input.challengeToken);
   if (!challenge) return { status: false, reason: 'login.twoFactorChallengeExpired' };
+
+  //? Cross-challenge, identity-keyed lockout FIRST (non-incrementing read).
+  //? The per-challenge budget below is resettable by minting a fresh challenge
+  //? (a password-holder can), so this account-level ceiling is what actually
+  //? stops a distributed grind of the second factor.
+  if (await isTwoFactorAccountLocked(challenge.userId)) {
+    return { status: false, reason: 'login.twoFactorLocked' };
+  }
 
   //? Attempt budget on the CHALLENGE (all methods combined). INCR is atomic;
   //? the counter inherits the challenge TTL.
@@ -240,12 +307,14 @@ export const verifyTwoFactorChallenge = async (input: VerifyTwoFactorInput): Pro
   }
 
   if (!verified) {
+    await recordTwoFactorAccountFailure(user.id);
     void dispatchHook('loginFailed', { email: user.email ?? undefined, userId: user.id, provider: 'credentials', reason: 'login.twoFactorInvalidCode', stage: 'login', requesterIp: input.requesterIp });
     return { status: false, reason: 'login.twoFactorInvalidCode' };
   }
 
   await burnChallenge(input.challengeToken);
   await clearEmailCode('2fa', user.id);
+  await clearTwoFactorAccountFailures(user.id);
   return finalizeLogin(user, {
     provider: 'credentials',
     email: user.email ?? undefined,
@@ -302,33 +371,50 @@ export const sendCodeEmail = async (to: string, code: string, subject: string, i
 
 //? ─────────────── enrollment (authenticated user) ───────────────
 
-export interface TotpEnrollmentStart {
-  /** base32 secret for manual entry in the authenticator app. */
-  secret: string;
-  /** otpauth:// URI to render as a QR code client-side. */
-  otpauthUri: string;
-}
+export type TotpEnrollmentStart =
+  | { ok: true; secret: string; otpauthUri: string }
+  | { ok: false; reason: string };
+
+//? Guard shared by setup + confirm: enrolling is refused when the feature is
+//? globally disabled (would give a false sense of security — the login gate
+//? never fires) AND when 2FA is ALREADY enabled. The second is the important
+//? one: without it a hijacked (2FA-less) session could call setup+enable to
+//? OVERWRITE the victim's factor with the attacker's — strictly worse than the
+//? disable path, which already requires a current code. Re-enrolling therefore
+//? requires disabling first (which proves current possession).
+const enrollmentBlockedReason = (user: UserRecord): string | null => {
+  if (twoFactorConfig().twoFactor === 'disabled') return 'login.twoFactorDisabledByServer';
+  if (user.twoFactorEnabled) return 'login.twoFactorAlreadyEnabled';
+  return null;
+};
 
 /**
  * Step 1: mint a secret and park it as PENDING (Redis, 10 min) — the user
  * record is untouched until the user proves the app works via
- * `confirmTotpEnrollment`. Re-calling replaces the pending secret.
+ * `confirmTotpEnrollment`. Re-calling replaces the pending secret. Refused for
+ * an already-enrolled user / a disabled feature (see enrollmentBlockedReason).
  */
 export const beginTotpEnrollment = async (user: UserRecord): Promise<TotpEnrollmentStart> => {
+  const blocked = enrollmentBlockedReason(user);
+  if (blocked) return { ok: false, reason: blocked };
   const secret = generateTotpSecret();
   await redis.set(pendingSecretKey(user.id), encryptTotpSecret(secret), 'EX', 60 * 10);
   return {
+    ok: true,
     secret,
     otpauthUri: buildOtpauthUri({ secret, accountName: user.email ?? user.id, issuer: getProjectName() }),
   };
 };
 
+//? 80 bits of entropy per code (10 random bytes → 20 hex, grouped 5×4 for
+//? readability). 40 bits (the earlier 5 bytes) is offline-crackable against an
+//? unsalted sha256 store if the user table leaks; 80 bits is not.
 const generateRecoveryCodes = (): { raw: string[]; hashes: string[] } => {
   const raw = Array.from({ length: 10 }, () => {
-    const hex = crypto.randomBytes(5).toString('hex');
-    return `${hex.slice(0, 5)}-${hex.slice(5)}`;
+    const hex = crypto.randomBytes(10).toString('hex');
+    return `${hex.slice(0, 5)}-${hex.slice(5, 10)}-${hex.slice(10, 15)}-${hex.slice(15, 20)}`;
   });
-  return { raw, hashes: raw.map((code) => sha256(code)) };
+  return { raw, hashes: raw.map((code) => sha256(code.toLowerCase())) };
 };
 
 export type ConfirmTotpEnrollmentResult =
@@ -341,6 +427,10 @@ export type ConfirmTotpEnrollmentResult =
  * The RAW recovery codes are returned exactly once — show + let them save.
  */
 export const confirmTotpEnrollment = async (user: UserRecord, code: string): Promise<ConfirmTotpEnrollmentResult> => {
+  //? Re-check the block here too (defense in depth — a stale pending secret
+  //? could otherwise be confirmed after 2FA was enabled by another path).
+  const blocked = enrollmentBlockedReason(user);
+  if (blocked) return { ok: false, reason: blocked };
   const pendingStored = await redis.get(pendingSecretKey(user.id));
   if (!pendingStored) return { ok: false, reason: 'login.twoFactorEnrollmentExpired' };
   const secret = decryptTotpSecret(pendingStored);
@@ -383,7 +473,8 @@ export const disableTwoFactor = async (user: UserRecord, code: string): Promise<
     getLogger().error('[2fa] disable persist failed', updateError);
     return { ok: false, reason: 'login.twoFactorPersistFailed' };
   }
-  await redis.del(lastTimestepKey(user.id));
+  //? Clear any lingering account-lockout counter so re-enrolling later starts clean.
+  await clearTwoFactorAccountFailures(user.id);
   return { ok: true };
 };
 
