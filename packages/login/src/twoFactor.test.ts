@@ -250,6 +250,18 @@ describe('enrollment', () => {
     expect(allowed.ok).toBe(true);
     expect(adapterMock.update).toHaveBeenCalledWith('u1', { totpSecret: null, twoFactorEnabled: false, recoveryCodes: [] });
   });
+
+  it('disable works right after a login that consumed the same timestep (no single-use guard on management)', async () => {
+    //? Login boundary consumes timestep T (stores the replay guard)…
+    adapterMock.findById.mockResolvedValue(user());
+    const challenge = await createTwoFactorChallengeIfRequired(user(), {});
+    if (!challenge) throw new Error('expected a challenge');
+    const code = currentCode();
+    await verifyTwoFactorChallenge({ challengeToken: challenge.challengeToken, code });
+    //? …the user's app still shows the SAME code — disable must still accept it.
+    const disabled = await disableTwoFactor(user(), code);
+    expect(disabled.ok).toBe(true);
+  });
 });
 
 describe('TOTP secret at rest', () => {

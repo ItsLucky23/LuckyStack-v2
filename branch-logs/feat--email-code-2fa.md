@@ -41,3 +41,12 @@
 - Gates: build, dev-lint, pkg-lint, cli-tests (parity), ai:lint groen.
 
 **Rest fase 2b-2:** docs (ADR 0024, ARCHITECTURE_AUTH, http-routes.md, CLAUDE.md's core/login/server/scaffolder, CHANGELOGs) + e2e (scaffold+install, console-email, echte login/2FA-flow) + dev-settings-page-drift als bewuste rest melden.
+
+## 2026-07-12 13:00 — Fase 2b-2: docs/ADR/CHANGELOGs + RUNTIME-e2e vond & fixte een echte bug
+
+- **Docs**: ADR 0024 (email-code login + TOTP-2fa, backwards-compatible; alternatieven — Google/MS als dienst, TOTP-lib, oneTimeToken-hergebruik — afgewezen); ARCHITECTURE_AUTH.md endpoint-tabel + config-hint; server/docs/http-routes.md pre/post-lijst + route-referentie; CHANGELOGs login/server/core/create-luckystack-app/cli (onder [Unreleased] — release-keuze aan user); ai:index + ai:decisions geregenereerd.
+- **Runtime-e2e** (`C:\code\ls-e2e\runtime-2fa-harness.mjs`): drijft de GEBOUWDE login-dist tegen een ECHTE Redis (WSL :6399) met in-memory UserAdapter + capturing email-sender. 24 asserts over enroll → login-gate → replay → email-fallback → recovery → passwordless email-code → disable.
+- **BUG GEVONDEN & GEFIXT** (unit-fakes misten 'm — bevestigt de "runtime-test voor ship-safe"-les): de TOTP single-use timestep-replay-guard werd óók afgedwongen op de authenticated management-acties (disable/regenerate). Gevolg: een net-ingelogde user kon 2FA niet uitzetten binnen hetzelfde 30s-venster (z'n app toont nog dezelfde, nu verbruikte code). Fix: `verifyTotpForUser(user, code, enforceSingleUse)` — login-grens dwingt de guard af (replay-defense), management doet plain proof-of-possession (al door sessie beschermd). Regressietest toegevoegd (disable direct na login met dezelfde code). Harness daarna 24/24 groen.
+- Gates: volledige unit-suite, build, lint, ai:lint groen.
+
+**Klaar voor user-review.** Volledige feature (backend + UI 3 trees + template + docs + runtime-bewijs) op feat/email-code-2fa. Open beslissing: merge + release (minor bump → 0.6.0 wegens nieuwe features?). Bewuste rest: dev-settings-page is verder gedrift van template (buiten 2FA om) — aparte verzoening; QR-code render is consumer-keuze (otpauth-URI wordt geleverd).

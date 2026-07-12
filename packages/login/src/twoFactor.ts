@@ -147,15 +147,25 @@ const burnChallenge = async (token: string): Promise<void> => {
 
 //? ─────────────── verification (completes the login) ───────────────
 
-const verifyTotpForUser = async (user: UserRecord, code: string): Promise<boolean> => {
+//? `enforceSingleUse` — the timestep replay guard is a LOGIN-boundary defense:
+//? an intercepted code must not be replayable to complete a challenge. It is
+//? applied on the login path only. Session-authenticated management actions
+//? (disable / regenerate) do a plain proof-of-possession verify WITHOUT the
+//? guard — otherwise a user who just logged in with a TOTP code could not
+//? manage 2FA until their authenticator rolled to the next code (their app
+//? still shows the one they just burned). Those actions are already gated by
+//? the live session, so replaying a management code buys an attacker nothing
+//? they couldn't already do with that session.
+const verifyTotpForUser = async (user: UserRecord, code: string, enforceSingleUse: boolean): Promise<boolean> => {
   if (!user.totpSecret) return false;
   const secret = decryptTotpSecret(user.totpSecret);
   if (!secret) return false;
   const result = verifyTotp({ secret, code });
   if (!result.valid || result.timestep === null) return false;
+  if (!enforceSingleUse) return true;
 
   //? Single-use across the drift window: refuse any timestep at or below the
-  //? highest one this user already redeemed.
+  //? highest one this user already redeemed on the login boundary.
   const guardKey = lastTimestepKey(user.id);
   const lastAccepted = Number((await redis.get(guardKey)) ?? '0');
   if (result.timestep <= lastAccepted) return false;
@@ -215,7 +225,8 @@ export const verifyTwoFactorChallenge = async (input: VerifyTwoFactorInput): Pro
   const method: TwoFactorMethod = input.method ?? 'totp';
   let verified = false;
   if (method === 'totp') {
-    verified = await verifyTotpForUser(user, input.code);
+    //? Login boundary → enforce the single-use timestep replay guard.
+    verified = await verifyTotpForUser(user, input.code, true);
   } else if (method === 'email-code') {
     if (!twoFactorConfig().twoFactorEmailFallback) return { status: false, reason: 'login.twoFactorMethodUnavailable' };
     verified = (await verifyEmailCode({
@@ -357,7 +368,9 @@ export const confirmTotpEnrollment = async (user: UserRecord, code: string): Pro
  * code, so a hijacked (but 2FA-less) session can't silently strip the factor.
  */
 export const disableTwoFactor = async (user: UserRecord, code: string): Promise<{ ok: boolean; reason?: string }> => {
-  const viaTotp = await verifyTotpForUser(user, code);
+  //? Management action (session-authenticated) → plain proof-of-possession, no
+  //? single-use guard, so a just-logged-in user isn't blocked for 30s.
+  const viaTotp = await verifyTotpForUser(user, code, false);
   const viaRecovery = viaTotp ? false : await consumeRecoveryCode(user, code);
   if (!viaTotp && !viaRecovery) return { ok: false, reason: 'login.twoFactorInvalidCode' };
 
@@ -376,7 +389,8 @@ export const disableTwoFactor = async (user: UserRecord, code: string): Promise<
 
 /** Replace the recovery-code set (requires a valid current TOTP code). */
 export const regenerateRecoveryCodes = async (user: UserRecord, code: string): Promise<ConfirmTotpEnrollmentResult> => {
-  if (!(await verifyTotpForUser(user, code))) return { ok: false, reason: 'login.twoFactorInvalidCode' };
+  //? Management action → plain verify (see disableTwoFactor).
+  if (!(await verifyTotpForUser(user, code, false))) return { ok: false, reason: 'login.twoFactorInvalidCode' };
   const { raw, hashes } = generateRecoveryCodes();
   const [updateError] = await tryCatch(() => getUserAdapter().update(user.id, { recoveryCodes: hashes }));
   if (updateError) {
