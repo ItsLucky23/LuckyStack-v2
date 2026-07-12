@@ -8,6 +8,10 @@ const providersList: { name: string }[] = [{ name: 'credentials' }];
 vi.mock('../capabilities', () => ({
   getLogin: () => Promise.resolve({ getOAuthProviders: () => providersList }),
 }));
+//? ADR 0024: the route also advertises `auth.emailCodeLogin` from config.
+vi.mock('@luckystack/core', () => ({
+  getProjectConfig: () => ({ auth: { emailCodeLogin: true } }),
+}));
 
 const makeCtx = (method: string, routePath: string): { ctx: HttpRouteContext; ended: () => string | undefined } => {
   let body: string | undefined;
@@ -41,6 +45,6 @@ describe('handleAuthProvidersRoute', () => {
     const { ctx, ended } = makeCtx('GET', '/auth/providers');
 
     expect(await handleAuthProvidersRoute(ctx)).toBe(true);
-    expect(JSON.parse(ended() ?? '{}')).toEqual({ providers: ['credentials', 'google', 'github'] });
+    expect(JSON.parse(ended() ?? '{}')).toEqual({ providers: ['credentials', 'google', 'github'], emailCodeLogin: true });
   });
 });

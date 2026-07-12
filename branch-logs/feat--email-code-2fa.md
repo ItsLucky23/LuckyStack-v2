@@ -21,3 +21,14 @@
 **Files touched:** packages/login/src/{totp.ts,totp.test.ts,emailOtp.ts,emailOtp.test.ts,twoFactor.ts,twoFactor.test.ts,emailCodeLogin.ts,emailCodeLogin.test.ts,login.ts,session.ts,userAdapter.ts,index.ts}, packages/core/src/projectConfig.ts, packages/server/src/{httpHandler.ts,httpRoutes/authSecondFactorRoutes.ts,httpRoutes/authSecondFactorRoutes.test.ts,httpRoutes/authApiRoute.ts,httpRoutes/csrfMiddleware.ts}, LoginForm×3 + reset-password×3 + src/_locales×4, packages/cli/src/assetParity.test.ts.
 
 **Nog te doen (fase 2):** LoginForm phase-state (2FA-challenge-stap + email-code-tab) in alle 3 kopieën + locales; 2FA-sectie in settings (prisma) / starter-docs; template config-block + .env.local_template (TOTP_ENCRYPTION_KEY) + prisma-schema-velden + starter-adapters (parity); wizard/manage-substappen; ARCHITECTURE_AUTH.md + ADR 0024; e2e met console-email-adapter; CHANGELOGs.
+
+## 2026-07-12 12:30 — Fase 2a: LoginForm-statemachine + template-laag (schema/config/env) + providers-advertentie
+
+**Wat ik deed:**
+- **LoginForm** (3 kopieën byte-identiek, parity-net bewaakt): nu een phase-statemachine `credentials | emailCode | twoFactor`. Gedeelde `postAuth` (module-scope) + `handleAuthOutcome` (failure-toast / 2FA-challenge → phase-switch / succes → token+redirect). Email-code view (request → code-invoer → verify, resend, terug-naar-wachtwoord); 2FA-view (TOTP/email-fallback/recovery method-switch links, autoComplete="one-time-code"). Entry-point "inloggen met e-mailcode" alleen zichtbaar als de server het adverteert.
+- **/auth/providers** adverteert nu `emailCodeLogin` (boolean uit config — zelfde trustniveau als providernamen); route-test bijgewerkt.
+- **Template**: prisma-schema User + `twoFactorEnabled/totpSecret/recoveryCodes` (optioneel — bestaande DB's blijven werken); config.ts auth-blok met commented `emailCodeLogin`/`twoFactor: 'optional'` opties (pruneAuthNone-token in scaffolder mee-geüpdatet); `.env.local_template` + TOTP_ENCRYPTION_KEY blok.
+- **Locales**: 31 nieuwe `login.*` keys (2FA + email-code UI- en server-reason-keys) × 4 talen × dev+template trees; JSON gevalideerd.
+- Gates: build, pkg-lint, dev-lint, alle tests, ai:lint groen.
+
+**Nog te doen (fase 2b):** settings-2FA-sectie (enroll/disable/recovery UI op de framework-routes), wizard/manage-substappen, docs (ARCHITECTURE_AUTH, http-routes.md, package-CLAUDE.md's, ADR 0024), CHANGELOGs, e2e met console-email-adapter.

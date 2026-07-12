@@ -55,5 +55,14 @@ model User {
   //? the settings/updatePreferences route and surfaced on the session.
   preferences     Json?
 
+  //? 2FA (ADR 0024) — all optional so existing databases keep working; the
+  //? framework only writes them once a user enrolls via /auth/api/2fa/setup.
+  //? totpSecret is encrypted at rest when TOTP_ENCRYPTION_KEY is set and is
+  //? NEVER sent to the client (sanitized by @luckystack/login). recoveryCodes
+  //? holds sha256 hashes of the unused one-time backup codes.
+  twoFactorEnabled Boolean  @default(false)
+  totpSecret      String?
+  recoveryCodes   Json?
+
   @@unique([email, provider])
 }
