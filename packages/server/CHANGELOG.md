@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Email-code login + 2FA routes** (ADR 0024, `authSecondFactorRoutes.ts`):
+  POST `/auth/api/email-code/request|verify`, `/auth/api/2fa` (completes a
+  pending challenge through the session-cookie seam), `/auth/api/2fa/email-code`,
+  and the authenticated enrollment routes `/auth/api/2fa/setup|enable|disable|
+  recovery-codes` (fresh user re-read via the UserAdapter — the session copy is
+  sanitized). Registered before the `/auth/api/*` catch-all; per-IP shields.
+- `/auth/providers` now advertises `emailCodeLogin` so the login form can show
+  the passwordless entry point.
+
+### Changed
+
+- `/auth/api/credentials` relays the 2FA challenge envelope
+  (`requiresTwoFactor`, `challengeToken`, `twoFactorMethods` — no session
+  transport) when the account has a second factor enrolled.
+- CSRF middleware: the login-completing email-code/2FA routes joined the
+  auth-bootstrap exemption set; the authed enrollment routes stay enforced.
+
 ## [0.5.0] - 2026-07-11
 
 ### Added

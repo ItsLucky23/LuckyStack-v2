@@ -151,11 +151,27 @@ Reach for the dedicated functions when you wire up a custom auth surface (admin 
 
 ## Auth Endpoints
 
-| Endpoint                    | Method | Purpose                        |
-| --------------------------- | ------ | ------------------------------ |
-| `/auth/api/{provider}`      | GET    | Initiate OAuth login           |
-| `/auth/api/credentials`     | POST   | Credentials login/register     |
-| `/auth/callback/{provider}` | GET    | OAuth callback (from provider) |
+| Endpoint                       | Method | Purpose                                                        |
+| ------------------------------ | ------ | -------------------------------------------------------------- |
+| `/auth/api/{provider}`         | GET    | Initiate OAuth login                                            |
+| `/auth/api/credentials`        | POST   | Credentials login/register (may return a 2FA challenge)         |
+| `/auth/callback/{provider}`    | GET    | OAuth callback (from provider)                                  |
+| `/auth/api/email-code/request` | POST   | Passwordless login: mail a one-time code (ADR 0024; always "ok" — anti-enumeration) |
+| `/auth/api/email-code/verify`  | POST   | Passwordless login: verify the code, mint the session (or return a 2FA challenge) |
+| `/auth/api/2fa`                | POST   | Complete a pending 2FA challenge (`{ challengeToken, code, method? }`) → session |
+| `/auth/api/2fa/email-code`     | POST   | Send the 2FA email-fallback code for an active challenge        |
+| `/auth/api/2fa/setup`          | POST*  | Begin authenticator enrollment → `{ secret, otpauthUri }`       |
+| `/auth/api/2fa/enable`         | POST*  | Confirm enrollment with the first code → `{ recoveryCodes[] }` (shown once) |
+| `/auth/api/2fa/disable`        | POST*  | Turn 2FA off (requires a valid TOTP or recovery code)           |
+| `/auth/api/2fa/recovery-codes` | POST*  | Replace the recovery-code set (requires a valid TOTP code)      |
+
+`*` = authenticated (live session required); these are CSRF-enforced in cookie
+mode. The login-completing routes are CSRF-bootstrap-exempt like
+`/auth/api/credentials`. Enable via `auth.emailCodeLogin: true` and
+`auth.twoFactor: 'optional'` in `config.ts` (both default off; ADR 0024).
+Authenticator apps work via the open TOTP standard (RFC 6238) — no vendor
+integration; set `TOTP_ENCRYPTION_KEY` in `.env.local` to encrypt the secrets
+at rest.
 
 ---
 

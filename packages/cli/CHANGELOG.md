@@ -5,6 +5,16 @@ All notable changes to `@luckystack/cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The `add login` asset bundle ships the new auth UI (ADR 0024): the
+  phase-based LoginForm (email-code login + 2FA challenge views) and the
+  settings `TwoFactorSection` (enroll/recovery/disable on the framework
+  routes). Copy-if-absent as always — existing consumer files are never
+  overwritten.
+
 ## [0.5.1] - 2026-07-11
 
 ### Added

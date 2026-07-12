@@ -18,12 +18,14 @@ Pre-params handlers (no body parse) run first so probes, favicon, and CSRF stay 
 Post-params handlers (after body parsing) run next:
 
 1. `handleUploadsRoute` — `/uploads/*`
-2. `handleAuthApiRoute` — `/auth/api/*`
-3. `handleAuthCallbackRoute` — `/auth/callback/*`
-4. `handleApiRoute` — `/api/*` (delegates to `@luckystack/api`)
-5. `handleSyncRoute` — `/sync/*` (delegates to `@luckystack/sync`)
-6. `handleCustomRoutes` — every handler from `registerCustomRoute(...)` + `options.customRoutes`
-7. `handleStaticAndSpaFallback` — `/assets/*`, known extensions, SPA `index.html`
+2. `handleAuthEmailCodeRoute` — `/auth/api/email-code/request|verify` (ADR 0024; BEFORE the `/auth/api/*` catch-all)
+3. `handleAuthTwoFactorRoute` — `/auth/api/2fa` + `/auth/api/2fa/*` (ADR 0024; BEFORE the `/auth/api/*` catch-all)
+4. `handleAuthApiRoute` — `/auth/api/*`
+5. `handleAuthCallbackRoute` — `/auth/callback/*`
+6. `handleApiRoute` — `/api/*` (delegates to `@luckystack/api`)
+7. `handleSyncRoute` — `/sync/*` (delegates to `@luckystack/sync`)
+8. `handleCustomRoutes` — every handler from `registerCustomRoute(...)` + `options.customRoutes`
+9. `handleStaticAndSpaFallback` — `/assets/*`, known extensions, SPA `index.html`
 
 A custom-route registry sits in front of the static fallback. Both the legacy `customRoutes` option on `CreateLuckyStackServerOptions` and the global `registerCustomRoute(...)` registry are honored. Errors in custom handlers are caught and reported as `500 server.customRouteFailed`; the request loop is never crashed by a misbehaving handler.
 
@@ -38,7 +40,12 @@ A custom-route registry sits in front of the static fallback. Both the legacy `c
 | `/_health` | GET | `handleHealthRoute` | `200 { status: 'ok', bootUuid, envKey, synchronizedHashes }` | `503 { status: 'degraded', ... }` when boot UUID is missing |
 | `/_test/reset` | POST | `handleTestResetRoute` | `200 { status: 'success', cleared: string[] }` | `404 notFound` or `403 auth.forbidden` — see `security-defaults.md` |
 | `/uploads/*` | GET | `handleUploadsRoute` | Avatar bytes via `@luckystack/core` `serveAvatar` | `404` from `serveAvatar` when missing |
-| `/auth/api/*` | POST | `handleAuthApiRoute` | OAuth redirect (`302`) or credentials login envelope | Rate-limited envelope, `200` envelope with `status:false, reason` |
+| `/auth/api/email-code/request` | POST | `handleAuthEmailCodeRoute` | `200 { status: true }` (anti-enumeration: also for unknown addresses) | `200 { status:false, reason }`, `429` per-IP |
+| `/auth/api/email-code/verify` | POST | `handleAuthEmailCodeRoute` | Login envelope + session transport, or 2FA-challenge envelope | `200 { status:false, reason }`, `429` per-IP |
+| `/auth/api/2fa` | POST | `handleAuthTwoFactorRoute` | Login envelope + session transport (completes the challenge) | `200 { status:false, reason }`, `429` per-IP |
+| `/auth/api/2fa/email-code` | POST | `handleAuthTwoFactorRoute` | `200 { status: true }` (fallback code sent) | `200 { status:false, reason }`, `429` per-IP |
+| `/auth/api/2fa/setup\|enable\|disable\|recovery-codes` | POST (authed) | `handleAuthTwoFactorRoute` | `200 { status:true, secret/otpauthUri \| recoveryCodes[] }` | `401 api.unauthorized` without session; `200 { status:false, reason }` |
+| `/auth/api/*` | POST | `handleAuthApiRoute` | OAuth redirect (`302`) or credentials login envelope (may carry `requiresTwoFactor` + `challengeToken`) | Rate-limited envelope, `200` envelope with `status:false, reason` |
 | `/auth/callback/*` | GET | `handleAuthCallbackRoute` | `302` to `redirectUrl` with session cookie or token | `401 'Login failed'` plain text |
 | `/api/*` | GET / POST / PUT / DELETE | `handleApiRoute` | JSON envelope from `@luckystack/api` `handleHttpApiRequest`, or SSE stream | `400 api.invalidName`, `500 api.invalidRequestFormat` |
 | `/sync/*` | POST | `handleSyncRoute` | JSON envelope from `@luckystack/sync` `handleHttpSyncRequest`, or SSE stream | `405 sync.methodNotAllowed`, `400 sync.invalidName`, `500 sync.invalidRequestFormat` |
