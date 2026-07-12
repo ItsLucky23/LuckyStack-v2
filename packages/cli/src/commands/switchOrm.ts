@@ -63,11 +63,14 @@ export const ORM_SURFACES: Record<DetectedOrm, OrmSurface> = {
       '@mikro-orm/better-sqlite',
       '@mikro-orm/mongodb',
     ],
-    devDeps: ['@mikro-orm/cli'],
+    //? No `@mikro-orm/cli` / `mikro-orm` config key: schema updates run via the
+    //? MikroORM API in scripts/mikroOrmSchema.ts (the CLI's figlet dep crashes
+    //? on Node 22 / Windows and can't resolve secret-manager pointers).
+    devDeps: [],
     scripts: ['db:schema:update'],
-    pkgKeys: ['mikro-orm'],
+    pkgKeys: [],
     replaceFiles: SHARED_REPLACE_FILES,
-    starterFiles: ['server/db/entities.ts', 'server/db/mikro-orm.config.ts'],
+    starterFiles: ['server/db/entities.ts', 'server/db/mikro-orm.config.ts', 'scripts/mikroOrmSchema.ts'],
   },
   none: {
     deps: [],

@@ -2628,6 +2628,16 @@ export const MIKRO_DRIVER_PACKAGES: Record<DbProvider, string> = {
   mongodb: '@mikro-orm/mongodb',
 };
 
+//? MikroORM's ConfigurationLoader REFUSES to init unless every official
+//? `@mikro-orm/*` package resolves to the EXACT same version — a caret range
+//? lets core + driver drift to different patches (e.g. core 6.6.15 vs
+//? better-sqlite 6.6.14, since the sqlite driver lags), which crashes at
+//? `MikroORM.init` with "Bad @mikro-orm/<pkg> version". So core AND the driver
+//? are pinned to ONE exact version — the highest 6.x where ALL official
+//? packages (core + the 4 drivers we support) are published. Bump both
+//? together, and only to a version that exists for every driver.
+export const MIKRO_ORM_VERSION = '6.6.14';
+
 const mikroEntitiesFor = (dbProvider: DbProvider): string => {
   const header = `//? MikroORM entities via EntitySchema (no decorators needed). Extend this
 //? file and run \`npm run db:schema:update\` to sync the database.
@@ -2679,10 +2689,9 @@ const mikroConfigFor = (dbProvider: DbProvider, databaseUrl: string): string => 
   const connection = dbProvider === 'sqlite'
     ? `dbName: (process.env.DATABASE_URL ?? '${databaseUrl}').replace(/^file:/, ''),`
     : `clientUrl: process.env.DATABASE_URL ?? '${databaseUrl}',`;
-  return `//? MikroORM config — consumed by functions/db.ts AND the mikro-orm CLI
-//? (\`npm run db:schema:update\`; the CLI finds this file via the "mikro-orm"
-//? entry in package.json). Entities are listed EXPLICITLY (EntitySchema), so
-//? no ts-morph discovery or decorator metadata is needed.
+  return `//? MikroORM config — consumed by functions/db.ts AND scripts/mikroOrmSchema.ts
+//? (\`npm run db:schema:update\`). Entities are listed EXPLICITLY (EntitySchema),
+//? so no ts-morph discovery or decorator metadata is needed.
 import { defineConfig } from '${driverPackage}';
 import { ItemSchema } from './entities';
 
@@ -2737,6 +2746,50 @@ const MIKRO_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'mikro-orm')
 export {};
 `;
 
+//? `npm run db:schema:update` — syncs server/db/entities.ts to the database via
+//? the MikroORM API DIRECTLY, deliberately NOT via \`@mikro-orm/cli\`:
+//?   1. the CLI's \`figlet\` banner dependency crashes on Node 22 / Windows, and
+//?   2. the CLI reads DATABASE_URL raw, so a @luckystack/secret-manager pointer
+//?      (\`NAME=BASE_V<n>\`) never gets resolved — this script resolves it first,
+//?      exactly like server boot does. Self-activating + guarded: a no-op when
+//?      secret-manager isn't installed/configured.
+const MIKRO_SCHEMA_SCRIPT = `/// <reference types="node" />
+
+//? Update the database schema from server/db/entities.ts. Runs the MikroORM
+//? SchemaGenerator programmatically (the equivalent of \`mikro-orm schema:update
+//? --run\`) so it works on Node 22 / Windows and honors secret-manager-resolved
+//? DATABASE_URL. Invoked by \`npm run db:schema:update\`.
+import { loadEnvFiles, tryCatch } from '@luckystack/core';
+
+const run = async (): Promise<void> => {
+  loadEnvFiles();
+
+  //? Resolve @luckystack/secret-manager pointers into process.env BEFORE the
+  //? ORM reads DATABASE_URL (guarded — no-op without the package / config).
+  const projectConfig = (await import('../config')).default;
+  if (projectConfig.secretManager?.url) {
+    const [error, sm] = await tryCatch(() => import('@luckystack/secret-manager'));
+    if (error || !sm) {
+      console.warn('secretManager.url is set but @luckystack/secret-manager is not installed — using the raw DATABASE_URL.');
+    } else {
+      await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
+    }
+  }
+
+  const { getOrm } = await import('../functions/db');
+  const orm = await getOrm();
+  const [schemaError] = await tryCatch(() => orm.getSchemaGenerator().updateSchema());
+  await orm.close(true);
+  if (schemaError) {
+    console.error('Schema update failed:', schemaError);
+    process.exit(1);
+  }
+  console.log('✓ database schema updated from server/db/entities.ts');
+};
+
+void run();
+`;
+
 //? Apply the chosen non-prisma data layer (ADR 0020): strip Prisma, then wire
 //? the ORM-specific starter files + dependencies + scripts. `orm: 'prisma'`
 //? never reaches this function.
@@ -2779,17 +2832,20 @@ const applyOrmChoice = (targetDir: string, choices: ScaffoldChoices, databaseUrl
   fs.writeFileSync(path.join(dbDir, 'mikro-orm.config.ts'), mikroConfigFor(choices.dbProvider, databaseUrl));
   fs.writeFileSync(path.join(targetDir, 'functions', 'db.ts'), MIKRO_DB_SHIM);
   fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), MIKRO_CLIENTS_STUB);
+  fs.writeFileSync(path.join(targetDir, 'scripts', 'mikroOrmSchema.ts'), MIKRO_SCHEMA_SCRIPT);
   const driverPackage = MIKRO_DRIVER_PACKAGES[choices.dbProvider];
   mutateScaffoldPackageJson(targetDir, (pkg) => {
     pkg.dependencies = {
       ...pkg.dependencies,
-      '@mikro-orm/core': '^6.6.0',
-      [driverPackage]: '^6.6.0',
+      //? Exact + identical (see MIKRO_ORM_VERSION) — MikroORM refuses to init on
+      //? a core/driver version mismatch, which caret ranges cause.
+      '@mikro-orm/core': MIKRO_ORM_VERSION,
+      [driverPackage]: MIKRO_ORM_VERSION,
     };
-    pkg.devDependencies = { ...pkg.devDependencies, '@mikro-orm/cli': '^6.6.0' };
-    pkg.scripts = { ...pkg.scripts, 'db:schema:update': 'mikro-orm schema:update --run' };
-    //? CLI config discovery — points `npm run db:schema:update` at the config.
-    pkg['mikro-orm'] = { configPaths: ['./server/db/mikro-orm.config.ts'] };
+    //? NO `@mikro-orm/cli`: its `figlet` banner dep crashes on Node 22 / Windows
+    //? and the CLI can't resolve secret-manager pointers. `db:schema:update`
+    //? runs the SchemaGenerator via the MikroORM API in scripts/mikroOrmSchema.ts.
+    pkg.scripts = { ...pkg.scripts, 'db:schema:update': 'tsx --tsconfig tsconfig.server.json scripts/mikroOrmSchema.ts' };
   });
 };
 

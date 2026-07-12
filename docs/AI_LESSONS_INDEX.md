@@ -9,13 +9,14 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (3)
+## Lessons (4)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
 | 0001 | A node:* server import in shared/client code blanks the whole frontend | 🔴 critical | packages/core (client/server boundary) | runtime, bundling, client-server-boundary | `docs/lessons/0001-node-modules-leak-into-client-bundle.md` |
 | 0002 | A nested union in a route's input type made runtime validation reject ALL input with a bogus depth error | 🟠 high | packages/core (runtimeTypeValidation) | runtime, validation, type-text, production | `docs/lessons/0002-validatetype-union-depth-false-positive.md` |
 | 0003 | Measuring DevTools-open lag — three pitfalls that produce wrong conclusions | 🟡 medium | performance diagnostics (scripts/devtoolsLagHarness) | performance, devtools, react, measurement, cdp | `docs/lessons/0003-devtools-lag-measurement-pitfalls.md` |
+| 0004 | The @mikro-orm/cli crashes on Node 22 / Windows — run the SchemaGenerator via the API | 🟠 high | packages/create-luckystack-app (mikro-orm scaffold) | scaffold, mikro-orm, cli, windows, secret-manager | `docs/lessons/0004-mikro-orm-cli-figlet-crash-node22-windows.md` |
 
 ## Takeaways
 
@@ -42,3 +43,11 @@ The single-member union recursion must only happen when `splitTopLevel` actually
 Use `scripts/devtoolsLagHarness/cdpStressTest.mjs` with the committed `/devtools-lag-test` page at a NON-saturated point (n=1500, hz=20 → ~27fps baseline is the validated regime). Drive re-renders (setState on an interval), not synthetic pointer events. For socket-transport questions, read `socket.io.engine.transport.name` from the live module — never conclude from the request list. And remember `Debugger.setAsyncCallStackDepth` only approximates an open DevTools; console-object retention and source-map parsing exist only in the real DevTools frontend, so the final verdict needs a manual check.
 
 → `docs/lessons/0003-devtools-lag-measurement-pitfalls.md`
+
+### 0004 — The @mikro-orm/cli crashes on Node 22 / Windows — run the SchemaGenerator via the API
+
+**0004** · high · packages/create-luckystack-app (mikro-orm scaffold) · tags: scaffold, mikro-orm, cli, windows, secret-manager · 2026-07-12
+
+Prefer the ORM's programmatic API over its CLI for framework-shipped scripts. `db:schema:update` now runs `orm.getSchemaGenerator().updateSchema()` in `scripts/mikroOrmSchema.ts` (via `tsx`), the exact equivalent of `schema:update --run`, with `loadEnvFiles()` + guarded secret-manager resolution first (mirrors `scripts/prismaWithSecrets.ts`). No `@mikro-orm/cli` dependency, no `figlet`, works on Node 22 / Windows, and honors secret-manager-resolved `DATABASE_URL`. When a scaffold ships a runnable script for a specific Node/OS combo, RUN it on that combo before shipping — a `--no-install` scaffold + tsc never exercises the actual command. (Same class as lesson 0001 / the runtime-test-before-ship memory.)
+
+→ `docs/lessons/0004-mikro-orm-cli-figlet-crash-node22-windows.md`

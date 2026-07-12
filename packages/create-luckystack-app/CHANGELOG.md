@@ -5,6 +5,22 @@ All notable changes to `create-luckystack-app` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **mikro-orm `db:schema:update` now works on Node 22 / Windows.** It ran the
+  `@mikro-orm/cli` (`schema:update --run`), whose `figlet` banner dependency
+  crashes on Node 22 / Windows and which never resolves `@luckystack/secret-manager`
+  pointers. It now runs the MikroORM `SchemaGenerator` via the API in
+  `scripts/mikroOrmSchema.ts` (loads env + resolves secret-manager pointers
+  first, mirroring `scripts/prismaWithSecrets.ts`). `@mikro-orm/cli` +
+  the `mikro-orm` config-discovery key are dropped from the scaffold.
+- **mikro-orm packages are pinned to one EXACT version** (`@mikro-orm/core` +
+  the driver, `6.6.14`). MikroORM refuses to init on a core/driver version
+  mismatch, and caret ranges let them drift to different patches (e.g. core
+  6.6.15 vs the lagging better-sqlite 6.6.14) → a hard crash at `MikroORM.init`.
+
 ## [0.6.0] - 2026-07-12
 
 ### Added

@@ -477,3 +477,22 @@ Root-causes + fixes:
 **Feature:** passwordless email-code login + 2FA (TOTP via de open standaard van Google/Microsoft Authenticator, email-fallback default-on per user-besluit, recovery codes). Beide features default UIT, config auto-seed → bestaande projecten upgraden zonder gedragswijziging. Security-hardened via 5-lens adversariële scan (atomaire single-use, account-lockout, re-enroll step-up, 80-bit recovery, enumeratie-oracle dicht) + bewezen tegen echte Redis.
 
 **Notes:** volgende release bij voorkeur via CI voor provenance. Bewuste rest: 2FA-UI heeft geen auto-aflever-pad voor niet-re-gescaffolde projecten (upgrade-runbook in ARCHITECTURE_AUTH.md); dev-settings-page verder gedrift van template (los van 2FA); QR-render = consumer-keuze.
+
+## 2026-07-12 21:10 — mikro-orm scaffold: db:schema:update werkt nu op Node 22/Windows (feedback consumer-AI)
+
+**User prompt:** consumer-AI meldt: mikro-orm CLI crasht nog (upstream figlet op Node 22/Windows) + `db:schema:update` verwees naar een eigen script dat ook secret-manager pointers resolvet (wat de CLI nooit doet). Suggestie: dat script in de template opnemen.
+
+**Bevestigd:** scaffolder wiret `db:schema:update` → `mikro-orm schema:update --run` (de `@mikro-orm/cli`). NIET gefixt in 0.6.0. Suggestie overgenomen.
+
+**Wat ik deed:**
+- Nieuw `scripts/mikroOrmSchema.ts` (scaffolder-stub MIKRO_SCHEMA_SCRIPT): draait `orm.getSchemaGenerator().updateSchema()` via de MikroORM-API (= equivalent van `schema:update --run`), met `loadEnvFiles()` + guarded secret-manager-resolutie eerst (spiegelt prismaWithSecrets.ts). Geen `@mikro-orm/cli`, geen figlet.
+- `db:schema:update` → `tsx ... scripts/mikroOrmSchema.ts`; `@mikro-orm/cli` devDep + `mikro-orm` config-key gedropt.
+- **RUNTIME-TEST ving een 2e latente bug**: MikroORM weigert init bij core/driver-versie-mismatch, en `^6.6.0`-carets lieten core (6.6.15) en better-sqlite (6.6.14, loopt achter) uiteenlopen → crash bij `MikroORM.init`. Fix: `MIKRO_ORM_VERSION = '6.6.14'` exact-pin voor core + driver (hoogste 6.x waar alle 4 drivers + core bestaan; geverifieerd via npm).
+- CLI switchOrm ORM_SURFACES mikro-orm bijgewerkt (geen cli/config-key, wél scripts/mikroOrmSchema.ts als starter) — parity.
+- Lesson 0004 vastgelegd (CLI-figlet-crash + runtime-test-voor-ship). CHANGELOGs [Unreleased] voor scaffolder + cli.
+
+**Verificatie (echt, Node 22/Windows):** verse mikro-orm/sqlite scaffold + npm install (exact 6.6.14) + `npm run db:schema:update` → "✓ database schema updated from server/db/entities.ts"; tsc volledig schoon na generateArtifacts. Framework-gates (build/pkg-lint/cli+scaffolder-tests/ai:lint) groen.
+
+**Files touched:** packages/create-luckystack-app/src/index.ts (+CHANGELOG), packages/cli/src/commands/switchOrm.ts (+CHANGELOG), docs/lessons/0004-*.md + AI_LESSONS_INDEX.md.
+
+**Open:** dit zit nog NIET op npm (0.6.0 heeft de kapotte mikro-wiring). Kandidaat voor 0.6.1 patch-release — wacht op user-akkoord.
