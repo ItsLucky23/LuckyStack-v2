@@ -14,6 +14,7 @@ import {
 import type { PageMiddleware } from "@luckystack/core/client";
 import { menuHandler } from "src/_functions/menuHandler";
 import { apiRequest } from "src/_sockets/apiRequest";
+import TwoFactorSection from "./_components/TwoFactorSection";
 
 import { backendUrl, SessionLayout } from "../../config";
 
@@ -461,6 +462,14 @@ export default function Home() {
                 {translate({ key: 'settings.changePassword' })}
               </button>
             </form>
+          </Section>
+        )}
+
+        {/* Two-factor authentication (ADR 0024) — credentials accounts only:
+            the 2FA challenge gates the password + email-code login flows. */}
+        {session.provider === 'credentials' && (
+          <Section title={translate({ key: 'settings.twoFactorSection' })}>
+            <TwoFactorSection />
           </Section>
         )}
 

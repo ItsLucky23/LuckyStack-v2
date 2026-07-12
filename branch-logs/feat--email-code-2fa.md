@@ -32,3 +32,12 @@
 - Gates: build, pkg-lint, dev-lint, alle tests, ai:lint groen.
 
 **Nog te doen (fase 2b):** settings-2FA-sectie (enroll/disable/recovery UI op de framework-routes), wizard/manage-substappen, docs (ARCHITECTURE_AUTH, http-routes.md, package-CLAUDE.md's, ADR 0024), CHANGELOGs, e2e met console-email-adapter.
+
+## 2026-07-12 12:50 — Fase 2b-1: 2FA-sectie in settings (3 trees) + settings-locale-keys
+
+- **TwoFactorSection**: enroll (setup → secret/otpauth-URI met copy → eerste code → recovery codes eenmalig tonen), disable (code vereist), recovery-codes regenereren. Praat met de framework-routes via fetch + getCsrfToken() (cookie-mode CSRF) + Bearer (token-mode). Template: inline Section-wrapper in page.tsx (na PasswordSection, credentials-only); cli-asset = byte-identieke kopie (parity ✓); dev-app: eigen variant met lokale Section-wrapper + named export (dev-settings is component-gesplitst — VERDER gedrift van template dan gedacht; verzoening = aparte klus, genoteerd).
+- 19 nieuwe `settings.twoFactor*` locale-keys × 4 talen × dev+template.
+- INCIDENT (hersteld, les herbevestigd): recursieve delete van src/settings/_components wiste bestaande dev-componenten (git checkout herstelde alles — was gecommit); PowerShell -replace op een .tsx corrumpeerde UTF-8 → reset vanaf template + Edit-tool. Beide bekende valkuilen uit eerdere sessies.
+- Gates: build, dev-lint, pkg-lint, cli-tests (parity), ai:lint groen.
+
+**Rest fase 2b-2:** docs (ADR 0024, ARCHITECTURE_AUTH, http-routes.md, CLAUDE.md's core/login/server/scaffolder, CHANGELOGs) + e2e (scaffold+install, console-email, echte login/2FA-flow) + dev-settings-page-drift als bewuste rest melden.

@@ -2,8 +2,8 @@
   "version": 2,
   "note": "Dependency graph, ids relative to src/. File level: blastRadius[file] = files transitively importing it. Symbol level: callEdges are function->function calls; symbolBlastRadius['file::fn'] = symbols transitively calling it. <module> = file top-level scope. functions.* injection-proxy / dynamic-import / interface-typed calls are intentionally not resolved. See docs/decisions/0002,0004,0006.",
   "counts": {
-    "nodes": 95,
-    "edges": 65,
+    "nodes": 96,
+    "edges": 67,
     "symbols": 127,
     "callEdges": 31
   },
@@ -469,6 +469,11 @@
       "route": null
     },
     {
+      "id": "settings/_components/TwoFactorSection.tsx",
+      "kind": "other",
+      "route": null
+    },
+    {
       "id": "settings/confirm-email/page.tsx",
       "kind": "page",
       "route": null
@@ -718,6 +723,10 @@
       "to": "settings/_components/Section.tsx"
     },
     {
+      "from": "settings/_components/TwoFactorSection.tsx",
+      "to": "settings/_components/Section.tsx"
+    },
+    {
       "from": "settings/confirm-email/page.tsx",
       "to": "_sockets/apiRequest.ts"
     },
@@ -744,6 +753,10 @@
     {
       "from": "settings/page.tsx",
       "to": "settings/_components/SessionsSection.tsx"
+    },
+    {
+      "from": "settings/page.tsx",
+      "to": "settings/_components/TwoFactorSection.tsx"
     }
   ],
   "blastRadius": {
@@ -903,9 +916,13 @@
       "settings/_components/PreferencesSection.tsx",
       "settings/_components/ProfileSection.tsx",
       "settings/_components/SessionsSection.tsx",
+      "settings/_components/TwoFactorSection.tsx",
       "settings/page.tsx"
     ],
     "settings/_components/SessionsSection.tsx": [
+      "settings/page.tsx"
+    ],
+    "settings/_components/TwoFactorSection.tsx": [
       "settings/page.tsx"
     ]
   },
@@ -921,6 +938,12 @@
       "kind": "other",
       "dependents": 8,
       "directDependents": 4
+    },
+    {
+      "id": "settings/_components/Section.tsx",
+      "kind": "other",
+      "dependents": 7,
+      "directDependents": 6
     },
     {
       "id": "_components/Avatar.tsx",
@@ -939,12 +962,6 @@
       "kind": "helper",
       "dependents": 6,
       "directDependents": 3
-    },
-    {
-      "id": "settings/_components/Section.tsx",
-      "kind": "other",
-      "dependents": 6,
-      "directDependents": 5
     },
     {
       "id": "_components/dropdownInternals.tsx",
