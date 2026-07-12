@@ -8,12 +8,18 @@ import tryCatch from "shared/tryCatch";
 
 import { i18nNotify as notify, useTranslator } from "@luckystack/core/client";
 
+//? Post-redirect delay in ms: long enough for the success toast to be read,
+//? short enough not to feel broken. Named to avoid a bare magic number.
+const REDIRECT_DELAY_MS = 1000;
+
 export default function LoginForm({ formType }: { formType: "login" | "register" }) {
   const translate = useTranslator();
+  //? Preserve the current search params (e.g. ?backend=8080) across the
+  //? login↔register nav and the post-login redirect, so dev overrides survive.
   const { search } = useLocation();
   const isLogin = formType === "login";
-  const title = isLogin ? translate({ key: 'login.signInTitle' }) : translate({ key: 'login.createAccountTitle' });
-  const subtitleText = isLogin ? translate({ key: 'login.noAccountYet' }) : translate({ key: 'login.alreadyHaveAccount' });
+  const title = isLogin ? translate({ key: 'login.signInTitle' }) : translate({ key: 'login.registerTitle' });
+  const subtitleText = isLogin ? translate({ key: 'login.noAccount' }) : translate({ key: 'login.haveAccount' });
   const subtitleLink = isLogin ? translate({ key: 'login.createAccount' }) : translate({ key: 'login.logIn' });
   const redirectURL = isLogin ? `/register${search}` : `/login${search}`;
   const buttonText = isLogin ? translate({ key: 'login.logIn' }) : translate({ key: 'login.signUp' });
@@ -28,7 +34,8 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
   //? (`GET /auth/providers`) — the single source of truth. A provider is active
   //? only when its credentials env vars are set; `credentials` (email+password)
   //? is present when `auth.credentials` is enabled. Secrets never reach the
-  //? browser. `credentials` gates the form fields; everything else is a button.
+  //? browser. We split the returned list: `credentials` gates the form fields,
+  //? everything else becomes an OAuth button.
   const [oauthProviders, setOauthProviders] = useState<string[]>([]);
   const [showCredentials, setShowCredentials] = useState(false);
   //? Gate the whole form on the providers fetch so the OAuth buttons + credential
@@ -111,10 +118,15 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
         credentials: "include",
       });
       const sessionToken = res.headers.get("x-session-token");
+      //? `status` is a BOOLEAN on the auth handler's own responses, but framework
+      //? guards (CSRF, rate-limit) reply with the generic error envelope
+      //? `{ status: 'error', errorCode }` — a truthy STRING. Type it as the union
+      //? so the success check below can't be fooled into treating an error as a win.
       const body = (await res.json()) as {
-        status: boolean;
-        reason: string;
-        session: SessionLayout | undefined;
+        status: boolean | string;
+        reason?: string;
+        errorCode?: string;
+        session?: SessionLayout;
         authenticated?: boolean;
       };
 
@@ -132,16 +144,20 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
       setLoading(false); return;
     }
 
-    if (!response.status) {
-      const reasonKey = typeof response.reason === 'string' && response.reason.length > 0
-        ? response.reason
-        : 'api.internalServerError';
+    //? Success is ONLY a literal boolean `true`. Anything else — `false`, or the
+    //? framework error envelope's `'error'` string — is a failure. (Without the
+    //? strict `=== true`, a 403 CSRF reply `{ status: 'error' }` slipped through
+    //? as success: empty green toast + bounce back to /login.)
+    if (response.status !== true) {
+      const reasonKey = [response.reason, response.errorCode].find(
+        (key): key is string => typeof key === 'string' && key.length > 0,
+      ) ?? 'api.internalServerError';
       notify.error({ key: reasonKey });
       setLoading(false);
       return;
     }
 
-    notify.success({ key: response.reason });
+    notify.success({ key: response.reason ?? 'login.loggedIn' });
     setTimeout(() => {
       if (response.sessionToken && sessionBasedToken) {
         sessionStorage.setItem("token", response.sessionToken);
@@ -156,7 +172,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
       //? keep the current frontend origin, so :5174 stays :5174.
       const target = response.authenticated ? loginRedirectUrl : loginPageUrl;
       globalThis.location.href = `${target}${search}`;
-    }, 1000);
+    }, REDIRECT_DELAY_MS);
   };
 
   return (
@@ -245,7 +261,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
               <button
                 type="button"
                 ref={buttonRef}
-                className="mt-1 h-9 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60"
+                className="mt-1 h-9 rounded-md bg-primary text-title-primary text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60"
                 onClick={(e) => void handleSubmit(e, "credentials")}
                 disabled={loading}
               >
@@ -270,7 +286,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 onClick={(e) => void handleSubmit(e, provider)}
                 className="h-9 rounded-md cursor-pointer bg-container1 text-title text-sm border border-container1-border flex gap-2 items-center justify-center hover:bg-container1-hover transition-colors"
               >
-                <img src={`/${provider}.png`} alt={provider} className="w-4 h-4" />
+                <img src={`/${provider}.png`} alt={provider} className="w-4 h-4" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                 <span>{provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
               </button>
             ))}

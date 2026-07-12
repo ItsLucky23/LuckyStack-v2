@@ -240,6 +240,10 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
     reason: string;
     newToken: string | null;
     session: unknown;
+    //? ADR 0024: 2FA half-way state — first factor OK, no session minted yet.
+    requiresTwoFactor?: true;
+    challengeToken?: string;
+    twoFactorMethods?: string[];
   } | undefined;
 
   if (!result?.status) {
@@ -249,6 +253,21 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
         : 'api.internalServerError';
     res.setHeader('content-type', 'application/json; charset=utf-8');
     res.end(JSON.stringify({ status: false, reason: reasonKey }));
+    return true;
+  }
+
+  //? 2FA challenge (ADR 0024): relay the parked-login envelope. NO session
+  //? transport is set — `/auth/api/2fa` completes the login and mints it.
+  if (result.requiresTwoFactor) {
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({
+      status: true,
+      reason: result.reason,
+      requiresTwoFactor: true,
+      challengeToken: result.challengeToken,
+      twoFactorMethods: result.twoFactorMethods,
+      authenticated: false,
+    }));
     return true;
   }
 

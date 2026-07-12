@@ -8,7 +8,7 @@ import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { saveSession } from "./session"
 import validator from 'validator';
 import type { BaseSessionLayout as SessionLayout } from './sessionLayout';
-import { getUserAdapter } from './userAdapter';
+import { getUserAdapter, type UserRecord } from './userAdapter';
 import { resolveUserByEmail } from './accountStrategy';
 import { validatePassword } from './passwordPolicy';
 import { isAccountLocked, clearAuthFailures } from './authLockout';
@@ -26,20 +26,38 @@ interface LoginOrRegisterParams {
 
 //? Discriminated result of the credentials login/register surface (QUA-080).
 //? Exporting this lets `@luckystack/server`'s auth route narrow on `status`
-//? instead of casting the result to an inline shape. On `status: true`,
+//? instead of casting the result to an inline shape. On a full success,
 //? `newToken` + `session` are always present; on `status: false` only `reason`
-//? is meaningful (the failure branch never mints a token).
+//? is meaningful (the failure branch never mints a token). The CHALLENGE
+//? member (ADR 0024) is the 2FA half-way state: the first factor was correct
+//? but NO session exists yet — the route relays `challengeToken` to the client
+//? and `/auth/api/2fa` completes the login. The `?: undefined` markers keep
+//? property access legal across the whole union (`result.newToken`).
+export type TwoFactorMethod = 'totp' | 'email-code' | 'recovery-code';
 export interface CredentialsLoginSuccess {
   status: true;
   reason: string;
   newToken: string;
   session: SessionLayout;
+  requiresTwoFactor?: undefined;
+}
+export interface CredentialsLoginChallenge {
+  status: true;
+  reason: string;
+  requiresTwoFactor: true;
+  challengeToken: string;
+  twoFactorMethods: TwoFactorMethod[];
+  newToken?: undefined;
+  session?: undefined;
 }
 export interface CredentialsLoginFailure {
   status: false;
   reason: string;
+  newToken?: undefined;
+  session?: undefined;
+  requiresTwoFactor?: undefined;
 }
-export type CredentialsLoginResult = CredentialsLoginSuccess | CredentialsLoginFailure;
+export type CredentialsLoginResult = CredentialsLoginSuccess | CredentialsLoginChallenge | CredentialsLoginFailure;
 
 //? Resolved at call time via getUploadsDir() so consumer path overrides win.
 const uploadsFolder = (): string => getUploadsDir();
@@ -276,8 +294,13 @@ const resolveUploadedAvatar = async (userId: string): Promise<string | null> => 
   return avatarStat ? `${userId}.webp` : null;
 };
 
-const sanitizeUserForSession = <T extends { password?: unknown }>(user: T): Omit<T, 'password'> => {
-  const { password: _password, ...safeUser } = user;
+//? Strips every column that must never reach Redis or the client: the bcrypt
+//? hash AND the 2FA material (ADR 0024). Consumers with more sensitive columns
+//? add a `registerSessionSanitizer` on top; this is the always-on floor.
+const sanitizeUserForSession = <T extends { password?: unknown; totpSecret?: unknown; recoveryCodes?: unknown }>(
+  user: T,
+): Omit<T, 'password' | 'totpSecret' | 'recoveryCodes'> => {
+  const { password: _password, totpSecret: _totpSecret, recoveryCodes: _recoveryCodes, ...safeUser } = user;
   return safeUser;
 };
 
@@ -497,6 +520,76 @@ const registerWithCredentials = async (
   };
 };
 
+//? ─── 2FA gate slot (ADR 0024) ───
+//? DI registry (same idiom as registerUserAdapter / registerSessionAdapter)
+//? instead of importing twoFactor.ts here — that would be a login ↔ twoFactor
+//? module cycle. twoFactor.ts registers the gate at module init (pulled in via
+//? the package index); with nothing registered, first-factor logins complete
+//? directly — which is also why every existing unit test keeps its behavior.
+export type TwoFactorGate = (
+  user: UserRecord,
+  context: { requesterIp?: string },
+) => Promise<CredentialsLoginChallenge | null>;
+let twoFactorGate: TwoFactorGate | null = null;
+export const registerTwoFactorGate = (gate: TwoFactorGate): void => {
+  twoFactorGate = gate;
+};
+const applyTwoFactorGate: TwoFactorGate = async (user, context) =>
+  (twoFactorGate ? twoFactorGate(user, context) : null);
+
+//? Shared post-authentication tail (ADR 0024): every first-factor-verified
+//? path — password login, email-code login, and the completed 2FA challenge —
+//? funnels through here so the session-minting behavior can never drift
+//? between them. Mint token → best-effort lastLogin → session layout →
+//? saveSession → postLogin hook → clear lockout counters (when email known).
+export const finalizeLogin = async (
+  user: UserRecord,
+  options: { provider: string; email?: string; supersedeToken?: string; requesterIp?: string },
+): Promise<CredentialsLoginResult> => {
+  const newToken = randomBytes(32).toString('hex');
+  const previousLogin = user.lastLogin ?? null;
+  const nowLogin = new Date();
+
+  // Best-effort lastLogin update — silently no-ops if the user adapter
+  // (or User schema) doesn't accept the field.
+  await tryCatch(() => getUserAdapter().update(user.id, { lastLogin: nowLogin }));
+
+  const newUser: SessionLayout = {
+    ...sanitizeUserForSession(user),
+    token: newToken,
+    lastLogin: nowLogin,
+    previousLogin,
+  };
+
+  const uploadedAvatar = await resolveUploadedAvatar(newUser.id);
+  if (uploadedAvatar) {
+    newUser.avatar = uploadedAvatar;
+  }
+
+  const saved = await saveSession(newToken, newUser, true, { supersedeToken: options.supersedeToken });
+  if (!saved.ok) {
+    //? Session never persisted (adapter blip / preSessionCreate veto). Fail the
+    //? login so the route does NOT set a cookie or delete the prior session for
+    //? a token that getSession() can't resolve.
+    emitLoginFailed({ email: options.email, userId: newUser.id, provider: options.provider, reason: saved.errorCode, stage: 'login', requesterIp: options.requesterIp });
+    return { status: false, reason: saved.errorCode };
+  }
+  await dispatchHook('postLogin', { userId: newUser.id, provider: options.provider, isNewUser: false, token: newToken });
+  //? Reset the brute-force counter on success so earlier typos don't keep a
+  //? legitimate user locked out (F7). No-op when the feature is disabled.
+  //? Clear the IP+account composite key (DD-LOGIN-F5) AND the bare account key
+  //? so that failures recorded without an IP (e.g. from a different surface) are
+  //? also cleared after a confirmed legitimate login.
+  if (options.email) {
+    void clearAuthFailures(options.email, options.requesterIp);
+    if (options.requesterIp) void clearAuthFailures(options.email);
+  }
+  if (isDevMode()) {
+    getLogger().debug(`${options.provider} login success for user ${newUser.id}`);
+  }
+  return { status: true, reason: 'login.loggedIn', newToken, session: newUser };
+};
+
 const loginWithCredentialsCore = async (
   { email, password }: { email: string; password: string },
   //? DD-LOGIN-F5: `requesterIp` is optional so all existing callers stay
@@ -573,46 +666,19 @@ const loginWithCredentialsCore = async (
     return { status: false, reason: 'login.wrongPassword' };
   }
 
-  const newToken = randomBytes(32).toString('hex');
-  const previousLogin = findUserResponse.lastLogin ?? null;
-  const nowLogin = new Date();
+  //? Second factor (ADR 0024): the password is verified, but an enrolled user
+  //? must answer a 2FA challenge before any session is minted. The registered
+  //? gate returns null when 2FA is disabled or the user never enrolled — then
+  //? the login completes directly through the shared tail.
+  const challenge = await applyTwoFactorGate(findUserResponse, { requesterIp });
+  if (challenge) return challenge;
 
-  // Best-effort lastLogin update — silently no-ops if the user adapter
-  // (or User schema) doesn't accept the field.
-  await tryCatch(() => userAdapter.update(findUserResponse.id, { lastLogin: nowLogin }));
-
-  const newUser: SessionLayout = {
-    ...sanitizeUserForSession(findUserResponse),
-    token: newToken,
-    lastLogin: nowLogin,
-    previousLogin,
-  };
-
-  const uploadedAvatar = await resolveUploadedAvatar(newUser.id);
-  if (uploadedAvatar) {
-    newUser.avatar = uploadedAvatar;
-  }
-
-  const saved = await saveSession(newToken, newUser, true, { supersedeToken: options?.supersedeToken });
-  if (!saved.ok) {
-    //? Session never persisted (adapter blip / preSessionCreate veto). Fail the
-    //? login so the route does NOT set a cookie or delete the prior session for
-    //? a token that getSession() can't resolve.
-    emitLoginFailed({ email, userId: newUser.id, provider: 'credentials', reason: saved.errorCode, stage: 'login', requesterIp });
-    return { status: false, reason: saved.errorCode };
-  }
-  await dispatchHook('postLogin', { userId: newUser.id, provider: 'credentials', isNewUser: false, token: newToken });
-  //? Reset the brute-force counter on success so earlier typos don't keep a
-  //? legitimate user locked out (F7). No-op when the feature is disabled.
-  //? Clear the IP+account composite key (DD-LOGIN-F5) AND the bare account key
-  //? so that failures recorded without an IP (e.g. from a different surface) are
-  //? also cleared after a confirmed legitimate login.
-  void clearAuthFailures(email, requesterIp);
-  if (requesterIp) void clearAuthFailures(email);
-  if (isDevMode()) {
-    getLogger().debug(`credentials login success for user ${newUser.id}`);
-  }
-  return { status: true, reason: 'login.loggedIn', newToken, session: newUser };
+  return finalizeLogin(findUserResponse, {
+    provider: 'credentials',
+    email,
+    supersedeToken: options?.supersedeToken,
+    requesterIp,
+  });
 };
 
 //? Thin dispatcher: keeps the existing single-entry HTTP surface but forwards

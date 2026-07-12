@@ -191,3 +191,24 @@ describe.each(ASSET_BUNDLES)('asset bundle present: %s', (bundle) => {
     expect(statSync(path.resolve(here, '..', 'assets', bundle)).isDirectory()).toBe(true);
   });
 });
+
+//? The framework DEV APP (repo-root src/) is the THIRD copy of the auth UI and
+//? was never in the parity net — it drifted in BOTH directions from the
+//? template/asset pair for months (search-param preservation + OAuth return_url
+//? only in dev; the CSRF-envelope fix + REDIRECT_DELAY_MS only in template).
+//? The 2026-07-12 reconciliation merged them; this suite keeps all THREE copies
+//? locked so an auth-UI change (e.g. a 2FA step) can't land in one tree only.
+describe('framework dev app ↔ template auth-UI parity', () => {
+  const DEV_LOCKED_FILES = [
+    'src/_components/LoginForm.tsx',
+    'src/login/page.tsx',
+    'src/register/page.tsx',
+    'src/reset-password/page.tsx',
+  ] as const;
+
+  it.each([...DEV_LOCKED_FILES])('%s is byte-identical (CRLF-normalized) in dev app and template', (rel) => {
+    const dev = normalize(readFileSync(path.join(repoRoot, rel), 'utf8'));
+    const template = normalize(readFileSync(path.join(TEMPLATE_ROOT, rel), 'utf8'));
+    expect(dev).toBe(template);
+  });
+});
