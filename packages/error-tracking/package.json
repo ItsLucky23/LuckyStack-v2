@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/error-tracking",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -57,10 +57,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.5.1"
+    "@luckystack/core": "^0.6.0"
   },
   "devDependencies": {
-    "@luckystack/login": "^0.5.1"
+    "@luckystack/login": "^0.6.0"
   },
   "peerDependencies": {
     "@sentry/node": "^10.48.0",

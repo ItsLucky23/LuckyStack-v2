@@ -5,7 +5,7 @@ All notable changes to `@luckystack/login` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-07-12
 
 ### Added
 
@@ -32,6 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `sanitizeUserForSession` (and the fail-closed session-persist fallback) now
   always strips `totpSecret` + `recoveryCodes` alongside `password`.
+
+### Security
+
+- Hardened from a pre-release adversarial review (5 lenses), verified against a
+  real Redis: atomic single-use on the TOTP replay guard (per-(user,timestep)
+  `SET NX`) and the recovery-code burn (per-user lease + re-read); a cross-IP
+  per-account 2FA-verify lockout (10 fails / 15 min); re-enrollment step-up
+  (setup/enable refuse while 2FA is enabled — disable first); 80-bit recovery
+  codes; email-code request made fire-and-forget to close a timing/reason
+  enumeration oracle; TOTP verify pinned to 6 digits on the auth surface;
+  `recoveryCodes` added to the log-redaction floor.
 
 ## [0.1.0]
 
