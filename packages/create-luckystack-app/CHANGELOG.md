@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Email-code login + 2FA surface in the template** (ADR 0024): LoginForm is
+  now a phase state machine (credentials / email-code / 2FA challenge) with a
+  passwordless entry point that only renders when the server advertises
+  `emailCodeLogin`; the settings page gains a two-factor management section
+  (enroll via authenticator app, recovery codes, disable) talking to the
+  adapter-based framework routes; `config.ts` ships commented
+  `emailCodeLogin` / `twoFactor: 'optional'` options; `.env.local_template`
+  documents `TOTP_ENCRYPTION_KEY`; the Prisma `User` model gains the optional
+  `twoFactorEnabled` / `totpSecret` / `recoveryCodes` columns; 50 new
+  `login.*` + `settings.twoFactor*` locale keys across en/nl/de/fr.
+
 ## [0.5.1] - 2026-07-11
 
 ### Added

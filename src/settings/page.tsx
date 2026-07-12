@@ -16,6 +16,7 @@ import { PasswordSection } from "./_components/PasswordSection";
 import { PreferencesSection } from "./_components/PreferencesSection";
 import { ProfileSection } from "./_components/ProfileSection";
 import { SessionsSection } from "./_components/SessionsSection";
+import { TwoFactorSection } from "./_components/TwoFactorSection";
 
 const stripAvatarVersion = (url: string) => url.replace(/[?&]v=\d+/, '');
 
@@ -242,6 +243,10 @@ export default function Home() {
 
         {/* Password change — only relevant for credentials accounts */}
         {session.provider === 'credentials' && <PasswordSection />}
+
+        {/* Two-factor authentication (ADR 0024) — credentials accounts only:
+            the 2FA challenge gates the password + email-code login flows. */}
+        {session.provider === 'credentials' && <TwoFactorSection />}
 
         <SessionsSection
           activeSessions={activeSessions}

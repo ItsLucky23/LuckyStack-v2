@@ -23,6 +23,7 @@ import { handleHealthRoute, handleLivezRoute, handleReadyzRoute } from './httpRo
 import { handleTestResetRoute } from './httpRoutes/testResetRoute';
 import { handleUploadsRoute } from './httpRoutes/uploadsRoute';
 import { handleAuthApiRoute } from './httpRoutes/authApiRoute';
+import { handleAuthEmailCodeRoute, handleAuthTwoFactorRoute } from './httpRoutes/authSecondFactorRoutes';
 import { handleAuthLogoutRoute } from './httpRoutes/authLogoutRoute';
 import { handleAuthProvidersRoute } from './httpRoutes/authProvidersRoute';
 import { handleAuthCallbackRoute } from './httpRoutes/authCallbackRoute';
@@ -94,8 +95,12 @@ const PRE_PARAMS_ROUTES: HttpRouteHandler[] = [
 ];
 
 //? Routes that run AFTER params parsing.
+//? ORDER: the email-code + 2FA routes MUST run before handleAuthApiRoute —
+//? that handler catch-alls every `/auth/api/*` path into `providerNotFound`.
 const POST_PARAMS_ROUTES: HttpRouteHandler[] = [
   handleUploadsRoute,
+  handleAuthEmailCodeRoute,
+  handleAuthTwoFactorRoute,
   handleAuthApiRoute,
   handleAuthCallbackRoute,
   handleApiRoute,

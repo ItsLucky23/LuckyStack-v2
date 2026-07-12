@@ -54,11 +54,14 @@ export { registerSessionAdapter, getSessionAdapter, redisSessionAdapter } from '
 export type { SessionAdapter } from './sessionAdapter';
 export { registerSessionSanitizer, getSessionSanitizer } from './sessionSanitizer';
 export type { SessionSanitizer } from './sessionSanitizer';
-export { loginWithCredentials, loginCallback, createOAuthState, registerWithCredentials, loginWithCredentialsCore } from './login';
+export { loginWithCredentials, loginCallback, createOAuthState, registerWithCredentials, loginWithCredentialsCore, finalizeLogin, registerTwoFactorGate } from './login';
 export type {
   CredentialsLoginResult,
   CredentialsLoginSuccess,
+  CredentialsLoginChallenge,
   CredentialsLoginFailure,
+  TwoFactorMethod,
+  TwoFactorGate,
   OAuthCallbackResult,
 } from './login';
 export type { CreateOAuthStateResult } from './login';
@@ -125,6 +128,30 @@ export type {
   UserAdapterCreateInput,
   UserRecord,
 } from './userAdapter';
+
+// 2FA (ADR 0024): TOTP (authenticator apps) + email-code fallback + recovery
+// codes. IMPORTING THIS MODULE ARMS THE LOGIN GATE (it registers itself into
+// login.ts at init) — which happens right here in the package index, so any
+// app with @luckystack/login installed gets the challenge step for enrolled
+// users once `auth.twoFactor` is 'optional'.
+export {
+  beginTotpEnrollment,
+  confirmTotpEnrollment,
+  disableTwoFactor,
+  regenerateRecoveryCodes,
+  verifyTwoFactorChallenge,
+  requestTwoFactorEmailCode,
+  availableTwoFactorMethods,
+  createTwoFactorChallengeIfRequired,
+} from './twoFactor';
+export type { TotpEnrollmentStart, ConfirmTotpEnrollmentResult, VerifyTwoFactorInput } from './twoFactor';
+export { verifyTotp, generateTotpSecret, buildOtpauthUri, hotp, base32Encode, base32Decode } from './totp';
+
+// Passwordless email-code login (ADR 0024) + the reusable numeric-OTP store.
+export { requestEmailLoginCode, verifyEmailLoginCode } from './emailCodeLogin';
+export type { RequestEmailLoginCodeInput, RequestEmailLoginCodeResult, VerifyEmailLoginCodeInput } from './emailCodeLogin';
+export { issueEmailCode, verifyEmailCode, clearEmailCode, generateNumericCode } from './emailOtp';
+export type { EmailOtpPurpose, EmailCodeVerdict } from './emailOtp';
 
 // Post-login redirect resolver — lets consumers compute the OAuth callback
 // destination dynamically (per-user, per-tenant, per-provider).

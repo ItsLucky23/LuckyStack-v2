@@ -18,6 +18,11 @@ export const DEFAULT_REDACTED_LOG_KEYS: readonly string[] = [
   'csrftoken',
   'apikey',
   'secret',
+  //? 2FA (ADR 0024). `totpSecret` already matches the `secret` suffix, but
+  //? `recoveryCodes` matches neither the exact set nor any suffix — list it
+  //? explicitly so the log-redaction floor mirrors the session sanitizer,
+  //? which strips both `totpSecret` and `recoveryCodes`.
+  'recoverycodes',
 ];
 
 const redactedKeys = new Set<string>(DEFAULT_REDACTED_LOG_KEYS.map((key) => key.toLowerCase()));

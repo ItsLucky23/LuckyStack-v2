@@ -141,6 +141,15 @@ registerProjectConfig({
     //? Email+password auth. Set `false` for an OAuth-only app — the login form
     //? hides the email/password fields and the credentials route rejects.
     credentials: true,
+    //? Passwordless email-code login (ADR 0024): uncomment to let users sign in
+    //? with a short numeric code sent to their email (needs @luckystack/email).
+    // emailCodeLogin: true,
+    //? Second factor (ADR 0024): 'optional' lets users enroll an authenticator
+    //? app (Google/Microsoft Authenticator, Authy, … — the open TOTP standard).
+    //? Enrolled users answer a 2FA challenge at login; recovery codes + an
+    //? email-code fallback are included. Tip: set TOTP_ENCRYPTION_KEY in
+    //? .env.local to encrypt the TOTP secrets at rest.
+    // twoFactor: 'optional',
   },
 });
 

@@ -1,3 +1,4 @@
+import { getProjectConfig } from '@luckystack/core';
 import { getLogin } from '../capabilities';
 import type { HttpRouteHandler } from './types';
 
@@ -14,7 +15,12 @@ export const handleAuthProvidersRoute: HttpRouteHandler = async ({ req, res, rou
   const login = await getLogin();
   const providers = login ? login.getOAuthProviders().map((provider) => provider.name) : [];
 
+  //? ADR 0024: advertise whether passwordless email-code login is enabled so
+  //? the login form can render the "email me a code" entry point. A boolean
+  //? config flag only — no secrets, same trust level as the provider names.
+  const emailCodeLogin = Boolean(login) && getProjectConfig().auth.emailCodeLogin;
+
   res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify({ providers }));
+  res.end(JSON.stringify({ providers, emailCodeLogin }));
   return true;
 };

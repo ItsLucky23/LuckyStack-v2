@@ -80,7 +80,7 @@ function RequestForm() {
             disabled={loading}
             className="h-9 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60"
           >
-            {loading ? 'Loading...' : translate({ key: 'login.resetSendLink' })}
+            {loading ? translate({ key: 'login.loading' }) : translate({ key: 'login.resetSendLink' })}
           </button>
         </>
       )}
@@ -169,7 +169,7 @@ function ConfirmForm({ token }: { token: string }) {
             disabled={loading}
             className="h-9 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60"
           >
-            {loading ? 'Loading...' : translate({ key: 'login.resetConfirm' })}
+            {loading ? translate({ key: 'login.loading' }) : translate({ key: 'login.resetConfirm' })}
           </button>
         </>
       )}

@@ -480,6 +480,37 @@ export interface AuthConfig {
    * DEFAULT `/confirm-email-change`.
    */
   emailChangeConfirmPath: string;
+  /**
+   * Passwordless email-code login (ADR 0024): the user enters their email,
+   * receives a short numeric code, and signs in by typing it. Requires a
+   * registered email sender (`@luckystack/email`). DEFAULT `false`.
+   * Anti-enumeration: the request endpoint always answers "sent".
+   */
+  emailCodeLogin: boolean;
+  /** Email-code TTL in seconds (login + 2FA fallback codes). DEFAULT 600. */
+  emailCodeTtlSeconds: number;
+  /** Email-code length in digits. DEFAULT 6. */
+  emailCodeLength: number;
+  /** Wrong-code attempts before an email code is burned. DEFAULT 5. */
+  emailCodeMaxAttempts: number;
+  /**
+   * Second factor at login (ADR 0024). `'optional'` = per-user opt-in: a user
+   * who enrolled an authenticator app (TOTP — Google/Microsoft Authenticator,
+   * Authy, …) must answer a 2FA challenge after their password/email-code is
+   * verified. `'disabled'` (DEFAULT) = the challenge step never triggers, even
+   * for enrolled users (kill switch).
+   */
+  twoFactor: 'disabled' | 'optional';
+  /**
+   * Allow "send the code to my email instead" as a 2FA fallback channel for
+   * enrolled users (lost phone). Requires a registered email sender.
+   * DEFAULT `true` (recovery codes always work regardless).
+   */
+  twoFactorEmailFallback: boolean;
+  /** Pending 2FA login-challenge TTL in seconds. DEFAULT 300. */
+  twoFactorChallengeTtlSeconds: number;
+  /** Wrong-code attempts before a pending 2FA challenge is burned. DEFAULT 5. */
+  twoFactorMaxAttempts: number;
 }
 
 export interface OfflineQueueConfig {
@@ -839,6 +870,14 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     allowRegistration: true,
     passwordResetPath: '/reset-password',
     emailChangeConfirmPath: '/confirm-email-change',
+    emailCodeLogin: false,
+    emailCodeTtlSeconds: 60 * 10,
+    emailCodeLength: 6,
+    emailCodeMaxAttempts: 5,
+    twoFactor: 'disabled',
+    twoFactorEmailFallback: true,
+    twoFactorChallengeTtlSeconds: 60 * 5,
+    twoFactorMaxAttempts: 5,
   },
   socket: {
     maxHttpBufferSize: 5 * 1024 * 1024,

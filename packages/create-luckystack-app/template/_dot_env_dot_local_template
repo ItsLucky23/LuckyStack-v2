@@ -34,5 +34,11 @@ REDIS_PASSWORD=
 # in server/server.ts uncommented (it must load before everything).
 {{MONITORING_ENV_VARS}}
 
+# ──────────────────────── Two-factor authentication ─────────────────────────
+# Optional (ADR 0024): encrypts users' TOTP secrets at rest (AES-256-GCM).
+# Any long random string works. Without it, secrets are stored as-is (a
+# one-time warning is logged); adding the key later upgrades new enrollments.
+# TOTP_ENCRYPTION_KEY=
+
 # Test-only — protects /_test/reset in dev. Set this if you run integration tests.
 TEST_RESET_TOKEN=

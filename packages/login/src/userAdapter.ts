@@ -23,6 +23,20 @@ export interface UserRecord extends BaseSessionLayout {
   provider?: string | null;
   /** Most recent successful login. Mirrors the optional `lastLogin` column on User. */
   lastLogin?: Date | null;
+  /**
+   * 2FA (ADR 0024): whether this user enrolled a second factor. All three 2FA
+   * fields are OPTIONAL so pre-0.6 schemas/adapters keep working unchanged —
+   * an adapter that never returns them simply has no 2FA-capable users.
+   */
+  twoFactorEnabled?: boolean | null;
+  /**
+   * 2FA: the TOTP shared secret (base32; `gcm:`-prefixed when encrypted at
+   * rest via TOTP_ENCRYPTION_KEY). NEVER reaches the client — stripped by
+   * `sanitizeUserForSession` before any session persist/broadcast.
+   */
+  totpSecret?: string | null;
+  /** 2FA: sha256 hashes of the UNUSED one-time recovery codes (also stripped). */
+  recoveryCodes?: string[] | null;
 }
 
 export interface UserAdapter {

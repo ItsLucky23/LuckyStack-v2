@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `AuthConfig` slots for email-code login + 2FA (ADR 0024, all additive with
+  safe defaults): `emailCodeLogin` (false), `emailCodeTtlSeconds` (600),
+  `emailCodeLength` (6), `emailCodeMaxAttempts` (5), `twoFactor`
+  (`'disabled' | 'optional'`, default disabled), `twoFactorEmailFallback`
+  (true), `twoFactorChallengeTtlSeconds` (300), `twoFactorMaxAttempts` (5).
+
 ## [0.5.0] - 2026-07-11
 
 ### Changed

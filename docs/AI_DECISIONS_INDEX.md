@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (23)
+## Decisions (24)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -36,6 +36,7 @@
 | 0021 | Scaffold writes a manifest (.luckystack/scaffold.json); updates to copied files go through an explicit `luckystack update` that never overwrites user-modified files (AI-assisted merge via change-notes) | 🟢 accepted | scaffold, cli, updates, dx | — | `docs/decisions/0021-scaffold-manifest-and-luckystack-update.md` |
 | 0022 | Ship @luckystack/cron (leader-elected scheduler) — reversing the "deliberately no cron" extension-points position | 🟢 accepted | cron, scheduler, packages, multi-instance, redis | — | `docs/decisions/0022-ship-luckystack-cron-reversing-no-cron.md` |
 | 0023 | auth selectable on ts first orms | 🟢 accepted | scaffold, auth, orm, cli | — | `docs/decisions/0023-auth-selectable-on-ts-first-orms.md` |
+| 0024 | email code login and totp 2fa | 🟢 accepted | auth, login, 2fa, security | — | `docs/decisions/0024-email-code-login-and-totp-2fa.md` |
 
 ## Summaries
 
@@ -232,6 +233,14 @@ Ship an optional `@luckystack/cron` package (NOT a core/server feature). It comp
 The scaffold wizard shows the auth step for **prisma, drizzle and mikro-orm**; only `orm: 'none'` forces auth off (there is no data layer to write an adapter against). Explicit `--orm=none --auth=<mode>` exits 2 (mirrors the drizzle+mongodb hard reject). A non-prisma auth scaffold keeps the adapter-based flows (login/register/reset-password, LoginForm, functions/session.ts, @luckystack/login) and writes the per-ORM starter `luckystack/login/userAdapter.ts` (auto-imported at boot via the login overlay slot; consumer finishes 2 documented steps). The **Prisma-bound surface is pruned** to keep the scaffold buildable on first try: `src/settings` (6 `_api` routes call `functions.db.prisma` directly) and `server/hooks/notifications.ts` (`getPrismaClient()`; would fail silently inside its tryCatch on every login). README/Home.tsx/next-steps text is adjusted accordingly. `luckystack add login` behaves identically on a non-prisma project: it no longer copies the Prisma-bound files (previously it copied them and warned "port these" — leaving a project that could not compile). The starter strings are duplicated in create-luckystack-app and @luckystack/cli (they cannot import each other at runtime) and pinned byte-identical by a parity test.
 
 → `docs/decisions/0023-auth-selectable-on-ts-first-orms.md`
+
+### 0024 — email code login and totp 2fa
+
+**0024** · accepted · tags: auth, login, 2fa, security · 2026-07-12
+
+**TOTP hand-rolled on `node:crypto`** (`packages/login/src/totp.ts`): HMAC- SHA1 HOTP + timing-safe TOTP verify across the drift window, base32 codecs, otpauth:// provisioning URI. Zero dependencies; pinned to the official RFC 4226/6238 test vectors. Replay protection = the verify returns the matched timestep; the flow layer persists the highest accepted step per user. **Email-OTP store** (`emailOtp.ts`) is deliberately NOT the core one-time-token primitive: that hashes the KEY material, which is only safe for 256-bit tokens — a 6-digit code (10^6) would be brute-forceable from a Redis dump and unfindable at verify time. Codes are keyed by purpose+identity with the sha256 in the VALUE, an atomic INCR attempt counter, winner-take-all consume, one active code per slot. **2FA challenge = a parked login** (`twoFactor.ts`): after the first factor verifies, no session is minted; a high-entropy challenge token (hashed at rest) is returned and `/auth/api/2fa` completes the login through the SAME `finalizeLogin` tail as the password path. Wrong codes do not burn the challenge — the attempt budget does. Methods: `totp` (primary), `email-code` (config-gated fallback, bound to an active challenge), `recovery-code` (10 one-time codes, sha256 at rest, fail-closed burn). **Login gate as a DI slot** (`registerTwoFactorGate`): twoFactor.ts registers itself via the package index — avoids a login↔twoFactor module cycle and keeps every path that never imports the package unchanged. **Secrets at rest**: `sanitizeUserForSession` (and the fail-closed session fallback) always strips `totpSecret`/`recoveryCodes`; the TOTP secret is AES-256-GCM encrypted when `TOTP_ENCRYPTION_KEY` is set (legacy plaintext stays readable so the key can be introduced later). **Routes live in the framework layer** (`@luckystack/server` `authSecondFactorRoutes.ts`) because only that layer may write the HttpOnly session cookie. Login-completing routes join the CSRF bootstrap-exemption set; the authed enrollment routes stay CSRF-enforced. **Backwards compatibility**: all logic ships in framework packages (comes along with a dep upgrade), routes self-wire, the new `UserRecord`/Prisma fields are optional, and both features default OFF (`auth.emailCodeLogin: false`, `auth.twoFactor: 'disabled'`). An upgraded v0.5.1 project enables them in config.ts; the only schema action is adding the three optional User columns (db push / migrate).
+
+→ `docs/decisions/0024-email-code-login-and-totp-2fa.md`
 
 ## Code governed by decisions
 

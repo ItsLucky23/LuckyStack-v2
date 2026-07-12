@@ -32,7 +32,21 @@ export const enforceCsrfOnStateChangingRequest = async ({
   //? present. Cross-site abuse is already prevented by the SameSite=Strict session
   //? cookie — a cross-site POST never carries it, so `token` would be absent here
   //? and this guard wouldn't fire anyway. Exempting it removes no real protection.
-  const isAuthBootstrap = routePath === '/auth/api/credentials';
+  //? ADR 0024: the email-code + 2FA LOGIN routes share the credentials-route
+  //? bootstrap semantics — they authenticate via their own factor (code /
+  //? challenge token), may run while a stale session cookie is present, and a
+  //? cross-site POST never carries the SameSite=Strict cookie anyway. The
+  //? authenticated 2FA ENROLLMENT routes (/auth/api/2fa/setup|enable|disable|
+  //? recovery-codes) are deliberately NOT exempt — they are state-changing
+  //? actions on a live session.
+  const AUTH_BOOTSTRAP_PATHS = new Set([
+    '/auth/api/credentials',
+    '/auth/api/email-code/request',
+    '/auth/api/email-code/verify',
+    '/auth/api/2fa',
+    '/auth/api/2fa/email-code',
+  ]);
+  const isAuthBootstrap = AUTH_BOOTSTRAP_PATHS.has(routePath);
   //? CSRF covers all framework routes (/api/, /sync/, /auth/api/) AND
   //? state-changing custom routes registered via `registerCustomRoute` that
   //? are not marked origin-exempt (those authenticate via HMAC/signature, not
