@@ -463,3 +463,17 @@ Root-causes + fixes:
 - Publish naar npmjs met `--no-provenance` (lokaal, geen OIDC) → alle 17 packages @0.5.1; tag v0.5.1; main + tags gepusht naar origin.
 
 **Notes:** volgende release bij voorkeur via CI voor provenance-attestatie. Geparkeerde vervolgrondes ongewijzigd: settings-routes porten naar UserAdapter (login-interface-beslissing), email-code login + 2FA.
+
+## 2026-07-12 18:30 — v0.6.0 gereleased naar npm (email-code login + 2FA)
+
+**User prompt:** "Jij mag dalijk naar 0.6.0 publishen maar eerst [security-scan + upgrade-analyse]" → na scan+fixes: "Nu volledige release naar 0.6.0".
+
+**Wat ik deed:**
+- `feat/email-code-2fa` (7 commits: backend, LoginForm-statemachine, settings-2FA-UI, docs/ADR 0024, replay-guard-fix, security-hardening) via `--no-ff` gemerged naar main.
+- CHANGELOGs [Unreleased]→0.6.0 (login incl. Security-sectie, server, core, create-luckystack-app, cli); lockstep-bump alle 17 packages naar 0.6.0 + lockfile; release-commit 970d051.
+- Gates op gemergde main: build + volledige unit-suite groen vóór publish.
+- Publish naar npmjs `--no-provenance` (lokaal) → alle 17 packages @0.6.0; tag v0.6.0; main + tags + branch gepusht.
+
+**Feature:** passwordless email-code login + 2FA (TOTP via de open standaard van Google/Microsoft Authenticator, email-fallback default-on per user-besluit, recovery codes). Beide features default UIT, config auto-seed → bestaande projecten upgraden zonder gedragswijziging. Security-hardened via 5-lens adversariële scan (atomaire single-use, account-lockout, re-enroll step-up, 80-bit recovery, enumeratie-oracle dicht) + bewezen tegen echte Redis.
+
+**Notes:** volgende release bij voorkeur via CI voor provenance. Bewuste rest: 2FA-UI heeft geen auto-aflever-pad voor niet-re-gescaffolde projecten (upgrade-runbook in ARCHITECTURE_AUTH.md); dev-settings-page verder gedrift van template (los van 2FA); QR-render = consumer-keuze.
