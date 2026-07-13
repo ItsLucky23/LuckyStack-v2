@@ -97,8 +97,24 @@ committing.
 
 ## Step 4 — Adopt a feature the user opted into (feature-specific)
 
-Enabling a new feature usually needs three things the safe auto-update can't do
-for you:
+First decide WHICH kind of adoption it is — they use different commands:
+
+- **A new OPTIONAL PACKAGE** (e.g. `cron`, `presence`, `docs-ui`,
+  `secret-manager`, `router`, `email`, `sync`). `npm install` upgrading the
+  version does NOT install a package the project never had, and `luckystack
+  update` won't add one either (it only refreshes files that were already
+  rendered with your recorded choices). Adopt it with **`npx luckystack add
+  <feature>`** — that adds the dependency, injects any `src/` assets a plain
+  `npm i` can't (Vite/file-routing only see `src/`), and self-wires backend-only
+  packages at boot. Run `npx luckystack list` first to see installed vs
+  available. (These same packages are also scaffold `--<feature>` flags for NEW
+  projects, but on an EXISTING project `luckystack add` is the path.)
+- **A feature TOGGLE on an already-installed package** (e.g. turning on 2FA /
+  email-code login, which live inside `@luckystack/login` you already have).
+  This needs the three things below — a package add won't do it.
+
+Enabling a feature toggle usually needs three things the safe auto-update can't
+do for you:
 
 - **Flip the config flag** in `config.ts` (e.g. `auth.twoFactor: 'optional'`,
   `auth.emailCodeLogin: true`). `--app` sidecars the new commented options into

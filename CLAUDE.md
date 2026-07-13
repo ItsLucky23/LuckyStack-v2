@@ -347,9 +347,13 @@ bump silently:
    `npx luckystack update --app` to bring framework docs/scripts AND the framework-authored `src/`
    files (a feature's new UI + routes) into the project — new files delivered, files the developer
    edited get a `<file>.new` sidecar you then merge (never overwrite). See ADR 0025.
-4. **Finish an opted-in feature.** Schema columns are NEVER auto-edited (safety) — for a
-   schema-affecting feature like 2FA add the documented columns + migrate, flip the config flag,
-   and wire prerequisites, per the feature's runbook (2FA → `ARCHITECTURE_AUTH.md`).
+4. **Finish an opted-in feature — the command depends on the KIND.** A new optional PACKAGE
+   (`cron`, `presence`, `docs-ui`, `secret-manager`, `router`, `email`, `sync`) is adopted with
+   `npx luckystack add <feature>` (NOT `npm install`/`update` — those don't add a package the
+   project never had; `luckystack list` shows installed vs available). A feature TOGGLE on an
+   already-installed package (e.g. 2FA / email-code login inside `@luckystack/login`) needs the
+   config flag flipped + schema columns added + prerequisites wired. Schema columns are NEVER
+   auto-edited (safety); follow the feature's runbook (2FA → `ARCHITECTURE_AUTH.md`).
 
 ## Documentation Reference
 
