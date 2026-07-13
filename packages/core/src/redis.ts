@@ -3,7 +3,7 @@
 import Redis from 'ioredis';
 import type { Redis as RedisClient } from 'ioredis';
 import { env } from './env';
-import { getRedisClient, setDefaultRedisResolver } from './clients';
+import { getRedisClient, setDefaultRedisResolver, registerRedisClient, isRedisClientRegistered } from './clients';
 import { getLogger } from './loggerRegistry';
 import { applyStrayKeyPrefix } from './redisKeyFormatter';
 import { registerSecretsResolvedListener } from './secretsResolved';
@@ -29,13 +29,14 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const buildDefaultRedisClient = (): RedisClient => {
-  if (cachedDefault) return cachedDefault;
-
+//? Build a fresh ioredis client from the CURRENT env (read at call time so
+//? dotenv / secret-manager timing doesn't capture a stale value). Password +
+//? username come from `process.env`; host/port from the frozen `env` snapshot.
+const constructRedisClient = (): RedisClient => {
   const maxReconnectAttempts = readPositiveIntEnv('LUCKYSTACK_REDIS_MAX_RECONNECTS', DEFAULT_MAX_REDIS_RECONNECT_ATTEMPTS);
   const maxBackoffMs = readPositiveIntEnv('LUCKYSTACK_REDIS_MAX_BACKOFF_MS', DEFAULT_MAX_REDIS_BACKOFF_MS);
 
-  cachedDefault = new Redis({
+  const client = new Redis({
     host: env.REDIS_HOST,
     port: Number.parseInt(env.REDIS_PORT, 10),
     ...(process.env.REDIS_USER && { username: process.env.REDIS_USER }),
@@ -55,11 +56,11 @@ const buildDefaultRedisClient = (): RedisClient => {
   //? `ready` (not `connect`): `connect` fires on TCP connect BEFORE the AUTH
   //? handshake, so logging there reports success even when credentials are
   //? wrong. `ready` fires only after AUTH succeeds.
-  cachedDefault.on('ready', async () => {
+  client.on('ready', async () => {
     getLogger().info('Connected to Redis');
   });
 
-  cachedDefault.on('error', (err) => {
+  client.on('error', (err) => {
     //? CORE-1: a very common, cryptic failure is an auth error whose password
     //? is still a @luckystack/secret-manager POINTER (e.g. `REDIS_PASSWORD_V1`)
     //? because the default client was constructed — and cached — during an
@@ -70,12 +71,12 @@ const buildDefaultRedisClient = (): RedisClient => {
     if (/WRONGPASS|NOAUTH|invalid username-password/i.test(message) && /_V\d+$/i.test(password)) {
       getLogger().error(
         `Redis auth failed and REDIS_PASSWORD ("${password}") looks like an UNRESOLVED secret-manager pointer. ` +
-        'The default Redis client was likely built before secret-manager init ran. The framework now drops a stale ' +
-        'client automatically when `config.secretManager.url` is set (server boot) and when `initSecretManager` is ' +
-        'wired with `onApplied: notifySecretsResolved`; if you resolve secrets by other means, call ' +
-        '`resetDefaultRedisClient()` (or `registerRedisClient(new Redis(getRedisConnectionOptions()))`) after resolution. ' +
-        'Also confirm `REDIS_PASSWORD` is listed in the secret-manager `envNames` allowlist (unset resolves nothing). ' +
-        'See docs/luckystack/ARCHITECTURE_SECRET_MANAGER.md.',
+        'The default Redis client was likely built before secret-manager init ran. The framework now EAGERLY REBUILDS + ' +
+        'registers a fresh client automatically when `config.secretManager.url` is set (server boot) and when ' +
+        '`initSecretManager` is wired with `onApplied: notifySecretsResolved`; if you resolve secrets by other means, ' +
+        'call `rebuildDefaultRedisClient()` (or `registerRedisClient(new Redis(getRedisConnectionOptions()))`) after ' +
+        'resolution. Also confirm `REDIS_PASSWORD` is listed in the secret-manager `envNames` allowlist (unset resolves ' +
+        'nothing). See docs/luckystack/ARCHITECTURE_SECRET_MANAGER.md.',
         err,
       );
       return;
@@ -83,18 +84,20 @@ const buildDefaultRedisClient = (): RedisClient => {
     getLogger().error('Error connecting to Redis', err);
   });
 
+  return client;
+};
+
+const buildDefaultRedisClient = (): RedisClient => {
+  if (cachedDefault) return cachedDefault;
+  cachedDefault = constructRedisClient();
   return cachedDefault;
 };
 
-//? CORE-1: drop (and disconnect) the cached default Redis client so the NEXT
-//? resolve rebuilds it from the current env. Call this after a late env change
-//? — most importantly right after `initSecretManager(...)` when
-//? `REDIS_PASSWORD`/`REDIS_HOST` were secret-manager pointers at first import:
-//? the early function-injection scan may have already built a client with the
-//? raw pointer value, and this forces a clean rebuild with the resolved secret.
-//? No-op when nothing was cached. A consumer that instead calls
-//? `registerRedisClient(...)` explicitly does not need this (the registered
-//? slot wins over the resolver).
+//? Drop (and disconnect) the cached default Redis client so the NEXT resolve
+//? rebuilds it. Kept for consumers that resolve secrets by other means, but note
+//? it is INSUFFICIENT on its own for the secret-manager pointer case: it only
+//? nulls `cachedDefault` and DEFERS the rebuild, so a stale value can resurface.
+//? Prefer `rebuildDefaultRedisClient()` (eager replace) — the framework uses it.
 export const resetDefaultRedisClient = (): void => {
   if (!cachedDefault) return;
   const previous = cachedDefault;
@@ -106,18 +109,43 @@ export const resetDefaultRedisClient = (): void => {
   }
 };
 
+//? EAGER REPLACE (the secret-manager pointer fix): build a fresh default client
+//? from the CURRENT (resolved) env and REGISTER it into the default slot so it
+//? wins over the lazy resolver. This is what `resetDefaultRedisClient()` alone
+//? could not do — a plain reset defers the rebuild (a stale/pointer value can
+//? resurface by the time it's lazily rebuilt) and never overrides a client that
+//? was already registered. Capturing the resolved secret NOW, into a registered
+//? client, is immune to that. Disconnects the previous default first so rotation
+//? doesn't leak a connection. The framework calls this on the secrets-resolved
+//? hook and at the server boot when a secret-manager URL is configured.
+export const rebuildDefaultRedisClient = (): RedisClient => {
+  const previousRegistered = isRedisClientRegistered() ? getRedisClient() : null;
+  resetDefaultRedisClient();
+  const client = constructRedisClient();
+  registerRedisClient(client);
+  if (previousRegistered && previousRegistered !== client) {
+    try {
+      previousRegistered.disconnect();
+    } catch {
+      //? Best-effort — a client that never connected can throw on disconnect.
+    }
+  }
+  return client;
+};
+
 setDefaultRedisResolver(buildDefaultRedisClient);
 
 //? CORE-1 (decoupled hook): when a secret resolver reports that secrets were
 //? (re)resolved — e.g. `@luckystack/secret-manager` wiring `onApplied` to
-//? `notifySecretsResolved` — drop the cached default client if a `REDIS_`
-//? credential changed, so the next use rebuilds from the resolved env. This is
-//? what lets a project run Redis auth via a secret-manager POINTER without
-//? hand-calling `resetDefaultRedisClient()`. `undefined` (caller doesn't know
-//? which keys changed) resets defensively.
+//? `notifySecretsResolved` — EAGERLY REBUILD + REGISTER the default client from
+//? the now-resolved env if a `REDIS_` credential changed. Registering (not
+//? resetting) is what lets a project run Redis auth via a secret-manager POINTER
+//? with zero consumer code: the resolved secret is captured immediately into a
+//? registered client that wins over the resolver. `undefined` (caller doesn't
+//? know which keys changed) rebuilds defensively.
 registerSecretsResolvedListener((changedKeys) => {
   if (changedKeys === undefined || changedKeys.some((key) => /^REDIS_/i.test(key))) {
-    resetDefaultRedisClient();
+    rebuildDefaultRedisClient();
   }
 });
 

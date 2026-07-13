@@ -9,7 +9,7 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (5)
+## Lessons (6)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
@@ -18,6 +18,7 @@
 | 0003 | Measuring DevTools-open lag — three pitfalls that produce wrong conclusions | 🟡 medium | performance diagnostics (scripts/devtoolsLagHarness) | performance, devtools, react, measurement, cdp | `docs/lessons/0003-devtools-lag-measurement-pitfalls.md` |
 | 0004 | The @mikro-orm/cli crashes on Node 22 / Windows — run the SchemaGenerator via the API | 🟠 high | packages/create-luckystack-app (mikro-orm scaffold) | scaffold, mikro-orm, cli, windows, secret-manager | `docs/lessons/0004-mikro-orm-cli-figlet-crash-node22-windows.md` |
 | 0005 | npm run eats no provenance flag | 🟡 medium | release / publishing | npm, publish, provenance, windows, release | `docs/lessons/0005-npm-run-eats-no-provenance-flag.md` |
+| 0006 | reset cached client insufficient register instead | 🟠 high | core / redis / secret-manager | redis, secret-manager, boot, caching, ioredis | `docs/lessons/0006-reset-cached-client-insufficient-register-instead.md` |
 
 ## Takeaways
 
@@ -60,3 +61,11 @@ Prefer the ORM's programmatic API over its CLI for framework-shipped scripts. `d
 Invoke the release script DIRECTLY with node so the flag lands in `process.argv` unambiguously, and set the env var as a belt-and-suspenders (npm reads it as a config too):
 
 → `docs/lessons/0005-npm-run-eats-no-provenance-flag.md`
+
+### 0006 — reset cached client insufficient register instead
+
+**0006** · high · core / redis / secret-manager · tags: redis, secret-manager, boot, caching, ioredis · 2026-07-13
+
+For any client that captures a credential at construction (ioredis, DB pools, SDKs), the fix after a late secret resolution is to **eagerly rebuild + REGISTER a fresh client**, not to null a cache and hope the lazy rebuild reads the right value. Core now exposes `rebuildDefaultRedisClient()` (disconnect previous → construct from current env → `registerRedisClient`), used by the server boot and the `notifySecretsResolved` hook. `resetDefaultRedisClient()` remains but is documented as insufficient for this case.
+
+→ `docs/lessons/0006-reset-cached-client-insufficient-register-instead.md`

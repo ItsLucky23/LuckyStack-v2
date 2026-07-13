@@ -256,7 +256,7 @@ Add an opt-in `--app` scope to `luckystack update`. It reuses the exact mechanis
 
 **0026** · accepted · tags: core, server, redis, secret-manager, boot · 2026-07-13
 
-Fix the timing at the framework level, without making core depend on secret-manager and without moving secret-manager init into `bootstrapLuckyStack`:
+Fix the timing at the framework level, without making core depend on secret-manager and without moving secret-manager init into `bootstrapLuckyStack`.
 
 → `docs/decisions/0026-secret-manager-redis-pointer-boot.md`
 

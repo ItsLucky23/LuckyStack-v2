@@ -595,3 +595,17 @@ Root-causes + fixes:
 **Verificatie:** dry-run 17 tarballs; registry bevestigt core/server/cli/create-luckystack-app allen 0.6.3. Gates vóór release groen (build 17/17, lint 0, 1656 unit, ai:lint 0).
 
 **Open:** matchrix kan nu upgraden naar 0.6.3 en de Redis registerRedisClient-workaround verwijderen. Deferred: degraded-type-extraction (55 routes MikroORM/Mongo).
+
+## 2026-07-13 23:25 — FIX-1 herzien: eager rebuild+register i.p.v. reset (0.6.3 werkte niet) [ADR 0026, lesson 0006]
+
+**User prompt:** consumer matchrix bewees dat 0.6.3 het Redis secret-pointer-boot NIET fixt — alle drie de zonder-wiring-routes falen met WRONGPASS, alleen registerRedisClient werkt. Gaf de één-regel-fix: framework-boot moet de client VERVANGEN (registreren), niet resetten.
+
+**Root-cause (bevestigd):** ioredis leest password één keer bij constructie. `resetDefaultRedisClient()` (alleen cachedDefault=null) is onvoldoende: (1) stelt de herbouw uit → stale pointer duikt weer op tegen writeBootUuid-tijd (~15s ná type-map-gen); (2) raakt de redisClients-registry niet → kan een vóór-resolve geregistreerde client niet overriden. registerRedisClient werkt want het bouwt EAGER (captured resolved password) + wint van de resolver.
+
+**Fix (user's één-regel, geïmplementeerd):** nieuwe core `rebuildDefaultRedisClient()` (disconnect vorige → constructRedisClient uit huidige env → registerRedisClient in default-slot). Gebruikt op beide plekken: server-boot (createServer, gated op secretManager.url) + de notifySecretsResolved-listener in redis.ts. `constructRedisClient` geëxtraheerd uit buildDefaultRedisClient (retryStrategy + handlers hergebruikt). resetDefaultRedisClient blijft bestaan maar gedocumenteerd als onvoldoende. CORE-1-foutmelding + ADR 0026 + ARCHITECTURE_SECRET_MANAGER + CHANGELOGs bijgewerkt. Lesson 0006 vastgelegd (cache-null ≠ juiste waarde capturen).
+
+**Verificatie:** build 17/17, lint 0, test:unit 1657 (redisSecretsReset herschreven: rebuild registreert + wint van resolver, gemockte ioredis), ai:lint 0. Echte real-Redis-repro heeft matchrix al bewezen (registerRedisClient werkt).
+
+**Files:** packages/core/src/{redis.ts,index.ts}, packages/server/src/createServer.ts, docs/decisions/0026-*.md, docs/lessons/0006-*.md, docs/ARCHITECTURE_SECRET_MANAGER.md, core+server CHANGELOG, packages/core/src/redisSecretsReset.test.ts.
+
+**Open:** publiceren als 0.6.4 (user: "publish 0.6.4 als het gefixt is").

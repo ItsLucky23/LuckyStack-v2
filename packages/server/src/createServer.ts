@@ -1,5 +1,5 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, isProduction, resolveEnvKey, dispatchHook, resetDefaultRedisClient } from '@luckystack/core';
+import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, isProduction, resolveEnvKey, dispatchHook, rebuildDefaultRedisClient } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
@@ -231,16 +231,17 @@ export const createLuckyStackServer = async (
   }
 
   //? FIX-1 (secret-manager Redis pointer): if a secret resolver is configured,
-  //? drop any DEFAULT Redis client that an early import may have built while
-  //? `REDIS_PASSWORD`/`REDIS_USER` was still an UNRESOLVED secret-manager pointer.
-  //? By this point the consumer's `initSecretManager(...)` (called before
-  //? `bootstrapLuckyStack`) has overwritten `process.env` with the real values,
-  //? so the first real Redis use below (the boot-UUID write) rebuilds from the
-  //? resolved env. Belt-and-suspenders alongside core's `secretsResolved` hook —
-  //? this also covers projects that resolved secrets by other means. No-op when
-  //? nothing was cached or no resolver is configured.
+  //? EAGERLY REBUILD + register the DEFAULT Redis client from the now-resolved
+  //? env. By this point the consumer's `initSecretManager(...)` (called before
+  //? `bootstrapLuckyStack`) has overwritten `process.env` with the real values.
+  //? A plain reset was insufficient (it defers the rebuild, so a stale/pointer
+  //? value could resurface, and it can't override an already-registered client);
+  //? rebuild+register captures the resolved secret NOW into a registered client
+  //? that wins over the resolver, so the boot-UUID write below authenticates with
+  //? the real password. Belt-and-suspenders alongside core's `secretsResolved`
+  //? hook — also covers projects that resolved secrets by other means.
   if (getProjectConfig().secretManager?.url) {
-    resetDefaultRedisClient();
+    rebuildDefaultRedisClient();
   }
 
   //? Boot UUID must be written before /_health can answer truthfully. Router

@@ -36,25 +36,41 @@ build TIMING + client caching, not a resolver design mismatch.
 ## Decision
 
 Fix the timing at the framework level, without making core depend on
-secret-manager and without moving secret-manager init into `bootstrapLuckyStack`:
+secret-manager and without moving secret-manager init into `bootstrapLuckyStack`.
+
+> **0.6.4 correction.** The 0.6.3 version of this ADR used
+> `resetDefaultRedisClient()` (null `cachedDefault`, defer the rebuild). Real
+> testing proved that INSUFFICIENT: a plain reset only defers the lazy rebuild —
+> a stale/pointer value can resurface by the time it rebuilds, and a reset never
+> overrides a client already sitting in the registry. The proven fix (a consumer
+> `registerRedisClient(new Redis(getRedisConnectionOptions()))` worked; a reset
+> did not) is to **EAGERLY REBUILD + REGISTER**: build a fresh client from the
+> now-resolved env immediately and put it in the default slot so it wins over the
+> resolver. Both mechanisms below now call `rebuildDefaultRedisClient()`.
 
 1. **Decoupled "secrets resolved" hook in core** (`secretsResolved.ts`):
    `registerSecretsResolvedListener` + `notifySecretsResolved(changedKeys?)`.
-   `redis.ts` self-registers a listener that calls `resetDefaultRedisClient()`
-   when a `REDIS_` key changed (or `undefined` = reset defensively). A resolver
+   `redis.ts` self-registers a listener that calls `rebuildDefaultRedisClient()`
+   when a `REDIS_` key changed (or `undefined` = rebuild defensively). A resolver
    fires it (secret-manager already exposes the `onApplied` callback for exactly
-   this — wire `onApplied: notifySecretsResolved`), so a stale client is dropped
+   this — wire `onApplied: notifySecretsResolved`), so a fresh client is captured
    at boot AND on rotation, regardless of ordering. Generic on purpose — other
    cached-client owners (Prisma pools, SDK clients) can subscribe too.
 
-2. **Defensive reset in the server boot** (`createServer.ts`, before
+2. **Eager rebuild in the server boot** (`createServer.ts`, before
    `writeBootUuid`): when `getProjectConfig().secretManager?.url` is set, call
-   `resetDefaultRedisClient()`. By then the consumer's `initSecretManager` (called
-   before `bootstrapLuckyStack`) has resolved `process.env`, so the first real
-   Redis use rebuilds from the resolved env with NO consumer action — this is what
-   fixes the reported boot bug automatically on a plain `npm` upgrade. Required a
+   `rebuildDefaultRedisClient()`. By then the consumer's `initSecretManager`
+   (called before `bootstrapLuckyStack`) has resolved `process.env`, so a fresh
+   registered client captures the real password and the boot-UUID write
+   authenticates — with NO consumer action, on a plain `npm` upgrade. Required a
    minimal `secretManager?: SecretManagerConfigRef` field on core's `ProjectConfig`
    (structural, dependency-free — core does not import secret-manager).
+
+`rebuildDefaultRedisClient()` (core, exported): disconnect the previous default,
+build a fresh client from the current (resolved) env via `getRedisConnectionOptions`
+semantics, and `registerRedisClient(...)` it into the default slot (wins over the
+lazy resolver). `resetDefaultRedisClient()` stays exported for the
+resolve-by-other-means case but is documented as insufficient for this one.
 
 ## Rejected alternatives
 
