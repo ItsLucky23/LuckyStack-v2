@@ -30,6 +30,7 @@ There is exactly one positional argument (the project name) and a set of recogni
 | `--docs-ui` | off | Opt INTO `@luckystack/docs-ui` (in-app API docs viewer). |
 | `--secret-manager` | off | Opt INTO `@luckystack/secret-manager` (`.env`-pointer secret resolution). |
 | `--router` | off | Opt INTO `@luckystack/router` (multi-instance load-balancer) + a `npm run router` script. |
+| `--cron` | off | Opt INTO `@luckystack/cron` (leader-elected recurring jobs). Dependency-only; self-wires at boot, register jobs in `luckystack/cron/*.ts`. |
 | `--ai-docs` / `--no-ai-docs` | on | Include / omit the LuckyStack AI dev-context (root `CLAUDE.md`, `docs/luckystack/`, `skills/`, `.claude/commands/`, the pre-commit AI-index hook + `@luckystack/mcp`). |
 | `--ai-browser=<all\|agent-browser\|none>` | `agent-browser` | AI browser-testing tooling. `all` also wires the Playwright + Chrome DevTools MCP servers. Forced to `none` when AI instructions are off. |
 | `--help`, `-h` | — | Print the usage banner via `printHelp()` and exit 0. Takes precedence over every other flag. |
@@ -48,7 +49,7 @@ export const VALID_FLAGS = [
   '--oauth=<google,github,discord,facebook,microsoft>',
   '--email=<none|console|resend|smtp>',
   '--monitoring=<none|sentry|datadog|posthog>',
-  '--presence', '--error-tracking', '--docs-ui', '--secret-manager', '--router',
+  '--presence', '--error-tracking', '--docs-ui', '--secret-manager', '--router', '--cron',
   '--ai-docs', '--no-ai-docs',
   '--ai-browser=<all|agent-browser|none>',
   '--help', '-h',
@@ -76,6 +77,7 @@ interface CliArgs {
   docsUi: boolean;
   secretManager: boolean;
   router: boolean;
+  cron: boolean;
   aiBrowserTooling: 'all' | 'agent-browser' | 'none' | null;
   dbProvider: 'mongodb' | 'postgresql' | 'mysql' | 'sqlite' | null;
   authMode: 'none' | 'credentials' | 'credentials+oauth' | null;
@@ -99,7 +101,7 @@ Applied under `--no-prompt` (and as the wizard's pre-selected values). **Lean by
 | `oauthProviders` | `[]` |
 | `emailProvider` | `none` |
 | `monitoringProvider` | `none` |
-| `presence` / `errorTracking` / `docsUi` / `secretManager` / `router` | all `false` |
+| `presence` / `errorTracking` / `docsUi` / `secretManager` / `router` / `cron` | all `false` |
 | `aiInstructions` | `true` (docs + git hook only; no app-runtime weight) |
 | `aiBrowserTooling` | `agent-browser` |
 
@@ -139,6 +141,7 @@ Options:
   --docs-ui      Install @luckystack/docs-ui (in-app API docs viewer).
   --secret-manager  Install @luckystack/secret-manager (.env-pointer secrets).
   --router       Install @luckystack/router (multi-instance load-balancer; npm run router).
+  --cron         Install @luckystack/cron (leader-elected recurring jobs; register in luckystack/cron/*.ts).
   --ai-docs / --no-ai-docs   Include / omit LuckyStack AI dev instructions (default on).
   --ai-browser=<all|agent-browser|none>
                  AI browser-testing tooling (default agent-browser). 'all' also wires the

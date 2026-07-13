@@ -543,3 +543,17 @@ Root-causes + fixes:
 **Files touched:** docs/UPGRADING.md (nieuw), CLAUDE.md, packages/cli/{CLAUDE.md,CHANGELOG.md}, docs/ARCHITECTURE_AUTH.md, docs/decisions/0025-*.md, docs/lessons/0005-*.md, alle packages/*/package.json (bump), diverse ai:*-indexes.
 
 **Open:** git-push naar origin ontbreekt (SSH-auth in deze omgeving) — user pusht `git push origin main && git push origin v0.6.1` zelf. Bewuste rest ongewijzigd: 6 prisma-settings-routes → UserAdapter porten; volgende release idealiter via CI voor echte provenance.
+
+## 2026-07-13 13:30 — @luckystack/cron als wizard-opt-in (create-luckystack-app)
+
+**User prompt:** "ook in de wizard wil ik de cron package hebben" (cron zat alleen in de CLI add/manage, niet in de scaffold-wizard).
+
+**Wat ik deed:** cron toegevoegd als opt-in in `create-luckystack-app` (`--cron`-flag + prompt-stap, default off), gespiegeld op de andere opt-ins maar als **dependency-only** injectie via `injectOptionalDeps` — byte-identiek aan `luckystack add cron` (backend-only, self-wired at boot via `@luckystack/cron/register`; GEEN template-bestand, geen server.ts-edit; jobs in `luckystack/cron/*.ts`). Raakpunten: CliArgs, VALID_FLAGS, parseArgs, ScaffoldChoices, DEFAULT_CHOICES, runPrompts-stap, runPromptsFallback, convertAnswersToChoices, buildPresetAnswers, buildNoPromptChoices, printHelp, injectOptionalDeps, printNextSteps. Round-trip geborgd: `choicesToFlags` (`luckystack update` → `--cron`) + `manifestSync` (`cron: state.packages.cron`) zodat wizard-cron en manage-cron niet driften. Manage-kant (registry/state/transitions/reconfigure) had cron al volledig — niks nodig.
+
+**Aanpak:** 3 parallelle read-only Explore-agents mapten eerst álle raakpunten (wizard-wiring, add-cron-parity, parity-tests/manifest/docs) vóór de edits — parity-drift tussen add-assets en template is hier de #1 bug-klasse.
+
+**Verificatie:** build 0, lint:packages 0, test:unit 1645 groen, ai:lint 0. Tests uitgebreid: 3 CliArgs-toEqual-blokken + expliciete `--cron`-parse-test + `choicesToFlags` cron round-trip. ÉCHTE e2e (gebouwde scaffolder, `--no-prompt --no-install`): mét `--cron` → `@luckystack/cron ^0.6.1` in package.json; zónder → geen dep (controle); geen cron-broncode gelekt (dependency-only bevestigd).
+
+**Files touched:** packages/create-luckystack-app/src/{index.ts,index.test.ts}, packages/create-luckystack-app/{CLAUDE.md,CHANGELOG.md}, packages/create-luckystack-app/docs/cli-flags.md, packages/cli/src/commands/{update.ts,update.test.ts}, packages/cli/src/lib/manifestSync.ts.
+
+**Open:** meelift met volgende release (0.6.2-kandidaat). Bewuste keuze: cron blijft inject-when-on (niet in base-template + pruned) — consistent met docs-ui/secret-manager.

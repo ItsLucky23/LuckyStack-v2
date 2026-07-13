@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`@luckystack/cron` is now a wizard opt-in** (`--cron` flag + a prompt step;
+  off by default). Previously cron was only addable post-scaffold via
+  `luckystack add cron`. It is a dependency-only add that self-wires at boot via
+  `@luckystack/cron/register` (byte-identical to `luckystack add cron` — no
+  template file, no `server.ts` edit); register jobs in `luckystack/cron/*.ts`.
+  The recorded `cron` choice round-trips through `luckystack update` and manage.
+
 ### Fixed
 
 - **mikro-orm `db:schema:update` now works on Node 22 / Windows.** It ran the

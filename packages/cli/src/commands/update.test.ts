@@ -121,6 +121,7 @@ describe('choicesToFlags', () => {
         docsUi: false,
         secretManager: false,
         router: true,
+        cron: true,
         aiInstructions: true,
         aiBrowserTooling: 'agent-browser',
       }),
@@ -134,6 +135,7 @@ describe('choicesToFlags', () => {
       '--presence',
       '--error-tracking',
       '--router',
+      '--cron',
       '--ai-browser=agent-browser',
     ]);
   });

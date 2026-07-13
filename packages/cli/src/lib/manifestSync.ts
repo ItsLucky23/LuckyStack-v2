@@ -58,6 +58,7 @@ export const syncScaffoldManifestChoices = (project: ConsumerProject): boolean =
     docsUi: state.packages['docs-ui'] === true,
     secretManager: state.packages['secret-manager'] === true,
     router: state.packages.router === true,
+    cron: state.packages.cron === true,
   };
 
   try {

@@ -158,6 +158,7 @@ export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
   if (choices.docsUi === true) flags.push('--docs-ui');
   if (choices.secretManager === true) flags.push('--secret-manager');
   if (choices.router === true) flags.push('--router');
+  if (choices.cron === true) flags.push('--cron');
   if (choices.aiInstructions === false) flags.push('--no-ai-docs');
   const aiBrowser = str('aiBrowserTooling');
   if (aiBrowser) flags.push(`--ai-browser=${aiBrowser}`);

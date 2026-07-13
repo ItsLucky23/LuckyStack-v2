@@ -46,6 +46,8 @@ export interface CliArgs {
   secretManager: boolean;
   /** `--router`: opt INTO @luckystack/router (multi-instance; off by default). */
   router: boolean;
+  /** `--cron`: opt INTO @luckystack/cron (leader-elected recurring jobs; off by default). */
+  cron: boolean;
   /** `--ai-browser=<all|agent-browser|none>`: AI browser-testing tooling (null = unspecified → DEFAULT_CHOICES). */
   aiBrowserTooling: AiBrowserTooling | null;
   //? CFG-01 — every wizard choice now has a matching CLI flag so the scaffold is
@@ -74,7 +76,7 @@ export const VALID_FLAGS = [
   '--oauth=<google,github,discord,facebook,microsoft>',
   '--email=<none|console|resend|smtp>',
   '--monitoring=<none|sentry|datadog|posthog>',
-  '--presence', '--error-tracking', '--docs-ui', '--secret-manager', '--router',
+  '--presence', '--error-tracking', '--docs-ui', '--secret-manager', '--router', '--cron',
   '--ai-docs', '--no-ai-docs',
   '--ai-browser=<all|agent-browser|none>',
   '--help', '-h',
@@ -100,6 +102,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
   let docsUi = false;
   let secretManager = false;
   let router = false;
+  let cron = false;
   let aiBrowserTooling: AiBrowserTooling | null = null;
   let orm: OrmProvider | null = null;
   let dbProvider: DbProvider | null = null;
@@ -136,6 +139,10 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
     case '--router': {
     router = true;
+    break;
+    }
+    case '--cron': {
+    cron = true;
     break;
     }
     case '--ai-docs': {
@@ -184,7 +191,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
   }
   return {
-    projectName, install, prompt, help, presence, errorTracking, docsUi, secretManager, router, aiBrowserTooling,
+    projectName, install, prompt, help, presence, errorTracking, docsUi, secretManager, router, cron, aiBrowserTooling,
     orm, dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, aiInstructions,
   };
 };
@@ -257,6 +264,8 @@ interface ScaffoldChoices {
   secretManager: boolean;
   /** Install @luckystack/router (multi-instance load-balancer process) + a `npm run router` script. Opt-in; off by default. */
   router: boolean;
+  /** Install @luckystack/cron (leader-elected recurring jobs). Dependency-only, self-wires at boot; register jobs in `luckystack/cron/*.ts`. Opt-in; off by default. */
+  cron: boolean;
   /**
    * Copy LuckyStack's AI dev-context into the project (root `CLAUDE.md`, the
    * `docs/luckystack/` deep-dives, `skills/`, `.claude/commands/`, the
@@ -291,6 +300,7 @@ export const DEFAULT_CHOICES: ScaffoldChoices = {
   docsUi: false,
   secretManager: false,
   router: false,
+  cron: false,
   aiInstructions: true,
   aiBrowserTooling: 'agent-browser',
 };
@@ -405,6 +415,9 @@ const runPromptsFallback = async (
     }
     if (need('router')) {
       answers.router = (await askYesNo(rl, 'Install @luckystack/router (multi-instance load-balancer; run via npm run router)?', false)) ? 'Yes' : 'No';
+    }
+    if (need('cron')) {
+      answers.cron = (await askYesNo(rl, 'Install @luckystack/cron (leader-elected recurring jobs; register in luckystack/cron/*.ts)?', false)) ? 'Yes' : 'No';
     }
     if (need('aiInstructions')) {
       answers.aiInstructions = (await askYesNo(
@@ -743,6 +756,7 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
     docsUi: answers.docsUi === 'Yes',
     secretManager: answers.secretManager === 'Yes',
     router: answers.router === 'Yes',
+    cron: answers.cron === 'Yes',
     aiInstructions: answers.aiInstructions !== 'No',
     //? Browser tooling rides on the AI template — forced 'none' when AI
     //? instructions are excluded (the wizard step is skipped in that case).
@@ -924,6 +938,18 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
       options: ['Yes', 'No'], defaultValue: 'No',
     },
     {
+      key: 'cron', type: 'select', label: 'Install @luckystack/cron?',
+      description: 'Leader-elected recurring jobs (cron expressions / intervals; runs on exactly one instance).',
+      details: [
+        '@luckystack/cron — schedule recurring background jobs with cron expressions',
+        'or intervals. Leader-elected, so a job runs on exactly ONE instance even when',
+        'you scale out. Choosing Yes adds the dep only; it self-wires at boot and stays',
+        'dormant until you register a job with registerCronJob(...) in a',
+        'luckystack/cron/*.ts file. Zero jobs = zero timers.',
+      ].join('\n'),
+      options: ['Yes', 'No'], defaultValue: 'No',
+    },
+    {
       key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions?',
       description: 'CLAUDE.md + docs + git hook + the @luckystack/mcp graph server for AI agents.',
       details: [
@@ -967,6 +993,7 @@ const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> =>
   if (args.docsUi) presets.docsUi = 'Yes';
   if (args.secretManager) presets.secretManager = 'Yes';
   if (args.router) presets.router = 'Yes';
+  if (args.cron) presets.cron = 'Yes';
   if (args.aiInstructions !== null) presets.aiInstructions = args.aiInstructions ? 'Yes' : 'No';
   if (args.aiBrowserTooling) presets.aiBrowserTooling = args.aiBrowserTooling;
   return presets;
@@ -1022,6 +1049,7 @@ const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
   if (args.docsUi) choices.docsUi = true;
   if (args.secretManager) choices.secretManager = true;
   if (args.router) choices.router = true;
+  if (args.cron) choices.cron = true;
   if (args.aiInstructions !== null) choices.aiInstructions = args.aiInstructions;
   if (args.aiBrowserTooling) choices.aiBrowserTooling = args.aiBrowserTooling;
   return normalizeChoices(choices);
@@ -1055,6 +1083,7 @@ Options:
   --docs-ui      Install @luckystack/docs-ui (in-app API docs viewer).
   --secret-manager  Install @luckystack/secret-manager (.env-pointer secrets).
   --router       Install @luckystack/router (multi-instance load-balancer; npm run router).
+  --cron         Install @luckystack/cron (leader-elected recurring jobs; register in luckystack/cron/*.ts).
   --ai-docs / --no-ai-docs   Include / omit LuckyStack AI dev instructions (default on).
   --ai-browser=<all|agent-browser|none>
                  AI browser-testing tooling (default agent-browser). 'all' also wires the
@@ -1514,6 +1543,10 @@ const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckyst
   //? / server.ts / .env blocks ship in the template as the enable-later guide).
   if (choices.docsUi) deps['@luckystack/docs-ui'] = `^${luckystackVersion}`;
   if (choices.secretManager) deps['@luckystack/secret-manager'] = `^${luckystackVersion}`;
+  //? cron is backend-only + self-wires at boot via @luckystack/cron/register — a
+  //? dependency-only add, byte-identical to `luckystack add cron` (no template file,
+  //? no server.ts edit; jobs live in the consumer's luckystack/cron/*.ts).
+  if (choices.cron) deps['@luckystack/cron'] = `^${luckystackVersion}`;
 
   if (Object.keys(deps).length === 0 && Object.keys(devDeps).length === 0) return;
 
@@ -3121,6 +3154,7 @@ Choices:
   docs-ui:     ${choices.docsUi ? 'installed' : 'skipped'}
   secret-mgr:  ${choices.secretManager ? 'installed' : 'skipped'}
   router:      ${choices.router ? 'installed' : 'skipped'}
+  cron:        ${choices.cron ? 'installed' : 'skipped'}
   ai-docs:     ${choices.aiInstructions ? 'included (+ pre-commit AI-index hook)' : 'skipped'}
   ai-browser:  ${choices.aiBrowserTooling}
 

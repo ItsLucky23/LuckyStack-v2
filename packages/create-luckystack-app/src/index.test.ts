@@ -249,6 +249,7 @@ describe("parseArgs", () => {
       docsUi: false,
       secretManager: false,
       router: false,
+      cron: false,
       aiBrowserTooling: null,
       ...CFG01_NULLS,
     });
@@ -265,6 +266,7 @@ describe("parseArgs", () => {
       docsUi: false,
       secretManager: false,
       router: false,
+      cron: false,
       aiBrowserTooling: null,
       ...CFG01_NULLS,
     });
@@ -292,6 +294,11 @@ describe("parseArgs", () => {
     expect(parseArgs(["my-app", "--presence"]).presence).toBe(true);
   });
 
+  it("sets cron for --cron (default false)", () => {
+    expect(parseArgs(["my-app"]).cron).toBe(false);
+    expect(parseArgs(["my-app", "--cron"]).cron).toBe(true);
+  });
+
   it("parses --ai-browser=<value> (default null)", () => {
     expect(parseArgs(["my-app"]).aiBrowserTooling).toBeNull();
     expect(parseArgs(["my-app", "--ai-browser=all"]).aiBrowserTooling).toBe("all");
@@ -315,6 +322,7 @@ describe("parseArgs", () => {
       docsUi: false,
       secretManager: false,
       router: false,
+      cron: false,
       aiBrowserTooling: null,
       ...CFG01_NULLS,
     });
