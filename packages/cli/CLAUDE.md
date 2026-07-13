@@ -41,6 +41,18 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
   new framework version NO LONGER SHIPS (left in place — delete manually). After every
   `add`/`remove`/`manage` apply, `lib/manifestSync.ts` re-derives the manifest's
   recorded `choices` from the detected project state so update never replays stale ones.
+- `luckystack update --app` (ADR 0025) — the SAME command with a broadened scope: it
+  ALSO refreshes framework-AUTHORED files under the app tree (`src/` UI + routes,
+  `functions/`, `server/`, `luckystack/`, `config.ts`, `tsconfig`). This is the
+  upgrade path for files that must land in `src/` after a feature release (e.g. the
+  2FA `LoginForm` + `TwoFactorSection` in 0.6.0) — `npm install` can't deliver src/
+  files and framework-scope update won't. Safety = two invariants: only files in the
+  FRESH RENDER are considered (your own app code is never touched), and a file you
+  edited gets a `<file>.new` sidecar + AI-merge note (never overwritten). A short
+  deny-list still guards `prisma/`, `.env`/`.env.local`, `package.json`, and the
+  manifest even in app scope. `isUpdatablePath(rel, scope)` is the predicate; `--app`
+  → scope `'app'`, default `'framework'`. The report gains "new files delivered" +
+  "refreshed" sections.
 - `luckystack check-env` / `luckystack check-i18n` — codebase audits that write AI-feedable,
   per-run hashed logs to `dump/<KIND>_<hash>.log` (dead/missing env keys + i18n keys).
 

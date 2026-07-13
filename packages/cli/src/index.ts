@@ -32,7 +32,7 @@ Usage:
   npx luckystack manage [--no-install]
   npx luckystack add [<feature>] [--no-install]
   npx luckystack remove [<feature>] [--no-install]
-  npx luckystack update
+  npx luckystack update [--app]
   npx luckystack check-env
   npx luckystack check-i18n
 
@@ -55,6 +55,12 @@ update            Refresh the framework-owned files the scaffold copied into thi
                   get a \`<file>.new\` sidecar + a merge report in dump/ — nothing you
                   changed is ever overwritten. Never touches src/, functions/,
                   config, prisma, or .env*.
+update --app      Same, but ALSO refresh framework-authored files under the app tree
+                  (src/ UI + routes, functions/, server/, luckystack/, config.ts,
+                  tsconfig). New framework files (e.g. a feature's UI after an upgrade)
+                  are delivered; files you edited get \`<file>.new\` + an AI-merge note.
+                  Your own app code is never touched (only fresh-render files are).
+                  Still never touches prisma/, package.json, or .env/.env.local.
 
 check-env         Scan for .env keys unused in code + env vars used but undefined.
 check-i18n        Scan for translation keys unused in code + used but missing from locales.
@@ -135,14 +141,16 @@ const main = async (): Promise<void> => {
     return;
   }
 
-  //? Framework-owned-files refresh (ADR 0021 phase 1a).
+  //? Framework-owned-files refresh (ADR 0021 phase 1a). `--app` (ADR 0025) also
+  //? refreshes the framework-authored src/ UI + routes + config.
   if (command === 'update') {
     const project = validateProject(process.cwd(), 'Run this inside your project directory.');
     if (!project) {
       process.exit(1);
     }
+    const scope = argv.includes('--app') ? 'app' : 'framework';
     console.log(`luckystack update — ${project.root}`);
-    finish(runUpdate(project, { cliVersion }));
+    finish(runUpdate(project, { cliVersion, scope }));
     return;
   }
 

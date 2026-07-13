@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (24)
+## Decisions (25)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -37,6 +37,7 @@
 | 0022 | Ship @luckystack/cron (leader-elected scheduler) — reversing the "deliberately no cron" extension-points position | 🟢 accepted | cron, scheduler, packages, multi-instance, redis | — | `docs/decisions/0022-ship-luckystack-cron-reversing-no-cron.md` |
 | 0023 | auth selectable on ts first orms | 🟢 accepted | scaffold, auth, orm, cli | — | `docs/decisions/0023-auth-selectable-on-ts-first-orms.md` |
 | 0024 | email code login and totp 2fa | 🟢 accepted | auth, login, 2fa, security | — | `docs/decisions/0024-email-code-login-and-totp-2fa.md` |
+| 0025 | luckystack update app scope | 🟢 accepted | cli, update, scaffold, dx | — | `docs/decisions/0025-luckystack-update-app-scope.md` |
 
 ## Summaries
 
@@ -241,6 +242,14 @@ The scaffold wizard shows the auth step for **prisma, drizzle and mikro-orm**; o
 **TOTP hand-rolled on `node:crypto`** (`packages/login/src/totp.ts`): HMAC- SHA1 HOTP + timing-safe TOTP verify across the drift window, base32 codecs, otpauth:// provisioning URI. Zero dependencies; pinned to the official RFC 4226/6238 test vectors. Replay protection = the verify returns the matched timestep; the flow layer persists the highest accepted step per user. **Email-OTP store** (`emailOtp.ts`) is deliberately NOT the core one-time-token primitive: that hashes the KEY material, which is only safe for 256-bit tokens — a 6-digit code (10^6) would be brute-forceable from a Redis dump and unfindable at verify time. Codes are keyed by purpose+identity with the sha256 in the VALUE, an atomic INCR attempt counter, winner-take-all consume, one active code per slot. **2FA challenge = a parked login** (`twoFactor.ts`): after the first factor verifies, no session is minted; a high-entropy challenge token (hashed at rest) is returned and `/auth/api/2fa` completes the login through the SAME `finalizeLogin` tail as the password path. Wrong codes do not burn the challenge — the attempt budget does. Methods: `totp` (primary), `email-code` (config-gated fallback, bound to an active challenge), `recovery-code` (10 one-time codes, sha256 at rest, fail-closed burn). **Login gate as a DI slot** (`registerTwoFactorGate`): twoFactor.ts registers itself via the package index — avoids a login↔twoFactor module cycle and keeps every path that never imports the package unchanged. **Secrets at rest**: `sanitizeUserForSession` (and the fail-closed session fallback) always strips `totpSecret`/`recoveryCodes`; the TOTP secret is AES-256-GCM encrypted when `TOTP_ENCRYPTION_KEY` is set (legacy plaintext stays readable so the key can be introduced later). **Routes live in the framework layer** (`@luckystack/server` `authSecondFactorRoutes.ts`) because only that layer may write the HttpOnly session cookie. Login-completing routes join the CSRF bootstrap-exemption set; the authed enrollment routes stay CSRF-enforced. **Backwards compatibility**: all logic ships in framework packages (comes along with a dep upgrade), routes self-wire, the new `UserRecord`/Prisma fields are optional, and both features default OFF (`auth.emailCodeLogin: false`, `auth.twoFactor: 'disabled'`). An upgraded v0.5.1 project enables them in config.ts; the only schema action is adding the three optional User columns (db push / migrate).
 
 → `docs/decisions/0024-email-code-login-and-totp-2fa.md`
+
+### 0025 — luckystack update app scope
+
+**0025** · accepted · tags: cli, update, scaffold, dx · 2026-07-13
+
+Add an opt-in `--app` scope to `luckystack update`. It reuses the exact mechanism ADR 0021 built (fresh scaffold render with the recorded manifest choices = single source of truth; per-file add / overwrite-if-pristine / sidecar-if-modified / unchanged), and only broadens which files are in scope.
+
+→ `docs/decisions/0025-luckystack-update-app-scope.md`
 
 ## Code governed by decisions
 

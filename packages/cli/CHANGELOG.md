@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`luckystack update --app`** (ADR 0025) — broadens `update` to also refresh
+  framework-authored files under the app tree (`src/` UI + routes, `functions/`,
+  `server/`, `luckystack/`, `config.ts`, `tsconfig`), closing the upgrade gap for
+  files that must live in `src/` after a feature release (e.g. the 2FA UI in
+  0.6.0). New framework files are delivered; files you edited get a `<file>.new`
+  sidecar + AI-merge note (never overwritten); your own app code + `prisma/` +
+  secrets + `package.json` are never touched. Default scope stays `framework`.
+
 ### Fixed
 
 - ORM switcher (`manage` → data layer) mirrors the mikro-orm scaffold fix:

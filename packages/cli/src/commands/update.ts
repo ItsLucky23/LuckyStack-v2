@@ -69,6 +69,39 @@ const SAFE_FILES = new Set([
 export const isSafeSurfacePath = (relativePath: string): boolean =>
   SAFE_FILES.has(relativePath) || SAFE_PREFIXES.some((prefix) => relativePath.startsWith(prefix));
 
+//? ADR 0025: `--app` scope also updates framework-AUTHORED files under the
+//? app tree (src/ UI + routes, functions/, server/, luckystack/, config.ts,
+//? tsconfig, …) — the files a plain `npm install` / bucket-B `update` can't
+//? reach. Safety comes from two invariants, NOT from a narrow allow-list:
+//?   1. Only files present in the FRESH RENDER are ever considered, so a
+//?      consumer's own app code (never in the render) is never touched.
+//?   2. A user-modified file is NEVER overwritten — it gets a `<file>.new`
+//?      sidecar + an AI-merge instruction (same as bucket B).
+//? A short deny-list still guards the few files that are too critical / too
+//? personal to touch even as a sidecar: the DB schema, real env/secrets, the
+//? dependency manifest, and the scaffold manifest itself.
+export type UpdateScope = 'framework' | 'app';
+
+const NEVER_UPDATED_EXACT = new Set<string>([
+  'package.json',
+  'package-lock.json',
+  '.env',
+  '.env.local',
+  '.secret-manager-token',
+  MANIFEST_RELATIVE_PATH,
+]);
+const NEVER_UPDATED_PREFIXES = ['prisma/', 'node_modules/', '.git/'] as const;
+
+const isNeverUpdatedPath = (relativePath: string): boolean =>
+  NEVER_UPDATED_EXACT.has(relativePath) || NEVER_UPDATED_PREFIXES.some((prefix) => relativePath.startsWith(prefix));
+
+//? Whether a fresh-render file is in scope for the given update mode.
+export const isUpdatablePath = (relativePath: string, scope: UpdateScope): boolean => {
+  if (isNeverUpdatedPath(relativePath)) return false;
+  if (isSafeSurfacePath(relativePath)) return true; //? bucket B — both scopes
+  return scope === 'app'; //? app scope — every other framework-authored file
+};
+
 //? Same text-extension heuristic + CRLF normalization as the scaffolder's
 //? manifest writer (kept in sync by the update e2e — the hashes must agree or
 //? every file would read as modified).
@@ -153,13 +186,14 @@ export const planUpdate = (
   consumerRoot: string,
   consumerManifest: ScaffoldManifest | null,
   freshManifest: ScaffoldManifest,
+  scope: UpdateScope = 'framework',
 ): UpdatePlan => {
   const recordedHashes = new Map(
     (consumerManifest?.files ?? []).map((entry) => [entry.path, entry.sha256]),
   );
   const entries: UpdatePlanEntry[] = [];
   for (const fresh of freshManifest.files) {
-    if (!isSafeSurfacePath(fresh.path)) continue;
+    if (!isUpdatablePath(fresh.path, scope)) continue;
     const localAbsolute = path.join(consumerRoot, fresh.path);
     if (!fs.existsSync(localAbsolute)) {
       entries.push({ path: fresh.path, action: 'add', freshSha256: fresh.sha256 });
@@ -192,9 +226,12 @@ export const applyUpdate = (
   consumerManifest: ScaffoldManifest | null,
   freshRoot: string,
   freshManifest: ScaffoldManifest,
+  scope: UpdateScope = 'framework',
 ): { reportPath: string; counts: Record<UpdateAction, number> } => {
   const counts: Record<UpdateAction, number> = { add: 0, overwrite: 0, sidecar: 0, unchanged: 0 };
   const sidecars: string[] = [];
+  const added: string[] = [];
+  const overwritten: string[] = [];
   const written: UpdatePlanEntry[] = [];
 
   for (const entry of plan.entries) {
@@ -205,6 +242,8 @@ export const applyUpdate = (
       fs.mkdirSync(path.dirname(localAbsolute), { recursive: true });
       fs.copyFileSync(freshAbsolute, localAbsolute);
       written.push(entry);
+      if (entry.action === 'add') added.push(entry.path);
+      else overwritten.push(entry.path);
     } else if (entry.action === 'sidecar') {
       fs.copyFileSync(freshAbsolute, `${localAbsolute}.new`);
       sidecars.push(entry.path);
@@ -237,14 +276,14 @@ export const applyUpdate = (
   const noLongerShipped = (consumerManifest?.files ?? [])
     .filter(
       (entry) =>
-        isSafeSurfacePath(entry.path) &&
+        isUpdatablePath(entry.path, scope) &&
         !freshPaths.has(entry.path) &&
         fs.existsSync(path.join(project.root, entry.path)),
     )
     .map((entry) => entry.path);
 
   const lines: string[] = [
-    `luckystack update — ${consumerManifest?.luckystackVersion ?? 'unknown (no manifest)'} -> ${freshManifest.luckystackVersion}`,
+    `luckystack update (${scope} scope) — ${consumerManifest?.luckystackVersion ?? 'unknown (no manifest)'} -> ${freshManifest.luckystackVersion}`,
     '',
     `added:       ${String(counts.add)}`,
     `overwritten: ${String(counts.overwrite)} (pristine — hash matched the scaffold manifest)`,
@@ -252,6 +291,22 @@ export const applyUpdate = (
     `unchanged:   ${String(counts.unchanged)}`,
     '',
   ];
+  if (added.length > 0) {
+    lines.push(
+      'New framework files delivered (did not exist in your project):',
+      ...added.map((p) => `  - ${p}`),
+      '',
+    );
+  }
+  //? In app scope the overwrites include src/ files — list them so a reviewer
+  //? can eyeball what the framework refreshed (each was pristine = unedited).
+  if (scope === 'app' && overwritten.length > 0) {
+    lines.push(
+      'Refreshed to the new framework version (you had not edited these):',
+      ...overwritten.map((p) => `  - ${p}`),
+      '',
+    );
+  }
   if (noLongerShipped.length > 0) {
     lines.push(
       'No longer shipped by this framework version (left in place — delete manually if unused):',
@@ -325,6 +380,9 @@ const runScaffolderCli = (cwd: string, args: string[]): boolean => {
 
 export interface UpdateOptions {
   cliVersion: string;
+  /** `'framework'` (default) = docs/scripts/CLAUDE.md only; `'app'` (--app) also
+   *  refreshes framework-authored src/ UI + routes + config (ADR 0025). */
+  scope?: UpdateScope;
   /** Injectable for tests/e2e: produce a fresh render dir for the given choices. */
   renderFreshScaffold?: (input: {
     cliVersion: string;
@@ -379,6 +437,7 @@ const readInstalledCoreVersion = (root: string): string | null => {
 };
 
 export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Result<void> => {
+  const scope: UpdateScope = options.scope ?? 'framework';
   const consumerManifest = readScaffoldManifest(project.root);
 
   const installedCoreVersion = readInstalledCoreVersion(project.root);
@@ -425,23 +484,35 @@ export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Res
     };
   }
 
-  const plan = planUpdate(project.root, consumerManifest, freshManifest);
+  if (scope === 'app') {
+    console.log(
+      'Running in APP scope (--app): framework-authored src/ UI + routes + config are\n' +
+        'refreshed too. Your own app files (never in the fresh render) are untouched, and\n' +
+        'any file you edited gets a `.new` sidecar — nothing you changed is overwritten.',
+    );
+  }
+
+  const plan = planUpdate(project.root, consumerManifest, freshManifest, scope);
   const { reportPath, counts } = applyUpdate(
     project,
     plan,
     consumerManifest,
     render.projectDir,
     freshManifest,
+    scope,
   );
   render.cleanup();
 
   console.log(
-    `\nUpdate complete: +${String(counts.add)} added, ${String(counts.overwrite)} refreshed, ` +
+    `\nUpdate complete (${scope} scope): +${String(counts.add)} added, ${String(counts.overwrite)} refreshed, ` +
       `${String(counts.sidecar)} need a merge (\`.new\` sidecars), ${String(counts.unchanged)} already current.`,
   );
   console.log(`Report: ${reportPath}`);
   if (counts.sidecar > 0) {
     console.log('Merge the listed `.new` sidecars (an AI agent can apply the report), then review with git diff.');
+  }
+  if (scope === 'framework' && counts.add + counts.overwrite + counts.sidecar === 0) {
+    console.log('Tip: framework-owned docs/scripts are current. Run `npx luckystack update --app` to also refresh the scaffolded src/ UI + routes (e.g. after a feature release).');
   }
   return ok();
 };

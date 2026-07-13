@@ -515,3 +515,17 @@ Root-causes + fixes:
 **Files touched:** packages/core/src/{tryCatchSync.ts,tryCatchSync.test.ts,redis.ts,index.ts,CHANGELOG.md}, packages/devkit/src/{typeMap/tsProgram.ts,typeMap/emitterArtifacts.ts,typeMap/typeContext.ts,typeMap/extractors.ts,typeMap/stripSymbolKeyedMembers.test.ts,routeNamingValidation.ts,privateRouteSubfolder.test.ts,CHANGELOG.md}.
 
 **Open:** kandidaat voor 0.6.1 (samen met de mikro-schema-fix van eerder). CORE-1 volledige runtime-repro (secret-manager + dev-supervisor) niet gedraaid — code-reviewed + mechanisme + diagnose. Consumer kan z'n 5 dist-patches + de registerRoutingRules-ignore-workaround droppen zodra 0.6.1 gepubliceerd is.
+
+## 2026-07-13 11:40 — luckystack update --app: framework-authored src/-files bij upgrade (ADR 0025)
+
+**User prompt:** vervolg op het eerdere gesprek over "nieuwe files die direct in de codebase moeten" — bevestigde de richting: nieuw bestand → erbij, door developer aangepast bestand met nieuwe waardes → `.new`-sidecar + AI-handoff om te mergen.
+
+**Wat ik deed:** `luckystack update` uitgebreid met een opt-in `--app` scope die ook framework-geschreven files onder de app-tree ververst (src/ UI+routes, functions/, server/, luckystack/, config.ts, tsconfig). Hergebruikt exact het bestaande ADR 0021-mechanisme (verse render = waarheid; add/overwrite-if-pristine/sidecar-if-modified). Twee veiligheids-invarianten: (1) alleen files in de verse render worden overwogen → eigen app-code nooit aangeraakt; (2) een door jou aangepaste file wordt NOOIT overschreven → `<file>.new`-sidecar + AI-merge-note. Deny-list (ook in app-scope onaangeraakt): prisma/, .env/.env.local, package.json, manifest, node_modules, .git. `isUpdatablePath(rel, scope)` is het predikaat; `--app`→'app', default 'framework'. Rapport kreeg "new files delivered" + "refreshed" secties. Framework-scope print nu een hint naar --app als er niks te doen is.
+
+**Verificatie:** 5 nieuwe unit-tests (isUpdatablePath framework-vs-app + deny-list; het 2FA-scenario: nieuwe file geleverd + aangepaste gesidecar'd + eigen code & schema onaangeraakt; framework-scope laat src/ met rust). ÉCHTE e2e (built cli + echte npx-render) in C:\code\ls-e2e\upd-app: verse 0.6.0-scaffold → `update --app` op dezelfde versie = 241 unchanged/0 spurious sidecars (2 refreshed door lokaal-vóór-gepubliceerd, geen non-determinisme); daarna LoginForm.tsx handmatig aangepast → `update --app` → sidecar geschreven, mijn edit BEHOUDEN, geen spurious sidecars op eigen files. Gates (build/lint/cli-tests 259/ai:lint) groen.
+
+**ADR 0025** (amends 0021): default blijft framework-scope; --app expliciet; alternatieven (default-aan / los `upgrade`-command / prisma meenemen) afgewezen. 2FA-upgrade-runbook (ARCHITECTURE_AUTH.md stap 5) vervangt "hand-port de UI" door `npx luckystack update --app`. cli CLAUDE.md + CHANGELOG bijgewerkt.
+
+**Files touched:** packages/cli/src/commands/{update.ts,update.test.ts}, packages/cli/src/index.ts, packages/cli/CLAUDE.md, packages/cli/CHANGELOG.md, docs/decisions/0025-*.md, docs/AI_DECISIONS_INDEX.md, docs/ARCHITECTURE_AUTH.md.
+
+**Open:** meelift met 0.6.1 (mikro-fix + devkit/core-fixes + dit). Bewuste rest: config.ts wordt in app-scope wél meegenomen (sidecar-if-modified is veilig) maar prisma-schema bewust niet — schema-changes blijven via CHANGELOG/runbook.

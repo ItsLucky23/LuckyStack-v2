@@ -200,14 +200,15 @@ re-scaffolded:
    plaintext with a one-time boot warning; adding the key later upgrades new
    enrollments. Use a random value, not a memorable passphrase (it is not
    stretched).*
-5. **UI — manual for a non-re-scaffolded project.** The phase-based
+5. **UI — `npx luckystack update --app`** (ADR 0025). The phase-based
    `LoginForm` (email-code + 2FA challenge views) and the settings
-   `TwoFactorSection` are consumer-owned `src/` files; neither `npm install`
-   nor `npx luckystack update` delivers them (both leave `src/` untouched by
-   design). Hand-port them from the 0.6.0 scaffold template
-   (`src/_components/LoginForm.tsx`, `src/settings/_components/TwoFactorSection.tsx`)
-   or re-scaffold a reference project to diff against. *Skipping is the one
-   SILENT gap — no error, but users have no way to enroll or answer a challenge.*
+   `TwoFactorSection` are consumer-owned `src/` files that a plain `npm install`
+   / framework-scope `update` can't deliver. Run `npx luckystack update --app`:
+   it renders a fresh scaffold with your recorded choices and delivers the new
+   `TwoFactorSection` (a genuinely new file) + a `LoginForm.tsx.new` sidecar if
+   you edited yours (an AI agent can apply the `dump/UPDATE_*.log` merge note).
+   Files you never touched are refreshed in place; your own code + `prisma/` +
+   secrets are never touched. Review with `git diff` before committing.
 
 ### Security posture notes (ADR 0024)
 

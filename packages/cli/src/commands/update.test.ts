@@ -6,6 +6,7 @@ import {
   choicesToFlags,
   hashFileContent,
   isSafeSurfacePath,
+  isUpdatablePath,
   planUpdate,
   readScaffoldManifest,
   runUpdate,
@@ -75,6 +76,33 @@ describe('isSafeSurfacePath', () => {
     expect(isSafeSurfacePath('prisma/schema.prisma')).toBe(false);
     expect(isSafeSurfacePath('docs/PRODUCT.md')).toBe(false);
     expect(isSafeSurfacePath('.env.local')).toBe(false);
+  });
+});
+
+describe('isUpdatablePath (ADR 0025 --app scope)', () => {
+  it('framework scope = bucket B only (never src/ or config)', () => {
+    expect(isUpdatablePath('CLAUDE.md', 'framework')).toBe(true);
+    expect(isUpdatablePath('scripts/generateTypeMaps.ts', 'framework')).toBe(true);
+    expect(isUpdatablePath('src/_components/LoginForm.tsx', 'framework')).toBe(false);
+    expect(isUpdatablePath('config.ts', 'framework')).toBe(false);
+  });
+
+  it('app scope ALSO updates framework-authored app files', () => {
+    expect(isUpdatablePath('src/_components/LoginForm.tsx', 'app')).toBe(true);
+    expect(isUpdatablePath('src/settings/_components/TwoFactorSection.tsx', 'app')).toBe(true);
+    expect(isUpdatablePath('functions/session.ts', 'app')).toBe(true);
+    expect(isUpdatablePath('config.ts', 'app')).toBe(true);
+    expect(isUpdatablePath('tsconfig.server.json', 'app')).toBe(true);
+    expect(isUpdatablePath('CLAUDE.md', 'app')).toBe(true); //? bucket B still included
+  });
+
+  it('app scope STILL never touches schema / deps / secrets / manifest', () => {
+    expect(isUpdatablePath('prisma/schema.prisma', 'app')).toBe(false);
+    expect(isUpdatablePath('package.json', 'app')).toBe(false);
+    expect(isUpdatablePath('package-lock.json', 'app')).toBe(false);
+    expect(isUpdatablePath('.env', 'app')).toBe(false);
+    expect(isUpdatablePath('.env.local', 'app')).toBe(false);
+    expect(isUpdatablePath('.luckystack/scaffold.json', 'app')).toBe(false);
   });
 });
 
@@ -247,5 +275,80 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
       renderFreshScaffold: () => null,
     });
     expect(result.ok).toBe(false);
+  });
+
+  //? ADR 0025: the --app scenario that motivated the feature — a feature
+  //? release ships a NEW framework src/ file + CHANGES an existing one, while
+  //? the developer has edited some framework files and has their own app code.
+  it('--app scope: delivers new framework src/ files, sidecars edited ones, never touches user code / schema', () => {
+    //? Consumer: edited LoginForm (framework file), pristine page.tsx (framework
+    //? file), their OWN component, an edited prisma schema.
+    write(consumerDir, 'src/_components/LoginForm.tsx', 'USER-EDITED FORM\n');
+    write(consumerDir, 'src/login/page.tsx', 'old page\n');
+    write(consumerDir, 'src/_components/MyOwnThing.tsx', 'my code\n');
+    write(consumerDir, 'prisma/schema.prisma', 'model User { many fields }\n');
+    manifestFor(consumerDir, {
+      'src/_components/LoginForm.tsx': 'old form\n',
+      'src/login/page.tsx': 'old page\n',
+      'prisma/schema.prisma': 'model User { }\n',
+    });
+
+    //? Fresh render (new version): LoginForm changed, page.tsx changed, a
+    //? brand-new TwoFactorSection, and a changed schema.
+    write(freshDir, 'src/_components/LoginForm.tsx', 'new form with 2fa\n');
+    write(freshDir, 'src/login/page.tsx', 'new page\n');
+    write(freshDir, 'src/settings/_components/TwoFactorSection.tsx', 'new 2fa section\n');
+    write(freshDir, 'prisma/schema.prisma', 'model User { + twoFactor fields }\n');
+    manifestFor(freshDir, {
+      'src/_components/LoginForm.tsx': 'new form with 2fa\n',
+      'src/login/page.tsx': 'new page\n',
+      'src/settings/_components/TwoFactorSection.tsx': 'new 2fa section\n',
+      'prisma/schema.prisma': 'model User { + twoFactor fields }\n',
+    }, { luckystackVersion: '0.6.0' });
+
+    const result = runUpdate(project(), {
+      cliVersion: '0.6.0',
+      scope: 'app',
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    });
+    expect(result.ok).toBe(true);
+
+    //? New framework file delivered.
+    expect(fs.readFileSync(path.join(consumerDir, 'src/settings/_components/TwoFactorSection.tsx'), 'utf8')).toBe('new 2fa section\n');
+    //? Edited framework file: NOT overwritten, gets a `.new` sidecar.
+    expect(fs.readFileSync(path.join(consumerDir, 'src/_components/LoginForm.tsx'), 'utf8')).toBe('USER-EDITED FORM\n');
+    expect(fs.readFileSync(path.join(consumerDir, 'src/_components/LoginForm.tsx.new'), 'utf8')).toBe('new form with 2fa\n');
+    //? Pristine framework file: refreshed to the new version.
+    expect(fs.readFileSync(path.join(consumerDir, 'src/login/page.tsx'), 'utf8')).toBe('new page\n');
+    //? The developer's OWN file (never in the fresh render) is untouched, no sidecar.
+    expect(fs.readFileSync(path.join(consumerDir, 'src/_components/MyOwnThing.tsx'), 'utf8')).toBe('my code\n');
+    expect(fs.existsSync(path.join(consumerDir, 'src/_components/MyOwnThing.tsx.new'))).toBe(false);
+    //? Deny-listed schema: NEVER touched, even in app scope (no overwrite, no `.new`).
+    expect(fs.readFileSync(path.join(consumerDir, 'prisma/schema.prisma'), 'utf8')).toBe('model User { many fields }\n');
+    expect(fs.existsSync(path.join(consumerDir, 'prisma/schema.prisma.new'))).toBe(false);
+
+    //? Report lists the new file + the merge sidecar.
+    const dumpDir = path.join(consumerDir, 'dump');
+    const report = fs.readFileSync(path.join(dumpDir, String(fs.readdirSync(dumpDir).find((f) => f.startsWith('UPDATE_')))), 'utf8');
+    expect(report).toContain('New framework files delivered');
+    expect(report).toContain('src/settings/_components/TwoFactorSection.tsx');
+    expect(report).toContain('src/_components/LoginForm.tsx');
+    expect(report).toContain('AI merge instruction');
+  });
+
+  it('framework scope leaves src/ untouched even when the render changed it', () => {
+    write(consumerDir, 'src/login/page.tsx', 'old page\n');
+    manifestFor(consumerDir, { 'src/login/page.tsx': 'old page\n' });
+    write(freshDir, 'src/login/page.tsx', 'new page\n');
+    manifestFor(freshDir, { 'src/login/page.tsx': 'new page\n' }, { luckystackVersion: '0.6.0' });
+
+    const result = runUpdate(project(), {
+      cliVersion: '0.6.0',
+      //? default scope = framework
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    });
+    expect(result.ok).toBe(true);
+    expect(fs.readFileSync(path.join(consumerDir, 'src/login/page.tsx'), 'utf8')).toBe('old page\n');
+    expect(fs.existsSync(path.join(consumerDir, 'src/login/page.tsx.new'))).toBe(false);
   });
 });
