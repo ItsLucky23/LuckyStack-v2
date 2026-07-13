@@ -557,3 +557,15 @@ Root-causes + fixes:
 **Files touched:** packages/create-luckystack-app/src/{index.ts,index.test.ts}, packages/create-luckystack-app/{CLAUDE.md,CHANGELOG.md}, packages/create-luckystack-app/docs/cli-flags.md, packages/cli/src/commands/{update.ts,update.test.ts}, packages/cli/src/lib/manifestSync.ts.
 
 **Open:** meelift met volgende release (0.6.2-kandidaat). Bewuste keuze: cron blijft inject-when-on (niet in base-template + pruned) — consistent met docs-ui/secret-manager.
+
+## 2026-07-13 14:00 — v0.6.2 gepubliceerd naar npm (17 packages)
+
+**User prompt:** "ja breng uit" (na cron-wizard + upgrade-doc-aanvulling).
+
+**Wat ik deed:** lockstep bump 0.6.1 → 0.6.2, alle 17 packages gepubliceerd (node-direct + NPM_CONFIG_PROVENANCE=false per lesson 0005), main + tag v0.6.2 gepusht. Bundelt: `@luckystack/cron` als wizard-opt-in (`--cron`, dependency-only, byte-parity met `add cron`) + upgrade-runbook (UPGRADING.md + CLAUDE.md-conventie) die nu nieuw-optioneel-package-adoptie via `npx luckystack add <feature>` dekt (los van feature-toggle op bestaand package).
+
+**Verificatie:** dry-run valideerde 17 tarballs; registry bevestigt core/cli/cron/create-luckystack-app allen 0.6.2. Gates waren groen vóór bump (build/lint/1645 unit/ai:lint 0; sindsdien alleen docs).
+
+**Deliverable:** paste-klare upgrade-handoff (UPGRADE_HANDOFF_v0.6.2.md) aan user gegeven — self-contained zodat een project-AI de eerste AI-gedreven upgrade kan bootstrappen; daarna zelfsturend via de shipped docs.
+
+**Open:** geen. Volgende release idealiter via CI voor echte provenance.
