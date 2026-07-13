@@ -329,10 +329,33 @@ When verifying the frontend in a browser, follow the cheapest-first ladder + sug
 
 ---
 
+## Upgrading LuckyStack (AI behavior)
+
+When the user asks to **upgrade LuckyStack** / bump `@luckystack/*` to a newer version,
+follow `docs/UPGRADING.md` (consumer copy: `docs/luckystack/UPGRADING.md`) — and do NOT
+bump silently:
+
+1. **Read the gap first.** Find the installed version (`node_modules/@luckystack/core/package.json`)
+   vs the target (`npm view @luckystack/core version` or the named version), then read the
+   CHANGELOGs BETWEEN them (`node_modules/@luckystack/*/CHANGELOG.md`).
+2. **Surface + offer.** Tell the user in plain language what the new version adds — ESPECIALLY
+   security features (e.g. 2FA / email-code login) and breaking changes — and ASK whether they
+   want to adopt any new feature, e.g. *"v0.5.0 → v0.6.1 adds passwordless email-code login + 2FA
+   and fixes N bugs; want me to enable 2FA + email-code login as part of this upgrade?"* Never
+   enable a feature they didn't ask for; never hide one they'd want.
+3. **Deliver the files.** After `npm install` (developer action), run `npx luckystack update` +
+   `npx luckystack update --app` to bring framework docs/scripts AND the framework-authored `src/`
+   files (a feature's new UI + routes) into the project — new files delivered, files the developer
+   edited get a `<file>.new` sidecar you then merge (never overwrite). See ADR 0025.
+4. **Finish an opted-in feature.** Schema columns are NEVER auto-edited (safety) — for a
+   schema-affecting feature like 2FA add the documented columns + migrate, flip the config flag,
+   and wire prerequisites, per the feature's runbook (2FA → `ARCHITECTURE_AUTH.md`).
+
 ## Documentation Reference
 
 | Doc | Purpose |
 |---|---|
+| `docs/UPGRADING.md` | AI-actionable upgrade runbook: read the CHANGELOG gap → surface + OFFER new features → `npm install` → `luckystack update --app` → merge sidecars → finish schema-affecting features |
 | `docs/ARCHITECTURE_ROUTING.md` | File-based routing (pages, APIs, syncs) |
 | `docs/ARCHITECTURE_API.md` | API request system |
 | `docs/ARCHITECTURE_HTTP.md` | HTTP pipeline, custom-route phases, webhook + streaming-upload seam (origin-exempt paths) |

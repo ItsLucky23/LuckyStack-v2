@@ -25,6 +25,7 @@
 | Templates | Pages export a `template` constant: `'plain'`, `'dashboard'`, or a project-specific addition wired into `TemplateProvider`. |
 | Provider Hierarchy | ``` |
 | AI Browser Testing | When verifying the frontend in a browser, follow the cheapest-first ladder + suggest→approve protocol — full detail in `docs/AI_BROWSER_TESTING.md` (consumer copy: `docs/luckystack/AI_BROWSER_TESTING.md`). Wired in via `--ai-browser=<all\|agent-browser\|none>`; dev-tools only. |
+| Upgrading LuckyStack (AI behavior) | When the user asks to **upgrade LuckyStack** / bump `@luckystack/*` to a newer version, |
 | Documentation Reference | \| Doc \| Purpose \| |
 | User Project Rules | <!-- |
 
