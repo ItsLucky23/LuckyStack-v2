@@ -5,6 +5,17 @@ All notable changes to `@luckystack/server` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Redis secret-manager pointer boot** (ADR 0026): `createLuckyStackServer` now drops any
+  cached default Redis client right before the boot-UUID write when
+  `config.secretManager.url` is set, so a client an early import may have built from an
+  unresolved `REDIS_PASSWORD` pointer is rebuilt from the resolved `process.env`. Fixes the
+  `WRONGPASS ... REDIS_PASSWORD_V<n>` boot failure with no consumer code — the
+  `registerRedisClient(...)` workaround can be removed.
+
 ## [0.6.0] - 2026-07-12
 
 ### Added

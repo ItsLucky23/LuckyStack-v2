@@ -118,6 +118,29 @@ secretManager: {
 
 So `.env` (plain config) and `.env.local` (pointers) each get a role: `.env` values are injected as-is on change, `.env.local` pointers are resolved from the server.
 
+## Clients built from a resolved secret (Redis, pools) — ADR 0026
+
+A long-lived client (ioredis, a DB pool, an SDK) reads its credential **once at construction** and never re-reads `process.env`. If such a client is built from a value that was still a POINTER (`REDIS_PASSWORD=REDIS_PASSWORD_V1`) — because something touched it before `initSecretManager` resolved it — the pointer is baked in and auth fails with `WRONGPASS` even after `process.env` is later fixed.
+
+The framework handles the default Redis client automatically (ADR 0026), on two levels:
+
+1. **Boot** — when `config.secretManager.url` is set, `createLuckyStackServer` drops any cached default Redis client right before the first Redis use (the boot-UUID write), so it rebuilds from the now-resolved `process.env`. No code needed.
+2. **Rotation** — wire the resolver's `onApplied` callback to core's `notifySecretsResolved`, which drops the default Redis client whenever a `REDIS_` credential changes so the next use reconnects with the new secret:
+
+```ts
+import { notifySecretsResolved } from '@luckystack/core';
+
+await initSecretManager({
+  ...projectConfig.secretManager,
+  source: 'remote',
+  onApplied: notifySecretsResolved, // drop clients built from a stale pointer (boot + rotation)
+});
+```
+
+`notifySecretsResolved(changedKeys)` is a generic hook — a custom pool/SDK client can subscribe via `registerSecretsResolvedListener(fn)` and rebuild itself the same way. For a client the framework does NOT own, rebuild it yourself inside `onApplied` (that is what `onApplied` receives the changed env NAMES for).
+
+> **Reminder — `envNames` must list the key.** `REDIS_PASSWORD` (or `DATABASE_URL`, …) only resolves if it is in the `envNames` allowlist; the default is deny-all. An unresolved pointer that still boots means `envNames` is missing it.
+
 ## The token
 
 The shared bearer token is the only real secret on the developer machine. Keep it in a gitignored single-line file (`.secret-manager-token`) and reference it via `token: { fromFile }` — read at resolve time, so rotating the file is picked up by the next poll. CI runners inject the file from their secret store. The `.gitignore` already excludes `.secret-manager-token`.

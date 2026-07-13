@@ -69,6 +69,7 @@ export type {
   OfflineQueueConfig,
   DevConfig,
   PathsConfig,
+  SecretManagerConfigRef,
 } from './projectConfig';
 export {
   registerRuntimeMapsProvider,
@@ -172,6 +173,8 @@ export {
 export type { DbHealthCheck, DbHealthResult } from './dbHealthCheck';
 export { redis, getRedisConnectionOptions, registerStrayPrefixCommand, resetDefaultRedisClient } from './redis';
 export type { RedisConnectionOptions } from './redis';
+export { registerSecretsResolvedListener, notifySecretsResolved } from './secretsResolved';
+export type { SecretsResolvedListener } from './secretsResolved';
 export {
   registerRedisKeyFormatter,
   getRedisKeyFormatter,

@@ -7,8 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Decoupled secrets-resolved hook** (ADR 0026): `notifySecretsResolved(changedKeys?)`
+  + `registerSecretsResolvedListener(fn)`. A secret resolver (e.g.
+  `@luckystack/secret-manager` via `onApplied: notifySecretsResolved`) fires it after
+  overwriting `process.env`; `redis.ts` self-registers a listener that drops the cached
+  default client when a `REDIS_` credential changed, so Redis auth via a secret-manager
+  POINTER survives boot AND rotation with no hand-wiring. Generic — Prisma pools / SDK
+  clients can subscribe too. Also adds an optional structural `secretManager?` field on
+  `ProjectConfig` (`SecretManagerConfigRef`) so the server boot can detect a resolver.
+
 ### Fixed
 
+- **Redis secret-manager pointer boot** (ADR 0026): the default Redis client no longer
+  fails auth with a baked-in `REDIS_PASSWORD_V<n>` pointer when it was built (during an
+  early import) before secrets resolved — the decoupled hook above + the server-boot
+  reset rebuild it from the resolved env. The `WRONGPASS` diagnostic now points at the
+  automatic handling + the `envNames` allowlist requirement.
 - **CORE-2** — `tryCatchSync<T, P = void>` now mirrors `tryCatch`'s `P` default,
   so a params-less call can pass only the result type (`tryCatchSync<URL>(() =>
   new URL(raw))`) instead of failing with TS2558.

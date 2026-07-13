@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ai:lint` `i18n-jsx` false positive on TS generics** (template `scripts/lintInvariants.mjs`):
+  return-type / cast fragments on a line with generics (`): Promise<void>`, `x as Promise<T>`)
+  are no longer reported as hardcoded JSX text. Mirrors the repo-root copy.
+
+### Changed
+
+- **Scaffold `tsconfig` target/lib bumped to ES2023** (`tsconfig.json` + `tsconfig.server.json`).
+  Node 20+ (the scaffold requirement) supports ES2023, so consumer code can use `toSorted` /
+  `toReversed` / `findLast` following framework idioms without a manual bump.
+
 ### Added
 
 - **`@luckystack/cron` is now a wizard opt-in** (`--cron` flag + a prompt step;

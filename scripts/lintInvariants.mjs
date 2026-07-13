@@ -92,6 +92,20 @@ const RULES = [
       // Skip single short tokens / all-caps consts / pure punctuation+digits.
       if (inner.length < 4 && !inner.includes(" ")) return null;
       if (/^[A-Z0-9_ ]+$/.test(inner) && !inner.includes(" ")) return null;
+      // Skip TypeScript type/expression fragments the regex captures between
+      // GENERIC angle brackets (it can't tell `<T>` / `Promise<U>` from a JSX
+      // tag boundary) — e.g. `): Promise`, `(): Foo`, `x as Promise`, `json()`.
+      // These carry code punctuation JSX prose does not, so a narrow guard here
+      // avoids flagging framework-owned .tsx (LoginForm etc.) without muting real
+      // strings like "Welcome back" / "Status: Active" / "Save as draft".
+      if (
+        /^[()\s]*:\s*[A-Za-z]/.test(inner) || // return-type / annotation head
+        /\bas\s+[A-Z]/.test(inner) ||          // TS cast to a PascalCase type
+        /=>/.test(inner) ||                    // arrow function
+        /\w\(\)/.test(inner)                   // empty call expression
+      ) {
+        return null;
+      }
       return `hardcoded user-facing text "${inner.slice(0, 40)}" — wrap it in useTranslator (Rule 13).`;
     },
   },

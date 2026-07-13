@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (25)
+## Decisions (26)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -38,6 +38,7 @@
 | 0023 | auth selectable on ts first orms | 🟢 accepted | scaffold, auth, orm, cli | — | `docs/decisions/0023-auth-selectable-on-ts-first-orms.md` |
 | 0024 | email code login and totp 2fa | 🟢 accepted | auth, login, 2fa, security | — | `docs/decisions/0024-email-code-login-and-totp-2fa.md` |
 | 0025 | luckystack update app scope | 🟢 accepted | cli, update, scaffold, dx | — | `docs/decisions/0025-luckystack-update-app-scope.md` |
+| 0026 | secret manager redis pointer boot | 🟢 accepted | core, server, redis, secret-manager, boot | — | `docs/decisions/0026-secret-manager-redis-pointer-boot.md` |
 
 ## Summaries
 
@@ -250,6 +251,14 @@ The scaffold wizard shows the auth step for **prisma, drizzle and mikro-orm**; o
 Add an opt-in `--app` scope to `luckystack update`. It reuses the exact mechanism ADR 0021 built (fresh scaffold render with the recorded manifest choices = single source of truth; per-file add / overwrite-if-pristine / sidecar-if-modified / unchanged), and only broadens which files are in scope.
 
 → `docs/decisions/0025-luckystack-update-app-scope.md`
+
+### 0026 — secret manager redis pointer boot
+
+**0026** · accepted · tags: core, server, redis, secret-manager, boot · 2026-07-13
+
+Fix the timing at the framework level, without making core depend on secret-manager and without moving secret-manager init into `bootstrapLuckyStack`:
+
+→ `docs/decisions/0026-secret-manager-redis-pointer-boot.md`
 
 ## Code governed by decisions
 

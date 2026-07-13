@@ -569,3 +569,19 @@ Root-causes + fixes:
 **Deliverable:** paste-klare upgrade-handoff (UPGRADE_HANDOFF_v0.6.2.md) aan user gegeven — self-contained zodat een project-AI de eerste AI-gedreven upgrade kan bootstrappen; daarna zelfsturend via de shipped docs.
 
 **Open:** geen. Volgende release idealiter via CI voor echte provenance.
+
+## 2026-07-13 17:15 — matchrix-handoff: framework-fixes FIX-1 (Redis secret-pointer boot) + FIX-2 (ai:lint) [ADR 0026]
+
+**User prompt:** handoff van consumer matchrix met framework-level bugs gevonden bij de 0.6.2-upgrade: FIX-1 (KRITIEK, Redis-auth via secret-manager-pointer faalt bij boot, óók met resetDefaultRedisClient), FIX-2 (ai:lint i18n-jsx FP op TS-generics), + observaties (ES2023 lib, degraded types).
+
+**Onderzoek (3 parallelle read-only agents, root-cause geverifieerd vóór changes):** handoff-aanname deels gecorrigeerd — initSecretManager schrijft resolved waarden WEL in-place naar process.env (alleen voor envNames-allowlist; deny-all default). Core's redis.ts leest kale process.env bij client-CONSTRUCTIE en memoïseert (cachedDefault). In de canonieke scaffold draait init vóór de eerste Redis-touch (writeBootUuid). matchrix' werkende workaround (registerRedisClient ná init) bewijst dat process.env resolved is → oorzaak = puur timing/caching (client gebouwd/gecachet mét pointer vóór/rond init; consumer-reset in de IIFE zit te vroeg, bootstrap-overlays/function-scan herbouwen erna).
+
+**Fix (ADR 0026, user koos "defensieve reset in framework-boot + gedecoupleerde hook"):** (A) core `secretsResolved.ts` — `notifySecretsResolved`/`registerSecretsResolvedListener`; redis.ts self-registreert reset-listener (reset bij REDIS_-key-change of undefined). (B) server createServer.ts — defensieve `resetDefaultRedisClient()` vóór writeBootUuid als `secretManager.url` gezet → automatische boot-fix voor élke consumer via npm-upgrade (geen consumer-actie). Vereiste minimaal `secretManager?: SecretManagerConfigRef` op core's ProjectConfig. Rotatie via `onApplied: notifySecretsResolved` (gedocumenteerd, niet auto-bekabeld — descoped om fragiele wireSecretManager-parity niet te raken). CORE-1-foutmelding bijgewerkt. FIX-2: type-positie-guard in scripts/lintInvariants.mjs (+ template-spiegel). Observatie: scaffold-tsconfig ES2022→ES2023.
+
+**Afgewezen:** handoff-voorkeur "init verplaatsen naar bootstrap" (grotere blast-radius; onnodig want canonieke volgorde draait init al vóór de eerste touch).
+
+**Verificatie:** build 17/17, lint:packages 0, test:unit 1652 (2 nieuwe files: secretsResolved 4 + redisSecretsReset 3 met gemockte ioredis, referentie-identiteit), ai:lint 0. FIX-2-guard node-getest: beide FP's onderdrukt, echte prose ("Welcome back"/"Status: Active"/"Save as draft"/"Sign in (SSO)") nog geflagd.
+
+**Files:** packages/core/src/{secretsResolved.ts,secretsResolved.test.ts,redisSecretsReset.test.ts,redis.ts,projectConfig.ts,index.ts}, packages/server/src/createServer.ts, scripts/lintInvariants.mjs, packages/create-luckystack-app/template/scripts/lintInvariants.mjs, packages/create-luckystack-app/template/tsconfig{,.server}.json, docs/decisions/0026-*.md, docs/ARCHITECTURE_SECRET_MANAGER.md, 3× CHANGELOG.
+
+**Open:** meelift met 0.6.3. Deferred: degraded-type-extraction (55 routes MikroORM/Mongo — aparte devkit-investigatie). matchrix kan ná 0.6.3 hun registerRedisClient-workaround verwijderen.

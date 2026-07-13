@@ -6,6 +6,7 @@ import { env } from './env';
 import { getRedisClient, setDefaultRedisResolver } from './clients';
 import { getLogger } from './loggerRegistry';
 import { applyStrayKeyPrefix } from './redisKeyFormatter';
+import { registerSecretsResolvedListener } from './secretsResolved';
 
 let cachedDefault: RedisClient | null = null;
 
@@ -69,9 +70,12 @@ const buildDefaultRedisClient = (): RedisClient => {
     if (/WRONGPASS|NOAUTH|invalid username-password/i.test(message) && /_V\d+$/i.test(password)) {
       getLogger().error(
         `Redis auth failed and REDIS_PASSWORD ("${password}") looks like an UNRESOLVED secret-manager pointer. ` +
-        'The default Redis client was likely built before secret-manager init ran. Resolve secrets first, then call ' +
-        '`resetDefaultRedisClient()` (or `registerRedisClient(new Redis(getRedisConnectionOptions()))`) after init so the ' +
-        'client is rebuilt with the resolved value. See docs/luckystack/ARCHITECTURE_SECRET_MANAGER.md.',
+        'The default Redis client was likely built before secret-manager init ran. The framework now drops a stale ' +
+        'client automatically when `config.secretManager.url` is set (server boot) and when `initSecretManager` is ' +
+        'wired with `onApplied: notifySecretsResolved`; if you resolve secrets by other means, call ' +
+        '`resetDefaultRedisClient()` (or `registerRedisClient(new Redis(getRedisConnectionOptions()))`) after resolution. ' +
+        'Also confirm `REDIS_PASSWORD` is listed in the secret-manager `envNames` allowlist (unset resolves nothing). ' +
+        'See docs/luckystack/ARCHITECTURE_SECRET_MANAGER.md.',
         err,
       );
       return;
@@ -103,6 +107,19 @@ export const resetDefaultRedisClient = (): void => {
 };
 
 setDefaultRedisResolver(buildDefaultRedisClient);
+
+//? CORE-1 (decoupled hook): when a secret resolver reports that secrets were
+//? (re)resolved — e.g. `@luckystack/secret-manager` wiring `onApplied` to
+//? `notifySecretsResolved` — drop the cached default client if a `REDIS_`
+//? credential changed, so the next use rebuilds from the resolved env. This is
+//? what lets a project run Redis auth via a secret-manager POINTER without
+//? hand-calling `resetDefaultRedisClient()`. `undefined` (caller doesn't know
+//? which keys changed) resets defensively.
+registerSecretsResolvedListener((changedKeys) => {
+  if (changedKeys === undefined || changedKeys.some((key) => /^REDIS_/i.test(key))) {
+    resetDefaultRedisClient();
+  }
+});
 
 //? Single source of truth for Redis connection params. Used by
 //? `@luckystack/router`'s bootHandshake (which opens its own short-lived
