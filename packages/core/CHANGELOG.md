@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Timestamps in the built-in loggers.** The default `console.*` logger and
+  `createDevLogger` now prefix each line with an ISO-8601 UTC timestamp
+  (`[2026-07-13T15:20:01.123Z] Connected to Redis`), controlled by a new
+  `logging.timestamps` config key (default `true`; set `false` under a log
+  aggregator that stamps its own time). Only the message is prefixed — context /
+  error args stay separate. A registered custom logger owns its own formatting.
 - **Decoupled secrets-resolved hook** (ADR 0026): `notifySecretsResolved(changedKeys?)`
   + `registerSecretsResolvedListener(fn)`. A secret resolver (e.g.
   `@luckystack/secret-manager` via `onApplied: notifySecretsResolved`) fires it after

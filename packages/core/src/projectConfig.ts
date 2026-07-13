@@ -26,6 +26,16 @@ export interface LoggingConfig {
   socketStatus: boolean;
   socketStartup: boolean;
   stream: boolean;
+  /**
+   * Prefix every line from the framework's built-in loggers (the default
+   * `console.*` logger and `createDevLogger`) with an ISO-8601 UTC timestamp,
+   * e.g. `[2026-07-13T15:20:01.123Z] Connected to Redis`. DEFAULT `true`. Set
+   * `false` under a log aggregator that stamps its own time (journald, Docker,
+   * Datadog) to avoid double timestamps. A registered custom logger
+   * (`registerLogger(...)`) is responsible for its own timestamps — this flag
+   * only governs the built-in loggers.
+   */
+  timestamps: boolean;
 }
 
 export interface RateLimitingConfig {
@@ -781,6 +791,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     socketStatus: false,
     socketStartup: false,
     stream: false,
+    timestamps: true,
   },
   rateLimiting: {
     enabled: true,

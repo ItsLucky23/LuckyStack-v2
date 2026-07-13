@@ -13,6 +13,7 @@
 //? — same contract as `getProjectConfig()` and friends.
 
 import { createRegistry } from './createRegistry';
+import { getProjectConfig } from './projectConfig';
 
 export type LoggerContext = Record<string, unknown>;
 
@@ -23,24 +24,32 @@ export interface Logger {
   error: (message: string, error?: unknown, context?: LoggerContext) => void;
 }
 
+//? Prefix a log message with an ISO-8601 UTC timestamp when
+//? `logging.timestamps` is on (the default). Read at call time so a consumer's
+//? config registration order doesn't matter, and so it can be toggled off under
+//? a log aggregator that stamps its own time. Only the framework's BUILT-IN
+//? loggers use this — a registered custom logger owns its own formatting.
+const withTimestamp = (message: string): string =>
+  getProjectConfig().logging.timestamps ? `[${new Date().toISOString()}] ${message}` : message;
+
 const defaultLogger: Logger = {
   debug: (message, context) => {
-    if (context === undefined) {console.debug(message);}
-    else {console.debug(message, context);}
+    if (context === undefined) {console.debug(withTimestamp(message));}
+    else {console.debug(withTimestamp(message), context);}
   },
   info: (message, context) => {
-    if (context === undefined) {console.info(message);}
-    else {console.info(message, context);}
+    if (context === undefined) {console.info(withTimestamp(message));}
+    else {console.info(withTimestamp(message), context);}
   },
   warn: (message, context) => {
-    if (context === undefined) {console.warn(message);}
-    else {console.warn(message, context);}
+    if (context === undefined) {console.warn(withTimestamp(message));}
+    else {console.warn(withTimestamp(message), context);}
   },
   error: (message, error, context) => {
-    if (error !== undefined && context !== undefined) console.error(message, error, context);
-    else if (error !== undefined) console.error(message, error);
-    else if (context === undefined) {console.error(message);}
-    else {console.error(message, context);}
+    if (error !== undefined && context !== undefined) console.error(withTimestamp(message), error, context);
+    else if (error !== undefined) console.error(withTimestamp(message), error);
+    else if (context === undefined) {console.error(withTimestamp(message));}
+    else {console.error(withTimestamp(message), context);}
   },
 };
 
@@ -52,22 +61,22 @@ const defaultLogger: Logger = {
 //? text. Use the default logger when running in production or unsure.
 export const createDevLogger = (): Logger => ({
   debug: (message, context) => {
-    if (context === undefined) {console.log(message, 'cyan');}
-    else {console.log(message, context, 'cyan');}
+    if (context === undefined) {console.log(withTimestamp(message), 'cyan');}
+    else {console.log(withTimestamp(message), context, 'cyan');}
   },
   info: (message, context) => {
-    if (context === undefined) {console.log(message);}
-    else {console.log(message, context);}
+    if (context === undefined) {console.log(withTimestamp(message));}
+    else {console.log(withTimestamp(message), context);}
   },
   warn: (message, context) => {
-    if (context === undefined) {console.log(message, 'yellow');}
-    else {console.log(message, context, 'yellow');}
+    if (context === undefined) {console.log(withTimestamp(message), 'yellow');}
+    else {console.log(withTimestamp(message), context, 'yellow');}
   },
   error: (message, error, context) => {
-    if (error !== undefined && context !== undefined) console.log(message, error, context, 'red');
-    else if (error !== undefined) console.log(message, error, 'red');
-    else if (context === undefined) {console.log(message, 'red');}
-    else {console.log(message, context, 'red');}
+    if (error !== undefined && context !== undefined) console.log(withTimestamp(message), error, context, 'red');
+    else if (error !== undefined) console.log(withTimestamp(message), error, 'red');
+    else if (context === undefined) {console.log(withTimestamp(message), 'red');}
+    else {console.log(withTimestamp(message), context, 'red');}
   },
 });
 
