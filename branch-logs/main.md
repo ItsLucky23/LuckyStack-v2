@@ -529,3 +529,17 @@ Root-causes + fixes:
 **Files touched:** packages/cli/src/commands/{update.ts,update.test.ts}, packages/cli/src/index.ts, packages/cli/CLAUDE.md, packages/cli/CHANGELOG.md, docs/decisions/0025-*.md, docs/AI_DECISIONS_INDEX.md, docs/ARCHITECTURE_AUTH.md.
 
 **Open:** meelift met 0.6.1 (mikro-fix + devkit/core-fixes + dit). Bewuste rest: config.ts wordt in app-scope wél meegenomen (sidecar-if-modified is veilig) maar prisma-schema bewust niet — schema-changes blijven via CHANGELOG/runbook.
+
+## 2026-07-13 12:15 — v0.6.1 gepubliceerd naar npm (17 packages)
+
+**User prompt:** "kan een v0.5.0-project alle files/changes krijgen incl. src/? kan de AI zelf upgraden + proactief 2fa aanbieden via de docs? zo ja, publiceer alles."
+
+**Wat ik deed:** (1) Bevestigd dat v0.5.0 → nieuwste via `luckystack update --app` de framework-src/-files krijgt (manifest bestond al in 0.5.0); enige bewuste uitzondering = prisma-kolommen (deny-listed, handmatig, faalt luid). (2) `docs/UPGRADING.md` geschreven — AI-actionable upgrade-runbook: lees de CHANGELOG-gap → SURFACE + OFFER nieuwe features (m.n. security als 2FA) → npm install → `update --app` → merge sidecars → schema-afrondstap. Conventie in de meegeleverde `CLAUDE.md` (nieuwe sectie "Upgrading LuckyStack" + doc-tabel-rij) zodat de consumer-AN proactief "vX voegt 2FA toe, aanzetten?" vraagt i.p.v. stil te bumpen. (3) Release 0.6.0 → 0.6.1 (lockstep bump alle 17 pkgs), bundelt: mikro-orm scaffold-fix + 7 devkit/core consumer-fixes (DEVKIT-1..5, CORE-1/2) + update --app.
+
+**Verificatie:** gates groen (build/test:unit/ai:lint 0), dry-run valideerde 17 tarballs, registry bevestigt core/cli/devkit/login/create-luckystack-app allen 0.6.1. De 2FA-UI (`TwoFactorSection.tsx`) zit in de scaffold-tarball.
+
+**Footgun (→ lesson 0005):** `npm run publish:packages -- --no-provenance` slikte de flag op (npm@11 consumeerde `--no-provenance` als eigen config); child draaide `publish --provenance` → EUSAGE "provider: null". Fix = script direct via node + `NPM_CONFIG_PROVENANCE=false`: `node scripts/publishPackages.mjs --no-provenance`. Her-run publiceerde schoon (niks was geüpload toen core als eerste faalde).
+
+**Files touched:** docs/UPGRADING.md (nieuw), CLAUDE.md, packages/cli/{CLAUDE.md,CHANGELOG.md}, docs/ARCHITECTURE_AUTH.md, docs/decisions/0025-*.md, docs/lessons/0005-*.md, alle packages/*/package.json (bump), diverse ai:*-indexes.
+
+**Open:** git-push naar origin ontbreekt (SSH-auth in deze omgeving) — user pusht `git push origin main && git push origin v0.6.1` zelf. Bewuste rest ongewijzigd: 6 prisma-settings-routes → UserAdapter porten; volgende release idealiter via CI voor echte provenance.
