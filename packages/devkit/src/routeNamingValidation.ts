@@ -35,6 +35,23 @@ const normalizePath = (value: string): string => {
 const toRel = (absolute: string): string =>
   path.relative(ROOT_DIR, absolute).replaceAll('\\', '/');
 
+//? DEVKIT-5: a path segment that starts with the private-folder prefix (`_`)
+//? AND sits AFTER the `_api`/`_sync` marker marks a private helper subtree
+//? (e.g. `_api/_lib/*`, `_sync/_lib/__tests__/*`). Those are ordinary modules,
+//? not routes, so route discovery + naming validation must skip them — exactly
+//? like the invisible `_`-prefixed PAGE folders are skipped elsewhere. The
+//? marker itself is excluded from the check (it also starts with `_`).
+export const isInsidePrivateRouteSubfolder = (fullPath: string): boolean => {
+  //? Use the BARE marker segment names (`_api` / `_sync`). `apiMarkerSegment()`
+  //? returns the slash-wrapped `/_api/` form used for substring matching, which
+  //? never equals a split path segment.
+  const { privateFolderPrefix, apiMarker, syncMarker } = getRoutingRules();
+  const segments = normalizePath(fullPath).split('/');
+  const markerIndex = segments.findIndex((segment) => segment === apiMarker || segment === syncMarker);
+  if (markerIndex === -1) return false;
+  return segments.slice(markerIndex + 1).some((segment) => segment.startsWith(privateFolderPrefix));
+};
+
 const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   const apiSeg = apiMarkerSegment();
@@ -46,6 +63,9 @@ const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
     const normalizedFullPath = normalizePath(fullPath);
 
     if (ignore(toRel(fullPath))) continue;
+
+    //? Private helper subtree under a marker (`_api/_lib/…`) — not a route.
+    if (isInsidePrivateRouteSubfolder(fullPath)) continue;
 
     if (entry.isDirectory()) {
       if (entry.name.startsWith('.') || entry.name === 'node_modules') {

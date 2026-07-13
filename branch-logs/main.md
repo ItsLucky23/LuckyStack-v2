@@ -496,3 +496,22 @@ Root-causes + fixes:
 **Files touched:** packages/create-luckystack-app/src/index.ts (+CHANGELOG), packages/cli/src/commands/switchOrm.ts (+CHANGELOG), docs/lessons/0004-*.md + AI_LESSONS_INDEX.md.
 
 **Open:** dit zit nog NIET op npm (0.6.0 heeft de kapotte mikro-wiring). Kandidaat voor 0.6.1 patch-release — wacht op user-akkoord.
+
+## 2026-07-13 11:20 — 7 upstream framework-fixes uit MikroORM-consumer-handoff (DEVKIT-1..5, CORE-1/2)
+
+**User prompt:** consumer-AI (matchrix, MikroORM/MongoDB) had node_modules/@luckystack/devkit+core gepatcht om codegen werkend te krijgen; volledig handoff-document met 5 devkit-patches + 2 core-design-gaps aangeleverd. "fix dit" → upstream oplossen zodat de patches vervallen.
+
+**Wat ik deed (elk met regressietest; DEVKIT-1..5 e2e-geverifieerd tegen echte MikroORM/sqlite-consumer op Node 22/Windows — generateArtifacts + tsc beide schoon):**
+- DEVKIT-1: symbol-keyed entity-leden (`[OptionalProps]`/`[loadedType]`/`[selectedType]` → `__@name@id`) uit de inline-type: prop-skip in expandTypeDetailed (tsProgram.ts) + brace-aware content-vangnet in emitterArtifacts.ts voor de typeToString-cycle/depth-fallbacks. Unit: 7 cases.
+- DEVKIT-2: SessionLayout van de existingImports-whitelist (typeContext.ts) → normale import-collectie, zoals AuthProps.
+- DEVKIT-3: per-route error-arm expliciet `message?/errorParams?/httpStatus?` naast de index-signature (emitterArtifacts.ts, 3 plekken) → narrowing werkt.
+- DEVKIT-4: stream-payload-fallback naar `ApiParams.stream: ApiStreamEmitter<T>` als main geen letterlijke stream() heeft (extractors.ts) → geen `never`.
+- DEVKIT-5: private submappen onder marker (`_api/_lib/*`) overslaan in walkRouteFiles (routeNamingValidation.ts). **Runtime-test ving een bug in mijn eigen fix**: `apiMarkerSegment()` = de slash-omvatte `/_api/`, niet de kale segment-naam → gefixt naar `getRoutingRules().apiMarker`. Unit: 8 cases (incl. custom marker).
+- CORE-2: `tryCatchSync<T, P = void>` default (was TS2558).
+- CORE-1: `resetDefaultRedisClient()` (cache-invalidatie ná secret-init) + actionable WRONGPASS-diagnose bij pointer-achtig wachtwoord (redis.ts, geëxporteerd via index.ts).
+
+**Verificatie:** 18 nieuwe tests; devkit+core-suite 358 groen; volledige unit-suite, build, lint:packages, ai:lint groen. E2e in C:\code\ls-e2e\mikro-sqlite2 met 5 repro-routes (entity-return, SessionLayout-output, helper-stream, _api/_lib-helper): generateArtifacts 0 + tsc 0, gegenereerde output geverifieerd (geen `__@`, echte entity-velden, expliciete error-leden, stream = HelperEvent i.p.v. never).
+
+**Files touched:** packages/core/src/{tryCatchSync.ts,tryCatchSync.test.ts,redis.ts,index.ts,CHANGELOG.md}, packages/devkit/src/{typeMap/tsProgram.ts,typeMap/emitterArtifacts.ts,typeMap/typeContext.ts,typeMap/extractors.ts,typeMap/stripSymbolKeyedMembers.test.ts,routeNamingValidation.ts,privateRouteSubfolder.test.ts,CHANGELOG.md}.
+
+**Open:** kandidaat voor 0.6.1 (samen met de mikro-schema-fix van eerder). CORE-1 volledige runtime-repro (secret-manager + dev-supervisor) niet gedraaid — code-reviewed + mechanisme + diagnose. Consumer kan z'n 5 dist-patches + de registerRoutingRules-ignore-workaround droppen zodra 0.6.1 gepubliceerd is.

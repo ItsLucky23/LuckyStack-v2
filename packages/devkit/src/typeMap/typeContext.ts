@@ -112,9 +112,14 @@ export const sanitizeTypeAndCollectImports = ({
 
   return type.replaceAll(/\b([A-Z][a-zA-Z0-9_]*)(<[^>]+>)?(\[\])?\b/g, (match: string, typeName: string, _generics: string | undefined, isArray: string | undefined) => {
     const builtins = ['Promise', 'Date', 'Function', 'Array', 'Record', 'Partial', 'Pick', 'Omit', 'Error', 'Map', 'Set', 'Buffer', 'Uint8Array', 'Object'];
-    const existingImports = ['SessionLayout'];
 
-    if (builtins.includes(typeName) || existingImports.includes(typeName) || knownGenerics.has(typeName)) {
+    //? DEVKIT-2: `SessionLayout` used to sit on an `existingImports` whitelist
+    //? that kept the identifier in the text but NEVER emitted an import for it
+    //? — so any route whose output surfaced `SessionLayout` (e.g. session_v1)
+    //? tripped `validateGeneratedTypeIdentifiers` ("unresolved: SessionLayout").
+    //? It now runs through the normal import collection below, exactly like
+    //? `AuthProps` (both come from `config`), so the import is actually written.
+    if (builtins.includes(typeName) || knownGenerics.has(typeName)) {
       return match;
     }
 

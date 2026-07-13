@@ -332,6 +332,13 @@ export const expandTypeDetailed = (
       let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
 
       for (const prop of props) {
+        //? DEVKIT-1: skip symbol-keyed members. A property whose key is a
+        //? unique symbol (e.g. MikroORM's `[OptionalProps]` / `[loadedType]` /
+        //? `[selectedType]`) has an escaped name of the form `__@<name>@<id>`,
+        //? which `checker.typeToString` would emit verbatim — an invalid TS
+        //? identifier that corrupts the generated file. These markers carry no
+        //? API-payload meaning, so drop them from the inlined type text.
+        if (prop.getName().startsWith('__@')) continue;
         const propType = checker.getTypeOfSymbol(prop);
         const literalType = getLiteralTypeFromPropertySymbol(prop, checker, depth + 1);
         const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;

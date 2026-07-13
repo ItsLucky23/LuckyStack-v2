@@ -282,6 +282,62 @@ export const getApiStreamPayloadTypeFromFile = (filePath: string): string => {
   return getApiStreamPayloadTypeDetailsFromFile(filePath).text;
 };
 
+//? DEVKIT-4 fallback. `collectStreamCallPayloadTypeDetails` only sees LITERAL
+//? `stream(...)` calls inside `main`. A route that hands its emitter to a helper
+//? (`eventBroadcaster.buildBroadcaster(stream)`) has zero literal calls → the
+//? payload type would degrade to `never`, which the framework's typed
+//? `onStream` rejects. When that happens, read the declared payload type off the
+//? `stream: ApiStreamEmitter<T>` annotation on the `ApiParams` interface instead
+//? (`ApiStreamEmitter<T>` / the Sync emitter types all carry the payload as
+//? their single type argument).
+const STREAM_EMITTER_TYPE_NAMES = new Set([
+  'ApiStreamEmitter',
+  'SyncServerStreamEmitter',
+  'SyncClientStreamEmitter',
+  'SyncBroadcastStreamEmitter',
+  'SyncStreamToEmitter',
+]);
+
+const extractDeclaredStreamTypeFromApiParams = (
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+): TypeExtractionResult | null => {
+  let result: TypeExtractionResult | null = null;
+
+  const visit = (node: ts.Node): void => {
+    if (result) return;
+    //? The route's params interface — `ApiParams` (API) / `SyncServerParams`
+    //? etc. Convention names all end in `Params`.
+    if (ts.isInterfaceDeclaration(node) && node.name.text.endsWith('Params')) {
+      for (const member of node.members) {
+        if (
+          ts.isPropertySignature(member)
+          && ts.isIdentifier(member.name)
+          && member.name.text === 'stream'
+          && member.type
+          && ts.isTypeReferenceNode(member.type)
+          && ts.isIdentifier(member.type.typeName)
+          && STREAM_EMITTER_TYPE_NAMES.has(member.type.typeName.text)
+        ) {
+          const typeArg = member.type.typeArguments?.[0];
+          if (typeArg) {
+            const argType = checker.getNonNullableType(checker.getTypeFromTypeNode(typeArg));
+            const expanded = expandTypeDetailed(argType, checker);
+            if (expanded.text.trim().length > 0) {
+              result = { text: expanded.text, unresolvedSymbols: expanded.unresolvedSymbols };
+              return;
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return result;
+};
+
 export const getApiStreamPayloadTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = 'never';
 
@@ -295,7 +351,13 @@ export const getApiStreamPayloadTypeDetailsFromFile = (filePath: string): TypeEx
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const details = collectStreamCallPayloadTypeDetails(mainFn, checker);
-    return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
+    if (details.text !== '') return details;
+
+    //? No literal stream() call — fall back to the declared ApiParams.stream type.
+    const declared = extractDeclaredStreamTypeFromApiParams(sourceFile, checker);
+    if (declared) return declared;
+
+    return { text: DEFAULT, unresolvedSymbols: [] };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting API stream payload type from ${filePath}:`, error);
     return { text: DEFAULT, unresolvedSymbols: [] };

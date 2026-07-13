@@ -8,7 +8,10 @@
 //? already do their own contextual logging and deliberately keep the error
 //? path side-effect-light. Capture explicitly on the error tuple when needed.
 
-export default function tryCatchSync<T, P>(
+//? `P = void` mirrors the async `tryCatch<T, P = void>` so a params-less call
+//? can pass just the result type: `tryCatchSync<URL>(() => new URL(raw))`.
+//? Without the default TS demands both type args (TS2558).
+export default function tryCatchSync<T, P = void>(
   func: (values: P) => T,
   params?: P,
 ): [Error | null, T | null] {

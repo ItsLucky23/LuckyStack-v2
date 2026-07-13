@@ -170,7 +170,7 @@ export {
   resetDbHealthCheckForTests,
 } from './dbHealthCheck';
 export type { DbHealthCheck, DbHealthResult } from './dbHealthCheck';
-export { redis, getRedisConnectionOptions, registerStrayPrefixCommand } from './redis';
+export { redis, getRedisConnectionOptions, registerStrayPrefixCommand, resetDefaultRedisClient } from './redis';
 export type { RedisConnectionOptions } from './redis';
 export {
   registerRedisKeyFormatter,

@@ -5,6 +5,24 @@ All notable changes to `@luckystack/core` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **CORE-2** — `tryCatchSync<T, P = void>` now mirrors `tryCatch`'s `P` default,
+  so a params-less call can pass only the result type (`tryCatchSync<URL>(() =>
+  new URL(raw))`) instead of failing with TS2558.
+
+### Added
+
+- **CORE-1** — `resetDefaultRedisClient()` drops + disconnects the cached lazy
+  default Redis client so the next resolve rebuilds it from current env. Call it
+  after `initSecretManager(...)` when `REDIS_PASSWORD`/`REDIS_HOST` were
+  secret-manager pointers at first import (the early function-injection scan may
+  have already built a client with the raw pointer value). The default client's
+  error handler also turns the resulting `WRONGPASS` into an actionable message
+  when the password still looks like an unresolved pointer.
+
 ## [0.6.0] - 2026-07-12
 
 ### Added

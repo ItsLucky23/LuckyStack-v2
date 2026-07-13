@@ -111,6 +111,40 @@ const indentStr = (str: string, indentText: string): string => {
 	return str.split('\n').map((line, i) => i === 0 ? line : indentText + line).join('\n');
 };
 
+//? DEVKIT-1 safety net. `expandTypeDetailed` already skips symbol-keyed props
+//? on the structural path, but its `checker.typeToString` FALLBACKS (cycle
+//? detection + depth limit — both routinely hit by self-referential MikroORM
+//? entities) re-serialize the whole entity, re-introducing the invalid
+//? `__@<name>@<id>` markers. This removes any that slipped through, brace-aware
+//? because a member's value can be a multi-line object literal.
+export const stripSymbolKeyedMembers = (text: string): string => {
+	if (!text.includes('__@')) return text;
+	let result = text;
+	for (;;) {
+		const match = /__@\w+@\d+\??\s*:/.exec(result);
+		if (!match) break;
+		const symStart = match.index;
+		const lineStart = result.lastIndexOf('\n', symStart) + 1;
+		let i = symStart + match[0].length;
+		let depth = 0;
+		let end = result.length;
+		while (i < result.length) {
+			const ch = result[i];
+			if (ch === '{' || ch === '[' || ch === '(') {
+				depth++;
+			} else if (ch === '}' || ch === ']' || ch === ')') {
+				if (depth === 0) { end = i; break; } //? parent closer — member had no trailing ';'
+				depth--;
+			} else if (ch === ';' && depth === 0) { end = i + 1; break; }
+			i++;
+		}
+		//? Swallow the newline left behind by a consumed ';' so no blank line remains.
+		if (result[end] === '\n') end += 1;
+		result = result.slice(0, lineStart) + result.slice(end);
+	}
+	return result;
+};
+
 const validateGeneratedTypeIdentifiers = (content: string): void => {
 	const sourceFile = ts.createSourceFile('apiTypes.generated.ts', content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 	const knownSymbols = new Set<string>();
@@ -359,9 +393,13 @@ type _ProjectApiTypeMap = {
 				content += `        input: ${indentStr(entry.input, '        ')};\n`;
 				//? Union the framework error envelope so ApiOutput<P,N,V> covers the
 				//? error branch without a Rule-21-forbidden cast at every call site.
-				//? The index signature mirrors ApiErrorResponse so property accesses
-				//? that do not narrow on status first remain compile-clean.
-				content += `        output: ${indentStr(entry.output, '        ')} | { status: 'error'; errorCode: string; [key: string]: unknown };\n`;
+				//? DEVKIT-3: the error arm lists its real fields EXPLICITLY (mirroring
+				//? ApiResponse's error arm) so `errorCode`/`message`/`errorParams`/
+				//? `httpStatus` narrow to their real types after a status check. The
+				//? trailing `[key: string]: unknown` stays for forward-compat, but an
+				//? explicit member always wins over the index signature, so it no
+				//? longer poisons those fields to `unknown`.
+				content += `        output: ${indentStr(entry.output, '        ')} | { status: 'error'; errorCode: string; message?: string; errorParams?: { key: string; value: string | number | boolean }[]; httpStatus?: number; [key: string]: unknown };\n`;
 				content += `        stream: ${indentStr(entry.stream, '        ')};\n`;
 				content += `        method: '${entry.method}';\n`;
 				if (entry.rateLimit !== undefined) {
@@ -519,10 +557,10 @@ type _ProjectSyncTypeMap = {
 
 				content += `      '${version}': {\n`;
 				content += `        clientInput: ${indentStr(entry.clientInput, '        ')};\n`;
-				//? Same error-envelope union as API output — makes SyncServerOutput /
-				//? SyncClientOutput cover the error branch without casts.
-				content += `        serverOutput: ${indentStr(entry.serverOutput, '        ')} | { status: 'error'; errorCode: string; [key: string]: unknown };\n`;
-				content += `        clientOutput: ${indentStr(entry.clientOutput, '        ')} | { status: 'error'; errorCode: string; [key: string]: unknown };\n`;
+				//? Same error-envelope union as API output (DEVKIT-3: explicit error
+				//? fields so they narrow, index signature only for forward-compat).
+				content += `        serverOutput: ${indentStr(entry.serverOutput, '        ')} | { status: 'error'; errorCode: string; message?: string; errorParams?: { key: string; value: string | number | boolean }[]; [key: string]: unknown };\n`;
+				content += `        clientOutput: ${indentStr(entry.clientOutput, '        ')} | { status: 'error'; errorCode: string; message?: string; errorParams?: { key: string; value: string | number | boolean }[]; [key: string]: unknown };\n`;
 				content += `        serverStream: ${indentStr(entry.serverStream, '        ')};\n`;
 				content += `        clientStream: ${indentStr(entry.clientStream, '        ')};\n`;
 				content += `      };\n`;
@@ -559,6 +597,10 @@ declare module '@luckystack/core/typemap' {
 	interface SyncTypeMap extends _ProjectSyncTypeMap {}
 }
 `;
+
+	//? DEVKIT-1: final safety net against symbol-keyed markers that reached the
+	//? emitted text through a typeToString fallback (see stripSymbolKeyedMembers).
+	content = stripSymbolKeyedMembers(content);
 
 	validateGeneratedTypeIdentifiers(content);
 

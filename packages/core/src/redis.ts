@@ -59,10 +59,47 @@ const buildDefaultRedisClient = (): RedisClient => {
   });
 
   cachedDefault.on('error', (err) => {
+    //? CORE-1: a very common, cryptic failure is an auth error whose password
+    //? is still a @luckystack/secret-manager POINTER (e.g. `REDIS_PASSWORD_V1`)
+    //? because the default client was constructed — and cached — during an
+    //? early import-scan, BEFORE secret-manager init resolved the pointer. Turn
+    //? the raw `WRONGPASS` into an actionable message instead.
+    const message = String((err as { message?: string } | undefined)?.message ?? err);
+    const password = process.env.REDIS_PASSWORD ?? '';
+    if (/WRONGPASS|NOAUTH|invalid username-password/i.test(message) && /_V\d+$/i.test(password)) {
+      getLogger().error(
+        `Redis auth failed and REDIS_PASSWORD ("${password}") looks like an UNRESOLVED secret-manager pointer. ` +
+        'The default Redis client was likely built before secret-manager init ran. Resolve secrets first, then call ' +
+        '`resetDefaultRedisClient()` (or `registerRedisClient(new Redis(getRedisConnectionOptions()))`) after init so the ' +
+        'client is rebuilt with the resolved value. See docs/luckystack/ARCHITECTURE_SECRET_MANAGER.md.',
+        err,
+      );
+      return;
+    }
     getLogger().error('Error connecting to Redis', err);
   });
 
   return cachedDefault;
+};
+
+//? CORE-1: drop (and disconnect) the cached default Redis client so the NEXT
+//? resolve rebuilds it from the current env. Call this after a late env change
+//? — most importantly right after `initSecretManager(...)` when
+//? `REDIS_PASSWORD`/`REDIS_HOST` were secret-manager pointers at first import:
+//? the early function-injection scan may have already built a client with the
+//? raw pointer value, and this forces a clean rebuild with the resolved secret.
+//? No-op when nothing was cached. A consumer that instead calls
+//? `registerRedisClient(...)` explicitly does not need this (the registered
+//? slot wins over the resolver).
+export const resetDefaultRedisClient = (): void => {
+  if (!cachedDefault) return;
+  const previous = cachedDefault;
+  cachedDefault = null;
+  try {
+    previous.disconnect();
+  } catch {
+    //? Best-effort — a client that never connected can throw on disconnect.
+  }
 };
 
 setDefaultRedisResolver(buildDefaultRedisClient);
