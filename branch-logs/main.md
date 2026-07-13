@@ -585,3 +585,13 @@ Root-causes + fixes:
 **Files:** packages/core/src/{secretsResolved.ts,secretsResolved.test.ts,redisSecretsReset.test.ts,redis.ts,projectConfig.ts,index.ts}, packages/server/src/createServer.ts, scripts/lintInvariants.mjs, packages/create-luckystack-app/template/scripts/lintInvariants.mjs, packages/create-luckystack-app/template/tsconfig{,.server}.json, docs/decisions/0026-*.md, docs/ARCHITECTURE_SECRET_MANAGER.md, 3× CHANGELOG.
 
 **Open:** meelift met 0.6.3. Deferred: degraded-type-extraction (55 routes MikroORM/Mongo — aparte devkit-investigatie). matchrix kan ná 0.6.3 hun registerRedisClient-workaround verwijderen.
+
+## 2026-07-13 17:45 — v0.6.3 gepubliceerd naar npm (17 packages)
+
+**User prompt:** "ja mag nu alles publishen".
+
+**Wat ik deed:** lockstep bump 0.6.2 → 0.6.3, alle 17 gepubliceerd (node-direct + NPM_CONFIG_PROVENANCE=false per lesson 0005), main + tag v0.6.3 gepusht. Bundelt: FIX-1 Redis secret-manager-pointer boot [ADR 0026, gedecoupleerde secretsResolved-hook + server-boot reset], FIX-2 ai:lint i18n-jsx FP op TS-generics, scaffold-tsconfig ES2023, en logger-timestamps (logging.timestamps, default aan, ISO-8601).
+
+**Verificatie:** dry-run 17 tarballs; registry bevestigt core/server/cli/create-luckystack-app allen 0.6.3. Gates vóór release groen (build 17/17, lint 0, 1656 unit, ai:lint 0).
+
+**Open:** matchrix kan nu upgraden naar 0.6.3 en de Redis registerRedisClient-workaround verwijderen. Deferred: degraded-type-extraction (55 routes MikroORM/Mongo).
