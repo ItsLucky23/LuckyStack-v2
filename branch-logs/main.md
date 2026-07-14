@@ -639,3 +639,21 @@ Root-causes + fixes:
 **Files:** packages/server/src/createServer.ts, packages/core/src/{projectConfig.ts,index.ts,redis.ts}, docs/decisions/0026, docs/ARCHITECTURE_SECRET_MANAGER.md, core+server CHANGELOG.
 
 **Open:** release 0.6.6.
+
+## 2026-07-14 15:15 — upgrade-betrouwbaarheid + doc-conventies: `luckystack upgrade`, `ai:changelog-check`, findings-protocol
+
+**User prompt:** maak het zo dat een AI altijd kan upgraden (beide opties: deterministisch command + changelog-gate); plus doc-regels: datums overal, AI-scans/findings altijd onder een gedateerde folder, en per-folder README-status-grootboek.
+
+**Deel 1 — Findings & Dated-Docs Protocol:** AI-scans/findings/analyses gaan nu onder `docs/findings/<YYYY-MM-DD>-<slug>/` met een `README.md` status-grootboek (per item: status + datums; vocab open/in-progress/fixed/wontfix/superseded/duplicate/false-positive) zodat "docs opschonen" veilig is. Nieuw: `docs/FINDINGS_PROTOCOL.md`, `docs/findings/README.md`-index, CLAUDE.md-protocolsectie + doc-tabel-rij, en de scaffold-copy strip t de framework-eigen gedateerde finding-sets (consument houdt eigen findings). Datums overal (ISO).
+
+**Deel 2 — `luckystack upgrade` (read-only):** deterministische plan-generator. `readInstalledPackages` (node_modules @luckystack/* + versies + CHANGELOG-paden), `buildUpgradePlan` (pure: installed/target/manifest + geordende changelog-lijst + stappen + gotchas), `runUpgrade` schrijft `dump/UPGRADE_PLAN.md`. Zo leest een AI een vaste command-output i.p.v. prose te reconstrueren. Gewired in index.ts + help + cli CLAUDE.md (self-contained runbook, node_modules-bereikbaar). 4 tests.
+
+**Deel 3 — `ai:changelog-check` (report-only):** git-gebaseerd — elk publishable package dat wijzigde sinds de laatste `v*`-tag moet z'n CHANGELOG updaten (lockstep-only bump vrijgesteld); diff tegen werktree zodat een in-flight CHANGELOG-edit telt. In de pre-commit-hook als nudge + hoort in de pre-publish-checklist. Voorkomt nieuwe gaten in "lees de CHANGELOG-gap". Dogfooded: ving + fixte een ontbrekende create-luckystack-app-entry.
+
+**Ook (vorige stap, zelfde thema):** UPGRADING.md kreeg "Where the info lives" + "Upgrading an OLDER project" (bootstrap-gap, no-manifest sidecar-only, changelog-gaten) + "Behaviour changes" (logger-timestamps); cli CLAUDE.md kreeg een self-contained runbook (node_modules-bereikbaar).
+
+**Verificatie:** build 17/17, lint 0, test:unit groen (4 upgrade-tests nieuw), ai:lint 0, ai:changelog-check clean.
+
+**Files:** docs/FINDINGS_PROTOCOL.md + docs/findings/README.md, packages/cli/src/commands/upgrade.ts(+test), packages/cli/src/index.ts, scripts/checkChangelogs.mjs, package.json, .githooks/pre-commit, CLAUDE.md, packages/cli/CLAUDE.md, docs/UPGRADING.md, create-luckystack-app CHANGELOG + src/index.ts.
+
+**Open:** gaat mee met de volgende release (0.6.7-kandidaat).
