@@ -66,6 +66,36 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
 - Brand-new project from scratch — use `create-luckystack-app`.
 - Anything outside the known feature list (the `src/registry.ts` REGISTRY).
 
+## Upgrading LuckyStack — AI runbook (self-contained)
+
+When the user says **"upgrade LuckyStack" / "bump to the latest version"**, follow
+this. (Fuller version: the project's `docs/luckystack/UPGRADING.md`; this copy ships
+in the installed cli so it's readable even when the project's own docs predate it.)
+
+1. **Read the gap — don't bump silently.** Installed version:
+   `node_modules/@luckystack/core/package.json`. Latest: `npm view @luckystack/core version`.
+   Read `node_modules/@luckystack/*/CHANGELOG.md` (core, server, cli, create-luckystack-app,
+   login) for entries BETWEEN them. If a CHANGELOG lacks an entry for the installed
+   version (historical gaps in the 0.2–0.4 window), also read each package's `CLAUDE.md`
+   "Config keys" section + `docs/luckystack/decisions/*.md`.
+2. **Surface + OFFER.** Tell the user in plain language what's new — especially security
+   (2FA / email-code login) and any `### Changed` behaviour flip (e.g. logger timestamps
+   default-on since 0.6.3) — and ask if they want to adopt any feature. Never enable one
+   they didn't ask for.
+3. **Bump + install (developer action).** Set every `@luckystack/*` (incl. the
+   `@luckystack/cli` devDep) to the same target version → `npm install`. This delivers all
+   package code + new config DEFAULTS (deep-merged, feature OFF).
+4. **Refresh in-tree files.** `npx luckystack update` (docs/scripts/CLAUDE.md) then
+   `npx luckystack update --app` (framework `src/` UI + routes + `config.ts`). New files
+   are delivered; files the developer edited get a `<file>.new` sidecar + an AI-merge note
+   in `dump/UPDATE_*.log` (never overwritten). No `.luckystack/scaffold.json` (pre-0.4.1
+   project) → sidecar-only mode (every differing file gets a `.new` twin).
+5. **Merge the `.new` sidecars**, then adopt any opted-in feature: a NEW optional package →
+   `npx luckystack add <feature>` (`luckystack list` shows options); a feature TOGGLE on an
+   installed package (2FA) → config flag + schema columns (manual, fails loudly) +
+   prerequisites, per the feature runbook (`docs/luckystack/ARCHITECTURE_AUTH.md` for 2FA).
+6. **Verify:** `npm run generateArtifacts` → `npm run typecheck` → smoke-test. Commit green.
+
 ## Function Index
 
 | Export / file | One-liner |

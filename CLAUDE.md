@@ -333,11 +333,20 @@ When verifying the frontend in a browser, follow the cheapest-first ladder + sug
 
 When the user asks to **upgrade LuckyStack** / bump `@luckystack/*` to a newer version,
 follow `docs/UPGRADING.md` (consumer copy: `docs/luckystack/UPGRADING.md`) — and do NOT
-bump silently:
+bump silently. Everything you need is on disk after `npm install`: the CHANGELOGs
+(`node_modules/@luckystack/*/CHANGELOG.md`), the per-package docs
+(`node_modules/@luckystack/*/CLAUDE.md`), and — if this project's own docs predate the
+upgrade tooling — a self-contained copy of the runbook in
+`node_modules/@luckystack/cli/CLAUDE.md`. The reliable order is always **bump →
+`npm install` → read the now-updated `node_modules/@luckystack/*` docs → execute.**
 
 1. **Read the gap first.** Find the installed version (`node_modules/@luckystack/core/package.json`)
    vs the target (`npm view @luckystack/core version` or the named version), then read the
-   CHANGELOGs BETWEEN them (`node_modules/@luckystack/*/CHANGELOG.md`).
+   CHANGELOGs BETWEEN them (`node_modules/@luckystack/*/CHANGELOG.md`). If a CHANGELOG lacks the
+   installed version (historical 0.2–0.4 gaps), also read each package's CLAUDE.md "Config keys"
+   + `docs/decisions/*.md`. A pre-0.4.1 project has no scaffold manifest → `update` runs
+   sidecar-only (every differing file gets a `.new` twin). Watch `### Changed` entries for
+   behaviour flips (e.g. logger timestamps default-on since 0.6.3).
 2. **Surface + offer.** Tell the user in plain language what the new version adds — ESPECIALLY
    security features (e.g. 2FA / email-code login) and breaking changes — and ASK whether they
    want to adopt any new feature, e.g. *"v0.5.0 → v0.6.1 adds passwordless email-code login + 2FA

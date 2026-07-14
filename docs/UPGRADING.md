@@ -19,6 +19,32 @@ compiles.
 
 ---
 
+## Where the upgrade info lives (so you can ALWAYS find it)
+
+Everything an AI needs to upgrade is on disk after a plain `npm install` — you do
+not need network access beyond `npm view` for the latest version number:
+
+- **What changed:** `node_modules/@luckystack/*/CHANGELOG.md` (per package). These
+  ship inside every package tarball, so after `npm install` of the NEW versions
+  they describe exactly what you're moving TO. Read `core`, `server`, `cli`,
+  `create-luckystack-app`, and `login` first.
+- **How each package works + how to upgrade:** `node_modules/@luckystack/*/CLAUDE.md`
+  — every package ships its own. `node_modules/@luckystack/cli/CLAUDE.md` carries a
+  self-contained copy of THIS runbook, so even a project whose own docs predate the
+  upgrade tooling can read the procedure once the new cli is installed.
+- **Deep dives + the "why":** `node_modules/@luckystack/core/docs/` and (in the
+  project) `docs/luckystack/` + `docs/luckystack/decisions/`. When a CHANGELOG is
+  terse or has gaps for an old version (see the OLDER-project section), the
+  per-package CLAUDE.md "Config keys" section and the ADRs fill in the detail.
+
+So the reliable order is always: **bump the versions → `npm install` → THEN read
+the now-updated `node_modules/@luckystack/*` docs → execute.** The one thing you
+can't read from the old project is the new procedure itself; that's why it also
+lives in the cli package (point 2) and, for a project scaffolded with AI docs, in
+this file (`docs/luckystack/UPGRADING.md`).
+
+---
+
 ## Step 0 — Find the version gap and read the changes
 
 1. **Installed version:** read `node_modules/@luckystack/core/package.json`
@@ -144,6 +170,45 @@ npm run build               # optional: prod bundle
 
 Then smoke-test the flows you touched in a browser (server-start is a developer
 action). Commit once green.
+
+---
+
+## Upgrading an OLDER project (before the update tooling / no manifest)
+
+A project scaffolded before the upgrade tooling existed needs three extra things.
+None of them block the upgrade — they just add manual steps.
+
+- **Bootstrap the procedure.** A very old project's own `CLAUDE.md` / `docs/` predate
+  this runbook, so the AI can't read the procedure from the project until AFTER the
+  refresh. Break the cycle by bumping `@luckystack/cli` (and the rest) FIRST and
+  running `npm install` — then read `node_modules/@luckystack/cli/CLAUDE.md` (it
+  ships this runbook) and continue. If in doubt, the developer can paste the
+  standalone upgrade handoff; a capable AI can also just do the version bump from
+  first principles ("upgrade = bump every `@luckystack/*` to the same latest
+  version, then install").
+- **No scaffold manifest (`.luckystack/scaffold.json`, added in 0.4.1).** Without it,
+  `luckystack update` / `update --app` run in **sidecar-only mode**: every framework
+  file that differs from the fresh render becomes a `<file>.new` twin and NOTHING is
+  overwritten — safe, but more `.new` files to merge by hand. (A project keeps its
+  manifest once it re-scaffolds or is created 0.4.1+.)
+- **CHANGELOG gaps.** Some packages' `CHANGELOG.md` do not have an entry for every
+  historical version (e.g. the 0.2.x–0.4.x window). When the gap between the
+  installed and target version isn't fully covered by the CHANGELOGs, ALSO read the
+  per-package `CLAUDE.md` "Config keys" sections (they document new config keys +
+  the rare behaviour-flip defaults) and the relevant `docs/decisions/*.md` ADRs.
+
+## Behaviour changes to expect (not breaking, but visible)
+
+LuckyStack keeps new features OFF by default, so upgrades rarely break a build.
+But a few defaults change observable behaviour — call these out to the user:
+
+- **Logger timestamps ON (since 0.6.3).** The built-in loggers now prefix each line
+  with an ISO-8601 UTC timestamp. Set `logging.timestamps: false` to restore the old
+  output (e.g. under a log aggregator that stamps its own time).
+- **When adopting an opt-in feature** (2FA, email-code login, …) you are turning on
+  new behaviour deliberately — that's Step 4, not an automatic change.
+
+Check each package CHANGELOG's **### Changed** entries for anything else in your gap.
 
 ---
 
