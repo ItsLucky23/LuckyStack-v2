@@ -9,14 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Redis secret-manager pointer boot** (ADR 0026): `createLuckyStackServer` now EAGERLY
-  REBUILDS + registers the default Redis client from the resolved `process.env` right before
-  the boot-UUID write when `config.secretManager.url` is set, so a client an early import may
-  have built from an unresolved `REDIS_PASSWORD` pointer is replaced by a fresh registered one.
-  **Correction over 0.6.3:** the previous `resetDefaultRedisClient()` was insufficient (it
-  deferred the lazy rebuild, so the pointer resurfaced); `rebuildDefaultRedisClient()` captures
-  the resolved secret immediately. Fixes the `WRONGPASS ... REDIS_PASSWORD_V<n>` boot failure
-  with no consumer code — the `registerRedisClient(...)` workaround can be removed.
+- **Redis secret-manager pointer boot** (ADR 0026): fixes the `WRONGPASS ... REDIS_PASSWORD_V<n>`
+  boot failure with no consumer code — the `registerRedisClient(...)` workaround can be removed.
+  The rebuild is triggered by `@luckystack/secret-manager` firing core's secrets-resolved channel
+  at resolve time (see the `@luckystack/core` changelog). An intermediate 0.6.3/0.6.4 attempt did
+  this from `createLuckyStackServer` gated on `config.secretManager.url`, but that gate is always
+  falsy (the scaffold doesn't register `secretManager` into `projectConfig`) — that vestigial gate
+  is now REMOVED; the channel is the single trigger.
 
 ## [0.6.0] - 2026-07-12
 

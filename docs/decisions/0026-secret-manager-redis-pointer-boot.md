@@ -75,14 +75,14 @@ secret-manager and without moving secret-manager init into `bootstrapLuckyStack`
    rotation, regardless of ordering. Generic on purpose — other cached-client
    owners (Prisma pools, SDK clients) can subscribe too.
 
-2. **Eager rebuild in the server boot** (`createServer.ts`, before
-   `writeBootUuid`): when `getProjectConfig().secretManager?.url` is set, call
-   `rebuildDefaultRedisClient()`. By then the consumer's `initSecretManager`
-   (called before `bootstrapLuckyStack`) has resolved `process.env`, so a fresh
-   registered client captures the real password and the boot-UUID write
-   authenticates — with NO consumer action, on a plain `npm` upgrade. Required a
-   minimal `secretManager?: SecretManagerConfigRef` field on core's `ProjectConfig`
-   (structural, dependency-free — core does not import secret-manager).
+> **0.6.6 cleanup — one mechanism, not two.** 0.6.3/0.6.4 also added a
+> server-boot rebuild in `createServer.ts` gated on
+> `getProjectConfig().secretManager?.url` (plus a `secretManager?` field on
+> `ProjectConfig`). Once the resolver fires the channel itself (0.6.5), that gate
+> was pure vestigial cruft: it is ALWAYS falsy for the scaffold (the reason it
+> never worked), and where it could fire it only re-did the channel's work a
+> second time. Both the `createServer` gate and the `ProjectConfig.secretManager`
+> field are REMOVED — the secrets-resolved channel is the single trigger.
 
 `rebuildDefaultRedisClient()` (core, exported): disconnect the previous default,
 build a fresh client from the current (resolved) env via `getRedisConnectionOptions`

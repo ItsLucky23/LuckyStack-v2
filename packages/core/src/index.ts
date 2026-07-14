@@ -69,7 +69,6 @@ export type {
   OfflineQueueConfig,
   DevConfig,
   PathsConfig,
-  SecretManagerConfigRef,
 } from './projectConfig';
 export {
   registerRuntimeMapsProvider,

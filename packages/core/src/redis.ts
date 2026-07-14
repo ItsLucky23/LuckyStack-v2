@@ -71,12 +71,11 @@ const constructRedisClient = (): RedisClient => {
     if (/WRONGPASS|NOAUTH|invalid username-password/i.test(message) && /_V\d+$/i.test(password)) {
       getLogger().error(
         `Redis auth failed and REDIS_PASSWORD ("${password}") looks like an UNRESOLVED secret-manager pointer. ` +
-        'The default Redis client was likely built before secret-manager init ran. The framework now EAGERLY REBUILDS + ' +
-        'registers a fresh client automatically when `config.secretManager.url` is set (server boot) and when ' +
-        '`initSecretManager` is wired with `onApplied: notifySecretsResolved`; if you resolve secrets by other means, ' +
-        'call `rebuildDefaultRedisClient()` (or `registerRedisClient(new Redis(getRedisConnectionOptions()))`) after ' +
-        'resolution. Also confirm `REDIS_PASSWORD` is listed in the secret-manager `envNames` allowlist (unset resolves ' +
-        'nothing). See docs/luckystack/ARCHITECTURE_SECRET_MANAGER.md.',
+        '`@luckystack/secret-manager` now rebuilds this client automatically after it resolves secrets, so this usually ' +
+        'means REDIS_PASSWORD is NOT in the secret-manager `envNames` allowlist (unset resolves nothing) — add it. ' +
+        'If you resolve secrets by other means, call `rebuildDefaultRedisClient()` (or ' +
+        '`registerRedisClient(new Redis(getRedisConnectionOptions()))`) after resolution. ' +
+        'See docs/luckystack/ARCHITECTURE_SECRET_MANAGER.md.',
         err,
       );
       return;
@@ -116,8 +115,8 @@ export const resetDefaultRedisClient = (): void => {
 //? resurface by the time it's lazily rebuilt) and never overrides a client that
 //? was already registered. Capturing the resolved secret NOW, into a registered
 //? client, is immune to that. Disconnects the previous default first so rotation
-//? doesn't leak a connection. The framework calls this on the secrets-resolved
-//? hook and at the server boot when a secret-manager URL is configured.
+//? doesn't leak a connection. The framework calls this from the secrets-resolved
+//? hook below (fired by `@luckystack/secret-manager` after every resolve).
 export const rebuildDefaultRedisClient = (): RedisClient => {
   const previousRegistered = isRedisClientRegistered() ? getRedisClient() : null;
   resetDefaultRedisClient();
@@ -136,13 +135,14 @@ export const rebuildDefaultRedisClient = (): RedisClient => {
 setDefaultRedisResolver(buildDefaultRedisClient);
 
 //? CORE-1 (decoupled hook): when a secret resolver reports that secrets were
-//? (re)resolved — e.g. `@luckystack/secret-manager` wiring `onApplied` to
-//? `notifySecretsResolved` — EAGERLY REBUILD + REGISTER the default client from
-//? the now-resolved env if a `REDIS_` credential changed. Registering (not
-//? resetting) is what lets a project run Redis auth via a secret-manager POINTER
-//? with zero consumer code: the resolved secret is captured immediately into a
-//? registered client that wins over the resolver. `undefined` (caller doesn't
-//? know which keys changed) rebuilds defensively.
+//? (re)resolved — `@luckystack/secret-manager` fires this automatically after
+//? every resolve (via the global-symbol channel in `secretsResolved.ts`) —
+//? EAGERLY REBUILD + REGISTER the default client from the now-resolved env if a
+//? `REDIS_` credential changed. Registering (not resetting) is what lets a project
+//? run Redis auth via a secret-manager POINTER with zero consumer code: the
+//? resolved secret is captured immediately into a registered client that wins over
+//? the resolver. `undefined` (caller doesn't know which keys changed) rebuilds
+//? defensively.
 registerSecretsResolvedListener((changedKeys) => {
   if (changedKeys === undefined || changedKeys.some((key) => /^REDIS_/i.test(key))) {
     rebuildDefaultRedisClient();

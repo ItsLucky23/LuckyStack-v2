@@ -39,7 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ARRAY (`Symbol.for('luckystack.secretsResolved.listeners')`) at module load, which
   `@luckystack/secret-manager` fires automatically after every resolve — so the rebuild
   happens at resolve time with zero consumer code, in prod and dev, and even survives a
-  dual `@luckystack/core` instance.
+  dual `@luckystack/core` instance. (A short-lived 0.6.3/0.6.4 server-boot gate + a
+  `ProjectConfig.secretManager` field were vestigial once the channel existed and are
+  removed — the channel is the single trigger.)
 - **CORE-2** — `tryCatchSync<T, P = void>` now mirrors `tryCatch`'s `P` default,
   so a params-less call can pass only the result type (`tryCatchSync<URL>(() =>
   new URL(raw))`) instead of failing with TS2558.

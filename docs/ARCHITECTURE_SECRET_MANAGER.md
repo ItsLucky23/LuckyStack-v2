@@ -124,8 +124,8 @@ A long-lived client (ioredis, a DB pool, an SDK) reads its credential **once at 
 
 The framework handles the default Redis client automatically (ADR 0026), on two levels:
 
-1. **Boot** — when `config.secretManager.url` is set, `createLuckyStackServer` EAGERLY REBUILDS + registers a fresh default Redis client from the now-resolved `process.env` right before the first Redis use (the boot-UUID write). No code needed. (A plain reset was insufficient — it defers the lazy rebuild, so a stale value could resurface; `rebuildDefaultRedisClient()` captures the resolved secret immediately into a registered client that wins over the resolver.)
-2. **Rotation** — wire the resolver's `onApplied` callback to core's `notifySecretsResolved`, which rebuilds + registers the default Redis client whenever a `REDIS_` credential changes so it reconnects with the new secret:
+1. **Boot & rotation (automatic)** — `@luckystack/secret-manager` fires core's secrets-resolved channel after EVERY resolve, so core EAGERLY REBUILDS + registers a fresh default Redis client from the now-resolved `process.env` at resolve time (before any later env revert). No code needed — a bare `initSecretManager(...)` is enough. (A plain reset was insufficient — it defers the lazy rebuild, so a stale value could resurface; `rebuildDefaultRedisClient()` captures the resolved secret immediately into a registered client that wins over the resolver.)
+2. **A client the framework does NOT own** (your own pool / SDK) — subscribe to the same channel and rebuild it yourself. Either `registerSecretsResolvedListener((names) => ...)` from `@luckystack/core`, or wire the resolver's `onApplied` callback:
 
 ```ts
 import { notifySecretsResolved } from '@luckystack/core';

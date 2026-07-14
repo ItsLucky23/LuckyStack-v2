@@ -757,26 +757,6 @@ export interface ProjectConfig {
    * consumer's `config.ts` sets it.
    */
   oauthCallbackBase?: string;
-  /**
-   * Optional `@luckystack/secret-manager` settings — present when the project
-   * commits `.env` POINTERS and resolves them from a remote secret server at
-   * boot. Only a minimal structural shape is typed here on purpose: core does
-   * NOT depend on `@luckystack/secret-manager` (the full `SecretManagerConfig`
-   * lives there). The framework boot reads `secretManager?.url` to know a
-   * resolver is configured and drop any Redis client built with an unresolved
-   * pointer before the first Redis use.
-   */
-  secretManager?: SecretManagerConfigRef;
-}
-
-/**
- * Structural, dependency-free view of a secret-manager config as seen by core.
- * The authoritative shape is `SecretManagerConfig` in `@luckystack/secret-manager`;
- * core only needs to detect that a resolver is configured (`url`).
- */
-export interface SecretManagerConfigRef {
-  url?: string;
-  [key: string]: unknown;
 }
 
 export type ProjectConfigInput = DeepPartial<ProjectConfig>;

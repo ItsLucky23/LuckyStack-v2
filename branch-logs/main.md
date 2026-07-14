@@ -625,3 +625,17 @@ Root-causes + fixes:
 **Files:** packages/core/src/{secretsResolved.ts,secretsResolved.test.ts}, packages/secret-manager/src/{index.ts,index.test.ts}, core+secret-manager CHANGELOG, docs/decisions/0026, docs/lessons/0007.
 
 **Open:** matchrix test dit → daarna 0.6.5 publiceren.
+
+## 2026-07-14 12:15 — opruimen: vestigiale server-boot-gate + ProjectConfig.secretManager weg (0.6.6) [ADR 0026]
+
+**User prompt:** review of de v0.6.0→v0.6.5 boot-changes coherent zijn of random; daarna: opruimen + 0.6.6.
+
+**Review-conclusie:** eind-mechanisme coherent (secret-manager firet channel → core rebuildt+registreert op resolve-tijd). Churn was reëel (0.6.3 reset=fout, 0.6.4 rebuild-maar-nooit-getriggerd), elk met een vastgelegde les (0006/0007). Eén stuk cruft over: de `createServer`-gate `if (getProjectConfig().secretManager?.url) rebuildDefaultRedisClient()` (altijd falsy voor de scaffold → dode code; redundant met de channel) + het `secretManager?`-veld op ProjectConfig dat alleen die gate voedde.
+
+**Wat ik deed:** verwijderd — de `createServer`-gate + ongebruikte import, het `ProjectConfig.secretManager`-veld + `SecretManagerConfigRef`-interface + de barrel-export. WRONGPASS-melding + redis.ts-comments + ADR 0026 + ARCHITECTURE_SECRET_MANAGER + core/server CHANGELOG bijgewerkt zodat de channel het enige (juiste) mechanisme is. `rebuildDefaultRedisClient` blijft (kern, gebruikt door de hook + public API).
+
+**Verificatie:** build 17/17, lint 0, test:unit groen, ai:lint 0. Geen enkele test refereerde aan de verwijderde code (vooraf gecheckt).
+
+**Files:** packages/server/src/createServer.ts, packages/core/src/{projectConfig.ts,index.ts,redis.ts}, docs/decisions/0026, docs/ARCHITECTURE_SECRET_MANAGER.md, core+server CHANGELOG.
+
+**Open:** release 0.6.6.
