@@ -48,14 +48,32 @@ secret-manager and without moving secret-manager init into `bootstrapLuckyStack`
 > now-resolved env immediately and put it in the default slot so it wins over the
 > resolver. Both mechanisms below now call `rebuildDefaultRedisClient()`.
 
+> **0.6.5 correction — the fix was correct but NEVER FIRED.** 0.6.4's
+> `rebuildDefaultRedisClient()` logic was right, but neither trigger ran for a
+> normal project: (a) the server-boot gate `getProjectConfig().secretManager?.url`
+> is ALWAYS falsy because the scaffold registers `secretManager` only in the
+> config default-export (read by `server.ts` → `initSecretManager`), NOT into
+> `registerProjectConfig(...)`; (b) bare `initSecretManager(...)` wires no
+> `onApplied`. So the rebuild never happened — proven to fail in BOTH prod and
+> dev. Fix: **`@luckystack/secret-manager` now fires the hook AUTOMATICALLY after
+> every resolve**, over a decoupled global-symbol channel (`Symbol.for(
+> 'luckystack.secretsResolved.listeners')`) so it keeps NO import of core. Core
+> publishes its `notifySecretsResolved` onto that global ARRAY at module load
+> (an array, not a slot, so even a dual `@luckystack/core` instance — the likely
+> cause of the separate dev env-revert — has every registry rebuilt). Now a bare
+> `initSecretManager(...)` boots Redis-via-pointer with zero consumer code, in
+> prod and dev, because the client is rebuilt+registered AT RESOLVE TIME (before
+> any later `process.env` revert).
+
 1. **Decoupled "secrets resolved" hook in core** (`secretsResolved.ts`):
    `registerSecretsResolvedListener` + `notifySecretsResolved(changedKeys?)`.
    `redis.ts` self-registers a listener that calls `rebuildDefaultRedisClient()`
-   when a `REDIS_` key changed (or `undefined` = rebuild defensively). A resolver
-   fires it (secret-manager already exposes the `onApplied` callback for exactly
-   this — wire `onApplied: notifySecretsResolved`), so a fresh client is captured
-   at boot AND on rotation, regardless of ordering. Generic on purpose — other
-   cached-client owners (Prisma pools, SDK clients) can subscribe too.
+   when a `REDIS_` key changed (or `undefined` = rebuild defensively). The resolver
+   fires it: `@luckystack/secret-manager` calls it automatically after every
+   resolve (global-symbol channel), and a consumer can also wire
+   `onApplied: notifySecretsResolved`. So a fresh client is captured at boot AND on
+   rotation, regardless of ordering. Generic on purpose — other cached-client
+   owners (Prisma pools, SDK clients) can subscribe too.
 
 2. **Eager rebuild in the server boot** (`createServer.ts`, before
    `writeBootUuid`): when `getProjectConfig().secretManager?.url` is set, call

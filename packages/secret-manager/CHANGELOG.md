@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Fires the framework "secrets resolved" channel automatically** (ADR 0026). After
+  every resolve that changes `process.env`, the client now notifies every listener
+  published on the global-symbol array `Symbol.for('luckystack.secretsResolved.listeners')`
+  with the changed env NAMES. This lets `@luckystack/core` rebuild clients that captured a
+  now-stale secret at construction (most importantly the default Redis client — ioredis
+  bakes the password in at `new Redis(...)` time) with ZERO consumer code and no
+  `onApplied` wiring. Decoupled via the global symbol so this package keeps no import of
+  core (its "zero required deps" contract is unchanged); best-effort + isolated (a missing
+  core or a throwing listener never breaks the resolve path). The consumer `onApplied`
+  callback still fires alongside it.
+
 ## [0.1.0]
 
 ### Added

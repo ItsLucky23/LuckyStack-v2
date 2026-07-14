@@ -940,3 +940,55 @@ describe('reloadSecretManagerFromFiles atomicity (SM-09a)', () => {
     }
   });
 });
+
+//? The decoupled framework channel (ADR 0026): after resolving, secret-manager
+//? fires every listener published on the well-known global-symbol array — this is
+//? what makes `@luckystack/core` rebuild the Redis client from the resolved env
+//? with zero consumer code, without secret-manager importing core.
+describe('framework secrets-resolved channel (global symbol)', () => {
+  const SYMBOL = Symbol.for('luckystack.secretsResolved.listeners');
+
+  it('fires the global listeners with the CHANGED env NAMES after a resolve', async () => {
+    process.env.REDIS_PASSWORD = 'REDIS_PASSWORD_V1';
+    const seen: (readonly string[])[] = [];
+    const listener = (names: readonly string[]): void => {
+      seen.push(names);
+    };
+    const list: unknown[] = Array.isArray(Reflect.get(globalThis, SYMBOL))
+      ? (Reflect.get(globalThis, SYMBOL) as unknown[])
+      : [];
+    Reflect.set(globalThis, SYMBOL, list);
+    list.push(listener);
+    try {
+      await initSecretManager(
+        baseConfig({ fetchImpl: okFetch({ REDIS_PASSWORD_V1: 'sk-resolved' }) }),
+      );
+      expect(process.env.REDIS_PASSWORD).toBe('sk-resolved');
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toContain('REDIS_PASSWORD');
+    } finally {
+      const idx = list.indexOf(listener);
+      if (idx >= 0) list.splice(idx, 1);
+    }
+  });
+
+  it('does NOT fire when nothing actually changed (no pointers resolved)', async () => {
+    let fired = 0;
+    const listener = (): void => {
+      fired += 1;
+    };
+    const list: unknown[] = Array.isArray(Reflect.get(globalThis, SYMBOL))
+      ? (Reflect.get(globalThis, SYMBOL) as unknown[])
+      : [];
+    Reflect.set(globalThis, SYMBOL, list);
+    list.push(listener);
+    try {
+      //? No pointer-shaped env value → zero changes → no fire.
+      await initSecretManager(baseConfig({ fetchImpl: okFetch({}) }));
+      expect(fired).toBe(0);
+    } finally {
+      const idx = list.indexOf(listener);
+      if (idx >= 0) list.splice(idx, 1);
+    }
+  });
+});

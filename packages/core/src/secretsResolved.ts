@@ -1,8 +1,10 @@
 //? Decoupled "secrets were (re)resolved" notification channel.
 //?
-//? A secret resolver — e.g. `@luckystack/secret-manager` via its `onApplied`
-//? callback — fires `notifySecretsResolved(changedKeys)` right after it
+//? A secret resolver fires `notifySecretsResolved(changedKeys)` right after it
 //? overwrites `process.env` with the real values (at boot AND on rotation).
+//? `@luckystack/secret-manager` fires it AUTOMATICALLY after every resolve (via
+//? the global-symbol channel at the bottom of this file — no import edge, no
+//? `onApplied` wiring needed).
 //? Listeners then drop any client they built from the PRE-resolution env so the
 //? next use rebuilds with the resolved secret.
 //?
@@ -36,3 +38,23 @@ export const notifySecretsResolved = (changedKeys?: readonly string[]): void => 
     }
   }
 };
+
+//? Cross-PACKAGE channel: publish THIS core instance's `notifySecretsResolved`
+//? on a well-known global-symbol array so a decoupled package that must not
+//? depend on `@luckystack/core` — notably `@luckystack/secret-manager`, the
+//? zero-dependency resolver — can fire it right after it resolves secrets, with
+//? NO import edge. An ARRAY (not a single slot) so that if the process somehow
+//? has more than one `@luckystack/core` instance (dual-package / mixed src+dist
+//? resolution — a real footgun that also causes the env-revert), EVERY instance's
+//? redis registry gets the rebuilt client, not just the last one loaded.
+const GLOBAL_LISTENERS_SYMBOL = Symbol.for('luckystack.secretsResolved.listeners');
+
+const getGlobalSecretsResolvedListeners = (): SecretsResolvedListener[] => {
+  const existing: unknown = Reflect.get(globalThis, GLOBAL_LISTENERS_SYMBOL);
+  if (Array.isArray(existing)) return existing as SecretsResolvedListener[];
+  const created: SecretsResolvedListener[] = [];
+  Reflect.set(globalThis, GLOBAL_LISTENERS_SYMBOL, created);
+  return created;
+};
+
+getGlobalSecretsResolvedListeners().push(notifySecretsResolved);

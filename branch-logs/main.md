@@ -609,3 +609,19 @@ Root-causes + fixes:
 **Files:** packages/core/src/{redis.ts,index.ts}, packages/server/src/createServer.ts, docs/decisions/0026-*.md, docs/lessons/0006-*.md, docs/ARCHITECTURE_SECRET_MANAGER.md, core+server CHANGELOG, packages/core/src/redisSecretsReset.test.ts.
 
 **Open:** publiceren als 0.6.4 (user: "publish 0.6.4 als het gefixt is").
+
+## 2026-07-14 08:30 — FIX-1 échte root-cause: de rebuild werd NOOIT getriggerd (gate falsy) — secret-manager firet nu zelf [ADR 0026, lesson 0007]
+
+**User prompt:** matchrix bewees dat 0.6.4 het NIET fixt, met poll-bewijs: process.env.REDIS_PASSWORD klapt ~12s terug van resolved (len13) naar pointer (len17). Twee problemen: (1) prod-blocking: auto server-boot-rebuild levert geen werkende client (handmatige rebuild ná init wél); (2) dev: env-revert.
+
+**Onderzoek (2 agents + eigen reads):** (1) BEVESTIGD: de scaffold registreert `secretManager` NIET in `registerProjectConfig()` (alleen in config default-export → server.ts→initSecretManager), dus createServer's gate `getProjectConfig().secretManager?.url` is ALTIJD falsy → mijn 0.6.4-rebuild draaide daar nooit. Bare init wire't ook geen onApplied. De rebuild-logica was correct maar werd nooit getriggerd. (2) De reverting-regel is env.ts:70 (`override:true` op `.env.local`), maar de trigger is NIET type-map-gen (weerlegd) — meest waarschijnlijk een tweede core-module-instance die env.ts top-level herdraait.
+
+**Fix (0.6.5-kandidaat):** secret-manager firet nu ná élke resolve de framework-channel — gedecoupleerd via een global-symbol-ARRAY (`Symbol.for('luckystack.secretsResolved.listeners')`), zonder core-import (zero-dep behouden). Core pusht z'n notifySecretsResolved op die array bij module-load (array i.p.v. slot → werkt óók bij dual core-instance). Zo wordt de client op RESOLVE-tijd herbouwd+geregistreerd (vóór welke revert dan ook), met nul consumer-code, prod én dev. De registered ioredis-client heeft het resolved password gebakken → overleeft de dev-env-revert.
+
+**Verificatie:** build 17/17, lint 0, test:unit 1660 (nieuw: core global-channel-publish + secret-manager firet changed-names na resolve + firet niet bij 0 changes), ai:lint 0. Echte real-Redis-repro ligt bij matchrix.
+
+**Bewust NIET gewijzigd:** loadEnvFiles-revert (trigger onbevestigd; de register-op-resolve-fix omzeilt 'm sowieso). createServer-gate blijft (harmless belt-and-suspenders voor config-registered geval).
+
+**Files:** packages/core/src/{secretsResolved.ts,secretsResolved.test.ts}, packages/secret-manager/src/{index.ts,index.test.ts}, core+secret-manager CHANGELOG, docs/decisions/0026, docs/lessons/0007.
+
+**Open:** matchrix test dit → daarna 0.6.5 publiceren.

@@ -29,13 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Redis secret-manager pointer boot** (ADR 0026): the default Redis client no longer
   fails auth with a baked-in `REDIS_PASSWORD_V<n>` pointer when it was built (during an
-  early import) before secrets resolved. **Correction over 0.6.3:** a plain
-  `resetDefaultRedisClient()` was INSUFFICIENT (it defers the lazy rebuild, so the stale
-  value resurfaced, and never overrode an already-registered client). The framework now
-  EAGERLY REBUILDS + registers a fresh client from the resolved env
-  (`rebuildDefaultRedisClient()`), so the boot-UUID write authenticates with the real
-  password — no consumer code. The `WRONGPASS` diagnostic points at the automatic handling
-  + the `envNames` allowlist requirement.
+  early import) before secrets resolved. The framework EAGERLY REBUILDS + registers a
+  fresh client from the resolved env (`rebuildDefaultRedisClient()`), so the boot-UUID
+  write authenticates with the real password — no consumer code. **Correction over
+  0.6.3/0.6.4:** the rebuild logic was right but never TRIGGERED for a normal project (the
+  server-boot gate `getProjectConfig().secretManager?.url` is falsy — the scaffold doesn't
+  register `secretManager` into `projectConfig` — and bare `initSecretManager` wires no
+  `onApplied`). Core now publishes `notifySecretsResolved` onto a decoupled global-symbol
+  ARRAY (`Symbol.for('luckystack.secretsResolved.listeners')`) at module load, which
+  `@luckystack/secret-manager` fires automatically after every resolve — so the rebuild
+  happens at resolve time with zero consumer code, in prod and dev, and even survives a
+  dual `@luckystack/core` instance.
 - **CORE-2** — `tryCatchSync<T, P = void>` now mirrors `tryCatch`'s `P` default,
   so a params-less call can pass only the result type (`tryCatchSync<URL>(() =>
   new URL(raw))`) instead of failing with TS2558.

@@ -585,6 +585,31 @@ const fetchResolve = async (
   throw lastError;
 };
 
+//? Fire the framework's decoupled "secrets resolved" channel (if `@luckystack/core`
+//? is present in the process) so it can rebuild clients that captured a now-stale
+//? secret at construction — most importantly the default Redis client, whose
+//? ioredis password is baked in at `new Redis(...)` time and never re-read. Kept
+//? DECOUPLED via a well-known global-symbol array so this package keeps NO import
+//? of core (its "zero required deps" contract). Best-effort + isolated: a missing
+//? core, or a throwing listener, must never break the resolve/boot path. This is
+//? what makes Redis-auth-via-a-secret-manager-POINTER boot with zero consumer code
+//? (the client is rebuilt from the resolved env AT RESOLVE TIME, before any later
+//? env revert — ADR 0026).
+const GLOBAL_SECRETS_RESOLVED_LISTENERS = Symbol.for('luckystack.secretsResolved.listeners');
+
+const fireFrameworkSecretsResolved = (changedNames: readonly string[]): void => {
+  const listeners: unknown = Reflect.get(globalThis, GLOBAL_SECRETS_RESOLVED_LISTENERS);
+  if (!Array.isArray(listeners)) return;
+  for (const listener of listeners) {
+    if (typeof listener !== 'function') continue;
+    try {
+      (listener as (keys: readonly string[]) => void)(changedNames);
+    } catch {
+      //? A misbehaving framework listener must never break the resolve path.
+    }
+  }
+};
+
 const applyResolved = (
   map: Record<string, string>,
   values: Record<string, string>,
@@ -701,7 +726,12 @@ const doResolveInner = async (
   //? otherwise-successful resolve, AND a HANGING `onApplied` can't wedge the
   //? serialized resolve chain forever (it is abandoned after `HOOK_TIMEOUT_MS`,
   //? with a warn) — process.env + the cache are already written by this point.
-  if (changes.length > 0) await runHookAsync(() => config.onApplied?.(changes), 'onApplied');
+  if (changes.length > 0) {
+    //? Framework channel FIRST (synchronous, in-process — rebuilds framework
+    //? clients like Redis from the just-resolved env), then the consumer hook.
+    fireFrameworkSecretsResolved(changes.map((change) => change.name));
+    await runHookAsync(() => config.onApplied?.(changes), 'onApplied');
+  }
 };
 
 //? Minimal .env parser kept in-package so the resolver stays dependency-free.
