@@ -3071,6 +3071,19 @@ const copyAiDocs = (
     copiedCount++;
   }
 
+  //? The framework's OWN dated finding-sets (docs/findings/<YYYY-MM-DD>-*/) are
+  //? scan output, not convention — a consumer keeps its own. Strip the dated
+  //? subfolders from the copy but keep the convention (findings/README.md +
+  //? FINDINGS_PROTOCOL.md). See docs/FINDINGS_PROTOCOL.md.
+  const consumerFindings = path.join(targetDir, 'docs', 'luckystack', 'findings');
+  if (fs.existsSync(consumerFindings)) {
+    for (const entry of fs.readdirSync(consumerFindings, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        fs.rmSync(path.join(consumerFindings, entry.name), { recursive: true, force: true });
+      }
+    }
+  }
+
   installAiIndexHook(targetDir);
 
   //? Wire the @luckystack/mcp server into .mcp.json so the consumer's Claude

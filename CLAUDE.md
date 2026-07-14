@@ -137,6 +137,16 @@ Same shape as the Decision Memory Protocol — **automatic AI behavior, no user 
 
 **AI MUST, on its own:** (1) **Record a lesson** in `docs/lessons/NNNN-slug.md` (What happened / Root cause / How to avoid) when a session burns real effort on a non-obvious dead-end, then `npm run ai:lessons` — autonomous, like a branch-log append. (2) **Consult it** (`find_lesson`) before retrying something tricky. (3) **Offer to backfill** if at session start `docs/lessons/` is effectively empty but the project has substantial history — mirror Decision Memory Protocol §8: TELL the user, OFFER a one-time resumable interview ("welke dingen heb je al een paar keer opnieuw moeten leren in deze codebase?"), act only on go-ahead, never fabricate. Full spec: `docs/LESSONS_PROTOCOL.md`. Keep the four surfaces distinct: branch-logs (what happened) · User Project Rules (always-do) · decisions (why) · lessons (what failed).
 
+## Findings & Dated-Docs Protocol
+
+**Automatic AI behavior — no user command.** Whenever the AI produces a **scan, findings-set, or analysis** (security scan, bug sweep, perf review, a feature investigation — anything that yields a list of items to track), it MUST:
+
+1. **Write it under a DATE-LED folder**: `docs/findings/<YYYY-MM-DD>-<slug>/`, where the date is **today** (resolve it to the absolute ISO date — never a loose file at the repo root, per Rule 10). One folder per scan-run; a re-scan gets a fresh dated folder that may `supersede` an older one. This replaces ad-hoc scan folders.
+2. **Give that folder a `README.md` status ledger** — the strict per-item record (finding · severity · status · dates), status vocab `open` / `in-progress` / `fixed` / `wontfix` / `superseded` / `duplicate` / `false-positive`. This is what makes a later "clean up the docs" request SAFE: the ledger says exactly which items are processed vs still `open`. **Never delete/trim a findings-folder that still has an `open` item without surfacing it.** When you act on a finding, update its row (status + resolved date) + the ledger's `Last updated` line + the parent index (`docs/findings/README.md`).
+3. **Dates everywhere** (ISO `YYYY-MM-DD`): the folder name, a `Last updated:` line, and a per-item date column — same discipline as branch-logs / ADR `date:` / lesson `date:`.
+
+Full spec + templates: `docs/FINDINGS_PROTOCOL.md`. Keep the surfaces distinct: branch-logs (what happened, per prompt) · decisions (why) · lessons (what failed) · **findings (what a scan turned up + its live status)**.
+
 ## Canonical Example Corpus
 
 `docs/examples/<slug>.md` holds curated, reviewed reference implementations per pattern (a rate-limited auth route, a sync server+client pair, the `tryCatch` pattern, a protected page+component+middleware). When building one of these, **copy the canonical shape** (`get_example('<pattern>')` / `list_examples`) instead of an arbitrary first match. `npm run ai:examples` regenerates `docs/AI_EXAMPLES_INDEX.md`. On an existing project with a bare corpus, OFFER to seed it from the real, reviewed routes/pages (same backfill etiquette as above) — never fabricate an "approved" example.
@@ -389,6 +399,7 @@ upgrade tooling — a self-contained copy of the runbook in
 | `docs/BRANCH_LOG_PROTOCOL.md` | Branch-log entry format |
 | `docs/DECISION_MEMORY_PROTOCOL.md` | Committed decision-log (ADR) protocol — the shareable "why" record the AI auto-fills + reads (no command) |
 | `docs/LESSONS_PROTOCOL.md` | Pitfalls-layer protocol — the committed "what failed + how to avoid" record the AI auto-fills + reads (no command) |
+| `docs/FINDINGS_PROTOCOL.md` | Findings-layer protocol — AI scans/findings go under a date-led `docs/findings/<YYYY-MM-DD>-<slug>/` folder with a per-folder `README.md` status ledger (no command) |
 | `docs/AI_LESSONS_INDEX.md` | Auto-generated index of `docs/lessons/` pitfalls (severity, area, takeaway) |
 | `docs/AI_EXAMPLES_INDEX.md` | Auto-generated index of the curated canonical example corpus (`docs/examples/`) |
 | `docs/AI_CONTEXT_BUDGET.md` | Auto-generated per-task retrieval profiles + artifact token sizes (what-to-load-when) |
