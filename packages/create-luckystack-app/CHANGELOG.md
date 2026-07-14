@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The scaffold docs copy now strips the framework's OWN dated finding-sets
+  (`docs/findings/<YYYY-MM-DD>-*/`) — a consumer keeps only the convention
+  (`docs/luckystack/findings/README.md` + `FINDINGS_PROTOCOL.md`) and its own
+  `docs/findings/`. See the Findings & Dated-Docs Protocol.
+
 ### Fixed
 
 - **`ai:lint` `i18n-jsx` false positive on TS generics** (template `scripts/lintInvariants.mjs`):

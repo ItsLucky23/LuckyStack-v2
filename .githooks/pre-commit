@@ -69,5 +69,8 @@ npm run ai:context-budget --silent
 echo "[pre-commit] Checking hand-written doc staleness (report-only)..."
 npm run ai:doc-staleness --silent || true
 
+echo "[pre-commit] Checking CHANGELOG completeness (report-only)..."
+npm run ai:changelog-check --silent || true
+
 git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_LESSONS_INDEX.md docs/AI_EXAMPLES_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json docs/AI_CONTEXT_BUDGET.md
 git add docs/ai-product 2>/dev/null || true   # per-area product shards (only exist when docs.sharding splits)
