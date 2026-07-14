@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/login",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -59,7 +59,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.6.6",
+    "@luckystack/core": "^0.6.7",
     "bcryptjs": "^3.0.0",
     "dotenv": "^17.0.0",
     "validator": "^13.15.35"
@@ -67,7 +67,7 @@
   "peerDependencies": {
     "@prisma/client": "^6.19.0",
     "socket.io": "^4.8.0",
-    "@luckystack/email": "^0.6.6"
+    "@luckystack/email": "^0.6.7"
   },
   "peerDependenciesMeta": {
     "@prisma/client": {
