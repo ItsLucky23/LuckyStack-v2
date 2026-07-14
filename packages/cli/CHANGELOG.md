@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`luckystack upgrade [<target>]`** — READ-ONLY command that gathers the upgrade plan
+  (installed `@luckystack/core` version, every installed `@luckystack/*` + its CHANGELOG
+  path, scaffold-manifest presence, the full step sequence + gotchas) into
+  `dump/UPGRADE_PLAN.md`, so an AI executes a deterministic plan instead of reconstructing
+  it from prose. Mutates nothing. A self-contained upgrade runbook also ships in this
+  package's `CLAUDE.md`, readable from `node_modules` even when a project's own docs predate
+  the tooling.
 - **`luckystack update --app`** (ADR 0025) — broadens `update` to also refresh
   framework-authored files under the app tree (`src/` UI + routes, `functions/`,
   `server/`, `luckystack/`, `config.ts`, `tsconfig`), closing the upgrade gap for

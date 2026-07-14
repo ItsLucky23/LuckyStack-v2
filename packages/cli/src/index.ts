@@ -3,6 +3,7 @@
 //?   npx luckystack add <feature> [--no-install]   add ONE optional package
 //?   npx luckystack add | remove | manage          interactive add/remove wizard
 //?   npx luckystack list                           inventory installed vs available
+//?   npx luckystack upgrade [<target>]             write dump/UPGRADE_PLAN.md (read-only)
 //?   npx luckystack check-env | check-i18n         codebase audits
 //?
 //? `add` is the INVERSE of create-luckystack-app's optional-package pruner: it
@@ -22,6 +23,7 @@ import { listFeatures } from './commands/list';
 import { applyManagePlan } from './commands/manage';
 import { runReconfigureWizard } from './commands/reconfigure';
 import { runUpdate } from './commands/update';
+import { runUpgrade } from './commands/upgrade';
 import { syncScaffoldManifestChoices } from './lib/manifestSync';
 import { REGISTRY, findRegistryEntry } from './registry';
 
@@ -33,6 +35,7 @@ Usage:
   npx luckystack add [<feature>] [--no-install]
   npx luckystack remove [<feature>] [--no-install]
   npx luckystack update [--app]
+  npx luckystack upgrade [<target-version>]
   npx luckystack check-env
   npx luckystack check-i18n
 
@@ -61,6 +64,12 @@ update --app      Same, but ALSO refresh framework-authored files under the app 
                   are delivered; files you edited get \`<file>.new\` + an AI-merge note.
                   Your own app code is never touched (only fresh-render files are).
                   Still never touches prisma/, package.json, or .env/.env.local.
+
+upgrade           READ-ONLY. Gather everything needed to upgrade LuckyStack —
+                  installed version, the CHANGELOGs to read (in node_modules), the
+                  step sequence + gotchas — into dump/UPGRADE_PLAN.md so an AI (or you)
+                  can execute it. Optional positional = target version. Full narrative
+                  runbook: docs/luckystack/UPGRADING.md.
 
 check-env         Scan for .env keys unused in code + env vars used but undefined.
 check-i18n        Scan for translation keys unused in code + used but missing from locales.
@@ -141,6 +150,19 @@ const main = async (): Promise<void> => {
     return;
   }
 
+  //? Read-only: gather the upgrade plan (installed version + CHANGELOGs to read +
+  //? the step sequence) into dump/UPGRADE_PLAN.md. Optional positional = target
+  //? version. Mutates nothing.
+  if (command === 'upgrade') {
+    const project = validateProject(process.cwd(), 'Run this inside your project directory.');
+    if (!project) {
+      process.exit(1);
+    }
+    const target = feature !== undefined && feature.length > 0 && !feature.startsWith('-') ? feature : null;
+    runUpgrade(project, target, new Date());
+    return;
+  }
+
   //? Framework-owned-files refresh (ADR 0021 phase 1a). `--app` (ADR 0025) also
   //? refreshes the framework-authored src/ UI + routes + config.
   if (command === 'update') {
@@ -155,7 +177,7 @@ const main = async (): Promise<void> => {
   }
 
   if (command !== 'add' && command !== 'remove' && command !== 'manage') {
-    console.error(`Unknown command: "${command ?? ''}". Commands: list, manage, add, remove, update, check-env, check-i18n.\n`);
+    console.error(`Unknown command: "${command ?? ''}". Commands: list, manage, add, remove, update, upgrade, check-env, check-i18n.\n`);
     console.log(HELP);
     process.exit(2);
   }

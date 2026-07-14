@@ -53,6 +53,12 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
   manifest even in app scope. `isUpdatablePath(rel, scope)` is the predicate; `--app`
   → scope `'app'`, default `'framework'`. The report gains "new files delivered" +
   "refreshed" sections.
+- `luckystack upgrade [<target>]` — READ-ONLY. Gathers the upgrade plan (installed
+  `@luckystack/core` version, every installed `@luckystack/*` + its CHANGELOG path, the
+  scaffold-manifest presence, the step sequence + gotchas) into `dump/UPGRADE_PLAN.md` so
+  an AI executes a deterministic plan instead of reconstructing it from prose. Mutates
+  nothing. Optional positional = target version. Narrative runbook: this package's
+  `## Upgrading LuckyStack` section + `docs/luckystack/UPGRADING.md`.
 - `luckystack check-env` / `luckystack check-i18n` — codebase audits that write AI-feedable,
   per-run hashed logs to `dump/<KIND>_<hash>.log` (dead/missing env keys + i18n keys).
 
@@ -121,6 +127,7 @@ in the installed cli so it's readable even when the project's own docs predate i
 | `commands/addAiDocs.ts` | Add `@luckystack/mcp` (devDep) + register the graph server in `.mcp.json`; `removeAiDocs` reverses. (The doc tree is NOT bundled — re-scaffold for that.) |
 | `commands/addBackendOnly.ts` | Generic handler for `sync` / `email`: add dep + install (self-wire at boot). |
 | `commands/update.ts` | `update` — framework-owned-files refresh (ADR 0021 phase 1a). Exports the pure pieces for tests/tooling: `readScaffoldManifest`, `choicesToFlags` (recorded choices → scaffolder flags), `isSafeSurfacePath` (the bucket-(a) allow-list), `planUpdate` (add/overwrite/sidecar/unchanged classification), `applyUpdate` (writes + manifest refresh + dump/ report), `runUpdate` (orchestrator; `renderFreshScaffold` injectable — default runs `npx create-luckystack-app@<version>` into a temp dir with the Windows-safe cmd /s /c quoting). Hash logic mirrors the scaffolder's `scaffoldManifest.ts` (sha256, CRLF→LF for text) — verified by a cross-scaffold check. |
+| `commands/upgrade.ts` | `upgrade` — READ-ONLY plan generator. `readInstalledPackages` (node_modules `@luckystack/*` + versions + CHANGELOG paths), `buildUpgradePlan` (pure — installed/target/manifest + ordered CHANGELOG list + steps + gotchas), `runUpgrade` (writes `dump/UPGRADE_PLAN.md`, injectable `now` for tests). |
 | `commands/checkEnv.ts` | `check-env` — A: unused `.env` keys; B: env vars used but undefined. DEV_-aware; framework-key ignore list; env files via `getEnvFiles()` semantics (`LUCKYSTACK_ENV_FILES` else `.env`,`.env.local`). |
 | `commands/checkI18n.ts` | `check-i18n` — C: unused locale keys; D: used keys missing per-language. Used-set = literal `{ key: '...' }` + `errorCode: '...'` (dotted) harvested repo-wide; dynamic `key:<var>` sites listed for review. |
 | `lib/scan.ts` | Shared regex scanner: `collectSourceFiles` (skips node_modules/dist/tests/generated), `matchAll` (capture+line), `groupLocations`, `writeDumpLog` (`dump/<KIND>_<hash>.log`). |
