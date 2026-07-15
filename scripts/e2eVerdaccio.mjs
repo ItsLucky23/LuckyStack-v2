@@ -371,14 +371,9 @@ const main = async () => {
           : run('npm', ['install'], projectDir, registryEnv),
       );
 
-      //? `generateArtifacts` FIRST — a fresh scaffold ships without the generated
-      //? route/type maps. The template has no `postinstall` (the repo root does),
-      //? and neither `typecheck` nor `build` chains generation, so both fail on a
-      //? never-yet-run project with a confusing "Cannot find module
-      //? '../_sockets/apiTypes.generated'". The intended first command is
-      //? `npm run server`, which generates them via the dev supervisor. This
-      //? mirrors the established recipe: install -> prisma -> gen -> tsc -> build.
-      step('generateArtifacts', () => run('npm', ['run', 'generateArtifacts'], projectDir));
+      //? No explicit generateArtifacts step: the template now chains it into
+      //? BOTH typecheck and build (E1), mirroring what it already did for test.
+      //? Leaving the step here would MASK a regression of that chaining.
       step('typecheck', () => run('npm', ['run', 'typecheck'], projectDir));
       step('build', () => run('npm', ['run', 'build'], projectDir));
 

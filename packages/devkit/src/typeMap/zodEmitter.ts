@@ -109,7 +109,17 @@ const convertTypeNode = (node: ts.TypeNode): string => {
           : anyFallback('Array without element type');
       }
       case 'Date': {
-        return 'z.date()';
+        //? `z.iso.datetime()`, NOT `z.date()`. An input arrives as JSON, and JSON
+        //? has no Date — a client sending a `Date` puts an ISO STRING on the wire.
+        //? `z.date()` requires an actual Date instance, so it rejected every valid
+        //? payload: a route declaring `data: { from: Date }` accepted nothing.
+        //? Measured (zod 4.4.3): z.date() on "2026-07-15T15:20:15.553Z" -> false;
+        //? z.iso.datetime() -> true, and still false on a non-date string.
+        //?
+        //? Note this validates what genuinely ARRIVES. The declared `Date` is
+        //? itself questionable on an input — the handler receives a string —
+        //? which is why the schema describes the wire rather than the annotation.
+        return 'z.iso.datetime()';
       }
       default: {
         return anyFallback(`unresolved TypeReference '${name}'`);

@@ -13,19 +13,25 @@
 //? resolve under TS's standard-decorator mode. Verified clean:
 //?   npx tsc -p packages/devkit/src/typeMap/__fixtures__/tsconfig.json  -> exit 0
 //?
-//? `@ts-nocheck` is a SCOPE WORKAROUND, not a cover-up. The repo-wide
-//? `tsconfig.server.json` globs `packages/devkit/src/**/*` and does NOT set
-//? `experimentalDecorators`, so without it `tsc -b` fails with 7x TS1240 on
-//? this file. The correct fix is a one-line `exclude` entry for
-//? `packages/devkit/src/typeMap/__fixtures__/**` in `tsconfig.server.json` and
-//? `packages/devkit/tsconfig.json` (there is precedent — `tsconfig.server.json`
-//? already excludes `packages/devkit/src/templates/page_*.template.tsx`). Those
-//? files are out of this task's edit scope; once the exclude lands, DELETE the
-//? `@ts-nocheck` below.
+//? `@ts-nocheck` is LOAD-BEARING here. Do not "clean it up" with a tsconfig
+//? `exclude` — that was the obvious fix, it was tried, and it BREAKS this
+//? fixture:
 //?
-//? `@ts-nocheck` suppresses only diagnostic REPORTING — the checker still
-//? computes every type in full, so `expandTypeDetailed` sees the real MikroORM
-//? shape and the reproduction is unaffected.
+//?   `expandTypeDetailed` reads the program built by `getServerProgram()`, which
+//?   is built from `tsconfig.server.json`. Exclude this file there and it is no
+//?   longer IN that program, so the extractor's `getSourceFile()` misses it and
+//?   every test here silently falls back to the default output. Verified: adding
+//?   the exclude turns `wireProjection.test.ts` red.
+//?
+//? So the file must stay in `tsconfig.server.json`'s globs — which do not set
+//? `experimentalDecorators`, hence 7x TS1240 without the directive. The precedent
+//? that looks similar (`page_*.template.tsx` IS excluded) does not apply: nothing
+//? has to type-check those through the server program.
+//?
+//? The directive is safe precisely because of how it works: it suppresses
+//? diagnostic REPORTING only. The checker still computes every type in full, so
+//? the expander sees the real MikroORM shape and the reproduction is intact —
+//? which is the whole point of this fixture existing.
 // @ts-nocheck
 import { BaseEntity, Collection, Entity, ManyToOne, OneToMany, PrimaryKey, Property } from '@mikro-orm/core';
 
