@@ -247,6 +247,42 @@ describe("createServiceTargetResolver — startup validation", () => {
     ).toThrow(/Binding for service "vehicles" in env "dev" is missing an explicit port/);
   });
 
+  //? THE BUG THIS PINS: the check used `new URL(...).port`, which is EMPTY for a
+  //? protocol's DEFAULT port — `new URL('https://h.com:443').port === ''`, exactly
+  //? like the port-less `https://h.com`. So an operator who wrote `:443` was told
+  //? their port was "missing" and had no way to comply short of picking a
+  //? non-default port. Unsatisfiable for the most common production shape, and
+  //? shipped that way since v0.2.0. The check now reads the raw URL text.
+  it.each([
+    ["https + explicit :443 (the default port — the case that was impossible)", "https://api.example.com:443/system"],
+    ["http + explicit :80 (same trap on the other protocol)", "http://api.example.com:80/system"],
+    ["a non-default port still passes", "https://api.example.com:8443/system"],
+    ["IPv6 literal with an explicit port", "http://[::1]:4100/system"],
+    ["userinfo containing '@' does not confuse the host split", "http://user:p@ss@api.example.com:4100/system"],
+  ])("accepts %s", (_label, binding) => {
+    const deploy: DeployConfigShape = {
+      resources: {},
+      environments: { dev: makeEnv({ bindings: { vehicles: binding } }) },
+    };
+    expect(() =>
+      createServiceTargetResolver({ deploy, services: makeServices(), currentEnvKey: "dev" }),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ["https with no port at all", "https://api.example.com/system"],
+    ["http with no port at all", "http://api.example.com/system"],
+    ["IPv6 literal with no port — its own colons are not a port", "http://[::1]/system"],
+  ])("still rejects %s", (_label, binding) => {
+    const deploy: DeployConfigShape = {
+      resources: {},
+      environments: { dev: makeEnv({ bindings: { vehicles: binding } }) },
+    };
+    expect(() =>
+      createServiceTargetResolver({ deploy, services: makeServices(), currentEnvKey: "dev" }),
+    ).toThrow(/missing an explicit port/);
+  });
+
   it("throws when a FALLBACK-env binding URL has no explicit port", () => {
     //? Current env is port-clean; the missing port lives in the fallback env,
     //? which is validated separately.

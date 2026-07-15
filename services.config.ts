@@ -13,9 +13,10 @@
  *   - Route names follow the service-first contract: `service/name` (see docs/ARCHITECTURE_ROUTING.md).
  */
 
-//? Import directly from the file path, same as deploy.config.ts and config.ts
-//? do, so Vite's client bundle doesn't drag server-only modules into the browser.
-import { registerServicesConfig } from './packages/core/src/servicesConfigRegistry';
+//? `@luckystack/core/config`, same as deploy.config.ts and config.ts — see the
+//? comment there. Client-safe (the barrel would drag ioredis into the browser)
+//? AND one module instance (a deep source import splits under Bun).
+import { registerServicesConfig } from '@luckystack/core/config';
 
 export interface ServiceDefinition {
   /** 'root' -> src/_api, src/_sync (reserved for `system`). Otherwise a folder name under src/. */

@@ -168,6 +168,36 @@ const assertEnvKeyIsSafe = (envKey: string): void => {
   }
 };
 
+/**
+ * Does the RAW url text spell out a port?
+ *
+ * `new URL(...).port` cannot answer this: it is EMPTY for a protocol's default
+ * port, so `https://h.com:443/x` and the port-less `https://h.com/x` are
+ * indistinguishable through it. That made the check below unsatisfiable for the
+ * single most common production shape — an operator who wrote `:443` was told
+ * their port was "missing", with no way to comply short of picking a non-default
+ * port. Shipped that way since v0.2.0.
+ *
+ * So read the text instead. The port, if present, is the trailing `:<digits>` of
+ * the authority — after any `user:pass@`, and after the `]` of an IPv6 literal
+ * (whose own colons must not be mistaken for a port separator).
+ */
+const hasExplicitPort = (target: string): boolean => {
+  const schemeEnd = target.indexOf('://');
+  if (schemeEnd === -1) return false;
+
+  const authority = target.slice(schemeEnd + 3).split(/[/?#]/, 1)[0] ?? '';
+  //? `lastIndexOf`: a password may itself contain '@'.
+  const hostPort = authority.slice(authority.lastIndexOf('@') + 1);
+
+  if (hostPort.startsWith('[')) {
+    //? IPv6 literal — only what follows the closing bracket can be a port.
+    return /^:\d+$/.test(hostPort.slice(hostPort.indexOf(']') + 1));
+  }
+  const colon = hostPort.lastIndexOf(':');
+  return colon !== -1 && /^\d+$/.test(hostPort.slice(colon + 1));
+};
+
 const assertBindingsHaveExplicitPorts = (env: EnvironmentDefinition, envKey: string): void => {
   for (const [service, target] of Object.entries(env.bindings)) {
     const [urlError, url] = tryCatchSync(() => new URL(target));
@@ -176,11 +206,12 @@ const assertBindingsHaveExplicitPorts = (env: EnvironmentDefinition, envKey: str
         `[router] Binding for service "${service}" in env "${envKey}" is not a valid URL: "${target}".`,
       );
     }
-    if (!url.port) {
+    if (!hasExplicitPort(target)) {
       throw new Error(
         `[router] Binding for service "${service}" in env "${envKey}" is missing an explicit port: "${target}". ` +
         `Port-less URLs silently fall through to the protocol default (80/443) which is rarely what a multi-instance deploy wants. ` +
-        `Set an explicit port in deploy.config.ts → environments.${envKey}.bindings.${service}.`,
+        `Write the port you mean — including ":443" for https or ":80" for http. ` +
+        `Set it in deploy.config.ts → environments.${envKey}.bindings.${service}.`,
       );
     }
   }

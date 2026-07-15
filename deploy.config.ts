@@ -1,7 +1,12 @@
-//? Import from the specific file (not the @luckystack/core barrel) so any
-//? client-bundled file that pulls deploy.config.ts won't drag server-only
-//? core modules (Redis, paths, etc.) into the browser. Same rule as config.ts.
-import { registerDeployConfig } from './packages/core/src/deployConfigRegistry';
+//? `@luckystack/core/config`, NOT the main barrel: any client-bundled file that
+//? pulls deploy.config.ts would otherwise drag server-only core modules (ioredis,
+//? paths, bootUuid) into the browser. This used to reach straight into
+//? `./packages/core/src/deployConfigRegistry` for that reason — but a deep source
+//? import resolves to a SEPARATE module instance under Bun, so the registration
+//? landed where the router never looked and `npm run router` died on "services
+//? config has not been registered". The subpath is both client-safe and one
+//? instance. Same rule as config.ts.
+import { registerDeployConfig } from '@luckystack/core/config';
 
 /**
  * DEPLOY CONFIG (per-environment runtime topology)
@@ -115,19 +120,23 @@ const deployConfig = defineDeploy<'development' | 'staging' | 'production'>({
     staging: {
       redis: 'redisShared',
       mongo: 'mongoShared',
+      //? Ports are explicit everywhere, including the protocol defaults. The
+      //? router refuses a port-less binding on purpose: relying on 80/443 by
+      //? omission is how a multi-instance topology silently collapses onto one
+      //? target. Writing `:443` is how you say you meant it.
       bindings: {
-        system: 'https://staging-api.luckystack.com/system',
-        vehicles: 'https://staging-api.luckystack.com/vehicles',
-        billing: 'https://staging-api.luckystack.com/billing',
+        system: 'https://staging-api.luckystack.com:443/system',
+        vehicles: 'https://staging-api.luckystack.com:443/vehicles',
+        billing: 'https://staging-api.luckystack.com:443/billing',
       },
     },
     production: {
       redis: 'redisShared',
       mongo: 'mongoShared',
       bindings: {
-        system: 'https://api.luckystack.com/system',
-        vehicles: 'https://api.luckystack.com/vehicles',
-        billing: 'https://api.luckystack.com/billing',
+        system: 'https://api.luckystack.com:443/system',
+        vehicles: 'https://api.luckystack.com:443/vehicles',
+        billing: 'https://api.luckystack.com:443/billing',
       },
     },
   },

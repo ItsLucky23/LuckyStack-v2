@@ -27,7 +27,12 @@ import '../config';
 import '../deploy.config';
 import '../services.config';
 
-import { startRouter } from '../packages/router/src/startRouter';
+//? The PACKAGE, not `../packages/router/src/...`. The whole chain has to resolve
+//? the same way or it splits into two module instances and the registries the
+//? configs just wrote are invisible here. The configs go through
+//? `@luckystack/core/config`; a source import of the router would pull core in
+//? via tsx's source mapping instead, which is a different copy.
+import { startRouter } from '@luckystack/router';
 
 const main = async (): Promise<void> => {
   const currentEnvKey =

@@ -26,6 +26,24 @@ export {
   DEFAULT_PROJECT_CONFIG,
 } from './projectConfig';
 
+//? The deploy + services registries belong here for the same two reasons as
+//? projectConfig: `deploy.config.ts` is client-bundled too (its own comment says
+//? so), and reaching for `./packages/core/src/...` instead splits into a separate
+//? module instance under Bun — which is exactly why `npm run router` died on
+//? "services config has not been registered" there while working on Node. Both
+//? modules import only `createRegistry`, so they cost the browser nothing.
+export {
+  registerDeployConfig,
+  getDeployConfig,
+  isDeployConfigRegistered,
+} from './deployConfigRegistry';
+
+export {
+  registerServicesConfig,
+  getServicesConfig,
+  isServicesConfigRegistered,
+} from './servicesConfigRegistry';
+
 export type {
   ProjectConfig,
   ProjectConfigInput,
