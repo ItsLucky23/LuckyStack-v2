@@ -75,7 +75,12 @@ registerEmailSender(autoSelectEmailSender({ from: projectConfig.email.from }));
 (async () => {
   //? Project-specific dev tooling. The package handles devkit + console.log init
   //? itself when enableDevTools is on; only the REPL is project-side.
-  if (process.env.NODE_ENV !== 'production') {
+  //?
+  //? Skipped on Bun: `node:repl` is unimplemented there (`repl.start is not a
+  //? function`), which would abort the boot. This is a dev convenience for THIS
+  //? sample app only — the scaffold template ships no REPL, so consumer projects
+  //? are unaffected either way.
+  if (process.env.NODE_ENV !== 'production' && !('Bun' in globalThis)) {
     const { initRepl } = await import('./utils/repl');
     initRepl();
   }

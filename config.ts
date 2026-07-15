@@ -3,7 +3,13 @@ import type { BaseSessionLayout } from '@luckystack/core';
 //? Import from the specific file (not the barrel) so Vite's client bundle
 //? doesn't drag server-only core modules (bootUuid, ioredis, etc.) into the
 //? browser. Same rule we use in apiRequest/syncRequest.
-import { registerProjectConfig } from './packages/core/src/projectConfig';
+//? Import from the PACKAGE, not `./packages/core/src/...`. Under Bun a deep
+//? source import and the package specifier resolve to TWO separate module
+//? instances, so the config would register into a registry that
+//? `@luckystack/server` never reads — boot then dies on "Bootstrap incomplete:
+//? ProjectConfig". Node happens to unify them, which is why the source import
+//? survived here; the scaffold template has always used the package specifier.
+import { registerProjectConfig } from '@luckystack/core';
 //? Single source of truth for frontend + backend ports (pure data; see
 //? config.ports.ts). Re-exported below so vite/app code + server share one source.
 import { ports } from './config.ports';
