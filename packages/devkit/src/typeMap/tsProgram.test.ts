@@ -4,13 +4,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expandTypeDetailed } from './tsProgram';
 
-//? DEVKIT-1 characterization suite. `tsProgram.ts` shipped with NO test file at
-//? all; this locks in what `expandTypeDetailed` ACTUALLY does to a real,
-//? decorator-based MikroORM entity so that any future fix produces a visible,
-//? intentional diff.
+//? DEVKIT-1 suite. `tsProgram.ts` shipped with NO test file at all; this pins
+//? what `expandTypeDetailed` does to a real, decorator-based MikroORM entity.
 //?
-//? These tests deliberately assert the CURRENT (broken) behaviour. Where a test
-//? pins a bug, it says so and names the fix that should flip it.
+//? It began life as a CHARACTERIZATION suite asserting the broken behaviour (a
+//? hard TypeError from the unguarded `type.symbol.name` read, reached because
+//? the tuple branch tested the instance instead of the target). That bug is now
+//? FIXED, and these tests are its regression net: the crash assertions became
+//? "does not throw" + "extracts a REAL shape". The TS-internal facts that
+//? explain the root cause are still asserted, because they are what the fix
+//? relies on.
 //?
 //? The fixture program is built from `__fixtures__/tsconfig.json` — NOT from
 //? `getServerProgram()`. MikroORM's decorators are legacy-style and need
@@ -144,6 +147,16 @@ const probeExpansion = (root: ts.Type, limit: number): ProbeResult => {
 
       if (type.flags & ts.TypeFlags.Object) {
         const objectType = type as ts.ObjectType;
+        // mirrors the FIXED tuple branch — tests the TARGET's ObjectFlags.Tuple
+        const tupleTarget = (objectType.objectFlags & ts.ObjectFlags.Reference)
+          ? ((objectType as ts.TypeReference).target as ts.ObjectType)
+          : objectType;
+        if (tupleTarget.objectFlags & ts.ObjectFlags.Tuple) {
+          for (const arg of checker.getTypeArguments(objectType as ts.TypeReference)) {
+            walk(arg, depth + 1, stack, `${p}[tuple]`);
+          }
+          return;
+        }
         if (objectType.objectFlags & ts.ObjectFlags.Reference) {
           const targetName = (objectType as ts.TypeReference).target.symbol?.name ?? '';
           if (targetName === 'Array' || targetName === 'ReadonlyArray') {
@@ -153,8 +166,11 @@ const probeExpansion = (root: ts.Type, limit: number): ProbeResult => {
           }
           if (SKIP_EXPANSION_MIRROR.has(targetName)) return;
         }
-        // tsProgram.ts:322 reads `type.symbol.name` with NO optional chaining.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but IS undefined at runtime for tuple references; that mismatch is the bug under test
+        //? The site that used to crash: a symbol-less type arriving at the
+        //? `type.symbol.name` read. Retained as an ASSERTABLE probe — with the
+        //? tuple branch fixed above, nothing should reach it any more, which is
+        //? what the `crash: 0` expectations below pin.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but IS undefined at runtime for tuple references
         if ((type as ts.Type & { symbol?: ts.Symbol }).symbol === undefined) {
           bailouts.push({ kind: 'crash', depth, path: p, rendered: checker.typeToString(type) });
           return;
@@ -202,54 +218,89 @@ describe('fixture integrity', () => {
   });
 });
 
-describe('expandTypeDetailed — the DEVKIT-1 failure mechanism', () => {
-  //? THE HEADLINE BUG. This is not corruption — it is a hard TypeError. The
-  //? expander never even reaches the depth limit on a MikroORM entity.
-  it('THROWS a TypeError on a route returning a decorator-based MikroORM entity', () => {
+describe('expandTypeDetailed — the DEVKIT-1 failure mechanism (FIXED)', () => {
+  //? THE HEADLINE BUG, now the regression net. Before the tuple-branch fix this
+  //? was a hard TypeError — `Cannot read properties of undefined (reading
+  //? 'name')` at the `type.symbol.name` read — raised while expanding
+  //? `EntityProperty.embedded?: [string, string]` at depth 6. `extractors.ts`
+  //? swallowed it, so the route silently degraded to `{ status: string }`.
+  it('does NOT throw on a route returning a decorator-based MikroORM entity', () => {
     const routeType = getRouteReturnType();
-    expect(() => expandTypeDetailed(routeType, checker))
-      .toThrowError(/Cannot read properties of undefined \(reading 'name'\)/);
+    expect(() => expandTypeDetailed(routeType, checker)).not.toThrow();
   });
 
-  it('throws for ANY Collection-typed value, not just the route payload', () => {
+  //? THE POINT OF THE WHOLE FIX: a real payload shape instead of a lost one.
+  it('extracts a REAL result shape — the entity fields survive', () => {
+    const { text } = expandTypeDetailed(getRouteReturnType(), checker);
+
+    //? The `result` key and the entity's own scalar fields are what the crash
+    //? destroyed. `{ status: string }` (the swallowed-crash DEFAULT) contains
+    //? none of these.
+    expect(text).not.toBe('{ status: string }');
+    expect(text).toContain("status: 'success'");
+    expect(text).toContain('result:');
+    expect(text).toContain('id: string');
+    expect(text).toContain('name: string');
+    expect(text).toContain('createdAt: Date');
+
+    //? The tuple that used to crash is now inlined as a real tuple type.
+    expect(text).toContain('[string, string]');
+    //? And the symbol-keyed MikroORM markers still never leak (tsProgram.ts:341).
+    expect(text).not.toContain('__@');
+  });
+
+  it('does not throw for ANY Collection-typed value, not just the route payload', () => {
     for (const alias of ['NamedCollection', 'MappedCollection', 'IntersectedCollection']) {
-      expect(() => expandTypeDetailed(getTypeAliasType(alias), checker), alias)
-        .toThrowError(/Cannot read properties of undefined \(reading 'name'\)/);
+      expect(() => expandTypeDetailed(getTypeAliasType(alias), checker), alias).not.toThrow();
     }
   });
 
-  //? Root cause, pinned to the exact guards that miss.
-  it('root cause: a TUPLE type reference falls through every guard into tsProgram.ts:322', () => {
+  //? Root cause, pinned to the exact TS-internal facts the fix relies on. These
+  //? are properties of the TypeScript checker, not of our code, so they stay
+  //? true after the fix — they are WHY testing the instance was wrong.
+  it('root cause: a tuple reference carries ObjectFlags.Tuple on its TARGET, not its instance', () => {
     const tuple = findTypeByRendering(getRouteReturnType(), '[string, string]');
     expect(tuple, 'MikroORM EntityProperty.embedded?: [string, string] must be reachable').toBeDefined();
     const objectType = tuple as ts.ObjectType;
 
-    // tsProgram.ts:283 — the tuple branch tests the INSTANCE for ObjectFlags.Tuple...
-    expect(objectType.objectFlags & ts.ObjectFlags.Tuple, 'instance is NOT flagged Tuple -> :283 misses').toBe(0);
-    // ...but only the TARGET carries that flag, so the branch is dead for real tuples.
+    // The old tuple branch tested the INSTANCE for ObjectFlags.Tuple...
+    expect(objectType.objectFlags & ts.ObjectFlags.Tuple, 'instance is NOT flagged Tuple').toBe(0);
+    // ...but only the TARGET carries that flag — hence the fix tests the target.
     expect(((objectType as ts.TypeReference).target as ts.ObjectType).objectFlags & ts.ObjectFlags.Tuple).toBeTruthy();
 
-    // tsProgram.ts:294 — it is a Reference, so we enter the Reference branch...
+    // It is a Reference, so the old code entered the Reference branch...
     expect(objectType.objectFlags & ts.ObjectFlags.Reference).toBeTruthy();
     // ...where the tuple target has NO symbol, so targetName === '' -> not Array, not SKIP_EXPANSION.
     expect((objectType as ts.TypeReference).target.symbol).toBeUndefined();
 
-    // tsProgram.ts:322 — `type.symbol.name` with no optional chaining. BOOM.
+    // ...and fell into `type.symbol.name`, where the instance has no symbol either. BOOM.
     expect((tuple as ts.Type & { symbol?: ts.Symbol }).symbol).toBeUndefined();
   });
 
-  it('the crash is reachable at depth 6 via Collection.property.embedded', () => {
-    const { bailouts } = probeExpansion(getRouteReturnType(), 12);
-    const crashes = bailouts.filter((b) => b.kind === 'crash');
-    expect(crashes).toHaveLength(1);
-    expect(crashes[0]!.depth).toBe(6);
-    expect(crashes[0]!.path).toBe('root.result.owner.items.property.embedded');
-    expect(crashes[0]!.rendered).toBe('[string, string]');
+  //? The empty tuple is the ONE shape the original instance-check DID catch:
+  //? `[]` has no type arguments to instantiate, so the reference is its own
+  //? target and carries Tuple directly. This is why the branch was not 100%
+  //? dead code — it fired for `[]` and nothing else.
+  it('the empty tuple `[]` is flagged Tuple on the INSTANCE (why the old branch was not fully dead)', () => {
+    const empty = getTypeAliasType('EmptyTuple') as ts.ObjectType;
+    expect(empty.objectFlags & ts.ObjectFlags.Tuple).toBeTruthy();
+    expect(expandTypeDetailed(empty, checker).text).toBe('[]');
   });
 
-  //? Fidelity check: the model above is only trustworthy if it agrees with the
-  //? real function about where things go wrong.
-  it('the model agrees with the real expander about the crash site', () => {
+  it('the tuple that used to crash at depth 6 is now expanded as a tuple', () => {
+    const { bailouts } = probeExpansion(getRouteReturnType(), 12);
+    //? Zero crashes: the fixed tuple branch consumes it before the symbol read.
+    expect(bailouts.filter((b) => b.kind === 'crash')).toHaveLength(0);
+
+    //? The exact member that used to blow up, now inlined. (`undefined` is in
+    //? the union because the property is optional under `strict`.)
+    const tupleText = expandTypeDetailed(getRouteReturnType(), checker).text;
+    expect(tupleText).toContain('embedded?: undefined | [string, string]');
+  });
+
+  //? Fidelity check: the model is only trustworthy if it agrees with the real
+  //? function. Both must now complete without crashing.
+  it('the model agrees with the real expander: neither crashes', () => {
     const routeType = getRouteReturnType();
     let realMessage = '';
     try {
@@ -258,22 +309,32 @@ describe('expandTypeDetailed — the DEVKIT-1 failure mechanism', () => {
       realMessage = (error as Error).message;
     }
     const modelled = probeExpansion(routeType, 12).bailouts.filter((b) => b.kind === 'crash');
-    expect(realMessage).toContain("reading 'name'");
-    expect(modelled).toHaveLength(1);
+    expect(realMessage).toBe('');
+    expect(modelled).toHaveLength(0);
   });
 });
 
 describe('expandTypeDetailed — which bailouts actually fire', () => {
-  it('hits BOTH the cycle guard and the depth bailout', () => {
+  it('hits BOTH the cycle guard and the depth bailout at the OLD limit of 12', () => {
     const { bailouts } = probeExpansion(getRouteReturnType(), 12);
     const cycles = bailouts.filter((b) => b.kind === 'cycle');
     const depths = bailouts.filter((b) => b.kind === 'depth');
 
     expect(cycles.length).toBeGreaterThan(0);
     expect(depths.length).toBeGreaterThan(0);
-    // Real numbers at DEPTH_LIMIT = 12, locked in.
+    //? Real numbers at the PREVIOUS DEPTH_LIMIT of 12, kept as the contrast
+    //? case: 491 truncation points is what raising the limit to 14 removes.
     expect(cycles).toHaveLength(43);
     expect(depths).toHaveLength(491);
+  });
+
+  //? The shipped limit. `DEPTH_LIMIT` is a module-local const with no injection
+  //? seam, so this asserts the model at the value tsProgram.ts:29 now ships.
+  it('at the SHIPPED limit of 14 the graph is fully exhausted — 0 depth bailouts', () => {
+    const { bailouts, maxDepth } = probeExpansion(getRouteReturnType(), 14);
+    expect(bailouts.filter((b) => b.kind === 'depth')).toHaveLength(0);
+    expect(bailouts.filter((b) => b.kind === 'crash')).toHaveLength(0);
+    expect(maxDepth).toBe(14);
   });
 
   it('the genuine entity cycle (Owner -> items -> Item -> owner) trips the cycle guard at depth 7', () => {
@@ -304,7 +365,7 @@ describe('INFERENCE #1 — "typeToString serializes symbol-keyed members verbati
   it('REFUTED: not one of the 534 bailouts leaks a `__@` marker', () => {
     const { bailouts } = probeExpansion(getRouteReturnType(), 12);
     const leaky = bailouts.filter((b) => b.rendered.includes('__@'));
-    expect(bailouts).toHaveLength(535); // 43 cycle + 491 depth + 1 crash
+    expect(bailouts).toHaveLength(534); // 43 cycle + 491 depth + 0 crash (the tuple no longer crashes)
     expect(leaky).toEqual([]);
   });
 
@@ -371,8 +432,9 @@ describe('INFERENCE #1 — "typeToString serializes symbol-keyed members verbati
 });
 
 describe('DEPTH_LIMIT measurement', () => {
-  //? DEPTH_LIMIT (tsProgram.ts:29) is a module-local const with no injection
-  //? seam and tsProgram.ts is out of scope, so this measures on the model.
+  //? DEPTH_LIMIT (tsProgram.ts) is a module-local const with no injection seam,
+  //? so this measures on the model. These measurements are the EVIDENCE behind
+  //? the shipped value of 14 — see the comment above the const.
   it('REFUTED: "12 is off by an order of magnitude" — the real requirement is 14', () => {
     const routeType = getRouteReturnType();
 
@@ -383,6 +445,41 @@ describe('DEPTH_LIMIT measurement', () => {
     // ...and 14 fully exhausts the type graph. Off by TWO, not by 10x.
     expect(probeExpansion(routeType, 14).bailouts.filter((b) => b.kind === 'depth')).toHaveLength(0);
   });
+
+  //? BINDS TO THE SHIPPED CONST — the tests above all pass an explicit limit to
+  //? the model, so every one of them would still pass if DEPTH_LIMIT were
+  //? reverted to 12. That is exactly the "fix that never fired" trap (lesson
+  //? 0007). `expandTypeDetailed`'s public `depth` START-OFFSET is the injection
+  //? seam the const itself lacks: starting the walk 2 levels down under a limit
+  //? of 14 is equivalent to starting at the root under a limit of 12.
+  it('the SHIPPED DEPTH_LIMIT is 14 — starting 2 levels down reproduces the OLD truncation', () => {
+    const root = getRouteReturnType();
+    const uniqueSymbols = (startDepth: number): string[] =>
+      [...new Set(expandTypeDetailed(root, checker, startDepth).unresolvedSymbols.map((s) => s.name))].sort();
+
+    //? At the shipped limit the graph is exhausted, so the only names left are
+    //? the 43 cycle bailouts collapsing to 5 distinct types.
+    expect(uniqueSymbols(0)).toEqual(['EntityMetadata', 'EntityProperty', 'FixtureOwner', 'Function', 'QueryOrderMap']);
+
+    //? Two levels down == the old limit of 12, where 491 depth bailouts drag in
+    //? 30 distinct names (MikroORM lifecycle hooks, Dictionary, CheckCallback…).
+    //? Revert DEPTH_LIMIT to 12 and uniqueSymbols(0) becomes this set — which is
+    //? what makes this assertion, and not the model ones, the real guard.
+    expect(uniqueSymbols(2)).toHaveLength(30);
+    expect(uniqueSymbols(2)).toContain('CheckCallback');
+    expect(uniqueSymbols(0)).not.toContain('CheckCallback');
+  }, 120_000);
+
+  //? Counter-intuitive but load-bearing: a HIGHER limit makes the emitted text
+  //? SMALLER. A depth bailout renders the truncated node via
+  //? `checker.typeToString`, which prints it structurally and verbosely; letting
+  //? the walk continue instead lets the cycle guard collapse it to a short name.
+  it('raising the limit SHRINKS the emitted text rather than growing it', () => {
+    const root = getRouteReturnType();
+    const atShipped = expandTypeDetailed(root, checker, 0).text.length;
+    const atOldLimit = expandTypeDetailed(root, checker, 2).text.length;
+    expect(atShipped).toBeLessThan(atOldLimit);
+  }, 120_000);
 
   it('the type graph is FINITE — the cycle guard, not the depth limit, is what bounds it', () => {
     const deep = probeExpansion(getRouteReturnType(), 30);

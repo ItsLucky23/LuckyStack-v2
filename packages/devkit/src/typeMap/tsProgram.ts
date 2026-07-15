@@ -26,7 +26,18 @@ export const invalidateProgramCache = (): void => {
   cachedProgram = null;
 };
 
-const DEPTH_LIMIT = 12;
+//? Max nesting the inliner will expand before falling back to
+//? `checker.typeToString`. 14 is MEASURED, not guessed: the decorator-based
+//? MikroORM fixture (`__fixtures__/mikroEntities.ts` — BaseEntity + Collection +
+//? a ManyToOne cycle, the deepest real-world graph we have) fully exhausts at
+//? depth 14 with ZERO depth bailouts, in ~3ms and <2x the node count of 12
+//? (2,491 -> 2,930). Raising it further changes nothing — a limit of 30 produces
+//? an identical traversal — because it is the CYCLE guard (`stackTypeIds`), not
+//? the depth limit, that bounds the walk. At the previous value of 12 the same
+//? graph was truncated in 491 places, so entity-shaped payloads inlined as
+//? `checker.typeToString` names rather than real structure. See
+//? `tsProgram.test.ts` > 'DEPTH_LIMIT measurement'.
+const DEPTH_LIMIT = 14;
 
 export interface UnresolvedTypeSymbol {
   name: string;
@@ -280,7 +291,21 @@ export const expandTypeDetailed = (
     const objectType = type as ts.ObjectType;
 
     // Tuple types [A, B, C]
-    if (objectType.objectFlags & ts.ObjectFlags.Tuple) {
+    //? A tuple VALUE is a TypeReference whose *target* carries ObjectFlags.Tuple
+    //? — the instance does not. (The sole exception is the empty tuple `[]`,
+    //? which has no type arguments to instantiate and so is its own target.)
+    //? Testing only the instance, as this branch used to, therefore missed every
+    //? non-empty tuple: it fell through to the Reference branch below, where a
+    //? tuple target has no symbol (`targetName === ''`, so neither Array nor
+    //? SKIP_EXPANSION matched), and on into the `type.symbol.name` read below —
+    //? which threw, because a tuple reference has no symbol either. That crash
+    //? is DEVKIT-1: MikroORM's `EntityProperty.embedded?: [string, string]` made
+    //? every route returning an entity degrade to `{ status: string }`.
+    const tupleTarget = (objectType.objectFlags & ts.ObjectFlags.Reference)
+      ? ((objectType as ts.TypeReference).target as ts.ObjectType)
+      : objectType;
+
+    if (tupleTarget.objectFlags & ts.ObjectFlags.Tuple) {
       const typeArgs = checker.getTypeArguments(objectType as ts.TypeReference);
       let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
       const tupleTypes = typeArgs.map((innerType) => {
@@ -319,7 +344,8 @@ export const expandTypeDetailed = (
     }
 
     // Known non-generic opaque containers (Date, Error, Buffer, etc.)
-    const symbolName = type.symbol.name || (type.aliasSymbol?.name ?? '');
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but absent at runtime for synthesized object types (tuple references); same guard as the reads above
+    const symbolName = type.symbol?.name || (type.aliasSymbol?.name ?? '');
     if (SKIP_EXPANSION.has(symbolName)) {
       return { text: checker.typeToString(type), unresolvedSymbols: [] };
     }

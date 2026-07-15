@@ -23,6 +23,12 @@ export type LiteralWithSymbolKey = { id: string; [Symbol.iterator]: () => Iterat
 //? A Pick over a symbol-carrying type.
 export type PickedCollection = Pick<Collection<FixtureItem>, 'length'>;
 
+//? The empty tuple — the ONLY tuple whose INSTANCE carries ObjectFlags.Tuple
+//? (it has no type arguments to instantiate, so the reference is its own
+//? target). Every other tuple carries the flag on its target only, which is
+//? what made the original instance-only tuple check miss them.
+export type EmptyTuple = [];
+
 //? Date — the SKIP_EXPANSION claim.
 export type PlainDate = Date;
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- must stay an alias; see LiteralWithSymbolKey

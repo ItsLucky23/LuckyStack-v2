@@ -5,6 +5,7 @@ import { getGeneratedApiDocsPath, getGeneratedApiSchemasPath, getGeneratedSocket
 
 import { mustGet } from '../internal/mapUtils';
 import { typeTextToZodSource } from './zodEmitter';
+import { findExtractionFailure } from './extractionDiagnostics';
 
 //? `auth` is consumer-defined opaque — each project exports its own
 //? `AuthProps` shape from `config.ts`. The emitter passes the parsed value
@@ -228,6 +229,11 @@ export interface DiagnosticsEntry {
 	field: string;
 	fallback: string;
 	reason: string;
+	//? Present only for `reason: 'extraction-error'` — the thrown error's
+	//? message. Without it the `console.error` at extraction time is the only
+	//? record of WHY the shape was lost, and that is gone by the time anyone
+	//? reads the artifact.
+	detail?: string;
 }
 
 export interface GeneratedDiagnosticsData {
@@ -237,10 +243,17 @@ export interface GeneratedDiagnosticsData {
 	fallbacks: DiagnosticsEntry[];
 }
 
-//? Detects type fields that fell back to a degraded default. Three signals:
-//? 1. `{ }` on input/clientInput — getSourceFile miss or missing ApiParams.data.
-//? 2. `{ status: string }` on output — main function has no typed return shape.
-//? 3. `z.any()` in the Zod schema source — zodEmitter hit an unsupported TypeNode.
+//? Detects type fields that fell back to a degraded default. Four signals:
+//? 1. The extraction THREW — `expandTypeDetailed` raised and `extractors.ts`
+//?    swallowed it into the DEFAULT. Checked FIRST, because it produces the same
+//?    `{ }` / `{ status: string }` text as signal 2 but has a different cause and
+//?    a different fix: signal 2 means "no shape was declared", this means "a
+//?    shape WAS declared and we lost it". Conflating them is what let DEVKIT-1
+//?    (every MikroORM-entity route silently degrading to `{ status: string }`)
+//?    hide in plain sight.
+//? 2. `{ }` on input/clientInput — getSourceFile miss or missing ApiParams.data.
+//? 3. `{ status: string }` on output — main function has no typed return shape.
+//? 4. `z.any()` in the Zod schema source — zodEmitter hit an unsupported TypeNode.
 //? These are not hard errors but lose type safety on the affected routes.
 const collectFallbacks = (
 	typesByPage: Map<string, Map<string, ApiTypeEntry>>,
@@ -249,6 +262,11 @@ const collectFallbacks = (
 	const entries: DiagnosticsEntry[] = [];
 
 	const flagField = (route: string, kind: 'api' | 'sync', field: string, value: string): void => {
+		const extractionError = findExtractionFailure(route, kind, field);
+		if (extractionError !== undefined) {
+			entries.push({ route, kind, field, fallback: value, reason: 'extraction-error', detail: extractionError });
+			return;
+		}
 		if (value === '{ }' || value === '{ status: string }') {
 			entries.push({ route, kind, field, fallback: value, reason: 'default-fallback' });
 			return;

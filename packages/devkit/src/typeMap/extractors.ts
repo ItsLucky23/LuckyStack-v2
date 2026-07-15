@@ -1,6 +1,7 @@
 import * as ts from 'typescript';
 import path from 'node:path';
 import { getServerProgram, expandTypeDetailed, ExpandedTypeResult, UnresolvedTypeSymbol } from './tsProgram';
+import { recordExtractionOutcome } from './extractionDiagnostics';
 import { getGeneratedSocketTypesPath } from '@luckystack/core';
 
 export type TypeExtractionResult = ExpandedTypeResult;
@@ -243,6 +244,9 @@ export const getInputTypeFromFile = (filePath: string): string => {
 
 export const getInputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ }';
+  //? Cleared on ENTRY, set only from the catch — so an early bail-out below
+  //? (no source file / no ApiParams / no `data`) cannot leave a stale verdict.
+  recordExtractionOutcome({ filePath, kind: 'api', field: 'input', error: null });
 
   try {
     const program = getServerProgram();
@@ -270,6 +274,7 @@ export const getInputTypeDetailsFromFile = (filePath: string): TypeExtractionRes
     return { text: expanded.text || DEFAULT, unresolvedSymbols: expanded.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting input type from ${filePath}:`, error);
+    recordExtractionOutcome({ filePath, kind: 'api', field: 'input', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
@@ -366,6 +371,7 @@ export const getApiStreamPayloadTypeDetailsFromFile = (filePath: string): TypeEx
 
 export const getOutputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ status: string }';
+  recordExtractionOutcome({ filePath, kind: 'api', field: 'output', error: null });
 
   try {
     const program = getServerProgram();
@@ -380,6 +386,7 @@ export const getOutputTypeDetailsFromFile = (filePath: string): TypeExtractionRe
     return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting output type from ${filePath}:`, error);
+    recordExtractionOutcome({ filePath, kind: 'api', field: 'output', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
@@ -390,6 +397,7 @@ export const getSyncClientDataType = (filePath: string): string => {
 
 export const getSyncClientDataTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ }';
+  recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientInput', error: null });
 
   try {
     const program = getServerProgram();
@@ -410,6 +418,7 @@ export const getSyncClientDataTypeDetailsFromFile = (filePath: string): TypeExtr
     return { text: expanded.text || DEFAULT, unresolvedSymbols: expanded.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting sync clientData type from ${filePath}:`, error);
+    recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientInput', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
@@ -444,6 +453,7 @@ export const getSyncServerStreamPayloadTypeDetailsFromFile = (filePath: string):
 
 export const getSyncServerOutputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ status: string }';
+  recordExtractionOutcome({ filePath, kind: 'sync', field: 'serverOutput', error: null });
 
   try {
     const program = getServerProgram();
@@ -458,6 +468,7 @@ export const getSyncServerOutputTypeDetailsFromFile = (filePath: string): TypeEx
     return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting sync serverOutput type from ${filePath}:`, error);
+    recordExtractionOutcome({ filePath, kind: 'sync', field: 'serverOutput', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
@@ -492,6 +503,7 @@ export const getSyncClientStreamPayloadTypeDetailsFromFile = (filePath: string):
 
 export const getSyncClientOutputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ }';
+  recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientOutput', error: null });
 
   try {
     const program = getServerProgram();
@@ -506,6 +518,7 @@ export const getSyncClientOutputTypeDetailsFromFile = (filePath: string): TypeEx
     return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting sync clientOutput type from ${filePath}:`, error);
+    recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientOutput', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };

@@ -32,6 +32,44 @@ MikroORM project + `tsc`); consumers can drop the corresponding
 - **DEVKIT-5** — private helper subtrees under a marker (`_api/_lib/*`,
   `_sync/_lib/__tests__/*`) are skipped by route-naming validation + discovery
   instead of being flagged as invalid route files.
+- **DEVKIT-6** — `expandTypeDetailed` no longer throws on a tuple type, so a
+  route returning a MikroORM entity keeps its real payload shape instead of
+  silently degrading to `{ status: string }`. The tuple branch tested the
+  *instance* for `ObjectFlags.Tuple`, but TypeScript puts that flag on the
+  tuple's *target* (only the empty tuple `[]` is its own target) — so every
+  non-empty tuple fell through to an unguarded `type.symbol.name` read and threw
+  `TypeError: Cannot read properties of undefined (reading 'name')`.
+  `extractors.ts` caught it, so the entire `result` shape was lost with only a
+  `console.error` to show for it. MikroORM's
+  `EntityProperty.embedded?: [string, string]` made every entity-returning route
+  hit this. The branch now tests the target, and the symbol read is
+  optional-chained to match the existing guards.
+  **Note:** a route that leaks an ORM entity into its payload will now surface
+  MikroORM's own types (`EntityProperty`, `EntityMetadata`, …) as unresolved
+  symbols, which `generateTypeMapFile()` reports as a hard abort. That is the
+  intended posture (DD-DEVKIT-D1: never silent) — the fix is to return a plain
+  DTO from the route rather than the entity.
+
+### Added
+
+- **Extraction failures are now a first-class diagnostics reason.** A type
+  extraction that THREW is reported in `apiTypeDiagnostics.generated.json` as
+  `reason: 'extraction-error'`, with the thrown message in a new optional
+  `detail` field, instead of being indistinguishable from a route that simply
+  declares no shape (both previously emitted `default-fallback`). Per
+  DD-DEVKIT-D3 a CI gate can fail on a non-zero `fallbackCount`, so a
+  whole-shape loss is no longer invisible to it.
+
+### Changed
+
+- **`DEPTH_LIMIT` raised from 12 to 14** in the type inliner. Measured, not
+  guessed: 14 fully exhausts the deepest real graph we have (a decorator-based
+  MikroORM entity: `BaseEntity` + `Collection` + a `ManyToOne` cycle) with zero
+  depth bailouts in ~3ms, and a limit of 30 traverses identically — it is the
+  cycle guard, not the depth limit, that bounds the walk. At 12 that graph was
+  truncated in 491 places. Raising it also *shrinks* the emitted text (a
+  truncated node is re-rendered verbosely by `checker.typeToString`). Every
+  route type in this repo is byte-identical before and after.
 
 ## [0.1.0]
 
