@@ -36,7 +36,9 @@ Real registry, real semver resolution, real onboarding install — not a `file:`
 | npm | node | ✅ **ALL GREEN** — the baseline |
 | bun | node | ✅ **ALL GREEN** — `bun.lock` present, so bun genuinely performed the install |
 | bun | bun | ✅ **ALL GREEN** — runtime probe reports `BUN` |
-| npm | bun | ⏳ running |
+| npm | bun | ✅ **ALL GREEN** — isolates the runtime from the installer |
+
+**All four cells green.**
 
 Every cell covers: publish 17/17 → origin assertion → **scaffold via `npx` WITH install** →
 lockfile assertion → re-install → generateArtifacts → typecheck → build.
@@ -46,6 +48,20 @@ lockfile assertion → re-install → generateArtifacts → typecheck → build.
 under bun. That is proven separately, and more strongly, by a real boot against live Redis
 (`[Supervisor] Started server process (runtime: bun)`, `typeof Bun = object`, `Connected to
 Redis`, `GET /livez` → 200, `/_health` → ok). The two should not be conflated.
+
+### What a green matrix does NOT yet prove about Bun
+
+Four gaps, none of them pedantic, all needing a live database or a real client:
+
+| Gap | Why the matrix cannot see it |
+|---|---|
+| **Prisma *queries* under Bun** | Only `prisma generate` is exercised. No query ever runs — and Prisma's Bun story is precisely about the query engine. |
+| **Databases other than SQLite** | The harness scaffolds `--db=sqlite`. Mongo / MySQL / Postgres untested (B8 in the bun-feasibility ledger). |
+| **A real Socket.io client connection** | The server initialises the socket, but nothing has ever connected under Bun. The WS upgrade is the most Bun-sensitive path in the stack. |
+| **Router WS proxying** | Untouched (B7). Raw `node:http` + `node:net` + 101 upgrade handling — must be load-tested, not reviewed. |
+
+So: **Bun is proven for building and booting a LuckyStack project.** "Production-ready on Bun"
+needs those four.
 
 ### E3 — the harness reported a bun install that never happened
 
