@@ -1,5 +1,5 @@
 import { LANGUAGE, THEME, User } from "@prisma/client";
-import type { BaseSessionLayout } from '@luckystack/core';
+import type { BaseSessionLayout, Jsonify } from '@luckystack/core';
 //? `@luckystack/core/config`, NOT the main barrel: this file is imported by both
 //? bundles, and the barrel drags server-only modules (ioredis, bootUuid, paths)
 //? into Vite's client bundle. That was the reason this used to reach straight
@@ -347,6 +347,21 @@ export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true
 //? token can never reach page JS in cookie mode by construction — while the
 //? server-side typing is untouched.
 export type ClientSessionLayout = Omit<SessionLayout, 'token' | 'csrfToken'>;
+
+/**
+ * What page JS actually HOLDS — `ClientSessionLayout` after it has crossed the
+ * wire as JSON.
+ *
+ * ADR 0018 treated "what session_v1 returns" and "what SessionProvider holds" as
+ * one type. They are not, and never were: the route hands back real `Date`
+ * objects, `JSON.stringify` turns them into ISO strings, and the client parses
+ * strings back. The old shared type claimed `lastLogin: Date` on both sides, so
+ * `session.lastLogin.getTime()` compiled in page code and threw at runtime.
+ *
+ * So: the ROUTE returns `ClientSessionLayout` (server-side, Dates intact — the
+ * codegen projects it for the generated client types), and the CLIENT holds this.
+ */
+export type ClientSessionPayload = Jsonify<ClientSessionLayout>;
 
 //? OAuth providers + the credentials form are now ENV-DRIVEN and read from the
 //? live registry via `GET /auth/providers` (a provider registers in

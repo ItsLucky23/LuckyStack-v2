@@ -115,13 +115,19 @@ describe('golden baseline — the shipped generated artifact', () => {
     expect(fs.readFileSync(generated, 'utf8')).not.toContain('__@');
   });
 
-  it('the committed apiTypes.generated.ts still emits `createdAt: Date` for system/session@v1', () => {
+  it('the committed apiTypes.generated.ts emits `createdAt: string` — what the client receives', () => {
     const generated = path.join(SRC_DIR, '_sockets', 'apiTypes.generated.ts');
     if (!fs.existsSync(generated)) return;
-    //? Pins the SKIP_EXPANSION Date behaviour end-to-end, at the artifact level
-    //? (src/_sockets/apiTypes.generated.ts:780-782). See the `Date` block in
-    //? tsProgram.test.ts for why this is the wire-incorrect baseline.
+    //? End-to-end, at the artifact level. This assertion used to pin
+    //? `createdAt: Date` as the deliberate wire-INCORRECT baseline, so that
+    //? fixing it would produce a visible diff. It did; this is the other side.
+    //?
+    //? Proven against the real stack rather than argued: a Prisma row's
+    //? `createdAt` is a Date on the server and arrives as
+    //? `"2026-07-15T15:20:15.553Z"` in the client, where `.getTime()` does not
+    //? exist. The old type said `Date`, so that call compiled and threw.
     const content = fs.readFileSync(generated, 'utf8');
-    expect(content).toContain('createdAt: Date');
+    expect(content).toContain('createdAt: string');
+    expect(content, 'no Date may survive into a client-facing generated type').not.toMatch(/:\s*Date;/);
   });
 });

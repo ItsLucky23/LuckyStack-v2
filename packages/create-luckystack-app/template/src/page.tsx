@@ -4,11 +4,11 @@
 //? through to the catch-all ErrorPage.
 
 import type { PageMiddleware } from "@luckystack/core/client";
-import { loginPageUrl, loginRedirectUrl, type SessionLayout } from "config";
+import { loginPageUrl, loginRedirectUrl, type ClientSessionPayload } from "config";
 
 export const template = 'plain';
 
-export const middleware: PageMiddleware<SessionLayout> = ({ session }) =>
+export const middleware: PageMiddleware<ClientSessionPayload> = ({ session }) =>
   session
     ? { success: false, redirect: loginRedirectUrl }
     : { success: false, redirect: loginPageUrl };

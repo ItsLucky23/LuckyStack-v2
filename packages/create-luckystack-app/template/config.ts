@@ -177,7 +177,7 @@ export const {
 // Project-specific session shape. Extend the framework's BaseSessionLayout
 // with whatever extra fields your User model has. Keep it structurally
 // compatible with BaseSessionLayout (the type-check below enforces it).
-import type { BaseSessionLayout } from '@luckystack/core';
+import type { BaseSessionLayout, Jsonify } from '@luckystack/core';
 import type { User } from '@prisma/client';
 
 //? Re-export AuthProps so file-based `_api` / `_sync` handlers can
@@ -193,3 +193,17 @@ export interface SessionLayout extends Omit<User, 'password'> {
 }
 
 export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true : never;
+
+/**
+ * What page JS actually HOLDS — `SessionLayout` after it has crossed the wire.
+ *
+ * `SessionLayout` is the SERVER shape: it extends your Prisma `User`, so
+ * `createdAt` is a real `Date`. The client never receives that. It receives
+ * JSON, and JSON has no Date — `createdAt` arrives as
+ * `"2026-07-15T15:20:15.553Z"`. Typing client state as `SessionLayout` therefore
+ * lies: `session.createdAt.getTime()` compiles and throws at runtime.
+ *
+ * `Jsonify<T>` is the type-level mirror of what the codegen does to route
+ * outputs. Use SessionLayout server-side, this client-side.
+ */
+export type ClientSessionPayload = Jsonify<SessionLayout>;

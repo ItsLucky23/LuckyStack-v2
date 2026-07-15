@@ -2,7 +2,7 @@ import { io, ManagerOptions, SocketOptions } from 'socket.io-client';
 import {
   backendUrl,
   logging,
-  ClientSessionLayout,
+  ClientSessionPayload,
   sessionBasedToken,
   socketActivityBroadcaster,
   locationProviderEnabled,
@@ -55,7 +55,7 @@ const shouldNotifyDev = logging.devNotifications;
 // eslint-disable-next-line unicorn/prefer-export-from
 export { socket, incrementResponseIndex, waitForSocket };
 
-export function useSocket(session: ClientSessionLayout | null) {
+export function useSocket(session: ClientSessionPayload | null) {
   const { socketStatus, setSocketStatus } = useSocketStatus();
   const sessionRef = useRef(session);
   const socketStatusRef = useRef(socketStatus);

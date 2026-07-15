@@ -222,6 +222,13 @@ const main = async () => {
     npm_config_userconfig: npmrcPath,
     npm_config_registry: REGISTRY,
     npm_config_cache: cacheDir,
+    //? Bun keeps its OWN cache (~/.bun/install/cache) keyed by name@version and
+    //? ignores npm_config_cache entirely. Without this it happily installs a
+    //? `@luckystack/core@0.6.7` from a PREVIOUS run — same version number, older
+    //? contents — so the harness tests code from days ago and reports green.
+    //? Third cache to bite this script (npx's _npx dir, npm's _cacache, now
+    //? bun's): a version number is not an identity when you republish it.
+    BUN_INSTALL_CACHE_DIR: path.join(work, 'bun-cache'),
   };
 
   //? The scaffolder resolves a package manager by scanning PATH only (never cwd

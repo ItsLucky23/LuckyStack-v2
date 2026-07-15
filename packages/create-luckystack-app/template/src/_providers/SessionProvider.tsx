@@ -19,10 +19,10 @@ import {
   socketEventNames,
 } from '@luckystack/core/client';
 
-import { dev, pageTitle, SessionLayout } from 'config';
+import { dev, pageTitle, ClientSessionPayload } from 'config';
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<SessionLayout | null>(null);
+  const [session, setSession] = useState<ClientSessionPayload | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   useSocket(session); //? starts the socket connection
 
@@ -80,7 +80,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     const handler = (data: string) => {
       if (dev) { console.log('updateSession', JSON.parse(data)); }
-      const parsed = JSON.parse(data) as SessionLayout;
+      const parsed = JSON.parse(data) as ClientSessionPayload;
       setSession(prev => {
         if (!prev) return parsed;
         return {
@@ -113,5 +113,5 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 //? or `getCurrentSession` from this file keeps working. Both ultimately
 //? resolve to `@luckystack/core/client`.
 export { useSession } from '@luckystack/core/client';
-export const getCurrentSession = (): SessionLayout | null =>
-  coreGetCurrentSession<SessionLayout>();
+export const getCurrentSession = (): ClientSessionPayload | null =>
+  coreGetCurrentSession<ClientSessionPayload>();

@@ -2,7 +2,7 @@ import type { Socket } from 'socket.io-client';
 import { i18nNotify as notify, tryCatch, clearCsrfToken } from "@luckystack/core/client";
 import {
   logging,
-  ClientSessionLayout,
+  ClientSessionPayload,
   socketActivityBroadcaster,
   loginPageUrl,
   sessionBasedToken,
@@ -205,7 +205,7 @@ export function attachOnlineHandler(socketConnection: Socket, canFlushQueue: () 
  */
 export function attachPresenceHandlers(
   setSocketStatus: SetSocketStatus,
-  sessionRef: RefObject<ClientSessionLayout | null>,
+  sessionRef: RefObject<ClientSessionPayload | null>,
 ) {
   void initSyncRequest({ setSocketStatus, sessionRef });
 }

@@ -13,16 +13,16 @@ import {
   tryCatch,
 } from '@luckystack/core/client';
 
-import { dev, pageTitle, ClientSessionLayout } from '../../config';
+import { dev, pageTitle, ClientSessionPayload } from '../../config';
 
-//? @adr 0018 — Client session state uses `ClientSessionLayout`, the session shape
+//? @adr 0018 — Client session state uses `ClientSessionPayload`, the session shape
 //? WITHOUT the server-only `token`/`csrfToken`. Neither the `session_v1` bootstrap
 //? nor the `updateSession` broadcast carries the token to page JS anymore, so the
 //? HttpOnly-cookie credential can't leak here by construction. The socket handshake
 //? reads the token from sessionStorage (token mode) / the cookie (cookie mode), and
 //? CSRF is fetched from `/auth/csrf` — so nothing here needs those fields.
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<ClientSessionLayout | null>(null);
+  const [session, setSession] = useState<ClientSessionPayload | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   useSocket(session); //? starts the socket connection
 
@@ -117,7 +117,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       //? `void (async …)()` so the `.on` callback itself stays sync (avoids
       //? no-misused-promises) — mirrors the pattern in `socketInitializer`.
       void (async () => {
-        const [error, parsed] = await tryCatch<ClientSessionLayout>(() => JSON.parse(data) as ClientSessionLayout);
+        const [error, parsed] = await tryCatch<ClientSessionPayload>(() => JSON.parse(data) as ClientSessionPayload);
         if (error || !parsed) {
           if (dev) console.warn('[session] updateSession: malformed payload', error);
           return;
@@ -159,5 +159,5 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 }
 
 export { useSession } from '@luckystack/core/client';
-export const getCurrentSession = (): ClientSessionLayout | null =>
-  coreGetCurrentSession<ClientSessionLayout>();
+export const getCurrentSession = (): ClientSessionPayload | null =>
+  coreGetCurrentSession<ClientSessionPayload>();

@@ -7,6 +7,39 @@
 //? code (`import type { BaseSessionLayout } from '@luckystack/login'`)
 //? keeps working.
 
+/**
+ * What `T` becomes after `JSON.stringify` → `JSON.parse`, at the type level.
+ *
+ * The mirror of what the codegen does to route OUTPUTS. Use it wherever you
+ * hand-write a type for something that CROSSES THE WIRE — the client never
+ * receives your server type, it receives JSON, and JSON has no `Date`:
+ *
+ *   type ClientUser = Jsonify<User>;   // createdAt: string, not Date
+ *
+ * Without it a type says `Date`, the client gets `"2026-07-15T15:20:15.553Z"`,
+ * and `user.createdAt.getTime()` compiles and then throws at runtime.
+ *
+ * Deliberately SHALLOW — one level of properties, descending only into arrays.
+ * A fully recursive version (mapping nested objects and dropping function keys)
+ * is what you would write first, and it does not survive contact with a real
+ * session type: `SessionLayout` carries Prisma's `JsonValue`, which is
+ * self-referential, so the compiler dies with TS2589 "type instantiation is
+ * excessively deep". Key-remapping to drop functions doubles the instantiations
+ * on top of that. This version is cheap and covers what actually crosses: a
+ * `Date` field, and arrays of them. If you ever need a nested `Date` projected,
+ * wrap that inner type explicitly rather than making this one recursive.
+ *
+ * `JsonifyValue` is a separate helper so the conditional DISTRIBUTES over unions
+ * — `Date | null` must become `string | null`, not stay `Date | null`.
+ */
+type JsonifyValue<TValue> = TValue extends Date
+  ? string
+  : TValue extends readonly (infer TElement)[]
+    ? JsonifyValue<TElement>[]
+    : TValue;
+
+export type Jsonify<T> = { [TKey in keyof T]: JsonifyValue<T[TKey]> };
+
 export interface SessionLocation {
   pathName: string;
   searchParams?: Record<string, string>;

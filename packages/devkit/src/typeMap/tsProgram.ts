@@ -227,7 +227,39 @@ interface ExpandState {
 //? `Date` is the one that bites in practice — it has a `toJSON()` returning an
 //? ISO string. Anything added here must be justified by what the SERIALIZER does,
 //? not by what feels convenient.
+//?
+//? This map is only a FAST PATH for types the expander already short-circuits via
+//? SKIP_EXPANSION. The general rule is `resolveToJsonReturnType` below, which
+//? needs no per-type entry — and no per-ORM entry, which is the point: a name list
+//? would rot the moment MikroORM renames an internal or a consumer brings their
+//? own ORM.
 const WIRE_PROJECTED_TYPES = new Map<string, string>([['Date', 'string']]);
+
+//? RULE 1 of the wire projection: if a type declares `toJSON()`, JSON.stringify
+//? calls it and serializes THAT instead. So the client receives the return type,
+//? not the declared one. This is the whole reason `Date` becomes a string — and
+//? for free it also covers MikroORM's `Collection` (`toJSON(): EntityDTO<T>[]`),
+//? Prisma's `Decimal`, and anything else that plays by JSON's contract.
+//? Measured, not assumed: on a real entity, `createdAt: Date -> toJSON(): string`
+//? and `items: Collection<Item> -> toJSON(): EntityDTO<TT>[]`.
+const resolveToJsonReturnType = (type: ts.Type, checker: ts.TypeChecker): ts.Type | null => {
+  const toJson = type.getProperty('toJSON');
+  if (!toJson) return null;
+  const declaration = toJson.valueDeclaration ?? toJson.declarations?.[0];
+  if (!declaration) return null;
+  const signature = checker.getTypeOfSymbolAtLocation(toJson, declaration).getCallSignatures()[0];
+  return signature ? signature.getReturnType() : null;
+};
+
+//? RULE 2: a function-valued property never survives JSON.stringify — the key is
+//? dropped entirely. This is what actually unblocks MikroORM: `BaseEntity` mixes
+//? in `isInitialized` / `populate` / `toObject` / `toPOJO` / `serialize` / …, and
+//? expanding THEIR signatures is what drags `EntityProperty` and `EntityMetadata`
+//? (declared inside node_modules, hence unresolvable) into the emitted type.
+//? Requires zero properties as well as call signatures: a callable object that
+//? also carries data would still serialize its data.
+const isFunctionOnlyType = (type: ts.Type, checker: ts.TypeChecker): boolean =>
+  type.getCallSignatures().length > 0 && checker.getPropertiesOfType(type).length === 0;
 
 export interface ExpandOptions {
   /**
@@ -354,6 +386,21 @@ export const expandTypeDetailed = (
       return { text: `[${tupleTypes.join(', ')}]`, unresolvedSymbols };
     }
 
+    //? Wire projection, rule 1 — BEFORE any structural expansion. If the type
+    //? declares toJSON(), that return value IS what the client receives, so
+    //? expanding the declared shape would describe something nobody ever sees.
+    //? Guarded on `wireProjection` so inputs are untouched (their text feeds the
+    //? fail-closed prod validator).
+    if (expandState.wireProjection) {
+      const jsonType = resolveToJsonReturnType(type, checker);
+      //? Identity check: a type whose toJSON returns itself (or a self-referential
+      //? DTO) would recurse forever. The stack guard would catch it, but bailing
+      //? here keeps the output structural instead of a typeToString fallback.
+      if (jsonType && jsonType !== type) {
+        return expandTypeDetailed(jsonType, checker, depth + 1, expandState);
+      }
+    }
+
     if (objectType.objectFlags & ts.ObjectFlags.Reference) {
       const refType = objectType as ts.TypeReference;
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but absent at runtime for anonymous reference targets
@@ -406,6 +453,13 @@ export const expandTypeDetailed = (
         //? API-payload meaning, so drop them from the inlined type text.
         if (prop.getName().startsWith('__@')) continue;
         const propType = checker.getTypeOfSymbol(prop);
+
+        //? Wire projection, rule 2: JSON.stringify drops a function-valued key
+        //? entirely, so describing it would be describing something the client
+        //? never receives — and expanding these is precisely what pulls
+        //? node_modules-internal ORM types into the output and aborts generation.
+        if (expandState.wireProjection && isFunctionOnlyType(propType, checker)) continue;
+
         const literalType = getLiteralTypeFromPropertySymbol(prop, checker, depth + 1);
         const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;
 

@@ -35,4 +35,4 @@ export type {
   AppConfig,
 } from './projectConfig';
 
-export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionTypes';
+export type { BaseSessionLayout, SessionLocation, AuthProps, Jsonify } from './sessionTypes';

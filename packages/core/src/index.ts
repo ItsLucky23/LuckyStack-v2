@@ -130,7 +130,7 @@ export {
 } from './localeReloader';
 export type { LocaleReloader } from './localeReloader';
 export type { statusContent, SOCKETSTATUS } from './socketStatusTypes';
-export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionTypes';
+export type { BaseSessionLayout, SessionLocation, AuthProps, Jsonify } from './sessionTypes';
 export * from './sentrySetup';
 export {
   registerErrorTracker,

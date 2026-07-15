@@ -82,8 +82,13 @@ describe('extractors — a route returning a MikroORM entity', () => {
     //? calls its toJSON() and the client gets an ISO string. This assertion used
     //? to pin `Date` deliberately, as the marker for exactly this fix.
     expect(result.text).toContain('createdAt: string');
-    //? The tuple that used to crash the expander.
-    expect(result.text).toContain('[string, string]');
+    //? The tuple that used to crash the expander is GONE from the output — and
+    //? that is the fix, not a regression. It lived on `EntityProperty.embedded`,
+    //? reachable only through `BaseEntity`'s methods (`populate`, `toObject`, …).
+    //? Functions never survive JSON.stringify, so the wire projection drops those
+    //? keys, and the tuple is no longer reachable. The crash-guard for it still
+    //? lives in tsProgram.test.ts, which exercises the expander directly.
+    expect(result.text).not.toContain('[string, string]');
     //? Symbol-keyed MikroORM markers must never reach the emitted text.
     expect(result.text).not.toContain('__@');
 
@@ -103,27 +108,30 @@ describe('extractors — a route returning a MikroORM entity', () => {
     expect(getInputTypeDetailsFromFile(ROUTE).text).toBe('{\n  ownerId: string\n}');
   }, EXTRACTION_TIMEOUT_MS);
 
-  //? THE COST OF FIXING THE CRASH, pinned so it cannot regress silently.
-  //? Reaching the real shape means the traversal now walks deep into MikroORM's
-  //? own types, and the cycle guard renders those as bare NAMES
-  //? (`EntityProperty`, `EntityMetadata`, ...). They are declared inside
-  //? node_modules, so `collectTypeSymbolFallback` returns them with NO
-  //? importPath — and `typeMapGenerator.ts` turns exactly that into a hard
-  //? `Aborting generation because unresolved type symbols were found`.
+  //? THIS TEST USED TO PIN "the cost of fixing the crash": reaching the real
+  //? shape walked into MikroORM's own types, the cycle guard rendered them as
+  //? bare names (`EntityProperty`, `EntityMetadata`, ...) declared inside
+  //? node_modules with NO importPath, and `typeMapGenerator.ts` turned exactly
+  //? that into a hard `Aborting generation because unresolved type symbols were
+  //? found`. A consumer leaking an ORM entity from a route went from a silent
+  //? degradation to a red build.
   //?
-  //? So for a route that leaks an ORM entity, the fix converts a SILENT
-  //? degradation into a LOUD generation abort. That is the correct posture per
-  //? DD-DEVKIT-D1 (never silent), and the real remedy is not to return an entity
-  //? from a route — but it IS a behaviour change worth knowing about.
-  it('surfaces node_modules-declared symbols with no importPath (which aborts generation)', () => {
+  //? The wire projection removed that cost entirely, so the assertion is
+  //? INVERTED rather than deleted — the absence is the whole point. The
+  //? traversal no longer reaches those symbols because the only paths to them
+  //? were `BaseEntity`'s methods, and functions do not survive JSON.stringify.
+  //? Measured on this fixture: 44,000 chars / 5 unresolved symbols BEFORE,
+  //? 149 chars / 0 AFTER — and the 149 match byte-for-byte what a real
+  //? `JSON.stringify` of the entity produces.
+  it('no longer surfaces node_modules-declared symbols, so generation does not abort', () => {
     const result = getOutputTypeDetailsFromFile(ROUTE);
     const names = result.unresolvedSymbols.map((s) => s.name);
 
-    expect(names).toContain('EntityProperty');
-    //? No importPath => typeMapGenerator.ts adds it to `unresolvedTypeAliases`
-    //? and throws.
-    const entityProperty = result.unresolvedSymbols.find((s) => s.name === 'EntityProperty');
-    expect(entityProperty?.importPath).toBeUndefined();
+    expect(names, 'ORM internals must be unreachable: they never cross the wire').not.toContain('EntityProperty');
+    expect(names).not.toContain('EntityMetadata');
+    //? Any unresolved symbol without an importPath aborts generation, so the set
+    //? must be empty — not merely free of the two names above.
+    expect(result.unresolvedSymbols).toEqual([]);
   }, EXTRACTION_TIMEOUT_MS);
 });
 
