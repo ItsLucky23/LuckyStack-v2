@@ -36,14 +36,14 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
     lastLogin: null | string;
     createdAt: string;
     updatedAt: string;
+    roomCodes?: undefined | string[];
     location?: undefined | {
         pathName: string;
         searchParams?: undefined | {
             [key: string]: string
           }
       };
-    previousLogin?: undefined | null | string;
-    roomCodes?: undefined | string[]
+    previousLogin?: undefined | null | string
   }
 }",
   },

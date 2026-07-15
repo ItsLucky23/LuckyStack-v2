@@ -186,24 +186,22 @@ import type { User } from '@prisma/client';
 //? core so this file compiles identically with or without @luckystack/login.
 export type { AuthProps } from '@luckystack/core';
 
-export interface SessionLayout extends Omit<User, 'password'> {
+/**
+ * The session as a handler RECEIVES it — hence `Jsonify`.
+ *
+ * Sessions are persisted to Redis with `JSON.stringify` and read back with
+ * `JSON.parse`. JSON has no `Date`, so a `createdAt` that was a Date on the way
+ * in is an ISO **string** on the way out. Inheriting Prisma's `User` verbatim
+ * would declare `createdAt: Date` for a value that is a string at runtime, and
+ * `user.createdAt.getTime()` would compile inside an API handler and then throw.
+ *
+ * The write side is unaffected: login builds the session from a live Prisma user
+ * and the serializer converts on the way in.
+ */
+export interface SessionLayout extends Jsonify<Omit<User, 'password'>> {
   avatarFallback: string;
   token: string;
   roomCodes?: string[];
 }
 
 export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true : never;
-
-/**
- * What page JS actually HOLDS — `SessionLayout` after it has crossed the wire.
- *
- * `SessionLayout` is the SERVER shape: it extends your Prisma `User`, so
- * `createdAt` is a real `Date`. The client never receives that. It receives
- * JSON, and JSON has no Date — `createdAt` arrives as
- * `"2026-07-15T15:20:15.553Z"`. Typing client state as `SessionLayout` therefore
- * lies: `session.createdAt.getTime()` compiles and throws at runtime.
- *
- * `Jsonify<T>` is the type-level mirror of what the codegen does to route
- * outputs. Use SessionLayout server-side, this client-side.
- */
-export type ClientSessionPayload = Jsonify<SessionLayout>;

@@ -325,14 +325,29 @@ interface SessionLayoutBase extends Omit<User, 'password'> {
   roomCodes?: string[];
 }
 
-export interface SessionLayout extends SessionLayoutBase {
+/**
+ * The session as a handler RECEIVES it — hence `Jsonify`.
+ *
+ * Sessions are persisted to Redis with `JSON.stringify` and read back with
+ * `JSON.parse` (`@luckystack/login`'s `session.ts`). JSON has no `Date`, so a
+ * `createdAt` that was a Date on the way in is an ISO **string** on the way out.
+ * Inheriting Prisma's `User` verbatim therefore declared `createdAt: Date` for a
+ * value that is a string at runtime: `user.createdAt.getTime()` compiled inside
+ * an API handler and threw.
+ *
+ * `Jsonify<T>` states the round-trip truth. It is the same rule the codegen
+ * applies to route outputs — this is its hand-written counterpart, one layer up.
+ * The write side is unaffected: login builds the session from a live Prisma user
+ * and the serializer converts on the way in.
+ */
+export interface SessionLayout extends Jsonify<SessionLayoutBase> {
   location?: import('@luckystack/core').SessionLocation;
   /** CSRF token bound to this session. Minted by `saveSession` in cookie mode. */
   csrfToken?: string;
-  //? `lastLogin` already comes from Prisma's User model via SessionLayoutBase
-  //? — don't redeclare it here (TS would flag the widening as incompatible).
+  //? `lastLogin` comes from Prisma's User via SessionLayoutBase, already
+  //? projected to `string | null` by Jsonify — do not redeclare it here.
   /** Previous successful login, runtime-only (not a Prisma column). */
-  previousLogin?: Date | string | null;
+  previousLogin?: string | null;
 }
 
 // Verify SessionLayout is structurally compatible with BaseSessionLayout at compile time.
@@ -346,22 +361,13 @@ export type _SessionLayoutCheck = SessionLayout extends BaseSessionLayout ? true
 //? this. `session_v1` returns this shape and `SessionProvider` holds it, so the
 //? token can never reach page JS in cookie mode by construction — while the
 //? server-side typing is untouched.
+//?
+//? No `Jsonify` wrapper here, deliberately: `SessionLayout` is ALREADY the
+//? post-round-trip shape (see its own comment — a session comes back out of Redis
+//? as JSON), so a handler and page JS hold the same value apart from the two
+//? credential fields. Projecting again would be a no-op that implies a conversion
+//? which never happens.
 export type ClientSessionLayout = Omit<SessionLayout, 'token' | 'csrfToken'>;
-
-/**
- * What page JS actually HOLDS — `ClientSessionLayout` after it has crossed the
- * wire as JSON.
- *
- * ADR 0018 treated "what session_v1 returns" and "what SessionProvider holds" as
- * one type. They are not, and never were: the route hands back real `Date`
- * objects, `JSON.stringify` turns them into ISO strings, and the client parses
- * strings back. The old shared type claimed `lastLogin: Date` on both sides, so
- * `session.lastLogin.getTime()` compiled in page code and threw at runtime.
- *
- * So: the ROUTE returns `ClientSessionLayout` (server-side, Dates intact — the
- * codegen projects it for the generated client types), and the CLIENT holds this.
- */
-export type ClientSessionPayload = Jsonify<ClientSessionLayout>;
 
 //? OAuth providers + the credentials form are now ENV-DRIVEN and read from the
 //? live registry via `GET /auth/providers` (a provider registers in

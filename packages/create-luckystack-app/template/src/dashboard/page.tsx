@@ -3,7 +3,7 @@
 
 import { useTranslator } from '@luckystack/core/client';
 import type { PageMiddleware } from '@luckystack/core/client';
-import type { ClientSessionPayload } from '../../config';
+import type { SessionLayout } from '../../config';
 
 const Dashboard = () => {
   const translate = useTranslator();
@@ -20,7 +20,7 @@ export const template = 'plain' as const;
 //? Per-page route guard. Logged-out visitors bounce to `/login`. Customize
 //? the function body for role-checks (e.g. `if (!session.admin) return;`
 //? returns `undefined` which sends the user back in browser history).
-export const middleware: PageMiddleware<ClientSessionPayload> = ({ session }) => {
+export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
   if (!session) return { success: false, redirect: '/login' };
   return { success: true };
 };

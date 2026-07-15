@@ -16,7 +16,7 @@ import { menuHandler } from "src/_functions/menuHandler";
 import { apiRequest } from "src/_sockets/apiRequest";
 import TwoFactorSection from "./_components/TwoFactorSection";
 
-import { backendUrl, ClientSessionPayload } from "../../config";
+import { backendUrl, SessionLayout } from "../../config";
 
 const stripAvatarVersion = (url: string) => url.replace(/[?&]v=\d+/, '');
 
@@ -50,7 +50,7 @@ export const template = 'home';
 //? (admin role, paid tier, etc.) extend the function body — return
 //? `{ success: false, redirect: '/...' }` to bounce, or `undefined` to
 //? send the user back in browser history with an optional toast.
-export const middleware: PageMiddleware<ClientSessionPayload> = ({ session }) => {
+export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
   if (!session) return { success: false, redirect: '/login' };
   return { success: true };
 };
@@ -71,7 +71,7 @@ const segmentedClass = (active: boolean) =>
       : 'bg-container2 border-container2-border text-common hover:bg-container2-hover hover:text-title'}`;
 
 export default function Home() {
-  const { session } = useSession<ClientSessionPayload>();
+  const { session } = useSession<SessionLayout>();
   const { setTheme: updateTheme } = useTheme();
   const setLanguage = useUpdateLanguage();
   const translate = useTranslator();
