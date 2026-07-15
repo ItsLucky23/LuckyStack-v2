@@ -2,7 +2,11 @@
 //? (side-effect import) so framework packages read your overrides via
 //? `getProjectConfig()`. Edit values here to tune the framework's behavior.
 
-import { registerProjectConfig } from '@luckystack/core';
+//? `/config`, not the main barrel: this file is imported by BOTH bundles, and the
+//? barrel drags the whole server surface — ioredis included — into the browser.
+//? The subpath exposes only the config registry (both share one registry, so
+//? `getProjectConfig()` from the barrel still sees what is registered here).
+import { registerProjectConfig } from '@luckystack/core/config';
 //? Frontend + backend ports live in ONE pure-data file (no side-effects) so
 //? `vite.config.ts` can read them without importing this config. Re-exported so
 //? app code + `server.ts` share the same single source of truth.

@@ -9,7 +9,7 @@ import { defineConfig } from 'tsup';
 //? alongside this package. Third-party deps come from node_modules at
 //? consume time (skipNodeModulesBundle).
 export default defineConfig({
-  entry: ['src/index.ts', 'src/client.ts', 'src/eslint/index.ts', 'src/apiTypeStubs.ts'],
+  entry: ['src/index.ts', 'src/client.ts', 'src/config.ts', 'src/eslint/index.ts', 'src/apiTypeStubs.ts'],
   format: ['esm'],
   dts: true,
   sourcemap: true,

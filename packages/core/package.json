@@ -45,6 +45,10 @@
       "types": "./dist/client.d.ts",
       "import": "./dist/client.js"
     },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    },
     "./eslint": {
       "types": "./dist/eslint/index.d.ts",
       "import": "./dist/eslint/index.js"

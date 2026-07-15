@@ -1,9 +1,13 @@
 import { LANGUAGE, THEME, User } from "@prisma/client";
 import type { BaseSessionLayout } from '@luckystack/core';
-//? Import from the specific file (not the barrel) so Vite's client bundle
-//? doesn't drag server-only core modules (bootUuid, ioredis, etc.) into the
-//? browser. Same rule we use in apiRequest/syncRequest.
-import { registerProjectConfig } from './packages/core/src/projectConfig';
+//? `@luckystack/core/config`, NOT the main barrel: this file is imported by both
+//? bundles, and the barrel drags server-only modules (ioredis, bootUuid, paths)
+//? into Vite's client bundle. That was the reason this used to reach straight
+//? into `./packages/core/src/projectConfig` — but a deep source import resolves
+//? to a SEPARATE module instance under Bun, so the config registered into a
+//? registry `@luckystack/server` never read and the boot died. The subpath solves
+//? both: it is client-safe AND it shares one registry with the barrel.
+import { registerProjectConfig } from '@luckystack/core/config';
 //? Single source of truth for frontend + backend ports (pure data; see
 //? config.ports.ts). Re-exported below so vite/app code + server share one source.
 import { ports } from './config.ports';
