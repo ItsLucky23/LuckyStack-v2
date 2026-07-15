@@ -1,0 +1,20 @@
+{
+  "//": "Standalone program for the DEVKIT-1 reproduction fixtures. MikroORM's decorators are LEGACY-style ((target: any, propertyName: string) => any), so they need experimentalDecorators — which the repo-wide tsconfigs deliberately do not set. tsProgram.test.ts builds its ts.Program from THIS config instead of getServerProgram().",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "noErrorTruncation": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"]
+}

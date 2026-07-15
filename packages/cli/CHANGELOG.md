@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`detectPackageManager(root, pkg)` is now exported** from `lib/project.ts`. No behaviour
+  change — it already resolved `bun` from a `packageManager: "bun@…"` field or a
+  `bun.lockb` / `bun.lock`, which is exactly what `create-luckystack-app --pm=bun` now
+  writes, so `add` / `remove` / `manage` installs pick bun up with no further wiring. The
+  export exists so a cross-package parity test can pin that seam (the scaffolder is
+  zero-dep and cannot import this package at runtime). pnpm/yarn stay recognised here for
+  a consumer who switches by hand, even though the scaffold wizard offers npm + bun only.
+
 - **`luckystack upgrade [<target>]`** — READ-ONLY command that gathers the upgrade plan
   (installed `@luckystack/core` version, every installed `@luckystack/*` + its CHANGELOG
   path, scaffold-manifest presence, the full step sequence + gotchas) into

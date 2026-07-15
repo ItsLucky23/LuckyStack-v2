@@ -50,6 +50,8 @@ export interface CliArgs {
   cron: boolean;
   /** `--ai-browser=<all|agent-browser|none>`: AI browser-testing tooling (null = unspecified → DEFAULT_CHOICES). */
   aiBrowserTooling: AiBrowserTooling | null;
+  /** `--pm=<npm|bun>`: package manager used for the post-scaffold install (null = unspecified → DEFAULT_CHOICES). */
+  packageManager: PackageManager | null;
   //? CFG-01 — every wizard choice now has a matching CLI flag so the scaffold is
   //? fully scriptable (CI / AI / `--no-prompt`). `null` = flag not passed → the
   //? wizard asks (interactive) or the default applies (`--no-prompt`).
@@ -79,6 +81,7 @@ export const VALID_FLAGS = [
   '--presence', '--error-tracking', '--docs-ui', '--secret-manager', '--router', '--cron',
   '--ai-docs', '--no-ai-docs',
   '--ai-browser=<all|agent-browser|none>',
+  '--pm=<npm|bun>',
   '--help', '-h',
 ] as const;
 
@@ -111,6 +114,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
   let emailProvider: EmailProvider | null = null;
   let monitoringProvider: MonitoringProvider | null = null;
   let aiInstructions: boolean | null = null;
+  let packageManager: PackageManager | null = null;
   for (const arg of argv) {
     switch (arg) {
     case '--no-install': {
@@ -160,6 +164,8 @@ export const parseArgs = (argv: string[]): CliArgs => {
     }
     default: { if (arg.startsWith('--ai-browser=')) {
       aiBrowserTooling = parseValueFlag('--ai-browser', arg.slice('--ai-browser='.length), PROVIDER_OPTIONS.aiBrowserTooling);
+    } else if (arg.startsWith('--pm=')) {
+      packageManager = parseValueFlag('--pm', arg.slice('--pm='.length), PROVIDER_OPTIONS.packageManager);
     } else if (arg.startsWith('--orm=')) {
       orm = parseValueFlag('--orm', arg.slice('--orm='.length), PROVIDER_OPTIONS.orm);
     } else if (arg.startsWith('--db=')) {
@@ -192,7 +198,7 @@ export const parseArgs = (argv: string[]): CliArgs => {
   }
   return {
     projectName, install, prompt, help, presence, errorTracking, docsUi, secretManager, router, cron, aiBrowserTooling,
-    orm, dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, aiInstructions,
+    orm, dbProvider, authMode, oauthProviders, emailProvider, monitoringProvider, aiInstructions, packageManager,
   };
 };
 
@@ -215,6 +221,11 @@ const PROVIDER_OPTIONS = {
   emailProvider: ['none', 'console', 'resend', 'smtp'],
   monitoringProvider: ['none', 'sentry', 'datadog', 'posthog'],
   aiBrowserTooling: ['all', 'agent-browser', 'none'],
+  //? Package manager used for the post-scaffold install AND recorded in the
+  //? rendered package.json. npm + bun ONLY — pnpm/yarn are deliberately not
+  //? offered (they add wizard/test surface nobody asked for). `@luckystack/cli`'s
+  //? `detectPackageManager` still recognises them if a consumer switches by hand.
+  packageManager: ['npm', 'bun'],
 } as const;
 
 type OrmProvider = (typeof PROVIDER_OPTIONS.orm)[number];
@@ -234,6 +245,17 @@ type OAuthProvider = (typeof PROVIDER_OPTIONS.oauthProviders)[number];
 type EmailProvider = (typeof PROVIDER_OPTIONS.emailProvider)[number];
 type MonitoringProvider = (typeof PROVIDER_OPTIONS.monitoringProvider)[number];
 type AiBrowserTooling = (typeof PROVIDER_OPTIONS.aiBrowserTooling)[number];
+type PackageManager = (typeof PROVIDER_OPTIONS.packageManager)[number];
+
+/**
+ * Minimum Bun version the scaffold targets. Single source of truth for BOTH
+ * the rendered `engines.bun` range and the `packageManager` field, so the two
+ * can never drift. Deliberately a fixed constant rather than the scaffolding
+ * machine's actual `bun --version`: the manifest (ADR 0021) hashes the rendered
+ * package.json, and a machine-dependent value would make every `luckystack
+ * update` re-render read as "user-modified" and spam a `.new` sidecar.
+ */
+export const BUN_VERSION_FLOOR = '1.1.0';
 
 interface ScaffoldChoices {
   /**
@@ -281,6 +303,14 @@ interface ScaffoldChoices {
    * sub-feature). Dev-tools only — never runtime dependencies.
    */
   aiBrowserTooling: AiBrowserTooling;
+  /**
+   * Package manager for the post-scaffold install. `'npm'` (default — no
+   * surprise for existing users) or `'bun'`. Drives which binary
+   * `runNpmInstall` spawns and, for bun, adds a `packageManager` field to the
+   * rendered package.json so `@luckystack/cli`'s `detectPackageManager` keeps
+   * using the same tool for every later `add`/`remove`/`manage` install.
+   */
+  packageManager: PackageManager;
 }
 
 //? Lean-by-default: every optional package/feature starts OFF so a fresh scaffold
@@ -303,6 +333,9 @@ export const DEFAULT_CHOICES: ScaffoldChoices = {
   cron: false,
   aiInstructions: true,
   aiBrowserTooling: 'agent-browser',
+  //? npm stays the default: it is what every existing scaffold used, so an
+  //? unattended `--no-prompt` run keeps producing byte-identical projects.
+  packageManager: 'npm',
 };
 
 const pickFromList = async <T extends string>(
@@ -436,6 +469,14 @@ const runPromptsFallback = async (
         'Set up AI browser-testing tooling? (all = agent-browser + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none)',
         PROVIDER_OPTIONS.aiBrowserTooling,
         'agent-browser',
+      );
+    }
+    if (need('packageManager')) {
+      answers.packageManager = await pickFromList(
+        rl,
+        'Which package manager? (npm = default, works everywhere; bun = much faster, must already be on your PATH)',
+        PROVIDER_OPTIONS.packageManager,
+        'npm',
       );
     }
     return convertAnswersToChoices(answers);
@@ -763,6 +804,7 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
     aiBrowserTooling: answers.aiInstructions === 'No'
       ? 'none'
       : asOption(answers.aiBrowserTooling, PROVIDER_OPTIONS.aiBrowserTooling, 'agent-browser'),
+    packageManager: asOption(answers.packageManager, PROVIDER_OPTIONS.packageManager, 'npm'),
   };
 };
 
@@ -972,6 +1014,18 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
       ].join('\n'),
       options: PROVIDER_OPTIONS.aiBrowserTooling, defaultValue: 'agent-browser', skip: (a) => a.aiInstructions === 'No',
     },
+    {
+      key: 'packageManager', type: 'select', label: 'Which package manager?',
+      description: 'Used for the install right after scaffolding, and by every later `luckystack` command.',
+      details: [
+        'npm = the default; works everywhere, nothing extra to install. bun = the',
+        'much faster installer/runtime — pick it only if bun is already on your PATH.',
+        'Your choice is recorded in package.json (packageManager) so `luckystack',
+        'add/remove/manage` keeps using the same tool. Prisma client generation',
+        'always runs on Node either way (Prisma\'s CLI is a Node program).',
+      ].join('\n'),
+      options: PROVIDER_OPTIONS.packageManager, defaultValue: 'npm',
+    },
   ], presets);
 
   return convertAnswersToChoices(answers);
@@ -996,6 +1050,7 @@ const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> =>
   if (args.cron) presets.cron = 'Yes';
   if (args.aiInstructions !== null) presets.aiInstructions = args.aiInstructions ? 'Yes' : 'No';
   if (args.aiBrowserTooling) presets.aiBrowserTooling = args.aiBrowserTooling;
+  if (args.packageManager) presets.packageManager = args.packageManager;
   return presets;
 };
 
@@ -1052,6 +1107,7 @@ const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
   if (args.cron) choices.cron = true;
   if (args.aiInstructions !== null) choices.aiInstructions = args.aiInstructions;
   if (args.aiBrowserTooling) choices.aiBrowserTooling = args.aiBrowserTooling;
+  if (args.packageManager) choices.packageManager = args.packageManager;
   return normalizeChoices(choices);
 };
 
@@ -1073,6 +1129,10 @@ Options:
                                               MongoDB; none = bring your own client via functions/db.ts.
                                               Auth on drizzle/mikro-orm ships a starter UserAdapter to
                                               finish; --orm=none forces --auth=none (no data layer).
+  --pm=<npm|bun>                              Package manager for the post-scaffold install (default npm).
+                                              bun must already be on your PATH; the choice is recorded in
+                                              package.json so later \`luckystack\` commands reuse it.
+                                              Prisma client generation always runs via npx (Node).
   --db=<mongodb|postgresql|mysql|sqlite>      Database provider (default mongodb).
   --auth=<none|credentials|credentials+oauth> Authentication mode (default 'none' = no auth).
   --oauth=<google,github,discord,facebook,microsoft>  OAuth providers (comma list; needs --auth=credentials+oauth).
@@ -1413,16 +1473,22 @@ const spawnResolved = (resolved: string, args: readonly string[], cwd: string): 
   return spawnSync(resolved, [...args], { cwd, stdio: 'inherit' });
 };
 
-const runNpmInstall = (cwd: string): void => {
-  console.log('\nInstalling dependencies (this may take a minute)...\n');
-  const resolved = resolveCommandPath('npm');
+//? `<pm> install` — the spawn is IDENTICAL for npm and bun (both take a bare
+//? `install`); only the resolved binary differs. bun resolves to `bun.exe` on
+//? Windows, so `spawnResolved`'s cmd-shim branch simply doesn't apply to it —
+//? the `.exe` takes the direct-spawn path. Do NOT "simplify" the shim branch
+//? away: npm still resolves to `C:\Program Files\nodejs\npm.cmd`, whose space
+//? silently broke installs before the outer+inner quote pair was added.
+const runNpmInstall = (cwd: string, packageManager: PackageManager): void => {
+  console.log(`\nInstalling dependencies with ${packageManager} (this may take a minute)...\n`);
+  const resolved = resolveCommandPath(packageManager);
   if (!resolved) {
-    console.error('\n[create-luckystack-app] Could not locate `npm` on PATH. Run `npm install` manually in the project directory.');
+    console.error(`\n[create-luckystack-app] Could not locate \`${packageManager}\` on PATH. Run \`${packageManager} install\` manually in the project directory.`);
     return;
   }
   const result = spawnResolved(resolved, ['install'], cwd);
   if (result.status !== 0) {
-    console.error('\n[create-luckystack-app] npm install failed. You can run it manually in the project directory.');
+    console.error(`\n[create-luckystack-app] \`${packageManager} install\` failed. You can run it manually in the project directory.`);
   }
 };
 
@@ -1430,6 +1496,26 @@ const runNpmInstall = (cwd: string): void => {
 //? on first build. We deliberately do NOT run `prisma db push` / `migrate`
 //? — that needs a live DATABASE_URL the user hasn't populated yet, and
 //? failing here would be the first thing they see.
+//?
+//? DELIBERATE: this stays on `npx` even when the project's package manager is
+//? bun. It is NOT an oversight — the three candidates were weighed:
+//?   - `bunx --bun prisma generate`: the ONLY variant that actually runs Prisma
+//?     on the Bun runtime, and the one Bun's own ecosystem guide shows. Rejected:
+//?     oven-sh/bun#14868 (open since Oct 2024, Windows) has `prisma generate`
+//?     HANGING FOREVER with no error and no client. A silent hang during a
+//?     first-run scaffold is the worst failure mode we can ship, and Windows is
+//?     a first-class target here (see the npm.cmd bug above). Prisma's own docs
+//?     scope `--bun` to `prisma init` only — never to `generate`.
+//?   - `bunx prisma generate` (what Prisma's Bun guide uses): buys nothing. The
+//?     CLI's `#!/usr/bin/env node` shebang makes bunx hand off to Node anyway,
+//?     so it is `npx` with extra indirection — and it still carries the Windows
+//?     hang reports.
+//?   - `npx prisma generate` (chosen): Prisma's CLI is a Node program and its
+//?     dynamic subcommand loading needs npm present alongside Bun regardless, so
+//?     a bun user loses nothing. `bun install` writes an ordinary node_modules
+//?     with .bin shims, so npx resolves the locally-installed prisma fine.
+//? This is only about which binary GENERATES the client; the generated client
+//? runs on Bun perfectly well. Revisit if bun#14868 closes.
 const runPrismaGenerate = (cwd: string): void => {
   console.log('\nGenerating Prisma client...\n');
   const resolved = resolveCommandPath('npx');
@@ -2321,6 +2407,31 @@ const wirePresence = (targetDir: string): void => {
 //? dependency + the run script. Env (ROUTER_PORT / LUCKYSTACK_ENV) is documented in
 //? docs/luckystack/ARCHITECTURE_MULTI_INSTANCE.md. A single-instance app never runs
 //? it — it's here so scaling out later is `npm run router`, no rewiring.
+//? Record the chosen package manager in the rendered package.json. Only bun is
+//? written: npm is the ecosystem default, so a `packageManager: "npm@x"` field
+//? would add a corepack-pinning promise the scaffold never made before (and
+//? every existing scaffold would suddenly differ). The field is the signal
+//? `@luckystack/cli`'s `detectPackageManager` reads FIRST — so every later
+//? `luckystack add/remove/manage` install uses bun too, and it works even with
+//? `--no-install`, where no `bun.lock` exists yet for the lockfile check.
+//? The version is the fixed `BUN_VERSION_FLOOR`, never the scaffolding
+//? machine's `bun --version` — see that constant for why (manifest hashing).
+const wirePackageManager = (targetDir: string, choices: ScaffoldChoices): void => {
+  if (choices.packageManager !== 'bun') return;
+  const pkgPath = path.join(targetDir, 'package.json');
+  if (!fs.existsSync(pkgPath)) return;
+  let pkg: { name?: string; packageManager?: string };
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
+    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
+  } catch {
+    console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping package-manager wiring.`);
+    return;
+  }
+  pkg.packageManager = `bun@${BUN_VERSION_FLOOR}`;
+  fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+};
+
 const wireRouter = (targetDir: string, luckystackVersion: string): void => {
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
@@ -3168,6 +3279,7 @@ Choices:
   secret-mgr:  ${choices.secretManager ? 'installed' : 'skipped'}
   router:      ${choices.router ? 'installed' : 'skipped'}
   cron:        ${choices.cron ? 'installed' : 'skipped'}
+  package-mgr: ${choices.packageManager}
   ai-docs:     ${choices.aiInstructions ? 'included (+ pre-commit AI-index hook)' : 'skipped'}
   ai-browser:  ${choices.aiBrowserTooling}
 
@@ -3243,6 +3355,11 @@ const main = async (): Promise<void> => {
     //? `npm run router` script (topology lives in the scaffolded deploy.config.ts).
     if (choices.router) wireRouter(targetDir, luckystackVersion);
 
+    //? Record the package-manager choice in package.json (bun only) so every
+    //? later `luckystack` install detects the same tool. Must run before the
+    //? manifest write below — it mutates a manifest-hashed file.
+    wirePackageManager(targetDir, choices);
+
     //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
     //? the framework's AI docs so the consumer's AI agents inherit full context,
     //? and install a pre-commit hook that keeps the AI snapshot files fresh. When
@@ -3273,7 +3390,7 @@ const main = async (): Promise<void> => {
     console.log('Files written.');
 
     if (args.install) {
-      runNpmInstall(targetDir);
+      runNpmInstall(targetDir, choices.packageManager);
       //? Only the prisma data layer has a schema.prisma to generate from.
       if (choices.orm === 'prisma') runPrismaGenerate(targetDir);
     } else {

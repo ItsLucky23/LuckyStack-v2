@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Package-manager choice — `--pm=<npm|bun>`** (new wizard step + CLI flag, default
+  `npm`). Picks the tool used for the post-scaffold install. **npm + bun only** —
+  pnpm/yarn are deliberately not offered and `--pm=pnpm` exits 2. Existing behaviour is
+  unchanged when the flag is omitted: `--no-prompt` still scaffolds an npm project
+  byte-for-byte.
+  - `--pm=bun` records `"packageManager": "bun@1.1.0"` in the rendered `package.json`,
+    which is what `@luckystack/cli`'s `detectPackageManager` reads — so every later
+    `luckystack add` / `remove` / `manage` install uses bun too (it works even under
+    `--no-install`, before any `bun.lock` exists).
+  - The choice is recorded in `.luckystack/scaffold.json` so `luckystack update`
+    re-renders with it.
+  - Requires bun already on your `PATH`; if it isn't found the scaffold skips the install
+    and prints a `bun install` hint instead of failing.
+- The scaffold `package.json` now declares a `bun` engine range (`>=1.1.0`) alongside
+  `node`. Additive — npm projects are unaffected.
+
 ### Changed
 
 - The scaffold docs copy now strips the framework's OWN dated finding-sets

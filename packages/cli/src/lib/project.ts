@@ -348,7 +348,14 @@ const resolveCommandPath = (command: string): string | null => {
 //? Detect the package manager in use by checking for lockfiles and the
 //? `packageManager` field in package.json. Checked in priority order so a
 //? project that committed multiple lockfiles still picks the right one.
-const detectPackageManager = (root: string, pkg: PackageJson): string => {
+//? Exported for the cross-package parity test that pins this detector against
+//? the `packageManager` field create-luckystack-app's `--pm=bun` actually
+//? writes — the scaffolder can't import it (zero-dep, no cli dependency), so
+//? the seam between "what the scaffold records" and "what every later
+//? `luckystack` install spawns" is guarded by a test instead of a shared import.
+//? pnpm/yarn stay recognised here (a consumer may switch by hand) even though
+//? the scaffold wizard only offers npm + bun.
+export const detectPackageManager = (root: string, pkg: PackageJson): string => {
   const pm = typeof pkg.packageManager === 'string' ? pkg.packageManager : '';
   if (pm.startsWith('pnpm')) return 'pnpm';
   if (pm.startsWith('yarn')) return 'yarn';

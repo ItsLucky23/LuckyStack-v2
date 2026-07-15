@@ -1,4 +1,12 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+//? Cross-package import, TEST-ONLY (the shipped scaffolder has no cli
+//? dependency and must stay zero-dep) — same precedent as the cli's
+//? `updateParity.test.ts`, which imports this package to pin the manifest
+//? hashing. Here it pins the `packageManager` field the scaffold writes
+//? against the detector every later `luckystack` install actually runs.
+import { detectPackageManager } from "../../cli/src/lib/project";
 
 //? These tests cover the PURE helpers of the scaffold CLI. The module's
 //? `main()` is guarded behind an `isCliEntry()` check (it only runs when this
@@ -18,6 +26,7 @@ import {
   normalizeChoices,
   DEFAULT_CHOICES,
   VALID_FLAGS,
+  BUN_VERSION_FLOOR,
 } from "./index";
 
 describe("slugify", () => {
@@ -236,6 +245,7 @@ describe("parseArgs", () => {
     emailProvider: null,
     monitoringProvider: null,
     aiInstructions: null,
+    packageManager: null,
   };
 
   it("returns defaults for empty argv (install + prompt on, no help, no name)", () => {
@@ -304,6 +314,27 @@ describe("parseArgs", () => {
     expect(parseArgs(["my-app", "--ai-browser=all"]).aiBrowserTooling).toBe("all");
     expect(parseArgs(["my-app", "--ai-browser=agent-browser"]).aiBrowserTooling).toBe("agent-browser");
     expect(parseArgs(["my-app", "--ai-browser=none"]).aiBrowserTooling).toBe("none");
+  });
+
+  //? ───────── --pm: the package-manager axis (npm + bun ONLY) ─────────
+  it("parses --pm=<value> (default null = wizard asks / npm applies)", () => {
+    expect(parseArgs(["my-app"]).packageManager).toBeNull();
+    expect(parseArgs(["my-app", "--pm=npm"]).packageManager).toBe("npm");
+    expect(parseArgs(["my-app", "--pm=bun"]).packageManager).toBe("bun");
+  });
+
+  it("exits with code 2 on an invalid --pm value", () => {
+    expect(() => parseArgs(["my-app", "--pm=bogus"])).toThrow("process.exit:2");
+    expect(exitSpy).toHaveBeenCalledWith(2);
+  });
+
+  //? SCOPE (user decision, final): pnpm + yarn are explicitly DROPPED from the
+  //? wizard. They are NOT typos to be quietly accepted — a `--pm=pnpm` must
+  //? fail loudly rather than silently scaffold an npm project.
+  it("rejects the deliberately-unsupported pnpm / yarn values", () => {
+    for (const value of ["pnpm", "yarn"]) {
+      expect(() => parseArgs(["my-app", `--pm=${value}`]), value).toThrow("process.exit:2");
+    }
   });
 
   it("exits with code 2 on an invalid --ai-browser value", () => {
@@ -488,5 +519,53 @@ describe("normalizeChoices — auth × orm invariants (ADR 0020, relaxed)", () =
   it("keeps auth ON for prisma (unchanged behavior)", () => {
     const out = normalizeChoices({ ...DEFAULT_CHOICES, authMode: "credentials" });
     expect(out.authMode).toBe("credentials");
+  });
+});
+
+describe("package-manager axis (--pm)", () => {
+  it("defaults to npm — an existing --no-prompt scaffold must not change tool", () => {
+    //? The whole point of the npm default: every project scaffolded before the
+    //? --pm axis existed, and every unattended CI run, keeps its behavior.
+    expect(DEFAULT_CHOICES.packageManager).toBe("npm");
+  });
+
+  it("advertises --pm in VALID_FLAGS (drives the help banner + unknown-flag hint)", () => {
+    expect(VALID_FLAGS).toContain("--pm=<npm|bun>");
+  });
+
+  //? DRIFT GUARD: `wirePackageManager` writes `bun@${BUN_VERSION_FLOOR}` into
+  //? package.json while the template declares the `engines.bun` range. They are
+  //? two hand-written spellings of ONE fact — pin them together so a bump to
+  //? either side can't silently leave a project claiming to need a bun version
+  //? it doesn't pin (or pin one it says it can't run).
+  it("keeps the template's engines.bun floor in step with BUN_VERSION_FLOOR", () => {
+    const templatePkg = JSON.parse(
+      fs.readFileSync(path.join(import.meta.dirname, "..", "template", "package.json"), "utf8"),
+    ) as { engines?: Record<string, string> };
+    expect(templatePkg.engines?.bun).toBe(`>=${BUN_VERSION_FLOOR}`);
+  });
+
+  it("still declares the node engine (bun is additive, not a replacement)", () => {
+    const templatePkg = JSON.parse(
+      fs.readFileSync(path.join(import.meta.dirname, "..", "template", "package.json"), "utf8"),
+    ) as { engines?: Record<string, string> };
+    expect(templatePkg.engines?.node).toBeTruthy();
+  });
+
+  //? THE CROSS-PACKAGE SEAM. The scaffolder records the choice as a
+  //? `packageManager` field; `@luckystack/cli` re-derives it from that field on
+  //? every later add/remove/manage install. The scaffolder cannot import the
+  //? cli (zero-dep, no dependency edge), so nothing but this test stops the two
+  //? spellings from drifting — and drift here is SILENT: the project would just
+  //? quietly fall back to npm installs forever.
+  it("writes a packageManager field the cli's detectPackageManager reads back as bun", () => {
+    expect(detectPackageManager("/nonexistent-root", { packageManager: `bun@${BUN_VERSION_FLOOR}` }))
+      .toBe("bun");
+  });
+
+  it("leaves the cli detecting npm when no packageManager field was written", () => {
+    //? The npm path writes NO field (see wirePackageManager) — the detector must
+    //? still land on npm rather than an undefined-ish value.
+    expect(detectPackageManager("/nonexistent-root", {})).toBe("npm");
   });
 });

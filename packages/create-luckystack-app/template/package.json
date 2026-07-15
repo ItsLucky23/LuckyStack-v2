@@ -4,7 +4,8 @@
   "version": "0.0.1",
   "type": "module",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0",
+    "bun": ">=1.1.0"
   },
   "scripts": {
     "client": "vite --host 0.0.0.0",

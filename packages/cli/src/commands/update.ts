@@ -141,6 +141,12 @@ export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
     const value = choices[key];
     return typeof value === 'string' && value.length > 0 ? value : null;
   };
+  //? A manifest written before the --pm axis existed has no `packageManager`
+  //? key, so `str()` returns null and the re-render correctly falls back to the
+  //? npm default. Without this replay a bun project re-renders as npm, its
+  //? package.json differs, and every update spams a sidecar.
+  const pm = str('packageManager');
+  if (pm) flags.push(`--pm=${pm}`);
   const orm = str('orm');
   if (orm) flags.push(`--orm=${orm}`);
   const db = str('dbProvider');

@@ -103,4 +103,24 @@ describe('writeScaffoldManifest', () => {
     //? The manifest must not list itself.
     expect(onDisk.files.some((f) => f.path.endsWith(SCAFFOLD_MANIFEST_FILE))).toBe(false);
   });
+
+  //? The packageManager choice has to SURVIVE to disk, because it is what a
+  //? later `luckystack update` replays to re-render an identical project. It
+  //? rides the generic `choices` record (no per-key allow-list), so this pins
+  //? that the record really is pass-through for a newly added axis.
+  it('round-trips the packageManager choice verbatim', () => {
+    write('package.json', '{"name":"t","packageManager":"bun@1.1.0"}');
+
+    writeScaffoldManifest(dir, {
+      luckystackVersion: '0.6.7',
+      projectName: 'my-app',
+      choices: { dbProvider: 'mongodb', packageManager: 'bun' },
+      isTextFile: isTextByExt,
+    });
+
+    const onDisk = JSON.parse(
+      fs.readFileSync(path.join(dir, SCAFFOLD_MANIFEST_DIR, SCAFFOLD_MANIFEST_FILE), 'utf8'),
+    ) as ScaffoldManifest;
+    expect(onDisk.choices.packageManager).toBe('bun');
+  });
 });

@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (26)
+## Decisions (27)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -39,6 +39,7 @@
 | 0024 | email code login and totp 2fa | 🟢 accepted | auth, login, 2fa, security | — | `docs/decisions/0024-email-code-login-and-totp-2fa.md` |
 | 0025 | luckystack update app scope | 🟢 accepted | cli, update, scaffold, dx | — | `docs/decisions/0025-luckystack-update-app-scope.md` |
 | 0026 | secret manager redis pointer boot | 🟢 accepted | core, server, redis, secret-manager, boot | — | `docs/decisions/0026-secret-manager-redis-pointer-boot.md` |
+| 0027 | Offer npm + bun as the scaffold's package managers, and generate Prisma via npx even on bun | 🟢 accepted | cli, scaffold, packaging, bun, prisma | — | `docs/decisions/0027-package-manager-axis-npm-and-bun.md` |
 
 ## Summaries
 
@@ -259,6 +260,14 @@ Add an opt-in `--app` scope to `luckystack update`. It reuses the exact mechanis
 Fix the timing at the framework level, without making core depend on secret-manager and without moving secret-manager init into `bootstrapLuckyStack`.
 
 → `docs/decisions/0026-secret-manager-redis-pointer-boot.md`
+
+### 0027 — Offer npm + bun as the scaffold's package managers, and generate Prisma via npx even on bun
+
+**0027** · accepted · tags: cli, scaffold, packaging, bun, prisma · 2026-07-15
+
+*Offer npm + bun only.** `--pm=<npm|bun>` threads through the existing flag→preset→choice pipeline exactly as the `cron` opt-in does; npm stays the default so an unattended `--no-prompt` run keeps producing byte-identical projects. `packageManager: "bun@<floor>"` is written for bun only — npm writes no field, because adding one would introduce a corepack pin the scaffold never made and change every existing project. The recorded choice round-trips through the manifest and `luckystack update`.
+
+→ `docs/decisions/0027-package-manager-axis-npm-and-bun.md`
 
 ## Code governed by decisions
 

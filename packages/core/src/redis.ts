@@ -29,16 +29,37 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+//? Every connection field is read from `process.env` at CALL time, never from
+//? the frozen `env` snapshot. A @luckystack/secret-manager POINTER is replaced
+//? in `process.env` at resolve time, which happens AFTER core's module-eval
+//? bootstrap froze `env` — so the snapshot can still hold the pointer. This
+//? applies to host/port exactly as it does to the credentials: `REDIS_HOST` is
+//? a legal pointer target too, and a pointer passes the Zod `min(1)` check, so
+//? the failure is a silent connect to a host literally named after the pointer.
+//? `getEnv()` is NOT an alternative — `bootstrapEnv` returns a cached singleton,
+//? so it hands back the same stale snapshot.
+//?
+//? The `env.*` fallbacks only guard a caller that cleared `process.env`:
+//? `env.ts`'s `applyResolvedDefaultsToProcessEnv` mirrors the resolved Zod
+//? defaults back into `process.env`, so in normal boot they are already set.
+//? An EMPTY string must fall back to the validated snapshot rather than reach
+//? ioredis as a blank host/port — hence the explicit emptiness check (`??`
+//? would let `''` win, which is why this is not a nullish-coalescing site).
+const readEnvOrSnapshot = (raw: string | undefined, fallback: string): string =>
+  raw === undefined || raw === '' ? fallback : raw;
+
+const readRedisHost = (): string => readEnvOrSnapshot(process.env.REDIS_HOST, env.REDIS_HOST);
+const readRedisPort = (): number => Number.parseInt(readEnvOrSnapshot(process.env.REDIS_PORT, env.REDIS_PORT), 10);
+
 //? Build a fresh ioredis client from the CURRENT env (read at call time so
-//? dotenv / secret-manager timing doesn't capture a stale value). Password +
-//? username come from `process.env`; host/port from the frozen `env` snapshot.
+//? dotenv / secret-manager timing doesn't capture a stale value).
 const constructRedisClient = (): RedisClient => {
   const maxReconnectAttempts = readPositiveIntEnv('LUCKYSTACK_REDIS_MAX_RECONNECTS', DEFAULT_MAX_REDIS_RECONNECT_ATTEMPTS);
   const maxBackoffMs = readPositiveIntEnv('LUCKYSTACK_REDIS_MAX_BACKOFF_MS', DEFAULT_MAX_REDIS_BACKOFF_MS);
 
   const client = new Redis({
-    host: env.REDIS_HOST,
-    port: Number.parseInt(env.REDIS_PORT, 10),
+    host: readRedisHost(),
+    port: readRedisPort(),
     ...(process.env.REDIS_USER && { username: process.env.REDIS_USER }),
     ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
 
@@ -162,8 +183,8 @@ export interface RedisConnectionOptions {
 }
 
 export const getRedisConnectionOptions = (): RedisConnectionOptions => ({
-  host: env.REDIS_HOST,
-  port: Number.parseInt(env.REDIS_PORT, 10),
+  host: readRedisHost(),
+  port: readRedisPort(),
   ...(process.env.REDIS_USER ? { username: process.env.REDIS_USER } : {}),
   ...(process.env.REDIS_PASSWORD ? { password: process.env.REDIS_PASSWORD } : {}),
 });

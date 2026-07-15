@@ -1,0 +1,452 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden baseline — generated route types > pins every unresolved type symbol the extractors report 1`] = `{}`;
+
+exports[`golden baseline — generated route types > pins the inlined input + output type of every API route 1`] = `
+{
+  "_api/logout_v1.ts": {
+    "input": "{
+  [key: string]: never
+}",
+    "output": "{
+  status: 'success';
+  result: true
+}",
+  },
+  "_api/session_v1.ts": {
+    "input": "{
+  [key: string]: never
+}",
+    "output": "{
+  status: 'success';
+  result: null
+} | {
+  status: 'success';
+  result: {
+    name: string;
+    id: string;
+    email: string;
+    admin: boolean;
+    avatar: string;
+    avatarFallback: string;
+    language: 'nl' | 'en' | 'de' | 'fr';
+    theme: 'dark' | 'light';
+    provider: 'credentials' | 'google' | 'github' | 'x' | 'facebook' | 'linkedIn' | 'apple' | 'discord' | 'instagram';
+    preferences: JsonValue;
+    lastLogin: null | Date;
+    createdAt: Date;
+    updatedAt: Date;
+    location?: undefined | {
+        pathName: string;
+        searchParams?: undefined | {
+            [key: string]: string
+          }
+      };
+    previousLogin?: undefined | null | string | Date;
+    roomCodes?: undefined | string[]
+  }
+}",
+  },
+  "billing/_api/listInvoices_v1.ts": {
+    "input": "{
+  [key: string]: never
+}",
+    "output": "{
+  status: 'success';
+  result: {
+    invoices: never[];
+    ownerId: string
+  }
+}",
+  },
+  "playground/_api/echo_v1.ts": {
+    "input": "{
+  message: string
+}",
+    "output": "{
+  status: 'success';
+  result: {
+    echoed: string;
+    receivedAt: string;
+    sessionId: null | string
+  }
+}",
+  },
+  "playground/_api/spam_v1.ts": {
+    "input": "{
+  [key: string]: never
+}",
+    "output": "{
+  status: 'success';
+  result: {
+    ok: true;
+    at: string;
+    sessionId: null | string
+  }
+}",
+  },
+  "playground/_api/streamCounter_v1.ts": {
+    "input": "{
+  ticks?: undefined | number;
+  intervalMs?: undefined | number
+}",
+    "output": "{
+  status: 'success';
+  result: {
+    totalTicks: number;
+    finalSum: number
+  }
+}",
+  },
+  "playground/_api/testEmail_v1.ts": {
+    "input": "{
+  email: string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'playground.testEmail.devOnly'
+} | {
+  status: 'error';
+  errorCode: 'login.invalidEmailFormat'
+} | {
+  status: 'success';
+  result: {
+    ok: false;
+    reason: 'email-package-not-installed';
+    adapter: null;
+    from: null
+  }
+} | {
+  status: 'success';
+  result: {
+    ok: boolean;
+    reason: null | string;
+    id: null | string
+  }
+}",
+  },
+  "playground/_api/throwError_v1.ts": {
+    "input": "{
+  mode?: undefined | 'throw' | 'returnError';
+  errorCode?: undefined | string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: string
+}",
+  },
+  "reset-password/_api/confirmReset_v1.ts": {
+    "input": "{
+  token: string;
+  password: string;
+  confirmPassword: string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'login.forgotPasswordDisabled'
+} | {
+  status: 'error';
+  errorCode: 'login.resetInvalidToken'
+} | {
+  status: 'error';
+  errorCode: 'login.passwordNotMatch'
+} | {
+  status: 'error';
+  errorCode: string
+} | {
+  status: 'success';
+  result: { }
+}",
+  },
+  "reset-password/_api/sendReset_v1.ts": {
+    "input": "{
+  email: string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'login.forgotPasswordDisabled'
+} | {
+  status: 'error';
+  errorCode: 'login.invalidEmailFormat'
+} | {
+  status: 'success';
+  result: { }
+}",
+  },
+  "settings/_api/changePassword_v1.ts": {
+    "input": "{
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'login.empty'
+} | {
+  status: 'error';
+  errorCode: 'login.passwordCharacterMinimum'
+} | {
+  status: 'error';
+  errorCode: 'login.passwordCharacterLimit'
+} | {
+  status: 'error';
+  errorCode: 'login.passwordNotMatch'
+} | {
+  status: 'error';
+  errorCode: 'login.wrongPassword'
+} | {
+  status: 'error';
+  errorCode: string
+} | {
+  status: 'success';
+  result: {
+    revokedSessions: number
+  }
+}",
+  },
+  "settings/_api/confirmEmailChange_v1.ts": {
+    "input": "{
+  token: string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'settings.emailChange.invalidToken'
+} | {
+  status: 'error';
+  errorCode: 'settings.emailChange.emailTaken'
+} | {
+  status: 'success';
+  result: {
+    revokedSessions: number
+  }
+}",
+  },
+  "settings/_api/deleteAccount_v1.ts": {
+    "input": "{
+  confirmation: string;
+  password?: undefined | string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'auth.forbidden'
+} | {
+  status: 'error';
+  errorCode: 'login.wrongPassword'
+} | {
+  status: 'error';
+  errorCode: string
+} | {
+  status: 'error';
+  errorCode: 'api.internalServerError'
+} | {
+  status: 'success';
+  result: { }
+}",
+  },
+  "settings/_api/listSessions_v1.ts": {
+    "input": "{
+  [key: string]: never
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'common.500'
+} | {
+  status: 'success';
+  result: {
+    sessions: ({
+        handle: string;
+        expiresInSeconds: null | number;
+        isCurrent: boolean
+      })[]
+  }
+}",
+  },
+  "settings/_api/requestEmailChange_v1.ts": {
+    "input": "{
+  newEmail: string;
+  currentPassword?: undefined | string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'settings.emailChange.invalidEmail'
+} | {
+  status: 'error';
+  errorCode: 'settings.emailChange.emailSameAsCurrent'
+} | {
+  status: 'error';
+  errorCode: 'settings.emailChange.currentPasswordRequired'
+} | {
+  status: 'error';
+  errorCode: 'settings.emailChange.wrongCurrentPassword'
+} | {
+  status: 'success'
+} | {
+  status: 'error';
+  errorCode: string
+} | {
+  status: 'error';
+  errorCode: 'settings.emailChange.emailSendFailed'
+}",
+  },
+  "settings/_api/revokeSession_v1.ts": {
+    "input": "{
+  handle: string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'session.invalid'
+} | {
+  status: 'error';
+  errorCode: 'common.500'
+} | {
+  status: 'error';
+  errorCode: 'auth.forbidden'
+} | {
+  status: 'success';
+  result: { }
+}",
+  },
+  "settings/_api/signOutEverywhere_v1.ts": {
+    "input": "{
+  [key: string]: never
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'common.500'
+} | {
+  status: 'success';
+  result: {
+    revokedSessions: number
+  }
+}",
+  },
+  "settings/_api/updatePreferences_v1.ts": {
+    "input": "{
+  preferences: {
+    notifyOnNewSignIn?: undefined | false | true;
+    notifyOnPasswordChange?: undefined | false | true
+  }
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'common.500'
+} | {
+  status: 'success';
+  result: {
+    preferences: {
+      [key: string]: boolean
+    }
+  }
+}",
+  },
+  "settings/_api/updateUser_v1.ts": {
+    "input": "{
+  name?: undefined | string;
+  theme?: undefined | 'dark' | 'light';
+  language?: undefined | 'nl' | 'en' | 'de' | 'fr';
+  avatar?: undefined | string
+}",
+    "output": "{
+  status: 'error';
+  errorCode: 'login.nameCharacterLimit'
+} | {
+  status: 'error';
+  errorCode: 'api.invalidInputType'
+} | {
+  status: 'error';
+  errorCode: 'avatar.invalidFormat'
+} | {
+  status: 'error';
+  errorCode: 'avatar.uploadFailed'
+} | {
+  status: 'error';
+  errorCode: string
+} | {
+  status: 'error';
+  errorCode: 'session.invalid'
+} | {
+  status: 'success';
+  result: { }
+}",
+  },
+  "vehicles/_api/listVehicles_v1.ts": {
+    "input": "{
+  [key: string]: never
+}",
+    "output": "{
+  status: 'success';
+  result: {
+    vehicles: never[];
+    ownerId: string
+  }
+}",
+  },
+}
+`;
+
+exports[`golden baseline — generated route types > pins the inlined types of every sync route 1`] = `
+{
+  "playground/_sync/echo_server_v1.ts": {
+    "clientInput": "{
+  message: string
+}",
+    "serverOutput": "{
+  status: 'success';
+  message: string;
+  senderId: string;
+  receivedAt: string
+}",
+  },
+  "playground/_sync/streamBroadcast_server_v1.ts": {
+    "clientInput": "{
+  text: string;
+  intervalMs?: undefined | number;
+  throttle?: undefined | false | true
+}",
+    "serverOutput": "{
+  status: 'success';
+  message: string;
+  senderId: string;
+  tokenCount: number;
+  throttled: boolean
+}",
+  },
+  "playground/_sync/streamProgress_server_v1.ts": {
+    "clientInput": "{
+  steps?: undefined | number;
+  intervalMs?: undefined | number
+}",
+    "serverOutput": "{
+  status: 'success';
+  senderId: string;
+  completedSteps: number
+}",
+  },
+  "playground/_sync/streamToToken_server_v1.ts": {
+    "clientInput": "{
+  targetTokens: string;
+  text?: undefined | string;
+  intervalMs?: undefined | number
+}",
+    "serverOutput": "{
+  status: 'error';
+  errorCode: 'playground.streamTo.missingTargets'
+} | {
+  status: 'error';
+  errorCode: 'playground.streamTo.tooManyTargets'
+} | {
+  status: 'success';
+  message: string;
+  senderId: string;
+  targetCount: number;
+  chunkCount: number
+}",
+  },
+  "playground/_sync/throwSync_server_v1.ts": {
+    "clientInput": "{
+  reason?: undefined | string
+}",
+    "serverOutput": "{ status: string }",
+  },
+}
+`;
