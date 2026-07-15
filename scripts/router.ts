@@ -16,6 +16,17 @@
  *                         "local"; others go straight to fallback env).
  */
 
+//? Side-effect imports FIRST — `startRouter` reads the services + deploy
+//? registries and nothing else in this process populates them, so without these
+//? the router died on "services config has not been registered" on EVERY
+//? runtime. Order mirrors server/server.ts: config, then deploy, then services.
+//? These import via the same source paths the configs themselves use, so all of
+//? it lands in one module instance (see config.ts on why those stay source
+//? imports: the barrel would drag ioredis into the client bundle).
+import '../config';
+import '../deploy.config';
+import '../services.config';
+
 import { startRouter } from '../packages/router/src/startRouter';
 
 const main = async (): Promise<void> => {
