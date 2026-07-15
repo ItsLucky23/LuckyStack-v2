@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — BREAKING
+
+- **Route OUTPUT types now describe what the client RECEIVES, not what the handler
+  returns.** Everything on an output path crosses the wire as JSON, and JSON has no
+  `Date`: `Date.prototype.toJSON()` makes it an ISO string. So `createdAt: Date` was
+  a lie TypeScript endorsed — `user.createdAt.getTime()` compiled and threw at
+  runtime. Generated outputs now read `createdAt: string`.
+
+  **Migration:** frontend code doing `user.createdAt.getTime()` no longer compiles.
+  Parse it instead: `new Date(user.createdAt).getTime()`. That code was already
+  broken at runtime; this converts a 3am crash into a red `tsc`. For hand-written
+  types that cross the wire, `@luckystack/core` now exports `Jsonify<T>` as the
+  type-level mirror (`type ClientUser = Jsonify<User>`).
+
+  Two rules, both `JSON.stringify`'s own — no per-ORM special-casing: a type with
+  `toJSON()` becomes its return type (covers `Date`, MikroORM's `Collection`,
+  Prisma's `Decimal`); a function-valued property is dropped. **INPUTS are
+  untouched** — their type text feeds `validateInputByType`, which is fail-closed in
+  production.
+
+  This also means a route returning an ORM entity no longer aborts generation: the
+  projection never walks into `EntityProperty`/`EntityMetadata`, because those do not
+  survive serialization. Measured on a real MikroORM entity: 44,000 chars with 5
+  unresolved symbols before, 149 chars with 0 after — matching what
+  `JSON.stringify` actually produces, field for field.
+
 ### Fixed
 
 Codegen fixes surfaced by a MikroORM/MongoDB consumer (verified against a real
