@@ -695,3 +695,23 @@ Root-causes + fixes:
 **Files:** server/server.ts, scripts/router.ts, config.ts (revert), docs/findings/2026-07-15-{bun-feasibility,scaffold-e2e}/README.md, branch-logs/main.md.
 
 **Open:** B14 (router, ontwerpbeslissing) · B8 MySQL/Postgres op Bun · B15 bevestigen op een gescaffolde build · wire-projectie + `Date`→`string`-beslissing.
+
+## 2026-07-15 (laat) — wire-projectie + ioredis uit de browser; matchrix hoeft niets te herschrijven
+
+**User prompt:** ioredis naar browser moet echt niet; string dates moeten gewoon goed werken; zorg dat dit de andere ORM-tools/tooling niet kapotmaakt. Plus: sinds wanneer die https-poortbug, en waarom zou https op 443 moeten?
+
+**https-poort (vraag beantwoord, niet gefixt):** bestaat sinds `7576c88` (29 mei, v0.2.0) — zit dus in élke release. User had gelijk: https hoeft niet op 443, en andere poorten wérken (`:8443` → `.port === "8443"`). De bug is smal: `new URL()` (de WHATWG-standaard in Node én browsers) gooit de DEFAULT-poort per spec weg, dus `:443` en "geen poort" zijn niet te onderscheiden. B14 blijft open — vergt een ontwerpbeslissing.
+
+**ioredis uit de browser (B15, gefixt):** nieuwe client-safe subpath `@luckystack/core/config`. Gemeten met schone cache: barrel = 10697KB mét ioredis in een client-chunk; subpath = 10417KB met **0**. Deze repo beschermde zichzelf met een source-import + comment; de TEMPLATE deed exact wat die comment verbiedt — de bescherming bestond dus alleen voor ons. tsup `splitting:true` zorgt dat de subpath de projectConfig-chunk DEELT met de barrel → één registry, twee deuren (op beide runtimes geverifieerd). **Bonus: dit lost B16 op** (monorepo kon niet op Bun booten) — die stond op wontfix omdat je moest kiezen tussen schone bundle óf Bun. Nu allebei. Guard: `configEntry.test.ts` loopt de import-graaf en faalt als de entry ooit redis raakt of welke bare dependency dan ook krijgt.
+
+**Wire-projectie (T17, gefixt — T14 + T16 dicht):** eerst GEMETEN wat er echt over de lijn gaat: een MikroORM-entity → **112 bytes** (`{"id","name","createdAt","items":[]}`). De ORM-machinerie zit op het prototype/achter symbols en `JSON.stringify` ziet 'm nooit. **De runtime was dus al schoon; het TYPE loog.** Nul runtime-verandering. Twee generieke regels, beide van `JSON.stringify` zelf, géén ORM-lijstjes: (1) type met `toJSON()` → z'n return-type (geprobed: `Date→string`, `Collection→EntityDTO[]`); (2) functie-property → weg (dát unblockt MikroORM: `BaseEntity`'s methodes sleepten `EntityProperty`/`EntityMetadata` mee). Meting: 44.000 tekens/5 onopgeloste symbolen → **149/0**. Outputs only (test-geborgd; inputs voeden de fail-closed prod-validator).
+
+**`Jsonify<T>` in core:** de type-level tegenhanger voor handgeschreven wire-types. Bewust SHALLOW — de voor de hand liggende recursieve versie sterft met TS2589 op een echte SessionLayout (Prisma's zelf-refererende `JsonValue`). Dat legde dezelfde leugen één laag hoger bloot: ADR 0018 behandelde "wat session_v1 returnt" en "wat SessionProvider houdt" als één type. Nooit waar geweest. Nu gesplitst: `ClientSessionLayout` (route-side) vs `ClientSessionPayload = Jsonify<...>` (wat page JS houdt) — in deze repo én de template.
+
+**Elke gate die de fix liet struikelen is gefixt i.p.v. gedempt** — stuk voor stuk echte mismatches: de scaffolder's prune-tokens (spiegelen template-tekst byte-voor-byte, gooien luid bij drift), assetParity (`assets/login/src/settings/page.tsx` dreef af van de template — de gedocumenteerde #1 defect-klasse, gevangen door hun eigen test), en drie devkit-tests die het oude gedrag bewust vastpinden (waaronder één letterlijk "surfaces node_modules-declared symbols (which aborts generation)") — geïnverteerd mét reden, niet verwijderd.
+
+**Harnas-bug 11:** bun heeft z'n EIGEN cache (`~/.bun/install/cache`) gekeyed op naam@versie en negeert `npm_config_cache` — installeerde dus een `@luckystack/core@0.6.7` van dagen terug en meldde groen. Derde cache die dit deed (npx `_npx`, npm `_cacache`, nu bun): een versienummer is geen identiteit als je republiceert. Gefixt met `BUN_INSTALL_CACHE_DIR` per run.
+
+**Verificatie:** tsc 0 · lint 0 · ai:lint clean · 1751/1751 · client-bundle 0× ioredis · e2e-matrix groen op ECHTE gescaffolde projecten (npm+node ALL GREEN, bun+bun ALL GREEN). Eén npm-run faalde eerst op **Out of memory** — puur resource (jouw dev-servers draaiden, ~1GB vrij); schone retry groen. Bij het opruimen alleen mijn eigen processen gekild — matchrix' vite + braindrop + de fivem-MCP's staan tussen de 58 node-processen en die blijven draaien.
+
+**Open:** B14 (router `:443` — ontwerpbeslissing) · B8 MySQL/Postgres op Bun · E1 verse scaffold typecheckt niet zonder `generateArtifacts` · `({ } & { })[]`-onnauwkeurigheid.
