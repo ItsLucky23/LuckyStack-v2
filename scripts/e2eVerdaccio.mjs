@@ -36,7 +36,14 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 4873;
-const REGISTRY = `http://localhost:${String(PORT)}/`;
+//? 127.0.0.1 everywhere — never `localhost`. Given only a port, verdaccio binds
+//? the IPv6 loopback (`[::1]`) on Windows, while a probe or client aimed at the
+//? IPv4 loopback then finds nothing; `localhost` resolves to whichever the OS
+//? prefers, so mixing the two produces a harness that hangs for the full timeout
+//? and blames a healthy server. Pinning the bind AND the URL to one stack removes
+//? the ambiguity.
+const HOST = '127.0.0.1';
+const REGISTRY = `http://${HOST}:${String(PORT)}/`;
 
 //? Bun is not on PATH after a winget install until the shell restarts, so fall
 //? back to the known install location before giving up.
@@ -75,18 +82,24 @@ const resolveBun = () => {
   return null;
 };
 
-const waitForPort = async (port, timeoutMs) => {
+const isPortOpen = async (port) =>
+  new Promise((resolve) => {
+    const socket = net.connect(port, HOST);
+    socket.on('connect', () => {
+      socket.end();
+      resolve(true);
+    });
+    socket.on('error', () => resolve(false));
+  });
+
+const waitForPort = async (port, timeoutMs, isDead) => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const open = await new Promise((resolve) => {
-      const socket = net.connect(port, '127.0.0.1');
-      socket.on('connect', () => {
-        socket.end();
-        resolve(true);
-      });
-      socket.on('error', () => resolve(false));
-    });
-    if (open) return true;
+    if (await isPortOpen(port)) return true;
+    //? Fail fast when the child is already gone: otherwise a verdaccio that
+    //? died on startup (bad config, port taken) costs the FULL timeout and
+    //? reports "did not come up", which reads like slowness rather than a crash.
+    if (isDead()) return false;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return false;
@@ -159,7 +172,17 @@ const main = async () => {
       '    url: https://registry.npmjs.org/',
       '    maxage: 60m',
       'packages:',
+      //? Both rules are LOCAL-ONLY (no `proxy:`) so a version already on npmjs
+      //? can never shadow the tarball under test. `create-luckystack-app` needs
+      //? its own rule because it is UNSCOPED — it does not match
+      //? `@luckystack/*`, so it fell through to the `**` proxy and the harness
+      //? silently scaffolded with the PUBLISHED scaffolder instead of this
+      //? working tree's. A green run would have proven nothing.
       "  '@luckystack/*':",
+      '    access: $all',
+      '    publish: $anonymous',
+      '    unpublish: $anonymous',
+      "  'create-luckystack-app':",
       '    access: $all',
       '    publish: $anonymous',
       '    unpublish: $anonymous',
@@ -175,28 +198,68 @@ const main = async () => {
     ].join('\n'),
   );
 
-  //? A dummy token is enough: the config grants $anonymous publish. npm still
-  //? insists on SOME token being present for the registry.
+  //? ONE npmrc, handed to every npm invocation via `npm_config_userconfig`.
+  //? A per-directory `.npmrc` does NOT work here: publish runs from
+  //? `packages/<name>/`, which never sees an npmrc written into the scaffold
+  //? directory — that mismatch is what produced `ENEEDAUTH` on all 17 packages.
+  //? The token itself is a dummy; the config grants `$anonymous` publish, but
+  //? npm still refuses to publish unless SOME token exists for the registry.
+  const npmrcPath = path.join(work, 'e2e.npmrc');
   fs.writeFileSync(
-    path.join(projectParent, '.npmrc'),
-    [`registry=${REGISTRY}`, `//localhost:${String(PORT)}/:_authToken=fake-e2e-token`, ''].join('\n'),
+    npmrcPath,
+    [`registry=${REGISTRY}`, `//${HOST}:${String(PORT)}/:_authToken=fake-e2e-token`, ''].join('\n'),
   );
+  //? An ISOLATED npm cache is not optional here. npx stores each package it runs
+  //? under `<cache>/_npx/<hash>`, and that hash is derived from the package SPEC
+  //? — not from the registry it came from. So `create-luckystack-app@0.6.7`
+  //? resolves to whatever npx already has, and the harness silently ran the
+  //? version published on npmjs instead of the tarball it had just published
+  //? locally: the scaffolder rejected `--pm` because the PUBLIC 0.6.7 predates
+  //? that flag. Same failure class as proxying an unscoped package — a green run
+  //? that proves nothing. A per-run cache costs re-downloads; correctness wins.
+  const cacheDir = path.join(work, 'npm-cache');
+  const registryEnv = {
+    npm_config_userconfig: npmrcPath,
+    npm_config_registry: REGISTRY,
+    npm_config_cache: cacheDir,
+  };
 
   console.log(`[e2e] pm=${args.pm} runtime=${args.runtime}`);
   console.log(`[e2e] workdir: ${work}`);
 
+  //? Pre-flight: a squatter on the port (a stray verdaccio from an interrupted
+  //? run is the usual suspect) would otherwise let us publish into, and test
+  //? against, SOMEONE ELSE'S registry — a far worse outcome than failing here.
+  if (await isPortOpen(PORT)) {
+    console.error(
+      `[e2e] port ${String(PORT)} is already in use. Something is listening there — probably a stray\n` +
+        '      verdaccio from an interrupted run. Refusing to continue: publishing into an unknown\n' +
+        `      registry would silently invalidate this test. Find it with \`netstat -ano | findstr ${String(PORT)}\`.`,
+    );
+    return 1;
+  }
+
   console.log('\n[e2e] starting verdaccio…');
-  const verdaccio = spawn('npx', ['--yes', 'verdaccio@6', '--config', configPath, '--listen', String(PORT)], {
-    cwd: work,
-    stdio: 'ignore',
-    shell: true,
-    detached: false,
+  //? Capture the log instead of discarding it: a startup failure prints its
+  //? reason here, and throwing that away is what turned a clear "address in use"
+  //? into a mute 120-second timeout.
+  const verdaccioLog = path.join(work, 'verdaccio.log');
+  const logFd = fs.openSync(verdaccioLog, 'a');
+  const verdaccio = spawn(
+    'npx',
+    ['--yes', 'verdaccio@6', '--config', configPath, '--listen', `${HOST}:${String(PORT)}`],
+    { cwd: work, stdio: ['ignore', logFd, logFd], shell: true, detached: false },
+  );
+  let verdaccioExited = false;
+  verdaccio.on('exit', () => {
+    verdaccioExited = true;
   });
 
   let exitCode = 1;
   try {
-    if (!(await waitForPort(PORT, 120_000))) {
-      console.error('[e2e] verdaccio did not come up within 120s.');
+    if (!(await waitForPort(PORT, 120_000, () => verdaccioExited))) {
+      console.error(`[e2e] verdaccio never listened on ${HOST}:${String(PORT)}. Its log:`);
+      console.error(fs.readFileSync(verdaccioLog, 'utf8').split('\n').slice(-25).join('\n'));
       return 1;
     }
     console.log(`[e2e] verdaccio up at ${REGISTRY}`);
@@ -206,22 +269,41 @@ const main = async () => {
 
     step('build packages', () => run('npm', ['run', 'build:packages'], ROOT));
 
-    let published = 0;
-    for (const pkg of packages) {
-      const ok = run('npm', ['publish', '--registry', REGISTRY, '--no-provenance', '--tag', 'latest'], pkg.dir, {
-        npm_config_registry: REGISTRY,
+    //? Reuse the REAL publish script rather than reimplementing `npm publish`.
+    //? A second implementation drifts from the one that actually ships, and this
+    //? harness exists to catch drift, not to add some: a hand-rolled loop here
+    //? already diverged twice — it missed that `publishConfig.provenance: true`
+    //? in every package.json needs the `--provenance=false` FORM to override
+    //? (plain `--no-provenance` / the env var do not), and it skipped the
+    //? script's registry-side idempotency check. Invoked via `node` directly, not
+    //? `npm run`: npm@11 eats the flag when routed through a script (lesson 0005).
+    step(`publish ${String(packages.length)} packages to the local registry`, () =>
+      run('node', ['scripts/publishPackages.mjs', '--no-provenance'], ROOT, {
+        ...registryEnv,
         NPM_CONFIG_PROVENANCE: 'false',
-        //? Same trick as the .npmrc above — publish needs a token to exist.
-        npm_config__auth: 'fake-e2e-token',
-      });
-      if (ok) published += 1;
-      else console.error(`[e2e]   ✗ publish failed: ${pkg.name}@${pkg.version}`);
-    }
-    results.push({ label: `publish ${String(published)}/${String(packages.length)} packages`, ok: published === packages.length });
+      }),
+    );
 
     const scaffolderVersion = packages.find((p) => p.name === 'create-luckystack-app')?.version ?? 'latest';
     const projectName = 'e2e-app';
     const projectDir = path.join(projectParent, projectName);
+
+    //? Assert we are about to test OUR tarball, not the one on npmjs. Twice now a
+    //? bug made this harness silently exercise the published package (an unscoped
+    //? name falling through to the proxy; then npx's spec-keyed cache) — both
+    //? would have produced a GREEN run that proved nothing, which is strictly
+    //? worse than a red one. So make the origin an explicit, failing assertion.
+    step('the registry serves OUR tarball (not npmjs)', () => {
+      const view = spawnSync('npm', ['view', `create-luckystack-app@${scaffolderVersion}`, 'dist.tarball'], {
+        cwd: work,
+        encoding: 'utf8',
+        shell: true,
+        env: { ...process.env, ...registryEnv },
+      });
+      const tarball = (view.stdout ?? '').trim();
+      console.log(`[e2e]   resolves to: ${tarball || '(nothing)'}`);
+      return tarball.includes(HOST);
+    });
 
     //? THE POINT OF THIS HARNESS: the scaffolder is fetched from the registry by
     //? SEMVER and installs its @luckystack/* deps the same way — the real path,
@@ -240,7 +322,7 @@ const main = async () => {
           '--no-prompt',
         ],
         projectParent,
-        { npm_config_registry: REGISTRY },
+        registryEnv,
       ),
     );
 
@@ -251,10 +333,21 @@ const main = async () => {
       //? upgrade/add path) also resolves cleanly against the same registry.
       step(`${args.pm} install (idempotent re-install)`, () =>
         args.pm === 'bun'
-          ? run(bunPath, ['install'], projectDir, { npm_config_registry: REGISTRY })
-          : run('npm', ['install'], projectDir, { npm_config_registry: REGISTRY }),
+          ? //? bun ignores npm_config_userconfig; it reads .npmrc from the
+            //? project dir, which the scaffolder does not write. Point it at the
+            //? local registry explicitly so it cannot resolve from npmjs.
+            run(bunPath, ['install'], projectDir, { ...registryEnv, BUN_CONFIG_REGISTRY: REGISTRY })
+          : run('npm', ['install'], projectDir, registryEnv),
       );
 
+      //? `generateArtifacts` FIRST — a fresh scaffold ships without the generated
+      //? route/type maps. The template has no `postinstall` (the repo root does),
+      //? and neither `typecheck` nor `build` chains generation, so both fail on a
+      //? never-yet-run project with a confusing "Cannot find module
+      //? '../_sockets/apiTypes.generated'". The intended first command is
+      //? `npm run server`, which generates them via the dev supervisor. This
+      //? mirrors the established recipe: install -> prisma -> gen -> tsc -> build.
+      step('generateArtifacts', () => run('npm', ['run', 'generateArtifacts'], projectDir));
       step('typecheck', () => run('npm', ['run', 'typecheck'], projectDir));
       step('build', () => run('npm', ['run', 'build'], projectDir));
 
@@ -281,7 +374,18 @@ const main = async () => {
     console.log(`[e2e] ${failed === 0 ? 'ALL GREEN' : `${String(failed)} step(s) FAILED`}`);
     exitCode = failed;
   } finally {
-    verdaccio.kill();
+    //? Kill the TREE, not just the direct child. `npx` is a wrapper: killing it
+    //? orphans the actual verdaccio node process, which keeps holding the port
+    //? and silently poisons the NEXT run (it answers as a registry that has none
+    //? of this run's tarballs). Learned the hard way — a stray from a manual run
+    //? is exactly what made the first execution of this harness fail.
+    if (verdaccio.pid !== undefined && !verdaccioExited) {
+      if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/pid', String(verdaccio.pid), '/T', '/F'], { stdio: 'ignore' });
+      } else {
+        verdaccio.kill();
+      }
+    }
     if (args.keep) {
       console.log(`\n[e2e] --keep: left the workdir at ${work}`);
     } else {
