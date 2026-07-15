@@ -88,7 +88,123 @@ const tsxCliPath = path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'c
 const tsconfigServerArgs = existsSync(path.resolve(process.cwd(), 'tsconfig.server.json'))
   ? ['--tsconfig', 'tsconfig.server.json']
   : [];
-const childArgs = [tsxCliPath, ...tsconfigServerArgs, 'server/server.ts'];
+
+//? ---------------------------------------------------------------------------
+//? Runtime honouring — `bun run server` must ACTUALLY run Bun
+//? ---------------------------------------------------------------------------
+//? A LuckyStack project must work on Node AND Bun. On Windows that is not
+//? automatic and the failure is SILENT: npm generates a `.cmd` shim per bin
+//? (`node_modules/.bin/luckystack-dev.cmd`) which hardcodes a `node` call, so
+//? `bun run server` dutifully launches NODE while every log line still looks
+//? green. Windows has no shebang to intercept, so the shim always wins.
+//? Verified empirically on bun 1.3.14 / Windows:
+//?   `bun run server`       -> child ran C:\Program Files\nodejs\node.exe
+//?   `bun --bun run server` -> child ran Bun (via a node-shim Bun injects at
+//?                             %TEMP%\bun-node-<hash>\node.exe)
+//? Bun does leave fingerprints even when it hands off to Node:
+//?   npm_config_user_agent = "bun/1.3.14 npm/? node/v24.3.0 win32 x64"
+//?   npm_execpath          = "<abs>/bun.exe"
+//? That lets us tell "the developer typed `bun run`" from "the developer typed
+//? `npm run`", and `npm_execpath` hands us the real bun binary to correct
+//? course with. The CHILD is what actually serves the app, so the child is
+//? where the intended runtime gets honoured. This keeps the promise honest
+//? with NO new runtime choice: no extra script name, no wizard question, no
+//? manifest dimension — `npm run server` stays Node, `bun run server` is Bun.
+const BUN_BINARY_PATTERN = /(?:^|[\\/])bun(?:\.exe)?$/i;
+
+export type SupervisorRuntime = 'node' | 'bun';
+
+export interface ChildSpawnSpec {
+  command: string;
+  args: string[];
+  runtime: SupervisorRuntime;
+}
+
+export interface ResolveChildSpawnInput {
+  //? `'Bun' in globalThis` at the call site — passed in so the branch is testable.
+  isBun: boolean;
+  execPath: string;
+  npmUserAgent: string | undefined;
+  npmExecPath: string | undefined;
+  tsxCliPath: string;
+  tsconfigServerArgs: string[];
+  //? MUST be absolute — see the fork-bomb note in the bun re-exec branch.
+  entry: string;
+  fileExists: (candidate: string) => boolean;
+}
+
+//? Result shape rather than a throw: this module may not import
+//? `@luckystack/core` (see the invariant at the top of this file), so the
+//? framework's `tryCatch` is unavailable here and a bare throw at module scope
+//? would surface as an ugly unhandled stack instead of an actionable message.
+export type ResolveChildSpawnResult =
+  | { ok: true; spec: ChildSpawnSpec }
+  | { ok: false; message: string };
+
+export const resolveChildSpawn = ({
+  isBun,
+  execPath,
+  npmUserAgent,
+  npmExecPath,
+  tsxCliPath: tsxCli,
+  tsconfigServerArgs: tsconfigArgs,
+  entry,
+  fileExists,
+}: ResolveChildSpawnInput): ResolveChildSpawnResult => {
+  //? Already executing under Bun (`bun --bun run server`, or `bun server/server.ts`).
+  //? `process.execPath` is then either bun itself or the node-shim Bun injects for
+  //? bin scripts — BOTH re-enter Bun (verified on 1.3.14/Windows), so spawning
+  //? execPath keeps the child on Bun. tsx is dropped deliberately: Bun compiles
+  //? TypeScript natively, so tsx would only add a redundant transpile hop, and
+  //? `--tsconfig` is not a Bun flag at all (Bun reads `tsconfig.json` itself).
+  if (isBun) return { ok: true, spec: { command: execPath, args: [entry], runtime: 'bun' } };
+
+  const launchedByBun =
+    (npmUserAgent ?? '').startsWith('bun/') || BUN_BINARY_PATTERN.test(npmExecPath ?? '');
+
+  //? Plain `npm run server` — the canonical Node path, unchanged. Node cannot
+  //? run the whole TypeScript server tree on its own, so tsx stays.
+  if (!launchedByBun) {
+    return {
+      ok: true,
+      spec: { command: execPath, args: [tsxCli, ...tsconfigArgs, entry], runtime: 'node' },
+    };
+  }
+
+  //? `bun run server` on Windows: WE are Node (the .cmd shim won), but the
+  //? developer asked for Bun. Re-exec the child through the real bun binary.
+  const bunBinary = npmExecPath ?? '';
+  if (!BUN_BINARY_PATTERN.test(bunBinary) || !fileExists(bunBinary)) {
+    //? Fail LOUD rather than quietly serving from Node. Silently continuing is
+    //? the exact trap this branch exists to remove: it would look green while
+    //? proving nothing about Bun compatibility.
+    return {
+      ok: false,
+      message:
+        'Detected a `bun run` launch, but could not locate the bun binary to run the server with ' +
+        `(npm_execpath=${npmExecPath ?? '<unset>'}). Refusing to silently fall back to Node — ` +
+        'that would look like a working Bun boot while actually running Node. ' +
+        'Run `npm run server` for the Node path, or reinstall/repair Bun so it is on PATH.',
+    };
+  }
+
+  //? `entry` MUST be absolute: `bun run <name>` resolves a package.json SCRIPT
+  //? before a file, so a relative `server/server.ts` could re-enter the `server`
+  //? script and fork-bomb. An absolute path can never be read as a script name.
+  return { ok: true, spec: { command: bunBinary, args: ['--bun', 'run', entry], runtime: 'bun' } };
+};
+
+const resolvedChildSpawn = resolveChildSpawn({
+  isBun: 'Bun' in globalThis,
+  execPath: process.execPath,
+  npmUserAgent: process.env.npm_config_user_agent,
+  npmExecPath: process.env.npm_execpath,
+  tsxCliPath,
+  tsconfigServerArgs,
+  entry: path.resolve(process.cwd(), 'server', 'server.ts'),
+  fileExists: existsSync,
+});
+
 
 let childProcess: ChildProcess | null = null;
 let pendingRestart = false;
@@ -100,8 +216,12 @@ let isShuttingDown = false;
 
 const startChild = () => {
   if (isShuttingDown) return;
+  //? Defensive: `bootSupervisor()` already aborts on an unresolved spawn, so this
+  //? is unreachable in practice — it exists to narrow the result type here.
+  if (!resolvedChildSpawn.ok) return;
+  const { command: childCommand, args: childArgs, runtime: childRuntime } = resolvedChildSpawn.spec;
   childBootStartedAt = performance.now();
-  const spawned = spawn(process.execPath, childArgs, {
+  const spawned = spawn(childCommand, childArgs, {
     stdio: 'inherit',
     //? `process.env` is guaranteed `.env`-free here (see the invariant at the
     //? top of this file), so the child loads `.env` fresh on every restart and
@@ -113,7 +233,12 @@ const startChild = () => {
   });
   childProcess = spawned;
 
-  console.log(`[Supervisor] Started server process (pid: ${String(spawned.pid)})`);
+  //? Name the runtime explicitly. `bun run server` silently serving from Node is
+  //? the bug this file guards against, so the runtime must be observable rather
+  //? than assumed — a green boot log is exactly what made the old trap invisible.
+  console.log(
+    `[Supervisor] Started server process (pid: ${String(spawned.pid)}, runtime: ${childRuntime})`,
+  );
 
   //? `'error'` and `'exit'` can BOTH fire for a single spawn (a failed spawn
   //? emits `'error'`, and some platforms then emit `'exit'` too). This flag
@@ -253,62 +378,78 @@ const shutdownSupervisor = () => {
   }
 };
 
-if (resolveNodeEnv() === 'production') {
-  //? In production the supervisor has no file watcher, but it still needs to
-  //? forward shutdown signals so the child gets a chance to drain (e.g. flush
-  //? error trackers, close DB connections). Without these handlers a SIGTERM
-  //? from a process manager (systemd, Docker) kills the supervisor instantly
-  //? and the child may never exit cleanly.
-  process.on('SIGINT', () => {
-    isShuttingDown = true;
-    shutdownSupervisor();
-  });
-  process.on('SIGTERM', () => {
-    isShuttingDown = true;
-    shutdownSupervisor();
-  });
-  startChild();
-} else {
-  const watcher = watch(CORE_WATCH_TARGETS, {
-    ignoreInitial: true,
-    awaitWriteFinish: {
-      stabilityThreshold: 120,
-      pollInterval: 20,
-    },
-  });
+const bootSupervisor = () => {
+  //? Fail loud before anything is watched or spawned: we were asked for Bun but
+  //? cannot deliver it, and Node-in-disguise is not an acceptable substitute.
+  if (!resolvedChildSpawn.ok) {
+    console.error(`[Supervisor] ${resolvedChildSpawn.message}`);
+    process.exit(1);
+  }
 
-  watcher.on('all', (event, changedPath) => {
-    //? Ignore pure directory churn from the recursively-watched bootstrap/auth dirs.
-    if (event === 'addDir' || event === 'unlinkDir') return;
-    //? Restore the old `**/*.ts` glob intent: within the watched directories only
-    //? TS sources matter. A `.ts` suffix covers every concrete watched TS file too
-    //? (config.ts, server.ts, functions/*.ts); the non-TS watched files are the
-    //? `.env*` set, matched explicitly. A stray non-TS file under a watched dir is
-    //? correctly ignored.
-    const normalized = changedPath.replaceAll('\\', '/');
-    const relevant = normalized.endsWith('.ts') || CORE_WATCH_FILES.some((file) => normalized.endsWith(file));
-    if (!relevant) return;
-    scheduleRestart({ event, changedPath });
-  });
-
-  const handleSignal = (signalName: string) => {
-    //? Set the flag synchronously so any in-flight child 'exit' handler
-    //? running BEFORE watcher.close() resolves won't schedule a new spawn.
-    if (isShuttingDown) {
-      //? Second Ctrl+C — user is impatient. Hard-exit immediately.
-      process.exit(1);
-    }
-    isShuttingDown = true;
-    console.log(`[Supervisor] Received ${signalName}, shutting down`);
-    void watcher.close().then(() => {
-      shutdownSupervisor();
-    }).catch(() => {
+  if (resolveNodeEnv() === 'production') {
+    //? In production the supervisor has no file watcher, but it still needs to
+    //? forward shutdown signals so the child gets a chance to drain (e.g. flush
+    //? error trackers, close DB connections). Without these handlers a SIGTERM
+    //? from a process manager (systemd, Docker) kills the supervisor instantly
+    //? and the child may never exit cleanly.
+    process.on('SIGINT', () => {
+      isShuttingDown = true;
       shutdownSupervisor();
     });
-  };
+    process.on('SIGTERM', () => {
+      isShuttingDown = true;
+      shutdownSupervisor();
+    });
+    startChild();
+  } else {
+    const watcher = watch(CORE_WATCH_TARGETS, {
+      ignoreInitial: true,
+      awaitWriteFinish: {
+        stabilityThreshold: 120,
+        pollInterval: 20,
+      },
+    });
 
-  process.on('SIGINT', () => { handleSignal('SIGINT'); });
-  process.on('SIGTERM', () => { handleSignal('SIGTERM'); });
+    watcher.on('all', (event, changedPath) => {
+      //? Ignore pure directory churn from the recursively-watched bootstrap/auth dirs.
+      if (event === 'addDir' || event === 'unlinkDir') return;
+      //? Restore the old `**/*.ts` glob intent: within the watched directories only
+      //? TS sources matter. A `.ts` suffix covers every concrete watched TS file too
+      //? (config.ts, server.ts, functions/*.ts); the non-TS watched files are the
+      //? `.env*` set, matched explicitly. A stray non-TS file under a watched dir is
+      //? correctly ignored.
+      const normalized = changedPath.replaceAll('\\', '/');
+      const relevant = normalized.endsWith('.ts') || CORE_WATCH_FILES.some((file) => normalized.endsWith(file));
+      if (!relevant) return;
+      scheduleRestart({ event, changedPath });
+    });
 
-  startChild();
-}
+    const handleSignal = (signalName: string) => {
+      //? Set the flag synchronously so any in-flight child 'exit' handler
+      //? running BEFORE watcher.close() resolves won't schedule a new spawn.
+      if (isShuttingDown) {
+        //? Second Ctrl+C — user is impatient. Hard-exit immediately.
+        process.exit(1);
+      }
+      isShuttingDown = true;
+      console.log(`[Supervisor] Received ${signalName}, shutting down`);
+      void watcher.close().then(() => {
+        shutdownSupervisor();
+      }).catch(() => {
+        shutdownSupervisor();
+      });
+    };
+
+    process.on('SIGINT', () => { handleSignal('SIGINT'); });
+    process.on('SIGTERM', () => { handleSignal('SIGTERM'); });
+
+    startChild();
+  }
+};
+
+//? Importing this module must not boot a server: the unit tests import
+//? `resolveChildSpawn` to exercise every runtime branch, and this file is an
+//? ENTRY (the `luckystack-dev` bin + the repo's `server/dev/supervisor.ts`
+//? shim both rely on the import side-effect, so a `main`-module check would
+//? break the shim). Default is unchanged — boot unless explicitly told not to.
+if (!process.env.LUCKYSTACK_SUPERVISOR_IMPORT_ONLY) bootSupervisor();

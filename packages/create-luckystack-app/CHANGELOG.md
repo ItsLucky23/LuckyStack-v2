@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`bun run server` now genuinely runs Bun instead of silently running Node.**
+  On Windows there is no shebang: npm generates a `.cmd` bin shim
+  (`node_modules/.bin/luckystack-dev.cmd`) that hardcodes a `node` call, so
+  `bun run server` launched **Node** while every log line looked green — the
+  "LuckyStack runs on both runtimes" claim was technically true and completely
+  hollow. `@luckystack/devkit`'s supervisor now resolves the child's runtime from
+  the fingerprints Bun leaves even when it hands off to Node
+  (`npm_config_user_agent` starts with `bun/`, `npm_execpath` points at the real
+  `bun.exe`) and re-execs the server child through that bun binary. Measured on
+  bun 1.3.14 / Windows x64:
+  - `npm run server` → Node + tsx (unchanged).
+  - `bun run server` → Bun, tsx dropped (Bun compiles TypeScript natively, and
+    `--tsconfig` is not a Bun flag).
+  - `bun --bun run server` → Bun (already Bun; spawns `process.execPath`).
+  - bun launch detected but the bun binary unresolvable → **exits 1 loudly**; it
+    never silently falls back to Node.
+
+  The supervisor now also names the runtime it spawned
+  (`[Supervisor] Started server process (pid: …, runtime: bun)`), because a green
+  boot log is exactly what made the old trap invisible. Verified end-to-end on a
+  scaffolded project: Redis connected, Socket.io initialized, `/livez` → `200`,
+  `/_health` → `{"status":"ok",…}` with `typeof Bun === 'object'` in-process.
+
+  > **Bun is not production-ready yet.** `packages/server/src/capabilities.ts`
+  > detaches `import.meta.resolve`, which throws under Bun — so every optional
+  > `@luckystack/*` package (login, sync, presence, cron, docs-ui, error-tracking,
+  > devkit) reports as ABSENT and silently degrades. See `docs/HOSTING.md`
+  > → "Known blockers (Bun)".
+
 ### Added
 
 - **Package-manager choice — `--pm=<npm|bun>`** (new wizard step + CLI flag, default

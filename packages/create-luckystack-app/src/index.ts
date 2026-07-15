@@ -254,8 +254,16 @@ type PackageManager = (typeof PROVIDER_OPTIONS.packageManager)[number];
  * machine's actual `bun --version`: the manifest (ADR 0021) hashes the rendered
  * package.json, and a machine-dependent value would make every `luckystack
  * update` re-render read as "user-modified" and spam a `.new` sidecar.
+ *
+ * 1.3.3 is NOT arbitrary and must not be lowered to widen support: it is the
+ * first Bun release that honours the `bunfig.toml` `env = false` the scaffold
+ * ships. Below it Bun SILENTLY ignores that key and auto-loads env files the
+ * framework never loads — reviving the precedence inversion the bunfig exists to
+ * prevent (`.env.<NODE_ENV>` shadowing `.env`, and a `LUCKYSTACK_ENV_FILES` set
+ * inside `.env` hijacking the file list). A lower floor would advertise support
+ * for versions where the shipped config is inert.
  */
-export const BUN_VERSION_FLOOR = '1.1.0';
+export const BUN_VERSION_FLOOR = '1.3.3';
 
 interface ScaffoldChoices {
   /**

@@ -22,7 +22,16 @@ const localRequire = createRequire(import.meta.url);
 //? resolver (`import.meta.resolve`, which honors the `"import"` condition).
 //? `createRequire().resolve` is kept only as a fallback for Node < 20.6 where
 //? synchronous `import.meta.resolve` is unavailable.
-const esmResolve = (import.meta as { resolve?: (specifier: string) => string }).resolve;
+//?
+//? Hold the import.meta OBJECT, never a detached reference to its `resolve`
+//? method. `const esmResolve = import.meta.resolve; esmResolve(pkg)` loses the
+//? `this` binding: Node tolerates that, but **Bun throws** `import.meta.resolve
+//? must be bound to an import.meta object`. `has()` catches the throw and
+//? returns false, so under Bun EVERY optional package reported absent —
+//? login/auth, sync, presence, cron, docs-ui and error-tracking all silently
+//? off while the server booted and served a green /_health. Calling it as a
+//? member of this object (`importMeta.resolve(pkg)`) keeps the binding intact.
+const importMeta = import.meta as { resolve?: (specifier: string) => string };
 
 //? Warn once when `import.meta.resolve` is absent (Node < 20.6). The CJS
 //? fallback misreports all import-only packages as absent, so optional
@@ -42,9 +51,9 @@ const warnResolverMissingOnce = (): void => {
 };
 
 const has = (pkg: string): boolean => {
-  if (typeof esmResolve === 'function') {
+  if (typeof importMeta.resolve === 'function') {
     try {
-      esmResolve(pkg);
+      importMeta.resolve(pkg);
       return true;
     } catch {
       return false;

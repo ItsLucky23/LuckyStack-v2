@@ -69,7 +69,8 @@
     "help": "node scripts/help.mjs",
     "postinstall": "node -e \"try{require('fs').statSync('src/_sockets/apiTypes.generated.ts')}catch{require('child_process').execSync('npm run generateArtifacts',{stdio:'inherit'})}\"",
     "prepare": "node -e \"try{require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})}catch{}\"",
-    "ai:changelog-check": "node scripts/checkChangelogs.mjs"
+    "ai:changelog-check": "node scripts/checkChangelogs.mjs",
+    "e2e:verdaccio": "node scripts/e2eVerdaccio.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
