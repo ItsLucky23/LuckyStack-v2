@@ -77,7 +77,11 @@ describe('extractors — a route returning a MikroORM entity', () => {
     expect(result.text).toContain('result:');
     //? The entity's own fields survive the round-trip.
     expect(result.text).toContain('id: string');
-    expect(result.text).toContain('createdAt: Date');
+    //? `string`, not `Date` — this is an OUTPUT, and outputs are projected to the
+    //? shape the client actually receives. The entity holds a Date; JSON.stringify
+    //? calls its toJSON() and the client gets an ISO string. This assertion used
+    //? to pin `Date` deliberately, as the marker for exactly this fix.
+    expect(result.text).toContain('createdAt: string');
     //? The tuple that used to crash the expander.
     expect(result.text).toContain('[string, string]');
     //? Symbol-keyed MikroORM markers must never reach the emitted text.

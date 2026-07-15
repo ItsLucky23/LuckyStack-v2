@@ -33,16 +33,16 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
     theme: 'dark' | 'light';
     provider: 'credentials' | 'google' | 'github' | 'x' | 'facebook' | 'linkedIn' | 'apple' | 'discord' | 'instagram';
     preferences: JsonValue;
-    lastLogin: null | Date;
-    createdAt: Date;
-    updatedAt: Date;
+    lastLogin: null | string;
+    createdAt: string;
+    updatedAt: string;
     location?: undefined | {
         pathName: string;
         searchParams?: undefined | {
             [key: string]: string
           }
       };
-    previousLogin?: undefined | null | string | Date;
+    previousLogin?: undefined | null | string;
     roomCodes?: undefined | string[]
   }
 }",

@@ -149,7 +149,9 @@ const collectReturnObjectTypeDetails = (
   const visit = (node: ts.Node) => {
     if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression)) {
       const type = checker.getTypeAtLocation(node.expression);
-      const expanded = expandTypeDetailed(type, checker);
+      //? OUTPUT — project to the wire shape. What a handler returns is not what
+      //? the client gets: it crosses as JSON, so a Date arrives as an ISO string.
+      const expanded = expandTypeDetailed(type, checker, 0, undefined, { wireProjection: true });
       types.push(expanded.text);
       unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
       unresolvedSymbols = mergeUnresolvedSymbols(
@@ -202,7 +204,8 @@ const collectStreamCallPayloadTypeDetails = (
       if (payloadArg) {
         const argType = checker.getTypeAtLocation(payloadArg);
         const nonNullableArgType = checker.getNonNullableType(argType);
-        const expanded = expandTypeDetailed(nonNullableArgType, checker);
+        //? OUTPUT — a streamed payload is JSON on the wire like any other.
+        const expanded = expandTypeDetailed(nonNullableArgType, checker, 0, undefined, { wireProjection: true });
 
         if (expanded.text.trim().length > 0) {
           types.push(expanded.text);
@@ -327,7 +330,8 @@ const extractDeclaredStreamTypeFromApiParams = (
           const typeArg = member.type.typeArguments?.[0];
           if (typeArg) {
             const argType = checker.getNonNullableType(checker.getTypeFromTypeNode(typeArg));
-            const expanded = expandTypeDetailed(argType, checker);
+            //? OUTPUT — the declared ApiStreamEmitter<T> payload (DEVKIT-4 path).
+            const expanded = expandTypeDetailed(argType, checker, 0, undefined, { wireProjection: true });
             if (expanded.text.trim().length > 0) {
               result = { text: expanded.text, unresolvedSymbols: expanded.unresolvedSymbols };
               return;

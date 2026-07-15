@@ -206,6 +206,35 @@ const collectTypeSymbolFallback = (type: ts.Type): UnresolvedTypeSymbol[] => {
 
 interface ExpandState {
   stackTypeIds: Set<number>;
+  /**
+   * Model what the CLIENT actually receives, not what the handler returns.
+   *
+   * Everything on an OUTPUT path crosses the wire as JSON — socket.io's default
+   * parser is `JSON.stringify`, and the HTTP route does the same. JSON has no
+   * `Date`: `Date.prototype.toJSON()` turns it into an ISO string. So emitting
+   * `createdAt: Date` was a lie that TypeScript happily endorsed —
+   * `user.createdAt.getTime()` compiled and then threw at runtime.
+   *
+   * OUTPUTS ONLY. Inputs must keep their true types: their text feeds
+   * `validateInputByType`, which in production runs with no resolver and is
+   * fail-closed, so projecting there would reject real payloads.
+   */
+  wireProjection: boolean;
+}
+
+//? Types whose JSON.stringify result differs from their TypeScript type. Keyed by
+//? the constructor/symbol name, valued by what the client genuinely receives.
+//? `Date` is the one that bites in practice — it has a `toJSON()` returning an
+//? ISO string. Anything added here must be justified by what the SERIALIZER does,
+//? not by what feels convenient.
+const WIRE_PROJECTED_TYPES = new Map<string, string>([['Date', 'string']]);
+
+export interface ExpandOptions {
+  /**
+   * Emit what the client RECEIVES (JSON) rather than what the handler returns.
+   * Pass `true` for every OUTPUT type; never for an input (see `ExpandState`).
+   */
+  wireProjection?: boolean;
 }
 
 // Recursively expand a TypeScript type to an inline type string with no named references.
@@ -215,8 +244,12 @@ export const expandTypeDetailed = (
   checker: ts.TypeChecker,
   depth = 0,
   state?: ExpandState,
+  options?: ExpandOptions,
 ): ExpandedTypeResult => {
-  const expandState: ExpandState = state ?? { stackTypeIds: new Set<number>() };
+  //? `state` carries the flag through the recursion, so a nested Date inside a
+  //? returned object is projected too — not just a top-level one.
+  const expandState: ExpandState =
+    state ?? { stackTypeIds: new Set<number>(), wireProjection: options?.wireProjection ?? false };
   const typeId = (type as ts.Type & { id?: number }).id;
 
   if (typeId !== undefined) {
@@ -272,7 +305,12 @@ export const expandTypeDetailed = (
       unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
       return expanded.text;
     });
-    return { text: expandedTypes.join(' | '), unresolvedSymbols };
+    //? Dedupe members. The checker's union is distinct BEFORE projection, but two
+    //? members can collapse to the same text after it — `Date | string` becomes
+    //? `string | string`, which is valid TypeScript and ugly to read. Order is
+    //? preserved (first occurrence wins) so unprojected output stays byte-identical.
+    const uniqueTypes = [...new Set(expandedTypes)];
+    return { text: uniqueTypes.join(' | '), unresolvedSymbols };
     }
 
   // Intersection types (A & B)
@@ -339,7 +377,8 @@ export const expandTypeDetailed = (
 
       // Known opaque containers  return as-is without expanding internals
       if (SKIP_EXPANSION.has(targetName)) {
-        return { text: checker.typeToString(type), unresolvedSymbols: [] };
+        const projected = expandState.wireProjection ? WIRE_PROJECTED_TYPES.get(targetName) : undefined;
+        return { text: projected ?? checker.typeToString(type), unresolvedSymbols: [] };
       }
     }
 
@@ -347,7 +386,8 @@ export const expandTypeDetailed = (
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but absent at runtime for synthesized object types (tuple references); same guard as the reads above
     const symbolName = type.symbol?.name || (type.aliasSymbol?.name ?? '');
     if (SKIP_EXPANSION.has(symbolName)) {
-      return { text: checker.typeToString(type), unresolvedSymbols: [] };
+      const projected = expandState.wireProjection ? WIRE_PROJECTED_TYPES.get(symbolName) : undefined;
+      return { text: projected ?? checker.typeToString(type), unresolvedSymbols: [] };
     }
 
     const props = checker.getPropertiesOfType(type);
