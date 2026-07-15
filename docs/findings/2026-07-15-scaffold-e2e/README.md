@@ -9,6 +9,7 @@ Last updated: 2026-07-15
 
 | # | Finding | Severity | Status | Since | Resolved | Notes / link |
 |---|---------|----------|--------|-------|----------|--------------|
+| **E2** | **🔴 `--pm=bun` shipped a BROKEN project: Bun runs no lifecycle scripts without `trustedDependencies`.** Proven empirically (bun 1.3.14) with a minimal probe: a dep whose `postinstall` writes a marker file → **without** `trustedDependencies` the marker never appears; **with** it, it does. Consequences for the scaffold: (a) **`@prisma/client`**'s `postinstall: node scripts/postinstall.js` is what GENERATES the client — without it, `generateArtifacts` dies on `unresolved type identifiers: User`, and every subsequent `bun install` (including the one `luckystack add <feature>` runs) silently destroys a client that `npx prisma generate` had produced, with nothing to regenerate it; (b) **`sharp`**'s `install: node install/check.js \|\| npm run build` fetches/builds its NATIVE binary — **this one fails silently and only at runtime**, in avatar processing. npm never had the problem because it re-runs `@prisma/client`'s postinstall on every install. | **HIGH** | fixed | 2026-07-15 | 2026-07-15 | `trustedDependencies: ["@prisma/client", "prisma", "sharp"]` in `template/package.json`. **This is the vindication of "a wizard option is a support claim"**: `--pm=bun` passed 281 unit tests, a real scaffold render, and the cross-package `detectPackageManager` seam — and still produced a broken project. Only a real registry install surfaced it |
 | E1 | **A freshly scaffolded project cannot `npm run typecheck` or `npm run build`.** Both fail with `TS2307: Cannot find module '../_sockets/apiTypes.generated'` plus ~4 cascading errors in `SessionProvider.tsx` (`Type 'string' is not assignable to type 'never'`). The scaffold ships **without** the generated route/type maps: the repo root has a guarded `postinstall` that generates them when missing, **the template does not**; `test` chains `generateArtifacts` (deliberately, per the package docs) but `typecheck` and `build` do not; and `main()` runs install + `prisma generate` but never generation. The intended first command IS `npm run server`, which generates them via the dev supervisor — so the happy path works and this only bites someone who typechecks/builds **before ever running the dev server**: a CI pipeline (`npm ci && npm run typecheck`), or an AI agent asked to verify the scaffold. | MED | open | 2026-07-15 | — | Found by the first full e2e run. Recommended fix: mirror the root's guarded `postinstall` into `template/package.json`. **Not applied — outside the task that found it (Report-Without-Auto-Fixing).** Note `docs/UPGRADING.md` already prescribes `generateArtifacts` → `typecheck`, so the sharp edge is known on the upgrade path but not on the scaffold path |
 
 ## What the e2e proved GREEN (the real install path)
@@ -32,10 +33,39 @@ Real registry, real semver resolution, real onboarding install — not a `file:`
 
 | PM | Runtime | Status |
 |---|---|---|
-| npm | node | ✅ **ALL GREEN** |
-| bun | node | ⏳ running |
-| npm | bun | not yet run |
-| bun | bun | not yet run |
+| npm | node | ✅ **ALL GREEN** — the baseline |
+| bun | node | ✅ **ALL GREEN** — `bun.lock` present, so bun genuinely performed the install |
+| bun | bun | ✅ **ALL GREEN** — runtime probe reports `BUN` |
+| npm | bun | ⏳ running |
+
+Every cell covers: publish 17/17 → origin assertion → **scaffold via `npx` WITH install** →
+lockfile assertion → re-install → generateArtifacts → typecheck → build.
+
+**Scope of the runtime probe, stated honestly:** it runs a file under bun and checks
+`typeof Bun`, which proves bun executes the project's code — *not* that the SERVER boots
+under bun. That is proven separately, and more strongly, by a real boot against live Redis
+(`[Supervisor] Started server process (runtime: bun)`, `typeof Bun = object`, `Connected to
+Redis`, `GET /livez` → 200, `/_health` → ok). The two should not be conflated.
+
+### E3 — the harness reported a bun install that never happened
+
+The `--pm=bun` run went green on "bun install" **before bun was ever invoked**. What
+actually happened: winget installs bun without touching the current shell's PATH → the
+scaffolder's PATH-only scan (deliberate: cwd is excluded as a BatBadBut mitigation) did not
+find it → it **skipped the install with a hint and no crash** (correct behaviour) → `npx
+prisma generate` then ran against an EMPTY `node_modules` → npx fetched the newest prisma
+from npmjs, i.e. **Prisma 7**, which rejects the v6-style `datasource.url` (P1012) → and the
+harness's own re-install step later populated `node_modules` anyway, painting the run green.
+
+Fixed by prepending bun's directory to the scaffold step's PATH, plus a **lockfile
+assertion** — `bun.lock` is the artifact only the real installer leaves behind, so a skipped
+install can no longer pass. This was the FOURTH time this harness tried to report green on
+something it had not tested (see bugs 3, 5, 7 below); the assertion pattern is the answer.
+
+**Worth its own note:** `npx prisma generate` silently resolves the NEWEST prisma from the
+registry when the local one is absent. A partially-failed install therefore produces a
+confusing Prisma **7** schema error in a project that pins **6** — the error names the schema,
+not the real cause. Not fixed; recorded.
 
 ## Harness bugs found by RUNNING it (all mine, all fixed)
 

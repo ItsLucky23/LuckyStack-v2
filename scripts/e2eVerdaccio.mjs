@@ -224,6 +224,17 @@ const main = async () => {
     npm_config_cache: cacheDir,
   };
 
+  //? The scaffolder resolves a package manager by scanning PATH only (never cwd
+  //? — a BatBadBut hazard mitigation), so testing `--pm=bun` requires bun to BE
+  //? on PATH. A winget install does not take effect until the shell restarts, so
+  //? without this the scaffolder correctly skips the install with a hint, my
+  //? own re-install step then populates node_modules anyway, and the run looks
+  //? like it exercised the bun install path when it never did. Prepend rather
+  //? than replace so the real PATH still resolves node/npm/git.
+  if (bunPath !== null && bunPath !== 'bun') {
+    registryEnv.PATH = `${path.dirname(bunPath)}${path.delimiter}${process.env.PATH ?? ''}`;
+  }
+
   console.log(`[e2e] pm=${args.pm} runtime=${args.runtime}`);
   console.log(`[e2e] workdir: ${work}`);
 
@@ -329,6 +340,19 @@ const main = async () => {
     if (!fs.existsSync(projectDir)) {
       console.error('[e2e] scaffold produced no project directory — aborting the remaining steps.');
     } else {
+      //? Prove the CHOSEN package manager actually ran. The scaffolder skips the
+      //? install with a hint (and no crash) when it cannot find the binary on
+      //? PATH — correct behaviour, but it means a `--pm=bun` run can complete
+      //? having never once invoked bun, while a later step populates
+      //? node_modules and paints everything green. The lockfile is the artifact
+      //? only the real installer leaves behind.
+      step(`${args.pm} actually performed the install (lockfile present)`, () => {
+        const expected = args.pm === 'bun' ? ['bun.lock', 'bun.lockb'] : ['package-lock.json'];
+        const found = expected.filter((name) => fs.existsSync(path.join(projectDir, name)));
+        console.log(`[e2e]   looked for ${expected.join(' | ')} → found: ${found.join(', ') || '(none)'}`);
+        return found.length > 0;
+      });
+
       //? The scaffolder installs already; this proves a SECOND install (the
       //? upgrade/add path) also resolves cleanly against the same registry.
       step(`${args.pm} install (idempotent re-install)`, () =>
