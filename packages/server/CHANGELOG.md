@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Under Bun, EVERY optional package was reported as absent.** `capabilities.ts`
+  cached a detached `import.meta.resolve`. Node calls a detached reference happily;
+  Bun throws `import.meta.resolve must be bound to an import.meta object`, and the
+  detection catches that and returns `false`. So on Bun, `@luckystack/login`,
+  `sync`, `presence`, `cron`, `docs-ui`, `error-tracking` and `devkit` were all
+  silently disabled while the server booted and served a green `/_health`.
+
+  Node-only deployments were never affected. Fixed by calling `resolve` as a member
+  of the `import.meta` object rather than caching the method — `obj.method()` binds
+  `this`, `const m = obj.method; m()` does not.
+
+### Fixed
+
 - **Redis secret-manager pointer boot** (ADR 0026): fixes the `WRONGPASS ... REDIS_PASSWORD_V<n>`
   boot failure with no consumer code — the `registerRedisClient(...)` workaround can be removed.
   The rebuild is triggered by `@luckystack/secret-manager` firing core's secrets-resolved channel
