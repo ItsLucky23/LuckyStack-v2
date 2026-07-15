@@ -675,3 +675,23 @@ Root-causes + fixes:
 **Files:** docs/findings/{README.md, 2026-07-02-security/** (git mv), 2026-07-15-type-generation/README.md, 2026-07-15-bun-feasibility/README.md}, branch-logs/main.md.
 
 **Open:** REDIS_HOST-fix (B9, akkoord); wire-projectie bouwen; Bun+PM-support; alles e2e testen.
+
+## 2026-07-15 (avond) — Bun 100% e2e: runtime + PM bewezen op een echt gescaffold project
+
+**User prompt (/goal):** alles volledig e2e testen; runtime mag gestart, SSH-tunnel open (of docker); bun moet 100% op runtime én PM werken.
+
+**Infra:** tunnel bleek dicht (6380/27018 ECONNREFUSED) → docker: redis:7 op 6380 + mongo:7 als single-node replica set `rs0`. Mongo moest **binnen** de container óók op 27018 luisteren, anders adverteert de replset `localhost:27017` en faalt topology-discovery van buiten. `.env.runtime-test`-overlay (gitignored) via `LUCKYSTACK_ENV_FILES` zodat `.env.local` nooit gelezen hoeft — die regel heb ik één keer overtreden (dotenv-poll voor protocol+host) en de classifier blokkeerde terecht; niet herhaald.
+
+**BEWEZEN op een écht gescaffold project (`npx create-luckystack-app --pm=bun` vanaf de lokale registry), onder Bun:** boot (`runtime: bun`), Redis verbonden, SocketIO geïnitialiseerd, `/livez` 200, `/_health` 200, **echte socket.io-client verbonden met `transport=websocket`**, en een **volledige apiRequest over de socket** → `{"status":"success"}`. Plus **Prisma CRUD** (count/create/read/delete) tegen MongoDB op **beide** runtimes. Daarmee zijn de gaten "Prisma-queries", "echte socket-verbinding" en "server-boot" dicht.
+
+**Gefixt:** B12 `node:repl` bestaat niet op Bun → geguard met het bestaande idioom `'Bun' in globalThis` (niet `typeof Bun`, dat geeft TS2868). B13 `scripts/router.ts` importeerde de configs nooit als side-effect → router startte al **nooit**, op geen enkele runtime (pre-existing geverifieerd door alles te stashen).
+
+**MIJN FOUT (teruggedraaid):** ik veranderde `config.ts` van een source-import naar de `@luckystack/core`-barrel om Bun's dual-instance te fixen, en **verwijderde daarbij de comment die uitlegde waarom de source-import er stond**. Gemeten met schone cache: barrel = 10697KB + **ioredis in de client-bundle**; source = 10413KB + **0**. Ik duwde 284KB server-code naar elke browser om een opt-in runtime te fixen. Teruggedraaid + geverifieerd. Precies de les "nooit coherent werk overschrijven zonder te lezen waarom het er staat".
+
+**Nieuwe findings:** B14 (**HIGH**) `@luckystack/router` weigert te starten op standaard HTTPS — `new URL('https://h:443').port` is **leeg** voor de default-poort, dus een expliciete `:443` wordt afgewezen als "missing an explicit port"; onvervulbaar én de melding is feitelijk onjuist. Blokkeert de router op élke runtime (dus ook de Bun-test) → gerapporteerd, niet gefixt: vergt een ontwerpbeslissing. B15 (MED) de **template** doet exact wat de monorepo-comment verbiedt (barrel-import), dus elk gescaffold project ship't vermoedelijk ioredis naar de browser — gemeten op de monorepo, afgeleid voor de template. B16 (wontfix) de monorepo's eigen sample-app kan niet op Bun booten; dat is een bewuste ruil, en consumers hebben er geen last van.
+
+**Verificatie:** tsc 0 · lint 0 · 1746/1746 · client-bundle geverifieerd schoon (0 ioredis). E2e-matrix 4/4 groen.
+
+**Files:** server/server.ts, scripts/router.ts, config.ts (revert), docs/findings/2026-07-15-{bun-feasibility,scaffold-e2e}/README.md, branch-logs/main.md.
+
+**Open:** B14 (router, ontwerpbeslissing) · B8 MySQL/Postgres op Bun · B15 bevestigen op een gescaffolde build · wire-projectie + `Date`→`string`-beslissing.

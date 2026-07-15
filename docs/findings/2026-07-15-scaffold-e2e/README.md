@@ -49,19 +49,45 @@ under bun. That is proven separately, and more strongly, by a real boot against 
 (`[Supervisor] Started server process (runtime: bun)`, `typeof Bun = object`, `Connected to
 Redis`, `GET /livez` → 200, `/_health` → ok). The two should not be conflated.
 
-### What a green matrix does NOT yet prove about Bun
+### Runtime proof on a REAL scaffolded project (2026-07-15)
 
-Four gaps, none of them pedantic, all needing a live database or a real client:
+The matrix only builds. These are the gaps it could not see — closed by booting a project
+that `npx create-luckystack-app --pm=bun` produced from the local registry, against a
+dockerised MongoDB replica set + Redis. No source hacks: this is what a consumer gets.
 
-| Gap | Why the matrix cannot see it |
+```
+[Supervisor] Started server process (pid: 91028, runtime: bun)
+Connected to Redis
+SocketIO server initialized (redis adapter attached)
+Server is running on http://127.0.0.1:84/
+
+GET  /livez    -> 200 {"status":"live"}
+GET  /_health  -> 200 {"status":"ok","bootUuid":"38ed765f-..."}
+socket.io client connected · transport=websocket      <- the WS upgrade
+apiRequest over the socket -> {"status":"success","result":null,"httpStatus":200}
+```
+
+Prisma CRUD (count → create → read → delete) against MongoDB, run on both runtimes:
+
+```
+[NODE] ✅ create+read+delete OK · createdAt=Date
+[BUN]  ✅ create+read+delete OK · createdAt=Date
+```
+
+(Incidentally this confirms the wire-type analysis in the type-generation ledger: `createdAt`
+really is a `Date` object server-side. It only becomes a string on the wire.)
+
+| Gap | Status |
 |---|---|
-| **Prisma *queries* under Bun** | Only `prisma generate` is exercised. No query ever runs — and Prisma's Bun story is precisely about the query engine. |
-| **Databases other than SQLite** | The harness scaffolds `--db=sqlite`. Mongo / MySQL / Postgres untested (B8 in the bun-feasibility ledger). |
-| **A real Socket.io client connection** | The server initialises the socket, but nothing has ever connected under Bun. The WS upgrade is the most Bun-sensitive path in the stack. |
-| **Router WS proxying** | Untouched (B7). Raw `node:http` + `node:net` + 101 upgrade handling — must be load-tested, not reviewed. |
+| Prisma *queries* under Bun | ✅ **closed** — real CRUD on MongoDB, both runtimes |
+| A real Socket.io client connection | ✅ **closed** — `transport=websocket`, full apiRequest round-trip |
+| Server boot under Bun | ✅ **closed** — on a genuinely scaffolded project |
+| Databases other than MongoDB/SQLite | ⛔ **open** — MySQL / Postgres untested on Bun (B8) |
+| Router WS proxying | ⛔ **blocked, not open** — the router cannot start on ANY runtime (B13 fixed, **B14 open**), so the Bun question cannot yet be asked |
 
-So: **Bun is proven for building and booting a LuckyStack project.** "Production-ready on Bun"
-needs those four.
+**Verdict: Bun is proven for a consumer's build, boot, and full request path — HTTP, the
+WebSocket upgrade, the socket API round-trip, and Prisma queries.** Two things remain: two
+untested database engines, and a router that is broken independently of Bun.
 
 ### E3 — the harness reported a bun install that never happened
 
