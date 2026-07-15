@@ -13,7 +13,7 @@ describe('logger timestamps (logging.timestamps)', () => {
   it('prefixes an ISO-8601 UTC timestamp by default', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     getLogger().info('Connected to Redis');
-    const msg = info.mock.calls[0][0] as string;
+    const msg = String(info.mock.calls[0]?.[0] ?? '');
     expect(msg).toMatch(new RegExp(`${ISO_PREFIX.source}Connected to Redis$`));
   });
 
@@ -27,16 +27,16 @@ describe('logger timestamps (logging.timestamps)', () => {
   it('only prefixes the message — context stays a separate console arg', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     getLogger().warn('careful', { code: 42 });
-    const [msg, ctx] = warn.mock.calls[0];
-    expect(msg as string).toMatch(ISO_PREFIX);
+    const [msg, ctx] = warn.mock.calls[0] ?? [];
+    expect(String(msg)).toMatch(ISO_PREFIX);
     expect(ctx).toEqual({ code: 42 });
   });
 
   it('createDevLogger timestamps the message and preserves the trailing color arg', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     createDevLogger().warn('dev warn');
-    const [msg, color] = log.mock.calls[0];
-    expect(msg as string).toMatch(new RegExp(`${ISO_PREFIX.source}dev warn$`));
+    const [msg, color] = log.mock.calls[0] ?? [];
+    expect(String(msg)).toMatch(new RegExp(`${ISO_PREFIX.source}dev warn$`));
     expect(color).toBe('yellow');
   });
 });

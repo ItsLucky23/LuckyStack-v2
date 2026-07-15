@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bun env auto-load guard.** Bun auto-loads `.env` files before any user code
+  runs; Node does not. That silently breaks two guarantees of `loadEnvFiles`:
+  `LUCKYSTACK_ENV_FILES` stops being an ambient-only override (a value set INSIDE
+  `.env` — exactly what `.env_template` shows commented — hijacks the file list),
+  and `.env.<mode>` / `.env.<mode>.local`, which the framework never loads, come
+  to outrank `.env` (verified under Bun 1.3.14: a key in `.env.development` beat
+  `.env`). Both failures were 100% silent. `loadEnvFiles` now detects the symptom
+  at boot — an env file already applied to `process.env` byte-for-byte before we
+  load it — and warns with the fix. It warns rather than throws: `bun install`
+  ignores `env = false` (oven-sh/bun#31450), so a postinstall boot would
+  otherwise be unfixably fatal. Node is never affected and never warns.
+- **`bunfig.toml` with `env = false`** at the repo root and in the
+  `create-luckystack-app` template, disabling Bun's `.env` auto-load (requires
+  Bun >= 1.3.3) so `bun` and `node` load byte-identical values. The "a real
+  ambient env var wins over `.env`" contract (Docker/K8s/CI) is unchanged — that
+  is LuckyStack's own loader, not Bun's.
 - **Timestamps in the built-in loggers.** The default `console.*` logger and
   `createDevLogger` now prefix each line with an ISO-8601 UTC timestamp
   (`[2026-07-13T15:20:01.123Z] Connected to Redis`), controlled by a new

@@ -1,0 +1,19 @@
+# Disable Bun's automatic .env loading (Bun >= 1.3.3).
+#
+# Bun preloads .env / .env.<mode> / .env.local BEFORE any user code runs; Node
+# does not. LuckyStack loads its own env files in `@luckystack/core`'s env.ts
+# (`.env` non-override, then `.env.local` override), which relies on Node
+# semantics:
+#   - `LUCKYSTACK_ENV_FILES` must be an AMBIENT-only override — Bun's preload
+#     makes a key inside `.env` hijack the file list.
+#   - Bun loads `.env.<mode>` / `.env.<mode>.local`, which the framework never
+#     loads; those values would silently outrank `.env`.
+#
+# `env = false` restores exact Node semantics. A real ambient environment
+# variable still wins over `.env` (the Docker/K8s/CI contract) — that is
+# LuckyStack's own loader, not Bun's.
+#
+# Note: `bun install` ignores this setting (oven-sh/bun#31450); it only affects
+# `bun run` / `bun <file>`. `@luckystack/core` warns at boot if it detects that
+# auto-load happened anyway.
+env = false

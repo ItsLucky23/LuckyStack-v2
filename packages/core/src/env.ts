@@ -3,6 +3,8 @@ import path from 'node:path';
 import { config as loadDotenv, parse as parseDotenv } from 'dotenv';
 import { z } from 'zod';
 
+import tryCatchSync from './tryCatchSync';
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   SERVER_IP: z.string().min(1).default('127.0.0.1'),
@@ -62,8 +64,77 @@ const reportDuplicateEnvKeys = (files: string[]): void => {
   }
 };
 
+//? Bun auto-loads .env files BEFORE any user code runs; Node does not. That
+//? silently breaks two guarantees of `loadEnvFiles` below:
+//?   1. `LUCKYSTACK_ENV_FILES` is contractually an AMBIENT-only override (see
+//?      `getEnvFiles`) — under Bun a key inside `.env` is already in
+//?      `process.env` by the time we read it, so it hijacks the file list.
+//?   2. Bun also loads `.env.<mode>` / `.env.<mode>.local`, which this framework
+//?      never loads. Because the first file is `override: false`, those values
+//?      silently outrank `.env`.
+//? The cure is a `bunfig.toml` with `env = false` (Bun >= 1.3.3), shipped at the
+//? repo root and in the scaffold template. Bun exposes NO way to read that
+//? setting back at runtime (`Bun.config` / `Bun.bunfig` are undefined), so we
+//? detect the SYMPTOM instead: a file we are about to load whose every key is
+//? already in `process.env` with a byte-identical value can only mean the
+//? runtime preloaded it.
+const isBunRuntime = (): boolean => 'Bun' in globalThis;
+
+//? Mirrors Bun's own mode selection (`BUN_ENV` -> `NODE_ENV`, exact-match
+//? 'production'/'test', anything else -> development) so the warning can NAME
+//? the extra files Bun loaded behind the framework's back.
+const getBunModeEnvFiles = (): string[] => {
+  const mode = process.env.BUN_ENV ?? process.env.NODE_ENV;
+  const suffix = mode === 'production' || mode === 'test' ? mode : 'development';
+  return [`.env.${suffix}`, `.env.${suffix}.local`];
+};
+
+const fileExists = (file: string): boolean => existsSync(path.resolve(process.cwd(), file));
+
+//? True when every key the file defines is ALREADY in `process.env` with the
+//? same value. Requires value equality (not mere presence) so a deployment that
+//? legitimately sets a few ambient overrides is not mistaken for auto-load.
+const isEnvFilePreloaded = (file: string): boolean => {
+  const filePath = path.resolve(process.cwd(), file);
+  if (!existsSync(filePath)) return false;
+  const [error, parsed] = tryCatchSync(() => parseDotenv(readFileSync(filePath, 'utf8')));
+  if (error || !parsed) return false;
+  const keys = Object.keys(parsed);
+  if (keys.length === 0) return false;
+  return keys.every((key) => process.env[key] === parsed[key]);
+};
+
+//? Checked at most once, and only BEFORE the first load — after `loadEnvFiles`
+//? has run, our own dotenv writes would make every file look "preloaded".
+let hasCheckedBunEnvAutoload = false;
+
+//? Warns rather than throws on purpose: `bun install` ignores `env = false`
+//? (oven-sh/bun#31450, still open), so a postinstall boot on Bun would be
+//? unfixably fatal. A wrong env value is a config bug, not a security boundary.
+const warnOnBunEnvAutoload = (files: string[]): void => {
+  if (hasCheckedBunEnvAutoload || !isBunRuntime()) return;
+  hasCheckedBunEnvAutoload = true;
+
+  //? Bun's mode files are the PUREST signal: the framework never loads them, so
+  //? one already applied to `process.env` can only have come from Bun. They also
+  //? cover the case that hides `.env` from this check — a mode file overriding a
+  //? `.env` key means `.env` itself is no longer byte-identical to the env.
+  const modeFiles = getBunModeEnvFiles();
+  const preloaded = [...files, ...modeFiles].filter((file) => isEnvFilePreloaded(file));
+  if (preloaded.length === 0) return;
+
+  const shadowed = modeFiles.filter((file) => fileExists(file));
+  const shadowNote = shadowed.length > 0
+    ? ` Bun also loaded ${shadowed.join(' + ')}, which LuckyStack never loads — those values outrank ${files[0]}.`
+    : '';
+
+  // eslint-disable-next-line no-console -- runs before the logger registry is wired
+  console.warn(`[env] Bun appears to have auto-loaded ${preloaded.join(' + ')} before LuckyStack did, so Bun's precedence wins over the framework's own layering.${shadowNote} LUCKYSTACK_ENV_FILES is also no longer ambient-only: a value set inside a .env file now hijacks the file list. Add \`env = false\` to bunfig.toml (Bun >= 1.3.3) to restore Node semantics.`);
+};
+
 export const loadEnvFiles = (): void => {
   const files = getEnvFiles();
+  warnOnBunEnvAutoload(files);
   //? First file is non-override (a real ambient env var wins); each later file
   //? overrides earlier ones, matching the historical `.env` -> `.env.local` order.
   for (const [index, file] of files.entries()) {
