@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Server-side Vitest imports now keep the real `@luckystack/core` barrel.**
+  The scaffold's Vite config still globally aliased the bare barrel to
+  `@luckystack/core/client`, even though shared config has moved to the dedicated
+  browser-safe `/config` entry. Vitest inherited that stale alias and turned
+  server-only exports such as `tryCatchSync` into `undefined` at runtime. The
+  obsolete alias is removed; regression guards require browser code to use
+  explicit `/client` or `/config` entries instead.
 - **Drizzle + SQLite now performs real queries on Node and Bun.** Node keeps
   `better-sqlite3`; Bun selects Drizzle's `bun:sqlite` adapter at module load via
   dynamic imports, because Bun rejects the native `better-sqlite3` addon

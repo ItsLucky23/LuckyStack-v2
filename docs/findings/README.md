@@ -9,7 +9,7 @@ Last updated: 2026-07-16
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
-| 2026-07-16 | [2026-07-16-v066-vitest-core-alias-handoff/](./2026-07-16-v066-vitest-core-alias-handoff/) | Validate v0.6.6 consumer handoff: Vite core alias breaks server-side Vitest imports | 1 | 1 open |
+| 2026-07-16 | [2026-07-16-v066-vitest-core-alias-handoff/](./2026-07-16-v066-vitest-core-alias-handoff/) | Validate v0.6.6 consumer handoff: Vite core alias breaks server-side Vitest imports | 2 | 1 open · 1 fixed |
 | 2026-07-16 | [2026-07-16-v070-orm-runtime-readiness/](./2026-07-16-v070-orm-runtime-readiness/) | v0.7.0 evidence audit: Prisma/MikroORM/Drizzle × Node/Bun | 5 | 0 open · 4 fixed · 1 wontfix |
 | 2026-07-16 | [2026-07-16-npm-vs-bun-benchmark/](./2026-07-16-npm-vs-bun-benchmark/) | npm+node vs Bun benchmark (runtime, HTTP, install) | — | analysis (no defects) — Bun 1.83× faster on realistic HTTP; install winner depends on clean vs repeat |
 | 2026-07-16 | [2026-07-16-unpushed-branch-review/](./2026-07-16-unpushed-branch-review/) | Review of all unpushed commits + working-tree changes | 7 | 0 open · 7 fixed |
@@ -18,9 +18,9 @@ Last updated: 2026-07-16
 | 2026-07-15 | [2026-07-15-bun-feasibility/](./2026-07-15-bun-feasibility/) | Bun runtime + PM + **router WS proxy** — runtime, PM, all 4 databases verified on both runtimes; router proxies WS on node, refuses on bun (upstream) | 22 | 0 open · 20 fixed · 1 wontfix · 1 mitigated |
 | 2026-07-02 | [2026-07-02-security/](./2026-07-02-security/) | Security & correctness scan (10 agents, full codebase) | 13 | 0 open · 10 fixed · 3 wontfix |
 
-> The unpushed-review and v0.7.0 ORM/runtime-readiness findings are closed. One
-> framework-side test-infrastructure issue remains open: the scaffold's stale global
-> core→client Vite alias can rewrite server-only imports under Vitest.
+> The stale scaffold core→client alias is fixed, alongside the earlier unpushed-review
+> and ORM/runtime findings. One related compiled-package issue remains open: tsup still
+> places `node:async_hooks` in a chunk reached by the core client entry.
 
 > **Rollups drift.** This table claimed "5 open" for type-generation (actually 0, since 2026-07-15)
 > and "1 open" for scaffold-e2e (fixed the same day) until 2026-07-16. A stale rollup is worse than

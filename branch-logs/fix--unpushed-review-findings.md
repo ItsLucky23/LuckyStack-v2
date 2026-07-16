@@ -49,3 +49,18 @@
 **Files touched**: `packages/{core,devkit,create-luckystack-app,cli}/**`, `scripts/{e2eVerdaccio.mjs,bundleServer.mjs,verifyOrmWireProjection.ts}`, `package*.json`, `tsconfig.server.json`, changelogs, `docs/findings/2026-07-16-v070-orm-runtime-readiness/README.md`, findings index, and branch-log metadata.
 
 **Notes / decisions**: Bun remains a supported server runtime, not a required Vitest host. The live `npm run test` business suite was not counted as a code failure when invoked without this worktree's server/database; it contacted an unrelated listener and returned `api.notFound`/missing `DATABASE_URL`. Vite's existing `async_hooks`, dependency-eval, and plugin-timing warnings remain outside this ORM/runtime change and are reported rather than silently suppressed.
+
+## 2026-07-16 15:10 — Remove stale scaffold core alias for server-side Vitest
+
+**User prompt (summary)**: Implement option C from the v0.6.6 handoff review so generated projects stop rewriting server-only `@luckystack/core` imports to the client barrel under Vitest.
+
+**What I did**:
+- Removed the scaffold's obsolete exact-match `@luckystack/core` → `@luckystack/core/client` Vite alias; shared runtime config already uses the dedicated browser-safe `/config` entry.
+- Added permanent regressions that execute `tryCatchSync` from the real bare barrel under Vitest, forbid reintroducing the alias, and require browser-facing scaffold source to use explicit `/client` or `/config` runtime imports.
+- Ran a real-registry generated Drizzle/SQLite scaffold through install, typecheck, client+server build, ORM CRUD, production Node boot, and `/livez` + `/_health` checks; all steps passed.
+- Closed VA-01. The consumer build reconfirmed a distinct pre-existing tsup chunk issue (`core/client.js` reaches `node:async_hooks` through the lazy error-capture/shared-logger chunk); recorded it as open VA-02 rather than hiding it or restoring the harmful alias.
+- Verified 1812/1812 unit tests, lint/package-lint/invariants, 17/17 package builds, client build, and server bundle.
+
+**Files touched**: `packages/create-luckystack-app/template/vite.config.ts`, `packages/create-luckystack-app/src/viteCoreResolution.test.ts`, `packages/create-luckystack-app/CHANGELOG.md`, `docs/findings/2026-07-16-v066-vitest-core-alias-handoff/README.md`, findings index, and branch-log metadata.
+
+**Notes / decisions**: Option A remained rejected as helper-specific masking; option B remains available for consumers that intentionally need separate browser/server Vitest projects. Removing the now-unneeded global alias fixes the framework-owned cause without widening the client barrel. VA-02 is separate follow-up because it predates and survives both alias states.

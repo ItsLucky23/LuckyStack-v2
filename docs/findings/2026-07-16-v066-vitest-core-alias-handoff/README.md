@@ -1,13 +1,14 @@
 # v0.6.6 Vitest core-alias handoff validation — 2026-07-16
 
 > AI findings ledger (Findings Protocol).
-> Scope: validate an external v0.6.6 consumer handoff against the current framework/scaffold after the v0.7.0 ORM/runtime fixes · Method: current-source comparison, tag comparison, package-export probe, existing gate evidence · Supersedes: —
+> Scope: validate and resolve an external v0.6.6 consumer handoff against the current framework/scaffold after the v0.7.0 ORM/runtime fixes · Method: current-source/tag comparison, package-export probe, permanent regressions, real-registry scaffold install/typecheck/build/boot, full repo gates · Supersedes: —
 
 Last updated: 2026-07-16
 
 | # | Finding | Severity | Status | Since | Resolved | Notes |
 |---|---------|----------|--------|-------|----------|-------|
-| VA-01 | The scaffold's global Vite alias still rewrites bare `@luckystack/core` to `@luckystack/core/client`, so server-side Vitest tests can receive the client barrel and lose server-only exports such as `tryCatchSync`. | MED | open | 2026-07-16 | — | The relevant v0.6.6 shape is unchanged: `vite.config.ts` still declares the exact-match alias; the current client barrel still omits `tryCatchSync`; a direct current-package probe reports bare=`function`, client=`undefined`. Vitest uses Vite configuration unless a separate test configuration overrides it. Production Node/Bun execution is unaffected. |
+| VA-01 | The scaffold's global Vite alias still rewrites bare `@luckystack/core` to `@luckystack/core/client`, so server-side Vitest tests can receive the client barrel and lose server-only exports such as `tryCatchSync`. | MED | fixed | 2026-07-16 | 2026-07-16 | Removed the obsolete alias after config moved to `/config`. Regression guards pin the absence of the rewrite, real bare-barrel `tryCatchSync` execution under Vitest, and explicit `/client`/`/config` browser imports. A real-registry scaffold typechecked, built, executed Drizzle CRUD, booted, and returned 200 health checks. |
+| VA-02 | The built `@luckystack/core/client` entry still statically reaches a split chunk containing `node:async_hooks`, producing a browser-build warning despite source-level browser-safe imports. | MED | open | 2026-07-16 | — | Pre-existing and byte-shape-equivalent before/after VA-01: tsup coalesces `tryCatchClient`'s dynamic `sentrySetup` path and the client-used logger into one shared chunk. The scaffold build succeeds, but the client entry is not as isolated as its source graph and docs claim. Separate follow-up; restoring the bad global alias would not fix this compiled-chunk edge. |
 
 ## Current assessment
 
@@ -26,15 +27,20 @@ framework has a simpler upstream option that did not exist in v0.6.6:
 - Remaining bare-core imports in `config.ts` are type-only and erase at build time.
 - Scaffold client modules already import `@luckystack/core/client` explicitly.
 
-Therefore the stale Vite alias can likely be removed completely, guarded by:
+Therefore the stale Vite alias was removed completely and is guarded by:
 
 1. a scaffold regression proving server-side Vitest resolves the bare barrel and can
    call `tryCatchSync`;
-2. the existing `@luckystack/core/config` browser-safety graph test;
-3. a generated scaffold client build proving no server barrel enters the browser.
+2. a source guard requiring browser runtime imports to use explicit `/client` or
+   `/config` entries;
+3. the existing `@luckystack/core/config` browser-safety graph test;
+4. a real-registry generated scaffold typecheck, client/server build, ORM probe,
+   production boot, and health checks.
 
-No fix was applied during this validation; this ledger records the open framework-side
-work without changing consumer or scaffold behavior.
+The real scaffold build also separated VA-02 from this fix: `core/client.js` already
+reached an `async_hooks`-bearing tsup chunk before the alias was removed. Option C did
+not introduce or widen that edge, and restoring the alias would re-break server tests
+without solving the packaged client chunk. VA-02 remains explicit follow-up work.
 
 ## Earlier v0.7.0 assessment after the fixes
 
