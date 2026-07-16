@@ -865,3 +865,18 @@ Dit is het meest materiële runtime-verschil voor een socket-first server, en he
 **Verificatie:** lokale supervisorsuite 10/10, root lint, devkit build, invariants en changelog-check groen. Linux Node 20+22 CI-rerun volgt vóór publicatie.
 
 **Files:** `packages/devkit/src/supervisor.test.ts`, `packages/devkit/CHANGELOG.md`, CI-findingsledger en branch-logmetadata.
+
+## 2026-07-16 17:15 — v0.7.0 via GitHub CI met provenance gepubliceerd
+
+**User prompt (completion):** publiceer de volledige 0.7.0-release via GitHub CI en verifieer het resultaat werkelijk op npm.
+
+**Wat ik deed:**
+- Reguliere CI-run `29508630527` volledig groen afgewacht op Node 20 én Node 22: Linux `npm ci`, artifacts, 17 packagebuilds, lint, volledige client/serverbuild en 1817/1817 unit-tests.
+- Echte publish-run `29509197209` via `workflow_dispatch` vanaf gecorrigeerde `main`-commit `508ef66` gestart met `dry_run=false`. Alle gates, pack-dry-run en real publish slaagden.
+- Registry nagevraagd voor alle 17 packages: elk rapporteert versie 0.7.0.
+- npm-attestations nagevraagd voor zowel `@luckystack/core@0.7.0` als `create-luckystack-app@0.7.0`: beide hebben SLSA provenance (`https://slsa.dev/provenance/v1`).
+- CI-01 en CI-02 gesloten; findings-index hergeteld.
+
+**Resultaat:** v0.7.0 is gepubliceerd. `main` is gepusht; tag `v0.7.0` bestaat. De eerste tag-run stopte veilig vóór publicatie; de daadwerkelijke release is met provenance gebouwd vanaf de gecorrigeerde main-commit.
+
+**Bewust onaangeraakt:** de vreemde untracked Windows-bannermap in `main` en `scripts/mikroSerializeProbe.temp.ts` in de oude fix-worktree.
