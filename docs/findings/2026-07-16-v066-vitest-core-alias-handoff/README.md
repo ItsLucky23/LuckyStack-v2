@@ -8,7 +8,7 @@ Last updated: 2026-07-16
 | # | Finding | Severity | Status | Since | Resolved | Notes |
 |---|---------|----------|--------|-------|----------|-------|
 | VA-01 | The scaffold's global Vite alias still rewrites bare `@luckystack/core` to `@luckystack/core/client`, so server-side Vitest tests can receive the client barrel and lose server-only exports such as `tryCatchSync`. | MED | fixed | 2026-07-16 | 2026-07-16 | Removed the obsolete alias after config moved to `/config`. Regression guards pin the absence of the rewrite, real bare-barrel `tryCatchSync` execution under Vitest, and explicit `/client`/`/config` browser imports. A real-registry scaffold typechecked, built, executed Drizzle CRUD, booted, and returned 200 health checks. |
-| VA-02 | The built `@luckystack/core/client` entry still statically reaches a split chunk containing `node:async_hooks`, producing a browser-build warning despite source-level browser-safe imports. | MED | open | 2026-07-16 | — | Pre-existing and byte-shape-equivalent before/after VA-01: tsup coalesces `tryCatchClient`'s dynamic `sentrySetup` path and the client-used logger into one shared chunk. The scaffold build succeeds, but the client entry is not as isolated as its source graph and docs claim. Separate follow-up; restoring the bad global alias would not fix this compiled-chunk edge. |
+| VA-02 | The built `@luckystack/core/client` entry still statically reaches a split chunk containing `node:async_hooks`, producing a browser-build warning despite source-level browser-safe imports. | MED | fixed | 2026-07-16 | 2026-07-16 | Moved `AsyncLocalStorage` identity state behind a server-only module while keeping the browser-reachable registry free of Node builtins. `checkClientBundle.mjs` now walks the emitted `dist/client.js` chunk graph and fails on any reachable Node builtin; it reports 5 files and 0 builtins. Real root and scaffold production builds are warning-free. |
 
 ## Current assessment
 
@@ -37,12 +37,14 @@ Therefore the stale Vite alias was removed completely and is guarded by:
 4. a real-registry generated scaffold typecheck, client/server build, ORM probe,
    production boot, and health checks.
 
-The real scaffold build also separated VA-02 from this fix: `core/client.js` already
-reached an `async_hooks`-bearing tsup chunk before the alias was removed. Option C did
-not introduce or widen that edge, and restoring the alias would re-break server tests
-without solving the packaged client chunk. VA-02 remains explicit follow-up work.
+The first real scaffold build also separated VA-02 from the alias fix: `core/client.js`
+already reached an `async_hooks`-bearing tsup chunk before the alias was removed. The
+follow-up moved only request-identity storage into a server-only module and added a
+post-build graph check against the actual emitted client chunks. The core client graph
+now reaches five emitted files and zero Node builtins; both the repository and a real
+registry-installed scaffold build without the former warning.
 
-## Earlier v0.7.0 assessment after the fixes
+## Final v0.7.0 assessment after the fixes
 
 The older release blockers are no longer open:
 

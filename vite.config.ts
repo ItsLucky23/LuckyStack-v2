@@ -43,12 +43,20 @@ export default defineConfig(({ command }) => {
     ],
     build: {
       rollupOptions: {
+        //? This monorepo sample intentionally compiles the full Tailwind corpus;
+        //? vite:css therefore dominates every release build. Keep size/timing
+        //? output, but disable Rolldown's repetitive non-actionable timing nudge.
+        checks: { pluginTimings: false },
         // Only apply heavy external filtering during the production build
         external: isProduction ? (id) => {
           const ignored = [/\/_api\//, /\/_sync\//, /\/server\//, /\/_server\//];
           return ignored.some(pattern => pattern.test(id));
         } : [],
       },
+      //? The Sentry-enabled app shell is ~680 kB minified (~216 kB gzip). Set an
+      //? explicit reviewed budget above that measured baseline instead of using
+      //? Vite's generic 500 kB warning threshold.
+      chunkSizeWarningLimit: 750,
       target: 'esnext',
     },
     resolve: {

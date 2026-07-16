@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Raised the optional `@sentry/node` peer floor to `^10.66.0`. That line uses
+  OpenTelemetry 2.9 and fixes the unbounded W3C Baggage allocation advisory
+  GHSA-8988-4f7v-96qf present in the previous 2.7 transitive stack.
+
 ## [0.1.0]
 
 ### Added

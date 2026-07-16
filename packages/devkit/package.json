@@ -39,8 +39,8 @@
     }
   },
   "bin": {
-    "luckystack-validate-deploy": "./dist/cli/validateDeploy.js",
-    "luckystack-dev": "./dist/supervisor.js"
+    "luckystack-validate-deploy": "dist/cli/validateDeploy.js",
+    "luckystack-dev": "dist/supervisor.js"
   },
   "files": [
     "dist",

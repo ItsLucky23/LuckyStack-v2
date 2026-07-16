@@ -30,7 +30,7 @@
 
 **0001** · critical · packages/core (client/server boundary) · tags: runtime, bundling, client-server-boundary · 2026-06-23
 
-Never import a `node:*` module (or anything that transitively does — `async_hooks`, `fs`, `child_process`) from code the client bundle can reach; use the `@luckystack/core/client` entry, which is built to keep Node built-ins out (see the `tryCatchClient` lazy-capture pattern). And ALWAYS smoke-test the real browser before calling a change "ship-safe" — a green build + green tests do not prove the page renders. Related: `docs/examples/trycatch-error-handling.md`.
+Never import a `node:*` module (or anything that transitively does — `async_hooks`, `fs`, `child_process`) from code the client bundle can reach; use the `@luckystack/core/client` entry. Keep server-only state such as AsyncLocalStorage in a separate module rather than relying on a lazy import inside a mixed registry.
 
 → `docs/lessons/0001-node-modules-leak-into-client-bundle.md`
 

@@ -63,7 +63,7 @@
     "@luckystack/login": "^0.6.7"
   },
   "peerDependencies": {
-    "@sentry/node": "^10.48.0",
+    "@sentry/node": "^10.66.0",
     "dd-trace": "^5.0.0",
     "hot-shots": "^10.0.0",
     "posthog-node": "^4.0.0"

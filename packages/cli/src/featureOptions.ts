@@ -128,7 +128,7 @@ export const blockPlaceholderDefaults = (id: string): Map<string, string> => {
 //? Mirrors the scaffolder's MONITORING_PROVIDERS deps.
 export const monitoringDeps: Readonly<Record<MonitoringProvider, Readonly<Record<string, string>>>> = {
   none: {},
-  sentry: { '@sentry/node': '^10.48.0' },
+  sentry: { '@sentry/node': '^10.66.0' },
   posthog: { 'posthog-node': '^4.0.0' },
   datadog: { 'dd-trace': '^5.0.0', 'hot-shots': '^10.0.0' },
 };

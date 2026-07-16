@@ -54,6 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`@luckystack/core/client` no longer reaches `node:async_hooks` in its built
+  chunk graph.** The browser-safe lazy capture path and the server-only
+  AsyncLocalStorage identity scope previously shared `errorTrackerRegistry.ts`;
+  tsup coalesced that dynamic capture path with the client logger and emitted a
+  static Node builtin import in a client-reached chunk. The identity scope now
+  lives in a dedicated server module, while capture fan-out remains browser-safe.
+  A post-tsup graph check rejects any Node builtin reachable from `dist/client.js`.
 - **`Jsonify<T>` now preserves already-JSON-stable recursive values.** Prisma's
   self-referential `JsonValue` previously recursed through the array branch until
   TypeScript rendered `... N more ...`, producing malformed generated route types

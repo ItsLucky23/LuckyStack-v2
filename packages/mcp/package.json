@@ -38,7 +38,7 @@
     }
   },
   "bin": {
-    "luckystack-mcp": "./dist/index.js"
+    "luckystack-mcp": "dist/index.js"
   },
   "files": [
     "dist",

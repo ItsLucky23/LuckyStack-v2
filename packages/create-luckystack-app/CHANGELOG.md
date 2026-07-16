@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scaffolded security-tool floors are current.** Sentry scaffolds now install
+  `@sentry/node ^10.66.0` (OpenTelemetry 2.9 fixes GHSA-8988-4f7v-96qf), and
+  the template pins `tsx ^4.23.1` so fresh installs resolve fixed esbuild 0.28.1.
+- **The required sync client is no longer both statically and dynamically
+  imported.** Socket initialization now calls the existing static re-export,
+  eliminating an ineffective code-split point and its production-build warning.
 - **Server-side Vitest imports now keep the real `@luckystack/core` barrel.**
   The scaffold's Vite config still globally aliased the bare barrel to
   `@luckystack/core/client`, even though shared config has moved to the dedicated

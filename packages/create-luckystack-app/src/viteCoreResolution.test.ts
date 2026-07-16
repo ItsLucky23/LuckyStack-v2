@@ -41,6 +41,18 @@ describe('scaffold Vite core resolution', () => {
     expect(parsed).toEqual({ server: true });
   });
 
+  it('does not create a dynamic split point for the statically required sync client', () => {
+    const socketInitializer = fs.readFileSync(
+      path.join(TEMPLATE, 'src/_sockets/socketInitializer.ts'),
+      'utf8',
+    );
+    const syncRequest = fs.readFileSync(path.join(TEMPLATE, 'src/_sockets/syncRequest.ts'), 'utf8');
+
+    expect(socketInitializer).not.toContain('import("@luckystack/sync/client")');
+    expect(socketInitializer).toContain('attachSyncReceiver(socketConnection)');
+    expect(syncRequest).toContain('attachSyncReceiver');
+  });
+
   it('keeps browser runtime imports on the explicit client-safe entries', () => {
     const browserFiles = [
       path.join(TEMPLATE, 'config.ts'),

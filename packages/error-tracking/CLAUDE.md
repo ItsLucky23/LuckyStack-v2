@@ -61,7 +61,7 @@ Optional, pluggable error-tracking integration for LuckyStack. Ships a backend-a
 
 - **Required (runtime deps)**: `@luckystack/core`.
 - **Peer (canonical ranges, all optional)**:
-  - `@sentry/node@^10.48.0` — required only when `createSentryAdapter()` or `initializeSentry()` is called. Hard boot error otherwise.
+  - `@sentry/node@^10.66.0` — required only when `createSentryAdapter()` or `initializeSentry()` is called. Hard boot error otherwise.
   - `dd-trace@^5.0.0` — required only when `createDatadogAdapter(...)` is called. Hard boot error otherwise. Consumer MUST require dd-trace as the first import in the server entry.
   - `hot-shots@^10.0.0` — optional companion for `dd-trace` (metrics via StatsD). Adapter still captures exceptions without it.
   - `posthog-node@^4.0.0` — required only when `createPostHogAdapter(...)` is called. Hard boot error otherwise.

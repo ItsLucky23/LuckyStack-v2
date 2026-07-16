@@ -143,10 +143,6 @@ export {
   recordMetricAcrossTrackers,
   startSpanAcrossTrackers,
   startSpanHandle,
-  runWithErrorTrackerIdentity,
-  runWithErrorTrackerIdentityScope,
-  setCurrentErrorTrackerIdentity,
-  getCurrentErrorTrackerIdentity,
   registerPreCaptureFilter,
   flushErrorTrackers,
   sanitizeErrorString,
@@ -161,6 +157,12 @@ export type {
   SpanHandle,
   PreCaptureFilter,
 } from './errorTrackerRegistry';
+export {
+  runWithErrorTrackerIdentity,
+  runWithErrorTrackerIdentityScope,
+  setCurrentErrorTrackerIdentity,
+  getCurrentErrorTrackerIdentity,
+} from './errorTrackerIdentity';
 export * from './env';
 export * from './db';
 export {

@@ -1305,7 +1305,7 @@ interface MonitoringProviderSpec extends EnvProviderSpec {
 const MONITORING_PROVIDERS: readonly MonitoringProviderSpec[] = [
   {
     id: 'sentry',
-    deps: { '@sentry/node': '^10.48.0' },
+    deps: { '@sentry/node': '^10.66.0' },
     lines: (active) => active
       ? ['# Sentry (active) — set the DSN + restart. Requires `npm i @sentry/node`.',
         '# Captures in all environments once the DSN is set; SENTRY_ENABLED=false opts out.',

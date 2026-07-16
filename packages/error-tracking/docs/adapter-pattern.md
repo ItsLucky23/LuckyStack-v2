@@ -296,7 +296,7 @@ interface SentryAdapterOptions {
 createSentryAdapter(options?: SentryAdapterOptions): ErrorTracker;
 ```
 
-- Peer-dep: `@sentry/node@^10.48.0`. Missing -> boot error.
+- Peer-dep: `@sentry/node@^10.66.0`. Missing -> boot error.
 - Resolves the SDK lazily via `createRequire(import.meta.url)`.
 - Forwards `captureException(error, { extra: context })`, `captureMessage`,
   `setUser`, `setContext`, and `startSpan({ name, op }, fn)`.

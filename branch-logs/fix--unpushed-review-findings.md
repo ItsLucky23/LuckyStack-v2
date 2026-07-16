@@ -64,3 +64,19 @@
 **Files touched**: `packages/create-luckystack-app/template/vite.config.ts`, `packages/create-luckystack-app/src/viteCoreResolution.test.ts`, `packages/create-luckystack-app/CHANGELOG.md`, `docs/findings/2026-07-16-v066-vitest-core-alias-handoff/README.md`, findings index, and branch-log metadata.
 
 **Notes / decisions**: Option A remained rejected as helper-specific masking; option B remains available for consumers that intentionally need separate browser/server Vitest projects. Removing the now-unneeded global alias fixes the framework-owned cause without widening the client barrel. VA-02 is separate follow-up because it predates and survives both alias states.
+
+## 2026-07-16 16:10 — Close browser-boundary and dependency-audit release blockers
+
+**User prompt (summary)**: Remove the built core client's `node:async_hooks` edge, resolve all three moderate and one low npm audit findings, then commit, merge, push, bump v0.7.0, and publish through GitHub CI.
+
+**What I did**:
+- Moved `AsyncLocalStorage` request identity state into a server-only core module while preserving per-request isolation and late session assignment; added focused regressions.
+- Added a post-build client chunk-graph gate that follows the real `dist/client.js` imports and rejects every reachable Node builtin. The built graph now reaches five files and zero Node builtins.
+- Upgraded Sentry to 10.66.0 / OpenTelemetry 2.9.0, upgraded `tsx` to 4.23.1, and pinned esbuild 0.28.1 across the repository, scaffold, CLI assets, peer floors, and docs. `npm audit` now reports zero vulnerabilities.
+- Removed production `vconsole`, narrowed page globs, established a reviewed client chunk budget, and removed ineffective dynamic imports for already-static page/sync modules. Repository and generated-scaffold production builds now complete without warnings.
+- Normalized package `bin` paths so npm no longer auto-corrects or warns during pack/publish.
+- Passed 1817/1817 unit tests, 13/13 strict Redis tests, full lint/type/build gates, and a real Verdaccio Sentry+Drizzle scaffold with Node/Bun CRUD, serialization, production boot, and health probes.
+
+**Files touched**: `packages/core/**`, Sentry/error-tracking dependency and documentation surfaces, scaffold/CLI assets, `package*.json`, `vite.config.ts`, root/scaffold client socket setup, changelogs, `docs/findings/2026-07-16-{v066-vitest-core-alias-handoff,v070-npm-audit-readiness}/README.md`, findings index, and branch-log metadata.
+
+**Notes / decisions**: Browser safety is enforced against emitted package artifacts, not inferred from source imports. The sync package is required in the base scaffold, so dynamically importing it beside an existing static import provided no optionality. Release/merge/push steps follow after this verified fix commit.

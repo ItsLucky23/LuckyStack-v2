@@ -31,7 +31,7 @@
   },
   "main": "./dist/index.js",
   "bin": {
-    "create-luckystack-app": "./dist/index.js"
+    "create-luckystack-app": "dist/index.js"
   },
   "files": [
     "dist",

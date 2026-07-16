@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Sentry feature installs now require `@sentry/node ^10.66.0`, pulling the
+  OpenTelemetry 2.9 line that fixes GHSA-8988-4f7v-96qf.
 - ORM switching now removes/adds the Drizzle SQLite `bun-types` declaration
   dependency together with the rest of the selected driver surface.
 - ORM switcher (`manage` → data layer) mirrors the mikro-orm scaffold fix:

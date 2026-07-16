@@ -198,8 +198,8 @@ const getRoutes = (loaders: Record<string, PageLoader>): RouteObject[] => {
 //? instead of every page eager-loading on first paint — which made even `/login`
 //? pull in all pages + their deps (heavy bundle + huge DevTools source-map parse).
 const prodPages = import.meta.glob([
-  './**/*.tsx',
-  './**/*.jsx',
+  './**/page.tsx',
+  './**/page.jsx',
   '!./docs/**',
   '!./**/docs/page.tsx',
   '!./**/_api/**',
@@ -213,8 +213,8 @@ const prodPages = import.meta.glob([
 ]);
 
 const devPages = import.meta.glob([
-  './**/*.tsx',
-  './**/*.jsx'
+  './**/page.tsx',
+  './**/page.jsx'
 ]);
 
 const pagesUnknown = import.meta.env.PROD ? prodPages : devPages;
@@ -244,10 +244,10 @@ const router = createBrowserRouter([{
   children: routes
 }])
 
-//? Lazy-load the mobile debug console only when the toggle is on, so vconsole
-//? lands in its own chunk (not the main bundle) and is never downloaded by
-//? users who don't enable it.
-if (mobileConsole) {
+//? Dev-only by design: vconsole contains direct eval and must never enter a
+//? production artifact. The compile-time DEV guard lets Vite remove the dynamic
+//? import completely; the config toggle then controls local mobile debugging.
+if (import.meta.env.DEV && mobileConsole) {
   const { default: VConsole } = await import('vconsole');
   new VConsole();
 }
