@@ -840,3 +840,18 @@ Dit is het meest materiële runtime-verschil voor een socket-first server, en he
 **Files:** releaseversies in alle `packages/*/package.json`, `package-lock.json`, acht package-CHANGELOGs en branch-logmetadata.
 
 **Notes:** `scripts/mikroSerializeProbe.temp.ts` blijft bewust onaangeraakt in de oude fix-worktree; de vreemde Windows-bannermap blijft bewust untracked in `main`.
+
+## 2026-07-16 16:50 — Linux CI-lockfile hersteld na veilig gestopte v0.7.0 tag-run
+
+**User prompt (continuation):** volg de GitHub CI-publicatie daadwerkelijk tot npm en los releaseblokkades op.
+
+**Wat ik deed:**
+- De tag-run `29507130350` stopte veilig in `npm ci`, vóór build/pack/publish: de Windows-lockfile miste `@emnapi/core` en `@emnapi/runtime` uit een optionele WASM-fallbackgraph. npm bleef aantoonbaar op 0.6.7.
+- De fout lokaal gereproduceerd met npm 10/11/12. `npm install --os=linux` bleek onvoldoende: npm bleef de transitives platform-prunen.
+- Beide packages als tooling-only root-devDependencies vastgelegd, zodat Windows de cross-platform lockentries behoudt. Daarna slaagde `npm ci --dry-run --ignore-scripts` op npm 10.9.4, 11.6.1 en 12.0.1.
+- Publish-toolchain gereproduceerbaar gemaakt: npm exact op 11.6.1 in plaats van mutable `latest`; `checkout`/`setup-node` naar Actions v5 om de Node-20 action-runtimewaarschuwing te verwijderen.
+- Finding CI-01 + lesson 0011 vastgelegd. Publicatie wordt na groene reguliere Linux CI via `workflow_dispatch` vanaf deze gecorrigeerde `main`-commit gestart; de reeds publieke tag wordt niet geforce-moved.
+
+**Files:** `package.json`, `package-lock.json`, `.github/workflows/{ci,publish}.yml`, `docs/findings/2026-07-16-v070-ci-publish-readiness/README.md`, `docs/findings/README.md`, `docs/lessons/0011-*.md`, branch-logmetadata.
+
+**Notes:** geen package was gepubliceerd; dit is een releaseharnas/lockfile-fix, geen wijziging aan de 0.7.0 package-runtimecode.

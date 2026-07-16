@@ -37,18 +37,19 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
-      # npm provenance requires npm >= 9.5; pin a recent line to be safe.
+      # npm provenance requires npm >= 9.5. Pin the exact release toolchain:
+      # `latest` previously changed CI's lockfile semantics between releases.
       - name: Ensure provenance-capable npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.6.1
 
       - name: Install dependencies
         run: npm ci --prefer-offline

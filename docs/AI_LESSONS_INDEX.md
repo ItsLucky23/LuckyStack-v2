@@ -9,7 +9,7 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (10)
+## Lessons (11)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
@@ -23,6 +23,7 @@
 | 0008 | A green test that asserts the status line proved the router could proxy WebSockets — it never could | 🔴 critical | packages/router | testing, sockets, router, protocol, false-green | `docs/lessons/0008-status-line-is-not-a-handshake.md` |
 | 0009 | The integration suite that "proves the Redis cross-instance link" had never run a single test | 🟠 high | testing | testing, redis, false-green, env | `docs/lessons/0009-a-skipped-test-suite-reports-as-a-pass.md` |
 | 0010 | An ORM's toJSON() describes stringifying THAT object — not the same object reached through its parent | 🟡 medium | packages/devkit | types, orm, serialization, codegen, wontfix | `docs/lessons/0010-tojson-describes-the-object-not-the-parent-path.md` |
+| 0011 | A Windows-green lockfile can be invalid for Linux npm ci | 🟠 high | release | npm, lockfile, ci, cross-platform, release | `docs/lessons/0011-windows-lockfile-can-omit-linux-optional-transitives.md` |
 
 ## Takeaways
 
@@ -105,3 +106,11 @@ When a fix depends on a config value or a callback, **verify the value is actual
 **When a codegen rule is derived from a runtime contract, verify the runtime actually takes that path.** Rule 1 is correct for `Date` (verified: ISO string standalone *and* through the entity) and wrong for a Collection-in-an-entity. Same rule, same file, different answer — only a payload can tell you which. **Vague-but-true beats precise-but-false.** `({ } & { })[]` costs the consumer a narrowing step. `EntityDTO<Item>[]` would cost them a production bug that type-checks. When you cannot be precise *and* correct, stay wide. **A type-level "improvement" is a claim about runtime.** Before tightening a generated type, produce the payload it claims to describe. **Beware fixes that only work for the ORM in front of you.** Substituting a type parameter with its constraint is a guess dressed as a derivation — it equates `EntityDTO<TT>` with "TT serialized", which is nowhere in the contract. A name-free rule that is really a per-ORM guess is still a per-ORM guess. **Record the refutation at the code, not only in a ledger.** The reasoning now sits above `resolveToJsonReturnType`, so the next person who spots the "obvious" fix meets the measurement before they touch it.
 
 → `docs/lessons/0010-tojson-describes-the-object-not-the-parent-path.md`
+
+### 0011 — A Windows-green lockfile can be invalid for Linux npm ci
+
+**0011** · high · release · tags: npm, lockfile, ci, cross-platform, release · 2026-07-16
+
+Validate release lockfiles with the npm majors used by CI: `npm ci --dry-run -ignore-scripts` under npm 10, 11, and the publish workflow's current npm. Keep `@emnapi/core` and `@emnapi/runtime` as root dev dependencies while the transitive optional-dependency graph needs them. Direct dependencies force npm to retain their lock entries on Windows; they are tooling-only and are not published in any LuckyStack package tarball. A successful `npm install` is not equivalent to `npm ci`; the latter validates the committed graph before installing. Do not move or recreate a release tag until the CI install step has passed. If a tag has already fired but publication has not started, fix `main` and use the manual publish workflow from the corrected commit rather than force-moving the tag.
+
+→ `docs/lessons/0011-windows-lockfile-can-omit-linux-optional-transitives.md`
