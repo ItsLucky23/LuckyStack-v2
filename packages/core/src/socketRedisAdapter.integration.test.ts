@@ -109,6 +109,23 @@ const expectNoEvent = (socket: ClientSocket, event: string, windowMs: number): P
     socket.on(event, handler);
   });
 
+//? Turn the graceful Redis skip into a hard failure when the caller declared that
+//? Redis MUST be there (`LUCKYSTACK_REQUIRE_REDIS=1`). The skip is deliberate for
+//? a Redis-less CI, but it is indistinguishable from success in the summary line
+//? — and this suite has in fact been reporting "5 skipped" as a PASS on the dev
+//? machine for as long as it has existed (`.env.local` supplies credentials the
+//? local docker Redis rejects, so the probe fails and every test silently opts
+//? out). Set the flag when you are trying to PROVE the cross-instance link.
+const assertRedisWasNotRequired = (): void => {
+  if (process.env.LUCKYSTACK_REQUIRE_REDIS !== '1') return;
+  const opts = getRedisConnectionOptions();
+  throw new Error(
+    `LUCKYSTACK_REQUIRE_REDIS=1, but Redis at ${opts.host}:${String(opts.port)} is unreachable `
+    + `(auth: ${opts.username || opts.password ? 'yes' : 'none'}). This suite proves nothing without it. `
+    + 'Start Redis, or point REDIS_HOST/REDIS_PORT at a reachable one.',
+  );
+};
+
 beforeAll(async () => {
   const probe = makeRedis();
   try {
@@ -117,6 +134,7 @@ beforeAll(async () => {
     redisAvailable = true;
   } catch {
     redisAvailable = false;
+    assertRedisWasNotRequired();
     return;
   }
 

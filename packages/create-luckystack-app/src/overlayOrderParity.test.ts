@@ -35,3 +35,14 @@ describe('bundleServer FALLBACK_OVERLAY_ORDER parity', () => {
     });
   }
 });
+
+describe('repo bundleServer workspace aliases', () => {
+  it('resolves @luckystack/core/config before the broad core barrel alias', () => {
+    const source = fs.readFileSync(path.join(REPO_ROOT, 'scripts/bundleServer.mjs'), 'utf8');
+    const configAlias = source.indexOf("'@luckystack/core/config': path.join(root, 'packages/core/src/config.ts')");
+    const barrelAlias = source.indexOf("'@luckystack/core': path.join(root, 'packages/core/src/index.ts')");
+
+    expect(configAlias, 'the config subpath would be swallowed by the core barrel alias').toBeGreaterThanOrEqual(0);
+    expect(barrelAlias).toBeGreaterThan(configAlias);
+  });
+});

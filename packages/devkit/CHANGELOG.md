@@ -21,11 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   types that cross the wire, `@luckystack/core` now exports `Jsonify<T>` as the
   type-level mirror (`type ClientUser = Jsonify<User>`).
 
-  Two rules, both `JSON.stringify`'s own — no per-ORM special-casing: a type with
+  Generic `JSON.stringify` rules apply without ORM name lists: a type with
   `toJSON()` becomes its return type (covers `Date`, MikroORM's `Collection`,
-  Prisma's `Decimal`); a function-valued property is dropped. **INPUTS are
-  untouched** — their type text feeds `validateInputByType`, which is fail-closed in
-  production.
+  Prisma's `Decimal`); every function-valued property is dropped; an
+  `undefined`/function/symbol union makes an object property optional and becomes
+  `null` in an array slot. Binary types (`Buffer`, `ArrayBuffer`, typed arrays,
+  Blob/File) now abort generation with an actionable error because HTTP JSON and
+  Socket.io binary transport produce incompatible shapes.
+
+  Wire-safe **INPUTS remain unprojected** because their text feeds the fail-closed
+  runtime validator. A `Date` input annotation is now rejected during generation:
+  JSON delivers an ISO string, so keeping `Date` would make the handler contract
+  lie. Declare `string`, validate it, then convert explicitly.
 
   This also means a route returning an ORM entity no longer aborts generation: the
   projection never walks into `EntityProperty`/`EntityMetadata`, because those do not
@@ -84,7 +91,10 @@ MikroORM project + `tsc`); consumers can drop the corresponding
   `detail` field, instead of being indistinguishable from a route that simply
   declares no shape (both previously emitted `default-fallback`). Per
   DD-DEVKIT-D3 a CI gate can fail on a non-zero `fallbackCount`, so a
-  whole-shape loss is no longer invisible to it.
+  whole-shape loss is no longer invisible to it. API `stream` and sync
+  `serverStream` / `clientStream` fields now use the same diagnostics seam; a
+  thrown stream extraction can no longer hide behind the legitimate `never`
+  default.
 
 ### Changed
 

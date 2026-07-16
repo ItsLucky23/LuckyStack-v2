@@ -35,14 +35,22 @@ afterEach(() => {
 //? plus a real upstream HTTP server that completes the WS 101 handshake.
 const boot = async (
   target: (upstreamPort: number) => ResolveTargetResult | null,
-  options?: { upstreamHandshakeTimeoutMs?: number; silentUpgrade?: boolean },
+  options?: {
+    upstreamHandshakeTimeoutMs?: number;
+    silentUpgrade?: boolean;
+    /** Extra headers the fake backend adds to its 101 (tests what the proxy filters out). */
+    upstreamExtraHeaders?: Record<string, string>;
+  },
 ): Promise<Harness> => {
   const upstream = http.createServer();
   upstream.on('upgrade', (_req, socket) => {
     //? `silentUpgrade` simulates a backend that accepts the TCP connection and
     //? the upgrade but never answers — the handshake-timeout path under test.
     if (options?.silentUpgrade) return;
-    socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
+    const extra = Object.entries(options?.upstreamExtraHeaders ?? {})
+      .map(([k, v]) => `${k}: ${v}\r\n`)
+      .join('');
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${extra}\r\n`);
   });
   await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
   const upstreamPort = (upstream.address() as AddressInfo).port;
@@ -79,6 +87,37 @@ const sendUpgrade = (port: number, requestTarget: string): Promise<string> =>
       buf += chunk.toString('utf8');
       if (buf.includes('\r\n')) {
         resolve(buf.split('\r\n')[0] ?? '');
+        socket.destroy();
+      }
+    });
+    socket.on('error', reject);
+    socket.setTimeout(2000, () => { socket.destroy(); reject(new Error('timeout')); });
+  });
+
+//? Send a raw upgrade request and return the COMPLETE header block, not just the
+//? status line. `sendUpgrade` above stops at the first CRLF, which is precisely
+//? why a three-week-old, fully-green suite missed a router that could not proxy a
+//? single WebSocket: "HTTP/1.1 101 Switching Protocols" was emitted faithfully
+//? while `Connection: Upgrade` was being stripped out from under it. A status
+//? line is not a handshake.
+const sendUpgradeReadHeaders = (port: number, requestTarget: string): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const socket = net.connect(port, '127.0.0.1', () => {
+      socket.write(
+        `GET ${requestTarget} HTTP/1.1\r\n`
+        + `Host: 127.0.0.1:${String(port)}\r\n`
+        + 'Connection: Upgrade\r\n'
+        + 'Upgrade: websocket\r\n'
+        + 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+        + 'Sec-WebSocket-Version: 13\r\n\r\n',
+      );
+    });
+    let buf = '';
+    socket.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      const end = buf.indexOf('\r\n\r\n');
+      if (end !== -1) {
+        resolve(buf.slice(0, end));
         socket.destroy();
       }
     });
@@ -135,6 +174,50 @@ describe('wsProxy', () => {
     }));
     const statusLine = await sendUpgrade(h.port, '/socket.io/?EIO=4');
     expect(statusLine).toContain('101');
+  });
+
+  it('keeps `Connection: Upgrade` on the forwarded 101 — without it there is no handshake', async () => {
+    //? REGRESSION (broken 2026-06-19 -> 2026-07-15). The response loop reused the
+    //? REQUEST hop-by-hop set, which drops `connection`. RFC 6455 §4.2.2 requires
+    //? the 101 carry BOTH `Upgrade: websocket` and `Connection: Upgrade`; without
+    //? the latter Node's parser refuses to emit `'upgrade'` and socket.io/ws fail
+    //? with a bare "websocket error". Net effect: no WebSocket could cross the
+    //? router at all — the package's whole reason to exist in a multi-instance
+    //? deploy. Asserting the status line alone let it ship for three weeks.
+    const h = await boot((upstreamPort) => ({
+      target: `http://127.0.0.1:${String(upstreamPort)}`,
+      viaFallback: false,
+      resolvedEnvKey: 'test',
+    }));
+    const headers = await sendUpgradeReadHeaders(h.port, '/socket.io/?EIO=4');
+    const lower = headers.toLowerCase();
+    expect(lower).toContain('101 switching protocols');
+    expect(lower, 'the 101 lost `Connection: Upgrade` — no client can complete this handshake').toContain('connection: upgrade');
+    expect(lower).toContain('upgrade: websocket');
+  });
+
+  it('still strips set-cookie and x-luckystack-* from the forwarded 101', async () => {
+    //? The 2026-06-19 sweep that broke the handshake had a REAL point: a backend
+    //? must not inject Set-Cookie or internal routing markers into the browser's
+    //? header context through the upgrade response. Keeping `connection` must not
+    //? quietly reopen that hole, so pin the intent alongside the fix.
+    const h = await boot(
+      (upstreamPort) => ({
+        target: `http://127.0.0.1:${String(upstreamPort)}`,
+        viaFallback: false,
+        resolvedEnvKey: 'test',
+      }),
+      {
+        upstreamExtraHeaders: {
+          'set-cookie': 'evil=1',
+          'x-luckystack-resolved-env': 'spoofed',
+        },
+      },
+    );
+    const headers = (await sendUpgradeReadHeaders(h.port, '/socket.io/?EIO=4')).toLowerCase();
+    expect(headers).toContain('connection: upgrade');
+    expect(headers, 'a backend must not set cookies through the WS upgrade response').not.toContain('set-cookie');
+    expect(headers, 'internal routing markers must not reach the browser').not.toContain('x-luckystack-');
   });
 
   it('rejects an absolute-form target (SSRF) with a non-101 status and does not re-host', async () => {

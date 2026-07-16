@@ -111,14 +111,14 @@ Key behaviors:
 - **Cycle protection.** Uses `state.stackTypeIds: Set<number>` keyed by TypeScript's internal type IDs. When the walker re-enters a type already on the stack, it short-circuits with `checker.typeToString(type)` plus `collectTypeSymbolFallback(type)` (so the unresolved-symbol bookkeeping still fires).
 - **Depth cap.** `DEPTH_LIMIT = 12`. Above this, the walker stops expanding and returns `checker.typeToString(type)`. Twelve levels is enough for every realistic Prisma model + nested DTO combination encountered in practice; beyond that the cost is exponential and the emitted text becomes unreadable.
 - **JSON passthrough.** `JSON_TYPE_NAMES` — `Json`, `JsonValue`, `JsonObject`, `JsonArray`, `InputJsonValue`, `InputJsonObject`, `InputJsonArray` — short-circuit to the literal text `JsonValue`. Prisma's recursive `Json` types blow the depth limit if expanded structurally, and the structural expansion is meaningless anyway (the runtime is "any JSON-shaped value").
-- **Opaque containers.** `SKIP_EXPANSION` — `Promise`, `Map`, `WeakMap`, `Set`, `WeakSet`, `Error`, `Date`, `RegExp`, `Buffer`, `ArrayBuffer`, `ReadonlyArray` — are returned as `checker.typeToString(type)` without recursion into internals. Their structural shape is irrelevant to API/sync wire types.
-- **Arrays.** `Array<T>` and `ReadonlyArray<T>` are rendered as `T[]`. Union/intersection element types are parenthesized: `(A | B)[]` not `A | B[]`.
+- **Opaque containers.** On unprojected paths, `SKIP_EXPANSION` containers are returned via `checker.typeToString`. On wire-output paths, `Date` becomes `string`; binary containers (`Buffer`, `ArrayBuffer`, typed arrays, Blob/File) abort generation because HTTP JSON and Socket.io binary delivery disagree.
+- **Arrays.** `Array<T>` and `ReadonlyArray<T>` are rendered as `T[]`. Union/intersection element types are parenthesized; `undefined`/symbol/function constituents become `null`, matching JSON array-slot semantics.
 - **Tuples.** `[A, B, C]` literal form, recursing into each element.
 - **Unions and intersections.** Each constituent is expanded; results are joined with ` | ` or ` & `. Unresolved-symbol lists are merged via `mergeUnresolvedSymbols`.
 - **Object types.** `checker.getPropertiesOfType(type)` + `checker.getIndexInfosOfType(type)`. For each property:
   - If the property's declaration is a `PropertyAssignment` / `ShorthandPropertyAssignment` whose initializer is a literal, the literal text is preserved (`'hello'`, `42`, `true`, `null`). This is what lets the emitter render `httpMethod: 'POST'` as a literal type rather than the generic `string`.
   - Otherwise the property type is recursively expanded.
-  - Optional flag (`prop.flags & ts.SymbolFlags.Optional`) is rendered as `?:`.
+  - Optional flag (`prop.flags & ts.SymbolFlags.Optional`) is rendered as `?:`. On wire paths, a union containing `undefined`/symbol/function also becomes optional after the omitted constituent is removed; a property containing only omitted constituents is dropped.
 - **Index signatures.** Both the key type and the value type are recursively expanded; rendered as `[key: KeyType]: ValueType`.
 - **Primitives.** `string`, `number`, `boolean`, `true`, `false`, `null`, `undefined`, `any`, `unknown`, `never`, `void` are returned via `checker.typeToString(type)` unchanged.
 - **String / number literals.** Single-quoted (with escape handling) for strings, numeric text for numbers. Negative number literals are reconstructed from prefix-unary expressions.
@@ -194,6 +194,7 @@ The two modules also share an invalidation contract: any code path that calls `i
 
 - `DEPTH_LIMIT = 12` — recursion cap for `expandTypeDetailed`.
 - `JSON_TYPE_NAMES` — set of seven Prisma-related JSON aliases that short-circuit to `JsonValue`.
-- `SKIP_EXPANSION` — set of opaque generic / built-in container names that pass through unexpanded.
+- `SKIP_EXPANSION` — set of opaque generic / built-in container names used by the unprojected path.
+- `TRANSPORT_DEPENDENT_BINARY_TYPES` — binary values rejected from shared HTTP/Socket.io output maps.
 
 These constants are not exported. They are tuning knobs internal to the expander; changing them requires regenerating the type map for every consumer project to verify no previously-expanding type now bottoms out as an unresolved alias.

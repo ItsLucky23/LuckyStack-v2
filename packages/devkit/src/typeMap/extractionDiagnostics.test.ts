@@ -115,6 +115,34 @@ describe('apiTypeDiagnostics — a THROWN extraction is a first-class reason', (
     expect(entry?.detail).toBe('kaboom');
   });
 
+  it('reports an API stream extraction throw even though `never` is normally legitimate', () => {
+    recordExtractionOutcome({ filePath: ROUTE_FILE, kind: 'api', field: 'stream', error: new Error('stream exploded') });
+    const apis = new Map([['demo', new Map([['thing@v1', apiEntry()]])]]);
+    const { diagnosticsData } = build({ apis });
+
+    expect(diagnosticsData.fallbacks).toContainEqual(expect.objectContaining({
+      route: 'demo/thing@v1',
+      field: 'stream',
+      fallback: 'never',
+      reason: 'extraction-error',
+      detail: 'stream exploded',
+    }));
+  });
+
+  it.each(['serverStream', 'clientStream'])('reports a sync %s extraction throw', (field) => {
+    recordExtractionOutcome({ filePath: SYNC_FILE, kind: 'sync', field, error: new Error(`${field} exploded`) });
+    const syncs = new Map([['demo', new Map([['tick@v1', syncEntry()]])]]);
+    const { diagnosticsData } = build({ syncs });
+
+    expect(diagnosticsData.fallbacks).toContainEqual(expect.objectContaining({
+      route: 'demo/tick@v1',
+      field,
+      fallback: 'never',
+      reason: 'extraction-error',
+      detail: `${field} exploded`,
+    }));
+  });
+
   //? A throw is reported even when the resulting text does NOT look like a
   //? default — the failure is the signal, not the shape of what it fell back to.
   it('reports a throw whose fallback text is not one of the known defaults', () => {
@@ -140,6 +168,20 @@ describe('apiTypeDiagnostics — a THROWN extraction is a first-class reason', (
 
     const entry = diagnosticsData.fallbacks.find((f) => f.field === 'output');
     expect(entry!.reason).toBe('default-fallback');
+  });
+
+  it('checks Zod degradation only for API input — the only generated schema field', () => {
+    const unsupportedByZod = '{ left: string } & { right: string }';
+    const apis = new Map([['demo', new Map([['thing@v1', apiEntry({
+      input: unsupportedByZod,
+      output: unsupportedByZod,
+      stream: unsupportedByZod,
+    })]])]]);
+    const { diagnosticsData } = build({ apis });
+
+    expect(diagnosticsData.fallbacks.filter((entry) => entry.reason === 'zod-any-fallback')).toEqual([
+      expect.objectContaining({ field: 'input' }),
+    ]);
   });
 
   it('a clean route produces no diagnostics at all', () => {

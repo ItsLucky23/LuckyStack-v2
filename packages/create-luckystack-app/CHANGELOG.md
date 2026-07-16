@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Late secret resolution now refreshes the complete project registration.**
+  The scaffold previously re-registered only `http.cors.allowedOrigins`; because
+  `registerProjectConfig` is last-write-wins over pristine defaults, that silently
+  reset auth, session, rate-limit, logging, and URL policy. The listener now
+  rebuilds the full registration and recomputes `PUBLIC_URL`, CORS, and OAuth
+  callback values together.
 - **`bun run server` now genuinely runs Bun instead of silently running Node.**
   On Windows there is no shebang: npm generates a `.cmd` bin shim
   (`node_modules/.bin/luckystack-dev.cmd`) that hardcodes a `node` call, so
@@ -32,11 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scaffolded project: Redis connected, Socket.io initialized, `/livez` → `200`,
   `/_health` → `{"status":"ok",…}` with `typeof Bun === 'object'` in-process.
 
-  > **Bun is not production-ready yet.** `packages/server/src/capabilities.ts`
-  > detaches `import.meta.resolve`, which throws under Bun — so every optional
-  > `@luckystack/*` package (login, sync, presence, cron, docs-ui, error-tracking,
-  > devkit) reports as ABSENT and silently degrades. See `docs/HOSTING.md`
-  > → "Known blockers (Bun)".
+  Bun backends are production-supported. Optional-package detection now keeps
+  `import.meta.resolve` bound and works on Node and Bun. The separate
+  `@luckystack/router` process must currently run on Node because Bun's
+  `node:http` upgrade sockets cannot proxy WebSockets (oven-sh/bun#28396); the
+  router probes that capability and fails loudly instead of black-holing sockets.
 
 ### Added
 
@@ -45,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pnpm/yarn are deliberately not offered and `--pm=pnpm` exits 2. Existing behaviour is
   unchanged when the flag is omitted: `--no-prompt` still scaffolds an npm project
   byte-for-byte.
-  - `--pm=bun` records `"packageManager": "bun@1.1.0"` in the rendered `package.json`,
+  - `--pm=bun` records `"packageManager": "bun@1.3.3"` in the rendered `package.json`,
     which is what `@luckystack/cli`'s `detectPackageManager` reads — so every later
     `luckystack add` / `remove` / `manage` install uses bun too (it works even under
     `--no-install`, before any `bun.lock` exists).
@@ -53,8 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     re-renders with it.
   - Requires bun already on your `PATH`; if it isn't found the scaffold skips the install
     and prints a `bun install` hint instead of failing.
-- The scaffold `package.json` now declares a `bun` engine range (`>=1.1.0`) alongside
-  `node`. Additive — npm projects are unaffected.
+- The scaffold `package.json` now declares a `bun` engine range (`>=1.3.3`) alongside
+  `node`. Bun 1.3.3 is the first release that honors the shipped `bunfig.toml`
+  `env = false`; npm projects are unaffected.
 
 ### Changed
 

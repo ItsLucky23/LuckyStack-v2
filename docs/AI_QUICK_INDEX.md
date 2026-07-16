@@ -585,7 +585,13 @@
 - HTTP proxy (`packages/router/src/httpProxy.ts`):
 - `createHttpProxy(input: CreateHttpProxyInput)` — Returns an `(req, res) => void` handler. Strips hop-by-hop headers, adds `x-forwarded-host`, `x-forwarded-proto`, `x-luckystack-resolved-env`, `x-luckystack-via-fallback`. Dispatches `preProxyRequest` hook before the upstream call and `postProxyResponse` after the upstream response starts. Emits `routing.invalidRequestPath` (400), `<missingServiceErrorCode>` (502), or `routing.upstreamUnreachable` (502) on errors.
 - WebSocket proxy (`packages/router/src/wsProxy.ts`):
-- `createWsProxy(input: CreateWsProxyInput)` — Returns an `upgrade` handler. Pins all upgrades to the `system` service backend; Socket.io's Redis adapter handles cross-instance fanout.
+- `createWsProxy(input: CreateWsProxyInput)` — Returns an `upgrade` handler. Pins all upgrades to the `system` service backend; Socket.io's Redis adapter handles cross-instance fanout. The forwarded 101 keeps `Connection: Upgrade` + `Upgrade: websocket` (RFC 6455 §4.2.2) while still stripping `set-cookie` and `x-luckystack-*` — see `WS_RESPONSE_HOP_BY_HOP_HEADERS`, and do not "simplify" it back to the request-direction set.
+- Runtime capability guard (`packages/router/src/runtimeCapabilities.ts`):
+- `probeUpgradeSocketDelivery(timeoutMs?): Promise<boolean>` — Measures whether an HTTP upgrade handshake written to an upgrade socket actually reaches a client on this runtime (one loopback connection). `false` on Bun.
+- `assertRuntimeCanProxyWebsockets(deps?): Promise<void>` — Called first by `startRouter`. Throws on a runtime that cannot deliver an upgrade, so the router fails loudly instead of black-holing every socket. Only probes when the failure is plausible (skipped on Node). `deps` injects `isBunRuntime` / `probe` for tests, because Node cannot reproduce the Bun branch. Escape hatch: `LUCKYSTACK_ALLOW_BROKEN_WS_PROXY=1`.
+- Proxy utilities (`packages/router/src/proxyUtils.ts`):
+- `isSocketIoPath(pathname): boolean` — Is this socket.io's engine path (either half of the connection)? The HTTP proxy uses it to pin the polling handshake to the same service as the upgrade; without it the first-segment resolver reads `"socket.io"` as a service name and 502s every default client.
+- `DEFAULT_WS_SERVICE` — `'system'`. Shared by both proxies so the two halves cannot drift.
 - Boot handshake (`packages/router/src/bootHandshake.ts`):
 - `runBootHandshake(input: RunBootHandshakeInput): Promise<void>` — Writes a fresh UUID to `luckystack:boot:<envKey>` in Redis, then probes `<fallbackBaseUrl>/_health`, compares the returned `bootUuid` against what's in Redis under the fallback key, and verifies `synchronizedEnvKeys` SHA-256 hashes match. Strict mode throws; non-strict logs a warning.
 - Shared health store (`packages/router/src/redisHealthStore.ts`):

@@ -16,7 +16,7 @@
   },
   "engines": {
     "node": ">=20.0.0",
-    "bun": ">=1.1.0"
+    "bun": ">=1.3.3"
   },
   "workspaces": [
     "packages/*"
@@ -38,6 +38,10 @@
     "test": "tsx --tsconfig tsconfig.server.json scripts/testAll.ts",
     "test:unit": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "smoke:ws": "tsx --tsconfig tsconfig.server.json scripts/wsProxySmoke.ts",
+    "benchmark:runtime": "node scripts/benchmarkRuntime.mjs",
+    "benchmark:concurrency": "node scripts/benchmarkConcurrency.mjs",
+    "benchmark:http": "node scripts/benchmark/runHttp.mjs",
     "scaffold:test": "node scripts/scaffoldRouteTest.mjs",
     "scaffold:page": "node scripts/scaffoldPage.mjs",
     "client": "vite --host 0.0.0.0",

@@ -320,42 +320,36 @@ Two deliberate properties:
 LuckyStack loads its own env files and relies on Node semantics, so `env = false`
 makes `bun` and `node` load exactly the same values. **Keep this file.**
 
-> `env = false` requires **Bun ≥ 1.3.3**. Note the scaffold's `engines.bun` currently
-> declares `>=1.1.0`, which is looser than what `bunfig.toml` actually needs — on
-> Bun 1.1–1.3.2 the setting is ignored and Bun will auto-load env files that
-> LuckyStack never loads. Use Bun ≥ 1.3.3.
+> `env = false` requires **Bun ≥ 1.3.3**. Both the framework root and scaffold
+> `engines.bun` declarations use that same floor; do not lower it, because older
+> Bun releases silently ignore the setting and auto-load env files LuckyStack
+> never loads.
 
 ### Known blockers (Bun)
 
 <a id="known-blockers-bun"></a>
 
-- **🔴 Optional-package detection fails under Bun — all `@luckystack/*` optional
-  packages silently report as ABSENT.** `packages/server/src/capabilities.ts` caches a
-  **detached** reference (`const esmResolve = import.meta.resolve`). Node tolerates the
-  detached call; Bun throws `"import.meta.resolve must be bound to an import.meta
-  object"`, which `has()` catches and turns into `false`. Consequence under Bun: login
-  (auth), sync, presence, cron, docs-ui, error-tracking and devkit are all treated as
-  not installed — the server boots, serves, and looks completely green while auth and
-  realtime are off. Verified on bun 1.3.14: calling it **bound**
-  (`import.meta.resolve(pkg)`) returns `true` on both runtimes. Until this is fixed,
-  a Bun boot is only useful for smoke-testing the HTTP core.
-- **`node:repl` is not implemented by Bun** (`repl.start is not a function`). This
-  affects the **framework monorepo's own** sample app (`server/utils/repl.ts`) only —
-  scaffolded consumer projects ship no REPL and are unaffected. It is why
-  `bun run server` cannot fully boot inside this repo.
+- **`@luckystack/router` cannot currently proxy WebSockets on Bun.** Bun's
+  `node:http` upgrade socket accepts `write()` but delivers no handshake bytes
+  ([oven-sh/bun#28396](https://github.com/oven-sh/bun/issues/28396)). This affects
+  only the separate router process; LuckyStack backends serve Socket.io normally
+  on Bun. The router measures the primitive at boot and refuses to start when it
+  is broken, so it cannot appear healthy while black-holing sockets. Run the
+  router on Node until the upstream capability probe passes.
+- **`node:repl` is not implemented by Bun** (`repl.start is not a function`). The
+  framework monorepo's optional sample REPL is skipped on Bun; scaffolded
+  consumer projects ship no REPL and are unaffected.
 
 ### Prod on Bun
 
 ```bash
-node dist/server.js   # canonical
-bun dist/server.js    # Bun — blocked by the capabilities issue above
+node dist/server.js   # Node backend
+bun dist/server.js    # Bun backend
 ```
 
-The prod bundle is plain JS, so no transpile hop is involved either way. The `prod`
-script names its runtime explicitly (`node dist/server.js`) rather than hiding it
-behind a bin shim. **Prod on Bun is blocked by the same optional-package detection
-bug** (prod runs the same `capabilities.has()` path via `bootstrapLuckyStack`), so it
-is not yet a supported deploy target.
+The prod bundle is plain JS, so no transpile hop is involved either way. Optional
+package detection is verified on both runtimes. Only the separate router process
+has the Bun limitation above and must currently run on Node.
 
 ### Not yet verified
 
