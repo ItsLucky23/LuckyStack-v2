@@ -13,13 +13,17 @@ Last updated: 2026-07-16
 ## Final publication
 
 The failed tag workflow did not run build, pack, or publish; npm still reported 0.6.7
-for both `@luckystack/core` and `create-luckystack-app` after the failure. Because the
-remote `v0.7.0` tag already existed, the corrected commit was published via the
-workflow's explicit `workflow_dispatch` real-publish path rather than force-moving a
-public tag.
+for both `@luckystack/core` and `create-luckystack-app` after the failure. The corrected
+commit was first published safely through the workflow's explicit `workflow_dispatch`
+real-publish path.
 
 GitHub publish run [`29509197209`](https://github.com/ItsLucky23/LuckyStack-v2/actions/runs/29509197209)
 completed every gate and the real provenance publish from corrected `main` commit
 `508ef66`. Registry verification confirmed all 17 packages at 0.7.0. npm exposes SLSA
 provenance attestations for both scoped packages (verified on `@luckystack/core`) and
 the unscoped scaffolder (`create-luckystack-app`).
+
+After publication, the user explicitly approved aligning the release tag with the
+provenance source. `v0.7.0` now peels to `508ef66`; the forced tag-update rerun
+[`29514853464`](https://github.com/ItsLucky23/LuckyStack-v2/actions/runs/29514853464)
+passed every gate and idempotently accepted the already-published versions.

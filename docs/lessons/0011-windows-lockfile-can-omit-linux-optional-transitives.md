@@ -40,8 +40,10 @@ install, so every local release gate missed the invalid cross-platform closure.
 - A successful `npm install` is not equivalent to `npm ci`; the latter validates the
   committed graph before installing.
 - Do not move or recreate a release tag until the CI install step has passed. If a tag
-  has already fired but publication has not started, fix `main` and use the manual
-  publish workflow from the corrected commit rather than force-moving the tag.
+  has already fired but publication has not started, first fix `main` and publish from
+  the corrected commit through the manual workflow. Aligning a public tag afterwards is
+  exceptional: do it only with explicit user approval, after proving the failed tag run
+  published nothing, and point it at the exact provenance commit.
 
 ## Related
 

@@ -880,3 +880,13 @@ Dit is het meest materiële runtime-verschil voor een socket-first server, en he
 **Resultaat:** v0.7.0 is gepubliceerd. `main` is gepusht; tag `v0.7.0` bestaat. De eerste tag-run stopte veilig vóór publicatie; de daadwerkelijke release is met provenance gebouwd vanaf de gecorrigeerde main-commit.
 
 **Bewust onaangeraakt:** de vreemde untracked Windows-bannermap in `main` en `scripts/mikroSerializeProbe.temp.ts` in de oude fix-worktree.
+
+## 2026-07-16 17:30 — v0.7.0-tag uitgelijnd met provenancecommit
+
+**User prompt:** maak tag en releasebron exact gelijk en bevestig of andere repositories nu naar de nieuwste LuckyStack kunnen upgraden.
+
+**Wat ik deed:** na expliciete toestemming de publieke annotated tag `v0.7.0` éénmalig force-updated van de oorspronkelijke releasecommit naar `508ef66`, de exacte commit waaruit GitHub CI de npm-artifacts met provenance bouwde. Remote tag-peel geverifieerd op `508ef669668278a439b7c5abf9d65df12ca828c0`. De hierdoor opnieuw getriggerde tag-workflow `29514853464` liep volledig groen; de publish-script is idempotent voor reeds aanwezige 0.7.0-versies.
+
+**Resultaat:** npm-versie, provenancecommit en release-tag wijzen nu coherent naar dezelfde releasebron. Andere repositories kunnen `0.7.0`/`latest` gebruiken.
+
+**Files:** alleen release-administratie en de bestaande CI-ledger/lesson/branch-logdocumentatie; geen package-runtimecode.

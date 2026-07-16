@@ -6,7 +6,7 @@
 > Don't read every index every session. Pick the profile matching your task, LOAD only its
 > artifacts, and QUERY the rest via the `@luckystack/mcp` tools instead of reading whole files.
 
-## Artifact sizes (total ≈ 80,783 tokens if all loaded)
+## Artifact sizes (total ≈ 80,823 tokens if all loaded)
 
 | Artifact | Est. tokens | Bytes | Purpose |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@
 | `capabilities` — `docs/AI_CAPABILITIES.md` | 3,742 | 14,966 | Existing helpers/exports — check before authoring. |
 | `project-index` — `docs/AI_PROJECT_INDEX.md` | 2,683 | 10,733 | Routes/pages/helpers/components + test coverage. |
 | `decisions` — `docs/AI_DECISIONS_INDEX.md` | 8,757 | 35,029 | Why-it-is-this-way (ADRs). |
-| `lessons` — `docs/AI_LESSONS_INDEX.md` | 3,596 | 14,382 | Known pitfalls (what failed). |
+| `lessons` — `docs/AI_LESSONS_INDEX.md` | 3,636 | 14,545 | Known pitfalls (what failed). |
 | `runbooks` — `docs/AI_RUNBOOKS.md` | 1,171 | 4,684 | Task-shaped golden paths. |
 | `examples` — `docs/AI_EXAMPLES_INDEX.md` | 776 | 3,104 | Canonical example corpus index. |
 | `product` — `docs/AI_PRODUCT_OVERVIEW.md` | 922 | 3,688 | What the app + each page is FOR. |
@@ -50,7 +50,7 @@ _Auditing: lean on the why-record + risky hubs, not every page intent._
 
 _Chasing a bug: check known pitfalls first, then trace impact via the graph._
 
-- **Load** (≈ 15,175 tokens): `contract`, `lessons`
+- **Load** (≈ 15,215 tokens): `contract`, `lessons`
 - **Query via MCP** (don't read whole): `find_lesson`, `who_calls`, `who_imports`, `blast_radius`
 
 ### `doc-fix`
