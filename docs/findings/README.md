@@ -9,7 +9,7 @@ Last updated: 2026-07-16
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
-| 2026-07-16 | [2026-07-16-v070-ci-publish-readiness/](./2026-07-16-v070-ci-publish-readiness/) | v0.7.0 CI publication: cross-platform lock closure and provenance publish | 1 | 1 in-progress |
+| 2026-07-16 | [2026-07-16-v070-ci-publish-readiness/](./2026-07-16-v070-ci-publish-readiness/) | v0.7.0 CI publication: cross-platform lock closure and provenance publish | 2 | 1 in-progress · 1 fixed |
 | 2026-07-16 | [2026-07-16-v070-npm-audit-readiness/](./2026-07-16-v070-npm-audit-readiness/) | v0.7.0 npm audit readiness: three moderate OpenTelemetry nodes + one low esbuild advisory | 2 | 0 open · 2 fixed |
 | 2026-07-16 | [2026-07-16-v066-vitest-core-alias-handoff/](./2026-07-16-v066-vitest-core-alias-handoff/) | Validate v0.6.6 consumer handoff: Vite core alias breaks server-side Vitest imports | 2 | 0 open · 2 fixed |
 | 2026-07-16 | [2026-07-16-v070-orm-runtime-readiness/](./2026-07-16-v070-orm-runtime-readiness/) | v0.7.0 evidence audit: Prisma/MikroORM/Drizzle × Node/Bun | 5 | 0 open · 4 fixed · 1 wontfix |

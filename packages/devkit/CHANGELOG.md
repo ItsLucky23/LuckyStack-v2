@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Windows Bun-supervisor regression now uses Windows path semantics even
+  when the suite runs on Linux, so CI verifies the intended absolute-entry guard
+  instead of rejecting the Windows fixture because of the host OS.
 - Inferred function-injection values containing checker-owned
   `typeof import("C:/absolute/path")` types now emit a portable type query back
   to the consumer's exported value. This prevents Drizzle's schema-parameterized

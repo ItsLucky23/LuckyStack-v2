@@ -145,7 +145,9 @@ describe('resolveChildSpawn — runtime honouring', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const passedEntry = result.spec.args.at(-1) ?? '';
-    expect(path.isAbsolute(passedEntry)).toBe(true);
+    //? This case intentionally simulates the Windows `.cmd` shim even when the
+    //? suite itself runs on Linux CI, so parse the fixture with Windows semantics.
+    expect(path.win32.isAbsolute(passedEntry)).toBe(true);
   });
 
   it('omits the tsconfig args on the Node path when no server tsconfig exists', () => {

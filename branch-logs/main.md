@@ -855,3 +855,13 @@ Dit is het meest materiële runtime-verschil voor een socket-first server, en he
 **Files:** `package.json`, `package-lock.json`, `.github/workflows/{ci,publish}.yml`, `docs/findings/2026-07-16-v070-ci-publish-readiness/README.md`, `docs/findings/README.md`, `docs/lessons/0011-*.md`, branch-logmetadata.
 
 **Notes:** geen package was gepubliceerd; dit is een releaseharnas/lockfile-fix, geen wijziging aan de 0.7.0 package-runtimecode.
+
+## 2026-07-16 17:00 — Windows Bun-supervisortest portable gemaakt voor Linux CI
+
+**User prompt (continuation):** volg de gecorrigeerde CI tot alles groen en publiceer daarna via GitHub.
+
+**Wat ik deed:** de herstelde lockfile bracht beide Linux-matrixcellen door install, generatie, packagebuild, lint en volledige build. De unitfase vond daarna CI-02: een Windows-specifieke fixture (`C:\\proj\\...`) werd met host-afhankelijk `path.isAbsolute()` beoordeeld en faalde daarom alleen op Linux. De productielogica was niet geraakt; de overige negen supervisortests slaagden. De assertion gebruikt nu expliciet `path.win32.isAbsolute`, precies passend bij de Windows `.cmd`-situatie die de test simuleert. Devkit-CHANGELOG en CI-ledger bijgewerkt.
+
+**Verificatie:** lokale supervisorsuite 10/10, root lint, devkit build, invariants en changelog-check groen. Linux Node 20+22 CI-rerun volgt vóór publicatie.
+
+**Files:** `packages/devkit/src/supervisor.test.ts`, `packages/devkit/CHANGELOG.md`, CI-findingsledger en branch-logmetadata.
