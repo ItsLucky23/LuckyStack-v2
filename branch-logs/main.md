@@ -822,3 +822,21 @@ Dit is het meest materiële runtime-verschil voor een socket-first server, en he
 *bestanden:* nieuw `scripts/benchmark/{httpServerNode,httpServerBun,runHttp}.mjs` + `README.md` + `benchmark:http` npm-script · `docs/findings/2026-07-16-npm-vs-bun-benchmark/README.md` herzien (oha-cijfers, correctie van ~tie).
 
 *verificatie:* 3 harnessen syntax-ok; oha 1.15.0 draait; 3 runs consistente ordening (node:http-node < node:http-bun < Bun.serve).
+
+## 2026-07-16 16:35 — v0.7.0 release voorbereid via GitHub CI
+
+**User prompt:** sluit VA-02 en alle npm-auditfindings, commit alles, merge naar `main`, push, bump de release en publiceer via GitHub CI.
+
+**Wat ik deed:**
+- De bestaande vuile `main`-worktree eerst byte-voor-byte vergeleken met de geïsoleerde fixbranch. Alle legitieme wijzigingen waren identiek aanwezig of bewust door een geteste fix vervangen; de vreemde untracked Windows-bannermap bleef onaangeraakt.
+- De oude working-tree-snapshot auditbaar bewaard als `7330b78`, daarna `fix/unpushed-review-findings` met mergecommit `3f77de9` gemerged. De uiteindelijke `main`-tree was exact gelijk aan de geteste featuretree.
+- VA-02 gesloten: server-only AsyncLocalStorage afgesplitst, emitted core-client-chunkgraph bevat 0 Node-builtins en heeft een permanente buildgate.
+- De drie moderate OpenTelemetry-nodes en één low esbuild-auditfinding opgelost; `npm audit` meldt 0 vulnerabilities. Real-registry Sentry+Drizzle-scaffold slaagde op Node en Bun.
+- Productie-clientbuild waarschuwingvrij gemaakt en npm `bin`-metadata genormaliseerd zodat pack/publish niet meer auto-corrigeert.
+- Alle 17 publishable packages lockstep gebumpt van 0.6.7 naar 0.7.0; acht niet-lege CHANGELOG-secties afgesloten als `[0.7.0] - 2026-07-16`; lockfile ververst.
+
+**Verificatie vóór releasecommit:** 1817/1817 unit, 13/13 strict Redis, lint/type/invariants, 17/17 packages + volledige client/serverbuild, npm audit 0, Verdaccio scaffold/install/CRUD/boot/health op Node+Bun groen. Finale `pack:dry` én `publish:dry` valideerden alle 17 tarballs op versie 0.7.0 zonder npm-metadatawaarschuwingen. Tag `v0.7.0` triggert daarna `.github/workflows/publish.yml` met npm provenance.
+
+**Files:** releaseversies in alle `packages/*/package.json`, `package-lock.json`, acht package-CHANGELOGs en branch-logmetadata.
+
+**Notes:** `scripts/mikroSerializeProbe.temp.ts` blijft bewust onaangeraakt in de oude fix-worktree; de vreemde Windows-bannermap blijft bewust untracked in `main`.
