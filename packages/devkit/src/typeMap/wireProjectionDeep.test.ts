@@ -8,10 +8,11 @@ import { getServerProgram } from './tsProgram';
 //? (Company -> Department -> Employee), each level a cycle, with a Date at every
 //? level, a nullable self-relation, a scalar array, and relation collections.
 //?
-//? Why this matters: a projection that only fixed the TOP level would still lie
-//? about `department.createdAt` / `employee.createdAt`. And an expander that
-//? mishandled the deeper cycles could re-introduce the `__@`-marker leak or the
-//? `EntityProperty` walk that DEVKIT-1 was about. Measured ground truth (real
+//? Why this matters: an expander that walks the deeper live-entity cycles can
+//? re-introduce the `__@`-marker leak or the `EntityProperty` walk that DEVKIT-1
+//? was about. Nested OBJECT projection is pinned separately by
+//? wireProjectionOrmMatrix.test.ts using `EntityDTO<Loaded<...>>`; a live entity
+//? serializes its relation collections as primary keys. Measured ground truth (real
 //? MikroORM 6.6.14 EntityManager, `JSON.stringify` on the live graph):
 //?
 //?   {"departments":["d1"],"name":"Acme","createdAt":"2026-...Z","tags":["a","b"],"id":"c1"}
@@ -29,12 +30,11 @@ beforeAll(() => {
 }, 180_000);
 
 describe('wire projection — deep 3-level ORM graph', () => {
-  it('projects EVERY level\'s Date to string, not just the top', () => {
+  it('projects each Date that survives the live entity\'s primary-key relation serialization', () => {
     const output = getOutputTypeDetailsFromFile(DEEP_ROUTE);
-    //? At minimum the top-level createdAt must be a string...
     expect(output.text).toContain('createdAt: string');
-    //? ...and NO `createdAt: Date` may survive at ANY nesting level. A top-only
-    //? fix would leave the deeper ones as Date; this catches that.
+    //? NO Date may survive. Nested DTO Date fields are tested by the ORM matrix;
+    //? this live entity sends relation primary keys rather than nested objects.
     expect(
       output.text,
       'a Date survived somewhere in the graph — a deeper level was not projected',

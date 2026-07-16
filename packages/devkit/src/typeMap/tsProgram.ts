@@ -91,8 +91,12 @@ const isJsonLikeType = (type: ts.Type, checker: ts.TypeChecker): boolean => {
 
   if (JSON_TYPE_NAMES.has(symbolName) || JSON_TYPE_NAMES.has(aliasName)) return true;
 
-  const rendered = checker.typeToString(type);
-  return /(\bPrisma\.)?(Input)?Json(Value|Object|Array)\b/.test(rendered);
+  //? Exact match only. A Prisma model OBJECT may contain a property rendered as
+  //? `preferences: JsonValue`; substring matching would then collapse the whole
+  //? model (and every nested relation) to `JsonValue` instead of projecting only
+  //? that property.
+  const rendered = checker.typeToString(type).trim();
+  return /^(?:Prisma\.)?(?:Input)?Json(?:Value|Object|Array)$/.test(rendered);
 };
 
 const getLiteralTypeFromExpression = (

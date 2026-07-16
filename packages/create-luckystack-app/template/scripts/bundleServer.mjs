@@ -36,6 +36,8 @@ const optionalPeerDeps = [
   'nodemailer', 'resend',
   '@sentry/node', 'dd-trace', 'hot-shots', 'posthog-node',
   '@luckystack/secret-manager', '@luckystack/email',
+  // Runtime-native Drizzle SQLite branch; Node must not try to resolve it.
+  'bun:sqlite',
 ];
 
 const external = [...new Set([...dependencyNames, ...nodeBuiltins, ...optionalPeerDeps])];

@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Inferred function-injection values containing checker-owned
+  `typeof import("C:/absolute/path")` types now emit a portable type query back
+  to the consumer's exported value. This prevents Drizzle's schema-parameterized
+  SQLite client from becoming malformed generated TypeScript on the second
+  artifact generation.
+- Prisma outputs containing a `JsonValue` field no longer collapse the entire
+  model (including nested relations) to `JsonValue`; JSON-type recognition now
+  matches the type itself instead of any mention inside its rendered object.
+  Real Prisma `Result.GetResult`, Drizzle relational-query, and populated
+  MikroORM `EntityDTO<Loaded<...>>` graphs now pin three-level Date projection.
+
 Codegen fixes surfaced by a MikroORM/MongoDB consumer (verified against a real
 MikroORM project + `tsc`); consumers can drop the corresponding
 `node_modules/@luckystack/devkit/dist` patches once on this version.

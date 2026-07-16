@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Jsonify<T>` now preserves already-JSON-stable recursive values.** Prisma's
+  self-referential `JsonValue` previously recursed through the array branch until
+  TypeScript rendered `... N more ...`, producing malformed generated route types
+  for a Prisma `SessionLayout`. A non-distributive JSON-stability guard keeps the
+  value intact while `Date | null` still becomes `string | null`.
 - **Redis secret-manager pointer boot** (ADR 0026): the default Redis client no longer
   fails auth with a baked-in `REDIS_PASSWORD_V<n>` pointer when it was built (during an
   early import) before secrets resolved. The framework EAGERLY REBUILDS + registers a

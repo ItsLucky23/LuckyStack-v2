@@ -59,6 +59,27 @@ const simplifyInferredType = (value: string): string => {
 //? repo root). Shims at other depths produced unresolvable type imports.
 const getGeneratedFileDir = (): string => path.dirname(getGeneratedSocketTypesPath());
 
+const sourceModuleSpecifier = (sourceFilePath: string): string => {
+  const relative = path.relative(getGeneratedFileDir(), sourceFilePath)
+    .replaceAll('\\', '/')
+    .replace(/\.tsx?$/i, '');
+  return relative.startsWith('.') ? relative : `./${relative}`;
+};
+
+//? Some libraries expose inferred values whose checker text contains an
+//? absolute `typeof import("C:/...")` (Drizzle databases parameterized by the
+//? consumer's schema are one example). Token-sanitizing that text corrupts the
+//? path and often leaves malformed generics. A type query back to the consumer's
+//? own exported value is exact, portable, and erased from the runtime bundle.
+export const portableInferredValueType = (
+  inferred: string,
+  sourceFilePath: string,
+  exportName: string,
+): string | null => {
+  if (!inferred.includes('typeof import(') && !inferred.includes('...')) return null;
+  return `typeof import('${sourceModuleSpecifier(sourceFilePath)}')['${exportName}']`;
+};
+
 const relativizeModuleSpecifier = (specifier: string, sourceFilePath: string): string => {
   if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
     return specifier;
@@ -208,6 +229,8 @@ const inferValueTypeForExport = ({
     if (!programDeclaration) return 'any';
 
     const inferred = resolvedChecker.typeToString(resolvedChecker.getTypeAtLocation(programDeclaration.name));
+    const portable = portableInferredValueType(inferred, filePath, exportName);
+    if (portable) return portable;
     const simplified = simplifyInferredType(normalizeInlineType(inferred));
     const localResolvedType = resolveLocalExportedTypes({
       type: simplified,

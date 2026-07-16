@@ -65,7 +65,7 @@ const PLACEHOLDER_BLOCK = `${NON_PRISMA_USER_TYPE_HEADER}\ntype User = {\n  id: 
 const seedFreshDrizzleRender = (): void => {
   write(freshDir, 'package.json', JSON.stringify({
     name: 'app',
-    dependencies: { '@luckystack/core': '^0.5.0', 'drizzle-orm': '^0.44.0', pg: '^8.16.0' },
+    dependencies: { '@luckystack/core': '^0.5.0', 'drizzle-orm': '^0.45.2', pg: '^8.16.0' },
     devDependencies: { 'drizzle-kit': '^0.31.0', '@types/pg': '^8.15.0' },
     scripts: { 'db:generate': 'drizzle-kit generate', 'db:migrate': 'drizzle-kit migrate', 'db:push': 'drizzle-kit push', 'db:studio': 'drizzle-kit studio' },
   }, null, 2));
@@ -99,7 +99,7 @@ describe('switchOrm — prisma → drizzle (fixture render)', () => {
     expect(pkg.dependencies['@prisma/client']).toBeUndefined();
     expect(pkg.devDependencies.prisma).toBeUndefined();
     expect(pkg.scripts['prisma:generate']).toBeUndefined();
-    expect(pkg.dependencies['drizzle-orm']).toBe('^0.44.0');
+    expect(pkg.dependencies['drizzle-orm']).toBe('^0.45.2');
     expect(pkg.dependencies.pg).toBe('^8.16.0');
     expect(pkg.devDependencies['drizzle-kit']).toBe('^0.31.0');
     expect(pkg.scripts['db:push']).toBe('drizzle-kit push');

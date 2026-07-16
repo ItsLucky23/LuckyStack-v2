@@ -38,6 +38,7 @@
     "test": "tsx --tsconfig tsconfig.server.json scripts/testAll.ts",
     "test:unit": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "verify:orm-wire": "tsx --tsconfig tsconfig.server.json scripts/verifyOrmWireProjection.ts",
     "smoke:ws": "tsx --tsconfig tsconfig.server.json scripts/wsProxySmoke.ts",
     "benchmark:runtime": "node scripts/benchmarkRuntime.mjs",
     "benchmark:concurrency": "node scripts/benchmarkConcurrency.mjs",

@@ -20,23 +20,28 @@
  * and `user.createdAt.getTime()` compiles and then throws at runtime.
  *
  * Deliberately SHALLOW — one level of properties, descending only into arrays.
- * A fully recursive version (mapping nested objects and dropping function keys)
- * is what you would write first, and it does not survive contact with a real
- * session type: `SessionLayout` carries Prisma's `JsonValue`, which is
- * self-referential, so the compiler dies with TS2589 "type instantiation is
- * excessively deep". Key-remapping to drop functions doubles the instantiations
- * on top of that. This version is cheap and covers what actually crosses: a
- * `Date` field, and arrays of them. If you ever need a nested `Date` projected,
- * wrap that inner type explicitly rather than making this one recursive.
- *
- * `JsonifyValue` is a separate helper so the conditional DISTRIBUTES over unions
- * — `Date | null` must become `string | null`, not stay `Date | null`.
+ * A fully recursive object mapper does not survive contact with Prisma's
+ * self-referential `JsonValue`. Already-JSON-stable values are therefore an
+ * identity boundary: do not recursively rebuild what JSON already represents.
+ * The NON-DISTRIBUTIVE tuple guard is load-bearing — it recognizes the complete
+ * `JsonValue` union before the Date branch distributes `Date | null` into
+ * `string | null`.
  */
-type JsonifyValue<TValue> = TValue extends Date
-  ? string
-  : TValue extends readonly (infer TElement)[]
-    ? JsonifyValue<TElement>[]
-    : TValue;
+type JsonStableValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonStableValue[]
+  | { [key: string]: JsonStableValue | undefined };
+
+type JsonifyValue<TValue> = [TValue] extends [JsonStableValue]
+  ? TValue
+  : TValue extends Date
+    ? string
+    : TValue extends readonly (infer TElement)[]
+      ? JsonifyValue<TElement>[]
+      : TValue;
 
 export type Jsonify<T> = { [TKey in keyof T]: JsonifyValue<T[TKey]> };
 

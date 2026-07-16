@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Drizzle + SQLite now performs real queries on Node and Bun.** Node keeps
+  `better-sqlite3`; Bun selects Drizzle's `bun:sqlite` adapter at module load via
+  dynamic imports, because Bun rejects the native `better-sqlite3` addon
+  (oven-sh/bun#4290). The SQLite scaffold adds `bun-types` for the adapter's
+  declarations, and the production bundler leaves `bun:sqlite` external so the
+  same bundle boots on Node and Bun while retaining one `functions.db.db` API.
+- **`--auth=none` scaffolds work after the complete-config factory change.** The
+  exact-token prune still targeted the old two-space auth block and lacked the
+  factory's `as const`, so every no-auth scaffold aborted and removed its partial
+  directory. A full-template prune regression now pins the current shape.
+- **New Drizzle scaffolds now require `drizzle-orm ^0.45.2`.** This is the first
+  release that fixes identifier-escaping SQL injection advisory
+  [GHSA-gpj5-g38j-94v9](https://github.com/advisories/GHSA-gpj5-g38j-94v9);
+  the previously scaffolded `^0.44.0` range was vulnerable.
 - **Late secret resolution now refreshes the complete project registration.**
   The scaffold previously re-registered only `http.cors.allowedOrigins`; because
   `registerProjectConfig` is last-write-wins over pristine defaults, that silently

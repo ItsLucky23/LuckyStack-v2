@@ -12,7 +12,7 @@ vi.mock("@luckystack/core", () => ({
   ROOT_DIR: "/project",
 }));
 
-import { normalizeInlineType, stripLineComments } from "./functionsMeta";
+import { normalizeInlineType, portableInferredValueType, stripLineComments } from "./functionsMeta";
 
 //? Both helpers are pure text transforms feeding the emitted `Functions`
 //? interface. The keystone bug: an inline `//` in an extracted type signature
@@ -36,6 +36,18 @@ describe("stripLineComments", () => {
   it("leaves block comments intact", () => {
     const input = "{ a: number /* keep me */ }";
     expect(stripLineComments(input)).toContain("/* keep me */");
+  });
+});
+
+describe("portableInferredValueType", () => {
+  it("replaces checker-owned absolute import types with a portable query to the exported value", () => {
+    const inferred = 'BetterSQLite3Database<typeof import("C:/Users/dev/app/server/db/schema")> & { $client: Database; }';
+    expect(portableInferredValueType(inferred, "/project/functions/db.ts", "db"))
+      .toBe("typeof import('../../functions/db')['db']");
+  });
+
+  it("leaves ordinary inferred scalar types on the existing sanitizer path", () => {
+    expect(portableInferredValueType("string", "/project/functions/example.ts", "name")).toBeNull();
   });
 });
 

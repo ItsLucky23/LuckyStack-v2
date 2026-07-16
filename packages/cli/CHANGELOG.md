@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ORM switching now removes/adds the Drizzle SQLite `bun-types` declaration
+  dependency together with the rest of the selected driver surface.
 - ORM switcher (`manage` → data layer) mirrors the mikro-orm scaffold fix:
   switching to mikro-orm no longer adds `@mikro-orm/cli` / the `mikro-orm`
   config key and ships `scripts/mikroOrmSchema.ts` (the API-based

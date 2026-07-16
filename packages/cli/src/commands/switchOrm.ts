@@ -49,7 +49,7 @@ export const ORM_SURFACES: Record<DetectedOrm, OrmSurface> = {
   },
   drizzle: {
     deps: ['drizzle-orm', 'pg', 'mysql2', 'better-sqlite3'],
-    devDeps: ['drizzle-kit', '@types/pg', '@types/better-sqlite3'],
+    devDeps: ['drizzle-kit', '@types/pg', '@types/better-sqlite3', 'bun-types'],
     scripts: ['db:generate', 'db:migrate', 'db:push', 'db:studio'],
     pkgKeys: [],
     replaceFiles: SHARED_REPLACE_FILES,

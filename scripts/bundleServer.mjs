@@ -41,6 +41,8 @@ const optionalPeerDeps = [
   // in server/bootstrap/initSecrets.ts; left external so a project that doesn't use
   // it bundles + boots without the package installed).
   '@luckystack/secret-manager',
+  // Runtime-native Drizzle SQLite branch; Node/esbuild must leave it for Bun.
+  'bun:sqlite',
 ];
 
 const externalDeps = [

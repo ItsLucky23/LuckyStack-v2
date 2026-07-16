@@ -88,6 +88,7 @@
     "vite.config.ts",
     "config.ts",
     "scripts/prismaWithSecrets.ts",
+    "scripts/verifyOrmWireProjection.ts",
     "server/**/*",
     "shared/**/*",
     "packages/core/src/**/*",
