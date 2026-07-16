@@ -7,6 +7,8 @@ import { dispatchHook, getDeployConfig } from '@luckystack/core';
 import type { ServiceTargetResolver } from './resolveTarget';
 import {
   WS_HOP_BY_HOP_HEADERS,
+  WS_RESPONSE_HOP_BY_HOP_HEADERS,
+  DEFAULT_WS_SERVICE,
   stripHopByHopHeaders,
   stripForwardedHeaders,
   safeDestroy,
@@ -15,13 +17,6 @@ import {
   normalizeForwardedProto,
   buildForwardedFor,
 } from './proxyUtils';
-
-//? Service key used for WebSocket upgrades. Socket.io clients connect to a
-//? single URL with path `/socket.io/?...`, so the first path segment doesn't
-//? carry a service name. We route WS to the `system` service by convention.
-//? With the Socket.io Redis adapter attached on every backend, rooms fan out
-//? across instances regardless of which one holds the WS connection.
-const DEFAULT_WS_SERVICE = 'system';
 
 //? Bound the upstream-handshake leg. A backend that accepts the TCP connection
 //? but never answers the WS upgrade would otherwise pin both the client and the
@@ -261,13 +256,18 @@ const openUpstream = async (
     //? 101 response before writing to the client — a backend must not be able to
     //? inject Set-Cookie, x-luckystack-* routing markers, or other internal headers
     //? through the WS upgrade response into the browser's header context.
+    //?
+    //? RESPONSE set, not the request one: a 101 MUST keep `Connection: Upgrade`
+    //? (RFC 6455 §4.2.2) or it is not an upgrade at all. Stripping it here is what
+    //? made every WebSocket through the router fail from 2026-06-19 to 2026-07-15.
+    //? See `WS_RESPONSE_HOP_BY_HOP_HEADERS`.
     const statusLine = `HTTP/1.1 ${upstreamRes.statusCode ?? 101} ${upstreamRes.statusMessage ?? 'Switching Protocols'}`;
     const headerLines: string[] = [statusLine];
     for (const [key, value] of Object.entries(upstreamRes.headers)) {
       if (value === undefined) continue;
       const lower = key.toLowerCase();
       if (lower === 'set-cookie') continue;
-      if (WS_HOP_BY_HOP_HEADERS.has(lower)) continue;
+      if (WS_RESPONSE_HOP_BY_HOP_HEADERS.has(lower)) continue;
       if (lower.startsWith('x-luckystack-')) continue;
       if (Array.isArray(value)) {
         for (const v of value) headerLines.push(`${key}: ${v}`);

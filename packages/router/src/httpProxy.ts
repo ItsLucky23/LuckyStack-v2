@@ -8,10 +8,12 @@ import type { ServiceTargetResolver } from './resolveTarget';
 import { resolveServiceKey } from './resolveTarget';
 import {
   HTTP_HOP_BY_HOP_HEADERS,
+  DEFAULT_WS_SERVICE,
   stripHopByHopHeaders,
   stripForwardedHeaders,
   isOriginFormTarget,
   isHostPinned,
+  isSocketIoPath,
   normalizeForwardedProto,
   buildForwardedFor,
 } from './proxyUtils';
@@ -34,6 +36,12 @@ export interface CreateHttpProxyInput {
    * disable.
    */
   maxRequestBodyBytes?: number;
+  /**
+   * Service that socket.io's polling handshake pins to. MUST match the value
+   * handed to `createWsProxy` — both halves of a socket.io connection have to
+   * reach the same backend. Defaults to `DEFAULT_WS_SERVICE` ('system').
+   */
+  websocketService?: string;
 }
 
 //? Bound the upstream request leg. A backend that accepts the TCP connection but
@@ -49,9 +57,10 @@ const UPSTREAM_REQUEST_TIMEOUT_MS = 30_000;
 //? to `Infinity` via `routing.maxRequestBodyBytes` to disable at the edge.
 const DEFAULT_MAX_BODY_BYTES = 100 * 1024 * 1024; // 100 MiB
 
-export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs, maxRequestBodyBytes }: CreateHttpProxyInput) => {
+export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs, maxRequestBodyBytes, websocketService }: CreateHttpProxyInput) => {
   const requestTimeoutMs = upstreamRequestTimeoutMs ?? UPSTREAM_REQUEST_TIMEOUT_MS;
   const bodySizeCap = maxRequestBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const socketIoService = websocketService ?? DEFAULT_WS_SERVICE;
 
   //? The handler returned to `http.createServer` must be `void`-returning so
   //? Node's HTTP internals do not see an unhandled promise. The real work is
@@ -61,7 +70,7 @@ export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamReq
   //? `new URL(...)`) would otherwise become an unhandled rejection and crash the
   //? process. This last-resort `.catch` closes that window.
   return (req: IncomingMessage, res: ServerResponse): void => {
-    void handleRequest(req, res, { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap }).catch((error: unknown) => {
+    void handleRequest(req, res, { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap, socketIoService }).catch((error: unknown) => {
       getLogger().error('[router] unhandled error while handling request:', { error });
       if (res.headersSent) {
         res.end();
@@ -82,9 +91,10 @@ const handleRequest = async (
     missingServiceErrorCode: string;
     requestTimeoutMs: number;
     bodySizeCap: number;
+    socketIoService: string;
   },
 ): Promise<void> => {
-  const { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap } = ctx;
+  const { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap, socketIoService } = ctx;
   const pathname = req.url ?? '/';
 
   //? Defense-in-depth: only strict origin-form targets (a single leading `/`)
@@ -99,11 +109,19 @@ const handleRequest = async (
     return;
   }
 
-  const service = resolveServiceKey({
-    pathname,
-    headers: req.headers,
-    host: req.headers.host ?? '',
-  });
+  //? socket.io's polling handshake pins to the websocket service, exactly as the
+  //? WS proxy pins the upgrade. Without this the first-segment resolver reads
+  //? "socket.io" as a service name and 502s the handshake, so a default client
+  //? (polling first) can never connect through the router at all. Checked BEFORE
+  //? `resolveServiceKey` so the convention holds for a custom resolver too —
+  //? mirroring the WS proxy, which never consults the resolver's path parsing.
+  const service = isSocketIoPath(pathname)
+    ? socketIoService
+    : resolveServiceKey({
+      pathname,
+      headers: req.headers,
+      host: req.headers.host ?? '',
+    });
 
   if (!service) {
     res.statusCode = 400;

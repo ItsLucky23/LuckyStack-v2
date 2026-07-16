@@ -26,6 +26,14 @@ It owns:
 - You want to **intercept proxy traffic** (tracing IDs, audit logging, redaction) via `preProxyRequest` / `postProxyResponse` hooks without forking the router.
 - You need **custom service resolution** (host-based, header-based, prefix-based) via `registerServiceResolver`.
 
+> **Run this package on Node, not Bun.** It refuses to start on a runtime whose HTTP
+> upgrade sockets do not deliver, which today means Bun: `socket.write()` on an upgrade
+> socket is a silent no-op there ([oven-sh/bun#28396](https://github.com/oven-sh/bun/issues/28396),
+> open as of Bun 1.3.14), so the router would serve HTTP and report healthy while dropping
+> every WebSocket. Your *backends* can still run on Bun — this is specific to proxying
+> upgrades. The guard is a boot-time capability probe (`runtimeCapabilities.ts`), not a
+> runtime ban, so it lifts itself once Bun ships the fix.
+
 ## When NOT to USE this package
 
 - A single backend instance fronted by your platform's built-in load balancer (Cloud Run, ALB, Caddy, nginx). Install `@luckystack/server` only and skip this package entirely.
@@ -59,7 +67,17 @@ HTTP proxy (`packages/router/src/httpProxy.ts`):
 
 WebSocket proxy (`packages/router/src/wsProxy.ts`):
 
-- `createWsProxy(input: CreateWsProxyInput)` — Returns an `upgrade` handler. Pins all upgrades to the `system` service backend; Socket.io's Redis adapter handles cross-instance fanout.
+- `createWsProxy(input: CreateWsProxyInput)` — Returns an `upgrade` handler. Pins all upgrades to the `system` service backend; Socket.io's Redis adapter handles cross-instance fanout. The forwarded 101 keeps `Connection: Upgrade` + `Upgrade: websocket` (RFC 6455 §4.2.2) while still stripping `set-cookie` and `x-luckystack-*` — see `WS_RESPONSE_HOP_BY_HOP_HEADERS`, and do not "simplify" it back to the request-direction set.
+
+Runtime capability guard (`packages/router/src/runtimeCapabilities.ts`):
+
+- `probeUpgradeSocketDelivery(timeoutMs?): Promise<boolean>` — Measures whether an HTTP upgrade handshake written to an upgrade socket actually reaches a client on this runtime (one loopback connection). `false` on Bun.
+- `assertRuntimeCanProxyWebsockets(deps?): Promise<void>` — Called first by `startRouter`. Throws on a runtime that cannot deliver an upgrade, so the router fails loudly instead of black-holing every socket. Only probes when the failure is plausible (skipped on Node). `deps` injects `isBunRuntime` / `probe` for tests, because Node cannot reproduce the Bun branch. Escape hatch: `LUCKYSTACK_ALLOW_BROKEN_WS_PROXY=1`.
+
+Proxy utilities (`packages/router/src/proxyUtils.ts`):
+
+- `isSocketIoPath(pathname): boolean` — Is this socket.io's engine path (either half of the connection)? The HTTP proxy uses it to pin the polling handshake to the same service as the upgrade; without it the first-segment resolver reads `"socket.io"` as a service name and 502s every default client.
+- `DEFAULT_WS_SERVICE` — `'system'`. Shared by both proxies so the two halves cannot drift.
 
 Boot handshake (`packages/router/src/bootHandshake.ts`):
 

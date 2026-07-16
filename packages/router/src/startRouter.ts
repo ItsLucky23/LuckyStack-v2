@@ -1,4 +1,5 @@
 import http from 'node:http';
+import type { Duplex } from 'node:stream';
 import { getDeployConfig, getLogger, getServicesConfig, tryCatch, type DeployEnvironmentShape } from '@luckystack/core';
 import { createServiceTargetResolver } from './resolveTarget';
 import type { ServiceTargetResolver } from './resolveTarget';
@@ -9,6 +10,7 @@ import { createWsProxy } from './wsProxy';
 import { createRedisHealthStore } from './redisHealthStore';
 import type { RedisHealthStore } from './redisHealthStore';
 import { runBootHandshake } from './bootHandshake';
+import { assertRuntimeCanProxyWebsockets } from './runtimeCapabilities';
 
 type EnvironmentDefinition = DeployEnvironmentShape;
 
@@ -21,6 +23,20 @@ type EnvironmentDefinition = DeployEnvironmentShape;
 const ROUTER_HEADERS_TIMEOUT_MS = 60_000;
 const ROUTER_KEEP_ALIVE_TIMEOUT_MS = 5000;
 const ROUTER_REQUEST_TIMEOUT_MS = 300_000;
+
+//? How long `stop()` lets in-flight HTTP requests finish before it force-closes
+//? whatever is left. Built-in rather than a deploy-config knob, matching the
+//? timeouts above.
+//?
+//? Why a force-close is REQUIRED and not a nicety: `server.close()` waits for
+//? every open connection to end on its own, and an upgraded WebSocket pipe never
+//? does. A WS proxy therefore always has connections that will outlive any wait —
+//? so a plain `server.close()` NEVER resolves once a single client is connected.
+//? `scripts/router.ts` awaits `stop()` before `process.exit(0)` on SIGTERM, so
+//? the router simply never exited: every deploy sat until the platform's grace
+//? period ran out and SIGKILLed it (30s on a default Kubernetes pod). Measured:
+//? with one WebSocket client connected, `stop()` was still hanging after 8s.
+const ROUTER_SHUTDOWN_DRAIN_MS = 10_000;
 
 /**
  * Starts the LuckyStack load-balancer backend.
@@ -72,7 +88,60 @@ export interface RunningRouter {
   stop: () => Promise<void>;
 }
 
+/**
+ * Stop accepting connections, let in-flight HTTP finish, then force-close what
+ * is left so shutdown actually terminates.
+ *
+ * Exported for its own test. `upgradedSockets` is not optional bookkeeping — see
+ * below.
+ */
+export const closeServerGracefully = async (
+  server: http.Server,
+  drainMs: number,
+  upgradedSockets: Iterable<Duplex>,
+): Promise<void> => {
+  const closed = new Promise<void>((resolve, reject) => {
+    server.close((err) => {
+      //? `ERR_SERVER_NOT_RUNNING` on an already-stopped server is not a failure
+      //? worth propagating out of a shutdown path — stopping a stopped server has
+      //? already achieved what the caller wanted, and a double SIGTERM is not an
+      //? error. Narrowed with `in` rather than cast to `NodeJS.ErrnoException`.
+      const alreadyStopped = err !== undefined && 'code' in err && err.code === 'ERR_SERVER_NOT_RUNNING';
+      if (err && !alreadyStopped) reject(err);
+      else resolve();
+    });
+  });
+
+  //? Idle keep-alives hold no work; drop them immediately rather than waiting out
+  //? the drain window for connections that have nothing to drain.
+  server.closeIdleConnections();
+
+  const forceClose = setTimeout(() => {
+    server.closeAllConnections();
+    //? MEASURED, and the reason this function exists in this shape:
+    //? `closeAllConnections()` does NOT touch a socket that was handed to an
+    //? `'upgrade'` listener. With one upgraded client, `getConnections()` stays
+    //? at 1 and `close()`'s callback never fires — even after calling it. Node
+    //? counts the socket but will not destroy it for you, so the ONLY way to end
+    //? an upgraded pipe is to hold the reference and destroy it yourself.
+    //? Without this loop `stop()` never resolves on a router that has ever had a
+    //? WebSocket client, which is every router.
+    for (const socket of upgradedSockets) socket.destroy();
+  }, drainMs);
+
+  try {
+    await closed;
+  } finally {
+    clearTimeout(forceClose);
+  }
+};
+
 export const startRouter = async (input: StartRouterInput): Promise<RunningRouter> => {
+  //? Before anything else: a runtime that cannot deliver a WS upgrade would run
+  //? as a healthy-looking HTTP proxy that black-holes every socket. Fail here,
+  //? not in production silence. Measured, not assumed — see runtimeCapabilities.
+  await assertRuntimeCanProxyWebsockets();
+
   const deployConfig = getDeployConfig();
   const servicesConfig = getServicesConfig();
   const defaultRouterPort = deployConfig.routing?.defaultRouterPort ?? 4000;
@@ -159,7 +228,9 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
     });
   }
 
-  const proxy = createHttpProxy({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs: upstreamTimeoutMs, maxRequestBodyBytes });
+  //? `websocketService` goes to BOTH proxies: socket.io's polling handshake (HTTP)
+  //? and its upgrade (WS) are one connection and must pin to the same backend.
+  const proxy = createHttpProxy({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs: upstreamTimeoutMs, maxRequestBodyBytes, websocketService });
   const wsProxy = createWsProxy({ resolver, upstreamHandshakeTimeoutMs: upstreamTimeoutMs, wsTargetService: websocketService });
   const server = http.createServer(proxy);
 
@@ -171,6 +242,17 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   server.keepAliveTimeout = ROUTER_KEEP_ALIVE_TIMEOUT_MS;
   server.requestTimeout = ROUTER_REQUEST_TIMEOUT_MS;
 
+  //? Track every socket the server hands to an 'upgrade' listener so `stop()` can
+  //? end them. Node will not: `closeAllConnections()` skips upgraded sockets
+  //? entirely (measured), so an untracked pipe keeps `server.close()` pending
+  //? forever. Registered BEFORE the proxy so the socket is recorded even if the
+  //? proxy rejects the upgrade — a rejected socket is destroyed, fires 'close',
+  //? and drops straight back out of the set.
+  const upgradedSockets = new Set<Duplex>();
+  server.on('upgrade', (_req, socket) => {
+    upgradedSockets.add(socket);
+    socket.on('close', () => { upgradedSockets.delete(socket); });
+  });
   server.on('upgrade', wsProxy);
 
   if (isDevMode && enableFallbackRouting && currentEnv) {
@@ -207,12 +289,7 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
     stop: async () => {
       healthPoller?.stop();
       if (healthStore) await healthStore.close();
-      await new Promise<void>((resolve, reject) => {
-        server.close((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
+      await closeServerGracefully(server, ROUTER_SHUTDOWN_DRAIN_MS, upgradedSockets);
     },
   };
 };

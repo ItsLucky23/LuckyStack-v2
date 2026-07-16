@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`registerSecretsResolvedListener` / `notifySecretsResolved` are now exported from
+  the client-safe `@luckystack/core/config` subpath** (they were already on the main
+  barrel). A project's `config.ts` — which is client-bundled, so it can only import from
+  `/config` — can now re-register env-derived slots the moment the secret manager
+  resolves. This closes a real defect (finding C-04): `config.ts` runs at module load,
+  *before* `resolveSecretsIfConfigured()`, so any slot derived from a secret-manager
+  pointer (`EMAIL_FROM`, `EXTERNAL_ORIGINS`, …) froze as the unresolved pointer —
+  measured live, CORS held `["ORIGINS_BASE_V1"]` while `process.env` already had the real
+  origin, so it would reject the very host the operator configured. `secretsResolved.ts`
+  imports nothing, so the subpath stays free of server deps (`configEntry.test.ts`).
+
 - **Bun env auto-load guard.** Bun auto-loads `.env` files before any user code
   runs; Node does not. That silently breaks two guarantees of `loadEnvFiles`:
   `LUCKYSTACK_ENV_FILES` stops being an ambient-only override (a value set INSIDE

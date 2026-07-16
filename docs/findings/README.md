@@ -5,14 +5,25 @@
 > `docs/FINDINGS_PROTOCOL.md` for the rules. This index lists them all so open
 > items are never lost during a cleanup.
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
-| 2026-07-15 | [2026-07-15-scaffold-e2e/](./2026-07-15-scaffold-e2e/) | Real-registry scaffold + install e2e (`npm run e2e:verdaccio`) | 1 | **1 open** |
-| 2026-07-15 | [2026-07-15-type-generation/](./2026-07-15-type-generation/) | Wire-type lie + ORM degradation — **projection shipped; T2 (server-side session lie) still open** | 17 | **5 open** · 10 fixed · 2 informational |
-| 2026-07-15 | [2026-07-15-bun-feasibility/](./2026-07-15-bun-feasibility/) | Bun runtime + PM — **runtime, PM, router, all 4 databases verified on both runtimes** | 17 | **1 open** · 15 fixed · 1 wontfix |
-| 2026-07-02 | [2026-07-02-security/](./2026-07-02-security/) | Security & correctness scan (10 agents, full codebase) | 12 | 0 open · 9 fixed · 3 wontfix (all terminal) |
+| 2026-07-16 | [2026-07-16-npm-vs-bun-benchmark/](./2026-07-16-npm-vs-bun-benchmark/) | npm+node vs bun benchmark (runtime + install) | — | analysis (no defects) — bun faster runtime, npm faster install on Windows |
+| 2026-07-16 | [2026-07-16-unpushed-branch-review/](./2026-07-16-unpushed-branch-review/) | Review of all unpushed commits + working-tree changes | 7 | 7 open |
+| 2026-07-15 | [2026-07-15-scaffold-e2e/](./2026-07-15-scaffold-e2e/) | Real-registry scaffold + install e2e (`npm run e2e:verdaccio`) | 1 | 0 open · 1 fixed |
+| 2026-07-15 | [2026-07-15-type-generation/](./2026-07-15-type-generation/) | Wire-type lie + ORM degradation — **projection shipped, T1/T2/T11/T14 all closed** | 18 | 0 open · 11 fixed · 3 wontfix · 2 informational · 1 false-positive · 1 superseded |
+| 2026-07-15 | [2026-07-15-bun-feasibility/](./2026-07-15-bun-feasibility/) | Bun runtime + PM + **router WS proxy** — runtime, PM, all 4 databases verified on both runtimes; router proxies WS on node, refuses on bun (upstream) | 22 | 0 open · 20 fixed · 1 wontfix · 1 mitigated |
+| 2026-07-02 | [2026-07-02-security/](./2026-07-02-security/) | Security & correctness scan (10 agents, full codebase) | 13 | 0 open · 10 fixed · 3 wontfix |
+
+> The older finding sets remain 0-open. The 2026-07-16 branch review adds the current open
+> release blockers and follow-ups; its own ledger is authoritative for their status.
+
+> **Rollups drift.** This table claimed "5 open" for type-generation (actually 0, since 2026-07-15)
+> and "1 open" for scaffold-e2e (fixed the same day) until 2026-07-16. A stale rollup is worse than
+> no rollup: it is what a later cleanup reads to decide what is safe to delete. Re-tally from the
+> folder's own ledger whenever you touch a row — the per-item status lines are the source of truth,
+> this table is a convenience.
 
 <!--
 Add a row per findings-folder, e.g.:

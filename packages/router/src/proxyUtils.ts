@@ -24,8 +24,67 @@ export const HTTP_HOP_BY_HOP_HEADERS: ReadonlySet<string> = new Set([
   'upgrade',
 ]);
 
-/** WebSocket-proxy hop-by-hop set: the base set (keeps `upgrade` for the handshake). */
+/** WebSocket-proxy REQUEST hop-by-hop set: the base set (keeps `upgrade` for the handshake). */
 export const WS_HOP_BY_HOP_HEADERS: ReadonlySet<string> = BASE_HOP_BY_HOP_HEADERS;
+
+//? WebSocket-proxy RESPONSE hop-by-hop set. `connection` is hop-by-hop by RFC
+//? 7230 §6.1 in general, but on a 101 it is the header that MAKES the response
+//? an upgrade: RFC 6455 §4.2.2 requires `Connection: Upgrade` alongside
+//? `Upgrade: websocket`, and every client enforces it — Node's own HTTP parser
+//? will not emit `'upgrade'` without it, and socket.io/ws reject the handshake.
+//?
+//? Applying the REQUEST set to the RESPONSE is exactly how the WS proxy shipped
+//? BROKEN from 2026-06-19 (0252a74, a security sweep) until this fix: the client
+//? received `HTTP/1.1 101 Switching Protocols` with `Connection` stripped, which
+//? is not a completable handshake, so NO WebSocket could cross the router at
+//? all. The unit test missed it for three weeks because it asserted only that
+//? the status line contained "101" — true, and useless.
+//?
+//? The sweep's actual intent is preserved: `set-cookie` and `x-luckystack-*` are
+//? still stripped in the response loop, and the genuinely connection-scoped
+//? headers below still go.
+export const WS_RESPONSE_HOP_BY_HOP_HEADERS: ReadonlySet<string> = new Set(
+  [...BASE_HOP_BY_HOP_HEADERS].filter((header) => header !== 'connection'),
+);
+
+//? Service key that socket.io traffic pins to by convention. A socket.io client
+//? connects to ONE url whose path is `/socket.io/?...` — the first path segment
+//? is the transport's own name, never a service name — so neither half of the
+//? connection can be routed by the usual first-segment rule. Overridable via
+//? `deploy.routing.websocketService`.
+export const DEFAULT_WS_SERVICE = 'system';
+
+//? Socket.io's engine path. `@luckystack/server` never passes a `path` option to
+//? `new SocketIOServer(...)`, so the library default is what the framework
+//? actually serves; if that ever becomes configurable, this must follow it.
+const SOCKET_IO_PATH = '/socket.io';
+
+/**
+ * Is this the socket.io engine path (either half of a socket.io connection)?
+ *
+ * A socket.io connection is TWO requests on the same path: an XHR polling
+ * handshake (plain HTTP -> the HTTP proxy) and then the upgrade (-> the WS
+ * proxy). The WS proxy has always pinned upgrades to the websocket service; the
+ * HTTP proxy had no matching rule, so it fed "socket.io" to the first-segment
+ * resolver, found no such service, and answered `502 serviceNotAssigned`.
+ *
+ * That broke the DEFAULT client outright: socket.io's default transport list is
+ * `['polling', 'websocket']`, and LuckyStack's own `socketInitializer.ts` sets no
+ * `transports`, so every browser opens with the poll that the router rejects and
+ * never reaches the upgrade at all. `loadSocket.ts` spells the requirement out —
+ * "Socket.io *must* complete that origin-less HTTP handshake before it can
+ * upgrade to WebSocket" — in the very comment describing the with-router
+ * topology.
+ *
+ * Both halves must also land on the SAME backend, which pinning to one service
+ * gives for free (a single binding per service), so no sticky-session layer is
+ * needed.
+ */
+export const isSocketIoPath = (pathname: string): boolean => {
+  const queryStart = pathname.indexOf('?');
+  const path = queryStart === -1 ? pathname : pathname.slice(0, queryStart);
+  return path === SOCKET_IO_PATH || path.startsWith(`${SOCKET_IO_PATH}/`);
+};
 
 /**
  * Extract the extra hop-by-hop header names listed in the `Connection` header

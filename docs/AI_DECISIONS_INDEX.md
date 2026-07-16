@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (27)
+## Decisions (28)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -40,6 +40,7 @@
 | 0025 | luckystack update app scope | 🟢 accepted | cli, update, scaffold, dx | — | `docs/decisions/0025-luckystack-update-app-scope.md` |
 | 0026 | secret manager redis pointer boot | 🟢 accepted | core, server, redis, secret-manager, boot | — | `docs/decisions/0026-secret-manager-redis-pointer-boot.md` |
 | 0027 | Offer npm + bun as the scaffold's package managers, and generate Prisma via npx even on bun | 🟢 accepted | cli, scaffold, packaging, bun, prisma | — | `docs/decisions/0027-package-manager-axis-npm-and-bun.md` |
+| 0028 | Support node and bun through socket.io on node:http; do NOT build a Bun.serve / native-WS socket abstraction | 🟢 accepted | runtime, sockets, bun, architecture, packaging | — | `docs/decisions/0028-keep-socketio-on-nodehttp-both-runtimes.md` |
 
 ## Summaries
 
@@ -191,7 +192,7 @@ Route every `prisma:*` script through a small wrapper, `scripts/prismaWithSecret
 
 The raw session `token` **never reaches page JS through the session object** — not via the `session_v1` bootstrap and not via the `updateSession` broadcast, in either mode. This is enforced by TYPE, not just discipline:
 
-**Governs** (`//? @adr 0018`): `packages/core/src/hooks/types.ts`, `packages/core/src/sessionTypes.ts`, `packages/login/src/session.ts`, `src/_api/session_v1.ts`, `src/_providers/SessionProvider.tsx`
+**Governs** (`//? @adr 0018`): `packages/core/src/hooks/types.ts`, `packages/login/src/session.ts`, `src/_api/session_v1.ts`, `src/_providers/SessionProvider.tsx`
 
 → `docs/decisions/0018-session-token-to-client-only-in-sessionbasedtoken-mode.md`
 
@@ -269,6 +270,14 @@ Fix the timing at the framework level, without making core depend on secret-mana
 
 → `docs/decisions/0027-package-manager-axis-npm-and-bun.md`
 
+### 0028 — Support node and bun through socket.io on node:http; do NOT build a Bun.serve / native-WS socket abstraction
+
+**0028** · accepted · tags: runtime, sockets, bun, architecture, packaging · 2026-07-16
+
+*Keep socket.io on `node:http` as the single socket abstraction, and support both runtimes by running that same stack on each (already the case).** Do not build a `Bun.serve()` HTTP path or a bun-native-WebSocket path, and do not introduce a runtime-branching socket facade. socket.io *is* the runtime-agnostic socket layer; it runs on node and bun today and already captures the large runtime win.
+
+→ `docs/decisions/0028-keep-socketio-on-nodehttp-both-runtimes.md`
+
 ## Code governed by decisions
 
 > Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.
@@ -277,7 +286,6 @@ Fix the timing at the framework level, without making core depend on secret-mana
 | File | ADR | Decision |
 | --- | --- | --- |
 | `packages/core/src/hooks/types.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
-| `packages/core/src/sessionTypes.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
 | `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
 | `packages/login/src/accountStrategy.ts` | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant |
 | `packages/login/src/session.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |

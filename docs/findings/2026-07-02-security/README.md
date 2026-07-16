@@ -3,13 +3,22 @@
 > AI findings ledger. Status of every item is tracked here (Findings Protocol).
 > Scope: all `@luckystack/*` packages + `create-luckystack-app` + consumer `src/`, `server/`, `scripts/`, `shared/`, `functions/`, root config · Tool/agents: 10 parallel audit agents (one per surface), two highest-severity re-verified by hand · Supersedes: —
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 > Migrated 2026-07-15 from the legacy root folder `codebase-scan-02-07/` into the
 > dated Findings-Protocol layout. The full ranked report is `SCAN_REPORT.md`;
 > per-area detail lives in `findings/*.md`. This table is the authoritative status
-> record. **No `open` items remain** — every finding is `fixed` or `wontfix`
-> (by-design, documented in an ADR), so this folder is safe to archive.
+> record.
+>
+> ⚠️ **2026-07-16 — this header used to read "No `open` items remain … so this folder is
+> safe to archive." That was false, and it is worth understanding why.** `C-04` was written
+> up in `SCAN_REPORT.md:117` and `findings/config.md:37` but **never got a row in this
+> table**, so the tally counted what was listed rather than what was found, and then invited
+> deletion of the evidence. It was re-derived from scratch on 2026-07-16 — from the code, not
+> from the report — and it is REAL. A row now exists (C-04, since **fixed** 2026-07-16). The lesson is structural,
+> not clerical: a rollup that is assembled from the rows below it can only ever be as complete
+> as the migration that produced them, and "safe to archive" is exactly the sentence that
+> stops anyone from checking.
 
 | # | Finding | Severity | Status | Since | Resolved | Notes / link |
 |---|---------|----------|--------|-------|----------|--------------|
@@ -25,6 +34,7 @@ Last updated: 2026-07-15
 | M8 | Test-runner: auth sweep silently dropped routes missing from `apiMetaMap` | MEDIUM | fixed | 2026-07-02 | 2026-07-02 | `runAuthEnforcementTests.ts` now records a `skipped`/"auth unverifiable" result instead of a silent continue |
 | L-batch | Security-relevant LOW hardening: CORS reflection on exempt paths (server L1), origin-exempt segment-boundary matching (L5), auth rate-limit window predicate (L4), SameSite-Strict boot warning (auth L2), cookie `Secure` default-on in prod (L5), `clearAuthFailures` tryCatch (L6), ConsoleSender prod warning (infra L2) | LOW | fixed | 2026-07-02 | 2026-07-02 | Third follow-up round; 1452 unit + 112 test-runner green |
 | L-rest | Remaining LOW items (registration enumeration oracle, pre-params body-cap for streaming, health-probe amplification, error-tracker PII plaintext, docs-ui CSS `image-set`/`cross-fade`, `prismaWithSecrets` dev shell, dup-report cosmetics) | LOW | wontfix | 2026-07-02 | 2026-07-02 | Accepted tradeoffs / cosmetic — report-only, see `findings/*.md` |
+| **C-04** | **Module-load-time env reads run BEFORE secret-manager resolution.** `config.ts` read `EMAIL_FROM` and `EXTERNAL_ORIGINS`/`DNS` inside the `registerProjectConfig({...})` literal, i.e. at module load; `server.ts` imports `../config` long before it awaits `resolveSecretsIfConfigured(...)`, so a pointer-shaped value for any of the three froze as the POINTER. `config.ts` even carried a DEV-WARN describing this exact hazard, unimplemented. | LOW | **fixed** | 2026-07-02 | 2026-07-16 | **Verified LIVE first (not from the report), then fixed.** Runtime proof before the fix: with `EXTERNAL_ORIGINS=ORIGINS_BASE_V1` at import and the resolver later writing `https://real.company.com`, `getProjectConfig().http.cors.allowedOrigins` stayed `["ORIGINS_BASE_V1"]` and `email.from` stayed the pointer. Fix uses the framework's OWN mechanism (ADR 0026), not a new one: `email.from` is now a call-time getter, and a `registerSecretsResolvedListener` re-registers `allowedOrigins` when secrets land (a getter can't help there — `registerProjectConfig` deep-merges the value during the call). Applied to repo `config.ts` AND the scaffold template. `registerSecretsResolvedListener`/`notifySecretsResolved` newly exported from the client-safe `/config` subpath (guard still green). Regression proof: `server/configSecretsResolved.test.ts` drives the REAL `config.ts` (both halves verified to fail against the reverted fix, independently) + `packages/core/src/secretsResolvedConfig.test.ts` pins the mechanism incl. "a getter cannot survive the merge". ⚠️ B10 (bun-feasibility) had pre-declared this a false-positive without checking — it was real. Full trail in that ledger's B10 row |
 
 ## Detail
 

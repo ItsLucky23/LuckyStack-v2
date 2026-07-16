@@ -44,6 +44,24 @@ export {
   isServicesConfigRegistered,
 } from './servicesConfigRegistry';
 
+//? A consumer `config.ts` reads env vars at MODULE LOAD, which is before
+//? `resolveSecretsIfConfigured()` has overwritten `process.env` with the real
+//? values — so any slot derived from a secret-manager pointer freezes as the
+//? POINTER. That is not hypothetical: it is finding C-04 (2026-07-02), measured
+//? live on 2026-07-16 — `http.cors.allowedOrigins` held `["ORIGINS_BASE_V1"]`
+//? while `process.env.EXTERNAL_ORIGINS` already said `https://real.company.com`.
+//?
+//? Subscribing here lets `config.ts` re-register the env-derived slots the moment
+//? secrets land, exactly as core's own `redis.ts` rebuilds its client (ADR 0026).
+//? `secretsResolved.ts` imports NOTHING, so this costs the browser nothing and
+//? cannot breach the entry's no-server-deps guarantee (`configEntry.test.ts`).
+export {
+  registerSecretsResolvedListener,
+  notifySecretsResolved,
+} from './secretsResolved';
+
+export type { SecretsResolvedListener } from './secretsResolved';
+
 export type {
   ProjectConfig,
   ProjectConfigInput,

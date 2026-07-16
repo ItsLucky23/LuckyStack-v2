@@ -242,6 +242,62 @@ const WIRE_PROJECTED_TYPES = new Map<string, string>([['Date', 'string']]);
 //? Prisma's `Decimal`, and anything else that plays by JSON's contract.
 //? Measured, not assumed: on a real entity, `createdAt: Date -> toJSON(): string`
 //? and `items: Collection<Item> -> toJSON(): EntityDTO<TT>[]`.
+//?
+//? KNOWN LIMITATION — `items: ({ } & { })[]`, and why it stays that way.
+//? A GENERIC toJSON leaves its type parameter uninstantiated here. MikroORM's is
+//? `Collection<T>.toJSON<TT extends T>(): EntityDTO<TT>[]`, so `getReturnType()`
+//? hands back `EntityDTO<TT>[]` with TT still a bare type parameter (its
+//? constraint resolves to the real entity, the parameter itself does not).
+//? `EntityDTO<TT>` is an intersection of two homomorphic mapped types keyed on
+//? `keyof TT`; over an unresolved TT both are deferred and expose ZERO
+//? properties, so each renders `{ }` and the pair renders `{ } & { }`.
+//?
+//? Instantiating TT would fix it and would NOT be expensive — a real
+//? `EntityDTO<FixtureItem>` expands to 166 clean chars, 0 unresolved symbols.
+//? It is simply not reachable: TS exposes no way to instantiate a generic call
+//? signature. `getSignatureInstantiation` / `instantiateType` are absent from the
+//? public API AND from all 174 runtime methods on the checker (verified, TS
+//? 6.0.3). `getApparentType` does not resolve it; the base class's non-generic
+//? `ArrayCollection.toJSON(): EntityDTO<T>[]` is no better, because `getBaseTypes`
+//? returns the UNINSTANTIATED `ArrayCollection<T, O>`.
+//?
+//? The one route that LOOKS open — substitute TT with its constraint and expand
+//? that — is a guess, not a derivation: it equates `EntityDTO<TT>` with "TT
+//? serialized", which is nowhere in the contract, and only approximates MikroORM
+//? by luck. An ORM whose `toJSON<T>()` returns a shape unrelated to T would get a
+//? confidently fabricated type. A name-free rule that is really a per-ORM guess is
+//? still a per-ORM guess, so it fails the same bar that keeps this projection free
+//? of ORM name lists.
+//?
+//? AND THE VAGUENESS IS LOAD-BEARING — it is not merely tolerable. Measured at
+//? RUNTIME (MikroORM 6.6.14, live EntityManager, real entity with two children),
+//? a Collection has TWO serializations and they do not agree:
+//?
+//?   JSON.stringify(owner)       -> {"items":["i1","i2"],"name":"Ada","id":"o1"}
+//?                                  ^ items are PRIMARY KEYS (string[])
+//?   JSON.stringify(owner.items) -> [{"label":"first",...},{"label":"second",...}]
+//?                                  ^ items are OBJECTS
+//?
+//? RULE 1 reads `Collection.toJSON()` and so models the SECOND. But a handler
+//? returning the ENTITY takes the first: MikroORM's parent serializer emits keys
+//? for the collection property and never calls `Collection.toJSON()` at all. So
+//? rule 1's premise ("stringify calls toJSON on this property") is simply false
+//? for a Collection reached THROUGH an entity — the normal case.
+//?
+//? Which means an instantiated TT would emit `items: EntityDTO<Item>[]` — objects
+//? with `.label` — while the wire carries `["i1","i2"]`. `items[0].label` would
+//? compile and be `undefined` at runtime: precise-looking and false, the exact lie
+//? this projection exists to kill. `{ }` accepts a string, so `({ } & { })[]` is
+//? instead a TRUE (if useless) statement about that payload. TS's inability to
+//? instantiate TT is accidentally protecting us from rule 1's wrong premise here.
+//?
+//? So: vague-but-true beats precise-but-false. The cost is one narrowing step for
+//? the consumer; it never lies to them, which is the bar that matters. Anyone
+//? tempted to make this precise must first fix the premise above — and that needs
+//? per-ORM serializer knowledge, which is the thing we refuse to encode.
+//?
+//? (Rule 1 is right for `Date`: `createdAt` is verified to come back as an ISO
+//? string on the same measured payload, both standalone and through the entity.)
 const resolveToJsonReturnType = (type: ts.Type, checker: ts.TypeChecker): ts.Type | null => {
   const toJson = type.getProperty('toJSON');
   if (!toJson) return null;

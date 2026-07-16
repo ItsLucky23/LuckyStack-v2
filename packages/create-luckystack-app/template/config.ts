@@ -6,7 +6,7 @@
 //? barrel drags the whole server surface — ioredis included — into the browser.
 //? The subpath exposes only the config registry (both share one registry, so
 //? `getProjectConfig()` from the barrel still sees what is registered here).
-import { registerProjectConfig } from '@luckystack/core/config';
+import { registerProjectConfig, registerSecretsResolvedListener } from '@luckystack/core/config';
 //? Frontend + backend ports live in ONE pure-data file (no side-effects) so
 //? `vite.config.ts` can read them without importing this config. Re-exported so
 //? app code + `server.ts` share the same single source of truth.
@@ -98,6 +98,29 @@ const config = {
   // },
 };
 
+//? The backend's own origin is always allowed. Add extra hosts (a separate
+//? frontend domain, OAuth provider origins, …) to EXTERNAL_ORIGINS in `.env`,
+//? comma-separated — e.g. EXTERNAL_ORIGINS=https://app.example.com,https://accounts.google.com
+//?
+//? A FUNCTION, not an inline array, so it can be re-run — see the listener below.
+const collectAllowedOrigins = (): string[] =>
+  [publicUrl, backendOrigin, ...(env('EXTERNAL_ORIGINS') || '').split(',').map((s) => s.trim()).filter(Boolean)];
+
+//? Re-register once the secret manager has overwritten process.env.
+//?
+//? This file is imported by server.ts BEFORE it awaits `resolveSecretsIfConfigured()`,
+//? so anything read here freezes at import — and `registerProjectConfig` deep-merges
+//? the value, so a getter cannot help either (the merge reads it during the call).
+//? If EXTERNAL_ORIGINS comes from a secret-manager pointer, CORS would keep the
+//? POINTER and reject the origin you actually configured — failing closed, with no
+//? error anywhere. Measured live before this fix (framework finding C-04).
+//?
+//? Not using the secret manager? The resolver never fires and this never runs;
+//? the read below was already final. Same channel core's own redis client uses.
+registerSecretsResolvedListener(() => {
+  registerProjectConfig({ http: { cors: { allowedOrigins: collectAllowedOrigins() } } });
+});
+
 registerProjectConfig({
   app: { publicUrl },
   logging: config.logging,
@@ -109,10 +132,7 @@ registerProjectConfig({
   },
   http: {
     cors: {
-      //? The backend's own origin is always allowed. Add extra hosts (a separate
-      //? frontend domain, OAuth provider origins, …) to EXTERNAL_ORIGINS in
-      //? `.env`, comma-separated — e.g. EXTERNAL_ORIGINS=https://app.example.com,https://accounts.google.com
-      allowedOrigins: [publicUrl, backendOrigin, ...(env('EXTERNAL_ORIGINS') || '').split(',').map((s) => s.trim()).filter(Boolean)],
+      allowedOrigins: collectAllowedOrigins(),
       //? In dev (NODE_ENV !== 'production') accept ANY localhost origin, so the
       //? Vite dev server on http://localhost:5173 (and :5174, :5175, … when the
       //? port is taken) can talk to the backend without listing each port. Stays

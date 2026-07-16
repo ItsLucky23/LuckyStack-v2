@@ -7,7 +7,7 @@ import type { BaseSessionLayout, Jsonify } from '@luckystack/core';
 //? to a SEPARATE module instance under Bun, so the config registered into a
 //? registry `@luckystack/server` never read and the boot died. The subpath solves
 //? both: it is client-safe AND it shares one registry with the barrel.
-import { registerProjectConfig } from '@luckystack/core/config';
+import { registerProjectConfig, registerSecretsResolvedListener } from '@luckystack/core/config';
 //? Single source of truth for frontend + backend ports (pure data; see
 //? config.ports.ts). Re-exported below so vite/app code + server share one source.
 import { ports } from './config.ports';
@@ -247,13 +247,20 @@ const config = {
      * is just a placeholder there. `typeof process` guard keeps the browser
      * bundle from blowing up on a `process is not defined` ReferenceError.
      *
-     * DEV-WARN: EMAIL_FROM (and DNS / EXTERNAL_ORIGINS below) are read at
-     * module-load time, BEFORE @luckystack/secret-manager can overwrite
-     * process.env. If these values come from the secret manager, move them
-     * into a factory function that is called AFTER `resolveSecretsIfConfigured`
-     * completes in server.ts.
+     * READ AT CALL TIME, deliberately — a getter, not a value. This module is
+     * imported by server.ts long before it awaits `resolveSecretsIfConfigured()`,
+     * so a plain `from: env('EMAIL_FROM')` froze whatever was in process.env at
+     * import: a secret-manager pointer never became the real address. The read
+     * sites (`registerEmailConfig` + `autoSelectEmailSender`) both run AFTER the
+     * resolve, so evaluating here rather than there is all it takes. Same fix as
+     * `readRedisHost()` in core (finding B9): call-time env, not a snapshot.
+     *
+     * Measured before/after (finding C-04): with EMAIL_FROM=EMAIL_FROM_BASE_V1 at
+     * import and the resolver later writing real-sender@company.com, the old
+     * literal handed `EMAIL_FROM_BASE_V1` to the sender; the getter hands the real
+     * address. Do not "simplify" this back to a value.
      */
-    from: env('EMAIL_FROM') ?? 'onboarding@resend.dev',
+    get from(): string { return env('EMAIL_FROM') ?? 'onboarding@resend.dev'; },
     /** Throw if sendEmail() runs with no sender registered. False = silent no-op. */
     required: false,
     logging: {
@@ -383,10 +390,31 @@ const splitOriginEnv = (key: string): string[] =>
 const collectAllowedOrigins = (): string[] =>
   [...splitOriginEnv('DNS'), ...splitOriginEnv('EXTERNAL_ORIGINS')];
 
+//? Re-register the env-derived slots once the secret manager has overwritten
+//? process.env. `registerProjectConfig` DEEP-MERGES a value, so — unlike
+//? `email.from` above — a getter cannot help here: the merge reads it during this
+//? very call and stores the result, freezing whatever env said at import.
+//?
+//? This is finding C-04, and it was live: measured 2026-07-16 with
+//? EXTERNAL_ORIGINS=ORIGINS_BASE_V1 at import, the registry still held
+//? `["ORIGINS_BASE_V1"]` after the resolver wrote `https://real.company.com` —
+//? so CORS would reject the very origin the operator configured, failing closed
+//? with no error anywhere. Same shape as core's redis client (ADR 0026); this
+//? subscribes to the same channel.
+//?
+//? No secret manager -> the resolver never fires -> the import-time read above
+//? was already final, and this is simply never called. Arrays REPLACE on merge
+//? (deepMerge only recurses into plain objects), so this overwrites rather than
+//? appends. In the browser the listener is registered and never fires.
+registerSecretsResolvedListener(() => {
+  registerProjectConfig({
+    http: { cors: { allowedOrigins: collectAllowedOrigins() } },
+  });
+});
+
 //? Side-effect registration: any import of this file — client bundle entry,
 //? server entry, tests — wires the project config into @luckystack/core so
-//? framework packages read the right values. Server re-registers explicitly
-//? in server.ts for order safety, which is a no-op overwrite.
+//? framework packages read the right values.
 registerProjectConfig({
   app: {
     //? The PUBLIC app origin — where the SPA routes live. Email links
