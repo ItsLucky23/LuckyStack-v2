@@ -40,7 +40,7 @@
     }
   },
   "bin": {
-    "luckystack-router": "./dist/cli.js"
+    "luckystack-router": "dist/cli.js"
   },
   "files": [
     "dist",

@@ -30,7 +30,7 @@
     "node": ">=20.0.0"
   },
   "bin": {
-    "luckystack": "./dist/index.js"
+    "luckystack": "dist/index.js"
   },
   "main": "./dist/index.js",
   "files": [

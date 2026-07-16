@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 //?     http.cors.allowedOrigins  -> ["ORIGINS_BASE_V1"]   (CORS fails CLOSED)
 //?   ...while process.env already held the resolved values.
 
-const ENV_KEYS = ['EMAIL_FROM', 'EXTERNAL_ORIGINS', 'DNS'] as const;
+const ENV_KEYS = ['EMAIL_FROM', 'EXTERNAL_ORIGINS', 'DNS', 'SERVER_PORT'] as const;
 const saved: Record<string, string | undefined> = {};
 
 //? Import core BEFORE stubbing anything. Importing it runs `env.ts`, whose dotenv
@@ -45,11 +45,12 @@ afterEach(() => {
 });
 
 describe('config.ts survives late secret resolution (C-04)', () => {
-  it('picks up EMAIL_FROM and EXTERNAL_ORIGINS resolved AFTER config.ts loaded', async () => {
+  it('refreshes every env-derived URL without resetting unrelated project policy', async () => {
     await loadCoreThenStub({
       EMAIL_FROM: 'EMAIL_FROM_BASE_V1',
       EXTERNAL_ORIGINS: 'ORIGINS_BASE_V1',
-      DNS: '',
+      DNS: 'DNS_BASE_V1',
+      SERVER_PORT: '80',
     });
 
     //? server.ts:17 — config.ts evaluates now, against the POINTER values above.
@@ -60,12 +61,15 @@ describe('config.ts survives late secret resolution (C-04)', () => {
     //? Sanity: the pointers really were what config.ts saw. Without this the test
     //? could pass against a config that never read the env at all.
     expect(projectConfig.email.from).toBe('EMAIL_FROM_BASE_V1');
-    expect(getProjectConfig().http.cors.allowedOrigins).toEqual(['ORIGINS_BASE_V1']);
+    expect(getProjectConfig().http.cors.allowedOrigins).toEqual(['DNS_BASE_V1', 'ORIGINS_BASE_V1']);
+    expect(getProjectConfig().rateLimiting.store).toBe('redis');
+    expect(getProjectConfig().auth.forgotPassword).toBe('framework');
 
     //? server.ts:52 — the resolver overwrites process.env and fires the channel.
     process.env.EMAIL_FROM = 'real-sender@company.com';
-    process.env.EXTERNAL_ORIGINS = 'https://real.company.com';
-    notifySecretsResolved(['EMAIL_FROM', 'EXTERNAL_ORIGINS']);
+    process.env.EXTERNAL_ORIGINS = 'https://external.company.com';
+    process.env.DNS = 'https://app.server.com,https://secondary.company.com';
+    notifySecretsResolved(['EMAIL_FROM', 'EXTERNAL_ORIGINS', 'DNS']);
 
     //? server.ts:55 + :73 read `projectConfig.email.from` — both AFTER the resolve.
     expect(
@@ -74,10 +78,26 @@ describe('config.ts survives late secret resolution (C-04)', () => {
     ).toBe('real-sender@company.com');
 
     //? The framework's `allowedOrigin()` reads this at request time.
+    const refreshed = getProjectConfig();
     expect(
-      getProjectConfig().http.cors.allowedOrigins,
+      refreshed.http.cors.allowedOrigins,
       'CORS would reject the origin the operator actually configured',
-    ).toEqual(['https://real.company.com']);
+    ).toEqual([
+      'https://app.server.com',
+      'https://secondary.company.com',
+      'https://external.company.com',
+    ]);
+    expect(refreshed.app.publicUrl).toBe('https://app.server.com');
+    expect(refreshed.oauthCallbackBase).toBe('https://app.server.com');
+    expect(refreshed.http.cors.allowLocalhost).toBe(false);
+    expect(refreshed.session.perUser).toBe('single');
+
+    //? Replacement registrations start from defaults. These assertions catch a
+    //? CORS-only partial silently wiping the rest of the consumer's policy.
+    expect(refreshed.rateLimiting.store).toBe('redis');
+    expect(refreshed.auth.forgotPassword).toBe('framework');
+    expect(refreshed.socketActivityBroadcaster).toBe(true);
+    expect(refreshed.loginRedirectUrl).toBe('/playground');
   });
 
   it('leaves the import-time values alone when no secret manager ever fires', async () => {

@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scaffolded security-tool floors are current.** Sentry scaffolds now install
+  `@sentry/node ^10.66.0` (OpenTelemetry 2.9 fixes GHSA-8988-4f7v-96qf), and
+  the template pins `tsx ^4.23.1` so fresh installs resolve fixed esbuild 0.28.1.
+- **The required sync client is no longer both statically and dynamically
+  imported.** Socket initialization now calls the existing static re-export,
+  eliminating an ineffective code-split point and its production-build warning.
+- **Server-side Vitest imports now keep the real `@luckystack/core` barrel.**
+  The scaffold's Vite config still globally aliased the bare barrel to
+  `@luckystack/core/client`, even though shared config has moved to the dedicated
+  browser-safe `/config` entry. Vitest inherited that stale alias and turned
+  server-only exports such as `tryCatchSync` into `undefined` at runtime. The
+  obsolete alias is removed; regression guards require browser code to use
+  explicit `/client` or `/config` entries instead.
+- **Drizzle + SQLite now performs real queries on Node and Bun.** Node keeps
+  `better-sqlite3`; Bun selects Drizzle's `bun:sqlite` adapter at module load via
+  dynamic imports, because Bun rejects the native `better-sqlite3` addon
+  (oven-sh/bun#4290). The SQLite scaffold adds `bun-types` for the adapter's
+  declarations, and the production bundler leaves `bun:sqlite` external so the
+  same bundle boots on Node and Bun while retaining one `functions.db.db` API.
+- **`--auth=none` scaffolds work after the complete-config factory change.** The
+  exact-token prune still targeted the old two-space auth block and lacked the
+  factory's `as const`, so every no-auth scaffold aborted and removed its partial
+  directory. A full-template prune regression now pins the current shape.
+- **New Drizzle scaffolds now require `drizzle-orm ^0.45.2`.** This is the first
+  release that fixes identifier-escaping SQL injection advisory
+  [GHSA-gpj5-g38j-94v9](https://github.com/advisories/GHSA-gpj5-g38j-94v9);
+  the previously scaffolded `^0.44.0` range was vulnerable.
+- **Late secret resolution now refreshes the complete project registration.**
+  The scaffold previously re-registered only `http.cors.allowedOrigins`; because
+  `registerProjectConfig` is last-write-wins over pristine defaults, that silently
+  reset auth, session, rate-limit, logging, and URL policy. The listener now
+  rebuilds the full registration and recomputes `PUBLIC_URL`, CORS, and OAuth
+  callback values together.
 - **`bun run server` now genuinely runs Bun instead of silently running Node.**
   On Windows there is no shebang: npm generates a `.cmd` bin shim
   (`node_modules/.bin/luckystack-dev.cmd`) that hardcodes a `node` call, so
@@ -32,11 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scaffolded project: Redis connected, Socket.io initialized, `/livez` → `200`,
   `/_health` → `{"status":"ok",…}` with `typeof Bun === 'object'` in-process.
 
-  > **Bun is not production-ready yet.** `packages/server/src/capabilities.ts`
-  > detaches `import.meta.resolve`, which throws under Bun — so every optional
-  > `@luckystack/*` package (login, sync, presence, cron, docs-ui, error-tracking,
-  > devkit) reports as ABSENT and silently degrades. See `docs/HOSTING.md`
-  > → "Known blockers (Bun)".
+  Bun backends are production-supported. Optional-package detection now keeps
+  `import.meta.resolve` bound and works on Node and Bun. The separate
+  `@luckystack/router` process must currently run on Node because Bun's
+  `node:http` upgrade sockets cannot proxy WebSockets (oven-sh/bun#28396); the
+  router probes that capability and fails loudly instead of black-holing sockets.
 
 ### Added
 
@@ -45,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pnpm/yarn are deliberately not offered and `--pm=pnpm` exits 2. Existing behaviour is
   unchanged when the flag is omitted: `--no-prompt` still scaffolds an npm project
   byte-for-byte.
-  - `--pm=bun` records `"packageManager": "bun@1.1.0"` in the rendered `package.json`,
+  - `--pm=bun` records `"packageManager": "bun@1.3.3"` in the rendered `package.json`,
     which is what `@luckystack/cli`'s `detectPackageManager` reads — so every later
     `luckystack add` / `remove` / `manage` install uses bun too (it works even under
     `--no-install`, before any `bun.lock` exists).
@@ -53,8 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     re-renders with it.
   - Requires bun already on your `PATH`; if it isn't found the scaffold skips the install
     and prints a `bun install` hint instead of failing.
-- The scaffold `package.json` now declares a `bun` engine range (`>=1.1.0`) alongside
-  `node`. Additive — npm projects are unaffected.
+- The scaffold `package.json` now declares a `bun` engine range (`>=1.3.3`) alongside
+  `node`. Bun 1.3.3 is the first release that honors the shipped `bunfig.toml`
+  `env = false`; npm projects are unaffected.
 
 ### Changed
 

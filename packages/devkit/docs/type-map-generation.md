@@ -95,6 +95,22 @@ Per-file extractor map (`typeMap/extractors.ts`):
 | `getSyncServerStreamPayloadTypeDetailsFromFile(filePath)` | `{ text, unresolvedSymbols }` | sync server stream emitter payload |
 | `getSyncClientStreamPayloadTypeDetailsFromFile(filePath)` | `{ text, unresolvedSymbols }` | sync client stream emitter payload |
 
+### Wire contract
+
+- Outputs and stream payloads describe serialized values: `Date -> string`,
+  `toJSON() -> return type`, omitted object values disappear/become optional, and
+  omitted array/tuple slots become `null`.
+- Binary values (`Buffer`, `ArrayBuffer`, typed arrays, Blob/File) abort generation.
+  Socket.io delivers them as binary attachments while HTTP emits JSON; one shared
+  route map cannot truthfully describe both. Return an explicit DTO/base64 string
+  or use a transport-specific custom route.
+- Inputs remain unprojected for fail-closed validation, but `Date` annotations are
+  rejected. Declare an ISO `string`, validate it, and convert explicitly in the
+  handler. Otherwise the source handler promises `Date` while JSON delivers a
+  string.
+- Extraction throws for API `stream` and sync `serverStream` / `clientStream` are
+  persisted as `extraction-error` diagnostics just like input/output failures.
+
 Two of these are also exported from the package root for use by the dev loader:
 
 ```typescript
@@ -389,4 +405,6 @@ Both are thin wrappers over the `*Details` variants — they discard `unresolved
 | `[TypeMapGenerator] Aborting generation because unresolved type symbols were found: X, Y, Z` | TypeChecker couldn't trace identifier(s) back to a source file. Usually a missing import or a naming collision. |
 | `[TypeMapGenerator] Generated type map has unresolved type identifiers: ...` | Post-emission validation: a generated symbol wasn't declared or imported. Bug in an extractor or in `generateServerFunctions`. |
 | `[TypeMapGenerator] Error writing type map or docs: ...` | Filesystem error during write. Caught and logged, generator returns normally so hot reload doesn't crash the server. |
+| `declares Date in a transport input` | The handler annotation promises an instance JSON cannot deliver. Change the input field to `string`, validate ISO format, then convert. |
+| `has transport-dependent or non-JSON output semantics` | A route returns binary/BigInt output that cannot share one HTTP + Socket.io type. Return a JSON DTO/base64 string or use a custom transport route. |
 | Stale generated types after a hot reload | `invalidateProgramCache()` not called (shouldn't happen — the generator always invalidates at the top). |

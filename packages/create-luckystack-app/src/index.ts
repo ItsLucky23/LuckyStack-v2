@@ -1305,7 +1305,7 @@ interface MonitoringProviderSpec extends EnvProviderSpec {
 const MONITORING_PROVIDERS: readonly MonitoringProviderSpec[] = [
   {
     id: 'sentry',
-    deps: { '@sentry/node': '^10.48.0' },
+    deps: { '@sentry/node': '^10.66.0' },
     lines: (active) => active
       ? ['# Sentry (active) — set the DSN + restart. Requires `npm i @sentry/node`.',
         '# Captures in all environments once the DSN is set; SENTRY_ENABLED=false opts out.',
@@ -1925,7 +1925,7 @@ const pruneLoginDocs = (targetDir: string): void => {
 };
 
 //? Remove all built-in auth UI/flows for the authMode:'none' scaffold.
-const pruneAuthNone = (targetDir: string): void => {
+export const pruneAuthNone = (targetDir: string): void => {
   //? The framework's (anonymous) session plumbing stays — `session_v1` returns a
   //? null user, `SessionProvider`/`useSession` resolve to "no session", and the
   //? sockets still run — but the credentials/OAuth login + register + password-reset
@@ -2062,30 +2062,30 @@ export default Dashboard;`,
   //? config.ts: disable credentials + framework forgot-password (no auth flows).
   editScaffoldFile(targetDir, 'config.ts', [
     [
-      `  auth: {
-    //? forgot-password is a @luckystack/login feature: it ONLY works with
-    //? @luckystack/login installed. 'framework' mode ALSO needs @luckystack/email
-    //? installed + a sender registered in server.ts to deliver the reset mail.
-    //? Set to 'disabled' or 'custom' to opt out.
-    forgotPassword: 'framework',
-    //? Email+password auth. Set \`false\` for an OAuth-only app — the login form
-    //? hides the email/password fields and the credentials route rejects.
-    credentials: true,
-    //? Passwordless email-code login (ADR 0024): uncomment to let users sign in
-    //? with a short numeric code sent to their email (needs @luckystack/email).
-    // emailCodeLogin: true,
-    //? Second factor (ADR 0024): 'optional' lets users enroll an authenticator
-    //? app (Google/Microsoft Authenticator, Authy, … — the open TOTP standard).
-    //? Enrolled users answer a 2FA challenge at login; recovery codes + an
-    //? email-code fallback are included. Tip: set TOTP_ENCRYPTION_KEY in
-    //? .env.local to encrypt the TOTP secrets at rest.
-    // twoFactor: 'optional',
-  },`,
-      `  auth: {
-    //? authMode 'none': no built-in auth UI/flows are scaffolded.
-    forgotPassword: 'disabled',
-    credentials: false,
-  },`,
+      `    auth: {
+      //? forgot-password is a @luckystack/login feature: it ONLY works with
+      //? @luckystack/login installed. 'framework' mode ALSO needs @luckystack/email
+      //? installed + a sender registered in server.ts to deliver the reset mail.
+      //? Set to 'disabled' or 'custom' to opt out.
+      forgotPassword: 'framework' as const,
+      //? Email+password auth. Set \`false\` for an OAuth-only app — the login form
+      //? hides the email/password fields and the credentials route rejects.
+      credentials: true,
+      //? Passwordless email-code login (ADR 0024): uncomment to let users sign in
+      //? with a short numeric code sent to their email (needs @luckystack/email).
+      // emailCodeLogin: true,
+      //? Second factor (ADR 0024): 'optional' lets users enroll an authenticator
+      //? app (Google/Microsoft Authenticator, Authy, … — the open TOTP standard).
+      //? Enrolled users answer a 2FA challenge at login; recovery codes + an
+      //? email-code fallback are included. Tip: set TOTP_ENCRYPTION_KEY in
+      //? .env.local to encrypt the TOTP secrets at rest.
+      // twoFactor: 'optional',
+    },`,
+      `    auth: {
+      //? authMode 'none': no built-in auth UI/flows are scaffolded.
+      forgotPassword: 'disabled' as const,
+      credentials: false,
+    },`,
     ],
   ]);
 };
@@ -2643,7 +2643,10 @@ export const DRIZZLE_DRIVER_DEPS: Record<
 > = {
   postgresql: { deps: { pg: '^8.16.0' }, devDeps: { '@types/pg': '^8.15.0' } },
   mysql: { deps: { mysql2: '^3.15.0' }, devDeps: {} },
-  sqlite: { deps: { 'better-sqlite3': '^12.4.0' }, devDeps: { '@types/better-sqlite3': '^7.6.13' } },
+  sqlite: {
+    deps: { 'better-sqlite3': '^12.4.0' },
+    devDeps: { '@types/better-sqlite3': '^7.6.13', 'bun-types': '^1.3.14' },
+  },
 };
 
 const drizzleSchemaFor = (dbProvider: DbProvider): string => {
@@ -2705,7 +2708,7 @@ export default defineConfig({
 `;
 };
 
-const drizzleDbShimFor = (dbProvider: DbProvider, databaseUrl: string): string => {
+export const drizzleDbShimFor = (dbProvider: DbProvider, databaseUrl: string): string => {
   const header = `//? Drizzle client shim. Whatever this file exports becomes \`functions.db.*\`
 //? inside every API + sync handler (function-injection — see
 //? docs/luckystack/ARCHITECTURE_FUNCTION_INJECTION.md). The schema lives in
@@ -2723,13 +2726,30 @@ export { schema };
 `;
   }
   if (dbProvider === 'sqlite') {
-    return `${header}import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+    return `${header}/// <reference types="bun-types" />
 import * as schema from '../server/db/schema';
 
 const file = (process.env.DATABASE_URL ?? '${databaseUrl}').replace(/^file:/, '');
 
-export const db = drizzle(new Database(file), { schema });
+//? Bun cannot load better-sqlite3 (oven-sh/bun#4290). Pick each runtime's
+//? official synchronous SQLite driver without statically loading the other one.
+const createDb = async () => {
+  if ('Bun' in globalThis) {
+    const [{ Database }, { drizzle }] = await Promise.all([
+      import('bun:sqlite'),
+      import('drizzle-orm/bun-sqlite'),
+    ]);
+    return drizzle(new Database(file), { schema });
+  }
+
+  const [{ default: Database }, { drizzle }] = await Promise.all([
+    import('better-sqlite3'),
+    import('drizzle-orm/better-sqlite3'),
+  ]);
+  return drizzle(new Database(file), { schema });
+};
+
+export const db = await createDb();
 export { schema };
 `;
   }
@@ -2966,7 +2986,7 @@ const applyOrmChoice = (targetDir: string, choices: ScaffoldChoices, databaseUrl
     const sqlDb = choices.dbProvider === 'mongodb' ? 'postgresql' : choices.dbProvider;
     const driver = DRIZZLE_DRIVER_DEPS[sqlDb];
     mutateScaffoldPackageJson(targetDir, (pkg) => {
-      pkg.dependencies = { ...pkg.dependencies, 'drizzle-orm': '^0.44.0', ...driver.deps };
+      pkg.dependencies = { ...pkg.dependencies, 'drizzle-orm': '^0.45.2', ...driver.deps };
       pkg.devDependencies = { ...pkg.devDependencies, 'drizzle-kit': '^0.31.0', ...driver.devDeps };
       pkg.scripts = {
         ...pkg.scripts,

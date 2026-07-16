@@ -13,7 +13,7 @@ import {
 } from "../../shared/socketEvents";
 import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
 import type { useSocketStatus } from "../_providers/socketStatusProvider";
-import { initSyncRequest } from "./syncRequest";
+import { attachSyncReceiver as attachPackageSyncReceiver, initSyncRequest } from "./syncRequest";
 import type { RefObject } from "react";
 
 const shouldLogDev = logging.devLogs;
@@ -164,25 +164,12 @@ export function attachSessionLifecycle(socketConnection: Socket) {
   });
 }
 
-/**
- * Dynamically imports `@luckystack/sync/client` and attaches the sync
- * receive listener. A missing package is a non-fatal no-op.
- */
-export async function attachSyncReceiver(socketConnection: Socket) {
-  //? Sync receive bridge. The incoming `sync` listener lives in
-  //? `@luckystack/sync/client` (`attachSyncReceiver`) so the consumer doesn't
-  //? carry a copy of the dispatch logic. Dynamic-imported + tryCatch so a base
-  //? install WITHOUT `@luckystack/sync` simply runs without sync receive (no
-  //? crash). Decoupled from the presence/activity flag — sync attaches whenever
-  //? the package is present, independent of `socketActivityBroadcaster`.
-  const [syncImportError, syncClient] = await tryCatch(() => import("@luckystack/sync/client"));
-  if (syncImportError || !syncClient) {
-    if (shouldLogDev) {
-      console.log("[sync] @luckystack/sync/client not installed — sync receive disabled.");
-    }
-    return;
-  }
-  syncClient.attachSyncReceiver(socketConnection);
+/** Attach the canonical sync receive listener from the required sync package. */
+export function attachSyncReceiver(socketConnection: Socket): void {
+  //? `syncRequest.ts` already imports the same package statically. Keeping a
+  //? second dynamic import cannot make it optional; it only creates a false
+  //? split point and a Rolldown warning.
+  attachPackageSyncReceiver(socketConnection);
 }
 
 /** Reconnects + flushes queues when the browser comes back online. */

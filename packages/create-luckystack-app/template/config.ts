@@ -23,7 +23,8 @@ const env = (key: string): string | undefined =>
 //? Honors LUCKYSTACK_ENV first (the framework canonical, mirroring core's
 //? `resolveEnvKey()`), then NODE_ENV — via the browser-safe `env()` helper so
 //? this dual-bundle file never references `process` directly in the client.
-export const dev = (env('LUCKYSTACK_ENV') ?? env('NODE_ENV')) !== 'production';
+const resolveDev = (): boolean => (env('LUCKYSTACK_ENV') ?? env('NODE_ENV')) !== 'production';
+export const dev = resolveDev();
 
 //? Backend HTTP origin as the BROWSER reaches it — where the framework's own
 //? routes live (notably the OAuth `/auth/callback/<provider>` handler). We use
@@ -33,14 +34,18 @@ export const dev = (env('LUCKYSTACK_ENV') ?? env('NODE_ENV')) !== 'production';
 //? `config.ports.ts` (`backend`) — so in dev this is http://localhost:80 — but a
 //? positional argv port (`npm run server -- <preset> <port>`, which parseArgv
 //? writes to process.env.SERVER_PORT) overrides it, mirroring createServer.
-const backendOrigin = `http://localhost:${env('SERVER_PORT') ?? ports.backend}`;
+const resolveBackendOrigin = (): string =>
+  `http://localhost:${env('SERVER_PORT') ?? ports.backend}`;
+const backendOrigin = resolveBackendOrigin();
 
 //? Public origin — where users actually browse the app. Drives post-login
 //? redirects, transactional email links, and the CORS allow-list. In dev that's
 //? the Vite dev server on `config.ports.ts` `frontend`; in production set
 //? PUBLIC_URL to your deployed domain (frontend + backend share one origin
 //? there, so PUBLIC_URL also covers the OAuth callback host).
-const publicUrl = dev ? `http://localhost:${ports.frontend}` : (env('PUBLIC_URL') ?? backendOrigin);
+const resolvePublicUrl = (isDev: boolean, currentBackendOrigin: string): string =>
+  isDev ? `http://localhost:${ports.frontend}` : (env('PUBLIC_URL') ?? currentBackendOrigin);
+const publicUrl = resolvePublicUrl(dev, backendOrigin);
 
 //? In the browser the app talks to its API surface same-origin — the Vite dev
 //? proxy forwards /api, /sync, /auth, /socket.io, … to the backend in dev, and in
@@ -55,7 +60,7 @@ export const backendUrl = browserOrigin ?? publicUrl;
 //? In prod it's the public domain (same origin as the backend).
 export const oauthCallbackBase = dev ? backendOrigin : publicUrl;
 
-const config = {
+const createConfig = (isDev: boolean) => ({
   pageTitle: '{{PROJECT_TITLE}}',
   loginPageUrl: '/login',
   loginRedirectUrl: '/dashboard',
@@ -73,11 +78,11 @@ const config = {
   locationProviderEnabled: false,
   //? Dev-only console logging toggles.
   logging: {
-    devLogs: dev,
-    devNotifications: dev,
-    socketStatus: dev,
+    devLogs: isDev,
+    devNotifications: isDev,
+    socketStatus: isDev,
     socketStartup: true,
-    stream: dev,
+    stream: isDev,
   },
   //? Rate limiting for API requests (Redis-backed so counters are shared across
   //? instances). Per-route override: `export const rateLimit = 60;` (or `false`)
@@ -96,86 +101,92 @@ const config = {
   //   url: env('LUCKYSTACK_SECRET_MANAGER_URL') ?? '',
   //   token: { fromFile: '.secret-manager-token' },
   // },
-};
+});
+
+const config = createConfig(dev);
 
 //? The backend's own origin is always allowed. Add extra hosts (a separate
 //? frontend domain, OAuth provider origins, …) to EXTERNAL_ORIGINS in `.env`,
 //? comma-separated — e.g. EXTERNAL_ORIGINS=https://app.example.com,https://accounts.google.com
 //?
 //? A FUNCTION, not an inline array, so it can be re-run — see the listener below.
-const collectAllowedOrigins = (): string[] =>
-  [publicUrl, backendOrigin, ...(env('EXTERNAL_ORIGINS') || '').split(',').map((s) => s.trim()).filter(Boolean)];
+const collectAllowedOrigins = (currentPublicUrl: string, currentBackendOrigin: string): string[] =>
+  [currentPublicUrl, currentBackendOrigin, ...(env('EXTERNAL_ORIGINS') || '').split(',').map((s) => s.trim()).filter(Boolean)];
 
-//? Re-register once the secret manager has overwritten process.env.
-//?
-//? This file is imported by server.ts BEFORE it awaits `resolveSecretsIfConfigured()`,
-//? so anything read here freezes at import — and `registerProjectConfig` deep-merges
-//? the value, so a getter cannot help either (the merge reads it during the call).
-//? If EXTERNAL_ORIGINS comes from a secret-manager pointer, CORS would keep the
-//? POINTER and reject the origin you actually configured — failing closed, with no
-//? error anywhere. Measured live before this fix (framework finding C-04).
-//?
-//? Not using the secret manager? The resolver never fires and this never runs;
-//? the read below was already final. Same channel core's own redis client uses.
-registerSecretsResolvedListener(() => {
-  registerProjectConfig({ http: { cors: { allowedOrigins: collectAllowedOrigins() } } });
-});
+//? @adr 0030 — Build a COMPLETE replacement registration from current env. The project
+//? registry intentionally rebuilds every call over pristine defaults; applying
+//? only a CORS partial here would reset unrelated auth/session/rate-limit policy.
+//? Recomputing the URL family together also prevents publicUrl/CORS/OAuth drift.
+const createProjectConfigRegistration = () => {
+  const currentDev = resolveDev();
+  const currentBackendOrigin = resolveBackendOrigin();
+  const currentPublicUrl = resolvePublicUrl(currentDev, currentBackendOrigin);
+  const currentConfig = createConfig(currentDev);
 
-registerProjectConfig({
-  app: { publicUrl },
-  logging: config.logging,
-  rateLimiting: config.rateLimiting,
-  session: {
-    basedToken: config.sessionBasedToken,
-    expiryDays: config.sessionExpiryDays,
-    perUser: config.sessionPerUser,
-  },
-  http: {
-    cors: {
-      allowedOrigins: collectAllowedOrigins(),
-      //? In dev (NODE_ENV !== 'production') accept ANY localhost origin, so the
-      //? Vite dev server on http://localhost:5173 (and :5174, :5175, … when the
-      //? port is taken) can talk to the backend without listing each port. Stays
-      //? false in production so deployments fail closed.
-      allowLocalhost: dev,
-      //? NOTE: the initial Socket.io polling handshake is an origin-less GET in
-      //? BOTH dev (Vite proxy → backend) and prod-with-router (single origin),
-      //? because browsers omit the `Origin` header on same-origin requests. The
-      //? framework's CORS layer admits origin-less handshakes unconditionally
-      //? (see @luckystack/server loadSocket.ts) — this list only gates requests
-      //? that DO carry an `Origin` header (cross-origin browsers, OAuth
-      //? callbacks). So you do NOT need to list every same-origin variant here.
+  return {
+    app: { publicUrl: currentPublicUrl },
+    logging: currentConfig.logging,
+    rateLimiting: currentConfig.rateLimiting,
+    session: {
+      basedToken: currentConfig.sessionBasedToken,
+      expiryDays: currentConfig.sessionExpiryDays,
+      perUser: currentConfig.sessionPerUser,
     },
-  },
-  defaultLanguage: config.defaultLanguage,
-  loginRedirectUrl: config.loginRedirectUrl,
-  //? Backend origin for OAuth callback redirect URIs. Read by
-  //? @luckystack/login/register's env-driven provider scan so adding an OAuth
-  //? provider is just env vars + restart (no code edit).
-  oauthCallbackBase,
-  socketActivityBroadcaster: config.socketActivityBroadcaster,
-  socketStatusIndicator: config.socketStatusIndicator,
-  locationProviderEnabled: config.locationProviderEnabled,
-  auth: {
-    //? forgot-password is a @luckystack/login feature: it ONLY works with
-    //? @luckystack/login installed. 'framework' mode ALSO needs @luckystack/email
-    //? installed + a sender registered in server.ts to deliver the reset mail.
-    //? Set to 'disabled' or 'custom' to opt out.
-    forgotPassword: 'framework',
-    //? Email+password auth. Set `false` for an OAuth-only app — the login form
-    //? hides the email/password fields and the credentials route rejects.
-    credentials: true,
-    //? Passwordless email-code login (ADR 0024): uncomment to let users sign in
-    //? with a short numeric code sent to their email (needs @luckystack/email).
-    // emailCodeLogin: true,
-    //? Second factor (ADR 0024): 'optional' lets users enroll an authenticator
-    //? app (Google/Microsoft Authenticator, Authy, … — the open TOTP standard).
-    //? Enrolled users answer a 2FA challenge at login; recovery codes + an
-    //? email-code fallback are included. Tip: set TOTP_ENCRYPTION_KEY in
-    //? .env.local to encrypt the TOTP secrets at rest.
-    // twoFactor: 'optional',
-  },
+    http: {
+      cors: {
+        allowedOrigins: collectAllowedOrigins(currentPublicUrl, currentBackendOrigin),
+        //? In dev (NODE_ENV !== 'production') accept ANY localhost origin, so the
+        //? Vite dev server on http://localhost:5173 (and :5174, :5175, … when the
+        //? port is taken) can talk to the backend without listing each port. Stays
+        //? false in production so deployments fail closed.
+        allowLocalhost: currentDev,
+        //? NOTE: the initial Socket.io polling handshake is an origin-less GET in
+        //? BOTH dev (Vite proxy → backend) and prod-with-router (single origin),
+        //? because browsers omit the `Origin` header on same-origin requests. The
+        //? framework's CORS layer admits origin-less handshakes unconditionally
+        //? (see @luckystack/server loadSocket.ts) — this list only gates requests
+        //? that DO carry an `Origin` header (cross-origin browsers, OAuth
+        //? callbacks). So you do NOT need to list every same-origin variant here.
+      },
+    },
+    defaultLanguage: currentConfig.defaultLanguage,
+    loginRedirectUrl: currentConfig.loginRedirectUrl,
+    //? Backend origin for OAuth callback redirect URIs. Read by
+    //? @luckystack/login/register's env-driven provider scan so adding an OAuth
+    //? provider is just env vars + restart (no code edit).
+    oauthCallbackBase: currentDev ? currentBackendOrigin : currentPublicUrl,
+    socketActivityBroadcaster: currentConfig.socketActivityBroadcaster,
+    socketStatusIndicator: currentConfig.socketStatusIndicator,
+    locationProviderEnabled: currentConfig.locationProviderEnabled,
+    auth: {
+      //? forgot-password is a @luckystack/login feature: it ONLY works with
+      //? @luckystack/login installed. 'framework' mode ALSO needs @luckystack/email
+      //? installed + a sender registered in server.ts to deliver the reset mail.
+      //? Set to 'disabled' or 'custom' to opt out.
+      forgotPassword: 'framework' as const,
+      //? Email+password auth. Set `false` for an OAuth-only app — the login form
+      //? hides the email/password fields and the credentials route rejects.
+      credentials: true,
+      //? Passwordless email-code login (ADR 0024): uncomment to let users sign in
+      //? with a short numeric code sent to their email (needs @luckystack/email).
+      // emailCodeLogin: true,
+      //? Second factor (ADR 0024): 'optional' lets users enroll an authenticator
+      //? app (Google/Microsoft Authenticator, Authy, … — the open TOTP standard).
+      //? Enrolled users answer a 2FA challenge at login; recovery codes + an
+      //? email-code fallback are included. Tip: set TOTP_ENCRYPTION_KEY in
+      //? .env.local to encrypt the TOTP secrets at rest.
+      // twoFactor: 'optional',
+    },
+  };
+};
+
+//? This file loads before secret resolution. Re-register the complete config
+//? after process.env changes; without a secret manager the listener never fires.
+registerSecretsResolvedListener(() => {
+  registerProjectConfig(createProjectConfigRegistration());
 });
+
+registerProjectConfig(createProjectConfigRegistration());
 
 export default config;
 export const {

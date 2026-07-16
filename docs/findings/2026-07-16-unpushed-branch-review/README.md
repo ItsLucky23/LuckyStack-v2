@@ -7,13 +7,15 @@ Last updated: 2026-07-16
 
 | # | Finding | Severity | Status | Since | Resolved | Notes / link |
 |---|---------|----------|--------|-------|----------|--------------|
-| BR-01 | The root production server bundle cannot resolve the new `@luckystack/core/config` subpath. | HIGH | open | 2026-07-16 | — | `npm run build` fails in `scripts/bundleServer.mjs`; its broad `@luckystack/core` alias rewrites the subpath to `packages/core/src/index.ts/config` |
-| BR-02 | The secret-resolved CORS refresh resets almost the entire registered project config to defaults. | HIGH | open | 2026-07-16 | — | `config.ts` + scaffold template call `registerProjectConfig({ http: ... })`, while `projectConfig.ts` intentionally rebuilds each registration from pristine defaults |
-| BR-03 | The C-04 refresh is incomplete for env-derived URL slots. | MED | open | 2026-07-16 | — | `DNS` / `PUBLIC_URL` can refresh the CORS array, but `app.publicUrl`, `backendUrl`, `oauthCallbackBase`, and environment selection remain frozen from module load |
-| BR-04 | A `Date` API input now passes validation as a string but reaches a handler still typed as `Date`. | MED | open | 2026-07-16 | — | `zodEmitter.ts` correctly accepts ISO JSON, but input extraction deliberately preserves `Date`; `data.from.getTime()` therefore compiles and can throw |
-| BR-05 | The “full wire projection” still emits false output types for several JSON/transport cases. | MED | open | 2026-07-16 | — | Examples: required `undefined` properties are omitted by JSON; function values with attached props are omitted but not dropped by `isFunctionOnlyType`; `Buffer` differs between HTTP JSON and Socket.io binary transport |
-| BR-06 | Extraction-error diagnostics omit all stream fields. | LOW | open | 2026-07-16 | — | API/sync stream extractors catch to `never` without `recordExtractionOutcome`, and `collectFallbacks` never checks `stream` / `serverStream` / `clientStream` |
-| BR-07 | Bun support metadata and release notes disagree with the implemented 1.3.3 floor/current status. | LOW | open | 2026-07-16 | — | Root `package.json` still says Bun `>=1.1.0`; create-app CHANGELOG says `bun@1.1.0` / `>=1.1.0` and still calls the now-fixed capability detector a blocker |
+| BR-01 | The root production server bundle cannot resolve the new `@luckystack/core/config` subpath. | HIGH | fixed | 2026-07-16 | 2026-07-16 | Explicit subpath alias + regression guard; full production bundle now passes |
+| BR-02 | The secret-resolved CORS refresh resets almost the entire registered project config to defaults. | HIGH | fixed | 2026-07-16 | 2026-07-16 | Repo + scaffold now rebuild and register the complete project config (ADR 0030) |
+| BR-03 | The C-04 refresh is incomplete for env-derived URL slots. | MED | fixed | 2026-07-16 | 2026-07-16 | URL/environment/CORS/OAuth values are recomputed coherently from current env |
+| BR-04 | A `Date` API input now passes validation as a string but reaches a handler still typed as `Date`. | MED | fixed | 2026-07-16 | 2026-07-16 | API/sync Date input annotations now fail generation with an actionable ISO-string migration (ADR 0029) |
+| BR-05 | The “full wire projection” still emits false output types for several JSON/transport cases. | MED | fixed | 2026-07-16 | 2026-07-16 | Omission/null semantics modeled; callable objects dropped; binary/BigInt contracts fail loudly (ADR 0029) |
+| BR-06 | Extraction-error diagnostics omit all stream fields. | LOW | fixed | 2026-07-16 | 2026-07-16 | API/sync stream outcomes recorded and emitted; Zod diagnostics limited to API inputs |
+| BR-07 | Bun support metadata and release notes disagree with the implemented 1.3.3 floor/current status. | LOW | fixed | 2026-07-16 | 2026-07-16 | Root engine, create-app CHANGELOG, and HOSTING now agree on Bun 1.3.3/current runtime scope |
+
+All seven review findings were resolved on `fix/unpushed-review-findings` on 2026-07-16. The sections below retain the original diagnosis; the ledger above is the live status.
 
 ## Detail
 
@@ -137,4 +139,15 @@ The implementation correctly establishes Bun 1.3.3 as the minimum version that h
 | `LUCKYSTACK_ENV_FILES=.env LUCKYSTACK_REQUIRE_REDIS=1 npm run test:integration` | **13/13 passed** |
 | `npm run ai:changelog-check` | passed structurally; BR-07 is semantic drift |
 | `git diff --check origin/main` | passed |
-| `npm run build` | **FAILED** at final server bundle (BR-01); package builds 17/17, typegen, `tsc`, and Vite completed first |
+| Initial `npm run build` | **FAILED** at final server bundle (BR-01); this is the reproduction that opened the finding |
+
+## Resolution verification
+
+| Gate | Result |
+|---|---|
+| Focused regressions | 30/30 passed before full sweep |
+| `npm run test:unit` | 161 files, **1800/1800 passed** |
+| lint client/server/packages (fresh, no cache) | passed |
+| `npm run ai:lint` | 0 invariant violations |
+| `npm run build` | **passed** — 17/17 packages, artifacts, `tsc`, Vite, and final server bundle |
+| `LUCKYSTACK_ENV_FILES=.env LUCKYSTACK_REQUIRE_REDIS=1 npm run test:integration` | **13/13 passed** |

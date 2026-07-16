@@ -261,7 +261,13 @@ const collectFallbacks = (
 ): DiagnosticsEntry[] => {
 	const entries: DiagnosticsEntry[] = [];
 
-	const flagField = (route: string, kind: 'api' | 'sync', field: string, value: string): void => {
+	const flagField = (
+		route: string,
+		kind: 'api' | 'sync',
+		field: string,
+		value: string,
+		checkZod = false,
+	): void => {
 		const extractionError = findExtractionFailure(route, kind, field);
 		if (extractionError !== undefined) {
 			entries.push({ route, kind, field, fallback: value, reason: 'extraction-error', detail: extractionError });
@@ -271,7 +277,10 @@ const collectFallbacks = (
 			entries.push({ route, kind, field, fallback: value, reason: 'default-fallback' });
 			return;
 		}
-		const zodSrc = typeTextToZodSource(value);
+		//? The generated Zod artifact contains API INPUT schemas only. Running
+		//? this check on outputs/sync/streams produces false diagnostics for a
+		//? converter that is never used on those fields.
+		const zodSrc = checkZod ? typeTextToZodSource(value) : null;
 		if (zodSrc?.includes('z.any()')) {
 			entries.push({ route, kind, field, fallback: value.slice(0, 80), reason: 'zod-any-fallback' });
 		}
@@ -281,8 +290,9 @@ const collectFallbacks = (
 		for (const [apiKey, entry] of apis) {
 			const { name, version } = splitVersionedKey(apiKey);
 			const route = `${pagePath}/${name}@${version}`;
-			flagField(route, 'api', 'input', entry.input);
+			flagField(route, 'api', 'input', entry.input, true);
 			flagField(route, 'api', 'output', entry.output);
+			flagField(route, 'api', 'stream', entry.stream);
 		}
 	}
 
@@ -293,6 +303,8 @@ const collectFallbacks = (
 			flagField(route, 'sync', 'clientInput', entry.clientInput);
 			flagField(route, 'sync', 'serverOutput', entry.serverOutput);
 			flagField(route, 'sync', 'clientOutput', entry.clientOutput);
+			flagField(route, 'sync', 'serverStream', entry.serverStream);
+			flagField(route, 'sync', 'clientStream', entry.clientStream);
 		}
 	}
 

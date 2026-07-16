@@ -39,8 +39,8 @@
     }
   },
   "bin": {
-    "luckystack-validate-deploy": "./dist/cli/validateDeploy.js",
-    "luckystack-dev": "./dist/supervisor.js"
+    "luckystack-validate-deploy": "dist/cli/validateDeploy.js",
+    "luckystack-dev": "dist/supervisor.js"
   },
   "files": [
     "dist",
@@ -73,6 +73,7 @@
   "devDependencies": {
     "@mikro-orm/core": "^6.6.14",
     "@mikro-orm/mongodb": "^6.6.14",
+    "drizzle-orm": "^0.45.2",
     "reflect-metadata": "^0.2.2"
   }
 }

@@ -95,7 +95,11 @@ Object literal types → `.strict()` (unknown keys rejected, fail-closed). This 
 
 **D3 — apiTypeDiagnostics.generated.json**
 
-Every `generateTypeMapFile()` run emits `apiTypeDiagnostics.generated.json` alongside `apiDocs.generated.json`. It lists every route whose type extraction degraded to a fallback (source file miss or `z.any()` in the Zod schema). Shape: `{ generatedAt, totalRoutes, fallbackCount, fallbacks: DiagnosticsEntry[] }`. CI can fail on non-zero `fallbackCount` to enforce type-fidelity. The file path is `<generatedApiDocs dir>/apiTypeDiagnostics.generated.json`.
+Every `generateTypeMapFile()` run emits `apiTypeDiagnostics.generated.json` alongside `apiDocs.generated.json`. It lists every route whose type extraction degraded to a fallback (source file miss, thrown API/sync input/output/**stream** extraction, or `z.any()` in the Zod schema). Shape: `{ generatedAt, totalRoutes, fallbackCount, fallbacks: DiagnosticsEntry[] }`. CI can fail on non-zero `fallbackCount` to enforce type-fidelity. The file path is `<generatedApiDocs dir>/apiTypeDiagnostics.generated.json`.
+
+**D4 — transport-safe route contracts**
+
+Output extraction projects `JSON.stringify` semantics recursively: `Date` becomes `string`; `toJSON()` becomes its return type; omitted object values (`undefined`, symbol, every callable value) disappear or make a union-valued property optional; those values become `null` in arrays/tuples. Binary values are rejected because HTTP JSON and Socket.io binary delivery cannot share one truthful output type. Input extraction does not project declarations, but rejects `Date`: JSON can only deliver an ISO string, so route authors must declare `string`, validate it, and convert explicitly before using Date methods.
 
 ## Config keys (env vars + registerProjectConfig slots)
 

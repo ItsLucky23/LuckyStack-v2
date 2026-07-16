@@ -2,12 +2,10 @@ import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import { typeTextToZodSource } from './zodEmitter';
 
-describe('zod emitter — a Date input is an ISO string on the wire', () => {
-  //? THE BUG THIS PINS: `Date` mapped to `z.date()`, which requires an actual
-  //? Date INSTANCE. But an input arrives as JSON, and JSON has no Date — a client
-  //? sending a Date puts an ISO string on the wire. So a route declaring
-  //? `data: { from: Date }` had a generated schema that rejected every valid
-  //? payload. Latent only because no route in this repo takes a Date input.
+describe('zod emitter — a Date value is an ISO string on the wire', () => {
+  //? The full route generator rejects Date input annotations because the handler
+  //? cannot truthfully receive an instance. This lower-level converter still
+  //? models the wire value correctly for direct callers and diagnostics.
 
   it('emits an ISO-string check, never z.date()', () => {
     const source = typeTextToZodSource('{ from: Date }');

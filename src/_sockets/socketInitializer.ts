@@ -111,8 +111,8 @@ export function useSocket(session: ClientSessionLayout | null) {
     // Wire session lifecycle (sessionReplaced toast, logout redirect)
     attachSessionLifecycle(socketConnection);
 
-    // Wire sync receive (dynamic import — no-op if package absent)
-    void attachSyncReceiver(socketConnection);
+    // Wire sync receive through the required sync client package.
+    attachSyncReceiver(socketConnection);
 
     // Reconnect + flush on browser coming back online
     const cleanupOnline = attachOnlineHandler(socketConnection, canFlushQueue);

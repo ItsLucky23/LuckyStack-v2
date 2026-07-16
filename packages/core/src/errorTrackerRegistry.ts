@@ -8,16 +8,14 @@
 //? every event fans out to all of them. Per-adapter errors are swallowed
 //? so one buggy tracker can't break the chain.
 
-//? SERVER-ONLY import. This static import of `node:async_hooks` is intentional
-//? and MUST remain externalized in any client-bundle build config (Vite/esbuild
-//? `external: ['node:async_hooks']`). Although AsyncLocalStorage is never
-//? constructed at module-eval time (the lazy `getIdentityStore()` guard handles
-//? that), the import itself will cause a runtime error in the browser if the
-//? bundler does not externalize it. Do NOT statically import this file from
-//? browser-bundle entry points — use `@luckystack/core/client` instead.
-import * as nodeAsyncHooks from 'node:async_hooks';
+//? The AsyncLocalStorage identity scope deliberately lives in the separate
+//? server-only errorTrackerIdentity.ts module. This registry is also reached by
+//? the browser-safe legacy capture seam, so it must remain free of node:* imports.
+import type { ErrorTrackerUser } from './errorTrackerIdentity';
 import { getRedactedLogKeys, REDACTED_PLACEHOLDER, sanitizeForLog } from './redactedLogKeys';
 import { getLogger } from './loggerRegistry';
+
+export type { ErrorTrackerUser } from './errorTrackerIdentity';
 
 export type ErrorTrackerContext = Record<string, unknown>;
 
@@ -99,13 +97,6 @@ export const sanitizeErrorStrings = (
   };
 };
 
-export interface ErrorTrackerUser {
-  id?: string;
-  email?: string;
-  username?: string;
-  [key: string]: unknown;
-}
-
 export interface ErrorTrackerEvent {
   /** When false, the adapter must not forward this event (beforeSend opt-out). */
   forwarded: boolean;
@@ -152,78 +143,6 @@ export interface ErrorTracker {
    */
   flush?: () => Promise<void>;
 }
-
-//? ET-02 fix seam: per-event identity carried in AsyncLocalStorage instead of a
-//? process-global mutable `currentDistinctId`. The framework's API + sync request
-//? handlers open an identity SCOPE at request entry (`runWithErrorTrackerIdentityScope`)
-//? — BEFORE the first await that could interleave with another concurrent request —
-//? then write the resolved session into it via `setCurrentErrorTrackerIdentity(user)`
-//? once `readSession` resolves. Adapters read `getCurrentErrorTrackerIdentity()` at
-//? capture time, so two concurrent requests with different users can't cross-attribute
-//? events. Lives in core so the registry (and any adapter) can read it without a
-//? back-dependency on error-tracking.
-//?
-//? The store holds a MUTABLE box (not the user directly) so the identity can be set
-//? AFTER the scope is entered: AsyncLocalStorage propagates the same box reference to
-//? every async child of the scope, and each request gets its own box — so mutating
-//? `box.user` post-`await` is visible to that request's captures only, never another's.
-interface IdentityBox {
-  user: ErrorTrackerUser | null;
-}
-
-//? BROWSER-SAFE LAZY ALS: this registry is reachable from the client bundle, but
-//? `node:async_hooks` only exists on the server — vite externalizes it and THROWS
-//? on any property access in the browser. So we never construct/touch
-//? AsyncLocalStorage at module-eval; we resolve it lazily behind a server guard
-//? (`typeof window === 'undefined'`). In the browser the store is null and every
-//? identity helper degrades to a no-op / null (the client never needs per-request
-//? identity). On the server, behaviour is identical to a top-level store (ET-02).
-type IdentityStore = nodeAsyncHooks.AsyncLocalStorage<IdentityBox>;
-let resolvedIdentityStore: IdentityStore | null | undefined;
-const getIdentityStore = (): IdentityStore | null => {
-  if (resolvedIdentityStore !== undefined) return resolvedIdentityStore;
-  //? Server detection via property presence — `'window' in globalThis` is false
-  //? in Node and avoids the DOM-lib typing that makes `globalThis.window === undefined`
-  //? a "no-overlap" lint error (and avoids a ReferenceError on a bare `window`).
-  resolvedIdentityStore =
-    'window' in globalThis ? null : new nodeAsyncHooks.AsyncLocalStorage<IdentityBox>();
-  return resolvedIdentityStore;
-};
-
-/**
- * Open a per-request error-tracker identity scope and run `fn` inside it. Call at
- * request ENTRY (before any await that could interleave with another request); the
- * identity starts null and is filled in later via {@link setCurrentErrorTrackerIdentity}
- * once the session is known. Each invocation gets an isolated box (ET-02).
- */
-export const runWithErrorTrackerIdentityScope = <T>(fn: () => T): T => {
-  const store = getIdentityStore();
-  return store ? store.run({ user: null }, fn) : fn();
-};
-
-/**
- * Run `fn` with `user` bound as the ambient error-tracker identity (ET-02). Convenience
- * wrapper that opens a scope and immediately sets the identity — used where the user is
- * already known up front (and by the adapter regression tests).
- */
-export const runWithErrorTrackerIdentity = <T>(user: ErrorTrackerUser | null, fn: () => T): T => {
-  const store = getIdentityStore();
-  return store ? store.run({ user }, fn) : fn();
-};
-
-/**
- * Write `user` into the active identity box opened by {@link runWithErrorTrackerIdentityScope}
- * / {@link runWithErrorTrackerIdentity}. No-op when called outside any scope (a background /
- * non-request capture has no per-request box; adapters fall back to their own global).
- */
-export const setCurrentErrorTrackerIdentity = (user: ErrorTrackerUser | null): void => {
-  const box = getIdentityStore()?.getStore();
-  if (box) box.user = user;
-};
-
-/** Read the ambient per-event identity for the active request scope, if any. */
-export const getCurrentErrorTrackerIdentity = (): ErrorTrackerUser | null =>
-  getIdentityStore()?.getStore()?.user ?? null;
 
 //? Pre-capture filter (error-tracking ET batch). A registered filter runs on
 //? EVERY event just before fan-out; returning `false` DROPS the event entirely

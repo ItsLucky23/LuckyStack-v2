@@ -66,6 +66,24 @@ const SKIP_EXPANSION = new Set([
   'Error', 'Date', 'RegExp', 'Buffer', 'ArrayBuffer', 'ReadonlyArray',
 ]);
 
+//? Socket.io sends these as binary attachments, while the HTTP transport runs
+//? JSON.stringify (Buffer.toJSON(), `{}` for several browser binary objects).
+//? A single shared API/sync output map cannot truthfully describe both. Refuse
+//? the ambiguous contract and require an explicit wire DTO/base64 string.
+const TRANSPORT_DEPENDENT_BINARY_TYPES = new Set([
+  'Buffer', 'ArrayBuffer', 'SharedArrayBuffer', 'DataView', 'Blob', 'File',
+  'Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array',
+  'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array',
+  'BigInt64Array', 'BigUint64Array',
+]);
+
+export class UnsupportedWireTypeError extends Error {
+  constructor(typeName: string) {
+    super(`[TypeMapGenerator] ${typeName} has transport-dependent or non-JSON output semantics. Return an explicit JSON DTO/base64 string, or use a transport-specific custom route.`);
+    this.name = 'UnsupportedWireTypeError';
+  }
+}
+
 const isJsonLikeType = (type: ts.Type, checker: ts.TypeChecker): boolean => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but absent at runtime for primitive types
   const symbolName = type.symbol?.name ?? '';
@@ -73,8 +91,12 @@ const isJsonLikeType = (type: ts.Type, checker: ts.TypeChecker): boolean => {
 
   if (JSON_TYPE_NAMES.has(symbolName) || JSON_TYPE_NAMES.has(aliasName)) return true;
 
-  const rendered = checker.typeToString(type);
-  return /(\bPrisma\.)?(Input)?Json(Value|Object|Array)\b/.test(rendered);
+  //? Exact match only. A Prisma model OBJECT may contain a property rendered as
+  //? `preferences: JsonValue`; substring matching would then collapse the whole
+  //? model (and every nested relation) to `JsonValue` instead of projecting only
+  //? that property.
+  const rendered = checker.typeToString(type).trim();
+  return /^(?:Prisma\.)?(?:Input)?Json(?:Value|Object|Array)$/.test(rendered);
 };
 
 const getLiteralTypeFromExpression = (
@@ -215,13 +237,14 @@ interface ExpandState {
    * `createdAt: Date` was a lie that TypeScript happily endorsed —
    * `user.createdAt.getTime()` compiled and then threw at runtime.
    *
-   * OUTPUTS ONLY. Inputs must keep their true types: their text feeds
-   * `validateInputByType`, which in production runs with no resolver and is
-   * fail-closed, so projecting there would reject real payloads.
+   * OUTPUTS ONLY. Wire-safe inputs stay unprojected because their text feeds
+   * `validateInputByType`, which is fail-closed. `extractors.ts` separately
+   * rejects Date input annotations: JSON cannot deliver the promised instance.
    */
   wireProjection: boolean;
 }
 
+//? @adr 0029 — shared API/sync maps accept only JSON-stable contracts.
 //? Types whose JSON.stringify result differs from their TypeScript type. Keyed by
 //? the constructor/symbol name, valued by what the client genuinely receives.
 //? `Date` is the one that bites in practice — it has a `toJSON()` returning an
@@ -307,19 +330,86 @@ const resolveToJsonReturnType = (type: ts.Type, checker: ts.TypeChecker): ts.Typ
   return signature ? signature.getReturnType() : null;
 };
 
-//? RULE 2: a function-valued property never survives JSON.stringify — the key is
-//? dropped entirely. This is what actually unblocks MikroORM: `BaseEntity` mixes
-//? in `isInitialized` / `populate` / `toObject` / `toPOJO` / `serialize` / …, and
-//? expanding THEIR signatures is what drags `EntityProperty` and `EntityMetadata`
-//? (declared inside node_modules, hence unresolvable) into the emitted type.
-//? Requires zero properties as well as call signatures: a callable object that
-//? also carries data would still serialize its data.
-const isFunctionOnlyType = (type: ts.Type, checker: ts.TypeChecker): boolean =>
-  type.getCallSignatures().length > 0 && checker.getPropertiesOfType(type).length === 0;
+//? RULE 2: every function-valued property is omitted by JSON.stringify — even a
+//? callable object with attached enumerable data. Arrays turn the same value into
+//? `null`. The old zero-properties condition was false: JSON never serializes a
+//? function object's attached properties when the VALUE itself is callable.
+const isFunctionValueType = (type: ts.Type): boolean => type.getCallSignatures().length > 0;
+
+const typeNameOf = (type: ts.Type, checker: ts.TypeChecker): string => {
+  const objectType = type as ts.ObjectType;
+  if ((type.flags & ts.TypeFlags.Object) && (objectType.objectFlags & ts.ObjectFlags.Reference)) {
+    const targetName = (objectType as ts.TypeReference).target.getSymbol()?.name;
+    if (targetName) return targetName;
+  }
+  return type.getSymbol()?.name ?? checker.typeToString(type);
+};
+
+const assertSupportedWireType = (type: ts.Type, checker: ts.TypeChecker): void => {
+  const typeName = typeNameOf(type, checker);
+  if (TRANSPORT_DEPENDENT_BINARY_TYPES.has(typeName)) {
+    throw new UnsupportedWireTypeError(typeName);
+  }
+  if ((type.flags & (ts.TypeFlags.BigInt | ts.TypeFlags.BigIntLiteral)) !== 0) {
+    throw new UnsupportedWireTypeError('bigint');
+  }
+};
+
+const isJsonOmittedValueType = (type: ts.Type): boolean =>
+  (type.flags & (
+    ts.TypeFlags.Undefined
+    | ts.TypeFlags.Void
+    | ts.TypeFlags.ESSymbol
+    | ts.TypeFlags.UniqueESSymbol
+  )) !== 0 || isFunctionValueType(type);
+
+interface WireConstituents {
+  serializable: ts.Type[];
+  omitted: boolean;
+}
+
+//? Resolve one property/array-element type to the values JSON can actually
+//? carry. `undefined`/symbol/function constituents disappear from objects and
+//? become null in arrays; toJSON return types replace their declared type.
+const resolveWireConstituents = (type: ts.Type, checker: ts.TypeChecker): WireConstituents => {
+  const queue = type.isUnion() ? [...type.types] : [type];
+  const serializable: ts.Type[] = [];
+  let omitted = false;
+  let changed = false;
+
+  for (const candidate of queue) {
+    assertSupportedWireType(candidate, checker);
+    if (isJsonOmittedValueType(candidate)) {
+      omitted = true;
+      changed = true;
+      continue;
+    }
+
+    const jsonType = resolveToJsonReturnType(candidate, checker);
+    const effective = jsonType && jsonType !== candidate ? jsonType : candidate;
+    if (effective !== candidate) changed = true;
+    const effectiveTypes = effective.isUnion() ? effective.types : [effective];
+    for (const effectiveType of effectiveTypes) {
+      assertSupportedWireType(effectiveType, checker);
+      if (isJsonOmittedValueType(effectiveType)) {
+        omitted = true;
+        changed = true;
+      } else {
+        serializable.push(effectiveType);
+      }
+    }
+  }
+
+  //? Preserve the original Type object when JSON does not change it. TypeScript
+  //? represents `boolean` as an internal `false | true` union and JsonValue as a
+  //? recursive union; expanding those constituents separately would degrade the
+  //? stable `boolean` / `JsonValue` text for no wire-level reason.
+  return changed ? { serializable, omitted } : { serializable: [type], omitted: false };
+};
 
 export interface ExpandOptions {
   /**
-   * Emit what the client RECEIVES (JSON) rather than what the handler returns.
+   * Emit what the client RECEIVES rather than what the handler returns.
    * Pass `true` for every OUTPUT type; never for an input (see `ExpandState`).
    */
   wireProjection?: boolean;
@@ -351,6 +441,16 @@ export const expandTypeDetailed = (
   }
 
   try {
+    if (expandState.wireProjection) {
+      assertSupportedWireType(type, checker);
+      //? Object-property and array branches below handle omission/null with the
+      //? surrounding context. Reaching an omitted value directly means the
+      //? whole response/stream payload has no JSON representation.
+      if (isJsonOmittedValueType(type)) {
+        throw new UnsupportedWireTypeError(checker.typeToString(type));
+      }
+    }
+
     if (depth > DEPTH_LIMIT) {
       return {
         text: checker.typeToString(type),
@@ -435,9 +535,18 @@ export const expandTypeDetailed = (
       const typeArgs = checker.getTypeArguments(objectType as ts.TypeReference);
       let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
       const tupleTypes = typeArgs.map((innerType) => {
-        const expanded = expandTypeDetailed(innerType, checker, depth + 1, expandState);
-        unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
-        return expanded.text;
+        const wire = expandState.wireProjection
+          ? resolveWireConstituents(innerType, checker)
+          : { serializable: [innerType], omitted: false };
+        const texts: string[] = [];
+        for (const serializableType of wire.serializable) {
+          const expanded = expandTypeDetailed(serializableType, checker, depth + 1, expandState);
+          unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
+          texts.push(expanded.text);
+        }
+        //? JSON.stringify turns an omitted tuple/array slot into null.
+        if (wire.omitted) texts.push('null');
+        return [...new Set(texts)].join(' | ');
       });
       return { text: `[${tupleTypes.join(', ')}]`, unresolvedSymbols };
     }
@@ -448,6 +557,8 @@ export const expandTypeDetailed = (
     //? Guarded on `wireProjection` so inputs are untouched (their text feeds the
     //? fail-closed prod validator).
     if (expandState.wireProjection) {
+      //? Binary types were rejected above before their HTTP-only toJSON shape
+      //? could hide the Socket.io binary representation.
       const jsonType = resolveToJsonReturnType(type, checker);
       //? Identity check: a type whose toJSON returns itself (or a self-referential
       //? DTO) would recurse forever. The stack guard would catch it, but bailing
@@ -467,14 +578,23 @@ export const expandTypeDetailed = (
         const typeArgs = checker.getTypeArguments(refType);
         const firstArg = typeArgs[0];
         if (firstArg) {
-          const expanded = expandTypeDetailed(firstArg, checker, depth + 1, expandState);
-          const elementType = /\s[|&]\s/.test(expanded.text)
-            ? `(${expanded.text})`
-            : expanded.text;
-          return {
-            text: `${elementType}[]`,
-            unresolvedSymbols: expanded.unresolvedSymbols,
-          };
+          const wire = expandState.wireProjection
+            ? resolveWireConstituents(firstArg, checker)
+            : { serializable: [firstArg], omitted: false };
+          let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
+          const texts: string[] = [];
+          for (const serializableType of wire.serializable) {
+            const expanded = expandTypeDetailed(serializableType, checker, depth + 1, expandState);
+            unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
+            texts.push(expanded.text);
+          }
+          //? In arrays JSON.stringify substitutes null instead of deleting a slot.
+          if (wire.omitted) texts.push('null');
+          const expandedText = [...new Set(texts)].join(' | ');
+          const elementType = /\s[|&]\s/.test(expandedText)
+            ? `(${expandedText})`
+            : expandedText;
+          return { text: `${elementType}[]`, unresolvedSymbols };
         }
       }
 
@@ -509,32 +629,49 @@ export const expandTypeDetailed = (
         //? API-payload meaning, so drop them from the inlined type text.
         if (prop.getName().startsWith('__@')) continue;
         const propType = checker.getTypeOfSymbol(prop);
+        const wire = expandState.wireProjection
+          ? resolveWireConstituents(propType, checker)
+          : { serializable: [propType], omitted: false };
 
-        //? Wire projection, rule 2: JSON.stringify drops a function-valued key
-        //? entirely, so describing it would be describing something the client
-        //? never receives — and expanding these is precisely what pulls
-        //? node_modules-internal ORM types into the output and aborts generation.
-        if (expandState.wireProjection && isFunctionOnlyType(propType, checker)) continue;
+        //? A property that can only be undefined/symbol/function never appears.
+        if (wire.serializable.length === 0) continue;
 
         const literalType = getLiteralTypeFromPropertySymbol(prop, checker, depth + 1);
-        const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+        const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0 || wire.omitted;
 
-        if (literalType) {
+        //? Literal preservation is valid when projection did not remove a
+        //? constituent (e.g. `string | undefined` must become optional). The
+        //? checker often exposes `true` as `boolean` (`false | true`), so do not
+        //? require one constituent here or discriminated response unions collapse.
+        if (literalType && !wire.omitted) {
           fields.push(`${prop.name}${isOptional ? '?' : ''}: ${literalType}`);
           continue;
         }
 
-        const expandedProp = expandTypeDetailed(propType, checker, depth + 1, expandState);
-        unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expandedProp.unresolvedSymbols);
-        fields.push(`${prop.name}${isOptional ? '?' : ''}: ${expandedProp.text}`);
+        const texts: string[] = [];
+        for (const serializableType of wire.serializable) {
+          const expandedProp = expandTypeDetailed(serializableType, checker, depth + 1, expandState);
+          unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expandedProp.unresolvedSymbols);
+          texts.push(expandedProp.text);
+        }
+        fields.push(`${prop.name}${isOptional ? '?' : ''}: ${[...new Set(texts)].join(' | ')}`);
       }
 
       for (const indexInfo of indexInfos) {
         const keyType = expandTypeDetailed(indexInfo.keyType, checker, depth + 1, expandState);
-        const valueType = expandTypeDetailed(indexInfo.type, checker, depth + 1, expandState);
+        const wire = expandState.wireProjection
+          ? resolveWireConstituents(indexInfo.type, checker)
+          : { serializable: [indexInfo.type], omitted: false };
+        //? An index whose values are always omitted serializes as an empty object.
+        if (wire.serializable.length === 0) continue;
+        const valueTexts: string[] = [];
+        for (const serializableType of wire.serializable) {
+          const valueType = expandTypeDetailed(serializableType, checker, depth + 1, expandState);
+          unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, valueType.unresolvedSymbols);
+          valueTexts.push(valueType.text);
+        }
         unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, keyType.unresolvedSymbols);
-        unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, valueType.unresolvedSymbols);
-        fields.push(`[key: ${keyType.text}]: ${valueType.text}`);
+        fields.push(`[key: ${keyType.text}]: ${[...new Set(valueTexts)].join(' | ')}`);
       }
 
       const indent = '  '.repeat(depth + 1);

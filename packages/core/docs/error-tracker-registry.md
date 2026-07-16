@@ -1,6 +1,6 @@
 # Error Tracker Registry
 
-> Deep specs for the backend-agnostic error tracker registry + legacy Sentry slot. Source: `packages/core/src/errorTrackerRegistry.ts`, `sentrySetup.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs for the backend-agnostic error tracker registry + legacy Sentry slot. Source: `packages/core/src/errorTrackerRegistry.ts`, `errorTrackerIdentity.ts`, `sentrySetup.ts`. Bijgewerkt: 2026-07-16.
 
 ## Overview
 
@@ -9,6 +9,14 @@ The error tracker registry is the seam between framework code (which never impor
 The legacy `initSharedSentry(instance)` + `captureException` / `captureMessage` / `setSentryUser` / `startSpan` API predates the multi-adapter registry. It is kept for backwards compatibility and dual-fans events through both the legacy slot AND any adapters registered with the new API, so a project can migrate incrementally.
 
 `startSpanAcrossTrackers` deliberately invokes only the first adapter that supports `startSpan` — spans don't fan out cleanly because they're nested execution scopes.
+
+The fan-out registry and per-request identity scope are separate modules. The registry
+is browser-safe because `@luckystack/core/client` reaches it through its lazy capture
+path. `errorTrackerIdentity.ts` is server-only and owns `node:async_hooks`; API/sync
+handlers and server adapters reach those identity exports through the main core barrel.
+The core package build walks the emitted `dist/client.js` chunk graph and fails if any
+Node builtin becomes reachable, because source-level import checks cannot see tsup's
+cross-entry chunk coalescing.
 
 ## Types
 
@@ -99,6 +107,18 @@ const datadogAdapter: ErrorTracker = { /* ... */ };
 
 registerErrorTrackers([sentryAdapter, datadogAdapter]);
 ```
+
+## API Reference — Per-request identity
+
+`runWithErrorTrackerIdentityScope(fn)` opens an empty AsyncLocalStorage scope before
+session lookup. `setCurrentErrorTrackerIdentity(user)` fills the mutable box once the
+session is known; `getCurrentErrorTrackerIdentity()` lets adapters read it without a
+process-global user. `runWithErrorTrackerIdentity(user, fn)` is the convenience form
+when the user is already known. Outside a scope, reads return `null` and writes are
+no-ops.
+
+These functions are server-only even though they are exported from the main core
+barrel. They are intentionally absent from `@luckystack/core/client`.
 
 ## API Reference — Legacy Sentry Slot
 

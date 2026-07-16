@@ -1,6 +1,12 @@
 import * as ts from 'typescript';
 import path from 'node:path';
-import { getServerProgram, expandTypeDetailed, ExpandedTypeResult, UnresolvedTypeSymbol } from './tsProgram';
+import {
+  getServerProgram,
+  expandTypeDetailed,
+  ExpandedTypeResult,
+  UnresolvedTypeSymbol,
+  UnsupportedWireTypeError,
+} from './tsProgram';
 import { recordExtractionOutcome } from './extractionDiagnostics';
 import { getGeneratedSocketTypesPath } from '@luckystack/core';
 
@@ -239,6 +245,38 @@ const unionTypes = (types: string[]): string => {
   return unique.length > 0 ? unique.join(' | ') : '';
 };
 
+//? @adr 0029 — JSON transports cannot deliver a Date instance. Keeping `Date` in a route's
+//? input annotation makes both the generated client signature and the handler
+//? promise an instance while runtime receives an ISO string. Refuse that source
+//? contract instead of accepting a value on which Date methods will throw.
+class UnsupportedTransportInputError extends Error {
+  constructor(filePath: string) {
+    super(`[TypeMapGenerator] ${filePath} declares Date in a transport input. JSON delivers an ISO string; declare string and validate/convert it explicitly.`);
+    this.name = 'UnsupportedTransportInputError';
+  }
+}
+
+const assertTransportInputIsWireSafe = (typeText: string, filePath: string): void => {
+  const sourceFile = ts.createSourceFile(
+    '__luckystack_input_check.ts',
+    `type __LuckyStackInput = ${typeText};`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const containsDate = (node: ts.Node): boolean => {
+    if (
+      ts.isTypeReferenceNode(node)
+      && ts.isIdentifier(node.typeName)
+      && node.typeName.text === 'Date'
+    ) {
+      return true;
+    }
+    return node.getChildren(sourceFile).some((child) => containsDate(child));
+  };
+  if (containsDate(sourceFile)) throw new UnsupportedTransportInputError(filePath);
+};
+
 //  public API 
 
 export const getInputTypeFromFile = (filePath: string): string => {
@@ -274,8 +312,10 @@ export const getInputTypeDetailsFromFile = (filePath: string): TypeExtractionRes
     if (!dataType) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const expanded = expandTypeDetailed(dataType, checker);
+    assertTransportInputIsWireSafe(expanded.text, filePath);
     return { text: expanded.text || DEFAULT, unresolvedSymbols: expanded.unresolvedSymbols };
   } catch (error) {
+    if (error instanceof UnsupportedTransportInputError) throw error;
     console.error(`[TypeMapGenerator] Error extracting input type from ${filePath}:`, error);
     recordExtractionOutcome({ filePath, kind: 'api', field: 'input', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
@@ -349,6 +389,7 @@ const extractDeclaredStreamTypeFromApiParams = (
 
 export const getApiStreamPayloadTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = 'never';
+  recordExtractionOutcome({ filePath, kind: 'api', field: 'stream', error: null });
 
   try {
     const program = getServerProgram();
@@ -368,7 +409,9 @@ export const getApiStreamPayloadTypeDetailsFromFile = (filePath: string): TypeEx
 
     return { text: DEFAULT, unresolvedSymbols: [] };
   } catch (error) {
+    if (error instanceof UnsupportedWireTypeError) throw error;
     console.error(`[TypeMapGenerator] Error extracting API stream payload type from ${filePath}:`, error);
+    recordExtractionOutcome({ filePath, kind: 'api', field: 'stream', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
@@ -389,6 +432,7 @@ export const getOutputTypeDetailsFromFile = (filePath: string): TypeExtractionRe
     const details = collectReturnObjectTypeDetails(mainFn, checker);
     return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
+    if (error instanceof UnsupportedWireTypeError) throw error;
     console.error(`[TypeMapGenerator] Error extracting output type from ${filePath}:`, error);
     recordExtractionOutcome({ filePath, kind: 'api', field: 'output', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
@@ -419,8 +463,10 @@ export const getSyncClientDataTypeDetailsFromFile = (filePath: string): TypeExtr
     if (!dataType) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const expanded = expandTypeDetailed(dataType, checker);
+    assertTransportInputIsWireSafe(expanded.text, filePath);
     return { text: expanded.text || DEFAULT, unresolvedSymbols: expanded.unresolvedSymbols };
   } catch (error) {
+    if (error instanceof UnsupportedTransportInputError) throw error;
     console.error(`[TypeMapGenerator] Error extracting sync clientData type from ${filePath}:`, error);
     recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientInput', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
@@ -437,6 +483,7 @@ export const getSyncServerStreamPayloadTypeFromFile = (filePath: string): string
 
 export const getSyncServerStreamPayloadTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = 'never';
+  recordExtractionOutcome({ filePath, kind: 'sync', field: 'serverStream', error: null });
 
   try {
     const program = getServerProgram();
@@ -450,7 +497,9 @@ export const getSyncServerStreamPayloadTypeDetailsFromFile = (filePath: string):
     const details = collectStreamCallPayloadTypeDetails(mainFn, checker);
     return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
+    if (error instanceof UnsupportedWireTypeError) throw error;
     console.error(`[TypeMapGenerator] Error extracting sync server stream payload type from ${filePath}:`, error);
+    recordExtractionOutcome({ filePath, kind: 'sync', field: 'serverStream', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
@@ -471,6 +520,7 @@ export const getSyncServerOutputTypeDetailsFromFile = (filePath: string): TypeEx
     const details = collectReturnObjectTypeDetails(mainFn, checker);
     return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
+    if (error instanceof UnsupportedWireTypeError) throw error;
     console.error(`[TypeMapGenerator] Error extracting sync serverOutput type from ${filePath}:`, error);
     recordExtractionOutcome({ filePath, kind: 'sync', field: 'serverOutput', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
@@ -487,6 +537,7 @@ export const getSyncClientStreamPayloadTypeFromFile = (filePath: string): string
 
 export const getSyncClientStreamPayloadTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = 'never';
+  recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientStream', error: null });
 
   try {
     const program = getServerProgram();
@@ -500,7 +551,9 @@ export const getSyncClientStreamPayloadTypeDetailsFromFile = (filePath: string):
     const details = collectStreamCallPayloadTypeDetails(mainFn, checker);
     return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
+    if (error instanceof UnsupportedWireTypeError) throw error;
     console.error(`[TypeMapGenerator] Error extracting sync client stream payload type from ${filePath}:`, error);
+    recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientStream', error });
     return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
@@ -521,6 +574,7 @@ export const getSyncClientOutputTypeDetailsFromFile = (filePath: string): TypeEx
     const details = collectReturnObjectTypeDetails(mainFn, checker);
     return { text: details.text || DEFAULT, unresolvedSymbols: details.unresolvedSymbols };
   } catch (error) {
+    if (error instanceof UnsupportedWireTypeError) throw error;
     console.error(`[TypeMapGenerator] Error extracting sync clientOutput type from ${filePath}:`, error);
     recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientOutput', error });
     return { text: DEFAULT, unresolvedSymbols: [] };

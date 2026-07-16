@@ -59,7 +59,7 @@ Sample rates and ignore-list come from this package's own `registerSentryConfig(
 
 - Runtime: `@luckystack/core`
 - Peer (canonical ranges, standardized 2026-05-07; all optional — install only what the adapters you use need):
-  - `@sentry/node@^10.48.0` — required only when `createSentryAdapter()` or `initializeSentry()` is called.
+  - `@sentry/node@^10.66.0` — required only when `createSentryAdapter()` or `initializeSentry()` is called.
   - `dd-trace@^5.0.0` — required only when `createDatadogAdapter(...)` is called. Import dd-trace as the FIRST require in your server entry.
   - `hot-shots@^10.0.0` — optional StatsD companion for the Datadog adapter (metrics). The adapter still captures exceptions without it.
   - `posthog-node@^4.0.0` — required only when `createPostHogAdapter(...)` is called.

@@ -41,6 +41,8 @@ const optionalPeerDeps = [
   // in server/bootstrap/initSecrets.ts; left external so a project that doesn't use
   // it bundles + boots without the package installed).
   '@luckystack/secret-manager',
+  // Runtime-native Drizzle SQLite branch; Node/esbuild must leave it for Bun.
+  'bun:sqlite',
 ];
 
 const externalDeps = [
@@ -139,6 +141,10 @@ const run = async () => {
     external: externalDeps,
     logLevel: 'info',
     alias: {
+      //? esbuild aliases match package subpaths too. Keep the explicit `/config`
+      //? entry before the barrel: without it `@luckystack/core/config` becomes
+      //? `packages/core/src/index.ts/config` and the production bundle fails.
+      '@luckystack/core/config': path.join(root, 'packages/core/src/config.ts'),
       '@luckystack/core': path.join(root, 'packages/core/src/index.ts'),
       '@luckystack/login': path.join(root, 'packages/login/src/index.ts'),
       '@luckystack/sync': path.join(root, 'packages/sync/src/index.ts'),

@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (28)
+## Decisions (30)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -41,6 +41,8 @@
 | 0026 | secret manager redis pointer boot | 🟢 accepted | core, server, redis, secret-manager, boot | — | `docs/decisions/0026-secret-manager-redis-pointer-boot.md` |
 | 0027 | Offer npm + bun as the scaffold's package managers, and generate Prisma via npx even on bun | 🟢 accepted | cli, scaffold, packaging, bun, prisma | — | `docs/decisions/0027-package-manager-axis-npm-and-bun.md` |
 | 0028 | Support node and bun through socket.io on node:http; do NOT build a Bun.serve / native-WS socket abstraction | 🟢 accepted | runtime, sockets, bun, architecture, packaging | — | `docs/decisions/0028-keep-socketio-on-nodehttp-both-runtimes.md` |
+| 0029 | Shared API and sync type maps accept only JSON-stable contracts | 🟢 accepted | devkit, api, sync, types, json, transport | — | `docs/decisions/0029-transport-contracts-are-json-stable.md` |
+| 0030 | Secret refresh rebuilds the complete project registration instead of patching the active registry | 🟢 accepted | core, config, secret-manager, cors, auth | — | `docs/decisions/0030-secret-refresh-reregisters-complete-project-config.md` |
 
 ## Summaries
 
@@ -277,6 +279,22 @@ Fix the timing at the framework level, without making core depend on secret-mana
 *Keep socket.io on `node:http` as the single socket abstraction, and support both runtimes by running that same stack on each (already the case).** Do not build a `Bun.serve()` HTTP path or a bun-native-WebSocket path, and do not introduce a runtime-branching socket facade. socket.io *is* the runtime-agnostic socket layer; it runs on node and bun today and already captures the large runtime win.
 
 → `docs/decisions/0028-keep-socketio-on-nodehttp-both-runtimes.md`
+
+### 0029 — Shared API and sync type maps accept only JSON-stable contracts
+
+**0029** · accepted · tags: devkit, api, sync, types, json, transport · 2026-07-16
+
+Shared route contracts must be JSON-stable. Input generation rejects `Date`; route authors declare an ISO string, validate it, and convert explicitly. Output and stream generation recursively projects JSON semantics (`Date -> string`, `toJSON()` return types, property omission, array-slot `null`). Binary and BigInt outputs abort generation with an actionable message; authors return an explicit JSON DTO/base64 string or use a transport-specific custom route.
+
+→ `docs/decisions/0029-transport-contracts-are-json-stable.md`
+
+### 0030 — Secret refresh rebuilds the complete project registration instead of patching the active registry
+
+**0030** · accepted · tags: core, config, secret-manager, cors, auth · 2026-07-16
+
+Consumer config defines a factory for its complete `registerProjectConfig` input. Both initial boot and every secrets-resolved notification call that factory and make one replacement registration. The factory recomputes the full public URL, backend origin, OAuth callback base, environment-dependent policy, and CORS list from the same current env snapshot.
+
+→ `docs/decisions/0030-secret-refresh-reregisters-complete-project-config.md`
 
 ## Code governed by decisions
 

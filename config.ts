@@ -62,13 +62,19 @@ const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
   },
 };
 
-const detectedDns = normalizeDns(
+const detectDns = (): string => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  runtimeWindow.window?.location.origin ?? (env('DNS') ?? "http://localhost:5173"),
-);
+  const raw = runtimeWindow.window?.location.origin ?? (env('DNS') ?? "http://localhost:5173");
+  const candidate = raw.split(',')[0]?.trim();
+  const primary = candidate === undefined || candidate.length === 0 ? "http://localhost:5173" : candidate;
+  return normalizeDns(primary);
+};
 
-const resolvedEnvironment: AppEnvironmentConfig =
-  dnsEnvironmentMap[detectedDns] ?? fallbackEnvironment;
+const resolveEnvironment = (dns: string): AppEnvironmentConfig =>
+  dnsEnvironmentMap[dns] ?? fallbackEnvironment;
+
+const detectedDns = detectDns();
+const resolvedEnvironment = resolveEnvironment(detectedDns);
 
 //? Dev-only convenience for local multi-instance testing: point a SINGLE local
 //? frontend at a specific backend instance via `?backend=<port>` (e.g.
@@ -81,9 +87,9 @@ const resolvedEnvironment: AppEnvironmentConfig =
 //? which drops the query string) and any other navigation that loses the query —
 //? without it the backend would reset to the default after login. Per-tab storage
 //? keeps two tabs pinned to their own instance.
-const resolveBackendUrl = (): string => {
-  const base = resolvedEnvironment.backendUrl;
-  if (!resolvedEnvironment.dev) return base;
+const resolveBackendUrl = (environment: AppEnvironmentConfig): string => {
+  const base = environment.backendUrl;
+  if (!environment.dev) return base;
   const win = runtimeWindow.window;
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!win) return base;
@@ -99,9 +105,9 @@ const resolveBackendUrl = (): string => {
   return url;
 };
 
-const config = {
+const createConfig = (resolvedEnvironment: AppEnvironmentConfig) => ({
   /** The URL of the backend server. Update for production. */
-  backendUrl: resolveBackendUrl(),
+  backendUrl: resolveBackendUrl(resolvedEnvironment),
  
   /** Enable extra console logs for debugging */
   dev: resolvedEnvironment.dev,
@@ -317,7 +323,9 @@ const config = {
     //? and when `url` is empty (init is skipped entirely).
     dev: { watch: false, pollIntervalMs: 30_000 },
   },
-};
+});
+
+const config = createConfig(resolvedEnvironment);
  
 // ============================================
 // TYPE DEFINITIONS
@@ -390,82 +398,80 @@ const splitOriginEnv = (key: string): string[] =>
 const collectAllowedOrigins = (): string[] =>
   [...splitOriginEnv('DNS'), ...splitOriginEnv('EXTERNAL_ORIGINS')];
 
-//? Re-register the env-derived slots once the secret manager has overwritten
-//? process.env. `registerProjectConfig` DEEP-MERGES a value, so — unlike
-//? `email.from` above — a getter cannot help here: the merge reads it during this
-//? very call and stores the result, freezing whatever env said at import.
-//?
-//? This is finding C-04, and it was live: measured 2026-07-16 with
-//? EXTERNAL_ORIGINS=ORIGINS_BASE_V1 at import, the registry still held
-//? `["ORIGINS_BASE_V1"]` after the resolver wrote `https://real.company.com` —
-//? so CORS would reject the very origin the operator configured, failing closed
-//? with no error anywhere. Same shape as core's redis client (ADR 0026); this
-//? subscribes to the same channel.
-//?
-//? No secret manager -> the resolver never fires -> the import-time read above
-//? was already final, and this is simply never called. Arrays REPLACE on merge
-//? (deepMerge only recurses into plain objects), so this overwrites rather than
-//? appends. In the browser the listener is registered and never fires.
+//? @adr 0030 — Build the COMPLETE registration from current env. Repeated
+//? `registerProjectConfig` calls are replacement registrations: each one merges
+//? over pristine defaults, not over the previous active value. A listener that
+//? re-registers only CORS therefore resets unrelated auth/session/rate-limit
+//? policy. Rebuilding the complete registration preserves those slots and also
+//? refreshes every DNS-derived URL coherently after secret resolution.
+const createProjectConfigRegistration = () => {
+  const currentDetectedDns = detectDns();
+  const currentEnvironment = resolveEnvironment(currentDetectedDns);
+  const currentConfig = createConfig(currentEnvironment);
+
+  return {
+    app: {
+      //? The PUBLIC app origin — where the SPA routes live. Email links
+      //? (/reset-password, /settings/confirm-email) are built on this base, so
+      //? it must point at the FRONTEND (dev: Vite on :5173), not the backend.
+      //? Server-side this is the first DNS entry; in the browser it's the
+      //? window origin. OAuth callbacks use `oauthCallbackBase` (backend) below.
+      publicUrl: currentDetectedDns,
+    },
+    logging: currentConfig.logging,
+    rateLimiting: currentConfig.rateLimiting,
+    session: {
+      basedToken: currentConfig.sessionBasedToken,
+      expiryDays: currentConfig.sessionExpiryDays,
+      perUser: currentConfig.sessionPerUser,
+    },
+    http: {
+      cors: {
+        allowedOrigins: collectAllowedOrigins(),
+        //? Convenience for local dev: any localhost origin is accepted regardless
+        //? of port. Production deployments should keep this `false` (the framework
+        //? default) and rely on `allowedOrigins` only.
+        allowLocalhost: currentEnvironment.dev,
+      },
+    },
+    defaultLanguage: currentConfig.defaultLanguage,
+    //? Backend origin for OAuth callback redirect URIs, read by
+    //? @luckystack/login/register's env-driven provider scan.
+    //?
+    //? In dev: derive from the actual SERVER_PORT env var so that starting the
+    //? server on a non-standard port (e.g. SERVER_PORT=8080 for parallel instances)
+    //? produces the correct redirect_uri automatically. `currentEnvironment.backendUrl`
+    //? is a static DNS-map value (always :80) and is NOT overridden by ?backend=,
+    //? so it cannot be used here for multi-port dev setups.
+    //? In prod: use the static backendUrl from the DNS map (the public domain).
+    oauthCallbackBase: currentEnvironment.dev
+      ? `http://localhost:${env('SERVER_PORT') ?? ports.backend}`
+      : currentEnvironment.backendUrl,
+    socketActivityBroadcaster: currentConfig.socketActivityBroadcaster,
+    socketStatusIndicator: currentConfig.socketStatusIndicator,
+    locationProviderEnabled: currentConfig.locationProviderEnabled,
+    loginRedirectUrl: currentConfig.loginRedirectUrl,
+    auth: {
+      //? forgot-password is a @luckystack/login feature: it ONLY works when
+      //? @luckystack/login is installed (no login package ⇒ no auth surface ⇒ this key
+      //? does nothing). 'framework' mode ALSO needs @luckystack/email installed + a
+      //? sender registered in server.ts to deliver the reset mail; without a sender it
+      //? silently no-ops (anti-enumeration). Use 'disabled' / 'custom' to opt out.
+      forgotPassword: 'framework' as const,
+    },
+  };
+};
+
+//? Re-register after the secret manager has overwritten process.env. No secret
+//? manager means the listener never fires and the initial registration is final.
 registerSecretsResolvedListener(() => {
-  registerProjectConfig({
-    http: { cors: { allowedOrigins: collectAllowedOrigins() } },
-  });
+  registerProjectConfig(createProjectConfigRegistration());
 });
 
 //? Side-effect registration: any import of this file — client bundle entry,
 //? server entry, tests — wires the project config into @luckystack/core so
 //? framework packages read the right values.
-registerProjectConfig({
-  app: {
-    //? The PUBLIC app origin — where the SPA routes live. Email links
-    //? (/reset-password, /settings/confirm-email) are built on this base, so
-    //? it must point at the FRONTEND (dev: Vite on :5173), not the backend.
-    //? Server-side this is the first DNS entry; in the browser it's the
-    //? window origin. OAuth callbacks use `oauthCallbackBase` (backend) below.
-    publicUrl: detectedDns.split(',')[0] ?? detectedDns,
-  },
-  logging: config.logging,
-  rateLimiting: config.rateLimiting,
-  session: {
-    basedToken: config.sessionBasedToken,
-    expiryDays: config.sessionExpiryDays,
-    perUser: config.sessionPerUser,
-  },
-  http: {
-    cors: {
-      allowedOrigins: collectAllowedOrigins(),
-      //? Convenience for local dev: any localhost origin is accepted regardless
-      //? of port. Production deployments should keep this `false` (the framework
-      //? default) and rely on `allowedOrigins` only.
-      allowLocalhost: resolvedEnvironment.dev,
-    },
-  },
-  defaultLanguage: config.defaultLanguage,
-  //? Backend origin for OAuth callback redirect URIs, read by
-  //? @luckystack/login/register's env-driven provider scan.
-  //?
-  //? In dev: derive from the actual SERVER_PORT env var so that starting the
-  //? server on a non-standard port (e.g. SERVER_PORT=8080 for parallel instances)
-  //? produces the correct redirect_uri automatically. `resolvedEnvironment.backendUrl`
-  //? is a static DNS-map value (always :80) and is NOT overridden by ?backend=,
-  //? so it cannot be used here for multi-port dev setups.
-  //? In prod: use the static backendUrl from the DNS map (the public domain).
-  oauthCallbackBase: resolvedEnvironment.dev
-    ? `http://localhost:${env('SERVER_PORT') ?? ports.backend}`
-    : resolvedEnvironment.backendUrl,
-  socketActivityBroadcaster: config.socketActivityBroadcaster,
-  socketStatusIndicator: config.socketStatusIndicator,
-  locationProviderEnabled: config.locationProviderEnabled,
-  loginRedirectUrl: config.loginRedirectUrl,
-  auth: {
-    //? forgot-password is a @luckystack/login feature: it ONLY works when
-    //? @luckystack/login is installed (no login package ⇒ no auth surface ⇒ this key
-    //? does nothing). 'framework' mode ALSO needs @luckystack/email installed + a
-    //? sender registered in server.ts to deliver the reset mail; without a sender it
-    //? silently no-ops (anti-enumeration). Use 'disabled' / 'custom' to opt out.
-    forgotPassword: 'framework',
-  },
-});
+registerProjectConfig(createProjectConfigRegistration());
 
 export default config;
 export const {
