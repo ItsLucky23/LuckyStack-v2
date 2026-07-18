@@ -21,6 +21,13 @@ export { default as sleep } from './sleep';
 //? `node:`-bearing module into the static graph of every client barrel importer.
 //? `tryCatchClient` is behaviourally identical but lazy-imports the capture seam.
 export { default as tryCatch } from './tryCatchClient';
+//? `tryCatchSync` needs NO client-specific variant: unlike the async `tryCatch`
+//? it deliberately does not auto-capture to the error tracker, so the module has
+//? ZERO imports — nothing `node:`-bearing can ride along. It was already being
+//? shipped to the browser (the offline-queue drop handler calls it) and was
+//? simply missing from this barrel. See `barrelParity.test.ts`, which now fails
+//? if another zero-import util is exported server-side but not here.
+export { default as tryCatchSync } from './tryCatchSync';
 
 export {
   getProjectConfig,

@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/secret-manager",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -53,6 +53,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.7.1"
+    "@luckystack/core": "^0.7.2"
   }
 }

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-07-18
+
+### Fixed
+
+- **`tryCatchSync` is now exported from `@luckystack/core/client`.** It was
+  already being shipped to the browser (`offlineQueue`'s drop handler and
+  `apiRequest` both call it) and is safe there — the module has zero imports and,
+  unlike the async `tryCatch`, deliberately does not auto-capture to the error
+  tracker. Only the export line was missing, so client code could see it in the
+  bundle but not import it. Consumers can drop a local `shared/tryCatchSync.ts`
+  shim and `import { tryCatchSync } from '@luckystack/core/client'`.
+
+### Added
+
+- **Barrel-parity guard (`barrelParity.test.ts`).** Fails when a helper that is
+  already reachable from the `/client` import graph is exported by the server
+  barrel but not by the client barrel — the bug class above. Scoped to modules
+  that genuinely ship to the browser (a blanket "must be in both" rule would flag
+  60+ deliberately server-only APIs), and matched on the exported NAME so the
+  intentional `tryCatch` → `tryCatchClient` split still passes. Deliberate
+  omissions live in a documented `DELIBERATELY_SERVER_ONLY` list.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added

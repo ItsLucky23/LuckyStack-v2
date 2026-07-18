@@ -270,6 +270,7 @@
 | `attachSocketRedisAdapter(io, options?)` | Now accepts `{ adapterOptions, pubClient, subClient }` to tune `createAdapter` / supply pre-built clients. | -> docs/redis-adapter.md |
 - ### `/client` subpath (browser-safe React + i18n surface)
 - Imported from `@luckystack/core/client` (the server barrel intentionally does NOT export these): `apiRequest`, `syncRequest` + sync-callback helpers, the offline-queue API, `registerClientHook` (returns an unsubscribe) + `ClientHookPayloadMap` (`preLogin`/`postLogin`/`postLogout`/`queueItemDropped`), `useTheme`, the `TranslationProvider` + i18n registry, `SessionProvider`/session context, `registerMiddlewareHandler`/`registerPageMiddleware`, and the CSRF-aware `httpFetch`.
+- Shared helpers available from BOTH barrels: `sleep`, `tryCatch`, `tryCatchSync`. Note `tryCatch` resolves to a different implementation per barrel — the client gets `tryCatchClient`, which lazy-imports the capture seam so `node:async_hooks` never enters a Vite bundle. `tryCatchSync` needs no such split (it has zero imports and deliberately does not auto-capture). `barrelParity.test.ts` fails the build if another browser-shipped helper is exported server-side but forgotten on `/client`.
 - ### `./eslint` subpath
 - `@luckystack/core/eslint` exposes the shared ESLint rule set (the CLAUDE.md-invariant rules). Requires the optional `eslint@^9.0.0` peer.
 
