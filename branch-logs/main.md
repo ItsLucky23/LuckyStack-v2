@@ -911,3 +911,13 @@ Dit is het meest materiële runtime-verschil voor een socket-first server, en he
 **Files:** `packages/server/src/devToolsStatus.ts` (nieuw), `packages/server/src/devToolsStatus.test.ts` (nieuw), `packages/server/src/createServer.ts`, `packages/server/src/httpRoutes/apiRoute.ts`, `packages/server/src/httpRoutes/syncRoute.ts`, `packages/server/src/httpRoutes/apiRoute.test.ts`.
 
 **Niet gecommit** — wacht op de gebruiker.
+
+## 2026-07-18 14:35 — v0.7.1 gepubliceerd via GitHub CI met provenance
+
+**User prompt:** doe zelf alle checks en tests om 100% te weten dat dit niks breekt en publish het dan als 0.7.1 via GitHub CI.
+
+**Wat ik deed:** volledige CI-gate lokaal gerepliceerd (generateArtifacts, build:packages, lint, lint:packages, build, test:unit, audit, pack:dry, changelog-check). Eén lokale test-fail was een load-timeout in een devkit `ts.Program`-fixture (geïsoleerd 114/114 groen; op de schone CI-runner ook groen) — niet mijn server-only change. Server-CHANGELOG-entry toegevoegd, `npm run bump patch` (0.7.0 → 0.7.1 lockstep, 17 packages), lockfile gesynct via `npm install --package-lock-only`. Release-commit `169e526` op main gepusht, annotated tag `v0.7.1` gepusht → publish-workflow `29644471713` volledig groen incl. real publish met provenance.
+
+**Resultaat:** 17/17 packages op npm @ 0.7.1; `@luckystack/core@0.7.1` en `create-luckystack-app@0.7.1` dragen SLSA-provenance-attestaties. Andere repos kunnen upgraden naar 0.7.1.
+
+**Files:** release-administratie (17× package.json + package-lock.json), `packages/server/CHANGELOG.md`, plus de eerder in deze branch beschreven server-hardening.
