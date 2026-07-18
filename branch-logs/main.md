@@ -921,3 +921,15 @@ Dit is het meest materiële runtime-verschil voor een socket-first server, en he
 **Resultaat:** 17/17 packages op npm @ 0.7.1; `@luckystack/core@0.7.1` en `create-luckystack-app@0.7.1` dragen SLSA-provenance-attestaties. Andere repos kunnen upgraden naar 0.7.1.
 
 **Files:** release-administratie (17× package.json + package-lock.json), `packages/server/CHANGELOG.md`, plus de eerder in deze branch beschreven server-hardening.
+
+## 2026-07-18 20:15 — v0.7.2: tryCatchSync ontbrak in de core client-barrel
+
+**User prompt:** bug-rapport (extern): `tryCatchSync` zit wel in de server-barrel maar niet in de client-barrel, terwijl hij al naar de browser verscheept wordt. Fix + guard, daarna publiceren als 0.7.2.
+
+**Wat ik deed:** claim geverifieerd in de source. De aangeleverde redenering ("zijn broertje `tryCatch` staat er wél in") bleek onjuist — `client.ts:23` exporteert `tryCatch` uit een APARTE `./tryCatchClient`, bewust, omdat de server-variant `node:async_hooks` de clientbundle in sleept. Wat de fix wél rechtvaardigt: `tryCatchSync.ts` heeft nul imports, en `offlineQueue.ts:4` + `apiRequest.ts:12` importeren hem al. Eén export-regel toegevoegd.
+
+Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide barrels tenzij SERVER_ONLY" gaf 63 hits (bijna allemaal terecht server-only) — die allowlist zou een reflex worden. Gekozen voor "zit al in de client-import-closure": 35 hits met `tryCatchSync` bovenaan, dus precies de bugklasse. Parity matcht op NAAM, niet op module, zodat de bewuste `tryCatch`→`tryCatchClient`-split blijft slagen. Bewezen dat de guard faalt zonder de fix.
+
+**Verificatie:** volledige unit-suite 1824/1824, core 274/274, lint + ai:lint schoon, build:packages 17/17, `dist/client.js` 0 Node builtins. Na publish op de ECHTE tarball gecontroleerd (niet de workspace-symlink, die wees naar mijn eigen build): `@luckystack/core@0.7.2` `dist/client.d.ts` exporteert `tryCatchSync`, 0 `node:` builtins. Publish-run `29655389235` groen; 17/17 op npm met SLSA-provenance.
+
+**Files:** `packages/core/src/client.ts`, `packages/core/src/barrelParity.test.ts` (nieuw), `packages/core/CHANGELOG.md`, `packages/core/CLAUDE.md`, release-administratie (17× package.json + lockfile).
