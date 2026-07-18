@@ -51,6 +51,7 @@ vi.mock('@luckystack/core', () => ({
 }));
 
 import { handleApiRoute } from './apiRoute';
+import { markDevToolsInitFailed, clearDevToolsInitError } from '../devToolsStatus';
 import type { HttpRouteHandler } from './types';
 
 interface FakeResCapture {
@@ -99,6 +100,36 @@ beforeEach(() => {
   seam.apiResult = { status: 'success', httpStatus: 200, result: { ok: true } };
   seam.emitChunk = false;
   seam.throwInHandler = false;
+  //? Module-level status — reset so a leaked failure from one test can't turn
+  //? every other test's route into a 503.
+  clearDevToolsInitError();
+});
+
+describe('handleApiRoute — dev-tools init failure surfaces the real reason', () => {
+  it('returns a 503 naming the cause instead of routing into an empty registry', async () => {
+    markDevToolsInitFailed(new Error('route naming validation failed: badFile.ts'));
+
+    const { args, cap } = makeReqRes();
+    const result = await handleApiRoute(args);
+
+    expect(result).toBe(true);
+    expect(cap.writeHeadStatus).toBe(503);
+    //? The handler must short-circuit BEFORE delegating to the (empty) route map.
+    expect(handleHttpApiRequestMock).not.toHaveBeenCalled();
+    const body = JSON.parse(cap.body ?? '{}');
+    expect(body).toMatchObject({ status: 'error', errorCode: 'api.devToolsUnavailable' });
+    //? WHY + how to recover must be in the response, not just the log.
+    expect(body.detail).toContain('route naming validation failed: badFile.ts');
+    expect(body.detail).toContain('RESTART');
+  });
+
+  it('does not interfere once the failure is cleared (healthy dev)', async () => {
+    const { args, cap } = makeReqRes();
+    await handleApiRoute(args);
+
+    expect(handleHttpApiRequestMock).toHaveBeenCalledTimes(1);
+    expect(cap.writeHeadStatus).toBe(200);
+  });
 });
 
 describe('handleApiRoute — SSE opens only after the gates pass (#5)', () => {

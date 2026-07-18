@@ -9,7 +9,7 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (11)
+## Lessons (12)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
@@ -24,6 +24,7 @@
 | 0009 | The integration suite that "proves the Redis cross-instance link" had never run a single test | 🟠 high | testing | testing, redis, false-green, env | `docs/lessons/0009-a-skipped-test-suite-reports-as-a-pass.md` |
 | 0010 | An ORM's toJSON() describes stringifying THAT object — not the same object reached through its parent | 🟡 medium | packages/devkit | types, orm, serialization, codegen, wontfix | `docs/lessons/0010-tojson-describes-the-object-not-the-parent-path.md` |
 | 0011 | A Windows-green lockfile can be invalid for Linux npm ci | 🟠 high | release | npm, lockfile, ci, cross-platform, release | `docs/lessons/0011-windows-lockfile-can-omit-linux-optional-transitives.md` |
+| 0012 | Alle input op _ai-routes geweigerd" was geen type-bug — het was een stale dev-proces met lege devApis | 🟠 high | packages/server | dev-tooling, false-diagnosis, silent-failure, ports, hot-reload, devkit | `docs/lessons/0012-a-stale-broken-dev-process-looks-like-a-per-route-bug.md` |
 
 ## Takeaways
 
@@ -114,3 +115,11 @@ When a fix depends on a config value or a callback, **verify the value is actual
 Validate release lockfiles with the npm majors used by CI: `npm ci --dry-run -ignore-scripts` under npm 10, 11, and the publish workflow's current npm. Keep `@emnapi/core` and `@emnapi/runtime` as root dev dependencies while the transitive optional-dependency graph needs them. Direct dependencies force npm to retain their lock entries on Windows; they are tooling-only and are not published in any LuckyStack package tarball. A successful `npm install` is not equivalent to `npm ci`; the latter validates the committed graph before installing. Do not move or recreate a release tag until the CI install step has passed. If a tag has already fired but publication has not started, first fix `main` and publish from the corrected commit through the manual workflow. Aligning a public tag afterwards is exceptional: do it only with explicit user approval, after proving the failed tag run published nothing, and point it at the exact provenance commit.
 
 → `docs/lessons/0011-windows-lockfile-can-omit-linux-optional-transitives.md`
+
+### 0012 — Alle input op _ai-routes geweigerd" was geen type-bug — het was een stale dev-proces met lege devApis
+
+**0012** · high · packages/server · tags: dev-tooling, false-diagnosis, silent-failure, ports, hot-reload, devkit · 2026-07-18
+
+**Verifieer eerst dat het proces dat je test het levende, juiste proces is.** Bij een "alles faalt op deze routes"-symptoom: check de boot-logs op init-fouten en check op welke poort dit proces daadwerkelijk luistert (dev auto-increment hopt weg van een bezette poort). Een zombie op de canonieke poort is de klassieke val. **Onderscheid de twee code-paden.** De extractor (`getInputTypeFromFile`, volledige TypeChecker) en de request-tijd-resolver (`resolveRuntimeTypeText`, string-re-parser) zijn verschillend. "Verse extractie werkt wél" bewijst niets over het request-pad tenzij je een echte request door de validatie stuurt. **Framework-fix (deze les):** foutgevoelige plekken moeten luid + zelf-verklarend falen. `createServer.ts` logt een init-fout nu als `error` met volledige uitleg + herstelstap en registreert de fout (`devToolsStatus.ts`); `apiRoute.ts`/`syncRoute.ts` geven dan een `503` met de echte oorzaak i.p.v. een misleidende 404; de poort-hop-warning legt de zombie-consequentie uit.
+
+→ `docs/lessons/0012-a-stale-broken-dev-process-looks-like-a-per-route-bug.md`

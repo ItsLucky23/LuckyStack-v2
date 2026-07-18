@@ -1,6 +1,6 @@
 {
   "name": "@luckystack/presence",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -63,13 +63,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@luckystack/core": "^0.7.0"
+    "@luckystack/core": "^0.7.1"
   },
   "peerDependencies": {
     "socket.io": "^4.8.0",
     "react": "^19.2.0",
     "react-router-dom": "^7.0.0",
-    "@luckystack/login": "^0.7.0"
+    "@luckystack/login": "^0.7.1"
   },
   "peerDependenciesMeta": {
     "@luckystack/login": {

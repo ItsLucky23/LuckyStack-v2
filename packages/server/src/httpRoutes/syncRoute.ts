@@ -9,6 +9,7 @@ import type { HttpSyncStreamEvent } from '@luckystack/sync';
 import { capabilities, getSync } from '../capabilities';
 import { initSseResponse, sendSseEvent, shouldUseHttpStream } from '../sse';
 import { resolveRequesterIp } from './resolveRequesterIp';
+import { getDevToolsInitError } from '../devToolsStatus';
 import type { HttpRouteHandler } from './types';
 
 interface NormalizedHttpSyncParams {
@@ -108,6 +109,23 @@ export const handleSyncRoute: HttpRouteHandler = async ({
       //? Pre-gate failure: SSE is never opened, so emit a real 400 status.
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(400);
+      res.end(JSON.stringify(response));
+      return true;
+    }
+
+    //? Dev-tools init failed at boot -> `devSyncs` is EMPTY, so this route would
+    //? report a misleading "route not found". Answer with the REAL reason (parity
+    //? with apiRoute). Null in prod + healthy dev, so normal flows are unaffected.
+    const devToolsError = getDevToolsInitError();
+    if (devToolsError) {
+      const response = {
+        status: 'error' as const,
+        message: 'sync.devToolsUnavailable',
+        errorCode: 'sync.devToolsUnavailable',
+        detail: `Dev tooling failed to initialize, so NO sync routes are loaded. Fix the cause and RESTART the dev server (hot reload is off). Cause: ${devToolsError.message}`,
+      };
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(503);
       res.end(JSON.stringify(response));
       return true;
     }

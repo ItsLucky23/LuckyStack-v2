@@ -8,6 +8,7 @@ import { getParsedPort } from './argv';
 import { canResolve } from './capabilities';
 import { runGracefulShutdown } from './stopServer';
 import { writeDevServerInfo, clearDevServerInfo } from './devServerInfo';
+import { markDevToolsInitFailed } from './devToolsStatus';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -106,7 +107,19 @@ const initDevTools = async (): Promise<void> => {
     devkit.setupWatchers();
   });
   if (devkitError) {
-    getLogger().warn('dev tooling failed to initialize — continuing without hot reload.', { error: devkitError.message });
+    //? LOUD + self-explaining. The old `warn` scrolled past and left the server
+    //? "up" but broken: `initializeAll()` clears `devApis`/`devSyncs` before it
+    //? throws, so every /api + /sync route is dead, AND `setupWatchers()` (the
+    //? next line above) never ran, so hot reload is OFF — the ONLY recovery is a
+    //? restart after fixing the cause. Record it so `apiRoute.ts` can answer
+    //? requests with the real reason instead of a misleading 404.
+    markDevToolsInitFailed(devkitError);
+    getLogger().error(
+      'dev tooling FAILED to initialize — the server is running but EVERY /api and /sync route will fail until this is fixed. '
+        + 'Hot reload is OFF (the file watchers never started), so fix the cause below and RESTART the server. '
+        + `Cause: ${devkitError.message}`,
+      devkitError,
+    );
   }
 };
 
@@ -148,7 +161,9 @@ export const listenLuckyStackServer = (
         }
         if (autoIncrement) {
           getLogger().warn(
-            `Port ${String(attemptPort)} is in use — trying ${String(attemptPort + 1)} (auto-increment; set SERVER_PORT_AUTO_INCREMENT=0 to disable)`,
+            `Port ${String(attemptPort)} is in use — trying ${String(attemptPort + 1)} (auto-increment; set SERVER_PORT_AUTO_INCREMENT=0 to disable). `
+              + `A previous/zombie dev server is still holding :${String(attemptPort)}: anything pinned to that port (an old browser tab, the Vite proxy's cached target, a manual client) will keep talking to the OLD process, NOT this restart. `
+              + `If this restart was meant to replace it, stop the process on :${String(attemptPort)} first.`,
           );
           tryListen(attemptPort + 1);
           return;

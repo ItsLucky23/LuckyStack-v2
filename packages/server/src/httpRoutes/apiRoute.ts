@@ -8,6 +8,7 @@ import {
 import { handleHttpApiRequest } from '@luckystack/api';
 import { initSseResponse, sendSseEvent, shouldUseHttpStream } from '../sse';
 import { resolveRequesterIp } from './resolveRequesterIp';
+import { getDevToolsInitError } from '../devToolsStatus';
 import type { HttpRouteHandler } from './types';
 
 export const handleApiRoute: HttpRouteHandler = async ({
@@ -71,6 +72,26 @@ export const handleApiRoute: HttpRouteHandler = async ({
       //? Pre-gate failure: SSE is never opened, so emit a real 400 status.
       res.setHeader('Content-Type', 'application/json');
       res.writeHead(400);
+      res.end(JSON.stringify(response));
+      return true;
+    }
+
+    //? Dev-tools init failed at boot -> `devApis` is EMPTY, so this route (and
+    //? every other) would 404 with no explanation. Answer with the REAL reason:
+    //? a 503 naming the underlying cause, instead of a misleading "route not
+    //? found". Null in prod + healthy dev, so normal 404s are unaffected. SSE is
+    //? never opened before this point, so a plain JSON status is correct.
+    const devToolsError = getDevToolsInitError();
+    if (devToolsError) {
+      const response = {
+        status: 'error' as const,
+        httpStatus: 503,
+        message: 'api.devToolsUnavailable',
+        errorCode: 'api.devToolsUnavailable',
+        detail: `Dev tooling failed to initialize, so NO API routes are loaded. Fix the cause and RESTART the dev server (hot reload is off). Cause: ${devToolsError.message}`,
+      };
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(503);
       res.end(JSON.stringify(response));
       return true;
     }

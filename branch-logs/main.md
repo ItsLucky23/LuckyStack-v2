@@ -890,3 +890,24 @@ Dit is het meest materiële runtime-verschil voor een socket-first server, en he
 **Resultaat:** npm-versie, provenancecommit en release-tag wijzen nu coherent naar dezelfde releasebron. Andere repositories kunnen `0.7.0`/`latest` gebruiken.
 
 **Files:** alleen release-administratie en de bestaande CI-ledger/lesson/branch-logdocumentatie; geen package-runtimecode.
+
+## 2026-07-18 14:05 — Dev-tooling init-fout + zombie-poort luid + zelf-verklarend
+
+**User prompt:** debug van een andere AI aangeleverde bug (alle input op `_ai`-routes geweigerd in dev); na verificatie bleek het geen framework-type-bug maar een stale/kapot dev-proces. Opdracht: maak alle foutgevoelige plekken duidelijk waarom iets fout gaat.
+
+**Diagnose:** de opgeslagen `inputType`, `resolveRuntimeTypeText` en verse extractie klopten alle vier — geen extractie/resolver-bug. Root-cause was een dev-proces waarvan `initializeAll()` faalde → lege `devApis` → elke route dood, terwijl (a) de fout enkel een stille `warn` was en de server "up" bleef, en (b) dev-poort-auto-increment een verse restart stil naar 4101 liet hoppen terwijl het zombie-proces 4100 vasthield. Samen lieten die twee randen een tijdelijke init-fout eruitzien als een hardnekkige per-route type-bug.
+
+**Wat ik deed (hardening, luid + zelf-verklarend):**
+- Nieuw `packages/server/src/devToolsStatus.ts` — module-slot dat een `initializeAll()`-fout één keer registreert.
+- `createServer.ts`: init-fout van `warn` → `error` met volledige uitleg (server up, álle /api+/sync dood, hot-reload uit, herstart nodig, oorzaak) + `markDevToolsInitFailed`.
+- `createServer.ts`: poort-hop-warning legt nu uit dat een zombie-proces de oude poort vasthoudt en dat clients gepind op die poort met het OUDE proces blijven praten.
+- `apiRoute.ts` + `syncRoute.ts`: bij een geregistreerde init-fout een `503` met de echte oorzaak in `detail`, i.p.v. een misleidende 404 op een lege registry.
+- Regressietests: `devToolsStatus.test.ts` (3) + 2 cases in `apiRoute.test.ts` (503-met-oorzaak + healthy-dev-passthrough).
+
+**Verificatie:** `vitest` 11/11 groen, `npm run lint` schoon, `npm run ai:lint` geen invariant-violations, `npm run build` exit 0.
+
+**Report-only (niet gefixt):** `docs/runtime-type-resolver.md:209` zegt dat de resolver-error in dev een *soft-pass* hoort te zijn, maar de code doet (terecht, fail-closed) een hard reject — doc-drift, code is correct.
+
+**Files:** `packages/server/src/devToolsStatus.ts` (nieuw), `packages/server/src/devToolsStatus.test.ts` (nieuw), `packages/server/src/createServer.ts`, `packages/server/src/httpRoutes/apiRoute.ts`, `packages/server/src/httpRoutes/syncRoute.ts`, `packages/server/src/httpRoutes/apiRoute.test.ts`.
+
+**Niet gecommit** — wacht op de gebruiker.

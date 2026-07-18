@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-18
+
+### Fixed
+
+- **A failed dev-tooling init no longer fails silently.** When `initializeAll()`
+  throws at boot, `createLuckyStackServer` cleared `devApis`/`devSyncs` but kept
+  serving — with only a `warn` — so every `/api` and `/sync` route died with no
+  explanation (it once read as a per-route type-validation bug across restarts).
+  The init failure is now logged at `error` level with the full cause + recovery
+  step (hot reload is off, restart after fixing), and recorded so the API/sync
+  HTTP routes answer with a `503` naming the real cause instead of a misleading
+  `404` on an empty registry. New internal `devToolsStatus` module.
+- **Dev port auto-increment now explains the zombie-process consequence.** When a
+  restart hops off a busy port, the warning spells out that a previous/zombie dev
+  server is still holding the old port and that any client pinned there (an old
+  browser tab, the Vite proxy's cached target) keeps talking to the OLD process,
+  not the restart.
+
 ## [0.7.0] - 2026-07-16
 
 ### Fixed
