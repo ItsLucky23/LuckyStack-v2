@@ -933,3 +933,19 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Verificatie:** volledige unit-suite 1824/1824, core 274/274, lint + ai:lint schoon, build:packages 17/17, `dist/client.js` 0 Node builtins. Na publish op de ECHTE tarball gecontroleerd (niet de workspace-symlink, die wees naar mijn eigen build): `@luckystack/core@0.7.2` `dist/client.d.ts` exporteert `tryCatchSync`, 0 `node:` builtins. Publish-run `29655389235` groen; 17/17 op npm met SLSA-provenance.
 
 **Files:** `packages/core/src/client.ts`, `packages/core/src/barrelParity.test.ts` (nieuw), `packages/core/CHANGELOG.md`, `packages/core/CLAUDE.md`, release-administratie (17× package.json + lockfile).
+
+## 2026-07-20 06:30 — v0.7.3 gepubliceerd: stale-port bugklasse (CORS + logging + OAuth)
+
+**User prompt:** meerdere checks doen om zeker te weten dat het klopt; ports config moet altijd voorrang hebben, daarboven de auto-increment-regel, logging moet overal kloppen, en OAuth moet altijd de nieuwste poort weten — dan publiceren als 0.7.3.
+
+**Wat ik deed (na de sweep van de vorige sessie):**
+- Fix 1 (`createServer.ts`): `registerBindAddress` opnieuw aangeroepen in de listen-callback met de ECHT gebonden poort → `getBindAddress()` waarheidsgetrouw → CORS same-origin klopt na een hop.
+- OAuth volgt nu de nieuwste poort (kernwens): nieuwe core-helper `resolveDevCallbackUrl` herschrijft de localhost-poort van een OAuth-callback naar de gebonden poort. Toegepast op BEIDE chokepoints — authorize (`authApiRoute.ts:155`) én token-exchange (`login.ts`) — zodat de twee redirect_uri's byte-identiek blijven (OAuth-eis; getBindAddress is proces-constant). Default-poort-collaps + prod no-op afgedekt.
+- Drift-waarschuwing herzien: framework richt OAuth nu op de gebonden poort; de resterende handmatige stap (provider-registratie) wordt luid benoemd.
+- Fix 4/5 (scripts): gedeelde `resolveTestBaseUrl()` volgt `dev-server.json` in 5 test-scripts; `testLoginFlows.mjs` is nu een echte drift-detector i.p.v. assert op :80; `cluster.ts` pint `SERVER_PORT_AUTO_INCREMENT=0`.
+
+**Geverifieerd:** prioriteitsketen `options.port > argv > ports.backend > SERVER_PORT > 80` + auto-increment erboven; logging-audit (enige startup-regel gebruikt de echte poort); volledige unit-suite 1837/1837; build:packages 17/17; lint + ai:lint schoon; tsc 0 errors; end-to-end via de gebouwde dist (hop :80→:84 volgt). Na publish op de ECHTE tarball bevestigd: `core@0.7.3` exporteert `resolveDevCallbackUrl`. Publish-run 29721633473 groen; 17/17 op npm met SLSA-provenance.
+
+**Bewust NIET gedaan (root sample-app-only, niet shipped):** root vite-proxy-rewrite (zou de `?backend=` multi-instance escape hatch slopen) en de module-load-capture in `luckystack/login/oauthProviders.ts` (geen template-equivalent; fixt de poort-bug niet).
+
+**Files:** core (`bindAddress.ts` + test + `index.ts`), server (`createServer.ts`, `authApiRoute.ts`, `listenServer.test.ts`), login (`login.ts`), 3× CHANGELOG, scripts (`resolveTestBaseUrl.ts` nieuw, `cluster.ts`, 5 test-scripts, `testLoginFlows.mjs`), release-administratie.
