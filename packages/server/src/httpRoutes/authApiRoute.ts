@@ -4,6 +4,7 @@ import {
   getLogger,
   getProjectConfig,
   resolveClientIp,
+  resolveDevCallbackUrl,
 } from '@luckystack/core';
 import { getLogin } from '../capabilities';
 import { resolveCookieSecure } from './sessionCookie';
@@ -152,7 +153,11 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
     //? are set LAST so a consumer key can never clobber the browser binding.
     const authParams = new URLSearchParams({
       client_id: provider.clientID,
-      redirect_uri: provider.callbackURL,
+      //? In dev, target the port the server ACTUALLY bound (auto-increment may
+      //? have moved it off the frozen `oauthCallbackBase` port). The token
+      //? exchange applies the SAME rewrite, so the two redirect_uri values stay
+      //? byte-identical as OAuth requires. Prod / non-localhost: unchanged.
+      redirect_uri: resolveDevCallbackUrl(provider.callbackURL),
       scope: provider.scope.join(' '),
       response_type: 'code',
       prompt: 'select_account',

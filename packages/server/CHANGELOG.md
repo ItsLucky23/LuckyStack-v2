@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-07-20
+
+### Fixed
+
+- **Stale-port bug class after a dev auto-increment hop.** When the dev server
+  auto-incremented off a busy port (`:80` → `:81`), the bind-address registry
+  still held the INTENDED port, so `checkOrigin`'s same-origin CORS entry pointed
+  at a port nothing listened on. `listenLuckyStackServer` now re-registers the
+  ACTUALLY-bound port inside the listen callback, so every `getBindAddress()`
+  reader (CORS foremost) sees reality.
+- **OAuth now targets the actually-bound port after a hop.** The `/auth/api/<provider>`
+  authorize route rewrites a `localhost` OAuth `redirect_uri` to the port the
+  server bound (via core's `resolveDevCallbackUrl`), matching the token-exchange
+  side in `@luckystack/login` — so the OAuth round-trip reaches the live dev
+  server even after an auto-increment hop, instead of a frozen dead port.
+- **Loud OAuth port-drift warning on a hop.** The framework auto-targets the bound
+  port for OAuth, but a provider console still exact-matches its registered
+  redirect URI — so the server now warns (naming both ports) to add the bound port
+  to the provider's authorized redirect URIs, or pin the port with
+  `SERVER_PORT_AUTO_INCREMENT=0`.
+
 ## [0.7.1] - 2026-07-18
 
 ### Fixed

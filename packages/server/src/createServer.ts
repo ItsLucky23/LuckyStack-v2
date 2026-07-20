@@ -1,5 +1,5 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, isProduction, resolveEnvKey, dispatchHook } from '@luckystack/core';
+import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, tryCatchSync, isProduction, resolveEnvKey, dispatchHook } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
@@ -183,6 +183,14 @@ export const listenLuckyStackServer = (
       httpServer.once('error', onError);
       httpServer.listen(attemptPort, ip, () => {
         httpServer.off('error', onError);
+        //? TRUTH-UP the bind registry with the port we ACTUALLY bound. The initial
+        //? `registerBindAddress` in `createLuckyStackServer` ran with the INTENDED
+        //? port, before any auto-increment hop. Every call-time reader of
+        //? `getBindAddress()` — notably `checkOrigin`'s same-origin CORS entry —
+        //? would otherwise compare against a port nothing listens on. Re-registering
+        //? here makes the registry match reality (the docstring on `bindAddress.ts`
+        //? promises "the actual listen ip/port").
+        registerBindAddress({ ip, port: attemptPort });
         //? Dev only: advertise the ACTUALLY-bound port so the Vite proxy follows
         //? us when auto-increment moved the listen off `SERVER_PORT`. Skipped in
         //? production (no proxy) and under the test runner (avoid stray files +
@@ -190,6 +198,29 @@ export const listenLuckyStackServer = (
         if (!isProduction && process.env.NODE_ENV !== 'test') {
           writeDevServerInfo(ip, attemptPort);
           process.once('exit', clearDevServerInfo);
+        }
+
+        //? DRIFT WARNING (Fix 3). A hop now auto-corrects BOTH same-origin CORS
+        //? (via the re-register above) AND the OAuth `redirect_uri` (the authorize
+        //? + token-exchange steps rewrite a localhost callback port to the bound
+        //? port via `resolveDevCallbackUrl`). So OAuth targets the LIVE server —
+        //? but the one thing the framework cannot do for you is update your
+        //? provider console: Google/GitHub still exact-match the registered
+        //? redirect URI. Surface that remaining manual step loudly. Only on an
+        //? ACTUAL hop, in dev, and only when the configured base names a different port.
+        if (attemptPort !== startPort && !isProduction) {
+          //? Read the configured callback base defensively — a pure-server boot
+          //? may not have registered projectConfig yet, and the slot defaults to ''.
+          const configuredCallbackBase = tryCatchSync(() => getProjectConfig().oauthCallbackBase)[1] ?? '';
+          const callbackPort = /:(\d+)(?:\/|$)/.exec(configuredCallbackBase)?.[1];
+          if (callbackPort && callbackPort !== String(attemptPort)) {
+            getLogger().warn(
+              `OAuth port drift: the server bound :${String(attemptPort)} but your OAuth callback base is configured for :${callbackPort} `
+                + `(${configuredCallbackBase}). The framework now auto-targets :${String(attemptPort)} for OAuth so the callback reaches THIS server — `
+                + `but your provider (Google/GitHub/…) still exact-matches its registered redirect URI, so add :${String(attemptPort)} to the authorized `
+                + `redirect URIs, OR set SERVER_PORT_AUTO_INCREMENT=0 to pin :${callbackPort} (stop whatever holds it) instead of hopping.`,
+            );
+          }
         }
         const config = getProjectConfig();
         if (config.logging.socketStartup || config.logging.devLogs) {

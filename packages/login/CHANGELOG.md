@@ -5,6 +5,19 @@ All notable changes to `@luckystack/login` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.7.3] - 2026-07-20
+
+### Fixed
+
+- **OAuth token exchange follows the actually-bound dev port.** The
+  `redirect_uri` sent at token exchange now applies core's `resolveDevCallbackUrl`
+  rewrite (same as the authorize step in `@luckystack/server`), so a `localhost`
+  callback reaches the live server after a dev auto-increment hop. The two
+  `redirect_uri` values stay byte-identical (OAuth requires it) because the rewrite
+  reads the process-constant bound port, not the request. No-op in production.
+
 ## [0.6.0] - 2026-07-12
 
 ### Added

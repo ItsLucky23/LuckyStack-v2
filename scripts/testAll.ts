@@ -15,6 +15,7 @@
 //?   TEST_NO_CUSTOM=1       — skip per-route custom tests
 
 import fs from 'node:fs';
+import { resolveTestBaseUrl } from './resolveTestBaseUrl';
 
 //? Register the PROJECT config (same as server.ts does) so the test process
 //? shares the server's projectName, rate-limit key prefix, and session cookie
@@ -25,7 +26,7 @@ import { logRunAllSummary, runAllTests } from '../packages/test-runner/src';
 import { apiInputSchemas } from '../src/_sockets/apiInputSchemas.generated';
 import { apiMetaMap, apiMethodMap } from '../src/_sockets/apiTypes.generated';
 
-const baseUrl = process.env.TEST_BASE_URL ?? 'http://localhost:80';
+const baseUrl = resolveTestBaseUrl();
 const skip = (process.env.TEST_SKIP ?? '').split(',').map(s => s.trim()).filter(Boolean);
 const authToken = process.env.TEST_AUTH_TOKEN || undefined;
 const filter = process.env.TEST_FILTER || undefined;

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-07-20
+
+### Added
+
+- **`resolveDevCallbackUrl(callbackUrl)`** — rewrites the port of a `localhost` /
+  `127.0.0.1` OAuth callback URL to the port the server ACTUALLY bound
+  (`getBindAddress()`), so OAuth targets the live dev server after an
+  auto-increment hop. No-op in production and for non-localhost bases. Consumed by
+  `@luckystack/server` (authorize) + `@luckystack/login` (token exchange), which
+  both call it so the two `redirect_uri` values stay byte-identical.
+
+### Changed
+
+- **`registerBindAddress` is now registered twice** — once with the intended port
+  before `listen`, once with the actually-bound port inside the listen callback
+  (done by `@luckystack/server`). This makes `getBindAddress()` truthful after a
+  dev auto-increment hop, which `checkOrigin`'s same-origin CORS entry (and now
+  `resolveDevCallbackUrl`) depend on.
+
 ## [0.7.2] - 2026-07-18
 
 ### Fixed

@@ -11,17 +11,25 @@ import type { Server as HttpServer } from 'node:http';
 //? `coreState.isProduction` is mutable so tests can flip the dev-vs-prod default
 //? for the auto-increment resolution. Reset to `true` in beforeEach so each test
 //? starts from the prod default (auto-increment off unless opted in).
-const { loggerMock, coreState } = vi.hoisted(() => ({
+const { loggerMock, coreState, registerBindAddressMock } = vi.hoisted(() => ({
   loggerMock: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-  coreState: { isProduction: true },
+  //? `oauthCallbackBase` is mutable so a test can drive the drift-warning branch.
+  coreState: { isProduction: true, oauthCallbackBase: '' },
+  registerBindAddressMock: vi.fn(),
 }));
 
 vi.mock('@luckystack/core', () => ({
   getLogger: () => loggerMock,
   get isProduction() { return coreState.isProduction; },
-  getProjectConfig: () => ({ logging: { socketStartup: true, devLogs: false } }),
-  //? Names the module imports at top level but these tests never reach.
-  registerBindAddress: vi.fn(),
+  getProjectConfig: () => ({
+    logging: { socketStartup: true, devLogs: false },
+    oauthCallbackBase: coreState.oauthCallbackBase,
+  }),
+  registerBindAddress: registerBindAddressMock,
+  //? Faithful tuple-shape mock — the drift check calls it to read config defensively.
+  tryCatchSync: (fn: () => unknown) => {
+    try { return [null, fn()]; } catch (error) { return [error, null]; }
+  },
   writeBootUuid: vi.fn(),
   tryCatch: vi.fn(),
 }));
@@ -84,7 +92,9 @@ beforeEach(() => {
   loggerMock.info.mockReset();
   loggerMock.warn.mockReset();
   loggerMock.error.mockReset();
+  registerBindAddressMock.mockReset();
   coreState.isProduction = true;
+  coreState.oauthCallbackBase = '';
   delete process.env.SERVER_PORT_AUTO_INCREMENT;
 });
 
@@ -155,6 +165,58 @@ describe('listenLuckyStackServer — EADDRINUSE with auto-increment', () => {
     expect(fake.listenCalls.map((c) => c.port)).toEqual([8080, 8081, 8082]);
     expect(loggerMock.warn).toHaveBeenCalledTimes(2);
     expect(loggerMock.info).toHaveBeenCalledWith('Server is running on http://127.0.0.1:8082/');
+  });
+});
+
+describe('listenLuckyStackServer — bind registry truth-up + OAuth drift (Fix 1 + Fix 3)', () => {
+  it('re-registers the ACTUALLY-bound port after an auto-increment hop', async () => {
+    coreState.isProduction = false;
+    const fake = new FakeHttpServer();
+    fake.succeedOnAttempt = 1; // 8080 busy, bind 8081
+    await listenLuckyStackServer(asServer(fake), '127.0.0.1', 8080);
+    //? getBindAddress() readers (checkOrigin's CORS same-origin) must see 8081.
+    expect(registerBindAddressMock).toHaveBeenLastCalledWith({ ip: '127.0.0.1', port: 8081 });
+  });
+
+  it('registers the bound port even with NO hop (bind == intended)', async () => {
+    coreState.isProduction = false;
+    const fake = new FakeHttpServer();
+    await listenLuckyStackServer(asServer(fake), '127.0.0.1', 8080);
+    expect(registerBindAddressMock).toHaveBeenLastCalledWith({ ip: '127.0.0.1', port: 8080 });
+  });
+
+  it('warns about OAuth port drift when a hop leaves the callback base pinned to the old port', async () => {
+    coreState.isProduction = false;
+    coreState.oauthCallbackBase = 'http://localhost:8080';
+    const fake = new FakeHttpServer();
+    fake.succeedOnAttempt = 1; // hop 8080 -> 8081
+    await listenLuckyStackServer(asServer(fake), '127.0.0.1', 8080);
+    const driftWarn = loggerMock.warn.mock.calls.find((c) => String(c[0]).includes('OAuth port drift'));
+    expect(driftWarn).toBeDefined();
+    //? Names BOTH the configured port (:8080) and the live bound port (:8081),
+    //? and points at the remaining manual step (provider registration).
+    expect(String(driftWarn?.[0])).toContain(':8080');
+    expect(String(driftWarn?.[0])).toContain(':8081');
+    expect(String(driftWarn?.[0])).toContain('auto-targets');
+  });
+
+  it('does NOT warn about drift when the callback base already matches the bound port', async () => {
+    coreState.isProduction = false;
+    coreState.oauthCallbackBase = 'http://localhost:8081';
+    const fake = new FakeHttpServer();
+    fake.succeedOnAttempt = 1; // hop 8080 -> 8081, and the base is already 8081
+    await listenLuckyStackServer(asServer(fake), '127.0.0.1', 8080);
+    const driftWarn = loggerMock.warn.mock.calls.find((c) => String(c[0]).includes('OAuth port drift'));
+    expect(driftWarn).toBeUndefined();
+  });
+
+  it('does NOT warn about drift when there was no hop at all', async () => {
+    coreState.isProduction = false;
+    coreState.oauthCallbackBase = 'http://localhost:9999'; // even a mismatch is irrelevant without a hop
+    const fake = new FakeHttpServer();
+    await listenLuckyStackServer(asServer(fake), '127.0.0.1', 8080);
+    const driftWarn = loggerMock.warn.mock.calls.find((c) => String(c[0]).includes('OAuth port drift'));
+    expect(driftWarn).toBeUndefined();
   });
 });
 

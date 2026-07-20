@@ -251,7 +251,7 @@ export type { CsrfConfig, CsrfCookieOptions } from './csrfConfig';
 export { serveAvatar } from './serveAvatars';
 export { processUpload } from './processUpload';
 export type { ProcessUploadInput, ProcessUploadResult } from './processUpload';
-export { registerBindAddress, getBindAddress } from './bindAddress';
+export { registerBindAddress, getBindAddress, resolveDevCallbackUrl } from './bindAddress';
 export {
   registerAvatarConfig,
   getAvatarConfig,

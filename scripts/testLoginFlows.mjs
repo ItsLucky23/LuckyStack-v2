@@ -6,7 +6,25 @@
  * Gebruik: node scripts/testLoginFlows.mjs
  */
 
-const BASE    = 'http://localhost:80';
+import fs from 'node:fs';
+import path from 'node:path';
+
+//? Follow the dev server's ACTUALLY-bound port (it may have auto-incremented off
+//? a busy :80). Priority: TEST_BASE_URL > node_modules/.luckystack/dev-server.json
+//? > http://localhost:80. Mirrors scripts/resolveTestBaseUrl.ts (this file is a
+//? standalone .mjs so it inlines the same logic rather than importing the .ts).
+const resolveBase = () => {
+  if (process.env.TEST_BASE_URL) return process.env.TEST_BASE_URL;
+  try {
+    const info = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), 'node_modules', '.luckystack', 'dev-server.json'), 'utf8'),
+    );
+    if (typeof info.port === 'number') return `http://localhost:${info.port}`;
+  } catch { /* fall through to the default */ }
+  return 'http://localhost:80';
+};
+
+const BASE    = resolveBase();
 const FRONT   = 'http://localhost:5175';
 const EMAIL   = `test-${Date.now()}@luckystack.dev`;
 const PASS    = 'Test1234!';
@@ -150,9 +168,19 @@ if (hasGoogle) {
     if (match) {
       const redirectUri = decodeURIComponent(match[1]);
       console.log(`       redirect_uri = ${redirectUri}`);
-      redirectUri.includes('localhost:80') || redirectUri.includes('localhost/auth/callback')
-        ? ok(`redirect_uri gebruikt port 80 (default SERVER_PORT)`)
-        : fail('Onverwachte redirect_uri', redirectUri);
+      //? DRIFT DETECTOR (not a hardcoded :80 check — that MASKED a real bug).
+      //? The redirect_uri MUST point at the same backend origin the server is
+      //? actually on; otherwise the OAuth round-trip lands on a dead/other port.
+      const basePort = new URL(BASE).port || '80';
+      const matchesServerPort = basePort === '80'
+        ? redirectUri.includes('localhost/auth/callback') || redirectUri.includes('localhost:80')
+        : redirectUri.includes(`localhost:${basePort}`);
+      matchesServerPort
+        ? ok(`redirect_uri matcht de backend-poort waar de server op draait (${basePort})`)
+        : fail(
+            `redirect_uri drift: wijst NIET naar de draaiende backend-poort (${basePort})`,
+            `${redirectUri} — oauthCallbackBase is bevroren op module-load; na een poort-hop breekt OAuth. Stop het proces op de oude poort of zet SERVER_PORT_AUTO_INCREMENT=0.`,
+          );
     } else {
       fail('redirect_uri niet gevonden in Google redirect', location.slice(0, 200));
     }

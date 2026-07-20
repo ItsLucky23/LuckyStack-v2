@@ -2,7 +2,7 @@ import { getOAuthProviders, isFullOAuthProvider, type FullOAuthProvider, type OA
 import { getPostLoginRedirect } from './redirectResolver';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { URLSearchParams } from 'node:url';
-import { tryCatch, tryCatchSync, redis as redisClient, getUploadsDir, dispatchHook, getLogger, formatKey, getProjectConfig, getCookieValue } from '@luckystack/core';
+import { tryCatch, tryCatchSync, redis as redisClient, getUploadsDir, dispatchHook, getLogger, formatKey, getProjectConfig, getCookieValue, resolveDevCallbackUrl } from '@luckystack/core';
 import bcrypt from 'bcryptjs';
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { saveSession } from "./session"
@@ -788,11 +788,15 @@ const exchangeOAuthToken = async (
   //? `code_verifier` (PKCE, F11) is included ONLY when the provider opted in and
   //? a verifier was stored with the state — for every existing flow it is
   //? `undefined` and the exchange body is unchanged.
+  //? `resolveDevCallbackUrl` applies the SAME dev-port rewrite the authorize step
+  //? used (`getBindAddress()` is process-constant, so the two agree byte-for-byte,
+  //? which OAuth's exchange-must-match-authorize rule requires). No-op in prod.
+  const redirectUri = resolveDevCallbackUrl(provider.callbackURL);
   const values = {
     code,
     client_id: provider.clientID,
     client_secret: provider.clientSecret,
-    redirect_uri: provider.callbackURL,
+    redirect_uri: redirectUri,
     grant_type: 'authorization_code',
     ...(codeVerifier ? { code_verifier: codeVerifier } : {}),
   };
@@ -820,7 +824,7 @@ const exchangeOAuthToken = async (
     formParams.append('client_secret', provider.clientSecret);
     formParams.append('code', values.code);
     formParams.append('grant_type', 'authorization_code');
-    formParams.append('redirect_uri', provider.callbackURL);
+    formParams.append('redirect_uri', redirectUri);
     if (codeVerifier) {
       formParams.append('code_verifier', codeVerifier);
     }

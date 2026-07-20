@@ -1,4 +1,5 @@
 import {
+import { resolveTestBaseUrl } from './resolveTestBaseUrl';
   logContractResult,
   logContractSummary,
   runAuthEnforcementTests,
@@ -11,7 +12,7 @@ import { apiMethodMap, apiMetaMap } from '../src/_sockets/apiTypes.generated';
 //? Config via env:
 //?   TEST_BASE_URL — defaults to http://localhost:80
 //?   TEST_SKIP     — comma-separated `<page>/<name>` pairs to skip
-const baseUrl = process.env.TEST_BASE_URL ?? 'http://localhost:80';
+const baseUrl = resolveTestBaseUrl();
 const skip = (process.env.TEST_SKIP ?? '').split(',').map(s => s.trim()).filter(Boolean);
 
 console.log(`[test:auth] walking auth-required endpoints against ${baseUrl}`);

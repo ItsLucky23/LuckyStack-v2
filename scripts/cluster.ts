@@ -18,6 +18,13 @@ if (!port || !/^\d+$/.test(port)) {
   process.exit(1);
 }
 
+//? A cluster instance must land on EXACTLY the port the router's
+//? `deploy.config.ts` binding expects. Auto-increment defaults ON in dev — a hop
+//? off a busy port would silently orphan this instance (the router keeps proxying
+//? to the dead binding port). Pin it OFF so a clash fails loudly instead. Mirrors
+//? `scripts/e2eVerdaccio.mjs`, which already sets this for the same reason.
+process.env.SERVER_PORT_AUTO_INCREMENT = '0';
+
 //? Reshape argv into `<bundles> <port>` BEFORE importing server.ts (its first
 //? line imports the argv parser, which reads process.argv at module load).
 process.argv = [process.argv[0] as string, process.argv[1] as string, 'core-preset', port];

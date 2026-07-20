@@ -1,4 +1,5 @@
 import {
+import { resolveTestBaseUrl } from './resolveTestBaseUrl';
   logContractResult,
   logContractSummary,
   runFuzzTests,
@@ -14,7 +15,7 @@ import { apiMethodMap } from '../src/_sockets/apiTypes.generated';
 //?   TEST_BASE_URL    — defaults to http://localhost:80
 //?   TEST_SKIP        — comma-separated `<page>/<name>` pairs to skip
 //?   TEST_AUTH_TOKEN  — session cookie value; enables testing of auth-required endpoints
-const baseUrl = process.env.TEST_BASE_URL ?? 'http://localhost:80';
+const baseUrl = resolveTestBaseUrl();
 const skip = (process.env.TEST_SKIP ?? '').split(',').map(s => s.trim()).filter(Boolean);
 const sessionCookieName = process.env.TEST_SESSION_COOKIE_NAME ?? 'luckystack_token';
 const authToken = process.env.TEST_AUTH_TOKEN;
