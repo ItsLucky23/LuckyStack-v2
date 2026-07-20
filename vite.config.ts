@@ -1,11 +1,35 @@
 import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vite'
+import fs from 'node:fs'
+import path from 'node:path'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { defineConfig, type ProxyOptions } from 'vite'
 //? Under rolldown-vite (Vite 8) the oxc-based `@vitejs/plugin-react` is faster
 //? than `@vitejs/plugin-react-swc` when no SWC plugins are used, and silences
 //? the "switch to @vitejs/plugin-react" startup hint. See https://vite.dev/rolldown.
 import react from '@vitejs/plugin-react'
+//? Single source of truth for the backend port fallback (config.ports.ts).
+import { ports } from './config.ports'
 
 const fromRoot = (relativePath: string) => fileURLToPath(new URL(relativePath, import.meta.url));
+
+//? The dev backend writes its ACTUALLY-bound port to
+//? `node_modules/.luckystack/dev-server.json` (it may have auto-incremented off a
+//? busy port). Read it so the proxy targets the real port; fall back to
+//? `config.ports.ts` `backend` when the file is absent (backend not up yet, or a
+//? production build). Re-read per request via the `bypass` hook so a backend that
+//? hops mid-session is followed live. Mirrors the shipped template proxy.
+const readBackendPort = (fallback: string): string => {
+  try {
+    const raw = fs.readFileSync(
+      path.join(process.cwd(), 'node_modules', '.luckystack', 'dev-server.json'),
+      'utf8',
+    );
+    const info = JSON.parse(raw) as { port?: number };
+    return info.port ? String(info.port) : fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 const normalizeFilePath = (value: string) => value.replace(/\\/g, '/');
 
@@ -34,6 +58,30 @@ const isIgnoredDevWatchPath = (filePath: string): boolean => {
 
 export default defineConfig(({ command }) => {
   const isProduction = command === 'build';
+
+  //? Proxy target: a running local router (ROUTER_PORT, cluster-dev) wins, else
+  //? the local backend on `config.ports.ts` `backend` — following an
+  //? auto-incremented port advertised in dev-server.json.
+  const ip = process.env.SERVER_IP || '127.0.0.1';
+  const routerPort = process.env.ROUTER_PORT && /^\d+$/.test(process.env.ROUTER_PORT) ? process.env.ROUTER_PORT : undefined;
+  const backendTarget = (): string =>
+    routerPort
+      ? `http://${ip}:${routerPort}`
+      : `http://${ip}:${readBackendPort(String(ports.backend))}`;
+
+  //? Vite's proxy has no live `router` option, but `bypass` runs per request with
+  //? the shared options object — set `target` there so every proxied request hits
+  //? the CURRENT backend port. socket.io's HTTP polling handshake passes through
+  //? here first and mutates the object, carrying the WS upgrade to the right port.
+  const followBackend = (_req: IncomingMessage, _res: ServerResponse, options: ProxyOptions): undefined => {
+    options.target = backendTarget();
+    return undefined;
+  };
+  const entry = (extra: ProxyOptions = {}): ProxyOptions => ({
+    target: backendTarget(),
+    bypass: followBackend,
+    ...extra,
+  });
 
   return {
     base: '/',
@@ -93,6 +141,22 @@ export default defineConfig(({ command }) => {
         //? everywhere pegs a CPU core (it re-stats every watched file on a timer).
         usePolling: process.env.VITE_USE_POLLING === '1',
         ignored: isIgnoredDevWatchPath,
+      },
+      //? Same-origin proxy so the browser (which now talks to `window.origin` by
+      //? default — see config.ts `resolveBackendUrl`) reaches the backend on its
+      //? REAL bound port, auto-increment hops included. Previously absent, so the
+      //? root sample app talked directly to a frozen `localhost:80` and every
+      //? socket/api/auth call hard-failed after a hop.
+      proxy: {
+        '/api': entry(),
+        '/sync': entry(),
+        '/auth': entry(),
+        '/uploads': entry(),
+        '/_health': entry(),
+        '/livez': entry(),
+        '/readyz': entry(),
+        '/_docs': entry(),
+        '/socket.io': entry({ ws: true }),
       },
     }
   }

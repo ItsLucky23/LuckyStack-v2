@@ -76,17 +76,20 @@ const resolveEnvironment = (dns: string): AppEnvironmentConfig =>
 const detectedDns = detectDns();
 const resolvedEnvironment = resolveEnvironment(detectedDns);
 
-//? Dev-only convenience for local multi-instance testing: point a SINGLE local
-//? frontend at a specific backend instance via `?backend=<port>` (e.g.
-//? http://localhost:5173/?backend=4101). Restricted to `localhost:<port>` and to
-//? dev environments, so a production build can never be redirected to another host.
+//? Dev backend origin the BROWSER talks to. Two modes:
 //?
-//? The chosen port is PERSISTED in per-tab sessionStorage: it's read from the URL
-//? when present, otherwise from storage. That way the choice survives the
-//? post-login full-page redirect (`LoginForm` does `location.href = loginRedirectUrl`,
-//? which drops the query string) and any other navigation that loses the query —
-//? without it the backend would reset to the default after login. Per-tab storage
-//? keeps two tabs pinned to their own instance.
+//?  1. DEFAULT (no `?backend=`): the current window origin — i.e. the Vite dev
+//?     server. Every /api /sync /auth /socket.io call then goes SAME-ORIGIN and
+//?     Vite's proxy forwards it to the real backend, FOLLOWING an auto-increment
+//?     hop live via `node_modules/.luckystack/dev-server.json`. This is what makes
+//?     the socket, fetches, AND the LoginForm OAuth redirect keep working when the
+//?     backend hops off a busy `:80` — instead of hard-failing against a dead port.
+//?
+//?  2. `?backend=<port>` (local multi-instance testing): point a SINGLE tab
+//?     DIRECTLY at a specific backend instance (e.g. http://localhost:5173/?backend=4101).
+//?     Restricted to `localhost:<port>` + dev, so a prod build can never be
+//?     redirected. Persisted in per-tab sessionStorage so the choice survives the
+//?     post-login full-page redirect (which drops the query string).
 const resolveBackendUrl = (environment: AppEnvironmentConfig): string => {
   const base = environment.backendUrl;
   if (!environment.dev) return base;
@@ -96,7 +99,9 @@ const resolveBackendUrl = (environment: AppEnvironmentConfig): string => {
   const fromUrl = new URLSearchParams(win.location.search).get("backend");
   const stored = win.sessionStorage.getItem("ls-dev-backend");
   const port = fromUrl && /^\d+$/.test(fromUrl) ? fromUrl : stored;
-  if (!port || !/^\d+$/.test(port)) return base;
+  //? No explicit override → same-origin, so the Vite proxy (which reads the real
+  //? bound port from dev-server.json) follows the backend even after a hop.
+  if (!port || !/^\d+$/.test(port)) return win.location.origin;
   win.sessionStorage.setItem("ls-dev-backend", port);
   const url = `http://localhost:${port}`;
   //? Make the override visible — otherwise "why is it on :4100 without a param?"
