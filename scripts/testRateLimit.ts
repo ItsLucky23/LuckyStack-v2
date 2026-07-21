@@ -1,16 +1,16 @@
 import {
-import { resolveTestBaseUrl } from './resolveTestBaseUrl';
   logContractResult,
   logContractSummary,
   runRateLimitTests,
 } from '../packages/test-runner/src';
 import { apiMethodMap, apiMetaMap } from '../src/_sockets/apiTypes.generated';
+import { resolveTestBaseUrl } from './resolveTestBaseUrl';
 
 //? Fires rateLimit+1 requests per endpoint and asserts the N+1 is blocked.
 //? Mutates server limiter state — run on a throwaway server or after a reset.
 //?
 //? Config via env:
-//?   TEST_BASE_URL            — defaults to http://localhost:80
+//?   TEST_BASE_URL            — override; otherwise live dev port → ports.backend fallback
 //?   TEST_SKIP                — comma-separated `<page>/<name>` pairs to skip
 //?   TEST_MAX_RATE_LIMIT      — skip endpoints with a rateLimit above this (default 50)
 //?   TEST_RESET_BETWEEN       — 'true' to call /_test/reset between endpoints (default 'true')

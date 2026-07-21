@@ -10,6 +10,8 @@ export { runCsrfEnforcementTests } from './runCsrfEnforcementTests';
 export { runFuzzCheck } from './fuzzCheck';
 export { runFuzzTests } from './runFuzzTests';
 export { resetServerState } from './resetServerState';
+export { resolveTestBaseUrl } from './resolveTestBaseUrl';
+export type { ResolveTestBaseUrlOptions } from './resolveTestBaseUrl';
 export { sampleSchemaInput } from './schemaSampleInput';
 export type { SampleSchemaOptions } from './schemaSampleInput';
 export { TEST_DATA_PREFIX, createTestDataMarker } from './testDataMarker';

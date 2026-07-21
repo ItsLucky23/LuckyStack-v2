@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Dev OAuth callback rewriting now distinguishes the intended pre-listen port from
+  the actually-bound port. Auto-derived direct loopback callbacks follow a port
+  hop (including IPv6 `[::1]`), while an explicitly configured localhost
+  router/reverse-proxy ingress is preserved.
+- Added `registerBoundAddress(...)` so `getBindAddress()` can expose the real
+  `node:http` address without discarding the intended-port baseline.
+
 ## [0.7.3] - 2026-07-20
 
 ### Added

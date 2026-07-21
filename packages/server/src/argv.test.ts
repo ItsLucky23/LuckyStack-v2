@@ -87,6 +87,12 @@ describe('parseServerArgv', () => {
         /port argument must be numeric/,
       );
     });
+
+    it('rejects a numeric port outside the TCP range', () => {
+      expect(() => parseServerArgv(['billing', '65536'])).toThrow(
+        /integer from 0 through 65535/,
+      );
+    });
   });
 
   describe('arity validation', () => {

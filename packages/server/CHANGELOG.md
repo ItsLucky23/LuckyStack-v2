@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Port resolution is now explicitly validated and regression-tested as
+  `options.port > argv > options.defaultPort > SERVER_PORT > 80`; invalid values
+  fail before `listen`, `65535` never retries to `65536`, and `listen(0)` registers,
+  advertises, and logs the OS-assigned port from `httpServer.address()`.
+- Auto-increment, dev advertisement, and OAuth now use the same canonical
+  `resolveEnvKey()` environment classification (`LUCKYSTACK_ENV` first).
+- Dev port-file cleanup is PID-owned, so an exiting old backend cannot remove a
+  newer backend's advertisement.
+
 ## [0.7.3] - 2026-07-20
 
 ### Fixed

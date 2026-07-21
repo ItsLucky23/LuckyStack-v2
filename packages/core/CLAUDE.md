@@ -41,8 +41,10 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `registerAvatarConfig(config: AvatarConfigInput): void` | Override avatar disk format(s) + Cache-Control header. | -> docs/config-registry.md |
 | `getAvatarConfig(): AvatarConfig` | Read active avatar config. | -> docs/config-registry.md |
 | `DEFAULT_AVATAR_CONFIG: AvatarConfig` | Default formats `[{ extension: 'webp', contentType: 'image/webp' }]` + 24h cache. | -> docs/config-registry.md |
-| `registerBindAddress(address: { ip: string; port: number }): void` | `createLuckyStackServer` writes the resolved listen address here at boot. | -> docs/app-bootstrap.md |
-| `getBindAddress(): { ip: string; port: string }` | Resolve at call time (registry -> `SERVER_IP`/`SERVER_PORT` -> `'127.0.0.1'`/`''`). | -> docs/app-bootstrap.md |
+| `registerBindAddress(address: { ip: string; port: number }): void` | Store the intended pre-listen address; resets the OAuth pre-hop baseline. | -> docs/app-bootstrap.md |
+| `registerBoundAddress(address: { ip: string; port: number }): void` | Store the address reported by `node:http` after bind while preserving the intended baseline. | -> docs/app-bootstrap.md |
+| `getBindAddress(): { ip: string; port: string }` | Resolve the actually-bound address at call time (registry -> env -> fallback). | -> docs/app-bootstrap.md |
+| `resolveDevCallbackUrl(callbackUrl: string): string` | In non-prod, rewrite a loopback OAuth callback from the intended port to the actually-bound port; preserves explicit local ingress ports. | -> docs/app-bootstrap.md |
 | `registerRuntimeMapsProvider(provider: RuntimeMapsProvider): void` | DI slot for generated api/sync maps; called by project `server/prod/runtimeMaps.ts`. | -> docs/app-bootstrap.md |
 | `getRuntimeApiMaps(): Promise<RuntimeApiMapsResult>` | Async accessor for `{ apisObject, functionsObject }`. | -> docs/app-bootstrap.md |
 | `getRuntimeSyncMaps(): Promise<RuntimeSyncMapsResult>` | Async accessor for `{ syncObject, functionsObject }`. | -> docs/app-bootstrap.md |

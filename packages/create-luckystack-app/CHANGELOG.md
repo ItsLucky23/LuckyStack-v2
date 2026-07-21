@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The scaffold Vite proxy now updates the original proxy options as well as
+  Vite's per-request clone, so HTTP and direct WebSocket upgrades genuinely
+  follow backend port changes after Vite has started. Stale advertisements from
+  crashed processes now fall back to `ports.backend` instead of targeting a dead port.
+- Scaffold test targeting now uses `@luckystack/test-runner`'s live-port resolver
+  with `config.ports.backend` as fallback instead of hardcoding port 80.
+- Scaffold typecheck coverage now includes TypeScript scripts and Vite port
+  configuration, preventing malformed test entrypoints and proxy signatures from
+  escaping release gates.
+
 ## [0.7.0] - 2026-07-16
 
 ### Fixed

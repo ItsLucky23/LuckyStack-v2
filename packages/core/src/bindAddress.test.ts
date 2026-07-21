@@ -6,7 +6,12 @@ const setEnv = (value: string | undefined) => {
   else process.env.LUCKYSTACK_ENV = value;
 };
 
-import { registerBindAddress, getBindAddress, resolveDevCallbackUrl } from './bindAddress';
+import {
+  registerBindAddress,
+  registerBoundAddress,
+  getBindAddress,
+  resolveDevCallbackUrl,
+} from './bindAddress';
 
 describe('bindAddress registry', () => {
   const savedEnv = process.env.LUCKYSTACK_ENV;
@@ -29,60 +34,68 @@ describe('bindAddress registry', () => {
     vi.restoreAllMocks();
   });
 
-  it('reflects the last registered address', () => {
-    registerBindAddress({ ip: '127.0.0.1', port: 8081 });
+  it('reflects the address node:http reports after binding', () => {
+    registerBindAddress({ ip: '127.0.0.1', port: 8080 });
+    registerBoundAddress({ ip: '127.0.0.1', port: 8081 });
     expect(getBindAddress()).toEqual({ ip: '127.0.0.1', port: '8081' });
   });
 });
 
-describe('resolveDevCallbackUrl — OAuth follows the actually-bound dev port', () => {
+describe('resolveDevCallbackUrl — OAuth follows only a direct pre-hop callback', () => {
   const savedEnv = process.env.LUCKYSTACK_ENV;
+  const registerHop = (from: number, to: number): void => {
+    registerBindAddress({ ip: '127.0.0.1', port: from });
+    registerBoundAddress({ ip: '127.0.0.1', port: to });
+  };
 
   beforeEach(() => setEnv('development'));
   afterEach(() => setEnv(savedEnv));
 
-  it('rewrites a localhost callback port to the bound port after a hop', () => {
-    registerBindAddress({ ip: '127.0.0.1', port: 84 });
+  it('rewrites a localhost callback from the intended port to the bound port', () => {
+    registerHop(80, 84);
     expect(resolveDevCallbackUrl('http://localhost:80/auth/callback/google'))
       .toBe('http://localhost:84/auth/callback/google');
   });
 
-  it('rewrites a default-port (no explicit :80) callback base too', () => {
-    registerBindAddress({ ip: '127.0.0.1', port: 84 });
-    //? `http://localhost/...` has an implicit :80 — it must still hop to :84.
+  it('rewrites an implicit default port when it was the intended port', () => {
+    registerHop(80, 84);
     expect(resolveDevCallbackUrl('http://localhost/auth/callback/github'))
       .toBe('http://localhost:84/auth/callback/github');
   });
 
-  it('collapses the default port to no explicit port when bound == 80', () => {
-    registerBindAddress({ ip: '127.0.0.1', port: 80 });
-    //? bound :80 is the http default — keep the URL byte-stable (no :80 added),
-    //? matching how a provider redirect_uri is normally registered.
-    expect(resolveDevCallbackUrl('http://localhost:81/auth/callback/google'))
-      .toBe('http://localhost/auth/callback/google');
+  it('rewrites IPv6 loopback with the same policy as localhost CORS', () => {
+    registerHop(80, 84);
+    expect(resolveDevCallbackUrl('http://[::1]/auth/callback/github'))
+      .toBe('http://[::1]:84/auth/callback/github');
+  });
+
+  it('preserves an explicit local router or reverse-proxy ingress', () => {
+    registerHop(4100, 4101);
+    expect(resolveDevCallbackUrl('http://localhost:4000/auth/callback/google'))
+      .toBe('http://localhost:4000/auth/callback/google');
   });
 
   it('is a no-op when the callback port already matches the bound port', () => {
-    registerBindAddress({ ip: '127.0.0.1', port: 84 });
+    registerHop(80, 84);
     expect(resolveDevCallbackUrl('http://localhost:84/auth/callback/google'))
       .toBe('http://localhost:84/auth/callback/google');
   });
 
-  it('leaves a non-localhost (remote dev backend) base untouched', () => {
-    registerBindAddress({ ip: '127.0.0.1', port: 84 });
+  it('leaves a non-localhost backend untouched', () => {
+    registerHop(80, 84);
     expect(resolveDevCallbackUrl('https://staging.example.com/auth/callback/google'))
       .toBe('https://staging.example.com/auth/callback/google');
   });
 
-  it('is a no-op in production (no hop; public domain has no port to chase)', () => {
+  it('is a no-op in production', () => {
     setEnv('production');
-    registerBindAddress({ ip: '127.0.0.1', port: 84 });
+    registerHop(80, 84);
     expect(resolveDevCallbackUrl('http://localhost:80/auth/callback/google'))
       .toBe('http://localhost:80/auth/callback/google');
   });
 
   it('returns an unparseable input unchanged', () => {
-    registerBindAddress({ ip: '127.0.0.1', port: 84 });
+    registerHop(80, 84);
     expect(resolveDevCallbackUrl('not-a-url')).toBe('not-a-url');
   });
 });

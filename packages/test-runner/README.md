@@ -19,12 +19,14 @@ import {
   runRateLimitTests,
   runFuzzTests,
   resetServerState,
+  resolveTestBaseUrl,
   logContractSummary,
 } from '@luckystack/test-runner';
 import { apiMethodMap } from './src/_sockets/apiMethodMap.generated';
 import { apiMetaMap } from './src/_sockets/apiMetaMap.generated';
+import { ports } from './config.ports';
 
-const baseUrl = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80';
+const baseUrl = resolveTestBaseUrl({ fallbackUrl: `http://localhost:${ports.backend}` });
 const contract = await runContractTests({ apiMethodMap, baseUrl });
 logContractSummary(contract);
 

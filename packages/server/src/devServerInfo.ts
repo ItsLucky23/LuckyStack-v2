@@ -40,13 +40,17 @@ export const writeDevServerInfo = (ip: string, port: number): void => {
   }
 };
 
-//? Remove the file on a clean exit so a later `npm run client` started without a
-//? backend doesn't proxy to a dead port. Silently ignores a missing file.
+//? Remove the file on a clean exit ONLY when this process still owns the current
+//? advertisement. Two dev backends can overlap while one hops off a busy port;
+//? the older process must not erase the newer process's port when it exits.
 export const clearDevServerInfo = (): void => {
   try {
-    fs.rmSync(devServerInfoPath(), { force: true });
+    const file = devServerInfoPath();
+    const info = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<DevServerInfo>;
+    if (info.pid !== process.pid) return;
+    fs.rmSync(file, { force: true });
   } catch {
-    //? Ignore — a leftover file is rewritten on the next dev boot, and the proxy
-    //? falls back to SERVER_PORT when it points at a port nothing answers on.
+    //? Missing/malformed/locked files are harmless. A later successful server
+    //? boot replaces the advertisement; cleanup never blocks exit.
   }
 };

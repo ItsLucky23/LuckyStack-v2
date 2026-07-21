@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (30)
+## Decisions (31)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -43,6 +43,7 @@
 | 0028 | Support node and bun through socket.io on node:http; do NOT build a Bun.serve / native-WS socket abstraction | 🟢 accepted | runtime, sockets, bun, architecture, packaging | — | `docs/decisions/0028-keep-socketio-on-nodehttp-both-runtimes.md` |
 | 0029 | Shared API and sync type maps accept only JSON-stable contracts | 🟢 accepted | devkit, api, sync, types, json, transport | — | `docs/decisions/0029-transport-contracts-are-json-stable.md` |
 | 0030 | Secret refresh rebuilds the complete project registration instead of patching the active registry | 🟢 accepted | core, config, secret-manager, cors, auth | — | `docs/decisions/0030-secret-refresh-reregisters-complete-project-config.md` |
+| 0031 | OAuth port hopping preserves an explicitly configured local ingress | 🟢 accepted | core, server, oauth, ports, router | — | `docs/decisions/0031-oauth-port-hop-preserves-explicit-local-ingress.md` |
 
 ## Summaries
 
@@ -296,6 +297,16 @@ Consumer config defines a factory for its complete `registerProjectConfig` input
 
 → `docs/decisions/0030-secret-refresh-reregisters-complete-project-config.md`
 
+### 0031 — OAuth port hopping preserves an explicitly configured local ingress
+
+**0031** · accepted · tags: core, server, oauth, ports, router · 2026-07-21
+
+Core retains two bind values:
+
+**Governs** (`//? @adr 0031`): `packages/core/src/bindAddress.ts`
+
+→ `docs/decisions/0031-oauth-port-hop-preserves-explicit-local-ingress.md`
+
 ## Code governed by decisions
 
 > Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.
@@ -303,6 +314,7 @@ Consumer config defines a factory for its complete `registerProjectConfig` input
 
 | File | ADR | Decision |
 | --- | --- | --- |
+| `packages/core/src/bindAddress.ts` | 0031 | OAuth port hopping preserves an explicitly configured local ingress |
 | `packages/core/src/hooks/types.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
 | `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
 | `packages/login/src/accountStrategy.ts` | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant |

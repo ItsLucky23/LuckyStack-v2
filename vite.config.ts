@@ -1,14 +1,14 @@
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { IncomingMessage, ServerResponse } from 'node:http'
-import { defineConfig, type ProxyOptions } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 //? Under rolldown-vite (Vite 8) the oxc-based `@vitejs/plugin-react` is faster
 //? than `@vitejs/plugin-react-swc` when no SWC plugins are used, and silences
 //? the "switch to @vitejs/plugin-react" startup hint. See https://vite.dev/rolldown.
 import react from '@vitejs/plugin-react'
 //? Single source of truth for the backend port fallback (config.ports.ts).
 import { ports } from './config.ports'
+import { createDynamicProxyOptions, isProcessRunning, type DynamicProxyOptions } from './viteBackendProxy'
 
 const fromRoot = (relativePath: string) => fileURLToPath(new URL(relativePath, import.meta.url));
 
@@ -24,8 +24,14 @@ const readBackendPort = (fallback: string): string => {
       path.join(process.cwd(), 'node_modules', '.luckystack', 'dev-server.json'),
       'utf8',
     );
-    const info = JSON.parse(raw) as { port?: number };
-    return info.port ? String(info.port) : fallback;
+    const info = JSON.parse(raw) as { port?: unknown; pid?: unknown };
+    return typeof info.port === 'number'
+      && Number.isInteger(info.port)
+      && info.port > 0
+      && info.port <= 65_535
+      && isProcessRunning(info.pid)
+      ? String(info.port)
+      : fallback;
   } catch {
     return fallback;
   }
@@ -56,32 +62,25 @@ const isIgnoredDevWatchPath = (filePath: string): boolean => {
   );
 };
 
-export default defineConfig(({ command }) => {
+export default defineConfig(({ command, mode }) => {
   const isProduction = command === 'build';
+  const env = loadEnv(mode, process.cwd(), '');
 
   //? Proxy target: a running local router (ROUTER_PORT, cluster-dev) wins, else
   //? the local backend on `config.ports.ts` `backend` — following an
-  //? auto-incremented port advertised in dev-server.json.
-  const ip = process.env.SERVER_IP || '127.0.0.1';
-  const routerPort = process.env.ROUTER_PORT && /^\d+$/.test(process.env.ROUTER_PORT) ? process.env.ROUTER_PORT : undefined;
+  //? auto-incremented port advertised in dev-server.json. `loadEnv` is required:
+  //? Vite evaluates this config before it exposes `.env` values on process.env.
+  const ip = env.SERVER_IP || '127.0.0.1';
+  const routerPort = env.ROUTER_PORT && /^\d+$/.test(env.ROUTER_PORT) ? env.ROUTER_PORT : undefined;
   const backendTarget = (): string =>
     routerPort
       ? `http://${ip}:${routerPort}`
       : `http://${ip}:${readBackendPort(String(ports.backend))}`;
 
-  //? Vite's proxy has no live `router` option, but `bypass` runs per request with
-  //? the shared options object — set `target` there so every proxied request hits
-  //? the CURRENT backend port. socket.io's HTTP polling handshake passes through
-  //? here first and mutates the object, carrying the WS upgrade to the right port.
-  const followBackend = (_req: IncomingMessage, _res: ServerResponse, options: ProxyOptions): undefined => {
-    options.target = backendTarget();
-    return undefined;
-  };
-  const entry = (extra: ProxyOptions = {}): ProxyOptions => ({
-    target: backendTarget(),
-    bypass: followBackend,
-    ...extra,
-  });
+  const entry = (extra: DynamicProxyOptions = {}) => createDynamicProxyOptions(
+    backendTarget,
+    extra,
+  );
 
   return {
     base: '/',
@@ -101,10 +100,10 @@ export default defineConfig(({ command }) => {
           return ignored.some(pattern => pattern.test(id));
         } : [],
       },
-      //? The Sentry-enabled app shell is ~680 kB minified (~216 kB gzip). Set an
-      //? explicit reviewed budget above that measured baseline instead of using
-      //? Vite's generic 500 kB warning threshold.
-      chunkSizeWarningLimit: 750,
+      //? The production-only dead-code elimination now folds the app shell into
+      //? one ~882 kB minified chunk (~274 kB gzip). Keep an explicit reviewed
+      //? 900 kB budget above that measured baseline instead of Vite's generic one.
+      chunkSizeWarningLimit: 900,
       target: 'esnext',
     },
     resolve: {
@@ -133,6 +132,7 @@ export default defineConfig(({ command }) => {
       __IS_PROD__: isProduction,
     },
     server: {
+      port: ports.frontend,
       watch: {
         //? Polling is OFF by default — native fs events are far cheaper and work
         //? on local NTFS/macOS/Linux. Set `VITE_USE_POLLING=1` only when the

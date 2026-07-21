@@ -247,7 +247,7 @@ const router = createBrowserRouter([{
 //? Dev-only by design: vconsole contains direct eval and must never enter a
 //? production artifact. The compile-time DEV guard lets Vite remove the dynamic
 //? import completely; the config toggle then controls local mobile debugging.
-if (import.meta.env.DEV && mobileConsole) {
+if (!__IS_PROD__ && mobileConsole) {
   const { default: VConsole } = await import('vconsole');
   new VConsole();
 }

@@ -4,7 +4,7 @@
 //? per CLAUDE.md). Run `npm run server` in another terminal first.
 //?
 //? Config via env:
-//?   TEST_BASE_URL          — defaults to http://localhost:80
+//?   TEST_BASE_URL          — override; otherwise live dev port → ports.backend fallback
 //?   TEST_SKIP              — comma-separated `<page>/<name>` to skip
 //?   TEST_AUTH_TOKEN        — applied as session cookie to sweep layers
 //?   TEST_FILTER            — substring match against `<page>/<name>/<version>`

@@ -40,6 +40,7 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 | `runFuzzCheck({ endpoint, baseUrl, headers? })` | Single-endpoint crash-resistance fuzz | → docs/fuzz-tests.md |
 | `runFuzzTests({ apiMethodMap, baseUrl, skip?, headers?, onResult? })` | Sweep fuzz layer (nightly CI) | → docs/fuzz-tests.md |
 | `resetServerState({ baseUrl, token? })` | POST naar `/_test/reset` om DB+Redis schoon te maken | → docs/rate-limit-tests.md |
+| `resolveTestBaseUrl({ cwd?, fallbackUrl? })` | Resolves `TEST_BASE_URL` → actually-bound dev port advertisement → caller fallback, so an auto-hop does not create false connection failures. | → docs/contract-tests.md |
 | `sampleSchemaInput(schema, options?)` | Genereert Zod-valid sample payload uit een schema. `options.stringPrefix` tagt UNCONSTRAINED strings (finding #98) — format/checked strings blijven ongeprefixt zodat ze valid blijven. | → docs/contract-tests.md |
 | `createTestDataMarker()` / `TEST_DATA_PREFIX` | Run-unique `lstest_<uuid>_` marker (+ vaste `lstest_` prefix-constant) waarmee `runAllTests` gegenereerde test-strings identificeerbaar maakt. | → docs/contract-tests.md |
 | `logContractResult(result)` | Pretty-print één `ContractCheckResult` | → docs/extension-hooks.md |
@@ -76,6 +77,7 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 
 ## Config keys (env vars + register* slots)
 
+- `TEST_BASE_URL` (env, test process) — explicit target override consumed first by `resolveTestBaseUrl`; otherwise it reads `node_modules/.luckystack/dev-server.json` and then uses the supplied config-derived fallback.
 - `NODE_ENV` (env, server-side) — `/_test/reset` is automatisch beschikbaar wanneer NIET `production`.
 - `TEST_RESET_TOKEN` (env, optional, server-side) — wanneer gezet moet `resetServerState({ token })` deze meesturen als `X-Test-Reset-Token`. Verplicht voor staging/preview deploys die het endpoint over het netwerk exposen.
 - `RunRateLimitTestsInput.maxRateLimitToTest` (default `50`) — endpoints met hogere `rateLimit` worden geskipt om duizenden requests in CI te vermijden.

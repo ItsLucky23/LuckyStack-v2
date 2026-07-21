@@ -11,6 +11,8 @@
 //? of their `server.ts` so the parsed port lands in `process.env.SERVER_PORT`
 //? before `config.ts` (top-level `backendUrl` const) is evaluated.
 
+import { normalizeServerPort } from './portResolution';
+
 export interface ParsedServerArgv {
   bundles: string[];
   port: number | null;
@@ -43,7 +45,7 @@ export const parseServerArgv = (argv: string[]): ParsedServerArgv => {
         `Usage: npm run server -- <bundle[,bundle...]> [port]`,
       );
     }
-    port = Number.parseInt(portArg, 10);
+    port = normalizeServerPort(portArg, 'port argument');
   }
 
   return { bundles, port };

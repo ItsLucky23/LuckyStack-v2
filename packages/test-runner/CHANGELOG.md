@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `resolveTestBaseUrl({ cwd?, fallbackUrl? })` centralizes live-test target
+  resolution: explicit `TEST_BASE_URL`, then the backend's actually-bound dev
+  port advertisement (only while its owner PID is alive), then the caller's
+  config-derived fallback.
+
 ## [0.5.0] - 2026-07-11
 
 ### Changed

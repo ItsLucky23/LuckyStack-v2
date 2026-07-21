@@ -124,6 +124,19 @@ Type-to-sample table:
 
 This is NOT a property-based generator. It always returns the same value for the same schema. Swap in `fast-check` if you need randomized fuzz that respects the schema.
 
+### `resolveTestBaseUrl(options?)`
+
+Resolve the live server target for test entrypoints. Priority is: non-empty `TEST_BASE_URL`, a valid integer port from `<cwd>/node_modules/.luckystack/dev-server.json` whose owner PID is still alive, then `fallbackUrl` (default `http://localhost:80`). Generated projects pass `http://localhost:${ports.backend}` as the fallback, so config changes, dev auto-increment hops, and stale crash leftovers remain truthful.
+
+```ts
+resolveTestBaseUrl(options?: {
+  cwd?: string;
+  fallbackUrl?: string;
+}): string
+```
+
+This helper does not start or probe a server; connection failures remain visible to the actual test layer.
+
 ## Types
 
 ```ts
@@ -178,11 +191,13 @@ import {
   runContractTests,
   logContractResult,
   logContractSummary,
+  resolveTestBaseUrl,
 } from '@luckystack/test-runner';
+import { ports } from './config.ports';
 
 const summary = await runContractTests({
   apiMethodMap,
-  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
+  baseUrl: resolveTestBaseUrl({ fallbackUrl: `http://localhost:${ports.backend}` }),
   onResult: logContractResult,
 });
 
