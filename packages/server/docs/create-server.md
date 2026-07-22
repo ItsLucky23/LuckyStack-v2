@@ -1,6 +1,6 @@
 # Create Server (`createLuckyStackServer` + `bootstrapLuckyStack`)
 
-> Deep specs. Bron: `packages/server/src/createServer.ts`, `packages/server/src/bootstrap.ts`, `packages/server/src/verifyBootstrap.ts`, `packages/server/src/hookPayloads.ts`, `packages/server/src/types.ts`. Bijgewerkt: 2026-07-20.
+> Deep specs. Bron: `packages/server/src/createServer.ts`, `packages/server/src/bootstrap.ts`, `packages/server/src/verifyBootstrap.ts`, `packages/server/src/hookPayloads.ts`, `packages/server/src/types.ts`. Bijgewerkt: 2026-07-22.
 
 ## Overview
 
@@ -20,7 +20,7 @@ Boot order (effective for both entries):
 5. In dev mode (`enableDevTools !== false` and `NODE_ENV !== 'production'`): `initConsolelog()` + dynamic-import `@luckystack/devkit` -> `initializeAll()` + `setupWatchers()`. Initialization status is shared with API/sync dispatchers and `/readyz`; a fatal devkit error keeps all three fail-closed with 503. Install `SIGINT` / `SIGTERM` handlers that force-exit.
 6. `writeBootUuid()` writes a fresh boot UUID to Redis so `/_health` becomes truthful and the router can detect rolling restarts.
 7. Construct `http.createServer(handleHttpRequest)` and `loadSocket(httpServer, { maxHttpBufferSize })`.
-8. Return `{ httpServer, ioServer, listen }`. The HTTP server has NOT started listening yet; the caller invokes `listen()` to bind.
+8. Return `{ httpServer, ioServer, listen }`. The HTTP server has NOT started listening yet; after `listen()` binds successfully it starts a non-overlapping boot-UUID heartbeat at one third of the configured TTL. `stop()` / `close()` cancels that heartbeat before graceful shutdown.
 
 ## API Reference
 

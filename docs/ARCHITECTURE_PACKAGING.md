@@ -1312,7 +1312,7 @@ Completed:
 3. **Redis-backed router health state** (`packages/router/src/redisHealthStore.ts`) — keys `router:health:<envKey>:<service>`, pub/sub channel `router:health:events:<envKey>`. Routers keep an in-memory cache hydrated from Redis and updated via subscribe; local resolve reads stay sync. Resolver accepts optional `healthStore` to swap the in-memory Map transparently. Startup hard-fails when shared Redis is mandated (current env has `fallback`) and Redis is unreachable — smoke-tested: Redis down → `Error: [router] split/fallback mode requires shared Redis...`.
 
 4. **Boot-time shared-Redis handshake** (`packages/router/src/bootHandshake.ts` + `packages/core/src/bootUuid.ts` + `/_health` endpoint in `server/server.ts`):
-   - On backend startup, `writeBootUuid()` writes `luckystack:boot:<env>` (TTL 1h) with a fresh UUID.
+   - On backend startup, `writeBootUuid()` writes `luckystack:boot:<env>` (TTL 1h) with a fresh UUID. After HTTP listen succeeds, an unref'd, non-overlapping heartbeat renews the current value every TTL/3; if Redis recovered after expiry it creates a new UUID. Shutdown cancels the heartbeat.
    - `GET /_health` returns `{ status, bootUuid, envKey }` from Redis.
    - On router startup (when the env has a `fallback`), the handshake probes `<fallbackBaseUrl>/_health`, then reads `luckystack:boot:<fallbackEnv>` from its own Redis and compares. Mismatch → warning (non-fatal until the `/_health` contract is fully adopted). Catches "two Redis URLs that both respond" per `deploy.config.ts` header comment.
 

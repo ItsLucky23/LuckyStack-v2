@@ -209,7 +209,15 @@ export {
   resetClientsForTests,
 } from './clients';
 export { attachSocketRedisAdapter } from './socketRedisAdapter';
-export { writeBootUuid, readBootUuid, resolveEnvKey, BOOT_KEY_PREFIX } from './bootUuid';
+export {
+  writeBootUuid,
+  readBootUuid,
+  refreshBootUuid,
+  startBootUuidHeartbeat,
+  resolveEnvKey,
+  BOOT_KEY_PREFIX,
+  type BootUuidHeartbeat,
+} from './bootUuid';
 export {
   collectSynchronizedEnvKeys,
   computeSynchronizedEnvHashes,

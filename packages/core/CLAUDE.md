@@ -165,6 +165,8 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `applySocketMiddlewares(io: SocketIOServer): void` | Wire every registered middleware into the running Socket.io server (called from `@luckystack/server`'s `loadSocket`). | -> docs/socket-bootstrap.md |
 | `writeBootUuid(envKey?): Promise<string>` | Write a fresh UUID to `luckystack:boot:<envKey>` with the configured TTL. | -> docs/app-bootstrap.md |
 | `readBootUuid(envKey?): Promise<string \| null>` | Read the boot UUID (router cross-checks against `/_health`). | -> docs/app-bootstrap.md |
+| `refreshBootUuid(envKey?): Promise<void>` | Extend the existing environment UUID without rotating it; recreate it when Redis recovered after expiry. | -> docs/app-bootstrap.md |
+| `startBootUuidHeartbeat(envKey?): BootUuidHeartbeat` | Start a non-overlapping, unref'd TTL/3 refresh loop; `stop()` cancels it during server shutdown. | -> docs/app-bootstrap.md |
 | `resolveEnvKey(): string` | `LUCKYSTACK_ENV` -> `NODE_ENV` -> `'development'`. | -> docs/app-bootstrap.md |
 | `BOOT_KEY_PREFIX: 'luckystack:boot:'` | Constant — single source of truth so router can't drift. | -> docs/app-bootstrap.md |
 | `collectSynchronizedEnvKeys()` / `computeSynchronizedEnvHashes(bootUuid?)` / `hashSynchronizedValue(value, bootUuid?)` | Cross-env drift detection helpers for the router boot handshake. Both hash helpers now honour `http.healthHash` (default `'plain'` = byte-identical to before); the optional `bootUuid?` arg is only needed when `http.healthHash.salt === '@bootUuid'`. Zero-arg callers unchanged. | -> docs/app-bootstrap.md |
