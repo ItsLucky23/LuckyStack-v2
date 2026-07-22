@@ -14,8 +14,9 @@ import {
   safeDestroy,
   isOriginFormTarget,
   isHostPinned,
-  normalizeForwardedProto,
+  resolveForwardedProto,
   buildForwardedFor,
+  type TrustedProxyMatcher,
 } from './proxyUtils';
 
 //? Bound the upstream-handshake leg. A backend that accepts the TCP connection
@@ -47,6 +48,8 @@ export interface CreateWsProxyInput {
    * Defaults to `UPSTREAM_HANDSHAKE_TIMEOUT_MS`.
    */
   upstreamHandshakeTimeoutMs?: number;
+  /** Trust gate for an immediately-connected TLS proxy. Omit to trust none. */
+  isTrustedProxy?: TrustedProxyMatcher;
 }
 
 //? Write a minimal HTTP status line to a not-yet-upgraded client socket, then
@@ -60,7 +63,7 @@ const writeStatusAndDestroy = (socket: Socket, statusCode: number, statusMessage
   safeDestroy(socket);
 };
 
-export const createWsProxy = ({ resolver, wsTargetService, upstreamHandshakeTimeoutMs }: CreateWsProxyInput) => {
+export const createWsProxy = ({ resolver, wsTargetService, upstreamHandshakeTimeoutMs, isTrustedProxy }: CreateWsProxyInput) => {
   const service = wsTargetService ?? DEFAULT_WS_SERVICE;
   const handshakeTimeoutMs = upstreamHandshakeTimeoutMs ?? UPSTREAM_HANDSHAKE_TIMEOUT_MS;
 
@@ -149,6 +152,7 @@ export const createWsProxy = ({ resolver, wsTargetService, upstreamHandshakeTime
       getUpgraded: () => upgraded,
       setUpgraded: (v) => { upgraded = v; },
       setUpstreamRequest: (r) => { upstreamRequest = r; },
+      isTrustedProxy,
     });
   };
 };
@@ -166,6 +170,7 @@ interface OpenUpstreamCtx {
   getUpgraded: () => boolean;
   setUpgraded: (v: boolean) => void;
   setUpstreamRequest: (r: ClientRequest) => void;
+  isTrustedProxy?: TrustedProxyMatcher;
 }
 
 const openUpstream = async (
@@ -177,6 +182,7 @@ const openUpstream = async (
   const {
     pathname, resolved, targetUrl, service, transport, handshakeTimeoutMs,
     onClientGone, getSettled, setSettled, getUpgraded, setUpgraded, setUpstreamRequest,
+    isTrustedProxy,
   } = ctx;
 
   //? `proxyRequestGate` is the fail-CLOSED deny gate for WebSocket upgrades.
@@ -223,7 +229,11 @@ const openUpstream = async (
       //? rather than trusted from the inbound header.
       'x-forwarded-for': buildForwardedFor(req.socket.remoteAddress),
       'x-forwarded-host': req.headers.host ?? '',
-      'x-forwarded-proto': normalizeForwardedProto(req.headers['x-forwarded-proto']),
+      'x-forwarded-proto': resolveForwardedProto(
+        req.headers['x-forwarded-proto'],
+        req.socket.remoteAddress,
+        isTrustedProxy,
+      ),
       'x-luckystack-resolved-env': resolved.resolvedEnvKey,
       'x-luckystack-via-fallback': resolved.viaFallback ? '1' : '0',
     },

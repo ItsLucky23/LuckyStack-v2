@@ -1,5 +1,5 @@
 import { getOAuthProviders, isFullOAuthProvider, type FullOAuthProvider, type OAuthUserData } from './oauthProviders';
-import { getPostLoginRedirect } from './redirectResolver';
+import { getPostLoginRedirect, resolvePostLoginRedirectAgainstDefault } from './redirectResolver';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { URLSearchParams } from 'node:url';
 import { tryCatch, tryCatchSync, redis as redisClient, getUploadsDir, dispatchHook, getLogger, formatKey, getProjectConfig, getCookieValue, resolveDevCallbackUrl } from '@luckystack/core';
@@ -1161,7 +1161,9 @@ const resolvePostLoginRedirect = async ({
     getLogger().warn(`[oauth] postLoginRedirect resolver threw`, { message: resolverError.message });
     return fallbackUrl;
   }
-  if (resolved && isAllowedRedirectUrl(resolved)) return resolved;
+  if (resolved && isAllowedRedirectUrl(resolved)) {
+    return resolvePostLoginRedirectAgainstDefault(resolved, fallbackUrl);
+  }
   if (resolved) {
     getLogger().warn(
       `[oauth] postLoginRedirect returned a URL not in allowed origins — falling back`,

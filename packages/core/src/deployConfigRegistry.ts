@@ -63,6 +63,14 @@ export interface DeployRoutingShape {
    */
   websocketService?: string;
   /**
+   * Immediate TLS proxy addresses/CIDRs allowed to assert
+   * `x-forwarded-proto: https`. Empty/undefined trusts nobody, so a client
+   * directly reaching the router cannot spoof secure-scheme backend logic.
+   * Examples: `['127.0.0.1/32', '::1/128']` for same-host nginx/Caddy, or the
+   * private subnet of a managed load balancer.
+   */
+  trustedProxyCidrs?: string[];
+  /**
    * Path the router exposes for its OWN health/liveness (distinct from the
    * backend `/_health` boot-handshake endpoint). DEFAULT undefined → router
    * uses its built-in default.

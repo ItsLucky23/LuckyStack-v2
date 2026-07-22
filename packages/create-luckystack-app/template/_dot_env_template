@@ -38,6 +38,11 @@ EXTERNAL_ORIGINS={{EXTERNAL_ORIGINS}}
 # Project namespace — used as the prefix for Redis session/active-user keys.
 PROJECT_NAME={{PROJECT_NAME}}
 
+# TOTP encryption keys are secrets. Keep the current primary and the JSON
+# decrypt-only legacy keyring in `.env.local`; successful proofs migrate rows.
+# TOTP_ENCRYPTION_KEY=<current-primary>
+# TOTP_ENCRYPTION_LEGACY_KEYS=["previous-primary"]
+
 # Redis connection (the framework defaults match these values).
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379

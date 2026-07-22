@@ -61,10 +61,13 @@ const result = await sendEmail({
   subject: 'Welcome aboard',
   html,
   text,
+  // Reuse this exact key if the same logical email is retried.
+  idempotencyKey: 'welcome:user-123:v1',
 });
 
 if (!result.ok) {
-  console.error('email failed', result.reason);
+  console.error('email failed', result.reason, result.deliveryOutcome);
+  // `unknown` means the provider may still deliver — never retry with a new key.
 }
 ```
 
@@ -83,9 +86,9 @@ import type { EmailSender } from '@luckystack/email';
 
 export const MyCustomSender: EmailSender = {
   name: 'my-custom',
-  send: async (message) => {
-    // call your provider's API
-    // return { ok: true, id: '...' } or { ok: false, reason: '...' }
+  send: async (message, context) => {
+    // Pass context?.signal + context?.idempotencyKey when your provider supports them.
+    // Return { ok: true, id: '...' } or a typed failure; do not throw.
   },
 };
 ```
@@ -158,7 +161,7 @@ Payloads are augmented onto `@luckystack/core`'s `HookPayloads` map via `package
 
 | Export | Purpose |
 | --- | --- |
-| `sendEmail(message)` | Send an email through the registered sender. Returns `{ ok: true, id } \| { ok: false, reason, cause? }`. |
+| `sendEmail(message)` | Send through the registered sender. Supports `signal` + `idempotencyKey`; failures may include `deliveryOutcome: 'not-sent' | 'unknown'`. |
 | `renderEmailLayout({ title, intro, ctaLabel?, ctaUrl?, outro?, footer?, brand?, accent? })` | Render a clean responsive HTML email + plain-text fallback. |
 | `ConsoleSender()` / `ResendSender(opts)` / `SmtpSender(opts)` | Built-in adapters. |
 | `autoSelectEmailSender(opts?)` | Pick the most-capable adapter for the current env (`Resend → SMTP → Console`). Accepts `{ force }`. |

@@ -101,7 +101,15 @@ export {
   listEmailSenderNames,
   isEmailSenderRegistered,
 } from './emailRegistry';
-export type { EmailSender, EmailMessage, EmailAttachment, EmailResult, EmailSenderRegistry } from './emailRegistry';
+export type {
+  EmailDeliveryOutcome,
+  EmailSendContext,
+  EmailSender,
+  EmailMessage,
+  EmailAttachment,
+  EmailResult,
+  EmailSenderRegistry,
+} from './emailRegistry';
 export {
   registerDeployConfig,
   getDeployConfig,
@@ -251,7 +259,7 @@ export type { CsrfConfig, CsrfCookieOptions } from './csrfConfig';
 export { serveAvatar } from './serveAvatars';
 export { processUpload } from './processUpload';
 export type { ProcessUploadInput, ProcessUploadResult } from './processUpload';
-export { registerBindAddress, getBindAddress, resolveDevCallbackUrl } from './bindAddress';
+export { registerBindAddress, registerBoundAddress, getBindAddress, resolveDevCallbackUrl } from './bindAddress';
 export {
   registerAvatarConfig,
   getAvatarConfig,

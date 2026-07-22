@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
+### Added
+
+- `EmailSender.send(message, context?)` now receives a cooperative abort signal
+  and optional stable idempotency key. Failed `EmailResult`s can distinguish
+  definitive `not-sent` from an `unknown` post-dispatch outcome.
+- Deploy routing config now includes `trustedProxyCidrs`, the explicit
+  immediate-peer trust boundary used by the HTTP and WebSocket router paths.
+
+### Fixed
+
+- Automatic Redis rebuilds after secret resolution now replace only a
+  framework-owned default client. A consumer registered through
+  `registerRedisClient(customClient)` keeps precedence across rotation instead
+  of being disconnected and downgraded to the host/port default.
+- Dev OAuth callback rewriting now distinguishes the intended pre-listen port from
+  the actually-bound port. Auto-derived direct loopback callbacks follow a port
+  hop (including IPv6 `[::1]`), while an explicitly configured localhost
+  router/reverse-proxy ingress is preserved.
+- Added `registerBoundAddress(...)` so `getBindAddress()` can expose the real
+  `node:http` address without discarding the intended-port baseline.
+
 ## [0.7.3] - 2026-07-20
 
 ### Added

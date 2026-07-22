@@ -4,6 +4,21 @@ All notable changes to `@luckystack/cron` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow the
 monorepo's lockstep versioning.
 
+## [Unreleased]
+
+## [0.7.4] - 2026-07-22
+
+### Fixed
+
+- Every intentional background promise now has a terminal observer, the leader
+  in-flight latch resets in `finally`, and per-run timer/running state is cleaned
+  even when an injected lease/infrastructure primitive rejects. Background
+  failures are logged instead of becoming unhandled rejections or wedging later
+  scheduler ticks.
+- A `runOnStart` job registered after this process already acquired leadership
+  now runs on the next tick instead of waiting for leadership to be lost and
+  reacquired.
+
 ## [0.5.0] - 2026-07-11
 
 ### Added

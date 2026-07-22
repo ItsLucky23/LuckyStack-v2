@@ -65,6 +65,7 @@ describe('ResendSender', () => {
         html: '<p>Hi</p>',
         text: 'Hi',
       }),
+      undefined,
     );
   });
 
@@ -72,7 +73,26 @@ describe('ResendSender', () => {
     sendMock.mockResolvedValue({ data: { id: 'x' }, error: null });
     const sender = ResendSender({ apiKey: 'rk_123', from: 'default@acme.test' });
     await sender.send({ to: 'u@test.dev', subject: 'S', html: '<p>x</p>' });
-    expect(sendMock).toHaveBeenCalledWith(expect.objectContaining({ from: 'default@acme.test' }));
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({ from: 'default@acme.test' }),
+      undefined,
+    );
+  });
+
+  it('passes the stable idempotency key through Resend request options', async () => {
+    sendMock.mockResolvedValue({ data: { id: 'deduped' }, error: null });
+    const sender = ResendSender({ apiKey: 'rk_123' });
+    const controller = new AbortController();
+
+    await sender.send(message, {
+      signal: controller.signal,
+      idempotencyKey: 'welcome:user-1:v1',
+    });
+
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'user@test.dev' }),
+      { idempotencyKey: 'welcome:user-1:v1' },
+    );
   });
 
   it('returns the provider error message when the SDK reports an error', async () => {

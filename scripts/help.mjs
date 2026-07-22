@@ -27,7 +27,7 @@ const META = {
   server: {
     desc: 'Start the backend dev server via the supervisor (hot-reloads on config.ts / .env / server changes). This is your normal dev command.',
     example: 'npm run server',
-    params: 'SERVER_PORT_AUTO_INCREMENT=1 auto-picks the next free port if SERVER_PORT is taken (off by default).',
+    params: 'Auto-increment defaults ON in development and OFF in production; set SERVER_PORT_AUTO_INCREMENT=0 to pin/fail on the configured port.',
   },
   'server:direct': { desc: 'Boot the backend ONCE without the supervisor (no hot reload).', example: 'npm run server:direct' },
   cluster: {

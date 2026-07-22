@@ -1,5 +1,5 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, tryCatchSync, isProduction, resolveEnvKey, dispatchHook } from '@luckystack/core';
+import { registerBindAddress, registerBoundAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, tryCatchSync, resolveEnvKey, dispatchHook } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
@@ -9,6 +9,7 @@ import { canResolve } from './capabilities';
 import { runGracefulShutdown } from './stopServer';
 import { writeDevServerInfo, clearDevServerInfo } from './devServerInfo';
 import { markDevToolsInitFailed } from './devToolsStatus';
+import { normalizeServerPort, resolveServerPort } from './portResolution';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -134,24 +135,25 @@ export const listenLuckyStackServer = (
   callback?: () => void,
 ): Promise<HttpServer> =>
   new Promise<HttpServer>((resolve, reject) => {
-    const startPort = typeof port === 'string' ? Number.parseInt(port, 10) : port;
+    const startPort = normalizeServerPort(port);
+    const environmentKey = resolveEnvKey();
+    const production = environmentKey === 'production';
+    const test = environmentKey === 'test';
     //? Auto-pick the next free port resolution:
     //? - When `SERVER_PORT_AUTO_INCREMENT` is set EXPLICITLY it always wins
     //?   (`1`/`true` -> on, `0`/`false` -> off), so a consumer can force either
     //?   behaviour in any environment.
-    //? - When it is NOT set we default to ON in dev and OFF in production. The
-    //?   dev-vs-prod signal is `isProduction` from `@luckystack/core` (NODE_ENV)
-    //?   — the same canonical flag this file already uses to gate dev tooling.
-    //? Prod stays OFF by default because `SERVER_PORT` also drives `config.ts`'s
-    //? `backendOrigin` / OAuth callback base; silently moving the listen port
-    //? there would leave clients talking to the old one. In dev a port clash is
-    //? almost always a leftover `npm run server`, so quietly hopping to the next
-    //? free port is the friendlier default.
+    //? - When it is NOT set we default to ON in dev and OFF in production. One
+    //?   canonical environment key (`LUCKYSTACK_ENV` before `NODE_ENV`) drives
+    //?   auto-increment, OAuth rewriting, proxy advertisement, and dev tooling.
+    //? Prod stays OFF by default because a silently moved direct listen port can
+    //? leave external clients talking to the old one. In dev a clash is usually
+    //? a leftover process, so hopping is the friendlier default.
     const autoIncrementEnv = (process.env.SERVER_PORT_AUTO_INCREMENT ?? '').toLowerCase();
     let autoIncrement: boolean;
     if (['0', 'false'].includes(autoIncrementEnv)) autoIncrement = false;
     else if (['1', 'true'].includes(autoIncrementEnv)) autoIncrement = true;
-    else autoIncrement = !isProduction;
+    else autoIncrement = !production;
 
     const tryListen = (attemptPort: number): void => {
       const onError = (err: NodeJS.ErrnoException): void => {
@@ -159,13 +161,21 @@ export const listenLuckyStackServer = (
           reject(err);
           return;
         }
-        if (autoIncrement) {
+        if (autoIncrement && attemptPort < 65_535) {
           getLogger().warn(
             `Port ${String(attemptPort)} is in use — trying ${String(attemptPort + 1)} (auto-increment; set SERVER_PORT_AUTO_INCREMENT=0 to disable). `
-              + `A previous/zombie dev server is still holding :${String(attemptPort)}: anything pinned to that port (an old browser tab, the Vite proxy's cached target, a manual client) will keep talking to the OLD process, NOT this restart. `
+              + `A previous/zombie dev server is still holding :${String(attemptPort)}: a manual client pinned there will keep talking to the OLD process, while the Vite proxy follows this restart's advertised port. `
               + `If this restart was meant to replace it, stop the process on :${String(attemptPort)} first.`,
           );
           tryListen(attemptPort + 1);
+          return;
+        }
+        if (autoIncrement) {
+          const rangeError = new RangeError(
+            'Port 65535 is already in use and auto-increment cannot select a valid higher TCP port.',
+          );
+          getLogger().error(rangeError.message);
+          reject(rangeError);
           return;
         }
         //? Truthful failure. The old code unconditionally logged "running on
@@ -183,20 +193,19 @@ export const listenLuckyStackServer = (
       httpServer.once('error', onError);
       httpServer.listen(attemptPort, ip, () => {
         httpServer.off('error', onError);
-        //? TRUTH-UP the bind registry with the port we ACTUALLY bound. The initial
-        //? `registerBindAddress` in `createLuckyStackServer` ran with the INTENDED
-        //? port, before any auto-increment hop. Every call-time reader of
-        //? `getBindAddress()` — notably `checkOrigin`'s same-origin CORS entry —
-        //? would otherwise compare against a port nothing listens on. Re-registering
-        //? here makes the registry match reality (the docstring on `bindAddress.ts`
-        //? promises "the actual listen ip/port").
-        registerBindAddress({ ip, port: attemptPort });
+        const address = httpServer.address();
+        const boundPort = typeof address === 'object' && address !== null
+          ? address.port
+          : attemptPort;
+        //? TRUTH-UP the bind registry with the port node:http ACTUALLY reports.
+        //? Reading `address().port` matters for listen(0), where the OS chooses an
+        //? ephemeral port that is different from the requested zero.
+        registerBoundAddress({ ip, port: boundPort });
         //? Dev only: advertise the ACTUALLY-bound port so the Vite proxy follows
-        //? us when auto-increment moved the listen off `SERVER_PORT`. Skipped in
-        //? production (no proxy) and under the test runner (avoid stray files +
-        //? exit handlers in unit tests). Best-effort — never blocks the boot.
-        if (!isProduction && process.env.NODE_ENV !== 'test') {
-          writeDevServerInfo(ip, attemptPort);
+        //? us when auto-increment moved the listen off the configured port. Skipped
+        //? in production and test environments. Best-effort — never blocks boot.
+        if (!production && !test) {
+          writeDevServerInfo(ip, boundPort);
           process.once('exit', clearDevServerInfo);
         }
 
@@ -208,23 +217,26 @@ export const listenLuckyStackServer = (
         //? provider console: Google/GitHub still exact-match the registered
         //? redirect URI. Surface that remaining manual step loudly. Only on an
         //? ACTUAL hop, in dev, and only when the configured base names a different port.
-        if (attemptPort !== startPort && !isProduction) {
+        if (attemptPort !== startPort && !production) {
           //? Read the configured callback base defensively — a pure-server boot
           //? may not have registered projectConfig yet, and the slot defaults to ''.
           const configuredCallbackBase = tryCatchSync(() => getProjectConfig().oauthCallbackBase)[1] ?? '';
-          const callbackPort = /:(\d+)(?:\/|$)/.exec(configuredCallbackBase)?.[1];
-          if (callbackPort && callbackPort !== String(attemptPort)) {
+          const callbackPort = tryCatchSync(() => {
+            const callbackUrl = new URL(configuredCallbackBase);
+            return callbackUrl.port || (callbackUrl.protocol === 'https:' ? '443' : '80');
+          })[1] ?? '';
+          if (callbackPort === String(startPort) && callbackPort !== String(boundPort)) {
             getLogger().warn(
-              `OAuth port drift: the server bound :${String(attemptPort)} but your OAuth callback base is configured for :${callbackPort} `
-                + `(${configuredCallbackBase}). The framework now auto-targets :${String(attemptPort)} for OAuth so the callback reaches THIS server — `
-                + `but your provider (Google/GitHub/…) still exact-matches its registered redirect URI, so add :${String(attemptPort)} to the authorized `
+              `OAuth port drift: the server bound :${String(boundPort)} but your OAuth callback base is configured for :${callbackPort} `
+                + `(${configuredCallbackBase}). The framework now auto-targets :${String(boundPort)} for OAuth so the callback reaches THIS server — `
+                + `but your provider (Google/GitHub/…) still exact-matches its registered redirect URI, so add :${String(boundPort)} to the authorized `
                 + `redirect URIs, OR set SERVER_PORT_AUTO_INCREMENT=0 to pin :${callbackPort} (stop whatever holds it) instead of hopping.`,
             );
           }
         }
         const config = getProjectConfig();
         if (config.logging.socketStartup || config.logging.devLogs) {
-          getLogger().info(`Server is running on http://${ip}:${String(attemptPort)}/`);
+          getLogger().info(`Server is running on http://${ip}:${String(boundPort)}/`);
         }
         callback?.();
         resolve(httpServer);
@@ -259,7 +271,12 @@ export const createLuckyStackServer = async (
     requireOAuthProviders: options.requireOAuthProviders,
   });
 
-  const port = options.port ?? getParsedPort() ?? options.defaultPort ?? process.env.SERVER_PORT ?? 80;
+  const port = resolveServerPort({
+    optionsPort: options.port,
+    parsedPort: getParsedPort(),
+    defaultPort: options.defaultPort,
+    envPort: process.env.SERVER_PORT,
+  });
   const ip = options.ip ?? process.env.SERVER_IP ?? '127.0.0.1';
   const enableDevTools = options.enableDevTools ?? resolveEnvKey() !== 'production';
 
@@ -267,10 +284,7 @@ export const createLuckyStackServer = async (
   //? (e.g. `checkOrigin` building the same-origin entry) doesn't drift when
   //? the consumer passed `options.ip`/`options.port` without also setting
   //? the legacy `SERVER_IP`/`SERVER_PORT` env vars.
-  registerBindAddress({
-    ip,
-    port: typeof port === 'string' ? Number.parseInt(port, 10) : port,
-  });
+  registerBindAddress({ ip, port });
 
   if (enableDevTools) {
     await initDevTools();

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { switchOrm, ORM_SURFACES, PRISMA_USER_TYPE_IMPORT, NON_PRISMA_USER_TYPE_HEADER } from './switchOrm';
-import type { ConsumerProject } from '../lib/project';
+import { addDependency, type ConsumerProject } from '../lib/project';
 import { USER_ADAPTER_STARTERS as CLI_USER_ADAPTER_STARTERS } from './addLogin';
 import {
   PRISMA_USER_TYPE_IMPORT as SCAFFOLDER_PRISMA_IMPORT,
@@ -81,7 +81,8 @@ describe('switchOrm — prisma → drizzle (fixture render)', () => {
     seedPrismaProject();
     seedFreshDrizzleRender();
 
-    const result = switchOrm(project(), {
+    const consumerProject = project();
+    const result = switchOrm(consumerProject, {
       from: 'prisma',
       to: 'drizzle',
       dbProvider: 'postgresql',
@@ -89,6 +90,12 @@ describe('switchOrm — prisma → drizzle (fixture render)', () => {
       renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
     });
     expect(result.ok).toBe(true);
+
+    //? The manage wizard reuses this object for every later transition in the
+    //? same pass. Prove a subsequent dependency write starts from the switched
+    //? snapshot instead of serializing the old Prisma package over it.
+    expect(consumerProject.pkg.dependencies?.['drizzle-orm']).toBe('^0.45.2');
+    addDependency(consumerProject, '@luckystack/email', '^0.5.0');
 
     const pkg = JSON.parse(fs.readFileSync(path.join(consumerDir, 'package.json'), 'utf8')) as {
       dependencies: Record<string, string>;
@@ -101,6 +108,7 @@ describe('switchOrm — prisma → drizzle (fixture render)', () => {
     expect(pkg.scripts['prisma:generate']).toBeUndefined();
     expect(pkg.dependencies['drizzle-orm']).toBe('^0.45.2');
     expect(pkg.dependencies.pg).toBe('^8.16.0');
+    expect(pkg.dependencies['@luckystack/email']).toBe('^0.5.0');
     expect(pkg.devDependencies['drizzle-kit']).toBe('^0.31.0');
     expect(pkg.scripts['db:push']).toBe('drizzle-kit push');
     //? Untouched user scripts survive.

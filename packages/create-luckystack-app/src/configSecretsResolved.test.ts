@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ENV_KEYS = ['LUCKYSTACK_ENV', 'NODE_ENV', 'PUBLIC_URL', 'EXTERNAL_ORIGINS', 'SERVER_PORT'] as const;
@@ -19,6 +22,24 @@ afterEach(() => {
     if (original === undefined) Reflect.deleteProperty(process.env, key);
     else process.env[key] = original;
   }
+});
+
+describe('scaffold framework contract delivery', () => {
+  const templateFile = (relativePath: string): string => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    return fs.readFileSync(path.resolve(here, '../template', relativePath), 'utf8');
+  };
+
+  it('passes a lazy project-config loader to runAllTests', () => {
+    expect(templateFile('scripts/testAll.ts')).toContain(
+      "loadProjectConfig: async () => (await import('../config')).default",
+    );
+  });
+
+  it('documents the router trust boundary and rotatable TOTP keyring', () => {
+    expect(templateFile('deploy.config.ts')).toContain('trustedProxyCidrs?: string[]');
+    expect(templateFile('_dot_env_dot_local_template')).toContain('TOTP_ENCRYPTION_LEGACY_KEYS=');
+  });
 });
 
 describe('scaffold config survives late secret resolution', () => {

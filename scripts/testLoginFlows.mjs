@@ -179,7 +179,7 @@ if (hasGoogle) {
         ? ok(`redirect_uri matcht de backend-poort waar de server op draait (${basePort})`)
         : fail(
             `redirect_uri drift: wijst NIET naar de draaiende backend-poort (${basePort})`,
-            `${redirectUri} — oauthCallbackBase is bevroren op module-load; na een poort-hop breekt OAuth. Stop het proces op de oude poort of zet SERVER_PORT_AUTO_INCREMENT=0.`,
+            `${redirectUri} — authorize en token-exchange moeten beide de actueel gebonden directe backendpoort gebruiken; controleer bindregistratie en resolveDevCallbackUrl.`,
           );
     } else {
       fail('redirect_uri niet gevonden in Google redirect', location.slice(0, 200));

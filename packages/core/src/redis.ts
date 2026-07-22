@@ -9,6 +9,11 @@ import { applyStrayKeyPrefix } from './redisKeyFormatter';
 import { registerSecretsResolvedListener } from './secretsResolved';
 
 let cachedDefault: RedisClient | null = null;
+//? Identity of the default-slot client last installed by THIS module. Secret
+//? rotation may replace only this framework-owned registration; a different
+//? registered identity belongs to the consumer (cluster/sentinel/TLS/custom
+//? retry policy) and must keep precedence across automatic refreshes.
+let frameworkRegisteredDefault: RedisClient | null = null;
 
 //? Stop reconnecting after this many consecutive failures so a permanently
 //? unreachable / misconfigured Redis (bad creds, wrong host) doesn't hammer
@@ -143,6 +148,7 @@ export const rebuildDefaultRedisClient = (): RedisClient => {
   resetDefaultRedisClient();
   const client = constructRedisClient();
   registerRedisClient(client);
+  frameworkRegisteredDefault = client;
   if (previousRegistered && previousRegistered !== client) {
     try {
       previousRegistered.disconnect();
@@ -165,9 +171,16 @@ setDefaultRedisResolver(buildDefaultRedisClient);
 //? the resolver. `undefined` (caller doesn't know which keys changed) rebuilds
 //? defensively.
 registerSecretsResolvedListener((changedKeys) => {
-  if (changedKeys === undefined || changedKeys.some((key) => /^REDIS_/i.test(key))) {
-    rebuildDefaultRedisClient();
+  if (changedKeys !== undefined && !changedKeys.some((key) => /^REDIS_/i.test(key))) return;
+
+  const registered = isRedisClientRegistered() ? getRedisClient() : null;
+  if (registered && registered !== frameworkRegisteredDefault) {
+    //? Consumer-owned clients win by registry contract. The generic
+    //? secrets-resolved channel still notifies consumer listeners, so their
+    //? own rotation hook can construct the right cluster/sentinel/TLS client.
+    return;
   }
+  rebuildDefaultRedisClient();
 });
 
 //? Single source of truth for Redis connection params. Used by

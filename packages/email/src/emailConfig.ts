@@ -59,12 +59,14 @@ export interface EmailConfig {
   /** Numeric defaults used when the env var resolves to nothing. */
   defaults: EmailDefaultsConfig;
   /**
-   * Maximum milliseconds to wait for a single `sender.send()` call before
-   * treating it as a failure (reason `'send-timeout'`). Set to `false` to
-   * disable the timeout entirely. Default: 30 000 ms (30 s).
+   * Maximum milliseconds to wait for a single `sender.send()` call. Expiry
+   * aborts the cooperative adapter signal and returns reason `'send-timeout'`
+   * with `deliveryOutcome: 'unknown'`: provider delivery may have completed.
+   * Retry only with the same idempotency key. Set `false` to disable. Default:
+   * 30 000 ms (30 s).
    *
-   * EMAIL-O8: an SMTP/Resend call that never resolves would otherwise hang
-   * the request indefinitely.
+   * EMAIL-O8/TW-15: a hung provider must not pin the request, but stopping the
+   * wait must never be misrepresented as proof that nothing was sent.
    */
   sendTimeoutMs: number | false;
   /**

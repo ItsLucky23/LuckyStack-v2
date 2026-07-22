@@ -195,11 +195,15 @@ re-scaffolded:
    `@luckystack/email` is installed and a sender is registered. *Skipping this
    fails LOUDLY — the send logs "@luckystack/email is not installed" and the
    flow returns `login.emailCodeSendFailed`.*
-4. **`TOTP_ENCRYPTION_KEY` in `.env.local` (recommended).** A long random
-   string; encrypts TOTP secrets at rest (AES-256-GCM). *Skipping stores them
-   plaintext with a one-time boot warning; adding the key later upgrades new
-   enrollments. Use a random value, not a memorable passphrase (it is not
-   stretched).*
+4. **TOTP keyring in `.env.local` (recommended).** `TOTP_ENCRYPTION_KEY` is
+   the current long-random primary write key. New rows use AES-256-GCM as
+   `enc:v2:<key-id>:<iv>:<tag>:<ciphertext>`. To rotate, set the new primary and
+   put the old value in `TOTP_ENCRYPTION_LEGACY_KEYS` as a JSON string array.
+   Old `gcm:`/v2/plaintext rows remain readable and are lazily rewritten under
+   the primary after a successful TOTP proof; remove a legacy key only after
+   migration coverage confirms no row references it. *Skipping the primary
+   stores new enrollments plaintext with a one-time warning. Use random values,
+   not memorable passphrases (keys are SHA-256-derived, not password-stretched).*
 5. **UI — `npx luckystack update --app`** (ADR 0025). The phase-based
    `LoginForm` (email-code + 2FA challenge views) and the settings
    `TwoFactorSection` are consumer-owned `src/` files that a plain `npm install`

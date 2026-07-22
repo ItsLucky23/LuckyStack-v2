@@ -8,9 +8,11 @@
 //? in the VALUE, a server-side attempt counter, and at most ONE active code
 //? per (purpose, identity): re-issuing overwrites the previous code.
 //?
-//? Consume is at-most-once: the final DEL doubles as the winner-take-all lock
-//? (mirrors consumeOneTimeToken's atomic GET+DEL semantics for parallel
-//? verifies with the correct code).
+//? Issue and consume are each one Redis Lua transaction. This is stronger than
+//? a final DEL winner check: GET-old → SET-new → DEL used to let an in-flight
+//? verifier authenticate with the superseded hash and delete the newly issued
+//? code. Linearizing SET+counter-reset and compare+attempt+DEL means every
+//? issue/verify race has one unambiguous generation order.
 
 import crypto from 'node:crypto';
 import { formatKey, redis } from '@luckystack/core';
@@ -27,6 +29,32 @@ const attemptsKey = (purpose: EmailOtpPurpose, identity: string): string =>
   formatKey('-emailcode-attempts', `${purpose}:${normalizeIdentity(identity)}`);
 
 const hashCode = (code: string): string => crypto.createHash('sha256').update(code).digest('hex');
+
+const ISSUE_CODE_SCRIPT = `
+redis.call('set', KEYS[1], ARGV[1], 'EX', ARGV[2])
+redis.call('del', KEYS[2])
+return 1
+`;
+
+//? Return codes: 0 expired, 1 invalid, 2 valid, 3 locked. The comparison is
+//? between fixed-length SHA-256 hex strings inside Redis; raw low-entropy codes
+//? never enter Redis and are never used as keys.
+const VERIFY_CODE_SCRIPT = `
+local stored = redis.call('get', KEYS[1])
+if not stored then return 0 end
+local attempts = redis.call('incr', KEYS[2])
+local remaining = redis.call('ttl', KEYS[1])
+redis.call('expire', KEYS[2], remaining > 0 and remaining or 600)
+if attempts > tonumber(ARGV[2]) then
+  redis.call('del', KEYS[1])
+  redis.call('del', KEYS[2])
+  return 3
+end
+if stored ~= ARGV[1] then return 1 end
+redis.call('del', KEYS[1])
+redis.call('del', KEYS[2])
+return 2
+`;
 
 //? Uniform random numeric code. `crypto.randomInt` does rejection sampling
 //? internally — NO modulo bias (a plain `randomBytes % 10^n` would skew low
@@ -50,8 +78,14 @@ export interface IssueEmailCodeInput {
  */
 export const issueEmailCode = async ({ purpose, identity, ttlSeconds, digits }: IssueEmailCodeInput): Promise<string> => {
   const code = generateNumericCode(digits);
-  await redis.set(codeKey(purpose, identity), hashCode(code), 'EX', ttlSeconds);
-  await redis.del(attemptsKey(purpose, identity));
+  await redis.eval(
+    ISSUE_CODE_SCRIPT,
+    2,
+    codeKey(purpose, identity),
+    attemptsKey(purpose, identity),
+    hashCode(code),
+    String(ttlSeconds),
+  );
   return code;
 };
 
@@ -72,35 +106,18 @@ export interface VerifyEmailCodeInput {
  * code: TTL passed, never issued, or already consumed).
  */
 export const verifyEmailCode = async ({ purpose, identity, code, maxAttempts }: VerifyEmailCodeInput): Promise<EmailCodeVerdict> => {
-  const key = codeKey(purpose, identity);
-  const storedHash = await redis.get(key);
-  if (!storedHash) return 'expired';
-
-  //? Count the attempt FIRST (INCR is atomic across parallel verifies), and
-  //? give the counter the code's own remaining TTL so it can't outlive it.
-  //? If the code expired between the GET above and this TTL read (`remaining`
-  //? <= 0), still bound the counter with a short fallback so a just-INCR'd
-  //? counter can never linger without a TTL.
-  const counter = attemptsKey(purpose, identity);
-  const attempts = await redis.incr(counter);
-  const remaining = await redis.ttl(key);
-  await redis.expire(counter, remaining > 0 ? remaining : 600);
-  if (attempts > maxAttempts) {
-    await redis.del(key);
-    await redis.del(counter);
-    return 'locked';
-  }
-
-  const submitted = Buffer.from(hashCode(code.trim()));
-  const expected = Buffer.from(storedHash);
-  const matches = submitted.length === expected.length && crypto.timingSafeEqual(submitted, expected);
-  if (!matches) return 'invalid';
-
-  //? Winner-take-all consume: DEL returns how many keys were removed — 0 means
-  //? a parallel verify with the same correct code beat us to it.
-  const deleted = await redis.del(key);
-  await redis.del(counter);
-  return deleted > 0 ? 'valid' : 'expired';
+  const result = Number(await redis.eval(
+    VERIFY_CODE_SCRIPT,
+    2,
+    codeKey(purpose, identity),
+    attemptsKey(purpose, identity),
+    hashCode(code.trim()),
+    String(maxAttempts),
+  ));
+  if (result === 2) return 'valid';
+  if (result === 1) return 'invalid';
+  if (result === 3) return 'locked';
+  return 'expired';
 };
 
 /** Drop any active code + counter for the slot (e.g. after a completed login). */

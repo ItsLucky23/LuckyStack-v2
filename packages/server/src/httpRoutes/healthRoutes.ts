@@ -11,6 +11,7 @@ import {
   resolveEnvKey,
   tryCatch,
 } from '@luckystack/core';
+import { getDevToolsInitError } from '../devToolsStatus';
 import type { HttpRouteHandler } from './types';
 
 //? Cross-provider connectivity ping. Prisma's generated TypeScript surface
@@ -88,8 +89,13 @@ export const handleReadyzRoute: HttpRouteHandler = async ({ res, routePath }) =>
   const redisOk = !redisError && (pong === 'PONG' || Boolean(pong));
 
   const databaseResult = await checkDatabaseReady();
+  const devToolsReady = getDevToolsInitError() === null;
 
-  const ready = Boolean(bootUuid) && redisOk && databaseResult !== false;
+  //? A devkit init failure empties the dev API/sync registries and those routes
+  //? deliberately return 503. Readiness must reflect that same fatal state;
+  //? otherwise an orchestrator keeps routing to an instance whose principal
+  //? framework routes are all unavailable.
+  const ready = Boolean(bootUuid) && redisOk && databaseResult !== false && devToolsReady;
   res.statusCode = ready ? 200 : 503;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({
@@ -102,6 +108,7 @@ export const handleReadyzRoute: HttpRouteHandler = async ({ res, routePath }) =>
       redis: redisOk,
       database: databaseResult,
       prisma: databaseResult !== false,
+      devTools: devToolsReady,
     },
   }));
   return true;

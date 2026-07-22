@@ -21,6 +21,7 @@ import {
   releaseLease,
   renewLease,
   tryCatch,
+  tryCatchSync,
 } from '@luckystack/core';
 import { getCronConfig } from './cronConfig';
 import { computeNextRun } from './schedule';
@@ -44,6 +45,23 @@ const state: SchedulerState = {
   tickLoop: null,
   leaderTickInFlight: false,
   teardownRegistered: false,
+};
+
+//? Every intentional fire-and-forget promise terminates here. Core's lease and
+//? stats primitives currently resolve fail-closed, but the scheduler must keep
+//? its own "never unhandled, never wedged" contract if an injected/custom
+//? implementation rejects. The logger is isolated too: a broken sink must not
+//? turn an observed background failure into a second unhandled exception.
+const logBackgroundFailure = (label: string, error: unknown): void => {
+  tryCatchSync(() => {
+    getLogger().error(`[cron] ${label} failed`, error);
+  });
+};
+
+const observeBackground = (promise: Promise<unknown>, label: string): void => {
+  void promise.catch((error: unknown) => {
+    logBackgroundFailure(label, error);
+  });
 };
 
 export const isCronLeader = (): boolean => state.leaderToken !== null;
@@ -76,31 +94,34 @@ const onLeadershipGained = (): void => {
 const leaderTick = async (): Promise<void> => {
   if (state.leaderTickInFlight) return;
   state.leaderTickInFlight = true;
-  const config = getCronConfig();
-  if (!config.enabled) {
+  try {
+    const config = getCronConfig();
+    if (!config.enabled) {
+      if (state.leaderToken) {
+        await releaseLease(config.leaseName, state.leaderToken);
+        state.leaderToken = null;
+      }
+      return;
+    }
     if (state.leaderToken) {
-      await releaseLease(config.leaseName, state.leaderToken);
-      state.leaderToken = null;
+      const renewed = await renewLease(config.leaseName, state.leaderToken, config.leaseTtlMs);
+      if (!renewed) {
+        state.leaderToken = null;
+        getLogger().warn('[cron] lost scheduler leadership — another instance will take over');
+      }
+      return;
     }
-    state.leaderTickInFlight = false;
-    return;
-  }
-  if (state.leaderToken) {
-    const renewed = await renewLease(config.leaseName, state.leaderToken, config.leaseTtlMs);
-    if (!renewed) {
-      state.leaderToken = null;
-      getLogger().warn('[cron] lost scheduler leadership — another instance will take over');
+    const token = await acquireLease(config.leaseName, config.leaseTtlMs);
+    if (token) {
+      state.leaderToken = token;
+      getLogger().info('[cron] acquired scheduler leadership on this instance');
+      onLeadershipGained();
     }
+  } finally {
+    //? A rejected injected lease primitive or logger must never freeze every
+    //? later election tick behind a permanently-true in-flight latch.
     state.leaderTickInFlight = false;
-    return;
   }
-  const token = await acquireLease(config.leaseName, config.leaseTtlMs);
-  if (token) {
-    state.leaderToken = token;
-    getLogger().info('[cron] acquired scheduler leadership on this instance');
-    onLeadershipGained();
-  }
-  state.leaderTickInFlight = false;
 };
 
 const runPerTenant = async (
@@ -137,8 +158,8 @@ const runPerTenant = async (
 };
 
 //? Executes one run of one job: preCronRun veto → per-run lease → handler
-//? (tryCatch, optional tenant fan-out) → stats + postCronRun. Never throws.
-const runJob = async (runtime: JobRuntime, scheduledFor: number): Promise<Error | null> => {
+//? (tryCatch, optional tenant fan-out) → stats + postCronRun.
+const runJobCore = async (runtime: JobRuntime, scheduledFor: number): Promise<Error | null> => {
   const { def } = runtime;
   const config = getCronConfig();
   const logger = getLogger();
@@ -161,23 +182,35 @@ const runJob = async (runtime: JobRuntime, scheduledFor: number): Promise<Error 
   runtime.running = true;
   runtime.ranOnStart = true;
   const renewTimer = setInterval(() => {
-    void renewLease(runLeaseName, runToken, runLeaseTtlMs);
+    observeBackground(
+      renewLease(runLeaseName, runToken, runLeaseTtlMs),
+      `job "${def.name}" lease renewal`,
+    );
   }, Math.max(1000, Math.floor(runLeaseTtlMs / 3)));
   renewTimer.unref();
 
   const startedAt = Date.now();
-  let runError: Error | null;
-  if (def.perTenant) {
-    runError = await runPerTenant(def, def.perTenant, scheduledFor);
-  } else {
-    const [error] = await tryCatch(async () => def.handler({ jobName: def.name, scheduledFor }));
-    runError = error;
-  }
+  //? The finally owns the in-process overlap flag + timer. Even an unexpected
+  //? infrastructure rejection cannot leave this runtime permanently "running"
+  //? or leak a renewal interval. The outer tryCatch converts that rejection to
+  //? this run's Error result, preserving runCronJobNow's documented contract.
+  const [executionError, handlerError] = await tryCatch(async (): Promise<Error | null> => {
+    try {
+      if (def.perTenant) {
+        const tenantError = await runPerTenant(def, def.perTenant, scheduledFor);
+        return tenantError;
+      }
+      const [error] = await tryCatch(async () => def.handler({ jobName: def.name, scheduledFor }));
+      return error;
+    } finally {
+      clearInterval(renewTimer);
+      runtime.running = false;
+      await releaseLease(runLeaseName, runToken);
+    }
+  });
+  const runError = executionError ?? handlerError;
   const durationMs = Date.now() - startedAt;
 
-  clearInterval(renewTimer);
-  runtime.running = false;
-  await releaseLease(runLeaseName, runToken);
   await writeRunStats(def.name, { lastRunAt: startedAt, durationMs, error: runError });
   await dispatchHook('postCronRun', { jobName: def.name, scheduledFor, durationMs, error: runError });
 
@@ -187,6 +220,18 @@ const runJob = async (runtime: JobRuntime, scheduledFor: number): Promise<Error 
     logger.debug(`[cron] job "${def.name}" completed in ${durationMs}ms`);
   }
   return runError;
+};
+
+//? Public/internal contract: infrastructure failures become an Error result,
+//? never a rejection. Scheduler calls are observed as an additional defensive
+//? backstop; runCronJobNow callers get the documented Error-or-null shape too.
+const runJob = async (runtime: JobRuntime, scheduledFor: number): Promise<Error | null> => {
+  const [infrastructureError, result] = await tryCatch(() => runJobCore(runtime, scheduledFor));
+  if (infrastructureError) {
+    logBackgroundFailure(`job "${runtime.def.name}" infrastructure`, infrastructureError);
+    return infrastructureError;
+  }
+  return result;
 };
 
 const schedulerTick = (): void => {
@@ -201,12 +246,13 @@ const schedulerTick = (): void => {
       getLogger().debug(
         `[cron] job "${runtime.def.name}" still running from the previous tick — skipped (overlap guard)`,
       );
-      void incrementSkipStat(runtime.def.name);
+      observeBackground(incrementSkipStat(runtime.def.name), `job "${runtime.def.name}" skip stat`);
       continue;
     }
-    //? Fire-and-forget: runJob handles every error path itself, and awaiting
-    //? here would let one slow job delay every other due job this tick.
-    void runJob(runtime, scheduledFor);
+    //? Fire-and-forget: awaiting here would let one slow job delay every other
+    //? due job this tick. The terminal observer is the defensive backstop for
+    //? any future/injected dependency that violates runJob's no-reject contract.
+    observeBackground(runJob(runtime, scheduledFor), `job "${runtime.def.name}" run`);
   }
 };
 
@@ -222,12 +268,12 @@ export const ensureCronSchedulerStarted = (): void => {
   registerCronTeardown();
   const config = getCronConfig();
   state.leaderLoop = setInterval(() => {
-    void leaderTick();
+    observeBackground(leaderTick(), 'leader tick');
   }, config.renewIntervalMs);
   state.leaderLoop.unref();
   state.tickLoop = setInterval(schedulerTick, config.tickIntervalMs);
   state.tickLoop.unref();
-  void leaderTick();
+  observeBackground(leaderTick(), 'initial leader tick');
 };
 
 /**

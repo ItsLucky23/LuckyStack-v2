@@ -185,19 +185,87 @@ describe('sendEmail orchestration (post-E13 decomposition)', () => {
   });
 
   describe('EMAIL-O8: send timeout', () => {
-    it('returns send-timeout when the adapter exceeds the configured sendTimeoutMs', async () => {
+    it('aborts cooperatively and reports an unknown outcome when the adapter exceeds the timeout', async () => {
       vi.useFakeTimers();
       registerEmailConfig({ sendTimeoutMs: 100 });
+      let providerSignal: AbortSignal | undefined;
 
-      //? A sender that never resolves.
-      registerEmailSender({ name: 'slow', send: () => new Promise<never>(() => { /* intentionally hangs */ }) });
+      registerEmailSender({
+        name: 'slow',
+        send: (_message, context) => {
+          providerSignal = context?.signal;
+          return new Promise<never>(() => { /* intentionally hangs */ });
+        },
+      });
 
-      const resultPromise = sendEmail({ to: 'u@example.com', subject: 'S', html: '<p>x</p>' });
+      const resultPromise = sendEmail({
+        to: 'u@example.com',
+        subject: 'S',
+        html: '<p>x</p>',
+        idempotencyKey: 'welcome:user-1:v1',
+      });
       await vi.runAllTimersAsync();
       const result = await resultPromise;
 
-      expect(result).toEqual({ ok: false, reason: 'send-timeout' });
+      expect(result).toEqual({
+        ok: false,
+        reason: 'send-timeout',
+        deliveryOutcome: 'unknown',
+      });
+      expect(providerSignal?.aborted).toBe(true);
       vi.useRealTimers();
+    });
+
+    it('passes a stable idempotency key and caller signal to the adapter', async () => {
+      let captured: { key?: string; signal?: AbortSignal } = {};
+      registerEmailSender({
+        name: 'capture',
+        send: async (_message, context) => {
+          captured = { key: context?.idempotencyKey, signal: context?.signal };
+          return { ok: true, id: 'sent' };
+        },
+      });
+      const controller = new AbortController();
+
+      await expect(sendEmail({
+        to: 'u@example.com',
+        subject: 'S',
+        html: '<p>x</p>',
+        idempotencyKey: 'password-reset:user-1:v3',
+        signal: controller.signal,
+      })).resolves.toEqual({ ok: true, id: 'sent' });
+
+      expect(captured.key).toBe('password-reset:user-1:v3');
+      expect(captured.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('does not dispatch when already aborted or when the idempotency key is unsafe', async () => {
+      const send = vi.fn(async () => ({ ok: true as const, id: 'unexpected' }));
+      registerEmailSender({ name: 'capture', send });
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(sendEmail({
+        to: 'u@example.com',
+        subject: 'S',
+        html: '<p>x</p>',
+        signal: controller.signal,
+      })).resolves.toEqual({
+        ok: false,
+        reason: 'send-aborted',
+        deliveryOutcome: 'not-sent',
+      });
+      await expect(sendEmail({
+        to: 'u@example.com',
+        subject: 'S',
+        html: '<p>x</p>',
+        idempotencyKey: 'unsafe\r\nkey',
+      })).resolves.toEqual({
+        ok: false,
+        reason: 'invalid-idempotency-key',
+        deliveryOutcome: 'not-sent',
+      });
+      expect(send).not.toHaveBeenCalled();
     });
 
     it('does not apply a timeout when sendTimeoutMs is false', async () => {

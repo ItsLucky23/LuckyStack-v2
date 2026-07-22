@@ -1,16 +1,16 @@
 import {
-import { resolveTestBaseUrl } from './resolveTestBaseUrl';
   logContractResult,
   logContractSummary,
   runAuthEnforcementTests,
 } from '../packages/test-runner/src';
 import { apiMethodMap, apiMetaMap } from '../src/_sockets/apiTypes.generated';
+import { resolveTestBaseUrl } from './resolveTestBaseUrl';
 
 //? Sends unauthenticated requests to every `auth.login: true` endpoint and
 //? asserts each one rejects with `auth.required`. Run against a live server.
 //?
 //? Config via env:
-//?   TEST_BASE_URL — defaults to http://localhost:80
+//?   TEST_BASE_URL — override; otherwise live dev port → ports.backend fallback
 //?   TEST_SKIP     — comma-separated `<page>/<name>` pairs to skip
 const baseUrl = resolveTestBaseUrl();
 const skip = (process.env.TEST_SKIP ?? '').split(',').map(s => s.trim()).filter(Boolean);

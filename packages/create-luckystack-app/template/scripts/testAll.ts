@@ -3,7 +3,7 @@
 //? up already; this script does NOT boot it. Run `npm run server` first.
 //?
 //? Config via env:
-//?   TEST_BASE_URL          — defaults to http://localhost:80
+//?   TEST_BASE_URL          — override; otherwise live dev port → ports.backend fallback
 //?   TEST_SKIP              — comma-separated `<page>/<name>` to skip
 //?   TEST_AUTH_TOKEN        — applied as session cookie to sweep layers
 //?   TEST_FILTER            — substring match against `<page>/<name>/<version>`
@@ -13,11 +13,14 @@
 //?   TEST_ONLY_CUSTOM=1     — alias for TEST_NO_SWEEP
 //?   TEST_NO_CUSTOM=1       — skip per-route custom tests
 
-import { logRunAllSummary, runAllTests } from '@luckystack/test-runner';
+import { logRunAllSummary, resolveTestBaseUrl, runAllTests } from '@luckystack/test-runner';
 import { apiInputSchemas } from '../src/_sockets/apiInputSchemas.generated';
 import { apiMetaMap, apiMethodMap } from '../src/_sockets/apiTypes.generated';
+import { ports } from '../config.ports';
 
-const baseUrl = process.env.TEST_BASE_URL ?? 'http://localhost:80';
+const baseUrl = resolveTestBaseUrl({
+  fallbackUrl: `http://localhost:${String(ports.backend)}`,
+});
 const skip = (process.env.TEST_SKIP ?? '').split(',').map(s => s.trim()).filter(Boolean);
 const authToken = process.env.TEST_AUTH_TOKEN || undefined;
 const filter = process.env.TEST_FILTER || undefined;
@@ -31,6 +34,10 @@ if (filter) console.log(`[luckystack-test] filter: ${filter}`);
 
 const summary = await runAllTests({
   apiMethodMap,
+  //? Load config lazily so the runner first applies .env/.env.local, then uses
+  //? the project's optional secretManager config to resolve pointers in THIS
+  //? process before Layer-5 tests import Prisma/Redis-backed modules.
+  loadProjectConfig: async () => (await import('../config')).default,
   apiMetaMap,
   apiInputSchemas,
   baseUrl,

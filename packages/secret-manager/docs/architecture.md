@@ -63,7 +63,7 @@ process start
 
 Set `config.dev` to live-reload while a long-running dev process is up (no-op when `NODE_ENV === 'production'`):
 
-- `dev.watch` (default `true`) — a debounced `fs.watch` on `dev.envFiles` (default `.env` + `.env.local`). On change the files are **re-parsed and applied**: plain values (`ENVIRONMENT=production`, `PORT=123`) are injected straight into `process.env` (live config reload), and pointer-shaped values are re-resolved against the server. A pointer added or bumped after boot is picked up here — no restart.
+- `dev.watch` (default `true`) — a debounced `fs.watch` on `dev.envFiles` (default `.env` + `.env.local`). On change the files are **re-parsed and applied**: plain values (`ENVIRONMENT=production`, `PORT=123`) are injected straight into `process.env` (live config reload), and pointer-shaped values are re-resolved against the server. A pointer added or bumped after boot is picked up here — no restart. Ownership is source-aware: a file-owned pointer changed to a plain value (or removed) is dropped from later polls, while an inherited shell/CI pointer not declared by any watched file stays active.
 - `dev.pollIntervalMs` (default `0`/off) — re-resolve the current pointers every N ms, catching server-side rotations. The interval lives in `config.ts`, changeable in one place.
 - `dev.envFiles` — override which files are watched + re-parsed (default `['.env', '.env.local']`).
 

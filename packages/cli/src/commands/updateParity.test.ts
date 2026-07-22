@@ -12,6 +12,8 @@ import {
   hashFileContent as cliHash,
   isTextFile as cliIsTextFile,
   choicesToFlags,
+  isSafeWindowsScaffoldArg,
+  normalizeScaffoldProjectName,
 } from './update';
 import {
   hashFileContent as scaffolderHash,
@@ -138,5 +140,42 @@ describe('choicesToFlags parity with the scaffolder flag surface', () => {
     //? re-render must fall back to the npm default rather than emit `--pm=`.
     const flags = choicesToFlags({ orm: 'prisma', dbProvider: 'mongodb' });
     expect(flags.some((flag) => flag.startsWith('--pm='))).toBe(false);
+  });
+
+  it('drops hand-edited unknown values before they can reach npx.cmd', () => {
+    const flags = choicesToFlags({
+      packageManager: 'npm & whoami',
+      orm: 'prisma | calc',
+      dbProvider: 'postgresql > stolen.txt',
+      authMode: 'credentials',
+      oauthProviders: ['google', 'github&whoami', 42],
+      emailProvider: 'resend',
+      monitoringProvider: 'posthog',
+      aiBrowserTooling: 'all && whoami',
+    });
+    expect(flags).toEqual([
+      '--auth=credentials',
+      '--oauth=google',
+      '--email=resend',
+      '--monitoring=posthog',
+    ]);
+    expect(flags.every(isSafeWindowsScaffoldArg)).toBe(true);
+  });
+});
+
+describe('update scaffold command boundary', () => {
+  it('uses the exact scaffolder slug for directory names with spaces/metacharacters', () => {
+    expect(normalizeScaffoldProjectName('  My Project & whoami  ')).toBe('my-project-whoami');
+    expect(normalizeScaffoldProjectName('***')).toBe('');
+  });
+
+  it('rejects cmd metacharacters and whitespace while accepting every generated shape', () => {
+    expect(isSafeWindowsScaffoldArg('my-project')).toBe(true);
+    expect(isSafeWindowsScaffoldArg('create-luckystack-app@0.7.3')).toBe(true);
+    expect(isSafeWindowsScaffoldArg('--auth=credentials+oauth')).toBe(true);
+    expect(isSafeWindowsScaffoldArg('--oauth=google,github')).toBe(true);
+    for (const unsafe of ['my project', 'x&whoami', 'x|whoami', 'x>file', 'x^y', 'x%PATH%']) {
+      expect(isSafeWindowsScaffoldArg(unsafe), unsafe).toBe(false);
+    }
   });
 });

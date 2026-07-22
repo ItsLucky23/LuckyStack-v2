@@ -26,7 +26,7 @@ Three modes: `'remote'` (default — missing pointer / unreachable server throws
 | --- | --- | --- |
 | `initSecretManager(config)` | Boot-time entry. Scans `process.env` for pointer-shaped values, `POST /resolve`s them, overwrites `process.env` with real values. No-op in `'local'`. Starts dev hot reload when `config.dev` is set. Starts the production rotation poll when `config.pollIntervalMs` is set. | -> docs/architecture.md |
 | `refreshSecretManager()` | Re-resolve the captured pointers against the server (the production rotation poll channel). Call manually after an admin rotates a secret on a long-running process. No-op in `'local'` mode. | -> docs/architecture.md |
-| `reloadSecretManagerFromFiles()` | Re-parse the configured env files (`dev.envFiles`, default `.env` + `.env.local`) and apply them: plain values injected into `process.env` (live config reload), pointer-shaped values re-resolved. The dev **file-watch** channel; callable manually. No-op before init or in `'local'` mode. | -> docs/architecture.md |
+| `reloadSecretManagerFromFiles()` | Re-parse the configured env files (`dev.envFiles`, default `.env` + `.env.local`) and apply them: plain values injected into `process.env`, pointer-shaped values re-resolved. File-owned names replace their prior topology (pointer→plain/removal drops the stale pointer), while unrelated inherited shell/CI pointers remain active. The dev **file-watch** channel; callable manually. No-op before init or in `'local'` mode. | -> docs/architecture.md |
 | `stopSecretManager()` | Tear down all dev watchers, debounce timers, and rotation-poll intervals started by `initSecretManager`. Call on process shutdown if you need deterministic cleanup; otherwise timers are `unref`'d and won't block exit. | -> docs/architecture.md |
 | `getCachedResolution()` | Returns a shallow copy of the last `{ fetchedAt, values }` (pointer -> resolved secret) for diagnostics, or `null`. **Sensitive** — never serialize into HTTP responses, health payloads, or logs. | -> docs/architecture.md |
 | `getCachedResolutionMeta()` | Values-free diagnostic view: `{ fetchedAt, pointerNames, pointerCount }` — the resolved pointer names only, never the secret values. Safe for logs and health endpoints. | -> docs/architecture.md |
@@ -53,7 +53,7 @@ Three modes: `'remote'` (default — missing pointer / unreachable server throws
 2. `'local'` mode short-circuits — no network, no writes, no watchers.
 3. Otherwise it captures the pointer map once, `POST /resolve`s the unique pointers, and overwrites `process.env`.
 4. `'remote'`: a missing pointer or fetch error throws (hard boot stop). `'hybrid'`: warn and leave `process.env` as-is.
-5. When `config.dev` is set and not production, dev hot reload starts: a debounced watch on `dev.envFiles` re-parses the files (plain values injected, pointers re-resolved) and an optional interval poll re-resolves the current pointers.
+5. When `config.dev` is set and not production, dev hot reload starts: a debounced watch on `dev.envFiles` re-parses the files (plain values injected, pointers re-resolved) and an optional interval poll re-resolves the current pointers. Pointer ownership is tracked by source: file-owned names can transition to plain or be removed without a stale captured pointer resurfacing; inherited pointers absent from the files are preserved.
 6. Only after `initSecretManager` resolves should other framework code read `process.env`.
 
 ## Config keys

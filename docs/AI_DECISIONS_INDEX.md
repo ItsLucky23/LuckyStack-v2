@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (30)
+## Decisions (35)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -43,6 +43,11 @@
 | 0028 | Support node and bun through socket.io on node:http; do NOT build a Bun.serve / native-WS socket abstraction | 🟢 accepted | runtime, sockets, bun, architecture, packaging | — | `docs/decisions/0028-keep-socketio-on-nodehttp-both-runtimes.md` |
 | 0029 | Shared API and sync type maps accept only JSON-stable contracts | 🟢 accepted | devkit, api, sync, types, json, transport | — | `docs/decisions/0029-transport-contracts-are-json-stable.md` |
 | 0030 | Secret refresh rebuilds the complete project registration instead of patching the active registry | 🟢 accepted | core, config, secret-manager, cors, auth | — | `docs/decisions/0030-secret-refresh-reregisters-complete-project-config.md` |
+| 0031 | OAuth port hopping preserves an explicitly configured local ingress | 🟢 accepted | core, server, oauth, ports, router | — | `docs/decisions/0031-oauth-port-hop-preserves-explicit-local-ingress.md` |
+| 0032 | The test runner resolves secret pointers in its own process through a lazy consumer-config loader | 🟢 accepted | test-runner, secret-manager, prisma, env, testing | — | `docs/decisions/0032-test-runner-resolves-secrets-in-its-own-process.md` |
+| 0033 | Forwarded HTTPS is trusted only from configured immediate proxy CIDRs | 🟢 accepted | router, security, proxy, tls, headers | — | `docs/decisions/0033-forwarded-proto-requires-an-explicit-proxy-trust-boundary.md` |
+| 0034 | Email timeout is cancellation intent, not proof of delivery failure | 🟢 accepted | email, reliability, idempotency, cancellation | — | `docs/decisions/0034-email-timeout-means-delivery-outcome-unknown.md` |
+| 0035 | TOTP ciphertext carries a key id and decrypt-only legacy keyring | 🟢 accepted | auth, 2fa, totp, encryption, rotation | — | `docs/decisions/0035-totp-ciphertext-carries-a-key-id-and-legacy-keyring.md` |
 
 ## Summaries
 
@@ -296,6 +301,56 @@ Consumer config defines a factory for its complete `registerProjectConfig` input
 
 → `docs/decisions/0030-secret-refresh-reregisters-complete-project-config.md`
 
+### 0031 — OAuth port hopping preserves an explicitly configured local ingress
+
+**0031** · accepted · tags: core, server, oauth, ports, router · 2026-07-21
+
+Core retains two bind values:
+
+**Governs** (`//? @adr 0031`): `packages/core/src/bindAddress.ts`
+
+→ `docs/decisions/0031-oauth-port-hop-preserves-explicit-local-ingress.md`
+
+### 0032 — The test runner resolves secret pointers in its own process through a lazy consumer-config loader
+
+**0032** · accepted · tags: test-runner, secret-manager, prisma, env, testing · 2026-07-21
+
+`@luckystack/test-runner` owns `resolveTestEnvironment()`. It always loads the normal env-file layers and optionally receives a **lazy** `loadProjectConfig` callback. The callback runs only after env loading, so `config.ts` sees the real `LUCKYSTACK_SECRET_MANAGER_URL`. If its default export contains a non-empty `secretManager.url`, the runner dynamically loads the optional `@luckystack/secret-manager` peer and calls `initSecretManager({ ...config.secretManager, source: 'remote' })` before any test layer or custom test-module import.
+
+**Governs** (`//? @adr 0032`): `packages/test-runner/src/resolveTestEnvironment.ts`
+
+→ `docs/decisions/0032-test-runner-resolves-secrets-in-its-own-process.md`
+
+### 0033 — Forwarded HTTPS is trusted only from configured immediate proxy CIDRs
+
+**0033** · accepted · tags: router, security, proxy, tls, headers · 2026-07-21
+
+`deploy.config.ts > routing.trustedProxyCidrs` is the explicit trust boundary. The default is empty: no peer may assert HTTPS. HTTP and WebSocket paths compile the configured addresses/subnets once with Node's `BlockList`, inspect only the immediate socket peer, and emit `https` only when that peer is trusted and the header's first value is exactly `https`. Malformed entries abort router boot. Forwarded chains remain discarded.
+
+**Governs** (`//? @adr 0033`): `packages/router/src/proxyUtils.ts`
+
+→ `docs/decisions/0033-forwarded-proto-requires-an-explicit-proxy-trust-boundary.md`
+
+### 0034 — Email timeout is cancellation intent, not proof of delivery failure
+
+**0034** · accepted · tags: email, reliability, idempotency, cancellation · 2026-07-21
+
+The adapter contract accepts an optional `EmailSendContext` containing a cooperative `AbortSignal` and caller-provided stable `idempotencyKey`. Context is optional so existing custom adapters remain source-compatible. `sendEmail` aborts the signal when timeout/caller cancellation wins. Once adapter dispatch has begun, the failure reports `deliveryOutcome: 'unknown'`; before dispatch it reports `not-sent`. Retries of an unknown outcome must reuse the same key. Resend forwards that key to provider-native deduplication. SMTP remains honest about its inability to guarantee cancellation.
+
+**Governs** (`//? @adr 0034`): `packages/email/src/sendEmail.ts`
+
+→ `docs/decisions/0034-email-timeout-means-delivery-outcome-unknown.md`
+
+### 0035 — TOTP ciphertext carries a key id and decrypt-only legacy keyring
+
+**0035** · accepted · tags: auth, 2fa, totp, encryption, rotation · 2026-07-21
+
+`TOTP_ENCRYPTION_KEY` remains the primary write key. New ciphertext is `enc:v2:<key-id>:<iv>:<tag>:<ciphertext>`, where the id is a domain-separated, truncated SHA-256 fingerprint and reveals no key material. `TOTP_ENCRYPTION_LEGACY_KEYS` is a JSON array of decrypt-only previous keys. Versioned rows select by id; pre-v2 `gcm:` rows try the configured ring; plaintext rows remain readable. After a successful TOTP proof, plaintext/legacy/old-key rows are best-effort rewritten under the current primary. Failed migration never turns a valid proof into a login failure.
+
+**Governs** (`//? @adr 0035`): `packages/login/src/twoFactor.ts`
+
+→ `docs/decisions/0035-totp-ciphertext-carries-a-key-id-and-legacy-keyring.md`
+
 ## Code governed by decisions
 
 > Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.
@@ -303,11 +358,16 @@ Consumer config defines a factory for its complete `registerProjectConfig` input
 
 | File | ADR | Decision |
 | --- | --- | --- |
+| `packages/core/src/bindAddress.ts` | 0031 | OAuth port hopping preserves an explicitly configured local ingress |
 | `packages/core/src/hooks/types.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
 | `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
+| `packages/email/src/sendEmail.ts` | 0034 | Email timeout is cancellation intent, not proof of delivery failure |
 | `packages/login/src/accountStrategy.ts` | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant |
 | `packages/login/src/session.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
+| `packages/login/src/twoFactor.ts` | 0035 | TOTP ciphertext carries a key id and decrypt-only legacy keyring |
 | `packages/mcp/src/index.ts` | 0016 | Expand the AI-context system with lessons / examples / coverage gates / eval before any RAG rung |
+| `packages/router/src/proxyUtils.ts` | 0033 | Forwarded HTTPS is trusted only from configured immediate proxy CIDRs |
+| `packages/test-runner/src/resolveTestEnvironment.ts` | 0032 | The test runner resolves secret pointers in its own process through a lazy consumer-config loader |
 | `scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
 | `src/_api/session_v1.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
 | `src/_providers/SessionProvider.tsx` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |

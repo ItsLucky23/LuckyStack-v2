@@ -1,10 +1,10 @@
 import {
-import { resolveTestBaseUrl } from './resolveTestBaseUrl';
   logContractResult,
   logContractSummary,
   runFuzzTests,
 } from '../packages/test-runner/src';
 import { apiMethodMap } from '../src/_sockets/apiTypes.generated';
+import { resolveTestBaseUrl } from './resolveTestBaseUrl';
 
 //? Sends well-known junk payloads to every endpoint and asserts no 5xx and
 //? that responses stay in the {status, errorCode} envelope. Does not validate
@@ -12,7 +12,7 @@ import { apiMethodMap } from '../src/_sockets/apiTypes.generated';
 //? runtime schemas.
 //?
 //? Config via env:
-//?   TEST_BASE_URL    — defaults to http://localhost:80
+//?   TEST_BASE_URL    — override; otherwise live dev port → ports.backend fallback
 //?   TEST_SKIP        — comma-separated `<page>/<name>` pairs to skip
 //?   TEST_AUTH_TOKEN  — session cookie value; enables testing of auth-required endpoints
 const baseUrl = resolveTestBaseUrl();

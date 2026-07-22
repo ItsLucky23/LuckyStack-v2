@@ -1,6 +1,11 @@
 import { createHash, createHmac } from 'node:crypto';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { registerDeployConfig, registerProjectConfig } from '@luckystack/core';
+import {
+  registerDbHealthCheck,
+  registerDeployConfig,
+  registerProjectConfig,
+  resetDbHealthCheckForTests,
+} from '@luckystack/core';
 
 //? SEC-13 regression: `/_health` must HMAC the synchronized-env fingerprints
 //? with the per-boot UUID (the 0.2.0 default `http.healthHash` =
@@ -19,11 +24,12 @@ vi.mock('@luckystack/core', async () => {
     ...actual,
     readBootUuid: () => Promise.resolve(BOOT_UUID),
     prisma: {},
-    redis: {},
+    redis: { ping: () => Promise.resolve('PONG') },
   };
 });
 
-import { handleHealthRoute } from './healthRoutes';
+import { clearDevToolsInitError, markDevToolsInitFailed } from '../devToolsStatus';
+import { handleHealthRoute, handleReadyzRoute } from './healthRoutes';
 import type { HttpRouteContext } from './types';
 
 const makeCtx = (routePath: string): { ctx: HttpRouteContext; ended: () => string | undefined } => {
@@ -40,6 +46,9 @@ const makeCtx = (routePath: string): { ctx: HttpRouteContext; ended: () => strin
 
 beforeEach(() => {
   process.env.SYNC_SECRET = SYNC_VALUE;
+  clearDevToolsInitError();
+  resetDbHealthCheckForTests();
+  registerDbHealthCheck(() => true);
   //? Default healthHash (`{ mode: 'hmac', salt: '@bootUuid' }`) is what we
   //? assert against — register a no-op config so defaults apply.
   registerProjectConfig({});
@@ -47,6 +56,22 @@ beforeEach(() => {
     resources: {
       db: { type: 'redis', urlEnvKey: 'REDIS_URL', synchronizedEnvKeys: ['SYNC_SECRET'] },
     },
+  });
+});
+
+describe('handleReadyzRoute — dev-tool fatal state', () => {
+  it('returns 503 when devkit init failed and API/sync routes are unavailable', async () => {
+    markDevToolsInitFailed(new Error('type-map init failed'));
+    const { ctx, ended } = makeCtx('/readyz');
+
+    expect(await handleReadyzRoute(ctx)).toBe(true);
+    const payload = JSON.parse(ended() ?? '{}') as {
+      status: string;
+      checks: { devTools: boolean };
+    };
+    expect(ctx.res.statusCode).toBe(503);
+    expect(payload.status).toBe('not-ready');
+    expect(payload.checks.devTools).toBe(false);
   });
 });
 

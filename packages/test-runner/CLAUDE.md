@@ -27,7 +27,7 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 | Function / Export | 1-regel | Deep doc |
 |---|---|---|
 | `runAllTests({ apiMethodMap, apiMetaMap, apiInputSchemas, baseUrl, ... })` | Orchestrator: draait contract + auth + rate-limit + fuzz + custom (Layer 5) in volgorde, levert een `RunAllTestsSummary`. | → docs/contract-tests.md |
-| `runCustomTests(input)` | Layer 5: draait per-route `<name>_v<N>.tests.ts` files naast de `_api/` / `_sync/` sources, levert een `RunCustomTestsSummary`. | → docs/contract-tests.md |
+| `runCustomTests(input)` | Layer 5: draait per-route tests. Direct callers moeten lazy `loadProjectConfig` meegeven; env/secrets resolven vóór test-module imports. `runAllTests` gebruikt een interne already-prepared entrypoint om pointer-reload te voorkomen. | → docs/contract-tests.md |
 | `discoverCustomTestFiles(srcDir?)` | Walker die elke `<name>_v<N>.tests.ts` onder de configured src dir yields. | → docs/contract-tests.md |
 | `logRunAllSummary(summary)` | Pretty-print één `RunAllTestsSummary`. | → docs/extension-hooks.md |
 | `walkEndpoints(apiMethodMap)` | Genereert `EndpointDescriptor[]` uit de generated map | → docs/contract-tests.md |
@@ -40,6 +40,8 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 | `runFuzzCheck({ endpoint, baseUrl, headers? })` | Single-endpoint crash-resistance fuzz | → docs/fuzz-tests.md |
 | `runFuzzTests({ apiMethodMap, baseUrl, skip?, headers?, onResult? })` | Sweep fuzz layer (nightly CI) | → docs/fuzz-tests.md |
 | `resetServerState({ baseUrl, token? })` | POST naar `/_test/reset` om DB+Redis schoon te maken | → docs/rate-limit-tests.md |
+| `resolveTestBaseUrl({ cwd?, fallbackUrl? })` | Resolves `TEST_BASE_URL` → actually-bound dev port advertisement → caller fallback, so an auto-hop does not create false connection failures. | → docs/contract-tests.md |
+| `resolveTestEnvironment({ loadProjectConfig? })` | Laadt `.env`-lagen en resolveert optionele secret-manager-pointers in het testproces vóór DB/Redis-backed Layer-5 modules importeren. | → docs/contract-tests.md |
 | `sampleSchemaInput(schema, options?)` | Genereert Zod-valid sample payload uit een schema. `options.stringPrefix` tagt UNCONSTRAINED strings (finding #98) — format/checked strings blijven ongeprefixt zodat ze valid blijven. | → docs/contract-tests.md |
 | `createTestDataMarker()` / `TEST_DATA_PREFIX` | Run-unique `lstest_<uuid>_` marker (+ vaste `lstest_` prefix-constant) waarmee `runAllTests` gegenereerde test-strings identificeerbaar maakt. | → docs/contract-tests.md |
 | `logContractResult(result)` | Pretty-print één `ContractCheckResult` | → docs/extension-hooks.md |
@@ -76,6 +78,8 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 
 ## Config keys (env vars + register* slots)
 
+- `TEST_BASE_URL` (env, test process) — explicit target override consumed first by `resolveTestBaseUrl`; otherwise it reads `node_modules/.luckystack/dev-server.json` and then uses the supplied config-derived fallback.
+- `RunAllTestsInput.loadProjectConfig` / `RunCustomTestsInput.loadProjectConfig` — verplichte lazy loader voor de default export van consumer `config.ts`. De runner laadt eerst `.env`/`.env.local`, leest daarna deze config en draait bij een niet-lege `secretManager.url` `initSecretManager({...config, source:'remote'})` vóór custom test imports. `runAllTests` doet dit één keer voor alle lagen; directe Layer-5-calls doen het zelf. Een ontbrekende loader of geconfigureerd-maar-ontbrekende secret-manager is een harde fout.
 - `NODE_ENV` (env, server-side) — `/_test/reset` is automatisch beschikbaar wanneer NIET `production`.
 - `TEST_RESET_TOKEN` (env, optional, server-side) — wanneer gezet moet `resetServerState({ token })` deze meesturen als `X-Test-Reset-Token`. Verplicht voor staging/preview deploys die het endpoint over het netwerk exposen.
 - `RunRateLimitTestsInput.maxRateLimitToTest` (default `50`) — endpoints met hogere `rateLimit` worden geskipt om duizenden requests in CI te vermijden.
@@ -90,7 +94,7 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 - **Required**: `zod@^4.0.0` (peer), `socket.io-client@^4.8.0` (peer — `streamWatcher.ts` opent een tweede socket voor `ctx.watchStream`), `@luckystack/core@^0.1.0` (dependency — levert de helpers die de runner consumeert: `tryCatch`/`tryCatchSync`, `getProjectConfig`/`getCsrfConfig`, `getSrcDir` (default src-dir voor custom-test discovery in `customTests.ts`), `getPrismaClient` (Layer-5 `ctx.prisma`) en `clearAllRateLimits`. De `apiMethodMap` zelf wordt door de consumer als argument doorgegeven, niet uit een pad gelezen).
 - **Required server-side**: `@luckystack/server` met `/_test/reset` endpoint gemount (default ingebouwd, gated op `NODE_ENV !== 'production'`).
 - **Required generated artefact**: `apiMethodMap.generated.ts` (en `apiMetaMap.generated.ts` voor de auth/rate-limit layers), geproduceerd door `@luckystack/devkit`.
-- **Optional**: geen — fixtures, reporters en custom layers zijn pure-JS opt-in.
+- **Optional**: `@luckystack/secret-manager@^0.7.3` (optional peer) — alleen dynamisch geladen wanneer `loadProjectConfig` een niet-lege `config.secretManager.url` teruggeeft. Zonder secret-managerconfig blijft de runner een gewone lokale-env flow.
 
 ## Related
 

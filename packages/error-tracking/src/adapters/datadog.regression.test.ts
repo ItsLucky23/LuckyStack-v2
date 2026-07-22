@@ -130,6 +130,25 @@ describe('datadog adapter regression', () => {
     expect(tracer.spans[0]?.tags['usr.id']).toBe('closureUser');
   });
 
+  it('keeps canonical scrubbed message + ALS identity tags authoritative over context', async () => {
+    const { createDatadogAdapter } = await import('./datadog');
+    const tracer = makeTracer();
+    const adapter = createDatadogAdapter({ tracer });
+    adapter.setUser({ id: 'real-user' });
+
+    adapter.captureMessage('password=canonical-secret', 'fatal', {
+      'message.text': 'password=context-secret',
+      'message.level': 'info',
+      'usr.id': 'spoofed-user',
+    });
+
+    const tags = tracer.spans[0]?.tags ?? {};
+    expect(String(tags['message.text'])).not.toContain('canonical-secret');
+    expect(String(tags['message.text'])).not.toContain('context-secret');
+    expect(tags['message.level']).toBe('fatal');
+    expect(tags['usr.id']).toBe('real-user');
+  });
+
   it('does not throw when a context value is a symbol (ET-15 formatTags guard)', async () => {
     const { createDatadogAdapter } = await import('./datadog');
     const tracer = makeTracer();

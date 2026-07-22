@@ -123,7 +123,7 @@ sendEmail(input)
   |     -> normalized to { ok: false, reason: error.message, cause } on throw
   |     -> normalized to { ok: false, reason: 'send-no-result' } on missing return
   |
-  +-- await dispatchHook('postEmailSend', { message, adapter: sender.name, ok, messageId?, reason? })
+  +-- await dispatchHook('postEmailSend', { message, adapter: sender.name, ok, messageId?, reason?, deliveryOutcome? })
   |
   +-- terminal logging (`getLogger().info` / `.warn`) gated by emailConfig.logging.sends / .errors
   |
@@ -274,6 +274,7 @@ There is no global "remove handler" or "replace handler" API. Boot order and pro
 | Handler returns `{ stop: true }` without `errorCode` | TypeScript would refuse to compile (`errorCode` is required). At runtime it would still abort, but with `undefined` errorCode — adapt your stop signals to always include a code. |
 | Handler mutates `message` | Persists into adapter call AND into `postEmailSend` payload. Use sparingly; document loudly. |
 | `preEmailSend` aborts | `postEmailSend` is not dispatched. Track the abort in the same `preEmailSend` handler if you need a trail. |
+| Timeout/caller abort after adapter dispatch | `postEmailSend` carries `deliveryOutcome: 'unknown'`; delivery may still happen, so retry only with the same idempotency key. |
 | No handlers registered | `dispatchHook` is a cheap no-op — it walks an empty array. |
 | Hook handler returns a non-stop, non-undefined value | TypeScript narrows it to `HookStopSignal`. Returning anything else compiles to "do not stop" but you've shadowed the contract — don't. |
 

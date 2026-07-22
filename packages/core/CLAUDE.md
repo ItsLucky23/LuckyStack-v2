@@ -41,8 +41,10 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `registerAvatarConfig(config: AvatarConfigInput): void` | Override avatar disk format(s) + Cache-Control header. | -> docs/config-registry.md |
 | `getAvatarConfig(): AvatarConfig` | Read active avatar config. | -> docs/config-registry.md |
 | `DEFAULT_AVATAR_CONFIG: AvatarConfig` | Default formats `[{ extension: 'webp', contentType: 'image/webp' }]` + 24h cache. | -> docs/config-registry.md |
-| `registerBindAddress(address: { ip: string; port: number }): void` | `createLuckyStackServer` writes the resolved listen address here at boot. | -> docs/app-bootstrap.md |
-| `getBindAddress(): { ip: string; port: string }` | Resolve at call time (registry -> `SERVER_IP`/`SERVER_PORT` -> `'127.0.0.1'`/`''`). | -> docs/app-bootstrap.md |
+| `registerBindAddress(address: { ip: string; port: number }): void` | Store the intended pre-listen address; resets the OAuth pre-hop baseline. | -> docs/app-bootstrap.md |
+| `registerBoundAddress(address: { ip: string; port: number }): void` | Store the address reported by `node:http` after bind while preserving the intended baseline. | -> docs/app-bootstrap.md |
+| `getBindAddress(): { ip: string; port: string }` | Resolve the actually-bound address at call time (registry -> env -> fallback). | -> docs/app-bootstrap.md |
+| `resolveDevCallbackUrl(callbackUrl: string): string` | In non-prod, rewrite a loopback OAuth callback from the intended port to the actually-bound port; preserves explicit local ingress ports. | -> docs/app-bootstrap.md |
 | `registerRuntimeMapsProvider(provider: RuntimeMapsProvider): void` | DI slot for generated api/sync maps; called by project `server/prod/runtimeMaps.ts`. | -> docs/app-bootstrap.md |
 | `getRuntimeApiMaps(): Promise<RuntimeApiMapsResult>` | Async accessor for `{ apisObject, functionsObject }`. | -> docs/app-bootstrap.md |
 | `getRuntimeSyncMaps(): Promise<RuntimeSyncMapsResult>` | Async accessor for `{ syncObject, functionsObject }`. | -> docs/app-bootstrap.md |
@@ -51,7 +53,7 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `getRegisteredApiMethod(pagePath: string, apiName: string, version: string): HttpMethodLiteral \| undefined` | Lookup helper used by `isGetMethod`. | -> docs/app-bootstrap.md |
 | `isApiMethodMapRegistered(): boolean` | Detect whether the prefix-heuristic fallback is active. | -> docs/app-bootstrap.md |
 | `registerPrismaClient(client: PrismaClient, key?: string): PrismaClient` | Register a Prisma client into a slot (default `'default'`). Pass a `key` for graded credentials (e.g. `'ro'`/`'rw'`) or per-tenant clients. | -> docs/app-bootstrap.md |
-| `registerRedisClient(client: RedisClient, key?: string): RedisClient` | Register an ioredis client into a slot (default `'default'`). | -> docs/app-bootstrap.md |
+| `registerRedisClient(client: RedisClient, key?: string): RedisClient` | Register an ioredis client into a slot (default `'default'`). A consumer-owned default keeps precedence across automatic secret refresh; rebuild it from your own secrets-resolved listener when needed. | -> docs/app-bootstrap.md |
 | `getPrismaClient(): PrismaClient` | Read the `'default'` slot (registered client or lazy default resolver). | -> docs/app-bootstrap.md |
 | `getRedisClient(): RedisClient` | Read the `'default'` slot (registered client or lazy default resolver). | -> docs/app-bootstrap.md |
 | `getPrismaClientFor(key?: string): PrismaClient` | Read a specific slot. `'default'` falls back to the resolver; any other unregistered slot throws (never silently returns the privileged default). | -> docs/app-bootstrap.md |
@@ -85,7 +87,7 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `registerNotifier(notifier: Notifier): void` | DI for client-side toast notifier (success/error/info/warning). | -> docs/app-bootstrap.md |
 | `getNotifier(): Notifier` | Read active notifier (no-op default). | -> docs/app-bootstrap.md |
 | `notify: Notifier` | Delegating wrapper used by framework hot paths. | -> docs/app-bootstrap.md |
-| `registerEmailSender(sender: EmailSender): void` | Legacy single-sender registration; mirrors into `default` slot. | -> docs/app-bootstrap.md |
+| `registerEmailSender(sender: EmailSender): void` | Legacy single-sender registration; mirrors into `default` slot. `send(message, context?)` may honor `AbortSignal` + stable idempotency key; timeout outcomes can be explicitly unknown. | -> docs/app-bootstrap.md |
 | `registerEmailSenders(senders: EmailSenderRegistry): void` | Multi-adapter registration (`'default'`, `'transactional'`, `'marketing'`, custom). | -> docs/app-bootstrap.md |
 | `getEmailSender(): EmailSender \| null` | Read legacy/`default` sender. | -> docs/app-bootstrap.md |
 | `getEmailSenderByName(name: string): EmailSender \| null` | Read a specific slot (falls back to legacy sender for `'default'`). | -> docs/app-bootstrap.md |

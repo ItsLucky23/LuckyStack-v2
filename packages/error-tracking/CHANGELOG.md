@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
+### Security
+
+- PostHog and Datadog message adapters now spread caller context before their
+  canonical scrubbed message/severity and request-bound identity fields. A
+  colliding context key can no longer restore secret-bearing text, downgrade
+  severity, or spoof `usr.*` attribution.
+
 ## [0.7.0] - 2026-07-16
 
 ### Security

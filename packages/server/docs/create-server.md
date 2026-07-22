@@ -1,6 +1,6 @@
 # Create Server (`createLuckyStackServer` + `bootstrapLuckyStack`)
 
-> Deep specs. Bron: `packages/server/src/createServer.ts`, `packages/server/src/bootstrap.ts`, `packages/server/src/verifyBootstrap.ts`, `packages/server/src/hookPayloads.ts`, `packages/server/src/types.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs. Bron: `packages/server/src/createServer.ts`, `packages/server/src/bootstrap.ts`, `packages/server/src/verifyBootstrap.ts`, `packages/server/src/hookPayloads.ts`, `packages/server/src/types.ts`. Bijgewerkt: 2026-07-20.
 
 ## Overview
 
@@ -16,8 +16,8 @@ Boot order (effective for both entries):
 1. `bootstrapLuckyStack` only: load overlay files (`core` -> `deploy` -> `login` -> `sentry` -> `presence` -> `docs-ui` -> `server`, each folder topologically followed by alphabetical `*.ts`).
 2. If `options.loadGeneratedMaps` was supplied, register the framework-shipped runtime-maps provider before `verifyBootstrap` so the boot check sees it.
 3. `verifyBootstrap` runs (using the per-call `requireDeployConfig` / `requireServicesConfig` / `requireOAuthProviders` flags). Throws a single descriptive `Error` if anything is missing.
-4. Resolve `port` (`options.port` -> argv-parsed -> `SERVER_PORT` -> `80`) and `ip` (`options.ip` -> `SERVER_IP` -> `127.0.0.1`); register them with `registerBindAddress` so framework consumers see the resolved values.
-5. In dev mode (`enableDevTools !== false` and `NODE_ENV !== 'production'`): `initConsolelog()` + dynamic-import `@luckystack/devkit` -> `initializeAll()` + `setupWatchers()`. Install `SIGINT` / `SIGTERM` handlers that force-exit.
+4. Resolve `port` (`options.port` -> argv-parsed -> `options.defaultPort` -> `SERVER_PORT` -> `80`) and `ip` (`options.ip` -> `SERVER_IP` -> `127.0.0.1`); validate the port in `0..65535` and register the intended address. After listen succeeds, register `httpServer.address().port` as the actually-bound address.
+5. In dev mode (`enableDevTools !== false` and `NODE_ENV !== 'production'`): `initConsolelog()` + dynamic-import `@luckystack/devkit` -> `initializeAll()` + `setupWatchers()`. Initialization status is shared with API/sync dispatchers and `/readyz`; a fatal devkit error keeps all three fail-closed with 503. Install `SIGINT` / `SIGTERM` handlers that force-exit.
 6. `writeBootUuid()` writes a fresh boot UUID to Redis so `/_health` becomes truthful and the router can detect rolling restarts.
 7. Construct `http.createServer(handleHttpRequest)` and `loadSocket(httpServer, { maxHttpBufferSize })`.
 8. Return `{ httpServer, ioServer, listen }`. The HTTP server has NOT started listening yet; the caller invokes `listen()` to bind.
@@ -38,8 +38,9 @@ export const createLuckyStackServer = async (
 
 | Field | Type | Default | Purpose |
 | --- | --- | --- | --- |
-| `port` | `number \| string` | `getParsedPort()` -> `SERVER_PORT` -> `80` | HTTP listen port. String coerced via `parseInt(_, 10)`. |
-| `ip` | `string` | `process.env.SERVER_IP ?? '127.0.0.1'` | Bind address. Registered with `registerBindAddress` so `checkOrigin` and other framework code see the resolved value. |
+| `port` | `number \| string` | `getParsedPort()` -> `defaultPort` -> `SERVER_PORT` -> `80` | Explicit HTTP listen port. Numeric strings are accepted; partial/non-integer/out-of-range values fail before `listen`. |
+| `defaultPort` | `number` | `SERVER_PORT` -> `80` | Config-level fallback below explicit `port` + argv; the scaffold passes `config.ports.backend`. |
+| `ip` | `string` | `process.env.SERVER_IP ?? '127.0.0.1'` | Bind address. Registered so `checkOrigin` and other framework code see the resolved value. |
 | `serveFile` | `StaticFileHandler` | none | Catch-all GET handler (Vite output, SPA `index.html`). Called for `/assets/*`, known static extensions, and the final SPA fallback. Without it the static fallback returns `404`. |
 | `serveFavicon` | `FaviconHandler` | none | Handler for `/favicon.ico`. Without it the route returns `404`. |
 | `customRoutes` | `CustomRouteHandler` | none | Inline custom-route hook. Composed after the registry handlers from `registerCustomRoute(...)`; first one to return `true` wins. |
@@ -61,13 +62,13 @@ interface RunningLuckyStackServer {
 }
 ```
 
-`listen()` resolves when the HTTP server is bound. Logs `Server is running on http://<ip>:<port>/` when `projectConfig.logging.socketStartup` or `projectConfig.logging.devLogs` is enabled. It is safe to call once; calling twice yields a Node `ERR_SERVER_ALREADY_LISTEN` from the underlying `httpServer.listen`.
+`listen()` resolves when the HTTP server is bound. The successful `httpServer.address().port` is registered, advertised to dev tooling, and logged, so `port: 0` reports the OS-assigned port. A busy port auto-increments by default in development (disable with `SERVER_PORT_AUTO_INCREMENT=0`) and fails by default in production. It never retries beyond `65535`. It is safe to call once; calling twice yields a Node `ERR_SERVER_ALREADY_LISTEN` from the underlying `httpServer.listen`.
 
 **Behavior (execution order):**
 
 - Auto-register prod runtime-maps provider if `loadGeneratedMaps` is set.
 - Run `verifyBootstrap` (may throw).
-- Resolve port + ip; call `registerBindAddress({ ip, port })`.
+- Resolve + validate port precedence and ip; call `registerBindAddress({ ip, port })` for the intended address.
 - If dev-tools enabled: load console initializer + devkit (`initializeAll`, `setupWatchers`); attach SIGINT / SIGTERM force-exit handlers.
 - `await writeBootUuid()`.
 - Create `http.Server` whose request handler is `handleHttpRequest(req, res, options)` (see `request-pipeline.md`).
@@ -275,7 +276,7 @@ export type CustomRouteHandler = (
 
 | Source | Key | Effect |
 | --- | --- | --- |
-| env | `SERVER_PORT` | Port fallback when neither `options.port` nor argv supplies one. |
+| env | `SERVER_PORT` | Legacy port fallback below `options.port`, argv, and `options.defaultPort`. |
 | env | `SERVER_IP` | IP fallback. |
 | env | `NODE_ENV` | Switches `enableDevTools` default, dynamic-import branch for devkit, and `verifyBootstrap` warn-vs-throw for runtime-maps / localized normalizer. |
 | env | `SECURE` | When `'true'`, session cookies are emitted with the `Secure;` flag (see `request-pipeline.md`). |

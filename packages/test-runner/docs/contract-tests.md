@@ -124,6 +124,35 @@ Type-to-sample table:
 
 This is NOT a property-based generator. It always returns the same value for the same schema. Swap in `fast-check` if you need randomized fuzz that respects the schema.
 
+### `resolveTestBaseUrl(options?)`
+
+Resolve the live server target for test entrypoints. Priority is: non-empty `TEST_BASE_URL`, a valid integer port from `<cwd>/node_modules/.luckystack/dev-server.json` whose owner PID is still alive, then `fallbackUrl` (default `http://localhost:80`). Generated projects pass `http://localhost:${ports.backend}` as the fallback, so config changes, dev auto-increment hops, and stale crash leftovers remain truthful.
+
+```ts
+resolveTestBaseUrl(options?: {
+  cwd?: string;
+  fallbackUrl?: string;
+}): string
+```
+
+This helper does not start or probe a server; connection failures remain visible to the actual test layer.
+
+### `resolveTestEnvironment(input?)`
+
+Prepare the **test process** before DB/Redis-backed integration tests run. It first calls core's `loadEnvFiles()`. When `loadProjectConfig` returns a config with a non-empty `secretManager.url`, it dynamically loads the optional `@luckystack/secret-manager` peer and runs `initSecretManager({ ...config.secretManager, source: 'remote' })`.
+
+```ts
+await resolveTestEnvironment({
+  loadProjectConfig: async () => (await import('./config')).default,
+});
+```
+
+`runAllTests` calls this automatically through its required `loadProjectConfig` callback. The official scaffolded `scripts/testAll.ts` supplies it. The callback is lazy deliberately: `.env` and `.env.local` must load before `config.ts` reads `LUCKYSTACK_SECRET_MANAGER_URL`.
+
+This is a separate process from the live server. Resolving `DATABASE_URL` during server boot does **not** resolve it for Layer-5 `ctx.prisma` calls. If a secret-manager URL is configured but the package cannot load, resolution fails loudly before any layer runs instead of handing a raw `DATABASE_URL_V<n>` pointer to Prisma.
+
+For a custom Vitest integration setup, call `resolveTestEnvironment` from a setup file before importing modules that construct env-backed clients. Direct Layer-5 callers must pass the same lazy loader to `runCustomTests({ ..., loadProjectConfig })`; it resolves before discovery/import. Both orchestrator APIs reject a missing loader at runtime, including from untyped JavaScript. `runAllTests` uses an internal already-prepared Layer-5 entrypoint, so the custom layer does not reload `.env.local` pointers over freshly resolved values.
+
 ## Types
 
 ```ts
@@ -154,6 +183,15 @@ interface RunContractSummary {
   skipped: number;
   results: ContractCheckResult[];
 }
+
+interface ResolveTestEnvironmentInput {
+  loadProjectConfig?: () => unknown | Promise<unknown>;
+}
+
+interface RunCustomTestsInput {
+  // other Layer-5 options omitted
+  loadProjectConfig: NonNullable<ResolveTestEnvironmentInput['loadProjectConfig']>;
+}
 ```
 
 `responseStatus: 'unknown'` only appears on failed results when the JSON either failed to parse or did not carry a `status` field. `errorCode` is set on pass results when `responseStatus === 'error'` and on fail results when the auth/rate-limit layers' `errorCode` mismatch path runs (contract layer never sets it on fail).
@@ -178,11 +216,13 @@ import {
   runContractTests,
   logContractResult,
   logContractSummary,
+  resolveTestBaseUrl,
 } from '@luckystack/test-runner';
+import { ports } from './config.ports';
 
 const summary = await runContractTests({
   apiMethodMap,
-  baseUrl: process.env.TEST_BASE_URL ?? 'http://127.0.0.1:80',
+  baseUrl: resolveTestBaseUrl({ fallbackUrl: `http://localhost:${ports.backend}` }),
   onResult: logContractResult,
 });
 

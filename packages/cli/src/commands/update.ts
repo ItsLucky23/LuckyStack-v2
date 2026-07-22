@@ -29,6 +29,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ok, type ConsumerProject, type Result } from '../lib/project';
 import { writeDumpLog } from '../lib/scan';
+import { AUTH_MODES, EMAIL_PROVIDERS, MONITORING_PROVIDERS, OAUTH_PROVIDERS } from '../featureOptions';
 
 //? Mirrors create-luckystack-app's scaffoldManifest.ts shape (schemaVersion 1).
 export interface ScaffoldManifestFileEntry {
@@ -133,31 +134,47 @@ export const readScaffoldManifest = (root: string): ScaffoldManifest | null => {
 };
 
 //? Recorded choices -> the scaffolder's CLI flags, so the temp re-render uses
-//? the exact configuration this project was created with. Unknown/missing
-//? keys fall back to scaffolder defaults (additive-choice forward-compat).
+//? the exact configuration this project was created with. Unknown/missing KEYS
+//? and unknown VALUES fall back to scaffolder defaults. Value validation is a
+//? correctness + command-boundary invariant: on Windows these args eventually
+//? enter a resolved npx.cmd shim, so a hand-edited manifest must never inject
+//? whitespace or cmd metacharacters before the scaffolder can validate it.
+const PACKAGE_MANAGER_CHOICES = ['npm', 'bun'] as const;
+const ORM_CHOICES = ['prisma', 'drizzle', 'mikro-orm', 'none'] as const;
+const DB_CHOICES = ['mongodb', 'postgresql', 'mysql', 'sqlite'] as const;
+const AI_BROWSER_CHOICES = ['all', 'agent-browser', 'none'] as const;
+
+const readChoice = <TChoice extends string>(
+  choices: Record<string, unknown>,
+  key: string,
+  allowed: readonly TChoice[],
+): TChoice | null => {
+  const value = choices[key];
+  if (typeof value !== 'string') return null;
+  return allowed.find((option) => option === value) ?? null;
+};
+
 export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
   const flags: string[] = [];
-  const str = (key: string): string | null => {
-    const value = choices[key];
-    return typeof value === 'string' && value.length > 0 ? value : null;
-  };
   //? A manifest written before the --pm axis existed has no `packageManager`
-  //? key, so `str()` returns null and the re-render correctly falls back to the
-  //? npm default. Without this replay a bun project re-renders as npm, its
-  //? package.json differs, and every update spams a sidecar.
-  const pm = str('packageManager');
+  //? key, so readChoice() returns null and the re-render correctly falls back to
+  //? npm. Without this replay a bun project re-renders as npm and sidecar-spams.
+  const pm = readChoice(choices, 'packageManager', PACKAGE_MANAGER_CHOICES);
   if (pm) flags.push(`--pm=${pm}`);
-  const orm = str('orm');
+  const orm = readChoice(choices, 'orm', ORM_CHOICES);
   if (orm) flags.push(`--orm=${orm}`);
-  const db = str('dbProvider');
+  const db = readChoice(choices, 'dbProvider', DB_CHOICES);
   if (db) flags.push(`--db=${db}`);
-  const auth = str('authMode');
+  const auth = readChoice(choices, 'authMode', AUTH_MODES);
   if (auth) flags.push(`--auth=${auth}`);
-  const oauth = choices.oauthProviders;
-  if (Array.isArray(oauth) && oauth.length > 0) flags.push(`--oauth=${oauth.join(',')}`);
-  const email = str('emailProvider');
+  const rawOauth = choices.oauthProviders;
+  const oauth = Array.isArray(rawOauth)
+    ? OAUTH_PROVIDERS.filter((provider) => rawOauth.includes(provider))
+    : [];
+  if (oauth.length > 0) flags.push(`--oauth=${oauth.join(',')}`);
+  const email = readChoice(choices, 'emailProvider', EMAIL_PROVIDERS);
   if (email) flags.push(`--email=${email}`);
-  const monitoring = str('monitoringProvider');
+  const monitoring = readChoice(choices, 'monitoringProvider', MONITORING_PROVIDERS);
   if (monitoring) flags.push(`--monitoring=${monitoring}`);
   if (choices.presence === true) flags.push('--presence');
   if (choices.errorTracking === true) flags.push('--error-tracking');
@@ -166,7 +183,7 @@ export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
   if (choices.router === true) flags.push('--router');
   if (choices.cron === true) flags.push('--cron');
   if (choices.aiInstructions === false) flags.push('--no-ai-docs');
-  const aiBrowser = str('aiBrowserTooling');
+  const aiBrowser = readChoice(choices, 'aiBrowserTooling', AI_BROWSER_CHOICES);
   if (aiBrowser) flags.push(`--ai-browser=${aiBrowser}`);
   return flags;
 };
@@ -367,12 +384,22 @@ const resolveCommandPath = (command: string): string | null => {
 
 //? Run the scaffolder into `cwd` with inherited stdio. Windows `.cmd` shims
 //? need the cmd.exe `/s /c ""<path>" args"` double-quote pattern (see
-//? runNpmInstall in lib/project.ts for the full Bug-H rationale).
+//? runNpmInstall in lib/project.ts for the full Bug-H rationale). Every dynamic
+//? arg is allowlisted by choicesToFlags + normalizeScaffoldProjectName; keep a
+//? final character guard here so future args cannot silently reopen cmd parsing.
+const SAFE_WINDOWS_SCAFFOLD_ARG = /^[A-Za-z0-9@./,=+_-]+$/;
+export const isSafeWindowsScaffoldArg = (value: string): boolean =>
+  SAFE_WINDOWS_SCAFFOLD_ARG.test(value);
+
 const runScaffolderCli = (cwd: string, args: string[]): boolean => {
   const resolved = resolveCommandPath('npx');
   if (!resolved) return false;
   const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
   if (needsShell) {
+    if (!args.every((argument) => isSafeWindowsScaffoldArg(argument))) {
+      console.error('[luckystack update] refusing an unsafe scaffold argument before invoking npx.cmd');
+      return false;
+    }
     const comspec = process.env.ComSpec ?? 'cmd.exe';
     const shellResult = spawnSync(comspec, ['/d', '/s', '/c', `""${resolved}" ${args.join(' ')}"`], {
       cwd,
@@ -384,6 +411,17 @@ const runScaffolderCli = (cwd: string, args: string[]): boolean => {
   const result = spawnSync(resolved, args, { cwd, stdio: 'inherit' });
   return result.status === 0;
 };
+
+//? Must stay byte-equivalent to create-luckystack-app's slugify(): the
+//? scaffolder writes into `<temp>/<slug>`, never `<temp>/<raw name>`. Besides
+//? fixing old projects whose directory contains spaces, this makes the only
+//? positional dynamic shell argument a strict `[a-z0-9-]+` token.
+export const normalizeScaffoldProjectName = (raw: string): string =>
+  raw
+    .toLowerCase()
+    .trim()
+    .replaceAll(/[^a-z0-9]+/g, '-')
+    .replaceAll(/^-+|-+$/g, '');
 
 export interface UpdateOptions {
   cliVersion: string;
@@ -406,17 +444,22 @@ export const renderScaffoldToTemp: NonNullable<UpdateOptions['renderFreshScaffol
   choices,
 }) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'luckystack-update-'));
+  const projectSlug = normalizeScaffoldProjectName(projectName);
+  if (!projectSlug) {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    return null;
+  }
   const args = [
     '-y',
     `create-luckystack-app@${cliVersion}`,
-    projectName,
+    projectSlug,
     '--no-prompt',
     '--no-install',
     ...choicesToFlags(choices),
   ];
   console.log(`\nRendering a fresh scaffold (${args.join(' ')})…`);
   const ok = runScaffolderCli(tempRoot, args);
-  const projectDir = path.join(tempRoot, projectName);
+  const projectDir = path.join(tempRoot, projectSlug);
   if (!ok || !fs.existsSync(projectDir)) {
     fs.rmSync(tempRoot, { recursive: true, force: true });
     return null;

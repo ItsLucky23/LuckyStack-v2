@@ -90,6 +90,23 @@ The wrapper does exactly the boot **prefix** — `loadEnvFiles()` (`.env` + `.en
 
 Any other CLI tool that needs resolved secrets (a one-off migration script, a data backfill) can follow the same shape: `loadEnvFiles()` → `resolveSecretsIfConfigured(config.secretManager)` → do the work.
 
+## Test-runner process (`npm run test`)
+
+The live server and `@luckystack/test-runner` are separate processes. Server boot resolving `DATABASE_URL` therefore does not change the test process's `process.env`; a Layer-5 test touching `ctx.prisma` would otherwise hand Prisma the raw pointer.
+
+`runAllTests` accepts a lazy config loader and performs the same prefix before any test layer runs:
+
+```ts
+const summary = await runAllTests({
+  // maps/baseUrl omitted
+  loadProjectConfig: async () => (await import('../config')).default,
+});
+```
+
+The scaffolded `scripts/testAll.ts` includes this callback. The runner loads `.env`/`.env.local` first, then imports config, and—when `config.secretManager.url` is non-empty—dynamically loads the optional package and runs remote, fail-fast resolution. Configured-but-missing secret-manager is a hard test-bootstrap error: continuing with unresolved pointers would only move the failure into Prisma/Redis and hide the cause.
+
+Custom Vitest integration suites can call `resolveTestEnvironment({ loadProjectConfig })` from their setup file before importing env-backed clients. Direct Layer-5 users must pass `loadProjectConfig` to `runCustomTests` itself; both public orchestrator APIs reject a missing loader. `runAllTests` marks its earlier bootstrap so the custom layer never reloads `.env.local` pointer literals over freshly resolved secrets.
+
 ## Modes
 
 The boot seam pins `source: 'remote'` (fail-fast) and treats an empty `url` as "off" (plain local env) — the recommended setup. The package itself supports three modes; call `initSecretManager` directly if you need `'local'` / `'hybrid'`:

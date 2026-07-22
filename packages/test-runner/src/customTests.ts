@@ -11,6 +11,11 @@ import { pathToFileURL } from 'node:url';
 import { getCsrfConfig, getPrismaClient, getProjectConfig, getSrcDir, tryCatch, tryCatchSync } from '@luckystack/core';
 
 import {
+  assertProjectConfigLoader,
+  resolveTestEnvironment,
+  type ResolveTestEnvironmentInput,
+} from './resolveTestEnvironment';
+import {
   openStreamWatcher,
   type StreamChunkFrame,
   type StreamWatcher,
@@ -76,8 +81,16 @@ export interface RunCustomTestsInput {
    * HTTP method (e.g. logout is DELETE). Falls back to POST when absent.
    */
   apiMethodMap?: ApiMethodMap;
+  /**
+   * Lazy consumer config for direct Layer-5 runs. Required so the public path
+   * cannot silently skip a configured secret manager; `runAllTests` prepares
+   * the environment separately before using the internal Layer-5 entrypoint.
+   */
+  loadProjectConfig: NonNullable<ResolveTestEnvironmentInput['loadProjectConfig']>;
   onResult?: (result: CustomTestResult) => void;
 }
+
+type PreparedRunCustomTestsInput = Omit<RunCustomTestsInput, 'loadProjectConfig'>;
 
 interface DiscoveredTestFile {
   /** Absolute path to the test file. */
@@ -381,7 +394,7 @@ interface BuiltContext {
 
 const buildContext = (
   discovery: DiscoveredTestFile,
-  input: RunCustomTestsInput,
+  input: PreparedRunCustomTestsInput,
 ): BuiltContext => {
   //? Default to the PROJECT's configured session cookie name (the server reads
   //? the token from this cookie). Hardcoding a name silently breaks every
@@ -443,7 +456,10 @@ const buildContext = (
   return { ctx, closeAllWatchers, state };
 };
 
-export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCustomTestsSummary> => {
+/** @internal Environment is already prepared by `runAllTests`. */
+export const runCustomTestsAfterEnvironmentPrepared = async (
+  input: PreparedRunCustomTestsInput,
+): Promise<RunCustomTestsSummary> => {
   const srcDir = getSrcDir();
   const files = discoverCustomTestFiles(srcDir);
   const results: CustomTestResult[] = [];
@@ -549,4 +565,14 @@ export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCus
     xpassed: results.filter(r => r.status === 'xpass').length,
     results,
   };
+};
+
+//? Public direct Layer-5 path: custom modules are imported only after env files
+//? and optional secret pointers resolve. The process-wide orchestrator calls the
+//? internal prepared function above, so it neither reloads pointers nor exposes
+//? a public `skipBootstrap` flag that callers could misuse accidentally.
+export const runCustomTests = async (input: RunCustomTestsInput): Promise<RunCustomTestsSummary> => {
+  assertProjectConfigLoader(input, 'runCustomTests');
+  await resolveTestEnvironment({ loadProjectConfig: input.loadProjectConfig });
+  return runCustomTestsAfterEnvironmentPrepared(input);
 };

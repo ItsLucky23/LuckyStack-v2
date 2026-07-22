@@ -1,3 +1,5 @@
+import process from 'node:process';
+
 //? Boot a SECOND backend instance on a custom port, sharing the same `.env`
 //? Redis/Mongo — for the local multi-instance smoke test described in
 //? docs/ARCHITECTURE_MULTI_INSTANCE.md. Bypasses the dev supervisor (no

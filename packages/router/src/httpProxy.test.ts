@@ -39,8 +39,16 @@ const boot = async (options: {
   maxRequestBodyBytes?: number;
   //? When true, the upstream answers every request with a 200.
   upstreamResponds?: boolean;
+  //? Send headers + a partial body, then reset the backend socket.
+  upstreamAbortsAfterHeaders?: boolean;
 }): Promise<Harness> => {
   const upstream = http.createServer((_req: IncomingMessage, res) => {
+    if (options.upstreamAbortsAfterHeaders) {
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-length': '100' });
+      res.write('partial');
+      setImmediate(() => { res.socket?.destroy(); });
+      return;
+    }
     if (options.upstreamResponds) {
       res.statusCode = 200;
       res.end('ok');
@@ -102,6 +110,22 @@ describe('httpProxy', () => {
 
     expect(statusCode).toBe(502);
     expect(body).toContain('routing.upstreamUnreachable');
+  });
+
+  it('contains an upstream response reset after headers instead of emitting an uncaught error', async () => {
+    const h = await boot({ upstreamAbortsAfterHeaders: true });
+
+    const outcome = await new Promise<'aborted' | 'response-error' | 'request-error'>((resolve, reject) => {
+      const req = http.get(`http://127.0.0.1:${String(h.port)}/api/system/ping/v1`, (res) => {
+        res.resume();
+        res.once('aborted', () => { resolve('aborted'); });
+        res.once('error', () => { resolve('response-error'); });
+      });
+      req.once('error', () => { resolve('request-error'); });
+      req.setTimeout(2000, () => { req.destroy(); reject(new Error('client timeout')); });
+    });
+
+    expect(['aborted', 'response-error', 'request-error']).toContain(outcome);
   });
 
   // --- DD-ROUTER-DD1: body size cap ---

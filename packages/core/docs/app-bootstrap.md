@@ -1,6 +1,6 @@
 # App Bootstrap
 
-> Deep specs for the registries + utilities a project entry wires at boot: bind address, runtime maps, api-method map, prisma/redis clients, notifier, email senders, logger + redacted log keys, locale reloader, boot UUID, synchronized env hashes, plus the cross-cutting helpers `tryCatch`, `sleep`, `getParams`, `serveAvatar`. Source: `packages/core/src/`. Bijgewerkt: 2026-05-20.
+> Deep specs for the registries + utilities a project entry wires at boot: bind address, runtime maps, api-method map, prisma/redis clients, notifier, email senders, logger + redacted log keys, locale reloader, boot UUID, synchronized env hashes, plus the cross-cutting helpers `tryCatch`, `sleep`, `getParams`, `serveAvatar`. Source: `packages/core/src/`. Bijgewerkt: 2026-07-20.
 
 ## Overview
 
@@ -22,14 +22,22 @@ This doc groups every slot into sections:
 
 ### `registerBindAddress(address: { ip: string; port: number }): void`
 
-Stores the listen address used by `createLuckyStackServer`. Framework code (e.g. `checkOrigin` building the same-origin allow-list entry) reads from this registry instead of `SERVER_IP`/`SERVER_PORT` env vars so programmatic `createLuckyStackServer({ ip, port })` boots don't drift.
+Stores the intended pre-listen address used by `createLuckyStackServer` and resets the OAuth pre-hop baseline. Framework code never needs to infer this from env vars.
+
+### `registerBoundAddress(address: { ip: string; port: number }): void`
+
+Called from the successful `node:http.listen` callback with `httpServer.address().port`. Updates the address all runtime readers see while preserving the intended address. The distinction matters for `listen(0)` and for a dev auto-increment hop.
 
 ### `getBindAddress(): { ip: string; port: string }`
 
 **Behavior (resolution order):**
-1. Registered value (returns `{ ip: registered.ip, port: String(registered.port) }`).
+1. Actually-bound registered value (returns `{ ip: registered.ip, port: String(registered.port) }`).
 2. `process.env.SERVER_IP` / `process.env.SERVER_PORT`.
 3. Fallback to `'127.0.0.1'` / `''`.
+
+### `resolveDevCallbackUrl(callbackUrl: string): string`
+
+In non-production environments, rewrites a `localhost`, `127.0.0.1`, or `[::1]` OAuth callback only when its effective port still equals the intended pre-listen port and the server actually bound another port. Authorize and token exchange both call this helper, so their `redirect_uri` remains byte-identical. An explicitly configured local router/reverse-proxy port is left untouched. Production, remote hosts, malformed URLs, and already-current callbacks are no-ops.
 
 ## API Reference — Runtime Maps
 

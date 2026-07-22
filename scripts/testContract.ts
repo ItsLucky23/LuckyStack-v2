@@ -1,5 +1,4 @@
 import {
-import { resolveTestBaseUrl } from './resolveTestBaseUrl';
   logContractResult,
   logContractSummary,
   runContractTests,
@@ -7,12 +6,13 @@ import { resolveTestBaseUrl } from './resolveTestBaseUrl';
 } from '../packages/test-runner/src';
 import { apiMethodMap } from '../src/_sockets/apiTypes.generated';
 import { apiInputSchemas } from '../src/_sockets/apiInputSchemas.generated';
+import { resolveTestBaseUrl } from './resolveTestBaseUrl';
 
 //? CLI wrapper: boots no server, just hits whatever URL the operator points at.
 //? Run `npm run server` in another terminal (or `npm run router`) before this.
 //?
 //? Config via env:
-//?   TEST_BASE_URL    — defaults to http://localhost:80
+//?   TEST_BASE_URL    — override; otherwise live dev port → ports.backend fallback
 //?   TEST_SKIP        — comma-separated `<page>/<name>` pairs to skip
 //?   TEST_AUTH_TOKEN  — passed through as session cookie when set
 const baseUrl = resolveTestBaseUrl();

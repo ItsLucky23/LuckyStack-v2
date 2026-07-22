@@ -11,6 +11,8 @@ import {
   isOriginFormTarget,
   isHostPinned,
   normalizeForwardedProto,
+  createTrustedProxyMatcher,
+  resolveForwardedProto,
   buildForwardedFor,
 } from './proxyUtils';
 import { URL } from 'node:url';
@@ -220,6 +222,29 @@ describe('normalizeForwardedProto (shared by HTTP + WS proxy)', () => {
 
   it('takes the first value from an array', () => {
     expect(normalizeForwardedProto(['https', 'http'])).toBe('https');
+  });
+});
+
+describe('trusted x-forwarded-proto boundary', () => {
+  it('ignores a direct client claiming https when no proxy is trusted', () => {
+    expect(resolveForwardedProto('https', '203.0.113.42')).toBe('http');
+  });
+
+  it('honors https only when the immediate peer matches an explicit CIDR', () => {
+    const trusted = createTrustedProxyMatcher(['10.20.0.0/16', '2001:db8::/32']);
+    expect(resolveForwardedProto('https', '10.20.4.8', trusted)).toBe('https');
+    expect(resolveForwardedProto('https', '10.21.4.8', trusted)).toBe('http');
+    expect(resolveForwardedProto('https', '2001:db8::42', trusted)).toBe('https');
+  });
+
+  it('normalizes IPv4-mapped IPv6 peer addresses before matching', () => {
+    const trusted = createTrustedProxyMatcher(['127.0.0.1/32']);
+    expect(resolveForwardedProto('https', '::ffff:127.0.0.1', trusted)).toBe('https');
+  });
+
+  it('fails router boot configuration on malformed CIDRs', () => {
+    expect(() => createTrustedProxyMatcher(['10.0.0.0/99'])).toThrow('invalid trusted proxy');
+    expect(() => createTrustedProxyMatcher(['not-an-ip'])).toThrow('invalid trusted proxy');
   });
 });
 

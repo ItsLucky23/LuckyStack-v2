@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
+### Added
+
+- Scaffold env docs now include the rotatable TOTP keyring contract
+  (`TOTP_ENCRYPTION_KEY` + JSON `TOTP_ENCRYPTION_LEGACY_KEYS`), and deploy config
+  documents the router's fail-closed `trustedProxyCidrs` TLS boundary.
+
+### Security
+
+- Fresh scaffolds now use `sharp ^0.35.3`, which includes the fixed libvips
+  builds for CVE-2026-33327, CVE-2026-33328, CVE-2026-35590 and CVE-2026-35591.
+
+### Fixed
+
+- The scaffold Vite proxy now updates the original proxy options as well as
+  Vite's per-request clone, so HTTP and direct WebSocket upgrades genuinely
+  follow backend port changes after Vite has started. Stale advertisements from
+  crashed processes now fall back to `ports.backend` instead of targeting a dead port.
+- Scaffold test targeting now uses `@luckystack/test-runner`'s live-port resolver
+  with `config.ports.backend` as fallback instead of hardcoding port 80.
+- Scaffolded `scripts/testAll.ts` now lazily supplies the project config to the
+  test runner, so `.env` pointers are resolved by optional secret-manager boot
+  in the test process before Layer-5 tests touch Prisma or Redis.
+- Scaffold typecheck coverage now includes TypeScript scripts and Vite port
+  configuration, preventing malformed test entrypoints and proxy signatures from
+  escaping release gates.
+
 ## [0.7.0] - 2026-07-16
 
 ### Fixed

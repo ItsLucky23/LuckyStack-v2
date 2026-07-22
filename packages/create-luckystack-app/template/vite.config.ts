@@ -1,10 +1,10 @@
-import { defineConfig, loadEnv, type ProxyOptions } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ports } from './config.ports';
+import { createDynamicProxyOptions, isProcessRunning, type DynamicProxyOptions } from './viteBackendProxy';
 
 //? The dev backend writes its ACTUALLY-bound port to
 //? `node_modules/.luckystack/dev-server.json` (it may have auto-incremented off
@@ -18,8 +18,14 @@ const readBackendPort = (fallback: string): string => {
       path.join(process.cwd(), 'node_modules', '.luckystack', 'dev-server.json'),
       'utf8',
     );
-    const info = JSON.parse(raw) as { port?: number };
-    return info.port ? String(info.port) : fallback;
+    const info = JSON.parse(raw) as { port?: unknown; pid?: unknown };
+    return typeof info.port === 'number'
+      && Number.isInteger(info.port)
+      && info.port > 0
+      && info.port <= 65_535
+      && isProcessRunning(info.pid)
+      ? String(info.port)
+      : fallback;
   } catch {
     return fallback;
   }
@@ -45,29 +51,19 @@ export default defineConfig(({ mode }) => {
         ? `http://${ip}:${routerPort}`
         : `http://${ip}:${readBackendPort(String(ports.backend))}`;
 
-  //? Vite's proxy (node-http-proxy) has NO `router` option, but `bypass` runs per
-  //? request with the live options object — set `target` there so every proxied
-  //? request hits the CURRENT backend port. socket.io always does an HTTP polling
-  //? handshake before upgrading; that handshake passes through here and mutates
-  //? the shared options object, so the subsequent websocket upgrade (which reuses
-  //? the same object) is carried to the right port too. Returning undefined lets
-  //? the proxy continue as normal.
-  const followBackend = (_req: IncomingMessage, _res: ServerResponse, options: ProxyOptions): undefined => {
-    options.target = backendTarget();
-    return undefined;
-  };
-
-  //? Fresh options object per route (spread) so each entry's `bypass` mutates its
-  //? own `target` and routes never cross-contaminate.
-  const entry = (extra: ProxyOptions = {}): ProxyOptions => ({
-    target: backendTarget(),
-    //? A remote backend (ports.devBackendUrl) sits on a different host, so rewrite
-    //? the Host header to match it (vhost routing + TLS SNI); the local/router
-    //? target is same-host so it stays off.
-    changeOrigin: Boolean(remoteBackend),
-    bypass: followBackend,
-    ...extra,
-  });
+  //? Fresh options object per route so HTTP requests and direct WebSocket
+  //? upgrades both resolve the CURRENT backend port. The helper updates Vite's
+  //? request clone AND the original options object held by node-http-proxy.
+  const entry = (extra: DynamicProxyOptions = {}) => createDynamicProxyOptions(
+    backendTarget,
+    {
+      //? A remote backend (ports.devBackendUrl) sits on a different host, so rewrite
+      //? the Host header to match it (vhost routing + TLS SNI); the local/router
+      //? target is same-host so it stays off.
+      changeOrigin: Boolean(remoteBackend),
+      ...extra,
+    },
+  );
 
   return {
     plugins: [

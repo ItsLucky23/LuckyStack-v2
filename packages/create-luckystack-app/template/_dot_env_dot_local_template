@@ -37,8 +37,11 @@ REDIS_PASSWORD=
 # ──────────────────────── Two-factor authentication ─────────────────────────
 # Optional (ADR 0024): encrypts users' TOTP secrets at rest (AES-256-GCM).
 # Any long random string works. Without it, secrets are stored as-is (a
-# one-time warning is logged); adding the key later upgrades new enrollments.
+# one-time warning is logged). New ciphertext carries a key id; during rotation,
+# move the old key into the JSON legacy array until all active users migrate on
+# successful TOTP use, then remove it.
 # TOTP_ENCRYPTION_KEY=
+# TOTP_ENCRYPTION_LEGACY_KEYS=["previous-long-random-key"]
 
 # Test-only — protects /_test/reset in dev. Set this if you run integration tests.
 TEST_RESET_TOKEN=

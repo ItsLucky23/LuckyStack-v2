@@ -18,7 +18,7 @@ vi.mock('ioredis', () => {
 //? Imported AFTER the mock so redis.ts builds mock clients. Importing redis.ts
 //? runs its module side effects: it registers the default resolver AND the
 //? secrets-resolved listener under test.
-import { getRedisClient, isRedisClientRegistered, resetClientsForTests } from './clients';
+import { getRedisClient, isRedisClientRegistered, registerRedisClient, resetClientsForTests } from './clients';
 import { rebuildDefaultRedisClient, resetDefaultRedisClient } from './redis';
 import { notifySecretsResolved } from './secretsResolved';
 
@@ -57,5 +57,14 @@ describe('default Redis client rebuild on secret resolution (FIX-1, ADR 0026)', 
     notifySecretsResolved(['DATABASE_URL', 'OPENAI_KEY']);
     expect(getRedisClient()).toBe(before);
     expect(isRedisClientRegistered()).toBe(false);
+  });
+
+  it('preserves a consumer-registered default client across automatic secret refresh', () => {
+    const custom = getRedisClient();
+    registerRedisClient(custom);
+    notifySecretsResolved(['REDIS_PASSWORD']);
+
+    expect(getRedisClient()).toBe(custom);
+    expect(isRedisClientRegistered()).toBe(true);
   });
 });

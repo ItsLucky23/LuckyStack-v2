@@ -10,7 +10,10 @@ interface ConsoleSenderOptions {
 //? no text fallback). Returns a deterministic fake id.
 export const ConsoleSender = (options: ConsoleSenderOptions = {}): EmailSender => ({
   name: 'console',
-  send: (message) => {
+  send: (message, context) => {
+    if (context?.signal.aborted) {
+      return Promise.resolve({ ok: false, reason: 'send-aborted', deliveryOutcome: 'not-sent' });
+    }
     const { from: defaultFrom } = options;
     const recipients = Array.isArray(message.to) ? message.to.join(', ') : message.to;
     const body = message.text ?? message.html.replaceAll(/<[^>]+>/g, '').trim().slice(0, 400);

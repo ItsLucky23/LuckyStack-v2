@@ -90,7 +90,7 @@ The rules:
 '/org/123/projects'      // ✓ relative path with multi-segment
 ```
 
-The trick is parsing against a `'http://placeholder'` base — if the resulting origin matches the base, the input was a relative URL (no scheme/host of its own). Relative URLs land on the same origin as the app, so they're safe by definition.
+The trick is parsing against a `'http://placeholder'` base — if the resulting origin matches the base, the input was a relative URL (no scheme/host of its own). Relative URLs are safe by definition, but the OAuth callback may run on a separate backend origin. After validation, the framework resolves a relative result against the trusted absolute `defaultUrl` supplied by the callback route, so `/dashboard` inherits the frontend origin instead of the backend callback origin.
 
 ### 2. Absolute URL — origin must match `http.cors.allowedOrigins`
 
@@ -160,7 +160,9 @@ const resolvePostLoginRedirect = async ({ fallbackUrl, userId, providerName, isN
     getLogger().warn(`[oauth] postLoginRedirect resolver threw`, { message: (resolverError as Error).message });
     return fallbackUrl;
   }
-  if (resolved && isAllowedRedirectUrl(resolved)) return resolved;
+  if (resolved && isAllowedRedirectUrl(resolved)) {
+    return resolvePostLoginRedirectAgainstDefault(resolved, fallbackUrl);
+  }
   if (resolved) {
     getLogger().warn(
       `[oauth] postLoginRedirect returned a URL not in allowed origins — falling back`,
@@ -244,7 +246,7 @@ registerPostLoginRedirect(async ({ userId, defaultUrl }) => {
 });
 ```
 
-Look up the user's tenant and route to a tenant-scoped URL. The relative path is always same-origin so it passes `isAllowedRedirectUrl` without needing `allowedOrigins` entries.
+Look up the user's tenant and route to a tenant-scoped URL. The relative path passes `isAllowedRedirectUrl` without needing `allowedOrigins` entries and then inherits the callback route's trusted frontend `defaultUrl` origin.
 
 ### Per-provider deep link
 

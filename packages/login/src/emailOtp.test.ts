@@ -25,6 +25,35 @@ const { store, fakeRedis } = vi.hoisted(() => {
         if (entry) entry.ttl = ttl;
         return entry ? 1 : 0;
       },
+      //? Execute the two emailOtp Lua shapes atomically against the backing map.
+      //? An issue script contains SET; the verify script contains INCR.
+      eval: async (
+        script: string,
+        _keyCount: number,
+        key: string,
+        counter: string,
+        firstArg: string,
+        secondArg: string,
+      ) => {
+        if (script.includes("redis.call('set'")) {
+          backing.set(key, { value: firstArg, ttl: Number(secondArg) });
+          backing.delete(counter);
+          return 1;
+        }
+        const stored = backing.get(key);
+        if (!stored) return 0;
+        const attempts = Number(backing.get(counter)?.value ?? '0') + 1;
+        backing.set(counter, { value: String(attempts), ttl: stored.ttl > 0 ? stored.ttl : 600 });
+        if (attempts > Number(secondArg)) {
+          backing.delete(key);
+          backing.delete(counter);
+          return 3;
+        }
+        if (stored.value !== firstArg) return 1;
+        backing.delete(key);
+        backing.delete(counter);
+        return 2;
+      },
     },
   };
 });
@@ -88,6 +117,25 @@ describe('issueEmailCode + verifyEmailCode', () => {
     await verifyEmailCode({ ...slot, code: '000000', maxAttempts: 5 }); //? one failed attempt
     const second = await issueEmailCode(slot);
     await expect(verifyEmailCode({ ...slot, code: first, maxAttempts: 5 })).resolves.toBe('invalid');
+    await expect(verifyEmailCode({ ...slot, code: second, maxAttempts: 5 })).resolves.toBe('valid');
+  });
+
+  it('atomically reissues after a spent attempt budget without a stale verifier burning the replacement', async () => {
+    const first = await issueEmailCode(slot);
+    const wrong = first === '999999' ? '888888' : '999999';
+    for (let remaining = 5; remaining > 0; remaining -= 1) {
+      await verifyEmailCode({ ...slot, code: wrong, maxAttempts: 5 });
+    }
+
+    //? Call issue first, then let a stale verifier race it. The old two-command
+    //? SET → DEL reset yielded between those operations: this verifier observed
+    //? the fresh hash with the old count=5, locked, and deleted the new code.
+    const [second, staleVerdict] = await Promise.all([
+      issueEmailCode(slot),
+      verifyEmailCode({ ...slot, code: first, maxAttempts: 5 }),
+    ]);
+
+    expect(staleVerdict).toBe('invalid');
     await expect(verifyEmailCode({ ...slot, code: second, maxAttempts: 5 })).resolves.toBe('valid');
   });
 

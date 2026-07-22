@@ -49,7 +49,10 @@ export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
 
   return {
     name: 'smtp',
-    send: async (message) => {
+    send: async (message, context) => {
+      if (context?.signal.aborted) {
+        return { ok: false, reason: 'send-aborted', deliveryOutcome: 'not-sent' };
+      }
       const fromAddress = message.from ?? defaultFrom;
       if (!fromAddress) {
         return { ok: false, reason: 'missing-from' };

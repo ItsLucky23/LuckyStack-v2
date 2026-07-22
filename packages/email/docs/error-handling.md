@@ -175,7 +175,7 @@ The only case where `sendEmail` *throws* is the strict `required: true` + no-sen
 
 ## DLQ / retry patterns
 
-`@luckystack/email` does NOT ship a built-in dead-letter queue. Failed sends are observable (via `postEmailSend` + Sentry) but **not** retried automatically — this is deliberate, because retry semantics depend heavily on provider quirks (Resend's rate limit headers, SMTP soft-bounce codes, regional ESP quotas).
+`@luckystack/email` does NOT ship a built-in dead-letter queue. Failed sends are observable (via `postEmailSend` + Sentry) but **not** retried automatically — this is deliberate, because retry semantics depend heavily on provider quirks (Resend's rate limit headers, SMTP soft-bounce codes, regional ESP quotas). A timeout or caller abort after dispatch reports `deliveryOutcome: 'unknown'`; retry only with the same caller-supplied idempotency key, because the first attempt may still arrive.
 
 The recommended pattern is a `postEmailSend` hook + a worker process:
 

@@ -20,5 +20,16 @@
       "config": ["./config.ts"]
     }
   },
-  "include": ["src", "server", "config.ts", "deploy.config.ts", "services.config.ts", "luckystack"]
+  "include": [
+    "src",
+    "server",
+    "scripts",
+    "config.ts",
+    "config.ports.ts",
+    "deploy.config.ts",
+    "services.config.ts",
+    "vite.config.ts",
+    "viteBackendProxy.ts",
+    "luckystack"
+  ]
 }

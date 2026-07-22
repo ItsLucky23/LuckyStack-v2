@@ -4,7 +4,7 @@
 //? per CLAUDE.md). Run `npm run server` in another terminal first.
 //?
 //? Config via env:
-//?   TEST_BASE_URL          — defaults to http://localhost:80
+//?   TEST_BASE_URL          — override; otherwise live dev port → ports.backend fallback
 //?   TEST_SKIP              — comma-separated `<page>/<name>` to skip
 //?   TEST_AUTH_TOKEN        — applied as session cookie to sweep layers
 //?   TEST_FILTER            — substring match against `<page>/<name>/<version>`
@@ -17,11 +17,10 @@
 import fs from 'node:fs';
 import { resolveTestBaseUrl } from './resolveTestBaseUrl';
 
-//? Register the PROJECT config (same as server.ts does) so the test process
-//? shares the server's projectName, rate-limit key prefix, and session cookie
-//? name. Without this, getProjectConfig() falls back to defaults and helpers
-//? like clearAllRateLimits()/getSession() target the wrong Redis namespace.
-import '../config';
+//? `runAllTests.loadProjectConfig` imports the PROJECT config lazily after the
+//? test process has loaded env files. Besides registering the project policy,
+//? this lets @luckystack/test-runner resolve secret-manager pointers BEFORE any
+//? Layer-5 module touches Prisma/Redis directly.
 import { logRunAllSummary, runAllTests } from '../packages/test-runner/src';
 import { apiInputSchemas } from '../src/_sockets/apiInputSchemas.generated';
 import { apiMetaMap, apiMethodMap } from '../src/_sockets/apiTypes.generated';
@@ -40,6 +39,7 @@ if (filter) console.log(`[luckystack-test] filter: ${filter}`);
 
 const summary = await runAllTests({
   apiMethodMap,
+  loadProjectConfig: async () => (await import('../config')).default,
   apiMetaMap,
   apiInputSchemas,
   baseUrl,

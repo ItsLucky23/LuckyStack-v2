@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
+### Fixed
+
+- Relative `postLoginRedirect` results are now resolved against the trusted
+  absolute frontend fallback URL. In split frontend/backend deployments,
+  `/dashboard` no longer lands on the OAuth callback's backend origin.
+- Concurrent TOTP enrollment confirmation is serialized per user, so at most
+  one caller receives the recovery-code set that was actually persisted.
+
+### Security
+
+- TOTP ciphertext now carries a non-secret key id (`enc:v2`) and supports a
+  JSON decrypt-only legacy keyring through `TOTP_ENCRYPTION_LEGACY_KEYS`.
+  Successful TOTP proofs lazily migrate plaintext, legacy `gcm:` and old-key
+  rows to the current primary, enabling rotation without locking users out.
+- Email-code issue and verification are now complete Redis Lua transactions.
+  A stale verifier can no longer authenticate with the previous generation,
+  consume the replacement's attempt budget, or delete a newly reissued code.
+
 ## [0.7.3] - 2026-07-20
 
 ### Fixed

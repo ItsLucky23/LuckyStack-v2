@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   registerPostLoginRedirect,
   getPostLoginRedirect,
+  resolvePostLoginRedirectAgainstDefault,
   type PostLoginRedirectInput,
 } from "./redirectResolver";
 
@@ -57,5 +58,29 @@ describe("post-login redirect resolver registry", () => {
     registerPostLoginRedirect(firstResolver);
     registerPostLoginRedirect(secondResolver);
     expect(getPostLoginRedirect()).toBe(secondResolver);
+  });
+});
+
+describe("resolvePostLoginRedirectAgainstDefault", () => {
+  it("anchors a root-relative resolver result on the frontend default origin", () => {
+    expect(
+      resolvePostLoginRedirectAgainstDefault(
+        "/onboarding?welcome=1#profile",
+        "https://app.example.com/dashboard",
+      ),
+    ).toBe("https://app.example.com/onboarding?welcome=1#profile");
+  });
+
+  it("preserves an allowed absolute resolver result", () => {
+    expect(
+      resolvePostLoginRedirectAgainstDefault(
+        "https://tenant.example.com/home",
+        "https://app.example.com/dashboard",
+      ),
+    ).toBe("https://tenant.example.com/home");
+  });
+
+  it("keeps backwards compatibility when a direct caller supplied only a relative default", () => {
+    expect(resolvePostLoginRedirectAgainstDefault("/onboarding", "/dashboard")).toBe("/onboarding");
   });
 });

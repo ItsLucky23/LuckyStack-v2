@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
+### Fixed
+
+- The heavyweight multi-ORM TypeScript Program fixture now has an explicit
+  30-second setup budget. Under full-suite parallel load it exceeded Vitest's
+  10-second default and skipped all 27 assertions despite passing in isolation.
+
 ## [0.7.0] - 2026-07-16
 
 ### Changed — BREAKING

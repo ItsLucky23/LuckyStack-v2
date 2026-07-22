@@ -12,7 +12,7 @@ interface ResendSenderOptions {
 
 interface ResendClient {
   emails: {
-    send: (input: Record<string, unknown>) => Promise<{
+    send: (input: Record<string, unknown>, options?: { idempotencyKey?: string }) => Promise<{
       data: { id: string } | null;
       error: { message?: string } | null;
     }>;
@@ -61,14 +61,23 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
 
   return {
     name: 'resend',
-    send: async (message) => {
+    send: async (message, context) => {
+      if (context?.signal.aborted) {
+        return { ok: false, reason: 'send-aborted', deliveryOutcome: 'not-sent' };
+      }
       const client = await clientPromise;
+      if (context?.signal.aborted) {
+        return { ok: false, reason: 'send-aborted', deliveryOutcome: 'not-sent' };
+      }
       const fromAddress = message.from ?? defaultFrom;
       if (!fromAddress) {
         return { ok: false, reason: 'missing-from' };
       }
 
-      const { data, error } = await client.emails.send(toProviderPayload(message, fromAddress));
+      const { data, error } = await client.emails.send(
+        toProviderPayload(message, fromAddress),
+        context?.idempotencyKey ? { idempotencyKey: context.idempotencyKey } : undefined,
+      );
 
       if (error) {
         return { ok: false, reason: error.message || 'resend-error', cause: error }; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- empty `message` should fall back too

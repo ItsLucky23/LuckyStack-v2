@@ -2077,7 +2077,8 @@ export default Dashboard;`,
       //? Second factor (ADR 0024): 'optional' lets users enroll an authenticator
       //? app (Google/Microsoft Authenticator, Authy, … — the open TOTP standard).
       //? Enrolled users answer a 2FA challenge at login; recovery codes + an
-      //? email-code fallback are included. Tip: set TOTP_ENCRYPTION_KEY in
+      //? email-code fallback are included. Tip: set TOTP_ENCRYPTION_KEY (and,
+      //? during rotation, TOTP_ENCRYPTION_LEGACY_KEYS as a JSON array) in
       //? .env.local to encrypt the TOTP secrets at rest.
       // twoFactor: 'optional',
     },`,
