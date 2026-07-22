@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The avatar route aliases Sharp's default import, keeping Sharp 0.35 builds
+  warning-free.
 - The scaffold Vite proxy now updates the original proxy options as well as
   Vite's per-request clone, so HTTP and direct WebSocket upgrades genuinely
   follow backend port changes after Vite has started. Stale advertisements from

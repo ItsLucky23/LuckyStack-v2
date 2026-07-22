@@ -1,6 +1,6 @@
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
-import sharp from 'sharp';
+import createSharpPipeline from 'sharp';
 import path from 'node:path';
 import { mkdir, stat } from 'node:fs/promises';
 import { getProjectConfig, getUploadsDir, processUpload } from '@luckystack/core';
@@ -78,7 +78,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       fileName,
       encodeAndSave: async (raw) => {
         await mkdir(uploadsDir, { recursive: true });
-        await sharp(raw).webp({ quality: 80 }).toFile(filePath);
+        await createSharpPipeline(raw).webp({ quality: 80 }).toFile(filePath);
         const savedStat = await stat(filePath).catch(() => null);
         return savedStat?.size ?? raw.byteLength;
       },

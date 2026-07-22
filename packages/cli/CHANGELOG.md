@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The login asset aliases Sharp's default import, keeping Sharp 0.35 scaffold
+  bundles warning-free.
 - The router feature asset now carries the same fail-closed
   `trustedProxyCidrs` deploy-config contract as a fresh scaffold.
 - A `luckystack manage` pass that switched ORM and changed another feature no
