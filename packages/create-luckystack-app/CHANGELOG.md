@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Dropdown and multi-select portals now seed their width before their first
+  layout measurement and stay anchored through rendered-size changes, scrolling,
+  viewport changes and transform-driven layout movement. This prevents an
+  incorrect first opening that appeared correct only after closing and reopening.
+
 ## [0.7.4] - 2026-07-22
 
 ### Added

@@ -169,7 +169,11 @@ export function useDropdownMenu({ showSearch }: UseDropdownMenuArgs): DropdownMe
 
     setMenuDirection(direction);
     setListViewportMaxHeight(nextListMaxHeight);
-    setMenuPosition({ top, left: rect.left, width: rect.width });
+    setMenuPosition((current) =>
+      current.top === top && current.left === rect.left && current.width === rect.width
+        ? current
+        : { top, left: rect.left, width: rect.width },
+    );
   }, [showSearch]);
 
   const cancelPendingFrames = useCallback(() => {
@@ -187,6 +191,15 @@ export function useDropdownMenu({ showSearch }: UseDropdownMenuArgs): DropdownMe
     cancelPendingFrames();
     setSearchValue("");
     setFocusedKey(null);
+
+    // Seed the portal width before it mounts. Measuring a width:0 first render
+    // can overestimate wrapped content height, which made the first opening use
+    // a stale top while the second opening was correct.
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setMenuPosition({ top: rect.bottom + TRIGGER_GAP, left: rect.left, width: rect.width });
+    }
+
     setIsMenuMounted(true);
     setIsMenuPositionReady(false);
     setIsOpen(true);
@@ -233,16 +246,77 @@ export function useDropdownMenu({ showSearch }: UseDropdownMenuArgs): DropdownMe
     return () => { document.removeEventListener("mousedown", handleMouseDown); };
   }, [isOpen, closeDropdown]);
 
-  // Reposition on scroll/resize while menu is mounted.
+  // Keep the body-level fixed portal attached to its trigger. Scroll/viewport
+  // events cover native movement; ResizeObserver catches the first width/height
+  // settlement; the lightweight rect signature also catches layout shifts and
+  // transform-based scrolling that emit neither event.
   useEffect(() => {
     if (!isMenuMounted) return;
-    updateMenuPosition();
 
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
+    let positionUpdateFrame: number | null = null;
+    let anchorTrackingFrame: number | null = null;
+
+    const requestPositionUpdate = () => {
+      if (positionUpdateFrame !== null) return;
+      positionUpdateFrame = requestAnimationFrame(() => {
+        positionUpdateFrame = null;
+        updateMenuPosition();
+      });
+    };
+
+    const readAnchorSignature = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return "";
+      const viewport = window.visualViewport;
+      return [
+        rect.top,
+        rect.left,
+        rect.width,
+        rect.height,
+        window.innerWidth,
+        window.innerHeight,
+        viewport?.offsetTop ?? 0,
+        viewport?.offsetLeft ?? 0,
+        viewport?.width ?? 0,
+        viewport?.height ?? 0,
+      ].join(":");
+    };
+
+    let anchorSignature = readAnchorSignature();
+    const trackAnchor = () => {
+      const nextSignature = readAnchorSignature();
+      if (nextSignature !== anchorSignature) {
+        anchorSignature = nextSignature;
+        requestPositionUpdate();
+      }
+      anchorTrackingFrame = requestAnimationFrame(trackAnchor);
+    };
+
+    updateMenuPosition();
+    requestPositionUpdate();
+    anchorTrackingFrame = requestAnimationFrame(trackAnchor);
+
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(requestPositionUpdate);
+    for (const element of [triggerRef.current, menuRef.current, listRef.current]) {
+      if (element) resizeObserver?.observe(element);
+    }
+
+    const visualViewport = window.visualViewport;
+    window.addEventListener("resize", requestPositionUpdate);
+    window.addEventListener("scroll", requestPositionUpdate, true);
+    visualViewport?.addEventListener("resize", requestPositionUpdate);
+    visualViewport?.addEventListener("scroll", requestPositionUpdate);
+
     return () => {
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
+      window.removeEventListener("resize", requestPositionUpdate);
+      window.removeEventListener("scroll", requestPositionUpdate, true);
+      visualViewport?.removeEventListener("resize", requestPositionUpdate);
+      visualViewport?.removeEventListener("scroll", requestPositionUpdate);
+      resizeObserver?.disconnect();
+      if (positionUpdateFrame !== null) cancelAnimationFrame(positionUpdateFrame);
+      if (anchorTrackingFrame !== null) cancelAnimationFrame(anchorTrackingFrame);
     };
   }, [isMenuMounted, updateMenuPosition]);
 
