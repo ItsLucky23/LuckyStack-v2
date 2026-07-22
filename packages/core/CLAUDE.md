@@ -53,7 +53,7 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `getRegisteredApiMethod(pagePath: string, apiName: string, version: string): HttpMethodLiteral \| undefined` | Lookup helper used by `isGetMethod`. | -> docs/app-bootstrap.md |
 | `isApiMethodMapRegistered(): boolean` | Detect whether the prefix-heuristic fallback is active. | -> docs/app-bootstrap.md |
 | `registerPrismaClient(client: PrismaClient, key?: string): PrismaClient` | Register a Prisma client into a slot (default `'default'`). Pass a `key` for graded credentials (e.g. `'ro'`/`'rw'`) or per-tenant clients. | -> docs/app-bootstrap.md |
-| `registerRedisClient(client: RedisClient, key?: string): RedisClient` | Register an ioredis client into a slot (default `'default'`). | -> docs/app-bootstrap.md |
+| `registerRedisClient(client: RedisClient, key?: string): RedisClient` | Register an ioredis client into a slot (default `'default'`). A consumer-owned default keeps precedence across automatic secret refresh; rebuild it from your own secrets-resolved listener when needed. | -> docs/app-bootstrap.md |
 | `getPrismaClient(): PrismaClient` | Read the `'default'` slot (registered client or lazy default resolver). | -> docs/app-bootstrap.md |
 | `getRedisClient(): RedisClient` | Read the `'default'` slot (registered client or lazy default resolver). | -> docs/app-bootstrap.md |
 | `getPrismaClientFor(key?: string): PrismaClient` | Read a specific slot. `'default'` falls back to the resolver; any other unregistered slot throws (never silently returns the privileged default). | -> docs/app-bootstrap.md |
@@ -87,7 +87,7 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `registerNotifier(notifier: Notifier): void` | DI for client-side toast notifier (success/error/info/warning). | -> docs/app-bootstrap.md |
 | `getNotifier(): Notifier` | Read active notifier (no-op default). | -> docs/app-bootstrap.md |
 | `notify: Notifier` | Delegating wrapper used by framework hot paths. | -> docs/app-bootstrap.md |
-| `registerEmailSender(sender: EmailSender): void` | Legacy single-sender registration; mirrors into `default` slot. | -> docs/app-bootstrap.md |
+| `registerEmailSender(sender: EmailSender): void` | Legacy single-sender registration; mirrors into `default` slot. `send(message, context?)` may honor `AbortSignal` + stable idempotency key; timeout outcomes can be explicitly unknown. | -> docs/app-bootstrap.md |
 | `registerEmailSenders(senders: EmailSenderRegistry): void` | Multi-adapter registration (`'default'`, `'transactional'`, `'marketing'`, custom). | -> docs/app-bootstrap.md |
 | `getEmailSender(): EmailSender \| null` | Read legacy/`default` sender. | -> docs/app-bootstrap.md |
 | `getEmailSenderByName(name: string): EmailSender \| null` | Read a specific slot (falls back to legacy sender for `'default'`). | -> docs/app-bootstrap.md |

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
+### Fixed
+
+- Dev file reload now tracks ambient versus file-owned pointer names. Changing
+  a watched value from `NAME=REMOTE_V1` to a plain literal (or removing the
+  file-owned pointer) drops the stale pointer from later polls while preserving
+  unrelated shell/CI pointers that are absent from the watched files.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added

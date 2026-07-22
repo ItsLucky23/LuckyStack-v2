@@ -752,7 +752,7 @@ describe('envNames scoping on file-reload (SM-06 drift)', () => {
   });
 });
 
-describe('file-reload merges pointers (SM — drop inherited pointer fix)', () => {
+describe('file-reload pointer ownership', () => {
   it('keeps a boot-captured pointer that is not in any watched file', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sm-reload-merge-'));
     const envFile = join(dir, 'env');
@@ -776,6 +776,57 @@ describe('file-reload merges pointers (SM — drop inherited pointer fix)', () =
       const sent = bodyOf(fetchImpl, 1).keys ?? [];
       expect(sent.toSorted()).toEqual(['FILE_SECRET_V1', 'INHERITED_SECRET_V1']);
       expect(process.env.FROM_FILE).toBe('fil');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('lets a watched value transition from a remote pointer back to plain text', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sm-reload-plain-'));
+    const envFile = join(dir, 'env');
+    writeFileSync(envFile, 'ROTATING=FILE_SECRET_V1\n');
+    process.env.NODE_ENV = 'production'; //? avoid real fs.watchers
+    const fetchImpl = okFetch({ FILE_SECRET_V1: 'remote-value' });
+
+    try {
+      await initSecretManager(baseConfig({ fetchImpl, dev: { envFiles: [envFile] } }));
+      await reloadSecretManagerFromFiles();
+      expect(process.env.ROTATING).toBe('remote-value');
+      expect(fetchImpl).toHaveBeenCalledOnce();
+
+      writeFileSync(envFile, 'ROTATING=plain-local\n');
+      await reloadSecretManagerFromFiles();
+      expect(process.env.ROTATING).toBe('plain-local');
+
+      //? The removed pointer is gone from the active topology too: a later poll
+      //? must not fetch/apply V1 over the explicit plain file value.
+      await refreshSecretManager();
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(process.env.ROTATING).toBe('plain-local');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not recapture a removed file pointer when its last secret value looks pointer-shaped', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sm-reload-removed-'));
+    const envFile = join(dir, 'env');
+    writeFileSync(envFile, 'REMOVED_POINTER=FILE_SECRET_V1\n');
+    process.env.NODE_ENV = 'production';
+    const fetchImpl = okFetch({ FILE_SECRET_V1: 'resolved-value_V1' });
+
+    try {
+      await initSecretManager(baseConfig({ fetchImpl, dev: { envFiles: [envFile] } }));
+      await reloadSecretManagerFromFiles();
+      expect(process.env.REMOVED_POINTER).toBe('resolved-value_V1');
+      expect(fetchImpl).toHaveBeenCalledOnce();
+
+      writeFileSync(envFile, '');
+      await reloadSecretManagerFromFiles();
+      await refreshSecretManager();
+
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(process.env.REMOVED_POINTER).toBe('resolved-value_V1');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

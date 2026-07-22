@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
 ### Fixed
 
+- `/readyz` now includes the recorded dev-tool initialization state. When
+  devkit boot failed and API/sync routes deliberately return 503, readiness is
+  503 too instead of advertising a hollow-green instance.
 - Port resolution is now explicitly validated and regression-tested as
   `options.port > argv > options.defaultPort > SERVER_PORT > 80`; invalid values
   fail before `listen`, `65535` never retries to `65536`, and `listen(0)` registers,

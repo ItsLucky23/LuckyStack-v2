@@ -7,12 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
 ### Added
 
+- `resolveTestEnvironment({ loadProjectConfig? })` and `RunAllTestsInput.loadProjectConfig`
+  give the test process the same env prefix as server/ORM boot: load env files,
+  lazily read consumer config, then dynamically run optional secret-manager
+  resolution before any layer or Layer-5 test-module import.
 - `resolveTestBaseUrl({ cwd?, fallbackUrl? })` centralizes live-test target
   resolution: explicit `TEST_BASE_URL`, then the backend's actually-bound dev
   port advertisement (only while its owner PID is alive), then the caller's
   config-derived fallback.
+
+### Fixed
+
+- Layer-5 tests that directly use Prisma/Redis no longer receive unresolved
+  values such as `DATABASE_URL_V1` merely because only the separate live-server
+  process ran secret-manager bootstrap. A configured resolver that cannot load
+  now fails before test execution with an actionable error.
+- Direct `runCustomTests(...)` calls now have the same lazy config/env bootstrap
+  as `runAllTests`; both public orchestrators require the loader and fail closed
+  when an untyped caller omits it. The internal prepared entrypoint prevents a
+  second env load from replacing resolved secrets with pointers.
 
 ## [0.5.0] - 2026-07-11
 

@@ -35,10 +35,18 @@ export const registerCronJob = <TTenant = unknown>(
   if (jobRuntimes.has(def.name)) {
     getLogger().debug(`[cron] job "${def.name}" re-registered — replacing previous definition`);
   }
+  const now = Date.now();
   jobRuntimes.set(def.name, {
     def: def as CronJobDefinition,
     normalized,
-    nextRunAt: computeNextRun(normalized, Date.now(), def.jitterMs ?? 0),
+    //? Jobs normally register before the first leader tick, which recomputes
+    //? every schedule. Hot-reload/plugin registrations can happen AFTER this
+    //? process already owns leadership; in that case onLeadershipGained() will
+    //? not run again. Arm runOnStart here as well so "on start" means the
+    //? registration's first leader-owned tick, not only process boot.
+    nextRunAt: def.runOnStart
+      ? now
+      : computeNextRun(normalized, now, def.jitterMs ?? 0),
     running: false,
     ranOnStart: false,
   });

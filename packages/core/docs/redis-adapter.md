@@ -22,7 +22,7 @@ export default redis
 
 **Behavior:**
 - Every method/property access is forwarded to whatever `getRedisClient()` currently returns.
-- When the consumer has called `registerRedisClient(...)`, that client wins.
+- When the consumer has called `registerRedisClient(...)`, that client wins — including across automatic secret-manager refresh. Core replaces only a framework-owned default; a cluster/sentinel/TLS/custom registration must rebuild itself from its own secrets-resolved listener if its credentials rotate.
 - Otherwise the proxy lazily constructs a default ioredis instance from `env.REDIS_HOST` / `env.REDIS_PORT` (plus optional `REDIS_USER` / `REDIS_PASSWORD`) on first access.
 - The default client installs a `connect` listener that logs `"Connected to Redis"` via `getLogger().info` and an `error` listener that routes to `getLogger().error`.
 - The default client uses an exponential `retryStrategy(times => Math.min(times * 50, 2000))`.

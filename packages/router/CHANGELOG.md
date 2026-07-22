@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
+### Security
+
+- Direct clients can no longer spoof `x-forwarded-proto: https`. HTTP and
+  WebSocket forwarding now honor the scheme only when the immediate peer
+  matches `routing.trustedProxyCidrs`; empty/undefined trusts nobody and
+  malformed CIDRs abort router boot.
+
+### Fixed
+
+- HTTP upstream responses now observe `error` and premature `aborted` events
+  before piping. A backend that resets after headers or a partial body closes
+  only that downstream response instead of emitting an uncaught stream error
+  that can terminate the router process.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added

@@ -1,4 +1,4 @@
-import type { EmailMessage } from '@luckystack/core';
+import type { EmailDeliveryOutcome, EmailMessage } from '@luckystack/core';
 
 export interface PreEmailSendPayload {
   /** Full message about to be sent (after `from` was filled in from config). */
@@ -18,6 +18,8 @@ export interface PostEmailSendPayload {
   messageId?: string;
   /** Failure reason when `ok === false`. */
   reason?: string;
+  /** `unknown` after timeout/abort once provider dispatch had begun. */
+  deliveryOutcome?: EmailDeliveryOutcome;
 }
 
 declare module '@luckystack/core' {

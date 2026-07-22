@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-22
+
+### Fixed
+
+- The router feature asset now carries the same fail-closed
+  `trustedProxyCidrs` deploy-config contract as a fresh scaffold.
+- A `luckystack manage` pass that switched ORM and changed another feature no
+  longer lets the later transition serialize the stale pre-switch package.json
+  over the new ORM dependencies/scripts. `switchOrm` now updates the shared
+  in-memory project snapshot immediately after its disk write.
+- `luckystack update` now normalizes the temp project name exactly like the
+  scaffolder and allowlists every manifest-derived flag value before invoking
+  `npx.cmd`. Windows project paths with spaces no longer point at the wrong temp
+  directory, and hand-edited cmd metacharacters cannot reach the shell.
+
 ## [0.7.0] - 2026-07-16
 
 ### Added

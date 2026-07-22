@@ -15,13 +15,18 @@
 The adapter contract lives in `@luckystack/core` and is re-exported from `@luckystack/email` for convenience:
 
 ```ts
-import type { EmailSender, EmailMessage, EmailResult } from '@luckystack/email';
+import type { EmailSender, EmailMessage, EmailResult, EmailSendContext } from '@luckystack/email';
 
 interface EmailSender {
   /** Short label used in log lines and the `preEmailSend` / `postEmailSend` payloads. */
   name: string;
-  /** Send a single message. Must NOT throw — return a typed result instead. */
-  send: (message: EmailMessage) => Promise<EmailResult>;
+  /** Context stays optional for compatibility with pre-0.7 custom adapters. */
+  send: (message: EmailMessage, context?: EmailSendContext) => Promise<EmailResult>;
+}
+
+interface EmailSendContext {
+  signal: AbortSignal;       // abort provider I/O when supported
+  idempotencyKey?: string;  // stable across retries of the same logical email
 }
 
 interface EmailMessage {
@@ -37,10 +42,17 @@ interface EmailMessage {
 
 type EmailResult =
   | { ok: true; id: string }
-  | { ok: false; reason: string; cause?: unknown };
+  | {
+      ok: false;
+      reason: string;
+      cause?: unknown;
+      deliveryOutcome?: 'not-sent' | 'unknown';
+    };
 ```
 
-`sendEmail` wraps `sender.send(message)` in `tryCatch`, so a thrown error is normalized into `{ ok: false, reason: error.message || 'send-threw', cause: error }`. Returning `undefined` is normalized into `{ ok: false, reason: 'send-no-result' }`. Adapters that *want* to be resilient should still prefer returning a typed result over throwing.
+`sendEmail` wraps `sender.send(message, context)` in `tryCatch`, so a thrown error is normalized into `{ ok: false, reason: error.message || 'send-threw', cause: error }`. Returning `undefined` is normalized into `{ ok: false, reason: 'send-no-result' }`. Adapters that *want* to be resilient should still prefer returning a typed result over throwing.
+
+Custom adapters should honor `context.signal` when their provider supports cancellation and pass `context.idempotencyKey` to provider-native deduplication. Resend does the latter. SMTP cannot guarantee cancellation or idempotency once `sendMail` begins; a timeout therefore reports `deliveryOutcome: 'unknown'`, never a definitive failure.
 
 ---
 

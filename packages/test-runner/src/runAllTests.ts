@@ -13,7 +13,12 @@ import { runAuthEnforcementTests } from './runAuthEnforcementTests';
 import { runRateLimitTests } from './runRateLimitTests';
 import { runCsrfEnforcementTests } from './runCsrfEnforcementTests';
 import { runFuzzTests } from './runFuzzTests';
-import { runCustomTests } from './customTests';
+import { runCustomTestsAfterEnvironmentPrepared } from './customTests';
+import {
+  assertProjectConfigLoader,
+  resolveTestEnvironment,
+  type ResolveTestEnvironmentInput,
+} from './resolveTestEnvironment';
 import { calculateSummary, LAYER_KEYS } from './testLayerHelpers';
 import type { CustomTestResult, RunCustomTestsSummary } from './customTests';
 import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
@@ -23,6 +28,12 @@ type ApiInputSchemas = Partial<Record<string, Partial<Record<string, Partial<Rec
 
 export interface RunAllTestsInput {
   apiMethodMap: ApiMethodMap;
+  /**
+   * Lazy loader for the consumer's default `config.ts` export. Required so
+   * runAllTests cannot silently skip a configured secret manager; resolution
+   * happens in THIS process before any layer or env-backed client is touched.
+   */
+  loadProjectConfig: NonNullable<ResolveTestEnvironmentInput['loadProjectConfig']>;
   apiMetaMap: ApiMetaMap;
   apiInputSchemas: ApiInputSchemas;
   baseUrl: string;
@@ -259,7 +270,7 @@ const runCustomLayer = async (input: RunAllTestsInput, summary: RunAllTestsSumma
   } catch {
     //? swallow — a missing clear() is a test-quality degrade, not a crash.
   }
-  const custom = await runCustomTests({
+  const custom = await runCustomTestsAfterEnvironmentPrepared({
     baseUrl: input.baseUrl,
     sessionCookieName: input.sessionCookieName,
     filter: input.filter,
@@ -319,6 +330,12 @@ const computeTotals = (summary: RunAllTestsSummary): void => {
 };
 
 export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsSummary> => {
+  assertProjectConfigLoader(input, 'runAllTests');
+  //? The live server resolves its own env, but Layer-5 tests may use ctx.prisma
+  //? or Redis directly in THIS process. Resolve before importing custom tests or
+  //? constructing those clients, otherwise DATABASE_URL_V<n> reaches Prisma raw.
+  await resolveTestEnvironment({ loadProjectConfig: input.loadProjectConfig });
+
   const summary: RunAllTestsSummary = { totalPassed: 0, totalFailed: 0 };
 
   //? Warn when a non-empty apiMethodMap is paired with an empty apiMetaMap.

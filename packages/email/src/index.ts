@@ -44,4 +44,11 @@ export {
   listEmailSenderNames,
   isEmailSenderRegistered,
 } from '@luckystack/core';
-export type { EmailSender, EmailMessage, EmailResult, EmailSenderRegistry } from '@luckystack/core';
+export type {
+  EmailDeliveryOutcome,
+  EmailSendContext,
+  EmailSender,
+  EmailMessage,
+  EmailResult,
+  EmailSenderRegistry,
+} from '@luckystack/core';

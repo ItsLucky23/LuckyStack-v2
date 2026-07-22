@@ -1,5 +1,6 @@
+//? @adr 0033
 import type { IncomingMessage } from 'node:http';
-import type { Socket } from 'node:net';
+import { BlockList, isIP, type Socket } from 'node:net';
 import { URL } from 'node:url';
 import { tryCatchSync } from '@luckystack/core';
 
@@ -158,18 +159,71 @@ export const isHostPinned = (targetUrl: URL, backendTarget: string): boolean => 
   return targetUrl.protocol === backendUrl.protocol && targetUrl.host === backendUrl.host;
 };
 
-/**
- * Normalize an inbound `x-forwarded-proto`. The router does not terminate TLS,
- * so it must NOT trust a client-asserted scheme (a client could spoof `https`
- * to a plain-HTTP backend, flipping secure-cookie / redirect logic). Only the
- * literal `http` / `https` values are honored; anything else collapses to
- * `http`. The inbound header is dropped by `stripForwardedHeaders` first, so the
- * value returned here is the only one forwarded.
- */
+/** Normalize a forwarded scheme AFTER the immediate peer passed the trust gate. */
 export const normalizeForwardedProto = (value: string | string[] | undefined): 'http' | 'https' => {
   const first = Array.isArray(value) ? value[0] : value;
   return first === 'https' ? 'https' : 'http';
 };
+
+export type TrustedProxyMatcher = (remoteAddress: string | undefined) => boolean;
+
+const normalizeRemoteAddress = (remoteAddress: string): string => {
+  const mapped = remoteAddress.toLowerCase().startsWith('::ffff:')
+    ? remoteAddress.slice('::ffff:'.length)
+    : remoteAddress;
+  return isIP(mapped) === 4 ? mapped : remoteAddress;
+};
+
+/**
+ * Compile trusted immediate-proxy addresses/CIDRs once at router boot. Empty is
+ * the secure default: direct clients cannot self-assert HTTPS. Node's BlockList
+ * handles IPv4 + IPv6 without adding an IP-parsing dependency.
+ */
+export const createTrustedProxyMatcher = (cidrs: readonly string[] = []): TrustedProxyMatcher => {
+  const blockList = new BlockList();
+  for (const rawEntry of cidrs) {
+    const entry = rawEntry.trim();
+    const slash = entry.lastIndexOf('/');
+    const address = slash === -1 ? entry : entry.slice(0, slash);
+    const family = isIP(address);
+    if (family === 0) {
+      throw new TypeError(`[router] invalid trusted proxy address/CIDR: "${rawEntry}"`);
+    }
+    const type = family === 4 ? 'ipv4' : 'ipv6';
+    if (slash === -1) {
+      blockList.addAddress(address, type);
+      continue;
+    }
+    const prefixText = entry.slice(slash + 1);
+    const prefix = Number(prefixText);
+    const maxPrefix = family === 4 ? 32 : 128;
+    if (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
+      throw new TypeError(`[router] invalid trusted proxy address/CIDR: "${rawEntry}"`);
+    }
+    blockList.addSubnet(address, prefix, type);
+  }
+
+  return (remoteAddress): boolean => {
+    if (!remoteAddress) return false;
+    const normalized = normalizeRemoteAddress(remoteAddress);
+    const family = isIP(normalized);
+    if (family === 0) return false;
+    return blockList.check(normalized, family === 4 ? 'ipv4' : 'ipv6');
+  };
+};
+
+/**
+ * Resolve the public scheme without trusting an internet client. The router
+ * itself listens on HTTP, so `https` is accepted only from a configured,
+ * immediately-connected TLS proxy. Every other peer deterministically gets
+ * `http`, regardless of its inbound header.
+ */
+export const resolveForwardedProto = (
+  value: string | string[] | undefined,
+  remoteAddress: string | undefined,
+  isTrustedProxy?: TrustedProxyMatcher,
+): 'http' | 'https' =>
+  isTrustedProxy?.(remoteAddress) === true ? normalizeForwardedProto(value) : 'http';
 
 //? Client-supplied copies of router-authoritative forwarding headers MUST be
 //? dropped before we set our own — otherwise a client could pre-seed

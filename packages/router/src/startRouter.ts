@@ -11,6 +11,7 @@ import { createRedisHealthStore } from './redisHealthStore';
 import type { RedisHealthStore } from './redisHealthStore';
 import { runBootHandshake } from './bootHandshake';
 import { assertRuntimeCanProxyWebsockets } from './runtimeCapabilities';
+import { createTrustedProxyMatcher } from './proxyUtils';
 
 type EnvironmentDefinition = DeployEnvironmentShape;
 
@@ -161,6 +162,10 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   //? deploy.config.routing but never threaded into createWsProxy — so a consumer
   //? terminating Socket.io on a non-system service was silently ignored.
   const websocketService = deployConfig.routing?.websocketService;
+  //? The router itself is plain HTTP. Only an explicitly trusted immediate TLS
+  //? proxy may assert `x-forwarded-proto: https`; direct clients always resolve
+  //? to http. Compile CIDRs once instead of parsing on every HTTP/WS request.
+  const isTrustedProxy = createTrustedProxyMatcher(deployConfig.routing?.trustedProxyCidrs);
 
   const envMap = (deployConfig.environments ?? {}) as Record<string, EnvironmentDefinition | undefined>;
   const currentEnv = envMap[input.currentEnvKey];
@@ -230,8 +235,8 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
 
   //? `websocketService` goes to BOTH proxies: socket.io's polling handshake (HTTP)
   //? and its upgrade (WS) are one connection and must pin to the same backend.
-  const proxy = createHttpProxy({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs: upstreamTimeoutMs, maxRequestBodyBytes, websocketService });
-  const wsProxy = createWsProxy({ resolver, upstreamHandshakeTimeoutMs: upstreamTimeoutMs, wsTargetService: websocketService });
+  const proxy = createHttpProxy({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs: upstreamTimeoutMs, maxRequestBodyBytes, websocketService, isTrustedProxy });
+  const wsProxy = createWsProxy({ resolver, upstreamHandshakeTimeoutMs: upstreamTimeoutMs, wsTargetService: websocketService, isTrustedProxy });
   const server = http.createServer(proxy);
 
   //? Slow-loris / idle-hold hardening for an internet-facing edge. Node's `http`

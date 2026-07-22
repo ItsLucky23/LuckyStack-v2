@@ -101,7 +101,15 @@ export {
   listEmailSenderNames,
   isEmailSenderRegistered,
 } from './emailRegistry';
-export type { EmailSender, EmailMessage, EmailAttachment, EmailResult, EmailSenderRegistry } from './emailRegistry';
+export type {
+  EmailDeliveryOutcome,
+  EmailSendContext,
+  EmailSender,
+  EmailMessage,
+  EmailAttachment,
+  EmailResult,
+  EmailSenderRegistry,
+} from './emailRegistry';
 export {
   registerDeployConfig,
   getDeployConfig,

@@ -86,6 +86,22 @@ describe('posthog adapter regression', () => {
     expect(client.events[0]?.distinctId).toBe('anon-x');
   });
 
+  it('keeps canonical scrubbed message fields authoritative over colliding context', async () => {
+    const { createPostHogAdapter } = await import('./posthog');
+    const client = makeClient();
+    const adapter = createPostHogAdapter({ client });
+
+    adapter.captureMessage('password=canonical-secret', 'fatal', {
+      message: 'password=context-secret',
+      level: 'info',
+    });
+
+    const properties = client.events[0]?.properties ?? {};
+    expect(properties.message).not.toContain('canonical-secret');
+    expect(properties.message).not.toContain('context-secret');
+    expect(properties.level).toBe('fatal');
+  });
+
   it('flush() drains the posthog client batch (ET-16)', async () => {
     const { createPostHogAdapter } = await import('./posthog');
     const client = makeClient();

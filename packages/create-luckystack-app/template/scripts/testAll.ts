@@ -34,6 +34,10 @@ if (filter) console.log(`[luckystack-test] filter: ${filter}`);
 
 const summary = await runAllTests({
   apiMethodMap,
+  //? Load config lazily so the runner first applies .env/.env.local, then uses
+  //? the project's optional secretManager config to resolve pointers in THIS
+  //? process before Layer-5 tests import Prisma/Redis-backed modules.
+  loadProjectConfig: async () => (await import('../config')).default,
   apiMetaMap,
   apiInputSchemas,
   baseUrl,

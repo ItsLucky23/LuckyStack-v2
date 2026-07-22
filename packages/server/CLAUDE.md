@@ -4,7 +4,7 @@
 
 ## What this package does
 
-One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js HTTP server, Socket.io (with optional Redis adapter), framework routes (`/api/*`, `/sync/*`, `/_health`, `/livez`, `/readyz`, `/_test/reset`, `/auth/*`, `/uploads/*`, `/csrf-token`), CSRF middleware, CORS + security headers, presence broadcasting, and dev-only hot reload. Consumer's `server.ts` shrinks to roughly twenty lines. Boots are gated by `verifyBootstrap` so missing registrations surface a single readable error instead of mid-request crashes.
+One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js HTTP server, Socket.io (with optional Redis adapter), framework routes (`/api/*`, `/sync/*`, `/_health`, `/livez`, `/readyz`, `/_test/reset`, `/auth/*`, `/uploads/*`, `/csrf-token`), CSRF middleware, CORS + security headers, presence broadcasting, and dev-only hot reload. Consumer's `server.ts` shrinks to roughly twenty lines. Boots are gated by `verifyBootstrap` so missing registrations surface a single readable error instead of mid-request crashes. If devkit initialization fails, API/sync dispatch and `/readyz` all fail closed with 503.
 
 ## When to USE this package
 
@@ -49,7 +49,7 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 | `registerErrorFormatter(formatter)` | Override the JSON error shape returned by framework error responses. | -> docs/security-defaults.md |
 | `getErrorFormatter()` | Read the currently registered formatter. | -> docs/security-defaults.md |
 | Route handler: `handleLivezRoute` | Liveness probe at `projectConfig.http.liveEndpoint`. Always 200 when reachable. | -> docs/http-routes.md |
-| Route handler: `handleReadyzRoute` | Readiness probe: boot UUID + Redis ping + database check (ADR 0020: a registered `registerDbHealthCheck` probe wins; else the built-in Prisma ping when Prisma is registered/resolvable; else `'skipped'` so a deliberately DB-less project can go ready). Response `checks.database` = tri-state, `checks.prisma` kept for compat. | -> docs/http-routes.md |
+| Route handler: `handleReadyzRoute` | Readiness probe: boot UUID + dev-tool initialization state + Redis ping + database check (ADR 0020: a registered `registerDbHealthCheck` probe wins; else the built-in Prisma ping when Prisma is registered/resolvable; else `'skipped'` so a deliberately DB-less project can go ready). A recorded fatal devkit boot is 503 even when Redis/database are green. Response `checks.database` = tri-state, `checks.prisma` kept for compat. | -> docs/http-routes.md |
 | Route handler: `handleHealthRoute` | Health endpoint: returns boot UUID + env hashes for router topology checks. | -> docs/http-routes.md |
 | Route handler: `handleTestResetRoute` | Destructive test reset. Fail-closed on `NODE_ENV` and `TEST_RESET_TOKEN`. | -> docs/security-defaults.md |
 | Hook payload: `OnSocketConnectPayload` | Payload type for `onSocketConnect` lifecycle hook handlers. | -> docs/create-server.md |

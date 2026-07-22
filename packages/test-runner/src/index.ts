@@ -12,6 +12,8 @@ export { runFuzzTests } from './runFuzzTests';
 export { resetServerState } from './resetServerState';
 export { resolveTestBaseUrl } from './resolveTestBaseUrl';
 export type { ResolveTestBaseUrlOptions } from './resolveTestBaseUrl';
+export { resolveTestEnvironment } from './resolveTestEnvironment';
+export type { ResolveTestEnvironmentInput } from './resolveTestEnvironment';
 export { sampleSchemaInput } from './schemaSampleInput';
 export type { SampleSchemaOptions } from './schemaSampleInput';
 export { TEST_DATA_PREFIX, createTestDataMarker } from './testDataMarker';

@@ -142,7 +142,10 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
         event: 'log_message',
         //? ET-O2: scrub secrets interpolated into a free-text message string before
         //? it reaches PostHog (captureMessage never ran through the scrubber).
-        properties: { message: sanitizeErrorString(resolved.message), level: resolved.level, ...resolved.context },
+        //? Context first: canonical scrubbed fields must win. Spreading context
+        //? last let `{ message: 'password=raw', level: 'info' }` restore a
+        //? secret-bearing value and downgrade a fatal event after scrubbing.
+        properties: { ...resolved.context, message: sanitizeErrorString(resolved.message), level: resolved.level },
       });
     },
 

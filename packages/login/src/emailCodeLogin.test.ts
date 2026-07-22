@@ -22,6 +22,27 @@ const { store, fakeRedis, getProjectConfigMock, checkRateLimitMock, finalizeLogi
         if (entry) entry.ttl = ttl;
         return entry ? 1 : 0;
       },
+      eval: async (script: string, _keyCount: number, codeKey: string, attemptsKey: string, expectedHash: string, limitOrTtl: string) => {
+        if (!script.includes("local stored = redis.call('get'")) {
+          backing.set(codeKey, { value: expectedHash, ttl: Number(limitOrTtl) });
+          backing.delete(attemptsKey);
+          return 1;
+        }
+        const stored = backing.get(codeKey);
+        if (!stored) return 0;
+        const attempts = Number(backing.get(attemptsKey)?.value ?? '0') + 1;
+        backing.set(attemptsKey, { value: String(attempts), ttl: stored.ttl > 0 ? stored.ttl : 600 });
+        if (attempts > Number(limitOrTtl)) {
+          backing.delete(codeKey);
+          backing.delete(attemptsKey);
+          return 3;
+        }
+        if (stored.value !== expectedHash) return 1;
+        backing.delete(codeKey);
+        backing.delete(attemptsKey);
+        return 2;
+      },
+
     },
     getProjectConfigMock: vi.fn(),
     checkRateLimitMock: vi.fn(),

@@ -32,3 +32,5 @@ export { createHttpProxy } from './httpProxy';
 export type { CreateHttpProxyInput } from './httpProxy';
 export { createWsProxy } from './wsProxy';
 export type { CreateWsProxyInput } from './wsProxy';
+export { createTrustedProxyMatcher, resolveForwardedProto } from './proxyUtils';
+export type { TrustedProxyMatcher } from './proxyUtils';

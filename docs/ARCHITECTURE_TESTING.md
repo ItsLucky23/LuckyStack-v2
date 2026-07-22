@@ -113,7 +113,7 @@ describe('defaultPrismaUserAdapter', () => {
 
 ## Integration tests (`@luckystack/test-runner`)
 
-The two layers below run against a **live server** (`npm run test`).
+The two layers below run against a **live server** (`npm run test`). The server and test runner are separate processes: each resolves its own env. The scaffolded `scripts/testAll.ts` passes the required lazy `loadProjectConfig` callback to `runAllTests`, so the runner loads `.env`/`.env.local` and resolves optional secret-manager pointers before importing Layer-5 modules or exposing `ctx.prisma`. Direct `runCustomTests` callers must pass the same loader; both public paths reject a missing loader. The orchestrator uses an internal already-prepared Layer-5 entrypoint so it cannot reload raw pointers over resolved values.
 
 ---
 
@@ -269,7 +269,9 @@ Exit code 0 if all pass, 1 if any failed. The CLI prints a per-route table and a
 
 ### Side effects
 
-Tests hit the real Prisma client + Redis. Run them against your dev environment (`.env.local`) — they will mutate state. Conventions:
+Tests hit the real Prisma client + Redis. Run them against your dev environment (`.env.local`) — they will mutate state. With secret-manager enabled, `runAllTests` resolves pointers in the test process through `loadProjectConfig`; resolving only during server boot is insufficient because it cannot mutate another process's `process.env`. A configured resolver that cannot load fails before tests instead of passing a raw `DATABASE_URL_V<n>` to Prisma.
+
+Conventions:
 
 - Use unique emails / identifiers per test (e.g. `test-${nanoid()}@example.com`) so cases don't collide.
 - Clean up in your test logic when feasible — but the framework does NOT auto-rollback. Consider a dedicated test database if isolation matters.

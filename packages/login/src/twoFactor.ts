@@ -1,3 +1,4 @@
+//? @adr 0035
 //? 2FA flow layer (ADR 0024) on top of the totp.ts primitive. Methods:
 //?   - 'totp'          — authenticator apps (Google/Microsoft Authenticator,
 //?                       Authy, …) via the open TOTP standard; primary channel.
@@ -34,24 +35,92 @@ import {
 
 const sha256 = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
 
-//? ─────────────── TOTP secret at rest (AES-256-GCM, optional) ───────────────
-//? With `TOTP_ENCRYPTION_KEY` set (any string; key = sha256 of it) secrets are
-//? stored as `gcm:<iv>:<tag>:<ciphertext>`; without it they are stored as the
-//? plain base32 string (warned once). Decrypt accepts BOTH forms, so adding
-//? the env key later upgrades new writes without breaking existing users.
+//? ─────────────── TOTP secret at rest (AES-256-GCM, rotatable) ───────────────
+//? New writes carry a non-secret key identifier: `enc:v2:<kid>:<iv>:<tag>:<data>`.
+//? `TOTP_ENCRYPTION_KEY` is the primary write key;
+//? `TOTP_ENCRYPTION_LEGACY_KEYS` is a JSON string array of decrypt-only keys.
+//? Legacy `gcm:<iv>:<tag>:<data>` and plaintext rows remain readable and are
+//? lazily re-encrypted after the next successful TOTP proof.
 
-const ENCRYPTED_PREFIX = 'gcm:';
+const LEGACY_ENCRYPTED_PREFIX = 'gcm:';
+const VERSIONED_ENCRYPTED_PREFIX = 'enc:v2:';
+const KEY_ID_LENGTH = 24;
 let warnedPlaintextSecret = false;
+let warnedInvalidLegacyKeyRing = false;
 
-const encryptionKey = (): Buffer | null => {
-  const raw = process.env.TOTP_ENCRYPTION_KEY;
-  if (!raw) return null;
-  return crypto.createHash('sha256').update(raw).digest();
+interface TotpEncryptionKey {
+  id: string;
+  key: Buffer;
+}
+
+interface DecryptedTotpSecret {
+  secret: string;
+  needsReencrypt: boolean;
+}
+
+const toEncryptionKey = (raw: string): TotpEncryptionKey => ({
+  id: crypto.createHash('sha256').update(`luckystack-totp-key-id:${raw}`).digest('hex').slice(0, KEY_ID_LENGTH),
+  key: crypto.createHash('sha256').update(raw).digest(),
+});
+
+const readLegacyEncryptionKeys = (): string[] => {
+  const raw = process.env.TOTP_ENCRYPTION_LEGACY_KEYS;
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      throw new TypeError('expected a JSON array of non-empty strings');
+    }
+    const keys: string[] = [];
+    for (const value of parsed) {
+      if (typeof value !== 'string' || value.length === 0) {
+        throw new TypeError('expected a JSON array of non-empty strings');
+      }
+      keys.push(value);
+    }
+    return keys;
+  } catch {
+    if (!warnedInvalidLegacyKeyRing) {
+      warnedInvalidLegacyKeyRing = true;
+      getLogger().error('[2fa] TOTP_ENCRYPTION_LEGACY_KEYS must be a JSON array of non-empty strings; legacy TOTP rows cannot be decrypted until it is fixed.');
+    }
+    return [];
+  }
+};
+
+const encryptionKeyRing = (): { primary: TotpEncryptionKey | null; all: TotpEncryptionKey[] } => {
+  const primaryRaw = process.env.TOTP_ENCRYPTION_KEY;
+  const primary = primaryRaw ? toEncryptionKey(primaryRaw) : null;
+  const seen = new Set<string>();
+  const all: TotpEncryptionKey[] = [];
+  for (const raw of [primaryRaw, ...readLegacyEncryptionKeys()]) {
+    if (!raw) continue;
+    const entry = toEncryptionKey(raw);
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    all.push(entry);
+  }
+  return { primary, all };
+};
+
+const decryptWithKey = (
+  key: Buffer,
+  ivPart: string,
+  tagPart: string,
+  dataPart: string,
+): string | null => {
+  try {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivPart, 'base64'));
+    decipher.setAuthTag(Buffer.from(tagPart, 'base64'));
+    return Buffer.concat([decipher.update(Buffer.from(dataPart, 'base64')), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
 };
 
 export const encryptTotpSecret = (secret: string): string => {
-  const key = encryptionKey();
-  if (!key) {
+  const { primary } = encryptionKeyRing();
+  if (!primary) {
     if (!warnedPlaintextSecret) {
       warnedPlaintextSecret = true;
       getLogger().warn('[2fa] TOTP_ENCRYPTION_KEY is not set — TOTP secrets are stored unencrypted. Set it in .env.local to encrypt new enrollments at rest.');
@@ -59,29 +128,55 @@ export const encryptTotpSecret = (secret: string): string => {
     return secret;
   }
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', primary.key, iv);
   const ciphertext = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
-  return `${ENCRYPTED_PREFIX}${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${ciphertext.toString('base64')}`;
+  return `${VERSIONED_ENCRYPTED_PREFIX}${primary.id}:${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${ciphertext.toString('base64')}`;
 };
 
-export const decryptTotpSecret = (stored: string): string | null => {
-  if (!stored.startsWith(ENCRYPTED_PREFIX)) return stored; //? legacy/keyless plaintext
-  const key = encryptionKey();
-  if (!key) {
-    getLogger().error('[2fa] found an encrypted TOTP secret but TOTP_ENCRYPTION_KEY is not set — cannot verify TOTP codes.');
+const decryptTotpSecretWithMetadata = (stored: string): DecryptedTotpSecret | null => {
+  const ring = encryptionKeyRing();
+  if (!stored.startsWith(LEGACY_ENCRYPTED_PREFIX) && !stored.startsWith('enc:')) {
+    return { secret: stored, needsReencrypt: ring.primary !== null };
+  }
+
+  if (stored.startsWith(VERSIONED_ENCRYPTED_PREFIX)) {
+    const [keyId, ivPart, tagPart, dataPart] = stored.slice(VERSIONED_ENCRYPTED_PREFIX.length).split(':');
+    if (!keyId || !ivPart || !tagPart || !dataPart) return null;
+    const entry = ring.all.find((candidate) => candidate.id === keyId);
+    if (!entry) {
+      getLogger().error('[2fa] TOTP secret references an unavailable encryption key id. Add the previous key to TOTP_ENCRYPTION_LEGACY_KEYS.');
+      return null;
+    }
+    const secret = decryptWithKey(entry.key, ivPart, tagPart, dataPart);
+    if (!secret) {
+      getLogger().error('[2fa] TOTP secret decryption failed (ciphertext is invalid or the configured key is wrong).');
+      return null;
+    }
+    return {
+      secret,
+      needsReencrypt: ring.primary !== null && entry.id !== ring.primary.id,
+    };
+  }
+
+  if (!stored.startsWith(LEGACY_ENCRYPTED_PREFIX)) {
+    getLogger().error('[2fa] unsupported TOTP ciphertext version.');
     return null;
   }
-  const [ivPart, tagPart, dataPart] = stored.slice(ENCRYPTED_PREFIX.length).split(':');
-  if (!ivPart || !tagPart || !dataPart) return null;
-  try {
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivPart, 'base64'));
-    decipher.setAuthTag(Buffer.from(tagPart, 'base64'));
-    return Buffer.concat([decipher.update(Buffer.from(dataPart, 'base64')), decipher.final()]).toString('utf8');
-  } catch {
-    getLogger().error('[2fa] TOTP secret decryption failed (wrong TOTP_ENCRYPTION_KEY?).');
+  const [ivPart, tagPart, dataPart] = stored.slice(LEGACY_ENCRYPTED_PREFIX.length).split(':');
+  if (!ivPart || !tagPart || !dataPart || ring.all.length === 0) {
+    getLogger().error('[2fa] found a legacy encrypted TOTP secret but no matching primary/legacy key is configured.');
     return null;
   }
+  for (const entry of ring.all) {
+    const secret = decryptWithKey(entry.key, ivPart, tagPart, dataPart);
+    if (secret) return { secret, needsReencrypt: ring.primary !== null };
+  }
+  getLogger().error('[2fa] legacy TOTP secret decryption failed with every configured key.');
+  return null;
 };
+
+export const decryptTotpSecret = (stored: string): string | null =>
+  decryptTotpSecretWithMetadata(stored)?.secret ?? null;
 
 //? ─────────────── challenge store ───────────────
 
@@ -107,6 +202,8 @@ const usedTimestepKey = (userId: string, timestep: number): string => formatKey(
 const accountFailureKey = (userId: string): string => formatKey('-2fa-accountfail', userId);
 const RECOVERY_LEASE_MS = 5000;
 const recoveryLeaseName = (userId: string): string => `2fa-recovery:${userId}`;
+const ENROLLMENT_LEASE_MS = 30_000;
+const enrollmentLeaseName = (userId: string): string => `2fa-enrollment:${userId}`;
 //? Pending (unconfirmed) enrollment secret — only written to the user record
 //? once the user proves the app is set up by entering a first valid code.
 const pendingSecretKey = (userId: string): string => formatKey('-2fa-pending', userId);
@@ -194,18 +291,32 @@ const verifyTotpForUser = async (user: UserRecord, code: string, enforceSingleUs
   //? generic verifyTotp accepts 6–8 for RFC completeness; the auth surface
   //? must not (a longer guess is a spec deviation with no benefit).
   if (!/^\d{6}$/.test(code.trim())) return false;
-  const secret = decryptTotpSecret(user.totpSecret);
-  if (!secret) return false;
-  const result = verifyTotp({ secret, code });
+  const decrypted = decryptTotpSecretWithMetadata(user.totpSecret);
+  if (!decrypted) return false;
+  const result = verifyTotp({ secret: decrypted.secret, code });
   if (!result.valid || result.timestep === null) return false;
-  if (!enforceSingleUse) return true;
 
-  //? Single-use on the login boundary: atomically CLAIM this (user, timestep)
-  //? with `NX`. If the marker already exists the code was already redeemed —
-  //? refuse. `NX` makes the claim race-free (fixes the earlier get-then-set
-  //? TOCTOU where two concurrent verifies of the same code both passed).
-  const claimed = await redis.set(usedTimestepKey(user.id, result.timestep), '1', 'EX', 60 * 2, 'NX');
-  return claimed !== null;
+  if (enforceSingleUse) {
+    //? Single-use on the login boundary: atomically CLAIM this (user, timestep)
+    //? with `NX`. If the marker already exists the code was already redeemed —
+    //? refuse. `NX` makes the claim race-free (fixes the earlier get-then-set
+    //? TOCTOU where two concurrent verifies of the same code both passed).
+    const claimed = await redis.set(usedTimestepKey(user.id, result.timestep), '1', 'EX', 60 * 2, 'NX');
+    if (claimed === null) return false;
+  }
+
+  //? Rotation is lazy and proof-gated: only after a valid authenticator code do
+  //? we rewrite plaintext/v1/legacy-key ciphertext under the current primary.
+  //? Migration failure must not lock a user out; the old decryptable row stays.
+  if (decrypted.needsReencrypt) {
+    const [migrationError] = await tryCatch(() => getUserAdapter().update(user.id, {
+      totpSecret: encryptTotpSecret(decrypted.secret),
+    }));
+    if (migrationError) {
+      getLogger().error('[2fa] TOTP encryption-key lazy migration failed; verification succeeded but the existing ciphertext was kept.', migrationError);
+    }
+  }
+  return true;
 };
 
 const matchRecoveryHash = (hashes: string[], code: string): number => {
@@ -431,26 +542,38 @@ export const confirmTotpEnrollment = async (user: UserRecord, code: string): Pro
   //? could otherwise be confirmed after 2FA was enabled by another path).
   const blocked = enrollmentBlockedReason(user);
   if (blocked) return { ok: false, reason: blocked };
-  const pendingStored = await redis.get(pendingSecretKey(user.id));
-  if (!pendingStored) return { ok: false, reason: 'login.twoFactorEnrollmentExpired' };
-  const secret = decryptTotpSecret(pendingStored);
-  if (!secret) return { ok: false, reason: 'login.twoFactorEnrollmentExpired' };
 
-  const result = verifyTotp({ secret, code });
-  if (!result.valid) return { ok: false, reason: 'login.twoFactorInvalidCode' };
+  //? The generic UserAdapter cannot atomically combine "consume pending" with
+  //? the user update. Serialize the whole read → verify → recovery-code mint →
+  //? persist → delete sequence per user. Without this, two confirms could both
+  //? return success with DIFFERENT raw recovery sets while only the last DB
+  //? write remained valid. Contention fails closed as an expired/consumed setup.
+  const leaseToken = await acquireLease(enrollmentLeaseName(user.id), ENROLLMENT_LEASE_MS);
+  if (!leaseToken) return { ok: false, reason: 'login.twoFactorEnrollmentExpired' };
+  try {
+    const pendingStored = await redis.get(pendingSecretKey(user.id));
+    if (!pendingStored) return { ok: false, reason: 'login.twoFactorEnrollmentExpired' };
+    const secret = decryptTotpSecret(pendingStored);
+    if (!secret) return { ok: false, reason: 'login.twoFactorEnrollmentExpired' };
 
-  const { raw, hashes } = generateRecoveryCodes();
-  const [updateError] = await tryCatch(() => getUserAdapter().update(user.id, {
-    totpSecret: encryptTotpSecret(secret),
-    twoFactorEnabled: true,
-    recoveryCodes: hashes,
-  }));
-  if (updateError) {
-    getLogger().error('[2fa] enrollment persist failed — is your UserAdapter/schema missing the 2FA fields? (twoFactorEnabled, totpSecret, recoveryCodes)', updateError);
-    return { ok: false, reason: 'login.twoFactorPersistFailed' };
+    const result = verifyTotp({ secret, code });
+    if (!result.valid) return { ok: false, reason: 'login.twoFactorInvalidCode' };
+
+    const { raw, hashes } = generateRecoveryCodes();
+    const [updateError] = await tryCatch(() => getUserAdapter().update(user.id, {
+      totpSecret: encryptTotpSecret(secret),
+      twoFactorEnabled: true,
+      recoveryCodes: hashes,
+    }));
+    if (updateError) {
+      getLogger().error('[2fa] enrollment persist failed — is your UserAdapter/schema missing the 2FA fields? (twoFactorEnabled, totpSecret, recoveryCodes)', updateError);
+      return { ok: false, reason: 'login.twoFactorPersistFailed' };
+    }
+    await redis.del(pendingSecretKey(user.id));
+    return { ok: true, recoveryCodes: raw };
+  } finally {
+    await releaseLease(enrollmentLeaseName(user.id), leaseToken);
   }
-  await redis.del(pendingSecretKey(user.id));
-  return { ok: true, recoveryCodes: raw };
 };
 
 /**

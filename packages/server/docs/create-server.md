@@ -17,7 +17,7 @@ Boot order (effective for both entries):
 2. If `options.loadGeneratedMaps` was supplied, register the framework-shipped runtime-maps provider before `verifyBootstrap` so the boot check sees it.
 3. `verifyBootstrap` runs (using the per-call `requireDeployConfig` / `requireServicesConfig` / `requireOAuthProviders` flags). Throws a single descriptive `Error` if anything is missing.
 4. Resolve `port` (`options.port` -> argv-parsed -> `options.defaultPort` -> `SERVER_PORT` -> `80`) and `ip` (`options.ip` -> `SERVER_IP` -> `127.0.0.1`); validate the port in `0..65535` and register the intended address. After listen succeeds, register `httpServer.address().port` as the actually-bound address.
-5. In dev mode (`enableDevTools !== false` and `NODE_ENV !== 'production'`): `initConsolelog()` + dynamic-import `@luckystack/devkit` -> `initializeAll()` + `setupWatchers()`. Install `SIGINT` / `SIGTERM` handlers that force-exit.
+5. In dev mode (`enableDevTools !== false` and `NODE_ENV !== 'production'`): `initConsolelog()` + dynamic-import `@luckystack/devkit` -> `initializeAll()` + `setupWatchers()`. Initialization status is shared with API/sync dispatchers and `/readyz`; a fatal devkit error keeps all three fail-closed with 503. Install `SIGINT` / `SIGTERM` handlers that force-exit.
 6. `writeBootUuid()` writes a fresh boot UUID to Redis so `/_health` becomes truthful and the router can detect rolling restarts.
 7. Construct `http.createServer(handleHttpRequest)` and `loadSocket(httpServer, { maxHttpBufferSize })`.
 8. Return `{ httpServer, ioServer, listen }`. The HTTP server has NOT started listening yet; the caller invokes `listen()` to bind.

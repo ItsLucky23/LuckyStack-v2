@@ -14,30 +14,30 @@ Run all four layers against a running server:
 
 ```ts
 import {
-  runContractTests,
-  runAuthEnforcementTests,
-  runRateLimitTests,
-  runFuzzTests,
-  resetServerState,
+  runAllTests,
   resolveTestBaseUrl,
-  logContractSummary,
+  logRunAllSummary,
 } from '@luckystack/test-runner';
-import { apiMethodMap } from './src/_sockets/apiMethodMap.generated';
-import { apiMetaMap } from './src/_sockets/apiMetaMap.generated';
+import { apiInputSchemas } from './src/_sockets/apiInputSchemas.generated';
+import { apiMetaMap, apiMethodMap } from './src/_sockets/apiTypes.generated';
 import { ports } from './config.ports';
 
 const baseUrl = resolveTestBaseUrl({ fallbackUrl: `http://localhost:${ports.backend}` });
-const contract = await runContractTests({ apiMethodMap, baseUrl });
-logContractSummary(contract);
-
-const auth = await runAuthEnforcementTests({ apiMethodMap, apiMetaMap, baseUrl });
-const rate = await runRateLimitTests({ apiMethodMap, apiMetaMap, baseUrl });
-const fuzz = await runFuzzTests({ apiMethodMap, baseUrl });
-
-await resetServerState({ baseUrl });
+const summary = await runAllTests({
+  apiMethodMap,
+  apiMetaMap,
+  apiInputSchemas,
+  baseUrl,
+  // Loaded only after .env/.env.local. If config.secretManager.url is set,
+  // pointers are resolved in THIS process before Layer-5 tests touch Prisma.
+  loadProjectConfig: async () => (await import('./config')).default,
+});
+logRunAllSummary(summary);
 ```
 
 Each layer is independently runnable — you can skip the ones that don't apply or rearrange them.
+
+`runAllTests` always loads the normal env-file layers and requires `loadProjectConfig` as above, even in projects that currently use only local env values. A configured resolver is loaded dynamically and runs in fail-fast remote mode before custom test modules are imported. Direct `runCustomTests` callers must pass the same callback. Both public paths reject a missing loader so a later secret-manager rollout cannot silently expose pointer values. This matters because the live server resolving its own `DATABASE_URL` does not mutate the separate test process.
 
 ## Layers
 
@@ -65,6 +65,7 @@ The fuzz layer is intentionally exhaustive and slow — wire it into nightly CI 
 | `runRateLimitCheck(input)` / `runRateLimitTests(input)` | Rate-limit layer. |
 | `runFuzzCheck(input)` / `runFuzzTests(input)` | Fuzz layer. |
 | `resetServerState(input)` | POST to `/_test/reset`. |
+| `resolveTestEnvironment({ loadProjectConfig? })` | Load env layers and optional secret-manager pointers for the test process; `runAllTests` calls it automatically. |
 | `sampleSchemaInput(schema)` | Generate a Zod-valid sample payload. |
 | `logContractResult` / `logContractSummary` | Pretty-printers. |
 
@@ -77,8 +78,8 @@ Types: `EndpointDescriptor`, `HttpMethod`, `ContractCheckResult`, `RunContractSu
 
 ## Dependencies
 
-- Peer (canonical ranges, standardized 2026-05-07):
-  - `zod@^3.25.0`
+- Required peers: `zod@^4.0.0`, `socket.io-client@^4.8.0`.
+- Optional peers: `@luckystack/login`, `@luckystack/secret-manager` (loaded only for their corresponding features).
 
 ## License
 

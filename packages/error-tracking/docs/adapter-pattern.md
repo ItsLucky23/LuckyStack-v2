@@ -331,8 +331,9 @@ createDatadogAdapter(options: DatadogAdapterOptions): ErrorTracker;
   short-lived span named `luckystack.error`, tags it with
   `error.type`, `error.msg`, `error.stack`, and `error: true`, then finishes
   it. APM correlates this with the surrounding trace.
-- `captureMessage` writes a `luckystack.message` span tagged with the text +
-  level, and (if `statsd` is present) increments `luckystack.error.message`
+- `captureMessage` writes a `luckystack.message` span tagged with caller
+  context followed by canonical scrubbed text + level (context cannot shadow
+  them), and (if `statsd` is present) increments `luckystack.error.message`
   with a `level:<level>` tag.
 - `setUser` calls `tracer.setUser(span, user)` on a throwaway span. Datadog
   propagates user identity via span tags, not process-globals, so this is a
@@ -360,7 +361,7 @@ createPostHogAdapter(options: PostHogAdapterOptions): ErrorTracker;
   recent addition. The adapter prefers `client.captureException(error, distinctId, properties)`
   when the installed SDK supports it, and falls back to a custom `$exception`
   event for older SDKs.
-- `captureMessage` -> custom `log_message` event with `{ message, level, ...context }`.
+- `captureMessage` -> custom `log_message` event with `{ ...context, message, level }`; the canonical scrubbed message and level always win.
 - `setUser` updates the internal `currentDistinctId` and (if available) calls
   `client.identify({ distinctId, properties: { email, username } })`. Passing
   `null` reverts to the configured `anonymousDistinctId`.

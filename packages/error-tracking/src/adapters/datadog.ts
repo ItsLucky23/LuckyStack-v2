@@ -173,12 +173,14 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
       const { message: fwdMessage, level: fwdLevel, context: fwdContext } = resolved;
       const span = options.tracer.startSpan('luckystack.message', {
         tags: {
+          //? Caller context first so it cannot shadow the canonical scrubbed
+          //? message/severity or ALS-bound usr.* identity below.
+          ...fwdContext,
           //? ET-O2: scrub secrets interpolated into a free-text message string
           //? (e.g. captureMessage(`reset token=${t}`)) before it reaches Datadog.
           'message.text': sanitizeErrorString(fwdMessage),
           'message.level': fwdLevel,
           ...userTags(),
-          ...fwdContext,
         },
       });
       //? ET-N4: same pattern as captureException — counter before finish for correlation.

@@ -25,7 +25,7 @@ Pluggable transactional email for LuckyStack. Ships three built-in adapters (`Co
 
 | Function / Export | 1-liner | Deep doc |
 |---|---|---|
-| `sendEmail(input)` | Send via the resolved sender; supports raw `{ subject, html }` or `{ template, data }`. Returns `EmailResult`. | -> docs/sending.md |
+| `sendEmail(input)` | Send via the resolved sender; supports raw/template input plus optional `signal` + stable `idempotencyKey`. Timeout/late abort returns `deliveryOutcome: 'unknown'`; retry only with the same key. | -> docs/sending.md |
 | `renderEmailLayout({ title, intro, ctaLabel?, ctaUrl?, outro?, footer?, brand?, accent? })` | Render inline-styled HTML + plain-text fallback with optional CTA button. | -> docs/templates.md |
 | `ConsoleSender(options?)` | Dev-mode adapter. Logs to terminal, never sends real mail. Returns `EmailSender`. | -> docs/adapters.md |
 | `ResendSender({ apiKey, from? })` | Production adapter using `resend` SDK (lazy peer-dep). | -> docs/adapters.md |
@@ -56,7 +56,7 @@ Pluggable transactional email for LuckyStack. Ships three built-in adapters (`Co
 | `EmailConfig`, `EmailConfigInput`, `EmailLoggingConfig`, `EmailEnvVarsConfig`, `EmailDefaultsConfig` | `./emailConfig` | Config shape + deep-partial input. |
 | `RenderEmailLayoutInput`, `RenderedEmail` | `./renderEmailLayout` | Layout helper input/output. |
 | `AutoSelectEmailSenderOptions` | `./autoSelect` | `{ from?, force? }`. |
-| `EmailSender`, `EmailMessage`, `EmailResult`, `EmailSenderRegistry` | Re-exported from `@luckystack/core` | Adapter contract + result tuple. |
+| `EmailSender`, `EmailSendContext`, `EmailMessage`, `EmailResult`, `EmailDeliveryOutcome`, `EmailSenderRegistry` | Re-exported from `@luckystack/core` | Adapter contract, cancellation/idempotency context, and outcome-aware result. |
 | `PreEmailSendPayload`, `PostEmailSendPayload` | `./hookPayloads` | Hook payload shapes (also augmented onto `HookPayloads`). |
 
 ## Config keys
@@ -73,7 +73,7 @@ Configured via `registerEmailConfig({...})` (deep-merged on top of `DEFAULT_EMAI
 | `envVars.smtpHost` / `smtpPort` / `smtpSecure` / `smtpUser` / `smtpPass` | `'SMTP_HOST'` / `'SMTP_PORT'` / `'SMTP_SECURE'` / `'SMTP_USER'` / `'SMTP_PASS'` | Env vars read by `autoSelectEmailSender` for SMTP. |
 | `envVars.emailFrom` | `'EMAIL_FROM'` | Env var fallback for the default `from` address. |
 | `defaults.smtpPort` | `587` | Fallback SMTP port when the env var is unset. |
-| `sendTimeoutMs` | `30_000` | Max ms for a single `sender.send()` call; returns `{ ok:false, reason:'send-timeout' }` on expiry. Set to `false` to disable (EMAIL-O8). |
+| `sendTimeoutMs` | `30_000` | Max wait for one send. On expiry the adapter signal aborts and result is `{ ok:false, reason:'send-timeout', deliveryOutcome:'unknown' }`; provider delivery may already have happened. Set `false` to disable. |
 | `recipientHmacKey` | `undefined` | HMAC-SHA-256 key for recipient hashing in error-tracker + log contexts. When unset, falls back to un-keyed SHA-256 with a one-time dev warning. Set to `''` to silence the warning and keep un-keyed hashing (document the tradeoff). (EMAIL-O5). |
 
 Environment variables read at adapter-selection time (names overridable via `envVars` above):

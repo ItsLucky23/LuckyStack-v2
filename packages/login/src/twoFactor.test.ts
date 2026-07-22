@@ -1,9 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { store, fakeRedis, getProjectConfigMock, finalizeLoginMock, adapterMock, sendEmailMock } = vi.hoisted(() => {
+const {
+  store,
+  fakeRedis,
+  heldLeases,
+  acquireLeaseMock,
+  releaseLeaseMock,
+  getProjectConfigMock,
+  finalizeLoginMock,
+  adapterMock,
+  sendEmailMock,
+} = vi.hoisted(() => {
   const backing = new Map<string, { value: string; ttl: number }>();
+  const leases = new Set<string>();
   return {
     store: backing,
+    heldLeases: leases,
+    acquireLeaseMock: vi.fn(async (name: string) => {
+      if (leases.has(name)) return null;
+      leases.add(name);
+      return `lease-token:${name}`;
+    }),
+    releaseLeaseMock: vi.fn(async (name: string) => leases.delete(name)),
     fakeRedis: {
       get: async (key: string) => backing.get(key)?.value ?? null,
       //? Supports the trailing `'NX'` flag: SET NX returns null when the key
@@ -24,6 +42,34 @@ const { store, fakeRedis, getProjectConfigMock, finalizeLoginMock, adapterMock, 
         const entry = backing.get(key);
         if (entry) entry.ttl = ttl;
         return entry ? 1 : 0;
+      },
+      //? Email fallback uses emailOtp's atomic issue/verify Lua scripts.
+      eval: async (
+        script: string,
+        _keyCount: number,
+        key: string,
+        counter: string,
+        firstArg: string,
+        secondArg: string,
+      ) => {
+        if (script.includes("redis.call('set'")) {
+          backing.set(key, { value: firstArg, ttl: Number(secondArg) });
+          backing.delete(counter);
+          return 1;
+        }
+        const stored = backing.get(key);
+        if (!stored) return 0;
+        const attempts = Number(backing.get(counter)?.value ?? '0') + 1;
+        backing.set(counter, { value: String(attempts), ttl: stored.ttl > 0 ? stored.ttl : 600 });
+        if (attempts > Number(secondArg)) {
+          backing.delete(key);
+          backing.delete(counter);
+          return 3;
+        }
+        if (stored.value !== firstArg) return 1;
+        backing.delete(key);
+        backing.delete(counter);
+        return 2;
       },
     },
     getProjectConfigMock: vi.fn(),
@@ -46,10 +92,8 @@ vi.mock('@luckystack/core', () => ({
   getProjectName: () => 'testapp',
   getLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   dispatchHook: vi.fn(async () => ({ stopped: false })),
-  //? Lease is a no-op single-holder in the unit fake (real atomicity is
-  //? exercised by the real-Redis runtime harness).
-  acquireLease: async () => 'lease-token',
-  releaseLease: async () => true,
+  acquireLease: acquireLeaseMock,
+  releaseLease: releaseLeaseMock,
   tryCatch: async (fn: () => Promise<unknown>) => {
     try { return [null, await fn()]; } catch (error) { return [error, null]; }
   },
@@ -116,11 +160,13 @@ const user = (overrides: Partial<UserRecord> = {}): UserRecord => ({
 
 beforeEach(() => {
   store.clear();
+  heldLeases.clear();
   vi.clearAllMocks();
   setAuthConfig();
   adapterMock.update.mockImplementation(async () => user());
   finalizeLoginMock.mockResolvedValue({ status: true, reason: 'login.loggedIn', newToken: 't', session: {} });
   delete process.env.TOTP_ENCRYPTION_KEY;
+  delete process.env.TOTP_ENCRYPTION_LEGACY_KEYS;
 });
 
 describe('createTwoFactorChallengeIfRequired (the login gate)', () => {
@@ -295,6 +341,33 @@ describe('enrollment', () => {
     expect(confirmed).toEqual({ ok: false, reason: 'login.twoFactorEnrollmentExpired' });
   });
 
+  it('serializes concurrent confirms so only one recovery-code set is returned', async () => {
+    const record = user({ twoFactorEnabled: false, totpSecret: null });
+    const start = await beginTotpEnrollment(record);
+    if (!start.ok) throw new Error('enrollment should start');
+    const key = base32Decode(start.secret);
+    if (!key) throw new Error('secret must decode');
+    const code = hotp(key, Math.floor(Date.now() / 1000 / 30));
+
+    let finishUpdate: () => void = () => undefined;
+    const updateGate = new Promise<void>((resolve) => { finishUpdate = resolve; });
+    adapterMock.update.mockImplementationOnce(async () => {
+      await updateGate;
+      return record;
+    });
+
+    const firstPromise = confirmTotpEnrollment(record, code);
+    await vi.waitFor(() => { expect(adapterMock.update).toHaveBeenCalledTimes(1); });
+    const second = await confirmTotpEnrollment(record, code);
+    expect(second).toEqual({ ok: false, reason: 'login.twoFactorEnrollmentExpired' });
+
+    finishUpdate();
+    const first = await firstPromise;
+    expect(first.ok).toBe(true);
+    expect(adapterMock.update).toHaveBeenCalledTimes(1);
+    expect(releaseLeaseMock).toHaveBeenCalledWith('2fa-enrollment:u1', 'lease-token:2fa-enrollment:u1');
+  });
+
   it('disable requires a currently-valid code and clears the 2FA fields', async () => {
     const denied = await disableTwoFactor(user(), '000000');
     expect(denied.ok).toBe(false);
@@ -317,17 +390,43 @@ describe('enrollment', () => {
 });
 
 describe('TOTP secret at rest', () => {
+  const encryptLegacyGcm = (secret: string, rawKey: string): string => {
+    const key = crypto.createHash('sha256').update(rawKey).digest();
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const ciphertext = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+    return `gcm:${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${ciphertext.toString('base64')}`;
+  };
+
   it('without TOTP_ENCRYPTION_KEY the secret round-trips as plaintext', () => {
     const stored = encryptTotpSecret(SECRET);
     expect(stored).toBe(SECRET);
     expect(decryptTotpSecret(stored)).toBe(SECRET);
   });
 
-  it('with TOTP_ENCRYPTION_KEY the secret is AES-256-GCM encrypted and round-trips', () => {
+  it('writes versioned AES-256-GCM ciphertext with a non-secret key id', () => {
     process.env.TOTP_ENCRYPTION_KEY = 'super-secret-key';
     const stored = encryptTotpSecret(SECRET);
-    expect(stored.startsWith('gcm:')).toBe(true);
+    expect(stored.startsWith('enc:v2:')).toBe(true);
     expect(stored).not.toContain(SECRET);
+    expect(stored).not.toContain('super-secret-key');
+    expect(decryptTotpSecret(stored)).toBe(SECRET);
+  });
+
+  it('decrypts v2 ciphertext through the legacy key ring after primary rotation', () => {
+    process.env.TOTP_ENCRYPTION_KEY = 'old-primary';
+    const stored = encryptTotpSecret(SECRET);
+    process.env.TOTP_ENCRYPTION_KEY = 'new-primary';
+    process.env.TOTP_ENCRYPTION_LEGACY_KEYS = JSON.stringify(['old-primary']);
+
+    expect(decryptTotpSecret(stored)).toBe(SECRET);
+  });
+
+  it('keeps pre-v2 gcm ciphertext readable through the legacy key ring', () => {
+    const stored = encryptLegacyGcm(SECRET, 'old-primary');
+    process.env.TOTP_ENCRYPTION_KEY = 'new-primary';
+    process.env.TOTP_ENCRYPTION_LEGACY_KEYS = JSON.stringify(['old-primary']);
+
     expect(decryptTotpSecret(stored)).toBe(SECRET);
   });
 
@@ -336,11 +435,33 @@ describe('TOTP secret at rest', () => {
     expect(decryptTotpSecret(SECRET)).toBe(SECRET);
   });
 
-  it('an encrypted secret without the key fails closed (null)', () => {
+  it('an encrypted secret without its primary or legacy key fails closed', () => {
     process.env.TOTP_ENCRYPTION_KEY = 'super-secret-key';
     const stored = encryptTotpSecret(SECRET);
     delete process.env.TOTP_ENCRYPTION_KEY;
     expect(decryptTotpSecret(stored)).toBeNull();
+  });
+
+  it('lazily rewrites legacy-key ciphertext after a successful TOTP proof', async () => {
+    process.env.TOTP_ENCRYPTION_KEY = 'old-primary';
+    const oldCiphertext = encryptTotpSecret(SECRET);
+    process.env.TOTP_ENCRYPTION_KEY = 'new-primary';
+    process.env.TOTP_ENCRYPTION_LEGACY_KEYS = JSON.stringify(['old-primary']);
+    const rotatedUser = user({ totpSecret: oldCiphertext });
+    adapterMock.findById.mockResolvedValue(rotatedUser);
+    const challenge = await createTwoFactorChallengeIfRequired(rotatedUser, {});
+    if (!challenge) throw new Error('expected a challenge');
+
+    await verifyTwoFactorChallenge({
+      challengeToken: challenge.challengeToken,
+      code: currentCode(),
+    });
+
+    const migrationCall = adapterMock.update.mock.calls.find((call) =>
+      typeof call[1]?.totpSecret === 'string' && call[1].totpSecret.startsWith('enc:v2:'),
+    );
+    expect(migrationCall).toBeDefined();
+    expect(decryptTotpSecret(migrationCall?.[1].totpSecret ?? '')).toBe(SECRET);
   });
 });
 

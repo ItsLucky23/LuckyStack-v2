@@ -45,6 +45,8 @@ export interface DeployConfig<TEnvKey extends string = string> {
     strictBootHandshake?: boolean;
     /** TCP port the router listens on (default 4000). Also overridable via ROUTER_PORT env. */
     defaultRouterPort?: number;
+    /** Immediate TLS proxy addresses/CIDRs trusted to set x-forwarded-proto. */
+    trustedProxyCidrs?: string[];
   };
   development?: {
     enableFallbackRouting?: boolean;
@@ -75,7 +77,11 @@ const deployConfig: DeployConfig = {
   //?       bindings: { system: 'http://localhost:4100' },
   //?     },
   //?   },
-  //?   routing: { defaultRouterPort: 4000 },
+  //?   routing: {
+  //?     defaultRouterPort: 4000,
+  //?     // Add ONLY the immediate TLS proxy/load-balancer subnet. Empty = trust none.
+  //?     trustedProxyCidrs: ['127.0.0.1/32', '::1/128'],
+  //?   },
   environments: {},
 };
 

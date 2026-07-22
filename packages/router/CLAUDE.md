@@ -63,11 +63,11 @@ Health polling (`packages/router/src/healthPoller.ts`):
 
 HTTP proxy (`packages/router/src/httpProxy.ts`):
 
-- `createHttpProxy(input: CreateHttpProxyInput)` — Returns an `(req, res) => void` handler. Strips hop-by-hop headers, adds `x-forwarded-host`, `x-forwarded-proto`, `x-luckystack-resolved-env`, `x-luckystack-via-fallback`. Dispatches `preProxyRequest` hook before the upstream call and `postProxyResponse` after the upstream response starts. Emits `routing.invalidRequestPath` (400), `<missingServiceErrorCode>` (502), or `routing.upstreamUnreachable` (502) on errors.
+- `createHttpProxy(input: CreateHttpProxyInput)` — Returns an `(req, res) => void` handler. Strips hop-by-hop headers, adds router-authoritative forwarding/routing headers, and honors inbound HTTPS only when `isTrustedProxy(remoteAddress)` passes. Dispatches `preProxyRequest` before the upstream call and `postProxyResponse` after response start. Guards all streams; a backend reset closes only that downstream leg. Emits typed 400/502 errors.
 
 WebSocket proxy (`packages/router/src/wsProxy.ts`):
 
-- `createWsProxy(input: CreateWsProxyInput)` — Returns an `upgrade` handler. Pins all upgrades to the `system` service backend; Socket.io's Redis adapter handles cross-instance fanout. The forwarded 101 keeps `Connection: Upgrade` + `Upgrade: websocket` (RFC 6455 §4.2.2) while still stripping `set-cookie` and `x-luckystack-*` — see `WS_RESPONSE_HOP_BY_HOP_HEADERS`, and do not "simplify" it back to the request-direction set.
+- `createWsProxy(input: CreateWsProxyInput)` — Returns an `upgrade` handler. Pins all upgrades to the `system` service backend; Socket.io's Redis adapter handles cross-instance fanout. Uses the same immediate-peer HTTPS trust gate as HTTP. The forwarded 101 keeps `Connection: Upgrade` + `Upgrade: websocket` while stripping `set-cookie` and `x-luckystack-*`.
 
 Runtime capability guard (`packages/router/src/runtimeCapabilities.ts`):
 
@@ -106,6 +106,7 @@ Read from `getDeployConfig()` (registered by the consumer's `deploy.config.ts`):
 - `routing.strictBootHandshake?: boolean` — when true, boot handshake throws instead of warning on mismatch.
 - `routing.healthProbeTimeoutMs?: number` — fallback `/_health` probe timeout (default `3000`).
 - `routing.bootKeyTtlSeconds?: number` — TTL for the Redis boot UUID key (default `3600`).
+- `routing.trustedProxyCidrs?: string[]` — immediate TLS proxy addresses/subnets allowed to assert `x-forwarded-proto: https`. Default empty = trust nobody. Same-host nginx/Caddy example: `['127.0.0.1/32', '::1/128']`; managed load balancers need their private subnet(s).
 - `routing.maxRequestBodyBytes?: number` — max request body size (bytes) the HTTP proxy rejects before forwarding (413 `routing.requestBodyTooLarge`). DEFAULT undefined → 100 MiB. Set to `Infinity` to disable edge enforcement.
 - `development.enableFallbackRouting?: boolean` — turn on the dev-mode `local → staging fallback` flow.
 - `development.healthPollMs?: number` — dev health-poll override.

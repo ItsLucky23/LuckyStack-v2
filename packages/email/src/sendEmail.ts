@@ -1,3 +1,4 @@
+//? @adr 0034
 import { createHash, createHmac } from 'node:crypto';
 
 import {
@@ -10,6 +11,7 @@ import {
   tryCatchSync,
   type EmailMessage,
   type EmailResult,
+  type EmailSender,
 } from '@luckystack/core';
 
 import { getEmailConfig } from './emailConfig';
@@ -72,9 +74,16 @@ const redactSubject = (subject: string): string => `redacted(len=${subject.lengt
  *   2. Falls back to `getEmailSenderByName('default')` then to the legacy
  *      single sender from `registerEmailSender(...)`.
  */
+export interface EmailSendControls {
+  /** Stable key to reuse when retrying this same logical email. */
+  idempotencyKey?: string;
+  /** Caller cancellation; in-flight provider outcome may remain unknown. */
+  signal?: AbortSignal;
+}
+
 export type SendEmailInput =
-  | (EmailMessage & { adapter?: string; template?: undefined; data?: undefined; adapterHint?: never })
-  | {
+  | (EmailMessage & EmailSendControls & { adapter?: string; template?: undefined; data?: undefined; adapterHint?: never })
+  | ({
       to: string | string[];
       template: string;
       data?: Record<string, unknown>;
@@ -87,7 +96,7 @@ export type SendEmailInput =
       bcc?: string | string[];
       attachments?: EmailMessage['attachments'];
       headers?: EmailMessage['headers'];
-    };
+    } & EmailSendControls);
 
 //? EMAIL-O4: distinguish an EXPLICITLY-requested adapter from a best-effort
 //? adapterHint. When the caller names a specific `adapter` slot and it is not
@@ -245,6 +254,94 @@ const scrubEmailPii = (value: string): string => value.replaceAll(EMAIL_ADDRESS_
 //? The thrown-error path scrubs recipient PII from the message AND the nested
 //? `cause` in place, so the same Error reference (with its original stack)
 //? reaches `captureException` already redacted (#57).
+const MAX_IDEMPOTENCY_KEY_LENGTH = 256;
+
+const normalizeIdempotencyKey = (value: string | undefined): string | null => {
+  if (value === undefined) return '';
+  if (value.length === 0 || value.length > MAX_IDEMPOTENCY_KEY_LENGTH) return null;
+  //? Provider keys become HTTP headers. Restrict to visible ASCII without
+  //? whitespace so CR/LF injection and ambiguous normalization are impossible.
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 33 || code > 126) return null;
+  }
+  return value;
+};
+
+const sendWithControls = (
+  sender: EmailSender,
+  message: EmailMessage,
+  controls: EmailSendControls,
+  timeoutMs: number | false,
+  idempotencyKey: string | undefined,
+): Promise<EmailResult> => {
+  if (controls.signal?.aborted) {
+    return Promise.resolve({ ok: false, reason: 'send-aborted', deliveryOutcome: 'not-sent' });
+  }
+
+  const controller = new AbortController();
+  let dispatchStarted = false;
+
+  return new Promise<EmailResult>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const callerSignal = controls.signal;
+
+    const cleanup = (): void => {
+      if (timer) clearTimeout(timer);
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+    };
+    const complete = (result: EmailResult): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+    const fail = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    function onCallerAbort(): void {
+      controller.abort(callerSignal?.reason);
+      complete({
+        ok: false,
+        reason: 'send-aborted',
+        deliveryOutcome: dispatchStarted ? 'unknown' : 'not-sent',
+      });
+    }
+
+    callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+    if (timeoutMs !== false && timeoutMs > 0) {
+      timer = setTimeout(() => {
+        controller.abort(new Error('email send timed out'));
+        complete({
+          ok: false,
+          reason: 'send-timeout',
+          deliveryOutcome: dispatchStarted ? 'unknown' : 'not-sent',
+        });
+      }, timeoutMs);
+    }
+
+    //? Promise.resolve catches a non-async custom adapter that throws before it
+    //? returns a Promise. Re-check the signal before crossing the provider
+    //? boundary so an abort in the scheduling gap remains definitively not-sent.
+    void Promise.resolve()
+      .then<EmailResult>(() => {
+        if (controller.signal.aborted) {
+          return { ok: false, reason: 'send-aborted', deliveryOutcome: 'not-sent' };
+        }
+        dispatchStarted = true;
+        return sender.send(message, {
+          signal: controller.signal,
+          ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+        });
+      })
+      .then(complete, fail);
+  });
+};
+
 const normalizeSendResult = (sendError: Error | null, sendResult: EmailResult | null): EmailResult => {
   if (!sendError) return sendResult ?? { ok: false, reason: 'send-no-result' };
   const scrubbedMessage = scrubEmailPii(sendError.message || '');
@@ -283,6 +380,7 @@ const reportSendOutcome = (senderName: string, message: EmailMessage, result: Em
     bcc: redactRecipients(message.bcc),
     subject: redactSubject(message.subject),
     reason: result.reason,
+    deliveryOutcome: result.deliveryOutcome,
   });
 };
 
@@ -326,6 +424,14 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
   //? (EMAIL-O7). Hooks observe the sanitized values so their payloads are
   //? also safe for logging.
   const message = sanitizeMessageHeaders(built.message);
+  const normalizedIdempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
+  if (normalizedIdempotencyKey === null) {
+    return { ok: false, reason: 'invalid-idempotency-key', deliveryOutcome: 'not-sent' };
+  }
+  const idempotencyKey = normalizedIdempotencyKey || undefined;
+  if (input.signal?.aborted) {
+    return { ok: false, reason: 'send-aborted', deliveryOutcome: 'not-sent' };
+  }
 
   //? Honor the `preEmailSend` veto: a registered suppression hook (GDPR
   //? opt-out / unsubscribe / bounce list) returns a stop signal to abort the
@@ -341,30 +447,13 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
     return { ok: false, reason: preSend.signal.errorCode || 'email.suppressed' };
   }
 
-  //? EMAIL-O8: wrap the adapter send in a configurable timeout so a hung
-  //? SMTP/Resend call does not pin the request indefinitely. The race is
-  //? set up only when `sendTimeoutMs` is a positive number; `false` disables
-  //? it entirely (documented escape hatch for long-running adapters).
-  const sendWithTimeout = (): Promise<EmailResult> => {
-    const sendPromise = sender.send(message);
-    const { sendTimeoutMs } = config;
-    if (sendTimeoutMs === false || sendTimeoutMs <= 0) return sendPromise;
-    return new Promise<EmailResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        resolve({ ok: false, reason: 'send-timeout' });
-      }, sendTimeoutMs);
-      void sendPromise.then(
-        (result) => { clearTimeout(timer); resolve(result); },
-        (error: unknown) => {
-          clearTimeout(timer);
-          //? Rejection surfaces via the outer tryCatch wrapper below.
-          reject(error instanceof Error ? error : new Error(String(error)));
-        },
-      );
-    });
-  };
-
-  const [sendError, sendResult] = await tryCatch<EmailResult, undefined>(sendWithTimeout);
+  //? EMAIL-O8/TW-15: bound the wait AND signal cooperative cancellation. A
+  //? timeout after provider dispatch is explicitly `deliveryOutcome: unknown`;
+  //? callers must retry with the same idempotency key instead of assuming the
+  //? first attempt failed. Legacy adapters still work because context is optional.
+  const [sendError, sendResult] = await tryCatch<EmailResult, undefined>(() =>
+    sendWithControls(sender, message, input, config.sendTimeoutMs, idempotencyKey),
+  );
   const result = normalizeSendResult(sendError, sendResult);
 
   await dispatchHook('postEmailSend', {
@@ -373,6 +462,7 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
     ok: result.ok,
     messageId: result.ok ? result.id : undefined,
     reason: result.ok ? undefined : result.reason,
+    deliveryOutcome: result.ok ? undefined : result.deliveryOutcome,
   });
 
   reportSendOutcome(sender.name, message, result, config);

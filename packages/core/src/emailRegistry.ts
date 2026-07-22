@@ -82,14 +82,37 @@ export interface EmailMessage {
   headers?: Record<string, string>;
 }
 
+export type EmailDeliveryOutcome = 'not-sent' | 'unknown';
+
 export type EmailResult =
   | { ok: true; id: string }
-  | { ok: false; reason: string; cause?: unknown };
+  | {
+      ok: false;
+      reason: string;
+      cause?: unknown;
+      /**
+       * `unknown` means the caller stopped waiting after dispatch began; retry
+       * only with the same idempotency key. Omitted on legacy/provider failures
+       * whose delivery semantics are adapter-specific.
+       */
+      deliveryOutcome?: EmailDeliveryOutcome;
+    };
+
+export interface EmailSendContext {
+  /** Cooperative cancellation. Custom adapters should abort provider I/O when supported. */
+  signal: AbortSignal;
+  /** Stable caller-provided key reused across retries of the same logical email. */
+  idempotencyKey?: string;
+}
 
 export interface EmailSender {
   /** Adapter identifier for logs + diagnostics ("console", "resend", "smtp", etc.). */
   name: string;
-  send: (message: EmailMessage) => Promise<EmailResult>;
+  /**
+   * The optional context preserves source compatibility with pre-0.7 adapters.
+   * New adapters should honor `signal` and provider-native idempotency where available.
+   */
+  send: (message: EmailMessage, context?: EmailSendContext) => Promise<EmailResult>;
 }
 
 /**

@@ -19,7 +19,7 @@ Source: `packages/router/src/httpProxy.ts`, `packages/router/src/wsProxy.ts`.
 4. **Choose transport.** `https.request` when the target URL starts with `https:`, otherwise `http.request`. The default port is `443` for https and `80` for http when the URL omits an explicit port.
 5. **Build the upstream request.** Strip hop-by-hop headers, inject forwarding headers, and call `transport.request(options, onUpstream)`.
 6. **Dispatch `preProxyRequest`.** Hook fires fire-and-forget before the upstream call lands.
-7. **Pipe.** `req.pipe(forwardRequest)` streams the client body upstream. On upstream response, `upstream.pipe(res)` streams the response body back. No buffering, so large uploads/downloads do not multiply memory.
+7. **Pipe.** `req.pipe(forwardRequest)` streams the client body upstream. On upstream response, `upstream.pipe(res)` streams the response body back. No buffering, so large uploads/downloads do not multiply memory. The upstream `IncomingMessage` has its own `error`/`aborted` guards: a backend reset after headers destroys only the truncated downstream response instead of escaping as an uncaught stream error.
 8. **Dispatch `postProxyResponse`.** Fires once the upstream response headers arrive (right when the body starts streaming) on the happy path, **or** when the upstream transport emits `'error'` before a response (`statusCode: 0`, `error` field populated). `latencyMs` is measured from step 1 (proxy entry) to whichever happens. Consumers branch on `payload.error` to distinguish failure events.
 
 ## SSRF / host-pinning guards
@@ -54,7 +54,7 @@ The proxy adds the following on every forwarded HTTP request:
 | Header | Value | Purpose |
 | --- | --- | --- |
 | `x-forwarded-host` | `req.headers.host ?? ''` | Lets the backend know the public hostname even though it sees the router's internal `Host`. Reflected verbatim from the inbound `Host` header; backends building absolute URLs from it should validate the value against an allowlist. |
-| `x-forwarded-proto` | `normalizeForwardedProto(req.headers['x-forwarded-proto'])` | Strips any inbound `x-forwarded-proto` and emits a normalized single value (`'https'` or `'http'`). The inbound header is never trusted or forwarded verbatim — a multi-hop chain cannot spoof the scheme seen by the backend. |
+| `x-forwarded-proto` | `resolveForwardedProto(header, remoteAddress, trustedMatcher)` | Strips the inbound value and emits `'https'` only when the **immediate peer** matches `routing.trustedProxyCidrs`; all direct/untrusted peers resolve to `'http'` even if they claim HTTPS. |
 | `x-luckystack-resolved-env` | `resolved.resolvedEnvKey` | Which env owns the binding (current env or the fallback env key). Useful for audit logs and per-env metrics on the backend side. |
 | `x-luckystack-via-fallback` | `'1'` when `viaFallback`, else `'0'` | `1` means the local binding was missing or unhealthy and the request was routed to the fallback env. |
 
@@ -68,6 +68,20 @@ const transport = targetUrl.protocol === 'https:' ? https : http;
 ```
 
 The choice is purely on the upstream URL scheme. The router itself listens over plain HTTP — it is designed to sit behind a TLS-terminating proxy (Cloud Run, ALB, Caddy, nginx). Do not add cert-loading logic here.
+
+### Trusting the TLS terminator
+
+An internet client can send `x-forwarded-proto: https` over plain HTTP, so the header is ignored by default. Configure only the immediate proxy addresses/subnets:
+
+```ts
+routing: {
+  // Same-host nginx/Caddy example. For ALB/Cloud Run, use the documented
+  // private ingress subnet(s) instead — never `0.0.0.0/0` or `::/0`.
+  trustedProxyCidrs: ['127.0.0.1/32', '::1/128'],
+}
+```
+
+HTTP and WebSocket paths share the compiled matcher. Malformed addresses/CIDRs abort router boot with an actionable error. This setting trusts only the socket peer; forwarded multi-hop chains are still discarded.
 
 ## Error responses
 
@@ -94,7 +108,7 @@ Body shape (matches the framework's response envelope):
 ## Streaming semantics
 
 - **Request body.** `req.pipe(forwardRequest)` — no buffering. Aborting the client request aborts the upstream side too.
-- **Response body.** `upstream.pipe(res)` — same. Backpressure is honored by Node's stream machinery.
+- **Response body.** `upstream.pipe(res)` — same. Backpressure is honored by Node's stream machinery. Source `error` and premature `aborted` events are consumed before piping; if headers already left the router, the downstream socket is destroyed so a partial 200 is never presented as complete.
 - **Headers.** Each upstream header is copied except for the hop-by-hop set. `undefined` values are skipped.
 - **Status code.** `res.statusCode = upstream.statusCode ?? 502`. A response with no status (network failure mid-stream) collapses to 502.
 

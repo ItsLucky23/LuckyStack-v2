@@ -192,10 +192,14 @@ const probeExpansion = (root: ts.Type, limit: number): ProbeResult => {
   return { bailouts, maxDepth, nodes };
 };
 
+//? Building the real multi-ORM fixture Program is intentionally heavyweight.
+//? It finishes in ~7.5s alone but exceeded Vitest's 10s default when 170+ test
+//? files loaded TypeScript concurrently, skipping this entire 27-test suite.
+//? Give only this known-heavy setup a deterministic CI budget.
 beforeAll(() => {
   program = buildFixtureProgram();
   checker = program.getTypeChecker();
-});
+}, 30_000);
 
 describe('fixture integrity', () => {
   it('the decorator-based MikroORM fixture type-checks under experimentalDecorators', () => {

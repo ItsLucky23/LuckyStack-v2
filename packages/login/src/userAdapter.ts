@@ -30,8 +30,9 @@ export interface UserRecord extends BaseSessionLayout {
    */
   twoFactorEnabled?: boolean | null;
   /**
-   * 2FA: the TOTP shared secret (base32; `gcm:`-prefixed when encrypted at
-   * rest via TOTP_ENCRYPTION_KEY). NEVER reaches the client — stripped by
+   * 2FA: the TOTP shared secret (base32; new encrypted rows use
+   * `enc:v2:<key-id>:...`, while legacy `gcm:` rows remain readable through
+   * TOTP_ENCRYPTION_LEGACY_KEYS). NEVER reaches the client — stripped by
    * `sanitizeUserForSession` before any session persist/broadcast.
    */
   totpSecret?: string | null;

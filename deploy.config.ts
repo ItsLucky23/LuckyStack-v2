@@ -81,6 +81,8 @@ export interface DeployConfig<TEnvKey extends string = string> {
      * /_health.
      */
     strictBootHandshake?: boolean;
+    /** Immediate TLS proxy addresses/CIDRs trusted to set x-forwarded-proto. */
+    trustedProxyCidrs?: string[];
   };
   development?: {
     enableFallbackRouting?: boolean;
@@ -145,6 +147,9 @@ const deployConfig = defineDeploy<'development' | 'staging' | 'production'>({
     onMissingService: 'proxy-fallback',
     missingServiceErrorCode: 'serviceNotAssigned',
     enableUnhealthyFallback: true,
+    //? Secure default: direct clients cannot claim HTTPS. Add only the immediate
+    //? TLS load-balancer/nginx CIDRs when production terminates TLS upstream.
+    trustedProxyCidrs: [],
   },
 
   development: {

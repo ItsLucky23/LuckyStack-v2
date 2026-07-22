@@ -54,6 +54,13 @@ vi.mock('@luckystack/core', () => {
         return [error instanceof Error ? error : new Error(String(error)), null];
       }
     },
+    tryCatchSync: <T>(fn: () => T): [Error | null, T | null] => {
+      try {
+        return [null, fn()];
+      } catch (error) {
+        return [error instanceof Error ? error : new Error(String(error)), null];
+      }
+    },
     deepMerge: deepMergeImpl,
   };
 });
@@ -157,6 +164,23 @@ describe('leadership', () => {
     expect(handler).not.toHaveBeenCalled();
     expect(mocks.acquireLease).not.toHaveBeenCalled();
   });
+
+  it('clears the in-flight latch after an unexpected lease rejection and retries later', async () => {
+    mocks.acquireLease.mockRejectedValueOnce(new Error('redis exploded'));
+    registerCronJob({ name: 'job-a', schedule: { everyMs: 1000 }, handler: vi.fn() });
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(isCronLeader()).toBe(false);
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('initial leader tick failed'),
+      expect.any(Error),
+    );
+
+    //? The queued one-shot rejection is spent; the normal lease implementation
+    //? can acquire on the next cadence only if leaderTickInFlight was reset.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(isCronLeader()).toBe(true);
+  });
 });
 
 describe('run behavior', () => {
@@ -257,6 +281,50 @@ describe('run behavior', () => {
 
     await vi.advanceTimersByTimeAsync(1100);
     expect(handler).toHaveBeenCalledTimes(1); // fired immediately, not at 03:00
+  });
+
+  it('runOnStart also fires for a job registered after leadership was acquired', async () => {
+    registerCronJob({ name: 'anchor', schedule: '0 3 * * *', handler: vi.fn() });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(isCronLeader()).toBe(true);
+
+    const lateHandler = vi.fn();
+    registerCronJob({ name: 'late-warmup', schedule: '0 3 * * *', handler: lateHandler, runOnStart: true });
+    await vi.advanceTimersByTimeAsync(1100);
+
+    expect(lateHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears running state when per-run lease cleanup rejects', async () => {
+    const handler = vi.fn();
+    mocks.releaseLease.mockRejectedValueOnce(new Error('release failed'));
+    registerCronJob({ name: 'cleanup-rejects', schedule: { everyMs: 1000 }, handler });
+
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(handler).toHaveBeenCalledTimes(1);
+    //? A wedged runtime.running flag would suppress this next due tick.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('observes a rejected fire-and-forget run-lease renewal', async () => {
+    registerCronConfig({ runLeaseTtlMs: 3000 });
+    let releaseHandler: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { releaseHandler = resolve; });
+    mocks.renewLease.mockRejectedValueOnce(new Error('renew failed'));
+    registerCronJob({
+      name: 'renew-rejects',
+      schedule: { everyMs: 1000 },
+      handler: async () => gate,
+    });
+
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('lease renewal failed'),
+      expect.any(Error),
+    );
+    releaseHandler();
+    await vi.advanceTimersByTimeAsync(1);
   });
 });
 

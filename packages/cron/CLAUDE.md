@@ -4,7 +4,7 @@
 
 ## What this package does
 
-Leader-elected, Redis-backed cron scheduler for LuckyStack. Declarative recurring jobs (`registerCronJob`) driven by cron expressions (croner — DST/timezone-correct) or plain intervals, guaranteed to fire on **exactly one instance** in a multi-instance deployment via core's Redis lease primitive (`acquireLease`/`renewLease` — no second election mechanism). Ships overlap guards, per-run dedup leases, optional jitter, per-tenant fan-out, run stats in Redis, and `preCronRun`/`postCronRun` hooks. The scheduler starts lazily on the first job registration and tears down via the core `preServerStop` hook.
+Leader-elected, Redis-backed cron scheduler for LuckyStack. Declarative recurring jobs (`registerCronJob`) driven by cron expressions (croner — DST/timezone-correct) or plain intervals, guaranteed to fire on **exactly one instance** in a multi-instance deployment via core's Redis lease primitive (`acquireLease`/`renewLease` — no second election mechanism). Ships overlap guards, per-run dedup leases, optional jitter, per-tenant fan-out, run stats in Redis, and `preCronRun`/`postCronRun` hooks. The scheduler starts lazily on the first job registration and tears down via the core `preServerStop` hook. Every intentional background promise has a terminal observer; unexpected injected infrastructure rejections are logged and cannot leave the leadership/running latches wedged.
 
 ## When to USE this package
 
@@ -73,7 +73,7 @@ registerCronJob({
 });
 ```
 
-Semantics to know: no catch-up (ticks missed while no leader was alive are skipped; schedules recompute from "now" on leadership gain); overlapping ticks are skipped (in-process guard + per-run lease); `runOnStart` fires at most once per process; interval schedules anchor on "previous fire + everyMs".
+Semantics to know: no catch-up (ticks missed while no leader was alive are skipped; schedules recompute from "now" on leadership gain); overlapping ticks are skipped (in-process guard + per-run lease); `runOnStart` fires at most once per registration/process and also arms immediately when a job is registered after this process already became leader; interval schedules anchor on "previous fire + everyMs".
 
 ## Peer dependencies
 

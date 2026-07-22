@@ -15,7 +15,7 @@
 - **Lifecycle hooks**: `preLogin` / `postLogin`, `preRegister` / `postRegister`, `preLogout` / `postLogout`, `preSessionCreate` / `postSessionCreate`, `preSessionDelete` / `postSessionDelete`, `passwordResetRequested`, `passwordResetCompleted`, `passwordChanged`. All `pre*` hooks support stop-signals (abort the side-effect with a reason key).
 - **Pluggable user store** via `UserAdapter` — decouples auth from a specific Prisma `User` schema.
 - **Password-reset primitives** (`createPasswordResetToken`, `consumePasswordResetToken`, `updatePasswordHash`, `verifyPassword`) plus the framework-mode `sendPasswordResetEmail` orchestrator (requires the optional `@luckystack/email` peer).
-- **Dynamic post-login redirect** resolver registry (per-user / per-tenant / per-provider OAuth landing pages).
+- **Dynamic post-login redirect** resolver registry (per-user / per-tenant / per-provider OAuth landing pages). Relative resolver results inherit the trusted frontend `defaultUrl` origin, not the backend callback origin.
 
 OAuth state is stored in Redis under `${projectName}-oauth-state:<provider>:<state>` with TTL `auth.oauthStateTtlSeconds`. Sessions live at `${projectName}-session:<token>`. Active-tokens-per-user set lives at `${projectName}-activeUsers:<userId>`. Password-reset and email-change tokens are **hashed at rest** (0.2.0): only `sha256(token)` is stored as the Redis key (`${projectName}-pwreset:<sha256(token)>` / `${projectName}-email-change:<sha256(token)>`) via the `@luckystack/core` one-time-token primitive (`issueOneTimeToken` / `consumeOneTimeToken`). The raw token is returned to the caller exactly once for the emailed URL, so a leaked Redis keyspace can't be replayed to mint a reset or confirm an email change.
 
@@ -97,7 +97,7 @@ Do NOT use this package for:
 
 - `registerPostLoginRedirect(resolver)` — Register a `({ userId, provider, isNewUser, defaultUrl }) => string | Promise<string>` resolver.
 - `getPostLoginRedirect()` — Read the active resolver (or `null`).
-- The resolver's returned URL is validated against `http.cors.allowedOrigins` before use; invalid URLs fall back to `defaultUrl`.
+- The resolver's returned URL is validated against `http.cors.allowedOrigins` before use; invalid URLs fall back to `defaultUrl`. A valid relative result is then resolved against an absolute `defaultUrl`, so split frontend/backend callback deployments return to the frontend origin.
 
 ### Password reset (`./src/passwordReset.ts`, `./src/forgotPassword.ts`, `./src/passwordPolicy.ts`)
 
@@ -108,6 +108,7 @@ Do NOT use this package for:
 - `PasswordPolicyError` — Thrown by `updatePasswordHash`; carries `errorCode` matching the i18n reason keys used by the rest of the login flow.
 - `validatePassword(plaintext)` — Returns `null` when the policy passes, or a reason key when it fails (length, complexity, common-list, custom validator).
 - `sendPasswordResetEmail({ email, brand? })` — Framework-mode orchestrator. Looks up the user (credentials provider only), mints a token, lazy-imports `@luckystack/email`, and sends a transactional reset email. Always resolves "ok" when the email is not found (anti-enumeration). No-op when `auth.forgotPassword !== 'framework'`.
+- Email-code issue/verify (`emailOtp.ts`) — passwordless login + 2FA fallback primitive. Issue (`SET code hash + reset attempts`) and verify (`read current hash + increment attempts + compare + consume`) each run as one Redis Lua transaction, so reissue and verification are generation-linearizable; a stale code cannot delete or spend the replacement.
 - `createEmailChangeToken(userId, newEmail)` — Mint a one-shot token bound to `userId` + `newEmail`. Stored in Redis at `${projectName}-email-change:<sha256(token)>` (hashed at rest, via `@luckystack/core`'s `issueOneTimeToken`) with TTL from `auth.emailChangeTtlSeconds`. Returns the RAW token.
 - `consumeEmailChangeToken(token)` — Atomic get + del redemption. Returns `{ userId, newEmail }` on success, `null` on miss / malformed payload / expired entry.
 - `sendEmailChangeConfirmation({ userId, newEmail, userName?, brand? })` — Lazy-imports `@luckystack/email`, renders the confirmation template via `renderEmailLayout`, and sends to the NEW address with `adapterHint: 'transactional'`. Returns `{ ok, reason?, token }` — `token` is the minted email-change token so the caller can build the confirmation URL.
@@ -140,6 +141,8 @@ All config keys live on `ProjectConfig` (from `@luckystack/core`). Resolved at c
 | `MICROSOFT_TENANT_ID` | `microsoftProvider` (optional) | Single-tenant Azure AD. Defaults to `'common'`. |
 | (callback origin) | All OAuth `callbackUrl` builders | The `callbackUrl` is the BACKEND origin + `/auth/callback/<provider>`. The scaffold derives it in `config.ts` (`oauthCallbackBase`: dev `http://localhost:80`, prod the public domain). No `DNS` env var — that was removed in 0.1.5. |
 | `BCRYPT_ROUNDS` | `auth.bcryptRounds` | Surfaced through project config; salt rounds for credentials hashing. |
+| `TOTP_ENCRYPTION_KEY` | TOTP at-rest encryption | Current primary write key; new rows are `enc:v2:<key-id>:...`. |
+| `TOTP_ENCRYPTION_LEGACY_KEYS` | TOTP key rotation | JSON array of decrypt-only previous keys. Successful TOTP proofs lazily rewrite legacy/plaintext rows under the primary. |
 
 > Env-key set without the matching package installed = hard boot crash (see peer-dep guard policy). `@luckystack/email` is the optional case — login lazy-imports it and gracefully fails when `forgotPassword !== 'framework'`.
 

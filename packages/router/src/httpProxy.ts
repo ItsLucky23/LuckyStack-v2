@@ -14,8 +14,9 @@ import {
   isOriginFormTarget,
   isHostPinned,
   isSocketIoPath,
-  normalizeForwardedProto,
+  resolveForwardedProto,
   buildForwardedFor,
+  type TrustedProxyMatcher,
 } from './proxyUtils';
 import { readErrorCode, inferErrorCause } from './errorClassification';
 
@@ -42,6 +43,11 @@ export interface CreateHttpProxyInput {
    * reach the same backend. Defaults to `DEFAULT_WS_SERVICE` ('system').
    */
   websocketService?: string;
+  /**
+   * Trust gate for the immediately-connected TLS proxy. Omit to ignore every
+   * inbound x-forwarded-proto value (secure direct-client default).
+   */
+  isTrustedProxy?: TrustedProxyMatcher;
 }
 
 //? Bound the upstream request leg. A backend that accepts the TCP connection but
@@ -57,7 +63,7 @@ const UPSTREAM_REQUEST_TIMEOUT_MS = 30_000;
 //? to `Infinity` via `routing.maxRequestBodyBytes` to disable at the edge.
 const DEFAULT_MAX_BODY_BYTES = 100 * 1024 * 1024; // 100 MiB
 
-export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs, maxRequestBodyBytes, websocketService }: CreateHttpProxyInput) => {
+export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs, maxRequestBodyBytes, websocketService, isTrustedProxy }: CreateHttpProxyInput) => {
   const requestTimeoutMs = upstreamRequestTimeoutMs ?? UPSTREAM_REQUEST_TIMEOUT_MS;
   const bodySizeCap = maxRequestBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const socketIoService = websocketService ?? DEFAULT_WS_SERVICE;
@@ -70,7 +76,7 @@ export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamReq
   //? `new URL(...)`) would otherwise become an unhandled rejection and crash the
   //? process. This last-resort `.catch` closes that window.
   return (req: IncomingMessage, res: ServerResponse): void => {
-    void handleRequest(req, res, { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap, socketIoService }).catch((error: unknown) => {
+    void handleRequest(req, res, { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap, socketIoService, isTrustedProxy }).catch((error: unknown) => {
       getLogger().error('[router] unhandled error while handling request:', { error });
       if (res.headersSent) {
         res.end();
@@ -92,6 +98,7 @@ const handleRequest = async (
     requestTimeoutMs: number;
     bodySizeCap: number;
     socketIoService: string;
+    isTrustedProxy?: TrustedProxyMatcher;
   },
 ): Promise<void> => {
   const { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap, socketIoService } = ctx;
@@ -238,11 +245,43 @@ const handleRequest = async (
       'x-forwarded-for': buildForwardedFor(req.socket.remoteAddress),
       // Preserve the original host so the upstream knows the public hostname.
       'x-forwarded-host': req.headers.host ?? '',
-      'x-forwarded-proto': normalizeForwardedProto(req.headers['x-forwarded-proto']),
+      'x-forwarded-proto': resolveForwardedProto(
+        req.headers['x-forwarded-proto'],
+        req.socket.remoteAddress,
+        ctx.isTrustedProxy,
+      ),
       'x-luckystack-resolved-env': resolved.resolvedEnvKey,
       'x-luckystack-via-fallback': resolved.viaFallback ? '1' : '0',
     },
   }, (upstream) => {
+    //? A ClientRequest `'error'` listener does NOT cover errors emitted later by
+    //? its IncomingMessage response (backend resets after headers/partial body).
+    //? `pipe()` also does not forward source errors. Observe both error and
+    //? aborted before piping so a truncated backend response closes only this
+    //? downstream socket instead of surfacing as an uncaught process error.
+    let upstreamResponseFailed = false;
+    const failUpstreamResponse = (error: Error): void => {
+      if (upstreamResponseFailed) return;
+      upstreamResponseFailed = true;
+      forwardRequest.destroy();
+      if (res.destroyed) return;
+      if (res.headersSent) {
+        res.destroy(error);
+        return;
+      }
+      res.statusCode = 502;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({
+        status: 'error',
+        errorCode: 'routing.upstreamUnreachable',
+        errorParams: [{ key: 'service', value: service }],
+      }));
+    };
+    upstream.once('error', failUpstreamResponse);
+    upstream.once('aborted', () => {
+      failUpstreamResponse(new Error('upstream response aborted before completion'));
+    });
+
     res.statusCode = upstream.statusCode ?? 502;
     for (const [key, value] of Object.entries(upstream.headers)) {
       if (value === undefined) continue;

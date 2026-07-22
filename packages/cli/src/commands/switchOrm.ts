@@ -252,6 +252,13 @@ export const switchOrm = (project: ConsumerProject, input: SwitchOrmInput): Resu
       if (freshPkg[key] !== undefined) pkg[key] = freshPkg[key];
     }
     fs.writeFileSync(project.pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+    //? Keep the shared ConsumerProject snapshot aligned with the file we just
+    //? wrote. The manage wizard applies ORM FIRST and then reuses this same
+    //? object for auth/email/monitoring/toggle transitions. Leaving the old
+    //? object in memory made the next transition serialize the pre-switch
+    //? package.json over this file, silently undoing the ORM deps/scripts while
+    //? the shims + scaffold manifest still said the new ORM.
+    project.pkg = pkg;
     console.log(`• swapped package.json deps/scripts: ${from} → ${to}`);
 
     //? 3. Active shims: replace (with backup). Starters: copy-if-absent.

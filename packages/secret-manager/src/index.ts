@@ -177,6 +177,11 @@ let cachedResolution: CachedResolution | null = null;
 //? refresh because the first resolve OVERWRITES the env value with the real
 //? secret, after which it no longer looks like a pointer.
 let pointerMap: Record<string, string> | null = null;
+//? File reload needs source ownership, not a blind map merge: preserve inherited
+//? shell/CI pointers that are absent from watched files, while letting a file
+//? explicitly replace/remove its own pointer (including pointer -> plain).
+let ambientPointerMap: Record<string, string> | null = null;
+let fileOwnedEnvNames = new Set<string>();
 let activeConfig: SecretManagerConfig | null = null;
 
 //? In-flight resolve, used to SERIALIZE concurrent resolves. Four channels can
@@ -680,10 +685,14 @@ const doResolveInner = async (
   //? (e.g. set into `process.env` after init) is still picked up by a later
   //? refresh — a non-empty `{}` would otherwise pin the resolver to zero pointers.
   if (pointerMap === null || Object.keys(pointerMap).length === 0) {
-    pointerMap = capturePointers(
+    const captured = capturePointers(
       stripStatefulFlags(config.pointerPattern ?? DEFAULT_POINTER_PATTERN),
       config.envNames,
     );
+    const nextAmbient = { ...ambientPointerMap, ...captured };
+    for (const name of fileOwnedEnvNames) Reflect.deleteProperty(nextAmbient, name);
+    ambientPointerMap = nextAmbient;
+    pointerMap = { ...nextAmbient };
   }
   const activePointerMap = pointerMap;
   const pointers = [...new Set(Object.values(activePointerMap))];
@@ -925,24 +934,41 @@ export const reloadSecretManagerFromFiles = async (): Promise<void> => {
     config.envNames,
   );
 
-  //? MERGE the fresh file-sourced pointers over the existing map (don't replace):
-  //? a pointer captured at boot from the inherited shell/CI env that isn't in a
-  //? watched file would otherwise be dropped and stop rotating. A file-sourced
-  //? pointer with the same name still wins.
-  //? Build the merged map locally and commit it ONLY after a successful resolve so
-  //? a failed remote reload can't permanently poison the in-memory pointer map and
-  //? cause every subsequent refreshSecretManager / poll to resolve the bad set.
+  //? Preserve ambient shell/CI pointers that are ABSENT from watched files, but
+  //? make the current file set authoritative for every name it declares. The
+  //? old blind `{ ...pointerMap, ...freshPointers }` merge kept a removed file
+  //? pointer forever: changing `DB_PASS=..._V1` to `DB_PASS=literal` still sent
+  //? V1 off-host and ignored the literal. Source ownership closes that gap.
   const previousPointerMap = pointerMap;
-  pointerMap = { ...pointerMap, ...freshPointerMap };
+  const previousAmbientPointerMap = ambientPointerMap;
+  const previousFileOwnedEnvNames = fileOwnedEnvNames;
+  //? Keep a tombstone for every name ever managed by these files. Immediately
+  //? after pointer removal process.env still contains the last resolved secret;
+  //? if that secret itself happens to match the pointer pattern, doResolve's
+  //? empty-map recapture must not resurrect it as an inherited pointer.
+  const nextFileOwnedEnvNames = new Set([
+    ...previousFileOwnedEnvNames,
+    ...Object.keys(freshPointerMap),
+    ...Object.keys(plainValues),
+  ]);
+  const nextAmbientPointerMap = { ...ambientPointerMap };
+  for (const name of nextFileOwnedEnvNames) {
+    Reflect.deleteProperty(nextAmbientPointerMap, name);
+  }
+  ambientPointerMap = nextAmbientPointerMap;
+  fileOwnedEnvNames = nextFileOwnedEnvNames;
+  pointerMap = { ...nextAmbientPointerMap, ...freshPointerMap };
 
   //? Resolve the pointers FIRST. In 'remote' mode an unresolved pointer throws —
   //? mirror the atomic boot path and inject the plain values only AFTER a
   //? successful resolve, so a throw never leaves half-applied state. On failure
-  //? roll back the pointer map to its pre-reload snapshot.
+  //? roll back every ownership map to its pre-reload snapshot.
   try {
     await doResolve(config, 'file-reload');
   } catch (error) {
     pointerMap = previousPointerMap;
+    ambientPointerMap = previousAmbientPointerMap;
+    fileOwnedEnvNames = previousFileOwnedEnvNames;
     throw error;
   }
   for (const [name, value] of Object.entries(plainValues)) {
@@ -1035,6 +1061,8 @@ export const resetSecretManagerForTests = (): void => {
   stopSecretManager();
   cachedResolution = null;
   pointerMap = null;
+  ambientPointerMap = null;
+  fileOwnedEnvNames = new Set<string>();
   activeConfig = null;
   resolveChain = Promise.resolve();
   warnedEnvNamesUnset = false;

@@ -5,10 +5,14 @@
 > `docs/FINDINGS_PROTOCOL.md` for the rules. This index lists them all so open
 > items are never lost during a cleanup.
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
+| 2026-07-22 | [2026-07-22-v074-release-audit/](./2026-07-22-v074-release-audit/) | v0.7.4 release audit: newly published sharp/libvips advisory | 1 | 0 open · 1 fixed |
+| 2026-07-21 | [2026-07-21-test-runner-env-bootstrap-review/](./2026-07-21-test-runner-env-bootstrap-review/) | Review of ADR 0032 test-process env/secret bootstrap and direct Layer-5 path | 1 | 0 open · 1 fixed |
+| 2026-07-21 | [2026-07-21-two-week-codebase-review/](./2026-07-21-two-week-codebase-review/) | Two-week change review + general correctness/security scan | 17 | 0 open · 17 fixed |
+| 2026-07-21 | [2026-07-21-test-runner-secret-bootstrap/](./2026-07-21-test-runner-secret-bootstrap/) | External consumer diagnosis: test-process secret resolution before Layer-5 DB/Redis access | 1 | 0 open · 1 fixed |
 | 2026-07-20 | [2026-07-20-v073-port-oauth-review/](./2026-07-20-v073-port-oauth-review/) | Release-blocking review of v0.7.3 port/OAuth/auto-increment flow and root/scaffold parity | 11 | 0 open · 11 fixed |
 | 2026-07-16 | [2026-07-16-v070-ci-publish-readiness/](./2026-07-16-v070-ci-publish-readiness/) | v0.7.0 CI publication: cross-platform lock closure and provenance publish | 2 | 0 open · 2 fixed |
 | 2026-07-16 | [2026-07-16-v070-npm-audit-readiness/](./2026-07-16-v070-npm-audit-readiness/) | v0.7.0 npm audit readiness: three moderate OpenTelemetry nodes + one low esbuild advisory | 2 | 0 open · 2 fixed |

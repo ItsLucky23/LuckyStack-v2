@@ -7,7 +7,7 @@
 | feat/email-code-2fa | (none) | 2026-07-12 16:05 | merged 2026-07-12 — in v0.6.0 (merge 970d051; passwordless email-code login + 2FA TOTP/email-fallback/recovery [ADR 0024]; security-hardened via 5-lens scan + echte-Redis-harness) | 7 |
 | fix/unpushed-review-findings | (none) | 2026-07-16 16:10 | merged 2026-07-16 — v0.7.0 release-readiness fixes (merge 3f77de9) | 5 |
 | main | (none) | 2026-07-20 06:30 | active — v0.7.3 gepubliceerd: stale-port bugklasse gefixt (CORS + logging + OAuth volgt gebonden poort). | 50 |
-| fix/v073-port-oauth-review | (none) | 2026-07-21 18:20 | active — alle 11 v0.7.3 port/OAuth-reviewbevindingen opgelost; volledige verificatie groen. | 1 |
+| fix/v073-port-oauth-review | (none) | 2026-07-22 09:50 | active — v0.7.4 provenance-release voorbereid; alle findings gesloten en releasegates groen. | 5 |
 | feat/orm-aware-cli | (none) | 2026-07-11 16:30 | merged 2026-07-11 — in v0.5.1 (b7ee295→61ec674; CLI overal ORM-bewust + bidirectionele ORM-switch als manage-stap 0 + auth kiesbaar op drizzle/mikro-orm [ADR 0023]; rest: settings-routes porten naar UserAdapter) | 3 |
 | test/e2e-integration | (none) | 2026-07-11 13:35 | merged 2026-07-11 — v0.5.0 GEPUBLICEERD naar npm (ee8100b; 17 packages incl. nieuw @luckystack/cron; multi-instance exactly-once + failover eerst bewezen via verdaccio; provenance-less lokale publish — volgende release via CI) | 2 |
 | feat/scaffold-manifest | (none) | 2026-07-09 09:20 | merged 2026-07-11 (via test/e2e-integration; fase 0+1a ADR 0021: scaffold-manifest + `luckystack update`) | 2 |

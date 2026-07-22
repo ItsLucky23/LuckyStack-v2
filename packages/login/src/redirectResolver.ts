@@ -32,3 +32,27 @@ export const registerPostLoginRedirect = (
 };
 
 export const getPostLoginRedirect = (): PostLoginRedirectResolver | null => activeResolver;
+
+const RELATIVE_BASE = 'http://luckystack-relative.invalid';
+
+/**
+ * Resolve a valid relative post-login result against the trusted absolute
+ * default URL supplied by the HTTP callback layer. OAuth callbacks commonly
+ * live on a separate backend origin; returning `/dashboard` unchanged would
+ * make the browser resolve it against that backend instead of the frontend.
+ *
+ * Absolute candidates and callers that supplied only a relative default stay
+ * byte-identical. Origin allowlisting happens in login.ts BEFORE this helper.
+ */
+export const resolvePostLoginRedirectAgainstDefault = (
+  candidate: string,
+  defaultUrl: string,
+): string => {
+  if (!URL.canParse(candidate, RELATIVE_BASE)) return candidate;
+  const parsed = new URL(candidate, RELATIVE_BASE);
+  if (parsed.origin !== RELATIVE_BASE) return candidate;
+  if (!URL.canParse(defaultUrl)) return candidate;
+  const fallback = new URL(defaultUrl);
+  if (fallback.protocol !== 'http:' && fallback.protocol !== 'https:') return candidate;
+  return new URL(candidate, fallback).toString();
+};

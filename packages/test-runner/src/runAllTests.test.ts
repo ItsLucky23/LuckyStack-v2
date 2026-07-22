@@ -39,14 +39,24 @@ const runCustomTests = vi.fn((_input: unknown): Promise<RunCustomTestsSummary> =
 const clearAllRateLimits = vi.fn((): Promise<void> => { order.push('clear'); return Promise.resolve(); });
 const getProjectConfig = vi.fn(() => ({ http: { sessionCookieName: 'cfg_cookie' } }));
 const resetServerState = vi.fn((_input: unknown): Promise<boolean> => { order.push('reset'); return Promise.resolve(true); });
+const resolveTestEnvironment = vi.fn((_input: unknown): Promise<void> => Promise.resolve());
 
 vi.mock('./resetServerState', () => ({ resetServerState: (i: unknown) => resetServerState(i) }));
+vi.mock('./resolveTestEnvironment', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./resolveTestEnvironment')>();
+  return {
+    ...actual,
+    resolveTestEnvironment: (input: unknown) => resolveTestEnvironment(input),
+  };
+});
 vi.mock('./runContractTests', () => ({ runContractTests: (i: unknown) => runContractTests(i) }));
 vi.mock('./runAuthEnforcementTests', () => ({ runAuthEnforcementTests: (i: unknown) => runAuthEnforcementTests(i) }));
 vi.mock('./runRateLimitTests', () => ({ runRateLimitTests: (i: unknown) => runRateLimitTests(i) }));
 vi.mock('./runCsrfEnforcementTests', () => ({ runCsrfEnforcementTests: (i: unknown) => runCsrfEnforcementTests(i) }));
 vi.mock('./runFuzzTests', () => ({ runFuzzTests: (i: unknown) => runFuzzTests(i) }));
-vi.mock('./customTests', () => ({ runCustomTests: (i: unknown) => runCustomTests(i) }));
+vi.mock('./customTests', () => ({
+  runCustomTestsAfterEnvironmentPrepared: (i: unknown) => runCustomTests(i),
+}));
 vi.mock('@luckystack/core', () => ({
   clearAllRateLimits: () => clearAllRateLimits(),
   getProjectConfig: () => getProjectConfig(),
@@ -60,6 +70,7 @@ const baseInput = {
   apiMetaMap: {},
   apiInputSchemas: {},
   baseUrl: 'http://localhost:3000',
+  loadProjectConfig: vi.fn(() => ({ secretManager: { url: '' } })),
 };
 
 const originalResetToken = process.env.TEST_RESET_TOKEN;
@@ -78,6 +89,28 @@ afterEach(() => {
 });
 
 describe('runAllTests orchestration (characterization)', () => {
+  it('fails closed when a JavaScript caller omits the required config loader', async () => {
+    const withoutLoader = { ...baseInput };
+    Reflect.deleteProperty(withoutLoader, 'loadProjectConfig');
+
+    await expect(Reflect.apply(runAllTests, undefined, [withoutLoader])).rejects.toThrow(
+      'runAllTests requires a lazy loadProjectConfig callback',
+    );
+    expect(resolveTestEnvironment).not.toHaveBeenCalled();
+  });
+
+  it('prepares the test-process env before running any layer', async () => {
+    const loadProjectConfig = vi.fn(() => ({ secretManager: { url: '' } }));
+
+    await runAllTests({ ...baseInput, loadProjectConfig });
+
+    expect(resolveTestEnvironment).toHaveBeenCalledTimes(1);
+    expect(resolveTestEnvironment).toHaveBeenCalledWith({ loadProjectConfig });
+    expect(resolveTestEnvironment.mock.invocationCallOrder[0]).toBeLessThan(
+      runContractTests.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
   it('runs every layer in order: contract → auth → rate-limit → fuzz → clear → custom', async () => {
     await runAllTests({ ...baseInput });
     expect(order).toStrictEqual(['contract', 'auth', 'rateLimit', 'fuzz', 'clear', 'custom']);
