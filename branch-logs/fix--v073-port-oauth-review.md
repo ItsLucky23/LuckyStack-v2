@@ -69,3 +69,15 @@
 **Notes:** `.claude/settings.local.json` en het losse `nul`-bestand zijn bewust uitgesloten van de releasecommit. Publicatie loopt via de tag-triggered GitHub Actions-workflow met npm provenance.
 
 **Verificatie:** 1907/1907 unit-tests; lint groen; 17/17 builds en 17/17 dry-packs; high-auditgate groen; `sharp 0.35.3` image smoke groen; lockfile dry-run groen op npm 10.9.4, 11.6.1 en 12.0.1; deep ORM/wire-gates groen op Node + Bun; AI/changelog/doc-gates groen.
+
+## 2026-07-22 10:38 — v0.7.4 gepubliceerd met provenance
+
+**User prompt (summary):** Publiceer v0.7.4 via GitHub CLI.
+
+**What I did:** release-PR #2 en de warning-fix PR #3 via groene Node 20/22-CI gemerged. De nieuwe Sharp 0.35-importwaarschuwing is vóór tagging in root, scaffold en CLI-asset weggewerkt; de definitieve main-CI heeft nul annotations. Annotated tag `v0.7.4` wijst naar main commit `4651dbd0151f7eda0a5194c99f8a2a0fe9676050` en startte de GitHub provenance-workflow.
+
+**Files touched:** post-release alleen deze branch-log en `branch-logs/INDEX.md`; de releasecode zelf staat onder tag `v0.7.4`.
+
+**Notes:** publish run `29903990622` voltooide succesvol. Alle 17 registrypackages rapporteren 0.7.4; npm-attestations voor core en create-app zijn als SLSA provenance gecontroleerd. De tag is niet verplaatst en branchverwijdering is niet uitgevoerd.
+
+**Verificatie:** PR-CI, definitieve main-CI en publishworkflow groen; publish-job heeft nul annotations; 17/17 npm-versies gecontroleerd; tag en main peelen beide naar `4651dbd`.
