@@ -11,3 +11,15 @@
 **Notes:** `.claude/settings.local.json` en het ongetrackte lege `nul`-bestand zijn niet aangepast. Geen browser gestart en geen server gestart; de gebruiker moet de visuele flow nog in de draaiende playground controleren.
 
 **Verificatie:** dropdownregressies 7/7; volledige create-app testselectie 127/127; gerichte TypeScriptchecks voor root- en scaffold-internals groen; root- en package-lint plus `ai:lint` groen; volledige build groen (17/17 packages, TypeScript, Vite en serverbundle); `git diff --check` groen.
+
+## 2026-07-22 20:50 — v0.7.5 release voorbereid
+
+**User prompt (summary):** Merge de dropdownbranch en de vorige branch naar main en publiceer daarna een release; voer de benodigde commands uit.
+
+**What I did:** bevestigd dat de vorige v0.7.4-branch al via mergecommit `134a279` volledig op `main` staat. Alle 17 publiceerbare packages en interne ranges zijn lockstep van 0.7.4 naar 0.7.5 gezet, de lockfile is met npm ververst en het create-app-changelog is als v0.7.5 gedateerd. De releasebron wordt via een PR naar `main` gebracht; pas de exacte groene main-commit krijgt de immutable annotated `v0.7.5`-tag voor de provenance-workflow.
+
+**Files touched:** alle 17 package-manifests; `package-lock.json`; `packages/create-luckystack-app/CHANGELOG.md`; deze branch-log en `branch-logs/INDEX.md`.
+
+**Notes:** de twee bekende moderate `@modelcontextprotocol/sdk -> @hono/node-server`-advisories blijven geaccepteerd: LuckyStack MCP is stdio-only en mount de kwetsbare HTTP static-file-handler niet. De high-auditgate is groen. `.claude/settings.local.json` en `nul` blijven uitgesloten.
+
+**Verificatie:** 1914/1914 unit-tests; root- en package-lint groen; volledige build 17/17 plus TypeScript/Vite/server groen; 17/17 dry-packs op versie 0.7.5; `ai:lint`, changelog-, doc-staleness- en high-auditgate groen; lockfile bevat alle 17 workspaces op 0.7.5.
