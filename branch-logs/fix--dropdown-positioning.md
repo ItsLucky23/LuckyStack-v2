@@ -23,3 +23,15 @@
 **Notes:** de twee bekende moderate `@modelcontextprotocol/sdk -> @hono/node-server`-advisories blijven geaccepteerd: LuckyStack MCP is stdio-only en mount de kwetsbare HTTP static-file-handler niet. De high-auditgate is groen. `.claude/settings.local.json` en `nul` blijven uitgesloten.
 
 **Verificatie:** 1914/1914 unit-tests; root- en package-lint groen; volledige build 17/17 plus TypeScript/Vite/server groen; 17/17 dry-packs op versie 0.7.5; `ai:lint`, changelog-, doc-staleness- en high-auditgate groen; lockfile bevat alle 17 workspaces op 0.7.5.
+
+## 2026-07-22 21:17 — v0.7.5 gepubliceerd met provenance
+
+**User prompt (summary):** Voer de merge en release volledig uit.
+
+**What I did:** PR #5 is na groene Node 20/22-CI naar `main` gemerged. De afzonderlijke main-CI op mergecommit `9955696f2e6251f2cc0748738624090089e79e07` is eveneens volledig groen. De annotated tag `v0.7.5` is exact op die commit gezet en heeft publishrun `29949496394` gestart; de echte publishstap met npm provenance is geslaagd.
+
+**Files touched:** post-release alleen deze branch-log en `branch-logs/INDEX.md`; de releasecode staat onder de immutable `v0.7.5`-tag.
+
+**Notes:** tagobject `60bb2153d00a880fdf231ff2e0e8b11c7a832b47` peelt naar main/releasecommit `9955696f2e6251f2cc0748738624090089e79e07`. De tag is niet verplaatst en branches zijn niet verwijderd. `.claude/settings.local.json` en `nul` bleven onaangeraakt.
+
+**Verificatie:** alle 17 npm-packages rapporteren 0.7.5; SLSA-provenanceattestaties bevestigd voor `@luckystack/core@0.7.5` en `create-luckystack-app@0.7.5`; PR-CI, main-CI `29948991023` en publishrun `29949496394` zijn groen.
