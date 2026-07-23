@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-07-23
+
 ### Fixed
 
 - A successfully listening server now refreshes its boot-UUID TTL every third
