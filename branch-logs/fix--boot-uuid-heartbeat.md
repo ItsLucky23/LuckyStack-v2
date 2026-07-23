@@ -23,3 +23,15 @@
 **Notes:** de twee bekende moderate `@modelcontextprotocol/sdk -> @hono/node-server`-advisories blijven via het stdio-only MCP-pad onbereikbaar; de high-auditgate is groen. `.claude/settings.local.json` en `nul` blijven uitgesloten.
 
 **Verificatie:** 1922/1922 unit-tests; root- en package-lint groen; volledige build 17/17 plus TypeScript/Vite/server groen; 17/17 dry-packs op 0.7.6; high-audit-, AI-, changelog-, doc-staleness- en diff-gates groen; alle 17 lockfile-workspaces staan op 0.7.6.
+
+## 2026-07-23 08:40 — v0.7.6 via GitHub provenance gepubliceerd
+
+**User prompt (summary):** Merge de huidige wijzigingen naar `main` en publiceer via GitHub CI.
+
+**What I did:** release-PR #7 na groene Node 20/22-PR-CI gemerged. De aparte main-CI is vervolgens groen geworden op mergecommit `a2bdea777815c9d6cf512f78dc6fbf075260501e`. Pas daarna is een immutable annotated `v0.7.6`-tag op exact die commit gepusht; GitHub Actions heeft alle 17 packages met npm provenance gepubliceerd.
+
+**Files touched:** alleen deze afsluitende branch-log en `branch-logs/INDEX.md`; de releasebron zelf blijft exact mergecommit `a2bdea7`.
+
+**Notes:** annotated tagobject `6094bf242c6940903964446784199e24690ee04a` peelt naar `a2bdea7`. Publishrun: `https://github.com/ItsLucky23/LuckyStack-v2/actions/runs/29985018632`. De persoonlijke `.claude/settings.local.json` en `nul` zijn niet aangeraakt of gecommit.
+
+**Verificatie:** PR-CI en main-CI groen op Node 20/22; publishworkflow groen; alle 17 npm-packages rapporteren 0.7.6 en een SLSA provenance-attestation.
