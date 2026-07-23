@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-07-23
+
+### Fixed
+
+- Boot UUIDs can now be renewed without rotating their value, and a missing key
+  is recreated after Redis recovery. The non-overlapping, unref'd heartbeat API
+  prevents the default one-hour TTL from making healthy servers not-ready.
+
 ## [0.7.4] - 2026-07-22
 
 ### Added

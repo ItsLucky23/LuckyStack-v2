@@ -1,5 +1,5 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, registerBoundAddress, writeBootUuid, getLogger, getProjectConfig, tryCatch, tryCatchSync, resolveEnvKey, dispatchHook } from '@luckystack/core';
+import { registerBindAddress, registerBoundAddress, writeBootUuid, startBootUuidHeartbeat, getLogger, getProjectConfig, tryCatch, tryCatchSync, resolveEnvKey, dispatchHook } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
@@ -24,7 +24,7 @@ import type {
  *   `/_test/reset`, `/uploads/*`, `/auth/api`, `/auth/callback`)
  * - Socket.io server with the Redis adapter, room handlers, presence
  *   integration, location sync
- * - Boot-UUID write so the router's handshake can verify topology
+ * - Boot-UUID write + heartbeat so readiness and router topology stay truthful
  * - Optional dev-mode tooling (devkit hot reload + REPL)
  *
  * Project responsibilities (passed in as options):
@@ -326,14 +326,23 @@ export const createLuckyStackServer = async (
     maxHttpBufferSize: options.maxHttpBufferSize,
   });
 
-  const listen = (callback?: () => void): Promise<HttpServer> =>
-    listenLuckyStackServer(httpServer, ip, port, callback);
+  //? @adr 0036
+  let bootUuidHeartbeat: ReturnType<typeof startBootUuidHeartbeat> | null = null;
+  const listen = async (callback?: () => void): Promise<HttpServer> => {
+    const listeningServer = await listenLuckyStackServer(httpServer, ip, port, callback);
+    //? Start only after node:http is genuinely listening. The initial UUID was
+    //? written before route construction, but a failed bind must not keep an
+    //? environment advertising readiness through a background heartbeat.
+    bootUuidHeartbeat ??= startBootUuidHeartbeat();
+    return listeningServer;
+  };
 
   //? Idempotent graceful shutdown. A second call (e.g. SIGINT then SIGTERM, or a
   //? programmatic `stop()` racing a signal) returns the in-flight promise rather
   //? than running the teardown twice.
   let shutdownPromise: Promise<void> | null = null;
   const stop = (stopOptions: StopLuckyStackServerOptions = {}): Promise<void> => {
+    bootUuidHeartbeat?.stop();
     shutdownPromise ??= runGracefulShutdown({ httpServer, ioServer, adapterClients }, stopOptions);
     return shutdownPromise;
   };

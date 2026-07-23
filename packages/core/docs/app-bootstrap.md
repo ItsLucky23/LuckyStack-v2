@@ -303,6 +303,20 @@ Returns `process.env.LUCKYSTACK_ENV` ?? `process.env.NODE_ENV` ?? `'development'
 
 Reads the UUID for the given env key (defaults via `resolveEnvKey()`).
 
+### `refreshBootUuid(envKey?: string): Promise<void>`
+
+Extends the existing key with the configured TTL without changing its UUID. If
+Redis recovered after the key had already expired, writes a fresh UUID instead.
+The key is environment-level: every healthy backend may renew the current value,
+so multi-instance readiness does not depend on the last process that wrote it.
+
+### `startBootUuidHeartbeat(envKey?: string): BootUuidHeartbeat`
+
+Starts an unref'd refresh loop at one third of the configured TTL. Each refresh
+must settle before the next timer is scheduled, preventing overlapping Redis
+calls during an outage. Failures are logged and retried. Call `stop()` during
+server shutdown. `@luckystack/server` starts this only after HTTP listen succeeds.
+
 ### `collectSynchronizedEnvKeys(): string[]`
 
 Walks `deployConfig.resources` and collects every `synchronizedEnvKeys[]` entry into a sorted unique list.

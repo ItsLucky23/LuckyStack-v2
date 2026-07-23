@@ -27,7 +27,7 @@ const bootUuid = randomUUID();
 await client.set(`${BOOT_KEY_PREFIX}${envKey}`, bootUuid, 'EX', routing.bootKeyTtlSeconds ?? 3600);
 ```
 
-`BOOT_KEY_PREFIX` comes from `@luckystack/core` (currently `luckystack:boot:`). TTL defaults to one hour and is configurable via `deploy.config.ts -> routing.bootKeyTtlSeconds`. The TTL refreshes on every restart, so a long-running router keeps the key alive.
+`BOOT_KEY_PREFIX` comes from `@luckystack/core` (currently `luckystack:boot:`). TTL defaults to one hour and is configurable via `deploy.config.ts -> routing.bootKeyTtlSeconds`. After a backend has successfully started listening, `@luckystack/server` renews the current environment UUID every third of that TTL without rotating its value. Every healthy backend may renew the environment-level key; if Redis recovered after expiry, the first refresh creates a new UUID. The heartbeat stops with server shutdown, so the TTL still removes stale environments when no backend remains.
 
 If this initial write fails (Redis unreachable, auth failure), the handshake throws:
 

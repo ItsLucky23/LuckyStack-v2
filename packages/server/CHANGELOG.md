@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-07-23
+
+### Fixed
+
+- A successfully listening server now refreshes its boot-UUID TTL every third
+  of the configured lifetime and stops the heartbeat during shutdown. Healthy
+  long-running servers therefore no longer become not-ready after one hour.
+
 ## [0.7.4] - 2026-07-22
 
 ### Fixed

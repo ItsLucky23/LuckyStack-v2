@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (35)
+## Decisions (36)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -48,6 +48,7 @@
 | 0033 | Forwarded HTTPS is trusted only from configured immediate proxy CIDRs | 🟢 accepted | router, security, proxy, tls, headers | — | `docs/decisions/0033-forwarded-proto-requires-an-explicit-proxy-trust-boundary.md` |
 | 0034 | Email timeout is cancellation intent, not proof of delivery failure | 🟢 accepted | email, reliability, idempotency, cancellation | — | `docs/decisions/0034-email-timeout-means-delivery-outcome-unknown.md` |
 | 0035 | TOTP ciphertext carries a key id and decrypt-only legacy keyring | 🟢 accepted | auth, 2fa, totp, encryption, rotation | — | `docs/decisions/0035-totp-ciphertext-carries-a-key-id-and-legacy-keyring.md` |
+| 0036 | Boot UUID TTL requires a stable environment-level heartbeat | 🟢 accepted | readiness, redis, boot-uuid, multi-instance, reliability | — | `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md` |
 
 ## Summaries
 
@@ -351,6 +352,16 @@ The adapter contract accepts an optional `EmailSendContext` containing a coopera
 
 → `docs/decisions/0035-totp-ciphertext-carries-a-key-id-and-legacy-keyring.md`
 
+### 0036 — Boot UUID TTL requires a stable environment-level heartbeat
+
+**0036** · accepted · tags: readiness, redis, boot-uuid, multi-instance, reliability · 2026-07-22
+
+Keep the TTL and treat the UUID as an environment-level value. After HTTP listen succeeds, every healthy backend starts an unref'd heartbeat at one third of the configured TTL. A refresh uses `EXPIRE`, preserving the current value regardless of which instance wrote it. If Redis reports that the key is missing, the first refresher writes a new UUID.
+
+**Governs** (`//? @adr 0036`): `packages/core/src/bootUuid.ts`
+
+→ `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md`
+
 ## Code governed by decisions
 
 > Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.
@@ -359,6 +370,7 @@ The adapter contract accepts an optional `EmailSendContext` containing a coopera
 | File | ADR | Decision |
 | --- | --- | --- |
 | `packages/core/src/bindAddress.ts` | 0031 | OAuth port hopping preserves an explicitly configured local ingress |
+| `packages/core/src/bootUuid.ts` | 0036 | Boot UUID TTL requires a stable environment-level heartbeat |
 | `packages/core/src/hooks/types.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
 | `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
 | `packages/email/src/sendEmail.ts` | 0034 | Email timeout is cancellation intent, not proof of delivery failure |

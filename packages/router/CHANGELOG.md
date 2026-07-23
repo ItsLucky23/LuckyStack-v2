@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-07-23
+
+### Fixed
+
+- Boot-handshake documentation now records the server-owned TTL heartbeat
+  instead of incorrectly implying that a startup-only write stays alive by itself.
+
 ## [0.7.4] - 2026-07-22
 
 ### Security
