@@ -1073,3 +1073,15 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Files:** `packages/server/src/runtimeMapsLoader.ts`, `packages/server/src/runtimeMapsLoader.test.ts`, server changelog/CLAUDE/runtime-mapdocs, `docs/ARCHITECTURE_PACKAGING.md`, ADR 0042, findingsledger/index en gegenereerde AI-indexen.
 
 **Notes:** De fix is lokaal releaseklaar maar nog niet gepubliceerd. Flexbuddy Docker blijft op gepubliceerde 0.8.1 de regressie tonen totdat een goedgekeurde patchrelease beschikbaar is. Apart open: runtime maps laden pas bij het eerste verzoek, waardoor `/readyz` nog groen kan zijn vóór een mapfout zichtbaar wordt; dit staat als finding 2 geregistreerd en is niet stil meegefixed.
+
+## 2026-07-27 22:18 — v0.8.2 function-composition patch gepubliceerd
+
+**User prompt (summary):** Ga na of alles met de Flexbuddy Docker Compose-opzet mogelijk is en stel vragen zodra een onzekere of gevoelige grens wordt bereikt.
+
+**Wat ik deed:** Met expliciete goedkeuring alle 17 packages lockstep naar 0.8.2 gebracht, interne ranges en lockfile vernieuwd, de serverchangelog gedateerd, protected `main` fast-forward gepusht en de additieve annotated tag `v0.8.2` gepubliceerd. GitHub Actions run `30300996723` voltooide succesvol en npm latest rapporteert 0.8.2 voor core/server/scaffolder.
+
+**Verificatie:** unit 1971/1971; root/package/AI-lint schoon; build 17/17 + rootapp; changelog- en productie-audit groen; `pack:dry` en `publish:dry` 17/17; provenance-workflow succesvol.
+
+**Files:** 17 packageversies/interne ranges, `package-lock.json`, serverchangelog, releasecommit/tag en branchlog/index.
+
+**Notes:** Bestaande tags/artifacts zijn niet herschreven. Flexbuddy kan nu naar de gepubliceerde patch upgraden voor de volledige Compose-acceptatiematrix.

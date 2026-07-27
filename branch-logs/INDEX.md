@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | feat/email-code-2fa | (none) | 2026-07-12 16:05 | merged 2026-07-12 — in v0.6.0 (merge 970d051; passwordless email-code login + 2FA TOTP/email-fallback/recovery [ADR 0024]; security-hardened via 5-lens scan + echte-Redis-harness) | 7 |
 | fix/unpushed-review-findings | (none) | 2026-07-16 16:10 | merged 2026-07-16 — v0.7.0 release-readiness fixes (merge 3f77de9) | 5 |
-| main | (none) | 2026-07-27 21:45 | active — composed atomic-preset function collision gefixt en volledig geverifieerd; patchrelease wacht op goedkeuring. | 63 |
+| main | (none) | 2026-07-27 22:18 | completed — v0.8.2 function-composition patch via provenance gepubliceerd; Flexbuddy-acceptatie kan door. | 64 |
 | fix/dropdown-positioning | (none) | 2026-07-22 21:17 | completed — v0.7.5 gepubliceerd via GitHub Actions met npm provenance. | 3 |
 | fix/boot-uuid-heartbeat | (none) | 2026-07-23 08:40 | merged — BU-01 uitgebracht in v0.7.6 met npm provenance. | 3 |
 | fix/v073-port-oauth-review | (none) | 2026-07-22 10:38 | completed — v0.7.4 gepubliceerd via GitHub Actions met npm provenance. | 6 |
