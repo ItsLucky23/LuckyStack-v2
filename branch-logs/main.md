@@ -949,3 +949,18 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Bewust NIET gedaan (root sample-app-only, niet shipped):** root vite-proxy-rewrite (zou de `?backend=` multi-instance escape hatch slopen) en de module-load-capture in `luckystack/login/oauthProviders.ts` (geen template-equivalent; fixt de poort-bug niet).
 
 **Files:** core (`bindAddress.ts` + test + `index.ts`), server (`createServer.ts`, `authApiRoute.ts`, `listenServer.test.ts`), login (`login.ts`), 3× CHANGELOG, scripts (`resolveTestBaseUrl.ts` nieuw, `cluster.ts`, 5 test-scripts, `testLoginFlows.mjs`), release-administratie.
+
+## 2026-07-27 14:03 — Distributed Docker- en servicesplitplan
+
+**User prompt (summary):** Onderzoek na een fast-forward pull van `origin/main` hoe LuckyStack horizontale replicatie, één gedeelde remote Redis, lokale containers tegen staging en één lokaal featurepreset met remote fallback framework-breed moet ondersteunen. Bepaal ook welke bewezen Flexbuddy Docker-code generiek naar LuckyStack hoort.
+
+**What I did**:
+- Bevestigde welke bouwstenen al bestaan: presetbundles, routerfallback, gedeelde Redis/fanout, externe load-balancerbindings en gedeelde router-healthstate.
+- Lokaliseerde de blokkerende transportkloof: socket-first API/sync-invocations worden uitgevoerd door `system`, niet door het servicepreset dat de router voor HTTP aanwijst.
+- Koos als aanbevolen richting één Socket.io-ingress plus optionele routed HTTP/SSE-invocation; realtime fanout blijft via gedeelde Redis lopen.
+- Beschreef drie schaalmodellen, de lokale-admin→staging workflow, framework/consumer-eigenaarschap, de Docker-assetmigratie en geordende implementatie-/verificatiefases.
+- Registreerde tien open frameworkbevindingen in een gedateerde ledger.
+
+**Files touched:** `docs/findings/2026-07-27-distributed-docker-framework-plan/README.md`, `docs/findings/README.md`, `branch-logs/main.md`, `branch-logs/INDEX.md`.
+
+**Notes / decisions:** Dit is een onderbouwd voorstel, nog geen geaccepteerde architectuurbeslissing. De bestaande HTTP/SSE parity-laag hergebruiken is kleiner en veiliger dan direct een tweede intern RPC-protocol bouwen.
