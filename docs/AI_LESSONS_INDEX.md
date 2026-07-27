@@ -9,7 +9,7 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (13)
+## Lessons (14)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
@@ -26,6 +26,7 @@
 | 0011 | A Windows-green lockfile can be invalid for Linux npm ci | 🟠 high | release | npm, lockfile, ci, cross-platform, release | `docs/lessons/0011-windows-lockfile-can-omit-linux-optional-transitives.md` |
 | 0012 | Alle input op _ai-routes geweigerd" was geen type-bug — het was een stale dev-proces met lege devApis | 🟠 high | packages/server | dev-tooling, false-diagnosis, silent-failure, ports, hot-reload, devkit | `docs/lessons/0012-a-stale-broken-dev-process-looks-like-a-per-route-bug.md` |
 | 0013 | Production dependencies can overwrite generated runtime artifacts | 🟠 high | docker | docker, prisma, multi-stage, healthcheck, scaffold | `docs/lessons/0013-production-dependencies-can-overwrite-generated-runtime-artifacts.md` |
+| 0014 | Global transitive overrides can hide platform-specific contract breakage | 🟠 high | dependencies | dependencies, eslint, linux, ci, release | `docs/lessons/0014-global-transitive-overrides-can-hide-platform-specific-contract-breakage.md` |
 
 ## Takeaways
 
@@ -132,3 +133,11 @@ Validate release lockfiles with the npm majors used by CI: `npm ci --dry-run -ig
 After ORM/client generation, copy required generated runtime dependency directories from the build stage into the final production `node_modules`. Keep the production-dependency stage minimal, but add an explicit `runtime-artifacts` projection stage rather than copying all dev dependencies. Run a real final-image `/readyz` check; a successful `docker build` is insufficient. Use a TCP liveness check for the standalone router process and test routed backend readiness separately through integration/edge smoke tests. Validate against a clean scaffold and Linux image, not only the framework monorepo's already-generated local tree.
 
 → `docs/lessons/0013-production-dependencies-can-overwrite-generated-runtime-artifacts.md`
+
+### 0014 — Global transitive overrides can hide platform-specific contract breakage
+
+**0014** · high · dependencies · tags: dependencies, eslint, linux, ci, release · 2026-07-27
+
+Never silence a transitive advisory by globally forcing an incompatible major without testing every consumer contract. Reproduce release gates in the target Linux/Node environment before tagging, not only on the developer OS. Distinguish required runtime dependencies from optional peer/tooling trees in audit policy, while tracking both explicitly. Keep the lockfile on each package's declared compatible major and prefer upstream plugin upgrades over cross-major overrides. Treat a green audit report as insufficient when the dependency graph no longer matches consumers' declared ranges.
+
+→ `docs/lessons/0014-global-transitive-overrides-can-hide-platform-specific-contract-breakage.md`

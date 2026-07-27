@@ -14,7 +14,7 @@ if (!npmCli) {
   process.exit(1);
 }
 
-const audit = spawnSync(process.execPath, [npmCli, 'audit', '--omit=dev', '--json'], {
+const audit = spawnSync(process.execPath, [npmCli, 'audit', '--omit=dev', '--omit=optional', '--json'], {
   cwd: root,
   encoding: 'utf8',
   shell: false,

@@ -1000,3 +1000,19 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Files:** numeric validator + tests/docs/changelog; 17 packageversies + lockfile; dependency-overrides; auditgate + workflow; ADR/findings/indexen; scaffold response-normalizer; releaseadministratie.
 
 **Notes:** `.agents/`, `.codex/` en `AGENTS.md` blijven bewust ongevolgd en buiten de release. Bun kan ongepubliceerde siblingtarballs niet als onderlinge `^0.8.0`-resolutie gebruiken; de Bun-scaffoldgate volgt direct na npm-publicatie tegen de registrypackages.
+
+## 2026-07-27 18:10 — Linux CI ontmaskert onveilige transitive override
+
+**User prompt (summary):** Rond de geautoriseerde v0.8.0-publicatie af en monitor de provenance-release tot npm, tag en consumers aantoonbaar groen zijn.
+
+**Wat ik deed:**
+- De eerste tagworkflow (`30282082125`) stopte vóór npm-publicatie op Linux-lint; via een schone Node 22 Linux-container gereproduceerd dat de globale minimatch-10-override `eslint-plugin-jsx-a11y` liet crashen omdat die minimatch 3's callable CommonJS-contract verwacht.
+- De globale minimatch/brace-expansion-overrides verwijderd en de lockfile teruggebracht naar iedere consumers ondersteunde major.
+- Productie-audit correct gescheiden van `devOptional` tooling (`--omit=dev --omit=optional`), met dezelfde exact-fail-closed React Router-allowlist. Linux-lint blijft een zelfstandige harde gate.
+- ADR 0039 als superseded gemarkeerd; ADR 0041 en lesson 0014 leggen de gecorrigeerde auditgrens en cross-platform overridevalkuil vast. Dependency-findingsstatus gecorrigeerd naar 1 fixed / 3 wontfix.
+
+**Verificatie:** Windows root/package lint en volledige build 17/17 + app groen; schone Node 22 Linux `npm ci` + typegeneratie + packagebuild + root/package lint groen; audit van vereiste runtimeafhankelijkheden bevat alleen de gedocumenteerde React Router/Hono-paden.
+
+**Files:** `package.json`, `package-lock.json`, `scripts/auditProduction.mjs`, ADR 0039/0041, lesson 0014, dependency-findings + indexen, branchlog.
+
+**Notes:** npm `0.8.0` is nog niet gepubliceerd. De bestaande remote tag `v0.8.0` wijst naar de gefaalde prepcommit; verplaatsen vereist een expliciet goedgekeurde force-update nadat de correctie op `main` staat.

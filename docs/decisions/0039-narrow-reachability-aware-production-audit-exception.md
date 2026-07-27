@@ -1,7 +1,7 @@
 ---
 name: narrow-reachability-aware-production-audit-exception
 title: Use a narrow reachability-aware production audit exception
-status: accepted
+status: superseded
 date: 2026-07-27
 deciders: [mathijs]
 tags: [security, dependencies, ci, react-router, release]

@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (39)
+## Decisions (40)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -51,7 +51,8 @@
 | 0036 | Boot UUID TTL requires a stable environment-level heartbeat | 🟢 accepted | readiness, redis, boot-uuid, multi-instance, reliability | — | `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md` |
 | 0037 | Separate routed invocation from realtime Socket.io delivery | 🟢 accepted | api, sync, router, transport, multi-instance, redis | — | `docs/decisions/0037-separate-routed-invocation-from-realtime-socket-delivery.md` |
 | 0038 | Ship generic rendered Docker assets as a project surface | 🟢 accepted | docker, compose, scaffold, cli, deployment, presets | — | `docs/decisions/0038-ship-generic-rendered-docker-assets-as-a-project-surface.md` |
-| 0039 | Use a narrow reachability-aware production audit exception | 🟢 accepted | security, dependencies, ci, react-router, release | — | `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md` |
+| 0039 | Use a narrow reachability-aware production audit exception | ⚪ superseded | security, dependencies, ci, react-router, release | — | `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md` |
+| 0041 | Audit required production dependencies and test tooling separately | 🟢 accepted | security, dependencies, ci, eslint, release | 0039 | `docs/decisions/0041-audit-required-production-dependencies-and-test-tooling-separately.md` |
 
 ## Summaries
 
@@ -383,11 +384,19 @@ Treat Docker as rendered project files, not a runtime package. Fresh scaffolds r
 
 ### 0039 — Use a narrow reachability-aware production audit exception
 
-**0039** · accepted · tags: security, dependencies, ci, react-router, release · 2026-07-27
+**0039** · superseded · tags: security, dependencies, ci, react-router, release · 2026-07-27
 
 Keep current React Router 7.18.1 and replace the release workflow's raw `npm audit --audit-level=high` command with `npm run audit:production`.
 
 → `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md`
+
+### 0041 — Audit required production dependencies and test tooling separately
+
+**0041** · accepted · tags: security, dependencies, ci, eslint, release · 2026-07-27
+
+The production release gate runs `npm audit --omit=dev --omit=optional --json`. This audits required runtime dependencies and excludes optional peer/tooling trees. It retains the exact React Router RSC/action advisory allowlist described by ADR 0039; every other high or critical finding still fails closed.
+
+→ `docs/decisions/0041-audit-required-production-dependencies-and-test-tooling-separately.md`
 
 ## Code governed by decisions
 
