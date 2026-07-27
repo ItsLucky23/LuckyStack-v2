@@ -1044,3 +1044,20 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Files:** 17 packageversies + interne ranges + lockfile; twaalf packagechangelogs; branchlog/index.
 
 **Notes:** npm `0.8.0` en beide bestaande tags blijven immutable. `0.8.1` bevat de volledige hybrid-transport/Docker/numeric-literalrelease plus de named-runtime-topologycorrectie en is klaar voor de provenance-tagworkflow.
+
+## 2026-07-27 21:20 — v0.8.1 gepubliceerd zonder geschiedenis te herschrijven
+
+**User prompt (summary):** Publiceer alle code zonder bestaande code, tags of artifacts te overschrijven.
+
+**Wat ik deed:**
+- Releasecommit `6241aa0` fast-forward naar `main` gepusht en additieve annotated tag `v0.8.1` gemaakt; geen bestaande tag verplaatst of verwijderd.
+- GitHub Actions workflow `30295742756` voltooide alle gates en publiceerde 17/17 packages met npm provenance.
+- Alle registry-latestversies en attestations gecontroleerd: `@luckystack/*` en `create-luckystack-app` staan op `0.8.1`.
+- Verse gepubliceerde Bun-scaffold (`router`, SQLite) slaagde voor install, Prisma/typegeneratie, lint, build en `luckystack docker check`.
+- Flexbuddy via no-save/no-lock naar 16/16 LuckyStack `0.8.1` packages geladen; typegeneratie, lint, typecheck, build en AI-lint zijn groen zonder manifest, lockfile of broncode te wijzigen.
+
+**Verificatie:** CI build/lint/unit/audit/pack/publish groen; npm provenance aanwezig; gepubliceerde Bun-consumer groen; Flexbuddy-consumer groen.
+
+**Files:** alleen deze publicatieregistratie + branchlogindex; releasecode/tag blijven op `6241aa0`.
+
+**Notes:** Bekende kleine DX-afwijking buiten releasescope: een Bun-scaffold toont in de afsluitende “Next steps” nog `npm run ...` in plaats van `bun run ...`; de gegenereerde Bun-scripts zelf werken wel en zijn succesvol getest.
