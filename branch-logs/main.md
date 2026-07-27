@@ -983,3 +983,20 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Files:** core API/CSRF/routed transport; sync client; router ownership/proxy/integratietest; server GET-decodering; devkit validator; root/template/CLI topology; template + CLI Docker-assets/commands; bundle scripts; docs/ADRs/lesson/findings/changelogs/indexen.
 
 **Notes / decisions:** Socket blijft monolith-default; router-scaffolds kiezen routed invocation. Docker is een transparant projectoppervlak, geen runtimepackage. Bestaande consumerfiles worden nooit overschreven. De bestaande gepubliceerde dependencyboom meldde bij de schone npm-install 18 high audit-items; buiten deze taak niet stil gerepareerd en vóór een release apart te beoordelen.
+
+## 2026-07-27 17:52 — v0.8.0 releasevoorbereiding + numeric-literalvalidator
+
+**User prompt (summary):** Breng de distributed-transport- en Dockerwijzigingen uit als LuckyStack v0.8.0 en neem de generieke numeric-literal runtimevalidatorfix mee, inclusief regressietests, documentatie, changelog en volledige releaseverificatie.
+
+**Wat ik deed:**
+- Runtime-inputvalidatie uitgebreid met exacte numerieke literals in objectvelden en unions, inclusief finite decimalen, negatieve waarden, exponentnotatie, hex/binair/octal en numeric separators; zes regressiescenario's toegevoegd.
+- Alle 17 publiceerbare packages lockstep naar `0.8.0` gebracht en de relevante packagechangelogs aangevuld.
+- Productie-audit fail-closed gemaakt met één smalle, bereikbaarheidsonderbouwde React Router-allowlist; PostCSS, `brace-expansion` en `minimatch` naar veilige versies gebracht. ADR 0039 en de dependency-findingsledger leggen de twee gefixte en twee bewust niet-bereikbare advisories vast.
+- De publishworkflow op dezelfde auditgate gezet.
+- Alle 17 tarballs gebouwd en geïnspecteerd. Een echte lokale-tarballscaffold bracht nog drie type/lintproblemen in de nieuwe response-normalizer aan het licht; de template is type-safe/lint-clean gemaakt en opnieuw als tarball gevalideerd.
+
+**Verificatie:** root- en packagelint schoon; build 17/17 + app/build groen; 1964/1964 unittests groen; Redis-integratie 14/14; AI-lint/changelog/doc-staleness groen; productie-audit alleen de gedocumenteerde React Router/Hono-paden; `pack:dry` en `publish:dry` voor 17/17 packages groen; lokale npm-tarballscaffold met router/PostgreSQL slaagt voor Prisma-generate, typegeneratie, lint, build en `luckystack docker check`.
+
+**Files:** numeric validator + tests/docs/changelog; 17 packageversies + lockfile; dependency-overrides; auditgate + workflow; ADR/findings/indexen; scaffold response-normalizer; releaseadministratie.
+
+**Notes:** `.agents/`, `.codex/` en `AGENTS.md` blijven bewust ongevolgd en buiten de release. Bun kan ongepubliceerde siblingtarballs niet als onderlinge `^0.8.0`-resolutie gebruiken; de Bun-scaffoldgate volgt direct na npm-publicatie tegen de registrypackages.

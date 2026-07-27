@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-27
+
 ### Added
 
 - `luckystack add docker` renders provider/router-aware production-like Docker assets copy-if-absent; `luckystack docker check` validates assets and transport wiring without exposing secrets.

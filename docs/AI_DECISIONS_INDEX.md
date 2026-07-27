@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (38)
+## Decisions (39)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -51,6 +51,7 @@
 | 0036 | Boot UUID TTL requires a stable environment-level heartbeat | 🟢 accepted | readiness, redis, boot-uuid, multi-instance, reliability | — | `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md` |
 | 0037 | Separate routed invocation from realtime Socket.io delivery | 🟢 accepted | api, sync, router, transport, multi-instance, redis | — | `docs/decisions/0037-separate-routed-invocation-from-realtime-socket-delivery.md` |
 | 0038 | Ship generic rendered Docker assets as a project surface | 🟢 accepted | docker, compose, scaffold, cli, deployment, presets | — | `docs/decisions/0038-ship-generic-rendered-docker-assets-as-a-project-surface.md` |
+| 0039 | Use a narrow reachability-aware production audit exception | 🟢 accepted | security, dependencies, ci, react-router, release | — | `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md` |
 
 ## Summaries
 
@@ -379,6 +380,14 @@ Keep one browser Socket.io connection to the configured websocket service, and m
 Treat Docker as rendered project files, not a runtime package. Fresh scaffolds receive a provider/router-aware `Dockerfile`, `compose.yaml`, `.dockerignore`, nginx config, preset entrypoint, remote-infrastructure env template, generic Mongo replica initializer and runbook. Existing projects use `npx luckystack add docker`; files are copy-if-absent and `luckystack docker check` validates the rendered surface without printing secrets.
 
 → `docs/decisions/0038-ship-generic-rendered-docker-assets-as-a-project-surface.md`
+
+### 0039 — Use a narrow reachability-aware production audit exception
+
+**0039** · accepted · tags: security, dependencies, ci, react-router, release · 2026-07-27
+
+Keep current React Router 7.18.1 and replace the release workflow's raw `npm audit --audit-level=high` command with `npm run audit:production`.
+
+→ `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md`
 
 ## Code governed by decisions
 

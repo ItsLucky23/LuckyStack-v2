@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-27
+
 ### Added
 
 - Custom HTTP paths resolve through longest-prefix `services.config.ts > customRoutes` ownership, with fail-fast validation for invalid, overlapping, duplicate or unknown owners.

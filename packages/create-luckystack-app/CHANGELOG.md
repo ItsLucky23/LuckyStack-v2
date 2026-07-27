@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-27
+
 ### Added
 
 - Fresh scaffolds now include provider-aware hardened Docker/Compose assets, preset-aware app/router startup, unprivileged nginx, private infrastructure and a seed-free Mongo replica initializer.
@@ -15,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Production images retain generated Prisma runtime artifacts instead of replacing them with an ungenerated production dependency tree.
-- Fresh server bundles now register the required translation-backed localized response normalizer.
+- Fresh server bundles now register a type-safe, lint-clean translation-backed localized response normalizer.
 
 ## [0.7.5] - 2026-07-22
 

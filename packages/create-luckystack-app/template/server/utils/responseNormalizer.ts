@@ -22,9 +22,8 @@ const translations: Record<LanguageCode, TranslationRecord> = {
   fr: frJson,
 };
 
-const supportedLanguages: readonly LanguageCode[] = ['nl', 'en', 'de', 'fr'];
-const isSupportedLanguage = (code: string): code is LanguageCode =>
-  supportedLanguages.includes(code as LanguageCode);
+const supportedLanguages = new Set<string>(['nl', 'en', 'de', 'fr']);
+const isSupportedLanguage = (code: string): code is LanguageCode => supportedLanguages.has(code);
 
 const translate = ({
   language,
@@ -42,14 +41,15 @@ const translate = ({
     result = (result as Record<string, unknown>)[part];
   }
   if (typeof result !== 'string') return key;
+  let rendered = result;
   for (const param of params ?? []) {
-    result = result.replaceAll(`{{${param.key}}}`, () => String(param.value));
+    rendered = rendered.replaceAll(`{{${param.key}}}`, () => String(param.value));
   }
-  return result;
+  return rendered;
 };
 
 registerLocalizedNormalizer(createLocalizedNormalizer({
   translate,
-  defaultLanguage: defaultLanguage ?? 'en',
+  defaultLanguage,
   isSupportedLanguage,
 }));
