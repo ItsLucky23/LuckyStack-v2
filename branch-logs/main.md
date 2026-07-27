@@ -1072,4 +1072,4 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 
 **Files:** `packages/server/src/runtimeMapsLoader.ts`, `packages/server/src/runtimeMapsLoader.test.ts`, server changelog/CLAUDE/runtime-mapdocs, `docs/ARCHITECTURE_PACKAGING.md`, ADR 0042, findingsledger/index en gegenereerde AI-indexen.
 
-**Notes:** De fix is lokaal releaseklaar maar nog niet gepubliceerd. Flexbuddy Docker blijft op gepubliceerde 0.8.1 de regressie tonen totdat een goedgekeurde patchrelease beschikbaar is.
+**Notes:** De fix is lokaal releaseklaar maar nog niet gepubliceerd. Flexbuddy Docker blijft op gepubliceerde 0.8.1 de regressie tonen totdat een goedgekeurde patchrelease beschikbaar is. Apart open: runtime maps laden pas bij het eerste verzoek, waardoor `/readyz` nog groen kan zijn vóór een mapfout zichtbaar wordt; dit staat als finding 2 geregistreerd en is niet stil meegefixed.
