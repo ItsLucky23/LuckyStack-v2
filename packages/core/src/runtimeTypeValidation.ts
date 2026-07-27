@@ -236,6 +236,18 @@ const isPrimitiveMatch = (type: string, value: unknown): boolean => {
   return false;
 };
 
+const parseFiniteNumericLiteral = (type: string): number | null => {
+  const normalized = type.replaceAll('_', '');
+  const decimal = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
+  const nonDecimal = /^-?0(?:x[\da-f]+|b[01]+|o[0-7]+)$/i;
+  if (!decimal.test(normalized) && !nonDecimal.test(normalized)) return null;
+
+  const negative = normalized.startsWith('-');
+  const unsigned = negative ? normalized.slice(1) : normalized;
+  const parsed = Number(unsigned) * (negative ? -1 : 1);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const isPrimitiveType = (type: string): boolean => {
   return ['string', 'number', 'boolean', 'true', 'false', 'null', 'undefined', 'Date'].includes(type);
 };
@@ -352,6 +364,13 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
     return value === literal
       ? { status: 'success' }
       : { status: 'error', message: `${path} should equal ${literal}` };
+  }
+
+  const numericLiteral = parseFiniteNumericLiteral(type);
+  if (numericLiteral !== null) {
+    return typeof value === 'number' && value === numericLiteral
+      ? { status: 'success' }
+      : { status: 'error', message: `${path} should equal ${type}` };
   }
 
   if (isPrimitiveMatch(type, value)) {

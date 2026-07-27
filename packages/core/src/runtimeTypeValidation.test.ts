@@ -71,6 +71,62 @@ describe('validateInputByType — production enforce wiring (CORE-01)', () => {
   });
 });
 
+describe('validateInputByType — numeric literal types', () => {
+  beforeEach(() => {
+    registerProjectConfig({});
+    process.env.NODE_ENV = 'production';
+  });
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    registerProjectConfig({});
+  });
+
+  it('accepts the exact numeric literal in an object field', async () => {
+    const result = await validateInputByType({
+      typeText: '{ settings: { schemaVersion: 1 } }',
+      value: { settings: { schemaVersion: 1 } },
+      rootKey: 'data',
+    });
+    expect(result.status).toBe('success');
+  });
+
+  it('rejects a different number for a numeric literal', async () => {
+    const result = await validateInputByType({
+      typeText: '{ schemaVersion: 1 }',
+      value: { schemaVersion: 2 },
+      rootKey: 'data',
+    });
+    expect(result.status).toBe('error');
+  });
+
+  it('rejects a numeric string for a numeric literal', async () => {
+    const result = await validateInputByType({
+      typeText: '{ schemaVersion: 1 }',
+      value: { schemaVersion: '1' },
+      rootKey: 'data',
+    });
+    expect(result.status).toBe('error');
+  });
+
+  it('accepts a negative numeric literal', async () => {
+    const result = await validateInputByType({ typeText: '-3', value: -3, rootKey: 'data' });
+    expect(result.status).toBe('success');
+  });
+
+  it('accepts a decimal numeric literal', async () => {
+    const result = await validateInputByType({ typeText: '1.25', value: 1.25, rootKey: 'data' });
+    expect(result.status).toBe('success');
+  });
+
+  it('validates numeric literals inside a union', async () => {
+    const accepted = await validateInputByType({ typeText: '1 | 2 | -3.5', value: -3.5, rootKey: 'data' });
+    const rejected = await validateInputByType({ typeText: '1 | 2 | -3.5', value: 3, rootKey: 'data' });
+    expect(accepted.status).toBe('success');
+    expect(rejected.status).toBe('error');
+  });
+});
+
 describe('validateInputByType — fail-closed hardening', () => {
   beforeEach(() => {
     registerProjectConfig({});

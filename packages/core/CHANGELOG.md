@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Browser-safe routed invocation now preserves timeout, cancellation, streaming envelopes, typed GET payloads, bearer auth and origin-scoped CSRF.
 - Service topology can declare pure-data `customRoutes` ownership for non-`/api`/`/sync` paths.
 
+### Fixed
+
+- Runtime input validation now recognizes finite numeric TypeScript literals in object fields and unions, including negative and decimal values, instead of rejecting them as unvalidatable before the handler runs.
+
 ## [0.7.6] - 2026-07-23
 
 ### Fixed
