@@ -76,6 +76,12 @@ const createConfig = (isDev: boolean) => ({
   socketActivityBroadcaster: false,
   socketStatusIndicator: false,
   locationProviderEnabled: false,
+  //? Typed API/sync invocations stay socket-first by default. Router-enabled
+  //? split deployments switch this to `routed-http`; the Socket.io connection
+  //? remains active for rooms, presence and realtime callbacks in both modes.
+  transport: {
+    invocation: 'socket' as 'socket' | 'routed-http',
+  },
   //? Dev-only console logging toggles.
   logging: {
     devLogs: isDev,
@@ -126,6 +132,7 @@ const createProjectConfigRegistration = () => {
   return {
     app: { publicUrl: currentPublicUrl },
     logging: currentConfig.logging,
+    transport: currentConfig.transport,
     rateLimiting: currentConfig.rateLimiting,
     session: {
       basedToken: currentConfig.sessionBasedToken,
@@ -202,6 +209,7 @@ export const {
   socketActivityBroadcaster,
   socketStatusIndicator,
   locationProviderEnabled,
+  transport,
   logging,
   rateLimiting,
 } = config;

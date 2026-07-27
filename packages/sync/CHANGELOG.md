@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `syncRequest` can invoke owning services through HTTP/SSE in routed transport mode while callbacks, rooms and fanout continue over the single Socket.io connection.
+
 ## [0.1.0]
 
 ### Added

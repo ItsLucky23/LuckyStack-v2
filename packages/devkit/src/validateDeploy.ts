@@ -90,7 +90,47 @@ export const validateDeploy = ({
     }
   }
 
-  //? Rule 3: every binding's service matches an actual service.
+  //? Rule 3: every custom HTTP route prefix has a valid, known service owner.
+  const normalizedCustomPrefixes = new Set<string>();
+  for (const [rawPrefix, owner] of Object.entries(services.customRoutes ?? {})) {
+    const prefix = rawPrefix.length > 1 && rawPrefix.endsWith('/')
+      ? rawPrefix.slice(0, -1)
+      : rawPrefix;
+    if (!prefix.startsWith('/') || prefix === '/' || prefix.includes('?') || prefix.includes('#')) {
+      findings.push({
+        severity: 'error',
+        code: 'custom-route-invalid-prefix',
+        message: `Custom route ownership prefix "${rawPrefix}" must be an absolute non-root path prefix without query/hash.`,
+        location: `services.config.ts > customRoutes.${rawPrefix}`,
+      });
+    } else if (prefix === '/api' || prefix.startsWith('/api/') || prefix === '/sync' || prefix.startsWith('/sync/')) {
+      findings.push({
+        severity: 'error',
+        code: 'custom-route-overlaps-typed-transport',
+        message: `Custom route ownership prefix "${rawPrefix}" overlaps /api or /sync. Typed transport ownership is derived from the service-first route name.`,
+        location: `services.config.ts > customRoutes.${rawPrefix}`,
+      });
+    }
+    if (normalizedCustomPrefixes.has(prefix)) {
+      findings.push({
+        severity: 'error',
+        code: 'custom-route-duplicate-prefix',
+        message: `Custom route ownership prefix "${rawPrefix}" duplicates normalized prefix "${prefix}".`,
+        location: `services.config.ts > customRoutes.${rawPrefix}`,
+      });
+    }
+    normalizedCustomPrefixes.add(prefix);
+    if (!serviceNames.has(owner)) {
+      findings.push({
+        severity: 'error',
+        code: 'custom-route-unknown-service',
+        message: `Custom route ownership prefix "${rawPrefix}" references unknown service "${owner}".`,
+        location: `services.config.ts > customRoutes.${rawPrefix}`,
+      });
+    }
+  }
+
+  //? Rule 4: every binding's service matches an actual service.
   //? Rule 4: fallback env key must exist.
   //? Rule 5: redis/mongo resource keys must exist.
   //? Rule 6: fallback shared-resource invariant.

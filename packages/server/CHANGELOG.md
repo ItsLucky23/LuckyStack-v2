@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Routed GET API calls can carry a lossless typed payload through the reserved `__luckystack_data` query value while public key-per-query callers remain compatible.
+
 ## [0.7.6] - 2026-07-23
 
 ### Fixed

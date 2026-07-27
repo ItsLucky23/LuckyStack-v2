@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Custom HTTP paths resolve through longest-prefix `services.config.ts > customRoutes` ownership, with fail-fast validation for invalid, overlapping, duplicate or unknown owners.
+- Routed API/sync invocation now has a multi-process Redis integration proof covering local execution, remote-system callback delivery, fallback and one browser socket.
+
 ## [0.7.6] - 2026-07-23
 
 ### Fixed

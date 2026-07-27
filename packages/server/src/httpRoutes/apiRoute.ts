@@ -4,6 +4,7 @@ import {
   extractTokenFromRequest,
   getLogger,
   tryCatch,
+  tryCatchSync,
 } from '@luckystack/core';
 import { handleHttpApiRequest } from '@luckystack/api';
 import { initSseResponse, sendSseEvent, shouldUseHttpStream } from '../sse';
@@ -96,10 +97,31 @@ export const handleApiRoute: HttpRouteHandler = async ({
       return true;
     }
 
-    const apiData = typeof params === 'object'
+    let apiData = typeof params === 'object'
       ? { ...(params as Record<string, unknown>) }
       : {};
-    delete (apiData as Record<string, unknown>).stream;
+    delete apiData.stream;
+
+    //? Routed GET invocations encode the typed payload as one JSON query value.
+    //? Plain public HTTP callers keep the existing key-per-query contract; only
+    //? the reserved framework key opts into lossless nested/number/boolean data.
+    const routedData = apiData.__luckystack_data;
+    if (typeof routedData === 'string') {
+      const [parseError, parsed] = tryCatchSync(() => JSON.parse(routedData) as unknown);
+      if (parseError || parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        const response = {
+          status: 'error' as const,
+          httpStatus: 400,
+          message: 'api.invalidRequestFormat',
+          errorCode: 'api.invalidRequestFormat',
+        };
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(400);
+        res.end(JSON.stringify(response));
+        return true;
+      }
+      apiData = { ...(parsed as Record<string, unknown>) };
+    }
 
     //? Resolve the real client IP for per-IP rate limiting (honors
     //? `http.trustProxy`; preserves the historical `undefined` fallback when

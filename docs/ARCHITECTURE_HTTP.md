@@ -31,6 +31,30 @@ The key consequence: a `'post-params'` custom route can **never** read the raw b
 
 **Pre-params contract:** a handler that starts reading the body **MUST** send its own response and return `true`. Returning `false` *without* consuming the body falls through to the normal pipeline. Handlers run in registration order, after the framework fast-paths.
 
+### Custom-route ownership in split deployments
+
+A handler predicate is runtime code, so the router cannot infer its owning
+service from `registerCustomRoute(...)`. Declare ownership as pure data in
+`services.config.ts`:
+
+```ts
+const servicesConfig = {
+  services: { system: { source: 'root' }, admin: { source: 'admin' } },
+  presets: { /* ... */ },
+  customRoutes: {
+    '/webhooks/admin': 'admin',
+    '/_docs': 'system',
+  },
+};
+```
+
+The router uses longest path-prefix matching before its normal first-segment
+resolver. Prefixes match path boundaries (`/webhooks` does not match
+`/webhooks-admin`). Router boot, `presetLoader` and
+`luckystack-validate-deploy` fail on malformed prefixes, `/api`/`/sync`
+overlap, or unknown service owners. The owning service still needs a local or
+fallback binding.
+
 ## Origin-exempt paths (webhooks)
 
 `registerOriginExemptPath({ pathPrefix })` (`@luckystack/server`) removes the step-1 origin gate for paths under `pathPrefix`. Empty by default — **opt-in only**.

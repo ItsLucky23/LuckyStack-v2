@@ -22,6 +22,12 @@ export interface PresetDefinition {
 export interface ServicesConfigShape {
   services: Record<string, ServiceDefinition>;
   presets: Record<string, PresetDefinition>;
+  /**
+   * Pure-data ownership manifest for HTTP routes outside `/api/*` and `/sync/*`.
+   * Keys are absolute path prefixes; values are service keys. The router uses
+   * longest-prefix matching, so `/webhooks/admin` may override `/webhooks`.
+   */
+  customRoutes?: Record<string, string>;
 }
 
 import { createRegistry } from './createRegistry';

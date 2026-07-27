@@ -54,6 +54,21 @@ const validatePresets = (services: Record<string, ServiceDefinition>, presets: R
   }
 };
 
+const validateCustomRouteOwnership = (services: ServicesConfig): void => {
+  const knownServices = new Set(Object.keys(services.services));
+  for (const [prefix, owner] of Object.entries(services.customRoutes ?? {})) {
+    if (!prefix.startsWith('/') || prefix === '/' || prefix.includes('?') || prefix.includes('#')) {
+      throw new Error(`[presetLoader] Custom route prefix '${prefix}' must be an absolute non-root path without query/hash.`);
+    }
+    if (prefix === '/api' || prefix.startsWith('/api/') || prefix === '/sync' || prefix.startsWith('/sync/')) {
+      throw new Error(`[presetLoader] Custom route prefix '${prefix}' overlaps the typed /api or /sync transport.`);
+    }
+    if (!knownServices.has(owner)) {
+      throw new Error(`[presetLoader] Custom route prefix '${prefix}' references unknown service '${owner}'.`);
+    }
+  }
+};
+
 const validateResourceReferences = (
   resources: Record<string, ResourceDefinition>,
   environments: Record<string, EnvironmentDefinition>,
@@ -141,6 +156,7 @@ export const validateResolvedConfig = (config: ResolvedConfig): void => {
   const { services, deploy } = config;
   validateServiceDefinitions(services.services);
   validatePresets(services.services, services.presets);
+  validateCustomRouteOwnership(services);
   validateResourceReferences(deploy.resources, deploy.environments);
   validateFallbackChain(deploy.environments);
   validateServiceBindings(services.services, deploy.environments);

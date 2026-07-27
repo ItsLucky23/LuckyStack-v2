@@ -2,7 +2,7 @@
 
 <!-- @covers packages/sync/src -->
 
-> Real-time event broadcasting between clients using rooms.
+> Real-time room fanout with configurable Socket.io or routed HTTP/SSE invocation.
 
 > **Where the code lives (post-package-split):** the runtime described below is in `@luckystack/sync` (`packages/sync/src/handleSyncRequest.ts`, `handleHttpSyncRequest.ts`, `streamThrottle.ts`). Client-side helpers (`syncRequest`, `upsertSyncEventCallback`, `useSyncEvents`) live at `@luckystack/sync/client`. See [`packages/sync/README.md`](../packages/sync/README.md) for the public API surface.
 
@@ -77,6 +77,24 @@ At least one of these files must exist for a sync route.
 ```
 
 ---
+
+## Invocation transport
+
+`config.ts > transport.invocation` controls only how `syncRequest` reaches the
+server:
+
+- `'socket'` (default) executes on the backend holding the one browser socket.
+- `'routed-http'` POSTs `/sync/<service>/<name>/<version>` through the router, so
+  the owning preset executes `_server`; requester streaming uses SSE.
+
+In both modes the browser keeps exactly one Socket.io connection to `system`.
+Room membership, presence, reconnect state, `upsertSyncEventCallback` and
+recipient stream callbacks stay on that connection. After routed execution, the
+owning service fans out over the shared Socket.io Redis adapter; Redis delivers
+to remote sockets but does not remotely execute the handler.
+
+Auth, receiver policy, rate limits, validation, response typing, `AbortSignal`,
+timeout and offline queue semantics are transport-equivalent.
 
 ## Creating a Sync Event
 
@@ -420,7 +438,7 @@ Repository note:
 
 ## Offline Request Queue
 
-When the socket is disconnected or the browser is offline, `syncRequest` queues requests in memory and flushes on reconnect or when the browser comes back online.
+When the socket is disconnected or the browser is offline, `syncRequest` queues requests in memory and flushes on reconnect or when the browser comes back online in both invocation modes. Routed mode retains the socket-readiness gate because realtime delivery still depends on that one connection.
 
 ## syncRequest Return Contract
 
@@ -463,7 +481,7 @@ Body:
 }
 ```
 
-Note: HTTP is only the trigger. Actual delivery still happens via Socket.io to users in the target room.
+HTTP is the invocation/acknowledgement transport. Actual recipient delivery still happens via Socket.io to users in the target room, including users attached to remote `system` instances through shared Redis.
 
 HTTP requester streaming is available via SSE:
 

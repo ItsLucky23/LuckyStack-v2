@@ -10,35 +10,38 @@ import { getCsrfConfig } from './csrfConfig';
 import { getProjectConfig } from './projectConfig';
 import { socket } from './socketState';
 import tryCatch from './tryCatch';
+import tryCatchSync from './tryCatchSync';
 
-let cachedToken: string | null = null;
-let inflightFetch: Promise<string | null> | null = null;
+//? Tokens are scoped to the HTTP invocation origin. In routed-http mode the
+//? Socket.io connection may terminate on a remote `system` service while the
+//? invocation goes same-origin through a local router; a single socket-derived
+//? cache would fetch the CSRF token from the wrong ingress.
+const cachedTokens = new Map<string, string>();
+const inflightFetches = new Map<string, Promise<string | null>>();
 
-const resolveBackendUrl = (): string => {
-  //? Prefer the live socket's connection URI — it IS the backend origin, even
-  //? in the split-origin dev model (Vite on :5173, server on :80) where
-  //? `location.origin` would point at the FRONTEND and `/auth/csrf` would hit
-  //? the dev server's SPA fallback (HTML, not JSON → token resolution fails).
-  const socketUri = socket?.io.opts.hostname
-    ? `${socket.io.opts.secure ? 'https' : 'http'}://${socket.io.opts.hostname}${socket.io.opts.port ? `:${socket.io.opts.port}` : ''}`
-    : '';
-  if (socketUri) return socketUri;
+const resolveSocketOrigin = (): string => socket?.io.opts.hostname
+  ? `${socket.io.opts.secure ? 'https' : 'http'}://${socket.io.opts.hostname}${socket.io.opts.port ? `:${socket.io.opts.port}` : ''}`
+  : '';
 
-  // Same-origin deploys (template prod + Vite proxy) fall back to the
-  // browser's location. Server-side callers should not invoke this helper —
-  // they have direct access to the session.
-  //? Both checks here look redundant to TS (globals are always typed as set)
-  //? but at runtime in Node `globalThis.window` is undefined; the defensive
-  //? guard is what keeps SSR from crashing.
+const resolveRequestOrigin = (input?: RequestInfo | URL): string => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- SSR runtime guard
-  if (globalThis.window !== undefined && globalThis.location?.origin) {
-    return globalThis.location.origin;
+  const browserOrigin = globalThis.window !== undefined && globalThis.location?.origin
+    ? globalThis.location.origin
+    : '';
+  if (input !== undefined) {
+    let raw: string;
+    if (typeof input === 'string') raw = input;
+    else if (input instanceof URL) raw = input.href;
+    else raw = input.url;
+    const fallbackOrigin = browserOrigin.length > 0 ? browserOrigin : resolveSocketOrigin();
+    const [error, parsed] = tryCatchSync(() => new URL(raw, fallbackOrigin));
+    if (!error && parsed) return parsed.origin;
   }
-  return '';
+  return browserOrigin.length > 0 ? browserOrigin : resolveSocketOrigin();
 };
 
-const fetchCsrfToken = async (): Promise<string | null> => {
-  const base = resolveBackendUrl();
+const fetchCsrfToken = async (origin: string): Promise<string | null> => {
+  const base = origin;
   const [error, token] = await tryCatch<string | null, undefined>(async () => {
     const response = await fetch(`${base}/auth/csrf`, {
       method: 'GET',
@@ -57,29 +60,31 @@ const fetchCsrfToken = async (): Promise<string | null> => {
  * null in token mode or when no session exists. Callers should attach the
  * returned value as the `X-CSRF-Token` request header.
  */
-export const getCsrfToken = async (): Promise<string | null> => {
+export const getCsrfToken = async (origin = resolveRequestOrigin()): Promise<string | null> => {
   //? Token-mode sessions: skip entirely. The server doesn't enforce CSRF
   //? in token mode, and there's no value to attach.
   if (getProjectConfig().session.basedToken) {
     return null;
   }
 
-  if (cachedToken) return cachedToken;
-  if (inflightFetch) return inflightFetch;
+  const cached = cachedTokens.get(origin);
+  if (cached) return cached;
+  const inflight = inflightFetches.get(origin);
+  if (inflight) return inflight;
 
-  inflightFetch = fetchCsrfToken().then((token) => {
-    cachedToken = token;
-    inflightFetch = null;
+  const next = fetchCsrfToken(origin).then((token) => {
+    if (token) cachedTokens.set(origin, token);
+    inflightFetches.delete(origin);
     return token;
   });
-
-  return inflightFetch;
+  inflightFetches.set(origin, next);
+  return next;
 };
 
 /** Drop the cached token. Call this on logout or when a 403 csrfMismatch is seen. */
 export const clearCsrfToken = (): void => {
-  cachedToken = null;
-  inflightFetch = null;
+  cachedTokens.clear();
+  inflightFetches.clear();
 };
 
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -124,6 +129,14 @@ const isCsrfMismatchResponse = async (response: Response): Promise<boolean> => {
 export const httpFetch: typeof fetch = async (input, init = {}) => {
   const method = (init.method ?? 'GET').toUpperCase();
   const headers = new Headers(init.headers);
+  const config = getProjectConfig();
+  if (config.session.basedToken && !headers.has('Authorization')) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- SSR runtime guard
+    const token = globalThis.window === undefined
+      ? null
+      : tryCatchSync(() => globalThis.sessionStorage.getItem('token'))[1];
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+  }
   if (!headers.has('Content-Type') && init.body && typeof init.body === 'string') {
     headers.set('Content-Type', 'application/json');
   }
@@ -142,11 +155,12 @@ export const httpFetch: typeof fetch = async (input, init = {}) => {
     });
   };
 
-  if (!STATE_CHANGING.has(method) || getProjectConfig().session.basedToken) {
+  if (!STATE_CHANGING.has(method) || config.session.basedToken) {
     return send(null);
   }
 
-  const token = await getCsrfToken();
+  const requestOrigin = resolveRequestOrigin(input);
+  const token = await getCsrfToken(requestOrigin);
   let response = await send(token);
 
   //? On csrfMismatch, the cached token is stale (session rotated). Clear and
@@ -156,7 +170,7 @@ export const httpFetch: typeof fetch = async (input, init = {}) => {
   //? fresh token won't fix (e.g. session expired), and retrying would loop.
   if (await isCsrfMismatchResponse(response)) {
     clearCsrfToken();
-    const refreshed = await getCsrfToken();
+    const refreshed = await getCsrfToken(requestOrigin);
     if (refreshed) {
       response = await send(refreshed);
     }

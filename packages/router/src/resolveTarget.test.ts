@@ -128,6 +128,21 @@ describe("parseServiceFromPath", () => {
   it("returns null for a malformed percent-encoded path", () => {
     expect(parseServiceFromPath("/api/%ZZ")).toBeNull();
   });
+
+  it('routes custom paths from the pure-data ownership manifest', () => {
+    expect(parseServiceFromPath('/webhooks/inbound', { '/webhooks': 'system' })).toBe('system');
+  });
+
+  it('uses the longest matching custom-route prefix', () => {
+    expect(parseServiceFromPath('/webhooks/admin/inbound', {
+      '/webhooks': 'system',
+      '/webhooks/admin': 'admin',
+    })).toBe('admin');
+  });
+
+  it('matches custom prefixes on a path boundary, not a string prefix', () => {
+    expect(parseServiceFromPath('/webhooks-admin/inbound', { '/webhooks': 'system' })).toBe('webhooks-admin');
+  });
 });
 
 describe("registerServiceResolver + resolveServiceKey", () => {
@@ -213,6 +228,22 @@ describe("createServiceTargetResolver — startup validation", () => {
         currentEnvKey: "dev",
       }),
     ).toThrow(/declares fallback 'staging' which is not defined/);
+  });
+
+  it('throws when a custom-route owner is not a declared service', () => {
+    const deploy: DeployConfigShape = {
+      resources: {},
+      environments: { dev: makeEnv({ bindings: { system: 'http://localhost:4001' } }) },
+    };
+    expect(() => createServiceTargetResolver({
+      deploy,
+      services: {
+        services: { system: { source: 'root' } },
+        presets: { system: { services: ['system'] } },
+        customRoutes: { '/webhooks': 'missing' },
+      },
+      currentEnvKey: 'dev',
+    })).toThrow(/references unknown service "missing"/);
   });
 
   it("throws when a current-env binding URL is not a valid URL", () => {

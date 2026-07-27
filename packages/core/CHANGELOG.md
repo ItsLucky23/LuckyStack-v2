@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `transport.invocation` can opt typed API/sync calls into routed HTTP/SSE while the existing Socket.io connection remains responsible for realtime delivery.
+- Browser-safe routed invocation now preserves timeout, cancellation, streaming envelopes, typed GET payloads, bearer auth and origin-scoped CSRF.
+- Service topology can declare pure-data `customRoutes` ownership for non-`/api`/`/sync` paths.
+
 ## [0.7.6] - 2026-07-23
 
 ### Fixed

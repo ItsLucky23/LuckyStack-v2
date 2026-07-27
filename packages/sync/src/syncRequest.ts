@@ -16,12 +16,14 @@ import {
   socket,
   waitForSocket,
   enqueueSyncRequest,
+  removeSyncQueueItem,
   isOnline,
   normalizeErrorResponseCore,
   parseServiceRouteName,
   buildSyncProgressEventName,
   buildSyncResponseEventName,
   socketEventNames,
+  invokeRoutedHttp,
 } from "@luckystack/core/client";
 import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useRef } from "react";
 import { Socket } from "socket.io-client";
@@ -169,6 +171,15 @@ interface SyncResponseError {
   errorParams?: SyncErrorParam[];
   httpStatus?: number;
 }
+
+type RoutedSyncFailureKind = 'timeout' | 'aborted' | 'network-error' | 'invalid-response';
+
+const routedSyncErrorCode = (kind: RoutedSyncFailureKind): string => {
+  if (kind === 'timeout') return 'sync.requestTimeout';
+  if (kind === 'aborted') return 'request.aborted';
+  if (kind === 'invalid-response') return 'sync.invalidServerResponse';
+  return 'sync.ioUnavailable';
+};
 
 interface SyncAckResponse {
   status?: 'success' | 'error';
@@ -489,7 +500,82 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
               response: { status: 'error', errorCode: 'offline.queueFull' },
               fallbackErrorCode: 'offline.queueFull',
             }));
+          } else if (externalSignal && queueId) {
+            const capturedQueueId = queueId;
+            externalSignal.addEventListener('abort', () => {
+              removeSyncQueueItem(capturedQueueId);
+              resolve(normalizeSyncError({
+                response: { status: 'error', errorCode: 'request.aborted' },
+                fallbackErrorCode: 'request.aborted',
+              }));
+            }, { once: true });
           }
+          return;
+        }
+
+        if (getProjectConfig().transport.invocation === 'routed-http') {
+          void (async () => {
+            const routed = await invokeRoutedHttp<SyncAckResponse, SyncRequestStreamEvent>({
+              path: `/sync/${sanitizedName}/${resolvedVersion}`,
+              method: 'POST',
+              data: {
+                data,
+                receiver: normalizedReceiver,
+                ignoreSelf: ignoreSelf ?? false,
+              },
+              stream: onStream,
+              signals: [externalSignal],
+              timeoutMs: getProjectConfig().sync.requestTimeoutMs,
+            });
+            if (queueId) removeSyncQueueItem(queueId);
+
+            if (routed.kind !== 'response') {
+              const errorCode = routedSyncErrorCode(routed.kind);
+              resolve(normalizeSyncError({
+                response: {
+                  status: 'error',
+                  errorCode,
+                  httpStatus: routed.kind === 'timeout' ? 504 : undefined,
+                },
+                fallbackErrorCode: errorCode,
+              }));
+              return;
+            }
+
+            const responseData = routed.response;
+            if (responseData.status === 'error') {
+              const normalizedError = normalizeSyncError({
+                response: responseData,
+                fallbackErrorCode: 'sync.failedRequest',
+              });
+              if (shouldNotifyDev()) {
+                notify.error({ key: normalizedError.errorCode, params: normalizedError.errorParams });
+              }
+              resolve(normalizedError);
+              return;
+            }
+            if (responseData.status !== 'success') {
+              resolve(normalizeSyncError({
+                response: responseData,
+                fallbackErrorCode: 'sync.invalidServerResponse',
+              }));
+              return;
+            }
+
+            const result = responseData.result && typeof responseData.result === 'object'
+              ? responseData.result
+              : {};
+            //? HTTP response boundary: generated route typing supplies the
+            //? precise result shape, while JSON parsing necessarily starts at unknown.
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- routed response boundary
+            resolve({
+              status: 'success',
+              message: typeof responseData.message === 'string' && responseData.message.trim().length > 0
+                ? responseData.message
+                : `sync ${sanitizedName} success`,
+              result,
+            } as RequestOutput);
+          })();
           return;
         }
 

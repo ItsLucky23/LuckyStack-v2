@@ -546,6 +546,17 @@ export interface SyncStreamThrottleConfig {
   field: string;
 }
 
+export interface TransportConfig {
+  /**
+   * Transport used for typed API/sync invocations. Socket.io remains connected
+   * in both modes for rooms, presence, reconnect state and realtime callbacks.
+   * `'socket'` is the backwards-compatible monolith default; `'routed-http'`
+   * sends invocations over same-origin HTTP/SSE so @luckystack/router can select
+   * the service owner.
+   */
+  invocation: 'socket' | 'routed-http';
+}
+
 export interface ApiConfig {
   /**
    * Default response timeout (ms) for `apiRequest`. After this elapses with no
@@ -731,6 +742,7 @@ export interface ProjectConfig {
   http: HttpConfig;
   auth: AuthConfig;
   socket: SocketConfig;
+  transport: TransportConfig;
   api: ApiConfig;
   sync: SyncConfig;
   validation: ValidationConfig;
@@ -896,6 +908,9 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     pingInterval: 25_000,
     activityHeartbeatThrottleMs: 10_000,
     maxRoomsPerSession: 50,
+  },
+  transport: {
+    invocation: 'socket',
   },
   api: {
     //? Default OFF (was 30_000): a legit handler may run for minutes (e.g. a deep

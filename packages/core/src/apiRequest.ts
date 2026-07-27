@@ -1,7 +1,7 @@
 import { getProjectConfig } from "./projectConfig";
 import { getLogger } from "./loggerRegistry";
 import { getRegisteredApiMethod } from "./apiMethodMapRegistry";
-import { isGetMethodName } from "./httpApiUtils";
+import { inferHttpMethod, isGetMethodName } from "./httpApiUtils";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketState";
 import type { ApiTypeMap, StreamPayload } from './apiTypeStubs';
 import { notify } from "./notifier";
@@ -19,6 +19,7 @@ import {
   dispatchApiRequestInterceptors,
   dispatchApiResponseInterceptors,
 } from "./apiInterceptors";
+import { invokeRoutedHttp } from './routedHttpInvocation';
 
 //? Abort controller logic:
 //? - abortable: true → always use abort controller
@@ -77,6 +78,26 @@ export type ApiStreamEvent<T extends StreamPayload = StreamPayload> = T;
  * `registerApiMethodMap(...)` from their `socketInitializer.ts` boot file.
  */
 const isGetMethodByPrefix = (apiName: string): boolean => isGetMethodName(apiName.toLowerCase());
+
+type RoutedApiFailureKind = 'timeout' | 'aborted' | 'network-error' | 'invalid-response';
+
+const routedApiErrorCode = (kind: RoutedApiFailureKind): string => {
+  if (kind === 'timeout') return 'api.timeout';
+  if (kind === 'aborted') return 'request.aborted';
+  if (kind === 'invalid-response') return 'api.invalidServerResponse';
+  return 'api.ioUnavailable';
+};
+
+const resolveHttpMethod = (apiName: string, version: string) => {
+  const lastSlash = apiName.lastIndexOf('/');
+  if (lastSlash > 0) {
+    const pagePath = apiName.slice(0, lastSlash);
+    const leaf = apiName.slice(lastSlash + 1);
+    const method = getRegisteredApiMethod(pagePath, leaf, version);
+    if (method) return method;
+  }
+  return inferHttpMethod(apiName);
+};
 
 const resolveGetMethod = (apiName: string, version: string): { isGet: boolean; usingHeuristic: boolean } => {
   //? Resolved-name shape: `pagePath/apiName`. apiMethodMap is nested by
@@ -495,6 +516,51 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         }
 
         if (signal?.aborted) {
+          return;
+        }
+
+        if (getProjectConfig().transport.invocation === 'routed-http') {
+          void (async () => {
+            const effectiveTimeoutMs = timeoutMs ?? getProjectConfig().api.requestTimeoutMs;
+            const routed = await invokeRoutedHttp<ApiResponse, ApiStreamEvent>({
+              path: `/api/${sanitizedName}/${version}`,
+              method: resolveHttpMethod(sanitizedName, version),
+              data: data as Record<string, unknown>,
+              stream: onStream,
+              signals: [signal, externalSignal],
+              timeoutMs: effectiveTimeoutMs,
+            });
+            cleanupAbortController();
+            if (queueId) removeApiQueueItem(queueId);
+
+            if (routed.kind !== 'response') {
+              const errorCode = routedApiErrorCode(routed.kind);
+              resolve(normalizeApiError({
+                response: {
+                  status: 'error',
+                  errorCode,
+                  httpStatus: routed.kind === 'timeout' ? 504 : undefined,
+                },
+                fallbackErrorCode: errorCode,
+                fallbackHttpStatus: routed.kind === 'timeout' ? 504 : 500,
+              }) as RequestOutput);
+              return;
+            }
+
+            const response = routed.response;
+            dispatchApiResponseInterceptors({ name: sanitizedName, version, response });
+            if (response.status === 'error') {
+              const normalizedError = normalizeErrorResponseCore({ response });
+              if (!disableErrorMessage) {
+                notify.error({
+                  key: normalizedError.errorCode || normalizedError.message,
+                  params: normalizedError.errorParams,
+                });
+              }
+              Object.assign(response, normalizedError);
+            }
+            resolve(response as RequestOutput);
+          })();
           return;
         }
 

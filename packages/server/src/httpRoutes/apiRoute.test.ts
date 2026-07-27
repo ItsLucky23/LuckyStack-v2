@@ -48,6 +48,9 @@ vi.mock('@luckystack/core', () => ({
   tryCatch: async (fn: () => Promise<unknown>) => {
     try { return [null, await fn()]; } catch (error) { return [error, null]; }
   },
+  tryCatchSync: (fn: () => unknown) => {
+    try { return [null, fn()]; } catch (error) { return [error, null]; }
+  },
 }));
 
 import { handleApiRoute } from './apiRoute';
@@ -129,6 +132,36 @@ describe('handleApiRoute — dev-tools init failure surfaces the real reason', (
 
     expect(handleHttpApiRequestMock).toHaveBeenCalledTimes(1);
     expect(cap.writeHeadStatus).toBe(200);
+  });
+});
+
+describe('handleApiRoute — routed GET payload', () => {
+  it('decodes the reserved JSON query value before invoking the typed handler', async () => {
+    const { args } = makeReqRes();
+    args.method = 'GET';
+    args.params = {
+      __luckystack_data: JSON.stringify({ count: 3, nested: { enabled: true } }),
+      stream: 'false',
+    };
+
+    await handleApiRoute(args);
+
+    expect(handleHttpApiRequestMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: { count: 3, nested: { enabled: true } },
+      method: 'GET',
+    }));
+  });
+
+  it('rejects malformed routed JSON with 400 before invoking the handler', async () => {
+    const { args, cap } = makeReqRes();
+    args.method = 'GET';
+    args.params = { __luckystack_data: '{bad' };
+
+    await handleApiRoute(args);
+
+    expect(handleHttpApiRequestMock).not.toHaveBeenCalled();
+    expect(cap.writeHeadStatus).toBe(400);
+    expect(JSON.parse(cap.body ?? '{}')).toMatchObject({ errorCode: 'api.invalidRequestFormat' });
   });
 });
 

@@ -32,6 +32,8 @@ export interface PresetDefinition {
 export interface ServicesConfig {
   services: Record<string, ServiceDefinition>;
   presets: Record<string, PresetDefinition>;
+  /** HTTP path-prefix → owning service for routes outside /api and /sync. */
+  customRoutes?: Record<string, string>;
 }
 
 const servicesConfig: ServicesConfig = {
@@ -39,6 +41,17 @@ const servicesConfig: ServicesConfig = {
     system: { source: 'root' },
     vehicles: { source: 'vehicles' },
     billing: { source: 'billing' },
+  },
+
+  customRoutes: {
+    '/auth': 'system',
+    '/uploads': 'system',
+    '/hooks': 'system',
+    '/csrf-token': 'system',
+    '/_health': 'system',
+    '/livez': 'system',
+    '/readyz': 'system',
+    '/_docs': 'system',
   },
 
   presets: {

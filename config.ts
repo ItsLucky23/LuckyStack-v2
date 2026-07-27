@@ -118,6 +118,15 @@ const createConfig = (resolvedEnvironment: AppEnvironmentConfig) => ({
   dev: resolvedEnvironment.dev,
 
   /**
+   * Keep one Socket.io connection for realtime state, but route typed API/sync
+   * invocations through the service-aware HTTP/SSE router in this split-service
+   * reference project. Monolithic scaffolds default to `socket`.
+   */
+  transport: {
+    invocation: 'routed-http' as 'socket' | 'routed-http',
+  },
+
+  /**
    * Granular logging and debug notification controls.
    *
    * Use these flags to avoid coupling all diagnostics to a single `dev` switch.
@@ -424,6 +433,7 @@ const createProjectConfigRegistration = () => {
       publicUrl: currentDetectedDns,
     },
     logging: currentConfig.logging,
+    transport: currentConfig.transport,
     rateLimiting: currentConfig.rateLimiting,
     session: {
       basedToken: currentConfig.sessionBasedToken,
@@ -486,6 +496,7 @@ export const {
   loginRedirectUrl,
   defaultLanguage,
   mobileConsole,
+  transport,
   sessionPerUser,
   sessionBasedToken,
   sessionExpiryDays,

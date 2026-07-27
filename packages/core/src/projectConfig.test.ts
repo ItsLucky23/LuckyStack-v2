@@ -46,6 +46,7 @@ describe('registerProjectConfig + getProjectConfig', () => {
 
   it('exposes DEFAULT_PROJECT_CONFIG with the documented defaults', () => {
     expect(DEFAULT_PROJECT_CONFIG.session.expiryDays).toBe(7);
+    expect(DEFAULT_PROJECT_CONFIG.transport.invocation).toBe('socket');
     expect(DEFAULT_PROJECT_CONFIG.auth.bcryptRounds).toBe(10);
     expect(DEFAULT_PROJECT_CONFIG.offlineQueue.dropPolicy).toBe('drop-oldest');
   });

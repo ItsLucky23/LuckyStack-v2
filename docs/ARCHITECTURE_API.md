@@ -2,7 +2,7 @@
 
 <!-- @covers packages/api/src -->
 
-> Type-safe API request system with WebSocket-first architecture and HTTP fallback.
+> Type-safe API request system with configurable Socket.io or routed HTTP/SSE invocation.
 
 > **Where the code lives (post-package-split):** the runtime described below is implemented in `@luckystack/api` (`packages/api/src/handleApiRequest.ts`, `handleHttpApiRequest.ts`) and shared utilities in `@luckystack/core` (`packages/core/src/`). The `server/` directory in this repo is the *consumer* of those packages — most files referenced here have moved into `packages/`. See the [Runtime Function Reference](#runtime-function-reference) at the bottom for current paths.
 
@@ -28,9 +28,9 @@ const nestedResult = await apiRequest({
 // Global API call (service-first)
 const session = await apiRequest({ name: "system/session", version: "v1" });
 
-// HTTP fallback (same API, no WebSocket needed)
-// GET /api/examples/getUserData/v1?userId=123
-// POST /api/examples/getUserData/v1 with JSON body
+// Split-service invocation (global config; call sites stay identical)
+// transport: { invocation: 'routed-http' }
+// GET/POST/PUT/DELETE /api/<service>/... through @luckystack/router
 ```
 
 Request naming contract:
@@ -131,9 +131,32 @@ if (result.status === "success") {
 
 ---
 
+## Invocation transport
+
+`config.ts` registers one global choice:
+
+```ts
+transport: {
+  invocation: 'socket' | 'routed-http',
+}
+```
+
+- `'socket'` is the backwards-compatible default. `apiRequest` emits through the
+  one Socket.io connection and the socket-owning backend executes the handler.
+- `'routed-http'` keeps that Socket.io connection for rooms/presence/realtime
+  callbacks, but sends typed API invocations same-origin over HTTP/SSE. The
+  router resolves the service-first path and forwards it to the owning preset.
+
+Both modes preserve generated response typing, auth, errors, streaming,
+`AbortSignal`, timeout and the existing offline queue. Routed writes use
+`httpFetch`, so cookie mode fetches CSRF from the same invocation origin; token
+mode forwards the sessionStorage token as bearer auth. GET payloads use the
+reserved `__luckystack_data` query field internally so nested objects, numbers
+and booleans retain their JSON types.
+
 ## HTTP API Access
 
-APIs are accessible via HTTP for testing, webhooks, or non-socket clients.
+APIs are accessible via HTTP for testing, routed invocation, webhooks, or non-socket clients.
 
 ### RESTful Routes
 
@@ -322,7 +345,7 @@ Repository note:
 
 ## Offline Request Queue
 
-When the socket is disconnected or the browser is offline, `apiRequest` automatically queues requests in memory. The queue flushes on reconnect or when the browser comes back online. Aborted requests are removed from the queue.
+When the socket is disconnected or the browser is offline, `apiRequest` automatically queues requests in memory in either invocation mode. The queue flushes on reconnect or when the browser comes back online. Aborted requests are removed from the queue. Routed mode deliberately keeps this socket-readiness gate because the same connection carries realtime state and sync callbacks.
 
 ## Rate Limiting
 

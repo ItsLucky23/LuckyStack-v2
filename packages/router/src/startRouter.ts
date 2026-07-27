@@ -235,7 +235,15 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
 
   //? `websocketService` goes to BOTH proxies: socket.io's polling handshake (HTTP)
   //? and its upgrade (WS) are one connection and must pin to the same backend.
-  const proxy = createHttpProxy({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs: upstreamTimeoutMs, maxRequestBodyBytes, websocketService, isTrustedProxy });
+  const proxy = createHttpProxy({
+    resolver,
+    missingServiceErrorCode,
+    upstreamRequestTimeoutMs: upstreamTimeoutMs,
+    maxRequestBodyBytes,
+    websocketService,
+    isTrustedProxy,
+    customRoutes: servicesConfig.customRoutes,
+  });
   const wsProxy = createWsProxy({ resolver, upstreamHandshakeTimeoutMs: upstreamTimeoutMs, wsTargetService: websocketService, isTrustedProxy });
   const server = http.createServer(proxy);
 
