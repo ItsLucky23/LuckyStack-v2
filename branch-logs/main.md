@@ -1028,3 +1028,19 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Files:** core runtime-mode API/tests/docs; server runtime-map/devtool/cookie/bootstrap/portbeleid; api/sync/login/email/docs-ui/error-tracking/devkit/secret-manager callsites; scaffold/CLI templates; ADR 0040; multi-instance-docs; Docker findings/changelogs.
 
 **Notes:** Deze correctie is release-blockerend voor named split environments. De dependency-auditfix landde parallel als `3af7b5d`; deze runtimecorrectie is daarop gerebased. Publicatie, protected push en een nieuwe releasetag blijven expliciet goedkeuringsplichtig.
+
+## 2026-07-27 20:50 — Alle code behouden in v0.8.1 patchrelease
+
+**User prompt (summary):** Publiceer nu, maar overschrijf niets en behoud alle code.
+
+**Wat ik deed:**
+- De bestaande mislukte `v0.8.0`-tag bewust niet verplaatst. De geverifieerde `3af7b5d` is additief getagd als `v0.8.0+publish.1`; workflow `30293374053` publiceerde alle 17 packages als npm `0.8.0` met provenance.
+- Parallel commit `f33ab9c` eerst fast-forward naar `main` gepusht, zodat geen code verloren ging. Die commit stond terecht als Unreleased/release-blockerend voor named staging/Docker-topologieën en zat niet in de reeds immutable npm-0.8.0-artifacts.
+- Daarom alle 17 packages lockstep naar `0.8.1` gebracht, interne ranges bijgewerkt en de twaalf relevante Unreleased-changelogsecties onder `0.8.1` gedateerd.
+- Een gepubliceerde Bun-scaffold op `0.8.0` en Flexbuddy met een no-save `0.8.0`-install slaagden voor typegeneratie, lint, build, typecheck en AI-lint; Flexbuddy `package.json`/lockfile en bestaande code bleven ongewijzigd.
+
+**Verificatie:** build 17/17 + app groen; root/package/AI-lint schoon; 1968/1968 unittests; Redis-integratie 14/14; changelog/doc-staleness/audit groen; `pack:dry` en `publish:dry` voor 17/17 packages groen.
+
+**Files:** 17 packageversies + interne ranges + lockfile; twaalf packagechangelogs; branchlog/index.
+
+**Notes:** npm `0.8.0` en beide bestaande tags blijven immutable. `0.8.1` bevat de volledige hybrid-transport/Docker/numeric-literalrelease plus de named-runtime-topologycorrectie en is klaar voor de provenance-tagworkflow.

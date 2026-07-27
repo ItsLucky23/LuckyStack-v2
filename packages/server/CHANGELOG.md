@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-27
+
 ### Fixed
 
 - Production route maps, dev-tool startup, cookie security, bootstrap checks and port auto-increment now follow `NODE_ENV`; named topology environments remain available for health and routing identity.

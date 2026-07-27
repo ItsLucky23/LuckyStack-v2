@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-27
+
 ### Fixed
 
 - Fresh scaffolds keep named topology environments in production mode and inject Vite's build/serve runtime mode into browser config; custom profiles such as `--mode staging` no longer enable development behavior.
