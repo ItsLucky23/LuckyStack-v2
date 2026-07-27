@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-07-27
+
 ### Fixed
 
 - Processes can compose non-overlapping atomic presets whose generated maps repeat the same full function registry; equivalent function entries deduplicate while conflicting function implementations and duplicate API/sync ownership still fail closed.
