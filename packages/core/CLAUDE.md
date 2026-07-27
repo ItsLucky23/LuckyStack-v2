@@ -168,7 +168,8 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `readBootUuid(envKey?): Promise<string \| null>` | Read the boot UUID (router cross-checks against `/_health`). | -> docs/app-bootstrap.md |
 | `refreshBootUuid(envKey?): Promise<void>` | Extend the existing environment UUID without rotating it; recreate it when Redis recovered after expiry. | -> docs/app-bootstrap.md |
 | `startBootUuidHeartbeat(envKey?): BootUuidHeartbeat` | Start a non-overlapping, unref'd TTL/3 refresh loop; `stop()` cancels it during server shutdown. | -> docs/app-bootstrap.md |
-| `resolveEnvKey(): string` | `LUCKYSTACK_ENV` -> `NODE_ENV` -> `'development'`. | -> docs/app-bootstrap.md |
+| `resolveRuntimeMode()` / `isProductionRuntime()` / `isTestRuntime()` | `NODE_ENV` application mode; security, route-map and dev-tool policy uses this axis. | -> docs/app-bootstrap.md |
+| `resolveEnvKey(): string` | Deploy-topology identity: `LUCKYSTACK_ENV` -> `NODE_ENV` -> `'development'`; not a dev/prod-mode check. | -> docs/app-bootstrap.md |
 | `BOOT_KEY_PREFIX: 'luckystack:boot:'` | Constant — single source of truth so router can't drift. | -> docs/app-bootstrap.md |
 | `collectSynchronizedEnvKeys()` / `computeSynchronizedEnvHashes(bootUuid?)` / `hashSynchronizedValue(value, bootUuid?)` | Cross-env drift detection helpers for the router boot handshake. Both hash helpers now honour `http.healthHash` (default `'plain'` = byte-identical to before); the optional `bootUuid?` arg is only needed when `http.healthHash.salt === '@bootUuid'`. Zero-arg callers unchanged. | -> docs/app-bootstrap.md |
 | `hashSynchronizedValueWith({ mode, salt }, value)` / `resolveHealthHashConfig(bootUuid?)` | Shared health-hash primitives so the router can hash a local value with the SAME `{mode,salt}` (+ resolved boot UUID) the backend used and the boot-handshake compare still matches. | -> docs/app-bootstrap.md |
@@ -209,7 +210,7 @@ Env vars read directly by core (via `env.ts` and call-time helpers):
 
 | Env var | Default | Consumer |
 | --- | --- | --- |
-| `NODE_ENV` | `'development'` | Zod-validated, mirrored to `process.env`. |
+| `NODE_ENV` | `'development'` | Zod-validated application runtime mode, mirrored to `process.env`. |
 | `SERVER_IP` | `'127.0.0.1'` | `getBindAddress()` fallback. |
 | `SERVER_PORT` | `'80'` | `getBindAddress()` fallback. |
 | `SECURE` | `'false'` | `allowedOrigin` scheme selection. |
@@ -218,7 +219,7 @@ Env vars read directly by core (via `env.ts` and call-time helpers):
 | `REDIS_USER` | (unset) | Optional ioredis auth. |
 | `REDIS_PASSWORD` | (unset) | Optional ioredis auth. |
 | `PROJECT_NAME` | `'luckystack'` | Redis-prefix fallback in `getProjectName()`. |
-| `LUCKYSTACK_ENV` | (unset) | `resolveEnvKey()` first preference (boot UUID, router handshake). |
+| `LUCKYSTACK_ENV` | (unset) | Deploy-topology identity for boot UUID/router handshake/observability; never enables dev behavior. |
 | `LUCKYSTACK_ENV_FILES` | `.env,.env.local` | Ambient override for `getEnvFiles()` / `loadEnvFiles()` — comma-separated list of env files to load, "later overrides earlier". |
 
 `registerProjectConfig` slots (see `ProjectConfig` for full surface): `app.publicUrl`, `transport.invocation` (`'socket'` default or `'routed-http'`), `logging.*`, `rateLimiting.{enabled, store, redisKeyPrefix, defaultApiLimit, defaultIpLimit, windowMs, cleanupIntervalMs, onStoreError, skipLoopbackInDev, identity, auth}`, `session.{basedToken, expiryDays, perUser, maxConcurrentPerUser, onConflict, notifyOldDeviceOnRevoke, projectName}`, `http.{sessionCookie*, sessionCookieDomain, sessionCookiePrefix, sessionCookieSecure, requestBodyMaxBytes, trustProxy, trustedProxyHopCount, acceptBearerInCookieMode, healthEndpoint, liveEndpoint, readyEndpoint, testResetEndpoint, healthHash, stream, securityHeaders, cors}`, `auth.{credentials, oauthStateTtlSeconds, passwordPolicy, emailMaxLength, nameMaxLength, bcryptRounds, providerAccountStrategy, forgotPassword, passwordResetTtlSeconds, passwordResetBrand, emailChangeTtlSeconds, allowRegistration, passwordResetPath, emailChangeConfirmPath}`, `socket.{maxHttpBufferSize, pingTimeout, pingInterval, activityHeartbeatThrottleMs}`, `api.{requestTimeoutMs}`, `validation.{runtimeMode}`, `sync.{streamThrottle, fanoutYieldEvery, fanoutYieldMs, requestTimeoutMs, allowClientReceiverAll, requireRoomMembership, flushPressure}`, `offlineQueue.{maxSize, maxAgeMs, dropPolicy}`, `dev.{hotReloadDebounceMs, watcherStabilityThresholdMs, watcherPollIntervalMs, warnOnMissingInputType}`, `deploy.routing.{upstreamTimeoutMs, websocketService, routerHealthPath, maxRequestBodyBytes}` (via `registerDeployConfig`), `paths.*`, `defaultLanguage`, `defaultTheme`, `socketActivityBroadcaster`, `socketStatusIndicator`, `locationProviderEnabled`, `loginRedirectUrl`, `oauthCallbackBase`.

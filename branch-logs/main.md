@@ -1015,4 +1015,16 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 
 **Files:** `package.json`, `package-lock.json`, `scripts/auditProduction.mjs`, ADR 0039/0041, lesson 0014, dependency-findings + indexen, branchlog.
 
-**Notes:** npm `0.8.0` is nog niet gepubliceerd. De bestaande remote tag `v0.8.0` wijst naar de gefaalde prepcommit; verplaatsen vereist een expliciet goedgekeurde force-update nadat de correctie op `main` staat.
+**Notes:** npm `0.8.0` is nog niet gepubliceerd. De bestaande remote tag `v0.8.0` wijst naar de gefaalde prepcommit; een nieuwe patchrelease voorkomt herschrijven van de gepubliceerde tag.
+
+## 2026-07-27 18:20 — Runtime mode losgekoppeld van deployment-identiteit
+
+**User prompt (summary):** Bereid in Flexbuddy alles voor wat vóór de LuckyStack-release kan; valideer monolith-, split- en local-admin-Dockerrollen zonder de nog ongepubliceerde routed invocation vroegtijdig te activeren.
+
+**Wat ik deed:** Tijdens een geïsoleerde Flexbuddy Docker-proef bleek `NODE_ENV=production` + `LUCKYSTACK_ENV=docker` toch devkit en dev-routemaps te laden. De generieke oorzaak zat in LuckyStack: `resolveEnvKey()` werd zowel als router/boot-identiteit als dev/prod-securitymodus gebruikt. Nieuwe core-API `resolveRuntimeMode()` / `isProductionRuntime()` / `isTestRuntime()` toegevoegd en alle productiebeleidschecks (maps, devtools, cookies, bootstrap, ports, validation/rate limits, login/email/docs/error tracking, secret reload) omgezet naar `NODE_ENV`; `resolveEnvKey()` blijft alleen topology/boot/health/observability. De scaffold krijgt Vite build/serve-runtime mode voor browserconfig; custom profielen zoals `--mode staging` kunnen daardoor niet als devmodus lekken. ADR 0040, docs, changelogs en regressietests toegevoegd.
+
+**Verificatie:** gerichte regressies 103/103 + Flexbuddy topology/runtime 19/19; volledige unit-suite 1968/1968; packagebuild 17/17 + root build groen; root- en package-lint + AI-lint schoon; changelog-check en productie-audit groen. De live `npm test`-sweep kon niet starten doordat de lokaal geconfigureerde Mongo/Redis-runtime niet bereikbaar was; dit is infrastructuur-onbeschikbaarheid, terwijl alle zelfstandige unit/packagegates groen zijn.
+
+**Files:** core runtime-mode API/tests/docs; server runtime-map/devtool/cookie/bootstrap/portbeleid; api/sync/login/email/docs-ui/error-tracking/devkit/secret-manager callsites; scaffold/CLI templates; ADR 0040; multi-instance-docs; Docker findings/changelogs.
+
+**Notes:** Deze correctie is release-blockerend voor named split environments. De dependency-auditfix landde parallel als `3af7b5d`; deze runtimecorrectie is daarop gerebased. Publicatie, protected push en een nieuwe releasetag blijven expliciet goedkeuringsplichtig.

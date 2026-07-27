@@ -17,7 +17,7 @@
 import {
   getLogger,
   registerRuntimeMapsProvider,
-  resolveEnvKey,
+  isProductionRuntime,
   type RuntimeApiMapsResult,
   type RuntimeMapsProvider,
   type RuntimeSyncMapsResult,
@@ -166,7 +166,7 @@ const mergeInto = (
  * `registerProdRuntimeMapsProvider(...)` (this module) to do both in one
  * step.
  */
-const isProduction = (): boolean => resolveEnvKey() === 'production';
+const isProduction = (): boolean => isProductionRuntime();
 
 export const createProdRuntimeMapsProvider = (
   options: ProdRuntimeMapsLoaderOptions,

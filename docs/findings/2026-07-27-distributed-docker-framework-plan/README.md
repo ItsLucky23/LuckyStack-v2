@@ -17,6 +17,7 @@ Last updated: 2026-07-27
 | 8 | Local upload volumes are unsafe for service replicas on multiple hosts | HIGH | open | 2026-07-27 | — | Shared object storage is required before multi-host promotion |
 | 9 | No framework CI job proves image builds, Compose health, routed API/sync, Socket.io affinity, or split-host behavior | MED | open | 2026-07-27 | — | Unit/integration coverage does not currently build the production topology |
 | 10 | The supported scaling modes and local-preset→remote-fallback runbook are fragmented rather than AI-first | MED | open | 2026-07-27 | — | Consolidate in architecture/hosting/package docs and generated AI runbooks |
+| 11 | Named `LUCKYSTACK_ENV` topology identities were also treated as application development mode | CRITICAL | fixed | 2026-07-27 | 2026-07-27 | ADR 0040 separates NODE_ENV runtime policy from boot/router topology identity; security, maps, cookies, ports and tooling use runtime mode |
 
 ## Executive conclusion
 
@@ -41,7 +42,7 @@ So the short answer is:
 | Horizontal replicas of a complete monolith | Yes | Put replicas behind an external LB and share Redis/database/storage |
 | Horizontal replicas per feature service | Yes via external LB | Each service binding points to its LB URL; native target arrays are not present |
 | Multiple router replicas | Architecturally yes | Edge affinity is mandatory for Socket.io polling/upgrade; shared Redis health state is already supported |
-| Fully split multi-host LuckyStack | Transport-complete, deployment assets pending | Routed invocation + custom-route ownership are implemented; shared storage and production Docker/edge templates remain |
+| Fully split multi-host LuckyStack | Framework transport/assets complete | Routed invocation, custom-route ownership and Docker assets are implemented; shared storage and production edge topology remain consumer/operator responsibilities |
 
 ## Recommended execution model
 

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-//? `resolveEnvKey()` reads LUCKYSTACK_ENV/NODE_ENV. Drive it per test.
+//? Application mode follows NODE_ENV; topology identity is independent.
 const setEnv = (value: string | undefined) => {
-  if (value === undefined) delete process.env.LUCKYSTACK_ENV;
-  else process.env.LUCKYSTACK_ENV = value;
+  if (value === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = value;
 };
 
 import {
@@ -14,7 +14,7 @@ import {
 } from './bindAddress';
 
 describe('bindAddress registry', () => {
-  const savedEnv = process.env.LUCKYSTACK_ENV;
+  const savedEnv = process.env.NODE_ENV;
   const savedPort = process.env.SERVER_PORT;
   const savedIp = process.env.SERVER_IP;
 
@@ -42,14 +42,19 @@ describe('bindAddress registry', () => {
 });
 
 describe('resolveDevCallbackUrl — OAuth follows only a direct pre-hop callback', () => {
-  const savedEnv = process.env.LUCKYSTACK_ENV;
+  const savedEnv = process.env.NODE_ENV;
+  const savedTopologyEnv = process.env.LUCKYSTACK_ENV;
   const registerHop = (from: number, to: number): void => {
     registerBindAddress({ ip: '127.0.0.1', port: from });
     registerBoundAddress({ ip: '127.0.0.1', port: to });
   };
 
   beforeEach(() => setEnv('development'));
-  afterEach(() => setEnv(savedEnv));
+  afterEach(() => {
+    setEnv(savedEnv);
+    if (savedTopologyEnv === undefined) delete process.env.LUCKYSTACK_ENV;
+    else process.env.LUCKYSTACK_ENV = savedTopologyEnv;
+  });
 
   it('rewrites a localhost callback from the intended port to the bound port', () => {
     registerHop(80, 84);
@@ -87,8 +92,9 @@ describe('resolveDevCallbackUrl — OAuth follows only a direct pre-hop callback
       .toBe('https://staging.example.com/auth/callback/google');
   });
 
-  it('is a no-op in production', () => {
+  it('is a no-op in production even with a named topology environment', () => {
     setEnv('production');
+    process.env.LUCKYSTACK_ENV = 'staging';
     registerHop(80, 84);
     expect(resolveDevCallbackUrl('http://localhost:80/auth/callback/google'))
       .toBe('http://localhost:80/auth/callback/google');

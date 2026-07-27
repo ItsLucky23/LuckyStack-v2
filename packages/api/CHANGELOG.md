@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Named deployment environments no longer enable development-only loopback rate-limit bypasses when `NODE_ENV=production`.
+
 ## [0.1.0]
 
 ### Added

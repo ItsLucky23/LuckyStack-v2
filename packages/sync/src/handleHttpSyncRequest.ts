@@ -24,7 +24,7 @@ import {
   setCurrentErrorTrackerIdentity,
   isLoopbackIp,
   extractLanguageFromHeader,
-  resolveEnvKey,
+  isProductionRuntime,
 } from '@luckystack/core';
 
 
@@ -156,7 +156,7 @@ const applyHttpSyncRateLimits = async ({
   //? Mirror handleHttpApiRequest API-O2 fix: use isLoopbackIp() + skipLoopbackInDev
   //? config flag so the loopback check is canonical and config-gated.
   const requesterIsLoopback = config.rateLimiting.skipLoopbackInDev
-    && resolveEnvKey() !== 'production'
+    && !isProductionRuntime()
     && isLoopbackIp(requesterIp ?? '');
   if (!requesterIsLoopback && defaultIpLimit !== false && defaultIpLimit > 0) {
     const ipBucket = requesterIp ?? 'unknown';

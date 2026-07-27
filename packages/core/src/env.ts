@@ -199,3 +199,14 @@ export const isProduction = env.NODE_ENV === 'production';
 //? in functions, class constructors, and anywhere `bootstrapEnv` must not run
 //? at module evaluation time (e.g. unit tests that reset `process.env`).
 export const getEnv = (): RuntimeEnv => bootstrapEnv();
+
+/** Application runtime mode. Keep separate from `resolveEnvKey()`, which is a
+ * deploy-topology identity and may be `staging`, `dockerSplit`, etc. */
+export const resolveRuntimeMode = (): RuntimeEnv['NODE_ENV'] => {
+  const mode = process.env.NODE_ENV;
+  return mode === 'production' || mode === 'test' || mode === 'development'
+    ? mode
+    : getEnv().NODE_ENV;
+};
+export const isProductionRuntime = (): boolean => resolveRuntimeMode() === 'production';
+export const isTestRuntime = (): boolean => resolveRuntimeMode() === 'test';

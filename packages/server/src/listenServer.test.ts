@@ -8,8 +8,8 @@ import type { Server as HttpServer } from 'node:http';
 //? SERVER_PORT_AUTO_INCREMENT retry path (explicit + dev-default), and
 //? non-EADDRINUSE pass-through.
 //?
-//? `coreState.envKey` is mutable so tests can flip the canonical dev-vs-prod
-//? default (`resolveEnvKey`: LUCKYSTACK_ENV before NODE_ENV).
+//? `coreState.envKey` stores the mocked NODE_ENV runtime mode so tests can
+//? flip the canonical dev-vs-prod default independently from topology identity.
 const { loggerMock, coreState, registerBoundAddressMock, writeDevServerInfoMock } = vi.hoisted(() => ({
   loggerMock: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   //? `oauthCallbackBase` is mutable so a test can drive the drift-warning branch.
@@ -20,7 +20,7 @@ const { loggerMock, coreState, registerBoundAddressMock, writeDevServerInfoMock 
 
 vi.mock('@luckystack/core', () => ({
   getLogger: () => loggerMock,
-  resolveEnvKey: () => coreState.envKey,
+  resolveRuntimeMode: () => coreState.envKey,
   getProjectConfig: () => ({
     logging: { socketStartup: true, devLogs: false },
     oauthCallbackBase: coreState.oauthCallbackBase,

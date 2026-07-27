@@ -1968,7 +1968,7 @@ export const pruneAuthNone = (targetDir: string): void => {
   //? overlay compiles without @luckystack/login (leave a minimal placeholder).
   editScaffoldFile(targetDir, 'luckystack/server/index.ts', [
     [
-      `import { registerHook, resolveEnvKey } from '@luckystack/core';
+      `import { registerHook, isProductionRuntime } from '@luckystack/core';
 import { registerNotificationHooks } from '../../server/hooks/notifications';
 
 //? Wires the transactional notification hooks (new sign-in email,
@@ -1979,7 +1979,7 @@ registerNotificationHooks();
 
 //? Example dev-only logger — delete or replace with your own audit hook.
 registerHook('postLogin', ({ userId, provider, isNewUser }) => {
-  if (resolveEnvKey() !== 'production') {
+  if (!isProductionRuntime()) {
     console.log(\`[hooks] login: user=\${userId}, provider=\${provider}, new=\${String(isNewUser)}\`);
   }
   return undefined;
@@ -2270,7 +2270,7 @@ const adaptAuthNonPrisma = (targetDir: string, orm: OrmProvider): void => {
   removeScaffoldPath(targetDir, 'server/hooks/notifications.ts');
   editScaffoldFile(targetDir, 'luckystack/server/index.ts', [
     [
-      `import { registerHook, resolveEnvKey } from '@luckystack/core';
+      `import { registerHook, isProductionRuntime } from '@luckystack/core';
 import { registerNotificationHooks } from '../../server/hooks/notifications';
 
 //? Wires the transactional notification hooks (new sign-in email,
@@ -2279,7 +2279,7 @@ import { registerNotificationHooks } from '../../server/hooks/notifications';
 //? sender no-ops with \`{ ok: false, reason: 'no-sender' }\`.
 registerNotificationHooks();
 `,
-      `import { registerHook, resolveEnvKey } from '@luckystack/core';
+      `import { registerHook, isProductionRuntime } from '@luckystack/core';
 
 //? The template's notification hooks (new sign-in / password-change emails)
 //? read the user via Prisma and are not scaffolded on this data layer — add

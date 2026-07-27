@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `resolveRuntimeMode()`, `isProductionRuntime()` and `isTestRuntime()` expose the `NODE_ENV` application mode separately from deploy-topology identity.
+
+### Fixed
+
+- Production security/validation gates no longer treat named `LUCKYSTACK_ENV` values such as `staging` or `dockerSplit` as development.
+
 ## [0.8.0] - 2026-07-27
 
 ### Added

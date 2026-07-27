@@ -15,6 +15,7 @@ import {
   getProjectName,
   isRedactedLogKey,
   initSharedSentry,
+  isProductionRuntime,
   loadPeer,
   REDACTED_PLACEHOLDER,
   resolveEnvKey,
@@ -80,7 +81,7 @@ interface ResolvedSentryInitConfig {
 //? emitted here so call-time behavior is centralised.
 const resolveSentryInitConfig = (): ResolvedSentryInitConfig | null => {
   const dsn = process.env.SENTRY_DSN ?? process.env.VITE_SENTRY_DSN;
-  const isProduction = resolveEnvKey() === 'production';
+  const isProduction = isProductionRuntime();
   const enabledOverride = process.env.SENTRY_ENABLED ?? process.env.VITE_SENTRY_ENABLED;
 
   if (!dsn) {

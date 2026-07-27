@@ -20,10 +20,15 @@ export { ports } from './config.ports';
 const env = (key: string): string | undefined =>
   typeof process === 'undefined' ? undefined : process.env[key];
 
-//? Honors LUCKYSTACK_ENV first (the framework canonical, mirroring core's
-//? `resolveEnvKey()`), then NODE_ENV — via the browser-safe `env()` helper so
-//? this dual-bundle file never references `process` directly in the client.
-const resolveDev = (): boolean => (env('LUCKYSTACK_ENV') ?? env('NODE_ENV')) !== 'production';
+//? Application mode and deploy-topology identity are separate axes.
+//? NODE_ENV decides server dev/prod behavior; LUCKYSTACK_ENV may name any
+//? deployment environment. The browser has no `process`, so Vite injects the
+//? actual runtime mode. A custom `--mode staging` build remains production.
+declare const __LUCKYSTACK_VITE_RUNTIME_MODE__: string | undefined;
+const viteRuntimeMode = typeof __LUCKYSTACK_VITE_RUNTIME_MODE__ === 'string'
+  ? __LUCKYSTACK_VITE_RUNTIME_MODE__
+  : undefined;
+const resolveDev = (): boolean => (env('NODE_ENV') ?? viteRuntimeMode) !== 'production';
 export const dev = resolveDev();
 
 //? Backend HTTP origin as the BROWSER reaches it — where the framework's own

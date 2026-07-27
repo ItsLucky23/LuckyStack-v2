@@ -115,6 +115,7 @@ describe('initializeSentry — DSN-present orchestration (characterization)', ()
     delete process.env.SENTRY_ENABLED;
     delete process.env.VITE_SENTRY_ENABLED;
     process.env.NODE_ENV = 'test';
+    process.env.LUCKYSTACK_ENV = 'test';
   });
 
   afterEach(() => {
@@ -204,6 +205,7 @@ describe('initializeSentry — DSN-present orchestration (characterization)', ()
   it('uses the production sample-rate branch and honors SENTRY_ENABLED override', async () => {
     process.env.SENTRY_DSN = 'https://abc@example.ingest.sentry.io/1';
     process.env.NODE_ENV = 'production';
+    process.env.LUCKYSTACK_ENV = 'production';
     const { initializeSentry } = await import('./sentry');
 
     initializeSentry();
@@ -214,6 +216,19 @@ describe('initializeSentry — DSN-present orchestration (characterization)', ()
     expect(opts.tracesSampleRate).toBe(0.2);
     //? DSN present ⇒ enabled (production sets the sample rate, not the gate).
     expect(opts.enabled).toBe(true);
+  });
+
+  it('labels a named topology without changing production sampling policy', async () => {
+    process.env.SENTRY_DSN = 'https://abc@example.ingest.sentry.io/1';
+    process.env.NODE_ENV = 'production';
+    process.env.LUCKYSTACK_ENV = 'staging';
+    const { initializeSentry } = await import('./sentry');
+
+    initializeSentry();
+
+    const opts = firstCallArg(fakeSentry.init);
+    expect(opts.environment).toBe('staging');
+    expect(opts.tracesSampleRate).toBe(0.2);
   });
 
   it('enables outside production with a DSN and no SENTRY_ENABLED override', async () => {

@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (40)
+## Decisions (41)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -52,6 +52,7 @@
 | 0037 | Separate routed invocation from realtime Socket.io delivery | 🟢 accepted | api, sync, router, transport, multi-instance, redis | — | `docs/decisions/0037-separate-routed-invocation-from-realtime-socket-delivery.md` |
 | 0038 | Ship generic rendered Docker assets as a project surface | 🟢 accepted | docker, compose, scaffold, cli, deployment, presets | — | `docs/decisions/0038-ship-generic-rendered-docker-assets-as-a-project-surface.md` |
 | 0039 | Use a narrow reachability-aware production audit exception | ⚪ superseded | security, dependencies, ci, react-router, release | — | `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md` |
+| 0040 | Separate application runtime mode from deployment environment identity | 🟢 accepted | core, deployment, security, docker, multi-instance | — | `docs/decisions/0040-separate-runtime-mode-from-deployment-environment-identity.md` |
 | 0041 | Audit required production dependencies and test tooling separately | 🟢 accepted | security, dependencies, ci, eslint, release | 0039 | `docs/decisions/0041-audit-required-production-dependencies-and-test-tooling-separately.md` |
 
 ## Summaries
@@ -389,6 +390,14 @@ Treat Docker as rendered project files, not a runtime package. Fresh scaffolds r
 Keep current React Router 7.18.1 and replace the release workflow's raw `npm audit --audit-level=high` command with `npm run audit:production`.
 
 → `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md`
+
+### 0040 — Separate application runtime mode from deployment environment identity
+
+**0040** · accepted · tags: core, deployment, security, docker, multi-instance · 2026-07-27
+
+Use two explicit axes:
+
+→ `docs/decisions/0040-separate-runtime-mode-from-deployment-environment-identity.md`
 
 ### 0041 — Audit required production dependencies and test tooling separately
 

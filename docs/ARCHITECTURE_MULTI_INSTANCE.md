@@ -177,6 +177,8 @@ Fresh scaffolds include `Dockerfile`, `compose.yaml`, `docker/` and `docs/DOCKER
 
 `LUCKYSTACK_PRESET` selects the backend bundle at container startup instead of hardcoding `default`. Router-enabled builds emit `dist/router/deploy.config.js` and `dist/router/services.config.js`; the default Docker environment binds `system` to `http://app:4100`. Split deployments add one app service/binding per chosen preset while retaining one immutable image.
 
+`NODE_ENV` and `LUCKYSTACK_ENV` are deliberately separate axes. `NODE_ENV=production` controls route maps, cookies, validation, rate limits, port policy and dev tooling. `LUCKYSTACK_ENV=dockerSplit` (or `staging`, `localAdmin`, ...) selects deploy bindings, boot UUIDs, health attestation and observability labels. Never infer production safety from the topology name.
+
 The default `services.config.ts > customRoutes` maps framework-owned non-typed paths (`/auth`, health endpoints, uploads/hooks/docs) to `system`. Consumer routes add their own prefixes and mirror them in `docker/nginx.conf`. App/router are non-root and read-only-root compatible; nginx is unprivileged; Mongo initialization elects a replica set but creates no application data.
 
 For local-preset→remote-staging development, use the gitignored `.env.docker` explicitly. Database and Redis can be selected independently via `LUCKYSTACK_DATABASE_URL` and `LUCKYSTACK_REDIS_*`; this grants normal remote read/write access and never implies migrations or seeding.

@@ -1,4 +1,4 @@
-import { resolveEnvKey } from '@luckystack/core';
+import { isProductionRuntime } from '@luckystack/core';
 
 //? Single source of truth for the session / OAuth-state cookie `Secure` flag:
 //? honor the explicit `http.sessionCookieSecure` override (CORE-39), else the
@@ -18,5 +18,5 @@ export const resolveCookieSecure = (
 ): boolean => {
   if (sessionCookieSecure !== undefined) return sessionCookieSecure;
   if (secureEnv === 'true') return true;
-  return resolveEnvKey() === 'production';
+  return isProductionRuntime();
 };

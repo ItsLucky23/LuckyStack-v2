@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Production docs exposure and error-detail gates now follow runtime mode instead of deploy-topology identity.
+
 ## [0.1.0]
 
 ### Added

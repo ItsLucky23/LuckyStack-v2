@@ -1,5 +1,5 @@
 import tryCatchSync from './tryCatchSync';
-import { resolveEnvKey } from './bootUuid';
+import { isProductionRuntime } from './env';
 
 type ValidationResult =
   | { status: 'success' }
@@ -558,7 +558,7 @@ export const validateInputByType = async ({
   //? build time (the generator ran the devkit resolver before emitting), so we
   //? validate it directly without re-resolving. `validation.runtimeMode: 'off'`
   //? is the loud, documented opt-out that restores the old prod no-op.
-  if (resolveEnvKey() === 'production') {
+  if (isProductionRuntime()) {
     //? Read the mode lazily (call-time) so `registerProjectConfig` can run after
     //? this module is imported. Indirect import avoids pulling projectConfig into
     //? the dev resolver path needlessly — but it's a cheap same-package import.

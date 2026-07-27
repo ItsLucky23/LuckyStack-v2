@@ -66,7 +66,7 @@ export interface CreateLuckyStackServerOptions {
   customRoutes?: CustomRouteHandler;
   /**
    * Enable dev-mode tooling (devkit hot reload, REPL, console init).
-   * Defaults to `resolveEnvKey() !== 'production'`.
+   * Defaults to `resolveRuntimeMode() !== 'production'` (NODE_ENV-based).
    */
   enableDevTools?: boolean;
   /**

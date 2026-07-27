@@ -29,7 +29,7 @@
 import { readFileSync, watch as fsWatch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 
-import { resolveEnvKey, sleep, tryCatchSync } from '@luckystack/core';
+import { resolveRuntimeMode, sleep, tryCatchSync } from '@luckystack/core';
 
 /**
  * Bearer token: a literal string, or a file whose entire contents are the token.
@@ -804,12 +804,9 @@ const scheduleReload = (): void => {
 
 const startDevReload = (config: SecretManagerConfig): void => {
   if (devReloadStarted || config.dev === undefined) return;
-  //? Allowlist the dev environments rather than exact-matching 'production': a
-  //? 'prod' / 'staging' env must NOT silently start fs watchers + a poll on a
-  //? host the operator believes is production. Only an explicit 'development' or
-  //? 'test' enables dev hot reload (an unset env resolves to 'development' via
-  //? the canonical `resolveEnvKey()`, so it counts as dev).
-  const nodeEnv = resolveEnvKey();
+  //? Only NODE_ENV development/test enables filesystem watchers and polling;
+  //? named deploy-topology identities never change application runtime mode.
+  const nodeEnv = resolveRuntimeMode();
   if (nodeEnv !== 'development' && nodeEnv !== 'test') return;
 
   const watch = config.dev.watch ?? true;

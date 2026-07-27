@@ -251,7 +251,8 @@
 | `readBootUuid(envKey?): Promise<string \| null>` | Read the boot UUID (router cross-checks against `/_health`). | -> docs/app-bootstrap.md |
 | `refreshBootUuid(envKey?): Promise<void>` | Extend the existing environment UUID without rotating it; recreate it when Redis recovered after expiry. | -> docs/app-bootstrap.md |
 | `startBootUuidHeartbeat(envKey?): BootUuidHeartbeat` | Start a non-overlapping, unref'd TTL/3 refresh loop; `stop()` cancels it during server shutdown. | -> docs/app-bootstrap.md |
-| `resolveEnvKey(): string` | `LUCKYSTACK_ENV` -> `NODE_ENV` -> `'development'`. | -> docs/app-bootstrap.md |
+| `resolveRuntimeMode()` / `isProductionRuntime()` / `isTestRuntime()` | `NODE_ENV` application mode; security, route-map and dev-tool policy uses this axis. | -> docs/app-bootstrap.md |
+| `resolveEnvKey(): string` | Deploy-topology identity: `LUCKYSTACK_ENV` -> `NODE_ENV` -> `'development'`; not a dev/prod-mode check. | -> docs/app-bootstrap.md |
 | `BOOT_KEY_PREFIX: 'luckystack:boot:'` | Constant — single source of truth so router can't drift. | -> docs/app-bootstrap.md |
 | `collectSynchronizedEnvKeys()` / `computeSynchronizedEnvHashes(bootUuid?)` / `hashSynchronizedValue(value, bootUuid?)` | Cross-env drift detection helpers for the router boot handshake. Both hash helpers now honour `http.healthHash` (default `'plain'` = byte-identical to before); the optional `bootUuid?` arg is only needed when `http.healthHash.salt === '@bootUuid'`. Zero-arg callers unchanged. | -> docs/app-bootstrap.md |
 | `hashSynchronizedValueWith({ mode, salt }, value)` / `resolveHealthHashConfig(bootUuid?)` | Shared health-hash primitives so the router can hash a local value with the SAME `{mode,salt}` (+ resolved boot UUID) the backend used and the boot-handshake compare still matches. | -> docs/app-bootstrap.md |
