@@ -594,7 +594,7 @@ npm run server -- billing,vehicles 4001     # same, listening on port 4001 (seco
 
 - No args: loads `server/prod/generatedApis.default.ts` (aggregate build). This is the **only** bundle in a base install — when `services.config.ts` is absent (no router), `scripts/generateServerRequests.ts` emits just the `default` preset, so a bare `npm run server` always resolves.
 - One preset name: loads `server/prod/generatedApis.{preset}.ts`.
-- Comma-separated list: loads each preset's map and shallow-merges `apis` / `syncs` / `functions`. **Key collisions across presets throw at boot** — services must own exactly one preset (§10.1 ownership rule).
+- Comma-separated list: loads each preset's map and shallow-merges `apis` / `syncs` / `functions`. **API/sync key collisions across presets throw at boot** — services must own exactly one preset (§10.1 ownership rule). Phase-1 builds intentionally repeat the complete function registry in every preset: equivalent function entries deduplicate, while the same function key with different exports fails closed (ADR 0042).
 - The files are emitted by `scripts/generateServerRequests.ts`: the single `default` bundle when no router config is present, or one file per preset defined in `services.config.ts` once `npx luckystack add router` adds it.
 
 **Port (second positional argv).** The listen port comes from `defaultPort: ports.backend` (from `config.ports.ts`), which `server.ts` passes to `bootstrapLuckyStack`. A second positional argv port (`npm run server -- <preset> <port>`) sits ABOVE it and still wins — required for booting multiple instances behind the router on one host. `SERVER_PORT` is no longer read from `.env`.

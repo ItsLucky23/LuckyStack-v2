@@ -9,6 +9,7 @@ Last updated: 2026-07-27
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
+| 2026-07-27 | [2026-07-27-composed-preset-function-collision/](./2026-07-27-composed-preset-function-collision/) | Browser acceptance: composed atomic presets rejected their shared function registry | 1 | 0 open · 1 fixed |
 | 2026-07-27 | [2026-07-27-v080-dependency-audit/](./2026-07-27-v080-dependency-audit/) | v0.8.0 dependency audit: clean-scaffold and framework advisory assessment | 4 | 0 open · 1 fixed · 3 wontfix |
 | 2026-07-27 | [2026-07-27-distributed-docker-framework-plan/](./2026-07-27-distributed-docker-framework-plan/) | Distributed Docker, shared infrastructure, local-preset fallback and horizontal-scaling framework plan | 11 | 6 open · 5 fixed |
 | 2026-07-22 | [2026-07-22-boot-uuid-ttl-review/](./2026-07-22-boot-uuid-ttl-review/) | External finding validation: boot UUID expiry made healthy long-running servers not-ready | 1 | 0 open · 1 fixed |

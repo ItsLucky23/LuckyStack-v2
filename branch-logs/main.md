@@ -1061,3 +1061,15 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Files:** alleen deze publicatieregistratie + branchlogindex; releasecode/tag blijven op `6241aa0`.
 
 **Notes:** Bekende kleine DX-afwijking buiten releasescope: een Bun-scaffold toont in de afsluitende “Next steps” nog `npm run ...` in plaats van `bun run ...`; de gegenereerde Bun-scripts zelf werken wel en zijn succesvol getest.
+
+## 2026-07-27 21:45 — Composed-preset function registry collision hersteld
+
+**User prompt (summary):** Upgrade Flexbuddy naar de nieuwste LuckyStack-versie, activeer routed invocation en maak de Docker-topologie compleet en aantoonbaar werkend.
+
+**Wat ik deed:** De echte Flexbuddy 0.8.1-browsertest ontdekte dat API-calls in een uit atomic presets samengestelde monolith 500 gaven. De loader behandelde de opzettelijk in elk scoped artifact opgenomen volledige function registry als dubbele service ownership. De merge semantiek is gecorrigeerd: equivalente function entries worden eenmaal behouden; verschillende function implementations en dubbele API/sync-routes blijven fail-closed. Drie regressietests, ADR 0042, een gedateerde findingsledger, package-/architectuurdocs en de server-changelog zijn toegevoegd.
+
+**Verificatie:** gerichte regressies 3/3; volledige unit-suite 1971/1971; root- en package-lint schoon; alle 17 packages + rootapp gebouwd; AI-lint/changelog-check/productie-audit groen.
+
+**Files:** `packages/server/src/runtimeMapsLoader.ts`, `packages/server/src/runtimeMapsLoader.test.ts`, server changelog/CLAUDE/runtime-mapdocs, `docs/ARCHITECTURE_PACKAGING.md`, ADR 0042, findingsledger/index en gegenereerde AI-indexen.
+
+**Notes:** De fix is lokaal releaseklaar maar nog niet gepubliceerd. Flexbuddy Docker blijft op gepubliceerde 0.8.1 de regressie tonen totdat een goedgekeurde patchrelease beschikbaar is.

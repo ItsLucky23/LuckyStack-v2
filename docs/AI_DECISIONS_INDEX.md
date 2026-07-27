@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (41)
+## Decisions (42)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -54,6 +54,7 @@
 | 0039 | Use a narrow reachability-aware production audit exception | ⚪ superseded | security, dependencies, ci, react-router, release | — | `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md` |
 | 0040 | Separate application runtime mode from deployment environment identity | 🟢 accepted | core, deployment, security, docker, multi-instance | — | `docs/decisions/0040-separate-runtime-mode-from-deployment-environment-identity.md` |
 | 0041 | Audit required production dependencies and test tooling separately | 🟢 accepted | security, dependencies, ci, eslint, release | 0039 | `docs/decisions/0041-audit-required-production-dependencies-and-test-tooling-separately.md` |
+| 0042 | Deduplicate equivalent functions across composed presets | 🟢 accepted | runtime-maps, presets, functions, multi-instance | — | `docs/decisions/0042-deduplicate-equivalent-functions-across-composed-presets.md` |
 
 ## Summaries
 
@@ -406,6 +407,14 @@ Use two explicit axes:
 The production release gate runs `npm audit --omit=dev --omit=optional --json`. This audits required runtime dependencies and excludes optional peer/tooling trees. It retains the exact React Router RSC/action advisory allowlist described by ADR 0039; every other high or critical finding still fails closed.
 
 → `docs/decisions/0041-audit-required-production-dependencies-and-test-tooling-separately.md`
+
+### 0042 — Deduplicate equivalent functions across composed presets
+
+**0042** · accepted · tags: runtime-maps, presets, functions, multi-instance · 2026-07-27
+
+Runtime-map composition keeps API and sync collision checks strict. Repeated function keys are accepted only when both generated entries have the same keys and each exported value is reference- or value-identical through `Object.is`. The first equivalent wrapper remains in the merged registry.
+
+→ `docs/decisions/0042-deduplicate-equivalent-functions-across-composed-presets.md`
 
 ## Code governed by decisions
 
