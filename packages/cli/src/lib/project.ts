@@ -317,7 +317,9 @@ export const copyDirIfAbsent = (srcDir: string, destDir: string): string[] => {
 //? sits one level under the package root, so `assets/` is `../assets`.
 export const assetPath = (...segments: string[]): string => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.join(here, '..', 'assets', ...segments);
+  const packaged = path.join(here, '..', 'assets');
+  const source = path.join(here, '..', '..', 'assets');
+  return path.join(fs.existsSync(packaged) ? packaged : source, ...segments);
 };
 
 //? Resolve a bare command name (`npm`) to an ABSOLUTE path by scanning `PATH`

@@ -129,6 +129,19 @@ const writeBundleEntry = () => {
   return entryFile;
 };
 
+const monorepoAliases = {
+  //? esbuild aliases match package subpaths too. Keep the explicit `/config`
+  //? entry before the barrel: without it `@luckystack/core/config` becomes
+  //? `packages/core/src/index.ts/config` and the production bundle fails.
+  '@luckystack/core/config': path.join(root, 'packages/core/src/config.ts'),
+  '@luckystack/core': path.join(root, 'packages/core/src/index.ts'),
+  '@luckystack/login': path.join(root, 'packages/login/src/index.ts'),
+  '@luckystack/sync': path.join(root, 'packages/sync/src/index.ts'),
+  '@luckystack/error-tracking': path.join(root, 'packages/error-tracking/src/index.ts'),
+  '@luckystack/api': path.join(root, 'packages/api/src/index.ts'),
+  '@luckystack/presence': path.join(root, 'packages/presence/src/index.ts'),
+};
+
 const run = async () => {
   await build({
     entryPoints: [writeBundleEntry()],
@@ -140,18 +153,23 @@ const run = async () => {
     sourcemap: enableSourcemap,
     external: externalDeps,
     logLevel: 'info',
-    alias: {
-      //? esbuild aliases match package subpaths too. Keep the explicit `/config`
-      //? entry before the barrel: without it `@luckystack/core/config` becomes
-      //? `packages/core/src/index.ts/config` and the production bundle fails.
-      '@luckystack/core/config': path.join(root, 'packages/core/src/config.ts'),
-      '@luckystack/core': path.join(root, 'packages/core/src/index.ts'),
-      '@luckystack/login': path.join(root, 'packages/login/src/index.ts'),
-      '@luckystack/sync': path.join(root, 'packages/sync/src/index.ts'),
-      '@luckystack/error-tracking': path.join(root, 'packages/error-tracking/src/index.ts'),
-      '@luckystack/api': path.join(root, 'packages/api/src/index.ts'),
-      '@luckystack/presence': path.join(root, 'packages/presence/src/index.ts'),
+    alias: monorepoAliases,
+  });
+
+  await build({
+    entryPoints: {
+      'deploy.config': path.join(root, 'deploy.config.ts'),
+      'services.config': path.join(root, 'services.config.ts'),
     },
+    outdir: 'dist/router',
+    bundle: true,
+    platform: 'node',
+    target: 'node22',
+    format: 'esm',
+    sourcemap: enableSourcemap,
+    external: externalDeps,
+    logLevel: 'info',
+    alias: monorepoAliases,
   });
 };
 

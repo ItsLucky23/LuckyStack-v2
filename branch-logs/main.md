@@ -964,3 +964,22 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Files touched:** `docs/findings/2026-07-27-distributed-docker-framework-plan/README.md`, `docs/findings/README.md`, `branch-logs/main.md`, `branch-logs/INDEX.md`.
 
 **Notes / decisions:** Dit is een onderbouwd voorstel, nog geen geaccepteerde architectuurbeslissing. De bestaande HTTP/SSE parity-laag hergebruiken is kleiner en veiliger dan direct een tweede intern RPC-protocol bouwen.
+
+## 2026-07-27 16:22 — Routed invocation + generieke Docker-productlaag
+
+**User prompt (summary):** Implementeer het goedgekeurde hybrid distributed transportplan volledig en ga daarna autonoom door met fase 2: generaliseer de bewezen Flexbuddy Docker/Compose-opzet naar LuckyStack zonder Flexbuddy-seeds, env-namen, integraties, servicegroepen of storagecredentials over te nemen.
+
+**Wat ik deed:**
+- `transport.invocation: 'socket' | 'routed-http'` toegevoegd; API/sync gebruiken optioneel HTTP/SSE voor uitvoering terwijl callbacks, rooms, presence en fanout op één system-Socket.io-verbinding blijven.
+- Origin-scoped CSRF, sessionStorage-bearer auth, lossless GET-payloads, timeout/abort/offline-queuegedrag en JSON/SSE-enveloppen afgedekt.
+- `services.config.ts > customRoutes` toegevoegd met longest-prefix routing en fail-fast router/deployvalidatie; frameworkpaden wijzen standaard naar `system`.
+- Harde multiprocess-integratietest toegevoegd: lokaal admin-handlerexecution, remote system-socketdelivery via gedeelde Redis, stagingfallback en exact één browsersocket.
+- Provider/router-aware Docker-assets toegevoegd aan de scaffold en `luckystack add docker`/`docker check`: npm/Bun multi-stage build, Prisma runtimeprojectie, preset-entrypoint, non-root app/router, unprivileged nginx, private database/Redis, health gates, read-only roots en seed-vrije Mongo replica-init.
+- Verse scaffolds voor Mongo/Postgres/MySQL/SQLite gevalideerd; echte Linux-images gebouwd. De geïsoleerde runtimeproef gaf healthy app/router en een SPA-200 op `127.0.0.1:18081`. Publieke routed `/readyz` bleef alleen in de npm-0.7.6-proef 502 omdat die gepubliceerde router de nieuwe customRoutes-code nog niet bevat; bronintegratietests zijn groen en er is niet gepubliceerd.
+- ADR 0037/0038, lesson 0013, changelogs, architecture/hosting/package/CLI/scaffolddocs en findings 1–4 bijgewerkt.
+
+**Verificatie:** gerichte suites 168/168 + Docker/CLI/scaffold 146/146; TypeScript schoon; packagebuild 17/17; Redis-hardfail integration 14/14; Compose-config voor vier databases + router/socket varianten geldig; Dockerfile checks waarschuwingvrij; volledige gate wordt direct voor commit opnieuw uitgevoerd.
+
+**Files:** core API/CSRF/routed transport; sync client; router ownership/proxy/integratietest; server GET-decodering; devkit validator; root/template/CLI topology; template + CLI Docker-assets/commands; bundle scripts; docs/ADRs/lesson/findings/changelogs/indexen.
+
+**Notes / decisions:** Socket blijft monolith-default; router-scaffolds kiezen routed invocation. Docker is een transparant projectoppervlak, geen runtimepackage. Bestaande consumerfiles worden nooit overschreven. De bestaande gepubliceerde dependencyboom meldde bij de schone npm-install 18 high audit-items; buiten deze taak niet stil gerepareerd en vóór een release apart te beoordelen.

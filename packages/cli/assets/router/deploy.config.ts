@@ -67,9 +67,9 @@ const deployConfig: DeployConfig = {
       urlEnvKey: 'DATABASE_URL',
     },
   },
-  //? Single-instance default: no cross-environment routing. Add entries here
-  //? (development / staging / production with their resource + per-service URL
-  //? bindings) once you run the app behind `npm run router`. Example:
+  //? The Docker scaffold routes the default system service to its private app
+  //? container. Add development/staging/production entries and per-service
+  //? bindings when you split presets across additional processes. Example:
   //?
   //?   environments: {
   //?     development: {
@@ -82,7 +82,13 @@ const deployConfig: DeployConfig = {
   //?     // Add ONLY the immediate TLS proxy/load-balancer subnet. Empty = trust none.
   //?     trustedProxyCidrs: ['127.0.0.1/32', '::1/128'],
   //?   },
-  environments: {},
+  environments: {
+    docker: {
+      redis: 'redisShared',
+      mongo: 'mongoShared',
+      bindings: { system: 'http://app:4100' },
+    },
+  },
 };
 
 registerDeployConfig(deployConfig);

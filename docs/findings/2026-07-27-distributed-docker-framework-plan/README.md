@@ -7,10 +7,10 @@ Last updated: 2026-07-27
 
 | # | Finding | Severity | Status | Since | Resolved | Notes / link |
 |---|---------|----------|--------|-------|----------|--------------|
-| 1 | Socket-first `apiRequest`/`syncRequest` executes on the `system` socket backend, so a locally owned feature preset is bypassed | HIGH | open | 2026-07-27 | — | `packages/core/src/apiRequest.ts`, `packages/sync/src/syncRequest.ts`, `packages/server/src/loadSocket.ts` |
-| 2 | Production Docker/Compose assets are not shipped by the scaffolder or `luckystack add router` | HIGH | open | 2026-07-27 | — | Only root `compose.yaml`/`compose.override.yaml` exist |
-| 3 | Production container startup is not preset-aware as a first-class generated artifact | MED | open | 2026-07-27 | — | Generated maps support presets; consumer Docker currently hardcodes `default` |
-| 4 | Custom HTTP-route ownership is not represented in the shared topology manifest | HIGH | open | 2026-07-27 | — | Default first-segment routing caused live `serviceNotAssigned` regressions in Flexbuddy |
+| 1 | Socket-first `apiRequest`/`syncRequest` executes on the `system` socket backend, so a locally owned feature preset is bypassed | HIGH | fixed | 2026-07-27 | 2026-07-27 | `transport.invocation: 'routed-http'` now routes typed API/sync execution through HTTP/SSE; one system socket remains for realtime delivery. ADR 0037 + hard-fail Redis integration proof. |
+| 2 | Production Docker/Compose assets are not shipped by the scaffolder or CLI | HIGH | fixed | 2026-07-27 | 2026-07-27 | Fresh scaffolds render provider/router-aware assets; existing projects use `npx luckystack add docker`; raw template/CLI assets have byte-parity tests. |
+| 3 | Production container startup is not preset-aware as a first-class generated artifact | MED | fixed | 2026-07-27 | 2026-07-27 | `docker/start.sh` selects `LUCKYSTACK_PRESET` at runtime; images bundle generated preset maps and router configs without hardcoding execution to `default`. |
+| 4 | Custom HTTP-route ownership is not represented in the shared topology manifest | HIGH | fixed | 2026-07-27 | 2026-07-27 | `services.config.ts > customRoutes` is pure data; longest-prefix routing plus router/preset/deploy fail-fast validation. |
 | 5 | A service binding accepts one URL, not a health-aware replica target pool | MED | open | 2026-07-27 | — | External load-balancer URL works today; router-native pools do not |
 | 6 | Multi-router/System-replica Socket.io affinity is not delivered as production edge configuration | HIGH | open | 2026-07-27 | — | Polling + upgrade must remain on one backend; shared Redis does not replace affinity |
 | 7 | Managed/remote Redis TLS is possible only through custom client registration, not simple standard env configuration | MED | open | 2026-07-27 | — | `luckystack/core/clients.ts` supports custom ioredis; default client only reads host/port/user/password |
@@ -29,7 +29,7 @@ LuckyStack already has most **server-side primitives** needed for this model:
 - a binding may point at an external load balancer, so one service can already have multiple replicas behind that URL;
 - router health state and fallback state can be shared through Redis.
 
-The important qualification is that the complete browser flow does **not** yet honor split ownership. Browser `apiRequest` and `syncRequest` calls are emitted over the single Socket.io connection, and that connection is pinned to `routing.websocketService` (normally `system`). The process terminating the socket therefore executes the handler. Redis can distribute the resulting event, but it cannot make a handler that is absent from `system` execute on the owning feature backend.
+Implementation update (2026-07-27): the browser flow now honors split ownership when `transport.invocation: 'routed-http'` is selected. `apiRequest` and `syncRequest` invoke through routed HTTP/SSE while the single Socket.io connection remains pinned to `routing.websocketService` (normally `system`) for rooms, presence and realtime callbacks. Redis distributes the resulting events; it still does not remotely execute handlers. Socket invocation remains the backwards-compatible monolith default.
 
 So the short answer is:
 
@@ -37,11 +37,11 @@ So the short answer is:
 |---|---|---|
 | One shared remote Redis | Yes | Every backend/router must use the same instance, credentials, key namespace and compatible secrets |
 | Local containers against staging Redis/Mongo | Yes | Explicit opt-in env; this gives normal staging read/write access |
-| Start only `admin` locally, keep other services remote | Partly | Router HTTP routing works; socket-ingressed API/sync execution still lands on `system` |
+| Start only `admin` locally, keep other services remote | Yes with routed invocation | Set `transport.invocation: 'routed-http'`; local `admin` executes its routes and other services use router fallback |
 | Horizontal replicas of a complete monolith | Yes | Put replicas behind an external LB and share Redis/database/storage |
 | Horizontal replicas per feature service | Yes via external LB | Each service binding points to its LB URL; native target arrays are not present |
 | Multiple router replicas | Architecturally yes | Edge affinity is mandatory for Socket.io polling/upgrade; shared Redis health state is already supported |
-| Fully split multi-host LuckyStack | Not end-to-end yet | Needs routed invocation transport, custom-route ownership, shared storage and production templates/tests |
+| Fully split multi-host LuckyStack | Transport-complete, deployment assets pending | Routed invocation + custom-route ownership are implemented; shared storage and production Docker/edge templates remain |
 
 ## Recommended execution model
 

@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
-| 2026-07-27 | [2026-07-27-distributed-docker-framework-plan/](./2026-07-27-distributed-docker-framework-plan/) | Distributed Docker, shared infrastructure, local-preset fallback and horizontal-scaling framework plan | 10 | 10 open |
+| 2026-07-27 | [2026-07-27-distributed-docker-framework-plan/](./2026-07-27-distributed-docker-framework-plan/) | Distributed Docker, shared infrastructure, local-preset fallback and horizontal-scaling framework plan | 10 | 6 open · 4 fixed |
 | 2026-07-22 | [2026-07-22-boot-uuid-ttl-review/](./2026-07-22-boot-uuid-ttl-review/) | External finding validation: boot UUID expiry made healthy long-running servers not-ready | 1 | 0 open · 1 fixed |
 | 2026-07-22 | [2026-07-22-v074-release-audit/](./2026-07-22-v074-release-audit/) | v0.7.4 release audit: newly published sharp/libvips advisory | 1 | 0 open · 1 fixed |
 | 2026-07-21 | [2026-07-21-test-runner-env-bootstrap-review/](./2026-07-21-test-runner-env-bootstrap-review/) | Review of ADR 0032 test-process env/secret bootstrap and direct Layer-5 path | 1 | 0 open · 1 fixed |

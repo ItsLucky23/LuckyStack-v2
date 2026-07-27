@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Fresh scaffolds now include provider-aware hardened Docker/Compose assets, preset-aware app/router startup, unprivileged nginx, private infrastructure and a seed-free Mongo replica initializer.
+- Production bundles emit router topology ESM under `dist/router` when router config is present.
+
+### Fixed
+
+- Production images retain generated Prisma runtime artifacts instead of replacing them with an ungenerated production dependency tree.
+- Fresh server bundles now register the required translation-backed localized response normalizer.
+
 ## [0.7.5] - 2026-07-22
 
 ### Fixed

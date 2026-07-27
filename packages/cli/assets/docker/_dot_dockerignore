@@ -1,0 +1,47 @@
+# Dependency/build output
+node_modules
+dist
+.cache
+.eslintcache
+*.tsbuildinfo
+
+# Version control and AI/editor state
+.git
+.github
+.gitlab
+.claude
+.agents
+.codex
+.agent-browser
+.playwright-mcp
+.vscode
+.idea
+branch-logs
+docs/findings
+screenshots
+test-results
+playwright-report
+
+# Secrets and local environment overlays (.env is committed/non-secret)
+.env.local
+.env.*.local
+.env.docker
+.secret-manager-token
+*.pem
+*.key
+
+# Runtime/local data
+uploads
+output
+.temp
+__pycache__
+*.pyc
+NUL
+
+# Generated files are rebuilt inside the image
+src/_sockets/apiTypes.generated.ts
+src/_sockets/apiInputSchemas.generated.ts
+src/docs/apiDocs.generated.json
+src/docs/apiTypeDiagnostics.generated.json
+server/prod/generatedApis*.ts
+*.generated.*

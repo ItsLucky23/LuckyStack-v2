@@ -1,0 +1,12 @@
+# Copy to .env.docker (gitignored). Defaults use private local Compose services.
+# To use remote/staging infrastructure, set only the resources you intend to use.
+# Containers reach host tunnels through host.docker.internal, not 127.0.0.1.
+# WARNING: remote values grant normal application read/write access.
+
+LUCKYSTACK_PRESET=default
+# LUCKYSTACK_DATABASE_URL={{DOCKER_REMOTE_DATABASE_URL_EXAMPLE}}
+# LUCKYSTACK_REDIS_HOST=host.docker.internal
+# LUCKYSTACK_REDIS_PORT=6379
+# LUCKYSTACK_REDIS_USER=default
+# LUCKYSTACK_REDIS_PASSWORD=<remote-redis-password>
+# LUCKYSTACK_LOCAL_REDIS_PASSWORD=<separate-local-only-password>

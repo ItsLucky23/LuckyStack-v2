@@ -7,10 +7,10 @@
 
 | Package | Use case | Required peers | Optional peers |
 |---|---|---|---|
-| `@luckystack/core` | Foundation: socket-first transport contracts, DI registries (config, prisma, redis, notifier, email, error-tracker, logger, runtime maps), hooks bus, cross-cutting primitives (`tryCatch`, rate limiter, CORS, validateRequest, offline queue, CSRF), AND the LuckyStack eslint contract via the `@luckystack/core/eslint` subpath. | `@prisma/client@^6.19.0`, `ioredis@^5.10.0`, `socket.io@^4.8.0`, `socket.io-client@^4.8.0`, `zod@^4.0.0` | `react@^19.2.0`, `react-dom@^19.2.0`, `react-router-dom@^7.0.0`, `sonner@^2.0.0`, `eslint@^9.0.0` (only `/eslint` subpath) |
+| `@luckystack/core` | Foundation: socket-first realtime contracts plus optional routed HTTP/SSE invocation, DI registries (config, prisma, redis, notifier, email, error-tracker, logger, runtime maps), hooks bus, cross-cutting primitives (`tryCatch`, rate limiter, CORS, validateRequest, offline queue, CSRF), AND the LuckyStack eslint contract via the `@luckystack/core/eslint` subpath. | `@prisma/client@^6.19.0`, `ioredis@^5.10.0`, `socket.io@^4.8.0`, `socket.io-client@^4.8.0`, `zod@^4.0.0` | `react@^19.2.0`, `react-dom@^19.2.0`, `react-router-dom@^7.0.0`, `sonner@^2.0.0`, `eslint@^9.0.0` (only `/eslint` subpath) |
 | `@luckystack/server` | One-call server bootstrap that wires raw Node HTTP, Socket.io (+ Redis adapter), framework routes (`/api/*`, `/sync/*`, `/_health`, `/livez`, `/readyz`, `/_test/reset`, `/auth/*`), CSRF, CORS, security headers, and dev hot reload. | `@prisma/client@^6.19.0` (via core), `socket.io@^4.8.0` | `@luckystack/error-tracking`, `@luckystack/email`, `@luckystack/docs-ui`, `@luckystack/devkit` (dev-only) |
 | `@luckystack/api` | Transport-agnostic API request layer for file-based `_api/` routes — handles auth, rate limit, Zod validation, hook dispatch, and response normalization for both socket and HTTP transports. | `@prisma/client@^6.19.0` (via core), `socket.io@^4.8.0` | none |
-| `@luckystack/sync` | Real-time room-based fanout over Socket.io (+ HTTP/SSE fallback) for file-based `_sync/` routes with streaming primitives and an offline-replay queue. | `@prisma/client@^6.19.0` (via core), `socket.io@^4.8.0`, `socket.io-client@^4.8.0` | `react@^19.2.0` (only `/client` subpath) |
+| `@luckystack/sync` | Real-time room-based fanout over one Socket.io connection, with configurable socket or routed HTTP/SSE invocation for file-based `_sync/` routes with streaming primitives and an offline-replay queue. | `@prisma/client@^6.19.0` (via core), `socket.io@^4.8.0`, `socket.io-client@^4.8.0` | `react@^19.2.0` (only `/client` subpath) |
 
 ## Auth & Sessions
 
@@ -35,7 +35,7 @@
 
 | Package | Use case | Required peers | Optional peers |
 |---|---|---|---|
-| `@luckystack/router` | Optional standalone HTTP + WebSocket load-balancer for multi-instance / preset-bundle deploys with boot-UUID handshake, Redis-backed health state, and dev-to-staging fallback proxy. The router's topology config files (`services.config.ts` + `deploy.config.ts`, plus the build-time `server/config/presetLoader.ts`) are **NOT** in a default install — they ship via `npx luckystack add router` (which also wires their two `server.ts` side-effect imports) and are removed again by `npx luckystack remove router`. | `ioredis@^5.10.0` | none |
+| `@luckystack/router` | Optional standalone HTTP + WebSocket load-balancer for multi-instance / preset-bundle deploys with routed typed invocation, pure-data custom-route ownership, boot-UUID handshake, Redis-backed health state, and dev-to-staging fallback proxy. The router's topology config files (`services.config.ts` + `deploy.config.ts`, plus the build-time `server/config/presetLoader.ts`) are **NOT** in a default install — they ship via `npx luckystack add router` (which also wires their two `server.ts` side-effect imports) and are removed again by `npx luckystack remove router`. | `ioredis@^5.10.0` | none |
 | `@luckystack/cron` | Leader-elected, Redis-backed cron scheduler: declarative recurring jobs (`registerCronJob`, cron expressions via croner or `{ everyMs }` intervals) that fire on exactly ONE instance, with per-run dedup leases, overlap guards, jitter, per-tenant fan-out, run stats (`getCronJobStats`), and `preCronRun`/`postCronRun` hooks. Auto-wired at boot; register jobs in `luckystack/cron/*.ts`. Jobs must be idempotent (best-effort single-Redis lease). NOT a queue — for retries/priorities use bullmq. | none (Redis via core) | none |
 
 ## Dev Tools
@@ -57,7 +57,8 @@
 
 | Package | Use case | Required peers | Optional peers |
 |---|---|---|---|
-| `create-luckystack-app` | Interactive scaffold CLI for new LuckyStack projects (`npx create-luckystack-app <name>`); copies template, runs `npm install` + `npx prisma generate`. | none (Node >= 20, npm on PATH) | none |
+| `create-luckystack-app` | Interactive scaffold CLI for new LuckyStack projects (`npx create-luckystack-app <name>`); renders provider-aware Docker/Compose assets, copies the template, then runs the selected package-manager install + Prisma generation where applicable. | none (Node >= 20, npm or Bun on PATH) | Docker/Compose for the generated container workflow |
+| `@luckystack/cli` | Post-install project management (`luckystack add/remove/manage/update`) plus `add docker` and `docker check` for existing projects. Docker assets are project files, not another runtime package. | none | Docker/Compose for Docker checks and startup |
 
 ## "I want to..." cheatsheet
 
@@ -74,6 +75,7 @@ Quick lookup: feature -> which package(s) to suggest.
 | Run multi-instance load-balanced | `@luckystack/router` |
 | Add API endpoints | `@luckystack/api` (auto-wired via `@luckystack/server`; create `src/{page}/_api/{name}_v{N}.ts`) |
 | Bootstrap a new project | `npx create-luckystack-app` |
+| Add production-like Docker assets to an existing app | `npx luckystack add docker` (provided by `@luckystack/cli`; no runtime package added) |
 | Run integration tests | `@luckystack/test-runner` |
 | Browse generated docs in dev | `@luckystack/docs-ui` |
 | Resolve secrets from a central server (committed pointers) | `@luckystack/secret-manager` |

@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (36)
+## Decisions (38)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -49,6 +49,8 @@
 | 0034 | Email timeout is cancellation intent, not proof of delivery failure | 🟢 accepted | email, reliability, idempotency, cancellation | — | `docs/decisions/0034-email-timeout-means-delivery-outcome-unknown.md` |
 | 0035 | TOTP ciphertext carries a key id and decrypt-only legacy keyring | 🟢 accepted | auth, 2fa, totp, encryption, rotation | — | `docs/decisions/0035-totp-ciphertext-carries-a-key-id-and-legacy-keyring.md` |
 | 0036 | Boot UUID TTL requires a stable environment-level heartbeat | 🟢 accepted | readiness, redis, boot-uuid, multi-instance, reliability | — | `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md` |
+| 0037 | Separate routed invocation from realtime Socket.io delivery | 🟢 accepted | api, sync, router, transport, multi-instance, redis | — | `docs/decisions/0037-separate-routed-invocation-from-realtime-socket-delivery.md` |
+| 0038 | Ship generic rendered Docker assets as a project surface | 🟢 accepted | docker, compose, scaffold, cli, deployment, presets | — | `docs/decisions/0038-ship-generic-rendered-docker-assets-as-a-project-surface.md` |
 
 ## Summaries
 
@@ -361,6 +363,22 @@ Keep the TTL and treat the UUID as an environment-level value. After HTTP listen
 **Governs** (`//? @adr 0036`): `packages/core/src/bootUuid.ts`
 
 → `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md`
+
+### 0037 — Separate routed invocation from realtime Socket.io delivery
+
+**0037** · accepted · tags: api, sync, router, transport, multi-instance, redis · 2026-07-27
+
+Keep one browser Socket.io connection to the configured websocket service, and make invocation transport independently configurable through `transport.invocation: 'socket' | 'routed-http'`.
+
+→ `docs/decisions/0037-separate-routed-invocation-from-realtime-socket-delivery.md`
+
+### 0038 — Ship generic rendered Docker assets as a project surface
+
+**0038** · accepted · tags: docker, compose, scaffold, cli, deployment, presets · 2026-07-27
+
+Treat Docker as rendered project files, not a runtime package. Fresh scaffolds receive a provider/router-aware `Dockerfile`, `compose.yaml`, `.dockerignore`, nginx config, preset entrypoint, remote-infrastructure env template, generic Mongo replica initializer and runbook. Existing projects use `npx luckystack add docker`; files are copy-if-absent and `luckystack docker check` validates the rendered surface without printing secrets.
+
+→ `docs/decisions/0038-ship-generic-rendered-docker-assets-as-a-project-surface.md`
 
 ## Code governed by decisions
 
