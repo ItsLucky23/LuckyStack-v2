@@ -11,3 +11,15 @@
 **Files:** core methodeselectie/test/docs/changelog; create-luckystack-app wrapper/test/changelog; root `src/_sockets/apiRequest.ts`; API-architectuurdoc; lesson 0015.
 
 **Notes:** Niet gepubliceerd. Een schone artifactvrije worktree legde daarnaast bloot dat Prisma Client vóór route-typegeneratie nodig is; dit is apart vastgelegd als lesson 0015 en niet buiten scope stil gerepareerd.
+
+## 2026-07-27 23:45 — v0.8.3 release voorbereid
+
+**User prompt (summary):** Publiceer de methodemapfix wanneer de volledige verificatie zekerheid geeft.
+
+**Wat ik deed:** Alle 17 packages lockstep naar `0.8.3` verhoogd, interne LuckyStack-ranges en lockfile bijgewerkt, core/scaffolderchangelogs gedateerd en de capability-index vernieuwd. De nieuwe versie bevat uitsluitend de reeds geïsoleerde methodemapbootstrapfix plus releasemetadata.
+
+**Verificatie:** build 17/17 + rootapp; 1975/1975 unittests; root/package/AI-lint schoon; productie-audit, changelog- en doc-stalenesschecks groen; `pack:dry` en `publish:dry` valideerden 17/17 packages.
+
+**Files:** 17 packageversies/interne ranges, `package-lock.json`, core/scaffolderchangelogs, capability-index en branchlog/index.
+
+**Notes:** Klaar voor protected fast-forward, additieve `v0.8.3`-tag en provenance-workflow. Bestaande tags en npm-artifacts worden niet herschreven.
