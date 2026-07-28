@@ -23,3 +23,15 @@
 **Files:** 17 packageversies/interne ranges, `package-lock.json`, core/scaffolderchangelogs, capability-index en branchlog/index.
 
 **Notes:** Klaar voor protected fast-forward, additieve `v0.8.3`-tag en provenance-workflow. Bestaande tags en npm-artifacts worden niet herschreven.
+
+## 2026-07-27 23:59 — v0.8.3 met provenance gepubliceerd
+
+**User prompt (summary):** Publiceer de geverifieerde methodemapfix.
+
+**Wat ik deed:** Releasecommit `3ae8007` fast-forward naar protected `main` gepusht, additieve annotated tag `v0.8.3` gemaakt en GitHub Actions workflow `30366112651` gevolgd tot succesvolle publicatie. Alle 17 npm-latestversies en de SLSA-attestations van core en scaffolder zijn gecontroleerd. Een verse registry-scaffold met router/SQLite bevestigde de daadwerkelijke `registerApiMethodMap(apiMethodMap)`-bootstrap en slaagde voor artifactgeneratie, lint, build en Docker-wiringcheck.
+
+**Verificatie:** provenance-workflow volledig groen; npm 17/17 op `0.8.3`; gepubliceerde consumer install/generate/lint/build/docker-check groen.
+
+**Files:** alleen deze publicatieregistratie + branchlogindex; releasetag blijft op `3ae8007`.
+
+**Notes:** Bestaande tags en npm-artifacts zijn niet gewijzigd. Nieuwe projecten bevatten de fix direct; bestaande projecten krijgen de wrapper via dependency-upgrade plus `npx luckystack update --app` met sidecarbescherming.
