@@ -154,6 +154,12 @@ mode forwards the sessionStorage token as bearer auth. GET payloads use the
 reserved `__luckystack_data` query field internally so nested objects, numbers
 and booleans retain their JSON types.
 
+`src/_sockets/apiRequest.ts` must register the generated `apiMethodMap` before
+re-exporting `apiRequest`. Routed HTTP uses this runtime map to preserve each
+handler's declared GET/POST/PUT/DELETE method; route-name inference is only a
+legacy fallback and cannot classify names such as `organization` correctly.
+Fresh scaffolds wire this registration automatically.
+
 ## HTTP API Access
 
 APIs are accessible via HTTP for testing, routed invocation, webhooks, or non-socket clients.

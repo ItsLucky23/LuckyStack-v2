@@ -3,9 +3,9 @@
 //? the actual HTTP method declared on the handler instead of guessing
 //? from the name prefix.
 //?
-//? Wiring: the project's `src/_sockets/socketInitializer.ts` (or any boot
-//? entry that imports `apiTypes.generated.ts`) calls
-//? `registerApiMethodMap(apiMethodMap)` once at module load. Until then,
+//? Wiring: the project's `src/_sockets/apiRequest.ts` wrapper imports the
+//? generated runtime map and calls `registerApiMethodMap(apiMethodMap)` once at
+//? module load, immediately before re-exporting the core request helper. Until then,
 //? lookups return `undefined` and `isGetMethod` falls back to the
 //? prefix heuristic (preserving previous behavior for transitional code).
 

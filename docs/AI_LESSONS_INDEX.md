@@ -9,7 +9,7 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (14)
+## Lessons (15)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
@@ -27,6 +27,7 @@
 | 0012 | Alle input op _ai-routes geweigerd" was geen type-bug — het was een stale dev-proces met lege devApis | 🟠 high | packages/server | dev-tooling, false-diagnosis, silent-failure, ports, hot-reload, devkit | `docs/lessons/0012-a-stale-broken-dev-process-looks-like-a-per-route-bug.md` |
 | 0013 | Production dependencies can overwrite generated runtime artifacts | 🟠 high | docker | docker, prisma, multi-stage, healthcheck, scaffold | `docs/lessons/0013-production-dependencies-can-overwrite-generated-runtime-artifacts.md` |
 | 0014 | Global transitive overrides can hide platform-specific contract breakage | 🟠 high | dependencies | dependencies, eslint, linux, ci, release | `docs/lessons/0014-global-transitive-overrides-can-hide-platform-specific-contract-breakage.md` |
+| 0015 | Generate Prisma before type maps in artifact-free worktrees | 🟡 medium | build | prisma, type-generation, worktree, postinstall, build | `docs/lessons/0015-generate-prisma-before-type-maps-in-artifact-free-worktrees.md` |
 
 ## Takeaways
 
@@ -141,3 +142,11 @@ After ORM/client generation, copy required generated runtime dependency director
 Never silence a transitive advisory by globally forcing an incompatible major without testing every consumer contract. Reproduce release gates in the target Linux/Node environment before tagging, not only on the developer OS. Distinguish required runtime dependencies from optional peer/tooling trees in audit policy, while tracking both explicitly. Keep the lockfile on each package's declared compatible major and prefer upstream plugin upgrades over cross-major overrides. Treat a green audit report as insufficient when the dependency graph no longer matches consumers' declared ranges.
 
 → `docs/lessons/0014-global-transitive-overrides-can-hide-platform-specific-contract-breakage.md`
+
+### 0015 — Generate Prisma before type maps in artifact-free worktrees
+
+**0015** · medium · build · tags: prisma, type-generation, worktree, postinstall, build · 2026-07-27
+
+In artifact-free worktree and release validation, generate Prisma Client before generating route type maps. Treat an unsupported `symbol` error on a Prisma-backed DTO as a possible missing-client artifact, not immediately as a route contract violation. A future build-pipeline fix should order Prisma generation before route generation or produce a specific missing-Prisma diagnostic; do not weaken wire-type validation to hide the placeholder.
+
+→ `docs/lessons/0015-generate-prisma-before-type-maps-in-artifact-free-worktrees.md`

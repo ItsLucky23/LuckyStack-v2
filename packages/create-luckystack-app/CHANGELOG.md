@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fresh scaffolds register the generated API method map before exposing `apiRequest`, so routed HTTP preserves explicitly declared methods for routes whose names do not reveal GET/POST/PUT/DELETE semantics.
+
 ## [0.8.1] - 2026-07-27
 
 ### Fixed

@@ -74,8 +74,8 @@ export type ApiStreamEvent<T extends StreamPayload = StreamPayload> = T;
  * Primary path: consult the registered `apiMethodMap` (generated from the
  * actual handler's `httpMethod` export or name-based inference at codegen
  * time). Falls back to name-prefix heuristic only when the map isn't
- * registered yet — typically because the consumer hasn't called
- * `registerApiMethodMap(...)` from their `socketInitializer.ts` boot file.
+ * registered yet — typically because an older consumer wrapper has not called
+ * `registerApiMethodMap(...)` from `src/_sockets/apiRequest.ts` before re-exporting this helper.
  */
 const isGetMethodByPrefix = (apiName: string): boolean => isGetMethodName(apiName.toLowerCase());
 
@@ -88,7 +88,7 @@ const routedApiErrorCode = (kind: RoutedApiFailureKind): string => {
   return 'api.ioUnavailable';
 };
 
-const resolveHttpMethod = (apiName: string, version: string) => {
+export const resolveApiRequestHttpMethod = (apiName: string, version: string) => {
   const lastSlash = apiName.lastIndexOf('/');
   if (lastSlash > 0) {
     const pagePath = apiName.slice(0, lastSlash);
@@ -524,7 +524,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
             const effectiveTimeoutMs = timeoutMs ?? getProjectConfig().api.requestTimeoutMs;
             const routed = await invokeRoutedHttp<ApiResponse, ApiStreamEvent>({
               path: `/api/${sanitizedName}/${version}`,
-              method: resolveHttpMethod(sanitizedName, version),
+              method: resolveApiRequestHttpMethod(sanitizedName, version),
               data: data as Record<string, unknown>,
               stream: onStream,
               signals: [signal, externalSignal],

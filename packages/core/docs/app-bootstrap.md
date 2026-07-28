@@ -84,7 +84,7 @@ Shape: `apiMethodMap[pagePath][apiName][version] = 'GET' | ...`.
 
 ### `registerApiMethodMap(map: ApiMethodMap): void`
 
-Stores the generated method map (typically wired by `apiTypes.generated.ts`).
+Stores the generated method map. The canonical consumer wrapper `src/_sockets/apiRequest.ts` imports `apiMethodMap` from `apiTypes.generated.ts`, registers it at module load, then re-exports the core request helper. This registration is required for routed HTTP because route names alone cannot reliably reveal their declared HTTP method.
 
 ### `getRegisteredApiMethod(pagePath, apiName, version): HttpMethodLiteral | undefined`
 
@@ -412,7 +412,6 @@ import {
   registerLogger,
   registerNotifier,
   registerRuntimeMapsProvider,
-  registerApiMethodMap,
   registerBindAddress,
 } from '@luckystack/core';
 import { PrismaClient } from '@prisma/client';
@@ -429,8 +428,17 @@ registerLogger({
 });
 registerNotifier(toastNotifier);
 registerRuntimeMapsProvider(prodRuntimeMaps);
-registerApiMethodMap(generatedApiMethodMap);
 registerBindAddress({ ip: '0.0.0.0', port: 8080 });
+```
+
+The browser-side method map is registered separately by the project wrapper:
+
+```typescript
+import { registerApiMethodMap } from '@luckystack/core/client';
+import { apiMethodMap } from './apiTypes.generated';
+
+registerApiMethodMap(apiMethodMap);
+export { apiRequest } from '@luckystack/core/client';
 ```
 
 ## Related
