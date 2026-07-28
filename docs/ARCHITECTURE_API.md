@@ -156,8 +156,10 @@ and booleans retain their JSON types.
 
 `src/_sockets/apiRequest.ts` must register the generated `apiMethodMap` before
 re-exporting `apiRequest`. Routed HTTP uses this runtime map to preserve each
-handler's declared GET/POST/PUT/DELETE method; route-name inference is only a
-legacy fallback and cannot classify names such as `organization` correctly.
+handler's declared GET/POST/PUT/DELETE method. It fails closed with
+`api.methodMapUnavailable` when the lookup is unavailable rather than guessing
+from a name such as `organization`. Socket-mode abort selection retains its
+legacy name inference for backwards compatibility.
 Fresh scaffolds wire this registration automatically.
 
 ## HTTP API Access

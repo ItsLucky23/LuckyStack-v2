@@ -16,7 +16,7 @@ describe('apiRequest routed HTTP method map', () => {
     expect(resolveApiRequestHttpMethod('system/organization', 'v1')).toBe('GET');
   });
 
-  it('keeps name inference only as a compatibility fallback for an unknown route', () => {
-    expect(resolveApiRequestHttpMethod('system/unknownAction', 'v1')).toBe('POST');
+  it('fails closed for a routed route missing from the generated method map', () => {
+    expect(resolveApiRequestHttpMethod('system/unknownAction', 'v1')).toBeUndefined();
   });
 });

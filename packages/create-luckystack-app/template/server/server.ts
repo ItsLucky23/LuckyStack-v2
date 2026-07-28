@@ -85,7 +85,7 @@ import { bootstrapLuckyStack } from '@luckystack/server';
     defaultPort: ports.backend,
     serveFile: noopServeFile,
     serveFavicon: noopServeFavicon,
-    loadGeneratedMaps: (preset: string) => import(`./prod/generatedApis.${preset}`),
+    loadGeneratedMaps: (preset: string) => import(`./prod/generatedApis.${preset}.ts`),
   });
 
   await server.listen();

@@ -28,7 +28,71 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  consumer-acceptance:
+    name: consumer / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: fresh-minimal
+            browser: false
+            command: >-
+              node scripts/e2eVerdaccio.mjs
+              --scaffold-args="--orm=none --auth=none --no-ai-docs"
+          - name: fresh-full-packages
+            browser: false
+            command: >-
+              node scripts/e2eVerdaccio.mjs
+              --scaffold-args="--orm=prisma --db=sqlite --auth=credentials --email=resend --monitoring=sentry --presence --error-tracking --docs-ui --secret-manager --cron --no-ai-docs"
+          - name: fresh-routed-browser
+            browser: true
+            command: >-
+              node scripts/e2eVerdaccio.mjs --browser-routed
+              --scaffold-args="--orm=none --auth=none --router --no-ai-docs"
+          - name: upgrade-routed-browser
+            browser: true
+            command: >-
+              node scripts/e2eVerdaccio.mjs --mode=upgrade --browser-routed
+              --scaffold-args="--orm=none --auth=none --router --no-ai-docs"
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install Chromium
+        if: ${{ matrix.browser }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Run candidate consumer acceptance
+        run: ${{ matrix.command }}
+        env:
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          REDIS_USER: ''
+          REDIS_PASSWORD: ''
+
   publish:
+    needs: consumer-acceptance
     runs-on: ubuntu-latest
     permissions:
       # OIDC token for npm provenance attestation.

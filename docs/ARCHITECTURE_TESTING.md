@@ -303,6 +303,33 @@ The framework ships an `extensionRegistry` so consumers can add their own sweep 
 
 ---
 
+## Release consumer-acceptance gate
+
+Package tests are necessary but cannot prove that packed artifacts work after normal registry resolution. Before npm publication, `.github/workflows/publish.yml` therefore runs `scripts/e2eVerdaccio.mjs` as a blocking matrix against candidate tarballs published to an isolated local Verdaccio registry.
+
+The bounded release profiles cover:
+
+- a fresh minimal monolith;
+- a fresh scaffold with the broad optional-package set;
+- a fresh router-enabled split deployment;
+- an upgrade from the previous stable npm release to the candidate.
+
+The routed profiles start Redis, two production backend presets, `@luckystack/router`, Vite and Chromium. The browser must invoke explicit methods whose names deliberately contradict naming heuristics (`organization` is GET and `getMutation` is POST), receive routed sync fanout, prove `ignoreSelf` suppresses the originator callback, and open exactly one Socket.io WebSocket. This covers the complete `apiMethodMap → consumer bootstrap → apiRequest → router → owning service` chain rather than only checking that files exist.
+
+Upgrade mode uses the public registry only for the immutable N-1 scaffold, then switches the consumer to candidate packages from Verdaccio and runs both `luckystack update` scopes. It modifies a framework-owned consumer file before updating, verifies that the original is preserved and the candidate appears as `<file>.new`, accepts the sidecar in the disposable fixture, and runs the same typecheck/build/browser checks.
+
+Useful local commands (a local Redis is required for `--browser-routed`):
+
+```bash
+npm run e2e:consumer -- --scaffold-args="--orm=none --auth=none --no-ai-docs"
+npm run e2e:consumer -- --browser-routed --scaffold-args="--orm=none --auth=none --router --no-ai-docs"
+npm run e2e:consumer -- --mode=upgrade --browser-routed --scaffold-args="--orm=none --auth=none --router --no-ai-docs"
+```
+
+The harness exits with the number of failed steps. A non-zero result blocks the publish job; acceptance is intentionally before publication because npm artifacts are immutable.
+
+---
+
 ## Reading the output (failures, expected-failures, skips)
 
 The runner prints a **colored**, list-based report. Per layer you get a green `X/Y passed` headline (red `Z/Y failed` when something broke), followed by up to four sections and a one-line summary:

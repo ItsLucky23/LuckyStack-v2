@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (42)
+## Decisions (44)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -55,6 +55,8 @@
 | 0040 | Separate application runtime mode from deployment environment identity | 🟢 accepted | core, deployment, security, docker, multi-instance | — | `docs/decisions/0040-separate-runtime-mode-from-deployment-environment-identity.md` |
 | 0041 | Audit required production dependencies and test tooling separately | 🟢 accepted | security, dependencies, ci, eslint, release | 0039 | `docs/decisions/0041-audit-required-production-dependencies-and-test-tooling-separately.md` |
 | 0042 | Deduplicate equivalent functions across composed presets | 🟢 accepted | runtime-maps, presets, functions, multi-instance | — | `docs/decisions/0042-deduplicate-equivalent-functions-across-composed-presets.md` |
+| 0043 | Gate publication on real-registry consumer acceptance | 🟢 accepted | release, testing, verdaccio, upgrades, browser | — | `docs/decisions/0043-gate-publication-on-real-registry-consumer-acceptance.md` |
+| 0044 | Routed HTTP method resolution fails closed | 🟢 accepted | api, routed-http, method-map, security | — | `docs/decisions/0044-routed-http-method-resolution-fails-closed.md` |
 
 ## Summaries
 
@@ -415,6 +417,22 @@ The production release gate runs `npm audit --omit=dev --omit=optional --json`. 
 Runtime-map composition keeps API and sync collision checks strict. Repeated function keys are accepted only when both generated entries have the same keys and each exported value is reference- or value-identical through `Object.is`. The first equivalent wrapper remains in the merged registry.
 
 → `docs/decisions/0042-deduplicate-equivalent-functions-across-composed-presets.md`
+
+### 0043 — Gate publication on real-registry consumer acceptance
+
+**0043** · accepted · tags: release, testing, verdaccio, upgrades, browser · 2026-07-28
+
+The publish workflow blocks on a consumer-acceptance matrix before npm publication. Candidate packages are built and published to an isolated local Verdaccio registry, then installed through ordinary semver resolution.
+
+→ `docs/decisions/0043-gate-publication-on-real-registry-consumer-acceptance.md`
+
+### 0044 — Routed HTTP method resolution fails closed
+
+**0044** · accepted · tags: api, routed-http, method-map, security · 2026-07-28
+
+Routed HTTP API invocation requires a successful generated `apiMethodMap` lookup. A missing registration, route or version settles locally with `api.methodMapUnavailable` and sends no network request. Socket mode retains its existing compatibility heuristic.
+
+→ `docs/decisions/0044-routed-http-method-resolution-fails-closed.md`
 
 ## Code governed by decisions
 

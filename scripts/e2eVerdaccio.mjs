@@ -27,6 +27,8 @@
 //   node scripts/e2eVerdaccio.mjs --runtime=bun --redis-port=6380
 //   node scripts/e2eVerdaccio.mjs --keep                   # leave the project for inspection
 //   node scripts/e2eVerdaccio.mjs --scaffold-args="--orm=prisma --db=sqlite --auth=none"
+//   node scripts/e2eVerdaccio.mjs --browser-routed         # real browser → router → split services + Socket.io fanout
+//   node scripts/e2eVerdaccio.mjs --mode=upgrade --browser-routed # previous npm release → candidate + update --app
 //
 // Exit code is the number of failed steps (0 = all green), so CI can gate on it.
 
@@ -62,6 +64,8 @@ const parseArgs = () => {
     runtimeSmoke: false,
     redisPort: Number(process.env.REDIS_PORT ?? 6379),
     keep: false,
+    mode: 'fresh',
+    browserRouted: false,
     scaffoldArgs: '--orm=prisma --db=sqlite --auth=none --no-ai-docs',
   };
   for (const arg of process.argv.slice(2)) {
@@ -71,6 +75,8 @@ const parseArgs = () => {
       out.runtimeSmoke = true;
     } else if (arg.startsWith('--redis-port=')) out.redisPort = Number(arg.slice(13));
     else if (arg === '--keep') out.keep = true;
+    else if (arg === '--browser-routed') out.browserRouted = true;
+    else if (arg.startsWith('--mode=')) out.mode = arg.slice(7);
     else if (arg.startsWith('--scaffold-args=')) out.scaffoldArgs = arg.slice(16);
     else {
       console.error(`[e2e] unknown argument: ${arg}`);
@@ -83,6 +89,18 @@ const parseArgs = () => {
   }
   if (!['node', 'bun', 'both'].includes(out.runtime)) {
     console.error(`[e2e] --runtime must be node, bun, or both (got ${out.runtime})`);
+    process.exit(2);
+  }
+  if (!['fresh', 'upgrade'].includes(out.mode)) {
+    console.error(`[e2e] --mode must be fresh or upgrade (got ${out.mode})`);
+    process.exit(2);
+  }
+  if (out.mode === 'upgrade' && out.pm !== 'npm') {
+    console.error('[e2e] the blocking upgrade lane currently requires --pm=npm; Bun is covered by the fresh-install profile.');
+    process.exit(2);
+  }
+  if (out.browserRouted && !/(?:^|\s)--router(?:\s|$)/.test(out.scaffoldArgs)) {
+    console.error('[e2e] --browser-routed requires --router in --scaffold-args.');
     process.exit(2);
   }
   if (!Number.isInteger(out.redisPort) || out.redisPort < 1 || out.redisPort > 65_535) {
@@ -326,6 +344,498 @@ const smokeBuiltServer = async ({ projectDir, runtime, bunPath, redisPort, datab
   }
 };
 
+const parseStableVersion = (value) => {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value);
+  return match ? match.slice(1).map(Number) : null;
+};
+
+const compareStableVersions = (left, right) => {
+  const a = parseStableVersion(left);
+  const b = parseStableVersion(right);
+  if (!a || !b) return 0;
+  for (let index = 0; index < 3; index++) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+};
+
+const resolvePreviousPublishedVersion = (candidateVersion, publicEnv) => {
+  const view = spawnSync('npm', ['view', 'create-luckystack-app', 'versions', '--json'], {
+    encoding: 'utf8',
+    shell: true,
+    env: { ...process.env, ...publicEnv },
+  });
+  if (view.status !== 0) return null;
+  const versions = JSON.parse(view.stdout || '[]');
+  if (!Array.isArray(versions)) return null;
+  return versions
+    .filter((version) => typeof version === 'string' && parseStableVersion(version) && compareStableVersions(version, candidateVersion) < 0)
+    .sort(compareStableVersions)
+    .at(-1) ?? null;
+};
+
+const upgradeProjectToCandidate = ({ projectDir, candidateVersion, registryEnv }) => {
+  const packagePath = path.join(projectDir, 'package.json');
+  const apiRequestPath = path.join(projectDir, 'src', '_sockets', 'apiRequest.ts');
+  const apiRequestSidecarPath = `${apiRequestPath}.new`;
+  const consumerMarker = '// consumer-owned acceptance edit — must never be overwritten';
+  fs.appendFileSync(apiRequestPath, `\n${consumerMarker}\n`);
+
+  const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  for (const bucket of ['dependencies', 'devDependencies']) {
+    const dependencies = pkg[bucket];
+    if (!dependencies || typeof dependencies !== 'object') continue;
+    for (const name of Object.keys(dependencies)) {
+      if (name.startsWith('@luckystack/')) dependencies[name] = `^${candidateVersion}`;
+    }
+  }
+  fs.writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`);
+  if (!run('npm', ['install'], projectDir, registryEnv)) return false;
+  if (!run('npx', ['luckystack', 'update'], projectDir, registryEnv)) return false;
+  if (!run('npx', ['luckystack', 'update', '--app'], projectDir, registryEnv)) return false;
+
+  const installedCore = JSON.parse(fs.readFileSync(path.join(projectDir, 'node_modules', '@luckystack', 'core', 'package.json'), 'utf8'));
+  const preservedApiRequestSource = fs.readFileSync(apiRequestPath, 'utf8');
+  const sidecarCreated = fs.existsSync(apiRequestSidecarPath);
+  const sidecarSource = sidecarCreated ? fs.readFileSync(apiRequestSidecarPath, 'utf8') : '';
+  const consumerEditPreserved = preservedApiRequestSource.includes(consumerMarker);
+  const candidateWiringAvailable = sidecarSource.includes('registerApiMethodMap(apiMethodMap)');
+  console.log(`[e2e]   upgraded @luckystack/core=${installedCore.version}`);
+  console.log(`[e2e]   modified apiRequest preserved=${String(consumerEditPreserved)} candidate sidecar=${String(candidateWiringAvailable)}`);
+  if (!consumerEditPreserved || !candidateWiringAvailable) return false;
+
+  //? Simulate the developer accepting the candidate sidecar after the safety
+  //? assertion. Leaving the `.new` file in this throwaway fixture is harmless
+  //? and avoids deleting files in a release-safety test.
+  fs.copyFileSync(apiRequestSidecarPath, apiRequestPath);
+  return installedCore.version === candidateVersion;
+};
+
+export const writeRoutedAcceptanceFixture = async (projectDir) => {
+  const systemPort = await getFreePort();
+  const acceptancePort = await getFreePort();
+  const routerPort = await getFreePort();
+  const frontendPort = await getFreePort();
+
+  fs.writeFileSync(path.join(projectDir, 'config.ports.ts'), `export const ports: {\n  frontend: number;\n  backend: number;\n  devBackendUrl?: string;\n} = {\n  frontend: ${String(frontendPort)},\n  backend: ${String(systemPort)},\n};\n`);
+
+  const configPath = path.join(projectDir, 'config.ts');
+  let configSource = fs.readFileSync(configPath, 'utf8');
+  configSource = configSource.replace('sessionBasedToken: false,', 'sessionBasedToken: true,');
+  if (!configSource.includes('  sync: {\n    requireRoomMembership: false,')) {
+    configSource = configSource.replace(
+      '  //? Dev-only console logging toggles.',
+      "  sync: {\n    requireRoomMembership: false,\n  },\n  //? Dev-only console logging toggles.",
+    );
+  }
+  if (!configSource.includes('    sync: currentConfig.sync,')) {
+    configSource = configSource.replace(
+      '    transport: currentConfig.transport,',
+      '    transport: currentConfig.transport,\n    sync: currentConfig.sync,',
+    );
+  }
+  fs.writeFileSync(configPath, configSource);
+
+  fs.writeFileSync(path.join(projectDir, 'services.config.ts'), `import { registerServicesConfig } from '@luckystack/core';
+
+export interface ServiceDefinition { source: 'root' | string; }
+export interface PresetDefinition { description?: string; services: string[]; }
+export interface ServicesConfig {
+  services: Record<string, ServiceDefinition>;
+  presets: Record<string, PresetDefinition>;
+  customRoutes?: Record<string, string>;
+}
+
+const servicesConfig: ServicesConfig = {
+  services: {
+    system: { source: 'root' },
+    acceptance: { source: 'acceptance' },
+  },
+  customRoutes: {
+    '/auth': 'system',
+    '/uploads': 'system',
+    '/hooks': 'system',
+    '/csrf-token': 'system',
+    '/_health': 'system',
+    '/livez': 'system',
+    '/readyz': 'system',
+    '/_docs': 'system',
+  },
+  presets: {
+    'system-preset': { services: ['system'] },
+    'acceptance-preset': { services: ['acceptance'] },
+  },
+};
+
+registerServicesConfig(servicesConfig);
+export default servicesConfig;
+`);
+
+  fs.writeFileSync(path.join(projectDir, 'deploy.config.ts'), `import { registerDeployConfig } from '@luckystack/core';
+
+export type ResourceType = 'redis' | 'mongo';
+export interface ResourceDefinition {
+  type: ResourceType;
+  urlEnvKey: string;
+  synchronizedEnvKeys?: string[];
+}
+export interface EnvironmentDefinition<TEnvKey extends string = string> {
+  redis: string;
+  mongo: string;
+  fallback?: TEnvKey;
+  bindings: Record<string, string>;
+}
+export interface DeployConfig<TEnvKey extends string = string> {
+  resources: Record<string, ResourceDefinition>;
+  environments: Record<TEnvKey, EnvironmentDefinition<TEnvKey>>;
+  routing?: {
+    onMissingService?: 'hard-error' | 'proxy-fallback';
+    missingServiceErrorCode?: string;
+    enableUnhealthyFallback?: boolean;
+    strictBootHandshake?: boolean;
+    defaultRouterPort?: number;
+    trustedProxyCidrs?: string[];
+  };
+  development?: {
+    enableFallbackRouting?: boolean;
+    healthPollMs?: number;
+    switchNewTrafficToLocalWhenHealthy?: boolean;
+  };
+}
+
+const deployConfig: DeployConfig = {
+  resources: {
+    redisShared: { type: 'redis', urlEnvKey: 'REDIS_HOST', synchronizedEnvKeys: ['PROJECT_NAME'] },
+    databaseShared: { type: 'mongo', urlEnvKey: 'DATABASE_URL' },
+  },
+  environments: {
+    acceptance: {
+      redis: 'redisShared',
+      mongo: 'databaseShared',
+      bindings: {
+        system: 'http://${HOST}:${String(systemPort)}',
+        acceptance: 'http://${HOST}:${String(acceptancePort)}',
+      },
+    },
+  },
+  routing: {
+    defaultRouterPort: ${String(routerPort)},
+    trustedProxyCidrs: ['127.0.0.1/32', '::1/128'],
+  },
+};
+
+registerDeployConfig(deployConfig);
+export default deployConfig;
+`);
+
+  const apiRoot = path.join(projectDir, 'src', 'acceptance', '_api');
+  fs.mkdirSync(apiRoot, { recursive: true });
+  const apiCases = [
+    ['organization', 'GET'],
+    ['getMutation', 'POST'],
+    ['removeReplacement', 'PUT'],
+    ['updateArchive', 'DELETE'],
+  ];
+  for (const [name, method] of apiCases) {
+    fs.writeFileSync(path.join(apiRoot, `${name}_v1.ts`), `import type { AuthProps } from '../../../config';
+
+export const httpMethod = '${method}' as const;
+export const rateLimit = false;
+export const auth: AuthProps = { login: false };
+
+export interface ApiResponse {
+  status: 'success';
+  route: string;
+  declaredMethod: string;
+}
+
+export const main = (): ApiResponse => ({
+  status: 'success',
+  route: '${name}',
+  declaredMethod: '${method}',
+});
+`);
+  }
+
+  const syncRoot = path.join(projectDir, 'src', 'acceptance', '_sync');
+  fs.mkdirSync(syncRoot, { recursive: true });
+  fs.writeFileSync(path.join(syncRoot, 'fanout_server_v1.ts'), `import type { AuthProps, SessionLayout } from '../../../config';
+import type { Functions, MaybePromise } from '../../_sockets/apiTypes.generated';
+
+export const auth: AuthProps = { login: false };
+export const rateLimit = false;
+
+export interface SyncParams {
+  clientInput: { marker: string };
+  user: SessionLayout | null;
+  functions: Functions;
+  roomCode: string;
+}
+
+export interface SyncServerResponse {
+  status: 'success';
+  marker: string;
+}
+
+export const main = ({ clientInput }: SyncParams): MaybePromise<SyncServerResponse> => ({
+  status: 'success',
+  marker: clientInput.marker,
+});
+`);
+
+  const pageRoot = path.join(projectDir, 'src', 'acceptance');
+  fs.writeFileSync(path.join(pageRoot, 'page.tsx'), `//? intent: Prove candidate routed HTTP methods and cross-instance Socket.io sync delivery.
+import { useEffect } from 'react';
+
+import { apiRequest } from 'src/_sockets/apiRequest';
+import { syncRequest, useSyncEvents } from 'src/_sockets/syncRequest';
+
+interface AcceptanceState {
+  status: 'pending' | 'success' | 'error';
+  apiStatuses?: string[];
+  syncStatus?: string;
+  syncErrorCode?: string;
+  ignoreSelfSuppressed?: boolean;
+  callbackReceived?: boolean;
+}
+
+declare global {
+  interface Window {
+    __luckystackAcceptance: AcceptanceState;
+  }
+}
+
+window.__luckystackAcceptance = { status: 'pending' };
+
+const AcceptancePage = () => {
+  const { upsertSyncEventCallback } = useSyncEvents();
+
+  useEffect(() => {
+    let active = true;
+    let callbackCount = 0;
+    let resolveCallback: (received: boolean) => void = () => undefined;
+    const callbackPromise = new Promise<boolean>((resolve) => { resolveCallback = resolve; });
+    const teardown = upsertSyncEventCallback({
+      name: 'acceptance/fanout',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        callbackCount += 1;
+        resolveCallback(serverOutput.status === 'success');
+      },
+    });
+
+    void (async () => {
+      const apiResponses = await Promise.all([
+        apiRequest({ name: 'acceptance/organization', version: 'v1' }),
+        apiRequest({ name: 'acceptance/getMutation', version: 'v1' }),
+        apiRequest({ name: 'acceptance/removeReplacement', version: 'v1' }),
+        apiRequest({ name: 'acceptance/updateArchive', version: 'v1' }),
+      ]);
+      const ignoredSyncResponse = await syncRequest({
+        name: 'acceptance/fanout',
+        version: 'v1',
+        data: { marker: 'ignore-self' },
+        receiver: 'acceptance-browser-token',
+        ignoreSelf: true,
+      });
+      await new Promise<void>((resolve) => { setTimeout(resolve, 1_000); });
+      const ignoreSelfSuppressed = callbackCount === 0;
+      const syncResponse = await syncRequest({
+        name: 'acceptance/fanout',
+        version: 'v1',
+        data: { marker: 'cross-instance' },
+        receiver: 'acceptance-browser-token',
+      });
+      const callbackReceived = await Promise.race([
+        callbackPromise,
+        new Promise<boolean>((resolve) => { setTimeout(() => resolve(false), 10_000); }),
+      ]);
+      if (!active) return;
+      const apiStatuses = apiResponses.map((response) => response.status);
+      const success = apiStatuses.every((status) => status === 'success')
+        && ignoredSyncResponse.status === 'success'
+        && ignoreSelfSuppressed
+        && syncResponse.status === 'success'
+        && callbackReceived;
+      window.__luckystackAcceptance = {
+        status: success ? 'success' : 'error',
+        apiStatuses,
+        syncStatus: syncResponse.status,
+        syncErrorCode: syncResponse.status === 'error' ? syncResponse.errorCode : undefined,
+        ignoreSelfSuppressed,
+        callbackReceived,
+      };
+    })();
+
+    return () => {
+      active = false;
+      teardown();
+    };
+  }, [upsertSyncEventCallback]);
+
+  return <div data-testid={'acceptance-status'} />;
+};
+
+export const template = 'plain';
+export default AcceptancePage;
+`);
+
+  return { systemPort, acceptancePort, routerPort, frontendPort };
+};
+
+const startLoggedProcess = ({ label, command, args, cwd, env }) => {
+  const logPath = path.join(cwd, `e2e-${label}.log`);
+  const logFd = fs.openSync(logPath, 'a');
+  const child = spawn(command, args, {
+    cwd,
+    env: { ...process.env, ...env },
+    stdio: ['ignore', logFd, logFd],
+    shell: true,
+    detached: false,
+  });
+  let exited = false;
+  child.on('exit', () => { exited = true; });
+  return { label, child, logFd, logPath, isDead: () => exited };
+};
+
+const stopLoggedProcess = (running) => {
+  stopProcessTree(running.child);
+  fs.closeSync(running.logFd);
+};
+
+const printProcessLog = (running) => {
+  console.error(`[e2e] ${running.label} log:`);
+  console.error(fs.readFileSync(running.logPath, 'utf8').split('\n').slice(-60).join('\n'));
+};
+
+export const runRoutedBrowserAcceptance = async ({ projectDir, ports, redisPort }) => {
+  if (!(await isPortOpen(redisPort))) {
+    console.error(`[e2e] routed browser acceptance requires Redis on ${HOST}:${String(redisPort)}.`);
+    return false;
+  }
+
+  const sharedEnv = {
+    NODE_ENV: 'production',
+    LUCKYSTACK_ENV: 'acceptance',
+    LUCKYSTACK_ENV_FILES: '/dev/null',
+    PROJECT_NAME: 'luckystack-consumer-acceptance',
+    SERVER_IP: HOST,
+    REDIS_HOST: HOST,
+    REDIS_PORT: String(redisPort),
+    REDIS_USER: '',
+    REDIS_PASSWORD: '',
+    DATABASE_URL: 'file:./acceptance.sqlite',
+    PUBLIC_URL: `http://localhost:${String(ports.frontendPort)}`,
+    SECURE: 'false',
+  };
+
+  const processes = [
+    startLoggedProcess({
+      label: 'system', command: 'node', args: ['dist/server.js', 'system-preset', String(ports.systemPort)],
+      cwd: projectDir, env: sharedEnv,
+    }),
+    startLoggedProcess({
+      label: 'acceptance', command: 'node', args: ['dist/server.js', 'acceptance-preset', String(ports.acceptancePort)],
+      cwd: projectDir, env: sharedEnv,
+    }),
+  ];
+
+  let browser;
+  try {
+    for (const running of processes) {
+      const port = running.label === 'system' ? ports.systemPort : ports.acceptancePort;
+      if (!(await waitForHttp200(`http://${HOST}:${String(port)}/livez`, 90_000, running.isDead))) {
+        printProcessLog(running);
+        return false;
+      }
+    }
+
+    const router = startLoggedProcess({
+      label: 'router',
+      command: 'node',
+      args: [
+        'node_modules/@luckystack/router/dist/cli.js',
+        '--deploy', 'dist/router/deploy.config.js',
+        '--services', 'dist/router/services.config.js',
+        '--env', 'acceptance',
+        '--port', String(ports.routerPort),
+      ],
+      cwd: projectDir,
+      env: { ...sharedEnv, ROUTER_PORT: String(ports.routerPort) },
+    });
+    processes.push(router);
+    if (!(await waitForPort(ports.routerPort, 60_000, router.isDead))) {
+      printProcessLog(router);
+      return false;
+    }
+
+    const frontend = startLoggedProcess({
+      label: 'frontend',
+      command: 'npm',
+      args: ['run', 'client', '--', '--port', String(ports.frontendPort), '--strictPort'],
+      cwd: projectDir,
+      env: { ...sharedEnv, NODE_ENV: 'development', ROUTER_PORT: String(ports.routerPort) },
+    });
+    processes.push(frontend);
+    if (!(await waitForHttp200(`http://localhost:${String(ports.frontendPort)}/`, 90_000, frontend.isDead))) {
+      printProcessLog(frontend);
+      return false;
+    }
+
+    const { chromium } = await import('@playwright/test');
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    const methods = new Map();
+    const websocketUrls = [];
+    const browserErrors = [];
+    const httpFailures = [];
+    page.on('request', (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith('/api/acceptance/')) methods.set(pathname, request.method());
+    });
+    page.on('response', (response) => {
+      if (response.status() >= 400) httpFailures.push(`${String(response.status())} ${response.url()}`);
+    });
+    page.on('websocket', (socket) => { websocketUrls.push(socket.url()); });
+    page.on('console', (message) => {
+      if (message.type() === 'error') browserErrors.push(message.text());
+    });
+    page.on('pageerror', (error) => { browserErrors.push(error.message); });
+    await page.addInitScript(() => {
+      sessionStorage.setItem('token', 'acceptance-browser-token');
+    });
+    await page.goto(`http://localhost:${String(ports.frontendPort)}/acceptance`, { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => window.__luckystackAcceptance?.status !== 'pending', undefined, { timeout: 120_000 });
+    await page.waitForTimeout(1_000);
+    const result = await page.evaluate(() => window.__luckystackAcceptance);
+    const expectedMethods = new Map([
+      ['/api/acceptance/organization/v1', 'GET'],
+      ['/api/acceptance/getMutation/v1', 'POST'],
+      ['/api/acceptance/removeReplacement/v1', 'PUT'],
+      ['/api/acceptance/updateArchive/v1', 'DELETE'],
+    ]);
+    const methodsMatch = [...expectedMethods].every(([pathname, method]) => methods.get(pathname) === method);
+    const socketCount = websocketUrls.filter((url) => url.includes('/socket.io/')).length;
+    console.log(`[e2e]   browser result=${JSON.stringify(result)}`);
+    console.log(`[e2e]   methods=${JSON.stringify(Object.fromEntries(methods))}`);
+    console.log(`[e2e]   Socket.io websocket count=${String(socketCount)}`);
+    if (browserErrors.length > 0) console.error(`[e2e]   browser errors=${JSON.stringify(browserErrors)}`);
+    if (httpFailures.length > 0) console.error(`[e2e]   HTTP failures=${JSON.stringify(httpFailures)}`);
+    return result.status === 'success'
+      && methodsMatch
+      && socketCount === 1
+      && browserErrors.length === 0;
+  } catch (error) {
+    console.error('[e2e] routed browser acceptance failed:', error);
+    for (const running of processes) printProcessLog(running);
+    return false;
+  } finally {
+    if (browser) await browser.close();
+    for (const running of processes.toReversed()) stopLoggedProcess(running);
+  }
+};
+
 const main = async () => {
   const args = parseArgs();
   const needsBun = args.pm === 'bun' || args.runtime === 'bun' || args.runtime === 'both';
@@ -335,7 +845,11 @@ const main = async () => {
     process.exit(2);
   }
 
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-e2e-'));
+  //? Use the canonical Windows path, not its 8.3 alias. Mixing `MATHIJ~1`
+  //? with the long path returned by Vite makes tsconfig-path aliases appear
+  //? outside Vite's serving allow-list and degrades generator source matching.
+  const tempRoot = process.platform === 'win32' ? fs.realpathSync.native(os.tmpdir()) : os.tmpdir();
+  const work = fs.mkdtempSync(path.join(tempRoot, 'ls-e2e-'));
   const storage = path.join(work, 'storage');
   const configPath = path.join(work, 'verdaccio.yaml');
   const projectParent = path.join(work, 'scaffold');
@@ -412,6 +926,14 @@ const main = async () => {
     BUN_INSTALL_CACHE_DIR: path.join(work, 'bun-cache'),
   };
 
+  const publicNpmrcPath = path.join(work, 'public.npmrc');
+  fs.writeFileSync(publicNpmrcPath, 'registry=https://registry.npmjs.org/\n');
+  const publicRegistryEnv = {
+    npm_config_userconfig: publicNpmrcPath,
+    npm_config_registry: 'https://registry.npmjs.org/',
+    npm_config_cache: path.join(work, 'public-npm-cache'),
+  };
+
   //? The scaffolder resolves a package manager by scanning PATH only (never cwd
   //? — a BatBadBut hazard mitigation), so testing `--pm=bun` requires bun to BE
   //? on PATH. A winget install does not take effect until the shell restarts, so
@@ -423,7 +945,7 @@ const main = async () => {
     registryEnv.PATH = `${path.dirname(bunPath)}${path.delimiter}${process.env.PATH ?? ''}`;
   }
 
-  console.log(`[e2e] pm=${args.pm} runtime=${args.runtime}${args.runtimeSmoke ? ' (real server smoke)' : ' (build only)'}`);
+  console.log(`[e2e] mode=${args.mode} pm=${args.pm} runtime=${args.runtime}${args.runtimeSmoke ? ' (real server smoke)' : ' (build only)'}${args.browserRouted ? ' + routed browser' : ''}`);
   console.log(`[e2e] workdir: ${work}`);
 
   //? Pre-flight: a squatter on the port (a stray verdaccio from an interrupted
@@ -504,26 +1026,57 @@ const main = async () => {
       return tarball.includes(HOST);
     });
 
-    //? THE POINT OF THIS HARNESS: the scaffolder is fetched from the registry by
-    //? SEMVER and installs its @luckystack/* deps the same way — the real path,
-    //? not a file: shortcut.
-    step('scaffold (real registry, WITH install)', () =>
-      run(
-        'npx',
-        [
-          '--yes',
-          '--registry',
-          REGISTRY,
-          `create-luckystack-app@${scaffolderVersion}`,
-          projectName,
-          `--pm=${args.pm}`,
-          ...args.scaffoldArgs.split(' ').filter(Boolean),
-          '--no-prompt',
-        ],
-        projectParent,
-        registryEnv,
-      ),
-    );
+    //? THE POINT OF THIS HARNESS: fresh mode fetches the candidate scaffolder
+    //? from Verdaccio. Upgrade mode first creates an immutable N-1 npm consumer,
+    //? then installs candidate package ranges and executes BOTH update scopes.
+    if (args.mode === 'fresh') {
+      step('scaffold candidate (real registry, WITH install)', () =>
+        run(
+          'npx',
+          [
+            '--yes',
+            '--registry',
+            REGISTRY,
+            `create-luckystack-app@${scaffolderVersion}`,
+            projectName,
+            `--pm=${args.pm}`,
+            ...args.scaffoldArgs.split(' ').filter(Boolean),
+            '--no-prompt',
+          ],
+          projectParent,
+          registryEnv,
+        ),
+      );
+    } else {
+      const previousVersion = resolvePreviousPublishedVersion(scaffolderVersion, publicRegistryEnv);
+      step('resolve an immutable previous npm release', () => {
+        console.log(`[e2e]   candidate=${scaffolderVersion} previous=${previousVersion ?? '(none)'}`);
+        return previousVersion !== null;
+      });
+      if (previousVersion) {
+        step(`scaffold previous npm release ${previousVersion}`, () =>
+          run(
+            'npx',
+            [
+              '--yes',
+              '--registry',
+              'https://registry.npmjs.org/',
+              `create-luckystack-app@${previousVersion}`,
+              projectName,
+              '--pm=npm',
+              ...args.scaffoldArgs.split(' ').filter(Boolean),
+              '--no-prompt',
+            ],
+            projectParent,
+            publicRegistryEnv,
+          ),
+        );
+        if (fs.existsSync(projectDir)) {
+          step(`upgrade ${previousVersion} → candidate ${scaffolderVersion} including update --app`, () =>
+            upgradeProjectToCandidate({ projectDir, candidateVersion: scaffolderVersion, registryEnv }));
+        }
+      }
+    }
 
     if (!fs.existsSync(projectDir)) {
       console.error('[e2e] scaffold produced no project directory — aborting the remaining steps.');
@@ -552,11 +1105,35 @@ const main = async () => {
           : run('npm', ['install'], projectDir, registryEnv),
       );
 
+      if (/(?:^|\s)--router(?:\s|$)/.test(args.scaffoldArgs)) {
+        step('consumer registers the generated API method map', () => {
+          const source = fs.readFileSync(path.join(projectDir, 'src', '_sockets', 'apiRequest.ts'), 'utf8');
+          return source.includes('registerApiMethodMap(apiMethodMap)');
+        });
+      }
+
+      let routedAcceptancePorts = null;
+      if (args.browserRouted) {
+        await stepAsync('write split-service routed browser fixture', async () => {
+          routedAcceptancePorts = await writeRoutedAcceptanceFixture(projectDir);
+          return routedAcceptancePorts !== null;
+        });
+      }
+
       //? No explicit generateArtifacts step: the template now chains it into
       //? BOTH typecheck and build (E1), mirroring what it already did for test.
       //? Leaving the step here would MASK a regression of that chaining.
       step('typecheck', () => run('npm', ['run', 'typecheck'], projectDir));
       step('build', () => run('npm', ['run', 'build'], projectDir));
+
+      if (args.browserRouted && routedAcceptancePorts) {
+        await stepAsync('browser uses declared methods and receives cross-instance sync over one Socket.io connection', () =>
+          runRoutedBrowserAcceptance({
+            projectDir,
+            ports: routedAcceptancePorts,
+            redisPort: args.redisPort,
+          }));
+      }
 
       if (args.runtimeSmoke) {
         const orm = /(?:^|\s)--orm=([^\s]+)/.exec(args.scaffoldArgs)?.[1] ?? 'prisma';
@@ -632,9 +1209,11 @@ const main = async () => {
   return exitCode;
 };
 
-main()
-  .then((code) => process.exit(code))
-  .catch((error) => {
-    console.error('[e2e] harness crashed:', error);
-    process.exit(1);
-  });
+if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  void main()
+    .then((code) => process.exit(code))
+    .catch((error) => {
+      console.error('[e2e] harness crashed:', error);
+      process.exit(1);
+    });
+}

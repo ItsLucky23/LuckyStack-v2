@@ -101,7 +101,7 @@ registerEmailSender(autoSelectEmailSender({ from: projectConfig.email.from }));
     defaultPort: ports.backend,
     serveFile,
     serveFavicon,
-    loadGeneratedMaps: (preset: string) => import(`./prod/generatedApis.${preset}`),
+    loadGeneratedMaps: (preset: string) => import(`./prod/generatedApis.${preset}.ts`),
   });
 
   await server.listen();

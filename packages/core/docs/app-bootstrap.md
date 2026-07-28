@@ -88,11 +88,11 @@ Stores the generated method map. The canonical consumer wrapper `src/_sockets/ap
 
 ### `getRegisteredApiMethod(pagePath, apiName, version): HttpMethodLiteral | undefined`
 
-Returns the registered method or `undefined`. `isGetMethod` (in `apiRequest.ts`) falls back to the `inferHttpMethod` prefix heuristic when undefined.
+Returns the registered method or `undefined`. Socket-mode abort-controller selection retains the `inferHttpMethod` prefix heuristic for compatibility. Routed HTTP does not guess: a missing map or route settles as `api.methodMapUnavailable` before any network request is sent.
 
 ### `isApiMethodMapRegistered(): boolean`
 
-Detects whether the prefix-heuristic fallback is active.
+Detects whether the generated map has been registered. This is mainly diagnostic; routed HTTP always fails closed on a missing lookup.
 
 ## API Reference — Prisma + Redis Clients
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Production server bundles resolve generated preset modules with their emitted `.ts` suffix, preventing built API and sync routes from failing with `Module not found in bundle` at first invocation.
+
 ## [0.8.3] - 2026-07-27
 
 ### Fixed

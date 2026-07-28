@@ -1,7 +1,7 @@
 import { getProjectConfig } from "./projectConfig";
 import { getLogger } from "./loggerRegistry";
 import { getRegisteredApiMethod } from "./apiMethodMapRegistry";
-import { inferHttpMethod, isGetMethodName } from "./httpApiUtils";
+import { isGetMethodName } from "./httpApiUtils";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketState";
 import type { ApiTypeMap, StreamPayload } from './apiTypeStubs';
 import { notify } from "./notifier";
@@ -73,9 +73,8 @@ export type ApiStreamEvent<T extends StreamPayload = StreamPayload> = T;
  *
  * Primary path: consult the registered `apiMethodMap` (generated from the
  * actual handler's `httpMethod` export or name-based inference at codegen
- * time). Falls back to name-prefix heuristic only when the map isn't
- * registered yet — typically because an older consumer wrapper has not called
- * `registerApiMethodMap(...)` from `src/_sockets/apiRequest.ts` before re-exporting this helper.
+ * time). Socket-mode abort selection may retain the legacy name heuristic, but
+ * routed HTTP fails closed when this generated registration is unavailable.
  */
 const isGetMethodByPrefix = (apiName: string): boolean => isGetMethodName(apiName.toLowerCase());
 
@@ -90,13 +89,10 @@ const routedApiErrorCode = (kind: RoutedApiFailureKind): string => {
 
 export const resolveApiRequestHttpMethod = (apiName: string, version: string) => {
   const lastSlash = apiName.lastIndexOf('/');
-  if (lastSlash > 0) {
-    const pagePath = apiName.slice(0, lastSlash);
-    const leaf = apiName.slice(lastSlash + 1);
-    const method = getRegisteredApiMethod(pagePath, leaf, version);
-    if (method) return method;
-  }
-  return inferHttpMethod(apiName);
+  if (lastSlash <= 0) return;
+  const pagePath = apiName.slice(0, lastSlash);
+  const leaf = apiName.slice(lastSlash + 1);
+  return getRegisteredApiMethod(pagePath, leaf, version);
 };
 
 const resolveGetMethod = (apiName: string, version: string): { isGet: boolean; usingHeuristic: boolean } => {
@@ -521,10 +517,22 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
 
         if (getProjectConfig().transport.invocation === 'routed-http') {
           void (async () => {
+            const method = resolveApiRequestHttpMethod(sanitizedName, version);
+            if (!method) {
+              cleanupAbortController();
+              if (queueId) removeApiQueueItem(queueId);
+              resolve(normalizeApiError({
+                response: { status: 'error', errorCode: 'api.methodMapUnavailable', httpStatus: 500 },
+                fallbackErrorCode: 'api.methodMapUnavailable',
+                fallbackHttpStatus: 500,
+              }) as RequestOutput);
+              return;
+            }
+
             const effectiveTimeoutMs = timeoutMs ?? getProjectConfig().api.requestTimeoutMs;
             const routed = await invokeRoutedHttp<ApiResponse, ApiStreamEvent>({
               path: `/api/${sanitizedName}/${version}`,
-              method: resolveApiRequestHttpMethod(sanitizedName, version),
+              method,
               data: data as Record<string, unknown>,
               stream: onStream,
               signals: [signal, externalSignal],
