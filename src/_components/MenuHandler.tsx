@@ -82,7 +82,6 @@ function MenuItemFrame({ entry, position, background }: MenuItemFrameProps) {
 export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   const [stack, setStack] = useState<MenuEntry[]>([]);
   const closeTimeoutsRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const backdropPressedRef = useRef(false);
 
   const submitTopFormFromEnter = useCallback(() => {
     const menuRoot = document.querySelector('#MENUHANDLER');
@@ -237,20 +236,19 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
           role="presentation"
           className={`fixed inset-0 z-[1000] flex items-center justify-center overflow-y-auto p-3 sm:p-4 transition-colors duration-200 ${stack.length === 0 ? 'pointer-events-none' : ''}`}
           style={{ backgroundColor: dim ? 'rgba(0, 0, 0, 0.7)' : 'transparent' }}
-          onMouseDown={() => { backdropPressedRef.current = true; }}
-          onMouseUp={() => {
-            if (!backdropPressedRef.current) return;
-            backdropPressedRef.current = false;
-            closeAll();
-          }}
         >
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            onClick={closeAll}
+            className={`absolute inset-0 cursor-default`}
+          />
           <div
             id="MENUHANDLER"
             role="presentation"
             className={`relative flex min-h-0 flex-col overflow-hidden rounded-md transition-all duration-200 max-h-[calc(100dvh-2rem)] ${stackTop && !stackTop.isClosing ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`}
             style={{ width: sizeClass }}
-            onMouseDown={(e) => { e.stopPropagation(); }}
-            onMouseUp={(e) => { e.stopPropagation(); }}
             onKeyDown={(e) => { e.stopPropagation(); }}
           >
             {stack.map((entry, index) => (

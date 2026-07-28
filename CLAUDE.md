@@ -174,7 +174,7 @@ Before building any UI primitive, check this table. Extend the existing componen
 |---|---|
 | `Dropdown` (`./Dropdown.tsx`) | Single-select picker. Supports search, keyboard nav, sm/md/lg/xl sizes, controlled or uncontrolled. |
 | `MultiSelectDropdown` (`./MultiSelectDropdown.tsx`) | Multi-select picker with checkboxes. Same shell + search as `Dropdown`. |
-| `MenuHandlerProvider` + `useMenuHandler` (`./MenuHandler.tsx`) | Stack-based modal / sheet system with backdrop, animations, Escape/Enter handling. |
+| `MenuHandlerProvider` + `useMenuHandler` (`./MenuHandler.tsx`) | Stack-based modal / sheet system with backdrop, animations, Escape/Enter handling. Backdrop dismissal belongs only on the dedicated backdrop button; never put pointer handlers on the full overlay container because dialog events bubble through it. |
 | `menuHandler` (`src/_functions/menuHandler.ts`) | Imperative API to open menus from non-React code. Includes `menuHandler.confirm({ title, content, input? })` returning `Promise<boolean>`. |
 | `ConfirmMenu` (`./ConfirmMenu.tsx`) | Renderable confirm form (used inside `menuHandler.confirm`). Render directly only for non-modal confirm forms. |
 | `Avatar` (`./Avatar.tsx`) | User avatar with image + first-letter fallback. Reads image-load status from `AvatarProvider`. |

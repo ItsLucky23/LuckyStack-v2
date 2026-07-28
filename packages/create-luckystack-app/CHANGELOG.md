@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Confirm-dialog buttons can submit before dismissal: only the dedicated backdrop button closes the menu, so bubbled pointer events from inside the dialog no longer remove the form before its click/submit event.
+
 ## [0.8.3] - 2026-07-27
 
 ### Fixed

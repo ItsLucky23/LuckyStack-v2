@@ -6,11 +6,11 @@
 > Don't read every index every session. Pick the profile matching your task, LOAD only its
 > artifacts, and QUERY the rest via the `@luckystack/mcp` tools instead of reading whole files.
 
-## Artifact sizes (total ≈ 85,877 tokens if all loaded)
+## Artifact sizes (total ≈ 85,918 tokens if all loaded)
 
 | Artifact | Est. tokens | Bytes | Purpose |
 | --- | --- | --- | --- |
-| `contract` — `CLAUDE.md` | 11,579 | 46,314 | Always-on rules (read every session). |
+| `contract` — `CLAUDE.md` | 11,620 | 46,478 | Always-on rules (read every session). |
 | `quick-index` — `docs/AI_QUICK_INDEX.md` | 34,331 | 137,322 | Framework surfaces + package map. |
 | `capabilities` — `docs/AI_CAPABILITIES.md` | 3,742 | 14,966 | Existing helpers/exports — check before authoring. |
 | `project-index` — `docs/AI_PROJECT_INDEX.md` | 2,683 | 10,733 | Routes/pages/helpers/components + test coverage. |
@@ -29,33 +29,33 @@ Per task type: the minimal artifact set to load + the MCP tools to query for eve
 
 _Adding an API/sync route: reuse before authoring, copy the canonical shape._
 
-- **Load** (≈ 17,268 tokens): `contract`, `capabilities`, `examples`, `runbooks`
+- **Load** (≈ 17,309 tokens): `contract`, `capabilities`, `examples`, `runbooks`
 - **Query via MCP** (don't read whole): `find_route`, `get_capability`, `get_example('auth-api-route')`, `blast_radius`
 
 ### `new-page`
 
 _Adding a page: match an existing template/component + state the intent._
 
-- **Load** (≈ 15,960 tokens): `contract`, `project-index`, `examples`, `product`
+- **Load** (≈ 16,001 tokens): `contract`, `project-index`, `examples`, `product`
 - **Query via MCP** (don't read whole): `get_example('page-protected')`, `get_capability`, `find_route`
 
 ### `security-audit`
 
 _Auditing: lean on the why-record + risky hubs, not every page intent._
 
-- **Load** (≈ 25,743 tokens): `contract`, `decisions`, `project-index`
+- **Load** (≈ 25,784 tokens): `contract`, `decisions`, `project-index`
 - **Query via MCP** (don't read whole): `god_nodes`, `blast_radius`, `get_decision`, `list_decisions('security')`
 
 ### `debug`
 
 _Chasing a bug: check known pitfalls first, then trace impact via the graph._
 
-- **Load** (≈ 16,432 tokens): `contract`, `lessons`
+- **Load** (≈ 16,473 tokens): `contract`, `lessons`
 - **Query via MCP** (don't read whole): `find_lesson`, `who_calls`, `who_imports`, `blast_radius`
 
 ### `doc-fix`
 
 _Doc-only change: minimal context; the indexes regenerate themselves._
 
-- **Load** (≈ 11,579 tokens): `contract`
+- **Load** (≈ 11,620 tokens): `contract`
 - **Query via MCP** (don't read whole): `get_runbook`, `graph_status`
