@@ -1,0 +1,60 @@
+name: Consumer Nightly Acceptance
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: consumer-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-consumers:
+    name: synthetic consumers / seed ${{ matrix.seed }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [17, 431, 9001]
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run seeded admin and multiplayer acceptance
+        run: >-
+          node scripts/e2eVerdaccio.mjs
+          --extended-browser
+          --seed=${{ matrix.seed }}
+          --scaffold-args="--orm=none --auth=none --router --no-ai-docs"
+        env:
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          REDIS_USER: ''
+          REDIS_PASSWORD: ''

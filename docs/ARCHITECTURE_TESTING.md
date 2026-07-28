@@ -328,6 +328,21 @@ npm run e2e:consumer -- --mode=upgrade --browser-routed --scaffold-args="--orm=n
 
 The harness exits with the number of failed steps. A non-zero result blocks the publish job; acceptance is intentionally before publication because npm artifacts are immutable.
 
+### Nightly synthetic applications
+
+`.github/workflows/consumer-nightly.yml` runs the heavier `--extended-browser` profile every night with multiple deterministic seeds. Each seed produces different, reproducible admin records and executes two synthetic applications on the same real-registry split-service scaffold:
+
+- **Admin workflow:** a React page performs seeded create/list/update/delete API calls and a server-side verification route checks the final IDs, updated values and deletion.
+- **Mini multiplayer:** two isolated Chromium contexts each keep one Socket.io connection; player A targets player B and vice versa through routed sync, the acceptance service and Redis fanout. Each player receives exactly the peer action and not its own.
+
+These scenarios are intentionally nightly rather than publish-blocking: they add broad behavioral coverage without multiplying release latency. A failure reports its seed and is reproducible locally:
+
+```bash
+npm run e2e:consumer -- --extended-browser --seed=431 --scaffold-args="--orm=none --auth=none --router --no-ai-docs"
+```
+
+Randomness must remain seeded. Never use timing-dependent or unreproducible random values in this acceptance layer.
+
 ---
 
 ## Reading the output (failures, expected-failures, skips)

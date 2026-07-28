@@ -13,7 +13,7 @@
 | fix/v073-port-oauth-review | (none) | 2026-07-22 10:38 | completed — v0.7.4 gepubliceerd via GitHub Actions met npm provenance. | 6 |
 | feat/orm-aware-cli | (none) | 2026-07-11 16:30 | merged 2026-07-11 — in v0.5.1 (b7ee295→61ec674; CLI overal ORM-bewust + bidirectionele ORM-switch als manage-stap 0 + auth kiesbaar op drizzle/mikro-orm [ADR 0023]; rest: settings-routes porten naar UserAdapter) | 3 |
 | test/e2e-integration | (none) | 2026-07-11 13:35 | merged 2026-07-11 — v0.5.0 GEPUBLICEERD naar npm (ee8100b; 17 packages incl. nieuw @luckystack/cron; multi-instance exactly-once + failover eerst bewezen via verdaccio; provenance-less lokale publish — volgende release via CI) | 2 |
-| test/release-consumer-acceptance | (none) | 2026-07-28 20:19 | active | 1 |
+| test/release-consumer-acceptance | (none) | 2026-07-28 21:04 | active | 2 |
 | feat/scaffold-manifest | (none) | 2026-07-09 09:20 | merged 2026-07-11 (via test/e2e-integration; fase 0+1a ADR 0021: scaffold-manifest + `luckystack update`) | 2 |
 | feat/orm-choice | (none) | 2026-07-09 10:40 | merged 2026-07-11 (via test/e2e-integration; fase 1b ADR 0020 + verdaccio-e2e + e2e-fixes) | 2 |
 | feat/cron-package | (none) | 2026-07-09 08:55 | merged 2026-07-11 (via test/e2e-integration; @luckystack/cron, ADR 0022) | 1 |

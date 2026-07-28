@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (44)
+## Decisions (45)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -57,6 +57,7 @@
 | 0042 | Deduplicate equivalent functions across composed presets | 🟢 accepted | runtime-maps, presets, functions, multi-instance | — | `docs/decisions/0042-deduplicate-equivalent-functions-across-composed-presets.md` |
 | 0043 | Gate publication on real-registry consumer acceptance | 🟢 accepted | release, testing, verdaccio, upgrades, browser | — | `docs/decisions/0043-gate-publication-on-real-registry-consumer-acceptance.md` |
 | 0044 | Routed HTTP method resolution fails closed | 🟢 accepted | api, routed-http, method-map, security | — | `docs/decisions/0044-routed-http-method-resolution-fails-closed.md` |
+| 0045 | Run seeded synthetic applications nightly | 🟢 accepted | testing, nightly, browser, multiplayer, fuzz | — | `docs/decisions/0045-run-seeded-synthetic-apps-nightly.md` |
 
 ## Summaries
 
@@ -433,6 +434,14 @@ The publish workflow blocks on a consumer-acceptance matrix before npm publicati
 Routed HTTP API invocation requires a successful generated `apiMethodMap` lookup. A missing registration, route or version settles locally with `api.methodMapUnavailable` and sends no network request. Socket mode retains its existing compatibility heuristic.
 
 → `docs/decisions/0044-routed-http-method-resolution-fails-closed.md`
+
+### 0045 — Run seeded synthetic applications nightly
+
+**0045** · accepted · tags: testing, nightly, browser, multiplayer, fuzz · 2026-07-28
+
+A separate nightly workflow runs real-registry routed consumer acceptance with deterministic seeds. Every seed generates different admin records, drives a full create/list/update/delete/verify page flow, and runs a two-browser multiplayer exchange through routed sync, the owning service, Redis fanout and one Socket.io connection per player.
+
+→ `docs/decisions/0045-run-seeded-synthetic-apps-nightly.md`
 
 ## Code governed by decisions
 

@@ -269,6 +269,8 @@ After creating any new API or sync route, run `npm run scaffold:test <route>` au
 
 **Prioritize tests after new work, and flag untested existing code.** Tests for what you just built come before declaring done (a bug fix needs a regression test). Separately: when you touch or read a route that has NO per-route test (no sibling `_v<N>.tests.ts`), don't silently leave it — raise it with the user ("this route has no business-logic test; want me to add one?") and offer to write it. The `docs/AI_PROJECT_INDEX.md` "tested" indicator per route is your map of where coverage is missing. Don't bulk-add tests unasked; surface the gap and let the user choose.
 
+**Framework release acceptance is a maintained contract.** Changes to cross-cutting install, upgrade, routing, API or sync behavior must extend the blocking real-registry consumer matrix when release-critical, or the seeded nightly synthetic admin/multiplayer scenarios when broad and expensive. Never replace these with workspace-only or unseeded random tests; preserve reproducibility and actual packed-package installation.
+
 Full spec: `docs/ARCHITECTURE_TESTING.md`.
 
 ---

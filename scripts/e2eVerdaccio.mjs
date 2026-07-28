@@ -29,6 +29,7 @@
 //   node scripts/e2eVerdaccio.mjs --scaffold-args="--orm=prisma --db=sqlite --auth=none"
 //   node scripts/e2eVerdaccio.mjs --browser-routed         # real browser → router → split services + Socket.io fanout
 //   node scripts/e2eVerdaccio.mjs --mode=upgrade --browser-routed # previous npm release → candidate + update --app
+//   node scripts/e2eVerdaccio.mjs --extended-browser --seed=17 # nightly synthetic admin + two-player acceptance
 //
 // Exit code is the number of failed steps (0 = all green), so CI can gate on it.
 
@@ -66,6 +67,8 @@ const parseArgs = () => {
     keep: false,
     mode: 'fresh',
     browserRouted: false,
+    extendedBrowser: false,
+    seed: 17,
     scaffoldArgs: '--orm=prisma --db=sqlite --auth=none --no-ai-docs',
   };
   for (const arg of process.argv.slice(2)) {
@@ -76,6 +79,10 @@ const parseArgs = () => {
     } else if (arg.startsWith('--redis-port=')) out.redisPort = Number(arg.slice(13));
     else if (arg === '--keep') out.keep = true;
     else if (arg === '--browser-routed') out.browserRouted = true;
+    else if (arg === '--extended-browser') {
+      out.browserRouted = true;
+      out.extendedBrowser = true;
+    } else if (arg.startsWith('--seed=')) out.seed = Number(arg.slice(7));
     else if (arg.startsWith('--mode=')) out.mode = arg.slice(7);
     else if (arg.startsWith('--scaffold-args=')) out.scaffoldArgs = arg.slice(16);
     else {
@@ -100,7 +107,11 @@ const parseArgs = () => {
     process.exit(2);
   }
   if (out.browserRouted && !/(?:^|\s)--router(?:\s|$)/.test(out.scaffoldArgs)) {
-    console.error('[e2e] --browser-routed requires --router in --scaffold-args.');
+    console.error('[e2e] browser acceptance requires --router in --scaffold-args.');
+    process.exit(2);
+  }
+  if (!Number.isInteger(out.seed) || out.seed < 0 || out.seed > 2_147_483_647) {
+    console.error(`[e2e] --seed must be an integer from 0 through 2147483647 (got ${String(out.seed)})`);
     process.exit(2);
   }
   if (!Number.isInteger(out.redisPort) || out.redisPort < 1 || out.redisPort > 65_535) {
@@ -412,7 +423,7 @@ const upgradeProjectToCandidate = ({ projectDir, candidateVersion, registryEnv }
   return installedCore.version === candidateVersion;
 };
 
-export const writeRoutedAcceptanceFixture = async (projectDir) => {
+export const writeRoutedAcceptanceFixture = async (projectDir, { extended = false, seed = 17 } = {}) => {
   const systemPort = await getFreePort();
   const acceptancePort = await getFreePort();
   const routerPort = await getFreePort();
@@ -681,7 +692,224 @@ export const template = 'plain';
 export default AcceptancePage;
 `);
 
+  if (extended) writeSyntheticAcceptanceFixtures(projectDir, seed);
+
   return { systemPort, acceptancePort, routerPort, frontendPort };
+};
+
+const createSeededRandom = (seed) => {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6D2B79F5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
+  };
+};
+
+const writeSyntheticAcceptanceFixtures = (projectDir, seed) => {
+  const random = createSeededRandom(seed);
+  const records = Array.from({ length: 4 }, (_, index) => ({
+    id: `seed-${String(seed)}-${String(index + 1)}`,
+    title: `Record ${String(index + 1)}-${String(Math.floor(random() * 100_000))}`,
+    score: Math.floor(random() * 10_001) - 5_000,
+  }));
+  const updated = {
+    ...records[0],
+    title: `${records[0].title}-updated`,
+    score: records[0].score + 37,
+  };
+  const deletedId = records.at(-1).id;
+
+  const serverRoot = path.join(projectDir, 'src', 'acceptance', '_server');
+  fs.mkdirSync(serverRoot, { recursive: true });
+  fs.writeFileSync(path.join(serverRoot, 'adminStore.ts'), `export interface AdminRecord {
+  id: string;
+  title: string;
+  score: number;
+}
+
+const records = new Map<string, AdminRecord>();
+
+export const createRecord = (record: AdminRecord): void => { records.set(record.id, record); };
+export const updateRecord = (record: AdminRecord): boolean => {
+  if (!records.has(record.id)) return false;
+  records.set(record.id, record);
+  return true;
+};
+export const deleteRecord = (id: string): boolean => records.delete(id);
+export const listRecords = (): AdminRecord[] => [...records.values()].sort((left, right) => left.id.localeCompare(right.id));
+`);
+
+  const apiRoot = path.join(projectDir, 'src', 'acceptance', '_api');
+  fs.writeFileSync(path.join(apiRoot, 'createRecord_v1.ts'), `import type { AuthProps } from '../../../config';
+import { createRecord, type AdminRecord } from '../_server/adminStore';
+
+export const httpMethod = 'POST' as const;
+export const rateLimit = false;
+export const auth: AuthProps = { login: false };
+export interface ApiParams { data: AdminRecord; }
+export interface ApiResponse { status: 'success'; }
+export const main = ({ data }: ApiParams): ApiResponse => {
+  createRecord(data);
+  return { status: 'success' };
+};
+`);
+  fs.writeFileSync(path.join(apiRoot, 'listRecords_v1.ts'), `import type { AuthProps } from '../../../config';
+import { listRecords } from '../_server/adminStore';
+
+export const httpMethod = 'GET' as const;
+export const rateLimit = false;
+export const auth: AuthProps = { login: false };
+export interface ApiResponse { status: 'success'; count: number; }
+export const main = (): ApiResponse => ({ status: 'success', count: listRecords().length });
+`);
+  fs.writeFileSync(path.join(apiRoot, 'editRecord_v1.ts'), `import type { AuthProps } from '../../../config';
+import { updateRecord, type AdminRecord } from '../_server/adminStore';
+
+export const httpMethod = 'PUT' as const;
+export const rateLimit = false;
+export const auth: AuthProps = { login: false };
+export interface ApiParams { data: AdminRecord; }
+export type ApiResponse = { status: 'success' } | { status: 'error'; errorCode: 'admin.recordMissing' };
+export const main = ({ data }: ApiParams): ApiResponse => updateRecord(data)
+  ? { status: 'success' }
+  : { status: 'error', errorCode: 'admin.recordMissing' };
+`);
+  fs.writeFileSync(path.join(apiRoot, 'deleteRecord_v1.ts'), `import type { AuthProps } from '../../../config';
+import { deleteRecord } from '../_server/adminStore';
+
+export const httpMethod = 'DELETE' as const;
+export const rateLimit = false;
+export const auth: AuthProps = { login: false };
+export interface ApiParams { data: { id: string }; }
+export type ApiResponse = { status: 'success' } | { status: 'error'; errorCode: 'admin.recordMissing' };
+export const main = ({ data }: ApiParams): ApiResponse => deleteRecord(data.id)
+  ? { status: 'success' }
+  : { status: 'error', errorCode: 'admin.recordMissing' };
+`);
+  fs.writeFileSync(path.join(apiRoot, 'verifyAdmin_v1.ts'), `import type { AuthProps } from '../../../config';
+import { listRecords, type AdminRecord } from '../_server/adminStore';
+
+export const httpMethod = 'POST' as const;
+export const rateLimit = false;
+export const auth: AuthProps = { login: false };
+export interface ApiParams {
+  data: { expectedIds: string[]; updated: AdminRecord; deletedId: string };
+}
+export type ApiResponse = { status: 'success' } | { status: 'error'; errorCode: 'admin.criteriaFailed' };
+export const main = ({ data }: ApiParams): ApiResponse => {
+  const records = listRecords();
+  const updated = records.find((record) => record.id === data.updated.id);
+  const passed = records.map((record) => record.id).join(',') === [...data.expectedIds].sort().join(',')
+    && updated?.title === data.updated.title
+    && updated.score === data.updated.score
+    && !records.some((record) => record.id === data.deletedId);
+  return passed ? { status: 'success' } : { status: 'error', errorCode: 'admin.criteriaFailed' };
+};
+`);
+
+  const adminPageRoot = path.join(projectDir, 'src', 'admin-acceptance');
+  fs.mkdirSync(adminPageRoot, { recursive: true });
+  fs.writeFileSync(path.join(adminPageRoot, 'page.tsx'), `//? intent: Exercise a synthetic admin CRUD workflow against deterministic seeded data.
+import { useEffect } from 'react';
+import { apiRequest } from 'src/_sockets/apiRequest';
+
+interface AdminAcceptanceState { status: 'pending' | 'success' | 'error'; steps: string[]; }
+declare global { interface Window { __luckystackAdminAcceptance: AdminAcceptanceState; } }
+window.__luckystackAdminAcceptance = { status: 'pending', steps: [] };
+
+const records = ${JSON.stringify(records)};
+const updated = ${JSON.stringify(updated)};
+const deletedId = ${JSON.stringify(deletedId)};
+const expectedIds = ${JSON.stringify(records.slice(0, -1).map((record) => record.id))};
+
+const AdminAcceptancePage = () => {
+  useEffect(() => {
+    void (async () => {
+      const steps: string[] = [];
+      for (const record of records) {
+        const response = await apiRequest({ name: 'acceptance/createRecord', version: 'v1', data: record });
+        steps.push('create:' + response.status);
+      }
+      const listed = await apiRequest({ name: 'acceptance/listRecords', version: 'v1' });
+      steps.push('list:' + listed.status);
+      const edited = await apiRequest({ name: 'acceptance/editRecord', version: 'v1', data: updated });
+      steps.push('edit:' + edited.status);
+      const deleted = await apiRequest({ name: 'acceptance/deleteRecord', version: 'v1', data: { id: deletedId } });
+      steps.push('delete:' + deleted.status);
+      const verified = await apiRequest({
+        name: 'acceptance/verifyAdmin',
+        version: 'v1',
+        data: { expectedIds, updated, deletedId },
+      });
+      steps.push('verify:' + verified.status);
+      window.__luckystackAdminAcceptance = {
+        status: steps.every((step) => step.endsWith(':success')) ? 'success' : 'error',
+        steps,
+      };
+    })();
+  }, []);
+  return <div data-testid={'admin-acceptance-status'} />;
+};
+export const template = 'plain';
+export default AdminAcceptancePage;
+`);
+
+  const gamePageRoot = path.join(projectDir, 'src', 'game-acceptance');
+  fs.mkdirSync(gamePageRoot, { recursive: true });
+  fs.writeFileSync(path.join(gamePageRoot, 'page.tsx'), `//? intent: Exercise a deterministic two-browser multiplayer exchange over routed sync and Redis fanout.
+import { useEffect } from 'react';
+import { syncRequest, useSyncEvents } from 'src/_sockets/syncRequest';
+
+interface GameAcceptanceState {
+  status: 'booting' | 'ready' | 'error';
+  received: number;
+  send: (marker: string) => Promise<string>;
+}
+declare global { interface Window { __luckystackGameAcceptance: GameAcceptanceState; } }
+window.__luckystackGameAcceptance = {
+  status: 'booting',
+  received: 0,
+  send: async () => 'error',
+};
+
+const GameAcceptancePage = () => {
+  const { upsertSyncEventCallback } = useSyncEvents();
+  useEffect(() => {
+    const peer = new URL(globalThis.location.href).searchParams.get('peer') ?? '';
+    let received = 0;
+    const teardown = upsertSyncEventCallback({
+      name: 'acceptance/fanout',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        if (serverOutput.status !== 'success') return;
+        received += 1;
+        window.__luckystackGameAcceptance.received = received;
+      },
+    });
+    window.__luckystackGameAcceptance = {
+      status: peer ? 'ready' : 'error',
+      received,
+      send: async (marker: string) => {
+        const response = await syncRequest({
+          name: 'acceptance/fanout',
+          version: 'v1',
+          data: { marker },
+          receiver: peer,
+          ignoreSelf: true,
+        });
+        return response.status;
+      },
+    };
+    return teardown;
+  }, [upsertSyncEventCallback]);
+  return <div data-testid={'game-acceptance-status'} />;
+};
+export const template = 'plain';
+export default GameAcceptancePage;
+`);
 };
 
 const startLoggedProcess = ({ label, command, args, cwd, env }) => {
@@ -709,7 +937,92 @@ const printProcessLog = (running) => {
   console.error(fs.readFileSync(running.logPath, 'utf8').split('\n').slice(-60).join('\n'));
 };
 
-export const runRoutedBrowserAcceptance = async ({ projectDir, ports, redisPort }) => {
+const runExtendedBrowserAcceptance = async ({ browser, frontendPort, seed }) => {
+  const contexts = [];
+  try {
+    const adminContext = await browser.newContext();
+    contexts.push(adminContext);
+    const adminPage = await adminContext.newPage();
+    const adminMethods = new Map();
+    const errors = [];
+    const adminSockets = [];
+    adminPage.on('request', (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith('/api/acceptance/')) adminMethods.set(pathname, request.method());
+    });
+    adminPage.on('websocket', (socket) => { adminSockets.push(socket.url()); });
+    adminPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    adminPage.on('pageerror', (error) => { errors.push(error.message); });
+    await adminPage.addInitScript((token) => { sessionStorage.setItem('token', token); }, `admin-seed-${String(seed)}`);
+    await adminPage.goto(`http://localhost:${String(frontendPort)}/admin-acceptance`, { waitUntil: 'domcontentloaded' });
+    await adminPage.waitForFunction(() => window.__luckystackAdminAcceptance?.status !== 'pending', undefined, { timeout: 120_000 });
+    const adminResult = await adminPage.evaluate(() => window.__luckystackAdminAcceptance);
+    const expectedAdminMethods = new Map([
+      ['/api/acceptance/createRecord/v1', 'POST'],
+      ['/api/acceptance/listRecords/v1', 'GET'],
+      ['/api/acceptance/editRecord/v1', 'PUT'],
+      ['/api/acceptance/deleteRecord/v1', 'DELETE'],
+      ['/api/acceptance/verifyAdmin/v1', 'POST'],
+    ]);
+    const adminMethodsMatch = [...expectedAdminMethods].every(([pathname, method]) => adminMethods.get(pathname) === method);
+
+    const gameAContext = await browser.newContext();
+    const gameBContext = await browser.newContext();
+    contexts.push(gameAContext, gameBContext);
+    const gameAPage = await gameAContext.newPage();
+    const gameBPage = await gameBContext.newPage();
+    const tokenA = `game-a-${String(seed)}`;
+    const tokenB = `game-b-${String(seed)}`;
+    const gameASockets = [];
+    const gameBSockets = [];
+    for (const [page, sockets] of [[gameAPage, gameASockets], [gameBPage, gameBSockets]]) {
+      page.on('websocket', (socket) => { sockets.push(socket.url()); });
+      page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      page.on('pageerror', (error) => { errors.push(error.message); });
+    }
+    await gameAPage.addInitScript((token) => { sessionStorage.setItem('token', token); }, tokenA);
+    await gameBPage.addInitScript((token) => { sessionStorage.setItem('token', token); }, tokenB);
+    await Promise.all([
+      gameAPage.goto(`http://localhost:${String(frontendPort)}/game-acceptance?peer=${tokenB}`, { waitUntil: 'domcontentloaded' }),
+      gameBPage.goto(`http://localhost:${String(frontendPort)}/game-acceptance?peer=${tokenA}`, { waitUntil: 'domcontentloaded' }),
+    ]);
+    await Promise.all([
+      gameAPage.waitForFunction(() => window.__luckystackGameAcceptance?.status === 'ready', undefined, { timeout: 120_000 }),
+      gameBPage.waitForFunction(() => window.__luckystackGameAcceptance?.status === 'ready', undefined, { timeout: 120_000 }),
+    ]);
+    const sendA = await gameAPage.evaluate(() => window.__luckystackGameAcceptance.send('move-a'));
+    await gameBPage.waitForFunction(() => window.__luckystackGameAcceptance.received === 1, undefined, { timeout: 30_000 });
+    const aAfterOwnMove = await gameAPage.evaluate(() => window.__luckystackGameAcceptance.received);
+    const sendB = await gameBPage.evaluate(() => window.__luckystackGameAcceptance.send('move-b'));
+    await gameAPage.waitForFunction(() => window.__luckystackGameAcceptance.received === 1, undefined, { timeout: 30_000 });
+    const [gameAResult, gameBResult] = await Promise.all([
+      gameAPage.evaluate(() => window.__luckystackGameAcceptance),
+      gameBPage.evaluate(() => window.__luckystackGameAcceptance),
+    ]);
+    const countSockets = (urls) => urls.filter((url) => url.includes('/socket.io/')).length;
+    const gamePassed = sendA === 'success'
+      && sendB === 'success'
+      && aAfterOwnMove === 0
+      && gameAResult.received === 1
+      && gameBResult.received === 1
+      && countSockets(gameASockets) === 1
+      && countSockets(gameBSockets) === 1;
+    const adminPassed = adminResult.status === 'success'
+      && adminMethodsMatch
+      && countSockets(adminSockets) === 1;
+    console.log(`[e2e]   seeded admin result=${JSON.stringify(adminResult)}`);
+    console.log(`[e2e]   seeded multiplayer A=${JSON.stringify(gameAResult)} B=${JSON.stringify(gameBResult)}`);
+    if (errors.length > 0) console.error(`[e2e]   extended browser errors=${JSON.stringify(errors)}`);
+    return adminPassed && gamePassed && errors.length === 0;
+  } catch (error) {
+    console.error('[e2e] extended browser acceptance failed:', error);
+    return false;
+  } finally {
+    for (const context of contexts.toReversed()) await context.close();
+  }
+};
+
+export const runRoutedBrowserAcceptance = async ({ projectDir, ports, redisPort, extended = false, seed = 17 }) => {
   if (!(await isPortOpen(redisPort))) {
     console.error(`[e2e] routed browser acceptance requires Redis on ${HOST}:${String(redisPort)}.`);
     return false;
@@ -822,10 +1135,16 @@ export const runRoutedBrowserAcceptance = async ({ projectDir, ports, redisPort 
     console.log(`[e2e]   Socket.io websocket count=${String(socketCount)}`);
     if (browserErrors.length > 0) console.error(`[e2e]   browser errors=${JSON.stringify(browserErrors)}`);
     if (httpFailures.length > 0) console.error(`[e2e]   HTTP failures=${JSON.stringify(httpFailures)}`);
-    return result.status === 'success'
+    const basePassed = result.status === 'success'
       && methodsMatch
       && socketCount === 1
       && browserErrors.length === 0;
+    const extendedPassed = !extended || await runExtendedBrowserAcceptance({
+      browser,
+      frontendPort: ports.frontendPort,
+      seed,
+    });
+    return basePassed && extendedPassed;
   } catch (error) {
     console.error('[e2e] routed browser acceptance failed:', error);
     for (const running of processes) printProcessLog(running);
@@ -945,7 +1264,7 @@ const main = async () => {
     registryEnv.PATH = `${path.dirname(bunPath)}${path.delimiter}${process.env.PATH ?? ''}`;
   }
 
-  console.log(`[e2e] mode=${args.mode} pm=${args.pm} runtime=${args.runtime}${args.runtimeSmoke ? ' (real server smoke)' : ' (build only)'}${args.browserRouted ? ' + routed browser' : ''}`);
+  console.log(`[e2e] mode=${args.mode} pm=${args.pm} runtime=${args.runtime}${args.runtimeSmoke ? ' (real server smoke)' : ' (build only)'}${args.browserRouted ? ` + routed browser${args.extendedBrowser ? ` extended(seed=${String(args.seed)})` : ''}` : ''}`);
   console.log(`[e2e] workdir: ${work}`);
 
   //? Pre-flight: a squatter on the port (a stray verdaccio from an interrupted
@@ -1115,7 +1434,10 @@ const main = async () => {
       let routedAcceptancePorts = null;
       if (args.browserRouted) {
         await stepAsync('write split-service routed browser fixture', async () => {
-          routedAcceptancePorts = await writeRoutedAcceptanceFixture(projectDir);
+          routedAcceptancePorts = await writeRoutedAcceptanceFixture(projectDir, {
+            extended: args.extendedBrowser,
+            seed: args.seed,
+          });
           return routedAcceptancePorts !== null;
         });
       }
@@ -1127,12 +1449,16 @@ const main = async () => {
       step('build', () => run('npm', ['run', 'build'], projectDir));
 
       if (args.browserRouted && routedAcceptancePorts) {
-        await stepAsync('browser uses declared methods and receives cross-instance sync over one Socket.io connection', () =>
-          runRoutedBrowserAcceptance({
-            projectDir,
-            ports: routedAcceptancePorts,
-            redisPort: args.redisPort,
-          }));
+        const browserLabel = args.extendedBrowser
+          ? `browser passes routed, seeded admin and two-player acceptance (seed ${String(args.seed)})`
+          : 'browser uses declared methods and receives cross-instance sync over one Socket.io connection';
+        await stepAsync(browserLabel, () => runRoutedBrowserAcceptance({
+          projectDir,
+          ports: routedAcceptancePorts,
+          redisPort: args.redisPort,
+          extended: args.extendedBrowser,
+          seed: args.seed,
+        }));
       }
 
       if (args.runtimeSmoke) {
