@@ -949,3 +949,33 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Bewust NIET gedaan (root sample-app-only, niet shipped):** root vite-proxy-rewrite (zou de `?backend=` multi-instance escape hatch slopen) en de module-load-capture in `luckystack/login/oauthProviders.ts` (geen template-equivalent; fixt de poort-bug niet).
 
 **Files:** core (`bindAddress.ts` + test + `index.ts`), server (`createServer.ts`, `authApiRoute.ts`, `listenServer.test.ts`), login (`login.ts`), 3× CHANGELOG, scripts (`resolveTestBaseUrl.ts` nieuw, `cluster.ts`, 5 test-scripts, `testLoginFlows.mjs`), release-administratie.
+
+## 2026-07-23 10:17 — TypeScript 7 en VoidZero-haalbaarheid onderzocht
+
+**User prompt (summary):** Onderzoek of LuckyStack naar `typescript@7.0.2` kan voor de native snelheidswinst, controleer packagecompatibiliteit en beoordeel bruikbare VoidZero-tooling.
+
+**Wat ik deed:** de root/scaffold manifests, 13 directe TypeScript Compiler API-imports, actuele npm peer-ranges en officiële TypeScript/VoidZero-documentatie vergeleken. Vastgelegd dat TS7 wel geschikt is voor een geïsoleerde `tsc -b`-benchmark, maar niet als drop-in: de stabiele Compiler API en `tsserver` ontbreken, `typescript-eslint` accepteert TS7 niet en tsup-declaratiegeneratie is onbewezen. Voor VoidZero is Oxlint de beste kleine pilot; Vite 8 gebruikt Rolldown al, terwijl Vite+ 0.2.6 beta een invasieve Vite-alias/Vitest-pin en een hogere Node-range vraagt. Geen dependency geïnstalleerd of productieconfig gewijzigd.
+
+**Files touched:** `docs/findings/2026-07-23-typescript7-voidzero-feasibility/README.md`, `docs/findings/README.md`, deze branch-log en `branch-logs/INDEX.md`.
+
+**Notes:** geen duurzame architectuurkeuze gemaakt, dus geen ADR. De aanbevolen volgende stap is een user-approved side-by-side TS6/TS7 benchmark; canonical TS6 blijft tot compiler-API/lint/IDE-pariteit bewezen is. De ongetrackte tijdelijke research-HTML en bestaande `nul` wachten op expliciete verwijdertoestemming.
+
+## 2026-08-04 09:05 — TS7/VoidZero-findings herverifieerd + research-rommel opgeruimd
+
+**User prompt (summary):** Ruim de rommel op en controleer of de findings nog kloppen tegen de meest recente versies, en of de redenen om TS7/VoidZero niet te implementeren blijven staan.
+
+**Wat ik deed:** de ongetrackte research-artefacten `voidzero-cloudflare.tmp.html` en `nul` (0-byte, Windows-devicenaam) verwijderd. Daarna elke blokkerende reden opnieuw tegen de npm-registry gecheckt: `typescript` staat nog steeds op stable 7.0.2 (alleen 7.1.0-dev nightlies), exporteert nog altijd uitsluitend `./unstable/*` en levert alleen een `tsc`-binary — geen `tsserver`. `typescript-eslint` 8.66.0 houdt peer `>=4.8.4 <6.1.0`, `vite-plus` 0.2.7 houdt dezelfde Node-range die de lokale Node 22.14 uitsluit, `vite` 8.2.0 bundelt nu rolldown ~1.2.0, en `tsdown` 0.22.14 heeft Node 20 helemaal laten vallen (`^22.18 || >=24.11`) terwijl root `engines.node` `>=20.0.0` is. Geen enkel item wisselde van status; de tsdown-blokkade is zelfs sterker geworden. Toegevoegd als sectie "Re-verification 2026-08-04" in de findings-ledger.
+
+**Files touched:** `docs/findings/2026-07-23-typescript7-voidzero-feasibility/README.md`, deze branch-log en `branch-logs/INDEX.md`.
+
+**Notes:** statuskolom van de 7 items bewust ongewijzigd gelaten (6 open · 1 duplicate), dus de rollup in `docs/findings/README.md` klopt nog. Her-check-trigger: een stable TypeScript boven 7.0.2 mét gedocumenteerde Compiler API, of een `typescript-eslint` waarvan de peer-range 7.x toelaat.
+
+## 2026-08-04 09:40 — Exposure-check keyv/cacheable supply-chain compromise + settings.local.json untracked
+
+**User prompt (summary):** `.claude/settings.local.json` gitignoren en untracken, upgrades rond Vite+/Rolldown/Oxlint voorlopig uitstellen, een Socket-Security-melding over gecompromitteerde packages nakijken, en committen.
+
+**Wat ik deed:** `.claude/settings.local.json` ge-untrackt met `git rm --cached` (stond al in `.gitignore` regel 75, maar tracking won). De hold op TS7/Vite+/Rolldown/Oxlint/tsdown vastgelegd in de findings-ledger, inclusief expliciete afwijzing van de Oxlint-pilot. Daarna de actieve npm-compromittering van de `keyv`/`cacheable`-namespaces (Socket.dev, vandaag) nagelopen: alle 6 lockfiles buiten `node_modules`, de geïnstalleerde tree, en de persistence-artefacten van de payload. Resultaat: **niet geraakt** — `keyv@4.5.4`, `flat-cache@4.0.1`, `file-entry-cache@8.0.0` komen transitief uit de ESLint-cacheketen en liggen ver onder de getroffen majors (6.0.0 / 6.1.24 / 11.1.7); de hele `cacheable`/`@keyv`-familie zit niet in de graaf. Geen `gh-token-monitor`-persistence, `.claude/settings.json` bevat alleen de agent-teams-envflag, geen `.vscode/tasks.json`.
+
+**Files touched:** `docs/findings/2026-08-04-keyv-cacheable-supply-chain/README.md` (nieuw), `docs/findings/2026-07-23-typescript7-voidzero-feasibility/README.md`, `docs/findings/README.md`, deze branch-log en `branch-logs/INDEX.md`.
+
+**Notes:** geen credential-rotatie nodig voor deze repo. Wel opgenomen als staande richtlijn: installeren met `npm ci` en ESLint niet bumpen zolang de advisory de namespaces niet schoon meldt, want een bump trekt `file-entry-cache` naar 11.x. De ledger bevat een herbruikbaar re-check-commando.

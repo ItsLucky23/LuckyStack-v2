@@ -5,10 +5,12 @@
 > `docs/FINDINGS_PROTOCOL.md` for the rules. This index lists them all so open
 > items are never lost during a cleanup.
 
-Last updated: 2026-07-22
+Last updated: 2026-08-04
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
+| 2026-08-04 | [2026-08-04-keyv-cacheable-supply-chain/](./2026-08-04-keyv-cacheable-supply-chain/) | Exposure check for the active keyv/cacheable npm compromise — not exposed | 5 | 0 open · 5 false-positive |
+| 2026-07-23 | [2026-07-23-typescript7-voidzero-feasibility/](./2026-07-23-typescript7-voidzero-feasibility/) | TypeScript 7 and VoidZero compatibility assessment | 7 | 6 open · 1 duplicate |
 | 2026-07-22 | [2026-07-22-boot-uuid-ttl-review/](./2026-07-22-boot-uuid-ttl-review/) | External finding validation: boot UUID expiry made healthy long-running servers not-ready | 1 | 0 open · 1 fixed |
 | 2026-07-22 | [2026-07-22-v074-release-audit/](./2026-07-22-v074-release-audit/) | v0.7.4 release audit: newly published sharp/libvips advisory | 1 | 0 open · 1 fixed |
 | 2026-07-21 | [2026-07-21-test-runner-env-bootstrap-review/](./2026-07-21-test-runner-env-bootstrap-review/) | Review of ADR 0032 test-process env/secret bootstrap and direct Layer-5 path | 1 | 0 open · 1 fixed |
