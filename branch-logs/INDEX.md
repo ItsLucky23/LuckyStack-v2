@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | feat/email-code-2fa | (none) | 2026-07-12 16:05 | merged 2026-07-12 — in v0.6.0 (merge 970d051; passwordless email-code login + 2FA TOTP/email-fallback/recovery [ADR 0024]; security-hardened via 5-lens scan + echte-Redis-harness) | 7 |
 | fix/unpushed-review-findings | (none) | 2026-07-16 16:10 | merged 2026-07-16 — v0.7.0 release-readiness fixes (merge 3f77de9) | 5 |
-| main | (none) | 2026-08-16 14:24 | active — framework-docs opgeschoond en naar scaffold-updatepad doorgezet; package-contract/session tweede audit toegevoegd. OAuth callback-port, AI-docs audit, TS7/VoidZero hold en keyv/cacheable exposure-check blijven vastgelegd. | 62 |
+| main | (none) | 2026-08-16 15:11 | active — backend-port env-bridge verwijderd en npm/Bun × Node/Bun Verdaccio-E2E groen; eerdere framework/package-docaudits blijven vastgelegd. | 63 |
 | fix/dropdown-positioning | (none) | 2026-07-22 21:17 | completed — v0.7.5 gepubliceerd via GitHub Actions met npm provenance. | 3 |
 | fix/boot-uuid-heartbeat | (none) | 2026-07-23 08:40 | merged — BU-01 uitgebracht in v0.7.6 met npm provenance. | 3 |
 | fix/v073-port-oauth-review | (none) | 2026-07-22 10:38 | completed — v0.7.4 gepubliceerd via GitHub Actions met npm provenance. | 6 |

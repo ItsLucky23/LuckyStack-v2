@@ -24,7 +24,8 @@
 //   node scripts/e2eVerdaccio.mjs --pm=bun --runtime=bun   # build + real Bun server boot
 //   node scripts/e2eVerdaccio.mjs --runtime=node            # build + real Node server boot
 //   node scripts/e2eVerdaccio.mjs --runtime=both            # boot the same build on Node and Bun
-//   node scripts/e2eVerdaccio.mjs --runtime=bun --redis-port=6380
+//   node scripts/e2eVerdaccio.mjs --runtime=both --port-contract # default/CLI/hop+OAuth port matrix
+//   node scripts/e2eVerdaccio.mjs --runtime=bun --redis-host=127.0.0.1 --redis-port=6380
 //   node scripts/e2eVerdaccio.mjs --keep                   # leave the project for inspection
 //   node scripts/e2eVerdaccio.mjs --scaffold-args="--orm=prisma --db=sqlite --auth=none"
 //
@@ -60,6 +61,8 @@ const parseArgs = () => {
     pm: 'npm',
     runtime: 'node',
     runtimeSmoke: false,
+    portContract: false,
+    redisHost: HOST,
     redisPort: Number(process.env.REDIS_PORT ?? 6379),
     keep: false,
     scaffoldArgs: '--orm=prisma --db=sqlite --auth=none --no-ai-docs',
@@ -69,7 +72,9 @@ const parseArgs = () => {
     else if (arg.startsWith('--runtime=')) {
       out.runtime = arg.slice(10);
       out.runtimeSmoke = true;
-    } else if (arg.startsWith('--redis-port=')) out.redisPort = Number(arg.slice(13));
+    } else if (arg.startsWith('--redis-host=')) out.redisHost = arg.slice(13);
+    else if (arg.startsWith('--redis-port=')) out.redisPort = Number(arg.slice(13));
+    else if (arg === '--port-contract') out.portContract = true;
     else if (arg === '--keep') out.keep = true;
     else if (arg.startsWith('--scaffold-args=')) out.scaffoldArgs = arg.slice(16);
     else {
@@ -83,6 +88,10 @@ const parseArgs = () => {
   }
   if (!['node', 'bun', 'both'].includes(out.runtime)) {
     console.error(`[e2e] --runtime must be node, bun, or both (got ${out.runtime})`);
+    process.exit(2);
+  }
+  if (out.redisHost.trim().length === 0) {
+    console.error('[e2e] --redis-host must not be empty');
     process.exit(2);
   }
   if (!Number.isInteger(out.redisPort) || out.redisPort < 1 || out.redisPort > 65_535) {
@@ -252,10 +261,66 @@ console.log('[e2e-orm] ${orm} ' + actual + ' CRUD + nested Date passed');
   return probe;
 };
 
-const smokeBuiltServer = async ({ projectDir, runtime, bunPath, redisPort, databaseUrl }) => {
-  const port = await getFreePort();
-  const launcher = path.join(projectDir, 'e2e-runtime-launch.mjs');
-  const logPath = path.join(projectDir, `e2e-${runtime}-server.log`);
+const tryReservePort = async (port) => new Promise((resolve) => {
+  const server = net.createServer();
+  server.once('error', () => resolve(null));
+  server.listen(port, HOST, () => resolve(server));
+});
+
+const closeNetServer = async (server) => new Promise((resolve) => server.close(resolve));
+
+const getFreePortPair = async () => {
+  //? Windows allocates ephemeral ports in pairs on some systems, so asking the
+  //? OS for port 0 and probing `port + 1` can report every adjacent port busy.
+  //? Reserve BOTH candidates to prove the exact auto-increment pair is usable.
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const configured = 20_000 + Math.floor(Math.random() * 30_000);
+    const first = await tryReservePort(configured);
+    if (!first) continue;
+    const second = await tryReservePort(configured + 1);
+    if (!second) {
+      await closeNetServer(first);
+      continue;
+    }
+    await closeNetServer(second);
+    await closeNetServer(first);
+    return { configured, incremented: configured + 1 };
+  }
+  throw new Error('could not reserve two consecutive ports for the port-contract E2E');
+};
+
+const getPortContractPorts = async () => {
+  const pair = await getFreePortPair();
+  let cli = await getFreePort();
+  while ([pair.configured, pair.incremented].includes(cli)) cli = await getFreePort();
+  return { ...pair, cli };
+};
+
+const occupyPort = async (port) => new Promise((resolve, reject) => {
+  const server = net.createServer();
+  server.once('error', reject);
+  server.listen(port, HOST, () => resolve(server));
+});
+
+const smokeBuiltServer = async ({
+  projectDir,
+  runtime,
+  bunPath,
+  redisHost = HOST,
+  redisPort,
+  databaseUrl,
+  configuredPort,
+  cliPort,
+  autoIncrement = false,
+  probeOauth = false,
+  assertNoLegacyPort = false,
+}) => {
+  const requestedPort = cliPort ?? configuredPort ?? await getFreePort();
+  const expectedPort = autoIncrement ? requestedPort + 1 : requestedPort;
+  const useCliPort = cliPort !== undefined || configuredPort === undefined;
+  const label = autoIncrement ? 'auto-increment' : useCliPort ? 'cli' : 'default';
+  const launcher = path.join(projectDir, `e2e-runtime-${runtime}-${label}.mjs`);
+  const logPath = path.join(projectDir, `e2e-${runtime}-${label}-server.log`);
   fs.writeFileSync(
     launcher,
     [
@@ -265,40 +330,49 @@ const smokeBuiltServer = async ({ projectDir, runtime, bunPath, redisPort, datab
       `  console.error('[e2e-runtime] expected ${runtime}, got ' + actual);`,
       `  process.exit(91);`,
       `}`,
+      assertNoLegacyPort
+        ? `if (Reflect.has(process.env, 'SERVER_PORT')) { console.error('[e2e-runtime] legacy port env leaked'); process.exit(92); }`
+        : '',
       `await import('./dist/server.js');`,
       '',
     ].join('\n'),
   );
 
+  const blocker = autoIncrement ? await occupyPort(requestedPort) : null;
   const logFd = fs.openSync(logPath, 'a');
   const command = runtime === 'bun' ? bunPath : 'node';
+  const positional = useCliPort ? ['default', String(requestedPort)] : [];
   const commandArgs = runtime === 'bun'
-    ? ['--bun', launcher, 'default', String(port)]
-    : [launcher, 'default', String(port)];
+    ? ['--bun', launcher, ...positional]
+    : [launcher, ...positional];
+  const childEnv = {
+    ...process.env,
+    NODE_ENV: 'development',
+    PROJECT_NAME: `luckystack-e2e-${runtime}-${label}`,
+    REDIS_HOST: redisHost,
+    REDIS_PORT: String(redisPort),
+    REDIS_USER: '',
+    REDIS_PASSWORD: '',
+    DATABASE_URL: databaseUrl,
+    SERVER_PORT_AUTO_INCREMENT: autoIncrement ? '1' : '0',
+    DEV_GOOGLE_CLIENT_ID: 'luckystack-e2e-client',
+    DEV_GOOGLE_CLIENT_SECRET: 'luckystack-e2e-secret',
+  };
+  Reflect.deleteProperty(childEnv, 'SERVER_PORT');
   const child = spawn(command, commandArgs, {
     cwd: projectDir,
     stdio: ['ignore', logFd, logFd],
     shell: true,
     detached: false,
-    env: {
-      ...process.env,
-      NODE_ENV: 'development',
-      PROJECT_NAME: `luckystack-e2e-${runtime}`,
-      REDIS_HOST: HOST,
-      REDIS_PORT: String(redisPort),
-      REDIS_USER: '',
-      REDIS_PASSWORD: '',
-      DATABASE_URL: databaseUrl,
-      SERVER_PORT_AUTO_INCREMENT: '0',
-    },
+    env: childEnv,
   });
   let exited = false;
   child.on('exit', () => { exited = true; });
 
   // eslint-disable-next-line luckystack/no-raw-try-catch -- process-tree cleanup must run after every async probe path
   try {
-    if (!(await waitForPort(port, 120_000, () => exited))) {
-      console.error(`[e2e] ${runtime} server did not listen on ${HOST}:${String(port)}. Log:`);
+    if (!(await waitForPort(expectedPort, 120_000, () => exited))) {
+      console.error(`[e2e] ${runtime} server did not listen on ${HOST}:${String(expectedPort)}. Log:`);
       console.error(fs.readFileSync(logPath, 'utf8').split('\n').slice(-40).join('\n'));
       return false;
     }
@@ -306,14 +380,27 @@ const smokeBuiltServer = async ({ projectDir, runtime, bunPath, redisPort, datab
     //? A TCP listen can become visible a few milliseconds before the request
     //? pipeline is ready (and a short-lived child can disappear between both).
     //? Retry real HTTP instead of turning that race into a runtime verdict.
-    const baseUrl = `http://${HOST}:${String(port)}`;
+    const baseUrl = `http://${HOST}:${String(expectedPort)}`;
     const live = await waitForHttp200(`${baseUrl}/livez`, 30_000, () => exited);
     const health = await waitForHttp200(`${baseUrl}/_health`, 30_000, () => exited);
+    let oauthOk = true;
+    if (probeOauth) {
+      const response = await fetch(`${baseUrl}/auth/api/google`, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10_000),
+      });
+      const location = response.headers.get('location');
+      const redirectUri = location ? new URL(location).searchParams.get('redirect_uri') : null;
+      const expectedRedirectUri = `http://localhost:${String(expectedPort)}/auth/callback/google`;
+      oauthOk = response.status >= 300 && response.status < 400 && redirectUri === expectedRedirectUri;
+      console.log(`[e2e]   ${runtime} OAuth redirect_uri=${String(redirectUri)} expected=${expectedRedirectUri}`);
+    }
     const log = fs.readFileSync(logPath, 'utf8');
     console.log(`[e2e]   ${runtime} /livez=${String(live?.status ?? 'down')} /_health=${String(health?.status ?? 'down')}`);
-    if (!live || !health) console.error(log.split('\n').slice(-40).join('\n'));
+    if (!live || !health || !oauthOk) console.error(log.split('\n').slice(-40).join('\n'));
     return live !== null
       && health !== null
+      && oauthOk
       && log.includes(`[e2e-runtime] ${runtime}`);
   } catch (error) {
     console.error(`[e2e] ${runtime} server smoke failed:`, error);
@@ -321,6 +408,7 @@ const smokeBuiltServer = async ({ projectDir, runtime, bunPath, redisPort, datab
     return false;
   } finally {
     stopProcessTree(child);
+    if (blocker) await new Promise((resolve) => blocker.close(resolve));
     fs.closeSync(logFd);
     fs.rmSync(launcher, { force: true });
   }
@@ -328,6 +416,7 @@ const smokeBuiltServer = async ({ projectDir, runtime, bunPath, redisPort, datab
 
 const main = async () => {
   const args = parseArgs();
+  const portContractPorts = args.portContract ? await getPortContractPorts() : null;
   const needsBun = args.pm === 'bun' || args.runtime === 'bun' || args.runtime === 'both';
   const bunPath = needsBun ? resolveBun() : null;
   if (needsBun && !bunPath) {
@@ -541,6 +630,38 @@ const main = async () => {
         return found.length > 0;
       });
 
+      step('port source + optional-router scaffold assets are truthful', () => {
+        const portsPath = path.join(projectDir, 'config.ports.ts');
+        const packagePath = path.join(projectDir, 'package.json');
+        if (!fs.existsSync(portsPath) || !fs.existsSync(packagePath)) return false;
+
+        const routerRequested = /(?:^|\s)--router(?:\s|$)/.test(args.scaffoldArgs);
+        const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+        const hasRouter = typeof packageJson.dependencies?.['@luckystack/router'] === 'string';
+        const hasTopology = fs.existsSync(path.join(projectDir, 'deploy.config.ts'))
+          && fs.existsSync(path.join(projectDir, 'services.config.ts'));
+        const envSource = fs.readFileSync(path.join(projectDir, '.env_template'), 'utf8');
+        const noLegacyPort = !/^SERVER_PORT=/m.test(envSource);
+        return hasRouter === routerRequested
+          && hasTopology === routerRequested
+          && noLegacyPort;
+      });
+
+      if (args.portContract) {
+        step(`set non-default config.ports.ts E2E contract (frontend 5391, backend ${String(portContractPorts?.configured)})`, () => {
+          if (!portContractPorts) return false;
+          const portsPath = path.join(projectDir, 'config.ports.ts');
+          const source = fs.readFileSync(portsPath, 'utf8');
+          const updated = source
+            .replace('frontend: 5173', 'frontend: 5391')
+            .replace('backend: 80', `backend: ${String(portContractPorts.configured)}`);
+          if (updated === source) return false;
+          fs.writeFileSync(portsPath, updated);
+          return updated.includes('frontend: 5391')
+            && updated.includes(`backend: ${String(portContractPorts.configured)}`);
+        });
+      }
+
       //? The scaffolder installs already; this proves a SECOND install (the
       //? upgrade/add path) also resolves cleanly against the same registry.
       step(`${args.pm} install (idempotent re-install)`, () =>
@@ -592,13 +713,55 @@ const main = async () => {
         }
 
         for (const runtime of runtimeTargets) {
-          await stepAsync(`built server boots on ${runtime} and serves health endpoints`, () =>
+          if (!args.portContract) {
+            await stepAsync(`built server boots on ${runtime} and serves health endpoints`, () =>
+              smokeBuiltServer({
+                projectDir,
+                runtime,
+                bunPath,
+                redisHost: args.redisHost,
+                redisPort: args.redisPort,
+                databaseUrl,
+              }));
+            continue;
+          }
+
+          if (!portContractPorts) throw new Error('port-contract ports were not initialized');
+          await stepAsync(`${runtime}: config.ports.ts backend ${String(portContractPorts.configured)} boots without a port env`, () =>
             smokeBuiltServer({
               projectDir,
               runtime,
               bunPath,
+              redisHost: args.redisHost,
               redisPort: args.redisPort,
               databaseUrl,
+              configuredPort: portContractPorts.configured,
+              assertNoLegacyPort: true,
+            }));
+          await stepAsync(`${runtime}: positional CLI port ${String(portContractPorts.cli)} overrides config.ports.ts`, () =>
+            smokeBuiltServer({
+              projectDir,
+              runtime,
+              bunPath,
+              redisHost: args.redisHost,
+              redisPort: args.redisPort,
+              databaseUrl,
+              configuredPort: portContractPorts.configured,
+              cliPort: portContractPorts.cli,
+              assertNoLegacyPort: true,
+            }));
+          await stepAsync(`${runtime}: auto-increment ${String(portContractPorts.configured)}→${String(portContractPorts.incremented)} keeps OAuth redirect parity`, () =>
+            smokeBuiltServer({
+              projectDir,
+              runtime,
+              bunPath,
+              redisHost: args.redisHost,
+              redisPort: args.redisPort,
+              databaseUrl,
+              configuredPort: portContractPorts.configured,
+              autoIncrement: true,
+              probeOauth: true,
+              assertNoLegacyPort: true,
             }));
         }
       }

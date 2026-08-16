@@ -1,9 +1,8 @@
 # Temporary implementation plan — remove `process.env.SERVER_PORT`
 
-> **Status:** plan only — no implementation started for this plan.
->
-> After compaction, reload this file before touching code. Delete or archive it
-> after the implementation is complete.
+> **Status:** implemented and verified on 2026-08-16. Kept as the execution
+> record for ADR 0039; the final E2E used dynamically reserved consecutive ports
+> rather than fixed `4787/4788` because port `4787` was already occupied locally.
 
 ## Goal
 

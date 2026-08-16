@@ -9,7 +9,7 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (12)
+## Lessons (13)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
@@ -25,6 +25,7 @@
 | 0010 | An ORM's toJSON() describes stringifying THAT object — not the same object reached through its parent | 🟡 medium | packages/devkit | types, orm, serialization, codegen, wontfix | `docs/lessons/0010-tojson-describes-the-object-not-the-parent-path.md` |
 | 0011 | A Windows-green lockfile can be invalid for Linux npm ci | 🟠 high | release | npm, lockfile, ci, cross-platform, release | `docs/lessons/0011-windows-lockfile-can-omit-linux-optional-transitives.md` |
 | 0012 | Alle input op _ai-routes geweigerd" was geen type-bug — het was een stale dev-proces met lege devApis | 🟠 high | packages/server | dev-tooling, false-diagnosis, silent-failure, ports, hot-reload, devkit | `docs/lessons/0012-a-stale-broken-dev-process-looks-like-a-per-route-bug.md` |
+| 0013 | Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup | 🟡 medium | scripts/e2eVerdaccio.mjs | e2e, windows, ports, redis, wsl, infrastructure | `docs/lessons/0013-windows-e2e-port-pairs-and-wsl-redis-protected-mode.md` |
 
 ## Takeaways
 
@@ -123,3 +124,11 @@ Validate release lockfiles with the npm majors used by CI: `npm ci --dry-run -ig
 **Verifieer eerst dat het proces dat je test het levende, juiste proces is.** Bij een "alles faalt op deze routes"-symptoom: check de boot-logs op init-fouten en check op welke poort dit proces daadwerkelijk luistert (dev auto-increment hopt weg van een bezette poort). Een zombie op de canonieke poort is de klassieke val. **Onderscheid de twee code-paden.** De extractor (`getInputTypeFromFile`, volledige TypeChecker) en de request-tijd-resolver (`resolveRuntimeTypeText`, string-re-parser) zijn verschillend. "Verse extractie werkt wél" bewijst niets over het request-pad tenzij je een echte request door de validatie stuurt. **Framework-fix (deze les):** foutgevoelige plekken moeten luid + zelf-verklarend falen. `createServer.ts` logt een init-fout nu als `error` met volledige uitleg + herstelstap en registreert de fout (`devToolsStatus.ts`); `apiRoute.ts`/`syncRoute.ts` geven dan een `503` met de echte oorzaak i.p.v. een misleidende 404; de poort-hop-warning legt de zombie-consequentie uit.
 
 → `docs/lessons/0012-a-stale-broken-dev-process-looks-like-a-per-route-bug.md`
+
+### 0013 — Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup
+
+**0013** · medium · scripts/e2eVerdaccio.mjs · tags: e2e, windows, ports, redis, wsl, infrastructure · 2026-08-16
+
+For an E2E that needs consecutive ports, reserve both exact candidates with real `net.Server` instances before selecting the pair; do not infer adjacency from `listen(0)`. When using a disposable WSL Redis from Windows, verify a real Redis `PING` over the Windows→WSL address, not just TCP connect. Use an isolated, non-persistent instance with `--protected-mode no` only for that test, then shut it down immediately; never weaken the developer's normal Redis or read secrets from `.env.local`.
+
+→ `docs/lessons/0013-windows-e2e-port-pairs-and-wsl-redis-protected-mode.md`

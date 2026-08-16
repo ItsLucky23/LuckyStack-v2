@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (37)
+## Decisions (38)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -49,7 +49,8 @@
 | 0035 | TOTP ciphertext carries a key id and decrypt-only legacy keyring | 🟢 accepted | auth, 2fa, totp, encryption, rotation | — | `docs/decisions/0035-totp-ciphertext-carries-a-key-id-and-legacy-keyring.md` |
 | 0036 | Boot UUID TTL requires a stable environment-level heartbeat | 🟢 accepted | readiness, redis, boot-uuid, multi-instance, reliability | — | `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md` |
 | 0037 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0037-single-source-ports-and-optin-router-topology.md` |
-| 0038 | Keep the scaffold backend default out of process.env until server bootstrap | 🟢 accepted | config, ports, scaffold, oauth, server | — | `docs/decisions/0038-scaffold-port-default-stays-out-of-process-env.md` |
+| 0038 | Keep the scaffold backend default out of process.env until server bootstrap | ⚪ superseded | config, ports, scaffold, oauth, server | — | `docs/decisions/0038-scaffold-port-default-stays-out-of-process-env.md` |
+| 0039 | Runtime backend-port overrides use a typed core registry, never process.env | 🟢 accepted | config, ports, scaffold, oauth, server, cli | 0038 | `docs/decisions/0039-runtime-port-overrides-use-a-typed-registry.md` |
 
 ## Summaries
 
@@ -363,11 +364,21 @@ Keep the TTL and treat the UUID as an environment-level value. After HTTP listen
 
 ### 0038 — Keep the scaffold backend default out of process.env until server bootstrap
 
-**0038** · accepted · tags: config, ports, scaffold, oauth, server · 2026-08-16
+**0038** · superseded · tags: config, ports, scaffold, oauth, server · 2026-08-16
 
 `@luckystack/core` keeps `SERVER_PORT='80'` in its validated environment snapshot and keeps the generic server fallback, but does **not** write the implicit value into `process.env`. `process.env.SERVER_PORT` remains reserved for an explicitly supplied environment value or the positional CLI-port writeback from `@luckystack/server/parseArgv`.
 
 → `docs/decisions/0038-scaffold-port-default-stays-out-of-process-env.md`
+
+### 0039 — Runtime backend-port overrides use a typed core registry, never process.env
+
+**0039** · accepted · tags: config, ports, scaffold, oauth, server, cli · 2026-08-16
+
+`SERVER_PORT` is removed from the core environment schema, server precedence, bind-address fallback, CLI diagnostics, and scaffold/runtime config.
+
+**Governs** (`//? @adr 0039`): `packages/core/src/env.ts`, `packages/create-luckystack-app/template/config.ts`
+
+→ `docs/decisions/0039-runtime-port-overrides-use-a-typed-registry.md`
 
 ## Code governed by decisions
 
@@ -378,9 +389,9 @@ Keep the TTL and treat the UUID as an environment-level value. After HTTP listen
 | --- | --- | --- |
 | `packages/core/src/bindAddress.ts` | 0031 | OAuth port hopping preserves an explicitly configured local ingress |
 | `packages/core/src/bootUuid.ts` | 0036 | Boot UUID TTL requires a stable environment-level heartbeat |
-| `packages/core/src/env.ts` | 0039 | _(unknown ADR — tag references a missing decision file)_ |
+| `packages/core/src/env.ts` | 0039 | Runtime backend-port overrides use a typed core registry, never process.env |
 | `packages/core/src/hooks/types.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
-| `packages/create-luckystack-app/template/config.ts` | 0039 | _(unknown ADR — tag references a missing decision file)_ |
+| `packages/create-luckystack-app/template/config.ts` | 0039 | Runtime backend-port overrides use a typed core registry, never process.env |
 | `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
 | `packages/email/src/sendEmail.ts` | 0034 | Email timeout is cancellation intent, not proof of delivery failure |
 | `packages/login/src/accountStrategy.ts` | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant |

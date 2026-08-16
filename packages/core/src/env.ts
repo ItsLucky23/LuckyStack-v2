@@ -161,7 +161,12 @@ export const bootstrapEnv = (): RuntimeEnv => {
 
   loadEnvFiles();
 
-  const parsed = EnvSchema.safeParse(process.env);
+  //? Zod's `.loose()` preserves consumer-defined keys, but the removed legacy
+  //? backend-port key must not survive in the validated snapshot. Server port
+  //? resolution is exclusively options/argv/config.ports.ts.
+  const envInput = { ...process.env };
+  Reflect.deleteProperty(envInput, 'SERVER_PORT');
+  const parsed = EnvSchema.safeParse(envInput);
   if (!parsed.success) {
     const details = parsed.error.issues
       .map((issue) => `${issue.path.join('.') || 'env'}: ${issue.message}`)

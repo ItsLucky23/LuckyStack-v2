@@ -33,6 +33,37 @@ describe('getEnvFiles', () => {
   });
 });
 
+describe('removed backend-port environment key', () => {
+  const legacyPortKey = 'SERVER_PORT';
+  const savedPort = process.env[legacyPortKey];
+  const savedFiles = process.env.LUCKYSTACK_ENV_FILES;
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    if (savedPort === undefined) Reflect.deleteProperty(process.env, legacyPortKey);
+    else process.env[legacyPortKey] = savedPort;
+    if (savedFiles === undefined) delete process.env.LUCKYSTACK_ENV_FILES;
+    else process.env.LUCKYSTACK_ENV_FILES = savedFiles;
+    vi.restoreAllMocks();
+    vi.resetModules();
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('does not expose the legacy key in the validated runtime snapshot', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'luckystack-env-port-removal-'));
+    tempDirs.push(dir);
+    writeFileSync(path.join(dir, '.env.test'), 'NODE_ENV=test\nSERVER_PORT=4787\n');
+    vi.spyOn(process, 'cwd').mockReturnValue(dir);
+    process.env.LUCKYSTACK_ENV_FILES = '.env.test';
+    Reflect.deleteProperty(process.env, legacyPortKey);
+
+    vi.resetModules();
+    const freshEnv = await import('./env');
+
+    expect(Reflect.has(freshEnv.env, legacyPortKey)).toBe(false);
+  });
+});
+
 //? Bun auto-loads .env files before user code runs, which silently breaks the
 //? loader's Node assumptions (see env.ts). The cure is `bunfig.toml` with
 //? `env = false`; this guard is the loud fallback for when that file is missing.

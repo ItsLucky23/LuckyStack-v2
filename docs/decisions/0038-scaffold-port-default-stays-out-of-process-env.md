@@ -1,11 +1,12 @@
 ---
 name: scaffold-port-default-stays-out-of-process-env
 title: Keep the scaffold backend default out of process.env until server bootstrap
-status: accepted
+status: superseded
 date: 2026-08-16
 deciders: [mathijs]
 tags: [config, ports, scaffold, oauth, server]
 supersedes: []
+superseded_by: [0039]
 relates: [0016, 0031]
 ---
 

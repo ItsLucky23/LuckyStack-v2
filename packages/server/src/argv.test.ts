@@ -117,21 +117,22 @@ describe('parseServerArgv', () => {
 describe('applyServerArgv', () => {
   it('registers the positional port without writing an environment port', () => {
     const savedArgv = process.argv;
-    const savedLegacyPort = process.env.SERVER_PORT;
+    const legacyPortKey = 'SERVER_PORT';
+    const savedLegacyPort = process.env[legacyPortKey];
     resetPortOverrideForTests();
-    delete process.env.SERVER_PORT;
+    Reflect.deleteProperty(process.env, legacyPortKey);
     process.argv = ['node', 'server.js', 'default', '4911'];
 
     try {
       applyServerArgv();
       expect(getPortOverride()).toBe(4911);
       expect(getParsedPort()).toBe(4911);
-      expect(process.env.SERVER_PORT).toBeUndefined();
+      expect(process.env[legacyPortKey]).toBeUndefined();
     } finally {
       process.argv = savedArgv;
       resetPortOverrideForTests();
-      if (savedLegacyPort === undefined) delete process.env.SERVER_PORT;
-      else process.env.SERVER_PORT = savedLegacyPort;
+      if (savedLegacyPort === undefined) Reflect.deleteProperty(process.env, legacyPortKey);
+      else process.env[legacyPortKey] = savedLegacyPort;
     }
   });
 });

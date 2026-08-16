@@ -23,7 +23,10 @@ describe('legacy backend-port environment removal', () => {
   it('keeps active runtime and scaffold surfaces free of the removed key', () => {
     for (const relativePath of runtimeFiles) {
       const source = fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
-      expect(source, relativePath).not.toMatch(/\bSERVER_PORT\b/);
+      expect(source, relativePath).not.toMatch(/process\.env\.SERVER_PORT\b/);
+      if (relativePath.includes('template/')) {
+        expect(source, relativePath).not.toMatch(/\bSERVER_PORT\b/);
+      }
     }
   });
 

@@ -1033,3 +1033,21 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Verificatie:** `npm run lint`, `npm run ai:lint`, `npm run ai:index`, `npm run ai:capabilities`, `npm run ai:context-budget`, `npm run build` en `node scripts/buildPackages.mjs --serial` groen; 17/17 packages gebouwd. `npm run ai:doc-staleness` meldt alleen de drie report-only docs door de nog niet gecommitte baseline. Workspace: `ai:capabilities`, `ai:context-budget`, `ai:lint`, `ai:doc-staleness` groen (12/12 docs), `git diff --check` schoon.
 
 **Files touched:** package README/CLAUDE/docs, `docs/ARCHITECTURE_{API,AUTH,EMAIL,SESSION}.md`, `docs/findings/2026-08-16-package-contract-audit/`, `packages/server/package.json` + changelog, generated AI snapshots, `../Workspace/docs/luckystack/ARCHITECTURE_{API,AUTH,EMAIL,SESSION}.md`, and both branch-log indexes.
+
+## 2026-08-16 15:11 — Backend-port env-bridge volledig verwijderd + echte E2E
+
+**User prompt (summary):** Controleer het tijdelijke verwijderplan en werk het, indien correct, volledig in één keer uit inclusief echte E2E-tests.
+
+**What I did**:
+- `registerPortOverride` / `getPortOverride` toegevoegd aan de browser-veilige `@luckystack/core/config` entry; `parseArgv`, root/scaffold config en serverresolutie gebruiken nu dezelfde typed registry zonder env-writeback.
+- De portvolgorde teruggebracht tot `options.port > argv > defaultPort > 80`; de legacy key uit core-env, bind fallback, CLI-diagnostics, templates en actieve docs verwijderd.
+- Intended/bound registratie uitgebreid met `configuredPort`, zodat programmatic `options.port` OAuth kan corrigeren zonder een expliciete lokale router/reverse proxy te omzeilen.
+- Unit-/source-contracttests toegevoegd voor registry, argv zonder envmutatie, default/CLI/programmatic/productie/generic OAuth, auto-incrementpariteit en scaffold/router-onafhankelijkheid.
+- Verdaccio-harness uitgebreid met dynamische consecutive-port-reservering, default/CLI/auto-increment+OAuth runtimeprobes, npm/Bun installs, Node/Bun runtimes en router/no-router assetcontrole.
+- ADR 0039, changelogs, findings-ledger en lesson 0013 bijgewerkt; ADR 0038 gemarkeerd als superseded.
+
+**Verificatie:** `lint`, `lint:packages`, `ai:lint`, `test:unit` (1945/1945), `test:integration` (13/13), `build` (17/17 packages + artifacts + tsc + Vite + server bundle), `pack:dry` (17/17) en `ai:doc-staleness` groen. Twee echte Verdaccio-runs volledig groen: npm-install + no-router en Bun-install + router; beide draaiden Node én Bun met config-default, CLI-override en auto-increment OAuth `redirect_uri` naar de werkelijk gebonden poort. Tijdelijke WSL Redis is na afloop gestopt; `.env.local` is niet gelezen.
+
+**Files touched:** `packages/core/src/{portOverrideRegistry,config,index,env,bindAddress}*`, `packages/server/src/{argv,parseArgv,portResolution,createServer,types,serverPortRemoval.test}*`, root/scaffold `config.ts` + server entry, `scripts/e2eVerdaccio.mjs`, port/auth/hosting docs, package changelogs, `docs/decisions/003{8,9}-*.md`, `docs/findings/2026-08-16-server-port-env-removal/`, `docs/lessons/0013-*.md`, generated AI indexes.
+
+**Notes / decisions:** E2E reserveert dynamisch een vrij portpaar in plaats van `4787/4788`, omdat `4787` lokaal bezet was en Windows `listen(0)` aangrenzende poorten niet garandeert. De statische regressietest gebruikt nog steeds `4787`. Tijdens de lange E2E-run committe een parallelle sessie de toenmalige werkboom als `f830e0f`; de afrondende ADR/lesson/E2E-harnesswijzigingen staan daarna nog on-gecommit.
