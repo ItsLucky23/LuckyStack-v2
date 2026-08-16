@@ -15,7 +15,7 @@ Produce a structured handoff document at the end of a working session, so anothe
 ### 1. Gather context
 
 - Read `branch-logs/<current-branch>.md` for the running log of work on this branch.
-- Read `SESSION_STATE.md` if present (whole-repo session checkpoint).
+- Read the latest relevant file under `handoffs/` if present; handoffs are temporary session checkpoints.
 - Scan the git status + recent commits since the last handoff.
 - Note any open plan files referenced in `~/.claude/plans/`.
 

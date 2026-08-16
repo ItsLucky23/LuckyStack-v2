@@ -173,7 +173,7 @@ real split deploy. `npm run luckystack-validate-deploy` flags service/preset mis
 | Sessions/cookies not portable between instances (users logged out after LB switch) | `COOKIE_SECRET` / `PROJECT_NAME` differ between instances | Align the `synchronizedEnvKeys` across all backends |
 | `502` `serviceNotAssigned` from the router | The route's service isn't in any running preset / has no binding | Add the service to a preset (`services.config.ts`) + a binding (`deploy.config.ts`) |
 | A sync route "doesn't exist" on the socket instance | The route's service is in a different preset than `system`, but WS is pinned to `system` | Keep socket/sync routes in the `system` preset, or run a monolith preset that includes them |
-| `getParsedPort()`/listen on wrong port for a 2nd local instance | `SERVER_PORT` from `.env.local` clobbered an env override | Pass the port via argv (`npm run server -- <preset> <port>`) — `getParsedPort()` wins over env |
+| `getParsedPort()`/listen on wrong port for a 2nd local instance | Port was not passed in argv slot two | Pass the port via argv (`npm run server -- <preset> <port>`) — `getParsedPort()` reads the typed override registry |
 
 ---
 

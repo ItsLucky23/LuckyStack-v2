@@ -1,6 +1,6 @@
 ---
 name: review_branch
-description: Full audit of the current branch — compares git history against branch-log and SESSION_STATE, flags discrepancies, suggests a commit message and review focus areas.
+description: Full audit of the current branch — compares git history against branch-log and handoff files, flags discrepancies, suggests a commit message and review focus areas.
 ---
 
 You are auditing the current branch end-to-end. Your goal: give the user a clear picture of what is on the branch, what is missing from the docs, what is risky, and what still needs testing.
@@ -36,8 +36,8 @@ Run these checks in parallel where possible. Use the Bash tool.
    - Sanitize the branch name as in `log_progress`.
    - Read `branch-logs/<sanitized>.md` if it exists. If missing, note it.
 
-6. **Session state**
-   - Read `SESSION_STATE.md` at the repo root if it exists.
+6. **Handoff context**
+   - Read the latest relevant file under `handoffs/` if one exists.
 
 7. **Working tree state**
    ```
@@ -51,7 +51,7 @@ Compare:
 
 - What the commits + diff say was done
 - What `branch-logs/<sanitized>.md` claims was done
-- What `SESSION_STATE.md` claims was done
+- What the latest relevant handoff claims was done, if one exists
 
 Flag every mismatch. Common shapes:
 

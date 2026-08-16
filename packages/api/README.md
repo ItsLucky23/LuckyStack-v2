@@ -97,9 +97,8 @@ Do not wrap `apiRequest` in `unknown` / `any` shims (see `.claude/CLAUDE.md` rul
 ## Dependencies
 
 - Runtime: `@luckystack/core`, `@luckystack/error-tracking` (`@luckystack/login` is NOT a runtime dependency — sessions resolve through core's session-provider registry; login is the optional default provider)
-- Peer (canonical ranges, standardized 2026-05-07):
-  - `@prisma/client@^6.19.0` (transitively required via `@luckystack/core`)
-  - `socket.io@^4.8.0`
+- Required peer: `socket.io@^4.8.0`
+- Optional peer: `@prisma/client@^6.19.0` — only needed when the active session/user provider uses the default Prisma client.
 
 ## License
 

@@ -1,5 +1,5 @@
-//? Positional argv parser for the LuckyStack server boot. Replaces
-//? `LUCKYSTACK_BUNDLE` + `SERVER_PORT` env-var reads with a single shape:
+//? Positional argv parser for the LuckyStack server boot. Replaces legacy
+//? environment toggles with a single shape:
 //?
 //?   npm run server -- billing,vehicles 4001
 //?
@@ -8,9 +8,10 @@
 //?
 //? `applyServerArgv()` is called by the side-effect module
 //? `@luckystack/server/parseArgv`, which consumers import as the FIRST line
-//? of their `server.ts` so the parsed port lands in `process.env.SERVER_PORT`
-//? before `config.ts` (top-level `backendUrl` const) is evaluated.
+//? of their `server.ts` so the parsed port lands in the browser-safe core/config
+//? registry before `config.ts` evaluates its top-level OAuth callback base.
 
+import { getPortOverride, registerPortOverride } from '@luckystack/core/config';
 import { normalizeServerPort } from './portResolution';
 
 export interface ParsedServerArgv {
@@ -19,7 +20,6 @@ export interface ParsedServerArgv {
 }
 
 let parsedBundles: string[] = [];
-let parsedPort: number | null = null;
 let hasRun = false;
 
 const PORT_PATTERN = /^\d+$/;
@@ -57,17 +57,8 @@ export const applyServerArgv = (): void => {
 
   const result = parseServerArgv(process.argv.slice(2));
   parsedBundles = result.bundles;
-  parsedPort = result.port;
-
-  //? Writeback so the downstream env-readers (`core/env.ts` Zod schema,
-  //? `core/bindAddress.ts` fallback, consumer `config.ts` backendUrl,
-  //? `oauthProviders.ts` callback URL) see the resolved port without us
-  //? having to refactor those four call sites. This is a deliberate
-  //? implementation detail — argv is the public source of truth.
-  if (parsedPort !== null) {
-    process.env.SERVER_PORT = String(parsedPort);
-  }
+  registerPortOverride(result.port);
 };
 
 export const getParsedBundles = (): string[] => parsedBundles;
-export const getParsedPort = (): number | null => parsedPort;
+export const getParsedPort = (): number | null => getPortOverride() ?? null;

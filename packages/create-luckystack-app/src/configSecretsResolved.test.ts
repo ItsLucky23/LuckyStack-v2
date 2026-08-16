@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ENV_KEYS = ['LUCKYSTACK_ENV', 'NODE_ENV', 'PUBLIC_URL', 'EXTERNAL_ORIGINS', 'SERVER_PORT'] as const;
+const ENV_KEYS = ['LUCKYSTACK_ENV', 'NODE_ENV', 'PUBLIC_URL', 'EXTERNAL_ORIGINS'] as const;
 const saved: Record<string, string | undefined> = {};
 
 const loadCoreThenStub = async (values: Record<string, string>): Promise<void> => {
@@ -48,7 +48,6 @@ describe('scaffold config survives late secret resolution', () => {
       LUCKYSTACK_ENV: 'production',
       PUBLIC_URL: 'PUBLIC_URL_BASE_V1',
       EXTERNAL_ORIGINS: 'ORIGINS_BASE_V1',
-      SERVER_PORT: '80',
     });
 
     await import('../template/config');

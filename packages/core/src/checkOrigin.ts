@@ -43,8 +43,8 @@ const allowedOrigin = (origin: string): boolean => {
   const configured = cors.allowedOrigins;
 
   //? Bind address comes from the registry (populated by `createLuckyStackServer`
-  //? from `options.ip`/`options.port`). Falls back to `SERVER_IP`/`SERVER_PORT`
-  //? env vars for legacy boots that don't go through the helper. Empty `port`
+  //? from `options.ip`/`options.port`). Before bootstrap it falls back to
+  //? `SERVER_IP` plus the generic port 80. Empty `port`
   //? produces an unmatchable `host:` entry which is fine — same-origin requests
   //? are typically allowed via `cors.allowLocalhost` or the configured
   //? `allowedOrigins` list anyway.

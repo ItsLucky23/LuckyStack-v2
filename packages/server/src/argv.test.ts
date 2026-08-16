@@ -1,14 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { getPortOverride, resetPortOverrideForTests } from '@luckystack/core/config';
 
-import { parseServerArgv } from './argv';
+import { applyServerArgv, getParsedPort, parseServerArgv } from './argv';
 
-//? `parseServerArgv` is the pure half of the argv module — no env writeback,
-//? no idempotency latch, no `process.argv` read. `applyServerArgv` and the
-//? `getParsed*` accessors are intentionally NOT covered here: they share
-//? module-level mutable state (`hasRun` latch + `process.env.SERVER_PORT`
-//? writeback) that only behaves correctly on first call per process, which
-//? makes deterministic per-test assertions impossible without resetting
-//? module state the module deliberately does not expose.
+//? `parseServerArgv` is the pure half; one focused case below also pins the
+//? process-level side effect that bridges a positional port into core/config.
 
 describe('parseServerArgv', () => {
   describe('bundles parsing', () => {
@@ -115,5 +111,27 @@ describe('parseServerArgv', () => {
         /unexpected positional argument/,
       );
     });
+  });
+});
+
+describe('applyServerArgv', () => {
+  it('registers the positional port without writing an environment port', () => {
+    const savedArgv = process.argv;
+    const savedLegacyPort = process.env.SERVER_PORT;
+    resetPortOverrideForTests();
+    delete process.env.SERVER_PORT;
+    process.argv = ['node', 'server.js', 'default', '4911'];
+
+    try {
+      applyServerArgv();
+      expect(getPortOverride()).toBe(4911);
+      expect(getParsedPort()).toBe(4911);
+      expect(process.env.SERVER_PORT).toBeUndefined();
+    } finally {
+      process.argv = savedArgv;
+      resetPortOverrideForTests();
+      if (savedLegacyPort === undefined) delete process.env.SERVER_PORT;
+      else process.env.SERVER_PORT = savedLegacyPort;
+    }
   });
 });

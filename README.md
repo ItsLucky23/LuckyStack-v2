@@ -76,10 +76,11 @@ A Docker Compose file is included for spinning up Redis + the framework's own de
 
 ### Access the App
 
-You can change the ports in the `.env` file.
+Change the dev ports in `config.ports.ts`. A one-off backend override is the
+second positional server argument (`npm run server -- <preset> <port>`).
 
-- **Frontend:** http://localhost:5173
-- **Backend:** http://localhost:80
+- **Frontend:** `http://localhost:<config.ports.ts frontend>`
+- **Backend:** `http://localhost:<config.ports.ts backend>`
 
 ---
 
@@ -220,7 +221,7 @@ await syncRequest({
 See [`.env_template`](./.env_template) for all available options:
 
 - `NODE_ENV` - development or production
-- `PUBLIC_URL` - Public origin (prod only; dev auto-derives the Vite origin). OAuth callbacks use the backend origin from `SERVER_IP`/`SERVER_PORT`.
+- `PUBLIC_URL` - Public origin (prod only; dev auto-derives the Vite origin). OAuth callbacks use the backend port from `config.ports.ts` or an explicit CLI port in dev, and `PUBLIC_URL` in production.
 - `REDIS_HOST` / `REDIS_PASSWORD` / `REDIS_PORT` - Redis connection
 - `DATABASE_URL` - MongoDB connection string
 - `SENTRY_DSN` / `VITE_SENTRY_DSN` - Error monitoring DSNs (server/client)

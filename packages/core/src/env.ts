@@ -1,3 +1,4 @@
+//? @adr 0039
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { config as loadDotenv, parse as parseDotenv } from 'dotenv';
@@ -8,7 +9,6 @@ import tryCatchSync from './tryCatchSync';
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   SERVER_IP: z.string().min(1).default('127.0.0.1'),
-  SERVER_PORT: z.string().regex(/^\d+$/).default('80'),
   SECURE: z.enum(['true', 'false']).default('false'),
   REDIS_HOST: z.string().min(1).default('127.0.0.1'),
   REDIS_PORT: z.string().regex(/^\d+$/).default('6379'),
@@ -148,7 +148,6 @@ export const loadEnvFiles = (): void => {
 const applyResolvedDefaultsToProcessEnv = (resolvedEnv: RuntimeEnv) => {
   process.env.NODE_ENV = process.env.NODE_ENV ?? resolvedEnv.NODE_ENV;
   process.env.SERVER_IP = process.env.SERVER_IP ?? resolvedEnv.SERVER_IP;
-  process.env.SERVER_PORT = process.env.SERVER_PORT ?? resolvedEnv.SERVER_PORT;
   process.env.SECURE = process.env.SECURE ?? resolvedEnv.SECURE;
   process.env.REDIS_HOST = process.env.REDIS_HOST ?? resolvedEnv.REDIS_HOST;
   process.env.REDIS_PORT = process.env.REDIS_PORT ?? resolvedEnv.REDIS_PORT;

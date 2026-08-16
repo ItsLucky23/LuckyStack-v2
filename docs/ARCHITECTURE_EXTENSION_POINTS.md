@@ -515,7 +515,7 @@ registerCronJob({
 });
 ```
 
-It is leader-elected on core's `acquireLease` (jobs fire on exactly ONE instance; takeover within one lease TTL), with per-run dedup leases, overlap guards, jitter, per-tenant fan-out, Redis-backed run stats (`getCronJobStats`), and `preCronRun`/`postCronRun` hooks. Semantics to know: handlers must be idempotent (single-Redis best-effort lease — rare double-fire possible), no catch-up of ticks missed while leaderless, and it is a scheduler, NOT a queue. Full spec: `packages/cron/docs/scheduler.md` (consumer: `node_modules/@luckystack/cron/docs/scheduler.md`).
+It is leader-elected on core's `acquireLease` (one active leader under a healthy lease; takeover within one lease TTL), with per-run dedup leases, overlap guards, jitter, per-tenant fan-out, Redis-backed run stats (`getCronJobStats`), and `preCronRun`/`postCronRun` hooks. Semantics to know: the single-Redis lease is best-effort and rare double-fire is possible, so handlers must be idempotent; there is no catch-up of ticks missed while leaderless, and it is a scheduler, NOT a queue. Full spec: `packages/cron/docs/scheduler.md` (consumer: `node_modules/@luckystack/cron/docs/scheduler.md`).
 
 ### When to reach past it
 

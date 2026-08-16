@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 //?     http.cors.allowedOrigins  -> ["ORIGINS_BASE_V1"]   (CORS fails CLOSED)
 //?   ...while process.env already held the resolved values.
 
-const ENV_KEYS = ['EMAIL_FROM', 'EXTERNAL_ORIGINS', 'DNS', 'SERVER_PORT'] as const;
+const ENV_KEYS = ['EMAIL_FROM', 'EXTERNAL_ORIGINS', 'DNS'] as const;
 const saved: Record<string, string | undefined> = {};
 
 //? Import core BEFORE stubbing anything. Importing it runs `env.ts`, whose dotenv
@@ -50,7 +50,6 @@ describe('config.ts survives late secret resolution (C-04)', () => {
       EMAIL_FROM: 'EMAIL_FROM_BASE_V1',
       EXTERNAL_ORIGINS: 'ORIGINS_BASE_V1',
       DNS: 'DNS_BASE_V1',
-      SERVER_PORT: '80',
     });
 
     //? server.ts:17 — config.ts evaluates now, against the POINTER values above.

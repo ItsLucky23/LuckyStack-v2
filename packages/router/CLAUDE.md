@@ -167,7 +167,7 @@ registerHook('proxyRequestGate', ({ remoteAddress }) => {
 - `packages/router/docs/http-proxy.md` — proxy semantics, header rewriting, error codes.
 - `packages/router/docs/boot-uuid-failover.md` — boot handshake protocol + strict-mode failure modes.
 - `packages/router/docs/post-proxy-response-hook.md` — `preProxyRequest` / `postProxyResponse` hook usage.
-- `docs/ARCHITECTURE_PACKAGING.md` §9.6 — packaging & router responsibilities.
+- `docs/ARCHITECTURE_PACKAGING.md` — current package boundaries and preset/runtime-bundle responsibilities.
 - `docs/ARCHITECTURE_ROUTING.md` — file-based routing conventions (consumer side).
 - `docs/HOSTING.md` — deployment topology, health probes, environment sync.
 - `docs/ARCHITECTURE_MULTI_INSTANCE.md` — multi-instance mental model + pitfalls (WS pins to `system`, cross-instance socket fan-out, shared-Redis footgun, single-binding-per-service scaling).

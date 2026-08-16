@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Port resolution is now `options.port > positional argv registry override >
+  options.defaultPort > 80`. The legacy `SERVER_PORT` environment fallback and
+  argv-to-environment writeback are removed. Migrate by editing
+  `config.ports.ts`, passing `port` / `defaultPort`, or supplying the second
+  positional argv.
+- `@luckystack/server/parseArgv` now registers its port through the browser-safe
+  `@luckystack/core/config` registry, keeping consumer OAuth config and server
+  listen resolution aligned without environment mutation.
+
+### Fixed
+
+- Declare `@luckystack/cron` as an optional peer so the auto-detected cron overlay is represented in the server package contract.
+- Programmatic `options.port` can now rewrite an OAuth callback that still names
+  `options.defaultPort`, while explicit local router/reverse-proxy ingress ports
+  remain authoritative.
+
 ## [0.7.6] - 2026-07-23
 
 ### Fixed

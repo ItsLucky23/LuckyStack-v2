@@ -7,20 +7,18 @@ describe('server port resolution', () => {
       optionsPort: 4100,
       parsedPort: 4101,
       defaultPort: 4102,
-      envPort: '4103',
     })).toBe(4100);
   });
 
-  it('uses argv above config default and legacy env', () => {
-    expect(resolveServerPort({ parsedPort: 4101, defaultPort: 4102, envPort: '4103' })).toBe(4101);
+  it('uses argv above the config default', () => {
+    expect(resolveServerPort({ parsedPort: 4101, defaultPort: 4102 })).toBe(4101);
   });
 
-  it('uses the config default above legacy SERVER_PORT', () => {
-    expect(resolveServerPort({ parsedPort: null, defaultPort: 4102, envPort: '4103' })).toBe(4102);
+  it('uses the config.ports backend default', () => {
+    expect(resolveServerPort({ parsedPort: null, defaultPort: 4787 })).toBe(4787);
   });
 
-  it('falls back through legacy SERVER_PORT to port 80', () => {
-    expect(resolveServerPort({ parsedPort: null, envPort: '4103' })).toBe(4103);
+  it('falls back to port 80 for a generic consumer without a configured source', () => {
     expect(resolveServerPort({ parsedPort: null })).toBe(80);
   });
 

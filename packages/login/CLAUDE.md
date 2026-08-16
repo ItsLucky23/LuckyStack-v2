@@ -11,13 +11,13 @@
 
 - **Credentials auth** (email + bcrypt-hashed password) with combined login/register dispatcher.
 - **OAuth 2.0** via a pluggable provider registry. Built-in helpers for Google, GitHub, Discord, Facebook, Microsoft. Custom providers register as raw `OAuthProvider` objects.
-- **Redis-backed sessions** with sliding expiration, CSRF token minting, single-session enforcement, and a swappable `SessionAdapter` (DynamoDB, Postgres, JWT-stateless, etc.).
+- **Redis-backed default sessions** with sliding expiration, CSRF token minting, single-session enforcement, and a swappable `SessionAdapter` (DynamoDB, Postgres, JWT-stateless, etc.).
 - **Lifecycle hooks**: `preLogin` / `postLogin`, `preRegister` / `postRegister`, `preLogout` / `postLogout`, `preSessionCreate` / `postSessionCreate`, `preSessionDelete` / `postSessionDelete`, `passwordResetRequested`, `passwordResetCompleted`, `passwordChanged`. All `pre*` hooks support stop-signals (abort the side-effect with a reason key).
 - **Pluggable user store** via `UserAdapter` — decouples auth from a specific Prisma `User` schema.
 - **Password-reset primitives** (`createPasswordResetToken`, `consumePasswordResetToken`, `updatePasswordHash`, `verifyPassword`) plus the framework-mode `sendPasswordResetEmail` orchestrator (requires the optional `@luckystack/email` peer).
 - **Dynamic post-login redirect** resolver registry (per-user / per-tenant / per-provider OAuth landing pages). Relative resolver results inherit the trusted frontend `defaultUrl` origin, not the backend callback origin.
 
-OAuth state is stored in Redis under `${projectName}-oauth-state:<provider>:<state>` with TTL `auth.oauthStateTtlSeconds`. Sessions live at `${projectName}-session:<token>`. Active-tokens-per-user set lives at `${projectName}-activeUsers:<userId>`. Password-reset and email-change tokens are **hashed at rest** (0.2.0): only `sha256(token)` is stored as the Redis key (`${projectName}-pwreset:<sha256(token)>` / `${projectName}-email-change:<sha256(token)>`) via the `@luckystack/core` one-time-token primitive (`issueOneTimeToken` / `consumeOneTimeToken`). The raw token is returned to the caller exactly once for the emailed URL, so a leaked Redis keyspace can't be replayed to mint a reset or confirm an email change.
+OAuth state is always stored in Redis under `${projectName}-oauth-state:<provider>:<state>` with TTL `auth.oauthStateTtlSeconds`. The default Redis session adapter stores sessions at `${projectName}-session:<token>` and active-tokens-per-user sets at `${projectName}-activeUsers:<userId>`; a custom `SessionAdapter` owns those storage details. Password-reset and email-change tokens are **hashed at rest** (0.2.0): only `sha256(token)` is stored as the Redis key (`${projectName}-pwreset:<sha256(token)>` / `${projectName}-email-change:<sha256(token)>`) via the `@luckystack/core` one-time-token primitive (`issueOneTimeToken` / `consumeOneTimeToken`). The raw token is returned to the caller exactly once for the emailed URL, so a leaked Redis keyspace can't be replayed to mint a reset or confirm an email change.
 
 ---
 
@@ -139,7 +139,7 @@ All config keys live on `ProjectConfig` (from `@luckystack/core`). Resolved at c
 | `FACEBOOK_CLIENT_ID` / `FACEBOOK_CLIENT_SECRET` | `facebookProvider` | OAuth app credentials. |
 | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | `microsoftProvider` | OAuth app credentials. |
 | `MICROSOFT_TENANT_ID` | `microsoftProvider` (optional) | Single-tenant Azure AD. Defaults to `'common'`. |
-| (callback origin) | All OAuth `callbackUrl` builders | The `callbackUrl` is the BACKEND origin + `/auth/callback/<provider>`. The scaffold derives it in `config.ts` (`oauthCallbackBase`: dev `http://localhost:80`, prod the public domain). No `DNS` env var — that was removed in 0.1.5. |
+| (callback origin) | All OAuth `callbackUrl` builders | The `callbackUrl` is the BACKEND origin + `/auth/callback/<provider>`. The scaffold derives dev from `config.ports.ts` (or the explicit CLI port) and production from `PUBLIC_URL`; generic consumers still fall back to `app.publicUrl`. No `DNS` env var is required by the framework OAuth contract. |
 | `BCRYPT_ROUNDS` | `auth.bcryptRounds` | Surfaced through project config; salt rounds for credentials hashing. |
 | `TOTP_ENCRYPTION_KEY` | TOTP at-rest encryption | Current primary write key; new rows are `enc:v2:<key-id>:...`. |
 | `TOTP_ENCRYPTION_LEGACY_KEYS` | TOTP key rotation | JSON array of decrypt-only previous keys. Successful TOTP proofs lazily rewrite legacy/plaintext rows under the primary. |
@@ -180,7 +180,7 @@ All config keys live on `ProjectConfig` (from `@luckystack/core`). Resolved at c
 | `bcryptjs` | hard runtime dep | Password hashing + comparison. |
 | `validator` | hard runtime dep | Email validation + name escaping. |
 | `dotenv` | hard runtime dep | Env loading at boot. |
-| `@prisma/client` | **required peer** | Default `UserAdapter` talks to `prisma.user`. Register a custom `UserAdapter` if you cannot ship Prisma. |
+| `@prisma/client` | **optional peer** | The default `UserAdapter` talks to `prisma.user`; register a custom `UserAdapter` when Prisma is not used. |
 | `socket.io` | **required peer** | `logout` and session enforcement broadcast through the live `io` instance from `getIoInstance()`. |
 | `@luckystack/email` | **optional peer** | Only required when `auth.forgotPassword === 'framework'`. Lazy-imported by `sendPasswordResetEmail` — every other API works without it. |
 

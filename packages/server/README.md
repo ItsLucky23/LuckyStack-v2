@@ -5,7 +5,11 @@
 ## Install
 
 ```bash
-npm install @luckystack/server @luckystack/core @luckystack/api @luckystack/login @luckystack/sync @luckystack/presence socket.io
+npm install @luckystack/server socket.io
+
+# Add the features your project uses; the server auto-detects these optional peers.
+# For the standard API + realtime stack, for example:
+npm install @luckystack/api @luckystack/sync
 ```
 
 ## Quickstart — recommended (`bootstrapLuckyStack`)
@@ -88,7 +92,8 @@ Both entries handle devkit hot reload + console init in dev mode automatically �
 
 ```ts
 interface CreateLuckyStackServerOptions {
-  port?: number | string;          // default: process.env.SERVER_PORT ?? 80
+  port?: number | string;          // options.port > argv > defaultPort > 80
+  defaultPort?: number;             // scaffold's config.ports.ts backend default
   ip?: string;                     // default: process.env.SERVER_IP ?? '127.0.0.1'
   serveFile?: StaticFileHandler;   // catch-all for non-framework GETs (Vite output, SPA fallback)
   serveFavicon?: FaviconHandler;   // /favicon.ico
@@ -161,15 +166,13 @@ Top-level `handleHttpRequest` + `dispatchRoutes(handlers, ctx)` are the only orc
 
 ## Dependencies
 
-- Runtime: `@luckystack/api`, `@luckystack/core`, `@luckystack/login`, `@luckystack/presence`, `@luckystack/sync`
-- Peer (canonical ranges, standardized 2026-05-07):
-  - `@prisma/client@^6.19.0` (transitively required via `@luckystack/core`)
-  - `socket.io@^4.8.0`
-- Optional peer: `@luckystack/error-tracking`, `@luckystack/email`, `@luckystack/docs-ui` — bootstrap auto-detects them but does not require them.
+- Runtime: `@luckystack/api`, `@luckystack/core`
+- Required peer: `socket.io@^4.8.0`
+- Optional peers: `@prisma/client@^6.19.0`, `@luckystack/login`, `@luckystack/presence`, `@luckystack/sync`, `@luckystack/error-tracking`, `@luckystack/email`, `@luckystack/cron`, `@luckystack/docs-ui`, and `@luckystack/devkit` (dev-only). Bootstrap auto-detects installed optional peers and degrades when they are absent.
 
 ## Selecting bundles + port at runtime
 
-`@luckystack/server/parseArgv` is a side-effect-only entrypoint. Import it as the **first line** of your `server.ts` so positional CLI args are parsed before any module that reads `process.env.SERVER_PORT` at load time (notably your project's `config.ts`).
+`@luckystack/server/parseArgv` is a side-effect-only entrypoint. Import it as the **first line** of your `server.ts` so a positional CLI port reaches the browser-safe `@luckystack/core/config` registry before your project's `config.ts` evaluates.
 
 ```ts
 // server.ts
@@ -177,11 +180,13 @@ import '@luckystack/server/parseArgv';
 // ...rest of your bootstrap
 ```
 
-Argv shape: `<bundle[,bundle...]> [port]`
+Argv shape: `<bundle[,bundle...]> [port]`. The positional port overrides the
+scaffold's `defaultPort: ports.backend`. Generic boots with no explicit,
+positional, or default port retain the numeric fallback `80`.
 
 ```bash
-npm run server                              # default preset, port 80
-npm run server -- billing                   # one bundle, port 80
+npm run server                              # default preset, config.ports.ts backend
+npm run server -- billing                   # one bundle, config.ports.ts backend
 npm run server -- billing,vehicles 4001     # merge bundles, listen on 4001
 ```
 

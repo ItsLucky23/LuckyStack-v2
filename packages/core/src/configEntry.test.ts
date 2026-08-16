@@ -76,7 +76,14 @@ describe('@luckystack/core/config is client-bundle safe', () => {
     //? Guards the other direction: a too-thin entry pushes consumers back to the
     //? barrel, which reintroduces the bundle problem.
     const source = fs.readFileSync(path.join(SRC, 'config.ts'), 'utf8');
-    for (const name of ['registerProjectConfig', 'getProjectConfig', 'BaseSessionLayout', 'AuthProps']) {
+    for (const name of [
+      'registerProjectConfig',
+      'getProjectConfig',
+      'registerPortOverride',
+      'getPortOverride',
+      'BaseSessionLayout',
+      'AuthProps',
+    ]) {
       expect(source, `config entry must export ${name}`).toContain(name);
     }
   });

@@ -134,7 +134,7 @@ payloads — you don't need to re-implement masking in your transport.
 
 ## Related
 
-- [`@luckystack/core` projectConfig.logging](./ARCHITECTURE_PACKAGING.md#projectconfig) — toggles for dev logs and socket-startup logs.
+- [`@luckystack/core` projectConfig.logging](../packages/core/docs/config-registry.md#api-reference--project-config) — toggles for dev logs and socket-startup logs.
 - [`@luckystack/error-tracking`](./ARCHITECTURE_PACKAGING.md) — pluggable
   error-tracker adapters (Sentry / Datadog / PostHog) that consume the
   same redacted payload stream.

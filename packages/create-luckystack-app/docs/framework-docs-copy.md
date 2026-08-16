@@ -70,28 +70,27 @@ These are Claude Code conventions and must live at fixed paths to be discovered 
 
 `branch-logs/` is a session-tracking convention: each working branch gets its own log file. The framework's own log entries are bookkeeping for the LuckyStack repo, not artefacts the consumer should inherit. Copying the README alone gives the consumer the convention without polluting their history. Their first session is expected to create a fresh per-branch log.
 
-## `repoRoot` resolution
+## Framework-doc source resolution
 
-```ts
-const repoRoot = path.resolve(__dirname, '..', '..', '..');
-```
+The build step `scripts/bundleFrameworkDocs.mjs` copies the framework sources into the published package under
+`framework-docs/`. At runtime `copyAiDocs()` prefers that bundled directory, so a published
+`npx create-luckystack-app` receives the same AI contract and deep docs as a monorepo scaffold.
 
-`__dirname` resolves to the directory containing the compiled `index.js`. With the project layout `packages/create-luckystack-app/dist/index.js`, three `..` hops reach the monorepo root. In the published npm tarball this same path resolves to somewhere inside `node_modules/create-luckystack-app/../../../`, which is the consumer's project parent and where none of the listed sources exist — hence the `fs.existsSync(src) || continue` guard.
+The monorepo-root fallback remains useful for local `scaffold:test` runs when the bundle has not been built.
+Missing optional source directories are skipped, but a published package build always bundles the framework
+docs before `dist/` is produced.
 
-This means the copy step is effectively a **monorepo-only** operation. When invoked via published `npx create-luckystack-app`, the loop skips every entry silently and the consumer only gets the bundled `template/` tree. This is acceptable today because:
-
-- The published flow is the primary way external users will install.
-- The bundled `template/` tree already contains a project-level `README.md` and `package.json` describing where to read the docs online.
-- The per-package docs still arrive via `node_modules/@luckystack/*/`.
-
-If we want consumers of the published CLI to also receive the root docs, we will need to add them to the package tarball — for example by copying them into `template/docs/luckystack/` during the package's `prepublishOnly` script. That decision is intentionally deferred.
+The bundle contains the framework's docs and conventions, not the framework's own branch-log entries. A
+consumer gets a fresh `branch-logs/README.md` convention and creates its own branch log on its first real
+change. Framework dated findings are stripped from the consumer copy; `FINDINGS_PROTOCOL.md` and the findings
+index remain as conventions.
 
 ## Skip behaviour
 
-`fs.existsSync(src) || continue` makes every entry optional. Failure modes covered:
-
-- Monorepo where some convention is not yet present (e.g. a fresh checkout with no `skills/` directory yet) — that entry is skipped without warning.
-- Published tarball flow where none of the sources exist — all entries are silently skipped, and the only visible side effect is the trailing `console.log` claiming the docs were copied (it always logs, even when nothing was copied).
+A missing optional source is skipped without aborting the scaffold. The scaffold still has its template tree,
+and the final output reports how many AI-doc sources were copied. A published package should not silently
+lack the framework docs: `npm run build` runs the bundler first, and the scaffold runtime prefers the bundled
+source when it exists.
 
 The unconditional log line is a known minor wart. It is cheap to keep accurate by gating on a counter; left as-is today because the noise is low and the line acts as a flow checkpoint in CI traces.
 
@@ -107,15 +106,18 @@ File-entry copies (`CLAUDE.md`, `branch-logs/README.md`) skip `copyTree` entirel
 
 ## Re-running / updating
 
-The scaffold is single-shot. The CLI refuses to write into an existing directory, so the framework-docs copy never runs against an existing project. Consumers who want to refresh the framework docs in their project after a LuckyStack update have two options:
+The scaffold is single-shot. The CLI refuses to write into an existing directory, so the framework-docs copy never runs against an existing project. Consumers who want to refresh the framework docs in their project after a LuckyStack update should upgrade the installed framework packages and run:
 
-1. Manual: pull the latest files from the GitHub repo and overlay them.
-2. Via `npm update`: per-package docs in `node_modules/@luckystack/*/` update automatically.
+```sh
+npx luckystack update
+```
 
-There is no built-in "refresh framework docs" subcommand. Adding one would require a careful merge strategy because the consumer might have edited the docs after scaffolding, and a naive overwrite would discard their changes.
+The update command re-renders the framework-owned surface with the recorded scaffold choices. Pristine files
+are safely overwritten; user-modified files receive `.new` sidecars for an AI-assisted merge. Package-local
+`CLAUDE.md` and deep docs refresh through the corresponding `@luckystack/*` package upgrade.
 
 ## Related
 
 - Scaffold flow: [`scaffold-flow.md`](./scaffold-flow.md)
-- Plan reference: Fase E.2 in the packaging-prep plan (kept in the working-branch notes, not committed).
 - Cross-cutting packaging strategy: `/docs/ARCHITECTURE_PACKAGING.md` (framework repo).
+- Upgrade runbook: `/docs/UPGRADING.md`.

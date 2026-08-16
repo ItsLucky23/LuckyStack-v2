@@ -129,7 +129,7 @@ Health changes affect **request-level** routing only:
 - A WebSocket connection upgraded to the `system` backend stays there for its lifetime, even if `system` is later marked unhealthy — the Socket.io Redis adapter keeps cross-instance rooms working regardless.
 - New incoming requests/upgrades hit the latest resolver state.
 
-This is the "switch new traffic, leave inflight alone" guarantee from `ARCHITECTURE_PACKAGING.md` §9.6 #5.
+This is the "switch new traffic, leave inflight alone" guarantee from the multi-service routing contract in `docs/ARCHITECTURE_PACKAGING.md`.
 
 ## Manual probe
 

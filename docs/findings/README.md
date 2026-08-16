@@ -5,10 +5,14 @@
 > `docs/FINDINGS_PROTOCOL.md` for the rules. This index lists them all so open
 > items are never lost during a cleanup.
 
-Last updated: 2026-08-04
+Last updated: 2026-08-16
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
+| 2026-08-16 | [2026-08-16-package-contract-audit/](./2026-08-16-package-contract-audit/) | Package manifests versus package docs and session architecture | 4 | 1 open · 3 fixed |
+| 2026-08-16 | [2026-08-16-server-port-env-removal/](./2026-08-16-server-port-env-removal/) | Assessment of removing the remaining `SERVER_PORT` env bridge | 4 | 2 open · 2 fixed |
+| 2026-08-16 | [2026-08-16-oauth-scaffold-port-contract/](./2026-08-16-oauth-scaffold-port-contract/) | OAuth callback port versus consumer scaffold `config.ports.ts` contract | 4 | 0 open · 4 fixed |
+| 2026-08-15 | [2026-08-15-ai-docs-audit/](./2026-08-15-ai-docs-audit/) | AI-context and documentation source-of-truth audit | 12 | 0 open · 12 fixed |
 | 2026-08-04 | [2026-08-04-keyv-cacheable-supply-chain/](./2026-08-04-keyv-cacheable-supply-chain/) | Exposure check for the active keyv/cacheable npm compromise — not exposed | 5 | 0 open · 5 false-positive |
 | 2026-07-23 | [2026-07-23-typescript7-voidzero-feasibility/](./2026-07-23-typescript7-voidzero-feasibility/) | TypeScript 7 and VoidZero compatibility assessment | 7 | 6 open · 1 duplicate |
 | 2026-07-22 | [2026-07-22-boot-uuid-ttl-review/](./2026-07-22-boot-uuid-ttl-review/) | External finding validation: boot UUID expiry made healthy long-running servers not-ready | 1 | 0 open · 1 fixed |
@@ -28,14 +32,8 @@ Last updated: 2026-08-04
 | 2026-07-15 | [2026-07-15-bun-feasibility/](./2026-07-15-bun-feasibility/) | Bun runtime + PM + **router WS proxy** — runtime, PM, all 4 databases verified on both runtimes; router proxies WS on node, refuses on bun (upstream) | 22 | 0 open · 20 fixed · 1 wontfix · 1 mitigated |
 | 2026-07-02 | [2026-07-02-security/](./2026-07-02-security/) | Security & correctness scan (10 agents, full codebase) | 13 | 0 open · 10 fixed · 3 wontfix |
 
-> All v0.7.0 product, runtime, audit, and CI publication findings are terminal. All
-> 17 packages are published at 0.7.0 with GitHub/npm provenance.
-
-> **Rollups drift.** This table claimed "5 open" for type-generation (actually 0, since 2026-07-15)
-> and "1 open" for scaffold-e2e (fixed the same day) until 2026-07-16. A stale rollup is worse than
-> no rollup: it is what a later cleanup reads to decide what is safe to delete. Re-tally from the
-> folder's own ledger whenever you touch a row — the per-item status lines are the source of truth,
-> this table is a convenience.
+> All release, runtime, audit, and CI publication findings currently listed here are terminal or
+> explicitly tracked as open in their own ledger. The current published package line is 0.7.6.
 
 <!--
 Add a row per findings-folder, e.g.:

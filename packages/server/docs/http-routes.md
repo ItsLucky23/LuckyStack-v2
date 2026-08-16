@@ -172,7 +172,7 @@ A handler returns `true` (or simply ends `res`) to short-circuit dispatch; retur
 - Calls `handleHttpApiRequest({ name, data, token, requesterIp, xLanguageHeader, acceptLanguageHeader, method, stream? })` from `@luckystack/api`. The `stream` callback emits `event: stream` SSE frames during long-running calls.
 - Emits the result (`event: final` for SSE, or `JSON.stringify(result)` + `res.writeHead(result.httpStatus)` for non-SSE).
 
-**Errors:** any thrown error is logged + captured to Sentry, `apiError` hook dispatched, and the envelope `500 api.invalidRequestFormat` is returned (over SSE or JSON).
+**Errors:** any thrown error is logged + captured by the registered error tracker(s), `apiError` hook dispatched, and the envelope `500 api.invalidRequestFormat` is returned (over SSE or JSON).
 
 ### `handleSyncRoute(ctx)`
 
@@ -184,7 +184,7 @@ A handler returns `true` (or simply ends `res`) to short-circuit dispatch; retur
 - Calls `handleHttpSyncRequest({ name: 'sync/<rest>', cb, data, receiver, ignoreSelf, token, requesterIp, xLanguageHeader, acceptLanguageHeader, stream? })` from `@luckystack/sync`.
 - SSE handling mirrors `handleApiRoute`.
 
-**Errors:** mirrors `handleApiRoute` — logs, Sentry, `syncError` hook, returns `500 sync.invalidRequestFormat`.
+**Errors:** mirrors `handleApiRoute` — logs, registered error tracker(s), `syncError` hook, returns `500 sync.invalidRequestFormat`.
 
 ### `handleCustomRoutes(ctx)`
 

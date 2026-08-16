@@ -18,11 +18,15 @@ This doc groups every slot into sections:
 - **Boot UUID + synchronized env hashes** — router cross-env handshake primitives.
 - **Misc utilities** — `tryCatch`, `sleep`, `getParams`, `serveAvatar`.
 
-## API Reference — Bind Address
+## API Reference — Runtime Port Override + Bind Address
 
-### `registerBindAddress(address: { ip: string; port: number }): void`
+### `registerPortOverride(port: number | null): void` / `getPortOverride(): number | undefined`
 
-Stores the intended pre-listen address used by `createLuckyStackServer` and resets the OAuth pre-hop baseline. Framework code never needs to infer this from env vars.
+Browser-safe registry exported from both `@luckystack/core/config` and the main barrel. `@luckystack/server/parseArgv` registers the positional CLI port before consumer `config.ts` evaluates; `null` clears it. This is runtime override state only — the static default remains consumer-owned `config.ports.ts`. Values outside integer `0..65535` throw.
+
+### `registerBindAddress(address: { ip: string; port: number; configuredPort?: number }): void`
+
+Stores the intended pre-listen address used by `createLuckyStackServer` and resets the OAuth pre-hop baseline. Optional `configuredPort` records the consumer default below a programmatic/argv override, so OAuth can update a callback that still names that default without bypassing an unrelated local router ingress. Framework code never needs to infer the listen port from env vars.
 
 ### `registerBoundAddress(address: { ip: string; port: number }): void`
 
@@ -32,12 +36,12 @@ Called from the successful `node:http.listen` callback with `httpServer.address(
 
 **Behavior (resolution order):**
 1. Actually-bound registered value (returns `{ ip: registered.ip, port: String(registered.port) }`).
-2. `process.env.SERVER_IP` / `process.env.SERVER_PORT`.
-3. Fallback to `'127.0.0.1'` / `''`.
+2. `process.env.SERVER_IP` for the pre-bootstrap bind address.
+3. Fallback to `'127.0.0.1'` / the generic server port `'80'`. A real server registers its intended `options.port` / argv / `defaultPort` before request-time CORS or OAuth resolution.
 
 ### `resolveDevCallbackUrl(callbackUrl: string): string`
 
-In non-production environments, rewrites a `localhost`, `127.0.0.1`, or `[::1]` OAuth callback only when its effective port still equals the intended pre-listen port and the server actually bound another port. Authorize and token exchange both call this helper, so their `redirect_uri` remains byte-identical. An explicitly configured local router/reverse-proxy port is left untouched. Production, remote hosts, malformed URLs, and already-current callbacks are no-ops.
+In non-production environments, rewrites a `localhost`, `127.0.0.1`, or `[::1]` OAuth callback only when its effective port still equals the intended pre-listen port or the registered consumer default and the server uses another port. Authorize and token exchange both call this helper, so their `redirect_uri` remains byte-identical. An explicitly configured local router/reverse-proxy port that matches neither is left untouched. Production, remote hosts, malformed URLs, and already-current callbacks are no-ops.
 
 ## API Reference — Runtime Maps
 
@@ -392,7 +396,6 @@ Resolves after `setTimeout(ms)`. Used in fanout-yield loops and dev-mode hot rel
 |---|---|---|
 | `NODE_ENV` | `'development'` | `env.ts` (Zod-validated). |
 | `SERVER_IP` | `'127.0.0.1'` | `getBindAddress` fallback. |
-| `SERVER_PORT` | `'80'` | `getBindAddress` fallback. |
 | `SECURE` | `'false'` | `allowedOrigin` scheme selection. |
 | `REDIS_HOST` | `'127.0.0.1'` | Default redis client. |
 | `REDIS_PORT` | `'6379'` | Same. |

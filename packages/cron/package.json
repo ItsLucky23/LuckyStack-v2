@@ -7,7 +7,7 @@
     "provenance": true
   },
   "type": "module",
-  "description": "Leader-elected, Redis-backed cron scheduler for LuckyStack: declarative recurring jobs that run on exactly one instance, with overlap guards, jitter, per-tenant fan-out, and run stats.",
+  "description": "Leader-elected, Redis-backed cron scheduler for LuckyStack: declarative recurring jobs with one active leader under a healthy lease, overlap guards, jitter, per-tenant fan-out, and run stats. Best-effort lease semantics require idempotent jobs.",
   "license": "MIT",
   "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
   "repository": {

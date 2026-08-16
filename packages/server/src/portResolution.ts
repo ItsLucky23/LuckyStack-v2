@@ -2,7 +2,6 @@ export interface ResolveServerPortInput {
   optionsPort?: number | string;
   parsedPort?: number | null;
   defaultPort?: number | string;
-  envPort?: string;
 }
 
 export const normalizeServerPort = (
@@ -23,16 +22,14 @@ export const normalizeServerPort = (
 };
 
 //? One explicit, testable precedence chain. The scaffold passes ports.backend as
-//? `defaultPort`; SERVER_PORT remains a final compatibility fallback.
+//? `defaultPort`; generic consumers that omit every source retain port 80.
 export const resolveServerPort = ({
   optionsPort,
   parsedPort,
   defaultPort,
-  envPort,
 }: ResolveServerPortInput): number => {
   if (optionsPort !== undefined) return normalizeServerPort(optionsPort, 'options.port');
   if (parsedPort !== undefined && parsedPort !== null) return normalizeServerPort(parsedPort, 'argv port');
   if (defaultPort !== undefined) return normalizeServerPort(defaultPort, 'options.defaultPort');
-  if (envPort !== undefined) return normalizeServerPort(envPort, 'SERVER_PORT');
   return 80;
 };

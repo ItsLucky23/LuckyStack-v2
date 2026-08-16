@@ -979,3 +979,57 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Files touched:** `docs/findings/2026-08-04-keyv-cacheable-supply-chain/README.md` (nieuw), `docs/findings/2026-07-23-typescript7-voidzero-feasibility/README.md`, `docs/findings/README.md`, deze branch-log en `branch-logs/INDEX.md`.
 
 **Notes:** geen credential-rotatie nodig voor deze repo. Wel opgenomen als staande richtlijn: installeren met `npm ci` en ESLint niet bumpen zolang de advisory de namespaces niet schoon meldt, want een bump trekt `file-entry-cache` naar 11.x. De ledger bevat een herbruikbaar re-check-commando.
+
+## 2026-08-16 — OAuth callback-port gelijkgetrokken met scaffold `config.ports.ts`
+
+**User prompt:** Onderzoek en fix de mismatch waarbij een consumer met bijvoorbeeld `ports.backend=4787` toch `http://localhost:80/auth/callback/google` genereert; behoud CLI-overrides, auto-increment, productie-`PUBLIC_URL`, router-opt-in en generic consumers.
+
+**Wat ik deed:** `@luckystack/core` schrijft de impliciete `SERVER_PORT=80` niet meer naar `process.env`; de gevalideerde snapshot en generieke serverfallback blijven behouden. Daardoor gebruikt de scaffold zonder CLI-port `config.ports.ts`, terwijl `parseArgv` een expliciete CLI-port nog steeds via `SERVER_PORT` doorgeeft. De bestaande intended/bound OAuth-rewrite blijft verantwoordelijk voor auto-increment. Template/config/docs/env-voorbeelden en changelogs zijn bijgewerkt; router blijft optioneel. ADR 0038 en een findings-ledger toegevoegd.
+
+**Files:** `packages/core/src/{env.ts,bindAddress.ts}`, `packages/create-luckystack-app/template/{config.ts,_dot_env_template}`, `config.ts`, `.env`, `.env_template`, OAuth/portdocs, changelogs, nieuwe regressietests in `packages/{core,server,login,create-luckystack-app}`, ADR 0038 en `docs/findings/2026-08-16-oauth-scaffold-port-contract/`.
+
+**Verificatie:** gerichte OAuth/porttests **56/56 groen**; `npm run lint` en `npm run ai:lint` groen; `npm run build:packages` **17/17 groen**; een volledige retry van `npm run build` is daarna volledig groen geëindigd (package builds, artifacts, `tsc`, Vite en server bundle). De volledige `npm run test:unit` had 2 bestaande/concurrent test-runner failures; geen auto-fix buiten deze scope.
+
+**Notes:** de handoff noemt frameworkversie 0.8.3, maar deze checkout heeft package manifests op 0.7.6; geen release-bump of publish uitgevoerd.
+
+## 2026-08-15 — AI docs source-of-truth audit
+
+**User prompt (summary):** Controleer of de huidige documentatielagen inhoudelijk gezond zijn, zonder implementation-details dubbel vast te leggen die uit code zouden moeten komen.
+
+**Wat ik deed:**
+- De LuckyStack-docs en AI-contextlagen gecontroleerd op bron/gegenereerd onderscheid, stale status, tegenstrijdige claims en kapotte verwijzingen.
+- Package-overzicht en actuele package manifests vergeleken.
+- Bevindingen vastgelegd in een date-led findings-folder; geen inhoudelijke docs-fixes toegepast.
+
+**Files touched:** `docs/findings/2026-08-15-ai-docs-audit/README.md`, `docs/findings/README.md`, `branch-logs/main.md`, `branch-logs/INDEX.md`.
+
+**Notes:** De ADR-, lessons-, examples-, product-intent- en branch-log-concepten zijn inhoudelijk goed. De grootste problemen zitten in oude handoff/statusdocumenten (`SESSION_STATE.md`, `ARCHITECTURE_PACKAGING.md`, `DESIGN_OPTIONAL_SERVER_PACKAGES.md`) en enkele stale overzichtsclaims. De bestaande doc-staleness gate dekt deze risicodocumenten nog niet.
+
+## 2026-08-16 13:12 — Framework-docs opgeschoond en naar scaffold-updatepad doorgezet
+
+**User prompt (summary):** Verwijder of corrigeer `SESSION_STATE.md` en verouderde documentatie in de framework-repo, de scaffold/template en consumenten die het framework gebruiken.
+
+**Wat ik deed:**
+- Root `SESSION_STATE.md` verwijderd en actieve guidance naar `handoffs/` en branch logs laten verwijzen.
+- `ARCHITECTURE_PACKAGING.md`, `DESIGN_OPTIONAL_SERVER_PACKAGES.md`, `PACKAGE_OVERVIEW.md`, `HOSTING.md` en `AI_BOOST_OVERVIEW.md` vervangen of gecorrigeerd naar actuele code- en package-contracten.
+- Stale package-/scaffold-docs, API-link, Prisma-metadata, ADR-nummering en router-sectie-verwijzingen gecorrigeerd.
+- `@covers`-markers toegevoegd en AI-indexen opnieuw gegenereerd; framework-docs opnieuw gebundeld zodat `npx luckystack update`/`update --app` de nieuwe bronnen kan leveren.
+
+**Verificatie:** `npm run ai:lint` groen; `npm run lint` groen; `node scripts/buildPackages.mjs --serial` 17/17 groen. `npm run ai:doc-staleness` meldt nog drie report-only kandidaten door de on-gecommitte commit-baseline. De volledige build is buiten deze docs-wijziging niet stabiel: de parallelle package-build had race-achtige DTS-fouten en `tsc -b` meldt de bestaande TS6/tsconfig `ignoreDeprecations`- en plugin-react-declaratieproblemen.
+
+**Files touched:** root/framework docs and indexes, `docs/findings/2026-08-15-ai-docs-audit/README.md`, `packages/create-luckystack-app` docs/bundle inputs, package CLAUDE/README docs, `packages/router/src` documentation comments, and `branch-logs/`.
+
+## 2026-08-16 14:24 — Package-contract en sessie-documentatie tweede audit
+
+**User prompt (summary):** zet de kritische documentatie-audit voort tegen package-manifests, session adapters en generieke error-tracking-contracten.
+
+**Wat ik deed:**
+- Package README’s en `CLAUDE.md`-contracten gecorrigeerd zodat optionele Prisma/feature-peers niet langer als verplicht worden gepresenteerd; actuele Zod-range en installatiestappen bijgewerkt.
+- `@luckystack/cron` als optionele peer aan `@luckystack/server` toegevoegd, omdat de server deze overlay auto-detecteert en de package-matrix dit al documenteerde.
+- `docs/ARCHITECTURE_SESSION.md` herwerkt rond de actieve `SessionAdapter`, Redis als default, actuele nested config en 64-karakter tokens; auth/API-verwijzingen daarop afgestemd.
+- Generieke API/sync/server/email-teksten spreken nu over geregistreerde error trackers; de expliciet legacy/Sentry-specifieke integratie blijft behouden.
+- Nieuwe findings-ledger toegevoegd voor deze tweede audit; consumer `../Workspace` kreeg de vier bijgewerkte architectuurdocs en een branch-log-entry.
+
+**Verificatie:** `npm run lint`, `npm run ai:lint`, `npm run ai:index`, `npm run ai:capabilities`, `npm run ai:context-budget`, `npm run build` en `node scripts/buildPackages.mjs --serial` groen; 17/17 packages gebouwd. `npm run ai:doc-staleness` meldt alleen de drie report-only docs door de nog niet gecommitte baseline. Workspace: `ai:capabilities`, `ai:context-budget`, `ai:lint`, `ai:doc-staleness` groen (12/12 docs), `git diff --check` schoon.
+
+**Files touched:** package README/CLAUDE/docs, `docs/ARCHITECTURE_{API,AUTH,EMAIL,SESSION}.md`, `docs/findings/2026-08-16-package-contract-audit/`, `packages/server/package.json` + changelog, generated AI snapshots, `../Workspace/docs/luckystack/ARCHITECTURE_{API,AUTH,EMAIL,SESSION}.md`, and both branch-log indexes.

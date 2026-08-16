@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (36)
+## Decisions (37)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -28,7 +28,6 @@
 | 0014 | CLI `manage` becomes a step-based reconfiguration wizard with consequence previews | 🟢 accepted | cli, scaffolder, dx, env, oauth | — | `docs/decisions/0014-cli-reconfigure-wizard.md` |
 | 0015 | Per-account login lockout uses a dual counter (per-IP + cross-IP) to actually stop distributed credential stuffing | 🟢 accepted | security, login, dos, brute-force | — | `docs/decisions/0015-login-lockout-dual-counter-cross-ip.md` |
 | 0016 | Expand the AI-context system with lessons / examples / coverage gates / eval before any RAG rung | 🟢 accepted | ai-context, docs, tooling, rag | — | `docs/decisions/0016-ai-context-layers-before-rag.md` |
-| 0016 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0016-single-source-ports-and-optin-router-topology.md` |
 | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot | 🟢 accepted | secret-manager, prisma, cli, scaffold, dx, packaging | — | `docs/decisions/0017-prisma-cli-resolves-secret-manager-pointers.md` |
 | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode | 🟢 accepted | security, session, auth, config | — | `docs/decisions/0018-session-token-to-client-only-in-sessionbasedtoken-mode.md` |
 | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant | 🟢 accepted | auth, schema, config, oauth | — | `docs/decisions/0019-email-uniqueness-is-optin-via-provideraccountstrategy.md` |
@@ -49,6 +48,8 @@
 | 0034 | Email timeout is cancellation intent, not proof of delivery failure | 🟢 accepted | email, reliability, idempotency, cancellation | — | `docs/decisions/0034-email-timeout-means-delivery-outcome-unknown.md` |
 | 0035 | TOTP ciphertext carries a key id and decrypt-only legacy keyring | 🟢 accepted | auth, 2fa, totp, encryption, rotation | — | `docs/decisions/0035-totp-ciphertext-carries-a-key-id-and-legacy-keyring.md` |
 | 0036 | Boot UUID TTL requires a stable environment-level heartbeat | 🟢 accepted | readiness, redis, boot-uuid, multi-instance, reliability | — | `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md` |
+| 0037 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0037-single-source-ports-and-optin-router-topology.md` |
+| 0038 | Keep the scaffold backend default out of process.env until server bootstrap | 🟢 accepted | config, ports, scaffold, oauth, server | — | `docs/decisions/0038-scaffold-port-default-stays-out-of-process-env.md` |
 
 ## Summaries
 
@@ -173,16 +174,6 @@ Build seven layers on the existing rails (generator → committed artifact → M
 **Governs** (`//? @adr 0016`): `packages/mcp/src/index.ts`
 
 → `docs/decisions/0016-ai-context-layers-before-rag.md`
-
-### 0016 — Single-source frontend/backend ports + router topology config is opt-in (not shipped by default)
-
-**0016** · accepted · tags: config, ports, scaffold, cli, router, packaging, dx · 2026-06-26
-
-*1. A pure-data `config.ports.ts` is the single source of truth for ports.** It exports `const ports = { frontend, backend }` with **no side-effects**. `config.ts` re-exports `ports`, and `vite.config.ts` imports `config.ports.ts` *directly** — so Vite reads the ports without evaluating `config.ts`'s side-effects (`registerProjectConfig`, server-only core imports). `server.ts` passes `defaultPort: ports.backend` to `bootstrapLuckyStack`.
-
-**Governs** (`//? @adr 0016`): `packages/mcp/src/index.ts`
-
-→ `docs/decisions/0016-single-source-ports-and-optin-router-topology.md`
 
 ### 0017 — Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot
 
@@ -362,6 +353,22 @@ Keep the TTL and treat the UUID as an environment-level value. After HTTP listen
 
 → `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md`
 
+### 0037 — Single-source frontend/backend ports + router topology config is opt-in (not shipped by default)
+
+**0037** · accepted · tags: config, ports, scaffold, cli, router, packaging, dx · 2026-06-26
+
+*1. A pure-data `config.ports.ts` is the single source of truth for ports.** It exports `const ports = { frontend, backend }` with **no side-effects**. `config.ts` re-exports `ports`, and `vite.config.ts` imports `config.ports.ts` *directly** — so Vite reads the ports without evaluating `config.ts`'s side-effects (`registerProjectConfig`, server-only core imports). `server.ts` passes `defaultPort: ports.backend` to `bootstrapLuckyStack`.
+
+→ `docs/decisions/0037-single-source-ports-and-optin-router-topology.md`
+
+### 0038 — Keep the scaffold backend default out of process.env until server bootstrap
+
+**0038** · accepted · tags: config, ports, scaffold, oauth, server · 2026-08-16
+
+`@luckystack/core` keeps `SERVER_PORT='80'` in its validated environment snapshot and keeps the generic server fallback, but does **not** write the implicit value into `process.env`. `process.env.SERVER_PORT` remains reserved for an explicitly supplied environment value or the positional CLI-port writeback from `@luckystack/server/parseArgv`.
+
+→ `docs/decisions/0038-scaffold-port-default-stays-out-of-process-env.md`
+
 ## Code governed by decisions
 
 > Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.
@@ -371,7 +378,9 @@ Keep the TTL and treat the UUID as an environment-level value. After HTTP listen
 | --- | --- | --- |
 | `packages/core/src/bindAddress.ts` | 0031 | OAuth port hopping preserves an explicitly configured local ingress |
 | `packages/core/src/bootUuid.ts` | 0036 | Boot UUID TTL requires a stable environment-level heartbeat |
+| `packages/core/src/env.ts` | 0039 | _(unknown ADR — tag references a missing decision file)_ |
 | `packages/core/src/hooks/types.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
+| `packages/create-luckystack-app/template/config.ts` | 0039 | _(unknown ADR — tag references a missing decision file)_ |
 | `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
 | `packages/email/src/sendEmail.ts` | 0034 | Email timeout is cancellation intent, not proof of delivery failure |
 | `packages/login/src/accountStrategy.ts` | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant |

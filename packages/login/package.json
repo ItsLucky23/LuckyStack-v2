@@ -7,7 +7,7 @@
     "provenance": true
   },
   "type": "module",
-  "description": "Authentication for LuckyStack: credentials + OAuth (Google/GitHub/Facebook/Discord), Redis-backed sessions, single-session enforcement, lifecycle hooks. Pairs with @luckystack/core.",
+  "description": "Authentication for LuckyStack: credentials + OAuth (Google/GitHub/Facebook/Discord/Microsoft/custom), Redis-backed sessions, single-session enforcement, password reset, 2FA, lifecycle hooks, and pluggable user/session adapters. Pairs with @luckystack/core.",
   "license": "MIT",
   "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
   "repository": {

@@ -9,7 +9,7 @@ import process from 'node:process';
 //?
 //? The port is injected through the server's own argv parser
 //? (`@luckystack/server/parseArgv`, shape `<bundles> [port]`) so `getParsedPort()`
-//? wins over any `SERVER_PORT` in `.env` / `.env.local`. `core-preset` is a no-op
+//? receives the explicit instance port. `core-preset` is a no-op
 //? in dev (NODE_ENV !== 'production' loads every route via devkit) — it only
 //? satisfies the required first positional so the port lands in slot two.
 

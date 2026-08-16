@@ -1,6 +1,6 @@
 # @luckystack/email
 
-> Pluggable transactional email for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Three built-in adapters (Console, Resend, SMTP), one tiny `<CTA>` template helper, and integration with the existing notifier + Sentry hooks. Optional package — install only when you need the framework's password-reset flow or want to send transactional mail.
+> Pluggable transactional email for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Three built-in adapters (Console, Resend, SMTP), one tiny `<CTA>` template helper, and integration with the existing notifier + error-tracking hooks. Optional package — install only when you need the framework's password-reset flow or want to send transactional mail.
 
 ## Install
 
@@ -128,9 +128,9 @@ The `envVars` and `defaults` sub-blocks let installers rename the Resend/SMTP en
 
 ## Observability
 
-Email send errors are auto-reported to Sentry **if `@luckystack/error-tracking` is installed and initialized**. No special wiring — `sendEmail` calls `captureException()` from `@luckystack/core`, which no-ops when error-tracking isn't registered.
+Email send errors are auto-reported to the registered error tracker(s) **if `@luckystack/error-tracking` is installed and initialized**. No special wiring — `sendEmail` calls `captureException()` from `@luckystack/core`, which no-ops when no tracker is registered.
 
-Terminal logging is independent of Sentry and controlled entirely by `email.logging.errors` / `email.logging.sends`.
+Terminal logging is independent of error tracking and controlled entirely by `email.logging.errors` / `email.logging.sends`.
 
 ## Hooks
 

@@ -1,6 +1,6 @@
 # Argv Parsing (`parseServerArgv` + `applyServerArgv`)
 
-> Deep specs. Bron: `packages/server/src/argv.ts`, `packages/server/src/parseArgv.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs. Bron: `packages/server/src/argv.ts`, `packages/server/src/parseArgv.ts`. Bijgewerkt: 2026-08-16.
 
 ## Overview
 
@@ -13,23 +13,18 @@ npm run server -- <bundle[,bundle...]> [port]
 - Arg 0 — preset list. Comma-separated; duplicates collapsed; runtime maps from each preset are shallow-merged at boot.
 - Arg 1 — listen port. Numeric. Optional.
 
-Argv replaces the legacy `LUCKYSTACK_BUNDLE` + `SERVER_PORT` environment toggles with one shape consumed by `createProdRuntimeMapsProvider` (preset) and `createLuckyStackServer` (port).
+Argv provides one shape consumed by `createProdRuntimeMapsProvider` (preset), `createLuckyStackServer` (port), and the browser-safe `@luckystack/core/config` port-override registry.
 
 The module exposes:
 
 - A pure parser: `parseServerArgv(argv)`.
-- A side-effect runner that reads `process.argv.slice(2)` once and caches: `applyServerArgv()`.
+- A side-effect runner that reads `process.argv.slice(2)` once and registers the result: `applyServerArgv()`.
 - Read accessors: `getParsedBundles()`, `getParsedPort()`.
 - A side-effect-only entrypoint `@luckystack/server/parseArgv` that simply imports `applyServerArgv` and runs it.
 
-The side-effect entry MUST be the FIRST import in the consumer's `server.ts` because the parsed port is written back to `process.env.SERVER_PORT`, and downstream modules read that variable at top-level evaluation time:
+The side-effect entry MUST be the FIRST import in the consumer's `server.ts` because it registers the parsed port in `@luckystack/core/config`, and the consumer's config reads that override at top-level evaluation time. When no CLI port was supplied, the registry stays empty and `config.ts` uses the consumer-owned `config.ports.ts` backend value.
 
-- `@luckystack/core` env Zod schema
-- `@luckystack/core` `bindAddress.ts` fallback
-- The consumer's `config.ts` `backendUrl` constant
-- `@luckystack/login` `oauthProviders.ts` callback URL builder
-
-Importing anything that pulls one of those four before `parseArgv` runs will lock in the wrong port.
+Importing the consumer config before `parseArgv` runs can lock the static default into its OAuth callback base. The server listen path still reads the same registry through `getParsedPort()`, so both surfaces share one override without an environment writeback.
 
 ## API Reference
 
@@ -105,13 +100,13 @@ export const applyServerArgv = (): void;
 - Idempotent. Subsequent calls return immediately via the module-level `hasRun` latch.
 - First call:
   1. `parseServerArgv(process.argv.slice(2))` (throws on malformed input).
-  2. Caches `bundles` + `port` in module state.
-  3. When `port !== null`, writes `process.env.SERVER_PORT = String(port)`. This is the writeback that lets the four downstream env-readers (listed in Overview) see the resolved port without per-call refactoring.
+  2. Caches `bundles` in module state.
+  3. Calls `registerPortOverride(port)`. A numeric port becomes visible through the browser-safe core/config entry; `null` clears the override.
 
 **Errors / Edge cases:**
 
-- Throwing during this call aborts boot before any other module has a chance to read `SERVER_PORT`.
-- Calling `applyServerArgv` after another module has already read `SERVER_PORT` is too late — that consumer has already captured the old value.
+- Throwing during this call aborts boot before consumer config evaluates.
+- Calling `applyServerArgv` after consumer config has evaluated is too late — that module has already captured its callback base.
 
 **Example:**
 
@@ -164,7 +159,7 @@ console.log(getParsedBundles()); // e.g. ['billing', 'vehicles']
 export const getParsedPort = (): number | null;
 ```
 
-**Returns:** the cached `port`. `null` until `applyServerArgv()` has run with a numeric arg 1.
+**Returns:** the port currently held in the core/config override registry. `null` when no positional port was registered.
 
 **Behavior:**
 
@@ -172,8 +167,8 @@ export const getParsedPort = (): number | null;
 - Consumed by `createLuckyStackServer` as one of the port-resolution fallbacks:
   1. `options.port`
   2. `getParsedPort()`
-  3. `process.env.SERVER_PORT`
-  4. `80`
+  3. `options.defaultPort` (the scaffold's `config.ports.ts` backend)
+  4. `80` (generic final fallback)
 
 **Example:**
 
@@ -204,28 +199,23 @@ applyServerArgv();
 import '@luckystack/server/parseArgv';
 ```
 
-Anything that depends on `process.env.SERVER_PORT` MUST be imported below this line. Common pitfalls:
-
-- Importing `'./config'` (which evaluates `backendUrl` at top level) before `parseArgv`.
-- Importing `@luckystack/core` modules that pull the env Zod schema before `parseArgv`.
-
-Both will freeze the wrong port into module-level constants.
+Consumer `config.ts` MUST be imported below this line because it reads `getPortOverride()` at module evaluation time. Importing core itself first is safe: the registry is mutable and browser-safe. With no CLI port, scaffold config intentionally falls back to its pure-data `config.ports.ts` value.
 
 ## Resolution order summary
 
 | Consumer | Source of port |
 | --- | --- |
-| `createLuckyStackServer` | `options.port` -> `getParsedPort()` -> `SERVER_PORT` -> `80` |
+| `createLuckyStackServer` | `options.port` -> `getParsedPort()` -> `options.defaultPort` -> `80` |
 | `createLuckyStackServer` IP | `options.ip` -> `SERVER_IP` -> `127.0.0.1` |
 | `createProdRuntimeMapsProvider` | `options.preset` (string -> single-entry array; non-empty array -> dedup) -> `getParsedBundles()` -> `['default']` |
 
 ## CLI examples
 
 ```bash
-# Default preset, port 80
+# Default preset, config.ports.ts backend
 npm run server
 
-# Single bundle, port 80
+# Single bundle, config.ports.ts backend
 npm run server -- billing
 
 # Two bundles merged, port 4001

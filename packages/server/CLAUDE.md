@@ -32,10 +32,10 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 | `registerOverlayLoader(loader)` | Production-bundle seam: the server bundler (`scripts/bundleServer.mjs`) generates an entry that statically imports the overlay files and registers this loader; `bootstrapLuckyStack` then runs it INSTEAD of the runtime `.ts` folder walk (plain `node` cannot import `.ts` — ERR_UNKNOWN_FILE_EXTENSION). | -> docs/create-server.md |
 | `verifyBootstrap(requirements?)` | Pre-flight check for ProjectConfig / DeployConfig / ServicesConfig / OAuth / RuntimeMapsProvider / LocalizedNormalizer. Throws one descriptive `Error`. | -> docs/create-server.md |
 | `parseServerArgv(argv)` | Pure parser: validates positional `<bundles> [port]` and returns `{ bundles, port }`. Throws on malformed input. | -> docs/argv-parsing.md |
-| `applyServerArgv()` | Side-effect runner: parses `process.argv.slice(2)`, stores bundles + port, writes `process.env.SERVER_PORT` for downstream env readers. Idempotent. | -> docs/argv-parsing.md |
+| `applyServerArgv()` | Side-effect runner: parses `process.argv.slice(2)`, stores bundles, and registers the port through browser-safe `@luckystack/core/config`. Idempotent. | -> docs/argv-parsing.md |
 | `getParsedBundles()` | Returns the preset list parsed by `applyServerArgv()` (empty array before first call). | -> docs/argv-parsing.md |
 | `getParsedPort()` | Returns the port parsed by `applyServerArgv()` (`null` if argv omitted it). | -> docs/argv-parsing.md |
-| `@luckystack/server/parseArgv` (side-effect import) | First-line import that runs `applyServerArgv()` before any module reads `process.env.SERVER_PORT` (notably `config.ts`). | -> docs/argv-parsing.md |
+| `@luckystack/server/parseArgv` (side-effect import) | First-line import that runs `applyServerArgv()` before consumer `config.ts` reads the typed override registry. | -> docs/argv-parsing.md |
 | `createProdRuntimeMapsProvider(options)` | Build a `RuntimeMapsProvider` that loads generated maps in prod and delegates to devkit discovery in dev. Returns the provider without registering. | -> docs/runtime-maps.md |
 | `registerProdRuntimeMapsProvider(options)` | Convenience wrapper: builds the provider AND calls `registerRuntimeMapsProvider`. Most consumers want this. | -> docs/runtime-maps.md |
 | `registerCustomRoute(handler, options?)` | Append a custom HTTP route handler. `options.phase`: `'post-params'` (default, runs after body parse) or `'pre-params'` (runs before `getParams`, raw `req` stream intact — webhooks + streaming uploads). | -> /docs/ARCHITECTURE_HTTP.md |
@@ -63,7 +63,7 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 
 ## Config keys (env vars + registerProjectConfig slots)
 
-- Port precedence — `options.port` → positional argv → `options.defaultPort` (the scaffold passes `config.ports.backend`) → legacy `SERVER_PORT` → `80`. Inputs must be integer ports in `0..65535`. After bind, `httpServer.address().port` is authoritative (including `listen(0)`). In dev, that port is advertised to `node_modules/.luckystack/dev-server.json`; cleanup removes it only when the exiting PID still owns it. The Vite proxy follows the advertisement for HTTP + WebSocket requests.
+- Port precedence — `options.port` → positional argv registry override → `options.defaultPort` (the scaffold passes `config.ports.backend`) → `80`. Inputs must be integer ports in `0..65535`. After bind, `httpServer.address().port` is authoritative (including `listen(0)`). In dev, that port is advertised to `node_modules/.luckystack/dev-server.json`; cleanup removes it only when the exiting PID still owns it. The Vite proxy follows the advertisement for HTTP + WebSocket requests.
 - `SERVER_IP` (env, optional, default `127.0.0.1`) — bind address fallback when `options.ip` is omitted.
 - `NODE_ENV` (env, required for security-sensitive branches) — `development` / `test` toggle devkit hot reload + REPL and gate `/_test/reset`.
 - `TEST_RESET_TOKEN` (env, required for `/_test/reset` to be reachable at all) — must match the `x-test-reset-token` request header. No fallback "no auth" mode.
@@ -77,8 +77,8 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 ## Peer dependencies
 
 - **Required (runtime deps)**: `@luckystack/api`, `@luckystack/core`.
-- **Peer (canonical ranges)**: `@prisma/client@^6.19.0` (transitive via core), `socket.io@^4.8.0`.
-- **Optional (all auto-detected by `bootstrapLuckyStack`; the server degrades gracefully when absent — `auth.disabled` / `sync.disabled`, presence skipped)**: `@luckystack/login`, `@luckystack/presence`, `@luckystack/sync`, `@luckystack/error-tracking`, `@luckystack/email`, `@luckystack/cron`, `@luckystack/docs-ui`, `@luckystack/devkit` (dev-only, dynamically imported by the `enableDevTools` branch).
+- **Required peer**: `socket.io@^4.8.0`.
+- **Optional (all auto-detected by `bootstrapLuckyStack`; the server degrades gracefully when absent — `auth.disabled` / `sync.disabled`, presence skipped)**: `@prisma/client@^6.19.0`, `@luckystack/login`, `@luckystack/presence`, `@luckystack/sync`, `@luckystack/error-tracking`, `@luckystack/email`, `@luckystack/cron`, `@luckystack/docs-ui`, `@luckystack/devkit` (dev-only, dynamically imported by the `enableDevTools` branch).
   - **0.2.0 install-anything-anytime**: `bootstrapLuckyStack` runs an auto-detect phase BEFORE the consumer overlay that imports each installed optional package's `@luckystack/<pkg>/register` side-effect subpath (`OPTIONAL_PACKAGES` in `capabilities.ts` = `login, email, error-tracking, presence, cron, docs-ui`). So `npm i @luckystack/<pkg>` + env + restart self-wires the BACKEND with zero code edits. Detection uses `import.meta.resolve` (the `@luckystack/*` exports maps are import-only — a CJS `require.resolve` reports them absent). Client-side mounts (presence JSX, login pages) need `npx luckystack add <feature>` (`@luckystack/cli`) because Vite can't statically import an uninstalled package and file-routing only scans `src/`.
 
 ## Related

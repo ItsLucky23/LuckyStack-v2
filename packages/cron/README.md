@@ -1,6 +1,6 @@
 # @luckystack/cron
 
-Leader-elected, Redis-backed cron scheduler for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Declarative recurring jobs that run on **exactly one instance** of a multi-instance deployment — no double-firing `setInterval`s, no hand-rolled locks.
+Leader-elected, Redis-backed cron scheduler for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Declarative recurring jobs with one active leader under a healthy Redis lease in a multi-instance deployment. The lease is best-effort, so handlers must be idempotent; this replaces double-firing `setInterval`s and hand-rolled locks.
 
 ## Install
 

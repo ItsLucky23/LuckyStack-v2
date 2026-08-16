@@ -104,11 +104,12 @@ None directly. Inherits socket transport config from `@luckystack/server` and Re
 ## Peer dependencies
 
 - **Required**: `@luckystack/core`, `@luckystack/error-tracking`. **`@luckystack/login` is NOT a dependency** (0.2.0 decoupling) — sessions resolve through core's `readSession` / session-provider registry (`handleSyncRequest` imports `readSession` from `@luckystack/core`), with login as the default *provider* (optional package), not a hard runtime dep.
-- **Peer (canonical ranges, 2026-05-07)**:
-  - `@prisma/client@^6.19.0` (transitively required via `@luckystack/core`)
-  - `react@^19.2.0` (only the `/client` subpath)
+- **Required peers**:
   - `socket.io@^4.8.0` (server entry)
   - `socket.io-client@^4.8.0` (client entry)
+- **Optional peers**:
+  - `@prisma/client@^6.19.0` (only for the default Prisma-backed session/user provider)
+  - `react@^19.2.0` (only the `/client` subpath)
 - Redis adapter (required for cross-instance fanout) wired by `@luckystack/server`; see `/docs/ARCHITECTURE_SOCKET.md`.
 
 ## Related

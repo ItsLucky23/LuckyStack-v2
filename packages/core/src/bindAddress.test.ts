@@ -15,7 +15,6 @@ import {
 
 describe('bindAddress registry', () => {
   const savedEnv = process.env.LUCKYSTACK_ENV;
-  const savedPort = process.env.SERVER_PORT;
   const savedIp = process.env.SERVER_IP;
 
   beforeEach(() => {
@@ -23,13 +22,11 @@ describe('bindAddress registry', () => {
     //? individual tests overwrite it. There is no public reset, so each test
     //? sets what it needs.
     setEnv('development');
-    delete process.env.SERVER_PORT;
     delete process.env.SERVER_IP;
   });
 
   afterEach(() => {
     setEnv(savedEnv);
-    if (savedPort === undefined) delete process.env.SERVER_PORT; else process.env.SERVER_PORT = savedPort;
     if (savedIp === undefined) delete process.env.SERVER_IP; else process.env.SERVER_IP = savedIp;
     vi.restoreAllMocks();
   });
@@ -55,6 +52,18 @@ describe('resolveDevCallbackUrl — OAuth follows only a direct pre-hop callback
     registerHop(80, 84);
     expect(resolveDevCallbackUrl('http://localhost:80/auth/callback/google'))
       .toBe('http://localhost:84/auth/callback/google');
+  });
+
+  it('rewrites a non-default scaffold port after an auto-increment hop', () => {
+    registerHop(4787, 4788);
+    expect(resolveDevCallbackUrl('http://localhost:4787/auth/callback/google'))
+      .toBe('http://localhost:4788/auth/callback/google');
+  });
+
+  it('rewrites the configured default before listen for a programmatic port override', () => {
+    registerBindAddress({ ip: '127.0.0.1', port: 4911, configuredPort: 4787 });
+    expect(resolveDevCallbackUrl('http://localhost:4787/auth/callback/google'))
+      .toBe('http://localhost:4911/auth/callback/google');
   });
 
   it('rewrites an implicit default port when it was the intended port', () => {

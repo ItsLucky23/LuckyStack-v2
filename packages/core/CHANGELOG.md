@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `registerPortOverride(port)` / `getPortOverride()` in the browser-safe
+  `@luckystack/core/config` entry provide the typed positional-port bridge used
+  by consumer config and server bootstrap.
+
+### Changed
+
+- Removed `SERVER_PORT` from the validated runtime environment and bind-address
+  fallback. Backend defaults now come from consumer `config.ports.ts`; per-boot
+  overrides use positional argv; generic server boots still default numerically
+  to port 80.
+- Bind-address registration accepts configured-default metadata so a
+  programmatic `options.port` can update OAuth callbacks that still name the
+  consumer default without bypassing an explicit local router ingress.
+
 ## [0.7.6] - 2026-07-23
 
 ### Fixed

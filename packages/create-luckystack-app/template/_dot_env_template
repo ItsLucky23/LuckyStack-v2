@@ -23,10 +23,12 @@ SECURE=false
 # PUBLIC_URL=https://your-domain.com
 #
 # The backend origin (where the OAuth `/auth/callback/<provider>` route lives) is
-# localhost + the `backend` port from config.ports.ts — in dev that's
-# http://localhost:80. Register THAT as the provider's redirect URI:
-# http://localhost:80/auth/callback/<provider> in dev,
+# localhost + the `backend` port from config.ports.ts (or the explicit CLI port).
+# Register THAT exact value as the provider's redirect URI, for example:
+# http://localhost:<backend-port>/auth/callback/<provider> in dev,
 # https://your-domain.com/auth/callback/<provider> in prod.
+# If auto-increment moves the backend, the framework follows the bound port at
+# runtime; the provider console must allow the resulting exact callback URI.
 
 # Comma-separated list of additional origins permitted by the CORS layer. The
 # public + backend origins are auto-included. OAuth callbacks arrive with the

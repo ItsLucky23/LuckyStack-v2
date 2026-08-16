@@ -42,7 +42,7 @@ const ROUTER_SHUTDOWN_DRAIN_MS = 10_000;
 /**
  * Starts the LuckyStack load-balancer backend.
  *
- * Responsibilities (per ARCHITECTURE_PACKAGING.md §9.6):
+ * Responsibilities (per the multi-service routing contract in ARCHITECTURE_PACKAGING.md):
  *   1. Parse first route segment as service key (HTTP + WS).
  *   2. Forward to the configured service backend URL (from deploy.config.ts).
  *   3. Return `serviceNotAssigned` when no binding can be resolved.
@@ -176,7 +176,7 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   const isDevMode = input.currentEnvKey === 'development';
 
   //? Split/fallback mode = `environment.fallback` is set on the current env.
-  //? Per §9.6 #7, shared Redis is mandatory in that mode; we bypass the opt-out.
+  //? In split/fallback mode, shared Redis is mandatory; bypass the opt-out.
   const requireSharedHealth = hasFallback;
   const wantSharedHealth = requireSharedHealth || !input.disableSharedHealthState;
 

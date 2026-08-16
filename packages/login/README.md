@@ -1,12 +1,14 @@
 # @luckystack/login
 
-> Authentication for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Credentials + OAuth (Google, GitHub, Facebook, Discord, Microsoft), Redis-backed sessions, single-session enforcement, and lifecycle hooks (`preLogin`, `preRegister`, `preLogout`, `preSessionCreate`, `preSessionDelete` and their `post*` counterparts).
+> Authentication for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Credentials + OAuth (Google, GitHub, Facebook, Discord, Microsoft), Redis-backed default sessions with a swappable session adapter, single-session enforcement, and lifecycle hooks (`preLogin`, `preRegister`, `preLogout`, `preSessionCreate`, `preSessionDelete` and their `post*` counterparts).
 
 ## Install
 
 ```bash
-npm install @luckystack/login @luckystack/core @prisma/client socket.io
+npm install @luckystack/login @luckystack/core ioredis socket.io
 ```
+
+The default user adapter uses Prisma; install `@prisma/client` as well when you use it. Projects with a custom `UserAdapter` and `SessionAdapter` can use another data layer and session store.
 
 ## Quickstart
 
@@ -28,7 +30,7 @@ const result = await loginWithCredentials({ email, password });
 // → { status: false, reason } on failure (including hook-stop with the hook's errorCode)
 ```
 
-Sessions are stored in Redis under `${PROJECT_NAME}-session:<token>` and are sliding (every authenticated read extends the TTL by `ProjectConfig.session.expiryDays`).
+The default `redisSessionAdapter` stores sessions under `${PROJECT_NAME}-session:<token>` and applies sliding expiration (every authenticated read extends the TTL by `ProjectConfig.session.expiryDays`). Register a custom `SessionAdapter` when sessions should live in another store.
 
 ## Hooks
 
@@ -195,8 +197,8 @@ import {
 | `loginCallback(pathname, req, res)` | OAuth state-exchange handler — wired to `/auth/callback/<provider>` by `@luckystack/server`. |
 | `createOAuthState(providerName)` | Issue a CSRF state token (Redis, NX, TTL from project config). |
 | `logout({ token, socket, userId })` | End a single socket's session. |
-| `saveSession(token, user, newUser?)` | Write to Redis + broadcast to existing connections. |
-| `getSession(token)` | Read + slide expiration. Dispatches `preSessionRefresh` / `postSessionRefresh` around the Redis EXPIRE call. |
+| `saveSession(token, user, newUser?)` | Write through the active `SessionAdapter` + broadcast to existing connections. |
+| `getSession(token)` | Read + slide expiration through the active adapter. Dispatches `preSessionRefresh` / `postSessionRefresh` around the adapter TTL refresh. |
 | `deleteSession(token)` | Hard delete + clean up active-tokens set. |
 | `getAllSessions()` | Admin utility — scans all sessions. |
 | `revokeUserSessions(userId)` | Force-logout every active session for a user. |
@@ -204,6 +206,7 @@ import {
 | `registerOAuthProviders(list)` / `getOAuthProviders()` / `isFullOAuthProvider(p)` | OAuth registry. |
 | `googleProvider`, `githubProvider`, `discordProvider`, `facebookProvider`, `microsoftProvider`, `credentialsProvider` | Built-in provider factories. |
 | `registerUserAdapter(adapter)` / `getUserAdapter()` / `isUserAdapterRegistered()` / `defaultPrismaUserAdapter` | Pluggable user store. |
+| `registerSessionAdapter(adapter)` / `getSessionAdapter()` / `redisSessionAdapter` | Pluggable session storage; Redis is the default. |
 | `registerPostLoginRedirect(resolver)` / `getPostLoginRedirect()` | Dynamic redirect resolution. |
 | `createPasswordResetToken`, `consumePasswordResetToken`, `updatePasswordHash`, `verifyPassword`, `sendPasswordResetEmail` | Password-reset primitives. |
 
@@ -221,18 +224,16 @@ If your project has no such surfaces this is informational. The framework intent
 ## Related architecture docs
 
 - [`docs/ARCHITECTURE_AUTH.md`](../../docs/ARCHITECTURE_AUTH.md) — OAuth + credentials lifecycle, allowed-origin checks, role guards.
-- [`docs/ARCHITECTURE_SESSION.md`](../../docs/ARCHITECTURE_SESSION.md) — Redis layout, sliding expiration, single-session enforcement.
+- [`docs/ARCHITECTURE_SESSION.md`](../../docs/ARCHITECTURE_SESSION.md) — session adapters, default Redis layout, sliding expiration, and single-session enforcement.
 - [`docs/ARCHITECTURE_EMAIL.md`](../../docs/ARCHITECTURE_EMAIL.md) — forgot-password modes (`framework` / `custom` / `disabled`).
 
 ## Dependencies
 
 - Runtime: `@luckystack/core`, `bcryptjs`, `validator`, `dotenv`
-- Peer (canonical ranges, standardized 2026-05-07):
-  - `@prisma/client@^6.19.0`
-  - `socket.io@^4.8.0`
-- Optional peer: `@luckystack/email` — only required when `forgotPassword: 'framework'`. The package lazy-imports it; without it, the framework-mode flow is disabled but every other API works.
+- Required peer: `socket.io@^4.8.0`
+- Optional peers: `@prisma/client@^6.19.0` (default user adapter) and `@luckystack/email` (only when `forgotPassword: 'framework'`). The package lazy-imports optional peers; every other API works without them.
 
-Your Prisma schema must include a `User` model with at least: `id`, `email`, `provider` (enum `PROVIDERS`), `password` (nullable), `name`, `avatar`, `avatarFallback`, `admin`, `language`. See [`prisma/schema.prisma`](../../prisma/schema.prisma) for the canonical shape, or register a `UserAdapter` to talk to a different schema.
+When using the default Prisma `UserAdapter`, your schema must include a `User` model with at least: `id`, `email`, `provider` (enum `PROVIDERS`), `password` (nullable), `name`, `avatar`, `avatarFallback`, `admin`, `language`. See [`prisma/schema.prisma`](../../prisma/schema.prisma) for the canonical shape. A custom `UserAdapter` and `SessionAdapter` can bind auth to another data layer and session store.
 
 ## License
 

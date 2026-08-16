@@ -43,6 +43,11 @@ export {
   isProjectConfigRegistered,
   DEFAULT_PROJECT_CONFIG,
 } from './projectConfig';
+export {
+  registerPortOverride,
+  getPortOverride,
+  resetPortOverrideForTests,
+} from './portOverrideRegistry';
 export type {
   ProjectConfig,
   ProjectConfigInput,

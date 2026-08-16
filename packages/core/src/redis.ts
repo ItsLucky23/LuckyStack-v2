@@ -45,9 +45,10 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 //? so it hands back the same stale snapshot.
 //?
 //? The `env.*` fallbacks only guard a caller that cleared `process.env`:
-//? `env.ts`'s `applyResolvedDefaultsToProcessEnv` mirrors the resolved Zod
-//? defaults back into `process.env`, so in normal boot they are already set.
-//? An EMPTY string must fall back to the validated snapshot rather than reach
+//? `env.ts` mirrors the resolved Zod defaults for the ordinary runtime keys
+//? back into `process.env`; runtime ports are owned separately by
+//? config.ports.ts plus the typed positional-override registry. An EMPTY string must fall
+//? back to the validated snapshot rather than reach
 //? ioredis as a blank host/port — hence the explicit emptiness check (`??`
 //? would let `''` win, which is why this is not a nullish-coalescing site).
 const readEnvOrSnapshot = (raw: string | undefined, fallback: string): string =>

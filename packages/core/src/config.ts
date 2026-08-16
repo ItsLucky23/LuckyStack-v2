@@ -26,6 +26,12 @@ export {
   DEFAULT_PROJECT_CONFIG,
 } from './projectConfig';
 
+export {
+  registerPortOverride,
+  getPortOverride,
+  resetPortOverrideForTests,
+} from './portOverrideRegistry';
+
 //? The deploy + services registries belong here for the same two reasons as
 //? projectConfig: `deploy.config.ts` is client-bundled too (its own comment says
 //? so), and reaching for `./packages/core/src/...` instead splits into a separate

@@ -208,7 +208,7 @@ export interface CorsConfig {
   credentials: boolean;
   /**
    * Origins permitted to make cross-origin requests. The framework always
-   * permits the `SERVER_IP:SERVER_PORT` it binds to. Set `allowLocalhost`
+   * permits the registered bind address. Set `allowLocalhost`
    * to true to also accept any `localhost` origin (useful for dev).
    * Origins are normalized (scheme + host + port) before comparison.
    *

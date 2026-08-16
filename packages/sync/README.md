@@ -5,7 +5,9 @@
 ## Install
 
 ```bash
-npm install @luckystack/sync @luckystack/core @luckystack/login @luckystack/error-tracking react socket.io socket.io-client
+npm install @luckystack/sync @luckystack/core @luckystack/error-tracking socket.io socket.io-client
+# Only for the /client subpath:
+npm install react
 ```
 
 ## Quickstart
@@ -143,12 +145,9 @@ Client entry (`@luckystack/sync/client`):
 
 ## Dependencies
 
-- Runtime: `@luckystack/core`, `@luckystack/login`, `@luckystack/error-tracking`
-- Peer (canonical ranges, standardized 2026-05-07):
-  - `@prisma/client@^6.19.0` (transitively required via `@luckystack/core`)
-  - `react@^19.2.0` (`/client` entry only)
-  - `socket.io@^4.8.0`
-  - `socket.io-client@^4.8.0`
+- Runtime: `@luckystack/core`, `@luckystack/error-tracking` (`@luckystack/login` is an optional session provider, not a runtime dependency)
+- Required peers: `socket.io@^4.8.0`, `socket.io-client@^4.8.0`
+- Optional peers: `@prisma/client@^6.19.0` (only for the default Prisma-backed session/user provider), `react@^19.2.0` (`/client` entry only).
 
 ## License
 

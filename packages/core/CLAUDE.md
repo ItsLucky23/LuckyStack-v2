@@ -41,10 +41,11 @@ Foundation package for LuckyStack. Owns the socket-first transport contracts (`a
 | `registerAvatarConfig(config: AvatarConfigInput): void` | Override avatar disk format(s) + Cache-Control header. | -> docs/config-registry.md |
 | `getAvatarConfig(): AvatarConfig` | Read active avatar config. | -> docs/config-registry.md |
 | `DEFAULT_AVATAR_CONFIG: AvatarConfig` | Default formats `[{ extension: 'webp', contentType: 'image/webp' }]` + 24h cache. | -> docs/config-registry.md |
-| `registerBindAddress(address: { ip: string; port: number }): void` | Store the intended pre-listen address; resets the OAuth pre-hop baseline. | -> docs/app-bootstrap.md |
+| `registerPortOverride(port)` / `getPortOverride()` | Browser-safe runtime bridge for a positional server port; consumer config falls back to its own `config.ports.ts` when empty. Exported from `@luckystack/core/config` and the main barrel. | -> docs/app-bootstrap.md |
+| `registerBindAddress(address: { ip: string; port: number; configuredPort?: number }): void` | Store the intended pre-listen address plus optional consumer-default metadata; resets the OAuth pre-hop baseline. | -> docs/app-bootstrap.md |
 | `registerBoundAddress(address: { ip: string; port: number }): void` | Store the address reported by `node:http` after bind while preserving the intended baseline. | -> docs/app-bootstrap.md |
-| `getBindAddress(): { ip: string; port: string }` | Resolve the actually-bound address at call time (registry -> env -> fallback). | -> docs/app-bootstrap.md |
-| `resolveDevCallbackUrl(callbackUrl: string): string` | In non-prod, rewrite a loopback OAuth callback from the intended port to the actually-bound port; preserves explicit local ingress ports. | -> docs/app-bootstrap.md |
+| `getBindAddress(): { ip: string; port: string }` | Resolve the actually-bound address at call time (registry -> `SERVER_IP` + generic port fallback). | -> docs/app-bootstrap.md |
+| `resolveDevCallbackUrl(callbackUrl: string): string` | In non-prod, rewrite a loopback OAuth callback from the intended/configured-default port to the actually-bound port; preserves explicit local ingress ports. | -> docs/app-bootstrap.md |
 | `registerRuntimeMapsProvider(provider: RuntimeMapsProvider): void` | DI slot for generated api/sync maps; called by project `server/prod/runtimeMaps.ts`. | -> docs/app-bootstrap.md |
 | `getRuntimeApiMaps(): Promise<RuntimeApiMapsResult>` | Async accessor for `{ apisObject, functionsObject }`. | -> docs/app-bootstrap.md |
 | `getRuntimeSyncMaps(): Promise<RuntimeSyncMapsResult>` | Async accessor for `{ syncObject, functionsObject }`. | -> docs/app-bootstrap.md |
@@ -210,7 +211,6 @@ Env vars read directly by core (via `env.ts` and call-time helpers):
 | --- | --- | --- |
 | `NODE_ENV` | `'development'` | Zod-validated, mirrored to `process.env`. |
 | `SERVER_IP` | `'127.0.0.1'` | `getBindAddress()` fallback. |
-| `SERVER_PORT` | `'80'` | `getBindAddress()` fallback. |
 | `SECURE` | `'false'` | `allowedOrigin` scheme selection. |
 | `REDIS_HOST` | `'127.0.0.1'` | `redis.ts` default client + `getRedisConnectionOptions`. |
 | `REDIS_PORT` | `'6379'` | Same. |
@@ -224,14 +224,14 @@ Env vars read directly by core (via `env.ts` and call-time helpers):
 
 > **New 0.2.0 keys (all additive — a missing key keeps prior behavior EXCEPT `validation.runtimeMode`):** `validation.runtimeMode` (`'enforce'` default — prod input validation now ACTUALLY runs; set `'off'` to restore the old prod no-op). `rateLimiting.skipLoopbackInDev` (default `false`; skip the cross-route IP cap for loopback in dev), `rateLimiting.identity` (callback overriding the per-route bucket basis), `rateLimiting.auth` (`{ enabled false, maxAttempts 5, maxAttemptsPerAccount 50, windowMs 900000 }` — dual lockout counter: per-IP `maxAttempts` + cross-IP `maxAttemptsPerAccount`, ADR 0015`) — per-account login lockout slot). **BREAKING — `sync.allowClientReceiverAll` (default now `false`, was `true`) + `sync.requireRoomMembership` (default now `true`, was `false`): a client can no longer broadcast to `'all'` nor target an unjoined room by default — join the room, approve via `preSyncAuthorize`, or opt back into the permissive values.** `sync.flushPressure` (`{ highWaterMarkChunks 1000, lowWaterMarkChunks 250, maxBufferedBytes 5242880 }`). **BREAKING — `http.healthHash` (`{ mode: 'plain'|'salted'|'hmac', salt: string }`) now DEFAULTS to `{ mode: 'hmac', salt: '@bootUuid' }`: `/_health` no longer exposes a stable, unsalted `sha256(secret)` — the synchronized-env fingerprint is HMAC-keyed on the per-boot UUID (rotates each restart). When no boot UUID is available the `'@bootUuid'` sentinel collapses to `'plain'` so the boot handshake never silently diverges. Set a non-empty `salt` to pin a stable key, or `mode:'plain'` to restore legacy wire output.** `http.sessionCookieDomain`/`sessionCookiePrefix` (`'__Host-'`/`'__Secure-'`)/`sessionCookieSecure`. `http.trustedProxyHopCount` (default `1` — when `trustProxy` is on, the resolved client IP is now the entry that many hops in from the RIGHT of `X-Forwarded-For` (the rightmost hop is the immediate upstream proxy); the leftmost, client-controlled hop is never trusted — CORE-O3 leftmost-spoof fix; clamped to the list length). `http.acceptBearerInCookieMode` (default `false` — in cookie-mode (`session.basedToken:false`) the framework now reads ONLY the session cookie and IGNORES any `Authorization: Bearer` / `handshake.auth.token` fallback, closing the CORE-O10 CSRF-bypass; set `true` to restore the legacy cookie-then-bearer fallback. Token-mode is unaffected). `socket.activityHeartbeatThrottleMs` (default `10000`). `auth.allowRegistration` (default `true`), `auth.passwordResetPath` (default `'/reset-password'`), `auth.emailChangeConfirmPath` (default `'/confirm-email-change'`). `deploy.routing.{upstreamTimeoutMs, websocketService, routerHealthPath, maxRequestBodyBytes}` (all optional — undefined uses the router built-in default).
 
-Other registries: `registerDeployConfig(DeployConfigShape)`, `registerServicesConfig(ServicesConfigShape)`, `registerAvatarConfig(AvatarConfigInput)`, `registerBindAddress({ ip, port })`.
+Other registries: `registerDeployConfig(DeployConfigShape)`, `registerServicesConfig(ServicesConfigShape)`, `registerAvatarConfig(AvatarConfigInput)`, `registerPortOverride(port)`, `registerBindAddress({ ip, port, configuredPort? })`.
 
 ## Peer dependencies
 
 Required:
 
-- `@prisma/client@^6.19.0` — DB client proxied through `getPrismaClient()`.
-- `ioredis@^5.10.0` — Redis client proxied through `getRedisClient()`; backs the rate limiter, session store, boot-UUID, and offline-queue.
+- `@prisma/client@^6.19.0` — optional DB client proxied through `getPrismaClient()`; a registered custom client or DB-less project does not need the package.
+- `ioredis@^5.10.0` — Redis client proxied through `getRedisClient()`; backs the rate limiter, Redis-backed login/session defaults, boot-UUID, and offline-queue.
 - `socket.io@^4.8.0` — server-side `SocketIOServer` consumed by `setIoInstance` and `attachSocketRedisAdapter`.
 - `socket.io-client@^4.8.0` — client-side socket types used by the offline queue.
 - `zod@^4.0.0` — `env.ts` schema parsing.

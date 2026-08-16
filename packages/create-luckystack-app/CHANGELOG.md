@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Scaffold config reads positional backend-port overrides from
+  `@luckystack/core/config`; generated projects no longer read or require a
+  backend listen-port environment variable. Edit `config.ports.ts` for the
+  static default or pass `<preset> <port>` for one boot.
+
+### Fixed
+
+- Scaffold OAuth callback documentation now points to the consumer-owned
+  `config.ports.ts` backend (or explicit CLI port) instead of assuming port 80;
+  `config.ports.ts` remains present in single-instance scaffolds without the
+  optional router.
+
 ## [0.7.5] - 2026-07-22
 
 ### Fixed

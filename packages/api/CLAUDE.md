@@ -82,10 +82,8 @@ No project env vars or secrets are read directly by this package — only the am
 ## Peer dependencies
 
 - **Required (runtime deps)**: `@luckystack/core`, `@luckystack/error-tracking`. **`@luckystack/login` is NOT a dependency** (0.2.0 decoupling) — sessions resolve through core's `readSession` / session-provider registry, with login as the default *provider* (optional package), not a hard runtime dep.
-- **Required (peer)**:
-  - `@prisma/client@^6.19.0` (transitively required via `@luckystack/core` session storage).
-  - `socket.io@^4.8.0` (only consumed for the `Socket` type — the HTTP entry point does not need a live socket.io instance at call time).
-- **No optional peers.** Streaming uses an injected callback, not an external SSE library.
+- **Required peer**: `socket.io@^4.8.0` (only consumed for the `Socket` type — the HTTP entry point does not need a live socket.io instance at call time).
+- **Optional peer**: `@prisma/client@^6.19.0` — only needed when the active session/user provider uses the default Prisma client. Streaming uses an injected callback, not an external SSE library.
 
 ## Hooks consumed
 

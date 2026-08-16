@@ -1,7 +1,7 @@
 /* eslint-disable unicorn/no-abusive-eslint-disable */
 /* eslint-disable */
-//? Argv parser MUST run before any module that reads `process.env.SERVER_PORT`
-//? at load time (notably `../config.ts`'s top-level `backendUrl`).
+//? Argv parser MUST run before `../config.ts` reads the typed port-override
+//? registry at module load.
 //? Argv shape: npm run server -- <bundle[,bundle...]> [port]
 import '@luckystack/server/parseArgv';
 

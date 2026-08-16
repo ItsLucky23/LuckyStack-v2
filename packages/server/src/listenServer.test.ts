@@ -132,6 +132,13 @@ describe('listenLuckyStackServer — success', () => {
     expect(fake.listenCalls).toEqual([{ port: 3000, ip: '0.0.0.0' }]);
   });
 
+  it('binds the scaffold-supplied config.ports backend default unchanged', async () => {
+    const fake = new FakeHttpServer();
+    await listenLuckyStackServer(asServer(fake), '127.0.0.1', 4787);
+    expect(fake.listenCalls).toEqual([{ port: 4787, ip: '127.0.0.1' }]);
+    expect(registerBoundAddressMock).toHaveBeenCalledWith({ ip: '127.0.0.1', port: 4787 });
+  });
+
   it('does not write a dev advertisement in the canonical test environment', async () => {
     coreState.envKey = 'test';
     const fake = new FakeHttpServer();

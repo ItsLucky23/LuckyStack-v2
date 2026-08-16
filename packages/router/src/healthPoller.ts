@@ -17,7 +17,7 @@ import { getHealthyStatusPredicate } from './healthConfig';
  * State flips through `resolver.setLocalHealth(...)`, which writes the
  * in-memory map AND (when a shared Redis health store is wired into the
  * resolver) publishes the change so sibling router instances converge on the
- * same picture (per §9.6 #5 in ARCHITECTURE_PACKAGING.md; see
+ * same picture (per the multi-service routing contract in ARCHITECTURE_PACKAGING.md; see
  * `redisHealthStore.ts`).
  */
 export interface StartHealthPollerInput {

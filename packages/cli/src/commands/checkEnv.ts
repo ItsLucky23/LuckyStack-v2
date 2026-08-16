@@ -19,7 +19,7 @@ import type { ConsumerProject } from '../lib/project';
 //? CI step that greps the published packages for `process.env.<KEY>` references
 //? and diffs them against this list.
 const FRAMEWORK_ENV_KEYS = new Set([
-  'NODE_ENV', 'SECURE', 'PROJECT_NAME', 'SERVER_IP', 'SERVER_PORT',
+  'NODE_ENV', 'SECURE', 'PROJECT_NAME', 'SERVER_IP',
   'REDIS_HOST', 'REDIS_USER', 'REDIS_PASSWORD', 'REDIS_PORT',
   'EXTERNAL_ORIGINS', 'DNS', 'LUCKYSTACK_ENV', 'LUCKYSTACK_ENV_FILES',
   'LUCKYSTACK_PRESET', 'ROUTER_PORT', 'LUCKYSTACK_SECRET_MANAGER_URL',

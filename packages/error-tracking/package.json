@@ -7,7 +7,7 @@
     "provenance": true
   },
   "type": "module",
-  "description": "Optional error-tracking integration for LuckyStack (currently Sentry-backed). Auto-wires error/performance capture into the framework's hook surface and request transports. No-op when DSN is missing.",
+  "description": "Optional, pluggable error-tracking integration for LuckyStack with Sentry, Datadog, and PostHog adapters. Auto-wires error/performance capture into the framework hook surface and is a safe no-op until a tracker is configured.",
   "license": "MIT",
   "author": "Mathijs van Melick <mathijsvanmelick3@gmail.com>",
   "repository": {

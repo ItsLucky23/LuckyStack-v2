@@ -16,7 +16,7 @@ Boot order (effective for both entries):
 1. `bootstrapLuckyStack` only: load overlay files (`core` -> `deploy` -> `login` -> `sentry` -> `presence` -> `docs-ui` -> `server`, each folder topologically followed by alphabetical `*.ts`).
 2. If `options.loadGeneratedMaps` was supplied, register the framework-shipped runtime-maps provider before `verifyBootstrap` so the boot check sees it.
 3. `verifyBootstrap` runs (using the per-call `requireDeployConfig` / `requireServicesConfig` / `requireOAuthProviders` flags). Throws a single descriptive `Error` if anything is missing.
-4. Resolve `port` (`options.port` -> argv-parsed -> `options.defaultPort` -> `SERVER_PORT` -> `80`) and `ip` (`options.ip` -> `SERVER_IP` -> `127.0.0.1`); validate the port in `0..65535` and register the intended address. After listen succeeds, register `httpServer.address().port` as the actually-bound address.
+4. Resolve `port` (`options.port` -> argv-registry override -> `options.defaultPort` -> `80`) and `ip` (`options.ip` -> `SERVER_IP` -> `127.0.0.1`); validate the port in `0..65535` and register the intended address plus configured-default metadata. After listen succeeds, register `httpServer.address().port` as the actually-bound address.
 5. In dev mode (`enableDevTools !== false` and `NODE_ENV !== 'production'`): `initConsolelog()` + dynamic-import `@luckystack/devkit` -> `initializeAll()` + `setupWatchers()`. Initialization status is shared with API/sync dispatchers and `/readyz`; a fatal devkit error keeps all three fail-closed with 503. Install `SIGINT` / `SIGTERM` handlers that force-exit.
 6. `writeBootUuid()` writes a fresh boot UUID to Redis so `/_health` becomes truthful and the router can detect rolling restarts.
 7. Construct `http.createServer(handleHttpRequest)` and `loadSocket(httpServer, { maxHttpBufferSize })`.
@@ -38,8 +38,8 @@ export const createLuckyStackServer = async (
 
 | Field | Type | Default | Purpose |
 | --- | --- | --- | --- |
-| `port` | `number \| string` | `getParsedPort()` -> `defaultPort` -> `SERVER_PORT` -> `80` | Explicit HTTP listen port. Numeric strings are accepted; partial/non-integer/out-of-range values fail before `listen`. |
-| `defaultPort` | `number` | `SERVER_PORT` -> `80` | Config-level fallback below explicit `port` + argv; the scaffold passes `config.ports.backend`. |
+| `port` | `number \| string` | `getParsedPort()` -> `defaultPort` -> `80` | Explicit HTTP listen port. Numeric strings are accepted; partial/non-integer/out-of-range values fail before `listen`. |
+| `defaultPort` | `number` | `80` | Config-level fallback below explicit `port` + argv; the scaffold passes `config.ports.backend`. It is also recorded so a programmatic `port` can update a callback that still names this default without overriding an unrelated local router ingress. |
 | `ip` | `string` | `process.env.SERVER_IP ?? '127.0.0.1'` | Bind address. Registered so `checkOrigin` and other framework code see the resolved value. |
 | `serveFile` | `StaticFileHandler` | none | Catch-all GET handler (Vite output, SPA `index.html`). Called for `/assets/*`, known static extensions, and the final SPA fallback. Without it the static fallback returns `404`. |
 | `serveFavicon` | `FaviconHandler` | none | Handler for `/favicon.ico`. Without it the route returns `404`. |
@@ -276,7 +276,7 @@ export type CustomRouteHandler = (
 
 | Source | Key | Effect |
 | --- | --- | --- |
-| env | `SERVER_PORT` | Legacy port fallback below `options.port`, argv, and `options.defaultPort`. |
+| config/argv | `config.ports.ts` backend / positional `[port]` | Static consumer default and per-boot override; no environment port bridge. |
 | env | `SERVER_IP` | IP fallback. |
 | env | `NODE_ENV` | Switches `enableDevTools` default, dynamic-import branch for devkit, and `verifyBootstrap` warn-vs-throw for runtime-maps / localized normalizer. |
 | env | `SECURE` | When `'true'`, session cookies are emitted with the `Secure;` flag (see `request-pipeline.md`). |

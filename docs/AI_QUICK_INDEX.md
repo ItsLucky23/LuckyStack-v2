@@ -12,7 +12,7 @@
 | H2 section | First line |
 | --- | --- |
 | Quick Links | \| Topic \| Framework dev path \| Consumer (post-install) path \| |
-| Project Snapshot | LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.5 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 6, Vite, Redis. The repo publishes as 16 `@luckystack/*` packages (+ `create-luckystack-app`); a 17th package dir, `env-resolver`, is a reserved, not-yet-published placeholder (no `package.json`, excluded from build/publish). See `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map. |
+| Project Snapshot | LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.19 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 6, Vite, Redis. The repo publishes as 16 `@luckystack/*` packages (+ `create-luckystack-app`); a 17th package dir, `env-resolver`, is a reserved, not-yet-published placeholder (no `package.json`, excluded from build/publish). See `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map. |
 | Core Rules (28) | 1. **Plan first for medium/high difficulty work.** Use tables or bullets, not wall-of-text. Skip planning only for trivial single-file changes. |
 | Branch Log Protocol | AI MUST append an entry to `branch-logs/<sanitized-branch>.md` after every prompt that produces **real code or architecture changes**. Skip for lint-only fixes, typo fixes, or translation-string-only edits. **When in doubt, log.** |
 | Decision Memory Protocol | This is **automatic AI behavior — there is no command for the user to run** (just like the branch-log protocol). The AI fills and reads the decision memory itself as a normal part of working in a session. |
@@ -43,10 +43,10 @@
 | ARCHITECTURE_LOGGING.md | Logger DI surface and the redacted-keys registry that keeps sensitive | docs/ARCHITECTURE_LOGGING.md |
 | ARCHITECTURE_MULTI_INSTANCE.md | **Read this before building anything that assumes more than one backend instance.** | docs/ARCHITECTURE_MULTI_INSTANCE.md |
 | ARCHITECTURE_MULTI_TENANCY.md | How to build a multi-tenant product on LuckyStack where **each tenant is a | docs/ARCHITECTURE_MULTI_TENANCY.md |
-| ARCHITECTURE_PACKAGING.md | Single source of truth for LuckyStack package extraction strategy. | docs/ARCHITECTURE_PACKAGING.md |
+| ARCHITECTURE_PACKAGING.md | <!-- @covers packages/server/src, packages/cli/src, packages/create-luckystack-app/src, scripts/generateServerRequests.ts --> | docs/ARCHITECTURE_PACKAGING.md |
 | ARCHITECTURE_ROUTING.md | File-based routing for pages, APIs, and real-time sync events. | docs/ARCHITECTURE_ROUTING.md |
 | ARCHITECTURE_SECRET_MANAGER.md | Replaces the older `ARCHITECTURE_SECRETS.md` design. The client (`@luckystack/secret-manager`) is implemented; the companion server lives in a separate repo (`luckystack-secret-manager`) and only its wire contract is captured here. | docs/ARCHITECTURE_SECRET_MANAGER.md |
-| ARCHITECTURE_SESSION.md | Session management using Redis with OAuth provider support. | docs/ARCHITECTURE_SESSION.md |
+| ARCHITECTURE_SESSION.md | Session management with a Redis default adapter, pluggable storage, and OAuth provider support. | docs/ARCHITECTURE_SESSION.md |
 | ARCHITECTURE_SOCKET.md | Socket.io-based real-time communication layer. | docs/ARCHITECTURE_SOCKET.md |
 | ARCHITECTURE_SYNC.md | <!-- @covers packages/sync/src --> | docs/ARCHITECTURE_SYNC.md |
 | ARCHITECTURE_TESTING.md | Spec for LuckyStack's two test systems: vitest **unit tests** (package internals) and the `@luckystack/test-runner` **integration** layers. Last updated 2026-06-02. | docs/ARCHITECTURE_TESTING.md |
@@ -122,10 +122,11 @@
 | `registerAvatarConfig(config: AvatarConfigInput): void` | Override avatar disk format(s) + Cache-Control header. | -> docs/config-registry.md |
 | `getAvatarConfig(): AvatarConfig` | Read active avatar config. | -> docs/config-registry.md |
 | `DEFAULT_AVATAR_CONFIG: AvatarConfig` | Default formats `[{ extension: 'webp', contentType: 'image/webp' }]` + 24h cache. | -> docs/config-registry.md |
-| `registerBindAddress(address: { ip: string; port: number }): void` | Store the intended pre-listen address; resets the OAuth pre-hop baseline. | -> docs/app-bootstrap.md |
+| `registerPortOverride(port)` / `getPortOverride()` | Browser-safe runtime bridge for a positional server port; consumer config falls back to its own `config.ports.ts` when empty. Exported from `@luckystack/core/config` and the main barrel. | -> docs/app-bootstrap.md |
+| `registerBindAddress(address: { ip: string; port: number; configuredPort?: number }): void` | Store the intended pre-listen address plus optional consumer-default metadata; resets the OAuth pre-hop baseline. | -> docs/app-bootstrap.md |
 | `registerBoundAddress(address: { ip: string; port: number }): void` | Store the address reported by `node:http` after bind while preserving the intended baseline. | -> docs/app-bootstrap.md |
-| `getBindAddress(): { ip: string; port: string }` | Resolve the actually-bound address at call time (registry -> env -> fallback). | -> docs/app-bootstrap.md |
-| `resolveDevCallbackUrl(callbackUrl: string): string` | In non-prod, rewrite a loopback OAuth callback from the intended port to the actually-bound port; preserves explicit local ingress ports. | -> docs/app-bootstrap.md |
+| `getBindAddress(): { ip: string; port: string }` | Resolve the actually-bound address at call time (registry -> `SERVER_IP` + generic port fallback). | -> docs/app-bootstrap.md |
+| `resolveDevCallbackUrl(callbackUrl: string): string` | In non-prod, rewrite a loopback OAuth callback from the intended/configured-default port to the actually-bound port; preserves explicit local ingress ports. | -> docs/app-bootstrap.md |
 | `registerRuntimeMapsProvider(provider: RuntimeMapsProvider): void` | DI slot for generated api/sync maps; called by project `server/prod/runtimeMaps.ts`. | -> docs/app-bootstrap.md |
 | `getRuntimeApiMaps(): Promise<RuntimeApiMapsResult>` | Async accessor for `{ apisObject, functionsObject }`. | -> docs/app-bootstrap.md |
 | `getRuntimeSyncMaps(): Promise<RuntimeSyncMapsResult>` | Async accessor for `{ syncObject, functionsObject }`. | -> docs/app-bootstrap.md |
@@ -281,7 +282,7 @@
 ### `create-luckystack-app`
 | Function / Export | One-liner | Deep doc |
 | --- | --- | --- |
-| `main()` (CLI entrypoint, auto-invoked at bottom of `src/index.ts`) | Orchestrates the full scaffold flow: parse argv -> validate target dir -> optional prompts -> `copyTree` -> framework-docs copy (E.2) -> scaffold-manifest write -> optional `npm install` + `npx prisma generate` -> print next-step block. | -> docs/scaffold-flow.md |
+| `main()` (CLI entrypoint, auto-invoked at bottom of `src/index.ts`) | Orchestrates the full scaffold flow: parse argv -> validate target dir -> optional prompts -> `copyTree` -> framework-docs copy -> scaffold-manifest write -> selected package-manager install + relevant ORM generation -> print next-step block. | -> docs/scaffold-flow.md |
 | `writeScaffoldManifest(targetDir, { luckystackVersion, projectName, choices, isTextFile })` (`src/scaffoldManifest.ts`) | LAST file-producing step of `main()`: writes `.luckystack/scaffold.json` = `{ schemaVersion, luckystackVersion, createdAt, projectName, choices, files: [{ path, sha256 }] }` — the committed baseline that lets a future `luckystack update` re-render the template with the SAME choices and tell pristine files (hash matches → safe overwrite) from user-modified ones (never overwrite). Hashes are CRLF→LF-normalized for text files; `node_modules`/`.git`/`.env`/`.env.local`/`.secret-manager-token`/the manifest itself are excluded. Companion helpers `collectFileHashes` / `hashFileContent` are exported for the update tooling. Rationale: ADR 0021. | (module header) |
 | `parseArgs(argv)` | Strict argv parser. Recognises `--no-install`, `--no-prompt`, the opt-in package flags `--presence` / `--error-tracking` / `--docs-ui` / `--secret-manager` / `--router` / `--cron`, `--db=` / `--auth=` / `--oauth=` / `--email=` / `--monitoring=`, `--ai-docs` / `--no-ai-docs`, `--ai-browser=<all\|agent-browser\|none>`, `--help` / `-h` (the `VALID_FLAGS` list), plus the first non-flag token as the project name. Any other `-`/`--` token (or a bad value) causes `process.exit(2)`. Returns `CliArgs`. | -> docs/cli-flags.md |
 | `printHelp()` | Prints the human-readable usage banner. Triggered by `--help` / `-h` and on missing project name. | -> docs/cli-flags.md |
@@ -641,10 +642,10 @@
 | `registerOverlayLoader(loader)` | Production-bundle seam: the server bundler (`scripts/bundleServer.mjs`) generates an entry that statically imports the overlay files and registers this loader; `bootstrapLuckyStack` then runs it INSTEAD of the runtime `.ts` folder walk (plain `node` cannot import `.ts` — ERR_UNKNOWN_FILE_EXTENSION). | -> docs/create-server.md |
 | `verifyBootstrap(requirements?)` | Pre-flight check for ProjectConfig / DeployConfig / ServicesConfig / OAuth / RuntimeMapsProvider / LocalizedNormalizer. Throws one descriptive `Error`. | -> docs/create-server.md |
 | `parseServerArgv(argv)` | Pure parser: validates positional `<bundles> [port]` and returns `{ bundles, port }`. Throws on malformed input. | -> docs/argv-parsing.md |
-| `applyServerArgv()` | Side-effect runner: parses `process.argv.slice(2)`, stores bundles + port, writes `process.env.SERVER_PORT` for downstream env readers. Idempotent. | -> docs/argv-parsing.md |
+| `applyServerArgv()` | Side-effect runner: parses `process.argv.slice(2)`, stores bundles, and registers the port through browser-safe `@luckystack/core/config`. Idempotent. | -> docs/argv-parsing.md |
 | `getParsedBundles()` | Returns the preset list parsed by `applyServerArgv()` (empty array before first call). | -> docs/argv-parsing.md |
 | `getParsedPort()` | Returns the port parsed by `applyServerArgv()` (`null` if argv omitted it). | -> docs/argv-parsing.md |
-| `@luckystack/server/parseArgv` (side-effect import) | First-line import that runs `applyServerArgv()` before any module reads `process.env.SERVER_PORT` (notably `config.ts`). | -> docs/argv-parsing.md |
+| `@luckystack/server/parseArgv` (side-effect import) | First-line import that runs `applyServerArgv()` before consumer `config.ts` reads the typed override registry. | -> docs/argv-parsing.md |
 | `createProdRuntimeMapsProvider(options)` | Build a `RuntimeMapsProvider` that loads generated maps in prod and delegates to devkit discovery in dev. Returns the provider without registering. | -> docs/runtime-maps.md |
 | `registerProdRuntimeMapsProvider(options)` | Convenience wrapper: builds the provider AND calls `registerRuntimeMapsProvider`. Most consumers want this. | -> docs/runtime-maps.md |
 | `registerCustomRoute(handler, options?)` | Append a custom HTTP route handler. `options.phase`: `'post-params'` (default, runs after body parse) or `'pre-params'` (runs before `getParams`, raw `req` stream intact — webhooks + streaming uploads). | -> /docs/ARCHITECTURE_HTTP.md |
@@ -796,7 +797,7 @@
 | /load_handoff | Load a handoff file and emit a short TL;DR (Done / Open / Next Steps) so the agent can resume work with full context. |
 | /log_progress | Manually append a branch-log entry for the current branch summarizing the most recent prompt's work. |
 | /parallel_review | Spawn four parallel sub-agent reviewers (security, performance, conventions, type-safety) over the current branch diff and consolidate their findings. |
-| /review_branch | Full audit of the current branch — compares git history against branch-log and SESSION_STATE, flags discrepancies, suggests a commit message and review focus areas. |
+| /review_branch | Full audit of the current branch — compares git history against branch-log and handoff files, flags discrepancies, suggests a commit message and review focus areas. |
 | /review_memory | Audit the session's persistent memory store — list every memory by type with mtime, accept user flags for keep/update/delete, apply edits. |
 | /save_handoff | Write a session handoff file (solo or parallel-agent mode) capturing done/in-progress/blockers/next-steps/open-questions/files-touched. |
 

@@ -1,3 +1,4 @@
+//? @adr 0039
 import { LANGUAGE, THEME, User } from "@prisma/client";
 import type { BaseSessionLayout, Jsonify } from '@luckystack/core';
 //? `@luckystack/core/config`, NOT the main barrel: this file is imported by both
@@ -7,7 +8,7 @@ import type { BaseSessionLayout, Jsonify } from '@luckystack/core';
 //? to a SEPARATE module instance under Bun, so the config registered into a
 //? registry `@luckystack/server` never read and the boot died. The subpath solves
 //? both: it is client-safe AND it shares one registry with the barrel.
-import { registerProjectConfig, registerSecretsResolvedListener } from '@luckystack/core/config';
+import { getPortOverride, registerProjectConfig, registerSecretsResolvedListener } from '@luckystack/core/config';
 //? Single source of truth for frontend + backend ports (pure data; see
 //? config.ports.ts). Re-exported below so vite/app code + server share one source.
 import { ports } from './config.ports';
@@ -443,14 +444,13 @@ const createProjectConfigRegistration = () => {
     //? Backend origin for OAuth callback redirect URIs, read by
     //? @luckystack/login/register's env-driven provider scan.
     //?
-    //? In dev: derive from the actual SERVER_PORT env var so that starting the
-    //? server on a non-standard port (e.g. SERVER_PORT=8080 for parallel instances)
-    //? produces the correct redirect_uri automatically. `currentEnvironment.backendUrl`
-    //? is a static DNS-map value (always :80) and is NOT overridden by ?backend=,
-    //? so it cannot be used here for multi-port dev setups.
-    //? In prod: use the static backendUrl from the DNS map (the public domain).
+    //? In dev: use the positional CLI override registered by parseArgv,
+    //? otherwise the consumer-owned config.ports.ts backend default. The
+    //? registry lives in the browser-safe core/config entry, so this dual-bundle
+    //? module never imports server-only argv code. In production the configured
+    //? public/backend origin remains authoritative.
     oauthCallbackBase: currentEnvironment.dev
-      ? `http://localhost:${env('SERVER_PORT') ?? ports.backend}`
+      ? `http://localhost:${String(getPortOverride() ?? ports.backend)}`
       : currentEnvironment.backendUrl,
     socketActivityBroadcaster: currentConfig.socketActivityBroadcaster,
     socketStatusIndicator: currentConfig.socketStatusIndicator,

@@ -43,7 +43,6 @@ Not blockers, but worth verifying before relying on them.
 
 ### Documentation
 
-- **Split `docs/ARCHITECTURE_PACKAGING.md`** — currently the largest doc in the repo. Hard to scan and creates merge-conflict hotspots.
 - **`packages/server/docs/security-defaults.md` + `http-routes.md`** still mention hardcoded `'x-csrf-token'` — should reference `registerCsrfConfig()` now.
 
 ### Tooling
@@ -62,5 +61,5 @@ Not blockers, but worth verifying before relying on them.
 1. **Read the relevant section above** plus any linked memory or doc.
 2. **Search `branch-logs/<branch>.md`** in the archive directory for prior context.
 3. **Check `docs/AGENT_TEAM_PLAYBOOK.md`** — captures the rationale for why some patterns were intentionally left as-is.
-4. **Start a new branch** named for the work (`feat/jwt-session-adapter`, `feat/sync-docs-cli`, etc.).
+4. **Start a new branch** named for the work (for example `feat/jwt-session-adapter`).
 5. **Remove the item from this `docs/ROADMAP.md`** when it lands. Treat it as a living document, not historical record.

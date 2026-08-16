@@ -1,6 +1,6 @@
 # error-states
 
-> Authoritative catalog of error codes emitted by `syncRequest` (client) and `handleSyncRequest` / `handleHttpSyncRequest` (server). Documents HTTP-status mapping, locale-aware message normalization, `errorParams` interpolation slots, the `rateLimitExceeded` hook payload, and Sentry capture behavior.
+> Authoritative catalog of error codes emitted by `syncRequest` (client) and `handleSyncRequest` / `handleHttpSyncRequest` (server). Documents HTTP-status mapping, locale-aware message normalization, `errorParams` interpolation slots, the `rateLimitExceeded` hook payload, and registered error-tracker capture behavior.
 
 For the originator response envelope shape see [`./sync-request.md`](./sync-request.md). For the full lifecycle these errors slot into see [`./server-vs-client-handlers.md`](./server-vs-client-handlers.md).
 
@@ -167,14 +167,14 @@ Recipients (per-recipient errors during fanout) use **their own** headers, not t
 
 ---
 
-## 9. Sentry capture via `tryCatch`
+## 9. Error-tracker capture via `tryCatch`
 
 Every `_server` and `_client` execution is wrapped in `tryCatch(..., undefined, { handler, sync, stage, userId, ... })`. The fourth argument is the breadcrumb context that gets attached when `tryCatch` captures an exception.
 
 Captured automatically:
 
-- `_server` thrown errors -> Sentry breadcrumb: `{ handler: 'handleSyncRequest', sync: <route>, stage: 'server', userId, receiver, transport: 'socket' | 'http' }`.
-- `_client` thrown errors -> Sentry breadcrumb: `{ handler: 'handleSyncRequest', sync: <route>, stage: 'client', sourceUserId, targetToken, receiver, transport }`.
+- `_server` thrown errors -> a breadcrumb/event for the registered tracker(s): `{ handler: 'handleSyncRequest', sync: <route>, stage: 'server', userId, receiver, transport: 'socket' | 'http' }`.
+- `_client` thrown errors -> a breadcrumb/event for the registered tracker(s): `{ handler: 'handleSyncRequest', sync: <route>, stage: 'client', sourceUserId, targetToken, receiver, transport }`.
 
 NOT captured (returned as `status: 'error'` envelopes only):
 
@@ -183,7 +183,7 @@ NOT captured (returned as `status: 'error'` envelopes only):
 - Rate-limit rejects — these are noise.
 - `_server` / `_client` returning `{ status: 'error' }` voluntarily — the handler made a domain decision; nothing threw.
 
-If you need to also Sentry-capture a voluntary error (e.g. "this code path should never trigger in production"), do it explicitly inside the handler via `@luckystack/error-tracking`'s `captureException`.
+If you need to capture a voluntary error (e.g. "this code path should never trigger in production"), do it explicitly inside the handler via `@luckystack/error-tracking`'s `captureException`; it fans out to the registered tracker(s).
 
 ---
 

@@ -1,6 +1,6 @@
 # @luckystack/cli
 
-> AI summary + function INDEX. For deep specs see the repo `docs/` + `SESSION_STATE.md`.
+> AI summary + function INDEX. For deep specs see the repo `docs/` and the current branch log.
 
 ## What this package does
 

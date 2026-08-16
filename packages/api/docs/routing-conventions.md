@@ -67,7 +67,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
 | Export | Type | Default | Effect |
 | --- | --- | --- | --- |
-| `main` | `(params) => Promise<ApiResponse>` | required | Handler invoked by `executeApiHandler` inside the `tryCatch` + Sentry span. |
+| `main` | `(params) => Promise<ApiResponse>` | required | Handler invoked by `executeApiHandler` inside the `tryCatch` + registered error-tracker span. |
 | `auth` | `AuthProps` | required | Auth gate (see [`./auth-flow.md`](./auth-flow.md)). |
 | `rateLimit` | `number \| false` | `rateLimiting.defaultApiLimit` from config | Per-route requests-per-window cap. `false` disables the per-route bucket; the global IP bucket still applies. See [`./rate-limiting.md`](./rate-limiting.md). |
 | `httpMethod` | `'GET' \| 'POST' \| 'PUT' \| 'DELETE'` | inferred from name | Overrides `inferHttpMethod` for the HTTP transport. Socket transport ignores this field. |

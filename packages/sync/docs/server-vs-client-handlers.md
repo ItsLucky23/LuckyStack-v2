@@ -146,7 +146,7 @@ incoming msg (Socket.io 'sync' event)
  2. parseTransportRouteName(name)  -> routing.invalidServiceRouteName
  3. validate cb         -> sync.invalidCallback
  4. validate receiver   -> sync.missingReceiver
- 5. getSession(token)   -> setSentryUser(...)
+ 5. getSession(token)   -> propagate identity to registered error trackers
  6. getRuntimeSyncMaps()
     no _server AND no _client  -> sync.notFound
         |

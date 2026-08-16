@@ -4,11 +4,11 @@
 
 ## What this package does
 
-Leader-elected, Redis-backed cron scheduler for LuckyStack. Declarative recurring jobs (`registerCronJob`) driven by cron expressions (croner — DST/timezone-correct) or plain intervals, guaranteed to fire on **exactly one instance** in a multi-instance deployment via core's Redis lease primitive (`acquireLease`/`renewLease` — no second election mechanism). Ships overlap guards, per-run dedup leases, optional jitter, per-tenant fan-out, run stats in Redis, and `preCronRun`/`postCronRun` hooks. The scheduler starts lazily on the first job registration and tears down via the core `preServerStop` hook. Every intentional background promise has a terminal observer; unexpected injected infrastructure rejections are logged and cannot leave the leadership/running latches wedged.
+Leader-elected, Redis-backed cron scheduler for LuckyStack. Declarative recurring jobs (`registerCronJob`) driven by cron expressions (croner — DST/timezone-correct) or plain intervals, with one active leader under a healthy Redis lease in a multi-instance deployment. The lease is best-effort: a stalled leader can hand over mid-run, so handlers must be idempotent. Ships overlap guards, per-run dedup leases, optional jitter, per-tenant fan-out, run stats in Redis, and `preCronRun`/`postCronRun` hooks. The scheduler starts lazily on the first job registration and tears down via the core `preServerStop` hook. Every intentional background promise has a terminal observer; unexpected injected infrastructure rejections are logged and cannot leave the leadership/running latches wedged.
 
 ## When to USE this package
 
-- Recurring background work that must run once per cluster, not once per instance: cleanup sweeps, scheduled publishing, periodic ingest, reaper jobs, housekeeping.
+- Recurring background work that should have one active cluster leader rather than one scheduler per instance: cleanup sweeps, scheduled publishing, periodic ingest, reaper jobs, housekeeping.
 - Replacing ad-hoc `setInterval` loops that double-fire when a second instance starts.
 - Multi-tenant apps where a job must iterate every tenant (`perTenant` fan-out; wrap your own `runInTenant` inside the handler).
 - You want job observability (`getCronJobStats`) without wiring a queue system.

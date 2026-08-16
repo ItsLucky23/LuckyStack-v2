@@ -184,8 +184,8 @@ export const listenLuckyStackServer = (
         //? the real problem and the two ways out instead.
         getLogger().error(
           `Port ${String(attemptPort)} is already in use — the server did NOT start. ` +
-            `Another \`npm run server\` is probably still running (stop it), or set ` +
-            `SERVER_PORT to a free port, or set SERVER_PORT_AUTO_INCREMENT=1 to auto-pick the next free port.`,
+            `Another \`npm run server\` is probably still running (stop it), or choose a free port ` +
+            `in config.ports.ts / positional argv, or set SERVER_PORT_AUTO_INCREMENT=1 to auto-pick the next free port.`,
         );
         reject(err);
       };
@@ -275,16 +275,16 @@ export const createLuckyStackServer = async (
     optionsPort: options.port,
     parsedPort: getParsedPort(),
     defaultPort: options.defaultPort,
-    envPort: process.env.SERVER_PORT,
   });
   const ip = options.ip ?? process.env.SERVER_IP ?? '127.0.0.1';
   const enableDevTools = options.enableDevTools ?? resolveEnvKey() !== 'production';
 
   //? Register the resolved bind address so framework code that needs it
-  //? (e.g. `checkOrigin` building the same-origin entry) doesn't drift when
-  //? the consumer passed `options.ip`/`options.port` without also setting
-  //? the legacy `SERVER_IP`/`SERVER_PORT` env vars.
-  registerBindAddress({ ip, port });
+  //? (e.g. `checkOrigin` and OAuth callback resolution) doesn't drift when the
+  //? consumer passed `options.ip`/`options.port`. `configuredPort` distinguishes
+  //? the consumer default from an explicit local router/reverse-proxy callback:
+  //? a programmatic options.port may replace the former, never the latter.
+  registerBindAddress({ ip, port, configuredPort: options.defaultPort });
 
   if (enableDevTools) {
     await initDevTools();

@@ -10,11 +10,13 @@ Every other `@luckystack/*` package depends on this one.
 npm install @luckystack/core
 ```
 
-Peer dependencies you must install separately:
+Required peer dependencies you must install separately:
 
 ```bash
-npm install @prisma/client ioredis socket.io socket.io-client zod
+npm install ioredis socket.io socket.io-client zod
 ```
+
+`@prisma/client` is an optional peer. Install it only when the project uses the default Prisma client; a registered custom database client or a DB-less project does not need it.
 
 ## Quickstart
 
@@ -81,12 +83,8 @@ import { socket, isOnline, enqueueApiRequest } from '@luckystack/core/client';
 ## Dependencies
 
 - Runtime: `@socket.io/redis-adapter`, `dotenv`
-- Peer (canonical ranges, standardized 2026-05-07):
-  - `@prisma/client@^6.19.0`
-  - `ioredis@^5.10.0`
-  - `socket.io@^4.8.0`
-  - `socket.io-client@^4.8.0`
-  - `zod@^3.25.0`
+- Required peers: `ioredis@^5.10.0`, `socket.io@^4.8.0`, `socket.io-client@^4.8.0`, `zod@^4.0.0`
+- Optional peer: `@prisma/client@^6.19.0` — only needed when the default Prisma client is used.
 
 ## License
 

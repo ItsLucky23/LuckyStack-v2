@@ -41,7 +41,7 @@ export default defineConfig(({ mode }) => {
   //?   2. ROUTER_PORT (env) — cluster-dev: proxy the @luckystack/router, which fans
   //?      out per service-key (deploy.config.ts bindings).
   //?   3. the local backend on ports.backend (following an auto-incremented port via
-  //?      node_modules/.luckystack/dev-server.json). SERVER_PORT is no longer read.
+  //?      node_modules/.luckystack/dev-server.json). No listen-port env is read.
   const remoteBackend = ports.devBackendUrl?.trim() || undefined;
   const routerPort = env.ROUTER_PORT && /^\d+$/.test(env.ROUTER_PORT) ? env.ROUTER_PORT : undefined;
   const backendTarget = (): string =>

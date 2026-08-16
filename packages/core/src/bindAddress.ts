@@ -2,8 +2,8 @@
 //? Server bind-address registry. The `createLuckyStackServer` bootstrap
 //? populates this with the actual listen `ip`/`port` so framework code that
 //? needs the bind address (e.g. `checkOrigin` building the same-origin
-//? entry) doesn't drift from `SERVER_IP`/`SERVER_PORT` env vars when the
-//? consumer used the `options.ip`/`options.port` arguments instead.
+//? entry) doesn't drift when the consumer used the `options.ip`/`options.port`
+//? arguments instead.
 //?
 //? `registerBindAddress` stores the intended address before `listen`;
 //? `registerBoundAddress` then records the address reported by node:http. Keeping
@@ -13,8 +13,8 @@
 //?
 //? Resolution at call time:
 //?   1. registered current value (intended before listen, bound after success)
-//?   2. `process.env.SERVER_IP` / `process.env.SERVER_PORT` (legacy)
-//?   3. `'127.0.0.1'` / `''` as the absolute fallback
+//?   2. `process.env.SERVER_IP` for the bind address
+//?   3. `'127.0.0.1'` / port `'80'` as the generic pre-bootstrap fallback
 
 import { resolveEnvKey } from './bootUuid';
 
@@ -23,12 +23,20 @@ interface BindAddress {
   port: number;
 }
 
+interface IntendedBindAddress extends BindAddress {
+  configuredPort?: number;
+}
+
+const DEFAULT_SERVER_PORT = '80';
+
 let intended: BindAddress | null = null;
+let configuredPort: number | null = null;
 let registered: BindAddress | null = null;
 
-export const registerBindAddress = (address: BindAddress): void => {
-  intended = address;
-  registered = address;
+export const registerBindAddress = (address: IntendedBindAddress): void => {
+  intended = { ip: address.ip, port: address.port };
+  configuredPort = address.configuredPort ?? null;
+  registered = intended;
 };
 
 export const registerBoundAddress = (address: BindAddress): void => {
@@ -42,7 +50,9 @@ export const getBindAddress = (): { ip: string; port: string } => {
   }
   return {
     ip: process.env.SERVER_IP ?? '127.0.0.1',
-    port: process.env.SERVER_PORT ?? '',
+    //? A real server registers its intended/defaultPort before OAuth or CORS
+    //? reads this value. Port 80 only remains the generic pre-bootstrap fallback.
+    port: DEFAULT_SERVER_PORT,
   };
 };
 
@@ -85,7 +95,9 @@ export const resolveDevCallbackUrl = (callbackUrl: string): string => {
   if (!boundPort || !intendedPort) return callbackUrl;
 
   const currentPort = url.port || defaultPortForProtocol(url.protocol);
-  if (currentPort === boundPort || currentPort !== intendedPort) return callbackUrl;
+  const matchesIntendedPort = currentPort === intendedPort;
+  const matchesConfiguredPort = configuredPort !== null && currentPort === String(configuredPort);
+  if (currentPort === boundPort || (!matchesIntendedPort && !matchesConfiguredPort)) return callbackUrl;
 
   url.port = boundPort === defaultPortForProtocol(url.protocol) ? '' : boundPort;
   return url.toString();

@@ -1,3 +1,4 @@
+//? @adr 0039
 //? Project-level config. Registered into `@luckystack/core` at module load
 //? (side-effect import) so framework packages read your overrides via
 //? `getProjectConfig()`. Edit values here to tune the framework's behavior.
@@ -6,7 +7,7 @@
 //? barrel drags the whole server surface — ioredis included — into the browser.
 //? The subpath exposes only the config registry (both share one registry, so
 //? `getProjectConfig()` from the barrel still sees what is registered here).
-import { registerProjectConfig, registerSecretsResolvedListener } from '@luckystack/core/config';
+import { getPortOverride, registerProjectConfig, registerSecretsResolvedListener } from '@luckystack/core/config';
 //? Frontend + backend ports live in ONE pure-data file (no side-effects) so
 //? `vite.config.ts` can read them without importing this config. Re-exported so
 //? app code + `server.ts` share the same single source of truth.
@@ -31,11 +32,12 @@ export const dev = resolveDev();
 //? `localhost` for the host (NOT SERVER_IP, which is just the bind address) so it
 //? shares a host with the frontend on localhost — the session cookie set during
 //? the OAuth callback is then visible to the app. The port defaults to
-//? `config.ports.ts` (`backend`) — so in dev this is http://localhost:80 — but a
-//? positional argv port (`npm run server -- <preset> <port>`, which parseArgv
-//? writes to process.env.SERVER_PORT) overrides it, mirroring createServer.
+//? `config.ports.ts` (`backend`) — so in dev this is
+//? `http://localhost:${ports.backend}` — but a positional argv port
+//? (`npm run server -- <preset> <port>`) overrides it through the browser-safe
+//? core/config registry, mirroring createServer without an environment bridge.
 const resolveBackendOrigin = (): string =>
-  `http://localhost:${env('SERVER_PORT') ?? ports.backend}`;
+  `http://localhost:${String(getPortOverride() ?? ports.backend)}`;
 const backendOrigin = resolveBackendOrigin();
 
 //? Public origin — where users actually browse the app. Drives post-login
@@ -56,8 +58,8 @@ export const backendUrl = browserOrigin ?? publicUrl;
 
 //? OAuth callback base = the redirect_uri host you register with each provider.
 //? `/auth/callback/<provider>` is a BACKEND route, so in dev this is the backend
-//? origin — register e.g. http://localhost:80/auth/callback/google with Google.
-//? In prod it's the public domain (same origin as the backend).
+//? origin from config.ports.ts (or the explicit CLI port). In prod it is PUBLIC_URL
+//? (same origin as the backend in the standard single-origin deployment).
 export const oauthCallbackBase = dev ? backendOrigin : publicUrl;
 
 const createConfig = (isDev: boolean) => ({

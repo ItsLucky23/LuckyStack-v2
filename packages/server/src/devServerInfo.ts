@@ -3,16 +3,16 @@ import path from 'node:path';
 import { getLogger } from '@luckystack/core';
 
 //? Dev-only handshake between the two local processes (`npm run server` and
-//? `npm run client`). When the backend auto-increments off a busy `SERVER_PORT`
-//? (see `listenLuckyStackServer`), the Vite proxy — which only knows the `.env`
-//? `SERVER_PORT` — would keep targeting the OLD port and every proxied request
+//? `npm run client`). When the backend auto-increments off a busy configured
+//? port (see `listenLuckyStackServer`), the Vite proxy would otherwise keep
+//? targeting the OLD port and every proxied request
 //? (api / sync / the socket.io websocket) would miss. So the backend advertises
 //? its ACTUAL bound port here and the template `vite.config.ts` reads it.
 //?
 //? Location: `node_modules/.luckystack/` — always gitignored (no `.gitignore`
 //? edit, no repo clutter) and present at the shared project cwd for both
 //? processes. Purely ephemeral: rewritten on every dev boot, removed on exit;
-//? a stale file is harmless (the proxy falls back to `SERVER_PORT`).
+//? a stale file is harmless (the proxy falls back to config.ports.ts).
 const DEV_SERVER_FILE = ['node_modules', '.luckystack', 'dev-server.json'] as const;
 
 const devServerInfoPath = (): string => path.join(process.cwd(), ...DEV_SERVER_FILE);
@@ -24,7 +24,7 @@ export interface DevServerInfo {
 }
 
 //? Best-effort: a failed write must NEVER take the server down. Worst case the
-//? proxy falls back to `.env` `SERVER_PORT` (the pre-existing behaviour).
+//? proxy falls back to the backend value in config.ports.ts.
 export const writeDevServerInfo = (ip: string, port: number): void => {
   try {
     const file = devServerInfoPath();
@@ -33,7 +33,7 @@ export const writeDevServerInfo = (ip: string, port: number): void => {
     fs.writeFileSync(file, `${JSON.stringify(info, null, 2)}\n`);
   } catch (error) {
     getLogger().debug(
-      `[dev-server-info] could not write port file (proxy will fall back to SERVER_PORT): ${
+      `[dev-server-info] could not write port file (proxy will fall back to config.ports.ts): ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
