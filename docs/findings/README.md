@@ -9,8 +9,9 @@ Last updated: 2026-08-16
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
+| 2026-08-16 | [2026-08-16-documentation-work-verification/](./2026-08-16-documentation-work-verification/) | Independent verification of documentation/runtime/consumer work | 8 | 7 open · 1 wontfix |
 | 2026-08-16 | [2026-08-16-full-docs-disagreement-audit/](./2026-08-16-full-docs-disagreement-audit/) | Full active-documentation disagreement audit | 9 | 9 open |
-| 2026-08-16 | [2026-08-16-package-contract-audit/](./2026-08-16-package-contract-audit/) | Package manifests versus package docs and session architecture | 4 | 1 open · 3 fixed |
+| 2026-08-16 | [2026-08-16-package-contract-audit/](./2026-08-16-package-contract-audit/) | Package manifests versus package docs and session architecture | 4 | 1 duplicate · 3 fixed |
 | 2026-08-16 | [2026-08-16-server-port-env-removal/](./2026-08-16-server-port-env-removal/) | Removal of the legacy backend-port env bridge | 4 | 0 open · 4 fixed |
 | 2026-08-16 | [2026-08-16-oauth-scaffold-port-contract/](./2026-08-16-oauth-scaffold-port-contract/) | OAuth callback port versus consumer scaffold `config.ports.ts` contract | 4 | 0 open · 4 fixed |
 | 2026-08-15 | [2026-08-15-ai-docs-audit/](./2026-08-15-ai-docs-audit/) | AI-context and documentation source-of-truth audit | 12 | 0 open · 12 fixed |

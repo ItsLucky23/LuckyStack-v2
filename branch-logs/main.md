@@ -1061,3 +1061,15 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Belangrijkste open punten:** verkeerde CSRF-route (`/csrf-token` versus `/auth/csrf`), oude `sessionBasedToken`-naam in actieve docs, onvolledige CSRF-beschrijving voor login-loze/custom routes, raw-token password-reset-documentatie, resterende Sentry-only formuleringen, dode `.claude/CLAUDE.md`-links, stale roadmap-item, misleidende handmatige datums en Redis-only caveats bij custom session adapters.
 
 **Files touched:** `docs/findings/2026-08-16-full-docs-disagreement-audit/README.md`, `docs/findings/README.md` en deze branch-log.
+
+## 2026-08-16 18:05 — Onafhankelijke verificatie eerdere documentatie-audit
+
+**User prompt (summary):** verifieer het werk en de conclusies van de andere AI, geef aan waarmee ik het eens ben en wat nog moet gebeuren.
+
+**Wat ik deed:** commits `f830e0f`, `680b439`, `30bb2a3` en consumercommit `a06b00d` tegen actuele broncode, manifests, lockfile, generated output en `../Workspace` gecontroleerd. De negen bestaande findings opnieuw gekalibreerd: zeven bevestigd, twee slechts gedeeltelijk (`DOC-14`, `DOC-21`), en `PKG-04` als duplicaat van `DOC-17` gemarkeerd. Een afzonderlijke verificatieledger toegevoegd met zeven gemiste open punten: root README, resterende package-contractdrift, server/cron-lockfile, stale scaffold-deep-docs, Prisma-only hostingintro, consumer/versiondrift en zeven ontbrekende changelogupdates.
+
+**Verificatie:** root `lint`, `lint:packages`, `ai:lint`, 183 testfiles/1945 tests en volledige build (17/17 packages + artifacts + tsc + Vite + serverbundle) groen; doc-staleness 8/8. Scaffold-docbundle 5/5. Workspace `ai:lint`, doc-staleness 12/12 en diff-check groen. `ai:changelog-check` meldt terecht zeven report-only gaten. Beide worktrees waren vóór de findings-update schoon.
+
+**Belangrijk oordeel:** de grote architectuurcorrecties zijn inhoudelijk grotendeels goed, maar “volledige documentatielaag” was een te sterke claim. `f830e0f` is bovendien geen zuivere docscommit: hij bevat runtime/config/tests; de huidige gecombineerde staat is wel mechanisch groen.
+
+**Files touched:** `docs/findings/2026-08-16-documentation-work-verification/README.md`, de twee eerdere auditledgers, `docs/findings/README.md` en branch-log/index.
