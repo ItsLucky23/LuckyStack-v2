@@ -19,6 +19,7 @@ import { type AddOptions } from './commands/addPresence';
 import { runAddByKind } from './commands/addDispatch';
 import { checkEnv } from './commands/checkEnv';
 import { checkI18n } from './commands/checkI18n';
+import { addDocker, checkDocker } from './commands/addDocker';
 import { listFeatures } from './commands/list';
 import { applyManagePlan } from './commands/manage';
 import { runReconfigureWizard } from './commands/reconfigure';
@@ -38,6 +39,7 @@ Usage:
   npx luckystack upgrade [<target-version>]
   npx luckystack check-env
   npx luckystack check-i18n
+  npx luckystack docker check
 
 Optional packages (add/remove/manage):
 ${REGISTRY.map((entry) => `  ${entry.id.padEnd(16)}${entry.description}`).join('\n')}
@@ -48,7 +50,9 @@ manage            Step-based reconfiguration wizard: pick a setting (auth + OAut
                   consequence preview, confirm, then apply. Bare \`add\` / \`remove\`
                   (no feature) opens the same wizard.
 add <feature>     Install one optional package + inject its consumer-src assets.
+add docker        Add the production-like Docker/Compose baseline (no package install).
 remove <feature>  Drop one optional package (reverses add; login removal is guarded).
+docker check      Validate Docker assets, selected preset summary, and transport wiring.
 
 update            Refresh the framework-owned files the scaffold copied into this
                   project (docs/luckystack, CLAUDE.md, skills, .claude/commands,
@@ -140,6 +144,19 @@ const main = async (): Promise<void> => {
     return;
   }
 
+  //? Docker assets are a project surface, not an optional npm package, so they
+  //? intentionally stay outside the feature registry/manage wizard.
+  if (command === 'docker') {
+    const project = validateProject(process.cwd(), 'Run this inside your project directory.');
+    if (!project) process.exit(1);
+    if (feature !== 'check') {
+      console.error('Unknown docker command. Use `luckystack docker check`.');
+      process.exit(2);
+    }
+    finish(checkDocker(project));
+    return;
+  }
+
   //? Read-only inventory.
   if (command === 'list') {
     const project = validateProject(process.cwd(), 'Run this inside your project directory.');
@@ -187,6 +204,11 @@ const main = async (): Promise<void> => {
     process.exit(1);
   }
   const options: AddOptions = { install, cliVersion };
+
+  if (command === 'add' && feature === 'docker') {
+    finish(addDocker(project));
+    return;
+  }
 
   //? `manage`, or bare `add` / `remove` with no feature arg, opens the wizard.
   const featureGiven = feature !== undefined && feature.length > 0 && !feature.startsWith('-');

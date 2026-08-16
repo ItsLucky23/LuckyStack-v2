@@ -31,7 +31,7 @@ const readBackendPort = (fallback: string): string => {
   }
 };
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const ip = env.SERVER_IP || '127.0.0.1';
   //? Proxy target resolution (config-driven, single source = config.ports.ts):
@@ -70,6 +70,14 @@ export default defineConfig(({ mode }) => {
       react(),
       tsconfigPaths({ projects: ['tsconfig.json'] }),
     ],
+    define: {
+      //? Vite `mode` may be a deployment profile such as `staging`; it is not
+      //? the dev/prod runtime axis. Build/serve mirrors Vite's actual behavior
+      //? unless NODE_ENV was explicitly supplied by the invoking shell.
+      __LUCKYSTACK_VITE_RUNTIME_MODE__: JSON.stringify(
+        process.env.NODE_ENV ?? (command === 'build' ? 'production' : 'development'),
+      ),
+    },
     server: {
       port: ports.frontend,
       host: true,

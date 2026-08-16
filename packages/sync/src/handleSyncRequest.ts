@@ -35,7 +35,7 @@ import {
   setCurrentErrorTrackerIdentity,
   registerSyncAbortController,
   unregisterSyncAbortController,
-  resolveEnvKey,
+  isProductionRuntime,
 } from "@luckystack/core";
 import { buildSyncStreamEmitters } from './_shared/streamEmitters';
 
@@ -147,7 +147,7 @@ const applySyncRateLimits = async ({
   //? IP bucket is skipped; per-route limits above still apply. Pass the raw
   //? `resolvedIp` (not UNKNOWN_CLIENT_IP) so only real loopback addresses qualify.
   const requesterIsLoopback = config.rateLimiting.skipLoopbackInDev
-    && resolveEnvKey() !== 'production'
+    && !isProductionRuntime()
     && isLoopbackIp(resolvedIp);
   if (!requesterIsLoopback && defaultIpLimit !== false && defaultIpLimit > 0) {
     const requesterIp = resolvedIp;

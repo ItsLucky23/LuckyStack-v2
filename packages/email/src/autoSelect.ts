@@ -1,4 +1,4 @@
-import { type EmailSender, getLogger, resolveEnvKey } from '@luckystack/core';
+import { type EmailSender, getLogger, isProductionRuntime } from '@luckystack/core';
 
 import { ConsoleSender } from './adapters/console';
 import { ResendSender } from './adapters/resend';
@@ -92,7 +92,7 @@ export const autoSelectEmailSender = (options: AutoSelectEmailSenderOptions = {}
   //? carries a live reset token) lands in the log sink until TTL expiry. Warn
   //? loudly so this common prod-misconfig (no RESEND_API_KEY / SMTP_HOST) is
   //? visible; a real prod deploy MUST configure a real adapter.
-  if (resolveEnvKey() === 'production') {
+  if (isProductionRuntime()) {
     getLogger().warn(
       '[LuckyStack] EMAIL: no email adapter configured (neither RESEND_API_KEY nor SMTP_HOST set) — '
       + 'falling back to ConsoleSender in PRODUCTION. Outbound mail is NOT sent, and any email body '

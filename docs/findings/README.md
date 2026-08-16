@@ -16,6 +16,9 @@ Last updated: 2026-08-16
 | 2026-08-16 | [2026-08-16-oauth-scaffold-port-contract/](./2026-08-16-oauth-scaffold-port-contract/) | OAuth callback port versus consumer scaffold `config.ports.ts` contract | 4 | 0 open · 4 fixed |
 | 2026-08-15 | [2026-08-15-ai-docs-audit/](./2026-08-15-ai-docs-audit/) | AI-context and documentation source-of-truth audit | 12 | 0 open · 12 fixed |
 | 2026-08-04 | [2026-08-04-keyv-cacheable-supply-chain/](./2026-08-04-keyv-cacheable-supply-chain/) | Exposure check for the active keyv/cacheable npm compromise — not exposed | 5 | 0 open · 5 false-positive |
+| 2026-07-27 | [2026-07-27-composed-preset-function-collision/](./2026-07-27-composed-preset-function-collision/) | Browser acceptance: composed atomic presets rejected their shared function registry | 2 | 1 open · 1 fixed |
+| 2026-07-27 | [2026-07-27-v080-dependency-audit/](./2026-07-27-v080-dependency-audit/) | v0.8.0 dependency audit: clean-scaffold and framework advisory assessment | 4 | 0 open · 1 fixed · 3 wontfix |
+| 2026-07-27 | [2026-07-27-distributed-docker-framework-plan/](./2026-07-27-distributed-docker-framework-plan/) | Distributed Docker, shared infrastructure, local-preset fallback and horizontal-scaling framework plan | 11 | 6 open · 5 fixed |
 | 2026-07-23 | [2026-07-23-typescript7-voidzero-feasibility/](./2026-07-23-typescript7-voidzero-feasibility/) | TypeScript 7 and VoidZero compatibility assessment | 7 | 6 open · 1 duplicate |
 | 2026-07-22 | [2026-07-22-boot-uuid-ttl-review/](./2026-07-22-boot-uuid-ttl-review/) | External finding validation: boot UUID expiry made healthy long-running servers not-ready | 1 | 0 open · 1 fixed |
 | 2026-07-22 | [2026-07-22-v074-release-audit/](./2026-07-22-v074-release-audit/) | v0.7.4 release audit: newly published sharp/libvips advisory | 1 | 0 open · 1 fixed |

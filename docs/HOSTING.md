@@ -529,87 +529,33 @@ That's it! Caddy automatically provisions SSL.
 
 ### Docker Deployment
 
-#### 1. Create Dockerfile
-
-Create `Dockerfile` in project root:
-
-```dockerfile
-FROM node:20-alpine AS builder
-
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-FROM node:20-alpine AS runner
-
-WORKDIR /app
-
-# Copy built files
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/prisma ./prisma
-
-# Generate Prisma client
-RUN npx prisma generate
-
-EXPOSE 3000
-
-ENV NODE_ENV=production
-ENV SERVER_IP=0.0.0.0
-
-# First positional argv is the preset bundle list, second is the listen port.
-# Pass `default` (or your own preset name) plus the port that EXPOSE/k8s expects.
-CMD ["node", "dist/server.js", "default", "3000"]
-```
-
-#### 2. Create docker-compose.yml
-
-The example below uses MongoDB. Replace the `mongo` service with your chosen database.
-
-```yaml
-version: '3.8'
-
-services:
-  app:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - DATABASE_URL=mongodb://mongo:27017/PROJECT_NAME
-    depends_on:
-      - redis
-      - mongo
-    restart: unless-stopped
-
-  redis:
-    image: redis:alpine
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
-  # Replace with your chosen database
-  mongo:
-    image: mongo:latest
-    volumes:
-      - mongo_data:/data/db
-    restart: unless-stopped
-
-volumes:
-  redis_data:
-  mongo_data:
-```
-
-#### 3. Deploy
+New projects ship a generic production-like Docker surface. Existing projects add it without installing a package:
 
 ```bash
-docker-compose up -d --build
+npx luckystack add docker
+npm run docker:check
+docker compose up --build -d
 ```
+
+The rendered assets include:
+
+- lockfile-aware Node/npm or Bun dependency stages;
+- a non-root app image with `tini`, read-only-root compatibility and preset-aware startup;
+- an optional router image with bundled `deploy.config.ts` / `services.config.ts`;
+- unprivileged nginx for SPA assets, API/sync/SSE and Socket.io upgrades;
+- private authenticated Redis and a provider-aware MongoDB, PostgreSQL, MySQL or SQLite setup;
+- health-gated startup, localhost-only public binding, named volumes, dropped capabilities and `no-new-privileges`;
+- a Mongo replica-set initializer that performs election only—never user/business seeding.
+
+Select the runtime preset and public port without rebuilding:
+
+```bash
+LUCKYSTACK_PRESET=admin LUCKYSTACK_PORT=8181 docker compose up --build -d
+```
+
+For an explicit local-preset→remote-infrastructure run, copy `.env.docker_template` to the gitignored `.env.docker` and start with `docker compose --env-file .env.docker up --build -d`. Containers reach host tunnels through `host.docker.internal`; this mode has normal remote read/write access and must never run migrations or seeds automatically. Full runbook: scaffolded `docs/DOCKER.md`.
+
+The image copies generated Prisma runtime artifacts from the build stage into production dependencies. Router config is emitted under `dist/router/`; app startup reports its selected preset and port without printing secrets.
 
 ---
 
@@ -650,8 +596,10 @@ When you run more than one backend process (horizontal scaling, preset-split ser
 1. **Shared Redis is mandatory.** Every backend attaches `@socket.io/redis-adapter` at startup so room broadcasts fan out across instances. All backends must point at the same Redis (`REDIS_HOST` + `REDIS_PORT`).
 2. **Split/fallback mode hard-fails without Redis.** When `environment.fallback` is set in `deploy.config.ts`, the router refuses to start if Redis is unreachable. This is deliberate — `disableSharedHealthState` is ignored in that mode.
 3. **`/_health` contract.** Each backend writes a boot UUID to `luckystack:boot:<envKey>` on startup and exposes it via `GET /_health`. The router's boot handshake cross-checks this to detect the "two Redis URLs that both respond" failure mode. Your edge proxy should let `/_health` through unauthenticated (it already skips auth in the default server config).
-4. **WebSocket upgrades.** The router forwards `/socket.io/?...` upgrades to the `system` service by convention. Make sure at least one backend in your deployment owns the `system` service.
-5. **Sync fan-out reaches across instances.** Regular `syncRequest` fan-out uses `io.in(room).fetchSockets()` (cross-instance enumeration + per-recipient `RemoteSocket.emit()`), and the streaming emitters (`broadcastStream` / `streamTo`) use `io.to().emit()` — both span every `system` instance on the shared Redis, so spreading a room's members across instances is fine (no sticky routing needed). Each sync fan-out costs one `fetchSockets()` round-trip (single-instance short-circuits). Full model + costs: **`docs/ARCHITECTURE_MULTI_INSTANCE.md`**.
+4. **WebSocket upgrades.** The router forwards `/socket.io/?...` upgrades to the `system` service by convention. Make sure at least one backend in your deployment owns `system`; edge affinity must keep polling + upgrade on one system replica.
+5. **Separate invocation from delivery in split deployments.** Set `transport.invocation: 'routed-http'`. Typed API/sync calls then reach the owning service through HTTP/SSE while rooms, presence and callbacks remain on the one `system` socket. Keep `'socket'` for monoliths.
+6. **Sync fan-out reaches across instances; handler execution does not.** After the owning service executes a sync, regular fanout uses `io.in(room).fetchSockets()` + `RemoteSocket.emit()`, and streaming uses `io.to().emit()`. Both span every backend sharing the Redis adapter. Redis delivers events; it cannot execute a handler absent from the receiving process. Full model: **`docs/ARCHITECTURE_MULTI_INSTANCE.md`**.
+7. **Declare custom HTTP ownership.** Add non-`/api`/`/sync` path prefixes to `services.config.ts > customRoutes`; `luckystack-validate-deploy` fails unknown owners before deploy.
 
 ### Socket.io Connection Fails
 

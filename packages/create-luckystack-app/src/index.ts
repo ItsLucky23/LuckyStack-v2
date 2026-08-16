@@ -1405,11 +1405,12 @@ export const replacePlaceholders = (
 };
 
 export const isTextFile = (filePath: string): boolean => {
-  const textExts = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.css', '.html', '.prisma'];
+  const textExts = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.css', '.html', '.prisma', '.yaml', '.yml', '.sh', '.conf'];
   if (textExts.includes(path.extname(filePath))) return true;
-  // Files without extensions but starting with a dot (e.g. .env_template) are text.
+  // Files without extensions but starting with a dot (e.g. .env_template), plus
+  // Dockerfile, are text and may contain scaffold placeholders.
   const base = path.basename(filePath);
-  if (base.startsWith('.')) return true;
+  if (base.startsWith('.') || base === 'Dockerfile') return true;
   return false;
 };
 
@@ -1967,7 +1968,7 @@ export const pruneAuthNone = (targetDir: string): void => {
   //? overlay compiles without @luckystack/login (leave a minimal placeholder).
   editScaffoldFile(targetDir, 'luckystack/server/index.ts', [
     [
-      `import { registerHook, resolveEnvKey } from '@luckystack/core';
+      `import { registerHook, isProductionRuntime } from '@luckystack/core';
 import { registerNotificationHooks } from '../../server/hooks/notifications';
 
 //? Wires the transactional notification hooks (new sign-in email,
@@ -1978,7 +1979,7 @@ registerNotificationHooks();
 
 //? Example dev-only logger — delete or replace with your own audit hook.
 registerHook('postLogin', ({ userId, provider, isNewUser }) => {
-  if (resolveEnvKey() !== 'production') {
+  if (!isProductionRuntime()) {
     console.log(\`[hooks] login: user=\${userId}, provider=\${provider}, new=\${String(isNewUser)}\`);
   }
   return undefined;
@@ -2269,7 +2270,7 @@ const adaptAuthNonPrisma = (targetDir: string, orm: OrmProvider): void => {
   removeScaffoldPath(targetDir, 'server/hooks/notifications.ts');
   editScaffoldFile(targetDir, 'luckystack/server/index.ts', [
     [
-      `import { registerHook, resolveEnvKey } from '@luckystack/core';
+      `import { registerHook, isProductionRuntime } from '@luckystack/core';
 import { registerNotificationHooks } from '../../server/hooks/notifications';
 
 //? Wires the transactional notification hooks (new sign-in email,
@@ -2278,7 +2279,7 @@ import { registerNotificationHooks } from '../../server/hooks/notifications';
 //? sender no-ops with \`{ ok: false, reason: 'no-sender' }\`.
 registerNotificationHooks();
 `,
-      `import { registerHook, resolveEnvKey } from '@luckystack/core';
+      `import { registerHook, isProductionRuntime } from '@luckystack/core';
 
 //? The template's notification hooks (new sign-in / password-change emails)
 //? read the user via Prisma and are not scaffolded on this data layer — add
@@ -2412,8 +2413,10 @@ const wirePresence = (targetDir: string): void => {
 //? a SEPARATE process (`npm run router`) and reads the project's deploy.config.ts +
 //? services.config.ts for its routing topology. Those files (and their server.ts
 //? side-effect imports) ship in the template and are KEPT here because router was
-//? chosen — `pruneRouter` only strips them when router is OFF. So this just adds the
-//? dependency + the run script. Env (ROUTER_PORT / LUCKYSTACK_ENV) is documented in
+//? chosen — `pruneRouter` only strips them when router is OFF. It adds the
+//? dependency + run script and switches typed invocation to routed HTTP/SSE;
+//? the single system Socket.io connection remains for realtime delivery. Env
+//? (ROUTER_PORT / LUCKYSTACK_ENV) is documented in
 //? docs/luckystack/ARCHITECTURE_MULTI_INSTANCE.md. A single-instance app never runs
 //? it — it's here so scaling out later is `npm run router`, no rewiring.
 //? Record the chosen package manager in the rendered package.json. Only bun is
@@ -2455,6 +2458,9 @@ const wireRouter = (targetDir: string, luckystackVersion: string): void => {
   pkg.dependencies = { ...pkg.dependencies, '@luckystack/router': `^${luckystackVersion}` };
   pkg.scripts = { ...pkg.scripts, router: 'luckystack-router' };
   fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  editScaffoldFile(targetDir, 'config.ts', [
+    ["invocation: 'socket' as 'socket' | 'routed-http',", "invocation: 'routed-http' as 'socket' | 'routed-http',"],
+  ]);
 };
 
 //? Wire @luckystack/mcp (the project graph MCP server) when AI dev-context is on:
@@ -3103,6 +3109,174 @@ const validateArgsOrExit = (args: CliArgs): { slug: string; targetDir: string } 
   return { slug, targetDir };
 };
 
+export const buildDockerTemplateVars = (
+  slug: string,
+  choices: ScaffoldChoices,
+): Record<string, string> => {
+  const database = (() => {
+    if (choices.dbProvider === 'postgresql') {
+      return {
+        services: [
+          '  database:',
+          '    image: postgres:17-alpine',
+          '    environment:',
+          `      POSTGRES_DB: ${slug}`,
+          '      POSTGRES_USER: luckystack',
+          '      POSTGRES_PASSWORD: ${LUCKYSTACK_LOCAL_DATABASE_PASSWORD:-docker-local-change-me}',
+          '    volumes:',
+          '      - database_data:/var/lib/postgresql/data',
+          '    healthcheck:',
+          `      test: ["CMD-SHELL", "pg_isready -U luckystack -d ${slug}"]`,
+          '      interval: 3s',
+          '      timeout: 5s',
+          '      retries: 30',
+          '    restart: unless-stopped',
+          '',
+        ].join('\n'),
+        url: `postgresql://luckystack:\${LUCKYSTACK_LOCAL_DATABASE_PASSWORD:-docker-local-change-me}@database:5432/${slug}`,
+        buildUrl: `postgresql://luckystack:docker-build-only@database:5432/${slug}`,
+        dependsOn: '      database:\n        condition: service_healthy\n',
+        volumes: '  database_data:\n',
+        appVolume: '',
+        appDataDeclaration: '',
+        remoteExample: `postgresql://luckystack:<password>@host.docker.internal:5432/${slug}`,
+      };
+    }
+    if (choices.dbProvider === 'mysql') {
+      return {
+        services: [
+          '  database:',
+          '    image: mysql:8.4',
+          '    environment:',
+          `      MYSQL_DATABASE: ${slug}`,
+          '      MYSQL_USER: luckystack',
+          '      MYSQL_PASSWORD: ${LUCKYSTACK_LOCAL_DATABASE_PASSWORD:-docker-local-change-me}',
+          '      MYSQL_ROOT_PASSWORD: ${LUCKYSTACK_LOCAL_DATABASE_ROOT_PASSWORD:-docker-local-root-change-me}',
+          '    volumes:',
+          '      - database_data:/var/lib/mysql',
+          '    healthcheck:',
+          '      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]',
+          '      interval: 3s',
+          '      timeout: 5s',
+          '      retries: 30',
+          '    restart: unless-stopped',
+          '',
+        ].join('\n'),
+        url: `mysql://luckystack:\${LUCKYSTACK_LOCAL_DATABASE_PASSWORD:-docker-local-change-me}@database:3306/${slug}`,
+        buildUrl: `mysql://luckystack:docker-build-only@database:3306/${slug}`,
+        dependsOn: '      database:\n        condition: service_healthy\n',
+        volumes: '  database_data:\n',
+        appVolume: '',
+        appDataDeclaration: '',
+        remoteExample: `mysql://luckystack:<password>@host.docker.internal:3306/${slug}`,
+      };
+    }
+    if (choices.dbProvider === 'sqlite') {
+      return {
+        services: '',
+        url: 'file:/app/data/production.db',
+        buildUrl: 'file:/tmp/luckystack-build.db',
+        dependsOn: '',
+        volumes: '',
+        appVolume: '      - app_data:/app/data\n',
+        appDataDeclaration: '  app_data:\n',
+        remoteExample: 'file:/app/data/production.db',
+      };
+    }
+    return {
+      services: [
+        '  database:',
+        '    image: mongo:7.0',
+        '    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]',
+        '    volumes:',
+        '      - database_data:/data/db',
+        '    healthcheck:',
+        '      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand(\'ping\').ok", "mongodb://127.0.0.1:27017/admin"]',
+        '      interval: 3s',
+        '      timeout: 5s',
+        '      retries: 30',
+        '    restart: unless-stopped',
+        '',
+        '  database-init:',
+        '    image: mongo:7.0',
+        '    depends_on:',
+        '      database:',
+        '        condition: service_healthy',
+        '    volumes:',
+        '      - ./docker/mongo-replica-init.js:/docker/mongo-replica-init.js:ro',
+        '    entrypoint: ["mongosh", "--host", "database:27017", "--quiet", "/docker/mongo-replica-init.js"]',
+        '    restart: "no"',
+        '',
+      ].join('\n'),
+      url: `mongodb://database:27017/${slug}?replicaSet=rs0&directConnection=true`,
+      buildUrl: `mongodb://database:27017/${slug}`,
+      dependsOn: '      database-init:\n        condition: service_completed_successfully\n',
+      volumes: '  database_data:\n',
+      appVolume: '',
+      appDataDeclaration: '',
+      remoteExample: `mongodb://host.docker.internal:27017/${slug}?replicaSet=rs0&directConnection=true`,
+    };
+  })();
+
+  const routerService = choices.router
+    ? [
+        '  router:',
+        '    build:',
+        '      context: .',
+        '      target: router',
+        '    env_file:',
+        '      - path: .env',
+        '        required: false',
+        '      - path: .env.docker',
+        '        required: false',
+        '    environment:',
+        '      NODE_ENV: production',
+        '      LUCKYSTACK_ENV_FILES: /dev/null',
+        '      LUCKYSTACK_ENV: docker',
+        '      LUCKYSTACK_ROUTER_PRESET: ${LUCKYSTACK_PRESET:-default}',
+        '      ROUTER_PORT: "4000"',
+        `      PROJECT_NAME: ${slug}-docker`,
+        `      DATABASE_URL: \${LUCKYSTACK_DATABASE_URL:-${database.url}}`,
+        '      REDIS_HOST: ${LUCKYSTACK_REDIS_HOST:-redis}',
+        '      REDIS_PORT: ${LUCKYSTACK_REDIS_PORT:-6379}',
+        '      REDIS_USER: ${LUCKYSTACK_REDIS_USER:-default}',
+        '      REDIS_PASSWORD: ${LUCKYSTACK_REDIS_PASSWORD:-docker-local-change-me}',
+        '    depends_on:',
+        '      app:',
+        '        condition: service_healthy',
+        '      redis:',
+        '        condition: service_healthy',
+        '    extra_hosts:',
+        '      - host.docker.internal:host-gateway',
+        '    read_only: true',
+        '    tmpfs:',
+        '      - /tmp',
+        '    security_opt:',
+        '      - no-new-privileges:true',
+        '    cap_drop:',
+        '      - ALL',
+        '    stop_grace_period: 20s',
+        '    restart: unless-stopped',
+        '',
+        '',
+      ].join('\n')
+    : '';
+
+  return {
+    DOCKER_DATABASE_SERVICES: database.services,
+    DOCKER_DATABASE_URL: database.url,
+    DOCKER_BUILD_DATABASE_URL: database.buildUrl,
+    DOCKER_DATABASE_DEPENDS_ON: database.dependsOn,
+    DOCKER_DATABASE_VOLUMES: database.volumes,
+    DOCKER_APP_DATA_VOLUME: database.appVolume,
+    DOCKER_APP_DATA_DECLARATION: database.appDataDeclaration,
+    DOCKER_REMOTE_DATABASE_URL_EXAMPLE: database.remoteExample,
+    DOCKER_BACKEND_TARGET: choices.router ? 'router:4000' : 'app:4100',
+    DOCKER_ROUTER_SERVICE: routerService,
+    DOCKER_WEB_DEPENDENCY: choices.router ? 'router' : 'app',
+  };
+};
+
 //? Build the {{TOKEN}} substitution map for the template tree. DATABASE_URL
 //? embeds `slug`, so it must be built per-run (not a module constant).
 const buildTemplateVars = (
@@ -3151,6 +3325,7 @@ const buildTemplateVars = (
     EXTERNAL_ORIGINS: externalOrigins,
     EMAIL_ENV_VARS: buildEmailEnvVars(choices.emailProvider),
     MONITORING_ENV_VARS: buildMonitoringEnvVars(choices.monitoringProvider),
+    ...buildDockerTemplateVars(slug, choices),
   };
 };
 

@@ -3,7 +3,46 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_ENV_FILES, getEnvFiles } from './env';
+import {
+  DEFAULT_ENV_FILES,
+  getEnvFiles,
+  isProductionRuntime,
+  isTestRuntime,
+  resolveRuntimeMode,
+} from './env';
+import { resolveEnvKey } from './bootUuid';
+
+describe('runtime mode versus topology identity', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalTopologyEnv = process.env.LUCKYSTACK_ENV;
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+    if (originalTopologyEnv === undefined) delete process.env.LUCKYSTACK_ENV;
+    else process.env.LUCKYSTACK_ENV = originalTopologyEnv;
+  });
+
+  it('keeps named deployment environments in production runtime mode', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.LUCKYSTACK_ENV = 'dockerSplit';
+
+    expect(resolveRuntimeMode()).toBe('production');
+    expect(isProductionRuntime()).toBe(true);
+    expect(isTestRuntime()).toBe(false);
+    expect(resolveEnvKey()).toBe('dockerSplit');
+  });
+
+  it('does not let a production topology identity disable test runtime policy', () => {
+    process.env.NODE_ENV = 'test';
+    process.env.LUCKYSTACK_ENV = 'production';
+
+    expect(resolveRuntimeMode()).toBe('test');
+    expect(isProductionRuntime()).toBe(false);
+    expect(isTestRuntime()).toBe(true);
+    expect(resolveEnvKey()).toBe('production');
+  });
+});
 
 describe('getEnvFiles', () => {
   const original = process.env.LUCKYSTACK_ENV_FILES;

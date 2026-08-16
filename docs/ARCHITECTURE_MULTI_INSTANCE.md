@@ -22,20 +22,24 @@ is attached but has no peers, and all sockets live in one process.
 ## Mental model
 
 ```
-                         ┌─────────────────────────────────────┐
-   browser / client ───► │  @luckystack/router  (npm run router) │  load balancer, :4000
-                         └───────────────┬─────────────────────┘
-            HTTP /api/<service>/...      │   WS /socket.io/  (pinned to `system`)
-                         ┌───────────────┴───────────────┐
+                         ┌────────────────────────────────────────┐
+   browser / client ───► │ @luckystack/router (npm run router) :4000 │
+                         └───────────────┬────────────────────────┘
+        routed HTTP/SSE /api|sync/<service>/...   WS /socket.io/
+                         │                    (pinned to `system`)
                          ▼                                ▼
-              backend "core-preset"            backend "fleet-preset"
-              owns service `system`            owns service `vehicles`
+              backend "fleet-preset"           backend "core-preset"
+              executes `vehicles` routes       owns browser sockets
                          │                                │
                          └──────────► shared Redis ◄───────┘
-                              (@socket.io/redis-adapter pub/sub)
+                           (Socket.io delivery/fanout only)
 ```
 
-Two config files drive it:
+Three config surfaces drive it:
+
+- **`config.ts > transport.invocation`** — `'socket'` (backwards-compatible
+  monolith default) or `'routed-http'` (API/sync invocations traverse the router;
+  the Socket.io connection still owns realtime delivery).
 - **`services.config.ts`** — which services exist and how they group into **presets**
   (one backend bundle = one preset). `system` is reserved (`source: 'root'` = `src/_api` +
   `src/_sync`).
@@ -64,16 +68,23 @@ Run a backend per preset: `npm run server -- core-preset 4100`. Run the router:
 
 ---
 
-## Sockets across instances — the part that surprises people
+## Invocation versus delivery — the part that surprises people
 
-**All WebSocket upgrades are pinned to the `system` service** by convention
-(`packages/router/src/wsProxy.ts:13`). So every socket — and therefore every sync/socket
-**handler** — runs on whichever `system`-service backend holds that client's connection.
-Handler location is **not** configurable per route; it follows the socket.
+**All WebSocket upgrades are pinned to the `system` service** by convention.
+That determines where room membership, presence, socket lifecycle handlers and
+incoming realtime callbacks live. It determines API/sync execution only when
+`transport.invocation === 'socket'`.
 
-Cross-instance reach is provided by **`@socket.io/redis-adapter`**, attached unconditionally
+With `transport.invocation: 'routed-http'`, `apiRequest` and `syncRequest` use
+HTTP/SSE paths whose service-first segment is resolved by the router. The owning
+preset executes the handler; the one `system` socket remains connected for rooms,
+presence and incoming sync events. There is no second browser socket.
+
+Cross-instance **delivery** is provided by **`@socket.io/redis-adapter`**, attached unconditionally
 on every backend (`packages/core/src/socketRedisAdapter.ts`, wired at
-`packages/server/src/loadSocket.ts:115`). Two mechanisms ride on it:
+`packages/server/src/loadSocket.ts:115`). Two delivery mechanisms ride on it. Neither mechanism remotely executes a
+missing API/sync handler; execution has already happened on the socket backend
+(`socket` mode) or routed service (`routed-http` mode):
 - `io.to(room).emit(...)` — used by the streaming emitters — publishes to Redis so a broadcast
   reaches that room's sockets on every instance.
 - `io.in(room).fetchSockets()` — used by the regular `syncRequest` fan-out — enumerates the
@@ -160,6 +171,20 @@ real split deploy. `npm run luckystack-validate-deploy` flags service/preset mis
 
 ---
 
+## Generated Docker topology
+
+Fresh scaffolds include `Dockerfile`, `compose.yaml`, `docker/` and `docs/DOCKER.md`; existing apps run `npx luckystack add docker`. The renderer follows the selected database provider and whether `@luckystack/router` is installed. It never copies consumer seeds, credentials or app-specific service groups.
+
+`LUCKYSTACK_PRESET` selects the backend bundle at container startup instead of hardcoding `default`. Router-enabled builds emit `dist/router/deploy.config.js` and `dist/router/services.config.js`; the default Docker environment binds `system` to `http://app:4100`. Split deployments add one app service/binding per chosen preset while retaining one immutable image.
+
+`NODE_ENV` and `LUCKYSTACK_ENV` are deliberately separate axes. `NODE_ENV=production` controls route maps, cookies, validation, rate limits, port policy and dev tooling. `LUCKYSTACK_ENV=dockerSplit` (or `staging`, `localAdmin`, ...) selects deploy bindings, boot UUIDs, health attestation and observability labels. Never infer production safety from the topology name.
+
+The default `services.config.ts > customRoutes` maps framework-owned non-typed paths (`/auth`, health endpoints, uploads/hooks/docs) to `system`. Consumer routes add their own prefixes and mirror them in `docker/nginx.conf`. App/router are non-root and read-only-root compatible; nginx is unprivileged; Mongo initialization elects a replica set but creates no application data.
+
+For local-preset→remote-staging development, use the gitignored `.env.docker` explicitly. Database and Redis can be selected independently via `LUCKYSTACK_DATABASE_URL` and `LUCKYSTACK_REDIS_*`; this grants normal remote read/write access and never implies migrations or seeding.
+
+---
+
 ## Pitfalls — symptom → cause → fix
 
 | Symptom | Cause | Fix |
@@ -172,8 +197,9 @@ real split deploy. `npm run luckystack-validate-deploy` flags service/preset mis
 | Router **crashes at boot** with an explicit-port error | A `deploy.config.ts` binding URL has no port | Add the port (`http://host:8081/`) |
 | Sessions/cookies not portable between instances (users logged out after LB switch) | `COOKIE_SECRET` / `PROJECT_NAME` differ between instances | Align the `synchronizedEnvKeys` across all backends |
 | `502` `serviceNotAssigned` from the router | The route's service isn't in any running preset / has no binding | Add the service to a preset (`services.config.ts`) + a binding (`deploy.config.ts`) |
-| A sync route "doesn't exist" on the socket instance | The route's service is in a different preset than `system`, but WS is pinned to `system` | Keep socket/sync routes in the `system` preset, or run a monolith preset that includes them |
-| `getParsedPort()`/listen on wrong port for a 2nd local instance | Port was not passed in argv slot two | Pass the port via argv (`npm run server -- <preset> <port>`) — `getParsedPort()` reads the typed override registry |
+| A sync/API route "doesn't exist" on the socket instance | `transport.invocation` is still `'socket'`, so the `system` socket backend is asked to execute a route bundled elsewhere | Set `transport.invocation: 'routed-http'` for a split topology, or run a monolith preset containing the route |
+| A custom HTTP route returns `serviceNotAssigned` | Its path has no owner in `services.config.ts > customRoutes` (or the owner lacks a binding/fallback) | Add the path prefix and owning service; `luckystack-validate-deploy` then catches unknown owners before deploy |
+| `getParsedPort()`/listen on wrong port for a second local instance | Port was not passed in argv slot two | Pass the port via argv (`npm run server -- <preset> <port>`) — `getParsedPort()` reads the typed override registry; there is no `SERVER_PORT` fallback |
 
 ---
 

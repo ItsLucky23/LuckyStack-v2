@@ -64,11 +64,16 @@ The `luckystack` CLI (`bin: luckystack`). Commands:
   `## Upgrading LuckyStack` section + `docs/luckystack/UPGRADING.md`.
 - `luckystack check-env` / `luckystack check-i18n` — codebase audits that write AI-feedable,
   per-run hashed logs to `dump/<KIND>_<hash>.log` (dead/missing env keys + i18n keys).
+- `luckystack add docker` — copies and renders the generic Docker/Compose surface for an
+  existing project without adding an npm package or overwriting an existing Docker file.
+- `luckystack docker check` — validates required rendered assets and router/invocation wiring,
+  then prints the selected preset, public URL and dependency mode without secret values.
 
 ## When to USE
 
 - A consumer scaffolded a base/partial project and now wants `login`, `presence`, `sync`,
   `email`, `cron`, `error-tracking`, or `docs-ui`.
+- An existing project needs the framework Docker baseline (`npx luckystack add docker`).
 
 ## When to NOT suggest
 
@@ -126,7 +131,8 @@ in the installed cli so it's readable even when the project's own docs predate i
 | `commands/addDocsUi.ts` | Add `@luckystack/docs-ui` + copy the React API explorer into `src/docs/page.tsx`. Removal deletes the page. |
 | `commands/addErrorTracking.ts` | Add `@luckystack/error-tracking` + copy the `functions/sentry.ts` shim. `copySentryShim` / `removeSentryShim` shared with planMonitoring. |
 | `commands/addSecretManager.ts` | Add `@luckystack/secret-manager` + uncomment the config.ts + server/server.ts blocks (mirror of `wireSecretManager`); `removeSecretManager` re-comments. |
-| `commands/addRouter.ts` | Add `@luckystack/router` + the `router` npm script AND copy the topology config files (`services.config.ts` + `deploy.config.ts` + `server/config/presetLoader.ts`) from `assets/router/` (idempotent) + wire their two `server.ts` side-effect imports (`import '../deploy.config';` / `import '../services.config';` after `import '../config';`). `removeRouter` drops the dep + script, un-wires those imports, and deletes the three config files. These files are NOT in a base install — `pruneRouter` strips them from a no-router scaffold; this is the inverse. |
+| `commands/addRouter.ts` | Add `@luckystack/router` + the `router` npm script, switch `transport.invocation` to routed HTTP/SSE, copy the topology config files, and wire their server imports. Removal restores socket invocation and removes the topology wiring. |
+| `commands/addDocker.ts` | `addDocker` renders provider/router-aware assets from `assets/docker/` copy-if-absent and adds `docker:*` scripts; `checkDocker` verifies files, placeholders and invocation wiring without reading/printing secrets. Docker is a project surface, not a registry package. |
 | `commands/addAiDocs.ts` | Add `@luckystack/mcp` (devDep) + register the graph server in `.mcp.json`; `removeAiDocs` reverses. (The doc tree is NOT bundled — re-scaffold for that.) |
 | `commands/addBackendOnly.ts` | Generic handler for `sync` / `email`: add dep + install (self-wire at boot). |
 | `commands/update.ts` | `update` — framework-owned-files refresh (ADR 0021 phase 1a). Exports the pure pieces for tests/tooling: `readScaffoldManifest`, `choicesToFlags` (allowlisted recorded choices → scaffolder flags), `normalizeScaffoldProjectName` (byte-equivalent scaffold slug), `isSafeWindowsScaffoldArg`, `isSafeSurfacePath` (the bucket-(a) allow-list), `planUpdate` (add/overwrite/sidecar/unchanged classification), `applyUpdate` (writes + manifest refresh + dump/ report), `runUpdate` (orchestrator; `renderFreshScaffold` injectable — default runs `npx create-luckystack-app@<version>` into a temp dir with the Windows-safe cmd /s /c boundary). Hash logic mirrors the scaffolder's `scaffoldManifest.ts` (sha256, CRLF→LF for text) — verified by a cross-scaffold check. |
@@ -138,6 +144,7 @@ in the installed cli so it's readable even when the project's own docs predate i
 | `assets/login/src/**` | The shipped auth UI bundle copied by `add login` (login/register/reset-password/settings pages + `_api` + `LoginForm`). |
 | `assets/docs-ui/src/**` | The React API-explorer page (`src/docs/page.tsx`) copied by `add docs-ui`. |
 | `assets/router/**` | The router topology config files (`services.config.ts` + `deploy.config.ts` + `server/config/presetLoader.ts`) copied by `add router` (the inverse of the scaffold's `pruneRouter`). |
+| `assets/docker/**` | Canonical Dockerfile, Compose, nginx, preset entrypoint, env template, generic Mongo replica initializer and Docker runbook copied/rendered by `add docker`; byte-parity tested against the scaffold template. |
 
 ## Notes
 
@@ -147,10 +154,8 @@ in the installed cli so it's readable even when the project's own docs predate i
   `index.ts` dispatch + `list`/`manage`/`remove` all derive from it). Mirror it against
   `OPTIONAL_PACKAGES` in `@luckystack/server` when adding a new optional package — the
   `assetParity.test.ts` parity test enforces this.
-- The `assetParity.test.ts` parity check now also covers `router`: the files under
-  `assets/router/**` (copied by `add router`) must match the scaffold template's router
-  config files (the ones `pruneRouter` strips when router is OFF), so the add-asset and
-  template copies can't drift.
+- `assetParity.test.ts` covers both `router` and `docker`; their raw CLI assets must stay
+  byte-identical to the canonical scaffold template before project-specific rendering.
 
 ## Peer dependencies
 

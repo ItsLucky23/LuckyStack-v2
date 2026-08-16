@@ -16,7 +16,7 @@
 //?   2. `process.env.SERVER_IP` for the bind address
 //?   3. `'127.0.0.1'` / port `'80'` as the generic pre-bootstrap fallback
 
-import { resolveEnvKey } from './bootUuid';
+import { isProductionRuntime } from './env';
 
 interface BindAddress {
   ip: string;
@@ -79,7 +79,7 @@ const defaultPortForProtocol = (protocol: string): string => (protocol === 'http
 //? byte-stable with how a provider redirect_uri is normally registered
 //? (`http://localhost/...`, not `http://localhost:80/...`).
 export const resolveDevCallbackUrl = (callbackUrl: string): string => {
-  if (resolveEnvKey() === 'production') return callbackUrl;
+  if (isProductionRuntime()) return callbackUrl;
 
   let url: URL;
   try {

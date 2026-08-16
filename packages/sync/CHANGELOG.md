@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-27
+
+### Fixed
+
+- Named production topology environments no longer enable development-only loopback rate-limit bypasses for socket or HTTP sync invocation.
+
+## [0.8.0] - 2026-07-27
+
+### Added
+
+- `syncRequest` can invoke owning services through HTTP/SSE in routed transport mode while callbacks, rooms and fanout continue over the single Socket.io connection.
+
 ## [0.1.0]
 
 ### Added

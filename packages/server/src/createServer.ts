@@ -1,5 +1,5 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, registerBoundAddress, writeBootUuid, startBootUuidHeartbeat, getLogger, getProjectConfig, tryCatch, tryCatchSync, resolveEnvKey, dispatchHook } from '@luckystack/core';
+import { registerBindAddress, registerBoundAddress, writeBootUuid, startBootUuidHeartbeat, getLogger, getProjectConfig, tryCatch, tryCatchSync, resolveRuntimeMode, dispatchHook } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
@@ -136,16 +136,15 @@ export const listenLuckyStackServer = (
 ): Promise<HttpServer> =>
   new Promise<HttpServer>((resolve, reject) => {
     const startPort = normalizeServerPort(port);
-    const environmentKey = resolveEnvKey();
-    const production = environmentKey === 'production';
-    const test = environmentKey === 'test';
+    const runtimeMode = resolveRuntimeMode();
+    const production = runtimeMode === 'production';
+    const test = runtimeMode === 'test';
     //? Auto-pick the next free port resolution:
     //? - When `SERVER_PORT_AUTO_INCREMENT` is set EXPLICITLY it always wins
     //?   (`1`/`true` -> on, `0`/`false` -> off), so a consumer can force either
     //?   behaviour in any environment.
-    //? - When it is NOT set we default to ON in dev and OFF in production. One
-    //?   canonical environment key (`LUCKYSTACK_ENV` before `NODE_ENV`) drives
-    //?   auto-increment, OAuth rewriting, proxy advertisement, and dev tooling.
+    //? - When it is NOT set we default to ON in dev and OFF in production.
+    //?   NODE_ENV drives runtime behavior; LUCKYSTACK_ENV remains topology-only.
     //? Prod stays OFF by default because a silently moved direct listen port can
     //? leave external clients talking to the old one. In dev a clash is usually
     //? a leftover process, so hopping is the friendlier default.
@@ -277,7 +276,7 @@ export const createLuckyStackServer = async (
     defaultPort: options.defaultPort,
   });
   const ip = options.ip ?? process.env.SERVER_IP ?? '127.0.0.1';
-  const enableDevTools = options.enableDevTools ?? resolveEnvKey() !== 'production';
+  const enableDevTools = options.enableDevTools ?? resolveRuntimeMode() !== 'production';
 
   //? Register the resolved bind address so framework code that needs it
   //? (e.g. `checkOrigin` and OAuth callback resolution) doesn't drift when the

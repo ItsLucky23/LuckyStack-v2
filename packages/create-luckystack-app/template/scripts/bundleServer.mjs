@@ -116,17 +116,42 @@ const writeBundleEntry = () => {
   return entryFile;
 };
 
-build({
-  entryPoints: [writeBundleEntry()],
-  outfile: 'dist/server.js',
-  bundle: true,
-  platform: 'node',
-  target: 'node20',
-  format: 'esm',
-  sourcemap: enableSourcemap,
-  external,
-  logLevel: 'info',
-}).catch((error) => {
+const run = async () => {
+  await build({
+    entryPoints: [writeBundleEntry()],
+    outfile: 'dist/server.js',
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    sourcemap: enableSourcemap,
+    external,
+    logLevel: 'info',
+  });
+
+  //? Router-enabled scaffolds retain these two files. Bundle them into plain ESM
+  //? so the minimal production image can start @luckystack/router without tsx or
+  //? source TypeScript. Base scaffolds prune both files and skip this target.
+  const routerEntries = {
+    'deploy.config': path.join(root, 'deploy.config.ts'),
+    'services.config': path.join(root, 'services.config.ts'),
+  };
+  if (Object.values(routerEntries).every((entry) => fs.existsSync(entry))) {
+    await build({
+      entryPoints: routerEntries,
+      outdir: 'dist/router',
+      bundle: true,
+      platform: 'node',
+      target: 'node20',
+      format: 'esm',
+      sourcemap: enableSourcemap,
+      external,
+      logLevel: 'info',
+    });
+  }
+};
+
+run().catch((error) => {
   console.error('Server bundle failed:', error);
   process.exit(1);
 });

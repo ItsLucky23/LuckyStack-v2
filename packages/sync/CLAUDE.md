@@ -4,7 +4,7 @@
 
 ## What this package does
 
-Real-time sync transport for LuckyStack. Provides type-safe, room-based fanout over Socket.io with an HTTP/SSE fallback. Each sync event is a file-based route with a mandatory `_server_v{N}.ts` (runs once, validates, produces `serverOutput`) and an optional `_client_v{N}.ts` (runs once per recipient socket for per-target filtering or auth). Streaming primitives (`stream`, `broadcastStream`, `streamTo`) support live LLM tokens, collab-editor diffs, and per-recipient progress. An offline queue with configurable drop policy keeps optimistic sends from being lost when the socket reconnects.
+Real-time sync transport for LuckyStack. Provides type-safe, room-based fanout over Socket.io with configurable socket or routed HTTP/SSE invocation. Each sync event is a file-based route with a mandatory `_server_v{N}.ts` (runs once, validates, produces `serverOutput`) and an optional `_client_v{N}.ts` (runs once per recipient socket for per-target filtering or auth). Streaming primitives (`stream`, `broadcastStream`, `streamTo`) support live LLM tokens, collab-editor diffs, and per-recipient progress. An offline queue with configurable drop policy keeps optimistic sends from being lost when the socket reconnects.
 
 ## When to USE this package
 
@@ -38,7 +38,7 @@ Real-time sync transport for LuckyStack. Provides type-safe, room-based fanout o
 
 | Export | One-liner | Deep doc |
 |---|---|---|
-| `syncRequest({ name, version, data?, receiver, ignoreSelf?, onStream?, offlineDropPolicy? })` | Fire a typed sync event into a room; resolves with the server result envelope. | → `docs/sync-request.md` |
+| `syncRequest({ name, version, data?, receiver, ignoreSelf?, onStream?, offlineDropPolicy? })` | Fire a typed sync event using `transport.invocation`; routed mode uses HTTP/SSE while recipient callbacks stay on the one socket. | → `docs/sync-request.md` |
 | `useSyncEvents()` | React hook returning `{ upsertSyncEventCallback, upsertSyncEventStreamCallback }` scoped to the component lifetime. | → `docs/callback-registration.md` |
 | `useSyncEventTrigger()` | React hook returning `{ triggerSyncEvent, triggerSyncStreamEvent }` for manually invoking registered callbacks (testing / local echo). | → `docs/callback-registration.md` |
 | `initSyncRequest({ setSocketStatus, sessionRef })` | One-time wiring of socket lifecycle handlers (connect/disconnect/reconnectAttempt/userAfk/userBack/connectError) into the socket-status provider. | → `docs/callback-registration.md` |
@@ -74,7 +74,9 @@ Real-time sync transport for LuckyStack. Provides type-safe, room-based fanout o
 
 ## Config keys
 
-### `registerProjectConfig({ sync, offlineQueue })`
+### `registerProjectConfig({ transport, sync, offlineQueue })`
+
+- `transport.invocation` — `'socket'` (backwards-compatible default) or `'routed-http'`. Routed mode invokes the owning service through the router; Socket.io remains connected for fanout callbacks, rooms and presence.
 
 - `sync.streamThrottle.flushAtChars` — char threshold before a buffered throttle flushes. Default `32`.
 - `sync.streamThrottle.flushEveryMs` — timer-based flush interval; `false` disables the timer. Default `50`.

@@ -188,6 +188,10 @@ describe("isTextFile", () => {
     ".css",
     ".html",
     ".prisma",
+    ".yaml",
+    ".yml",
+    ".sh",
+    ".conf",
   ])("treats %s as a text file", (ext) => {
     expect(isTextFile(`some/path/file${ext}`)).toBe(true);
   });
@@ -203,7 +207,8 @@ describe("isTextFile", () => {
     expect(isTextFile("assets/font.woff2")).toBe(false);
   });
 
-  it("returns false for an extensionless, non-dot filename", () => {
+  it("treats Dockerfile as text but other extensionless names as binary", () => {
+    expect(isTextFile("Dockerfile")).toBe(true);
     expect(isTextFile("bin/runner")).toBe(false);
     expect(isTextFile("Makefile")).toBe(false);
   });

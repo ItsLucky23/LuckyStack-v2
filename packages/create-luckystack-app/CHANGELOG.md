@@ -21,6 +21,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `config.ports.ts` remains present in single-instance scaffolds without the
   optional router.
 
+## [0.8.3] - 2026-07-27
+
+### Fixed
+
+- Fresh scaffolds register the generated API method map before exposing `apiRequest`, so routed HTTP preserves explicitly declared methods for routes whose names do not reveal GET/POST/PUT/DELETE semantics.
+
+## [0.8.1] - 2026-07-27
+
+### Fixed
+
+- Fresh scaffolds keep named topology environments in production mode and inject Vite's build/serve runtime mode into browser config; custom profiles such as `--mode staging` no longer enable development behavior.
+
+## [0.8.0] - 2026-07-27
+
+### Added
+
+- Fresh scaffolds now include provider-aware hardened Docker/Compose assets, preset-aware app/router startup, unprivileged nginx, private infrastructure and a seed-free Mongo replica initializer.
+- Production bundles emit router topology ESM under `dist/router` when router config is present.
+
+### Fixed
+
+- Production images retain generated Prisma runtime artifacts instead of replacing them with an ungenerated production dependency tree.
+- Fresh server bundles now register a type-safe, lint-clean translation-backed localized response normalizer.
+
 ## [0.7.5] - 2026-07-22
 
 ### Fixed

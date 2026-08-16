@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (38)
+## Decisions (44)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -48,9 +48,15 @@
 | 0034 | Email timeout is cancellation intent, not proof of delivery failure | 🟢 accepted | email, reliability, idempotency, cancellation | — | `docs/decisions/0034-email-timeout-means-delivery-outcome-unknown.md` |
 | 0035 | TOTP ciphertext carries a key id and decrypt-only legacy keyring | 🟢 accepted | auth, 2fa, totp, encryption, rotation | — | `docs/decisions/0035-totp-ciphertext-carries-a-key-id-and-legacy-keyring.md` |
 | 0036 | Boot UUID TTL requires a stable environment-level heartbeat | 🟢 accepted | readiness, redis, boot-uuid, multi-instance, reliability | — | `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md` |
+| 0037 | Separate routed invocation from realtime Socket.io delivery | 🟢 accepted | api, sync, router, transport, multi-instance, redis | — | `docs/decisions/0037-separate-routed-invocation-from-realtime-socket-delivery.md` |
 | 0037 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0037-single-source-ports-and-optin-router-topology.md` |
 | 0038 | Keep the scaffold backend default out of process.env until server bootstrap | ⚪ superseded | config, ports, scaffold, oauth, server | — | `docs/decisions/0038-scaffold-port-default-stays-out-of-process-env.md` |
+| 0038 | Ship generic rendered Docker assets as a project surface | 🟢 accepted | docker, compose, scaffold, cli, deployment, presets | — | `docs/decisions/0038-ship-generic-rendered-docker-assets-as-a-project-surface.md` |
+| 0039 | Use a narrow reachability-aware production audit exception | ⚪ superseded | security, dependencies, ci, react-router, release | — | `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md` |
 | 0039 | Runtime backend-port overrides use a typed core registry, never process.env | 🟢 accepted | config, ports, scaffold, oauth, server, cli | 0038 | `docs/decisions/0039-runtime-port-overrides-use-a-typed-registry.md` |
+| 0040 | Separate application runtime mode from deployment environment identity | 🟢 accepted | core, deployment, security, docker, multi-instance | — | `docs/decisions/0040-separate-runtime-mode-from-deployment-environment-identity.md` |
+| 0041 | Audit required production dependencies and test tooling separately | 🟢 accepted | security, dependencies, ci, eslint, release | 0039 | `docs/decisions/0041-audit-required-production-dependencies-and-test-tooling-separately.md` |
+| 0042 | Deduplicate equivalent functions across composed presets | 🟢 accepted | runtime-maps, presets, functions, multi-instance | — | `docs/decisions/0042-deduplicate-equivalent-functions-across-composed-presets.md` |
 
 ## Summaries
 
@@ -354,6 +360,14 @@ Keep the TTL and treat the UUID as an environment-level value. After HTTP listen
 
 → `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md`
 
+### 0037 — Separate routed invocation from realtime Socket.io delivery
+
+**0037** · accepted · tags: api, sync, router, transport, multi-instance, redis · 2026-07-27
+
+Keep one browser Socket.io connection to the configured websocket service, and make invocation transport independently configurable through `transport.invocation: 'socket' | 'routed-http'`.
+
+→ `docs/decisions/0037-separate-routed-invocation-from-realtime-socket-delivery.md`
+
 ### 0037 — Single-source frontend/backend ports + router topology config is opt-in (not shipped by default)
 
 **0037** · accepted · tags: config, ports, scaffold, cli, router, packaging, dx · 2026-06-26
@@ -370,6 +384,24 @@ Keep the TTL and treat the UUID as an environment-level value. After HTTP listen
 
 → `docs/decisions/0038-scaffold-port-default-stays-out-of-process-env.md`
 
+### 0038 — Ship generic rendered Docker assets as a project surface
+
+**0038** · accepted · tags: docker, compose, scaffold, cli, deployment, presets · 2026-07-27
+
+Treat Docker as rendered project files, not a runtime package. Fresh scaffolds receive a provider/router-aware `Dockerfile`, `compose.yaml`, `.dockerignore`, nginx config, preset entrypoint, remote-infrastructure env template, generic Mongo replica initializer and runbook. Existing projects use `npx luckystack add docker`; files are copy-if-absent and `luckystack docker check` validates the rendered surface without printing secrets.
+
+→ `docs/decisions/0038-ship-generic-rendered-docker-assets-as-a-project-surface.md`
+
+### 0039 — Use a narrow reachability-aware production audit exception
+
+**0039** · superseded · tags: security, dependencies, ci, react-router, release · 2026-07-27
+
+Keep current React Router 7.18.1 and replace the release workflow's raw `npm audit --audit-level=high` command with `npm run audit:production`.
+
+**Governs** (`//? @adr 0039`): `packages/core/src/env.ts`, `packages/create-luckystack-app/template/config.ts`
+
+→ `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md`
+
 ### 0039 — Runtime backend-port overrides use a typed core registry, never process.env
 
 **0039** · accepted · tags: config, ports, scaffold, oauth, server, cli · 2026-08-16
@@ -380,6 +412,30 @@ Keep the TTL and treat the UUID as an environment-level value. After HTTP listen
 
 → `docs/decisions/0039-runtime-port-overrides-use-a-typed-registry.md`
 
+### 0040 — Separate application runtime mode from deployment environment identity
+
+**0040** · accepted · tags: core, deployment, security, docker, multi-instance · 2026-07-27
+
+Use two explicit axes:
+
+→ `docs/decisions/0040-separate-runtime-mode-from-deployment-environment-identity.md`
+
+### 0041 — Audit required production dependencies and test tooling separately
+
+**0041** · accepted · tags: security, dependencies, ci, eslint, release · 2026-07-27
+
+The production release gate runs `npm audit --omit=dev --omit=optional --json`. This audits required runtime dependencies and excludes optional peer/tooling trees. It retains the exact React Router RSC/action advisory allowlist described by ADR 0039; every other high or critical finding still fails closed.
+
+→ `docs/decisions/0041-audit-required-production-dependencies-and-test-tooling-separately.md`
+
+### 0042 — Deduplicate equivalent functions across composed presets
+
+**0042** · accepted · tags: runtime-maps, presets, functions, multi-instance · 2026-07-27
+
+Runtime-map composition keeps API and sync collision checks strict. Repeated function keys are accepted only when both generated entries have the same keys and each exported value is reference- or value-identical through `Object.is`. The first equivalent wrapper remains in the merged registry.
+
+→ `docs/decisions/0042-deduplicate-equivalent-functions-across-composed-presets.md`
+
 ## Code governed by decisions
 
 > Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.
@@ -389,9 +445,9 @@ Keep the TTL and treat the UUID as an environment-level value. After HTTP listen
 | --- | --- | --- |
 | `packages/core/src/bindAddress.ts` | 0031 | OAuth port hopping preserves an explicitly configured local ingress |
 | `packages/core/src/bootUuid.ts` | 0036 | Boot UUID TTL requires a stable environment-level heartbeat |
-| `packages/core/src/env.ts` | 0039 | Runtime backend-port overrides use a typed core registry, never process.env |
+| `packages/core/src/env.ts` | 0039 | Use a narrow reachability-aware production audit exception |
 | `packages/core/src/hooks/types.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
-| `packages/create-luckystack-app/template/config.ts` | 0039 | Runtime backend-port overrides use a typed core registry, never process.env |
+| `packages/create-luckystack-app/template/config.ts` | 0039 | Use a narrow reachability-aware production audit exception |
 | `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
 | `packages/email/src/sendEmail.ts` | 0034 | Email timeout is cancellation intent, not proof of delivery failure |
 | `packages/login/src/accountStrategy.ts` | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant |

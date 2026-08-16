@@ -40,6 +40,7 @@ export type {
   LoggingConfig,
   RateLimitingConfig,
   SessionConfig,
+  TransportConfig,
 } from './projectConfig';
 
 export { notify, registerNotifier, getNotifier } from './notifier';
@@ -68,6 +69,14 @@ export {
 export { normalizeErrorResponseCore } from './responseNormalizer';
 
 export { getCsrfToken, clearCsrfToken, httpFetch } from './csrf';
+export { invokeRoutedHttp } from './routedHttpInvocation';
+export type {
+  RoutedHttpInvocationInput,
+  RoutedInvocationFailure,
+  RoutedInvocationMethod,
+  RoutedInvocationResponse,
+  RoutedInvocationResult,
+} from './routedHttpInvocation';
 
 export { parseServiceRouteName } from './serviceRoute';
 

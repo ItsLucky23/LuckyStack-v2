@@ -40,12 +40,22 @@ describe('scaffold framework contract delivery', () => {
     expect(templateFile('deploy.config.ts')).toContain('trustedProxyCidrs?: string[]');
     expect(templateFile('_dot_env_dot_local_template')).toContain('TOTP_ENCRYPTION_LEGACY_KEYS=');
   });
+
+  it('keeps custom Vite profile names separate from browser runtime mode', () => {
+    const config = templateFile('config.ts');
+    const viteConfig = templateFile('vite.config.ts');
+
+    expect(config).toContain('__LUCKYSTACK_VITE_RUNTIME_MODE__');
+    expect(viteConfig).toContain("command === 'build' ? 'production' : 'development'");
+    expect(viteConfig).not.toContain('__LUCKYSTACK_VITE_MODE__');
+  });
 });
 
 describe('scaffold config survives late secret resolution', () => {
   it('refreshes public/CORS/OAuth URLs while preserving the complete project policy', async () => {
     await loadCoreThenStub({
-      LUCKYSTACK_ENV: 'production',
+      NODE_ENV: 'production',
+      LUCKYSTACK_ENV: 'staging',
       PUBLIC_URL: 'PUBLIC_URL_BASE_V1',
       EXTERNAL_ORIGINS: 'ORIGINS_BASE_V1',
     });

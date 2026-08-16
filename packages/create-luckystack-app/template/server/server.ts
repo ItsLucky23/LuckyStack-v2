@@ -36,6 +36,7 @@ loadEnvFiles();
 import '../config';
 import '../deploy.config';
 import '../services.config';
+import './utils/responseNormalizer';
 import { ports } from '../config.ports';
 
 import type { IncomingMessage, ServerResponse } from 'node:http';

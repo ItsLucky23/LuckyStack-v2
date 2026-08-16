@@ -36,7 +36,7 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 | `getParsedBundles()` | Returns the preset list parsed by `applyServerArgv()` (empty array before first call). | -> docs/argv-parsing.md |
 | `getParsedPort()` | Returns the port parsed by `applyServerArgv()` (`null` if argv omitted it). | -> docs/argv-parsing.md |
 | `@luckystack/server/parseArgv` (side-effect import) | First-line import that runs `applyServerArgv()` before consumer `config.ts` reads the typed override registry. | -> docs/argv-parsing.md |
-| `createProdRuntimeMapsProvider(options)` | Build a `RuntimeMapsProvider` that loads generated maps in prod and delegates to devkit discovery in dev. Returns the provider without registering. | -> docs/runtime-maps.md |
+| `createProdRuntimeMapsProvider(options)` | Build a `RuntimeMapsProvider` that loads generated maps in prod and delegates to devkit discovery in dev. Composed presets reject duplicate API/sync ownership, deduplicate equivalent full-registry function entries, and reject differing function implementations. Returns the provider without registering. | -> docs/runtime-maps.md |
 | `registerProdRuntimeMapsProvider(options)` | Convenience wrapper: builds the provider AND calls `registerRuntimeMapsProvider`. Most consumers want this. | -> docs/runtime-maps.md |
 | `registerCustomRoute(handler, options?)` | Append a custom HTTP route handler. `options.phase`: `'post-params'` (default, runs after body parse) or `'pre-params'` (runs before `getParams`, raw `req` stream intact — webhooks + streaming uploads). | -> /docs/ARCHITECTURE_HTTP.md |
 | `getCustomRoutes()` | Read the `'post-params'` registry snapshot (the default phase). | -> /docs/ARCHITECTURE_HTTP.md |

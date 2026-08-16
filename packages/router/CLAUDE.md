@@ -11,7 +11,7 @@
 It owns:
 
 - A `luckystack-router` CLI that side-effect-imports the consumer's compiled `deploy.config.js` + `services.config.js`, then boots an HTTP server with a service-key-aware proxy.
-- **Service resolution**: parses the first non-transport URL segment (`/api/<service>/...`, `/sync/<service>/...`) and maps it to a target backend URL declared in `deploy.config.ts -> environments[envKey].bindings`.
+- **Service resolution**: maps typed `/api/<service>/...` and `/sync/<service>/...` paths by service segment, and non-transport custom paths by the pure-data `services.config.ts > customRoutes` ownership manifest, then resolves a backend URL from `deploy.config.ts`.
 - **Multi-instance load-balancing**: per-service bindings let preset bundles (e.g. `api` vs `system`) live on different backend processes; WebSocket upgrades are pinned to the `system` service backend.
 - **Health polling** of locally-owned services (dev fallback mode) and **Redis-backed shared health state** so router replicas converge on the same view.
 - **Boot-UUID handshake** that catches the "two Redis URLs both respond, but one is stale" footgun and warns (or hard-fails when `strictBootHandshake = true`) on `synchronizedEnvKeys` SHA-256 drift between current env and its `fallback`.
@@ -53,7 +53,7 @@ Bootstrap (`packages/router/src/startRouter.ts`):
 Service resolution (`packages/router/src/resolveTarget.ts`):
 
 - `createServiceTargetResolver(input: ResolveTargetInput): ServiceTargetResolver` — Builds the resolver bound to a specific env. Exposes `resolve(service)`, `setLocalHealth(service, healthy)`, `getLocalHealth(service)`, `getLocallyOwnedServices()`. Resolution order: local binding (when service is owned + healthy) → fallback env binding → null.
-- `parseServiceFromPath(pathname: string): string | null` — Default resolver. Strips `/api/` or `/sync/` prefix, returns the next segment.
+- `parseServiceFromPath(pathname, customRoutes?): string | null` — Default resolver. First applies longest-prefix custom-route ownership, otherwise strips `/api/` or `/sync/` and returns the service segment.
 - `registerServiceResolver(resolver: ServiceResolver | null): void` — Replace the default with a custom function. Return `null` from the resolver to defer to the default. Pass `null` to unregister.
 - `resolveServiceKey(input): string | null` — Internal: honors the registered resolver, falls back to `parseServiceFromPath`.
 
@@ -114,6 +114,7 @@ Read from `getDeployConfig()` (registered by the consumer's `deploy.config.ts`):
 Read from `getServicesConfig()`:
 
 - `presets[presetKey].services: string[]` — which services the locally-running preset bundle owns.
+- `customRoutes?: Record<string, string>` — absolute non-root path-prefix → owning service for HTTP routes outside `/api` and `/sync`. Longest prefix wins; invalid prefixes and unknown owners fail before listen.
 
 Env vars:
 

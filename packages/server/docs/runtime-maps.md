@@ -22,7 +22,7 @@ Preset list resolution (in `resolvePresets`):
 3. `getParsedBundles()` from `argv.ts` when non-empty.
 4. Final fallback: `['default']`.
 
-Multiple presets are loaded in parallel, normalized to `{ apisObject, syncObject, functionsObject }`, then shallow-merged into a single view. Key collisions across presets throw at boot — services must own exactly one preset (see `docs/ARCHITECTURE_PACKAGING.md` §10).
+Multiple presets are loaded in parallel, normalized to `{ apisObject, syncObject, functionsObject }`, then shallow-merged into a single view. API/sync key collisions throw at boot — services must own exactly one preset (see `docs/ARCHITECTURE_PACKAGING.md` §10). Because phase-1 generation intentionally repeats the complete function registry in every preset, equivalent function entries deduplicate; a repeated function key with different exports still throws.
 
 ## API Reference
 
@@ -66,14 +66,14 @@ interface RuntimeMapsProvider {
   1. Resolve presets via `resolvePresets(options)`.
   2. Concurrently `loadGenerated(preset)` for each preset; failures resolve to `null` (caught with `.catch(() => null)`).
   3. For each loaded module, run `normalizeGeneratedModule` (defends against missing or malformed export shape: anything other than an object becomes `{}`).
-  4. Merge `apis`, `syncs`, `functions` into the combined view with `mergeInto`, tracking origin per key in three `Map<string, string>`s.
+  4. Merge `apis`, `syncs`, `functions` into the combined view with `mergeInto`, tracking origin per key in three `Map<string, string>`s. Equivalent repeated function entries are retained once.
   5. Skipped presets emit `console.warn('[luckystack:runtimeMaps] preset "<name>" failed to load — skipping. ...')`.
   6. If no presets loaded successfully, emit `console.warn('[luckystack:runtimeMaps] no presets resolved (tried: ...). Every api/sync request will return notFound until at least one generated module loads.')` and return empty maps.
 - The dev branch caches the devkit module promise so repeated calls share one resolved module.
 
 **Errors / Edge cases:**
 
-- Key collision across presets throws synchronously inside `loadProdRuntimeMaps`:
+- API/sync collisions, and repeated function keys whose exported values differ, throw synchronously inside `loadProdRuntimeMaps`:
 
   ```
   [luckystack:runtimeMaps] <kind> key collision: "<key>" present in both preset "<previous>" and preset "<current>". Services must belong to exactly one preset (see docs/ARCHITECTURE_PACKAGING.md §10).
@@ -164,10 +164,11 @@ This matches what `scripts/generateServerRequests.ts` emits. Missing exports def
 `mergeInto(target, source, kind, fromPreset, keyOrigin)`:
 
 - Iterate every key in `source`.
-- If `keyOrigin` already records a different preset for that key -> throw the collision error.
+- If an API or sync key already belongs to a different preset -> throw the collision error.
+- If a function key already exists, compare both wrapper records: they must expose the same keys and every exported value must be identical through `Object.is`. Equivalent entries are skipped; different implementations throw.
 - Otherwise record the origin and shallow-assign `target[key] = source[key]`.
 
-Three independent origin maps are used so an api named `users/get` and a sync named `users/get` do not collide.
+Three independent origin maps are used so an api named `users/get` and a sync named `users/get` do not collide. ADR 0042 governs the shared-function exception.
 
 ## Failure modes
 
@@ -176,7 +177,9 @@ Three independent origin maps are used so an api named `users/get` and a sync na
 | `loadGenerated(preset)` rejects | Warn (`preset "<name>" failed to load — skipping`); continue with other presets. |
 | All presets failed | Warn (`no presets resolved (tried: ...)`); return empty maps; every request returns `notFound`. |
 | Preset module has wrong shape | Normalize to `{}`. Same effect: requests for those routes return `notFound`. |
-| Key collision across presets | Throw at boot — services must own exactly one preset. |
+| API/sync key collision across presets | Throw at boot — services must own exactly one preset. |
+| Equivalent repeated function entry | Deduplicate — phase-1 scoped builds intentionally carry the complete registry. |
+| Repeated function key with different exports | Throw at boot — generated artifacts disagree. |
 | Provider is never registered at all | `verifyBootstrap` hard-fails in production, loud-warns in dev. |
 
 ## Dev vs prod branch

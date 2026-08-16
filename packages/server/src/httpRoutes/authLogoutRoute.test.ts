@@ -12,10 +12,9 @@ vi.mock('../capabilities', () => ({
 vi.mock('@luckystack/core', () => ({
   getLogger: () => ({ warn: () => undefined }),
   getProjectConfig: () => ({ http: { sessionCookieName: 'token', sessionCookieSameSite: 'Strict', sessionCookiePath: '/' } }),
-  //? `resolveCookieSecure` reads `resolveEnvKey()` to default Secure ON in prod
-  //? (L5). Pin to a non-prod env so the logout-cookie assertions keep asserting
-  //? the flagless default (Secure off) that this suite expects.
-  resolveEnvKey: () => 'test',
+  //? Pin runtime mode to non-production so logout-cookie assertions keep the
+  //? flagless default (Secure off) that this suite expects.
+  isProductionRuntime: () => false,
   //? Mirror the real [error, result] tuple contract — a mock of tryCatch is
   //? the one place a raw try/catch is unavoidable.
   tryCatch: async (fn: () => Promise<unknown>) => {

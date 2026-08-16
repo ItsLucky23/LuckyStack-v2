@@ -17,7 +17,7 @@
 
 import fs from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { getBindAddress, getGeneratedApiDocsPath, isLoopbackIp, resolveEnvKey, tryCatch } from '@luckystack/core';
+import { getBindAddress, getGeneratedApiDocsPath, isLoopbackIp, isProductionRuntime, tryCatch } from '@luckystack/core';
 import { renderDocsHtml } from './docsHtml';
 
 export interface DocsBranding {
@@ -119,7 +119,7 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
     //? consumer explicitly opts in. Staging/preview servers that bind to a public
     //? interface must set `enabledInProd` to avoid exposing the docs route.
     const isPublicBind = !isLoopbackIp(getBindAddress().ip);
-    if ((resolveEnvKey() === 'production' || isPublicBind) && !options.enabledInProd) {
+    if ((isProductionRuntime() || isPublicBind) && !options.enabledInProd) {
       res.statusCode = 404;
       res.setHeader('Content-Type', 'text/plain');
       res.end('Not Found');
@@ -152,9 +152,8 @@ export const mountDocsUi = (options: MountDocsUiOptions = {}): DocsRouteHandler 
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         //? Only expose the absolute filesystem path in non-production envs to
         //? avoid leaking internal directory structure to callers (DOCSUI-8).
-        //? Use the framework-canonical env resolver (honors LUCKYSTACK_ENV),
-        //? mirroring the production gate above — not raw process.env.NODE_ENV.
-        const isDev = resolveEnvKey() !== 'production';
+        //? Runtime mode is separate from deploy-topology identity.
+        const isDev = !isProductionRuntime();
         res.end(JSON.stringify({
           error: 'apiDocs.generated.json not found',
           ...(isDev ? { expectedAt: docsPath } : {}),

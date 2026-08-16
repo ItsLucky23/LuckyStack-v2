@@ -945,12 +945,9 @@ describe('dev hot-reload env gate (SM-04)', () => {
     const prevNodeEnv = process.env.NODE_ENV;
     const prevLuckyEnv = process.env.LUCKYSTACK_ENV;
     try {
-      //? Resolve a non-dev env through the canonical `resolveEnvKey()`
-      //? (`LUCKYSTACK_ENV ?? NODE_ENV ?? 'development'`): clear the higher-priority
-      //? override and set an explicit 'staging' so the gate sees non-dev. An UNSET
-      //? env would resolve to 'development' and (correctly) start the poll.
-      Reflect.deleteProperty(process.env, 'LUCKYSTACK_ENV');
-      process.env.NODE_ENV = 'staging';
+      //? A named staging topology still uses production application mode.
+      process.env.LUCKYSTACK_ENV = 'staging';
+      process.env.NODE_ENV = 'production';
       process.env.DG_KEY = 'DG_SECRET_V1';
       const fetchImpl = okFetch({ DG_SECRET_V1: 'v' });
 

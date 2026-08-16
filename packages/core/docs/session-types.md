@@ -158,7 +158,7 @@ export const validateInputByType = async ({
 
 **Supported type forms (validateType):**
 - Primitives: `string`, `number`, `boolean`, `true`, `false`, `null`, `undefined`, `Date` (accepts ISO string or `Date` instance).
-- String/number literal types (single-quoted or double-quoted).
+- String literal types (single-quoted or double-quoted) and finite numeric literals, including negative, decimal, exponent, hexadecimal, binary, octal, and numeric-separator forms.
 - Unions (`A | B`) — succeeds on first matching branch.
 - Intersections (`A & B`) — requires all branches to succeed.
 - Arrays (`T[]`) — checks every element.

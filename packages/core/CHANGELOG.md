@@ -23,6 +23,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   programmatic `options.port` can update OAuth callbacks that still name the
   consumer default without bypassing an explicit local router ingress.
 
+## [0.8.3] - 2026-07-27
+
+### Fixed
+
+- Routed API method selection is regression-tested to prefer the registered generated method map over route-name inference for explicitly declared methods such as an `organization` GET route.
+
+## [0.8.1] - 2026-07-27
+
+### Added
+
+- `resolveRuntimeMode()`, `isProductionRuntime()` and `isTestRuntime()` expose the `NODE_ENV` application mode separately from deploy-topology identity.
+
+### Fixed
+
+- Production security/validation gates no longer treat named `LUCKYSTACK_ENV` values such as `staging` or `dockerSplit` as development.
+
+## [0.8.0] - 2026-07-27
+
+### Added
+
+- `transport.invocation` can opt typed API/sync calls into routed HTTP/SSE while the existing Socket.io connection remains responsible for realtime delivery.
+- Browser-safe routed invocation now preserves timeout, cancellation, streaming envelopes, typed GET payloads, bearer auth and origin-scoped CSRF.
+- Service topology can declare pure-data `customRoutes` ownership for non-`/api`/`/sync` paths.
+
+### Fixed
+
+- Runtime input validation now recognizes finite numeric TypeScript literals in object fields and unions, including negative and decimal values, instead of rejecting them as unvalidatable before the handler runs.
+
 ## [0.7.6] - 2026-07-23
 
 ### Fixed

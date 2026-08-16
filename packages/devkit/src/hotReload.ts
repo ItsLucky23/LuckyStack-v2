@@ -28,7 +28,7 @@ import {
 } from "./typeMapGenerator.js";
 import { findDependentRouteFiles, invalidateGraphForFile } from "./importDependencyGraph";
 import { isPrismaClientMissing, runPrismaGenerate } from "./prismaClientCheck";
-import { tryCatch, getProjectConfig, getLocaleReloader, resolveEnvKey } from "@luckystack/core";
+import { tryCatch, getProjectConfig, getLocaleReloader, isProductionRuntime } from "@luckystack/core";
 import { getRoutingRules } from './routingRules';
 
 // ----------------------------
@@ -268,7 +268,7 @@ const mountWatchers = (
 // ---------------------------------------------------------------------------
 
 export const setupWatchers = () => {
-  const isDevMode = resolveEnvKey() !== 'production';
+  const isDevMode = !isProductionRuntime();
   if (!isDevMode) return;
 
   const segments = buildPathSegments();

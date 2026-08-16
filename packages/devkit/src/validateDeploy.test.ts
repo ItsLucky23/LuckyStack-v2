@@ -137,6 +137,35 @@ describe("validateDeploy", () => {
     });
   });
 
+  describe('custom-route ownership manifest', () => {
+    it('accepts a valid custom path owned by a declared service', () => {
+      const services = validServices();
+      services.customRoutes = { '/webhooks/inbound': 'api' };
+      const result = validateDeploy({ services, deploy: validDeploy(), env: validEnv() });
+      expect(codesOf(result.findings)).not.toContain('custom-route-invalid-prefix');
+      expect(codesOf(result.findings)).not.toContain('custom-route-unknown-service');
+    });
+
+    it('fails config validation when a custom route has no known service owner', () => {
+      const services = validServices();
+      services.customRoutes = { '/webhooks/inbound': 'ghost' };
+      const result = validateDeploy({ services, deploy: validDeploy(), env: validEnv() });
+      expect(codesOf(result.findings)).toContain('custom-route-unknown-service');
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects invalid and typed-transport-overlapping prefixes', () => {
+      const services = validServices();
+      services.customRoutes = {
+        relative: 'api',
+        '/api/admin': 'api',
+      };
+      const result = validateDeploy({ services, deploy: validDeploy(), env: validEnv() });
+      expect(codesOf(result.findings)).toContain('custom-route-invalid-prefix');
+      expect(codesOf(result.findings)).toContain('custom-route-overlaps-typed-transport');
+    });
+  });
+
   describe("binding references unknown service (rule 3)", () => {
     it("flags an environment binding for a service that does not exist", () => {
       const deploy = validDeploy();

@@ -10,7 +10,7 @@ const { projectConfig } = vi.hoisted(() => ({
 
 vi.mock('@luckystack/core', () => ({
   getProjectConfig: () => projectConfig,
-  resolveEnvKey: () => 'production',
+  isProductionRuntime: () => true,
   tryCatch: vi.fn(),
 }));
 

@@ -25,6 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `options.defaultPort`, while explicit local router/reverse-proxy ingress ports
   remain authoritative.
 
+## [0.8.2] - 2026-07-27
+
+### Fixed
+
+- Processes can compose non-overlapping atomic presets whose generated maps repeat the same full function registry; equivalent function entries deduplicate while conflicting function implementations and duplicate API/sync ownership still fail closed.
+
+## [0.8.1] - 2026-07-27
+
+### Fixed
+
+- Production route maps, dev-tool startup, cookie security, bootstrap checks and port auto-increment now follow `NODE_ENV`; named topology environments remain available for health and routing identity.
+
+## [0.8.0] - 2026-07-27
+
+### Added
+
+- Routed GET API calls can carry a lossless typed payload through the reserved `__luckystack_data` query value while public key-per-query callers remain compatible.
+
 ## [0.7.6] - 2026-07-23
 
 ### Fixed

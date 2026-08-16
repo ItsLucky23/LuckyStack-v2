@@ -17,7 +17,7 @@
 import {
   getLogger,
   registerRuntimeMapsProvider,
-  resolveEnvKey,
+  isProductionRuntime,
   type RuntimeApiMapsResult,
   type RuntimeMapsProvider,
   type RuntimeSyncMapsResult,
@@ -136,6 +136,20 @@ const resolvePresets = (options: ProdRuntimeMapsLoaderOptions): string[] => {
   return ['default'];
 };
 
+//? @adr 0042
+//? Phase-1 scoped builds intentionally contain the complete function registry in
+//? every preset. ESM module caching makes equivalent entries share their exported
+//? values even though each generated preset creates a fresh wrapper object.
+const areEquivalentFunctionEntries = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) return true;
+  if (!isRuntimeMapRecord(left) || !isRuntimeMapRecord(right)) return false;
+
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => Object.hasOwn(right, key) && Object.is(left[key], right[key]));
+};
+
 const mergeInto = (
   target: RuntimeMapRecord,
   source: RuntimeMapRecord,
@@ -146,6 +160,9 @@ const mergeInto = (
   for (const key of Object.keys(source)) {
     const previousPreset = keyOrigin.get(key);
     if (previousPreset !== undefined && previousPreset !== fromPreset) {
+      if (kind === 'function' && areEquivalentFunctionEntries(target[key], source[key])) {
+        continue;
+      }
       throw new Error(
         `[luckystack:runtimeMaps] ${kind} key collision: "${key}" present in both ` +
         `preset "${previousPreset}" and preset "${fromPreset}". ` +
@@ -166,7 +183,7 @@ const mergeInto = (
  * `registerProdRuntimeMapsProvider(...)` (this module) to do both in one
  * step.
  */
-const isProduction = (): boolean => resolveEnvKey() === 'production';
+const isProduction = (): boolean => isProductionRuntime();
 
 export const createProdRuntimeMapsProvider = (
   options: ProdRuntimeMapsLoaderOptions,

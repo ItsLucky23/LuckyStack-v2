@@ -43,6 +43,27 @@ const SERVER_ENTRY = path.join('server', 'server.ts');
 //? services — matching the documented overlay order).
 const CONFIG_IMPORT = "import '../config';\n";
 const ROUTER_IMPORTS = "import '../deploy.config';\nimport '../services.config';\n";
+const SOCKET_INVOCATION = "invocation: 'socket' as 'socket' | 'routed-http',";
+const ROUTED_INVOCATION = "invocation: 'routed-http' as 'socket' | 'routed-http',";
+
+export const setInvocationTransport = (
+  project: ConsumerProject,
+  from: string,
+  to: string,
+): void => {
+  const configPath = path.join(project.root, 'config.ts');
+  if (!fs.existsSync(configPath)) {
+    console.warn(`• config.ts not found — set transport.invocation to '${to.includes('routed-http') && to !== SOCKET_INVOCATION ? 'routed-http' : 'socket'}' manually`);
+    return;
+  }
+  const content = fs.readFileSync(configPath, 'utf8');
+  if (content.includes(to)) return;
+  if (!content.includes(from)) {
+    console.warn('• config.ts transport block drifted — update transport.invocation manually');
+    return;
+  }
+  editFile(configPath, [{ find: from, replace: to }]);
+};
 
 const wireServerImports = (project: ConsumerProject): void => {
   const serverPath = path.join(project.root, SERVER_ENTRY);
@@ -95,6 +116,7 @@ export const addRouter = (project: ConsumerProject, options: AddOptions): Result
       console.log('• router config files already present');
     }
     wireServerImports(project);
+    setInvocationTransport(project, SOCKET_INVOCATION, ROUTED_INVOCATION);
   } catch (error) {
     return err(toError(error));
   }
@@ -120,6 +142,7 @@ export const removeRouter = (project: ConsumerProject): Result<void> => {
     //? Un-wire the server imports BEFORE deleting the files so a drifted server.ts
     //? is reported while the files still exist to point at.
     unwireServerImports(project);
+    setInvocationTransport(project, ROUTED_INVOCATION, SOCKET_INVOCATION);
     for (const rel of ROUTER_CONFIG_FILES) {
       const abs = path.join(project.root, rel);
       if (fs.existsSync(abs)) {

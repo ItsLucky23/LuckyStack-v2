@@ -88,7 +88,7 @@ Shape: `apiMethodMap[pagePath][apiName][version] = 'GET' | ...`.
 
 ### `registerApiMethodMap(map: ApiMethodMap): void`
 
-Stores the generated method map (typically wired by `apiTypes.generated.ts`).
+Stores the generated method map. The canonical consumer wrapper `src/_sockets/apiRequest.ts` imports `apiMethodMap` from `apiTypes.generated.ts`, registers it at module load, then re-exports the core request helper. This registration is required for routed HTTP because route names alone cannot reliably reveal their declared HTTP method.
 
 ### `getRegisteredApiMethod(pagePath, apiName, version): HttpMethodLiteral | undefined`
 
@@ -295,9 +295,10 @@ Returns the registered reloader, or `null` when none was supplied (watcher no-op
 
 `BOOT_KEY_PREFIX` is exported as the single source of truth so `@luckystack/router`'s `bootHandshake.ts` cannot drift.
 
-### `resolveEnvKey(): string`
+### Runtime mode versus deploy environment
 
-Returns `process.env.LUCKYSTACK_ENV` ?? `process.env.NODE_ENV` ?? `'development'`.
+- `resolveRuntimeMode()` returns the validated `NODE_ENV` application mode (`development`, `production` or `test`). `isProductionRuntime()` and `isTestRuntime()` are convenience predicates. Security, route-map, cookie and dev-tool behavior uses this axis.
+- `resolveEnvKey()` returns `process.env.LUCKYSTACK_ENV` ?? `process.env.NODE_ENV` ?? `'development'`. This is only the deploy-topology identity used by boot UUIDs, health attestation, routing and observability labels. A production process may therefore use `LUCKYSTACK_ENV=staging` without enabling development behavior.
 
 ### `writeBootUuid(envKey?: string): Promise<string>`
 
@@ -414,7 +415,6 @@ import {
   registerLogger,
   registerNotifier,
   registerRuntimeMapsProvider,
-  registerApiMethodMap,
   registerBindAddress,
 } from '@luckystack/core';
 import { PrismaClient } from '@prisma/client';
@@ -431,8 +431,17 @@ registerLogger({
 });
 registerNotifier(toastNotifier);
 registerRuntimeMapsProvider(prodRuntimeMaps);
-registerApiMethodMap(generatedApiMethodMap);
 registerBindAddress({ ip: '0.0.0.0', port: 8080 });
+```
+
+The browser-side method map is registered separately by the project wrapper:
+
+```typescript
+import { registerApiMethodMap } from '@luckystack/core/client';
+import { apiMethodMap } from './apiTypes.generated';
+
+registerApiMethodMap(apiMethodMap);
+export { apiRequest } from '@luckystack/core/client';
 ```
 
 ## Related

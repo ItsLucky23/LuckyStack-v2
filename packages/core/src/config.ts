@@ -75,6 +75,7 @@ export type {
   RateLimitingConfig,
   SessionConfig,
   AppConfig,
+  TransportConfig,
 } from './projectConfig';
 
 export type { BaseSessionLayout, SessionLocation, AuthProps, Jsonify } from './sessionTypes';

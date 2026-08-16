@@ -960,6 +960,141 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 
 **Notes:** geen duurzame architectuurkeuze gemaakt, dus geen ADR. De aanbevolen volgende stap is een user-approved side-by-side TS6/TS7 benchmark; canonical TS6 blijft tot compiler-API/lint/IDE-pariteit bewezen is. De ongetrackte tijdelijke research-HTML en bestaande `nul` wachten op expliciete verwijdertoestemming.
 
+## 2026-07-27 14:03 — Distributed Docker- en servicesplitplan
+
+**User prompt (summary):** Onderzoek na een fast-forward pull van `origin/main` hoe LuckyStack horizontale replicatie, één gedeelde remote Redis, lokale containers tegen staging en één lokaal featurepreset met remote fallback framework-breed moet ondersteunen. Bepaal ook welke bewezen Flexbuddy Docker-code generiek naar LuckyStack hoort.
+
+**What I did**:
+- Bevestigde welke bouwstenen al bestaan: presetbundles, routerfallback, gedeelde Redis/fanout, externe load-balancerbindings en gedeelde router-healthstate.
+- Lokaliseerde de blokkerende transportkloof: socket-first API/sync-invocations worden uitgevoerd door `system`, niet door het servicepreset dat de router voor HTTP aanwijst.
+- Koos als aanbevolen richting één Socket.io-ingress plus optionele routed HTTP/SSE-invocation; realtime fanout blijft via gedeelde Redis lopen.
+- Beschreef drie schaalmodellen, de lokale-admin→staging workflow, framework/consumer-eigenaarschap, de Docker-assetmigratie en geordende implementatie-/verificatiefases.
+- Registreerde tien open frameworkbevindingen in een gedateerde ledger.
+
+**Files touched:** `docs/findings/2026-07-27-distributed-docker-framework-plan/README.md`, `docs/findings/README.md`, `branch-logs/main.md`, `branch-logs/INDEX.md`.
+
+**Notes / decisions:** Dit is een onderbouwd voorstel, nog geen geaccepteerde architectuurbeslissing. De bestaande HTTP/SSE parity-laag hergebruiken is kleiner en veiliger dan direct een tweede intern RPC-protocol bouwen.
+
+## 2026-07-27 16:22 — Routed invocation + generieke Docker-productlaag
+
+**User prompt (summary):** Implementeer het goedgekeurde hybrid distributed transportplan volledig en ga daarna autonoom door met fase 2: generaliseer de bewezen Flexbuddy Docker/Compose-opzet naar LuckyStack zonder Flexbuddy-seeds, env-namen, integraties, servicegroepen of storagecredentials over te nemen.
+
+**Wat ik deed:**
+- `transport.invocation: 'socket' | 'routed-http'` toegevoegd; API/sync gebruiken optioneel HTTP/SSE voor uitvoering terwijl callbacks, rooms, presence en fanout op één system-Socket.io-verbinding blijven.
+- Origin-scoped CSRF, sessionStorage-bearer auth, lossless GET-payloads, timeout/abort/offline-queuegedrag en JSON/SSE-enveloppen afgedekt.
+- `services.config.ts > customRoutes` toegevoegd met longest-prefix routing en fail-fast router/deployvalidatie; frameworkpaden wijzen standaard naar `system`.
+- Harde multiprocess-integratietest toegevoegd: lokaal admin-handlerexecution, remote system-socketdelivery via gedeelde Redis, stagingfallback en exact één browsersocket.
+- Provider/router-aware Docker-assets toegevoegd aan de scaffold en `luckystack add docker`/`docker check`: npm/Bun multi-stage build, Prisma runtimeprojectie, preset-entrypoint, non-root app/router, unprivileged nginx, private database/Redis, health gates, read-only roots en seed-vrije Mongo replica-init.
+- Verse scaffolds voor Mongo/Postgres/MySQL/SQLite gevalideerd; echte Linux-images gebouwd. De geïsoleerde runtimeproef gaf healthy app/router en een SPA-200 op `127.0.0.1:18081`. Publieke routed `/readyz` bleef alleen in de npm-0.7.6-proef 502 omdat die gepubliceerde router de nieuwe customRoutes-code nog niet bevat; bronintegratietests zijn groen en er is niet gepubliceerd.
+- ADR 0037/0038, lesson 0013, changelogs, architecture/hosting/package/CLI/scaffolddocs en findings 1–4 bijgewerkt.
+
+**Verificatie:** gerichte suites 168/168 + Docker/CLI/scaffold 146/146; TypeScript schoon; packagebuild 17/17; Redis-hardfail integration 14/14; Compose-config voor vier databases + router/socket varianten geldig; Dockerfile checks waarschuwingvrij; volledige gate wordt direct voor commit opnieuw uitgevoerd.
+
+**Files:** core API/CSRF/routed transport; sync client; router ownership/proxy/integratietest; server GET-decodering; devkit validator; root/template/CLI topology; template + CLI Docker-assets/commands; bundle scripts; docs/ADRs/lesson/findings/changelogs/indexen.
+
+**Notes / decisions:** Socket blijft monolith-default; router-scaffolds kiezen routed invocation. Docker is een transparant projectoppervlak, geen runtimepackage. Bestaande consumerfiles worden nooit overschreven. De bestaande gepubliceerde dependencyboom meldde bij de schone npm-install 18 high audit-items; buiten deze taak niet stil gerepareerd en vóór een release apart te beoordelen.
+
+## 2026-07-27 17:52 — v0.8.0 releasevoorbereiding + numeric-literalvalidator
+
+**User prompt (summary):** Breng de distributed-transport- en Dockerwijzigingen uit als LuckyStack v0.8.0 en neem de generieke numeric-literal runtimevalidatorfix mee, inclusief regressietests, documentatie, changelog en volledige releaseverificatie.
+
+**Wat ik deed:**
+- Runtime-inputvalidatie uitgebreid met exacte numerieke literals in objectvelden en unions, inclusief finite decimalen, negatieve waarden, exponentnotatie, hex/binair/octal en numeric separators; zes regressiescenario's toegevoegd.
+- Alle 17 publiceerbare packages lockstep naar `0.8.0` gebracht en de relevante packagechangelogs aangevuld.
+- Productie-audit fail-closed gemaakt met één smalle, bereikbaarheidsonderbouwde React Router-allowlist; PostCSS, `brace-expansion` en `minimatch` naar veilige versies gebracht. ADR 0039 en de dependency-findingsledger leggen de twee gefixte en twee bewust niet-bereikbare advisories vast.
+- De publishworkflow op dezelfde auditgate gezet.
+- Alle 17 tarballs gebouwd en geïnspecteerd. Een echte lokale-tarballscaffold bracht nog drie type/lintproblemen in de nieuwe response-normalizer aan het licht; de template is type-safe/lint-clean gemaakt en opnieuw als tarball gevalideerd.
+
+**Verificatie:** root- en packagelint schoon; build 17/17 + app/build groen; 1964/1964 unittests groen; Redis-integratie 14/14; AI-lint/changelog/doc-staleness groen; productie-audit alleen de gedocumenteerde React Router/Hono-paden; `pack:dry` en `publish:dry` voor 17/17 packages groen; lokale npm-tarballscaffold met router/PostgreSQL slaagt voor Prisma-generate, typegeneratie, lint, build en `luckystack docker check`.
+
+**Files:** numeric validator + tests/docs/changelog; 17 packageversies + lockfile; dependency-overrides; auditgate + workflow; ADR/findings/indexen; scaffold response-normalizer; releaseadministratie.
+
+**Notes:** `.agents/`, `.codex/` en `AGENTS.md` blijven bewust ongevolgd en buiten de release. Bun kan ongepubliceerde siblingtarballs niet als onderlinge `^0.8.0`-resolutie gebruiken; de Bun-scaffoldgate volgt direct na npm-publicatie tegen de registrypackages.
+
+## 2026-07-27 18:10 — Linux CI ontmaskert onveilige transitive override
+
+**User prompt (summary):** Rond de geautoriseerde v0.8.0-publicatie af en monitor de provenance-release tot npm, tag en consumers aantoonbaar groen zijn.
+
+**Wat ik deed:**
+- De eerste tagworkflow (`30282082125`) stopte vóór npm-publicatie op Linux-lint; via een schone Node 22 Linux-container gereproduceerd dat de globale minimatch-10-override `eslint-plugin-jsx-a11y` liet crashen omdat die minimatch 3's callable CommonJS-contract verwacht.
+- De globale minimatch/brace-expansion-overrides verwijderd en de lockfile teruggebracht naar iedere consumers ondersteunde major.
+- Productie-audit correct gescheiden van `devOptional` tooling (`--omit=dev --omit=optional`), met dezelfde exact-fail-closed React Router-allowlist. Linux-lint blijft een zelfstandige harde gate.
+- ADR 0039 als superseded gemarkeerd; ADR 0041 en lesson 0014 leggen de gecorrigeerde auditgrens en cross-platform overridevalkuil vast. Dependency-findingsstatus gecorrigeerd naar 1 fixed / 3 wontfix.
+
+**Verificatie:** Windows root/package lint en volledige build 17/17 + app groen; schone Node 22 Linux `npm ci` + typegeneratie + packagebuild + root/package lint groen; audit van vereiste runtimeafhankelijkheden bevat alleen de gedocumenteerde React Router/Hono-paden.
+
+**Files:** `package.json`, `package-lock.json`, `scripts/auditProduction.mjs`, ADR 0039/0041, lesson 0014, dependency-findings + indexen, branchlog.
+
+**Notes:** npm `0.8.0` is nog niet gepubliceerd. De bestaande remote tag `v0.8.0` wijst naar de gefaalde prepcommit; een nieuwe patchrelease voorkomt herschrijven van de gepubliceerde tag.
+
+## 2026-07-27 18:20 — Runtime mode losgekoppeld van deployment-identiteit
+
+**User prompt (summary):** Bereid in Flexbuddy alles voor wat vóór de LuckyStack-release kan; valideer monolith-, split- en local-admin-Dockerrollen zonder de nog ongepubliceerde routed invocation vroegtijdig te activeren.
+
+**Wat ik deed:** Tijdens een geïsoleerde Flexbuddy Docker-proef bleek `NODE_ENV=production` + `LUCKYSTACK_ENV=docker` toch devkit en dev-routemaps te laden. De generieke oorzaak zat in LuckyStack: `resolveEnvKey()` werd zowel als router/boot-identiteit als dev/prod-securitymodus gebruikt. Nieuwe core-API `resolveRuntimeMode()` / `isProductionRuntime()` / `isTestRuntime()` toegevoegd en alle productiebeleidschecks (maps, devtools, cookies, bootstrap, ports, validation/rate limits, login/email/docs/error tracking, secret reload) omgezet naar `NODE_ENV`; `resolveEnvKey()` blijft alleen topology/boot/health/observability. De scaffold krijgt Vite build/serve-runtime mode voor browserconfig; custom profielen zoals `--mode staging` kunnen daardoor niet als devmodus lekken. ADR 0040, docs, changelogs en regressietests toegevoegd.
+
+**Verificatie:** gerichte regressies 103/103 + Flexbuddy topology/runtime 19/19; volledige unit-suite 1968/1968; packagebuild 17/17 + root build groen; root- en package-lint + AI-lint schoon; changelog-check en productie-audit groen. De live `npm test`-sweep kon niet starten doordat de lokaal geconfigureerde Mongo/Redis-runtime niet bereikbaar was; dit is infrastructuur-onbeschikbaarheid, terwijl alle zelfstandige unit/packagegates groen zijn.
+
+**Files:** core runtime-mode API/tests/docs; server runtime-map/devtool/cookie/bootstrap/portbeleid; api/sync/login/email/docs-ui/error-tracking/devkit/secret-manager callsites; scaffold/CLI templates; ADR 0040; multi-instance-docs; Docker findings/changelogs.
+
+**Notes:** Deze correctie is release-blockerend voor named split environments. De dependency-auditfix landde parallel als `3af7b5d`; deze runtimecorrectie is daarop gerebased. Publicatie, protected push en een nieuwe releasetag blijven expliciet goedkeuringsplichtig.
+
+## 2026-07-27 20:50 — Alle code behouden in v0.8.1 patchrelease
+
+**User prompt (summary):** Publiceer nu, maar overschrijf niets en behoud alle code.
+
+**Wat ik deed:**
+- De bestaande mislukte `v0.8.0`-tag bewust niet verplaatst. De geverifieerde `3af7b5d` is additief getagd als `v0.8.0+publish.1`; workflow `30293374053` publiceerde alle 17 packages als npm `0.8.0` met provenance.
+- Parallel commit `f33ab9c` eerst fast-forward naar `main` gepusht, zodat geen code verloren ging. Die commit stond terecht als Unreleased/release-blockerend voor named staging/Docker-topologieën en zat niet in de reeds immutable npm-0.8.0-artifacts.
+- Daarom alle 17 packages lockstep naar `0.8.1` gebracht, interne ranges bijgewerkt en de twaalf relevante Unreleased-changelogsecties onder `0.8.1` gedateerd.
+- Een gepubliceerde Bun-scaffold op `0.8.0` en Flexbuddy met een no-save `0.8.0`-install slaagden voor typegeneratie, lint, build, typecheck en AI-lint; Flexbuddy `package.json`/lockfile en bestaande code bleven ongewijzigd.
+
+**Verificatie:** build 17/17 + app groen; root/package/AI-lint schoon; 1968/1968 unittests; Redis-integratie 14/14; changelog/doc-staleness/audit groen; `pack:dry` en `publish:dry` voor 17/17 packages groen.
+
+**Files:** 17 packageversies + interne ranges + lockfile; twaalf packagechangelogs; branchlog/index.
+
+**Notes:** npm `0.8.0` en beide bestaande tags blijven immutable. `0.8.1` bevat de volledige hybrid-transport/Docker/numeric-literalrelease plus de named-runtime-topologycorrectie en is klaar voor de provenance-tagworkflow.
+
+## 2026-07-27 21:20 — v0.8.1 gepubliceerd zonder geschiedenis te herschrijven
+
+**User prompt (summary):** Publiceer alle code zonder bestaande code, tags of artifacts te overschrijven.
+
+**Wat ik deed:**
+- Releasecommit `6241aa0` fast-forward naar `main` gepusht en additieve annotated tag `v0.8.1` gemaakt; geen bestaande tag verplaatst of verwijderd.
+- GitHub Actions workflow `30295742756` voltooide alle gates en publiceerde 17/17 packages met npm provenance.
+- Alle registry-latestversies en attestations gecontroleerd: `@luckystack/*` en `create-luckystack-app` staan op `0.8.1`.
+- Verse gepubliceerde Bun-scaffold (`router`, SQLite) slaagde voor install, Prisma/typegeneratie, lint, build en `luckystack docker check`.
+- Flexbuddy via no-save/no-lock naar 16/16 LuckyStack `0.8.1` packages geladen; typegeneratie, lint, typecheck, build en AI-lint zijn groen zonder manifest, lockfile of broncode te wijzigen.
+
+**Verificatie:** CI build/lint/unit/audit/pack/publish groen; npm provenance aanwezig; gepubliceerde Bun-consumer groen; Flexbuddy-consumer groen.
+
+**Files:** alleen deze publicatieregistratie + branchlogindex; releasecode/tag blijven op `6241aa0`.
+
+**Notes:** Bekende kleine DX-afwijking buiten releasescope: een Bun-scaffold toont in de afsluitende “Next steps” nog `npm run ...` in plaats van `bun run ...`; de gegenereerde Bun-scripts zelf werken wel en zijn succesvol getest.
+
+## 2026-07-27 21:45 — Composed-preset function registry collision hersteld
+
+**User prompt (summary):** Upgrade Flexbuddy naar de nieuwste LuckyStack-versie, activeer routed invocation en maak de Docker-topologie compleet en aantoonbaar werkend.
+
+**Wat ik deed:** De echte Flexbuddy 0.8.1-browsertest ontdekte dat API-calls in een uit atomic presets samengestelde monolith 500 gaven. De loader behandelde de opzettelijk in elk scoped artifact opgenomen volledige function registry als dubbele service ownership. De merge semantiek is gecorrigeerd: equivalente function entries worden eenmaal behouden; verschillende function implementations en dubbele API/sync-routes blijven fail-closed. Drie regressietests, ADR 0042, een gedateerde findingsledger, package-/architectuurdocs en de server-changelog zijn toegevoegd.
+
+**Verificatie:** gerichte regressies 3/3; volledige unit-suite 1971/1971; root- en package-lint schoon; alle 17 packages + rootapp gebouwd; AI-lint/changelog-check/productie-audit groen.
+
+**Files:** `packages/server/src/runtimeMapsLoader.ts`, `packages/server/src/runtimeMapsLoader.test.ts`, server changelog/CLAUDE/runtime-mapdocs, `docs/ARCHITECTURE_PACKAGING.md`, ADR 0042, findingsledger/index en gegenereerde AI-indexen.
+
+**Notes:** De fix is lokaal releaseklaar maar nog niet gepubliceerd. Flexbuddy Docker blijft op gepubliceerde 0.8.1 de regressie tonen totdat een goedgekeurde patchrelease beschikbaar is. Apart open: runtime maps laden pas bij het eerste verzoek, waardoor `/readyz` nog groen kan zijn vóór een mapfout zichtbaar wordt; dit staat als finding 2 geregistreerd en is niet stil meegefixed.
+
+## 2026-07-27 22:18 — v0.8.2 function-composition patch gepubliceerd
+
+**User prompt (summary):** Ga na of alles met de Flexbuddy Docker Compose-opzet mogelijk is en stel vragen zodra een onzekere of gevoelige grens wordt bereikt.
+
+**Wat ik deed:** Met expliciete goedkeuring alle 17 packages lockstep naar 0.8.2 gebracht, interne ranges en lockfile vernieuwd, de serverchangelog gedateerd, protected `main` fast-forward gepusht en de additieve annotated tag `v0.8.2` gepubliceerd. GitHub Actions run `30300996723` voltooide succesvol en npm latest rapporteert 0.8.2 voor core/server/scaffolder.
+
+**Verificatie:** unit 1971/1971; root/package/AI-lint schoon; build 17/17 + rootapp; changelog- en productie-audit groen; `pack:dry` en `publish:dry` 17/17; provenance-workflow succesvol.
+
+**Files:** 17 packageversies/interne ranges, `package-lock.json`, serverchangelog, releasecommit/tag en branchlog/index.
+
+**Notes:** Bestaande tags/artifacts zijn niet herschreven. Flexbuddy kan nu naar de gepubliceerde patch upgraden voor de volledige Compose-acceptatiematrix.
 ## 2026-08-04 09:05 — TS7/VoidZero-findings herverifieerd + research-rommel opgeruimd
 
 **User prompt (summary):** Ruim de rommel op en controleer of de findings nog kloppen tegen de meest recente versies, en of de redenen om TS7/VoidZero niet te implementeren blijven staan.
@@ -1073,3 +1208,13 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Belangrijk oordeel:** de grote architectuurcorrecties zijn inhoudelijk grotendeels goed, maar “volledige documentatielaag” was een te sterke claim. `f830e0f` is bovendien geen zuivere docscommit: hij bevat runtime/config/tests; de huidige gecombineerde staat is wel mechanisch groen.
 
 **Files touched:** `docs/findings/2026-08-16-documentation-work-verification/README.md`, de twee eerdere auditledgers, `docs/findings/README.md` en branch-log/index.
+
+## 2026-08-16 18:43 — Lokale auditlijn samengevoegd met remote v0.8.3
+
+**User prompt (summary):** haal eerst de echte remote releasegeschiedenis binnen en integreer die vóór de brede documentatiefixes.
+
+**Wat ik deed:** remote refs/tags opgehaald en vastgesteld dat lokale `main` vijf commits voor en zestien commits achter liep. `origin/main` gemerged met behoud van de bestaande lokale hashes/referenties. De v0.8.0–v0.8.3 runtime, routed invocation, Docker-assets, ADR’s/findings/lessons en releasehistorie gecombineerd met de lokale port-registry-, packagecontract- en documentatieauditwijzigingen. Conflicten in gegenereerde AI-indexen via regeneratiepad opgelost; changelogs samengevoegd; server optional-cron-peer naar `^0.8.3` gebracht en lockmetadata via npm gereconcilieerd. De login provider-regressietest aangepast aan de v0.8.3 `isProductionRuntime`-seam.
+
+**Verificatie:** root/package/AI-lint groen; unit-suite 190 files en 1998/1998 tests groen; volledige build groen (17/17 packages, artifacts, TypeScript, Vite, server- en routerbundles). Servermanifest en lockfile bevatten beide de optionele cronpeer `^0.8.3`.
+
+**Files touched:** merge van `origin/main` plus conflictresoluties in branch logs, architectuurdocs, changelogs, servermanifest/lockfile en `packages/login/src/register.test.ts`.

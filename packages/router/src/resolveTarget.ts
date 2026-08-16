@@ -81,7 +81,31 @@ const firstSegment = (pathname: string): string | null => {
  * Consumers needing host-based or header-based routing register a custom
  * resolver via `registerServiceResolver(...)`.
  */
-export const parseServiceFromPath = (pathname: string): string | null => {
+const normalizeOwnershipPrefix = (prefix: string): string =>
+  prefix.length > 1 && prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+
+const resolveCustomRouteOwner = (
+  pathname: string,
+  customRoutes: Record<string, string> | undefined,
+): string | null => {
+  if (!customRoutes) return null;
+  const pathOnly = pathname.split(/[?#]/, 1)[0] ?? pathname;
+  const [decodeError, decoded] = tryCatchSync(() => decodeURIComponent(pathOnly));
+  if (decodeError || decoded === null) return null;
+
+  const matches = Object.entries(customRoutes)
+    .map(([prefix, service]) => [normalizeOwnershipPrefix(prefix), service] as const)
+    .filter(([prefix]) => decoded === prefix || decoded.startsWith(`${prefix}/`))
+    .toSorted(([left], [right]) => right.length - left.length);
+  return matches[0]?.[1] ?? null;
+};
+
+export const parseServiceFromPath = (
+  pathname: string,
+  customRoutes?: Record<string, string>,
+): string | null => {
+  const customOwner = resolveCustomRouteOwner(pathname, customRoutes);
+  if (customOwner) return customOwner;
   //? Decode the FULL pathname ONCE up front, then parse + slice on the decoded
   //? string. Decoding only the first segment but slicing the still-ENCODED
   //? remainder by the DECODED length misroutes a percent-encoded transport
@@ -143,12 +167,13 @@ export const resolveServiceKey = (input: {
   pathname: string;
   headers: Record<string, string | string[] | undefined>;
   host: string;
+  customRoutes?: Record<string, string>;
 }): string | null => {
   if (registeredResolver) {
     const custom = registeredResolver(input);
     if (custom !== null) return custom;
   }
-  return parseServiceFromPath(input.pathname);
+  return parseServiceFromPath(input.pathname, input.customRoutes);
 };
 
 //? Env keys are forwarded verbatim to upstream backends in the
@@ -198,6 +223,33 @@ const hasExplicitPort = (target: string): boolean => {
   return colon !== -1 && /^\d+$/.test(hostPort.slice(colon + 1));
 };
 
+const assertCustomRouteOwnership = (services: ServicesConfig): void => {
+  const knownServices = new Set(Object.keys(services.services));
+  const normalizedPrefixes = new Set<string>();
+  for (const [rawPrefix, service] of Object.entries(services.customRoutes ?? {})) {
+    const prefix = normalizeOwnershipPrefix(rawPrefix);
+    if (!prefix.startsWith('/') || prefix === '/' || prefix.includes('?') || prefix.includes('#')) {
+      throw new Error(
+        `[router] Custom route ownership prefix "${rawPrefix}" is invalid. Use an absolute non-root path prefix without query/hash, for example "/webhooks/admin".`,
+      );
+    }
+    if (prefix === '/api' || prefix.startsWith('/api/') || prefix === '/sync' || prefix.startsWith('/sync/')) {
+      throw new Error(
+        `[router] Custom route ownership prefix "${rawPrefix}" overlaps a typed /api or /sync transport route. Route ownership for those paths is derived from the service-first route name.`,
+      );
+    }
+    if (normalizedPrefixes.has(prefix)) {
+      throw new Error(`[router] Custom route ownership prefix "${rawPrefix}" duplicates normalized prefix "${prefix}".`);
+    }
+    normalizedPrefixes.add(prefix);
+    if (!knownServices.has(service)) {
+      throw new Error(
+        `[router] Custom route ownership prefix "${rawPrefix}" references unknown service "${service}". Add the service to services.config.ts or fix customRoutes.`,
+      );
+    }
+  }
+};
+
 const assertBindingsHaveExplicitPorts = (env: EnvironmentDefinition, envKey: string): void => {
   for (const [service, target] of Object.entries(env.bindings)) {
     const [urlError, url] = tryCatchSync(() => new URL(target));
@@ -219,6 +271,8 @@ const assertBindingsHaveExplicitPorts = (env: EnvironmentDefinition, envKey: str
 
 export const createServiceTargetResolver = (input: ResolveTargetInput): ServiceTargetResolver => {
   const { deploy, services, currentEnvKey, localPresetKey, healthStore } = input;
+
+  assertCustomRouteOwnership(services);
 
   const environments = deploy.environments ?? {};
   const currentEnv = environments[currentEnvKey];

@@ -48,6 +48,8 @@ export interface CreateHttpProxyInput {
    * inbound x-forwarded-proto value (secure direct-client default).
    */
   isTrustedProxy?: TrustedProxyMatcher;
+  /** Pure-data custom path-prefix ownership from services.config.ts. */
+  customRoutes?: Record<string, string>;
 }
 
 //? Bound the upstream request leg. A backend that accepts the TCP connection but
@@ -63,7 +65,7 @@ const UPSTREAM_REQUEST_TIMEOUT_MS = 30_000;
 //? to `Infinity` via `routing.maxRequestBodyBytes` to disable at the edge.
 const DEFAULT_MAX_BODY_BYTES = 100 * 1024 * 1024; // 100 MiB
 
-export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs, maxRequestBodyBytes, websocketService, isTrustedProxy }: CreateHttpProxyInput) => {
+export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamRequestTimeoutMs, maxRequestBodyBytes, websocketService, isTrustedProxy, customRoutes }: CreateHttpProxyInput) => {
   const requestTimeoutMs = upstreamRequestTimeoutMs ?? UPSTREAM_REQUEST_TIMEOUT_MS;
   const bodySizeCap = maxRequestBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const socketIoService = websocketService ?? DEFAULT_WS_SERVICE;
@@ -76,7 +78,7 @@ export const createHttpProxy = ({ resolver, missingServiceErrorCode, upstreamReq
   //? `new URL(...)`) would otherwise become an unhandled rejection and crash the
   //? process. This last-resort `.catch` closes that window.
   return (req: IncomingMessage, res: ServerResponse): void => {
-    void handleRequest(req, res, { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap, socketIoService, isTrustedProxy }).catch((error: unknown) => {
+    void handleRequest(req, res, { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap, socketIoService, isTrustedProxy, customRoutes }).catch((error: unknown) => {
       getLogger().error('[router] unhandled error while handling request:', { error });
       if (res.headersSent) {
         res.end();
@@ -99,6 +101,7 @@ const handleRequest = async (
     bodySizeCap: number;
     socketIoService: string;
     isTrustedProxy?: TrustedProxyMatcher;
+    customRoutes?: Record<string, string>;
   },
 ): Promise<void> => {
   const { resolver, missingServiceErrorCode, requestTimeoutMs, bodySizeCap, socketIoService } = ctx;
@@ -128,6 +131,7 @@ const handleRequest = async (
       pathname,
       headers: req.headers,
       host: req.headers.host ?? '',
+      customRoutes: ctx.customRoutes,
     });
 
   if (!service) {
