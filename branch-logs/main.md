@@ -1051,3 +1051,13 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Files touched:** `packages/core/src/{portOverrideRegistry,config,index,env,bindAddress}*`, `packages/server/src/{argv,parseArgv,portResolution,createServer,types,serverPortRemoval.test}*`, root/scaffold `config.ts` + server entry, `scripts/e2eVerdaccio.mjs`, port/auth/hosting docs, package changelogs, `docs/decisions/003{8,9}-*.md`, `docs/findings/2026-08-16-server-port-env-removal/`, `docs/lessons/0013-*.md`, generated AI indexes.
 
 **Notes / decisions:** E2E reserveert dynamisch een vrij portpaar in plaats van `4787/4788`, omdat `4787` lokaal bezet was en Windows `listen(0)` aangrenzende poorten niet garandeert. De statische regressietest gebruikt nog steeds `4787`. Tijdens de lange E2E-run committe een parallelle sessie de toenmalige werkboom als `f830e0f`; de afrondende ADR/lesson/E2E-harnesswijzigingen staan daarna nog on-gecommit.
+
+## 2026-08-16 15:30 — Volledige actieve-documentatie-audit met resterende bezwaren
+
+**User prompt (summary):** kijk naar alle aanwezige documentatie, meld welke claims/keuzes nog niet met de runtime overeenkomen en wat al is aangepast.
+
+**Wat ik deed:** een brede pass uitgevoerd over actieve architectuurdocs, package-README’s/CLAUDE-contracten, package deep docs, scaffoldvoorbeelden en cross-references. De resterende discrepanties vastgelegd in `docs/findings/2026-08-16-full-docs-disagreement-audit/` zonder ze stilzwijgend te wijzigen. Historische ADR’s/findings/lessons/branch logs en geïnstalleerde consumer-`node_modules` zijn bewust als historie/upgrade-output behandeld.
+
+**Belangrijkste open punten:** verkeerde CSRF-route (`/csrf-token` versus `/auth/csrf`), oude `sessionBasedToken`-naam in actieve docs, onvolledige CSRF-beschrijving voor login-loze/custom routes, raw-token password-reset-documentatie, resterende Sentry-only formuleringen, dode `.claude/CLAUDE.md`-links, stale roadmap-item, misleidende handmatige datums en Redis-only caveats bij custom session adapters.
+
+**Files touched:** `docs/findings/2026-08-16-full-docs-disagreement-audit/README.md`, `docs/findings/README.md` en deze branch-log.
