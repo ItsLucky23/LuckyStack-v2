@@ -9,7 +9,7 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (17)
+## Lessons (18)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
@@ -28,6 +28,7 @@
 | 0013 | Production dependencies can overwrite generated runtime artifacts | 🟠 high | docker | docker, prisma, multi-stage, healthcheck, scaffold | `docs/lessons/0013-production-dependencies-can-overwrite-generated-runtime-artifacts.md` |
 | 0014 | Global transitive overrides can hide platform-specific contract breakage | 🟠 high | dependencies | dependencies, eslint, linux, ci, release | `docs/lessons/0014-global-transitive-overrides-can-hide-platform-specific-contract-breakage.md` |
 | 0015 | Generate Prisma before type maps in artifact-free worktrees | 🟡 medium | build | prisma, type-generation, worktree, postinstall, build | `docs/lessons/0015-generate-prisma-before-type-maps-in-artifact-free-worktrees.md` |
+| 0016 | A second discovery walk only diverges in production | 🟠 high | codegen | function-injection, codegen, dev-prod-parity, runtime-maps, deploy | `docs/lessons/0016-a-second-discovery-walk-only-diverges-in-production.md` |
 | 0016 | Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup | 🟡 medium | scripts/e2eVerdaccio.mjs | e2e, windows, ports, redis, wsl, infrastructure | `docs/lessons/0016-windows-e2e-port-pairs-and-wsl-redis-protected-mode.md` |
 | 0017 | Security override edits do not necessarily refresh existing transitive lock pins | 🟠 high | package-lock.json | npm, security, overrides, lockfile, release | `docs/lessons/0017-security-overrides-need-targeted-lock-refresh.md` |
 
@@ -152,6 +153,14 @@ Never silence a transitive advisory by globally forcing an incompatible major wi
 In artifact-free worktree and release validation, generate Prisma Client before generating route type maps. Treat an unsupported `symbol` error on a Prisma-backed DTO as a possible missing-client artifact, not immediately as a route contract violation. A future build-pipeline fix should order Prisma generation before route generation or produce a specific missing-Prisma diagnostic; do not weaken wire-type validation to hide the placeholder.
 
 → `docs/lessons/0015-generate-prisma-before-type-maps-in-artifact-free-worktrees.md`
+
+### 0016 — A second discovery walk only diverges in production
+
+**0016** · high · codegen · tags: function-injection, codegen, dev-prod-parity, runtime-maps, deploy · 2026-08-14
+
+When more than one layer must agree on *what exists* — file discovery, key derivation, route naming — give them one shared function to call. Two walks over the same tree are a latent divergence, not a duplication smell you can defer. Be specific about which layers a green local build actually exercised. "Dev works, types are green, build passes" says nothing about a generated production artifact that no local code path loads. Treat a generated file that only production reads as untested by default. Assert on its content (this repo now does, in `packages/devkit/src/functionRegistry.test.ts`), or generate it from a source that is already covered. Make a discovery collision throw at build time. Both defects here degraded to a silently incomplete map; the flattened key even overwrote one module with another without a word. When a config key has a default (`serverFunctionDirs` defaults to `['functions', 'shared']`), check that every consumer reads the config rather than restating the default. A hardcoded copy of a default is a copy that stops matching.
+
+→ `docs/lessons/0016-a-second-discovery-walk-only-diverges-in-production.md`
 
 ### 0016 — Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup
 

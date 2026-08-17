@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The scaffolded `scripts/generateServerRequests.ts` emits the COMPLETE function registry into production maps. It previously scanned two hardcoded directories and ignored `paths.serverFunctionDirs`, so every module under `shared/` — including `shared/tryCatch.ts` and `shared/sleep.ts` — was absent from deployed builds and `functions.tryCatch.tryCatch(...)` / `functions.sleep.sleep(...)` threw at runtime while working in development. It also keyed modules on the bare filename, flattening `shared/rbac/engine.ts` to `functions.engine`; keys are now nested by directory, matching the dev loader and the generated `Functions` interface. Existing projects pick this up by upgrading and running `npm run generateArtifacts`.
-- A freshly scaffolded project could not run `npm run build`: Rollup failed to resolve `import 'src/index.css'` from `src/main.tsx`. The template's `vite-tsconfig-paths` plugin needs `loose: true` to apply tsconfig `paths` to non-JS/TS targets such as CSS. The framework repo was unaffected because it runs Vite 8, whose native `resolve.tsconfigPaths` resolves any specifier — so the repo built green while every scaffold could not.
 
 ## [0.8.4] - 2026-08-17
 

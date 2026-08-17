@@ -26,3 +26,17 @@
 **Files:** `scripts/generateServerRequests.ts`, `packages/test-runner/src/runAllTests.test.ts`, `packages/test-runner/CHANGELOG.md`, findingsledger + index.
 
 **Notes:** Tijdens de herverificatie kwam een APART, pre-existing probleem boven: `packages/devkit/src/typeMap/{wireProjectionEdges,transportInput,tsProgram}.test.ts` lopen ongeveer 1 op de 3 volle runs tegen dezelfde 5s-timeout. Bewezen pre-existing — gereproduceerd op een schone tree op HEAD met alles gestasht, en 4/4 groen in isolatie. Zelfde vorm als finding 7, maar hier is het zware werk terecht (ze bouwen het echte `ts.Program` over `tsconfig.server.json`), dus de fix is een verhoogde `testTimeout` voor de typeMap-suite en geen mock. Staat als finding 8 open geregistreerd, bewust niet meegefixt.
+
+## 2026-08-21 — Gerebased op v0.8.4 + e2e-poort eindelijk groen
+
+**User prompt (summary):** Recap na een week, alles pullen, docs van de remote behouden, en daarna de e2e build-stap draaien.
+
+**Wat ik deed:** Werk van `main` naar deze branch verplaatst en gerebased op `d75fc3c` (v0.8.4). Tien conflicten, allemaal append-only docs: upstream-inhoud overal behouden, mijn entries ernaast gezet; geverifieerd met een diff op verwijderde regels t.o.v. `origin/main` (8 verwijderingen, allemaal eigen herschrijvingen of een alfabetische hersortering). ADR hernummerd 0043 -> 0046 omdat upstream 0043-0045 voor het ports-werk nam. Daarna de e2e-blokkade van vorige week opgelost: de harness scaffoldde in `os.tmpdir()`, waardoor vite `vite.config.ts` niet kon laden en stil terugviel op een pluginloze default-config — de `src/index.css`-fout was daar het symptoom van, niet de oorzaak. Werkroot verplaatst naar een ondiepe map naast de repo (binnen de repo kan niet: npm-workspaces slokt de scaffold op). Meegevonden en meegefixt: de harness meldde `ALL GREEN` met exit 0 voor een run die hij na de scaffold had afgebroken.
+
+**Correctie op mezelf:** de `loose: true`-wijziging in `template/vite.config.ts` was niet nodig. Ik had bewezen dat de build slaagt MET die optie, maar nooit dat hij faalt ZONDER. Een A/B in een identieke scaffold bouwde beide keren groen (121 modules). Wijziging plus CHANGELOG-entry teruggedraaid; het bestand is weer byte-identiek aan upstream. Staat als finding 11 (false-positive) in de ledger.
+
+**Verificatie:** unit 2018/2018; 17/17 packages + rootapp gebouwd; lint/package-lint/ai:lint schoon; changelog-check groen; **e2e 9/9 ALL GREEN, exitcode 0**.
+
+**Files:** `scripts/e2eVerdaccio.mjs`, `.gitignore`, `packages/create-luckystack-app/CHANGELOG.md`, `packages/create-luckystack-app/template/vite.config.ts` (teruggedraaid), findingsledger + index, deze log.
+
+**Notes:** Nog niet gepusht en nog niet gebumpt. De e2e zit niet in CI (`.github/workflows/` draait 'm nergens) — dat is de reden dat deze twee harnessfouten onopgemerkt konden blijven; het is niet meegefixt.

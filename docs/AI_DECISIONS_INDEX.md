@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (44)
+## Decisions (45)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -57,6 +57,7 @@
 | 0043 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0043-single-source-ports-and-optin-router-topology.md` |
 | 0044 | Keep the scaffold backend default out of process.env until server bootstrap | ⚪ superseded | config, ports, scaffold, oauth, server | — | `docs/decisions/0044-scaffold-port-default-stays-out-of-process-env.md` |
 | 0045 | Runtime backend-port overrides use a typed core registry, never process.env | 🟢 accepted | config, ports, scaffold, oauth, server, cli | 0044 | `docs/decisions/0045-runtime-port-overrides-use-a-typed-registry.md` |
+| 0046 | Derive function-injection keys from one shared registry | 🟢 accepted | function-injection, codegen, runtime-maps, dev-prod-parity, devkit | — | `docs/decisions/0046-derive-function-injection-keys-from-one-shared-registry.md` |
 
 ## Summaries
 
@@ -433,6 +434,14 @@ Runtime-map composition keeps API and sync collision checks strict. Repeated fun
 **Governs** (`//? @adr 0045`): `packages/core/src/env.ts`, `packages/create-luckystack-app/template/config.ts`
 
 → `docs/decisions/0045-runtime-port-overrides-use-a-typed-registry.md`
+
+### 0046 — Derive function-injection keys from one shared registry
+
+**0046** · accepted · tags: function-injection, codegen, runtime-maps, dev-prod-parity, devkit · 2026-08-14
+
+Discovery and key derivation move into one module, `packages/devkit/src/functionRegistry.ts`, which all three layers now call:
+
+→ `docs/decisions/0046-derive-function-injection-keys-from-one-shared-registry.md`
 
 ## Code governed by decisions
 

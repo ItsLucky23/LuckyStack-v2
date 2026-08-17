@@ -68,16 +68,7 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [
       react(),
-      //? `loose: true` is REQUIRED, not a preference. Without it the plugin
-      //? only resolves tsconfig `paths` for imports it recognises as JS/TS
-      //? modules, so `import 'src/index.css'` in `src/main.tsx` reaches Rollup
-      //? as a bare specifier and `npm run build` fails with "failed to resolve
-      //? import 'src/index.css'". Dev serve is more forgiving, which is why the
-      //? break only showed up in a production build of a freshly scaffolded app.
-      //? The framework repo does not need this: it runs Vite 8, whose NATIVE
-      //? `resolve.tsconfigPaths` resolves any specifier — which is exactly why
-      //? the repo built green while every scaffold could not.
-      tsconfigPaths({ projects: ['tsconfig.json'], loose: true }),
+      tsconfigPaths({ projects: ['tsconfig.json'] }),
     ],
     define: {
       //? Vite `mode` may be a deployment profile such as `staging`; it is not

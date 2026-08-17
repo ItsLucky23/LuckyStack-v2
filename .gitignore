@@ -78,3 +78,6 @@ packages/create-luckystack-app/ls-np/
 
 # Dev scratch scripts in server/ (should never be committed)
 server/**/*.py
+
+# Throwaway work root for scripts/e2eVerdaccio.mjs (verdaccio storage + scaffold)
+.e2e-work/
