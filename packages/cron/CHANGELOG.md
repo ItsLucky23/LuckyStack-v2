@@ -6,6 +6,8 @@ monorepo's lockstep versioning.
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-08-17
+
 ### Changed
 
 - Clarified that Redis leader and per-run leases provide best-effort single-leader scheduling, not an exactly-once guarantee: a stalled process can outlive its lease, so every cron handler must remain idempotent.

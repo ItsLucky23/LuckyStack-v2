@@ -3,7 +3,7 @@
 //? AND rewrites every internal @luckystack/* dependency range (dependencies,
 //? devDependencies, peerDependencies, optionalDependencies) to `^<version>` so a
 //? coordinated release stays self-consistent. Replaces the error-prone manual
-//? edit of 14 package.json files on every bump.
+//? edit of 17 package.json files on every bump.
 //?
 //? Usage:
 //?   node scripts/setPackageVersions.mjs 0.1.5

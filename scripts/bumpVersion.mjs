@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SET_VERSIONS = path.join(ROOT, 'scripts', 'setPackageVersions.mjs');
-//? Single source of truth for the current version — all 14 packages move in
+//? Single source of truth for the current version — all 17 packages move in
 //? lockstep, so any one of them works; core is always present.
 const REFERENCE_PKG = path.join(ROOT, 'packages', 'core', 'package.json');
 

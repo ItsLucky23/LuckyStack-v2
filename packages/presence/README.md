@@ -131,7 +131,7 @@ The badge color uses theme tokens (`bg-correct` / `bg-warning` / `bg-wrong` pair
 
 - Runtime: `@luckystack/core`
 - Optional peers (install only for the used surface):
-  - `@luckystack/login@^0.8.3` — session lookup, token extraction, and lifecycle-hook integration.
+  - `@luckystack/login@^0.8.4` — session lookup, token extraction, and lifecycle-hook integration.
   - `socket.io@^4.8.0` — server lifecycle entry.
   - `react@^19.2.0` and `react-router-dom@^7.0.0` — `/client` React helpers.
 

@@ -1230,3 +1230,13 @@ Root README, HOSTING, packaging en create-app-deep-docs zijn opnieuw op de v0.8.
 **Verificatie:** root lint + package-lint + AI-lint groen; 190 testfiles en 1.998/1.998 tests groen; build 17/17 plus artifacts/TypeScript/Vite/server/router groen; pack-dry-run 17/17; changelog-check clean; scaffold-docbundle 5/5. Workspace lint, build, AI-lint, doc-staleness 12/12 en diff-check groen.
 
 **Files touched:** centrale architectuur-/hosting-/package-/findingsdocs, package README/CLAUDE/deep docs + changelogs, create-app template/deep docs, CSRF-commentcontracten, ADR/lessonnummering, gegenereerde AI-indexen, branch logs en de corresponderende `../Workspace/docs/luckystack/` snapshots.
+
+## 2026-08-17 09:10 — v0.8.4 release voorbereid en securitygate hersteld
+
+**User prompt (summary):** commit en push alles, bump de frameworkversie en publiceer een release.
+
+**Wat ik deed:** alle 17 publiceerbare packages lockstep van 0.8.3 naar 0.8.4 gebumpt, interne `@luckystack/*`-ranges naar `^0.8.4` gebracht en de relevante Unreleased-secties als v0.8.4 gedateerd. Actieve package-docpinnen en AI-capabilities bijgewerkt. De release-audit blokkeerde eerst op nieuw gemelde transitive advisories; `fast-uri`, `ip-address`, `nanoid`, `socket.io-parser`, Hono, js-yaml, React Router en brace-expansion zijn gecontroleerd bijgewerkt en met gerichte overrides geborgd. De scan staat in de findingsledger; het niet-vanzelf-verversen van lockpinnen is als lesson 0017 vastgelegd.
+
+**Verificatie:** volledige npm-audit 0 vulnerabilities; productie-audit 0 critical/high/moderate. Lint, package-lint, AI-lint, changelog-check en doc-staleness groen; 190 testfiles en 1.998/1.998 tests groen; volledige build 17/17 plus artifacts/TypeScript/Vite/server/router groen; pack-dry-run en publish-dry-run valideerden alle 17 packages.
+
+**Files touched:** alle 17 package manifests, package-lock/root security overrides, 15 changelogs, releaseversiepinnen, release scripts, AI-indexen, `docs/findings/2026-08-17-v084-release-security-audit/`, lesson 0017 en branch-log/index.

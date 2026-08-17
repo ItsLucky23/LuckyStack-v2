@@ -9,6 +9,7 @@ Last updated: 2026-08-17
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
+| 2026-08-17 | [2026-08-17-v084-release-security-audit/](./2026-08-17-v084-release-security-audit/) | v0.8.4 release dependency security audit | 8 | 8 fixed |
 | 2026-08-16 | [2026-08-16-documentation-work-verification/](./2026-08-16-documentation-work-verification/) | Independent verification of documentation/runtime/consumer work | 8 | 7 fixed · 1 wontfix |
 | 2026-08-16 | [2026-08-16-full-docs-disagreement-audit/](./2026-08-16-full-docs-disagreement-audit/) | Full active-documentation disagreement audit | 9 | 8 fixed · 1 false-positive |
 | 2026-08-16 | [2026-08-16-package-contract-audit/](./2026-08-16-package-contract-audit/) | Package manifests versus package docs and session architecture | 4 | 1 duplicate · 3 fixed |

@@ -94,7 +94,7 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 - **Required**: `zod@^4.0.0` (peer), `socket.io-client@^4.8.0` (peer — `streamWatcher.ts` opent een tweede socket voor `ctx.watchStream`), `@luckystack/core` (direct runtime dependency — levert de helpers die de runner consumeert: `tryCatch`/`tryCatchSync`, `getProjectConfig`/`getCsrfConfig`, `getSrcDir` (default src-dir voor custom-test discovery in `customTests.ts`), `getPrismaClient` (Layer-5 `ctx.prisma`) en `clearAllRateLimits`. De `apiMethodMap` zelf wordt door de consumer als argument doorgegeven, niet uit een pad gelezen).
 - **Required server-side**: `@luckystack/server` met `/_test/reset` gemount, exact `NODE_ENV=development|test`, en een niet-lege `TEST_RESET_TOKEN`.
 - **Required generated artefact**: `apiMethodMap.generated.ts` (en `apiMetaMap.generated.ts` voor de auth/rate-limit layers), geproduceerd door `@luckystack/devkit`.
-- **Optional**: `@luckystack/secret-manager@^0.8.3` (optional peer) — alleen dynamisch geladen wanneer `loadProjectConfig` een niet-lege `config.secretManager.url` teruggeeft. Zonder secret-managerconfig blijft de runner een gewone lokale-env flow.
+- **Optional**: `@luckystack/secret-manager@^0.8.4` (optional peer) — alleen dynamisch geladen wanneer `loadProjectConfig` een niet-lege `config.secretManager.url` teruggeeft. Zonder secret-managerconfig blijft de runner een gewone lokale-env flow.
 
 ## Related
 

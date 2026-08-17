@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-08-17
+
 ### Changed
 
 - Documented the fail-closed `/_test/reset` contract accurately: exact development/test mode plus required token, default Redis session namespaces only, and no application-DB or custom-SessionAdapter cleanup.

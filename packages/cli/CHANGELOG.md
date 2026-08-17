@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-08-17
+
 ### Fixed
 
 - `luckystack check-env` no longer treats removed `SERVER_PORT` as part of the framework environment contract; backend ports come from config/options or the typed positional override registry.

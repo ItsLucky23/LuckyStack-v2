@@ -9,7 +9,7 @@
 > and the private per-dev `~/.claude` memory. The AI records these automatically — see
 > `docs/LESSONS_PROTOCOL.md`.
 
-## Lessons (16)
+## Lessons (17)
 
 | # | Lesson | Severity | Area | Tags | File |
 | --- | --- | --- | --- | --- | --- |
@@ -29,6 +29,7 @@
 | 0014 | Global transitive overrides can hide platform-specific contract breakage | 🟠 high | dependencies | dependencies, eslint, linux, ci, release | `docs/lessons/0014-global-transitive-overrides-can-hide-platform-specific-contract-breakage.md` |
 | 0015 | Generate Prisma before type maps in artifact-free worktrees | 🟡 medium | build | prisma, type-generation, worktree, postinstall, build | `docs/lessons/0015-generate-prisma-before-type-maps-in-artifact-free-worktrees.md` |
 | 0016 | Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup | 🟡 medium | scripts/e2eVerdaccio.mjs | e2e, windows, ports, redis, wsl, infrastructure | `docs/lessons/0016-windows-e2e-port-pairs-and-wsl-redis-protected-mode.md` |
+| 0017 | Security override edits do not necessarily refresh existing transitive lock pins | 🟠 high | package-lock.json | npm, security, overrides, lockfile, release | `docs/lessons/0017-security-overrides-need-targeted-lock-refresh.md` |
 
 ## Takeaways
 
@@ -159,3 +160,11 @@ In artifact-free worktree and release validation, generate Prisma Client before 
 For an E2E that needs consecutive ports, reserve both exact candidates with real `net.Server` instances before selecting the pair; do not infer adjacency from `listen(0)`. When using a disposable WSL Redis from Windows, verify a real Redis `PING` over the Windows→WSL address, not just TCP connect. Use an isolated, non-persistent instance with `--protected-mode no` only for that test, then shut it down immediately; never weaken the developer's normal Redis or read secrets from `.env.local`.
 
 → `docs/lessons/0016-windows-e2e-port-pairs-and-wsl-redis-protected-mode.md`
+
+### 0017 — Security override edits do not necessarily refresh existing transitive lock pins
+
+**0017** · high · package-lock.json · tags: npm, security, overrides, lockfile, release · 2026-08-17
+
+After changing a security override, inspect the resolved version in `package-lock.json` and rerun both the complete and production audits. If the vulnerable pin remains, use a targeted `npm update <affected packages>` so npm recalculates those transitive selections. Never treat a changed `overrides` block or a zero-exit install as proof that the lockfile is safe.
+
+→ `docs/lessons/0017-security-overrides-need-targeted-lock-refresh.md`
