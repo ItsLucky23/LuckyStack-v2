@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | feat/email-code-2fa | (none) | 2026-07-12 16:05 | merged 2026-07-12 — in v0.6.0 (merge 970d051; passwordless email-code login + 2FA TOTP/email-fallback/recovery [ADR 0024]; security-hardened via 5-lens scan + echte-Redis-harness) | 7 |
 | fix/unpushed-review-findings | (none) | 2026-07-16 16:10 | merged 2026-07-16 — v0.7.0 release-readiness fixes (merge 3f77de9) | 5 |
-| main | (none) | 2026-08-17 09:10 | active — v0.8.4 release voorbereid; 17 packagebumps, volledige build/test/pack/publish-dry-run groen en npm-audit 0 vulnerabilities. | 77 |
+| main | (none) | 2026-08-17 09:27 | completed — v0.8.4 gepubliceerd via GitHub Actions met npm/SLSA provenance; 17/17 packages op latest, CI en audit groen. | 78 |
 | fix/routed-http-method-map-bootstrap | (none) | 2026-07-27 23:59 | completed — v0.8.3 met provenance gepubliceerd; registry-scaffold groen. | 3 |
 | fix/dropdown-positioning | (none) | 2026-07-22 21:17 | completed — v0.7.5 gepubliceerd via GitHub Actions met npm provenance. | 3 |
 | fix/boot-uuid-heartbeat | (none) | 2026-07-23 08:40 | merged — BU-01 uitgebracht in v0.7.6 met npm provenance. | 3 |

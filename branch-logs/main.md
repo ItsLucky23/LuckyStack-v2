@@ -1240,3 +1240,13 @@ Root README, HOSTING, packaging en create-app-deep-docs zijn opnieuw op de v0.8.
 **Verificatie:** volledige npm-audit 0 vulnerabilities; productie-audit 0 critical/high/moderate. Lint, package-lint, AI-lint, changelog-check en doc-staleness groen; 190 testfiles en 1.998/1.998 tests groen; volledige build 17/17 plus artifacts/TypeScript/Vite/server/router groen; pack-dry-run en publish-dry-run valideerden alle 17 packages.
 
 **Files touched:** alle 17 package manifests, package-lock/root security overrides, 15 changelogs, releaseversiepinnen, release scripts, AI-indexen, `docs/findings/2026-08-17-v084-release-security-audit/`, lesson 0017 en branch-log/index.
+
+## 2026-08-17 09:27 — v0.8.4 met npm provenance gepubliceerd
+
+**User prompt (summary):** push de commits, bump de versie en release alles.
+
+**Wat ik deed:** framework `main` en Workspace `main` gepusht. De geannoteerde tag `v0.8.4` op releasecommit `efabe00` aangemaakt en gepusht. GitHub Actions publish-run `32005013142` volledig gevolgd; build, unit tests, productie-audit, pack-gate en echte npm-publicatie zijn geslaagd. Daarna alle 17 packageversies en `latest`-dist-tags direct in npm geverifieerd; core en create-app attestations bevestigen SLSA provenance. De gelijktijdige main-CI-run is eveneens groen.
+
+**Verificatie:** 17/17 packages staan als 0.8.4/latest op npm; publish- en CI-workflows zijn success; root en Workspace worktrees waren schoon vóór deze releaseverslagupdate.
+
+**Files touched:** branch-log/index en de published-versionrollup in `docs/findings/README.md`.

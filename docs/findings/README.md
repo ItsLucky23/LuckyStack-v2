@@ -39,7 +39,7 @@ Last updated: 2026-08-17
 | 2026-07-02 | [2026-07-02-security/](./2026-07-02-security/) | Security & correctness scan (10 agents, full codebase) | 13 | 0 open · 10 fixed · 3 wontfix |
 
 > All release, runtime, audit, and CI publication findings currently listed here are terminal or
-> explicitly tracked as open in their own ledger. The current published package line is 0.8.3.
+> explicitly tracked as open in their own ledger. The current published package line is 0.8.4.
 
 <!--
 Add a row per findings-folder, e.g.:
