@@ -1250,3 +1250,15 @@ Root README, HOSTING, packaging en create-app-deep-docs zijn opnieuw op de v0.8.
 **Verificatie:** 17/17 packages staan als 0.8.4/latest op npm; publish- en CI-workflows zijn success; root en Workspace worktrees waren schoon vóór deze releaseverslagupdate.
 
 **Files touched:** branch-log/index en de published-versionrollup in `docs/findings/README.md`.
+
+## 2026-08-21 — v0.8.5: function-injectie-fix, e2e-poort en testbestand-uitsluiting
+
+**User prompt (summary):** "als je het helemaal getest hebt mag je het pushen en bumpen en publishen."
+
+**Wat ik deed:** `fix/prod-function-map-divergence` fast-forward in `main` gemerged (4 commits) en alle 17 packages lockstep naar 0.8.5 gebumpt, interne ranges en lockfile ververst. Inhoud: de productie-function-map las `paths.serverFunctionDirs` niet en sloeg geneste sleutels plat, waardoor `functions.tryCatch` en `functions.sleep` in élke deployed build ontbraken (ADR 0046); de verdaccio-e2e is gerepareerd en als blokkerende CI-job gewired; en testbestanden worden nu uitgesloten van elke import-alles-plek — overlay-loader, beide bundlers en function-injectie (ADR 0047), met een waarschuwing bij genegeerde overlay-submappen.
+
+**Verificatie vóór release:** unit 2033/2033 (193 files); build:packages 17/17 twee keer achtereen reproduceerbaar; volledige build, root-lint, package-lint, ai:lint en changelog-check groen; `audit:production` pass (critical=0, high=0, moderate=0); **e2e 9/9 ALL GREEN op de gebumpte 0.8.5-versies**; `pack:dry` 17/17 en `publish:dry` 17/17.
+
+**Files:** 17 package.json-versies + interne ranges, `package-lock.json`, vier CHANGELOGs, ADR 0046 + 0047, lesson 0016, findingsledger, `.github/workflows/ci.yml`, branch-logs.
+
+**Notes:** Eén build-run meldde onderweg 9 gefaalde packages en was daarna twee keer achtereen groen — Windows-file-lock, hetzelfde patroon als de e2e-tempdir van vandaag; niet gereproduceerd, wel bewust nagelopen. Gedragswijziging in deze release: een project dat leunde op een overlay-testbestand dat bij boot draaide, verliest dat side effect (bedoeld, zie ADR 0047).
