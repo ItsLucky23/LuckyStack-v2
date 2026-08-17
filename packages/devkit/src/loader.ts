@@ -6,7 +6,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from 'node:url';
-import { tryCatch, getServerFunctionDirs, getSrcDir, ROOT_DIR } from '@luckystack/core';
+import { tryCatch, getSrcDir, ROOT_DIR } from '@luckystack/core';
+import { collectFunctionModules, functionModuleFileName } from './functionRegistry';
 import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
@@ -477,85 +478,43 @@ const scanSyncFolder = async (file: string, basePath = "") => {
   }
 };
 
-//? Tracks which root directory claimed each key-path so we can detect
-//? cross-root collisions (e.g. `functions/sleep.ts` AND `shared/sleep.ts`)
-//? and surface the same error the codegen emits, instead of silently
-//? merging exports across roots.
-const functionClaimMap = new Map<string, string>();
-
+//? Discovery + key derivation live in `functionRegistry.ts`, shared with the
+//? type-map generator and the production map generator. Dev deliberately warns
+//? and skips on a collision instead of throwing — a running dev server should
+//? not hard-crash on a duplicate — while the build-time callers let the same
+//? collision throw. See ADR 0046.
 export const initializeFunctions = async () => {
   for (const key of Object.keys(devFunctions)) delete devFunctions[key];
-  functionClaimMap.clear();
 
-  const dirs = getServerFunctionDirs();
-  for (const dir of dirs) {
-    if (fs.existsSync(dir)) {
-      await scanFunctionsFolder(dir, dir);
-    }
-  }
-};
+  const modules = collectFunctionModules({
+    onConflict: (message) => {
+      console.log(`[loader][function] ${message} Skipping the second copy.`, 'red');
+    },
+  });
 
-const scanFunctionsFolder = async (dir: string, rootDir: string, basePath: string[] = []) => {
-  const entries = fs.readdirSync(dir);
+  for (const functionModule of modules) {
+    const absolutePath = path.resolve(ROOT_DIR, functionModule.sourcePath);
 
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry);
-    if (isIgnoredPath(fullPath)) continue;
-    const stat = fs.statSync(fullPath);
-
-    if (stat.isDirectory()) {
-      await scanFunctionsFolder(fullPath, rootDir, [...basePath, entry]);
-      continue;
-    }
-
-    if (!entry.endsWith(".ts")) {
-      continue;
-    }
-
-    const [err, module] = await tryCatch(async () => importFile(fullPath));
+    const [err, module] = await tryCatch(async () => importFile(absolutePath));
     if (err) {
-      console.log(`[loader][function] failed to import ${fullPath}:`, err, 'red');
+      console.log(`[loader][function] failed to import ${absolutePath}:`, err, 'red');
       continue;
     }
 
-    const fileName = entry.replace(".ts", "");
+    const fileName = functionModuleFileName(functionModule.keyPath);
     const resolvedFunctionModule = resolveFunctionModule(module, fileName);
     if (!isMergeable(resolvedFunctionModule)) continue;
-
-    const keyPath = [...basePath, fileName].join('.');
-    const previousRoot = functionClaimMap.get(keyPath);
-    if (previousRoot !== undefined && previousRoot !== rootDir) {
-      //? Cross-root collision. Mirror the codegen-time error so dev mode
-      //? surfaces the same diagnostic. Skip the import so the previous
-      //? claim wins; the next type-map regen will fail the build with the
-      //? full message.
-      console.log(
-        `[loader][function] Conflict at \`functions.${keyPath}\`: defined in both \`${previousRoot}\` and \`${rootDir}\`. Skipping the second copy; fix the duplicate (delete one — \`shared/\` is the canonical location for framework re-exports).`,
-        'red',
-      );
-      continue;
-    }
-    functionClaimMap.set(keyPath, rootDir);
 
     //? Walk into devFunctions tree, creating nested Record<string, unknown>
     //? subtrees on demand. Each level is structurally a record but typed as
     //? `unknown` after one level of indexing — re-narrow before descent.
     let target: Record<string, unknown> = devFunctions;
-    for (const part of basePath) {
+    for (const part of functionModule.keyPath.slice(0, -1)) {
       const existing = target[part];
       if (!existing || typeof existing !== 'object') {
         target[part] = {};
       }
       target = target[part] as Record<string, unknown>;
-    }
-
-    const existingAtFileName = target[fileName];
-    if (
-      existingAtFileName !== undefined
-      && isMergeable(resolvedFunctionModule)
-      && isMergeable(existingAtFileName)
-    ) {
-      Object.assign(resolvedFunctionModule, existingAtFileName);
     }
 
     target[fileName] = resolvedFunctionModule;

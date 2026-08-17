@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Composed presets accept a repeated NESTED function namespace. Equivalence is now checked recursively, so a namespace object rebuilt per preset (any function module living in a subdirectory of a `serverFunctionDirs` root) no longer reads as a differing implementation and rejects the compose at boot. A genuinely differing leaf implementation still fails closed.
+
 ## [0.8.4] - 2026-08-17
 
 ### Changed

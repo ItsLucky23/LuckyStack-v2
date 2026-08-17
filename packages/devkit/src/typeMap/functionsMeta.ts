@@ -2,8 +2,9 @@ import * as ts from 'typescript';
 import fs from 'node:fs';
 import path from 'node:path';
 import { FileImport, ImportCollectors, parseFileTypeContext, sanitizeTypeAndCollectImports } from './typeContext';
-import { getGeneratedSocketTypesPath, getServerFunctionDirs } from '@luckystack/core';
+import { getGeneratedSocketTypesPath, ROOT_DIR } from '@luckystack/core';
 import { expandType, getServerProgram } from './tsProgram';
+import { collectFunctionModules, functionModuleFileName } from '../functionRegistry';
 
 // Strips default parameter values from argument lists so the generated interface
 // is a clean type signature without runtime values.
@@ -502,66 +503,26 @@ const parseFunctionFile = (fullPath: string, collectors: ImportCollectors): IRFi
   }
 };
 
-const walkDirToIR = (dir: string, collectors: ImportCollectors): IRDirNode | null => {
-  if (!fs.existsSync(dir)) return null;
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  const children = new Map<string, IRFileNode | IRDirNode>();
+//? Places a parsed file at its key path, creating intermediate namespace nodes.
+//? Two roots contributing to the SAME namespace (`functions/admin/users.ts` +
+//? `shared/admin/roles.ts` -> `functions.admin.{users, roles}`) merge cleanly;
+//? genuine collisions never reach here because `collectFunctionModules()`
+//? already threw on them during discovery.
+const insertFileNode = (root: IRDirNode, keyPath: string[], file: IRFileNode): void => {
+  let target = root;
 
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-
-    if (entry.isDirectory()) {
-      const subDir = walkDirToIR(fullPath, collectors);
-      if (subDir && subDir.children.size > 0) {
-        children.set(entry.name, subDir);
-      }
+  for (const segment of keyPath.slice(0, -1)) {
+    const existing = target.children.get(segment);
+    if (existing?.kind === 'dir') {
+      target = existing;
       continue;
     }
-
-    if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
-
-    const fileName = entry.name.replace('.ts', '');
-    const parsed = parseFunctionFile(fullPath, collectors);
-    if (parsed && (parsed.exports.size > 0 || parsed.defaultExportName !== null || parsed.wildcardReExport !== null)) {
-      children.set(fileName, parsed);
-    }
+    const created: IRDirNode = { kind: 'dir', children: new Map(), sourcePath: segment };
+    target.children.set(segment, created);
+    target = created;
   }
 
-  return { kind: 'dir', children, sourcePath: dir };
-};
-
-const formatConflict = (keyPath: string[], a: IRFileNode | IRDirNode, b: IRFileNode | IRDirNode): string => {
-  const dottedKey = keyPath.join('.');
-  return (
-    `[function-injection] Conflict at \`functions.${dottedKey}\`: ` +
-    `defined in both \`${a.sourcePath}\` and \`${b.sourcePath}\`. ` +
-    `Delete one — \`shared/\` is the canonical location for framework re-exports.`
-  );
-};
-
-//? Merge `source` INTO `target` in place, throwing on conflicts. A "conflict"
-//? is one of:
-//?   - same key path mapped to a file in both roots
-//?   - same key path mapped to a file in one root and a directory in another
-//? Two directories with the same name merge recursively without warning so
-//? that `functions/admin/users.ts` + `shared/admin/roles.ts` produce
-//? `functions.admin.{users, roles}` cleanly.
-const mergeIR = (target: IRDirNode, source: IRDirNode, prefix: string[] = []): void => {
-  for (const [name, sourceChild] of source.children) {
-    const targetChild = target.children.get(name);
-    if (!targetChild) {
-      target.children.set(name, sourceChild);
-      continue;
-    }
-    const keyPath = [...prefix, name];
-    if (targetChild.kind !== sourceChild.kind) {
-      throw new Error(formatConflict(keyPath, targetChild, sourceChild));
-    }
-    if (targetChild.kind === 'file' || sourceChild.kind === 'file') {
-      throw new Error(formatConflict(keyPath, targetChild, sourceChild));
-    }
-    mergeIR(targetChild, sourceChild, keyPath);
-  }
+  target.children.set(functionModuleFileName(keyPath), file);
 };
 
 const serializeIRDir = (dir: IRDirNode, indent: string): string => {
@@ -618,14 +579,24 @@ const serializeIRDir = (dir: IRDirNode, indent: string): string => {
 };
 
 export const generateServerFunctions = (collectors: ImportCollectors): string => {
-  const dirs = getServerFunctionDirs();
-  if (dirs.length === 0) return '';
+  //? Discovery is owned by `functionRegistry.ts` so the emitted `Functions`
+  //? interface describes EXACTLY the module set the dev loader injects and the
+  //? production map generator emits. When these were three separate walks, the
+  //? interface promised keys that the deployed bundle did not have (ADR 0046).
+  const modules = collectFunctionModules();
+  if (modules.length === 0) return '';
 
   const merged: IRDirNode = { kind: 'dir', children: new Map(), sourcePath: '<merged>' };
-  for (const dir of dirs) {
-    const ir = walkDirToIR(dir, collectors);
-    if (!ir) continue;
-    mergeIR(merged, ir);
+
+  for (const module of modules) {
+    const absolutePath = path.resolve(ROOT_DIR, module.sourcePath);
+    const parsed = parseFunctionFile(absolutePath, collectors);
+    if (!parsed) continue;
+    if (parsed.exports.size === 0 && parsed.defaultExportName === null && parsed.wildcardReExport === null) {
+      continue;
+    }
+
+    insertFileNode(merged, module.keyPath, parsed);
   }
 
   return serializeIRDir(merged, '\t');

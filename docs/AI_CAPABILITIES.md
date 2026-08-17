@@ -78,19 +78,19 @@ Every entry below is callable inside an API or sync handler's `main({ data, user
 | --- | --- |
 | `functions.db.prisma` | `(typeof import("@luckystack/core"))["prisma"]` |
 | `functions.redis.redis` | `(typeof import("@luckystack/core"))["redis"]` |
+| `functions.responseNormalizer` | `typeof import("../../packages/core/src/responseNormalizer")` |
 | `functions.sentry.initializeSentry` | `(typeof import("@luckystack/error-tracking"))["initializeSentry"]` |
 | `functions.sentry.captureException` | `(typeof import("@luckystack/error-tracking"))["captureException"]` |
 | `functions.sentry.captureMessage` | `(typeof import("@luckystack/error-tracking"))["captureMessage"]` |
 | `functions.sentry.setSentryUser` | `(typeof import("@luckystack/error-tracking"))["setSentryUser"]` |
 | `functions.sentry.startSpan` | `(typeof import("@luckystack/error-tracking"))["startSpan"]` |
+| `functions.sentrySetup` | `typeof import("../../packages/core/src/sentrySetup")` |
+| `functions.serviceRoute` | `typeof import("../../packages/core/src/serviceRoute")` |
 | `functions.session.saveSession` | `(typeof import("@luckystack/login"))["saveSession"]` |
 | `functions.session.getSession` | `(typeof import("@luckystack/login"))["getSession"]` |
 | `functions.session.deleteSession` | `(typeof import("@luckystack/login"))["deleteSession"]` |
 | `functions.session.getAllSessions` | `(typeof import("@luckystack/login"))["getAllSessions"]` |
 | `functions.session.revokeUserSessions` | `(typeof import("@luckystack/login"))["revokeUserSessions"]` |
-| `functions.responseNormalizer` | `typeof import("../../packages/core/src/responseNormalizer")` |
-| `functions.sentrySetup` | `typeof import("../../packages/core/src/sentrySetup")` |
-| `functions.serviceRoute` | `typeof import("../../packages/core/src/serviceRoute")` |
 | `functions.sleep.sleep` | `(typeof import("../../packages/core/src/sleep"))["default"]` |
 | `functions.socketEvents` | `typeof import("../../packages/core/src/socketEvents")` |
 | `functions.tryCatch.tryCatch` | `(typeof import("../../packages/core/src/tryCatchClient"))["default"]` |

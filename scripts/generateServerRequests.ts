@@ -9,8 +9,10 @@ import {
   SYNC_VERSION_TOKEN_REGEX,
   assertNoDuplicateNormalizedRouteKeys,
   assertValidRouteNaming,
+  collectFunctionModules,
+  renderFunctionsMap,
 } from '@luckystack/devkit';
-import { ROOT_DIR, resolveFromRoot, getSrcDir, getServerDir } from '@luckystack/core';
+import { ROOT_DIR, getSrcDir, getServerDir } from '@luckystack/core';
 import { loadBuildConfig, validatePresetsAndServices, resolveRequestedPresets, getServicesForPreset } from '../server/config/presetLoader';
 
 const normalizePath = (p: string) => p.split(path.sep).join("/");
@@ -51,25 +53,6 @@ const walkSrcFiles = (dir: string, results: string[] = []) => {
   return results;
 };
 
-// Collect function files recursively
-const walkFunctionFiles = (dir: string, results: string[] = []) => {
-  if (!fs.existsSync(dir)) return results;
-
-  const entries = fs.readdirSync(dir);
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry);
-    const stat = fs.statSync(fullPath);
-
-    if (stat.isDirectory()) {
-      walkFunctionFiles(fullPath, results);
-    } else if (entry.endsWith(".ts")) {
-      results.push(normalizePath(fullPath));
-    }
-  }
-
-  return results;
-};
-
 // --------------------
 // Collect files
 // --------------------
@@ -91,20 +74,13 @@ assertNoDuplicateNormalizedRouteKeys({
 
 const rawSrcFiles = walkSrcFiles(srcDir).map(normalizePath).sort();
 
-// Collect functions: project-level functions/ overrides server/functions/ by module name.
-// This establishes the merge contract for Phase 1 (full registry, no pruning).
-const serverFunctionFiles = walkFunctionFiles("./server/functions");
-const projectFunctionFiles = walkFunctionFiles("./functions");
-
-const functionFilesByName = new Map<string, string>();
-for (const filePath of serverFunctionFiles) {
-  functionFilesByName.set(path.basename(filePath, ".ts"), filePath);
-}
-// Project functions win on name collision — same key replaces the server default.
-for (const filePath of projectFunctionFiles) {
-  functionFilesByName.set(path.basename(filePath, ".ts"), filePath);
-}
-const functionFiles = Array.from(functionFilesByName.values()).sort();
+// Collect functions from every configured `paths.serverFunctionDirs` root
+// (default `['functions', 'shared']`), nested by directory — the SAME discovery
+// the dev loader and the type-map generator use. Phase 1: the full registry is
+// emitted into every preset, no pruning. Cross-root and module/namespace key
+// collisions throw here, failing the build instead of shipping a map with a
+// silently missing entry (ADR 0046).
+const functionModules = collectFunctionModules();
 
 // --------------------
 // --------------------
@@ -115,7 +91,6 @@ for (const presetName of targetPresets) {
 
   const apiImports: string[] = [];
   const syncImports: string[] = [];
-  const functionImports: string[] = [];
 
   //? Generated route maps use `unknown` because each consumer's API/sync
   //? handler signature is unique — the framework dispatcher narrows at the
@@ -123,11 +98,9 @@ for (const presetName of targetPresets) {
   //? consumers can extend `AuthProps` via module augmentation.
   let apiMap = "export const apis: Record<string, { auth: Record<string, unknown>, main: (...args: unknown[]) => unknown, rateLimit?: number | false, httpMethod?: 'GET' | 'POST' | 'PUT' | 'DELETE', inputType?: string, inputTypeFilePath?: string, validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' }, errorFormatter?: (...args: unknown[]) => unknown }> = {\n";
   let syncMap = "export const syncs: Record<string, { main: (...args: unknown[]) => unknown, auth: Record<string, unknown>, inputType?: string, inputTypeFilePath?: string, validation?: 'strict' | 'relaxed' | { input: 'skip' | 'strict' }, errorFormatter?: (...args: unknown[]) => unknown }> = {\n";
-  let functionsMap = "export const functions: Record<string, Record<string, unknown>> = {\n";
 
   let apiCount = 0;
   let syncCount = 0;
-  let fnCount = 0;
 
   // Process API + Sync
   rawSrcFiles.forEach((normalized) => {
@@ -185,22 +158,13 @@ for (const presetName of targetPresets) {
   });
 
   // Process Functions (Phase 1: all functions are included regardless of service)
-  functionFiles.forEach((filePath) => {
-    const importPath = "../../" + filePath.replace(/\.ts$/, "");
-    const varName = `fn${fnCount++}`;
-    const fileName = path.basename(filePath, ".ts");
-    functionImports.push(`import * as ${varName} from '${importPath}';`);
-    functionsMap += `  ${JSON.stringify(fileName)}: (() => {\n`;
-    functionsMap += `    const { default: _default, ...named } = ${varName} as Record<string, unknown>;\n`;
-    functionsMap += `    const cleaned = Object.fromEntries(Object.entries(named).filter(([key]) => key !== '__esModule'));\n`;
-    functionsMap += `    if (Object.keys(cleaned).length > 0) return cleaned;\n`;
-    functionsMap += `    return _default !== undefined ? { ${JSON.stringify(fileName)}: _default } : {};\n`;
-    functionsMap += `  })(),\n`;
+  const { imports: functionImports, source: functionsMap } = renderFunctionsMap({
+    modules: functionModules,
+    importPrefix: '../../',
   });
 
   apiMap += "};\n";
   syncMap += "};\n";
-  functionsMap += "};";
 
   const importStatements = [
     ...apiImports,

@@ -38,6 +38,8 @@ const runFuzzTests = vi.fn((_input: unknown): Promise<RunContractSummary> => { o
 const runCustomTests = vi.fn((_input: unknown): Promise<RunCustomTestsSummary> => { order.push('custom'); return Promise.resolve(customSummaryOf(6, 3)); });
 const clearAllRateLimits = vi.fn((): Promise<void> => { order.push('clear'); return Promise.resolve(); });
 const getProjectConfig = vi.fn(() => ({ http: { sessionCookieName: 'cfg_cookie' } }));
+const getCsrfConfig = vi.fn(() => ({ headerName: 'x-csrf-token' }));
+const getSession = vi.fn((_token: string) => Promise.resolve({ csrfToken: 'csrf123' }));
 const resetServerState = vi.fn((_input: unknown): Promise<boolean> => { order.push('reset'); return Promise.resolve(true); });
 const resolveTestEnvironment = vi.fn((_input: unknown): Promise<void> => Promise.resolve());
 
@@ -60,6 +62,19 @@ vi.mock('./customTests', () => ({
 vi.mock('@luckystack/core', () => ({
   clearAllRateLimits: () => clearAllRateLimits(),
   getProjectConfig: () => getProjectConfig(),
+  getCsrfConfig: () => getCsrfConfig(),
+}));
+//? `buildAuthHeaders` reaches for the session record to attach a CSRF header
+//? whenever an `authToken` is supplied. Without this mock the orchestrator does
+//? a REAL `await import('@luckystack/login')` — a cold load of that package and
+//? its whole dependency graph, measured at ~600ms against ~2ms for every other
+//? case here. Under full-suite parallel load that overran the 5s timeout, and
+//? the timed-out run's pending promise then recorded its calls into the NEXT
+//? test's freshly-cleared mocks, so a sibling assertion read a Cookie value it
+//? never set. Mocking it keeps the file deterministic AND actually exercises
+//? the CSRF-header path, which previously degraded to a warning every run.
+vi.mock('@luckystack/login', () => ({
+  getSession: (token: string) => getSession(token),
 }));
 
 // Imported after the mocks are registered.
@@ -167,6 +182,27 @@ describe('runAllTests orchestration (characterization)', () => {
     expect(runFuzzTests.mock.calls[0]?.[0]).toMatchObject({ headers: { Cookie: 'my_cookie=tok123' } });
     //? sessionCookieName supplied → config fallback is NOT consulted.
     expect(getProjectConfig).not.toHaveBeenCalled();
+  });
+
+  it('attaches the session CSRF token so cookie-mode sweeps reach state-changing endpoints', async () => {
+    //? Previously unasserted: the real `@luckystack/login` import always failed
+    //? under the core mock, so every authToken run silently degraded to a
+    //? Cookie-only header set and this branch was never covered.
+    await runAllTests({ ...baseInput, authToken: 'tok123', sessionCookieName: 'my_cookie' });
+
+    expect(getSession).toHaveBeenCalledWith('tok123');
+    expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({
+      headers: { Cookie: 'my_cookie=tok123', 'x-csrf-token': 'csrf123' },
+    });
+  });
+
+  it('omits the CSRF header when the session has no csrf token', async () => {
+    getSession.mockResolvedValueOnce({ csrfToken: '' });
+
+    await runAllTests({ ...baseInput, authToken: 'tok123', sessionCookieName: 'my_cookie' });
+
+    expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({ headers: { Cookie: 'my_cookie=tok123' } });
+    expect(runContractTests.mock.calls[0]?.[0]).not.toHaveProperty('headers.x-csrf-token');
   });
 
   it('falls back to the project config cookie name when authToken is set but sessionCookieName is not', async () => {

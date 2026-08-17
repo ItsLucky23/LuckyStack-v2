@@ -51,6 +51,44 @@ describe('createProdRuntimeMapsProvider composed presets', () => {
     );
   });
 
+  it('merges a repeated NESTED function namespace across presets', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const engineFunction = vi.fn();
+    //? `shared/rbac/engine.ts` lands under an `rbac` namespace. Each generated
+    //? preset builds its own fresh wrapper objects around the same ESM exports,
+    //? so equivalence must be checked structurally all the way down — a shallow
+    //? per-key `Object.is` sees two different `rbac` objects and fails the boot.
+    const generatedFor = () => ({
+      apis: {},
+      syncs: {},
+      functions: { rbac: { engine: { evaluate: engineFunction } } },
+    });
+    const provider = createProdRuntimeMapsProvider({
+      preset: ['system', 'admin'],
+      loadGenerated: async () => generatedFor(),
+    });
+
+    const result = await provider.getRuntimeApiMaps();
+
+    expect(result.functionsObject.rbac).toEqual({ engine: { evaluate: engineFunction } });
+  });
+
+  it('still rejects a nested function namespace whose leaf implementation differs', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const provider = createProdRuntimeMapsProvider({
+      preset: ['system', 'admin'],
+      loadGenerated: async () => ({
+        apis: {},
+        syncs: {},
+        functions: { rbac: { engine: { evaluate: vi.fn() } } },
+      }),
+    });
+
+    await expect(provider.getRuntimeApiMaps()).rejects.toThrow(
+      'function key collision: "rbac" present in both preset "system" and preset "admin"',
+    );
+  });
+
   it('continues to reject duplicated route ownership across presets', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     const provider = createProdRuntimeMapsProvider({

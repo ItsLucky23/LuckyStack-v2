@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `collectFunctionModules()` / `renderFunctionsMap()` — one shared source of truth for server-function discovery and `functions.*` key derivation, consumed by the dev loader, the type-map generator and `scripts/generateServerRequests.ts`. A cross-root duplicate key or a module/namespace collision now fails the build with a diagnostic naming both source files, instead of silently dropping one module from the generated map.
+
+### Fixed
+
+- Server-function discovery no longer diverges between layers. The type-map generator now honours the `RoutingRules.ignore` predicate on function roots (it previously only did so for routes), and both it and the dev loader derive key paths from the same walk that feeds the production map generator.
+
 ## [0.8.4] - 2026-08-17
 
 ### Changed
