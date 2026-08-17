@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The scaffolded `scripts/bundleServer.mjs` no longer bundles test files from `luckystack/<pkg>/` into the production server. It now asks `@luckystack/server`'s `collectOverlayEntries` what a folder contributes, so the bundle and the runtime overlay walk can no longer disagree (ADR 0047).
 - The scaffolded `scripts/generateServerRequests.ts` emits the COMPLETE function registry into production maps. It previously scanned two hardcoded directories and ignored `paths.serverFunctionDirs`, so every module under `shared/` — including `shared/tryCatch.ts` and `shared/sleep.ts` — was absent from deployed builds and `functions.tryCatch.tryCatch(...)` / `functions.sleep.sleep(...)` threw at runtime while working in development. It also keyed modules on the bare filename, flattening `shared/rbac/engine.ts` to `functions.engine`; keys are now nested by directory, matching the dev loader and the generated `Functions` interface. Existing projects pick this up by upgrading and running `npm run generateArtifacts`.
 
 ## [0.8.4] - 2026-08-17

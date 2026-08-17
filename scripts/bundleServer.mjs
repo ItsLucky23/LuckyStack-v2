@@ -90,19 +90,45 @@ const OVERLAY_ORDER = await (async () => {
   return FALLBACK_OVERLAY_ORDER;
 })();
 
+//? WHICH files a package folder contributes is owned by @luckystack/server
+//? (`collectOverlayEntries`), for the same reason OVERLAY_ORDER is: a file the
+//? bundler includes but the runtime loader skips — or the reverse — is a
+//? dev/prod divergence, the defect class ADR 0046 exists for. Notably it
+//? excludes test files, which would otherwise be bundled into production and
+//? run their side effects at boot.
+//?
+//? The inline fallback only applies on a fresh checkout where the package dist
+//? does not exist yet; a parity test pins its pattern to core's.
+const FALLBACK_TEST_FILE_PATTERN = /\.(?:tests?|spec)\.(?:[cm]?[jt]sx?)$/i;
+const collectOverlayEntries = await (async () => {
+  try {
+    const server = await import('@luckystack/server');
+    if (typeof server.collectOverlayEntries === 'function') return server.collectOverlayEntries;
+  } catch {
+    // not built/installed yet — the parity-tested fallback below applies
+  }
+  return (packageDir) => {
+    const indexCandidates = ['index.ts', 'index.js'];
+    const entries = fs.readdirSync(packageDir, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+    const rest = files.filter((name) =>
+      !indexCandidates.includes(name)
+      && (name.endsWith('.ts') || name.endsWith('.js'))
+      && !FALLBACK_TEST_FILE_PATTERN.test(name));
+    const indexFileNames = indexCandidates.filter((candidate) => files.includes(candidate));
+    return { fileNames: [...indexFileNames, ...rest], ignoredDirectoryNames: [] };
+  };
+})();
+
 const collectOverlayFiles = (overlayAbs) => {
   const files = [];
   if (!fs.existsSync(overlayAbs)) return files;
   for (const packageName of OVERLAY_ORDER) {
     const packageDir = path.join(overlayAbs, packageName);
     if (!fs.existsSync(packageDir)) continue;
-    const entries = fs.readdirSync(packageDir).sort();
-    const indexEntries = entries.filter((entry) => entry === 'index.ts' || entry === 'index.js');
-    const restEntries = entries.filter(
-      (entry) => !indexEntries.includes(entry) && (entry.endsWith('.ts') || entry.endsWith('.js')),
-    );
-    for (const entry of [...indexEntries, ...restEntries]) {
-      files.push(path.join(packageDir, entry));
+    for (const fileName of collectOverlayEntries(packageDir).fileNames) {
+      files.push(path.join(packageDir, fileName));
     }
   }
   return files;

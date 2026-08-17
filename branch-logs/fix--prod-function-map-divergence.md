@@ -40,3 +40,15 @@
 **Files:** `scripts/e2eVerdaccio.mjs`, `.gitignore`, `packages/create-luckystack-app/CHANGELOG.md`, `packages/create-luckystack-app/template/vite.config.ts` (teruggedraaid), findingsledger + index, deze log.
 
 **Notes:** Nog niet gepusht en nog niet gebumpt. De e2e zit niet in CI (`.github/workflows/` draait 'm nergens) — dat is de reden dat deze twee harnessfouten onopgemerkt konden blijven; het is niet meegefixt.
+
+## 2026-08-21 — E2e in CI + testbestanden uitgesloten van elke import-alles-plek
+
+**User prompt (summary):** "voeg maar aan de pipeline toe, ook wil ik het nog even hebben over het feit dat als we luckystack installen we dan niet in de luckystack folder ... hierin test files toevoegen ... het is namelijk zo dat op runtime alle files worden geimport." Daarna: "ja inderdaad testbestanden uitsluiten in bijde plekken en kijk ook op andere plekken waar dit handig is en ook waarschuwen."
+
+**Wat ik deed:** De e2e als blokkerende job `e2e-scaffold` aan `ci.yml` toegevoegd (ubuntu, Node 22, 30 min, geen continue-on-error) — hij draaide nergens, en juist dáárom konden de twee harnessfouten van vandaag maanden onopgemerkt blijven. Daarna het overlay-vermoeden van de gebruiker geverifieerd: klopt, `bootstrap.ts` importeert elk `.ts`/`.js` in `luckystack/<pkg>/` en de bundler bakt datzelfde stel in de prod-bundle. Een sweep over alle `readdirSync`-plekken leverde drie lekke oppervlakken op — routes bleken al veilig omdat `isApiFileName` `_v1.tests.ts` niet matcht. De derde was function-injection in mijn eigen `functionRegistry.ts`: `functions/db.tests.ts` werd geïnjecteerd als `functions['db.tests']`, in dev, in de types én in de prod-map. Eén conventie in core (`isTestFile` / `isTestDirectory`), en het overlay-contract ondergebracht in één geëxporteerde `collectOverlayEntries` die zowel de runtime-loader als beide bundlers gebruiken. Genegeerde submappen worden nu gemeld in plaats van stil overgeslagen (behalve `__tests__`/`__mocks__`) — overlay-code één niveau lager draaide nooit en niets wees erop.
+
+**Verificatie:** unit 2033/2033 (193 files, 15 nieuwe tests); 17/17 packages + rootapp gebouwd; lint/package-lint schoon. Paritytest pint de inline fallback-regex in beide bundlers aan core's `TEST_FILE_PATTERN`, zoals `OVERLAY_ORDER` dat al deed.
+
+**Files:** `.github/workflows/ci.yml`, `packages/core/src/testFileConvention.ts` (+ test), `packages/core/src/index.ts`, `packages/server/src/bootstrap.ts` (+ `collectOverlayEntries.test.ts`), `packages/server/src/index.ts`, `packages/devkit/src/functionRegistry.ts` (+ test), `scripts/bundleServer.mjs`, `packages/create-luckystack-app/template/scripts/bundleServer.mjs`, ADR 0047, vier CHANGELOGs, `packages/{server,devkit}/CLAUDE.md`.
+
+**Notes:** Gedragswijziging, bewust: een project dat leunde op een overlay-testbestand dat bij boot draaide, verliest dat side effect. Dat is de bedoelde correctie. De overlay-walk is NIET recursief gemaakt — dat zou een load-order introduceren die er nu niet is en voor elk bestaand project veranderen welke bestanden draaien; waarschuwen behoudt het huidige gedrag en maakt het zichtbaar. Zie ADR 0047 Rejected alternatives.

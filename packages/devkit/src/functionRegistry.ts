@@ -17,7 +17,7 @@
 //? This module owns discovery + key derivation once; the generators render it.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT_DIR, getServerFunctionDirs } from '@luckystack/core';
+import { ROOT_DIR, getServerFunctionDirs, isTestFile, isTestDirectory } from '@luckystack/core';
 import { getRoutingRules } from './routingRules';
 
 export interface FunctionModule {
@@ -102,11 +102,19 @@ const walkFunctionRoot = (
     if (getRoutingRules().ignore(toWorkspaceRelative(fullPath))) continue;
 
     if (fs.statSync(fullPath).isDirectory()) {
+      //? `__tests__` / `__mocks__` hold no injectable modules.
+      if (isTestDirectory(entry)) continue;
       walkFunctionRoot(fullPath, rootDir, [...basePath, entry], collected);
       continue;
     }
 
     if (!entry.endsWith('.ts')) continue;
+    //? A test file beside a function module would be injected as a sibling key
+    //? (`functions/db.tests.ts` -> `functions['db.tests']`), imported at boot by
+    //? the dev loader AND baked into the production runtime map. Route
+    //? discovery gets this for free — `_v<N>.ts` never matches `_v1.tests.ts` —
+    //? but a function root has no such natural filter.
+    if (isTestFile(entry)) continue;
 
     collected.push({
       keyPath: [...basePath, entry.slice(0, -'.ts'.length)],

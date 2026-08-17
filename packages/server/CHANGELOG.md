@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `collectOverlayEntries(packageDir)` — the single owner of what a `luckystack/<pkg>/` folder contributes at boot, exported so `scripts/bundleServer.mjs` decides identically instead of reimplementing the walk (ADR 0047).
+
 ### Fixed
+
+- Test files in a `luckystack/<pkg>/` overlay folder are no longer imported at boot or bundled into the production server. A test file that only performs side effects (registering a stub adapter, say) previously ran in production without failing loudly. Covers `.tests.` / `.test.` / `.spec.` plus `__tests__` / `__mocks__` folders.
+- A subdirectory inside an overlay package folder is now reported instead of skipped in silence. The walk is flat by design, so overlay code parked one level down never ran and nothing pointed at it.
 
 - Composed presets accept a repeated NESTED function namespace. Equivalence is now checked recursively, so a namespace object rebuilt per preset (any function module living in a subdirectory of a `serverFunctionDirs` root) no longer reads as a differing implementation and rejects the compose at boot. A genuinely differing leaf implementation still fails closed.
 

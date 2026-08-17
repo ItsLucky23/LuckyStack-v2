@@ -7,10 +7,18 @@ import path from 'node:path';
 //? `getServerFunctionDirs` (which every test overrides via the `roots` option).
 //? Stubbing keeps the test free of a built core. Mirrors functionsMeta.test.ts.
 let mockRootDir = '/project';
-vi.mock('@luckystack/core', () => ({
-  get ROOT_DIR() { return mockRootDir; },
-  getServerFunctionDirs: vi.fn(() => []),
-}));
+vi.mock('@luckystack/core', async (importOriginal) => {
+  //? The test-file predicates are pure string helpers and are the thing under
+  //? test in the exclusion cases below — use the REAL implementations so the
+  //? mock cannot drift from the shipped convention.
+  const actual = await importOriginal<typeof import('@luckystack/core')>();
+  return {
+    get ROOT_DIR() { return mockRootDir; },
+    getServerFunctionDirs: vi.fn(() => []),
+    isTestFile: actual.isTestFile,
+    isTestDirectory: actual.isTestDirectory,
+  };
+});
 
 import {
   collectFunctionModules,
@@ -94,6 +102,24 @@ describe('collectFunctionModules', () => {
     write('functions/vendor/legacy.ts');
 
     registerRoutingRules({ ignore: (relativePath) => relativePath.includes('/vendor') });
+
+    expect(dottedKeys(collectFunctionModules({ roots: rootsOf('functions') }))).toEqual(['db']);
+  });
+
+  it('excludes test files so they are never injected or baked into the prod map', () => {
+    write('functions/db.ts');
+    write('functions/db.tests.ts');
+    write('functions/db.test.ts');
+    write('functions/db.spec.ts');
+    write('functions/nested/helper.tests.ts');
+
+    expect(dottedKeys(collectFunctionModules({ roots: rootsOf('functions') }))).toEqual(['db']);
+  });
+
+  it('skips conventional test directories', () => {
+    write('functions/db.ts');
+    write('functions/__tests__/fixtures.ts');
+    write('functions/__mocks__/redis.ts');
 
     expect(dottedKeys(collectFunctionModules({ roots: rootsOf('functions') }))).toEqual(['db']);
   });

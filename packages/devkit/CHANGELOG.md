@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Test files in a `serverFunctionDirs` root are excluded from function injection. `functions/db.tests.ts` used to be injected as `functions['db.tests']` — imported at boot by the dev loader, declared in the generated `Functions` interface, and baked into the production runtime map. `__tests__` / `__mocks__` folders are skipped too (ADR 0047).
+
 - Server-function discovery no longer diverges between layers. The type-map generator now honours the `RoutingRules.ignore` predicate on function roots (it previously only did so for routes), and both it and the dev loader derive key paths from the same walk that feeds the production map generator.
 
 ## [0.8.4] - 2026-08-17

@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (45)
+## Decisions (46)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -58,6 +58,7 @@
 | 0044 | Keep the scaffold backend default out of process.env until server bootstrap | ⚪ superseded | config, ports, scaffold, oauth, server | — | `docs/decisions/0044-scaffold-port-default-stays-out-of-process-env.md` |
 | 0045 | Runtime backend-port overrides use a typed core registry, never process.env | 🟢 accepted | config, ports, scaffold, oauth, server, cli | 0044 | `docs/decisions/0045-runtime-port-overrides-use-a-typed-registry.md` |
 | 0046 | Derive function-injection keys from one shared registry | 🟢 accepted | function-injection, codegen, runtime-maps, dev-prod-parity, devkit | — | `docs/decisions/0046-derive-function-injection-keys-from-one-shared-registry.md` |
+| 0047 | Exclude test files from every import-everything surface | 🟢 accepted | overlay, function-injection, bundling, dev-prod-parity, conventions | — | `docs/decisions/0047-exclude-test-files-from-every-import-everything-surface.md` |
 
 ## Summaries
 
@@ -442,6 +443,14 @@ Runtime-map composition keeps API and sync collision checks strict. Repeated fun
 Discovery and key derivation move into one module, `packages/devkit/src/functionRegistry.ts`, which all three layers now call:
 
 → `docs/decisions/0046-derive-function-injection-keys-from-one-shared-registry.md`
+
+### 0047 — Exclude test files from every import-everything surface
+
+**0047** · accepted · tags: overlay, function-injection, bundling, dev-prod-parity, conventions · 2026-08-21
+
+`@luckystack/core` owns one convention: `isTestFile` (`*.test|tests|spec.*` across `ts/tsx/js/jsx/mts/cts/mjs/cjs`) and `isTestDirectory` (`__tests__`, `__mocks__`). All three surfaces consult it.
+
+→ `docs/decisions/0047-exclude-test-files-from-every-import-everything-surface.md`
 
 ## Code governed by decisions
 
