@@ -15,10 +15,9 @@ export interface CsrfCookieOptions {
   sameSite?: 'strict' | 'lax' | 'none';
   secure?: boolean;
   /**
-   * MUST be false for CSRF cookies — the client needs to read the value
-   * with JS to attach it as a request header. The framework reads the
-   * value from the session record (Redis-side) rather than the cookie,
-   * so this flag is documentation/intent only.
+   * Whether the login-absent double-submit cookie is HttpOnly. The client gets
+   * the matching header value from the same-origin `GET /auth/csrf` JSON body,
+   * so either value works; `false` remains the compatibility default.
    */
   httpOnly?: boolean;
   path?: string;

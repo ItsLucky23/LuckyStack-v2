@@ -49,14 +49,14 @@
 | 0035 | TOTP ciphertext carries a key id and decrypt-only legacy keyring | 🟢 accepted | auth, 2fa, totp, encryption, rotation | — | `docs/decisions/0035-totp-ciphertext-carries-a-key-id-and-legacy-keyring.md` |
 | 0036 | Boot UUID TTL requires a stable environment-level heartbeat | 🟢 accepted | readiness, redis, boot-uuid, multi-instance, reliability | — | `docs/decisions/0036-boot-uuid-ttl-requires-a-stable-heartbeat.md` |
 | 0037 | Separate routed invocation from realtime Socket.io delivery | 🟢 accepted | api, sync, router, transport, multi-instance, redis | — | `docs/decisions/0037-separate-routed-invocation-from-realtime-socket-delivery.md` |
-| 0037 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0037-single-source-ports-and-optin-router-topology.md` |
-| 0038 | Keep the scaffold backend default out of process.env until server bootstrap | ⚪ superseded | config, ports, scaffold, oauth, server | — | `docs/decisions/0038-scaffold-port-default-stays-out-of-process-env.md` |
 | 0038 | Ship generic rendered Docker assets as a project surface | 🟢 accepted | docker, compose, scaffold, cli, deployment, presets | — | `docs/decisions/0038-ship-generic-rendered-docker-assets-as-a-project-surface.md` |
 | 0039 | Use a narrow reachability-aware production audit exception | ⚪ superseded | security, dependencies, ci, react-router, release | — | `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md` |
-| 0039 | Runtime backend-port overrides use a typed core registry, never process.env | 🟢 accepted | config, ports, scaffold, oauth, server, cli | 0038 | `docs/decisions/0039-runtime-port-overrides-use-a-typed-registry.md` |
 | 0040 | Separate application runtime mode from deployment environment identity | 🟢 accepted | core, deployment, security, docker, multi-instance | — | `docs/decisions/0040-separate-runtime-mode-from-deployment-environment-identity.md` |
 | 0041 | Audit required production dependencies and test tooling separately | 🟢 accepted | security, dependencies, ci, eslint, release | 0039 | `docs/decisions/0041-audit-required-production-dependencies-and-test-tooling-separately.md` |
 | 0042 | Deduplicate equivalent functions across composed presets | 🟢 accepted | runtime-maps, presets, functions, multi-instance | — | `docs/decisions/0042-deduplicate-equivalent-functions-across-composed-presets.md` |
+| 0043 | Single-source frontend/backend ports + router topology config is opt-in (not shipped by default) | 🟢 accepted | config, ports, scaffold, cli, router, packaging, dx | — | `docs/decisions/0043-single-source-ports-and-optin-router-topology.md` |
+| 0044 | Keep the scaffold backend default out of process.env until server bootstrap | ⚪ superseded | config, ports, scaffold, oauth, server | — | `docs/decisions/0044-scaffold-port-default-stays-out-of-process-env.md` |
+| 0045 | Runtime backend-port overrides use a typed core registry, never process.env | 🟢 accepted | config, ports, scaffold, oauth, server, cli | 0044 | `docs/decisions/0045-runtime-port-overrides-use-a-typed-registry.md` |
 
 ## Summaries
 
@@ -368,22 +368,6 @@ Keep one browser Socket.io connection to the configured websocket service, and m
 
 → `docs/decisions/0037-separate-routed-invocation-from-realtime-socket-delivery.md`
 
-### 0037 — Single-source frontend/backend ports + router topology config is opt-in (not shipped by default)
-
-**0037** · accepted · tags: config, ports, scaffold, cli, router, packaging, dx · 2026-06-26
-
-*1. A pure-data `config.ports.ts` is the single source of truth for ports.** It exports `const ports = { frontend, backend }` with **no side-effects**. `config.ts` re-exports `ports`, and `vite.config.ts` imports `config.ports.ts` *directly** — so Vite reads the ports without evaluating `config.ts`'s side-effects (`registerProjectConfig`, server-only core imports). `server.ts` passes `defaultPort: ports.backend` to `bootstrapLuckyStack`.
-
-→ `docs/decisions/0037-single-source-ports-and-optin-router-topology.md`
-
-### 0038 — Keep the scaffold backend default out of process.env until server bootstrap
-
-**0038** · superseded · tags: config, ports, scaffold, oauth, server · 2026-08-16
-
-`@luckystack/core` keeps `SERVER_PORT='80'` in its validated environment snapshot and keeps the generic server fallback, but does **not** write the implicit value into `process.env`. `process.env.SERVER_PORT` remains reserved for an explicitly supplied environment value or the positional CLI-port writeback from `@luckystack/server/parseArgv`.
-
-→ `docs/decisions/0038-scaffold-port-default-stays-out-of-process-env.md`
-
 ### 0038 — Ship generic rendered Docker assets as a project surface
 
 **0038** · accepted · tags: docker, compose, scaffold, cli, deployment, presets · 2026-07-27
@@ -398,19 +382,7 @@ Treat Docker as rendered project files, not a runtime package. Fresh scaffolds r
 
 Keep current React Router 7.18.1 and replace the release workflow's raw `npm audit --audit-level=high` command with `npm run audit:production`.
 
-**Governs** (`//? @adr 0039`): `packages/core/src/env.ts`, `packages/create-luckystack-app/template/config.ts`
-
 → `docs/decisions/0039-narrow-reachability-aware-production-audit-exception.md`
-
-### 0039 — Runtime backend-port overrides use a typed core registry, never process.env
-
-**0039** · accepted · tags: config, ports, scaffold, oauth, server, cli · 2026-08-16
-
-`SERVER_PORT` is removed from the core environment schema, server precedence, bind-address fallback, CLI diagnostics, and scaffold/runtime config.
-
-**Governs** (`//? @adr 0039`): `packages/core/src/env.ts`, `packages/create-luckystack-app/template/config.ts`
-
-→ `docs/decisions/0039-runtime-port-overrides-use-a-typed-registry.md`
 
 ### 0040 — Separate application runtime mode from deployment environment identity
 
@@ -436,6 +408,32 @@ Runtime-map composition keeps API and sync collision checks strict. Repeated fun
 
 → `docs/decisions/0042-deduplicate-equivalent-functions-across-composed-presets.md`
 
+### 0043 — Single-source frontend/backend ports + router topology config is opt-in (not shipped by default)
+
+**0043** · accepted · tags: config, ports, scaffold, cli, router, packaging, dx · 2026-06-26
+
+*1. A pure-data `config.ports.ts` is the single source of truth for ports.** It exports `const ports = { frontend, backend }` with **no side-effects**. `config.ts` re-exports `ports`, and `vite.config.ts` imports `config.ports.ts` *directly** — so Vite reads the ports without evaluating `config.ts`'s side-effects (`registerProjectConfig`, server-only core imports). `server.ts` passes `defaultPort: ports.backend` to `bootstrapLuckyStack`.
+
+→ `docs/decisions/0043-single-source-ports-and-optin-router-topology.md`
+
+### 0044 — Keep the scaffold backend default out of process.env until server bootstrap
+
+**0044** · superseded · tags: config, ports, scaffold, oauth, server · 2026-08-16
+
+`@luckystack/core` keeps `SERVER_PORT='80'` in its validated environment snapshot and keeps the generic server fallback, but does **not** write the implicit value into `process.env`. `process.env.SERVER_PORT` remains reserved for an explicitly supplied environment value or the positional CLI-port writeback from `@luckystack/server/parseArgv`.
+
+→ `docs/decisions/0044-scaffold-port-default-stays-out-of-process-env.md`
+
+### 0045 — Runtime backend-port overrides use a typed core registry, never process.env
+
+**0045** · accepted · tags: config, ports, scaffold, oauth, server, cli · 2026-08-16
+
+`SERVER_PORT` is removed from the core environment schema, server precedence, bind-address fallback, CLI diagnostics, and scaffold/runtime config.
+
+**Governs** (`//? @adr 0045`): `packages/core/src/env.ts`, `packages/create-luckystack-app/template/config.ts`
+
+→ `docs/decisions/0045-runtime-port-overrides-use-a-typed-registry.md`
+
 ## Code governed by decisions
 
 > Reverse links from a `//? @adr NNNN` tag in source back to the ADR that explains it.
@@ -445,9 +443,9 @@ Runtime-map composition keeps API and sync collision checks strict. Repeated fun
 | --- | --- | --- |
 | `packages/core/src/bindAddress.ts` | 0031 | OAuth port hopping preserves an explicitly configured local ingress |
 | `packages/core/src/bootUuid.ts` | 0036 | Boot UUID TTL requires a stable environment-level heartbeat |
-| `packages/core/src/env.ts` | 0039 | Use a narrow reachability-aware production audit exception |
+| `packages/core/src/env.ts` | 0045 | Runtime backend-port overrides use a typed core registry, never process.env |
 | `packages/core/src/hooks/types.ts` | 0018 | The session token reaches page JS only in sessionBasedToken (sessionStorage) mode |
-| `packages/create-luckystack-app/template/config.ts` | 0039 | Use a narrow reachability-aware production audit exception |
+| `packages/create-luckystack-app/template/config.ts` | 0045 | Runtime backend-port overrides use a typed core registry, never process.env |
 | `packages/create-luckystack-app/template/scripts/prismaWithSecrets.ts` | 0017 | Prisma (and other) CLI commands resolve secret-manager pointers via an always-on wrapper, not a full server boot |
 | `packages/email/src/sendEmail.ts` | 0034 | Email timeout is cancellation intent, not proof of delivery failure |
 | `packages/login/src/accountStrategy.ts` | 0019 | Email uniqueness is opt-in and governed by auth.providerAccountStrategy, not a hard schema invariant |

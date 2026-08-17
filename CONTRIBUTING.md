@@ -20,20 +20,18 @@ Why lockstep:
 
 Independent versioning is not supported and won't be accepted in PRs.
 
-## Publishability tiers
+## Publishability
 
-| Tier | Packages | Status |
-| --- | --- | --- |
-| A (publishable) | core, sentry, login, api, sync, presence, server, test-runner, docs-ui, create-luckystack-app | `"private": false`, published per release |
-| B (monorepo-only) | devkit, router | `"private": true`, never published — these are project-glue tools that depend on the consumer's source tree |
+The repository publishes 16 `@luckystack/*` packages plus the unscoped `create-luckystack-app`: api, cli, core, cron, devkit, docs-ui, email, error-tracking, login, mcp, presence, router, secret-manager, server, sync, test-runner, and create-luckystack-app. Every one has `"private": false` and participates in the lockstep release.
+
+`packages/env-resolver/` is a reserved placeholder with no `package.json`; it is not built or published.
 
 ## Adding a new framework package
 
 1. Place the package under `packages/<name>/`.
 2. Mirror an existing package's layout: `package.json`, `tsconfig.json`,
    `tsup.config.ts`, `src/`, `README.md`.
-3. Add it to `scripts/buildPackages.mjs`'s `ORDER` array in topological
-   build order.
+3. Add it to the appropriate dependency wave in `scripts/buildPackages.mjs` and update the package-count/release checks that enumerate publishable workspaces.
 4. If it ships hooks, add a `src/hookPayloads.ts` augmenting
    `@luckystack/core`'s `HookPayloads` (see `packages/login/src/hookPayloads.ts`
    or `packages/server/src/hookPayloads.ts` for the exact pattern).

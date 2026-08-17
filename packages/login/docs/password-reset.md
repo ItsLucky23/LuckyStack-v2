@@ -18,18 +18,23 @@ This is the password lifecycle from "user clicks Forgot password" through "new p
 
 The mode is read at call time via `getProjectConfig()`, so consumers can toggle it through `registerProjectConfig` without restarting. In practice, switching modes mid-process is uncommon — pick a mode at boot and stick with it.
 
-## Token layout
+## Token layout and hash-at-rest contract
 
 ```ts
-const token = randomBytes(32).toString('hex'); // 64 char URL-safe string
-const key = `${getProjectName()}-pwreset:${token}`;
-await redis.set(key, userId, 'EX', auth.passwordResetTtlSeconds);
+const handle = issueOneTimeToken('-pwreset', auth.passwordResetTtlSeconds, userId);
+await handle.store();
+
+// Redis stores only the hash-derived key:
+// <projectName>-pwreset:<sha256(handle.token)> -> userId
+return handle.token; // raw 64-character token, returned only for delivery
 ```
 
-- **Entropy** — 256 bits via `randomBytes(32)`. Hex-encoded so it can be passed in a URL query string without any escaping.
-- **Storage** — Redis. Single key holds the `userId`; one-time use means the redemption deletes the key.
-- **Namespace** — `${projectName}-pwreset:<token>`. Shared `getProjectName()` helper means the namespace matches sessions, activeUsers, OAuth state, and rate-limit (no drift between Redis keys).
-- **TTL** — `auth.passwordResetTtlSeconds`. Default 3600 (1 hour). Tighten for high-security deployments; loosen if your users frequently check email on a different device than they reset on.
+- **Entropy** — 256 bits via `randomBytes(32)`, hex-encoded as a 64-character URL-safe token.
+- **Hash at rest** — the raw token is never persisted. `issueOneTimeToken` derives a SHA-256 key suffix, so a Redis keyspace/backup leak does not yield a redeemable reset link.
+- **Namespace** — `formatKey('-pwreset', sha256(token))`; the active project/tenant key formatter remains authoritative.
+- **Single active token per user** — `${projectName}-pwreset-user:<userId>` points to the current hash key. Issuing a replacement deletes the previous outstanding token before storing the new one.
+- **TTL** — both the hash record and per-user pointer use `auth.passwordResetTtlSeconds` (default 3600 seconds).
+- **Storage boundary** — password-reset tokens intentionally use the core one-time-token Redis primitive; this is independent of the pluggable session-storage adapter.
 
 ## Primitives
 
@@ -39,9 +44,9 @@ await redis.set(key, userId, 'EX', auth.passwordResetTtlSeconds);
 createPasswordResetToken(userId: string): Promise<string>;
 ```
 
-Mint + store + return. Caller is responsible for getting the token to the user — typically embedded in a `${appPublicUrl}/reset-password?token=<token>` URL inside an email, but custom modes might send it via SMS, push notification, or an in-app banner.
+Invalidate the user's previous outstanding reset token, mint/store a new hash-at-rest token, persist the per-user pointer, and return the raw token. The caller is responsible for delivering it—normally in an `${appPublicUrl}/reset-password?token=<token>` URL.
 
-Always succeeds (returns the token string). If Redis is down, the underlying `redis.set` throws and propagates — wrap in `tryCatch` at the call site if you want to surface "email service degraded" rather than 500.
+The promise rejects when Redis cannot read/delete/store the token records. Framework-mode callers normalize that failure; custom callers should use the standard `tryCatch` helper when they need a typed degradation path.
 
 ### `consumePasswordResetToken(token)`
 
@@ -49,23 +54,9 @@ Always succeeds (returns the token string). If Redis is down, the underlying `re
 consumePasswordResetToken(token: string): Promise<string | null>;
 ```
 
-Atomic `GET` + `DEL` in a Redis transaction:
+Delegates to `consumeOneTimeToken('-pwreset', token)`. The shared primitive hashes the supplied raw token to derive the Redis key and performs one `MULTI` containing `GET` + `DEL`. It returns the bound `userId` only when both commands succeed.
 
-```ts
-const txResult = await redis.multi().get(key).del(key).exec();
-const [getErr, value] = txResult[0];
-if (getErr) return null;
-return typeof value === 'string' && value.length > 0 ? value : null;
-```
-
-Returns the bound `userId` on success, `null` on:
-
-- Empty or non-string `token` argument.
-- Token expired (Redis returns null for the GET).
-- Token already consumed (the DEL on a prior call already removed it).
-- The transaction failed entirely (Redis network blip).
-
-One-time-use is enforced by the atomic DEL — a second call with the same token returns `null` because the key is already gone. Replay attacks defeated.
+Returns `null` for an empty/malformed token, missing or expired hash record, an already-consumed token, or any transaction/DEL failure. A concurrent second redemption sees no value and fails closed, providing at-most-once consumption.
 
 ### `updatePasswordHash(userId, plaintext)`
 
@@ -80,10 +71,11 @@ const reason = validatePassword(plaintext);
 if (reason) throw new PasswordPolicyError(reason);
 const salt = await bcrypt.genSalt(getProjectConfig().auth.bcryptRounds);
 const hashedPassword = await bcrypt.hash(plaintext, salt);
-await getUserAdapter().update(userId, { password: hashedPassword } as never);
+const patch: Record<string, unknown> = { password: hashedPassword };
+await getUserAdapter().update(userId, patch);
 ```
 
-Throws `PasswordPolicyError` on policy violation. The cast to `never` on the patch tells TypeScript "we know `password` may not be a typed field on `UserRecord`, trust me" — the framework's `UserAdapter` interface is intentionally loose for this kind of optional column.
+Throws `PasswordPolicyError` on policy violation. `UserAdapter.update` accepts a loose patch because custom user stores may expose different optional credential fields; no transport-typing cast is needed.
 
 Note this primitive deliberately does NOT consume a reset token. The reset-password completion API is responsible for the sequence:
 
@@ -209,9 +201,9 @@ const { sendEmail, renderEmailLayout } = await (
 The framework-mode flow has two HTTP endpoints (wired by `@luckystack/server` via the file-based router):
 
 ```
-1. POST /api/login/sendReset/v1     → sendPasswordResetEmail({ email })
-                                       └ token now in Redis, email on its way
-2. POST /api/login/completeReset/v1 → consumePasswordResetToken(token)
+1. POST /api/reset-password/sendReset/v1   → sendPasswordResetEmail({ email })
+                                             └ token hash now in Redis; raw token is emailed
+2. POST /api/reset-password/confirmReset/v1 → consumePasswordResetToken(token)
                                        └ updatePasswordHash(userId, newPassword)
                                        └ revokeUserSessions(userId, currentToken?)
                                        └ dispatchHook('passwordResetCompleted', { userId, revokedOtherSessions })

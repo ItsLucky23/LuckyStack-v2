@@ -79,7 +79,7 @@ This package reads **no** env vars itself — it consumes `SecretManagerConfig` 
 | `resolvePath` | Override the resolve endpoint path (default `'/resolve'`). |
 | `headers` | Extra request headers merged onto every resolve request (cannot override `Authorization`). |
 | `onApplied` | Called after secrets are written to `process.env` — receives changed env NAMES only (never the values). Use to re-create pools/SDK clients on rotation. |
-| `onResolveError` | Called on resolve failure (alongside the existing `console.warn`). Route to Sentry/metrics; useful for `'hybrid'` where a silent warn is the default. |
+| `onResolveError` | Called on resolve failure (alongside the existing `console.warn`). Route to registered error trackers/metrics; useful for `'hybrid'` where a silent warn is the default. |
 | `fetchImpl` | Override the global `fetch`. For non-Node-20 hosts or test injection. |
 | `pollIntervalMs` | Production rotation poll interval in ms (re-resolves in ALL environments). Default `0` (disabled). Timers are `unref`'d. |
 

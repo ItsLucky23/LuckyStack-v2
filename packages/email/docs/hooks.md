@@ -127,7 +127,7 @@ sendEmail(input)
   |
   +-- terminal logging (`getLogger().info` / `.warn`) gated by emailConfig.logging.sends / .errors
   |
-  +-- Sentry capture on failure (no-op if @luckystack/error-tracking is not initialized)
+  +-- registered error-tracker capture on failure (safe no-op with no tracker)
   |
   +-- return EmailResult
 ```

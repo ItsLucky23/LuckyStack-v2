@@ -1,7 +1,7 @@
 # Auto-instrumentation via the core hook bus
 
 > What `@luckystack/error-tracking` wires into the framework for you, and
-> where each signal originates. As of 2026-05-21 the wiring is **hook-based**
+> where each signal originates. The wiring is **hook-based**
 > — `@luckystack/api` and `@luckystack/sync` no longer import this package
 > directly. See `/docs/MIGRATION_HOOK_BASED_ERROR_TRACKING.md` for the
 > migration history.

@@ -1,7 +1,7 @@
 # Temporary implementation plan — remove `process.env.SERVER_PORT`
 
 > **Status:** implemented and verified on 2026-08-16. Kept as the execution
-> record for ADR 0039; the final E2E used dynamically reserved consecutive ports
+> record for ADR 0045; the final E2E used dynamically reserved consecutive ports
 > rather than fixed `4787/4788` because port `4787` was already occupied locally.
 
 ## Goal
@@ -332,7 +332,7 @@ Expected result: only migration/history/changelog references plus the separate
 
 ## Documentation/memory actions
 
-- Add an ADR superseding or extending ADR 0038 for the final no-env contract.
+- Add an ADR superseding or extending ADR 0044 for the final no-env contract.
 - Update the findings ledger created for the removal assessment.
 - Regenerate `docs/AI_DECISIONS_INDEX.md` and `docs/AI_QUICK_INDEX.md`.
 - Append a branch-log entry with changed files, test matrix, and any runtime

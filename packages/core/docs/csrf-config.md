@@ -1,21 +1,21 @@
 # CSRF Config
 
-> Customise the framework's CSRF cookie name, header name, token length and cookie options without forking `@luckystack/server`. Source: `packages/core/src/csrfConfig.ts`. Bijgewerkt: 2026-05-21.
+> Customise the framework's CSRF cookie name, header name, token length and cookie options without forking `@luckystack/server`. Source: `packages/core/src/csrfConfig.ts`.
 
 ## Overview
 
-LuckyStack's CSRF defense is double-submit: on first session write, the login package mints a per-session token; the server reads it from the session record on every state-changing request and compares it against the value the browser sends in a request header. Consumers who need to integrate with an external framework expectation (legacy `x-xsrf-token`, a custom auth gateway that rewrites cookies, FIPS-grade token length) override the defaults via `registerCsrfConfig({ ... })`.
+LuckyStack has two cookie-mode CSRF branches. With `@luckystack/login`, the login package mints a per-session token and the server compares the configured request header with the session record. Without login, `GET /auth/csrf` issues a JavaScript-readable cookie and the server timing-safely compares that double-submit cookie with the header. Token/sessionStorage mode skips CSRF because the browser does not ambiently attach the bearer token. Use `registerCsrfConfig({ ... })` for external gateway conventions or a stronger token-length policy.
 
 | Setting | Default | Where it is consumed |
 |---|---|---|
-| `cookieName` | `'csrf-token'` | Reserved for future cookie-issued tokens (current double-submit uses session record). |
-| `headerName` | `'x-csrf-token'` | Server: `csrfMiddleware.ts` reads `req.headers[headerName]`. Client: `httpFetch` attaches `headerName` on state-changing requests. |
-| `tokenLength` | `32` (bytes) | Session mint in `packages/login/src/session.ts` (`randomBytes(tokenLength).toString('hex')`). |
-| `cookieOptions.sameSite` | `'lax'` | Cookie attributes if/when the framework migrates to cookie-issued tokens. |
-| `cookieOptions.secure` | `true` | Same. |
-| `cookieOptions.httpOnly` | `false` | MUST be false for CSRF cookies — clients need to read the value. |
-| `cookieOptions.path` | `'/'` | Same. |
-| `cookieOptions.maxAgeMs` | `86_400_000` (1 day) | Same. |
+| `cookieName` | `'csrf-token'` | Login-absent double-submit issue and validation. |
+| `headerName` | `'x-csrf-token'` | Middleware reads `req.headers[headerName]`; `httpFetch` attaches it on writes. |
+| `tokenLength` | `32` (bytes) | Session-bound and login-absent token minting (`randomBytes(tokenLength).toString('hex')`). |
+| `cookieOptions.sameSite` | `'lax'` | Login-absent double-submit cookie. |
+| `cookieOptions.secure` | unset | Follows `SECURE=true` unless explicitly overridden. |
+| `cookieOptions.httpOnly` | `false` | Compatibility default. May be `true`: the client reads the token from the same-origin JSON response, not from `document.cookie`. |
+| `cookieOptions.path` | `'/'` | Double-submit cookie path. |
+| `cookieOptions.maxAgeMs` | `86_400_000` (1 day) | Double-submit cookie lifetime. |
 
 ## API Reference
 
@@ -76,7 +76,7 @@ Test-only helper. Restore defaults between scenarios. Not part of the runtime co
 
 ## What this does NOT change
 
-- The double-submit comparison logic itself (`csrfSession.csrfToken === provided`).
+- The validation branch itself (session-bound comparison with login; timing-safe cookie/header comparison without login).
 - Token-mode session behaviour — token-mode sessions skip CSRF entirely (cross-origin requests don't auto-attach `sessionStorage`).
 - The framework's HTTP route paths (`GET /auth/csrf` is still the issuing endpoint).
 - The `csrfMismatch` hook fan-out — payload shape and timing are unchanged.

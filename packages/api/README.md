@@ -5,7 +5,8 @@
 ## Install
 
 ```bash
-npm install @luckystack/api @luckystack/core @luckystack/error-tracking socket.io
+npm install @luckystack/api socket.io
+# Optional Prisma-backed route code: npm install @prisma/client
 ```
 
 ## Quickstart
@@ -59,7 +60,7 @@ You typically don't call these yourself — `createLuckyStackServer` does. Use t
 2. **Rate-limits** with two buckets via `checkRateLimit` from `@luckystack/core`: a per-route bucket keyed on the validated `user.id` (anonymous callers fall back to the resolved IP — never the raw session token, so re-login can't reset the limit; the basis is overridable via `rateLimiting.identity`) plus a global per-IP abuse bucket.
 3. **Validates** the inbound payload against the Zod schema generated from your `ApiParams['data']` interface (via `@luckystack/devkit`).
 4. **Dispatches** the `preApiExecute` hook (may abort with a stop signal).
-5. **Calls** your `main(...)` and captures errors via `tryCatch` (auto-forwarded to Sentry).
+5. **Calls** your `main(...)` and captures thrown errors via `tryCatch` (fanned out to every registered error tracker).
 6. **Dispatches** the `postApiExecute` hook with the result + duration.
 7. **Returns** the response via socket `ack` or HTTP body / SSE stream.
 
@@ -79,7 +80,7 @@ if (result.status === 'success') {
 }
 ```
 
-Do not wrap `apiRequest` in `unknown` / `any` shims (see `.claude/CLAUDE.md` rule 16). If inference fails, fix the typing source or regenerate maps instead.
+Do not wrap `apiRequest` in `unknown` / `any` shims (see repository-root [`CLAUDE.md`](../../CLAUDE.md) rule 21). If inference fails, fix the typing source or regenerate maps instead.
 
 ## Public API
 

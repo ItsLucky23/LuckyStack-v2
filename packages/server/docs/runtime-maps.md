@@ -1,6 +1,6 @@
 # Runtime Maps Loader
 
-> Deep specs. Bron: `packages/server/src/runtimeMapsLoader.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs. Bron: `packages/server/src/runtimeMapsLoader.ts`.
 
 ## Overview
 

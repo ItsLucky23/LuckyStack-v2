@@ -52,7 +52,7 @@ The fuzz layer is intentionally exhaustive and slow — wire it into nightly CI 
 
 ## Server hooks it depends on
 
-- `/_test/reset` endpoint — served by `@luckystack/server` outside production (gated on `NODE_ENV !== 'production'` and an optional `TEST_RESET_TOKEN`). Used by `resetServerState` to clear DB + Redis between layers. Make sure `TEST_RESET_TOKEN` is set in any non-prod environment that is reachable over the network.
+- `/_test/reset` endpoint — served by `@luckystack/server` only when `NODE_ENV` is exactly `development` or `test`, and always gated by a non-empty `TEST_RESET_TOKEN`. `resetServerState` clears framework rate-limit state plus the default Redis session/active-user namespaces; it does not clear application database rows or custom `SessionAdapter` stores.
 - `apiMethodMap.generated.ts` — produced by `@luckystack/devkit` from your `_api/*` files. Defaults are read via `getApiMethodMapPath()` from `@luckystack/core`.
 
 ## Public API

@@ -166,7 +166,7 @@ registerHook('postLogout', async ({ userId, token }) => {
 { token: string; user: BaseSessionLayout; persistent: boolean }
 ```
 
-`persistent` is the inverse of `projectConfig.session.basedToken` — `true` means "this session survives a browser restart" (the default), `false` means "session-cookie only". Audit handlers can use this to differentiate a "remember me" login from a one-shot one.
+`persistent` is the inverse of `projectConfig.session.basedToken` — `true` means cookie mode (the credential can survive a browser restart according to cookie expiry, and is shared across tabs); `false` means tab-scoped `sessionStorage` bearer mode. Audit handlers can use this to differentiate a "remember me" login from a one-shot one.
 
 `user` is the freshly-sanitized session layout — password already stripped, avatar already resolved. Hooks should treat it as read-only; mutating it does NOT affect the saved session (the framework writes the original reference, but other hooks expect immutability).
 

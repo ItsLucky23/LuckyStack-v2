@@ -1,7 +1,5 @@
 # Routing Conventions
 
-> Last updated: 2026-05-20
-
 ## Overview
 
 `@luckystack/api` is transport-agnostic — it does not own file-based routing. Discovery of `_api/<name>_v<N>.ts` files lives in `@luckystack/devkit`, which walks `src/`, parses each file's exports, and emits two artifacts the API handler reads at runtime: the route map (`getRuntimeApiMaps()`) and the generated type map (`apiTypes.generated.ts`). This document describes the route-name conventions both handlers enforce, the per-route exports the runtime map carries, and the HTTP-method inference contract the HTTP transport applies.

@@ -1,68 +1,134 @@
 # @luckystack/error-tracking
 
-> Optional error-tracking integration for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Auto-wires error/performance capture into the framework's hook surface and request transports. Ships a backend-agnostic `ErrorTracker` adapter contract plus three built-in adapters — Sentry (`@sentry/node`), Datadog (`dd-trace` + `hot-shots`), and PostHog (`posthog-node`) — that can be registered together with fan-out. The package name is implementation-agnostic so further backends (CloudWatch, New Relic, ...) can slot in without renaming consumers' imports. The legacy single-Sentry entry is a no-op when `SENTRY_DSN` is missing.
+Pluggable server-side error capture and tracing for LuckyStack. The package re-exports the backend-neutral `ErrorTracker` registry from `@luckystack/core` and ships Sentry, Datadog, and PostHog adapters. Multiple adapters can run together; one failing adapter does not break request handling or sibling trackers.
 
 ## Install
 
+In a scaffolded app, use the feature command so the dependency and injected `functions.sentry.*` compatibility shim arrive together:
+
 ```bash
-npm install @luckystack/error-tracking @sentry/node
+npx luckystack add error-tracking
 ```
 
-`@sentry/node` is a peer dependency.
+Then install the SDK for the backend you use:
 
-## Quickstart
+```bash
+npm install @sentry/node             # Sentry
+npm install posthog-node             # PostHog
+npm install dd-trace hot-shots       # Datadog; hot-shots supplies optional metrics
+```
 
-Call `initializeSentry()` once at boot — before `createLuckyStackServer`.
+The package has no required vendor SDK. These four peers are optional and are loaded only by their matching integration.
+
+## Initialization paths
+
+### Sentry: automatic from environment
+
+`bootstrapLuckyStack` auto-imports `@luckystack/error-tracking/register`. When `SENTRY_DSN` is set, that entry initializes Sentry, registers its adapter, and enables the framework hook instrumentation. No consumer boot call is required.
+
+```env
+SENTRY_DSN=https://...
+# SENTRY_ENABLED=false # explicit opt-out while retaining the DSN
+```
+
+`initializeSentry()` remains public for custom bootstraps and legacy consumers. It is Sentry-specific and is a no-op without a DSN.
+
+### PostHog: automatic adapter registration
+
+With `POSTHOG_KEY` set, the same side-effect entry dynamically creates and appends a PostHog adapter. It can coexist with Sentry because registration uses `appendErrorTracker`.
+
+```env
+POSTHOG_KEY=phc_...
+POSTHOG_HOST=https://us.i.posthog.com
+```
+
+Use `registerPostHogConfig(...)` before the register entry runs when you need a custom host/options, anonymous distinct id, or `beforeSend` filter. In a custom bootstrap or when full hook-based span wiring is required without Sentry, call `enableErrorTrackingAutoInstrumentation()` after registering the adapter.
+
+### Datadog: first-import manual setup
+
+`dd-trace` must be imported and initialized before framework modules so it can patch Node I/O. The scaffolder therefore places an enable-later block at the top of `server/server.ts`; uncomment that block and its adapter-registration block. Datadog is not auto-created by the register entry.
 
 ```ts
-import { initializeSentry } from '@luckystack/error-tracking';
-import { createLuckyStackServer } from '@luckystack/server';
+// Must precede framework imports:
+import tracer from 'dd-trace';
+tracer.init();
 
-initializeSentry();
+// During boot:
+import StatsD from 'hot-shots';
+import {
+  createDatadogAdapter,
+  registerErrorTracker,
+  enableErrorTrackingAutoInstrumentation,
+} from '@luckystack/error-tracking';
 
-const server = await createLuckyStackServer({ /* ... */ });
-await server.listen();
+registerErrorTracker(createDatadogAdapter({ tracer, statsd: new StatsD() }));
+enableErrorTrackingAutoInstrumentation();
 ```
 
-Set `SENTRY_DSN` in your environment to enable. Without it, every export is a safe no-op so you can keep the import in production code unconditionally.
+### Custom or multi-tracker setup
 
-## Public API
+```ts
+import {
+  registerErrorTrackers,
+  createSentryAdapter,
+  createPostHogAdapter,
+  enableErrorTrackingAutoInstrumentation,
+} from '@luckystack/error-tracking';
+
+registerErrorTrackers([
+  createSentryAdapter(), // initialize the Sentry SDK first
+  createPostHogAdapter({ client: posthog }),
+]);
+enableErrorTrackingAutoInstrumentation();
+```
+
+`registerErrorTracker(s)` replaces the active list. `appendErrorTracker` adds or replaces one tracker by `name` without clobbering the others.
+
+## Backend-neutral API
 
 | Export | Purpose |
 | --- | --- |
-| `initializeSentry()` | Read `SENTRY_DSN`, sample rates, and init the SDK. Idempotent. |
-| `captureException(error, context?)` | Forward to Sentry; called by `tryCatch` automatically. |
-| `captureMessage(msg, level?, context?)` | Manual breadcrumb-style logging. |
-| `setSentryUser(user \| null)` | Attach session identity. Not called by `@luckystack/login` directly — identity is propagated by this package's auto-instrumentation hooks (`preApiValidate` / `preSyncAuthorize` set it; `postLogout` clears it). |
-| `startSpan(name, op)` | Performance tracing wrapper — used by API/sync request handlers. |
-| `registerSentryConfig(input)` / `getSentryConfig()` | Per-package config registry. Owned by this package; not part of `@luckystack/core`'s `ProjectConfig`. |
+| `registerErrorTracker(tracker)` | Replace the list with one adapter. |
+| `registerErrorTrackers(trackers)` | Replace the list with multiple adapters. |
+| `appendErrorTracker(tracker)` | Append/de-duplicate one adapter by name. |
+| `getActiveErrorTrackers()` | Snapshot active adapters. |
+| `captureExceptionAcrossTrackers(...)` | Fan out an exception. |
+| `captureMessageAcrossTrackers(...)` | Fan out a message. |
+| `setErrorTrackerUser(...)` | Propagate fallback identity across adapters. Request handlers also use request-scoped identity. |
+| `recordMetricAcrossTrackers(...)` | Emit through adapters that implement metrics. |
+| `startSpanAcrossTrackers(...)` / `startSpanHandle(...)` | Delegate a span to the first adapter that supports it. |
+| `flushErrorTrackers()` | Drain adapters that implement graceful flush. |
+| `enableErrorTrackingAutoInstrumentation()` | Subscribe identity/span lifecycle handlers to framework hooks. Idempotent. |
+| `createSentryAdapter(...)` | Wrap initialized `@sentry/node`. |
+| `createDatadogAdapter(...)` | Wrap consumer-initialized `dd-trace` and optional `hot-shots`. |
+| `createPostHogAdapter(...)` | Wrap a `posthog-node` client. |
 
-## What gets auto-instrumented
+The legacy `captureException`, `captureMessage`, `setSentryUser`, `startSpan`, `registerSentryConfig`, and `initializeSentry` exports remain intentionally Sentry-named compatibility APIs. New vendor-neutral integrations should use the registry surface above.
 
-`initializeSentry()` registers handlers on the framework's hook surface:
+## Automatic signal flow
 
-- `preApiValidate` / `preSyncAuthorize` — attach session identity (`setSentryUser` / `setCurrentErrorTrackerIdentity`) as early as each pipeline carries `user`.
-- `preApiExecute` / `postApiExecute` and `preSyncFanout` / `postSyncFanout` — performance spans + breadcrumbs with redacted input/output.
-- `postLogout` — clear the identity so a subsequent anonymous request is not attributed to the logged-out user.
+- Framework `tryCatch` calls dispatch exception capture through core, then across every registered adapter.
+- API/sync request handling establishes request-scoped identity so concurrent users do not share tracker context.
+- Auto-instrumentation hooks propagate identity, open/close request spans where supported, and clear fallback identity on logout.
+- Graceful server shutdown flushes adapters that expose `flush()`.
+- Built-in adapters scrub secret-bearing error/message strings; use each adapter's `beforeSend` to enforce project-specific filtering or PII policy.
 
-Handler exceptions are NOT captured via an `apiError`/`syncError` hook subscription — they flow through `tryCatch` -> `captureException` (see below).
+There are no `apiError` or `syncError` hook subscriptions: handler failures flow through `tryCatch` and the central capture registry.
 
-`tryCatch` (from `@luckystack/core` server entry) calls `captureException` automatically, so consumer-code errors flow into Sentry without explicit wiring.
+## Vendor-specific behavior
 
-Sample rates and ignore-list come from this package's own `registerSentryConfig({...})`. Breadcrumb redaction keys come from `registerRedactedLogKeys(...)` in `@luckystack/core`.
+- **Sentry:** first-class exceptions/messages, contexts, user scope, spans, and SDK drain.
+- **Datadog:** exceptions/messages become APM spans plus optional StatsD counters; custom metrics use `hot-shots`.
+- **PostHog:** uses `captureException` when available, otherwise `$exception`; messages and metrics become custom events.
 
-## Related architecture docs
+Datadog user fields become `usr.*` APM tags and PostHog identity may include email/username. Decide whether to omit or transform PII before calling the identity APIs.
 
-- Error-tracking covers the "why did it break?" half (stack traces, breadcrumbs, error grouping). The "what happened?" half (input/output audit trail, metrics, RUM) is planned for a future `@luckystack/monitoring` package that lives in its own repo — see `docs/ROADMAP.md`.
+## Deep docs
 
-## Dependencies
-
-- Runtime: `@luckystack/core`
-- Peer (canonical ranges, standardized 2026-05-07; all optional — install only what the adapters you use need):
-  - `@sentry/node@^10.66.0` — required only when `createSentryAdapter()` or `initializeSentry()` is called.
-  - `dd-trace@^5.0.0` — required only when `createDatadogAdapter(...)` is called. Import dd-trace as the FIRST require in your server entry.
-  - `hot-shots@^10.0.0` — optional StatsD companion for the Datadog adapter (metrics). The adapter still captures exceptions without it.
-  - `posthog-node@^4.0.0` — required only when `createPostHogAdapter(...)` is called.
+- [`docs/adapter-pattern.md`](./docs/adapter-pattern.md) — contract, fan-out, filtering, and built-in adapters.
+- [`docs/auto-instrumentation.md`](./docs/auto-instrumentation.md) — hook and `tryCatch` signal flow.
+- [`docs/sentry-integration.md`](./docs/sentry-integration.md) — dedicated Sentry compatibility and SDK behavior.
+- [`docs/span-helpers.md`](./docs/span-helpers.md) — span ownership and lifecycle.
 
 ## License
 

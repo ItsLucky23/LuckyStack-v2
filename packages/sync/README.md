@@ -5,9 +5,8 @@
 ## Install
 
 ```bash
-npm install @luckystack/sync @luckystack/core @luckystack/error-tracking socket.io socket.io-client
-# Only for the /client subpath:
-npm install react
+npm install @luckystack/sync socket.io socket.io-client
+# Optional React client helpers: npm install react
 ```
 
 ## Quickstart

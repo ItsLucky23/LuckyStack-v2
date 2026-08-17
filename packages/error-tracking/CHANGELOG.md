@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Reworked the consumer quickstart around the generic multi-tracker registry and documented the distinct automatic Sentry/PostHog and first-import Datadog initialization paths; legacy Sentry APIs remain explicit compatibility surfaces.
+
 ## [0.8.1] - 2026-07-27
 
 ### Fixed

@@ -1,6 +1,6 @@
 # HTTP Routes
 
-> Deep specs. Bron: `packages/server/src/httpHandler.ts`, `packages/server/src/httpRoutes/*.ts`, `packages/server/src/customRoutesRegistry.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs. Bron: `packages/server/src/httpHandler.ts`, `packages/server/src/httpRoutes/*.ts`, `packages/server/src/customRoutesRegistry.ts`.
 
 ## Overview
 
@@ -33,7 +33,7 @@ A custom-route registry sits in front of the static fallback. Both the legacy `c
 
 | Route | Method(s) | Handler | Response (success) | Response (failure) |
 | --- | --- | --- | --- | --- |
-| `/auth/csrf` | GET | `handleCsrfRoute` | `200 { status: 'success', csrfToken }` | `401 auth.unauthenticated` |
+| `/auth/csrf` | GET | `handleCsrfRoute` | `200 { status: 'success', csrfToken }`; without login it also sets the double-submit cookie | `401 auth.unauthenticated` only when login is installed and no valid session exists |
 | `/favicon.ico` | GET | `handleFaviconRoute` | Whatever `options.serveFavicon(res)` writes | `404` empty when no handler supplied |
 | `/livez` | GET | `handleLivezRoute` | `200 { status: 'live' }` | Always 200 when reachable |
 | `/readyz` | GET | `handleReadyzRoute` | `200 { status: 'ready', checks: {...} }` | `503 { status: 'not-ready', checks: {...} }` |
@@ -52,7 +52,9 @@ A custom-route registry sits in front of the static fallback. Both the legacy `c
 | `/assets/*`, `*.{png,jpg,jpeg,gif,svg,html,css,js}` | GET | `handleStaticAndSpaFallback` | Whatever `options.serveFile` writes (URL temporarily rewritten) | `404` when no `serveFile` is wired |
 | Any other extension-less path | GET | `handleStaticAndSpaFallback` | SPA fallback (rewrite URL to `/`, call `serveFile`) | `404` when no `serveFile` |
 
-> The CSRF header name clients must send (for the `/auth/csrf` route above) is configurable: it comes from `getCsrfConfig().headerName` (default `x-csrf-token`), renamable via `registerCsrfConfig({ headerName })` from `@luckystack/core`.
+> `GET /auth/csrf` issues the token; state-changing requests send it using `getCsrfConfig().headerName` (default `x-csrf-token`). `registerCsrfConfig(...)` also controls the login-absent cookie name/options and token length.
+>
+> `/_test/reset` clears rate limits and only the framework's default Redis session/active-user namespaces. It does not clear application database rows or invoke a custom `SessionAdapter`; custom-storage tests own that cleanup.
 
 ## API Reference — handlers
 

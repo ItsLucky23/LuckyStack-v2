@@ -116,13 +116,13 @@ registerEmailConfig({
 });
 ```
 
-Terminal logging is **independent** of any error-tracking adapter. Even when Sentry is wired, the terminal-side warnings still print — they're complementary, not redundant.
+Terminal logging is **independent** of any error-tracking adapter. Even when an error-tracker adapter is wired, the terminal-side warnings still print — they're complementary, not redundant.
 
 The active logger is whatever was registered via `registerLogger` (`@luckystack/core`). In dev that's typically the colored logger from `createDevLogger()`; in production it's Pino / Winston / Datadog / whatever you wired. The console fallback (`console.warn` / `console.info`) applies when no logger is registered.
 
 ---
 
-## Sentry / error-tracker capture
+## Error-tracker capture
 
 On every failure (`result.ok === false`), `sendEmail` calls:
 
@@ -139,14 +139,14 @@ captureException(
 );
 ```
 
-- `captureException` is imported from `@luckystack/core` and fans out to **every** registered error tracker (Sentry, OpenTelemetry, custom adapter), not just Sentry.
+- `captureException` is imported from `@luckystack/core` and fans out to **every** registered error tracker (Sentry, Datadog, PostHog, or custom adapters).
 - When `@luckystack/error-tracking` is **not** installed/initialized, the call is a silent no-op. No special detection needed — the underlying registry is empty.
 - The captured error is either the adapter's original throw (`cause`) or a synthetic `Error('Email send failed: <reason>')` when the adapter returned a typed failure without a thrown error.
 - Context fields are sanitized: `senderName`, `to`, `subject`, `reason`. **The HTML body and any data payload are NOT captured** to avoid leaking PII into the tracker. If you need richer context, wire a `postEmailSend` hook (`docs/hooks.md`).
 
 ### Successful sends are not captured
 
-Sentry/error-tracker capture only fires on failure. Successful sends are visible through:
+Error-tracker capture only fires on failure. Successful sends are visible through:
 
 1. Terminal logging (`logging.sends: true`).
 2. `postEmailSend` hook (audit log, analytics counter).
@@ -175,7 +175,7 @@ The only case where `sendEmail` *throws* is the strict `required: true` + no-sen
 
 ## DLQ / retry patterns
 
-`@luckystack/email` does NOT ship a built-in dead-letter queue. Failed sends are observable (via `postEmailSend` + Sentry) but **not** retried automatically — this is deliberate, because retry semantics depend heavily on provider quirks (Resend's rate limit headers, SMTP soft-bounce codes, regional ESP quotas). A timeout or caller abort after dispatch reports `deliveryOutcome: 'unknown'`; retry only with the same caller-supplied idempotency key, because the first attempt may still arrive.
+`@luckystack/email` does NOT ship a built-in dead-letter queue. Failed sends are observable (via `postEmailSend` + registered error trackers) but **not** retried automatically — this is deliberate, because retry semantics depend heavily on provider quirks (Resend's rate limit headers, SMTP soft-bounce codes, regional ESP quotas). A timeout or caller abort after dispatch reports `deliveryOutcome: 'unknown'`; retry only with the same caller-supplied idempotency key, because the first attempt may still arrive.
 
 The recommended pattern is a `postEmailSend` hook + a worker process:
 
@@ -222,8 +222,8 @@ Then a separate worker pulls due rows, calls `sendEmail` again, and re-enqueues 
 
 | Situation | Behaviour |
 | --- | --- |
-| Adapter returns `undefined` from `send` | `{ ok: false, reason: 'send-no-result' }`. No throw. Sentry capture fires with a synthetic `Error('Email send failed: send-no-result')`. |
-| Adapter throws | Caught by `tryCatch`, normalized to `{ ok: false, reason: error.message || 'send-threw', cause: error }`. Sentry capture uses `cause` (preserves stack). |
+| Adapter returns `undefined` from `send` | `{ ok: false, reason: 'send-no-result' }`. No throw. Error-tracker capture fires with a synthetic `Error('Email send failed: send-no-result')`. |
+| Adapter throws | Caught by `tryCatch`, normalized to `{ ok: false, reason: error.message || 'send-threw', cause: error }`. Error-tracker capture uses `cause` (preserves stack). |
 | `preEmailSend` returns a stop signal | Per the architecture doc: `sendEmail` returns `{ ok: false, reason: signal.errorCode }`, `sender.send` is never called, `postEmailSend` is *not* dispatched. **Current implementation caveat:** the abort wiring inside `sendEmail.ts` does not explicitly check the dispatcher's `stopped` flag in this revision — see `docs/hooks.md` for the workaround. |
 | Requested `adapter` slot missing | Returns `{ ok: false, reason: 'no-sender' }` — explicit adapter routing is a security contract (EMAIL-O4). No silent fallthrough to a different sender. When `emailConfig.required === true` this path throws instead. |
 | Hook handler throws | Caught by the dispatcher, logged + captured, dispatch continues with next handler. Never blocks the main send flow. |

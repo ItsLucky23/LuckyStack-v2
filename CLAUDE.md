@@ -243,7 +243,7 @@ When a Prisma model type is needed in app code, create `src/_types/{ModelName}.t
 Always use the custom `tryCatch`:
 
 - **In API / sync handlers**: use the injected `functions.tryCatch.tryCatch(...)` (sourced from `shared/tryCatch.ts` via the function-injection system — spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`).
-- **Elsewhere (client components, server utilities, scripts)**: `import { tryCatch } from '@luckystack/core'`. Same `[error, result]` tuple shape; the server-side path captures to Sentry via the registered error-tracker.
+- **Elsewhere (client components, server utilities, scripts)**: `import { tryCatch } from '@luckystack/core'`. Same `[error, result]` tuple shape; the server-side path captures through the registered error-tracker adapter(s).
 - Check the first value; if truthy, there's an error. Never use raw `try/catch`.
 
 ---

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Corrected install/dependency documentation so Socket.io, login, React, and React Router are presented as optional peers for their respective server/client integrations.
+
 ## [0.1.0]
 
 ### Added

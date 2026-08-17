@@ -6,6 +6,11 @@ monorepo's lockstep versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified that Redis leader and per-run leases provide best-effort single-leader scheduling, not an exactly-once guarantee: a stalled process can outlive its lease, so every cron handler must remain idempotent.
+- Documented `npx luckystack add cron` as the preferred consumer install path; direct package installation remains supported.
+
 ## [0.7.4] - 2026-07-22
 
 ### Fixed

@@ -1,6 +1,6 @@
 # Socket Bootstrap
 
-> Deep specs for socket transport bootstrap, token extraction, CORS check, offline queue, CSRF, cookies, service-route helpers and event constants. Source: `packages/core/src/`. Bijgewerkt: 2026-05-20.
+> Deep specs for socket transport bootstrap, token extraction, CORS check, offline queue, CSRF, cookies, service-route helpers and event constants. Source: `packages/core/src/`.
 
 ## Overview
 
@@ -129,7 +129,7 @@ export const extractTokenFromSocket = (socket: Socket): string | null
 **Behavior:**
 - Reads `socket.handshake.auth.token` (when it is a string) and the configured cookie (`projectConfig.http.sessionCookieName`) from `socket.handshake.headers.cookie`.
 - When `session.basedToken === true`: returns the auth-token first, falls back to the cookie.
-- When `session.basedToken === false`: returns the cookie first, falls back to the auth-token.
+- When `session.basedToken === false`: returns only the cookie by default; when `http.acceptBearerInCookieMode === true`, falls back to the auth-token for legacy compatibility.
 
 **Returns:** The token string or `null`.
 
@@ -143,7 +143,7 @@ export const extractTokenFromRequest = (req: IncomingMessage): string | null
 **Behavior:**
 - Reads `req.headers.authorization` and extracts the bearer (`'Bearer <token>'`).
 - Reads the configured cookie from `req.headers.cookie`.
-- Picks cookie-first vs bearer-first based on `session.basedToken`.
+- In token mode, prefers bearer and falls back to cookie. In cookie mode, returns the cookie and ignores bearer by default; `http.acceptBearerInCookieMode=true` enables the legacy bearer fallback.
 
 ## API Reference — Origin Check
 

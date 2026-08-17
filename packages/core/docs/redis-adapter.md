@@ -1,6 +1,6 @@
 # Redis Adapter
 
-> Deep specs for the Redis client proxy, connection options helper, and the Socket.io cross-instance adapter. Source: `packages/core/src/redis.ts`, `socketRedisAdapter.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs for the Redis client proxy, connection options helper, and the Socket.io cross-instance adapter. Source: `packages/core/src/redis.ts`, `socketRedisAdapter.ts`.
 
 ## Overview
 

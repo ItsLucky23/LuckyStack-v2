@@ -1,6 +1,6 @@
 # Session Types
 
-> Deep specs for the foundational session/auth types plus `validateRequest`, `isFalsy`, and `validateInputByType`. Source: `packages/core/src/sessionTypes.ts`, `validateRequest.ts`, `runtimeTypeValidation.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs for the foundational session/auth types plus `validateRequest`, `isFalsy`, and `validateInputByType`. Source: `packages/core/src/sessionTypes.ts`, `validateRequest.ts`, `runtimeTypeValidation.ts`.
 
 ## Overview
 

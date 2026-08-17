@@ -1,6 +1,6 @@
 # Security Defaults
 
-> Deep specs. Bron: `packages/server/src/httpHandler.ts`, `packages/server/src/httpRoutes/csrfMiddleware.ts`, `packages/server/src/httpRoutes/testResetRoute.ts`, `packages/server/src/securityHeadersRegistry.ts`, `packages/server/src/errorFormatterRegistry.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs. Sources: `packages/server/src/httpHandler.ts`, `packages/server/src/httpRoutes/csrfRoute.ts`, `packages/server/src/httpRoutes/csrfMiddleware.ts`, `packages/server/src/httpRoutes/testResetRoute.ts`, `packages/server/src/securityHeadersRegistry.ts`, and `packages/server/src/errorFormatterRegistry.ts`.
 
 ## Overview
 
@@ -8,7 +8,7 @@
 
 1. **Origin policy.** No `Host` fallback — non-browser callers cannot silently bypass CORS on state-changing methods.
 2. **Security headers.** Framework defaults are emitted for every response. A consumer-registered builder may override or extend.
-3. **CSRF middleware.** Cookie-mode state-changing requests to `/api/*`, `/sync/*`, and `/auth/api/*` require a CSRF header (default `x-csrf-token`, renamable via `registerCsrfConfig({ headerName })` from `@luckystack/core`) matching the session-bound token; mismatches return 403 and dispatch the `csrfMismatch` hook.
+3. **CSRF middleware.** Cookie-mode state-changing framework and custom routes require the configured CSRF header unless they are an auth bootstrap/callback route or explicitly origin-exempt. With login installed it validates a session-bound token; without login it uses a stateless double-submit cookie/header pair. Mismatches return 403 and dispatch `csrfMismatch`.
 4. **`/_test/reset` fail-closed.** Requires `NODE_ENV` to be exactly `development` or `test` AND a non-empty `TEST_RESET_TOKEN` env var. An unset token does NOT mean "no auth"; it means the route is permanently 403.
 
 Plus two extension seams:
@@ -82,20 +82,24 @@ Lives in `enforceCsrfOnStateChangingRequest` (`csrfMiddleware.ts`). Runs after o
 
 **Activation predicate (all required):**
 
-- `projectConfig.session.basedToken === false` (cookie mode).
-- HTTP method is NOT `GET` and NOT `OPTIONS`.
-- `routePath` starts with `/api/`, `/sync/`, or `/auth/api/`.
-- `routePath` does NOT start with `/auth/callback`.
-- A session token was extracted from the request.
+- `projectConfig.session.basedToken === false` (cookie mode; the public scaffold flag is `config.sessionBasedToken`).
+- HTTP method is state-changing: not `GET`, `HEAD`, or `OPTIONS`.
+- The path is a framework API/sync/auth-API route, or any custom path outside `/auth/*` and `/assets/*`.
+- The path is not an auth callback, credentials/email-code/2FA login-bootstrap route, or a prefix registered through `registerOriginExemptPath(...)`.
 
-When the predicate is true:
+The validation branch then depends on whether `@luckystack/login` is installed:
 
-1. `getSession(token)` resolves the session. If no session, skip middleware (downstream auth check rejects).
-2. Read the configured CSRF header (`getCsrfConfig().headerName`, default `x-csrf-token`; first value when array).
-3. If provided and equal to `session.csrfToken`, allow.
-4. Otherwise: dispatch the `csrfMismatch` hook with `{ route, method, requestId, userId, providedToken: Boolean(provided) }` (note: presence-only, never the value), then respond `403 application/json { status: 'error', errorCode: 'auth.csrfMismatch', message: 'CSRF token missing or invalid. Fetch /auth/csrf first.' }`.
+1. Read `getCsrfConfig().headerName` (default `x-csrf-token`; first value when the Node header is an array).
+2. **Login present:** when a valid session token/session exists, compare the header with `session.csrfToken`. Requests without a valid session continue to the downstream auth policy instead of being misclassified as CSRF failures.
+3. **Login absent:** read the configured CSRF cookie (default `csrf-token`) and compare it with the header using the timing-safe helper. No session read occurs.
+4. On mismatch, dispatch `csrfMismatch` with `{ route, method, requestId, userId, providedToken: Boolean(provided) }`—presence only, never the token—then return `403 auth.csrfMismatch`.
 
-Token issue: `GET /auth/csrf` (`csrfRoute.ts`) returns `{ status: 'success', csrfToken }`. The `apiRequest` helper in `@luckystack/core/client` fetches it once per session and attaches it to every state-changing request automatically.
+**Token issue:** `GET /auth/csrf` is the single issuing endpoint.
+
+- With login present it requires a valid session and returns that session's CSRF token.
+- Without login it returns a new random token and sets the same value in the configurable double-submit cookie; `httpOnly: true` is supported because the client reads the matching token from the JSON response. The cookie's `Secure` attribute follows explicit CSRF config or `SECURE=true`.
+
+The client helpers fetch/cache the token per invocation origin and attach it to state-changing requests. Token mode (`sessionBasedToken=true`, internally `session.basedToken=true`) deliberately skips CSRF because JavaScript explicitly supplies the bearer/handshake token; the browser does not ambiently attach it like a cookie.
 
 ## `/_test/reset` fail-closed contract
 
@@ -125,7 +129,9 @@ x-test-reset-token: <value of TEST_RESET_TOKEN>
 | 3 | `redis SCAN` + `DEL` keys matching `<projectName>-activeUsers:*`. Reported as `'activeUsers'` when at least one key is deleted. |
 | 4 (opt-in) | When `?include=hooks` is supplied, `clearAllHooks()` empties every framework hook registration. Reported as `'hooks'`. |
 
-`getProjectName()` (from `@luckystack/core`) is the single source of truth for the key prefix — same helper used by `session.ts` and `rateLimiter.ts`.
+`getProjectName()` (from `@luckystack/core`) is the single source of truth for the default Redis key prefix—same helper used by the Redis session adapter and rate limiter.
+
+> **Custom `SessionAdapter` caveat:** `/_test/reset` clears only the framework's default Redis session and active-user namespaces. It does not call or discover a custom adapter, so sessions stored in DynamoDB, Postgres, an in-memory test adapter, or another backend survive this endpoint. Custom-adapter test suites must clear their own store in setup/teardown.
 
 **Response:** `200 application/json { status: 'success', cleared: string[] }`. The `cleared` array reflects which subsystems reported deletions.
 

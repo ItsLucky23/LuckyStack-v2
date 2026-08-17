@@ -13,8 +13,9 @@
 //?      `posthog-node` peer. Runs ALONGSIDE Sentry (Sentry uses the legacy
 //?      shared-DI slot; PostHog uses the error-tracker adapter registry).
 //?
-//? For Datadog, use the separate `--import @luckystack/error-tracking/datadog-preload`
-//? mechanism (dd-trace must be the process's first import) — not this register.
+//? Datadog is not auto-created here: `dd-trace` must be the process's first
+//? import. Enable the scaffolded first-import + adapter-registration blocks in
+//? `server/server.ts`, or reproduce that ordering in a custom entry point.
 //?
 //? A consumer overlay (`luckystack/sentry/*.ts`) runs AFTER this import and can
 //? register additional adapters via `registerErrorTracker(s)(...)`.

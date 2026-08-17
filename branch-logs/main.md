@@ -1218,3 +1218,15 @@ Voor de guard heb ik de voorgestelde regel eerst GEMETEN: "elke export in beide 
 **Verificatie:** root/package/AI-lint groen; unit-suite 190 files en 1998/1998 tests groen; volledige build groen (17/17 packages, artifacts, TypeScript, Vite, server- en routerbundles). Servermanifest en lockfile bevatten beide de optionele cronpeer `^0.8.3`.
 
 **Files touched:** merge van `origin/main` plus conflictresoluties in branch logs, architectuurdocs, changelogs, servermanifest/lockfile en `packages/login/src/register.test.ts`.
+
+## 2026-08-17 08:16 — Alle resterende documentatiecorrecties afgerond
+
+**User prompt (summary):** voer alle eerder geïdentificeerde documentatieverbeteringen volledig uit en rond ook de consumerpropagatie en verificatie af.
+
+**Wat ik deed:** alle DOC-13–DOC-21 en VFY-01–VFY-07 bezwaren verwerkt. CSRF gebruikt nu overal `GET /auth/csrf` en documenteert session-bound, login-loze double-submit, custom-route/exemption-coverage en configureerbare cookie/headeropties. Password-resetdocs beschrijven hash-at-rest, vorige-tokeninvalidatie en de gedeelde one-time-tokenconsume. `sessionBasedToken` is als publieke flag behouden en de mapping naar `session.basedToken` expliciet gemaakt. Generieke error-flows zijn adapterneutraal; Sentry-compatibiliteitsdocs bleven Sentry-specifiek. Dode CLAUDE-links/rule-16-verwijzingen, stale freshness-datums, reset-adaptercaveats, package-peercontracten en roadmapdrift zijn gecorrigeerd.
+
+Root README, HOSTING, packaging en create-app-deep-docs zijn opnieuw op de v0.8.3 runtime/scaffolder gebaseerd. Alle veranderde packages hebben een Unreleased-changelogregel. Merge-overlap is opgelost door de port-ADR-keten naar 0043–0045 en de Windows-E2E-les naar 0016 te renummeren. Findingsledgers zijn gesloten en AI-indexen/scaffoldbundle zijn geregenereerd. `../Workspace` kreeg de actuele frameworkdocs, voorbeelden, ADR’s en lessons zonder wijzigingen in `node_modules`; de project-specifieke CLAUDE-regels bleven behouden.
+
+**Verificatie:** root lint + package-lint + AI-lint groen; 190 testfiles en 1.998/1.998 tests groen; build 17/17 plus artifacts/TypeScript/Vite/server/router groen; pack-dry-run 17/17; changelog-check clean; scaffold-docbundle 5/5. Workspace lint, build, AI-lint, doc-staleness 12/12 en diff-check groen.
+
+**Files touched:** centrale architectuur-/hosting-/package-/findingsdocs, package README/CLAUDE/deep docs + changelogs, create-app template/deep docs, CSRF-commentcontracten, ADR/lessonnummering, gegenereerde AI-indexen, branch logs en de corresponderende `../Workspace/docs/luckystack/` snapshots.

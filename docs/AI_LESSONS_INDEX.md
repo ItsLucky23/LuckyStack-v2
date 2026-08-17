@@ -26,9 +26,9 @@
 | 0011 | A Windows-green lockfile can be invalid for Linux npm ci | 🟠 high | release | npm, lockfile, ci, cross-platform, release | `docs/lessons/0011-windows-lockfile-can-omit-linux-optional-transitives.md` |
 | 0012 | Alle input op _ai-routes geweigerd" was geen type-bug — het was een stale dev-proces met lege devApis | 🟠 high | packages/server | dev-tooling, false-diagnosis, silent-failure, ports, hot-reload, devkit | `docs/lessons/0012-a-stale-broken-dev-process-looks-like-a-per-route-bug.md` |
 | 0013 | Production dependencies can overwrite generated runtime artifacts | 🟠 high | docker | docker, prisma, multi-stage, healthcheck, scaffold | `docs/lessons/0013-production-dependencies-can-overwrite-generated-runtime-artifacts.md` |
-| 0013 | Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup | 🟡 medium | scripts/e2eVerdaccio.mjs | e2e, windows, ports, redis, wsl, infrastructure | `docs/lessons/0013-windows-e2e-port-pairs-and-wsl-redis-protected-mode.md` |
 | 0014 | Global transitive overrides can hide platform-specific contract breakage | 🟠 high | dependencies | dependencies, eslint, linux, ci, release | `docs/lessons/0014-global-transitive-overrides-can-hide-platform-specific-contract-breakage.md` |
 | 0015 | Generate Prisma before type maps in artifact-free worktrees | 🟡 medium | build | prisma, type-generation, worktree, postinstall, build | `docs/lessons/0015-generate-prisma-before-type-maps-in-artifact-free-worktrees.md` |
+| 0016 | Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup | 🟡 medium | scripts/e2eVerdaccio.mjs | e2e, windows, ports, redis, wsl, infrastructure | `docs/lessons/0016-windows-e2e-port-pairs-and-wsl-redis-protected-mode.md` |
 
 ## Takeaways
 
@@ -136,14 +136,6 @@ After ORM/client generation, copy required generated runtime dependency director
 
 → `docs/lessons/0013-production-dependencies-can-overwrite-generated-runtime-artifacts.md`
 
-### 0013 — Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup
-
-**0013** · medium · scripts/e2eVerdaccio.mjs · tags: e2e, windows, ports, redis, wsl, infrastructure · 2026-08-16
-
-For an E2E that needs consecutive ports, reserve both exact candidates with real `net.Server` instances before selecting the pair; do not infer adjacency from `listen(0)`. When using a disposable WSL Redis from Windows, verify a real Redis `PING` over the Windows→WSL address, not just TCP connect. Use an isolated, non-persistent instance with `--protected-mode no` only for that test, then shut it down immediately; never weaken the developer's normal Redis or read secrets from `.env.local`.
-
-→ `docs/lessons/0013-windows-e2e-port-pairs-and-wsl-redis-protected-mode.md`
-
 ### 0014 — Global transitive overrides can hide platform-specific contract breakage
 
 **0014** · high · dependencies · tags: dependencies, eslint, linux, ci, release · 2026-07-27
@@ -159,3 +151,11 @@ Never silence a transitive advisory by globally forcing an incompatible major wi
 In artifact-free worktree and release validation, generate Prisma Client before generating route type maps. Treat an unsupported `symbol` error on a Prisma-backed DTO as a possible missing-client artifact, not immediately as a route contract violation. A future build-pipeline fix should order Prisma generation before route generation or produce a specific missing-Prisma diagnostic; do not weaken wire-type validation to hide the placeholder.
 
 → `docs/lessons/0015-generate-prisma-before-type-maps-in-artifact-free-worktrees.md`
+
+### 0016 — Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup
+
+**0016** · medium · scripts/e2eVerdaccio.mjs · tags: e2e, windows, ports, redis, wsl, infrastructure · 2026-08-16
+
+For an E2E that needs consecutive ports, reserve both exact candidates with real `net.Server` instances before selecting the pair; do not infer adjacency from `listen(0)`. When using a disposable WSL Redis from Windows, verify a real Redis `PING` over the Windows→WSL address, not just TCP connect. Use an isolated, non-persistent instance with `--protected-mode no` only for that test, then shut it down immediately; never weaken the developer's normal Redis or read secrets from `.env.local`.
+
+→ `docs/lessons/0016-windows-e2e-port-pairs-and-wsl-redis-protected-mode.md`

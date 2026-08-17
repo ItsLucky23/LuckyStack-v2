@@ -1,6 +1,6 @@
 # Config Registry
 
-> Deep specs for project / deploy / services / avatar / paths config slots. Source: `packages/core/src/`. Bijgewerkt: 2026-05-20.
+> Deep specs for project / deploy / services / avatar / paths config slots. Source: `packages/core/src/`.
 
 ## Overview
 
@@ -314,7 +314,7 @@ Deprecated module-level constants exist for backwards compatibility (`SRC_DIR`, 
 | `rateLimiting.enabled` | `boolean` | `true` | Kill-switch — when `false`, every check short-circuits to allowed. |
 | `rateLimiting.store` | `'memory' \| 'redis'` | `'memory'` | Backend for the default strategy. |
 | `rateLimiting.windowMs` | `number` | `60000` | Default sliding window. |
-| `session.basedToken` | `boolean` | `false` | When `true`, tokens are stored in sessionStorage + handshake auth instead of cookies. |
+| `session.basedToken` | `boolean` | `false` | Internal project-config slot: `true` uses tab-scoped sessionStorage + bearer/handshake auth; `false` uses an HttpOnly cookie + CSRF. The scaffold's public `config.sessionBasedToken` field maps here during registration. |
 | `session.expiryDays` | `number` | `7` | Session TTL. |
 | `session.perUser` | `'single' \| 'multiple'` | `'single'` | Whether a single user may be logged in on multiple devices/browsers concurrently. |
 | `session.maxConcurrentPerUser` | `number \| null` | `null` | Cap when `perUser === 'multiple'`. |

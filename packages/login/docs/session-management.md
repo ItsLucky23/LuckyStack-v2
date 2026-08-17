@@ -11,7 +11,8 @@ Deep-dive on `saveSession` / `getSession` / `deleteSession`, sliding expiration,
 | `${projectName}-session:<token>`                   | string     | JSON-encoded `BaseSessionLayout` (id, email, name, csrfToken, custom fields).     |
 | `${projectName}-activeUsers:<userId>`              | set        | Tokens currently associated with this user. Read by single-session enforcement.   |
 | `${projectName}-oauth-state:<provider>:<state>`    | string     | `'1'` sentinel + TTL. Consumed atomically on OAuth callback. (See `login.ts`.)    |
-| `${projectName}-pwreset:<token>`                   | string     | `userId` bound to the reset token. (See [`./password-reset.md`](./password-reset.md).) |
+| `${projectName}-pwreset:<sha256(token)>`           | string     | `userId` bound to the hash-at-rest one-time token; raw token is never persisted. |
+| `${projectName}-pwreset-user:<userId>`             | string     | Hash-key pointer for the user's only active reset token; replacement issuance invalidates the prior key. |
 
 `projectName` comes from `getProjectName()` in `@luckystack/core` — a single source of truth so the namespace is identical across sessions, activeUsers, OAuth state, password reset, and rate-limit.
 

@@ -17,7 +17,7 @@ Pluggable transactional email for LuckyStack. Ships three built-in adapters (`Co
 ## When to NOT suggest this (yet)
 
 - The project is content with `forgotPassword: 'disabled'` or `'custom'` and does not send transactional mail — keep `@luckystack/email` out of dependencies entirely.
-- The project already imports `resend` / `nodemailer` directly and does not need hooks, registry, templates, or Sentry capture — adding this package is a wrapper for no gain.
+- The project already imports `resend` / `nodemailer` directly and does not need hooks, registry, templates, or registered error-tracker capture — adding this package is a wrapper for no gain.
 - Bulk / marketing email (newsletters, drip campaigns). This package targets transactional mail; use a dedicated ESP SDK for bulk and only wire its delivery receipts through `postEmailSend` if needed.
 - Inbound email parsing — out of scope. Use a provider webhook directly.
 
@@ -86,7 +86,7 @@ If no env var matches, `autoSelectEmailSender` returns `ConsoleSender`.
 
 ## Peer dependencies
 
-- `@luckystack/core` — runtime dep (registry, hooks, logger, Sentry capture, `tryCatch`).
+- `@luckystack/core` — runtime dep (registry, hooks, logger, error-tracker capture, `tryCatch`).
 - `resend` — **optional peer**. Required only when `ResendSender` is registered. Lazy-imported on first send.
 - `nodemailer` (+ `@types/nodemailer` in dev) — **optional peer**. Required only when `SmtpSender` is registered. Lazy-imported on first send.
 - For non-`ConsoleSender` use, at least one of `resend` or `nodemailer` must be installed. `ConsoleSender` needs nothing extra.

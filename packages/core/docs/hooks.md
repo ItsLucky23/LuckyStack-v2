@@ -1,6 +1,6 @@
 # Hooks
 
-> Deep specs for the async + sync hook registries, the canonical core-owned payload shapes, `processUpload`, and the response normalizer family. Source: `packages/core/src/hooks/`, `processUpload.ts`, `responseNormalizer.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs for the async + sync hook registries, the canonical core-owned payload shapes, `processUpload`, and the response normalizer family. Source: `packages/core/src/hooks/`, `processUpload.ts`, `responseNormalizer.ts`.
 
 ## Overview
 

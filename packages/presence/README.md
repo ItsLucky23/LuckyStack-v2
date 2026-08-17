@@ -5,7 +5,10 @@
 ## Install
 
 ```bash
-npm install @luckystack/presence @luckystack/core @luckystack/login socket.io
+npm install @luckystack/presence
+# Add optional peers for the surfaces you use:
+npm install socket.io @luckystack/login       # server lifecycle/session integration
+npm install react react-router-dom             # /client React helpers
 ```
 
 ## Quickstart
@@ -127,10 +130,10 @@ The badge color uses theme tokens (`bg-correct` / `bg-warning` / `bg-wrong` pair
 ## Dependencies
 
 - Runtime: `@luckystack/core`
-- Peer (canonical ranges, standardized 2026-05-07):
-  - `@luckystack/login@^0.2.7` (optional peer — session lookup + token extraction + hook registry)
-  - `socket.io@^4.8.0` (server entry only)
-  - `react@^19.2.0` (`/client` entry only)
+- Optional peers (install only for the used surface):
+  - `@luckystack/login@^0.8.3` — session lookup, token extraction, and lifecycle-hook integration.
+  - `socket.io@^4.8.0` — server lifecycle entry.
+  - `react@^19.2.0` and `react-router-dom@^7.0.0` — `/client` React helpers.
 
 ## License
 

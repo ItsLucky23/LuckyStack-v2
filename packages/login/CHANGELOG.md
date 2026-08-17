@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Corrected password-reset/session documentation for hash-at-rest tokens, one-active-token-per-user invalidation, atomic shared-token consumption, current route paths, and pluggable session storage.
+
 ## [0.8.1] - 2026-07-27
 
 ### Fixed

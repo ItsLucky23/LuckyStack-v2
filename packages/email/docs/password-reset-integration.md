@@ -31,7 +31,7 @@ Source-of-truth file: `packages/login/src/forgotPassword.ts`.
 
 ```
 [client]
-  POST /reset-password/api/sendReset/v1   { email, brand? }
+  POST /api/reset-password/sendReset/v1   { email, brand? }
        |
        v
 [@luckystack/login] sendPasswordResetEmail({ email, brand? })
@@ -41,7 +41,8 @@ Source-of-truth file: `packages/login/src/forgotPassword.ts`.
   4. Look up user:   getUserAdapter().findByEmail({ email, provider: 'credentials' })
        - not found -> dispatch passwordResetRequested({ email, matched: false }), return { ok: true } (anti-enumeration)
   5. Mint token:     createPasswordResetToken(user.id)
-                     -> Redis: `${projectName}-pwreset:<token>` TTL `auth.passwordResetTtlSeconds`
+                     -> invalidates the user's prior outstanding token
+                     -> Redis stores `${projectName}-pwreset:<sha256(token)>` + a TTL-matched per-user pointer; the raw token is never stored
   6. Dispatch hook:  passwordResetRequested({ email, matched: true, userId, token, ttlSeconds })
   7. Build URL:      `${config.app.publicUrl}/reset-password?token=${encodedToken}`
   8. Send:           sendEmail({ to: user.email, template: 'password-reset', data: { resetUrl, userName, brand, ttlMinutes }, adapterHint: 'transactional' })
@@ -109,7 +110,7 @@ registerProjectConfig({
 });
 ```
 
-or per-call, when you invoke `sendPasswordResetEmail` yourself instead of going through the default `/reset-password/api/sendReset/v1`:
+or per-call, when you invoke `sendPasswordResetEmail` yourself instead of going through the default `/api/reset-password/sendReset/v1`:
 
 ```ts
 import { sendPasswordResetEmail } from '@luckystack/login';
@@ -290,9 +291,9 @@ To enable framework-mode password reset, at minimum:
 
 | Failure point | Surface |
 | --- | --- |
-| No email sender registered & `emailConfig.required: false` | `sendEmail` returns `{ ok: false, reason: 'no-sender' }`. Login's `sendPasswordResetEmail` returns `{ ok: false, reason: 'no-sender' }`. API responds `{ status: 'success' }` to the client anyway (anti-enumeration), but you see the failure in logs + Sentry. |
+| No email sender registered & `emailConfig.required: false` | `sendEmail` returns `{ ok: false, reason: 'no-sender' }`. Login's `sendPasswordResetEmail` returns `{ ok: false, reason: 'no-sender' }`. API responds `{ status: 'success' }` to the client anyway (anti-enumeration), but you see the failure in logs and every registered error tracker. |
 | No email sender registered & `emailConfig.required: true` | `sendEmail` throws. Login bubbles. The API errors. **Strongly recommended for prod**. |
-| Adapter throws (network, auth, etc.) | `sendEmail` returns `{ ok: false, reason: error.message, cause: error }`. Sentry capture fires with `{ fn: 'sendEmail', senderName, to, subject, reason }`. |
+| Adapter throws (network, auth, etc.) | `sendEmail` returns `{ ok: false, reason: error.message, cause: error }`. Error-tracker capture fires with `{ fn: 'sendEmail', senderName, to, subject, reason }`. |
 | Recipient on bounce / suppression list | If you registered a `preEmailSend` handler that returns a stop signal, the abort path applies (see `docs/hooks.md`). |
 | User not found | `sendPasswordResetEmail` returns `{ ok: true }` (anti-enumeration). Hook `passwordResetRequested` fires with `matched: false`. No email is sent. |
 | Token expired | Not an email problem — the user clicks the link, `consumePasswordResetToken` returns `null`, the reset-password page shows an "expired" error. |
@@ -322,7 +323,7 @@ registerEmailConfig({ required: true });
 registerEmailSender(autoSelectEmailSender()); // picks ResendSender from RESEND_API_KEY
 ```
 
-Set `RESEND_API_KEY` and `EMAIL_FROM` in your env. Done. Password-reset link generation, email send, and Sentry capture all wire automatically.
+Set `RESEND_API_KEY` and `EMAIL_FROM` in your env. Done. Password-reset link generation, email send, and registered error-tracker capture all wire automatically.
 
 ### B. Brand-customized template + per-language subject
 

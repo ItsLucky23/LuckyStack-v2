@@ -8,7 +8,7 @@ Leader-elected, Redis-backed cron scheduler for [LuckyStack](https://github.com/
 npm i @luckystack/cron
 ```
 
-That's it — `bootstrapLuckyStack` auto-detects the package at boot. Register jobs from a `luckystack/cron/*.ts` overlay file (auto-imported):
+In a scaffolded LuckyStack app, prefer `npx luckystack add cron`; it installs the package and delivers the overlay/config files. `bootstrapLuckyStack` then auto-detects the package at boot. Register jobs from a `luckystack/cron/*.ts` overlay file (auto-imported):
 
 ```ts
 // luckystack/cron/jobs.ts

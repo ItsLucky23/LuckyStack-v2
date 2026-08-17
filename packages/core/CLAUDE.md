@@ -232,14 +232,14 @@ Other registries: `registerDeployConfig(DeployConfigShape)`, `registerServicesCo
 
 Required:
 
-- `@prisma/client@^6.19.0` — optional DB client proxied through `getPrismaClient()`; a registered custom client or DB-less project does not need the package.
 - `ioredis@^5.10.0` — Redis client proxied through `getRedisClient()`; backs the rate limiter, Redis-backed login/session defaults, boot-UUID, and offline-queue.
 - `socket.io@^4.8.0` — server-side `SocketIOServer` consumed by `setIoInstance` and `attachSocketRedisAdapter`.
 - `socket.io-client@^4.8.0` — client-side socket types used by the offline queue.
 - `zod@^4.0.0` — `env.ts` schema parsing.
 
-Optional (mark in `peerDependenciesMeta`):
+Optional (marked in `peerDependenciesMeta`):
 
+- `@prisma/client@^6.19.0` — only for the Prisma path proxied through `getPrismaClient()`; a custom registered DB client or DB-less project does not need it.
 - `react@^19.2.0`, `react-dom@^19.2.0`, `react-router-dom@^7.0.0` — only consumed by `@luckystack/core/client` and the `react/*` subpath helpers. Pure server boots can skip these.
 - `sonner@^2.0.0` — only needed if you wire the default sonner-backed notifier from the project's React entry; the core notifier slot itself is library-agnostic.
 - `eslint@^9.0.0` — only needed to consume the shared rules from the `./eslint` subpath; pure runtime usage doesn't require it.

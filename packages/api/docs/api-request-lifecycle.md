@@ -1,7 +1,5 @@
 # API Request Lifecycle
 
-> Last updated: 2026-05-20
-
 ## Overview
 
 `@luckystack/api` exposes two transport adapters — `handleApiRequest` (socket.io) and `handleHttpApiRequest` (raw HTTP) — that share an identical 13-step pipeline. The pipeline takes a transport payload, resolves it to a registered route in the runtime maps emitted by `@luckystack/devkit`, runs authentication / rate-limit / input-validation gates, dispatches a fixed set of lifecycle hooks, executes the route's `main(...)` function under a `tryCatch` boundary, then normalizes the result into a localized envelope before emitting it on the wire.

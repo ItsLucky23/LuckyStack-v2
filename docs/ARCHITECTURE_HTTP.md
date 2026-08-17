@@ -13,7 +13,7 @@ Every request flows through `handleHttpRequest` (`packages/server/src/httpHandle
 1. **Origin policy** (`enforceOriginPolicy`) — fail-closed: a state-changing method (`POST`/`PUT`/`DELETE`) with **no** `Origin` and **no** `Referer` is `403`'d. This is the browser-CSRF baseline. **Registered origin-exempt prefixes skip this step** (see below).
 2. **Security headers + `preHttpRequest` hook** — instrumentation / IP allow-lists (can stop a request, cannot grant an exemption).
 3. **`OPTIONS`** → `204`.
-4. **CSRF** (`enforceCsrfOnStateChangingRequest`) — only for cookie-mode framework routes (`/api/`, `/sync/`, `/auth/api/`) with a session token. Custom paths outside those prefixes are not subject to CSRF.
+4. **CSRF** (`enforceCsrfOnStateChangingRequest`) — in cookie mode, protects state-changing framework routes **and custom routes** unless they are auth bootstrap/callback paths or match a registered origin-exempt prefix. With login installed it validates the session-bound token; without login it validates the double-submit cookie/header pair issued by `GET /auth/csrf`.
 5. **PRE-PARAMS routes** — framework fast-paths (`/auth/csrf`, health probes, favicon, `_test/reset`) **and then consumer `'pre-params'` custom routes**. These run **before the body is read**, so the raw `req` stream is intact.
 6. **`getParams`** — drains + parses the body (`application/json` or `x-www-form-urlencoded`), enforcing `http.requestBodyMaxBytes` (default **1 MiB**). After this point the body is gone.
 7. **POST-PARAMS routes** — `/uploads`, `/auth/*`, `/api/*`, `/sync/*`, the default (`'post-params'`) custom routes, then the static/SPA fallback.

@@ -1,216 +1,114 @@
 # Template Variables
 
-Reference for every `{{KEY}}` placeholder substituted into the scaffolded project tree, including the source function for each variable and the helper utilities that drive substitution.
+Reference for create-app-time `{{TOKEN}}` replacement. Source: `buildTemplateVars`, `buildDockerTemplateVars`, `replacePlaceholders`, and `copyTree` in `src/index.ts`.
 
-## Substitution engine
-
-`replacePlaceholders(content, vars)` (src/index.ts:1166) walks the text content of every file flagged as text by `isTextFile`, looking for the literal pattern `{{KEY}}` (one or more word characters between two curly-brace pairs).
+## Substitution contract
 
 ```ts
-const replacePlaceholders = (
-  content: string,
-  vars: Record<string, string>,
-): string => {
-  return content.replace(/{{(\w+)}}/g, (match, key: string) => {
-    return Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match;
-  });
-};
+content.replaceAll(/{{(\w+)}}/g, (match, key) =>
+  Object.prototype.hasOwnProperty.call(vars, key) ? (vars[key] ?? match) : match,
+);
 ```
 
-Key behaviours:
+- Keys use ASCII word characters; framework variables follow `SCREAMING_SNAKE_CASE`.
+- Unknown placeholders remain verbatim.
+- Replacement is a single pass.
+- Only text files are rendered; binaries are copied unchanged.
+- Symlinks are skipped.
 
-- Pattern is `/{{(\w+)}}/g` — only ASCII word chars (`[A-Za-z0-9_]`). Hyphens or dots in a placeholder key would not match. This is intentional; we use SCREAMING_SNAKE_CASE keys exclusively.
-- Unknown keys are **preserved verbatim** (the regex returns `match` for non-own keys). A `{{UNKNOWN_KEY}}` in a template file therefore lands in the scaffolded output unchanged, which is easy to spot in code review.
-- `hasOwnProperty` check guards against prototype pollution (e.g. `{{toString}}` would otherwise resolve to `Function.prototype.toString.toString`).
-- Substitution is single-pass — the replacement value is NOT re-scanned for placeholders. A var like `PROJECT_NAME: '{{PROJECT_TITLE}}'` would not chain.
+Unknown placeholders remaining in `.luckystack/templates/` are intentional: tokens such as `{{REL_PATH}}`, `{{PAGE_PATH}}`, and `{{SYNC_NAME}}` belong to the later route/page scaffold commands, not create-app.
 
-## The full variable set
+## Project variables
 
-Constructed in `main()` right after prompts settle. Only vars that appear as
-`{{TOKEN}}` in at least one template file are listed — unused entries would be
-silently dropped by `replacePlaceholders` without error, so we keep the map
-lean. Scaffold choices that don't map to a placeholder (authMode, oauthProviders,
-emailProvider, monitoringProvider, i18n) drive code-prune paths in
-`pruneOptionalPackages` instead of template substitution.
+| Variable | Source | Main destinations |
+| --- | --- | --- |
+| `PROJECT_NAME` | `slugify(rawProjectName)` | `package.json`, env templates, Compose project/service data |
+| `PROJECT_TITLE` | `titleCase(rawProjectName)` | `config.ts`, `index.html`, README, `docs/PRODUCT.md` |
+| `LUCKYSTACK_VERSION` | create-app's own validated package version | Every rendered `@luckystack/*` range |
 
-```ts
-const vars: Record<string, string> = {
-  PROJECT_NAME: slug,
-  PROJECT_TITLE: titleCase(args.projectName),
-  LUCKYSTACK_VERSION: luckystackVersion,
-  DB_PROVIDER: choices.dbProvider,
-  USER_ID_ATTRS: USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider] ?? '...',
-  DATABASE_URL: DATABASE_URL_BY_PROVIDER[choices.dbProvider] ?? '...',
-  OAUTH_ENV_VARS: buildOAuthEnvVars(choices.oauthProviders, choices.authMode),
-  EXTERNAL_ORIGINS: externalOrigins,
-  EMAIL_ENV_VARS: buildEmailEnvVars(choices.emailProvider),
-  MONITORING_ENV_VARS: buildMonitoringEnvVars(choices.monitoringProvider),
-};
-```
+### Slug rules
 
-### `{{PROJECT_NAME}}`
+`slugify` lowercases, trims, replaces each run outside `[a-z0-9]` with `-`, and removes edge dashes. The sanitized slug—not the raw argument—is the directory name. Empty slugs abort; the resolved target is checked to remain under the current working directory.
 
-- **Source**: `slugify(args.projectName)` (src/index.ts:936).
-- **Type**: kebab-case ASCII slug.
-- **Used for**: directory name, `package.json` `"name"` field, default header label in the scaffolded UI.
+Examples: `My Cool App` → `my-cool-app`; `café` → `caf`; `../Admin` → `admin`.
 
-`slugify` lower-cases the raw input, replaces every run of non-alphanumeric characters (regex `/[^a-z0-9]+/g`) with a single `-`, then trims leading and trailing dashes.
+`titleCase` splits the original input on whitespace/dash/underscore, capitalizes each part, and falls back to `My LuckyStack App`.
 
-Examples:
+## Data-layer variables
 
-| Raw input | `slugify` output |
+| Variable | Source/meaning |
 | --- | --- |
-| `MyApp` | `myapp` |
-| `My Cool App` | `my-cool-app` |
-| `acme-corp` | `acme-corp` |
-| `--weird--name__` | `weird-name` |
-| `123start` | `123start` (digit leads are allowed) |
-| `cafe` | `cafe` |
-| `café` | `caf` (non-ASCII chars are stripped, the diacritic falls out) |
-| `   ` | `''` (empty slug aborts with "Invalid project name") |
+| `DB_PROVIDER` | Selected `mongodb`, `postgresql`, `mysql`, or `sqlite`; consumed by the base Prisma schema before non-Prisma pruning/adaptation. |
+| `USER_ID_ATTRS` | MongoDB ObjectId attributes or SQL/SQLite cuid attributes for Prisma's `User.id`. |
+| `DATABASE_URL` | Provider-specific local example inserted into `.env.local_template` and reused by generated ORM config starters. MongoDB includes the required single-node replica-set query. |
+| `PRISMA_INIT_CMD` | Historical token name retained in `template/README.md`; value is now ORM-aware: Prisma push/migrate, `db:push`, `db:schema:update`, or an `orm=none` instruction. |
 
-Unicode handling is deliberately strict: only `[a-z0-9]` survives. If a user wants emoji or non-ASCII in their project name they must wrap that handling themselves at the consumer level.
+Provider examples:
 
-### `{{PROJECT_TITLE}}`
-
-- **Source**: `titleCase(args.projectName)` (src/index.ts:943).
-- **Type**: human-readable Title Case string.
-- **Used for**: page titles, headings in landing / login pages, README banner.
-
-`titleCase` splits the raw input on whitespace / `-` / `_`, filters out empty parts, Title-Cases each part, and joins with a single space. If the result is empty, it returns the fallback string `'My LuckyStack App'`.
-
-Examples:
-
-| Raw input | `titleCase` output |
+| Provider | Rendered development shape |
 | --- | --- |
-| `my-cool-app` | `My Cool App` |
-| `acme corp` | `Acme Corp` |
-| `acme_corp_inc` | `Acme Corp Inc` |
-| `myapp` | `Myapp` |
-| `---` | `My LuckyStack App` (fallback) |
+| MongoDB | `mongodb://localhost:27017/<slug>?replicaSet=rs0&directConnection=true` |
+| PostgreSQL | `postgresql://user:password@localhost:5432/<slug>` |
+| MySQL | `mysql://user:password@localhost:3306/<slug>` |
+| SQLite | `file:./dev.db` |
 
-Note: `titleCase` is applied to the ORIGINAL `args.projectName`, not to the slug, so casing and word boundaries in the user's input are preserved.
+## Integration env blocks
 
-### `{{LUCKYSTACK_VERSION}}`
+| Variable | Builder | Behavior |
+| --- | --- | --- |
+| `OAUTH_ENV_VARS` | `buildOAuthEnvVars` | Selected providers are active empty-key blocks; alternatives remain enable-later comments. Auth-off emits an add-login pointer. Both development-prefixed and production keys are documented. |
+| `EXTERNAL_ORIGINS` | selected OAuth authorization origins | Comma-separated CORS/origin allow-list contribution. |
+| `EMAIL_ENV_VARS` | `buildEmailEnvVars` | Console/Resend/SMTP-specific active block plus commented alternatives and `EMAIL_FROM`. |
+| `MONITORING_ENV_VARS` | `buildMonitoringEnvVars` | Sentry/PostHog/Datadog env blocks. The selected vendor is uncommented; Datadog also explains first-import setup. |
 
-- **Source**: `readSelfVersion()` (src/index.ts:950).
-- **Type**: semver string, e.g. `"0.4.2"`.
-- **Used for**: pinning `@luckystack/*` ranges in the generated `package.json`. The template ships these as `"^{{LUCKYSTACK_VERSION}}"` so the scaffolded app installs matching versions of every framework package.
+The associated SDK dependencies are injected separately; these strings only render the environment contract.
 
-`readSelfVersion` reads its own `package.json` (`path.resolve(__dirname, '..', 'package.json')`), parses it, and asserts the `version` field matches `/^\d+\.\d+\.\d+/`. It throws loudly when the version is missing or malformed.
+## Docker variables
 
-Rationale for the throw (from the inline comment): silently falling back to `'0.0.1'` would lock every newly-scaffolded project to a stale dependency set, which is almost always worse than aborting.
+`buildDockerTemplateVars(slug, choices)` renders the Dockerfile, `compose.yaml`, nginx config, and `.env.docker_template` for the selected provider and optional router topology.
 
-### `{{DB_PROVIDER}}`
-
-- **Source**: `choices.dbProvider` (`pickFromList` result).
-- **Type**: `'mongodb' | 'postgresql' | 'mysql' | 'sqlite'`.
-- **Used for**: the `provider` field in `prisma/schema.prisma`, the conditional database-init script in the next-steps block (`prisma:db:push` vs `prisma:migrate:dev`).
-
-### `{{PRISMA_INIT_CMD}}`
-
-- **Source**: `buildTemplateVars()` — `choices.dbProvider === 'mongodb' ? 'npm run prisma:db:push' : 'npm run prisma:migrate:dev'`.
-- **Type**: provider-conditional npm-script command string.
-- **Used for**: the first database-init step in `template/README.md`'s "Get started" block, so the printed command matches the chosen provider. MongoDB's Prisma connector does not support `migrate dev` (it needs `db push`); kept in step with `printNextSteps`' `prismaCmd`.
-
-### `{{USER_ID_ATTRS}}`
-
-- **Source**: `USER_ID_ATTRS_BY_PROVIDER[choices.dbProvider]`.
-- **Type**: Prisma field attribute string, e.g. `@id @default(auto()) @map("_id") @db.ObjectId` (MongoDB) or `@id @default(cuid())` (SQL).
-- **Used for**: the `id` field declaration in `prisma/schema.prisma`.
-
-### `{{DATABASE_URL}}`
-
-- **Source**: `DATABASE_URL_BY_PROVIDER[choices.dbProvider]`.
-- **Type**: provider-specific example connection string (dev defaults pre-filled).
-- **Used for**: the `DATABASE_URL` line in `.env.local_template` so the developer only needs to adjust credentials, not format.
-
-### `{{OAUTH_ENV_VARS}}`
-
-- **Source**: `buildOAuthEnvVars(choices.oauthProviders, choices.authMode)`.
-- **Type**: multi-line string. Selected providers are uncommented; unselected providers are comment-stubs. Under `authMode: 'none'` (no `@luckystack/login` installed) it collapses to a one-line `npx luckystack add login` pointer instead.
-- **Used for**: the OAuth block in `.env.local_template`.
-
-### `{{EXTERNAL_ORIGINS}}`
-
-- **Source**: comma-joined `OAUTH_PROVIDER_ORIGINS[provider]` for each selected OAuth provider.
-- **Type**: comma-separated origin string, e.g. `https://accounts.google.com,https://github.com`.
-- **Used for**: the `EXTERNAL_ORIGINS` line in `.env_template` (CORS allow-list for OAuth callbacks).
-
-### `{{EMAIL_ENV_VARS}}`
-
-- **Source**: `buildEmailEnvVars(choices.emailProvider)`.
-- **Type**: multi-line string (env lines for selected adapter, commented stubs for others).
-- **Used for**: the email block in `.env.local_template`.
-
-### `{{MONITORING_ENV_VARS}}`
-
-- **Source**: `buildMonitoringEnvVars(choices.monitoringProvider)`.
-- **Type**: multi-line string.
-- **Used for**: the monitoring block in `.env.local_template`.
-
----
-
-**Scaffold choices with NO template placeholder**: `authMode`, `oauthProviders`,
-`emailProvider`, `monitoringProvider`, and `i18n` drive `pruneOptionalPackages`
-(file/import removal) and `injectOptionalDeps` (npm dep injection) instead of
-placeholder substitution. Do not add `{{AUTH_MODE}}` etc. to template files —
-use the prune/inject path instead.
-
-## Text vs binary detection
-
-`isTextFile(filePath)` (src/index.ts:1175) decides whether `copyTree` runs `replacePlaceholders` or falls back to a binary copy.
-
-```ts
-const isTextFile = (filePath: string): boolean => {
-  const textExts = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json',
-                    '.md', '.css', '.html', '.prisma'];
-  if (textExts.includes(path.extname(filePath))) return true;
-  const base = path.basename(filePath);
-  if (base.startsWith('.')) return true;
-  return false;
-};
-```
-
-Behaviour:
-
-- Any path with one of the listed extensions is treated as text.
-- Any basename starting with `.` is treated as text. This is checked AFTER `renameDotFile`, so `_dot_env_template` (renamed to `.env_template`) qualifies. This catches dotfiles that have no extension (`.gitignore`, `.env`, `.env_template`).
-- Everything else (images, fonts, binary blobs) is byte-copied via `fs.copyFileSync`. Adding a new text extension is a one-line change to `textExts`.
-
-Files that contain `{{...}}` tokens but match no extension and no dot-prefix would be byte-copied with the tokens left intact. We do not have any such files today, but it is worth flagging as a footgun for future template additions.
-
-## Adding a new placeholder
-
-1. Add a new question to `runPrompts` (or extend `DEFAULT_CHOICES` if it should be auto-chosen).
-2. Add the key to `ScaffoldChoices`.
-3. Add a `KEY: value` line to the `vars` map in `main()`.
-4. Reference `{{KEY}}` from the relevant file(s) in `template/`.
-
-Always use SCREAMING_SNAKE_CASE for keys — the regex requires `\w+`, and the convention helps reviewers spot unfilled placeholders during code review.
-
-**Do not** read placeholder values from environment variables. The CLI is run on the consumer's machine, where stray env vars (`PROJECT_NAME=...`) could leak unintended values into a scaffold. All input must flow through argv or interactive prompts.
-
-## Where each placeholder lands
-
-The lookup below was generated by grepping the `template/` tree. It is illustrative — when files are added, the list will grow.
-
-| Placeholder | Files that reference it |
+| Variable | Purpose |
 | --- | --- |
-| `{{PROJECT_NAME}}` | `package.json` (`"name"`), `.env_template` (`PROJECT_NAME=`), `README.md` |
-| `{{PROJECT_TITLE}}` | `config.ts` (`pageTitle`), `index.html` (`<title>`), `README.md`, `docs/PRODUCT.md` |
-| `{{LUCKYSTACK_VERSION}}` | `package.json` (every `@luckystack/*` dependency range) |
-| `{{DB_PROVIDER}}` | `prisma/schema.prisma` (`provider =`) |
-| `{{PRISMA_INIT_CMD}}` | `README.md` (the database-init command in "Get started") |
-| `{{USER_ID_ATTRS}}` | `prisma/schema.prisma` (`id String {{USER_ID_ATTRS}}`) |
-| `{{DATABASE_URL}}` | `.env.local_template` (`DATABASE_URL=`) |
-| `{{OAUTH_ENV_VARS}}` | `.env.local_template` (OAuth block) |
-| `{{EXTERNAL_ORIGINS}}` | `.env_template` (`EXTERNAL_ORIGINS=`) |
-| `{{EMAIL_ENV_VARS}}` | `.env.local_template` (email block) |
-| `{{MONITORING_ENV_VARS}}` | `.env.local_template` (monitoring block) |
+| `DOCKER_DATABASE_SERVICES` | PostgreSQL/MySQL/MongoDB service definitions, Mongo replica initializer, or no external SQLite service. |
+| `DOCKER_DATABASE_URL` | App-container connection URL. |
+| `DOCKER_BUILD_DATABASE_URL` | Build-stage safe URL used while generating/building artifacts. |
+| `DOCKER_DATABASE_DEPENDS_ON` | Provider health/init dependency block. |
+| `DOCKER_DATABASE_VOLUMES` | External database volume declaration. |
+| `DOCKER_APP_DATA_VOLUME` | SQLite app-data mount. |
+| `DOCKER_APP_DATA_DECLARATION` | SQLite named volume declaration. |
+| `DOCKER_REMOTE_DATABASE_URL_EXAMPLE` | Host/external database override example. |
+| `DOCKER_BACKEND_TARGET` | nginx target: app directly, or router when selected. |
+| `DOCKER_ROUTER_SERVICE` | Optional router Compose service. |
+| `DOCKER_WEB_DEPENDENCY` | Web service dependency (`app` or `router`). |
+
+These assets use non-root containers, private Redis/database services, health gates, and preset-aware startup; see the scaffold's generated `docs/DOCKER.md`.
+
+## Text detection
+
+`isTextFile` renders:
+
+- `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.json`, `.md`, `.css`, `.html`, `.prisma`, `.yaml`, `.yml`, `.sh`, `.conf`;
+- any post-rename basename starting with `.`;
+- `Dockerfile`.
+
+Other files are byte-copied. `_dot_` is replaced everywhere in a destination filename, allowing npm-safe sources such as `_dot_env_dot_local_template` to become `.env.local_template`.
+
+## Framework-doc rendering differs intentionally
+
+Template files receive the full variable map. When AI docs are copied, framework `docs/` are copied with an empty map so documentation examples containing `{{...}}` remain examples. Other text entries such as root `CLAUDE.md` can receive project substitutions. Dated framework findings are removed after copying.
+
+## Adding a create-app placeholder
+
+1. Add the value to `buildTemplateVars` or `buildDockerTemplateVars`.
+2. Use a `SCREAMING_SNAKE_CASE` token in a recognized text template.
+3. Add/update tests for the rendered choice matrix.
+4. Update this reference and the create-app `CLAUDE.md` index.
+5. Verify no unexpected tokens remain outside `.luckystack/templates/`.
+
+Scaffold choices that primarily alter structure should continue using prune/wire/adapt functions rather than embedding large conditional source blocks in string variables.
 
 ## Related
 
-- Scaffold execution flow: [`scaffold-flow.md`](./scaffold-flow.md)
-- CLI flag reference: [`cli-flags.md`](./cli-flags.md)
-- Framework-docs copy step (uses the same `vars` set on the AI docs): [`framework-docs-copy.md`](./framework-docs-copy.md)
+- [`scaffold-flow.md`](./scaffold-flow.md)
+- [`cli-flags.md`](./cli-flags.md)
+- [`framework-docs-copy.md`](./framework-docs-copy.md)

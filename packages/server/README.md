@@ -35,7 +35,7 @@ await server.listen();
 
 The bootstrap call runs (in order):
 
-1. Auto-imports `luckystack/core/*.ts`, `luckystack/deploy/*.ts`, `luckystack/login/*.ts`, `luckystack/sentry/*.ts`, `luckystack/presence/*.ts`, `luckystack/docs-ui/*.ts`, `luckystack/server/*.ts` (topologically sorted, then alphabetically inside each folder).
+1. Auto-imports `luckystack/core/*.ts`, `luckystack/deploy/*.ts`, `luckystack/login/*.ts`, `luckystack/email/*.ts`, `luckystack/sentry/*.ts`, `luckystack/presence/*.ts`, `luckystack/cron/*.ts`, `luckystack/docs-ui/*.ts`, `luckystack/server/*.ts` (topologically sorted, then alphabetically inside each folder).
 2. Hands off to `createLuckyStackServer(options)`.
 
 Set `skipOverlayLoad: true` to handle every registration yourself, or `overlayRoot: 'custom-folder'` to load from somewhere other than `./luckystack`.
@@ -122,7 +122,7 @@ registerCustomRoute(async (req, res) => {
 
 - **HTTP server** with CORS + security headers, OPTIONS preflight, method validation, cookie sliding, CSRF middleware.
 - **Socket.io server** attached to the HTTP server, with optional Redis adapter when configured in deploy config.
-- **Framework routes:** `/_health`, `/livez`, `/readyz`, `/_test/reset` (dev/test only), `/api/*` and `/sync/*` (with SSE streaming), `/auth/api`, `/auth/callback/*`, `/uploads/*`, `/assets/*`, `/csrf-token`.
+- **Framework routes:** `/_health`, `/livez`, `/readyz`, `/_test/reset` (dev/test only), `/api/*` and `/sync/*` (with SSE streaming), `/auth/api`, `/auth/callback/*`, `GET /auth/csrf`, `/uploads/*`, and `/assets/*`.
 - **Presence broadcasting** (when enabled in project config): connect / disconnect / reconnect, location updates, peer notifications.
 - **Boot UUID** written on startup so the load-balancer (`@luckystack/router`) can detect rolling restarts.
 - **Dev tools** in non-production: devkit hot reload, console initializer.
@@ -133,7 +133,7 @@ registerCustomRoute(async (req, res) => {
 
 | File | Routes |
 | --- | --- |
-| `csrfMiddleware.ts` + `csrfRoute.ts` | CSRF guard on writes + `GET /csrf-token` |
+| `csrfMiddleware.ts` + `csrfRoute.ts` | CSRF guard on cookie-mode writes + `GET /auth/csrf` token issue |
 | `healthRoutes.ts` | `/livez`, `/readyz`, `/_health` |
 | `testResetRoute.ts` | `/_test/reset` (dev/test only — see Security below) |
 | `faviconRoute.ts` | `/favicon.ico` |
@@ -151,7 +151,7 @@ Top-level `handleHttpRequest` + `dispatchRoutes(handlers, ctx)` are the only orc
 
 - **CORS fail-closed.** If neither `Origin` nor `Referer` is present, only read-only methods (GET, HEAD, OPTIONS) are allowed; state-changing methods are rejected with 403. Earlier builds fell back to `Host`, which silently bypassed CORS for non-browser callers (`curl`, server-to-server). When you `curl` a write endpoint, set `-H 'Origin: https://your-allowed-origin'`.
 - **`/_test/reset` is fail-closed.** It requires both `NODE_ENV` to be exactly `development` or `test` AND a non-empty `TEST_RESET_TOKEN` env var. Any other state returns 403 (no silent allow-list). Wire `TEST_RESET_TOKEN` in your dev/test `.env.local` and pass it as the `x-test-reset-token: ${TOKEN}` header on the reset call. `@luckystack/test-runner`'s `resetServerState` reads the same env var.
-- **CSRF middleware.** Writes to `/api/*` and `/sync/*` require an `x-csrf-token` header that matches the value minted on the session record (mirrored via `GET /auth/csrf`). The `apiRequest` helper in `@luckystack/core/client` attaches it automatically. Rejections dispatch the `csrfMismatch` hook before returning 403; the payload contains presence-only token info, never the value. The header name, token length, and cookie options are customisable via `registerCsrfConfig({ headerName, tokenLength, cookieOptions })` from `@luckystack/core` — see `packages/core/docs/csrf-config.md`.
+- **CSRF middleware.** In cookie mode, state-changing framework routes and eligible custom routes require the configured CSRF header (default `x-csrf-token`). With login installed it must match the session-bound token; without login it must match the stateless double-submit cookie issued by `GET /auth/csrf`. The `apiRequest` helper in `@luckystack/core/client` fetches and attaches it automatically. Auth bootstrap/callback routes and explicitly origin-exempt paths are excluded. Rejections dispatch `csrfMismatch` before returning 403; the hook receives token presence only, never the value. Configure the header name, token length, and cookie name/options through `registerCsrfConfig(...)` — see `packages/core/docs/csrf-config.md` and `packages/server/docs/security-defaults.md`.
 
 ## Public API
 

@@ -5,10 +5,10 @@
 ## Install
 
 ```bash
-npm install @luckystack/login @luckystack/core ioredis socket.io
+npm install @luckystack/login socket.io
 ```
 
-The default user adapter uses Prisma; install `@prisma/client` as well when you use it. Projects with a custom `UserAdapter` and `SessionAdapter` can use another data layer and session store.
+The default user adapter uses Prisma; install optional peer `@prisma/client` when you use it. Framework-mode email flows additionally need optional peer `@luckystack/email`. Projects with custom `UserAdapter` and `SessionAdapter` implementations can use another data layer and session store.
 
 ## Quickstart
 

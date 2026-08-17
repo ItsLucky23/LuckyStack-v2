@@ -69,7 +69,7 @@ Behavior notes:
 
 ### `resetServerState(input)`
 
-POST to the server's `/_test/reset` endpoint. Used between rate-limit probes and at the start of a CI run to ensure a clean slate.
+POST to the server's `/_test/reset` endpoint. Used between rate-limit probes and at CI bookends to clear framework-owned limiter/default-session state; it is not a general application-database reset.
 
 Signature:
 
@@ -84,7 +84,7 @@ interface ResetServerStateInput {
 
 Returns `true` when the server responds 2xx, `false` on network error, parse error, or non-2xx. The error is swallowed deliberately — the most common reason for `false` is "the route is disabled in this environment", and the caller usually wants to proceed anyway.
 
-URL: `${baseUrl}/_test/reset` (POST). When `token` is set, the request includes `X-Test-Reset-Token: ${token}`. The header name is part of the server contract.
+URL: `${baseUrl}/_test/reset` (POST). Supply `token` (normally `TEST_RESET_TOKEN`); the request sends it as `X-Test-Reset-Token`. The server always requires a non-empty matching value.
 
 ## `/_test/reset` server contract
 
@@ -98,7 +98,7 @@ Gating, in order:
 What it clears (when both gates pass):
 
 - **All rate-limit buckets** via `clearAllRateLimits()` from `@luckystack/core`. Every key under the rate-limit Redis namespace is dropped. Always cleared.
-- **All sessions** under `${projectName}-session:*` and active-user records under `${projectName}-activeUsers:*`. Scanned in batches of 200 keys via `redis.scan + redis.del`. Project name comes from `getProjectName()` for consistency across `session.ts`, `rateLimiter.ts`, and this endpoint.
+- **Default Redis session namespaces** matching `formatKey('-session', '') + ':*'` and `formatKey('-activeUsers', '') + ':*'`. They are scanned in batches of 200 and follow the registered Redis key formatter.
 - **Registered runtime hooks** when `?include=hooks` is in the query string. NOT included by default because framework-internal handlers (e.g. presence postLogout) register at boot — clearing them would require a server restart to recover.
 
 Response:
@@ -108,6 +108,8 @@ Response:
 ```
 
 The `cleared` array reflects what actually had keys to drop. It is informational; `runRateLimitTests` only checks `response.ok`.
+
+> **Storage boundary:** the endpoint does not call `SessionAdapter`. A custom DynamoDB/Postgres/in-memory session store survives this reset, as do application database rows. Tests using custom storage must clear it explicitly in their own setup/teardown.
 
 ## Types
 

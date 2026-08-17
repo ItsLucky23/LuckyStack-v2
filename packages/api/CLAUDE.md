@@ -106,6 +106,6 @@ Deep behavior for each hook lives in `@luckystack/core`'s hook registry doc.
 
 - Architecture deep dives: `/docs/ARCHITECTURE_API.md`, `/docs/ARCHITECTURE_ROUTING.md`.
 - Consumer quickstart: `./README.md`.
-- Generated-type contract: `/docs/ARCHITECTURE_ROUTING.md` (see "Generated maps") and root `CLAUDE.md` rule 16 (no `unknown`/`any` casts).
+- Generated-type contract: `/docs/ARCHITECTURE_ROUTING.md` (see "Generated maps") and repository-root `CLAUDE.md` rule 21 (no `unknown`/`any` casts).
 - Session source: `@luckystack/core`'s session-provider registry — `readSession(token)` / `performLogout(...)` (see `docs/ARCHITECTURE_SESSION.md`). `@luckystack/login` is the DEFAULT provider when installed, not a hard dep. Shared types `BaseSessionLayout` / `AuthProps` come from `@luckystack/core`.
 - Runtime map source: `@luckystack/core` `getRuntimeApiMaps()` + `@luckystack/devkit` emitter.

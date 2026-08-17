@@ -6,7 +6,7 @@ date: 2026-08-16
 deciders: [mathijs]
 tags: [config, ports, scaffold, oauth, server]
 supersedes: []
-superseded_by: [0039]
+superseded_by: [0045]
 relates: [0016, 0031]
 ---
 

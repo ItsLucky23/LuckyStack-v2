@@ -7,7 +7,7 @@ date: 2026-08-16
 tags: [e2e, windows, ports, redis, wsl, infrastructure]
 ---
 
-# 0013 — Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup
+# 0016 — Windows port-0 probes and WSL Redis defaults can invalidate runtime E2E setup
 
 ## What happened
 

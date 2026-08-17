@@ -1,12 +1,10 @@
 # Error Handling
 
-> Last updated: 2026-05-20
-
 ## Overview
 
 `@luckystack/api` produces a strict, two-shape response envelope. Every code path through the handler — malformed input, auth failure, rate-limit rejection, handler throw, handler return — ends in either `{ status: 'success', ... }` or `{ status: 'error', errorCode, errorParams?, httpStatus, message }`. The transformation from raw failure to wire envelope flows through three layers:
 
-1. **`tryCatch`** wraps the handler's `main(...)` call. Errors are captured (auto-forwarded to Sentry / any registered tracker with context), and the tuple `[error, result]` is returned to the pipeline. Raw exceptions never reach the client.
+1. **`tryCatch`** wraps the handler's `main(...)` call. Thrown errors are captured (fanned out to every registered tracker with context), and the tuple `[error, result]` is returned to the pipeline. Raw exceptions never reach the client.
 2. **`buildApiResponseEnvelope`** (socket) / **`buildNetworkError`** (HTTP) maps the raw handler result to a wire envelope, inferring `httpStatus` via `defaultHttpStatusForResponse` and routing the error fields through `normalizeErrorResponse`.
 3. **`normalizeErrorResponse`** renders the localized `message` field from the `errorCode` + `errorParams`, using the project-registered translate function. Locale is extracted in priority order: `x-language` header → `accept-language` header → `user.language`.
 
@@ -199,7 +197,7 @@ The error tracker (registered via `@luckystack/error-tracking`) receives every `
 
 ## What is NOT handled here
 
-- **Business-logic errors inside `main(...)`.** Routes return `{ status: 'error', errorCode: '...' }` directly. The envelope normalizer renders them — no thrown exception, no Sentry capture. This is by design: business outcomes (validation failures in domain code, "user already exists") are not "errors" in the tracking sense.
+- **Business-logic errors inside `main(...)`.** Routes return `{ status: 'error', errorCode: '...' }` directly. The envelope normalizer renders them — no thrown exception, no error-tracker capture. This is by design: business outcomes (validation failures in domain code, "user already exists") are not "errors" in the tracking sense.
 - **Localization of `errorCode` strings.** That is the consumer's responsibility — `registerLocalizedNormalizer` from the project's `server/utils/responseNormalizer.ts` provides the translate function backed by JSON locale files in `src/_locales/`.
 - **Frontend error rendering.** The client's `apiRequest` returns the normalized envelope. UI code consumes `result.errorCode` + `result.message` and decides how to render (toast via `notify`, inline form error, redirect).
 - **Hook handler errors.** Failures inside a `dispatchHook` handler are isolated by the hook bus — they log via `getLogger()` + the tracker but do not affect the main pipeline.

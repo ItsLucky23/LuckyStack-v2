@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Corrected dependency, generated-typing, error-tracker, and transport-span documentation, including the current root no-cast rule and HTTP-only automatic sync request span.
+
 ## [0.8.1] - 2026-07-27
 
 ### Fixed

@@ -188,7 +188,7 @@ All config keys live on `ProjectConfig` (from `@luckystack/core`). Resolved at c
 
 ## Related links
 
-- Repo root contract: [`/.claude/CLAUDE.md`](../../.claude/CLAUDE.md)
+- Repository-root contract: [`CLAUDE.md`](../../CLAUDE.md)
 - Package README: [`./README.md`](./README.md)
 - Architecture — auth lifecycle: [`/docs/ARCHITECTURE_AUTH.md`](../../docs/ARCHITECTURE_AUTH.md)
 - Architecture — sessions (Redis layout, sliding expiration, single-session enforcement): [`/docs/ARCHITECTURE_SESSION.md`](../../docs/ARCHITECTURE_SESSION.md)

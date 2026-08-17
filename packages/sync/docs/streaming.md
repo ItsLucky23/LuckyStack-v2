@@ -238,7 +238,7 @@ io.to(receiver).emit(socketEventNames.sync, frame);
 
 ### Stream-hook fire-and-forget
 
-`preSyncStream` and `postSyncStream` hooks dispatch via `void dispatchHook(...)` — chunks never `await` the hook. Hook errors are swallowed by the hook dispatcher's own `tryCatch`. This matters because a slow Sentry breadcrumb (for example) must not delay chunk delivery to the user.
+`preSyncStream` and `postSyncStream` hooks dispatch via `void dispatchHook(...)` — chunks never `await` the hook. Hook errors are swallowed by the hook dispatcher's own `tryCatch`. This matters because a slow error-tracker breadcrumb (for example) must not delay chunk delivery to the user.
 
 ### Chunk-index counter
 

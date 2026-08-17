@@ -843,7 +843,7 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
         'NOTE: auth works on prisma out of the box; on drizzle/mikro-orm the',
         'scaffold ships a starter UserAdapter you finish first (the built-in one',
         'is Prisma-backed). orm "none" forces auth off — no data layer to adapt.',
-        'Redis stays required in all cases (sessions/rate-limiting run on it).',
+        'Every generated variant defaults rate limiting to Redis; use the memory store only for intentional single-instance use. Auth/reset/cron/multi-instance features may still require Redis.',
       ].join('\n'),
       options: PROVIDER_OPTIONS.orm, defaultValue: 'prisma',
     },
@@ -2541,8 +2541,9 @@ const ORM_NONE_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'none' �
 //?      import { registerDbHealthCheck } from '@luckystack/core';
 //?      registerDbHealthCheck(async () => { /* await yourClient.ping() */ return true; });
 //?
-//? 2) Redis overrides (unchanged from a normal scaffold) — Redis stays
-//?    REQUIRED: sessions, rate-limiting, and one-time tokens run on it:
+//? 2) Redis overrides — generated rate limiting defaults to Redis. Auth/reset/
+//?    cron/multi-instance features may also use Redis. A deliberate single-
+//?    instance app can instead set config.rateLimiting.store to 'memory':
 //?
 //?      import { registerRedisClient } from '@luckystack/core';
 //?      import Redis from 'ioredis';
@@ -2784,8 +2785,9 @@ const DRIZZLE_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'drizzle')
 //?      import { db } from '../../functions/db';
 //?      registerDbHealthCheck(async () => { await db.execute(sql\`select 1\`); return true; });
 //?
-//? 2) Redis overrides (unchanged from a normal scaffold) — Redis stays
-//?    REQUIRED: sessions, rate-limiting, and one-time tokens run on it.
+//? 2) Redis overrides — generated rate limiting defaults to Redis; selected
+//?    auth/reset/cron/multi-instance features may also require it. A deliberate
+//?    single-instance app can set config.rateLimiting.store to 'memory'.
 //?
 //? Auth was scaffolded OFF: the built-in login UserAdapter is Prisma-backed.
 //? To enable auth on drizzle, install @luckystack/login and register a custom
@@ -2914,8 +2916,9 @@ const MIKRO_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'mikro-orm')
 //?      import { getOrm } from '../../functions/db';
 //?      registerDbHealthCheck(async () => (await getOrm()).isConnected());
 //?
-//? 2) Redis overrides (unchanged from a normal scaffold) — Redis stays
-//?    REQUIRED: sessions, rate-limiting, and one-time tokens run on it.
+//? 2) Redis overrides — generated rate limiting defaults to Redis; selected
+//?    auth/reset/cron/multi-instance features may also require it. A deliberate
+//?    single-instance app can set config.rateLimiting.store to 'memory'.
 //?
 //? Auth was scaffolded OFF: the built-in login UserAdapter is Prisma-backed.
 //? To enable auth on mikro-orm, install @luckystack/login and register a
@@ -3462,7 +3465,8 @@ orm: none — bring-your-own data layer checklist:
   1. functions/db.ts        export your database client (becomes functions.db.* in handlers)
   2. luckystack/core/clients.ts   optional: registerDbHealthCheck(...) so /readyz probes your DB
   3. .env.local             set your own connection string (DATABASE_URL is just a suggestion)
-  4. Redis stays REQUIRED   sessions / rate-limiting / tokens run on Redis, not the ORM
+  4. Redis default          rate limiting starts Redis-backed; memory is available for an
+                            intentional single-instance app; selected features may require Redis
   5. Want auth later?       install Prisma (or register a custom UserAdapter) first —
                             the built-in login UserAdapter is Prisma-backed.
 `,

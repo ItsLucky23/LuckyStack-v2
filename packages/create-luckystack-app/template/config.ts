@@ -1,4 +1,4 @@
-//? @adr 0039
+//? @adr 0045
 //? Project-level config. Registered into `@luckystack/core` at module load
 //? (side-effect import) so framework packages read your overrides via
 //? `getProjectConfig()`. Edit values here to tune the framework's behavior.
@@ -236,9 +236,10 @@ export type { AuthProps } from '@luckystack/core';
 /**
  * The session as a handler RECEIVES it — hence `Jsonify`.
  *
- * Sessions are persisted to Redis with `JSON.stringify` and read back with
- * `JSON.parse`. JSON has no `Date`, so a `createdAt` that was a Date on the way
- * in is an ISO **string** on the way out. Inheriting Prisma's `User` verbatim
+ * Sessions cross the transport/storage boundary as JSON (the default Redis
+ * adapter serializes with `JSON.stringify`; custom adapters must preserve the
+ * same wire shape). JSON has no `Date`, so a `createdAt` that was a Date on the
+ * way in is an ISO **string** on the way out. Inheriting Prisma's `User` verbatim
  * would declare `createdAt: Date` for a value that is a string at runtime, and
  * `user.createdAt.getTime()` would compile inside an API handler and then throw.
  *

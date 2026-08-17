@@ -1,215 +1,173 @@
 # Scaffold Flow
 
-End-to-end execution path of `create-luckystack-app` from `npx` invocation to the final "Done — scaffold complete." banner.
+End-to-end behavior of `create-luckystack-app`, from argv parsing to the final next-steps banner. Source of truth: `src/index.ts` and `src/scaffoldManifest.ts`.
 
 ## High-level sequence
 
-```
-npx create-luckystack-app <name> [flags]
-   |
-   v
-[1] main()                                src/index.ts:283
-   |
-   |-- parseArgs(process.argv.slice(2))   src/index.ts:39
-   |     -> CliArgs { projectName, install, prompt, help }
-   |
-   |-- if (args.help) -> printHelp() -> return
-   |
-   |-- if (!args.projectName) -> printHelp() -> exit 1
-   |
-   |-- slug = slugify(args.projectName)
-   |     -> if (!slug) exit 1   // "Invalid project name"
-   |
-   |-- targetDir = path.resolve(cwd, args.projectName)
-   |     -> if (fs.existsSync) exit 1   // "Target directory already exists"
-   |
-   |-- if (!fs.existsSync(TEMPLATE_DIR)) exit 1   // packaging bug
-   |
-   |-- choices = args.prompt ? await runPrompts() : DEFAULT_CHOICES
-   |
-   |-- vars = { PROJECT_NAME, PROJECT_TITLE, LUCKYSTACK_VERSION, DB_PROVIDER,
-   |            AUTH_MODE, OAUTH_PROVIDERS, EMAIL_PROVIDER, MONITORING_PROVIDER,
-   |            I18N_ENABLED }
-   |
-   |-- copyTree(TEMPLATE_DIR, targetDir, vars)
-   |
-   |-- [Fase E.2] framework-docs copy block
-   |     CLAUDE.md            -> targetDir/CLAUDE.md
-   |     docs/                -> targetDir/docs/luckystack/
-   |     skills/              -> targetDir/skills/
-   |     .claude/commands/    -> targetDir/.claude/commands/
-   |     branch-logs/README.md -> targetDir/branch-logs/README.md
-   |
-   |-- if (args.install):
-   |     runNpmInstall(targetDir)
-   |     runPrismaGenerate(targetDir)
-   |
-   v
-"Done — scaffold complete." + Next-steps block
+```text
+parseArgs
+  -> validate project slug + safe fresh target
+  -> resolve choices (TTY wizard or defaults + flags)
+  -> read create-app's own version
+  -> build project/provider/Docker template variables
+  -> copy bundled template with placeholder rendering
+  -> inject selected SDK/package dependencies
+  -> prune deselected features and auth/router surfaces
+  -> apply selected ORM + optional-package wiring
+  -> wire package-manager metadata
+  -> optionally copy AI context + MCP/browser tooling
+  -> write .luckystack/scaffold.json with rendered-file hashes
+  -> selected package-manager install
+  -> Prisma generate only when ORM=prisma
+  -> print choices + ORM-specific next steps
 ```
 
-## Functions
+A thrown scaffold-time error triggers best-effort removal of the directory created by that run. A pre-existing target is never touched.
 
-### `main()` (src/index.ts:283)
+## 1. Parse and validate
 
-CLI entrypoint, auto-invoked at the bottom of the module via `main().catch(...)`. Returns `Promise<void>`. Failure modes:
+`parseArgs(process.argv.slice(2))` is strict:
 
-- Help requested -> `printHelp()`, return cleanly (exit 0).
-- Missing project name -> stderr message, `printHelp()`, `process.exit(1)`.
-- Slug empty after `slugify()` -> stderr "Invalid project name", `process.exit(1)`.
-- Target directory already exists -> stderr, `process.exit(1)`. The CLI never overwrites.
-- `TEMPLATE_DIR` not present at runtime -> stderr "This is a packaging bug", `process.exit(1)`.
-- Any other thrown error bubbles up to the `.catch` on line 390, logged as `[create-luckystack-app] unexpected error:`, exit 1.
+- exact bare toggles and validated `--key=value` choices;
+- first non-flag token becomes the project-name source;
+- unknown/invalid flags exit 2;
+- `--help` prints help and exits cleanly.
 
-`main` does NOT swallow errors from `runPrompts`, `copyTree`, or `readSelfVersion` — they propagate to the top-level catch.
+`validateArgsOrExit` then:
 
-### `parseArgs(argv)` (src/index.ts:39)
+1. requires a project name;
+2. derives the ASCII kebab-case slug;
+3. resolves the target from that sanitized slug (not the raw argument);
+4. verifies it remains inside the current directory;
+5. rejects an existing target;
+6. verifies the packaged `template/` directory exists.
 
-Pure function. Walks the argv array once. Recognises:
+## 2. Resolve choices
 
-- `--no-install` -> `install = false`
-- `--no-prompt` -> `prompt = false`
-- `--help` / `-h` -> `help = true`
-- First non-flag token -> `projectName` (only the first is captured because of `projectName ||= arg`)
+### Interactive TTY
 
-Unknown flags are silently ignored. There is no `--flag=value` syntax. Order of flags does not matter. Returns `CliArgs`.
+`runPrompts(presets)` presents an arrow-key wizard with progress, details toggles, conditional steps, and a final review/edit screen. Supplied CLI flags pre-fill their matching steps.
 
-### `runPrompts()` (src/index.ts:124)
+The logical order is:
 
-Opens a `readline` interface bound to `process.stdin` / `process.stdout`, then asks six questions in this order:
+1. ORM/data layer;
+2. compatible database provider;
+3. auth mode;
+4. OAuth providers when applicable;
+5. email adapter;
+6. monitoring backend;
+7. presence;
+8. error-tracking layer;
+9. docs UI;
+10. secret manager;
+11. router;
+12. cron;
+13. AI instructions;
+14. browser tooling when AI instructions are on;
+15. package manager.
 
-1. `dbProvider` — `pickFromList` over `['mongodb', 'postgresql', 'mysql', 'sqlite']`, default `'mongodb'`.
-2. `authMode` — `pickFromList` over `['none', 'credentials', 'credentials+oauth']`, default `'credentials'`.
-3. `oauthProviders` — **conditional**: only asked when `authMode === 'credentials+oauth'`. `pickMulti` over `['google', 'github', 'discord', 'facebook', 'microsoft']`. Default empty.
-4. `emailProvider` — `pickFromList` over `['none', 'console', 'resend', 'smtp']`, default `'console'`.
-5. `monitoringProvider` — `pickFromList` over `['none', 'sentry', 'datadog', 'posthog']`, default `'none'`.
-6. `i18n` — `askYesNo`, default `true`.
+### Non-TTY fallback
 
-The readline interface is always closed in `finally` so a Ctrl-C during prompts does not leave the TTY in raw mode.
+`runPromptsFallback` uses numbered readline prompts and the same normalization/conversion logic. Unrecognized values warn and fall back rather than silently changing a choice.
 
-Skipped entirely when `parseArgs` set `prompt: false`. In that case `DEFAULT_CHOICES` is used as-is.
+### `--no-prompt`
 
-### `pickFromList(rl, label, options, defaultValue)` (src/index.ts:77)
+`buildNoPromptChoices` overlays explicit flags on `DEFAULT_CHOICES` and enforces the same cross-field invariants. See [`cli-flags.md`](./cli-flags.md).
 
-Single-choice prompt helper. Behaviour:
+## 3. Render the base template
 
-- Prints the label, then a numbered menu (`1) optionA`, `2) optionB`, ...). The default option is marked `(default)`.
-- Blank input -> returns `defaultValue`.
-- Numeric input within `[1, options.length]` -> returns `options[n-1]`.
-- Otherwise case-insensitive name match against the option list -> returns the matching option.
-- No match -> returns `defaultValue` (silent fallback, not an error). This makes the prompt forgiving for typos.
+`copyTree(template, target, vars)` recursively:
 
-### `pickMulti(rl, label, options)` (src/index.ts:95)
+- rewrites `_dot_` in destination names to `.`;
+- skips symlinks;
+- renders known text formats with `replacePlaceholders`;
+- byte-copies binary files.
 
-Multi-choice prompt helper. Behaviour:
+Text detection includes TypeScript/JavaScript/JSON/Markdown/CSS/HTML/Prisma/YAML/shell/nginx extensions, dotfiles, and `Dockerfile`.
 
-- Prints `label (comma-separated, blank = none)` followed by a numbered menu.
-- Blank input -> returns `[]`.
-- Otherwise splits on `,`, trims each part, and for each part: accepts a numeric index OR a case-insensitive option name. Unknown parts are silently dropped.
-- Deduplicates via an internal `Set<T>`. Order in the return is the insertion order of the user's input.
+Every base template contains the complete feature surface. Subsequent transformations remove or adapt files so each resolved choice produces a buildable project rather than merely an over-installed one.
 
-There is no "all" sentinel — to pick everything the user must list each option.
+## 4. Apply feature and data-layer choices
 
-### `askYesNo(rl, label, defaultValue)` (src/index.ts:117)
+The transformation order matters:
 
-Boolean prompt helper. Behaviour:
+1. **`injectOptionalDeps`** adds selected email, monitoring, docs UI, secret-manager, cron, and related SDK dependencies at the current lockstep version.
+2. **`pruneOptionalPackages`** removes deselected presence/error-tracking/docs-ui/router surfaces and handles auth-off.
+3. **Non-Prisma ORM adaptation:**
+   - strips Prisma schema/dependencies/scripts and Prisma-bound imports;
+   - Drizzle writes `server/db/schema.ts`, `drizzle.config.ts`, a live `functions/db.ts`, driver dependencies, and `db:*` scripts;
+   - MikroORM writes EntitySchema/config/client files and the programmatic `db:schema:update` script;
+   - `none` leaves explicit bring-your-own `functions/db.ts` and core-client registration stubs.
+4. **Auth + Drizzle/MikroORM** keeps adapter-driven login/register/reset flows, writes a starter `luckystack/login/userAdapter.ts`, and prunes only Prisma-bound settings/notification surfaces. The developer must finish that adapter before sign-in works.
+5. **Secret manager** uncomments its config/server bootstrap seams.
+6. **Presence** flips the client/server gates that would otherwise leave the installed package dormant.
+7. **Router** keeps topology files, adds its script/dependency, and switches typed invocation to routed HTTP/SSE.
+8. **Package manager** writes a stable Bun `packageManager` field when selected; npm retains ecosystem-default metadata.
 
-- Prompt suffix is `(Y/n)` when default is `true`, `(y/N)` otherwise.
-- Blank input -> returns `defaultValue`.
-- Lowercase compare: `y` / `yes` -> `true`. Anything else -> `false`. Note: this means typing `n`, `no`, or even `maybe` all map to `false`.
+Provider-aware Dockerfile, Compose, nginx, health, non-root, Redis, database, and optional-router assets are rendered for every scaffold.
 
-### Self-contained `npm run test` in the scaffold
+## 5. Copy optional AI context
 
-The bundled `template/` tree includes the artifact-generation scripts and preset loader that `npm run test` depends on so a fresh checkout is testable without any extra wiring:
+When `aiInstructions=true`, `copyAiDocs` copies five bundled source groups:
 
-- `template/scripts/generateTypeMaps.ts` — emits `apiTypes.generated.ts` + `apiInputSchemas.generated.ts` + `apiDocs.generated.json` via `@luckystack/devkit`.
-- `template/scripts/generateServerRequests.ts` — emits the server-request typings the test runner consumes.
-- `template/server/config/presetLoader.ts` — loads the project's preset config so the runtime maps line up with what the test runner expects.
-- `template/package.json` declares a `generateArtifacts` script that runs both generators, and the `test` script chains `generateArtifacts` before invoking `@luckystack/test-runner`. Without this chain, `testAll.ts` imports `apiInputSchemas.generated` / `apiTypes.generated` files that don't exist on first checkout and `npm run test` errors before any layer starts.
+- root `CLAUDE.md`;
+- framework `docs/` into `docs/luckystack/`;
+- `skills/`;
+- `.claude/commands/`;
+- the branch-log convention README.
 
-`copyTree` carries these files into the scaffolded project unchanged. Consumers who customize the artifact pipeline should edit the scripts in `<scaffold>/scripts/` rather than removing them.
+It also installs the AI-index pre-commit hook and configures `@luckystack/mcp`. Dated framework finding runs are stripped while the findings protocol/index remain. Browser tooling is then wired according to `aiBrowserTooling`.
 
-### `copyTree(src, dest, vars)` (src/index.ts:241)
+See [`framework-docs-copy.md`](./framework-docs-copy.md).
 
-Recursive directory copier. For every entry under `src`:
+## 6. Write the scaffold manifest
 
-1. Rewrite the destination filename via `renameDotFile` (`_dot_` -> `.`).
-2. If the entry is a directory -> create the destination dir and recurse.
-3. If the entry is a file:
-   - `isTextFile(destPath)` -> read as UTF-8, run `replacePlaceholders(content, vars)`, write the result.
-   - Otherwise -> `fs.copyFileSync` for byte-exact binary copy.
-
-`fs.mkdirSync(dest, { recursive: true })` is called once per recursion level so missing intermediate dirs are created on demand. There is no manifest / allowlist — every file under `template/` is copied. To exclude a file from the scaffold, remove it from `template/`.
-
-### `renameDotFile(name)` (src/index.ts:221)
-
-Filename rewriter. Replaces every occurrence of the literal substring `_dot_` with `.`. Examples:
-
-| Source name in `template/` | Final name in scaffold |
-| --- | --- |
-| `_dot_gitignore` | `.gitignore` |
-| `_dot_env_template` | `.env_template` |
-| `_dot_env_dot_local_template` | `.env.local_template` |
-| `regular.ts` | `regular.ts` (unchanged) |
-
-This works around npm's tarball-publish behavior, which silently drops files whose names start with `.` (so a real `.gitignore` in `template/` never reaches consumers). Multiple `_dot_` occurrences in one name are all rewritten.
-
-## Constants
-
-### `TEMPLATE_DIR` (src/index.ts:30)
+The last file-producing step before installation is `.luckystack/scaffold.json`:
 
 ```ts
-const TEMPLATE_DIR = path.resolve(__dirname, '..', 'template');
-```
-
-Resolves to `<package-root>/template/` at runtime. In the published npm tarball this is `node_modules/create-luckystack-app/template/`. When running from source (`dist/index.js`) it points at the monorepo's `packages/create-luckystack-app/template/`. The CLI aborts with a packaging-bug message when this directory does not exist.
-
-### `DEFAULT_CHOICES` (src/index.ts:68)
-
-```ts
-const DEFAULT_CHOICES: ScaffoldChoices = {
-  dbProvider: 'mongodb',
-  authMode: 'credentials',
-  oauthProviders: [],
-  emailProvider: 'console',
-  monitoringProvider: 'none',
-  i18n: true,
-};
-```
-
-Applied only when `--no-prompt` is passed. Tuned for the "smoke test" / CI scenario — Mongo because it needs the least local setup, `console` email because it writes to stdout without any external service.
-
-## Type: `ScaffoldChoices`
-
-```ts
-interface ScaffoldChoices {
-  dbProvider: 'mongodb' | 'postgresql' | 'mysql' | 'sqlite';
-  authMode: 'none' | 'credentials' | 'credentials+oauth';
-  oauthProviders: ('google' | 'github' | 'discord' | 'facebook' | 'microsoft')[];
-  emailProvider: 'none' | 'console' | 'resend' | 'smtp';
-  monitoringProvider: 'none' | 'sentry' | 'datadog' | 'posthog';
-  i18n: boolean;
+interface ScaffoldManifest {
+  schemaVersion: 1;
+  luckystackVersion: string;
+  createdAt: string;
+  projectName: string;
+  choices: Record<string, unknown>;
+  files: Array<{ path: string; sha256: string }>;
 }
 ```
 
-The shape is the union of every prompt answer plus the conditional `oauthProviders`. It is converted to the string-keyed `vars` map in `main` immediately after prompting.
+Hashes cover rendered scaffold files with CRLF normalized for text. `node_modules`, `.git`, `.env`, `.env.local`, `.secret-manager-token`, and the manifest itself are excluded. `luckystack update` uses this baseline to overwrite pristine framework files while placing changed replacements beside user-modified files as `.new` sidecars.
 
-## Error handling and exit codes
+## 7. Install and generate
 
-| Exit code | Condition |
+Unless `--no-install`:
+
+- `runNpmInstall(targetDir, packageManager)` resolves npm or Bun from absolute `PATH` entries and runs `<manager> install` with Windows-safe command-shim handling;
+- for Prisma only, `runPrismaGenerate` resolves `npx` and runs `npx prisma generate`;
+- Drizzle, MikroORM, and `none` do not mutate a database during scaffolding.
+
+Install/generation failure prints a manual retry hint. It does not delete an otherwise complete project or run schema changes automatically.
+
+## 8. Final next steps
+
+The banner reports every resolved choice and an ORM-specific command:
+
+| ORM | Suggested initialization |
 | --- | --- |
-| `0` | Help printed, or scaffold completed (even if `npm install` exited non-zero — that only logs a manual-fallback hint). |
-| `1` | Missing project name, invalid slug after `slugify`, target directory exists, `TEMPLATE_DIR` missing, unexpected exception. |
+| Prisma + MongoDB | `npm run prisma:db:push` |
+| Prisma + SQL | `npm run prisma:migrate:dev` |
+| Drizzle | `npm run db:push` |
+| MikroORM | `npm run db:schema:update` |
+| none | Wire the project-owned data layer first |
 
-The scaffold is not transactional — if `copyTree` partially completes and then throws, the target directory is left in whatever state the failure caused. The user is expected to delete it and retry. This is deliberate: rollback logic would mask the real failure.
+It also reminds the developer to create `.env`/`.env.local`, start backend and frontend in separate terminals, and finish any selected non-Prisma auth adapter.
 
-## Non-TTY behaviour
+## Fresh-checkout testability
 
-If `runPrompts` is invoked under a non-interactive stdin (e.g. piped input), readline still works — it just receives whatever is fed on stdin line-by-line. Blank lines are interpreted as "use the default", which means a piped empty stream produces `DEFAULT_CHOICES`-equivalent answers. For deterministic CI usage prefer `--no-prompt`.
+The template ships its artifact generators and `npm run test` chains `generateArtifacts` before the test runner. Router-free projects remove the preset loader and use the default-bundle path; routed projects retain the topology/preset loader.
 
 ## Related
 
-- Flag reference: [`cli-flags.md`](./cli-flags.md)
-- Template variable reference: [`template-variables.md`](./template-variables.md)
-- Framework-docs copy step: [`framework-docs-copy.md`](./framework-docs-copy.md)
-- Post-scaffold install + next steps: [`post-scaffold-suggestions.md`](./post-scaffold-suggestions.md)
+- [`cli-flags.md`](./cli-flags.md)
+- [`template-variables.md`](./template-variables.md)
+- [`framework-docs-copy.md`](./framework-docs-copy.md)
+- [`post-scaffold-suggestions.md`](./post-scaffold-suggestions.md)

@@ -14,7 +14,8 @@ Scaffold a new [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2) project
 npx create-luckystack-app my-app
 cd my-app
 
-# Fill in real secrets:
+# Create tracked non-secret config + local secrets:
+cp .env_template .env
 cp .env.local_template .env.local
 $EDITOR .env.local
 

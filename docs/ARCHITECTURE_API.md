@@ -192,10 +192,10 @@ If `httpMethod` is not exported, it's inferred from the API name:
 
 ### Authentication
 
-Include token via:
+The public consumer flag is `config.sessionBasedToken`; `config.ts` maps it internally to `ProjectConfig.session.basedToken` when calling `registerProjectConfig(...)`:
 
-- **Cookie mode (`sessionBasedToken=false`)**: `token=your-token` (set automatically on login)
-- **Session-token mode (`sessionBasedToken=true`)**: `Authorization: Bearer your-token`
+- **Cookie mode (`sessionBasedToken=false`)**: the server sets the token in an HttpOnly cookie and state-changing HTTP calls use CSRF protection.
+- **SessionStorage bearer mode (`sessionBasedToken=true`)**: page JavaScript stores the token in `sessionStorage` and sends `Authorization: Bearer <token>` (Socket.io uses `handshake.auth.token`).
 
 For translated error responses over HTTP, send one of:
 

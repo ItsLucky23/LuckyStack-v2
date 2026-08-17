@@ -1,7 +1,5 @@
 # Auth Flow
 
-> Last updated: 2026-05-20
-
 ## Overview
 
 `@luckystack/api` does not own authentication — it consumes `getSession` from `@luckystack/login` and `validateRequest` from `@luckystack/core`. The handler's job is to translate the per-route `AuthProps` declaration into the right gate (require login + optional predicate checks) and to attribute every framework error tracker call that follows to the right user.

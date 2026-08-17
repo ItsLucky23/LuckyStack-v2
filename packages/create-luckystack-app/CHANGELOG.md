@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@luckystack/core/config`; generated projects no longer read or require a
   backend listen-port environment variable. Edit `config.ports.ts` for the
   static default or pass `<preset> <port>` for one boot.
+- Rebuilt the shipped CLI/scaffold/template-variable/framework-doc references around the current strict flag parser, ORM/package-manager matrix, rendered Docker assets, scaffold manifest, AI-context copy, and update flow. Generated Redis guidance now distinguishes the Redis-backed default from deliberate memory/custom-adapter alternatives.
 
 ### Fixed
 
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `config.ports.ts` backend (or explicit CLI port) instead of assuming port 80;
   `config.ports.ts` remains present in single-instance scaffolds without the
   optional router.
+- Router-enabled scaffolds no longer emit obsolete `/csrf-token` custom-route ownership; the canonical `GET /auth/csrf` route is already covered by the `/auth` owner.
 
 ## [0.8.3] - 2026-07-27
 

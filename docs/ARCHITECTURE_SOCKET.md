@@ -91,7 +91,7 @@ Both check the same sources in priority order:
 | Cookie (name from `http.sessionCookieName`) | `socket.handshake.headers.cookie` | `request.headers.cookie` |
 | Bearer / session-mode token | `socket.handshake.auth.token` | `Authorization: Bearer <token>` |
 
-The framework calls these internally before `getSession(token)` in `handleApiRequest`, `handleSyncRequest`, `handleHttpApiRequest`, and `handleHttpSyncRequest`. Custom transports (queue worker, gRPC bridge, Lambda adapter) should reuse them rather than reading cookies or headers manually — that is the only way to stay consistent with the cookie-name registry and the `sessionBasedToken` mode toggle.
+The framework calls these internally before `getSession(token)` in `handleApiRequest`, `handleSyncRequest`, `handleHttpApiRequest`, and `handleHttpSyncRequest`. Custom transports (queue worker, gRPC bridge, Lambda adapter) should reuse them rather than reading cookies or headers manually — that is the only way to stay consistent with the cookie-name registry and the public `config.sessionBasedToken` toggle. Consumer `config.ts` maps that flag to the internal `ProjectConfig.session.basedToken` slot.
 
 ---
 

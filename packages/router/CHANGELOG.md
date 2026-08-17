@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced stale architecture section-number references in health-polling and source guidance with stable links to the multi-service routing contract.
+
 ## [0.8.0] - 2026-07-27
 
 ### Added

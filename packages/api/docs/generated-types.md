@@ -1,12 +1,10 @@
 # Generated Types
 
-> Last updated: 2026-05-20
-
 ## Overview
 
 LuckyStack's API layer is fully type-safe end-to-end. Every `src/{page}/_api/{name}_v{N}.ts` file is read by `@luckystack/devkit` via the TypeScript compiler API, its `ApiParams['data']` and `main` return types are extracted, and three artifacts are emitted: `apiTypes.generated.ts` (the static type map), `apiInputSchemas.generated.ts` (runtime Zod schemas), and `apiDocs.generated.json` (introspection JSON used by `@luckystack/docs-ui`). `@luckystack/api` reads the runtime map at request time and uses the input-type text to drive `validateInputByType`. The client-side `apiRequest` from `@luckystack/core` reads the static type map to infer payload + response shapes from the route-name + version literals you pass it.
 
-This means: any change to an API file's `ApiParams['data']` interface or `main` return type propagates to the client at the next regeneration. The hot-reload watcher (devkit) triggers regeneration on save. The strict typing policy in the repo root contract (`.claude/CLAUDE.md` rule 16) requires this inference chain to remain intact — `unknown` / `any` casts around `apiRequest` defeat the whole pipeline.
+This means: any change to an API file's `ApiParams['data']` interface or `main` return type propagates to the client at the next regeneration. The hot-reload watcher (devkit) triggers regeneration on save. The strict typing policy in the repository-root contract (`CLAUDE.md` rule 21) requires this inference chain to remain intact — `unknown` / `any` casts around `apiRequest` defeat the whole pipeline.
 
 This doc covers the generated type surface, the runtime validation flow that consumes it, and the per-route opt-out for cases where strict input typing is impossible (third-party webhooks).
 
@@ -159,7 +157,7 @@ The HTTP transport does **not** honor the flag — relax-mode endpoints typicall
 
 ## Strict typing policy
 
-Repository rule (root `.claude/CLAUDE.md` §16): **NEVER** cast typed API/sync payloads to `unknown`, `any`, or `unsafe*` wrappers when calling `apiRequest`, `syncRequest`, or `upsertSyncEventCallback`.
+Repository rule (root `CLAUDE.md` §21): **NEVER** cast typed API/sync payloads to `unknown`, `any`, or `unsafe*` wrappers when calling `apiRequest`, `syncRequest`, or `upsertSyncEventCallback`.
 
 ```ts
 // Bad — defeats the entire generated-types pipeline
@@ -261,4 +259,4 @@ This package does not own hooks specific to type generation. The runtime validat
 - Error handling: [`./error-handling.md`](./error-handling.md)
 - Architecture: [`/docs/ARCHITECTURE_ROUTING.md`](../../../docs/ARCHITECTURE_ROUTING.md) (see "Generated maps")
 - Devkit type-map generation: `@luckystack/devkit/docs/type-map-generation.md`
-- Root rule on casts: [`/.claude/CLAUDE.md`](../../../.claude/CLAUDE.md) §16
+- Root rule on casts: [`CLAUDE.md`](../../../CLAUDE.md) §21

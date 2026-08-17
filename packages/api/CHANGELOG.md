@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Corrected consumer documentation for optional Prisma/error-tracking dependencies, registered-tracker capture, generated-type rule links, and stale freshness metadata.
+
 ## [0.8.1] - 2026-07-27
 
 ### Fixed

@@ -13,7 +13,7 @@ Both honor an explicit pre-flight check via `verifyBootstrap(requirements?)`, wh
 
 Boot order (effective for both entries):
 
-1. `bootstrapLuckyStack` only: load overlay files (`core` -> `deploy` -> `login` -> `sentry` -> `presence` -> `docs-ui` -> `server`, each folder topologically followed by alphabetical `*.ts`).
+1. `bootstrapLuckyStack` only: load overlay files (`core` -> `deploy` -> `login` -> `email` -> `sentry` -> `presence` -> `cron` -> `docs-ui` -> `server`, each folder topologically followed by alphabetical `*.ts`).
 2. If `options.loadGeneratedMaps` was supplied, register the framework-shipped runtime-maps provider before `verifyBootstrap` so the boot check sees it.
 3. `verifyBootstrap` runs (using the per-call `requireDeployConfig` / `requireServicesConfig` / `requireOAuthProviders` flags). Throws a single descriptive `Error` if anything is missing.
 4. Resolve `port` (`options.port` -> argv-registry override -> `options.defaultPort` -> `80`) and `ip` (`options.ip` -> `SERVER_IP` -> `127.0.0.1`); validate the port in `0..65535` and register the intended address plus configured-default metadata. After listen succeeds, register `httpServer.address().port` as the actually-bound address.
@@ -129,7 +129,7 @@ export const bootstrapLuckyStack = async (
 
 **Behavior:**
 
-- If `skipOverlayLoad !== true` and `<ROOT_DIR>/<overlayRoot>` exists, walk the canonical package order (`core`, `deploy`, `login`, `sentry`, `presence`, `docs-ui`, `server`).
+- If `skipOverlayLoad !== true` and `<ROOT_DIR>/<overlayRoot>` exists, walk the canonical package order (`core`, `deploy`, `login`, `email`, `sentry`, `presence`, `cron`, `docs-ui`, `server`).
 - Inside each package folder: import `index.ts`/`index.js` first if present, then every remaining `*.ts` / `*.js` file in alphabetical order. Each file is responsible for its own side-effect registration.
 - Then delegate to `createLuckyStackServer(options)`.
 

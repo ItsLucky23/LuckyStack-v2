@@ -30,17 +30,18 @@ export const handleCsrfRoute: HttpRouteHandler = async ({ res, routePath, token 
   if (!capabilities.login) {
     //? Stateless double-submit: the SAME random value is set as the CSRF cookie
     //? and echoed in the JSON body. `enforceCsrfOnStateChangingRequest` later
-    //? compares the cookie against the `x-csrf-token` request header. The cookie
-    //? is deliberately NOT HttpOnly (the client JS must read it to echo it as the
-    //? header); cross-site protection rests on SameSite + same-origin/CORS — an
-    //? attacker on another origin can neither read the cookie nor the JSON body,
-    //? so they cannot forge a matching header.
+    //? compares the cookie against the `x-csrf-token` request header. The client
+    //? obtains the header value from this same-origin JSON response, so consumers
+    //? may set `cookieOptions.httpOnly: true`; the historical default remains
+    //? false for compatibility. Cross-site protection rests on the attacker's
+    //? inability to read the response body and forge the matching custom header.
     //?
-    //? KNOWN LIMITATION: without HMAC binding to a server secret this token
-    //? cannot survive a subdomain compromise (an attacker on sub.example.com
-    //? can set a cookie on .example.com). This is accepted in the login-absent
-    //? posture; add `registerCsrfConfig({ sign: true })` to enable HMAC signing
-    //? when that threat model applies.
+    //? KNOWN LIMITATION: this unsigned double-submit token does not cover a
+    //? compromised sibling subdomain that can inject a parent-domain cookie.
+    //? Keep the cookie host-only (the built-in serializer exposes no Domain
+    //? option) and do not share the app origin with untrusted subdomains. Apps
+    //? with that threat model should install login for session-bound CSRF or
+    //? front the route with their own signed-token validation.
     const doubleSubmit = randomBytes(csrfConfig.tokenLength).toString('hex');
     res.statusCode = 200;
     //? Resolve `Secure` per-environment (env SECURE) when the config leaves it

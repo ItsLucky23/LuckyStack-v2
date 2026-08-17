@@ -66,7 +66,7 @@ upsertSyncEventCallback<F, V>(params: {
 }): () => void  // returns unsubscribe function
 ```
 
-### Typed payloads (rule 16, no casts)
+### Typed payloads (root contract rule 21, no casts)
 
 Both `clientOutput` and `serverOutput` are typed via the generated `SyncTypeMap`. The framework's discriminated unions surface every possible status:
 
@@ -83,7 +83,7 @@ upsertSyncEventCallback({
 });
 ```
 
-Never cast these to `unknown` or `any` (root `CLAUDE.md` rule 16). If inference fails, regenerate the type map (`npm run ai:index`) — that's the source of truth.
+Never cast these to `unknown` or `any` (root `CLAUDE.md` rule 21). If inference fails, run `npm run generateArtifacts`; if generated output is wrong, fix the generator rather than casting around it.
 
 ### Validation rules
 
@@ -199,7 +199,7 @@ Idempotent: if `initSyncRequest` is called again later, the previous handlers ar
 
 ## 6. Why callbacks must never cast `serverOutput` / `clientOutput`
 
-Rule 16 in the repo root `CLAUDE.md`: generated types are mandatory; no `unknown` / `any` casts on typed transports.
+Rule 21 in the repository-root `CLAUDE.md`: generated types are mandatory; no `unknown` / `any` casts on typed transports.
 
 Both `upsertSyncEventCallback` and `upsertSyncEventStreamCallback` give you fully typed payloads via the generated `SyncTypeMap`. The framework's discriminated unions handle the status branching cleanly:
 
@@ -253,5 +253,5 @@ When inference fails:
 - Originator API: [`./sync-request.md`](./sync-request.md)
 - Stream payload shapes: [`./streaming.md`](./streaming.md)
 - Server / client handler contracts (what produces the payloads): [`./server-vs-client-handlers.md`](./server-vs-client-handlers.md)
-- Type-generation contract (rule 16): repo root [`.claude/CLAUDE.md`](../../../.claude/CLAUDE.md)
+- Type-generation contract (rule 21): repository-root [`CLAUDE.md`](../../../CLAUDE.md)
 - `SocketStatusProvider` wiring: `src/_providers/SocketStatusProvider.tsx` (installer side)

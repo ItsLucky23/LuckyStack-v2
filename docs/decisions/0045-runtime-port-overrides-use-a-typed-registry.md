@@ -5,14 +5,14 @@ status: accepted
 date: 2026-08-16
 deciders: [mathijs]
 tags: [config, ports, scaffold, oauth, server, cli]
-supersedes: [0038]
-relates: [0031, 0037]
+supersedes: [0044]
+relates: [0031, 0043]
 ---
 
 ## Context
 
-ADR 0037 made consumer-owned `config.ports.ts` the static source of truth, but
-ADR 0038 retained `SERVER_PORT` as an argv-to-config bridge and generic server
+ADR 0043 made consumer-owned `config.ports.ts` the static source of truth, but
+ADR 0044 retained `SERVER_PORT` as an argv-to-config bridge and generic server
 fallback. That left one backend-port value in four different contracts: the
 consumer default, positional argv, the process environment, and the
 intended/bound runtime registry.

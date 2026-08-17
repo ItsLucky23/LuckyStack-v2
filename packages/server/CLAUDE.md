@@ -4,7 +4,7 @@
 
 ## What this package does
 
-One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js HTTP server, Socket.io (with optional Redis adapter), framework routes (`/api/*`, `/sync/*`, `/_health`, `/livez`, `/readyz`, `/_test/reset`, `/auth/*`, `/uploads/*`, `/csrf-token`), CSRF middleware, CORS + security headers, presence broadcasting, and dev-only hot reload. Consumer's `server.ts` shrinks to roughly twenty lines. Boots are gated by `verifyBootstrap` so missing registrations surface a single readable error instead of mid-request crashes. If devkit initialization fails, API/sync dispatch and `/readyz` all fail closed with 503.
+One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js HTTP server, Socket.io (with optional Redis adapter), framework routes (`/api/*`, `/sync/*`, `/_health`, `/livez`, `/readyz`, `/_test/reset`, `/auth/*`, `/uploads/*`, including `GET /auth/csrf`), CSRF middleware, CORS + security headers, presence broadcasting, and dev-only hot reload. Consumer's `server.ts` shrinks to roughly twenty lines. Boots are gated by `verifyBootstrap` so missing registrations surface a single readable error instead of mid-request crashes. If devkit initialization fails, API/sync dispatch and `/readyz` all fail closed with 503.
 
 ## When to USE this package
 

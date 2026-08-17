@@ -13,7 +13,7 @@ This guide covers everything you need to deploy LuckyStack from development to p
 > **Security defaults you must know before deploying:**
 > - **CORS is fail-closed.** When neither `Origin` nor `Referer` is present, only read-only methods (GET/HEAD/OPTIONS) are allowed. State-changing methods (POST/PUT/PATCH/DELETE) return 403. Any non-browser caller hitting a write endpoint (server-to-server probes, `curl` smoke tests, native apps) MUST send `Origin: https://your-allowed-origin`. Add the origin to `EXTERNAL_ORIGINS` in `.env`.
 > - **`/_test/reset` is fail-closed.** It requires `NODE_ENV` to be exactly `development` or `test` AND a non-empty `TEST_RESET_TOKEN`. Anything else returns 403. Production deploys should leave `TEST_RESET_TOKEN` unset; dev/test deploys should set it AND keep the URL behind a private network if at all possible.
-> - **CSRF middleware** runs on every `/api/*` and `/sync/*` write. The `apiRequest` helper in `@luckystack/core/client` attaches the token automatically; non-browser callers should `GET /csrf-token` first and forward `x-csrf-token` on writes.
+> - **CSRF middleware** protects cookie-mode state-changing framework routes and eligible custom routes. The client helpers attach the token automatically; non-browser cookie-mode callers should `GET /auth/csrf` first and forward the configured header (default `x-csrf-token`). Login-less apps use the issued double-submit cookie/header pair. Auth bootstrap/callback and explicitly origin-exempt paths are excluded.
 
 ---
 
@@ -38,28 +38,22 @@ Before deploying LuckyStack, ensure you have:
 | Requirement  | Version | Notes                                            |
 | ------------ | ------- | ------------------------------------------------ |
 | **Node.js**  | 20+     | LTS recommended (matches `engines.node` in every package) |
-| **Redis**    | 6+      | Used for session storage                         |
-| **Database** | -       | Your choice (see database section below)         |
-| **npm**      | 9+      | Comes with Node.js                               |
+| **Redis**    | 6+      | Required by Redis-backed framework features (Socket.io multi-instance adapter, cron, OAuth/reset state, Redis rate limiting, and the default session adapter) |
+| **Database** | -       | Only when the selected app/data-layer features require one |
+| **npm or Bun** | current supported release | Use the package manager recorded by the scaffold |
 
-### Database
+### Data layer
 
-LuckyStack uses **Prisma** as its ORM, which supports multiple database providers. Choose whichever fits your project:
+LuckyStack's scaffold supports four data-layer modes; Prisma is the default, not a framework-wide requirement:
 
-| Provider       | Config Value   | Notes                                              |
-| -------------- | -------------- | -------------------------------------------------- |
-| **MongoDB**    | `mongodb`      | Currently active in `prisma/schema.prisma`         |
-| **MySQL**      | `mysql`        | Uncomment in schema, update `DATABASE_URL`         |
-| **PostgreSQL** | `postgresql`   | Uncomment in schema, update `DATABASE_URL`         |
-| **SQLite**     | `sqlite`       | Uncomment in schema, no server needed (dev only)   |
+| Mode | Databases | Generated setup |
+| --- | --- | --- |
+| **Prisma** | MongoDB, PostgreSQL, MySQL, SQLite | `prisma/schema.prisma`, Prisma client, `prisma:*` scripts |
+| **Drizzle** | PostgreSQL, MySQL, SQLite | TypeScript schema, driver, `drizzle-kit` scripts |
+| **MikroORM** | MongoDB, PostgreSQL, MySQL, SQLite | EntitySchema starter, driver, schema-update script |
+| **none** | Bring your own | Database shim/registration seam only |
 
-To switch databases:
-1. Open `prisma/schema.prisma`
-2. Comment out the current `datasource db` block
-3. Uncomment the one for your chosen provider
-4. Adjust the `id` field syntax if switching between MongoDB and SQL (see comments in schema)
-5. Update `DATABASE_URL` in `.env`
-6. Run `npx prisma generate && npx prisma db push`
+Select these on a fresh project with `--orm=<prisma|drizzle|mikro-orm|none>` and `--db=<provider>`. Use the generated project README and scripts for initialization. Deployment examples below that invoke Prisma apply only to Prisma-mode projects; substitute the generated Drizzle/MikroORM command or your own migration process for other modes.
 
 ### Installing Redis
 
@@ -117,25 +111,22 @@ docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgre
 
 **SQLite (development only):**
 
-No installation needed. Set the datasource in `prisma/schema.prisma` to:
-```prisma
-datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
-}
-```
+No database server is needed. Use the SQLite setup generated for the selected ORM; Prisma mode uses `file:./dev.db` in `prisma/schema.prisma`.
 
 ---
 
 ## Development Setup
 
-### 1. Clone and Install
+### 1. Scaffold or clone your application
+
+For a new consumer project:
 
 ```bash
-git clone https://github.com/ItsLucky23/LuckyStack-v2 <PROJECT_NAME>
-cd PROJECT_NAME
-npm install
+npx create-luckystack-app <PROJECT_NAME>
+cd <PROJECT_NAME>
 ```
+
+For an existing application, clone **that application's repository** and run the package manager recorded in its `package.json`/lockfile (`npm install` or `bun install`). Do not deploy by cloning the LuckyStack framework monorepo unless you are developing the framework itself.
 
 ### 2. Configure Environment
 
@@ -156,15 +147,16 @@ SERVER_IP=localhost
 
 # Public origin (post-login landing, email links, CORS) is derived automatically
 # in dev as the Vite dev server. Only set PUBLIC_URL in production (your domain).
-# The OAuth callback uses the backend origin — dev: http://localhost:80.
+# The OAuth callback uses the backend origin from config.ports.ts (or the explicit CLI port).
 
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 
+# Set DATABASE_URL when your selected data layer needs it:
 DATABASE_URL="mongodb://localhost:27017/PROJECT_NAME"
 ```
 
-> Adjust `DATABASE_URL` to match your chosen database provider.
+> Adjust `DATABASE_URL` and driver-specific settings to the selected ORM/provider. An `orm=none` project may use a different configuration contract.
 
 ### 3. Configure Application
 
@@ -173,12 +165,18 @@ Edit the tracked config file:
 # Edit config.ts directly
 ```
 
-### 4. Initialize Database
+### 4. Initialize the selected data layer
+
+Run the command printed by the scaffolded project:
 
 ```bash
-npx prisma generate
-npx prisma db push
+npm run prisma:db:push     # Prisma + MongoDB
+npm run prisma:migrate:dev # Prisma + SQL
+npm run db:push            # Drizzle
+npm run db:schema:update   # MikroORM
 ```
+
+Run only the command matching the generated project; `orm=none` supplies its own initialization.
 
 ### 5. Start Development Servers
 
@@ -399,19 +397,19 @@ sudo npm install -g pm2
 #### 2. Deploy Application
 
 ```bash
-# Clone your repo
+# Clone your APPLICATION repo
 cd /var/www
-git clone https://github.com/ItsLucky23/LuckyStack-v2 PROJECT_NAME
+git clone https://github.com/your-org/your-app.git PROJECT_NAME
 cd PROJECT_NAME
 
-# Install dependencies
-npm ci --production
-
-# Build
+# Install build + runtime dependencies, then build
+npm ci
 npm run build
 
-# Start with PM2
-pm2 start dist/server.js --name PROJECT_NAME
+# Keep the app on an unprivileged loopback port; set ports.backend in
+# config.ports.ts to 4100 before the build (or pass an explicit argv port).
+npm prune --omit=dev
+pm2 start dist/server.js --name PROJECT_NAME -- default 4100
 pm2 save
 pm2 startup
 ```
@@ -437,28 +435,41 @@ server {
     ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
 
-    # Proxy to Node.js server
-    location / {
-        proxy_pass http://127.0.0.1:3000;
+    root /var/www/PROJECT_NAME/dist;
+
+    # Framework HTTP/SSE routes → backend from config.ports.ts.
+    location ~ ^/(api|sync|auth|uploads)(/|$) {
+        proxy_pass http://127.0.0.1:4100;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
+        proxy_buffering off;
     }
 
-    # WebSocket support (critical for Socket.io)
+    location ~ ^/(_health|livez|readyz|_test/reset|favicon\.ico)$ {
+        proxy_pass http://127.0.0.1:4100;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Socket.io polling + WebSocket upgrade.
     location /socket.io/ {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:4100;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+    }
+
+    # Vite build + SPA fallback. The scaffold backend does not serve dist/ by default.
+    location / {
+        try_files $uri $uri/ /index.html;
     }
 }
 ```
@@ -477,21 +488,18 @@ sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d your-domain.com
 ```
 
-#### 5. Production Environment
+#### 5. Production environment
 
-Update your `.env`:
+Keep non-secret production settings in `.env`:
 
 ```env
 NODE_ENV=production
 SECURE=true
 SERVER_IP=127.0.0.1
 PUBLIC_URL=https://your-domain.com
-
-# Use production OAuth credentials
-GOOGLE_CLIENT_ID=your_prod_id
-GOOGLE_CLIENT_SECRET=your_prod_secret
-# ... etc
 ```
+
+Put OAuth credentials, database passwords, tracker DSNs, email keys, and Redis credentials in the deployment secret store or `.env.local` with restrictive filesystem permissions—never commit them.
 
 ---
 
@@ -515,7 +523,12 @@ Edit `/etc/caddy/Caddyfile`:
 
 ```caddy
 your-domain.com {
-    reverse_proxy localhost:3000
+    @backend path /api/* /sync/* /auth/* /socket.io/* /uploads/* /_health /livez /readyz /_test/reset /favicon.ico
+    reverse_proxy @backend localhost:4100
+
+    root * /var/www/PROJECT_NAME/dist
+    try_files {path} /index.html
+    file_server
 }
 ```
 
@@ -555,7 +568,7 @@ LUCKYSTACK_PRESET=admin LUCKYSTACK_PORT=8181 docker compose up --build -d
 
 For an explicit local-preset→remote-infrastructure run, copy `.env.docker_template` to the gitignored `.env.docker` and start with `docker compose --env-file .env.docker up --build -d`. Containers reach host tunnels through `host.docker.internal`; this mode has normal remote read/write access and must never run migrations or seeds automatically. Full runbook: scaffolded `docs/DOCKER.md`.
 
-The image copies generated Prisma runtime artifacts from the build stage into production dependencies. Router config is emitted under `dist/router/`; app startup reports its selected preset and port without printing secrets.
+The image copies the selected data layer's generated/runtime artifacts from the build stage where applicable. Router config is emitted under `dist/router/`; app startup reports its selected preset and port without printing secrets.
 
 ---
 
@@ -569,13 +582,13 @@ The image copies generated Prisma runtime artifacts from the build stage into pr
 | _(listen port)_            | No       | `config.ports.ts` `backend` (80) | Single-instance listen port lives in `config.ports.ts` (`ports.backend`), passed to the server as `defaultPort` — there is no `SERVER_PORT` env-var. Override per-boot with the second positional argv (`node server.js <bundles> <port>`). |
 | `PUBLIC_URL`               | Prod     | (dev: auto)   | Public origin — post-login landing, email links, CORS. Dev derives the Vite origin; set to your domain in prod. OAuth callback uses the backend origin (`SERVER_IP` + the `config.ports.ts` `backend` port / argv override). |
 | `SECURE`                   | Yes      | `false`       | Enable HTTPS cookies                     |
-| `REDIS_HOST`               | Yes      | `127.0.0.1`   | Redis server host                        |
-| `REDIS_PORT`               | Yes      | `6379`        | Redis server port                        |
-| `DATABASE_URL`             | Yes      | -             | Database connection string (any Prisma-supported DB) |
+| `REDIS_HOST`               | Depends  | `127.0.0.1`   | Redis host for Redis-backed rate limiting/default sessions/OAuth/reset/cron/multi-instance fanout |
+| `REDIS_PORT`               | Depends  | `6379`        | Redis port for those features |
+| `DATABASE_URL`             | Depends  | -             | Connection string when required by the selected ORM/data layer |
 | `SENTRY_DSN`               | No       | -             | Server Sentry DSN                        |
-| `SENTRY_ENABLED`           | No       | `false`       | Force-enable server Sentry in development |
+| `SENTRY_ENABLED`           | No       | enabled when DSN exists | Set `false` to disable server Sentry without removing the DSN |
 | `VITE_SENTRY_DSN`          | No       | -             | Client Sentry DSN                        |
-| `VITE_SENTRY_ENABLED`      | No       | `false`       | Force-enable client Sentry in development |
+| `VITE_SENTRY_ENABLED`      | No       | `false`       | Legacy client warning toggle; a configured `VITE_SENTRY_DSN` enables capture |
 | `GOOGLE_CLIENT_ID`         | No       | -             | Google OAuth client ID                   |
 | `GOOGLE_CLIENT_SECRET`     | No       | -             | Google OAuth client secret               |
 | `GITHUB_CLIENT_ID`         | No       | -             | GitHub OAuth client ID                   |
@@ -637,8 +650,8 @@ When you run more than one backend process (horizontal scaling, preset-split ser
 
 **Solutions:**
 1. Check `SECURE=true` only if using HTTPS
-2. Verify `sessionBasedToken` in `config.ts` matches your intended token mode
-3. Check Redis is properly storing data: `redis-cli keys "*"`
+2. Verify the public `sessionBasedToken` flag in `config.ts` matches your intended mode (`false` = HttpOnly cookie, `true` = sessionStorage bearer token); it maps internally to `session.basedToken`
+3. If using the default Redis session adapter, verify its records through a safe `SCAN`-based admin tool; custom adapters must be inspected in their own backend
 
 ### Build Fails
 
@@ -646,18 +659,18 @@ When you run more than one backend process (horizontal scaling, preset-split ser
 
 **Solutions:**
 1. Ensure `config.ts` exists and contains valid project settings
-2. Run `npx prisma generate` before building
-3. Check all dependencies installed: `rm -rf node_modules && npm install`
+2. Run the selected data layer's generation step (`npm run prisma:generate` for Prisma; use the generated scripts for Drizzle/MikroORM)
+3. Reinstall dependencies with the package manager recorded in `package.json` if the lockfile or install is incomplete
 
 ### Database Connection Issues
 
-**Symptom:** Prisma errors on startup or API calls.
+**Symptom:** The selected data-layer client fails on startup or API calls.
 
 **Solutions:**
-1. Verify `DATABASE_URL` in `.env` matches your database provider
-2. Ensure only ONE `datasource db` block is uncommented in `prisma/schema.prisma`
-3. Run `npx prisma generate` after changing providers
-4. For MongoDB: ensure replica set is configured if using transactions
+1. Verify `DATABASE_URL` and any driver-specific variables match the selected provider
+2. Confirm the generated Prisma schema, Drizzle config, or MikroORM config matches that provider
+3. Run the selected generation/schema command after changing providers
+4. For MongoDB transactions, ensure a replica set is configured
 
 ---
 
@@ -674,7 +687,8 @@ npm run build           # Build everything
 npm run prod            # Run production server
 
 # Database
-npx prisma generate     # Generate Prisma client
-npx prisma db push      # Push schema to database
-npx prisma studio       # Open database GUI
+# Prisma-mode projects only:
+npm run prisma:generate
+npm run prisma:db:push
+npx prisma studio
 ```

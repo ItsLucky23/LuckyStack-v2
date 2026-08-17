@@ -71,7 +71,7 @@ registerEmailSender(ConsoleSender({ from: 'noreply@dev.local' }));
 - **Peer deps:** none.
 - **When to use:** local development, CI smoke tests, demo environments. Default selection when neither `RESEND_API_KEY` nor `SMTP_HOST` is set.
 - **`name`:** `'console'`.
-- **Notes:** even in dev, the rest of the pipeline (`preEmailSend` / `postEmailSend` / Sentry capture / logger) still runs. Wiring suppression-list and audit hooks against `ConsoleSender` is a deliberate way to verify hook behavior without burning real provider quota.
+- **Notes:** even in dev, the rest of the pipeline (`preEmailSend` / `postEmailSend` / registered error-tracker capture / logger) still runs. Wiring suppression-list and audit hooks against `ConsoleSender` is a deliberate way to verify hook behavior without burning real provider quota.
 
 ### `ResendSender({ apiKey, from? })`
 
@@ -420,7 +420,7 @@ registerEmailSender(RegionalSender({
 | All slots empty AND `emailConfig.required === true` | `sendEmail` throws with the boot-helpful "register a sender, or set `required: false`" message. |
 | All slots empty AND `emailConfig.required === false` | Returns `{ ok: false, reason: 'no-sender' }` and (if `logging.errors`) warns in the terminal. |
 | Adapter returns `undefined` | Normalized to `{ ok: false, reason: 'send-no-result' }`. |
-| Adapter `send` throws | Normalized to `{ ok: false, reason: error.message || 'send-threw', cause: error }`. The error is also captured to Sentry. |
+| Adapter `send` throws | Normalized to `{ ok: false, reason: error.message || 'send-threw', cause: error }`. The error is also captured by every registered error tracker. |
 | `RESEND_API_KEY` set but `resend` package not installed | `ResendSender(...)` throws at construction with installer-friendly message — server bootstrap fails fast. |
 | `SMTP_HOST` set but `nodemailer` not installed | Same pattern: `SmtpSender(...)` throws at construction. |
 | `force: 'resend'` but `RESEND_API_KEY` is unset | `autoSelectEmailSender` throws with `autoSelectEmailSender: force=resend requires the RESEND_API_KEY env var.`. |

@@ -1,6 +1,6 @@
 # Request Pipeline
 
-> Deep specs. Bron: `packages/server/src/httpHandler.ts`, `packages/server/src/loadSocket.ts`, `packages/server/src/sse.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs. Bron: `packages/server/src/httpHandler.ts`, `packages/server/src/loadSocket.ts`, `packages/server/src/sse.ts`.
 
 ## Overview
 

@@ -235,7 +235,7 @@ These are dev hints, not production behavior. Toggle both to `false` for product
 | Request reached server but auth rejected | `auth.required`, `auth.forbidden` | `_server`'s `auth` export, [`./server-vs-client-handlers.md`](./server-vs-client-handlers.md) |
 | 429 rate-limit responses | `sync.rateLimitExceeded` | `projectConfig.rateLimiting` |
 | Server-side schema fail | `sync.invalidInputType` | `_server`'s `SyncParams.clientInput` interface + generated Zod schema |
-| Handler threw | `sync.serverExecutionFailed` / `sync.clientExecutionFailed` | Sentry breadcrumb |
+| Handler threw | `sync.serverExecutionFailed` / `sync.clientExecutionFailed` | Registered error-tracker capture |
 | Domain logic rejected | `<route-supplied errorCode>` | The `_server` or `_client` file's return path |
 | Empty room | `sync.noReceiversFound` | `receiver` argument; check room membership |
 | Offline + caller didn't await | `offline.queueFull` | Bump `offlineQueue.maxSize` or switch `dropPolicy` |

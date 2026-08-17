@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `luckystack check-env` no longer treats removed `SERVER_PORT` as part of the framework environment contract; backend ports come from config/options or the typed positional override registry.
+- `luckystack add router` assets no longer add obsolete `/csrf-token` ownership; `/auth` covers the canonical `/auth/csrf` endpoint.
+
 ## [0.8.1] - 2026-07-27
 
 ### Fixed

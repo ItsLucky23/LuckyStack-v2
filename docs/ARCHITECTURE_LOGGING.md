@@ -124,7 +124,7 @@ The framework applies redaction in these locations:
 | API request entry log | The full `data` payload before the handler runs. |
 | API response entry log | The full result payload before it's sent to the client. |
 | Sync request entry log | The `data` payload. |
-| Error capture (Sentry / error-tracking adapter) | Cookies are dropped wholesale; redacted keys masked in `extra`/`context`. |
+| Error capture (registered tracker adapters) | Cookies are dropped wholesale; redacted keys masked in `extra`/`context`. |
 | HTTP request headers (`/_health`, custom routes) | `Authorization`, `Cookie`, `Set-Cookie` masked. |
 
 Custom loggers registered via `registerLogger()` receive already-redacted

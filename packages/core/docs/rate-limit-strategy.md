@@ -1,6 +1,6 @@
 # Rate Limit Strategy
 
-> Deep specs for the pluggable rate-limit dispatcher and built-in memory/Redis strategy. Source: `packages/core/src/rateLimiter.ts`. Bijgewerkt: 2026-05-20.
+> Deep specs for the pluggable rate-limit dispatcher and built-in memory/Redis strategy. Source: `packages/core/src/rateLimiter.ts`.
 
 ## Overview
 

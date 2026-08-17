@@ -1,7 +1,5 @@
 # Rate Limiting
 
-> Last updated: 2026-05-20
-
 ## Overview
 
 Every API request runs through two rate-limit buckets, in order. The per-route bucket protects an individual endpoint from a single caller; the global per-IP bucket protects the server as a whole from a single source hitting many endpoints. Both buckets use the same strategy backend (configurable via `registerRateLimitStrategy` in `@luckystack/core`; defaults to memory-or-redis depending on `rateLimiting.store`), share the same `windowMs`, and emit the same `rateLimitExceeded` hook on rejection.

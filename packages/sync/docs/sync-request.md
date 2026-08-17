@@ -40,7 +40,7 @@ This is enforced through generated `SyncTypeMap` entries — no runtime check fi
 - `src/{page}/_sync/{name}_server_v{N}.ts` -> `'{page}/{name}'`
 - `src/_sync/{name}_server_v{N}.ts` (root-level) -> `'system/{name}'`
 
-Always pass the literal string. Any narrowing layer (`as any`, `as SyncFullName`, manual cast helpers) breaks inference and **violates rule 16** in the root `CLAUDE.md` (no `unknown`/`any` casts on typed transports).
+Always pass the literal string. Any narrowing layer (`as any`, `as SyncFullName`, manual cast helpers) breaks inference and **violates rule 21** in the repository-root `CLAUDE.md` (no `unknown`/`any` casts on typed transports).
 
 ### `version: V extends VersionsForFullName<F>`
 
@@ -222,7 +222,7 @@ When the Socket.io transport is unavailable (corporate firewalls, mobile carrier
 |---|---|---|
 | Originator chunks (`stream(payload)`) | `socket.emit(progressEventName, payload)` | `stream?.(payload)` injected callback → SSE writer |
 | Recipients (`broadcastStream`, `streamTo`) | Socket.io fanout | Socket.io fanout (recipients still on sockets) |
-| Sentry span | `'sync.request'` | `'sync.request.http'` |
+| Auto-instrumented error-tracker span | none | `'sync.request.http'` |
 | Final ack | `socket.emit(buildSyncResponseEventName(responseIndex), envelope)` | HTTP response body (`HttpSyncResponse`) |
 
 Signature:

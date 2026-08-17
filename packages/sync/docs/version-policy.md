@@ -331,7 +331,7 @@ Allowed by the framework (it just maps `v3` to its own entry), but confusing for
 await syncRequest({ name: 'board/moveCard' as any, version: someString as any, ... });
 ```
 
-This violates rule 16 (no `as any` / `as unknown` on typed transports). If you don't know the version statically, the design needs to change — versions are an authoring-time decision, not a runtime one.
+This violates repository contract rule 21 (no `as any` / `as unknown` on typed transports). If you don't know the version statically, the design needs to change — versions are an authoring-time decision, not a runtime one.
 
 ---
 
@@ -359,4 +359,4 @@ This violates rule 16 (no `as any` / `as unknown` on typed transports). If you d
 - Recipient subscription: [`./callback-registration.md`](./callback-registration.md)
 - Error contract (including `sync.invalidInputType` from regenerated Zod schemas): [`./error-states.md`](./error-states.md)
 - Type-map regeneration: `npm run ai:index` (`@luckystack/devkit`)
-- Sync type contract: rule 16 in repo root [`.claude/CLAUDE.md`](../../../.claude/CLAUDE.md)
+- Sync type contract: rule 21 in repository-root [`CLAUDE.md`](../../../CLAUDE.md)

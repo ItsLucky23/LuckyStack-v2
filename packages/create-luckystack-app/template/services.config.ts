@@ -35,7 +35,6 @@ const servicesConfig: ServicesConfig = {
     '/auth': 'system',
     '/uploads': 'system',
     '/hooks': 'system',
-    '/csrf-token': 'system',
     '/_health': 'system',
     '/livez': 'system',
     '/readyz': 'system',
