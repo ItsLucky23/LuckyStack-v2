@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-08-17
+
 ### Added
 
 - `isTestFile` / `isTestDirectory` (+ the `TEST_FILE_PATTERN` / `TEST_DIRECTORY_NAMES` they are built from) — one convention for every framework surface that discovers files on disk and then imports them. See ADR 0047.

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-08-18
+
 ### Added
 
 - `luckystack update` now writes a `<file>.removed` marker next to every framework-owned file the new version no longer ships, and the `dump/UPDATE_<hash>.log` report gained a matching AI cleanup instruction. Previously these files were listed in the report only, so an agent applying the report merged the `.new` sidecars and silently left the retired files behind. Nothing is ever deleted — not by the update and not by the agent applying its report. The marker and the instruction both state what to check (does an npm script, the pre-commit hook, or another module still reference it?) and then require the findings to go to the developer in one batch with a per-file recommendation, waiting for a decision; deleting files is not an autonomous action. An ignored marker is re-created by the next update; once the file is gone, the flagging stops. Deliberately a distinct extension rather than a `.new`: the report instructs merging a `.new` INTO its file, which would destroy a file if the sidecar held a removal notice instead of replacement content.

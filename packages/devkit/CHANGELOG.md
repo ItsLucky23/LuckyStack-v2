@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-08-17
+
 ### Added
 
 - `collectFunctionModules()` / `renderFunctionsMap()` — one shared source of truth for server-function discovery and `functions.*` key derivation, consumed by the dev loader, the type-map generator and `scripts/generateServerRequests.ts`. A cross-root duplicate key or a module/namespace collision now fails the build with a diagnostic naming both source files, instead of silently dropping one module from the generated map.
