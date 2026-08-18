@@ -11,8 +11,6 @@
 #?                                 helpers, components, cross-refs)
 #?   - docs/AI_DECISIONS_INDEX.md (docs/decisions/ ADRs — the committed,
 #?                                 shareable "why" record the AI auto-fills)
-#?   - docs/AI_RUNBOOKS.md        (task-shaped golden paths grounded in this
-#?                                 project's real routes/pages/helpers)
 #?   - docs/AI_PRODUCT_OVERVIEW.md (the intent layer — what the app + each page
 #?                                 is FOR, in plain language; from docs/PRODUCT.md
 #?                                 + page `//? intent:` lines)
@@ -39,6 +37,9 @@ npm run ai:lint --silent
 echo "[pre-commit] Regenerating docs/AI_QUICK_INDEX.md..."
 npm run ai:index --silent
 
+echo "[pre-commit] Regenerating AGENTS.md from CLAUDE.md..."
+npm run ai:agents-md --silent
+
 echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
 npm run ai:capabilities --silent
 
@@ -51,20 +52,11 @@ npm run ai:decisions --silent
 echo "[pre-commit] Regenerating docs/AI_LESSONS_INDEX.md..."
 npm run ai:lessons --silent
 
-echo "[pre-commit] Regenerating docs/AI_EXAMPLES_INDEX.md..."
-npm run ai:examples --silent
-
-echo "[pre-commit] Regenerating docs/AI_RUNBOOKS.md..."
-npm run ai:runbooks --silent
-
 echo "[pre-commit] Regenerating docs/AI_PRODUCT_OVERVIEW.md..."
 npm run ai:product --silent
 
 echo "[pre-commit] Regenerating docs/ai-graph.json..."
 npm run ai:graph --silent
-
-echo "[pre-commit] Regenerating docs/AI_CONTEXT_BUDGET.md..."
-npm run ai:context-budget --silent
 
 echo "[pre-commit] Checking hand-written doc staleness (report-only)..."
 npm run ai:doc-staleness --silent || true
@@ -72,5 +64,5 @@ npm run ai:doc-staleness --silent || true
 echo "[pre-commit] Checking CHANGELOG completeness (report-only)..."
 npm run ai:changelog-check --silent || true
 
-git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_LESSONS_INDEX.md docs/AI_EXAMPLES_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json docs/AI_CONTEXT_BUDGET.md
+git add AGENTS.md docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_LESSONS_INDEX.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json
 git add docs/ai-product 2>/dev/null || true   # per-area product shards (only exist when docs.sharding splits)

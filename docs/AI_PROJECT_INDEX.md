@@ -40,14 +40,7 @@
 | `sync/playground/streamToToken/v1` | yes | — | login | — | yes | — | Playground: token-targeted streaming. Demonstrates `streamTo(tokens, payload)` |
 | `sync/playground/throwSync/v1` | yes | — | public | — | yes | — | Playground: deliberately throws inside a sync handler so the framework's |
 
-## Ownership & coverage
-
-**By owner** (from `@docs owner` tags — set them from day one, Rule 15b):
-
-| Owner | Routes |
-| --- | --- |
-| `mathijs` | 1 |
-| _(unowned)_ | 22 |
+## Test coverage
 
 **Test coverage**: 21/23 routes have a per-route `.tests.ts`.
 

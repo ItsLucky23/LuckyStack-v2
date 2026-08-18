@@ -1,5 +1,5 @@
 //? @luckystack/mcp — a read-only MCP server that exposes a LuckyStack project's
-//? committed AI-context artifacts (decisions, dependency graph, routes, runbooks,
+//? committed AI-context artifacts (decisions, lessons, dependency graph, routes,
 //? capabilities) to Claude Code as queryable tools, so an agent can ask precise
 //? questions ("what's the blast radius of changing X", "why did we decide Y")
 //? instead of loading whole files into context.
@@ -12,8 +12,9 @@
 //? this one answers questions about the repo, not the browser. They coexist as
 //? separate entries in the same .mcp.json.
 //?
-//? @adr 0016 — the lessons / examples / decision-reverse query tools below were
-//? added as part of the AI-context-layers-before-rag decision.
+//? @adr 0016 — the lessons / decision-reverse query tools below were added as
+//? part of the AI-context-layers-before-rag decision. The examples + runbooks
+//? tools it also introduced were retired again (superseding ADR).
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -26,8 +27,6 @@ import {
   readDocFile,
   loadGraph,
   resolveNodeId,
-  sectionMatching,
-  headings,
   grepLines,
 } from './artifacts.js';
 
@@ -238,27 +237,6 @@ server.registerTool(
 );
 
 server.registerTool(
-  'get_runbook',
-  {
-    description: 'Get a task-shaped golden-path runbook for THIS project (how to add an API/page/sync/helper, verify, record a decision). Omit task to list available runbooks.',
-    inputSchema: { task: z.string().optional().describe('Task keyword, e.g. "API", "page", "sync", "verify".') },
-  },
-  async ({ task }) => {
-    const doc = await readDocFile('docs/AI_RUNBOOKS.md');
-    if (doc === null) return text(missing('docs/AI_RUNBOOKS.md', 'npm run ai:runbooks'));
-    if (!task) return text(`Available runbooks:\n${bulletList(headings(doc))}`);
-    //? When more than one runbook heading matches the keyword, disambiguate
-    //? rather than silently returning the first (mirrors get_decision / who_calls
-    //? / blast_radius). A unique match falls through to sectionMatching unchanged.
-    const low = task.toLowerCase();
-    const matchingHeadings = headings(doc).filter((h) => h.toLowerCase().includes(low));
-    if (matchingHeadings.length > 1) return text(`"${task}" matches multiple runbooks — pick one (use a more specific keyword):\n${bulletList(matchingHeadings)}`);
-    const section = sectionMatching(doc, task);
-    return text(section ?? `No runbook matches "${task}". Available:\n${bulletList(headings(doc))}`);
-  },
-);
-
-server.registerTool(
   'get_capability',
   {
     description: 'Look up existing helpers/components/exports by name in the committed capability snapshot — check BEFORE authoring a new helper (Rule 12).',
@@ -340,58 +318,6 @@ server.registerTool(
     if (matches.length > 1) return text(`"${id}" is ambiguous — pick one:\n${bulletList(matches.toSorted())}`);
     const body = await readDocFile(`docs/lessons/${matches[0]}`);
     return text(body ?? `Could not read docs/lessons/${matches[0]}.`);
-  },
-);
-
-// ---------------------------------------------------------------------------
-// Canonical examples — docs/examples/ + docs/AI_EXAMPLES_INDEX.md
-// ---------------------------------------------------------------------------
-
-server.registerTool(
-  'list_examples',
-  {
-    description: 'List the curated canonical example corpus (reviewed reference implementations per pattern). Use to discover which pattern to copy before authoring.',
-    inputSchema: {},
-  },
-  async () => {
-    const index = await readDocFile('docs/AI_EXAMPLES_INDEX.md');
-    if (index === null) return text(missing('docs/AI_EXAMPLES_INDEX.md', 'npm run ai:examples'));
-    return text(index);
-  },
-);
-
-server.registerTool(
-  'get_example',
-  {
-    description: 'Read a full canonical example (When to use / Canonical example code / Why this shape) by its pattern key or slug — copy this SHAPE when building the pattern.',
-    inputSchema: { pattern: z.string().min(1).describe('Example pattern key (e.g. "auth-api-route", "sync-pair", "trycatch") or file slug.') },
-  },
-  async ({ pattern }) => {
-    const root = await projectRoot();
-    const dir = path.join(root, 'docs', 'examples');
-    let entries: string[];
-    try {
-      entries = await fs.readdir(dir);
-    } catch {
-      return text(missing('docs/examples/', 'npm run ai:examples'));
-    }
-    const candidates = entries.filter((f) => f.endsWith('.md') && f !== '0000-template.md' && f !== 'README.md');
-    const low = pattern.toLowerCase();
-    //? Match by slug first, then by the `pattern:` frontmatter inside each file.
-    let hit = candidates.find((f) => f.replace(/\.md$/, '').toLowerCase() === low)
-      ?? candidates.find((f) => f.replace(/\.md$/, '').toLowerCase().includes(low));
-    if (!hit) {
-      for (const f of candidates) {
-        const body = await readDocFile(`docs/examples/${f}`);
-        //? Compare the `pattern:` frontmatter value literally (no regex from user
-        //? input) — avoids both regex injection and the escaped-backslash lint.
-        const val = body?.match(/^pattern:\s*(.+)$/mi)?.[1]?.trim().toLowerCase();
-        if (val === low) { hit = f; break; }
-      }
-    }
-    if (!hit) return text(`No example matches "${pattern}". Use \`list_examples\` to see available patterns.`);
-    const body = await readDocFile(`docs/examples/${hit}`);
-    return text(body ?? `Could not read docs/examples/${hit}.`);
   },
 );
 

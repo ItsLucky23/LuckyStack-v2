@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (46)
+## Decisions (48)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -59,6 +59,8 @@
 | 0045 | Runtime backend-port overrides use a typed core registry, never process.env | 🟢 accepted | config, ports, scaffold, oauth, server, cli | 0044 | `docs/decisions/0045-runtime-port-overrides-use-a-typed-registry.md` |
 | 0046 | Derive function-injection keys from one shared registry | 🟢 accepted | function-injection, codegen, runtime-maps, dev-prod-parity, devkit | — | `docs/decisions/0046-derive-function-injection-keys-from-one-shared-registry.md` |
 | 0047 | Exclude test files from every import-everything surface | 🟢 accepted | overlay, function-injection, bundling, dev-prod-parity, conventions | — | `docs/decisions/0047-exclude-test-files-from-every-import-everything-surface.md` |
+| 0048 | Batch the AI record layers to session wrap-up and retire the examples / runbooks / context-budget layers | 🟢 accepted | ai-context, docs, tooling, protocol | — | `docs/decisions/0048-batch-record-capture-to-session-wrap-up.md` |
+| 0049 | Deep docs and the per-package function INDEX stay hand-written, not JSDoc-extracted | 🟢 accepted | docs, tooling, ai-context | — | `docs/decisions/0049-hand-written-deep-docs-over-jsdoc-extraction.md` |
 
 ## Summaries
 
@@ -451,6 +453,22 @@ Discovery and key derivation move into one module, `packages/devkit/src/function
 `@luckystack/core` owns one convention: `isTestFile` (`*.test|tests|spec.*` across `ts/tsx/js/jsx/mts/cts/mjs/cjs`) and `isTestDirectory` (`__tests__`, `__mocks__`). All three surfaces consult it.
 
 → `docs/decisions/0047-exclude-test-files-from-every-import-everything-surface.md`
+
+### 0048 — Batch the AI record layers to session wrap-up and retire the examples / runbooks / context-budget layers
+
+**0048** · accepted · tags: ai-context, docs, tooling, protocol · 2026-08-18
+
+*1. Record capture is batched to session wrap-up, and stays autonomous.**
+
+→ `docs/decisions/0048-batch-record-capture-to-session-wrap-up.md`
+
+### 0049 — Deep docs and the per-package function INDEX stay hand-written, not JSDoc-extracted
+
+**0049** · accepted · tags: docs, tooling, ai-context · 2026-08-18
+
+Both layers stay hand-written.
+
+→ `docs/decisions/0049-hand-written-deep-docs-over-jsdoc-extraction.md`
 
 ## Code governed by decisions
 

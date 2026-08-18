@@ -108,21 +108,6 @@ export const resolveNodeId = (graph: Graph, input: string): string | string[] | 
 // Markdown helpers
 // ---------------------------------------------------------------------------
 
-//? Return the `## <heading>` section whose title contains `needle` (case-insensitive),
-//? including the heading line, up to the next `## ` or EOF.
-export const sectionMatching = (markdown: string, needle: string): string | null => {
-  const lines = markdown.split(/\r?\n/);
-  const low = needle.toLowerCase();
-  const start = lines.findIndex((l) => /^##\s+/.test(l) && l.toLowerCase().includes(low));
-  if (start === -1) return null;
-  const after = lines.slice(start + 1).findIndex((l) => /^##\s+/.test(l));
-  const end = after === -1 ? lines.length : start + 1 + after;
-  return lines.slice(start, end).join('\n').trim();
-};
-
-export const headings = (markdown: string): string[] =>
-  markdown.split(/\r?\n/).filter((l) => /^##\s+/.test(l)).map((l) => l.replace(/^##\s+/, '').trim());
-
 //? Lines containing `needle` (case-insensitive), with a cap. Returns the
 //? matching lines (up to `limit`) plus the total count so callers can signal
 //? truncation to the agent.

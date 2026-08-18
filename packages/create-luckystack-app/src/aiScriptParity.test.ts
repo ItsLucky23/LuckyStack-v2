@@ -1,6 +1,6 @@
 //? Guards the AI-context layer against template↔root drift — the #1 historical
 //? defect class. The scaffold template ships byte-for-byte copies of the
-//? AI-context generator scripts + eval + example corpus; nothing else asserts
+//? AI-context generator scripts + eval harness; nothing else asserts
 //? they stay in sync, so a future edit to one side silently diverges. This test
 //? fails the moment a mirrored file drifts.
 //?
@@ -23,15 +23,10 @@ const readT = (rel: string): string => readFileSync(path.join(TEMPLATE, rel), 'u
 // Files shipped byte-for-byte to consumers.
 const STRICT = [
   'scripts/generateLessonsIndex.mjs',
-  'scripts/generateExamplesIndex.mjs',
-  'scripts/generateContextBudget.mjs',
+  'scripts/generateProjectIndex.mjs',
   'scripts/checkDocStaleness.mjs',
   'scripts/generateDecisionsIndex.mjs',
   'eval/scoreEval.mjs',
-  'docs/examples/auth-api-route.md',
-  'docs/examples/sync-server-client-pair.md',
-  'docs/examples/trycatch-error-handling.md',
-  'docs/examples/page-component-middleware.md',
 ];
 
 describe('AI-context script/doc parity (root ↔ scaffold template)', () => {
@@ -57,8 +52,19 @@ describe('AI-context script/doc parity (root ↔ scaffold template)', () => {
   it('template package.json exposes the new ai:* scripts', () => {
     const pkg: unknown = JSON.parse(readT('package.json'));
     const scripts = (pkg as { scripts?: Record<string, string> }).scripts ?? {};
-    for (const s of ['ai:lessons', 'ai:examples', 'ai:context-budget', 'ai:doc-staleness', 'ai:eval']) {
+    for (const s of ['ai:lessons', 'ai:doc-staleness', 'ai:eval']) {
       expect(scripts).toHaveProperty(s);
+    }
+  });
+
+  it('template package.json does not advertise retired or framework-only ai:* scripts', () => {
+    //? `ai:index` regenerates the FRAMEWORK's cross-repo index — a consumer has
+    //? no such script, so CLAUDE.md must not tell a consumer AI to run it.
+    //? examples / runbooks / context-budget were retired outright.
+    const pkg: unknown = JSON.parse(readT('package.json'));
+    const scripts = (pkg as { scripts?: Record<string, string> }).scripts ?? {};
+    for (const s of ['ai:index', 'ai:examples', 'ai:runbooks', 'ai:context-budget']) {
+      expect(scripts).not.toHaveProperty(s);
     }
   });
 });

@@ -78,10 +78,14 @@ statement.
 - Routine implementation with no real alternative (that's just code — the diff suffices).
 - Per-prompt work narrative (that's a branch-log entry).
 - An always-on imperative with no rationale to capture (that's a CLAUDE.md rule).
+- **Anything that was only discussed.** Options weighed in a sparring session, paths considered and
+  dropped, "we could do X" — none of these are decisions. If the chosen path later ships, the discarded
+  option belongs in that ADR's *Rejected alternatives* section; it never gets a file of its own.
 
 ### When in doubt
-Record it. A superseded decision is still valuable history; a lost rationale costs the next session — or
-the next teammate — an afternoon of archaeology.
+Leave it out of the wrap-up batch and say so in one line — the user can ask for it. An ADR nobody agreed
+to is worse than a missing one: it reads as settled policy to every future session. What justifies a
+record is a rationale a future reader would otherwise re-litigate, not the fact that a topic came up.
 
 ## 6. Supersession (never rewrite history)
 
@@ -98,12 +102,16 @@ There is **no slash command** and nothing the user is expected to run. Recording
 AI behavior, exactly like the branch-log protocol: the AI captures them as a normal part of working in a
 session. Specifically, **the AI MUST**:
 
-1. **Write a decision file when a durable decision is made during a session.** When a choice with a real
-   rejected alternative is settled (a dependency/layering/contract choice, a policy, a deliberate
-   deviation from the docs per Rule 3b), the AI creates `docs/decisions/NNNN-slug.md` then and there —
-   allocating the next free number, filling the four sections from the in-session reasoning it already
-   has. This is an autonomous action (a committed doc, not an install) — no permission prompt, same as
-   appending a branch-log entry.
+1. **Propose a decision file at wrap-up when a durable decision has become real.** A choice qualifies
+   only when it has a genuine rejected alternative (a dependency/layering/contract choice, a policy, a
+   deliberate deviation from the docs per Rule 3b) **AND** it was implemented in this session or
+   confirmed by the user in words. A choice that was merely discussed, sparred over, or sketched as an
+   option is **not** a decision and produces no file. Timing is governed by the **Session Capture
+   Protocol** (`CLAUDE.md`): the AI holds the candidate in its in-session capture buffer and writes
+   `docs/decisions/NNNN-slug.md` at wrap-up — allocating the next free number and filling the four
+   sections from the reasoning it already has. This is **autonomous**: a committed doc, not an install,
+   and the AI does not ask permission for it. The single user-gated case is an ADR that would record a
+   deviation the user has not agreed to yet (Rule 3b) — settle that first, then record the outcome.
 2. **Regenerate the index in-session** after writing one: `npm run ai:decisions` (autonomous). The
    pre-commit hook is the backstop, not the primary path.
 3. **Read the index before answering "why".** When the AI (or the user) wonders why something is the way

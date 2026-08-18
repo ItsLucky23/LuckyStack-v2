@@ -255,6 +255,90 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
     expect(report).toContain('AI merge instruction');
   });
 
+  it('flags a file the new version no longer ships with a .removed marker, never deleting it', () => {
+    //? Two retired framework files the consumer still has on disk: one the
+    //? developer edited, one pristine. Neither may be deleted by the update.
+    write(consumerDir, 'CLAUDE.md', 'old claude\n');
+    write(consumerDir, 'scripts/generateRunbooks.mjs', 'retired generator\n');
+    write(consumerDir, 'docs/luckystack/AI_RUNBOOKS.md', 'USER EDITED runbooks\n');
+    manifestFor(consumerDir, {
+      'CLAUDE.md': 'old claude\n',
+      'scripts/generateRunbooks.mjs': 'retired generator\n',
+      'docs/luckystack/AI_RUNBOOKS.md': 'old runbooks\n',
+    });
+
+    //? The fresh render no longer contains either retired file.
+    write(freshDir, 'CLAUDE.md', 'new claude\n');
+    manifestFor(freshDir, { 'CLAUDE.md': 'new claude\n' }, { luckystackVersion: '0.8.6' });
+
+    const result = runUpdate(project(), {
+      cliVersion: '0.8.6',
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    });
+    expect(result.ok).toBe(true);
+
+    //? The files themselves survive — an update never removes anything.
+    expect(fs.readFileSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs'), 'utf8')).toBe('retired generator\n');
+    expect(fs.readFileSync(path.join(consumerDir, 'docs/luckystack/AI_RUNBOOKS.md'), 'utf8')).toBe('USER EDITED runbooks\n');
+
+    //? Each gets a marker beside it, naming itself as a marker and not content.
+    const marker = fs.readFileSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'), 'utf8');
+    expect(marker).toContain('0.8.6');
+    expect(marker).toContain('scripts/generateRunbooks.mjs');
+    expect(marker).toContain('THIS IS A REMOVAL MARKER, NOT FILE CONTENT');
+    expect(fs.existsSync(path.join(consumerDir, 'docs/luckystack/AI_RUNBOOKS.md.removed'))).toBe(true);
+
+    //? The marker must never read as an order to delete — removing a file is
+    //? user-gated (CLAUDE.md Rule 8), so it has to route through the developer.
+    expect(marker).toContain('Rule 8');
+    expect(marker).toMatch(/propose|recommendation/i);
+
+    //? A retired file must never also get a `.new` twin — that is the exact
+    //? confusion the separate extension exists to prevent.
+    expect(fs.existsSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.new'))).toBe(false);
+    expect(fs.existsSync(path.join(consumerDir, 'docs/luckystack/AI_RUNBOOKS.md.new'))).toBe(false);
+
+    //? Report lists both and carries the cleanup instruction.
+    const dumpDir = path.join(consumerDir, 'dump');
+    const report = fs.readFileSync(
+      path.join(dumpDir, String(fs.readdirSync(dumpDir).filter((f) => f.startsWith('UPDATE_'))[0])),
+      'utf8',
+    );
+    expect(report).toContain('No longer shipped by this framework version');
+    expect(report).toContain('scripts/generateRunbooks.mjs');
+    expect(report).toContain('AI cleanup instruction');
+    //? The instruction must send the AI to the developer, batched, before any
+    //? deletion — not tell it to clean up on its own.
+    expect(report).toContain('WAIT for their decision');
+    expect(report).toContain('ONE batch');
+    expect(report).toContain('Rule 8');
+  });
+
+  it('re-flags an ignored removal on the next update, and stops once the file is gone', () => {
+    write(consumerDir, 'scripts/generateRunbooks.mjs', 'retired generator\n');
+    manifestFor(consumerDir, { 'scripts/generateRunbooks.mjs': 'retired generator\n' });
+    manifestFor(freshDir, {}, { luckystackVersion: '0.8.6' });
+
+    const opts = {
+      cliVersion: '0.8.6',
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    };
+    expect(runUpdate(project(), opts).ok).toBe(true);
+    expect(fs.existsSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'))).toBe(true);
+
+    //? Developer ignores it: the manifest keeps the entry, so a later update
+    //? flags it again rather than forgetting about it.
+    fs.rmSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'));
+    expect(runUpdate(project(), opts).ok).toBe(true);
+    expect(fs.existsSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'))).toBe(true);
+
+    //? Developer acts on it: file gone -> nothing left to flag.
+    fs.rmSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs'));
+    fs.rmSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'));
+    expect(runUpdate(project(), opts).ok).toBe(true);
+    expect(fs.existsSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'))).toBe(false);
+  });
+
   it('stamp-less mode: nothing overwritten, no manifest fabricated', () => {
     write(consumerDir, 'CLAUDE.md', 'old claude\n');
     write(freshDir, 'CLAUDE.md', 'new claude\n');

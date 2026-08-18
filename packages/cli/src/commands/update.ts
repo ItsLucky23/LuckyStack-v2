@@ -31,6 +31,38 @@ import { ok, type ConsumerProject, type Result } from '../lib/project';
 import { writeDumpLog } from '../lib/scan';
 import { AUTH_MODES, EMAIL_PROVIDERS, MONITORING_PROVIDERS, OAUTH_PROVIDERS } from '../featureOptions';
 
+//? Marker written next to a file the framework USED to ship and no longer does.
+//?
+//? Deliberately NOT a `.new` sidecar: `.new` means "here is the new content of
+//? this file, merge it in", and the report says so literally. A `.new` holding
+//? prose would be merged INTO the real file by anyone (human or agent)
+//? following that instruction — a working script traded for a sentence. A
+//? distinct extension makes the two cases impossible to confuse by name alone.
+export const REMOVED_MARKER_SUFFIX = '.removed';
+
+export const removedMarkerBody = (relativePath: string, frameworkVersion: string): string =>
+  [
+    `LuckyStack ${frameworkVersion} no longer ships \`${relativePath}\`.`,
+    '',
+    'THIS IS A REMOVAL MARKER, NOT FILE CONTENT. Never merge it into the file it',
+    'sits next to — unlike a `.new` sidecar it carries no replacement content.',
+    '',
+    'What to do:',
+    `  1. Check whether anything in this project still imports, runs, or references`,
+    `     \`${relativePath}\` (an npm script, the pre-commit hook, another module).`,
+    '  2. Take the finding to the developer with a recommendation — remove it, or',
+    '     keep it because <reference> still needs it. Deleting a file is NEVER an',
+    '     autonomous action (CLAUDE.md Rule 8): propose, then wait for a yes.',
+    '  3. On a yes to remove: delete the file and this marker together. On a no:',
+    '     keep the file, delete only this marker — the project now owns it, the',
+    '     framework no longer maintains it.',
+    '',
+    '`luckystack update` never removes a file on its own, and neither should you.',
+    'Leaving this marker in place is harmless; it is re-created by the next update',
+    'until the file is gone.',
+    '',
+  ].join('\n');
+
 //? Mirrors create-luckystack-app's scaffoldManifest.ts shape (schemaVersion 1).
 export interface ScaffoldManifestFileEntry {
   path: string;
@@ -293,9 +325,14 @@ export const applyUpdate = (
     );
   }
 
-  //? Report-only: manifest-recorded safe-surface files the NEW framework
-  //? version no longer ships. Deleting is the consumer's call — an update must
-  //? never remove files — but silently leaving them reads as "still current".
+  //? Manifest-recorded safe-surface files the NEW framework version no longer
+  //? ships. Deleting is the consumer's call — an update must never remove files
+  //? — but silently leaving them reads as "still current". Each one gets a
+  //? `<file>.removed` marker beside it (impossible to miss in `git status`,
+  //? impossible to confuse with a mergeable `.new`) plus a report entry.
+  //?
+  //? The manifest keeps the entry for a file we did not write, so an ignored
+  //? removal is re-reported on every later update until the file is gone.
   const freshPaths = new Set(freshManifest.files.map((entry) => entry.path));
   const noLongerShipped = (consumerManifest?.files ?? [])
     .filter(
@@ -305,6 +342,13 @@ export const applyUpdate = (
         fs.existsSync(path.join(project.root, entry.path)),
     )
     .map((entry) => entry.path);
+
+  for (const relativePath of noLongerShipped) {
+    fs.writeFileSync(
+      path.join(project.root, `${relativePath}${REMOVED_MARKER_SUFFIX}`),
+      removedMarkerBody(relativePath, freshManifest.luckystackVersion),
+    );
+  }
 
   const lines: string[] = [
     `luckystack update (${scope} scope) — ${consumerManifest?.luckystackVersion ?? 'unknown (no manifest)'} -> ${freshManifest.luckystackVersion}`,
@@ -333,8 +377,19 @@ export const applyUpdate = (
   }
   if (noLongerShipped.length > 0) {
     lines.push(
-      'No longer shipped by this framework version (left in place — delete manually if unused):',
+      `No longer shipped by this framework version (left in place, each flagged with a \`${REMOVED_MARKER_SUFFIX}\` marker):`,
       ...noLongerShipped.map((p) => `  - ${p}`),
+      '',
+      'AI cleanup instruction: these files are gone from the framework, not from',
+      'your project. For each one, check whether anything here still imports, runs,',
+      'or references it (npm scripts, the .githooks/pre-commit hook, other modules).',
+      'Then bring the whole list to the developer in ONE batch with a per-file',
+      'recommendation — "safe to remove, nothing references it" or "keep, <X> still',
+      'uses it" — and WAIT for their decision. Deleting files is never autonomous',
+      '(CLAUDE.md Rule 8). On a yes: remove the file together with its',
+      `\`${REMOVED_MARKER_SUFFIX}\` marker. On a no: keep the file and delete only the marker;`,
+      'the project owns it from now on. Never merge a marker into a file — it holds',
+      'no replacement content, and doing so would destroy the file.',
       '',
     );
   }

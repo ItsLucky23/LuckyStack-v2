@@ -148,13 +148,6 @@ const extractFileSummary = (src) => {
   return null;
 };
 
-const extractDocsOwner = (src) => {
-  const block = src.match(/\/\*\*([\s\S]*?)\*\//);
-  if (!block) return null;
-  const m = block[1].match(/@docs\s+owner\s+([^\n*]+)/);
-  return m ? m[1].trim() : null;
-};
-
 const extractIntent = (src) => {
   const lines = src.split(/\r?\n/);
   for (let i = 0; i < Math.min(lines.length, 20); i++) {
@@ -260,7 +253,7 @@ const wholeFileLines = async (relPaths) => {
 // Asserts that a NEWLY-ADDED route/page carries the docs its CLAUDE.md rule
 // mandates, so documentation can't silently drift to optional:
 //   - _api/<name>_v<N>.ts / _sync/<name>_(server|client)_v<N>.ts
-//       → a top-of-file summary line (Rule 12) AND an `@docs owner` tag (Rule 15b)
+//       → a top-of-file summary line (Rule 12)
 //   - page.tsx
 //       → a `//? intent: …` line (Rule 15a)
 // Diff-scoped to ADDED files (git --diff-filter=A) so existing undocumented
@@ -285,9 +278,6 @@ export const checkDocCoverageFile = (relPath, src) => {
   if (isRouteFile(relPath)) {
     if (extractFileSummary(src) === null) {
       findings.push({ file: relPath, line: 1, rule: "doc-coverage", message: "new route has no top-of-file summary — add a `//?` or `//` one-liner describing what it does (Rule 12)." });
-    }
-    if (extractDocsOwner(src) === null) {
-      findings.push({ file: relPath, line: 1, rule: "doc-coverage", message: "new route has no `@docs owner <name>` JSDoc tag — record ownership from day one (Rule 15b)." });
     }
   } else if (PAGE_RE.test(relPath)) {
     if (extractIntent(src) === null) {
@@ -326,8 +316,8 @@ const runSelfTest = () => {
     ["theme token ok", checkLine("src/p.tsx", "className={`bg-primary text-title p-4`}").every((f) => f.rule !== "no-arbitrary-color")],
     ["generated file skipped", checkLine("src/_sockets/apiTypes.generated.ts", "const x = y as any;").length === 0],
     ["request-wrapper message", checkLine("src/foo.ts", "apiRequest({ name: n as any });").some((f) => f.rule === "no-as-any" && /wrap/.test(f.message))],
-    ["doc-coverage: api missing summary+owner", checkDocCoverageFile("src/x/_api/get_v1.ts", "export const main = () => {};").length === 2],
-    ["doc-coverage: api complete ok", checkDocCoverageFile("src/x/_api/get_v1.ts", "//? Fetch a user.\n/** @docs owner alice */\nexport const main = () => {};").length === 0],
+    ["doc-coverage: api missing summary", checkDocCoverageFile("src/x/_api/get_v1.ts", "export const main = () => {};").length === 1],
+    ["doc-coverage: api complete ok", checkDocCoverageFile("src/x/_api/get_v1.ts", "//? Fetch a user.\nexport const main = () => {};").length === 0],
     ["doc-coverage: page missing intent", checkDocCoverageFile("src/x/page.tsx", "export default function Page() { return null; }").some((f) => f.rule === "doc-coverage")],
     ["doc-coverage: page with intent ok", checkDocCoverageFile("src/x/page.tsx", "//? intent: the user dashboard\nexport default function Page() {}").length === 0],
     ["doc-coverage: suppression works", checkDocCoverageFile("src/x/_api/get_v1.ts", "// luckystack-allow doc-coverage: scaffold stub\nexport const main = () => {};").length === 0],

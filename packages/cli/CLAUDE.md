@@ -102,9 +102,15 @@ in the installed cli so it's readable even when the project's own docs predate i
 4. **Refresh in-tree files.** `npx luckystack update` (docs/scripts/CLAUDE.md) then
    `npx luckystack update --app` (framework `src/` UI + routes + `config.ts`). New files
    are delivered; files the developer edited get a `<file>.new` sidecar + an AI-merge note
-   in `dump/UPDATE_*.log` (never overwritten). No `.luckystack/scaffold.json` (pre-0.4.1
+   in `dump/UPDATE_*.log` (never overwritten). A file the new version no longer ships stays
+   in place with a `<file>.removed` marker beside it. No `.luckystack/scaffold.json` (pre-0.4.1
    project) → sidecar-only mode (every differing file gets a `.new` twin).
-5. **Merge the `.new` sidecars**, then adopt any opted-in feature: a NEW optional package →
+5. **Merge the `.new` sidecars. Then resolve the `.removed` markers**: check what still
+   references each file (npm scripts, `.githooks/pre-commit`, other modules), bring the list
+   to the developer in ONE batch with a per-file recommendation, and WAIT for their decision —
+   deleting files is never autonomous. On a yes, remove file + marker; on a no, keep the file
+   and drop only the marker. Never merge a marker into its file: it holds no content, so a
+   merge destroys the file. Then adopt any opted-in feature: a NEW optional package →
    `npx luckystack add <feature>` (`luckystack list` shows options); a feature TOGGLE on an
    installed package (2FA) → config flag + schema columns (manual, fails loudly) +
    prerequisites, per the feature runbook (`docs/luckystack/ARCHITECTURE_AUTH.md` for 2FA).

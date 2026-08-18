@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The AI record layers (branch-logs, decisions, lessons, findings) are now **batched to the end of a session** instead of written mid-flight, and sparring is an explicit write-free zone. The new "Session Capture Protocol" section in the scaffolded `CLAUDE.md` sets the bar per layer (an ADR needs an implemented-or-confirmed choice, a lesson needs a real burned dead-end, a findings-folder needs a REQUESTED scan) and the AI reports what it recorded in one closing line. Capture stays autonomous — the bar, not an approval prompt, is what keeps the record small. Fixes sessions that turned thinking-out-loud into permanent artifacts nobody asked for.
+- Retired the canonical example corpus, the auto-generated runbooks, and the context-budget doc from scaffolded projects (`ai:examples` / `ai:runbooks` / `ai:context-budget` scripts, their generators, `docs/examples/`, and their pre-commit hook steps). They restated material already in `CLAUDE.md` and the architecture docs.
+- Dropped Rule 15b (`@docs owner` on every new route) and the linter's owner requirement; the tag stays available as optional route metadata, and the project index no longer renders an aggregate ownership table.
+
 ### Fixed
+
+- The scaffolded `CLAUDE.md` now points at `docs/luckystack/*` for framework documentation. Its in-body references were copied verbatim from the framework repo layout, so ~26 doc paths — including 8 in the session-start read sequence (Rule 28) — pointed at files that do not exist in a scaffolded project. Lines that deliberately spell out both paths (the Quick Links table) are left untouched.
+- The scaffolded `CLAUDE.md` no longer instructs the AI to run `npm run ai:index`; that script regenerates the FRAMEWORK's cross-repo index and has never existed in a scaffolded project.
+- The framework's own `docs/_archive/` and `docs/plans/` (retired one-offs and in-flight planning notes) no longer ride along in the npm tarball or land in a scaffolded project's `docs/luckystack/`.
 
 - The scaffolded `scripts/bundleServer.mjs` no longer bundles test files from `luckystack/<pkg>/` into the production server. It now asks `@luckystack/server`'s `collectOverlayEntries` what a folder contributes, so the bundle and the runtime overlay walk can no longer disagree (ADR 0047).
 - The scaffolded `scripts/generateServerRequests.ts` emits the COMPLETE function registry into production maps. It previously scanned two hardcoded directories and ignored `paths.serverFunctionDirs`, so every module under `shared/` — including `shared/tryCatch.ts` and `shared/sleep.ts` — was absent from deployed builds and `functions.tryCatch.tryCatch(...)` / `functions.sleep.sleep(...)` threw at runtime while working in development. It also keyed modules on the bare filename, flattening `shared/rbac/engine.ts` to `functions.engine`; keys are now nested by directory, matching the dev loader and the generated `Functions` interface. Existing projects pick this up by upgrading and running `npm run generateArtifacts`.
