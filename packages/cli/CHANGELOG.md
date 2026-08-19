@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `luckystack update` now honours a `.luckystackignore` file at the project root:
+  a `.gitignore`-shaped list of scaffold paths this project refuses. Ignored paths
+  get nothing written — no file, no `.new` sidecar — stay out of the scaffold
+  manifest, and are listed in the update report under "Skipped — this project
+  opted out". Until now the only way to refuse a scaffold file was to delete it,
+  which does not stick: a file missing locally plans as `add`, so the next update
+  delivers it again. This matters most when a project solves the same job under a
+  DIFFERENT name, because then nothing collides and no sidecar warns you — the
+  case that prompted it was a project with its own `compose.yml` receiving the
+  scaffold's `compose.yaml`, which Docker Compose silently prefers.
+
 ## [0.8.6] - 2026-08-18
 
 ### Added

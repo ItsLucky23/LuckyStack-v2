@@ -139,6 +139,35 @@ delete only the marker — the project owns it from then on, the framework no
 longer maintains it. Doing nothing is also fine: an ignored marker is re-created
 by the next `update`, so the decision is never lost.
 
+### Refusing a scaffold file for good — `.luckystackignore`
+
+The reverse case: a file the framework ships that this project should never
+receive. Deleting it does **not** stick — a file missing locally plans as `add`,
+so the next `update` delivers it again.
+
+List it in `.luckystackignore` at the project root instead (`.gitignore`-shaped:
+one pattern per line, `#` comments, `*` inside a segment, `**` across segments,
+a trailing `/` for a whole subtree):
+
+```
+# our compose lives at compose.yml + docker/images/App.Dockerfile
+compose.yaml
+Dockerfile
+```
+
+Ignored paths get **nothing** written — not the file, not a `.new` sidecar — and
+they stay out of the scaffold manifest, so they never re-plan as `unchanged`
+either. The update report lists them under *"Skipped — this project opted out"*,
+because a silent skip is indistinguishable from the framework having dropped the
+file.
+
+Reach for this when the project already solves the same job under a **different
+name**, which is exactly when nothing collides and no sidecar warns you. The case
+it was built for: a project with its own `compose.yml` received the scaffold's
+`compose.yaml`; Docker Compose prefers `compose.yaml`, so a bare
+`docker compose up` silently started the wrong stack. When the names DO match,
+you want the normal sidecar flow — not this.
+
 ---
 
 ## Step 4 — Adopt a feature the user opted into (feature-specific)

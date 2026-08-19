@@ -135,6 +135,83 @@ export const isUpdatablePath = (relativePath: string, scope: UpdateScope): boole
   return scope === 'app'; //? app scope — every other framework-authored file
 };
 
+//? ─────────────────────────── consumer opt-out ───────────────────────────
+//?
+//? A scaffold file a project genuinely does not want. Deleting it is not
+//? enough: a file missing locally plans as ADD, so the next update delivers it
+//? again — and the project must remember to delete it after every upgrade or
+//? silently regain it.
+//?
+//? The case that forced this: a project with its own `compose.yml` +
+//? `docker/images/<name>.Dockerfile` received the scaffold's `compose.yaml` +
+//? `Dockerfile`. Different names, so nothing collided and no sidecar was
+//? written — but Docker Compose PREFERS `compose.yaml`, so a bare
+//? `docker compose up` silently switched stacks. A file that is wrong for a
+//? project needs a way to stay gone.
+//?
+//? Deliberately a `.gitignore`-shaped file rather than a key in
+//? `.luckystack/scaffold.json`: that manifest is rewritten from the fresh
+//? render on every update, so anything hand-added there is lost. This one is
+//? owned by the project, lives in version control, and is obvious in a diff.
+export const IGNORE_FILE_NAME = '.luckystackignore';
+
+const normalizeIgnorePattern = (raw: string): string =>
+  raw.trim().replaceAll('\\', '/').replace(/^\.\//, '').replace(/^\/+/, '');
+
+//? Reads the patterns, dropping blanks and `#` comments. Missing file = no
+//? patterns; an unreadable one is treated the same, because failing an upgrade
+//? over an optional opt-out file would be worse than ignoring it.
+export const readScaffoldIgnore = (root: string): string[] => {
+  const absolute = path.join(root, IGNORE_FILE_NAME);
+  if (!fs.existsSync(absolute)) return [];
+  let raw: string;
+  try {
+    raw = fs.readFileSync(absolute, 'utf8');
+  } catch {
+    return [];
+  }
+  return raw
+    .split(/\r?\n/)
+    .map((line) => normalizeIgnorePattern(line))
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+};
+
+//? `*` stays inside one segment, `**` crosses them, everything else is
+//? literal. A trailing `/` (or a bare directory name that the caller wrote as
+//? `docs/`) matches the whole subtree.
+const ignorePatternToRegExp = (pattern: string): RegExp => {
+  const directoryOnly = pattern.endsWith('/');
+  const body = directoryOnly ? pattern.slice(0, -1) : pattern;
+  let source = '';
+  for (let index = 0; index < body.length; index++) {
+    //? `noUncheckedIndexedAccess` types a string index as possibly undefined;
+    //? the loop bound already rules that out.
+    const char = body[index] ?? '';
+    if (char === '*') {
+      if (body[index + 1] === '*') {
+        source += '.*';
+        index++;
+        continue;
+      }
+      source += '[^/]*';
+      continue;
+    }
+    source += char.replace(/[.+?^${}()|[\]\\]/g, String.raw`\$&`);
+  }
+  //? A directory pattern only matches things BENEATH it; a file pattern
+  //? matches the file itself and, if it names a folder, its contents too.
+  return new RegExp(directoryOnly ? `^${source}/.*$` : `^${source}(?:/.*)?$`);
+};
+
+export const createIgnoreMatcher = (patterns: readonly string[]): ((relativePath: string) => boolean) => {
+  if (patterns.length === 0) return () => false;
+  const expressions = patterns.map((pattern) => ignorePatternToRegExp(pattern));
+  return (relativePath: string) => {
+    const normalized = normalizeIgnorePattern(relativePath);
+    return expressions.some((expression) => expression.test(normalized));
+  };
+};
+
 //? Same text-extension heuristic + CRLF normalization as the scaffolder's
 //? manifest writer (kept in sync by the update e2e — the hashes must agree or
 //? every file would read as modified).
@@ -220,7 +297,7 @@ export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
   return flags;
 };
 
-export type UpdateAction = 'add' | 'overwrite' | 'sidecar' | 'unchanged';
+export type UpdateAction = 'add' | 'overwrite' | 'sidecar' | 'unchanged' | 'ignored';
 
 export interface UpdatePlanEntry {
   path: string;
@@ -243,6 +320,7 @@ export const planUpdate = (
   consumerManifest: ScaffoldManifest | null,
   freshManifest: ScaffoldManifest,
   scope: UpdateScope = 'framework',
+  isIgnored: (relativePath: string) => boolean = createIgnoreMatcher(readScaffoldIgnore(consumerRoot)),
 ): UpdatePlan => {
   const recordedHashes = new Map(
     (consumerManifest?.files ?? []).map((entry) => [entry.path, entry.sha256]),
@@ -250,6 +328,13 @@ export const planUpdate = (
   const entries: UpdatePlanEntry[] = [];
   for (const fresh of freshManifest.files) {
     if (!isUpdatablePath(fresh.path, scope)) continue;
+    //? Opted out by the project. Recorded rather than skipped so the report can
+    //? say so — an opt-out that leaves no trace is indistinguishable from the
+    //? framework quietly dropping the file.
+    if (isIgnored(fresh.path)) {
+      entries.push({ path: fresh.path, action: 'ignored', freshSha256: fresh.sha256 });
+      continue;
+    }
     const localAbsolute = path.join(consumerRoot, fresh.path);
     if (!fs.existsSync(localAbsolute)) {
       entries.push({ path: fresh.path, action: 'add', freshSha256: fresh.sha256 });
@@ -284,10 +369,11 @@ export const applyUpdate = (
   freshManifest: ScaffoldManifest,
   scope: UpdateScope = 'framework',
 ): { reportPath: string; counts: Record<UpdateAction, number> } => {
-  const counts: Record<UpdateAction, number> = { add: 0, overwrite: 0, sidecar: 0, unchanged: 0 };
+  const counts: Record<UpdateAction, number> = { add: 0, overwrite: 0, sidecar: 0, unchanged: 0, ignored: 0 };
   const sidecars: string[] = [];
   const added: string[] = [];
   const overwritten: string[] = [];
+  const ignored: string[] = [];
   const written: UpdatePlanEntry[] = [];
 
   for (const entry of plan.entries) {
@@ -303,6 +389,9 @@ export const applyUpdate = (
     } else if (entry.action === 'sidecar') {
       fs.copyFileSync(freshAbsolute, `${localAbsolute}.new`);
       sidecars.push(entry.path);
+    } else if (entry.action === 'ignored') {
+      //? Nothing on disk — not the file, not a sidecar. That IS the opt-out.
+      ignored.push(entry.path);
     }
   }
 
@@ -334,11 +423,16 @@ export const applyUpdate = (
   //? The manifest keeps the entry for a file we did not write, so an ignored
   //? removal is re-reported on every later update until the file is gone.
   const freshPaths = new Set(freshManifest.files.map((entry) => entry.path));
+  //? An opted-out path is excluded here too: the project has already said it
+  //? does not want the framework's opinion on this file, so telling it the
+  //? framework stopped shipping one is noise, not news.
+  const ignoredPaths = new Set(ignored);
   const noLongerShipped = (consumerManifest?.files ?? [])
     .filter(
       (entry) =>
         isUpdatablePath(entry.path, scope) &&
         !freshPaths.has(entry.path) &&
+        !ignoredPaths.has(entry.path) &&
         fs.existsSync(path.join(project.root, entry.path)),
     )
     .map((entry) => entry.path);
@@ -357,8 +451,19 @@ export const applyUpdate = (
     `overwritten: ${String(counts.overwrite)} (pristine — hash matched the scaffold manifest)`,
     `sidecars:    ${String(counts.sidecar)} (user-modified — new version written as <file>.new)`,
     `unchanged:   ${String(counts.unchanged)}`,
+    `ignored:     ${String(counts.ignored)} (opted out via ${IGNORE_FILE_NAME})`,
     '',
   ];
+  if (ignored.length > 0) {
+    lines.push(
+      `Skipped — this project opted out in ${IGNORE_FILE_NAME}:`,
+      ...ignored.map((p) => `  - ${p}`),
+      '',
+      'Nothing was written for these: no file, no sidecar. Remove the pattern',
+      `from ${IGNORE_FILE_NAME} if you want the framework's version back.`,
+      '',
+    );
+  }
   if (added.length > 0) {
     lines.push(
       'New framework files delivered (did not exist in your project):',

@@ -3,13 +3,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  applyUpdate,
   choicesToFlags,
+  createIgnoreMatcher,
   hashFileContent,
   isSafeSurfacePath,
   isUpdatablePath,
   planUpdate,
+  readScaffoldIgnore,
   readScaffoldManifest,
   runUpdate,
+  IGNORE_FILE_NAME,
   MANIFEST_RELATIVE_PATH,
   type ScaffoldManifest,
 } from './update';
@@ -436,5 +440,72 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
     expect(result.ok).toBe(true);
     expect(fs.readFileSync(path.join(consumerDir, 'src/login/page.tsx'), 'utf8')).toBe('old page\n');
     expect(fs.existsSync(path.join(consumerDir, 'src/login/page.tsx.new'))).toBe(false);
+  });
+});
+
+//? The opt-out exists because "just delete the file" does not work: a file
+//? missing locally plans as ADD, so the next update delivers it again. The
+//? real case was a project with its own `compose.yml` receiving the scaffold's
+//? `compose.yaml` — different name, no collision, no sidecar, and Docker
+//? Compose silently preferring the new one.
+describe('.luckystackignore opt-out', () => {
+  it('matches exact paths, directory subtrees, and single-segment globs', () => {
+    const matches = createIgnoreMatcher(['compose.yaml', 'docker/', '*.Dockerfile', 'docs/**/draft.md']);
+    expect(matches('compose.yaml')).toBe(true);
+    expect(matches('compose.yml')).toBe(false); //? a near-miss name must NOT match
+    expect(matches('docker/nginx.conf')).toBe(true);
+    expect(matches('docker')).toBe(false); //? `docker/` covers the subtree, not the entry itself
+    expect(matches('App.Dockerfile')).toBe(true);
+    expect(matches('build/App.Dockerfile')).toBe(false); //? `*` stays inside one segment
+    expect(matches('docs/a/b/draft.md')).toBe(true);
+    expect(matches('docs/draft.md')).toBe(false); //? `**` needs at least one segment here
+  });
+
+  it('reads patterns, skipping blanks and comments, and tolerates a missing file', () => {
+    expect(readScaffoldIgnore(consumerDir)).toEqual([]);
+    write(consumerDir, IGNORE_FILE_NAME, '# ours lives at compose.yml\ncompose.yaml\n\n  Dockerfile  \n');
+    expect(readScaffoldIgnore(consumerDir)).toEqual(['compose.yaml', 'Dockerfile']);
+  });
+
+  it('plans an ignored file as `ignored` instead of `add`, and writes nothing for it', () => {
+    write(consumerDir, IGNORE_FILE_NAME, 'compose.yaml\n');
+    write(consumerDir, 'CLAUDE.md', 'old claude\n');
+    const consumerManifest = manifestFor(consumerDir, { 'CLAUDE.md': 'old claude\n' });
+
+    write(freshDir, 'CLAUDE.md', 'new claude\n');
+    write(freshDir, 'compose.yaml', 'services: {}\n');
+    const freshManifest = manifestFor(freshDir, {
+      'CLAUDE.md': 'new claude\n',
+      'compose.yaml': 'services: {}\n',
+    }, { luckystackVersion: '0.9.0' });
+
+    const plan = planUpdate(consumerDir, consumerManifest, freshManifest, 'app');
+    expect(Object.fromEntries(plan.entries.map((e) => [e.path, e.action]))).toEqual({
+      'CLAUDE.md': 'overwrite',
+      'compose.yaml': 'ignored',
+    });
+
+    const { counts, reportPath } = applyUpdate(project(), plan, consumerManifest, freshDir, freshManifest, 'app');
+    expect(counts.ignored).toBe(1);
+    //? The whole point: not the file, and not a sidecar either.
+    expect(fs.existsSync(path.join(consumerDir, 'compose.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(consumerDir, 'compose.yaml.new'))).toBe(false);
+    //? But it must be visible in the report — a silent skip is indistinguishable
+    //? from the framework having dropped the file.
+    //? `writeDumpLog` returns the path relative to the project root.
+    expect(fs.readFileSync(path.join(consumerDir, reportPath), 'utf8')).toContain('compose.yaml');
+  });
+
+  it('keeps an ignored path out of the manifest baseline so it never re-plans as unchanged', () => {
+    write(consumerDir, IGNORE_FILE_NAME, 'compose.yaml\n');
+    const consumerManifest = manifestFor(consumerDir, {});
+    write(freshDir, 'compose.yaml', 'services: {}\n');
+    const freshManifest = manifestFor(freshDir, { 'compose.yaml': 'services: {}\n' });
+
+    const plan = planUpdate(consumerDir, consumerManifest, freshManifest, 'app');
+    applyUpdate(project(), plan, consumerManifest, freshDir, freshManifest, 'app');
+
+    const written = readScaffoldManifest(consumerDir);
+    expect(written?.files.some((entry) => entry.path === 'compose.yaml')).toBe(false);
   });
 });

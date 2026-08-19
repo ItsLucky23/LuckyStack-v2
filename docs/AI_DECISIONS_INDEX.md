@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (49)
+## Decisions (50)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -62,6 +62,7 @@
 | 0048 | Batch the AI record layers to session wrap-up and retire the examples / runbooks / context-budget layers | 🟢 accepted | ai-context, docs, tooling, protocol | — | `docs/decisions/0048-batch-record-capture-to-session-wrap-up.md` |
 | 0049 | Deep docs and the per-package function INDEX stay hand-written, not JSDoc-extracted | 🟢 accepted | docs, tooling, ai-context | — | `docs/decisions/0049-hand-written-deep-docs-over-jsdoc-extraction.md` |
 | 0050 | Post-listen work runs through `afterListen` and does not kill a listening server | 🟢 accepted | server, boot, resilience, scaffold | — | `docs/decisions/0050-post-listen-work-is-not-fatal.md` |
+| 0051 | A project can refuse a scaffold file permanently via `.luckystackignore` | 🟢 accepted | cli, update, scaffold, consumer | — | `docs/decisions/0051-consumers-can-refuse-a-scaffold-file-permanently.md` |
 
 ## Summaries
 
@@ -478,6 +479,14 @@ Both layers stay hand-written.
 `RunningLuckyStackServer` gains `afterListen(task, options?)`, and the scaffolded `server/server.ts` ships an explicit slot for it.
 
 → `docs/decisions/0050-post-listen-work-is-not-fatal.md`
+
+### 0051 — A project can refuse a scaffold file permanently via `.luckystackignore`
+
+**0051** · accepted · tags: cli, update, scaffold, consumer · 2026-08-19
+
+`luckystack update` reads `.luckystackignore` from the project root: a `.gitignore`-shaped list of scaffold paths this project refuses. One pattern per line, `#` comments, `*` inside a path segment, `**` across segments, a trailing `/` for a whole subtree.
+
+→ `docs/decisions/0051-consumers-can-refuse-a-scaffold-file-permanently.md`
 
 ## Code governed by decisions
 
