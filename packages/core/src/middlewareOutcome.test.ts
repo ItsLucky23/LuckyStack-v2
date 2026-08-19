@@ -36,6 +36,7 @@ describe('resolveMiddlewareOutcome', () => {
 
   it('falls back on a malformed result rather than allowing it', () => {
     //? Fail closed: an unrecognised shape must never read as "allow".
+    // luckystack-allow no-as-any: the point of this case is a shape the type FORBIDS — a JS consumer can still hand it to us, and the resolver must survive it. Typing it correctly would delete the test.
     const malformed = { success: false } as unknown as MiddlewareResult;
     expect(resolveMiddlewareOutcome(malformed)).toEqual({ kind: 'fallback' });
   });
@@ -44,6 +45,7 @@ describe('resolveMiddlewareOutcome', () => {
     //? The type forbids it, but JS callers exist. Redirect is the safer read:
     //? it moves the user somewhere valid instead of parking them on a page they
     //? cannot use.
+    // luckystack-allow no-as-any: same reason — the union deliberately makes redirect+status unrepresentable, and this asserts what happens when a JS caller sends it anyway.
     const both = { success: false, redirect: '/login', status: 403 } as unknown as MiddlewareResult;
     expect(resolveMiddlewareOutcome(both)).toEqual({ kind: 'redirect', to: '/login' });
   });
