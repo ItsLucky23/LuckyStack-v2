@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT_DIR } from '@luckystack/core';
+import { ROOT_DIR, isTestFile } from '@luckystack/core';
 import {
   isVersionedApiFileName,
   isVersionedSyncFileName,
@@ -51,6 +51,23 @@ export const isInsidePrivateRouteSubfolder = (fullPath: string): boolean => {
   if (markerIndex === -1) return false;
   return segments.slice(markerIndex + 1).some((segment) => segment.startsWith(privateFolderPrefix));
 };
+
+//? THE predicate for "is this file route surface", shared by the dev loader,
+//? the build-time type-map discovery, and naming validation so the three cannot
+//? drift apart. They must agree: when discovery accepts a file the loader
+//? skips, the generator emits a type for a route that never gets registered.
+//?
+//? Two ways to not be route surface:
+//?   - a private subtree under the marker (`_api/_lib/…`) — covers `__tests__`
+//?     and `__mocks__` too, since those also start with the `_` prefix;
+//?   - a test FILE anywhere under the marker (`_api/getUser.test.ts`). This is
+//?     the gap `isInsidePrivateRouteSubfolder` alone leaves, and it is why the
+//?     loader used to log a red "invalid filename" for every `.test.ts` a
+//?     consumer co-located with their routes. `isTestFile` (core) is broader
+//?     than devkit's `isRouteTestFile`: `.test.ts` and `.spec.ts`, not just
+//?     `.tests.ts`.
+export const isRouteSurfaceFile = (fullPath: string): boolean =>
+  !isInsidePrivateRouteSubfolder(fullPath) && !isTestFile(fullPath);
 
 const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
   const entries = fs.readdirSync(dir, { withFileTypes: true });

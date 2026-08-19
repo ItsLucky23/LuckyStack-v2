@@ -9,7 +9,7 @@
 > `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on
 > imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
-## Decisions (48)
+## Decisions (49)
 
 | # | Title | Status | Tags | Supersedes | File |
 | --- | --- | --- | --- | --- | --- |
@@ -61,6 +61,7 @@
 | 0047 | Exclude test files from every import-everything surface | 🟢 accepted | overlay, function-injection, bundling, dev-prod-parity, conventions | — | `docs/decisions/0047-exclude-test-files-from-every-import-everything-surface.md` |
 | 0048 | Batch the AI record layers to session wrap-up and retire the examples / runbooks / context-budget layers | 🟢 accepted | ai-context, docs, tooling, protocol | — | `docs/decisions/0048-batch-record-capture-to-session-wrap-up.md` |
 | 0049 | Deep docs and the per-package function INDEX stay hand-written, not JSDoc-extracted | 🟢 accepted | docs, tooling, ai-context | — | `docs/decisions/0049-hand-written-deep-docs-over-jsdoc-extraction.md` |
+| 0050 | Post-listen work runs through `afterListen` and does not kill a listening server | 🟢 accepted | server, boot, resilience, scaffold | — | `docs/decisions/0050-post-listen-work-is-not-fatal.md` |
 
 ## Summaries
 
@@ -469,6 +470,14 @@ Discovery and key derivation move into one module, `packages/devkit/src/function
 Both layers stay hand-written.
 
 → `docs/decisions/0049-hand-written-deep-docs-over-jsdoc-extraction.md`
+
+### 0050 — Post-listen work runs through `afterListen` and does not kill a listening server
+
+**0050** · accepted · tags: server, boot, resilience, scaffold · 2026-08-18
+
+`RunningLuckyStackServer` gains `afterListen(task, options?)`, and the scaffolded `server/server.ts` ships an explicit slot for it.
+
+→ `docs/decisions/0050-post-listen-work-is-not-fatal.md`
 
 ## Code governed by decisions
 

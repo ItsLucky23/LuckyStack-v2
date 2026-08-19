@@ -1291,3 +1291,25 @@ Root README, HOSTING, packaging en create-app-deep-docs zijn opnieuw op de v0.8.
 **Verificatie (eindstand):** lint + lint:packages schoon · `ai:lint` schoon · `ai:changelog-check` schoon · unit 2036/2036 (194 files) · build + build:packages 17/17 · `pack:dry` 17/17 · `audit:production` critical=0 high=0 moderate=0. `publish:dry` faalde verwacht op "cannot publish over 0.8.5" — de bump moest eerst.
 
 **Extra files:** `scripts/syncAgentsMd.mjs`, `packages/create-luckystack-app/src/frameworkDocPaths.test.ts`, `docs/decisions/0049-*.md`, `packages/mcp/CHANGELOG.md`, plus CHANGELOG-entries voor `@luckystack/cli` en `create-luckystack-app`.
+
+## 2026-08-18 17:20 — Loader-ruis en crash-loop: exacte marker-match + `afterListen`
+
+**User prompt (summary):** serverlogs met 33 rode `[loader][api] invalid filename`-regels voor bestanden die geen routes zijn (`_lib/`, `__tests__/`, en een map `externalApi/`), gevolgd door een Mongo-fout die de server meteen liet crashen. Onderzoek beide, daarna: bouwen.
+
+**Wat ik deed:**
+
+*Probleem 1 — drie losse defecten in `packages/devkit/src/loader.ts`, samen goed voor 33 valse meldingen:*
+- **Suffix-match i.p.v. exacte marker.** `file.toLowerCase().endsWith("api")` behandelde `externalApi/`, `thisIsAFolderAPI/` en `legacyapi/` als route-mappen; sync had dezelfde bug (`dataSync/`). Nu `file !== getRoutingRules().apiMarker`, wat meteen ook een consumer respecteert die de marker via `registerRoutingRules` overschrijft — dat negeerde de hardcoded suffix volledig.
+- **Private submappen werden ingelopen.** `collectTsFiles` recursede door `_api/_lib/`; `privateFolderPrefix` bestond wel in de routing rules maar werd alleen door page-route-validatie gebruikt.
+- **Testdetectie te smal.** `isRouteTestFile` was letterlijk `endsWith('.tests.ts')`, dus `.test.ts` / `.spec.ts` leverden rode regels op. Nu core's `isTestFile` (sinds 0.8.5 beschikbaar, werd niet gebruikt).
+
+Tijdens het bouwen bleek `isInsidePrivateRouteSubfolder` (DEVKIT-5) al te bestaan en bijna hetzelfde te doen. In plaats van een tweede variant ernaast te zetten is die hergebruikt: nieuwe `isRouteSurfaceFile` = `!isInsidePrivateRouteSubfolder && !isTestFile`, gedeeld door de dev-loader én `typeMap/discovery.ts`. Die twee liepen namelijk uit elkaar — discovery accepteerde `_api/_lib/x_v1.ts` en genereerde er een type voor terwijl de loader 'm nu overslaat.
+
+*Probleem 2 — crash-loop (ADR 0050):*
+De Mongo-fout zelf is omgeving (`getaddrinfo ENOTFOUND mongo` — compose-hostname buiten Docker) en niet van het framework. Wél van het framework: het scaffold-template wikkelt de boot in een IIFE waarvan de `.catch` `process.exit(1)` doet, en post-listen werk in diezelfde keten wordt daarmee stilzwijgend fataal. Eén onbereikbare dependency sloopte een draaiende server; de supervisor herstartte, dependency nog steeds down, ~40s per ronde. Nieuw: `RunningLuckyStackServer.afterListen(task, options?)` — logt luid en gaat door, `{ fatal: true }` herstelt propagatie, `{ label }` benoemt de taak. Als losse module `afterListen.ts` zodat het testbaar is zonder volledige bootstrap. Template kreeg een expliciete slot met uitleg.
+
+**Verificatie:** lint + lint:packages schoon · `ai:lint` schoon · `ai:changelog-check` schoon · build + build:packages 17/17 · unit **2060/2060 (197 files)**. Nieuwe tests: `routeMarkerMatching.test.ts` (11), `typeMap/discoveryRouteSurface.test.ts` (5, echte directory-walk op een temp-boom met precies de gemelde mapstructuur), `server/src/afterListen.test.ts` (7, inclusief een assertie dat het template `afterListen` daadwerkelijk gebruikt — een groene unit-test op een ongebruikte helper zou hier niets waard zijn).
+
+**Files touched:** `packages/devkit/src/{loader,routingRules,routeNamingValidation}.ts`, `packages/devkit/src/typeMap/discovery.ts`, `packages/server/src/{afterListen,createServer,types,index}.ts`, `packages/create-luckystack-app/template/server/server.ts`, `docs/ARCHITECTURE_ROUTING.md`, `packages/server/docs/create-server.md`, `packages/server/CLAUDE.md`, drie CHANGELOGs, ADR 0050, plus drie nieuwe testbestanden.
+
+**Notes:** Eén stille fout onderweg die het vermelden waard is: een `node -e`-replace op de CHANGELOGs matchte niet door CRLF en meldde tóch "updated" — de bestanden bleven ongewijzigd. Gevangen door `ai:changelog-check`, daarna met de Edit-tool gedaan (wat regel 9 sowieso voorschrijft). Niet gedaan (gemeld aan de user, hoort bij flexbuddy): de cursor-paginatie in `attachmentQueue.ts` gebruikt `id: { gt: cursor }`, wat op UUIDv4 stil breekt bij een providerwissel.

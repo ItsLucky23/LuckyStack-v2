@@ -481,6 +481,30 @@ Any folder prefixed with `_` is private and excluded from routing:
 | `_sockets/`    | Socket.io client utilities               |
 | `_locales/`    | i18n translation JSON files              |
 
+### Inside `_api/` and `_sync/`
+
+The same `_` rule applies **below** a marker folder, and route discovery skips
+those subtrees entirely — no scan, no warning:
+
+```
+src/chat/_api/
+  sendMessage_v1.ts        -> route  api/chat/sendMessage/v1
+  threads/list_v1.ts       -> route  api/chat/threads/list/v1   (nested names work)
+  _lib/buildPrompt.ts      -> skipped: private helper
+  __tests__/send.test.ts   -> skipped: test folder
+  sendMessage.test.ts      -> skipped: test file
+```
+
+Two consequences worth knowing:
+
+- **The marker is matched exactly.** A folder named `externalApi/`, `legacyApi/`
+  or `dataSync/` is an ordinary folder, not a route folder. (Before 0.8.7 the
+  check was a suffix test, so those were scanned and every file inside them
+  logged an `invalid filename` warning.)
+- **The `invalid filename` warning is now meaningful.** It fires only for a file
+  that really is route surface — directly under the marker (or a normal nested
+  folder), not a test file — and genuinely misses the `_v<N>` suffix.
+
 ---
 
 ## Hot Reload

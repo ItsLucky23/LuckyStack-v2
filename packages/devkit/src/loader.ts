@@ -6,13 +6,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from 'node:url';
-import { tryCatch, getSrcDir, ROOT_DIR } from '@luckystack/core';
+import { tryCatch, getSrcDir, ROOT_DIR, isTestFile } from '@luckystack/core';
 import { collectFunctionModules, functionModuleFileName } from './functionRegistry';
 import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
-import { getRoutingRules, isRouteTestFile } from './routingRules';
-import { assertValidRouteNaming, collectDuplicatePageRoutes, formatDuplicatePageRouteIssues } from './routeNamingValidation';
+import { getRoutingRules, isRouteTestFile, isNonRouteDirectory, apiMarkerSegment, syncMarkerSegment } from './routingRules';
+import { assertValidRouteNaming, collectDuplicatePageRoutes, formatDuplicatePageRouteIssues, isRouteSurfaceFile } from './routeNamingValidation';
 
 export const devApis: Record<string, unknown> = {};
 export const devSyncs: Record<string, unknown> = {};
@@ -160,8 +160,11 @@ const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
     if (isIgnoredPath(entryPath)) continue;
     const relPath = relativeTo ? `${relativeTo}/${entry}` : entry;
     if (fs.statSync(entryPath).isDirectory()) {
+      //? Called only for paths BELOW a marker folder, so private + test
+      //? directories are pruned here rather than walked and then warned about.
+      if (isNonRouteDirectory(entry)) continue;
       results.push(...collectTsFiles(entryPath, relPath));
-    } else if (entry.endsWith(".ts") && !isRouteTestFile(entry)) {
+    } else if (entry.endsWith(".ts") && !isRouteTestFile(entry) && !isTestFile(entry)) {
       results.push(relPath);
     }
   }
@@ -215,7 +218,7 @@ export const upsertApiFromFile = async (filePath: string): Promise<void> => {
   const routeMeta = resolveApiRouteMetaFromPath(filePath);
   if (!routeMeta) {
     const normalized = normalizePath(path.resolve(filePath));
-    if (normalized.includes('/_api/') && normalized.endsWith('.ts') && !isRouteTestFile(normalized)) {
+    if (normalized.endsWith('.ts') && normalized.includes(apiMarkerSegment()) && isRouteSurfaceFile(normalized)) {
       console.log(
         `[loader][api] invalid filename: ${normalized}. Expected <name>_v<number>.ts. File will not be loaded.`,
         'red'
@@ -275,7 +278,13 @@ const scanApiFolder = async (file: string, basePath = "") => {
   if (isIgnoredPath(fullPath)) return;
   if (!fs.statSync(fullPath).isDirectory()) return;
 
-  if (!file.toLowerCase().endsWith("api")) {
+  //? EXACT marker match. This used to be `file.toLowerCase().endsWith("api")`,
+  //? which swallowed any folder whose name merely ends in "api" —
+  //? `externalApi/`, `thisIsAFolderAPI/`, `legacyapi/` were all walked as route
+  //? folders and every file inside them logged a red "invalid filename".
+  //? Matching the configured marker also honours a consumer that overrode
+  //? `apiMarker` via `registerRoutingRules`, which the hardcoded suffix did not.
+  if (file !== getRoutingRules().apiMarker) {
     const subFolders = fs.readdirSync(fullPath);
     for (const sub of subFolders) {
       await scanApiFolder(sub, path.join(basePath, file));
@@ -350,7 +359,7 @@ export const upsertSyncFromFile = async (filePath: string): Promise<void> => {
   const routeMeta = resolveSyncRouteMetaFromPath(filePath);
   if (!routeMeta) {
     const normalized = normalizePath(path.resolve(filePath));
-    if (normalized.includes(`/${getRoutingRules().syncMarker}/`) && normalized.endsWith('.ts') && !isRouteTestFile(normalized)) {
+    if (normalized.endsWith('.ts') && normalized.includes(syncMarkerSegment()) && isRouteSurfaceFile(normalized)) {
       console.log(
         `[loader][sync] invalid filename: ${normalized}. Expected <name>_server_v<number>.ts or <name>_client_v<number>.ts. File will not be loaded.`,
         'red'
@@ -420,7 +429,9 @@ const scanSyncFolder = async (file: string, basePath = "") => {
   if (isIgnoredPath(fullPath)) return;
   if (!fs.statSync(fullPath).isDirectory()) return;
 
-  if (!file.toLowerCase().endsWith("sync")) {
+  //? EXACT marker match — see `scanApiFolder` for why. The suffix form caught
+  //? `dataSync/`, `autoSync/`, `websync/` as sync route folders.
+  if (file !== getRoutingRules().syncMarker) {
     const subFolders = fs.readdirSync(fullPath);
     for (const sub of subFolders) {
       await scanSyncFolder(sub, path.join(basePath, file));

@@ -115,6 +115,17 @@ export interface StopLuckyStackServerOptions {
   timeoutMs?: number;
 }
 
+export interface AfterListenOptions {
+  /**
+   * Re-throw instead of swallowing. Use only when the process is genuinely
+   * useless without this task. Default `false` — a listening server survives a
+   * failing post-listen task.
+   */
+  fatal?: boolean;
+  /** Label used in the failure log. Defaults to `post-listen task`. */
+  label?: string;
+}
+
 export interface RunningLuckyStackServer {
   httpServer: HttpServer;
   ioServer: SocketIOServer;
@@ -123,6 +134,20 @@ export interface RunningLuckyStackServer {
    * URL on success.
    */
   listen: (callback?: () => void) => Promise<HttpServer>;
+  /**
+   * Run work that belongs AFTER the server is accepting traffic — durable queue
+   * workers, warm-up passes, reconciliation jobs.
+   *
+   * A rejection here is logged loudly and swallowed by default, because the
+   * server is already up: killing a healthy process over one broken dependency
+   * turns an outage into a crash-loop (supervisor restarts, dependency is still
+   * down, repeat). Pass `{ fatal: true }` when the process genuinely has no
+   * purpose without the task — the rejection then propagates to the caller.
+   *
+   * Never resolves to the task's value; it is fire-and-report, not a pipeline
+   * stage. Read what you need inside the callback.
+   */
+  afterListen: (task: () => void | Promise<void>, options?: AfterListenOptions) => Promise<void>;
   /**
    * Graceful shutdown (MIS-016). Stops accepting new connections, dispatches the
    * core `preServerStop` hook, flushes error-trackers (bounded by a timeout

@@ -9,6 +9,7 @@ import {
   apiMarkerSegment,
   syncMarkerSegment,
 } from '../routingRules';
+import { isRouteSurfaceFile } from '../routeNamingValidation';
 
 const toForwardSlashRelative = (absolute: string): string => {
   const rel = path.relative(ROOT_DIR, absolute);
@@ -65,11 +66,17 @@ const walkFiles = (
   return results;
 };
 
+//? `isRouteSurfaceFile` keeps this in lockstep with the dev loader: a file in a
+//? private (`_lib/`) or test (`__tests__/`) subfolder of the marker is not a
+//? route, so the generator must not emit a type for something the loader will
+//? never register.
 export const findAllApiFiles = (srcDir: string): string[] => {
   const apiSegment = apiMarkerSegment();
   return walkFiles(srcDir, (fullPath, entryName) => {
     const normalized = fullPath.replaceAll('\\', '/');
-    return isApiFileName(entryName) && normalized.includes(apiSegment);
+    return isApiFileName(entryName)
+      && normalized.includes(apiSegment)
+      && isRouteSurfaceFile(normalized);
   });
 };
 
@@ -77,7 +84,9 @@ export const findAllSyncServerFiles = (srcDir: string): string[] => {
   const syncSegment = syncMarkerSegment();
   return walkFiles(srcDir, (fullPath, entryName) => {
     const normalized = fullPath.replaceAll('\\', '/');
-    return isSyncServerFileName(entryName) && normalized.includes(syncSegment);
+    return isSyncServerFileName(entryName)
+      && normalized.includes(syncSegment)
+      && isRouteSurfaceFile(normalized);
   });
 };
 
@@ -85,6 +94,8 @@ export const findAllSyncClientFiles = (srcDir: string): string[] => {
   const syncSegment = syncMarkerSegment();
   return walkFiles(srcDir, (fullPath, entryName) => {
     const normalized = fullPath.replaceAll('\\', '/');
-    return isSyncClientFileName(entryName) && normalized.includes(syncSegment);
+    return isSyncClientFileName(entryName)
+      && normalized.includes(syncSegment)
+      && isRouteSurfaceFile(normalized);
   });
 };

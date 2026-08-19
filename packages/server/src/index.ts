@@ -53,6 +53,7 @@ export {
 } from './errorFormatterRegistry';
 export type { ErrorFormatter, ErrorFormatterContext } from './errorFormatterRegistry';
 export type {
+  AfterListenOptions,
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
   StopLuckyStackServerOptions,

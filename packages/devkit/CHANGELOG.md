@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Route discovery matches the `_api` / `_sync` marker EXACTLY instead of any folder name ending in "api"/"sync". A folder called `externalApi/`, `thisIsAFolderAPI/` or `dataSync/` was walked as a route folder, so every file inside it logged a red `[loader][api] invalid filename` at boot. The suffix test also hardcoded the marker word, silently ignoring a consumer who overrode `apiMarker` via `registerRoutingRules`.
+- The route walk no longer descends into private (`_lib/`) or test (`__tests__/`, `__mocks__/`) subfolders of a marker. The `_`-prefix convention already said these are not route surface, but only page-route validation applied it — the loader walked in and warned about every helper file.
+- Test files co-located with routes no longer produce filename warnings. Detection was `.tests.ts` only, so `.test.ts` and `.spec.ts` each produced a red line; it now uses core's `isTestFile`. Together these three fixes take a real consumer project from 33 boot warnings — none of them an actual problem — to zero.
+- Build-time type-map discovery applies the same route-surface rule as the dev loader (shared `isRouteSurfaceFile`), so the generator can no longer emit a type for a route the loader will never register.
+
 ## [0.8.5] - 2026-08-17
 
 ### Added

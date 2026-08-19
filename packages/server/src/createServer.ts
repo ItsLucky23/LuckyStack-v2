@@ -10,6 +10,7 @@ import { runGracefulShutdown } from './stopServer';
 import { writeDevServerInfo, clearDevServerInfo } from './devServerInfo';
 import { markDevToolsInitFailed } from './devToolsStatus';
 import { normalizeServerPort, resolveServerPort } from './portResolution';
+import { runAfterListenTask } from './afterListen';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -368,5 +369,5 @@ export const createLuckyStackServer = async (
     process.once('SIGINT', () => { handleSignal('SIGINT'); });
   }
 
-  return { httpServer, ioServer, listen, stop, close: stop };
+  return { httpServer, ioServer, listen, afterListen: runAfterListenTask, stop, close: stop };
 };

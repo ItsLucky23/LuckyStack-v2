@@ -89,7 +89,31 @@ import { bootstrapLuckyStack } from '@luckystack/server';
   });
 
   await server.listen();
-})().catch((err) => {
+
+  //? ── Post-listen work goes HERE, inside `afterListen` ──────────────────
+  //? Anything that runs once the server is already accepting traffic — durable
+  //? queue workers, warm-up passes, reconciliation jobs — belongs in this
+  //? callback rather than after the `await` above.
+  //?
+  //? WHY: everything before `listen()` is genuinely fatal — a failure there
+  //? means there is no server. Post-listen work is different: the server IS up
+  //? and serving. A queue worker that cannot reach its database is a real
+  //? problem, but killing a healthy process over it turns one broken dependency
+  //? into a crash-loop (the supervisor restarts, the dependency is still down,
+  //? repeat). `afterListen` logs the failure loudly and keeps serving.
+  //?
+  //? Need the old fail-fast behaviour for a specific task — say the process is
+  //? useless without it — then throw inside the callback AND pass
+  //? `{ fatal: true }`.
+  await server.afterListen(async () => {
+    //? Example:
+    //? const { startWorkers } = await import('../src/jobs/workers');
+    //? await startWorkers();
+  });
+})().catch((err: unknown) => {
+  //? Reached only for pre-listen failures: config, bootstrap, or the bind
+  //? itself. By the time `afterListen` runs, the server is up and its failures
+  //? are handled there — so this message is always literally true.
   console.error('[server] failed to start:', err);
   process.exit(1);
 });

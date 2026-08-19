@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | feat/email-code-2fa | (none) | 2026-07-12 16:05 | merged 2026-07-12 — in v0.6.0 (merge 970d051; passwordless email-code login + 2FA TOTP/email-fallback/recovery [ADR 0024]; security-hardened via 5-lens scan + echte-Redis-harness) | 7 |
 | fix/unpushed-review-findings | (none) | 2026-07-16 16:10 | merged 2026-07-16 — v0.7.0 release-readiness fixes (merge 3f77de9) | 5 |
-| main | (none) | 2026-08-18 16:10 | active — v0.8.6 voorbereid: Session Capture Protocol (ADR 0048), Lazy-Load Contract (~68k→~20k tokens/sessie), playbook 424→157 regels, `AGENTS.md` afgeleid, `.removed` markers bij `luckystack update`, scaffold-padbug gefixt. | 80 |
+| main | (none) | 2026-08-18 17:20 | active — v0.8.6 gepubliceerd (17/17 op npm). Daarna richting 0.8.7: exacte `_api`/`_sync` marker-match + private/test-mappen overgeslagen (33 valse loader-warnings → 0), en `afterListen` zodat post-listen werk geen draaiende server meer sloopt (ADR 0050). | 82 |
 | fix/prod-function-map-divergence | (none) | 2026-08-21 | merged 2026-08-21 in v0.8.5 — function-injection in één registry (ADR 0046), e2e-poort gerepareerd + in CI, testbestanden uitgesloten van elke import-alles-plek (ADR 0047); gerebased op v0.8.4, nog niet gepubliceerd. | 4 |
 | fix/routed-http-method-map-bootstrap | (none) | 2026-07-27 23:59 | completed — v0.8.3 met provenance gepubliceerd; registry-scaffold groen. | 3 |
 | fix/dropdown-positioning | (none) | 2026-07-22 21:17 | completed — v0.7.5 gepubliceerd via GitHub Actions met npm provenance. | 3 |

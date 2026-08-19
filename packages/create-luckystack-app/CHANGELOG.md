@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The scaffolded `server/server.ts` now has an explicit `await server.afterListen(...)` slot for work that runs once the server is listening, with a commented example. Everything before `listen()` stays fatal — a failure there means there is no server — but a post-listen task that fails no longer reaches the `process.exit(1)` catch. The `[server] failed to start:` message is therefore always literally true.
+
 ## [0.8.6] - 2026-08-18
 
 ### Changed
