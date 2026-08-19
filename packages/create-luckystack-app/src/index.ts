@@ -1434,6 +1434,38 @@ const CONSUMER_OWNED_DOCS = new Set([
 //? A line that already mentions `docs/luckystack/` is left alone — those are the
 //? spots that deliberately spell out BOTH paths (the Quick Links table, the
 //? "consumer copy: …" parentheticals) and are correct as written.
+//? Blocks of CLAUDE.md that only mean anything INSIDE the framework repo, fenced
+//? in the source so the list lives next to the content instead of in a
+//? hand-kept array here (which would silently drift the moment a section moves).
+//?
+//? WHY strip at all: the scaffolded CLAUDE.md is read on every prompt, so every
+//? line costs tokens forever. A consumer has no `packages/*` to write framework
+//? code in, no `ai:changelog-check`, no cross-repo quick index — and the Project
+//? Snapshot actively describes the WRONG project, telling a consumer's AI that
+//? this repo publishes 16 npm packages.
+const FRAMEWORK_ONLY_OPEN = '<!-- framework-only -->';
+const FRAMEWORK_ONLY_CLOSE = '<!-- /framework-only -->';
+
+export const stripFrameworkOnlyBlocks = (content: string): string => {
+  const out: string[] = [];
+  let depth = 0;
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === FRAMEWORK_ONLY_OPEN) { depth++; continue; }
+    if (trimmed === FRAMEWORK_ONLY_CLOSE) { depth = Math.max(0, depth - 1); continue; }
+    if (depth === 0) out.push(line);
+  }
+  //? An unbalanced fence would silently swallow the rest of the file, so say so
+  //? loudly rather than shipping a truncated contract.
+  if (depth !== 0) {
+    throw new Error(
+      `[create-luckystack-app] unbalanced ${FRAMEWORK_ONLY_OPEN} fence in CLAUDE.md — `
+      + 'every opener needs a matching closer, otherwise the rest of the file is dropped.',
+    );
+  }
+  return out.join('\n');
+};
+
 export const rewriteFrameworkDocPaths = (content: string, frameworkDocEntries: string[]): string => {
   const rewritable = frameworkDocEntries.filter((e) => !CONSUMER_OWNED_DOCS.has(e));
   if (rewritable.length === 0) return content;
@@ -3431,7 +3463,7 @@ const copyAiDocs = (
         //? docs themselves are copied verbatim into docs/luckystack/, so their
         //? own relative cross-references stay valid inside that tree.
         if (path.basename(dst) === 'CLAUDE.md') {
-          rendered = rewriteFrameworkDocPaths(rendered, frameworkDocEntries);
+          rendered = stripFrameworkOnlyBlocks(rewriteFrameworkDocPaths(rendered, frameworkDocEntries));
         }
         fs.writeFileSync(dst, rendered);
       } else {

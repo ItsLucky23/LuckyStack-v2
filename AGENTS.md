@@ -25,11 +25,14 @@
 
 ---
 
+<!-- framework-only -->
 ## Project Snapshot
 
 LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Node.js + Socket.io backend (no Express), with file-based routing for pages, APIs, and real-time sync events. Tech stack: React 19, React Router 7, TailwindCSS 4, Socket.io, Prisma 6.19 (MongoDB / MySQL / PostgreSQL / SQLite), TypeScript 6, Vite, Redis. The repo publishes as 16 `@luckystack/*` packages (+ `create-luckystack-app`); a 17th package dir, `env-resolver`, is a reserved, not-yet-published placeholder (no `package.json`, excluded from build/publish). See `docs/PACKAGE_OVERVIEW.md` for the use-case matrix and peer-dependency map.
 
 ---
+<!-- /framework-only -->
+
 
 ## Core Rules (28)
 
@@ -46,7 +49,9 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 5. **After an update, spell out the developer actions required** (what to run, what to restart, what to verify).
 6. **Tell the user what to test and what observable differences to expect** after a change.
 7. **Code style depends on which side of the framework boundary you're on:**
+<!-- framework-only -->
    - **7a. In `packages/*` framework code: generic, SOLID, future-proof.** Framework code is reused by every consumer; abstractions earn their keep.
+<!-- /framework-only -->
    - **7b. In consumer `src/`, `server/`, `config.ts`: minimum code, nothing speculative.** No features beyond what was asked. No abstractions for single-use code. No "flexibility" or "configurability" that wasn't requested. No error handling for impossible scenarios. If you wrote 200 lines and it could be 50, rewrite it. Senior-engineer sanity check: "would they say this is overcomplicated?"
 
 ### Autonomy & Commands (8-10) — HYBRID
@@ -201,7 +206,9 @@ These keep the layers above honest and current — all opt-in / report-only so t
 
 - **Doc-coverage gate** (`ai:lint`, rule `doc-coverage`) — a NEWLY-ADDED route needs a top-of-file summary; a new `page.tsx` needs a `//? intent:` line (Rules 12/15a made enforceable). Diff-scoped to added files; WARN by default, opt into blocking via `luckystack.invariants.json`. Escape hatch: `// luckystack-allow doc-coverage: <reason>` on the first line.
 - **Doc-staleness** (`npm run ai:doc-staleness`, report-only) — a hand-written doc opts in with an `<!-- @covers <glob> -->` marker; the check reports when the covered code has moved on by more than `docs.stalenessThreshold` commits. Wire a deep-dive to the code it describes to enable the nudge.
+<!-- framework-only -->
 - **CHANGELOG-completeness** (`npm run ai:changelog-check`, report-only) — keeps the upgrade story ("read the CHANGELOG gap between installed and target") honest: every publishable package that CHANGED since the last `v*` release tag must also have a CHANGELOG update (a pure lockstep version bump is exempt). Prevents the kind of historical gap where a shipped version has no CHANGELOG entry. Framework-repo only; runs in the pre-commit hook as a nudge, and belongs in the pre-publish checklist.
+<!-- /framework-only -->
 - **Code→ADR link** — tag a file that embodies a deliberate decision with `//? @adr NNNN`; `ai:decisions` builds the reverse "ADR → governed files" map, queryable via `decision_for_file(path)`. Check it BEFORE "cleaning up" a deliberate-looking construct.
 - **Eval harness** (`eval/`, `npm run ai:eval`) — the deterministic with/without measurement of whether these artifacts actually improve AI output; it is the trigger gate ADR 0003 requires before any RAG rung. Extend `eval/scenarios/` as the project grows.
 
@@ -449,8 +456,12 @@ upgrade tooling — a self-contained copy of the runbook in
 | `docs/LESSONS_PROTOCOL.md` | Pitfalls-layer protocol — the committed "what failed + how to avoid" record the AI auto-fills + reads (no command) |
 | `docs/FINDINGS_PROTOCOL.md` | Findings-layer protocol — AI scans/findings go under a date-led `docs/findings/<YYYY-MM-DD>-<slug>/` folder with a per-folder `README.md` status ledger (no command) |
 | `docs/AI_LESSONS_INDEX.md` | Auto-generated index of `docs/lessons/` pitfalls (severity, area, takeaway) |
+<!-- framework-only -->
 | `eval/` | AI-context eval harness — deterministic with/without scorer measuring whether the artifacts improve AI output (`npm run ai:eval`) |
+<!-- /framework-only -->
+<!-- framework-only -->
 | `docs/AI_QUICK_INDEX.md` | Auto-generated cross-repo index (framework surfaces) |
+<!-- /framework-only -->
 | `docs/AI_PROJECT_INDEX.md` | Auto-generated inventory of the consumer project's own code (routes, pages, helpers, components, cross-refs) |
 | `docs/AI_DECISIONS_INDEX.md` | Auto-generated index of `docs/decisions/` ADRs (title, status, tags, summary) |
 | `docs/PRODUCT.md` | AI-maintained plain-language description of what the app is + for whom (the intent-layer source) |

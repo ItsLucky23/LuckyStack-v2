@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { rewriteFrameworkDocPaths } from './index.js';
+import { rewriteFrameworkDocPaths, stripFrameworkOnlyBlocks } from './index.js';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 
@@ -73,5 +73,42 @@ describe('rewriteFrameworkDocPaths', () => {
     const quickLink = before.find((l) => l.includes('| Architecture deep dives |'));
     expect(quickLink).toBeDefined();
     expect(after[before.indexOf(quickLink ?? '')]).toBe(quickLink);
+  });
+});
+
+describe('stripFrameworkOnlyBlocks', () => {
+  it('drops fenced blocks and keeps everything else', () => {
+    const src = [
+      'keep one',
+      '<!-- framework-only -->',
+      'drop me',
+      '<!-- /framework-only -->',
+      'keep two',
+    ].join('\n');
+    expect(stripFrameworkOnlyBlocks(src)).toBe('keep one\nkeep two');
+  });
+
+  it('leaves a file without fences untouched', () => {
+    const src = 'a\nb\nc';
+    expect(stripFrameworkOnlyBlocks(src)).toBe(src);
+  });
+
+  it('throws on an unbalanced fence instead of swallowing the rest', () => {
+    //? The failure mode worth guarding: a missing closer would silently drop
+    //? everything after it, shipping consumers a truncated contract.
+    const src = 'keep\n<!-- framework-only -->\nlost\nalso lost';
+    expect(() => stripFrameworkOnlyBlocks(src)).toThrow(/unbalanced/);
+  });
+
+  it('the real CLAUDE.md has balanced fences and gets measurably smaller', () => {
+    const claudeMd = readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf8');
+    const stripped = stripFrameworkOnlyBlocks(claudeMd);
+    expect(stripped.length).toBeLessThan(claudeMd.length);
+    //? No fence markers may survive into what a consumer reads.
+    expect(stripped).not.toContain('framework-only');
+    //? And the consumer-relevant contract must still be there.
+    for (const anchor of ['Session Capture Protocol', 'Lazy-Load Contract', 'Core Rules']) {
+      expect(stripped).toContain(anchor);
+    }
   });
 });

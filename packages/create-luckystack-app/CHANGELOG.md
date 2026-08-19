@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The scaffolded `CLAUDE.md` drops the sections that only mean something inside the framework repo: the Project Snapshot (which described LuckyStack's own 16-package layout, i.e. the wrong project for a consumer's AI), Rule 7a about `packages/*` framework code, the `ai:changelog-check` bullet, and two doc-table rows for framework-only surfaces. Marked with `<!-- framework-only -->` fences in the source so the list lives next to the content instead of in a hand-kept array that would drift the moment a section moves; an unbalanced fence throws rather than silently truncating the contract. Saves ~443 tokens (3.5%) on a file that is read on every prompt — modest, because most of the contract genuinely applies to consumers too.
+
 ## [0.8.7] - 2026-08-18
 
 ### Changed
