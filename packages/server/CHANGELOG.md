@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-08-18
+
 ### Added
 
 - `RunningLuckyStackServer.afterListen(task, options?)` — runs post-listen work (durable queue workers, warm-up passes, reconciliation jobs) isolated from the caller's fatal boot chain. A rejection is logged loudly and swallowed by default, because the server is already accepting traffic: killing a healthy process over one unreachable dependency turns an outage into a supervisor crash-loop, while the log claims "failed to start" about a server that started fine. Pass `{ fatal: true }` when the process genuinely has no purpose without the task, and `{ label }` to name it in the failure log.

@@ -1313,3 +1313,27 @@ De Mongo-fout zelf is omgeving (`getaddrinfo ENOTFOUND mongo` — compose-hostna
 **Files touched:** `packages/devkit/src/{loader,routingRules,routeNamingValidation}.ts`, `packages/devkit/src/typeMap/discovery.ts`, `packages/server/src/{afterListen,createServer,types,index}.ts`, `packages/create-luckystack-app/template/server/server.ts`, `docs/ARCHITECTURE_ROUTING.md`, `packages/server/docs/create-server.md`, `packages/server/CLAUDE.md`, drie CHANGELOGs, ADR 0050, plus drie nieuwe testbestanden.
 
 **Notes:** Eén stille fout onderweg die het vermelden waard is: een `node -e`-replace op de CHANGELOGs matchte niet door CRLF en meldde tóch "updated" — de bestanden bleven ongewijzigd. Gevangen door `ai:changelog-check`, daarna met de Edit-tool gedaan (wat regel 9 sowieso voorschrijft). Niet gedaan (gemeld aan de user, hoort bij flexbuddy): de cursor-paginatie in `attachmentQueue.ts` gebruikt `id: { gt: cursor }`, wat op UUIDv4 stil breekt bij een providerwissel.
+
+## 2026-08-18 18:05 — v0.8.7: loader-ruis, post-listen crash-loop, deny-in-place middleware
+
+**User prompt (summary):** onderzoek de loader-warnings en de Mongo-crash uit de serverlogs; daarna bouwen. Vervolgens: middleware-contract nakijken (andere AI claimde dat alleen allow/redirect bestaat), dat gat dichten, tweemaal een verse review op eigen werk, en bumpen + releasen als het klaar is.
+
+**Wat ik deed:**
+
+*Loader (devkit).* Drie defecten, samen 33 valse rode regels per boot in een echt project: suffix-match `endsWith("api")` behandelde `externalApi/` als route-map (sync idem met `dataSync/`); `collectTsFiles` liep private submappen in; testdetectie was alleen `.tests.ts`. Nu exacte marker-match uit `getRoutingRules()`, pruning van `_`-mappen en testmappen, en core's `isTestFile`. De bestaande `isInsidePrivateRouteSubfolder` (DEVKIT-5) is hergebruikt in een gedeelde `isRouteSurfaceFile`, óók toegepast op `typeMap/discovery.ts` — die accepteerde `_api/_lib/x_v1.ts` en genereerde er een type voor dat de loader nooit registreert.
+
+*Post-listen (server, ADR 0050).* De Mongo-fout uit de logs was omgeving (`ENOTFOUND mongo`, compose-hostname buiten Docker), maar het scaffold-template maakte 'm fataal: post-listen werk hing in dezelfde IIFE als `process.exit(1)`, dus één onbereikbare dependency sloopte een luisterende server en de supervisor loopte 'm elke ~40s. Nieuw `RunningLuckyStackServer.afterListen(task, opts)` — logt luid en blijft draaien, `{ fatal: true }` herstelt propagatie.
+
+*Middleware (core).* De claim klopte: `MiddlewareResult` kende alleen allow en redirect, dus een geauthenticeerde denial moest wegnavigeren. Nieuwe variant `{ success: false, status }` houdt de URL vast en rendert een deny-state; `denied`-prop voor eigen UI. Meegefixt: `useRouter` had een eigen branch-logica en deed *niets* bij een niet-herkend resultaat — knop leek kapot. Beide lopen nu door `resolveMiddlewareOutcome`.
+
+**Twee zelfreviews, vier eigen bugs gevonden:**
+1. Hot-reload en boot-scan liepen uit de pas — `_api/_lib/x_v1.ts` werd bij opslaan alsnog geregistreerd en verdween bij herstart.
+2. `isInsidePrivateRouteSubfolder` ankerde op de *eerste* marker; een checkout onder een map `_api` verborg élke route. Latent, maar mijn wijziging tilde het van "validatie overgeslagen" naar "niets geregistreerd".
+3. Het template shipte een **live lege** `afterListen`-callback → `require-await` / `no-empty-function` onder `strictTypeChecked`; elk nieuw project zou met een lint-fout starten. De e2e draait geen lint, dus niets anders had dit gevangen.
+4. `Middleware.tsx` bevatte een NUL-byte in de `routeKey`-literal, waardoor git het bestand als **binair** zag en de diff onzichtbaar was — pre-existing sinds ≤ v0.8.3, gevonden juist doordat mijn eigen diff er niet in te zien was.
+
+**Verificatie:** lint + lint:packages + `ai:lint` + `ai:changelog-check` schoon · build + build:packages 17/17 · unit **2073/2073 (199 files)** · `pack:dry` 17/17 · `audit:production` 0/0/0. Nieuwe tests: `routeMarkerMatching` (13), `hotReloadRouteSurface` (5), `discoveryRouteSurface` (5), `afterListen` (7), `middlewareOutcome` (7).
+
+**Bekende beperking, bewust geaccepteerd:** de React-componenten (`Middleware.tsx`, `Router.tsx`) blijven onbetest — deze repo heeft geen jsdom/testing-library en `npm install` is niet autonoom. Daarom is de beslislogica uit beide componenten getrokken naar de pure, wél geteste `resolveMiddlewareOutcome`. De wijziging is additief: bestaande result-shapes gedragen zich identiek.
+
+**Files:** `packages/devkit/src/{loader,routingRules,routeNamingValidation}.ts` + `typeMap/discovery.ts`, `packages/server/src/{afterListen,createServer,types,index}.ts`, `packages/core/src/{middlewareRegistry,client}.ts` + `react/{Middleware,Router}.tsx`, template `server/server.ts`, `docs/ARCHITECTURE_ROUTING.md`, `packages/server/docs/create-server.md`, drie package-CLAUDE.md's, vier CHANGELOGs, ADR 0050, vijf nieuwe testbestanden.

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-08-18
+
 ### Fixed
 
 - Route discovery matches the `_api` / `_sync` marker EXACTLY instead of any folder name ending in "api"/"sync". A folder called `externalApi/`, `thisIsAFolderAPI/` or `dataSync/` was walked as a route folder, so every file inside it logged a red `[loader][api] invalid filename` at boot. The suffix test also hardcoded the marker word, silently ignoring a consumer who overrode `apiMarker` via `registerRoutingRules`.

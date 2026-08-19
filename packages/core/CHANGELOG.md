@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-08-18
+
 ### Added
 
 - `MiddlewareResult` gains a deny-in-place variant: `{ success: false, status: number }`. The contract previously only supported allow and redirect, so a route guard could not say "you are signed in but not allowed here" without sending the user somewhere else — losing the requested URL and explaining nothing. `<Middleware>` now keeps the URL and renders a deny state; pass `denied` (a node, or a function of the status) to supply your own, otherwise a minimal built-in view is used. Deliberately untranslated: `translate()` returns the KEY when it cannot resolve one, so a built-in with i18n keys would print `middleware.forbidden.title` in every project that upgrades without adding them.
