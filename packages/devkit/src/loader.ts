@@ -11,7 +11,7 @@ import { collectFunctionModules, functionModuleFileName } from './functionRegist
 import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
-import { getRoutingRules, isRouteTestFile, isNonRouteDirectory, apiMarkerSegment, syncMarkerSegment } from './routingRules';
+import { getRoutingRules, isNonRouteDirectory, apiMarkerSegment, syncMarkerSegment } from './routingRules';
 import { assertValidRouteNaming, collectDuplicatePageRoutes, formatDuplicatePageRouteIssues, isRouteSurfaceFile } from './routeNamingValidation';
 
 export const devApis: Record<string, unknown> = {};
@@ -53,6 +53,14 @@ const resolveApiRouteMetaFromPath = (filePath: string): { routeKey: string; abso
     return null;
   }
 
+  //? Must agree with the boot scan, which prunes private + test subtrees in
+  //? `collectTsFiles`. Without this guard `_api/_lib/handoff_v1.ts` still
+  //? matches the `_v<N>` regex here, so hot-reload would register
+  //? `api/<page>/_lib/handoff/v1` — a route that vanishes on the next restart.
+  if (!isRouteSurfaceFile(normalizedAbsolutePath)) {
+    return null;
+  }
+
   const rules = getRoutingRules();
   const relativePath = normalizePath(path.relative(getSrcDir(), absolutePath));
   const segments = relativePath.split('/');
@@ -86,6 +94,11 @@ const resolveSyncRouteMetaFromPath = (
   const normalizedSrcDir = normalizePath(getSrcDir());
 
   if (!normalizedAbsolutePath.startsWith(normalizedSrcDir) || !normalizedAbsolutePath.endsWith('.ts')) {
+    return null;
+  }
+
+  //? Same boot-scan agreement as the API twin above.
+  if (!isRouteSurfaceFile(normalizedAbsolutePath)) {
     return null;
   }
 
@@ -164,7 +177,9 @@ const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
       //? directories are pruned here rather than walked and then warned about.
       if (isNonRouteDirectory(entry)) continue;
       results.push(...collectTsFiles(entryPath, relPath));
-    } else if (entry.endsWith(".ts") && !isRouteTestFile(entry) && !isTestFile(entry)) {
+    //? `isTestFile` already subsumes the `.tests.ts` form `isRouteTestFile`
+    //? matches, so one check covers both.
+    } else if (entry.endsWith(".ts") && !isTestFile(entry)) {
       results.push(relPath);
     }
   }

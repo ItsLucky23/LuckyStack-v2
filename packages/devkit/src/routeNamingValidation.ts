@@ -47,7 +47,12 @@ export const isInsidePrivateRouteSubfolder = (fullPath: string): boolean => {
   //? never equals a split path segment.
   const { privateFolderPrefix, apiMarker, syncMarker } = getRoutingRules();
   const segments = normalizePath(fullPath).split('/');
-  const markerIndex = segments.findIndex((segment) => segment === apiMarker || segment === syncMarker);
+  //? LAST marker, not the first. `fullPath` is absolute, so a project that
+  //? happens to live under a folder literally named `_api` (or `_sync`) would
+  //? otherwise anchor here — and every real marker further down then reads as a
+  //? private segment, silently hiding EVERY route in the project. The deepest
+  //? marker is the operative one for a route path.
+  const markerIndex = segments.findLastIndex((segment) => segment === apiMarker || segment === syncMarker);
   if (markerIndex === -1) return false;
   return segments.slice(markerIndex + 1).some((segment) => segment.startsWith(privateFolderPrefix));
 };

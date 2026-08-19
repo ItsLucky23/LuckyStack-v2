@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The route walk no longer descends into private (`_lib/`) or test (`__tests__/`, `__mocks__/`) subfolders of a marker. The `_`-prefix convention already said these are not route surface, but only page-route validation applied it — the loader walked in and warned about every helper file.
 - Test files co-located with routes no longer produce filename warnings. Detection was `.tests.ts` only, so `.test.ts` and `.spec.ts` each produced a red line; it now uses core's `isTestFile`. Together these three fixes take a real consumer project from 33 boot warnings — none of them an actual problem — to zero.
 - Build-time type-map discovery applies the same route-surface rule as the dev loader (shared `isRouteSurfaceFile`), so the generator can no longer emit a type for a route the loader will never register.
+- Hot reload applies that rule too. Pruning private subtrees in the boot scan alone left the two disagreeing: `_api/_lib/handoff_v1.ts` still matched the `_v<N>` regex on save, so it registered `api/<page>/_lib/handoff/v1` — a route that worked until the next restart and then silently vanished.
+- Private-subtree detection anchors on the LAST `_api` / `_sync` segment instead of the first. Paths are absolute, so a checkout living under a folder literally named `_api` anchored there and every real marker below it read as a private segment — hiding every route in the project.
 
 ## [0.8.5] - 2026-08-17
 

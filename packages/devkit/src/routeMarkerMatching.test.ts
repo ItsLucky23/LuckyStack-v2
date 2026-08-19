@@ -93,6 +93,19 @@ describe('isRouteSurfaceFile — what deserves an "invalid filename" warning', (
     expect(isRouteSurfaceFile('/app/src/data/_api/getUser_v1.tests.ts')).toBe(false);
   });
 
+  it('anchors on the LAST marker, so a project under a folder named _api still routes', () => {
+    //? Self-review catch: `isInsidePrivateRouteSubfolder` anchored on the FIRST
+    //? marker segment. Paths handed to it are ABSOLUTE, so a checkout living
+    //? under a folder literally called `_api` anchored there — and the real
+    //? marker further down then read as a private segment, silently hiding
+    //? EVERY route in the project. Latent before, but this predicate now gates
+    //? registration, not just naming validation.
+    expect(isRouteSurfaceFile('C:/_api/app/src/chat/_api/send_v1.ts')).toBe(true);
+    expect(isRouteSurfaceFile('/srv/_sync/proj/src/chat/_sync/push_server_v1.ts')).toBe(true);
+    //? A genuine private subtree under the deepest marker still loses.
+    expect(isRouteSurfaceFile('C:/_api/app/src/chat/_api/_lib/helper_v1.ts')).toBe(false);
+  });
+
   it('does NOT itself decide marker membership — the caller does', () => {
     //? Contract note: this predicate answers "is this private or a test file",
     //? not "does this live under a marker". Both call sites pair it with a
