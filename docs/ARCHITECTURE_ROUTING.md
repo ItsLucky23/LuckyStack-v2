@@ -90,12 +90,13 @@ import type { SessionLayout } from 'config';
 
 export const template = 'dashboard';
 
-//? Logged-out users → /login. Logged-in non-admins → toast + history-back.
+//? Logged-out → /login (that is where the problem gets solved).
+//? Logged-in non-admin → 403 on the SAME url, so the reason is visible and
+//? the address stays shareable.
 export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
   if (!session) return { success: false, redirect: '/login' };
   if (session.admin) return { success: true };
-  notify.error({ key: 'middleware.notAdmin' });
-  return; // navigate(-1)
+  return { success: false, status: 403 };
 };
 
 export default function AdminPage() { /* ... */ }
@@ -106,8 +107,22 @@ export default function AdminPage() { /* ... */ }
 | Return value | Effect |
 |---|---|
 | `{ success: true }` | Page renders. |
-| `{ success: false, redirect: '/some-path' }` | `navigate('/some-path')`. |
-| `undefined` (or no return) | `navigate(-1)` (browser history back). Pair with `notify.error(...)` for user feedback. |
+| `{ success: false, redirect: '/some-path' }` | `navigate('/some-path')`. Right for **unauthenticated** — send them where they can fix it. |
+| `{ success: false, status: 403 }` | Keeps the URL and renders a deny state in place. Right for **authenticated but not allowed** — a redirect there loses the URL and explains nothing. Any status works; `404` is the one to use when a resource's existence should stay hidden. |
+| `undefined` (or no return) | Navigates to `projectConfig.loginRedirectUrl ?? '/'`. Deliberately not `navigate(-1)`, which chains backwards out of the app on repeated denials. Pair with `notify.error(...)` for feedback. |
+
+Customize what a deny renders by passing `denied` to `<Middleware>` — a node, or a
+function of the status. Without it, a minimal built-in view is used.
+
+```tsx
+<Middleware denied={(status) => <ErrorState status={status} />}>
+  {children}
+</Middleware>
+```
+
+Programmatic navigation (`useRouter`) honours the same contract: on a `status`
+deny it still navigates, so the target route renders the deny state at the
+requested URL rather than the button appearing to do nothing.
 
 **Resolution order** (per route hit):
 
