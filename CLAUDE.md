@@ -48,11 +48,12 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 4. **Suggest `/compact`, new chat, or a recap at appropriate moments** when context is getting heavy.
 5. **After an update, spell out the developer actions required** (what to run, what to restart, what to verify).
 6. **Tell the user what to test and what observable differences to expect** after a change.
-7. **Code style depends on which side of the framework boundary you're on:**
+7. **In `src/`, `server/`, `config.ts`: minimum code, nothing speculative.** No features beyond what was asked. No abstractions for single-use code. No "flexibility" or "configurability" that wasn't requested. No error handling for impossible scenarios. If you wrote 200 lines and it could be 50, rewrite it. Senior-engineer sanity check: "would they say this is overcomplicated?"
 <!-- framework-only -->
-   - **7a. In `packages/*` framework code: generic, SOLID, future-proof.** Framework code is reused by every consumer; abstractions earn their keep.
+   - **7a. In `packages/*` framework code the opposite applies: generic, SOLID, future-proof.** Framework code is reused by every consumer; abstractions earn their keep. (Rule 7 above governs the consumer side of the boundary.)
 <!-- /framework-only -->
-   - **7b. In consumer `src/`, `server/`, `config.ts`: minimum code, nothing speculative.** No features beyond what was asked. No abstractions for single-use code. No "flexibility" or "configurability" that wasn't requested. No error handling for impossible scenarios. If you wrote 200 lines and it could be 50, rewrite it. Senior-engineer sanity check: "would they say this is overcomplicated?"
+<!-- The consumer variant drops 7a, so rule 7 must read as a complete rule on its own — it did not when it was only an intro to a two-sided comparison. -->
+
 
 ### Autonomy & Commands (8-10) — HYBRID
 
