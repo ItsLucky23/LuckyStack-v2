@@ -66,16 +66,28 @@ describe('runAfterListenTask', () => {
 });
 
 describe('the scaffolded server template wires it', () => {
-  it('puts post-listen work inside afterListen, not after the await', async () => {
-    //? The fix only lands for consumers if the template actually uses it — a
-    //? passing unit test on an unused helper would be worthless here.
+  it('documents the afterListen slot without shipping a lint error', async () => {
+    //? The fix only lands for consumers if the template points at it — but the
+    //? example must ship COMMENTED OUT. The scaffold lints `**/*.{ts,tsx}` with
+    //? `strictTypeChecked` + `stylisticTypeChecked`, so a live empty callback
+    //? trips `require-await` (async, no await) or `no-empty-function`, and every
+    //? new project would start with a lint error. The e2e runs typecheck +
+    //? build, not lint, so nothing else catches this.
     const { readFileSync } = await import('node:fs');
     const path = await import('node:path');
     const template = readFileSync(
       path.resolve(__dirname, '..', '..', 'create-luckystack-app', 'template', 'server', 'server.ts'),
       'utf8',
     );
-    expect(template).toContain('await server.afterListen(');
+
+    expect(template).toContain('server.afterListen(');
+    //? Every line mentioning it must be a comment.
+    const liveCall = template
+      .split('\n')
+      .filter((line) => line.includes('server.afterListen('))
+      .filter((line) => !line.trimStart().startsWith('//'));
+    expect(liveCall).toEqual([]);
+
     //? And the fatal catch must still be there for pre-listen failures.
     expect(template).toContain("console.error('[server] failed to start:', err)");
   });

@@ -105,11 +105,17 @@ import { bootstrapLuckyStack } from '@luckystack/server';
   //? Need the old fail-fast behaviour for a specific task — say the process is
   //? useless without it — then throw inside the callback AND pass
   //? `{ fatal: true }`.
-  await server.afterListen(async () => {
-    //? Example:
-    //? const { startWorkers } = await import('../src/jobs/workers');
-    //? await startWorkers();
-  });
+  //?
+  //? Uncomment and fill in when you have post-listen work. It ships commented
+  //? out on purpose: an empty callback trips `require-await` (async body with
+  //? no await) or `no-empty-function`, both active here via
+  //? `strictTypeChecked` + `stylisticTypeChecked`, so a live-but-empty example
+  //? would hand every new project a lint error on day one.
+  //?
+  //? await server.afterListen(async () => {
+  //?   const { startWorkers } = await import('../src/jobs/workers');
+  //?   await startWorkers();
+  //? }, { label: 'job workers' });
 })().catch((err: unknown) => {
   //? Reached only for pre-listen failures: config, bootstrap, or the bind
   //? itself. By the time `afterListen` runs, the server is up and its failures

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Middleware.tsx` no longer carries a stray NUL byte in the `routeKey` template literal (`${location.pathname}\0${location.search}`). Harmless at runtime — the key is only used for change detection — but git classified the source file as BINARY, so `git diff` showed nothing for it and it could not be merged textually. Predates 0.8.3.
 - `useRouter` no longer silently does nothing when a guard denies. It branched separately from `<Middleware>` and returned without navigating for any result that was neither allow nor redirect, so a guarded button simply appeared broken. Both now route through `resolveMiddlewareOutcome`, and a `status` deny navigates so the target route can render the deny state at the requested URL.
 
 ## [0.8.5] - 2026-08-17

@@ -145,7 +145,6 @@ export const isRouteTestFile = (fileNameOrPath: string): boolean => {
 export const isNonRouteDirectory = (directoryName: string): boolean =>
   directoryName.startsWith(getRoutingRules().privateFolderPrefix) || isTestDirectory(directoryName);
 
-
 //? Re-export the core page-route validator + bind it to the active
 //? `RoutingRules` (so a consumer that calls `registerRoutingRules({
 //? scaffoldIgnoredFolders: [...] })` to add a custom private folder
