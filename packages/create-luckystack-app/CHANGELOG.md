@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-28
+
+### Fixed
+
+- `AI_PROJECT_INDEX.md` and the dependency graph no longer drop root-level routes. `src/_api/session_v1.ts` and `logout_v1.ts` ship with every scaffold but required a page segment to be indexed, so `find_route` reported the session route as non-existent from day one.
+- The dependency graph's symbol pass no longer skips itself. Its file cap counted every `.d.ts` pulled in from `node_modules`, so on any real project it silently emitted `symbols: 0` and `who_calls` always returned nothing.
+- The graph now covers `server/`, `shared/`, `functions/`, `luckystack/` and `config.ts` (repo-relative ids, version 3), not just `src/`. A missing node reads as "nothing depends on this file", which was exactly wrong for the heaviest nodes in a project.
+- The scaffold no longer copies the FRAMEWORK's own generated indexes, ADRs, lessons and dependency graph into `docs/luckystack/`. They described the framework repo and sat next to the project's identically-named files — including a `decisions/` folder that made an inherited eval scenario cite a real but unrelated ADR. The conventions (protocols, `ARCHITECTURE_*`, templates) still ship.
+
+### Changed
+
+- Generated AI-context artifacts are now gitignored and rebuilt by `npm run ai:refresh` (all generators in parallel) and by `postinstall --if-missing`. They are derived from the code, so a committed copy is the answer that drifts.
+- The installed pre-commit hook runs CHECKS only (`checkRecordIds.mjs`, `lintInvariants.mjs`) and writes nothing. It used to regenerate nine artifacts and `git add` them — which made every commit slow and could stage an index derived from code that was not in the commit.
+
+### Added
+
+- `scripts/checkRecordIds.mjs` + `npm run ai:check-ids` — blocking guard on ADR/lesson number identity (duplicates, filename/frontmatter mismatch, dangling `relates`/`supersedes`/`@adr`). A duplicate number merges clean as two additions and silently repoints every reference.
+- `scripts/aiRefresh.mjs` + `npm run ai:refresh`.
+- Template `page.tsx` files carry a `//? intent:` line, which now surfaces in `AI_PROJECT_INDEX.md`'s Pages table; the separate `ai:product` generator and `AI_PRODUCT_OVERVIEW.md` are removed (no query tool, and it only duplicated `PRODUCT.md` + the intent lines).
+
 ## [0.8.4] - 2026-08-17
 
 ### Changed

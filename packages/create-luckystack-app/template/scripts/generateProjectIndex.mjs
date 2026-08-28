@@ -101,6 +101,9 @@ const extractFileSummary = (src) => {
       }
       return null;
     }
+    //? An `intent:` line is the INTENT column, not the summary — skip it so the
+    //? two columns don't print the same sentence twice.
+    if (/^\/\/\??\s*intent:/i.test(raw)) continue;
     // `//?` framework convention
     if (raw.startsWith("//?")) return raw.replace(/^\/\/\?\s*/, "").trim();
     // Plain `//`
@@ -247,13 +250,16 @@ const scanApiRoutes = async () => {
     if (src === null) continue;
     const noBlock = stripBlockComments(src);
     const rel = relFromSrc(abs);
-    // path: <pageSegments>/<routeName>/<version>
-    const m = rel.match(/^(.*)\/_api\/([A-Za-z0-9_-]+)_v(\d+)\.ts$/);
+    // path: [<pageSegments>/]<routeName>/<version> — the page segment is
+    // OPTIONAL. `src/_api/session_v1.ts` and `logout_v1.ts` are root routes the
+    // scaffold itself ships; requiring a segment dropped them from the index
+    // while they stayed perfectly routable, so `find_route` reported them absent.
+    const m = rel.match(/^(?:(.*)\/)?_api\/([A-Za-z0-9_-]+)_v(\d+)\.ts$/);
     if (!m) continue;
     const [, page, routeName, version] = m;
     const meta = extractDocsMeta(src);
     rows.push({
-      route: `${page}/${routeName}/v${version}`,
+      route: `${page ? `${page}/` : ""}${routeName}/v${version}`,
       file: rel,
       abs,
       method: extractStringExport(noBlock, "httpMethod") ?? "POST",
@@ -280,10 +286,11 @@ const scanSyncRoutes = async () => {
     if (src === null) continue;
     const noBlock = stripBlockComments(src);
     const rel = relFromSrc(abs);
-    const m = rel.match(/^(.*)\/_sync\/([A-Za-z0-9_-]+)_(server|client)_v(\d+)\.ts$/);
+    // Page segment optional — same root-route reason as scanApiRoutes.
+    const m = rel.match(/^(?:(.*)\/)?_sync\/([A-Za-z0-9_-]+)_(server|client)_v(\d+)\.ts$/);
     if (!m) continue;
     const [, page, syncName, kind, version] = m;
-    const key = `${page}/${syncName}/v${version}`;
+    const key = `${page ? `${page}/` : ""}${syncName}/v${version}`;
     if (!byRoute.has(key)) {
       byRoute.set(key, {
         route: key,
@@ -316,6 +323,31 @@ const scanSyncRoutes = async () => {
   return [...byRoute.values()].sort((a, b) => a.route.localeCompare(b.route));
 };
 
+//? The INTENT layer: a one-line `//? intent: <plain language>` at the top of a
+//? page.tsx saying what the page is FOR. It lives here rather than in a separate
+//? generated overview because that overview had no MCP tool — its only consumer
+//? was a mandatory whole-file read at session start, of content already present
+//? in the two places it was copied from. `find_route` reaches this table.
+const extractIntent = (src) => {
+  const lines = src.split(/\r?\n/).slice(0, 30);
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*\/\/\??\s*intent:\s*(.+?)\s*$/i);
+    if (!m) continue;
+    //? Greedily consume subsequent `//?`/`//` continuation lines so a wrapped
+    //? multi-line `//? intent:` isn't truncated to its first line. Stop at the
+    //? first line that isn't a comment or that starts a new `key:` directive.
+    const parts = [m[1].trim()];
+    for (let j = i + 1; j < lines.length; j++) {
+      const cont = lines[j].match(/^\s*\/\/\??\s*(.+?)\s*$/);
+      if (!cont) break;
+      if (/^\s*[A-Za-z][\w-]*:\s/.test(cont[1])) break;
+      parts.push(cont[1].trim());
+    }
+    return parts.join(" ").trim();
+  }
+  return null;
+};
+
 const scanPages = async () => {
   const files = await walkFiles(SRC_DIR, (name) => name === "page.tsx");
   const rows = [];
@@ -337,6 +369,7 @@ const scanPages = async () => {
       template: extractStringExport(noBlock, "template") ?? "plain",
       hasMiddleware: /^\s*export\s+const\s+middleware\b/m.test(noBlock),
       reservedFolder: inReservedOnly,
+      intent: extractIntent(src),
       summary: extractFileSummary(src),
     });
   }
@@ -470,9 +503,10 @@ const renderSyncRoutes = (rows) =>
 
 const renderPages = (rows) =>
   renderTable(
-    ["Route", "Template", "Per-page middleware", "File", "Summary"],
+    ["Route", "Intent", "Template", "Per-page middleware", "File", "Summary"],
     rows.map((r) => [
       `\`${r.route}\``,
+      r.intent ?? "_(no `//? intent:` line atop page.tsx)_",
       r.template,
       r.hasMiddleware ? "yes" : "—",
       `\`${r.file}\``,
@@ -576,6 +610,8 @@ const buildDocument = (data) => {
   parts.push(renderOwnershipAndCoverage([...data.apiRoutes, ...data.syncRoutes]));
   parts.push("");
   parts.push(`## Pages (${data.pages.length})`);
+  parts.push("");
+  parts.push("> **Intent** is the plain-language answer to *what is this page FOR* — a `//? intent: …` line at the top of `page.tsx`, next to the thing it describes. App-level intent lives in the hand-written `docs/PRODUCT.md`.");
   parts.push("");
   parts.push(renderPages(data.pages));
   parts.push("");

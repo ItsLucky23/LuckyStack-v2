@@ -5,16 +5,29 @@
 // depends on this file?", "what is the blast radius of changing it?", "which
 // files are god-nodes everything leans on?".
 //
-// Two layers, both committed to docs/ai-graph.json:
+// Two layers:
 //   1. FILE/IMPORT level — nodes are source files (classified api/sync/page/
-//      helper/component/other), edges are resolved `import` relations, and
-//      `blastRadius` is transitive reverse-reachability (file change-impact).
-//      Regex-based, fast, no compiler.
+//      helper/component/server/shared/config/other), edges are resolved
+//      `import` relations. Regex-based, fast, no compiler.
 //   2. SYMBOL level — function-to-function `callEdges` resolved with the
-//      TypeScript TypeChecker (`symbols`, `callEdges`, `symbolBlastRadius`), so
-//      "what calls THIS function / what breaks if I change it" is answered per
-//      function, not just per file. Uses the `typescript` package directly (a
-//      consumer devDependency) against tsconfig.server.json.
+//      TypeScript TypeChecker (`symbols`, `callEdges`), so "what calls THIS
+//      function / what breaks if I change it" is answered per function, not
+//      just per file. Uses the `typescript` package directly (a consumer
+//      devDependency); the program is built from the SCANNED files so the
+//      symbol layer covers exactly the same scope as the import layer.
+//
+// SCOPE: every project root that holds first-party code (src/, server/,
+// shared/, functions/, luckystack/) plus the root-level config files. Node ids
+// are REPO-relative (`src/foo.ts`, `config.ts`) — graph version 3. Scoping to
+// src/ alone made `config.ts` and `shared/` look like files nothing depends on,
+// which is worse than absent: a reassuring blind spot exactly where a change is
+// most expensive.
+//
+// NOT emitted: `blastRadius` / `symbolBlastRadius`. Both are transitive closures
+// derivable from `edges` / `callEdges` in milliseconds at load time, and they
+// grow superlinearly — on a real codebase they were 82% of the file. The MCP
+// server derives them in `loadGraph()`; graphs at version <= 2 that still carry
+// them keep working.
 //
 // Edge-coverage honesty (like the Zod emitter's z.any() fallbacks): calls
 // routed through the `functions.*` injection proxy resolve to the GENERATED
@@ -22,13 +35,13 @@
 // interface/abstract types, and deeply-aliased re-exports may be missed. Calls
 // outside any named scope attribute to a per-file `<module>` caller. The symbol
 // pass degrades gracefully to import-level only if the program can't be built,
-// or is skipped above SYMBOL_FILE_CAP files to protect commit time on huge
-// repos. Spec: docs/decisions/0002 + 0004 + 0006.
+// or is skipped above SYMBOL_FILE_CAP IN-PROJECT files (declaration files from
+// node_modules are NOT counted — counting them made the pass skip itself on
+// every non-trivial project, silently). Spec: docs/decisions/0002 + 0004 + 0006.
 //
-// Deterministic: sorted keys, POSIX paths, NO timestamps and NO commit SHA (a
-// SHA would dirty the file every commit and defeat the clean-diff guarantee).
-// The pre-commit hook regenerates it from disk, so the committed graph always
-// matches the committed code.
+// Deterministic: sorted keys, POSIX paths, NO timestamps and NO commit SHA.
+// The artifact is a local cache (gitignored), rebuilt by `npm run ai:refresh`
+// and by `postinstall`.
 //
 // KEEP IN SYNC with packages/create-luckystack-app/template/scripts/
 // generateGraph.mjs (byte-for-byte duplicate ships to consumers).
@@ -40,11 +53,18 @@ import ts from "typescript";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
-const SRC_DIR = path.join(REPO_ROOT, "src");
 const OUTPUT_FILE = path.join(REPO_ROOT, "docs", "ai-graph.json");
 
+//? First-party roots, in the order they appear in a node id. A root that does
+//? not exist in this project is skipped, so the same list serves the framework
+//? repo and every scaffold variant.
+const GRAPH_ROOT_DIRS = ["src", "server", "shared", "functions", "luckystack"];
+//? Root-level single files that are real graph nodes (config.ts is routinely
+//? the heaviest node in a project).
+const GRAPH_ROOT_FILES = ["config.ts", "config.ports.ts", "deploy.config.ts", "services.config.ts"];
+
 const GOD_NODE_LIMIT = 25; // top-N most-depended-upon files surfaced explicitly
-const SYMBOL_FILE_CAP = 2500; // skip the TS-compiler pass above this many program files
+const SYMBOL_FILE_CAP = 2500; // skip the TS-compiler pass above this many IN-PROJECT files
 
 const safe = async (promise) => {
   try { return [null, await promise]; } catch (error) { return [error, null]; }
@@ -55,7 +75,6 @@ const safeSync = (fn) => {
 
 const toPosix = (p) => p.replaceAll("\\", "/");
 const relFromRepo = (abs) => toPosix(path.relative(REPO_ROOT, abs));
-const relFromSrc = (abs) => toPosix(path.relative(SRC_DIR, abs));
 
 const walkFiles = async (rootDir, predicate) => {
   const out = [];
@@ -87,20 +106,31 @@ const readTextFile = async (absPath) => {
 const SOURCE_RE = /\.(ts|tsx)$/;
 const isSource = (name) => SOURCE_RE.test(name) && !name.endsWith(".d.ts") && !name.endsWith(".generated.ts");
 
-const classify = (relSrc, name) => {
-  if (/(^|\/)_api\/[A-Za-z0-9_-]+_v\d+\.ts$/.test(relSrc)) return "api";
-  if (/(^|\/)_sync\/[A-Za-z0-9_-]+_(server|client)_v\d+\.ts$/.test(relSrc)) return "sync";
+//? `id` is repo-relative (`src/login/_api/x_v1.ts`, `shared/tryCatch.ts`).
+const classify = (id, name) => {
+  if (/(^|\/)_api\/[A-Za-z0-9_-]+_v\d+\.ts$/.test(id)) return "api";
+  if (/(^|\/)_sync\/[A-Za-z0-9_-]+_(server|client)_v\d+\.ts$/.test(id)) return "sync";
   if (name === "page.tsx") return "page";
-  if (relSrc.startsWith("_functions/")) return "helper";
-  if (relSrc.startsWith("_components/")) return "component";
+  if (id.startsWith("src/_functions/")) return "helper";
+  if (id.startsWith("src/_components/")) return "component";
+  if (id.startsWith("server/")) return "server";
+  if (id.startsWith("shared/")) return "shared";
+  if (id.startsWith("functions/")) return "helper";
+  if (id.startsWith("luckystack/")) return "framework";
+  if (!id.includes("/")) return "config";
   return "other";
 };
 
-const routeOf = (relSrc) => {
-  const a = relSrc.match(/^(.*)\/_api\/([A-Za-z0-9_-]+)_v(\d+)\.ts$/);
-  if (a) return `api/${a[1]}/${a[2]}/v${a[3]}`;
-  const s = relSrc.match(/^(.*)\/_sync\/([A-Za-z0-9_-]+)_(server|client)_v(\d+)\.ts$/);
-  if (s) return `sync/${s[1]}/${s[2]}/v${s[4]}`;
+//? Route strings stay src-relative — they are the runtime route, not a path.
+//? The page segment is OPTIONAL: `src/_api/session_v1.ts` is a real root route
+//? that the scaffold itself ships, and requiring a segment silently dropped it.
+const routeOf = (id) => {
+  if (!id.startsWith("src/")) return null;
+  const relSrc = id.slice("src/".length);
+  const a = relSrc.match(/^(?:(.*)\/)?_api\/([A-Za-z0-9_-]+)_v(\d+)\.ts$/);
+  if (a) return `api/${a[1] ? `${a[1]}/` : ""}${a[2]}/v${a[3]}`;
+  const s = relSrc.match(/^(?:(.*)\/)?_sync\/([A-Za-z0-9_-]+)_(server|client)_v(\d+)\.ts$/);
+  if (s) return `sync/${s[1] ? `${s[1]}/` : ""}${s[2]}/v${s[4]}`;
   return null;
 };
 
@@ -118,19 +148,28 @@ const extractImportSources = (src) => {
   return [...out];
 };
 
-// Resolve an import specifier (from `importerRel`, a src-relative file) to a
-// src-relative file id that exists in `fileSet`, or null if it's external / not
-// under src/. Handles relative (./ ../) and the `src/` path alias.
+//? The tsconfig path aliases that point at a first-party root. They are already
+//? repo-relative, so an aliased specifier IS the node id modulo extension.
+const ALIAS_ROOTS = GRAPH_ROOT_DIRS.map((d) => `${d}/`);
+
+// Resolve an import specifier (from `importerRel`, a repo-relative file) to a
+// repo-relative file id that exists in `fileSet`, or null when it's external
+// (npm package / node builtin). Handles relative (./ ../), the first-party root
+// aliases, `@/*` -> src, and the bare `config` alias.
 const resolveTarget = (importerRel, spec, fileSet) => {
   let baseNoExt = null;
   if (spec.startsWith(".")) {
     const importerDir = path.posix.dirname(importerRel);
     baseNoExt = toPosix(path.posix.normalize(path.posix.join(importerDir, spec)));
     if (baseNoExt.startsWith("..")) return null;
-  } else if (spec.startsWith("src/")) {
-    baseNoExt = spec.slice("src/".length);
+  } else if (spec === "config") {
+    baseNoExt = "config";
+  } else if (spec.startsWith("@/")) {
+    baseNoExt = `src/${spec.slice("@/".length)}`;
+  } else if (ALIAS_ROOTS.some((root) => spec.startsWith(root))) {
+    baseNoExt = spec;
   } else {
-    return null; // package / shared / config / node builtin — not a src node
+    return null; // npm package / node builtin — not a first-party node
   }
   baseNoExt = baseNoExt.replace(/\.(tsx?|jsx?|mjs)$/, "");
   for (const cand of [`${baseNoExt}.ts`, `${baseNoExt}.tsx`, `${baseNoExt}/index.ts`, `${baseNoExt}/index.tsx`]) {
@@ -143,25 +182,30 @@ const resolveTarget = (importerRel, spec, fileSet) => {
 // Symbol-level call graph (TypeScript TypeChecker)
 // ---------------------------------------------------------------------------
 
-// Build a ts.Program from tsconfig.server.json (fallback tsconfig.json). Returns
-// null on any failure so the import-level graph still ships.
-const buildProgram = () => {
+// Build a ts.Program over the files WE scanned, using the compilerOptions from
+// tsconfig.json (fallback tsconfig.server.json). Taking the root files from the
+// scan instead of the tsconfig `include` keeps the symbol layer's scope exactly
+// equal to the import layer's — a consumer's tsconfig.server.json only includes
+// server-side src/ paths, which would silently halve the symbol coverage.
+// Returns null on any failure so the import-level graph still ships.
+const buildProgram = (absFiles) => {
   const configPath =
-    ts.findConfigFile(REPO_ROOT, ts.sys.fileExists, "tsconfig.server.json") ??
-    ts.findConfigFile(REPO_ROOT, ts.sys.fileExists, "tsconfig.json");
+    ts.findConfigFile(REPO_ROOT, ts.sys.fileExists, "tsconfig.json") ??
+    ts.findConfigFile(REPO_ROOT, ts.sys.fileExists, "tsconfig.server.json");
   if (!configPath) return null;
   const read = ts.readConfigFile(configPath, ts.sys.readFile);
   if (read.error) return null;
   const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, path.dirname(configPath));
-  if (parsed.fileNames.length === 0) return null;
-  return ts.createProgram(parsed.fileNames, parsed.options);
+  if (absFiles.length === 0) return null;
+  return ts.createProgram(absFiles, parsed.options);
 };
 
-// A source file's path as a src-relative id, or null if it isn't under src/ or
-// is a generated/declaration file.
-const srcIdOf = (fileName) => {
-  const rel = toPosix(path.relative(SRC_DIR, fileName));
-  if (rel.startsWith("..") || rel.endsWith(".d.ts") || rel.includes(".generated.")) return null;
+// A source file's path as a repo-relative node id, or null if it lives outside
+// the repo (node_modules) or is a generated/declaration file.
+const projectIdOf = (fileName) => {
+  const rel = toPosix(path.relative(REPO_ROOT, fileName));
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  if (rel.includes("node_modules/") || rel.endsWith(".d.ts") || rel.includes(".generated.")) return null;
   return rel;
 };
 
@@ -200,12 +244,18 @@ const resolveCallee = (expr, checker) => {
   return { file: decl.getSourceFile().fileName, name: sym.getName() };
 };
 
-const collectSymbolGraph = (fileSet) => {
+const collectSymbolGraph = (fileSet, absFiles) => {
   let program;
-  try { program = buildProgram(); } catch { return null; }
+  try { program = buildProgram(absFiles); } catch { return null; }
   if (!program) return null;
-  if (program.getSourceFiles().length > SYMBOL_FILE_CAP) {
-    console.error(`[ai:graph] symbol pass skipped: ${program.getSourceFiles().length} program files > cap ${SYMBOL_FILE_CAP} (import-level graph still emitted).`);
+  //? Count IN-PROJECT files only. `program.getSourceFiles()` also returns every
+  //? .d.ts the compiler pulled in from node_modules — thousands before a single
+  //? line of project code — so comparing that total against the cap made the
+  //? pass skip itself on every real project, reporting `symbols: 0` as if the
+  //? project simply had none.
+  const projectFileCount = program.getSourceFiles().filter((sf) => projectIdOf(sf.fileName) !== null).length;
+  if (projectFileCount > SYMBOL_FILE_CAP) {
+    console.error(`[ai:graph] symbol pass skipped: ${projectFileCount} in-project files > cap ${SYMBOL_FILE_CAP} (import-level graph still emitted).`);
     return null;
   }
   const checker = program.getTypeChecker();
@@ -220,7 +270,7 @@ const collectSymbolGraph = (fileSet) => {
 
   for (const sf of program.getSourceFiles()) {
     if (sf.isDeclarationFile) continue;
-    const callerFile = srcIdOf(sf.fileName);
+    const callerFile = projectIdOf(sf.fileName);
     if (!callerFile || !fileSet.has(callerFile)) continue;
     // Single recursive walk tracking the nearest enclosing named scope; a call
     // outside any named scope attributes to a synthetic `<module>` caller, so
@@ -229,7 +279,7 @@ const collectSymbolGraph = (fileSet) => {
       if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
         const target = resolveCallee(node.expression, checker);
         if (target) {
-          const calleeFile = srcIdOf(target.file);
+          const calleeFile = projectIdOf(target.file);
           if (calleeFile && fileSet.has(calleeFile)) {
             const calleeId = addSymbol(calleeFile, target.name, "fn");
             //? Join edge endpoints with `\n` (not a raw space): a src id is
@@ -253,56 +303,53 @@ const collectSymbolGraph = (fileSet) => {
     return { from, to };
   }).sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
 
-  // symbol blast-radius: transitive reverse-reachability over callEdges.
-  const reverse = new Map();
-  for (const s of symbolList) reverse.set(s.id, new Set());
-  for (const e of callEdges) reverse.get(e.to)?.add(e.from);
-  const memo = new Map();
-  const callersOf = (id, stack = new Set()) => {
-    if (memo.has(id)) return memo.get(id);
-    if (stack.has(id)) return new Set();
-    stack.add(id);
-    const acc = new Set();
-    for (const c of reverse.get(id) ?? []) { acc.add(c); for (const t of callersOf(c, stack)) acc.add(t); }
-    stack.delete(id);
-    memo.set(id, acc);
-    return acc;
-  };
-  const symbolBlastRadius = {};
-  for (const s of symbolList) {
-    const callers = [...callersOf(s.id)].sort();
-    if (callers.length > 0) symbolBlastRadius[s.id] = callers;
-  }
-
-  return { symbols: symbolList, callEdges, symbolBlastRadius };
+  //? The symbol blast-radius (transitive reverse-reachability over callEdges) is
+  //? deliberately NOT computed here — the MCP server derives it on load. See the
+  //? file header.
+  return { symbols: symbolList, callEdges };
 };
 
 // ---------------------------------------------------------------------------
 // Build
 // ---------------------------------------------------------------------------
 
+//? Every first-party file, absolute, deduped and sorted. A root that this
+//? project doesn't have contributes nothing.
+const collectSourceFiles = async () => {
+  const found = [];
+  for (const dir of GRAPH_ROOT_DIRS) {
+    found.push(...await walkFiles(path.join(REPO_ROOT, dir), (name) => isSource(name)));
+  }
+  for (const file of GRAPH_ROOT_FILES) {
+    const abs = path.join(REPO_ROOT, file);
+    const [err, stat] = await safe(fs.stat(abs));
+    if (!err && stat.isFile()) found.push(abs);
+  }
+  return [...new Set(found)].sort();
+};
+
 const build = async () => {
-  const absFiles = await walkFiles(SRC_DIR, (name) => isSource(name));
+  const absFiles = await collectSourceFiles();
   const nodes = absFiles.map((abs) => {
-    const rel = relFromSrc(abs);
+    const rel = relFromRepo(abs);
     return { id: rel, kind: classify(rel, path.basename(abs)), route: routeOf(rel) };
   }).sort((a, b) => a.id.localeCompare(b.id));
   const fileSet = new Set(nodes.map((n) => n.id));
 
-  // edges: importer -> imported (both src-relative ids)
+  // edges: importer -> imported (both repo-relative ids)
   const edgeSet = new Set();
   const forward = new Map(); // id -> Set(imported)
   const reverse = new Map(); // id -> Set(importers)
   for (const id of fileSet) { forward.set(id, new Set()); reverse.set(id, new Set()); }
 
   for (const abs of absFiles) {
-    const importerRel = relFromSrc(abs);
+    const importerRel = relFromRepo(abs);
     const src = await readTextFile(abs);
     if (src === null) continue;
     for (const spec of extractImportSources(src)) {
       const target = resolveTarget(importerRel, spec, fileSet);
       if (!target || target === importerRel) continue;
-      //? `\n`-joined edge key (not a raw space): a src-relative path can
+      //? `\n`-joined edge key (not a raw space): a repo-relative path can
       //? contain a space (`My Widget.tsx`), which a space-split would corrupt.
       const key = `${importerRel}\n${target}`;
       if (edgeSet.has(key)) continue;
@@ -317,8 +364,9 @@ const build = async () => {
     return { from, to };
   }).sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
 
-  // blast radius = transitive reverse-reachability (everything that would be
-  // affected by changing a file). Memoized DFS over the reverse graph.
+  // Transitive reverse-reachability (everything that would be affected by
+  // changing a file). Memoized DFS over the reverse graph. Computed here ONLY to
+  // rank god-nodes; the full map is not emitted (the MCP server derives it).
   const memo = new Map();
   const dependentsOf = (id, stack = new Set()) => {
     if (memo.has(id)) return memo.get(id);
@@ -334,24 +382,18 @@ const build = async () => {
     return acc;
   };
 
-  const blastRadius = {};
-  for (const n of nodes) {
-    const deps = [...dependentsOf(n.id)].sort();
-    if (deps.length > 0) blastRadius[n.id] = deps;
-  }
-
   const godNodes = nodes
-    .map((n) => ({ id: n.id, kind: n.kind, dependents: (blastRadius[n.id] ?? []).length, directDependents: (reverse.get(n.id) ?? new Set()).size }))
+    .map((n) => ({ id: n.id, kind: n.kind, dependents: dependentsOf(n.id).size, directDependents: (reverse.get(n.id) ?? new Set()).size }))
     .filter((g) => g.dependents > 0)
     .sort((a, b) => b.dependents - a.dependents || a.id.localeCompare(b.id))
     .slice(0, GOD_NODE_LIMIT);
 
   // Layer 2: symbol-level call graph (degrades to null on compiler failure / cap).
-  const symbolGraph = collectSymbolGraph(fileSet);
+  const symbolGraph = collectSymbolGraph(fileSet, absFiles);
 
   return {
-    version: 2,
-    note: "Dependency graph, ids relative to src/. File level: blastRadius[file] = files transitively importing it. Symbol level: callEdges are function->function calls; symbolBlastRadius['file::fn'] = symbols transitively calling it. <module> = file top-level scope. functions.* injection-proxy / dynamic-import / interface-typed calls are intentionally not resolved. See docs/decisions/0002,0004,0006.",
+    version: 3,
+    note: "Dependency graph, ids relative to the REPO root (src/, server/, shared/, functions/, luckystack/, config.ts). File level: edges are importer->imported. Symbol level: callEdges are function->function calls; <module> = file top-level scope. Transitive closures (blastRadius, symbolBlastRadius) are NOT stored — @luckystack/mcp derives them from edges/callEdges on load. functions.* injection-proxy / dynamic-import / interface-typed calls are intentionally not resolved. See docs/decisions/0002,0004,0006,0046.",
     counts: {
       nodes: nodes.length,
       edges: edges.length,
@@ -360,11 +402,9 @@ const build = async () => {
     },
     nodes,
     edges,
-    blastRadius,
     godNodes,
     symbols: symbolGraph?.symbols ?? [],
     callEdges: symbolGraph?.callEdges ?? [],
-    symbolBlastRadius: symbolGraph?.symbolBlastRadius ?? {},
   };
 };
 

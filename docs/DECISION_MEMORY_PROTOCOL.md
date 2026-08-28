@@ -166,7 +166,47 @@ in-session right after writing a decision, and `.githooks/pre-commit` rebuilds +
 commit-time backstop. The output is deterministic (no timestamps) so a no-op commit leaves it byte-identical.
 Decision *content* staleness is handled by `status`/`supersedes`, never by editing an accepted record.
 
-## 10. Numbering collisions
+## 10. Numbering collisions — a number is an IDENTITY
 
-Two branches may both grab the next number. Mitigation: the slug-first filename keeps them distinct on
-disk; renumber the later one on merge (same posture as branch-log filename collisions). Rare and cheap.
+**The rule: a number is never reused and never shifted.** On a collision, the **unmerged** side moves to
+the next free number. The trunk keeps its numbers, because they are published — other branches, source
+tags and other ADRs already reference them.
+
+This section previously said the opposite ("the slug-first filename keeps them distinct on disk; renumber
+the later one on merge. Rare and cheap"). Both halves were wrong, and the second one is the dangerous one.
+
+**Why distinct filenames make it worse, not better.** Two long-lived branches each allocate the next free
+number to a different decision. The slugs differ, so the filenames differ, so git sees two **additions** —
+not a conflict. The merge is green and there is no signal at all. The tree now holds two `0089-*.md`, and
+`//? @adr 0089`, `relates: [0089]` and `get_decision(89)` all address by NUMBER: from that moment they
+resolve to whichever file happens to sort first.
+
+**Why renumbering is the unrecoverable step.** Shifting a block of numbers to clear a collision leaves
+every reference written under the old scheme pointing at a *real but wrong* decision. Nothing is broken —
+the number exists — so no check, review or pipeline can see it. Measured in the field: 13 duplicate ADR
+numbers, 32 shifted numbers, and 6 `relates:` lines silently pointing at the wrong decision.
+
+**The guard.** `npm run ai:check-ids` (pre-commit, and CI with `--backrefs`) fails on a duplicate number,
+on an in-file number/slug that disagrees with the filename, and on a numeric `relates` / `supersedes` /
+`superseded_by` / `@adr` pointing at a record that does not exist. It cannot detect a reference to an
+existing-but-wrong number — that is not mechanically knowable — which is exactly why it blocks the
+collision that leads to renumbering.
+
+**Cleaning up an existing collision.** Decide mechanically which side a reference meant: check whether that
+exact line already existed on the trunk. If yes → trunk side, leave it alone. If no → your side, renumber
+it along with the record. This holds because neither branch could see the other's ADRs when the reference
+was written.
+
+---
+
+## 11. What belongs in an ADR (and what does not)
+
+An ADR records **why**, never **how**. See CLAUDE.md rule 15c — *the code is the truth; a hand-written doc
+may not repeat it*.
+
+- **Write:** the forces in play, the decision, the alternatives that were genuinely considered and why they
+  lost, and what this costs you later.
+- **Do not write:** an implementation description. It is a second, competing description of the code, and
+  it becomes wrong the first time someone refactors — while still reading as authoritative. If a reader
+  needs the implementation, the `//? @adr NNNN` tags point them at the real files (`decision_for_file`).
+- Need a code fact for a sentence to make sense? Name the place, don't copy the value.

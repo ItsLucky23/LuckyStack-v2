@@ -10,6 +10,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The AI-context record layers, checked WITHOUT an install: all three scripts
+  # are pure Node with no dependencies, so this job costs seconds and gives the
+  # fastest possible signal on the one class of problem nothing else catches —
+  # a duplicate or dangling ADR/lesson number, which is an identity collision
+  # that later gets "fixed" by renumbering and silently repoints every reference
+  # written under the old scheme. Blocking. `ai:lint` + `ai:doc-staleness` are
+  # report-only here, same as in the pre-commit hook.
+  ai-records:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Record-id identity (ADRs + lessons, incl. @adr backrefs)
+        run: node scripts/checkRecordIds.mjs --backrefs
+
+      - name: CLAUDE.md invariants (report-only)
+        run: node scripts/lintInvariants.mjs || true
+
+      - name: Hand-written doc staleness (report-only)
+        run: node scripts/checkDocStaleness.mjs || true
+
   lint-build-test:
     runs-on: ubuntu-latest
     strategy:

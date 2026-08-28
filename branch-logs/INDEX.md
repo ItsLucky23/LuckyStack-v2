@@ -4,6 +4,7 @@
 
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
+| chore/ai-context-contract-2026-08-28 | (none) | 2026-08-28 15:45 | in progress — AI-context-laag herzien (3 generatorbugs, artifacts nu gitignored cache, hook/CI checks-only, feature-grens-gate, ADR 0046–0050) + v0.9.0 release voorbereid: 17 packages lockstep, volledige publish-gate 8/8 groen, flaky test-runner-suite en `bump --dry-run`-footgun gefixt (lesson 0019). | 2 |
 | feat/email-code-2fa | (none) | 2026-07-12 16:05 | merged 2026-07-12 — in v0.6.0 (merge 970d051; passwordless email-code login + 2FA TOTP/email-fallback/recovery [ADR 0024]; security-hardened via 5-lens scan + echte-Redis-harness) | 7 |
 | fix/unpushed-review-findings | (none) | 2026-07-16 16:10 | merged 2026-07-16 — v0.7.0 release-readiness fixes (merge 3f77de9) | 5 |
 | main | (none) | 2026-08-17 09:27 | completed — v0.8.4 gepubliceerd via GitHub Actions met npm/SLSA provenance; 17/17 packages op latest, CI en audit groen. | 78 |

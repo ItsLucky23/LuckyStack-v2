@@ -1,3 +1,4 @@
+//? intent: The signed-in home surface — replace this with what your app is actually for.
 //? Sample page. The framework's file-based router maps this to `/dashboard`.
 //? Add APIs in `_api/` and sync events in `_sync/` next to this file.
 

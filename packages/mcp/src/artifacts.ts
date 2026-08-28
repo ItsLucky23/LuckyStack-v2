@@ -55,19 +55,59 @@ export const readDocFile = async (relPath: string): Promise<string | null> => {
 // Dependency graph (docs/ai-graph.json) — validated with zod, no casts.
 // ---------------------------------------------------------------------------
 
+const EdgeSchema = z.object({ from: z.string(), to: z.string() });
+
 const GraphSchema = z.object({
   version: z.number(),
   nodes: z.array(z.object({ id: z.string(), kind: z.string(), route: z.string().nullable() })),
-  edges: z.array(z.object({ from: z.string(), to: z.string() })),
-  blastRadius: z.record(z.string(), z.array(z.string())),
+  edges: z.array(EdgeSchema),
   godNodes: z.array(z.object({ id: z.string(), kind: z.string(), dependents: z.number(), directDependents: z.number() })),
+  //? Transitive closures. Graph version <= 2 STORED them; version >= 3 does not,
+  //? because they are derivable from edges/callEdges in milliseconds and grew to
+  //? 82% of the artifact on a real codebase. Optional here so both shapes load;
+  //? `loadGraph` derives whatever is absent, so every caller sees them present.
+  blastRadius: z.record(z.string(), z.array(z.string())).optional(),
+  symbolBlastRadius: z.record(z.string(), z.array(z.string())).optional(),
   //? Symbol level (graph version >= 2). Optional so older import-only graphs still validate.
   symbols: z.array(z.object({ id: z.string(), file: z.string(), name: z.string(), kind: z.string() })).optional(),
-  callEdges: z.array(z.object({ from: z.string(), to: z.string() })).optional(),
-  symbolBlastRadius: z.record(z.string(), z.array(z.string())).optional(),
+  callEdges: z.array(EdgeSchema).optional(),
 });
 
-export type Graph = z.infer<typeof GraphSchema>;
+type StoredGraph = z.infer<typeof GraphSchema>;
+
+//? What callers actually get: the stored graph with both closures guaranteed.
+export type Graph = StoredGraph & {
+  blastRadius: Record<string, string[]>;
+  symbolBlastRadius: Record<string, string[]>;
+};
+
+//? Transitive reverse-reachability per node: `out[x]` = everything that
+//? (transitively) depends on x. BFS per source with its own visited set, so a
+//? dependency cycle yields the correct closure instead of a truncated one.
+const reverseClosure = (edges: { from: string; to: string }[]): Record<string, string[]> => {
+  const reverse = new Map<string, string[]>();
+  for (const edge of edges) {
+    const importers = reverse.get(edge.to);
+    if (importers) importers.push(edge.from);
+    else reverse.set(edge.to, [edge.from]);
+  }
+  const out: Record<string, string[]> = {};
+  for (const id of reverse.keys()) {
+    const seen = new Set<string>();
+    const queue = [id];
+    while (queue.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length>0 guarantees a value
+      const current = queue.pop()!;
+      for (const importer of reverse.get(current) ?? []) {
+        if (importer === id || seen.has(importer)) continue;
+        seen.add(importer);
+        queue.push(importer);
+      }
+    }
+    if (seen.size > 0) out[id] = [...seen].toSorted();
+  }
+  return out;
+};
 
 export const loadGraph = async (): Promise<Graph | null> => {
   const text = await readDocFile('docs/ai-graph.json');
@@ -81,21 +121,35 @@ export const loadGraph = async (): Promise<Graph | null> => {
     return null;
   }
   const parsed = GraphSchema.safeParse(raw);
-  //? No referential-integrity check between blastRadius keys and nodes[] ids:
-  //? the generator guarantees consistency at emit time, and a stale/partial
-  //? graph simply surfaces fewer results rather than throwing. Callers already
-  //? handle empty arrays via `?? []`.
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) return null;
+  //? No referential-integrity check between closure keys and nodes[] ids: the
+  //? generator guarantees consistency at emit time, and a stale/partial graph
+  //? simply surfaces fewer results rather than throwing. Callers already handle
+  //? empty arrays via `?? []`.
+  return {
+    ...parsed.data,
+    blastRadius: parsed.data.blastRadius ?? reverseClosure(parsed.data.edges),
+    symbolBlastRadius: parsed.data.symbolBlastRadius ?? reverseClosure(parsed.data.callEdges ?? []),
+  };
 };
 
-//? Resolve a user-supplied path to a graph node id. Accepts a src-relative id
-//? (`_functions/foo.ts`), a `src/`-prefixed path, or a bare basename match.
-//? Returns the unique id, `null` when nothing matches, or a string[] with all
-//? matching candidates when a bare basename matches more than one node (so the
-//? caller can surface a disambiguation message instead of a bare null).
+//? Resolve a user-supplied path to a graph node id. Node ids are repo-relative
+//? (`src/_functions/foo.ts`, `config.ts`) since graph version 3; a version-2
+//? graph used src-relative ids, so a `src/`-less input is tried as a fallback
+//? rather than stripped up front. Returns the unique id, `null` when nothing
+//? matches, or a string[] with all matching candidates when a bare basename
+//? matches more than one node (so the caller can surface a disambiguation
+//? message instead of a bare null).
 export const resolveNodeId = (graph: Graph, input: string): string | string[] | null => {
-  const norm = input.replaceAll('\\', '/').replace(/^\.?\//, '').replace(/^src\//, '');
-  if (Object.hasOwn(graph.blastRadius, norm) || graph.nodes.some((n) => n.id === norm)) return norm;
+  const norm = input.replaceAll('\\', '/').replace(/^\.?\//, '');
+  const has = (id: string): boolean => Object.hasOwn(graph.blastRadius, id) || graph.nodes.some((n) => n.id === id);
+  if (has(norm)) return norm;
+  //? Accept the other convention in both directions: a v2-style id against a v3
+  //? graph, and a `src/`-prefixed path against a v2 graph.
+  const prefixed = `src/${norm}`;
+  if (has(prefixed)) return prefixed;
+  const unprefixed = norm.replace(/^src\//, '');
+  if (unprefixed !== norm && has(unprefixed)) return unprefixed;
   const base = path.posix.basename(norm);
   const byBase = graph.nodes.filter((n) => n.id.endsWith(`/${norm}`) || n.id === norm || path.posix.basename(n.id) === base);
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length===1 guarantees element exists

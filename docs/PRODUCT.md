@@ -1,9 +1,13 @@
 # Product
 
-> Plain-language description of what this app is and what it is for — the INTENT layer. Maintained by the
-> AI (and you): kept current when features land, and backfilled from history + a short interview on an
-> existing repo (see `docs/DECISION_MEMORY_PROTOCOL.md` §8 + CLAUDE.md). Folded into the generated
-> `docs/AI_PRODUCT_OVERVIEW.md` together with each page's `//? intent:` line. No emojis; plain language.
+> Plain-language description of what this app is and what it is for — the app-level INTENT layer.
+> Maintained by the AI (and you): kept current when features land, and backfilled from history + a short
+> interview on an existing repo (see `docs/DECISION_MEMORY_PROTOCOL.md` §8 + CLAUDE.md). Per-page intent
+> lives as a `//? intent:` line atop each `page.tsx` and surfaces in `docs/AI_PROJECT_INDEX.md`.
+>
+> Per CLAUDE.md rule 15c this file carries **no fact the code already states** — no config values, no file
+> inventories, no feature checklists. Only what the code cannot say: what this is, who it is for, and what
+> a newcomer has to know before they start.
 
 ## What this is
 

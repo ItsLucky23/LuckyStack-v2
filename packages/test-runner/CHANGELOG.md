@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-28
+
+### Fixed
+
+- The `runAllTests` characterization suite is no longer flaky under load. It mocked every dependency except `@luckystack/login`, which `buildAuthHeaders` pulls in through a runtime dynamic import; on a busy machine that real package load overran the test timeout and the aborted test's continuation then polluted the next test's mock calls. Runtime behaviour is unchanged — test-only.
+
 ## [0.8.4] - 2026-08-17
 
 ### Changed

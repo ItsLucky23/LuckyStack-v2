@@ -1,3 +1,5 @@
+//? intent: Account self-service — change your own credentials, theme, or delete the account.
+
 import { faMoon, faRightFromBracket, faSun, faTrash, faTriangleExclamation } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

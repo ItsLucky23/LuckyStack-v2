@@ -1,0 +1,9 @@
+{
+  "_note": "citedAdr MUST name a decision this repo actually recorded. The previous version of this scenario expected ADR 0007 for a CORS question; 0007 here is the secure-by-default flip and says nothing about CORS, so the scenario scored agreement with an invention. Re-check the number against docs/decisions/ whenever ADRs are added.",
+  "id": "why-forwarded-proto-failclosed",
+  "prompt": "Why does the router ignore an inbound x-forwarded-proto: https unless it comes from a configured proxy CIDR? Can I turn that off for local dev?",
+  "expects": {
+    "usesAnyTool": ["get_decision", "list_decisions"],
+    "citedAdr": "0033"
+  }
+}

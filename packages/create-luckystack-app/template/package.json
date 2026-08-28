@@ -27,8 +27,9 @@
     "ai:lessons": "node scripts/generateLessonsIndex.mjs",
     "ai:examples": "node scripts/generateExamplesIndex.mjs",
     "ai:runbooks": "node scripts/generateRunbooks.mjs",
-    "ai:product": "node scripts/generateProductOverview.mjs",
     "ai:graph": "node scripts/generateGraph.mjs",
+    "ai:refresh": "node scripts/aiRefresh.mjs",
+    "ai:check-ids": "node scripts/checkRecordIds.mjs",
     "ai:context-budget": "node scripts/generateContextBudget.mjs",
     "ai:lint": "node scripts/lintInvariants.mjs",
     "ai:doc-staleness": "node scripts/checkDocStaleness.mjs",
@@ -44,7 +45,8 @@
     "prisma:generate": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts generate",
     "prisma:db:push": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts db push",
     "prisma:migrate:dev": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts migrate dev",
-    "help": "node scripts/help.mjs"
+    "help": "node scripts/help.mjs",
+    "postinstall": "node scripts/aiRefresh.mjs --if-missing"
   },
   "dependencies": {
     "@luckystack/api": "^{{LUCKYSTACK_VERSION}}",

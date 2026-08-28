@@ -4,9 +4,11 @@
 
 ## What this package does
 
-`@luckystack/mcp` is a read-only [MCP](https://modelcontextprotocol.io) server that exposes a LuckyStack project's **committed AI-context artifacts** to Claude Code as queryable tools. Instead of loading whole index files into context, an agent can ask precise questions: *"what's the blast radius of changing this file?"*, *"why did we decide X?"*, *"which routes touch auth?"*, *"does a helper for Y already exist?"*.
+`@luckystack/mcp` is a read-only [MCP](https://modelcontextprotocol.io) server that exposes a LuckyStack project's **AI-context artifacts** to Claude Code as queryable tools. Instead of loading whole index files into context, an agent can ask precise questions: *"what's the blast radius of changing this file?"*, *"why did we decide X?"*, *"which routes touch auth?"*, *"does a helper for Y already exist?"*.
 
-It reads only committed artifacts under the project root — `docs/ai-graph.json`, `docs/decisions/` + `docs/AI_DECISIONS_INDEX.md`, `docs/lessons/` + `docs/AI_LESSONS_INDEX.md`, `docs/examples/` + `docs/AI_EXAMPLES_INDEX.md`, `docs/AI_PROJECT_INDEX.md`, `docs/AI_RUNBOOKS.md`, `docs/AI_CAPABILITIES.md`. No writes, no network, no app dependency. Claude Code launches it over stdio via a `.mcp.json` entry (`npx @luckystack/mcp`) with the working directory set to the project root.
+It reads files under the project root — `docs/ai-graph.json`, `docs/decisions/` + `docs/AI_DECISIONS_INDEX.md`, `docs/lessons/` + `docs/AI_LESSONS_INDEX.md`, `docs/examples/` + `docs/AI_EXAMPLES_INDEX.md`, `docs/AI_PROJECT_INDEX.md`, `docs/AI_RUNBOOKS.md`, `docs/AI_CAPABILITIES.md`. No writes, no network, no app dependency. Claude Code launches it over stdio via a `.mcp.json` entry (`npx @luckystack/mcp`) with the working directory set to the project root.
+
+**The generated artifacts are a gitignored LOCAL CACHE** (ADR 0047), not repo content: `npm run ai:refresh` rebuilds them and `postinstall` builds any that are missing, so a fresh clone works. Only the SOURCES are committed — `docs/decisions/`, `docs/lessons/`, `docs/examples/`. Each tool reports how to regenerate its artifact when it is absent, so a cold project degrades gracefully rather than erroring.
 
 It is **separate from** the `playwright` / `chrome-devtools` MCP servers (browser testing): those answer questions about the browser, this one answers questions about the repo. They coexist as distinct entries in the same `.mcp.json`.
 
@@ -18,7 +20,7 @@ It is **separate from** the `playwright` / `chrome-devtools` MCP servers (browse
 
 ## When to NOT suggest this (yet)
 
-- Tiny projects where reading the committed indexes directly is already cheap.
+- Tiny projects where reading the generated indexes directly is already cheap.
 - As a browser-automation tool — that's `@playwright/mcp` / `chrome-devtools-mcp`.
 - For WRITING to the repo — this server is strictly read-only by design.
 
@@ -56,11 +58,13 @@ It is **separate from** the `playwright` / `chrome-devtools` MCP servers (browse
 
 Each tool returns a helpful "generate it with `npm run ai:*`" message when its artifact is absent, so a cold project degrades gracefully.
 
-**Staleness note**: `docs/ai-graph.json` intentionally contains NO embedded timestamp (the generator strips all timestamps to guarantee deterministic committed diffs — every regeneration from the same source produces a byte-identical file). Graph freshness is therefore signalled via filesystem mtime comparison (`graph_status` tool) rather than a `generatedAt` field. The `who_calls` tool is available when `docs/ai-graph.json` is version ≥ 2 (symbol-level edges present).
+**Graph shape** (version 3, ADR 0046): node ids are **repo-relative** — `src/_functions/foo.ts`, `shared/tryCatch.ts`, `config.ts` — and the graph covers every first-party root, not just `src/`. `resolveNodeId` still resolves a version-2 (src-relative) id, so an older artifact keeps working. Version 3 does **not store** `blastRadius` / `symbolBlastRadius`; `loadGraph()` derives both from `edges` / `callEdges` at load (milliseconds), because as stored closures they reached 82% of the file on a real codebase.
+
+**Staleness note**: `docs/ai-graph.json` intentionally contains NO embedded timestamp — every regeneration from the same source is byte-identical. Freshness is therefore signalled via filesystem mtime comparison (`graph_status`) rather than a `generatedAt` field. A STALE verdict is not something to report to the user: run `npm run ai:graph`. The `who_calls` tool needs a version ≥ 2 graph (symbol-level edges present).
 
 ## Config keys
 
-None. The server reads committed files relative to the project root (resolved by walking up to the nearest `package.json`). No env vars, no `projectConfig` slots.
+None. The server reads files relative to the project root (resolved by walking up to the nearest `package.json`). No env vars, no `projectConfig` slots.
 
 ## Peer dependencies
 
@@ -69,6 +73,6 @@ None. The server reads committed files relative to the project root (resolved by
 
 ## Related
 
-- The artifacts it serves are produced by `scripts/generateGraph.mjs` (ai:graph), `generateDecisionsIndex.mjs` (ai:decisions), `generateProjectIndex.mjs` (ai:project-index), `generateRunbooks.mjs` (ai:runbooks), `generateAiCapabilities.mjs` (ai:capabilities).
+- The artifacts it serves are produced by `scripts/generateGraph.mjs` (ai:graph), `generateDecisionsIndex.mjs` (ai:decisions), `generateProjectIndex.mjs` (ai:project-index), `generateRunbooks.mjs` (ai:runbooks), `generateAiCapabilities.mjs` (ai:capabilities) — or all of them at once via `npm run ai:refresh`.
 - Decision protocol: `docs/DECISION_MEMORY_PROTOCOL.md`. AI-tooling overview: `docs/AI_BOOST_OVERVIEW.md`.
 - Call-graph design: `docs/decisions/0002-*` + `0004-*`.

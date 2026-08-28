@@ -37,7 +37,7 @@ const text = (body: string): { content: { type: 'text'; text: string }[] } => ({
 });
 
 const missing = (artifact: string, regen: string): string =>
-  `${artifact} not found in this project. It is a committed artifact — generate it with \`${regen}\` (the pre-commit hook also keeps it fresh).`;
+  `${artifact} not found in this project. It is a LOCAL cache (gitignored), rebuilt by \`npm run ai:refresh\` and by \`postinstall\` — generate it now with \`${regen}\`.`;
 
 const bulletList = (items: string[]): string => items.map((i) => `  - ${i}`).join('\n');
 
@@ -69,14 +69,14 @@ const server = new McpServer({ name: 'luckystack', version: serverVersion });
 server.registerTool(
   'blast_radius',
   {
-    description: 'List the files that would be affected by changing a given source file (transitive reverse-dependency / change-impact), from the committed dependency graph. Pass a src-relative path like "_functions/foo.ts".',
-    inputSchema: { file: z.string().min(1).describe('Source file, src-relative (e.g. "_functions/foo.ts") or with a src/ prefix.') },
+    description: 'List the files that would be affected by changing a given source file (transitive reverse-dependency / change-impact), from the dependency graph. Pass a repo-relative path like "src/_functions/foo.ts", "shared/tryCatch.ts" or "config.ts".',
+    inputSchema: { file: z.string().min(1).describe('Source file, repo-relative (e.g. "src/_functions/foo.ts", "config.ts"). A bare basename also resolves when unambiguous.') },
   },
   async ({ file }) => {
     const graph = await loadGraph();
     if (!graph) return text(missing('docs/ai-graph.json', 'npm run ai:graph'));
     const resolved = resolveNodeId(graph, file);
-    if (resolved === null) return text(`No graph node matches "${file}". Use a src-relative path (e.g. "_functions/foo.ts"). Run \`npm run ai:graph\` if the file is new.`);
+    if (resolved === null) return text(`No graph node matches "${file}". Use a repo-relative path (e.g. "src/_functions/foo.ts"). Run \`npm run ai:graph\` if the file is new.`);
     if (Array.isArray(resolved)) return text(`"${file}" matches multiple nodes — be more specific:\n${bulletList(resolved)}`);
     const id = resolved;
     const affected = Object.hasOwn(graph.blastRadius, id) ? graph.blastRadius[id] ?? [] : [];
@@ -88,14 +88,14 @@ server.registerTool(
 server.registerTool(
   'who_imports',
   {
-    description: 'List the DIRECT importers of a given source file (one hop), from the committed dependency graph.',
-    inputSchema: { file: z.string().min(1).describe('Source file, src-relative or with a src/ prefix.') },
+    description: 'List the DIRECT importers of a given source file (one hop), from the dependency graph.',
+    inputSchema: { file: z.string().min(1).describe('Source file, repo-relative (e.g. "src/_functions/foo.ts", "config.ts").') },
   },
   async ({ file }) => {
     const graph = await loadGraph();
     if (!graph) return text(missing('docs/ai-graph.json', 'npm run ai:graph'));
     const resolved = resolveNodeId(graph, file);
-    if (resolved === null) return text(`No graph node matches "${file}". Use a src-relative path (e.g. "_functions/foo.ts"). Run \`npm run ai:graph\` if the file is new.`);
+    if (resolved === null) return text(`No graph node matches "${file}". Use a repo-relative path (e.g. "src/_functions/foo.ts"). Run \`npm run ai:graph\` if the file is new.`);
     if (Array.isArray(resolved)) return text(`"${file}" matches multiple nodes — be more specific:\n${bulletList(resolved)}`);
     const id = resolved;
     const importers = graph.edges.filter((e) => e.to === id).map((e) => e.from).toSorted();
@@ -107,7 +107,7 @@ server.registerTool(
 server.registerTool(
   'god_nodes',
   {
-    description: 'List the most-depended-upon files (highest transitive-dependent count) — the risky-to-change hubs — from the committed dependency graph.',
+    description: 'List the most-depended-upon files (highest transitive-dependent count) — the risky-to-change hubs — from the dependency graph.',
     //? The generator (generateGraph.mjs) caps the stored list at GOD_NODE_LIMIT=25;
     //? clamping the schema to 25 avoids misleading the caller that more are available.
     inputSchema: { limit: z.number().int().min(1).max(25).optional().describe('How many to return (default 15, max 25 — the generator stores only the top 25).') },
@@ -131,13 +131,13 @@ server.registerTool(
 server.registerTool(
   'who_calls',
   {
-    description: 'Symbol-level change-impact: list the functions that (transitively) CALL a given function, from the committed call graph. Pass "file::fn" (e.g. "_functions/foo.ts::doThing") or just a function name to disambiguate.',
+    description: 'Symbol-level change-impact: list the functions that (transitively) CALL a given function, from the call graph. Pass "file::fn" (e.g. "src/_functions/foo.ts::doThing") or just a function name to disambiguate.',
     inputSchema: { symbol: z.string().min(1).describe('A symbol id "file::fn", or a bare function name.') },
   },
   async ({ symbol }) => {
     const graph = await loadGraph();
     if (!graph) return text(missing('docs/ai-graph.json', 'npm run ai:graph'));
-    const sbr = graph.symbolBlastRadius ?? {};
+    const sbr = graph.symbolBlastRadius;
     const symbols = graph.symbols ?? [];
     let id: string | null = Object.hasOwn(sbr, symbol) || symbols.some((s) => s.id === symbol) ? symbol : null;
     if (!id) {
@@ -408,7 +408,7 @@ server.registerTool(
 server.registerTool(
   'graph_status',
   {
-    description: 'Check whether the committed dependency graph (docs/ai-graph.json) is likely fresh or stale by comparing its mtime to the newest source file in src/. Returns the graph mtime, the newest source mtime, and a staleness verdict.',
+    description: 'Check whether the local dependency-graph cache (docs/ai-graph.json) is likely fresh or stale by comparing its mtime to the newest source file in src/. Returns the graph mtime, the newest source mtime, and a staleness verdict. A STALE verdict is not a problem to report — just run `npm run ai:graph`.',
     inputSchema: {},
   },
   async () => {

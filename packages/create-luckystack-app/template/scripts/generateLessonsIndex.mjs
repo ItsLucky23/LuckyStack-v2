@@ -21,7 +21,7 @@
 // KEEP IN SYNC with packages/create-luckystack-app/template/scripts/
 // generateLessonsIndex.mjs (byte-for-byte duplicate ships to consumers).
 
-import { promises as fs } from "node:fs";
+import { promises as fs, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -122,7 +122,18 @@ const renderTable = (header, rows) => {
   return out.join("\n");
 };
 
+//? The protocol lives at `docs/LESSONS_PROTOCOL.md` in the framework repo and at
+//? `docs/luckystack/LESSONS_PROTOCOL.md` in a scaffolded project. Probing beats
+//? shipping a second copy of the protocol so the literal always resolves — that
+//? copy is what silently goes stale and then contradicts the real one.
+const protocolPath = () => (
+  existsSync(path.join(REPO_ROOT, "docs", "LESSONS_PROTOCOL.md"))
+    ? "docs/LESSONS_PROTOCOL.md"
+    : "docs/luckystack/LESSONS_PROTOCOL.md"
+);
+
 const buildDocument = (rows) => {
+  const protocol = protocolPath();
   const parts = [];
   parts.push("# Lessons Index");
   parts.push("");
@@ -133,12 +144,12 @@ const buildDocument = (rows) => {
   parts.push("> rediscovered every few sessions. Read this before retrying something that smells hard.");
   parts.push("> Distinct from `docs/decisions/` (why-a-choice), `branch-logs/` (what-happened-per-prompt),");
   parts.push("> and the private per-dev `~/.claude` memory. The AI records these automatically — see");
-  parts.push("> `docs/LESSONS_PROTOCOL.md`.");
+  parts.push(`> \`${protocol}\`.`);
   parts.push("");
   parts.push(`## Lessons (${rows.length})`);
   parts.push("");
   if (rows.length === 0) {
-    parts.push("_(none yet — the AI records a lesson when a non-obvious dead-end or pitfall is hit. See `docs/lessons/0000-template.md` + `docs/LESSONS_PROTOCOL.md`. On an existing project with hard-won history, the AI offers to backfill this from git + a short interview.)_");
+    parts.push(`_(none yet — the AI records a lesson when a non-obvious dead-end or pitfall is hit. See \`docs/lessons/0000-template.md\` + \`${protocol}\`. On an existing project with hard-won history, the AI offers to backfill this from git + a short interview.)_`);
     parts.push("");
     return parts.join("\n");
   }

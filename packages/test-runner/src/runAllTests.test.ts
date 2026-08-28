@@ -61,6 +61,15 @@ vi.mock('@luckystack/core', () => ({
   clearAllRateLimits: () => clearAllRateLimits(),
   getProjectConfig: () => getProjectConfig(),
 }));
+//? `buildAuthHeaders` resolves the CSRF token through a RUNTIME
+//? `await import('@luckystack/login')`. Left unmocked it loaded the real login
+//? package (and its whole dependency tree) inside the test, which on a loaded
+//? machine overran the 5s timeout. The aborted test's continuation then called
+//? the layer mocks AFTER the next test's `clearAllMocks`, so the next test read
+//? the previous test's Cookie header out of `mock.calls[0]` — two failures from
+//? one slow import, and only under load. `getSession` returning null keeps the
+//? behaviour these characterization tests already pin: no CSRF header.
+vi.mock('@luckystack/login', () => ({ getSession: () => Promise.resolve(null) }));
 
 // Imported after the mocks are registered.
 const { runAllTests } = await import('./runAllTests');

@@ -51,21 +51,38 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
 
 ### Autonomy & Commands (8-10) — HYBRID
 
-8. **Autonomous (no permission needed)**: `npm run lint`, `npm run build`, `npm run ai:index`, `npm run ai:capabilities`, `npm run ai:project-index`, `npm run scaffold:test`, all git read-commands (`status`, `diff`, `log`, `branch`), `git add` + `git commit`, all Grep / Glob / Read.
+8. **Autonomous (no permission needed)**: `npm run lint`, `npm run build`, `npm run test:unit`, every `npm run ai:*` (`ai:refresh`, `ai:check-ids`, `ai:lint`, the individual generators), `npm run scaffold:test`, all git read-commands (`status`, `diff`, `log`, `branch`), `git add` + `git commit`, all Grep / Glob / Read.
    **NOT autonomous (always ask)**: `npm install`, `prisma migrate`, server start, `rm`, force-pushes, branch-deletes. Server start is always a developer action.
 9. **No ad-hoc string-replacement scripts or regex mutations** outside the Edit / Write tools. Use the proper file-editing tools.
 10. **No loose `.md` / `.txt` in repo root.** Documentation lives in `docs/` (which ships via `create-luckystack-app`).
 
 ### Code Quality & Framework Rules (11-21)
 
-11. **After every code change: `npm run lint && npm run build` autonomously.** Zero warnings, zero errors before delivery. Also run `npm run ai:lint` (the CLAUDE.md invariant linter — no `as any`, arbitrary colors, or untranslated JSX) and address what it surfaces; it is report-only by default (the pre-commit hook runs it as a backstop), so a finding is a prompt to fix or to consciously `// luckystack-allow <rule>: <reason>`, not an auto-block unless the project opted that rule into `luckystack.invariants.json`.
-12. **Reuse existing helpers in `src/_functions` and components in `src/_components`.** Check `docs/AI_CAPABILITIES.md` (the auto-generated capability snapshot) BEFORE authoring any new helper, util, or cross-cutting module. Check `docs/AI_PROJECT_INDEX.md` (the consumer-project snapshot — routes, pages, helpers, components, cross-refs) BEFORE creating a new route or page, AND when you need to know which existing helpers/components a similar route already imports. If a capability already exists there — use it. If it lives in a not-yet-installed `@luckystack/*` package (see `docs/PACKAGE_OVERVIEW.md`), propose the install instead of reimplementing. After adding ANY new export to `functions/`, `shared/`, `src/_functions/`, `src/_components/`, or after installing/upgrading a `@luckystack/*` package, run `npm run ai:capabilities` autonomously to refresh the snapshot. After adding/removing/renaming a route (`_api/`, `_sync/`), page, helper, or component, also run `npm run ai:project-index` autonomously, AND `npm run ai:graph` to refresh the dependency graph (`docs/ai-graph.json` — blast-radius + god-nodes). The `.githooks/pre-commit` hook regenerates AND `git add`s ALL the AI-context artifacts on every commit — `ai:index`, `ai:capabilities`, `ai:project-index`, `ai:decisions`, `ai:lessons`, `ai:examples`, `ai:runbooks`, `ai:product`, `ai:graph`, `ai:context-budget` (plus the `ai:lint` invariant check + the report-only `ai:doc-staleness` nudge) — so **the user never has to run any of these manually**. But you (the AI) refresh in-session after the relevant change so subsequent work this session sees the new state; the hook is only the commit-time backstop. This self-maintenance is not optional — keeping the indexes, the decision memory, the runbooks, and the graph current is YOUR job, the same way appending a branch-log entry is. **Exception:** `ai:capabilities` scans `node_modules/@luckystack/*`, so after adding/removing/renaming a `@luckystack/*` package the user must run `npm install` first — until the workspace symlinks are refreshed, both the in-session run and the pre-commit hook regenerate a stale snapshot.
+11. **Verify at the FEATURE boundary, not after every edit.** The full gate — `npm run lint && npm run build && npm run test:unit`, zero warnings, zero errors — runs when a piece of work is *finished*: before you report done, before a commit, before a handoff. It does NOT run after each individual file edit inside that work. Re-running a whole build and suite after a two-line change is noise: it costs minutes, buries the signal, and tells you nothing the next run won't.
+    - **11a. Mid-work, use the narrowest check that could actually fail.** Touched one package → typecheck that package. Changed a route → run that route's own test file. Edited a generator → run the generator and look at its output. Changed nothing that compiles (docs, comments) → run nothing.
+    - **11b. Always run the full gate before declaring done, and report the real result.** "Feature boundary" is permission to defer the gate, never to skip it. If the gate fails, say so with the output; if you skipped a step, say which.
+    - **11c. `npm run ai:lint` is report-only.** It flags CLAUDE.md invariants (no `as any`, arbitrary colors, untranslated JSX). A finding is a prompt to fix, or to consciously `// luckystack-allow <rule>: <reason>` — not an auto-block, unless the project opted that rule into `luckystack.invariants.json`. The pre-commit hook runs it as a backstop.
+12. **Reuse existing helpers in `src/_functions` and components in `src/_components`.** Check `docs/AI_CAPABILITIES.md` (the auto-generated capability snapshot) BEFORE authoring any new helper, util, or cross-cutting module. Check `docs/AI_PROJECT_INDEX.md` (the consumer-project snapshot — routes, pages, helpers, components, cross-refs) BEFORE creating a new route or page, AND when you need to know which existing helpers/components a similar route already imports. If a capability already exists there — use it. If it lives in a not-yet-installed `@luckystack/*` package (see `docs/PACKAGE_OVERVIEW.md`), propose the install instead of reimplementing. **Refreshing the indexes: one command, at the feature boundary.** `npm run ai:refresh` rebuilds every AI-context artifact (all generators in parallel, ~4s). Run it when you have added routes/pages/helpers/components/exports/packages and are about to *rely on a lookup* — or at the end of the work, alongside rule 11's gate. Not after each edit. The artifacts are **gitignored**: they are a local cache, rebuilt by `ai:refresh` and by `postinstall`, so there is nothing committed to keep in sync, no drift to police, and no index diff in your commits. The pre-commit hook runs **checks only** (`ai:check-ids` + `ai:lint`) and writes nothing. **Exception:** `ai:capabilities` scans `node_modules/@luckystack/*`, so after adding/removing/renaming a `@luckystack/*` package the user must run `npm install` first — until the workspace symlinks refresh, the snapshot is stale whoever regenerates it.
    - **12a. Package-recommendation safety net.** Before you hand-roll any *cross-cutting* capability (auth/session, sockets/realtime, presence/AFK, transactional email, error-tracking, rate-limiting, secret rotation, multi-instance routing, a test harness, browser testing, …), STOP and check `docs/PACKAGE_OVERVIEW.md` for a `@luckystack/*` package that already solves it. If one exists and isn't installed, **propose installing it** — name the package, the one-line reason it beats hand-rolling, and the exact `npm i @luckystack/<pkg>` (+ any env) — and wait for the user before reimplementing. Reimplementing a framework package's job in consumer code is a primary failure mode; the package is battle-tested, typed, and maintained. (This is the proactive half of Rule 3b's uninstalled-package flag.)
 13. **i18n is mandatory for user-facing text** via the `useTranslator` pattern from `src/_functions/translator`.
 14. **Tailwind colors come ONLY from `src/index.css` `@theme` block.** Never arbitrary hex values.
-15. **Update documentation immediately after code changes.** After significant doc updates (new doc file, slash command, skill, package), run `npm run ai:index` autonomously to regenerate `docs/AI_QUICK_INDEX.md`. For route/page/helper/component changes, rule 12 covers the in-session regen of `ai:capabilities` + `ai:project-index`. The `.githooks/pre-commit` hook re-runs all three at commit time as a safety net; refresh in-session anyway so the new state is visible to subsequent work.
-   - **15a. Keep the product-intent layer current, and backfill it.** The INTENT layer answers *what the app + each page is FOR*, in plain language (distinct from the structural indexes' *what exists*). Maintain it: keep `docs/PRODUCT.md` (app-level: what it does, for whom, key features, glossary) in step with the app, and put a one-line `//? intent: <plain language>` at the top of every `page.tsx` when you create or change a page. Then `npm run ai:product` (autonomous; also in the hook) regenerates `docs/AI_PRODUCT_OVERVIEW.md`. On an EXISTING/uploaded repo where `docs/PRODUCT.md` is the stub or pages lack `intent:` lines, treat it exactly like the decision memory: proactively OFFER to backfill it from the code + git history AND a short interview ("what does this do / who is it for?"), once, early — never fabricate.
+15. **Update the HAND-WRITTEN documentation when a change makes it untrue.** Not "after every change" — the generated indexes take care of themselves (`ai:refresh`, rule 12). A hand-written doc needs you only when a change contradicts something it says, or when it now needs a `why` it can't get from the code. Read rule 15c before you write a line of it.
+   - **15a. Keep the product-intent layer current, and backfill it.** The INTENT layer answers *what the app + each page is FOR*, in plain language (distinct from the structural indexes' *what exists*). Two places, both next to the thing they describe: `docs/PRODUCT.md` (app-level — what it does, for whom, key features, glossary; hand-written) and a one-line `//? intent: <plain language>` at the top of every `page.tsx`. The page intents surface in `docs/AI_PROJECT_INDEX.md`'s Pages table (`find_route` reaches them); there is no separate generated overview, because it had no query tool and only duplicated these two sources. On an EXISTING/uploaded repo where `docs/PRODUCT.md` is the stub or pages lack `intent:` lines, treat it exactly like the decision memory: proactively OFFER to backfill it from the code + git history AND a short interview ("what does this do / who is it for?"), once, early — never fabricate.
    - **15b. Record ownership from day one.** Put a `@docs owner <name>` JSDoc tag on new `_api/` / `_sync/` routes (and note page authors) from the start — even on a solo project, because it's what lets a later teammate (or an AI routing a question) know who to ask. It surfaces in `docs/AI_PROJECT_INDEX.md` (owner column + git authorship). Cheap now, essential at team scale.
+   - **15c. The code is the truth; a hand-written doc may not repeat it.** A doc contains **no fact that is derivable from the code** — no config values, no "which files exist" inventories, no paths or signatures, no restatement of what a function does. Write only what the code *cannot* say: why it is this way, what it is for, what breaks if you invert it, what you must know before you start. Need a code fact to make a sentence true? **Name the place instead of copying the value** ("see `config.ts` → `rateLimiting`", not "the window is 60s").
+     **Why this is a rule and not a preference.** A copied fact is correct on the day it is written and wrong from the first refactor onward — and it is wrong in the worst possible place, because a doc is where someone goes when they are *unsure*. Observed in the field: a "what new devs most often get wrong" list that taught a rate-limit window the config contradicted; a component table pointing at three files that did not exist, so an agent following it built a parallel implementation — precisely what the table existed to prevent; a 38 KB file-by-file tour, five months stale, whose closing line was *"CRITICAL RULE: you MUST update this file to keep it accurate."* That instruction is a guarantee of rot. The inverse is the maintainable one: **come back to a doc only when a change makes something in it untrue.**
+     **The one exception:** a **closed vocabulary you must get right in one pass** (the colour tokens, a status enum) may be listed — always with a pointer to its source. That exception is written down on purpose: without a stated boundary an unstated one appears.
+
+     | Doc type | Belongs in it | Does NOT belong in it |
+     |---|---|---|
+     | `docs/PRODUCT.md` | what the app is for, for whom, the domain glossary | feature inventories, config values, file maps |
+     | `docs/PROJECT_CONTEXT.md` | cross-cutting behavioural contracts no single file answers | a directory tour, "which files exist", anything `AI_PROJECT_INDEX.md` generates |
+     | `ARCHITECTURE_*.md` | the model, the invariants, the trade-off | signatures, line numbers, copied code blocks that drift |
+     | ADR (`docs/decisions/`) | why, and what was rejected | how it is implemented — that is the second, wrong description of the code the moment someone refactors |
+     | Lesson (`docs/lessons/`) | what failed and why it wasn't obvious | how the fix works; the pitfall outlives the fix |
+     | Findings (`docs/findings/`) | the claim + file:line pointer + status | pasted code; weeks later the paste is wrong and the pointer is still right |
+     | Branch log | what happened and why that way | what the code looks like now — the diff already shows that, exactly |
+     | `README.md` | how to start, and what this project IS | a directory tree, or anything left over from the scaffold |
 16. **At session start: read `config.ts` and `.env`. NEVER read `.env.local`** (contains real secrets).
 17. **Update `.env_template` and `.env.local_template` when new env vars are added.** The user updates their own `.env.local`.
 18. **Suggest extracting repeating patterns** into a helper, component, or skill.
@@ -94,7 +111,19 @@ LuckyStack is a socket-first fullstack framework: React 19 frontend on a raw Nod
     3. If (2) is empty: `branch-logs/INDEX.md` → most recent previous branch's log. Mark its contents as **"previous context, may not apply here"** and verify before acting on any assumption.
     4. Framework + project context: `docs/PROJECT_CONTEXT.md` (if exists), `docs/ROADMAP.md`, `docs/HOSTING.md`, `docs/PACKAGE_OVERVIEW.md`, `docs/AGENT_TEAM_PLAYBOOK.md`.
     5. `config.ts` + `.env` (NEVER `.env.local`).
-    6. Auto-generated indexes: `docs/AI_QUICK_INDEX.md`, `docs/AI_CAPABILITIES.md`, `docs/AI_PROJECT_INDEX.md`, `docs/AI_DECISIONS_INDEX.md` (the committed "why" record — open a `docs/decisions/NNNN-*.md` for the full rationale behind a choice), `docs/AI_RUNBOOKS.md` (task-shaped golden paths: how to add an API/page/sync/helper, verify, and record a decision in THIS project), `docs/AI_PRODUCT_OVERVIEW.md` (the intent layer — what the app + each page is FOR, in plain language), `docs/AI_LESSONS_INDEX.md` (the pitfalls layer — what was tried and FAILED, so it isn't repeated; query via `find_lesson`), `docs/AI_EXAMPLES_INDEX.md` (the canonical example corpus — copy these reviewed shapes; query via `list_examples` / `get_example`), `docs/AI_CONTEXT_BUDGET.md` (what-to-load-when per task type — don't read every index every session), and `docs/ai-graph.json` (the dependency graph — or query it via the `@luckystack/mcp` tools `blast_radius` / `who_imports` / `who_calls` / `god_nodes` / `decision_for_file` rather than reading the whole file).
+    6. **The generated indexes: QUERY, do not read.** Reading all of them costs ~250 KB (~60k tokens) at session start, and almost every one is also reachable through a tool that answers the actual question. Read exactly one — `docs/AI_CONTEXT_BUDGET.md`, the per-task retrieval profile telling you what this task needs — then use the `@luckystack/mcp` tools for the rest:
+
+        | Question | Tool | (whole-file fallback) |
+        |---|---|---|
+        | does a helper/component already exist? | `get_capability` | `docs/AI_CAPABILITIES.md` |
+        | which routes/pages exist, what do they do, are they tested? | `find_route` | `docs/AI_PROJECT_INDEX.md` |
+        | why is it this way / what was rejected? | `list_decisions`, `get_decision`, `decision_for_file` | `docs/AI_DECISIONS_INDEX.md` |
+        | what has already been tried and FAILED? | `find_lesson`, `get_lesson` | `docs/AI_LESSONS_INDEX.md` |
+        | what is the reviewed shape to copy? | `list_examples`, `get_example` | `docs/AI_EXAMPLES_INDEX.md` |
+        | how do I do task X in THIS project? | `get_runbook` | `docs/AI_RUNBOOKS.md` |
+        | what breaks if I change this file/function? | `blast_radius`, `who_imports`, `who_calls`, `god_nodes` | `docs/ai-graph.json` (never read whole) |
+
+        Whole-file reads are for when a tool is unavailable or you genuinely need the full list. `docs/AI_QUICK_INDEX.md` (framework surfaces + package map) has no tool — read it when you need the package map, not by default. All of these are a **gitignored local cache**; if one is missing, `npm run ai:refresh` builds it.
     7. **Memory-coverage check (then offer to backfill).** If the decision memory (`docs/AI_DECISIONS_INDEX.md` / `docs/decisions/`) is empty OR clearly does not cover major parts of an already-substantial codebase (many commits / large `src/` but few or no ADRs explaining the big choices), proactively TELL the user and OFFER to backfill it — both by mining the written history (`git log`, `branch-logs/`, and with permission the per-dev `~/.claude` memory) AND by offering a one-time, focused, resumable **interview** ("heb je even tijd om mijn vragen over de codebase te beantwoorden? eenmalig, verbetert al mijn toekomstige changes drastisch") since most rationale was never written down. Surface this once, early; act only on their go-ahead. Full how-to: Decision Memory Protocol §8 (§8a mine, §8b interview).
 
 ---
@@ -153,13 +182,15 @@ Full spec + templates: `docs/FINDINGS_PROTOCOL.md`. Keep the surfaces distinct: 
 
 ## Doc-coverage gate, staleness, code→ADR, context budget, eval
 
-These keep the layers above honest and current — all opt-in / report-only so they never block an existing codebase retroactively:
+These keep the layers above honest and current — report-only unless noted, so they never block an existing codebase retroactively:
 
+- **Record-id guard** (`npm run ai:check-ids`, **blocking**) — the one non-optional check, in the pre-commit hook (~125ms) and in CI with `--backrefs`. It fails on a duplicate ADR/lesson number, an in-file number/slug that disagrees with the filename, and a `relates:`/`supersedes:`/`@adr` pointing at a record that does not exist. Why it blocks: two long-lived branches allocating the same free number to different decisions produces two ADDITIONS, not a conflict — git merges it clean, and from then on every reference by number lands on whichever file sorts first. The usual "fix" is to shift a block of numbers, which is when it becomes unrecoverable: every reference written under the old scheme now points at a real but WRONG decision, and nothing is broken enough to notice. **A number is an identity: never reused, never shifted.** On a collision the UNMERGED side moves — published numbers stay put.
 - **Doc-coverage gate** (`ai:lint`, rule `doc-coverage`) — a NEWLY-ADDED route needs a top-of-file summary + `@docs owner`; a new `page.tsx` needs a `//? intent:` line (Rules 12/15a/15b made enforceable). Diff-scoped to added files; WARN by default, opt into blocking via `luckystack.invariants.json`. Escape hatch: `// luckystack-allow doc-coverage: <reason>` on the first line.
 - **Doc-staleness** (`npm run ai:doc-staleness`, report-only) — a hand-written doc opts in with an `<!-- @covers <glob> -->` marker; the check reports when the covered code has moved on by more than `docs.stalenessThreshold` commits. Wire a deep-dive to the code it describes to enable the nudge.
 - **CHANGELOG-completeness** (`npm run ai:changelog-check`, report-only) — keeps the upgrade story ("read the CHANGELOG gap between installed and target") honest: every publishable package that CHANGED since the last `v*` release tag must also have a CHANGELOG update (a pure lockstep version bump is exempt). Prevents the kind of historical gap where a shipped version has no CHANGELOG entry. Framework-repo only; runs in the pre-commit hook as a nudge, and belongs in the pre-publish checklist.
 - **Code→ADR link** — tag a file that embodies a deliberate decision with `//? @adr NNNN`; `ai:decisions` builds the reverse "ADR → governed files" map, queryable via `decision_for_file(path)`. Check it BEFORE "cleaning up" a deliberate-looking construct.
-- **Context budget** (`docs/AI_CONTEXT_BUDGET.md`, `ai:context-budget`) — per-task retrieval profiles: load only the relevant artifacts, query the rest via MCP. Don't read every index every session.
+- **Context budget** (`docs/AI_CONTEXT_BUDGET.md`, `ai:context-budget`) — per-task retrieval profiles: load only the relevant artifacts, query the rest via MCP. Don't read every index every session (rule 28.6).
+- **Artifact refresh** (`npm run ai:refresh`) — rebuilds every generated artifact, all generators in parallel (~4s). The artifacts are gitignored: they are derived from the code, so a committed copy is a second answer that drifts. Nothing in git means no drift gate, no hook writing to your tree, and no index diff in your commits. `postinstall` runs `ai:refresh --if-missing`, so a fresh clone and CI still get working lookups.
 - **Eval harness** (`eval/`, `npm run ai:eval`) — the deterministic with/without measurement of whether these artifacts actually improve AI output; it is the trigger gate ADR 0003 requires before any RAG rung. Extend `eval/scenarios/` as the project grows.
 
 ---
@@ -168,20 +199,20 @@ These keep the layers above honest and current — all opt-in / report-only so t
 
 ### Component Reference (`src/_components/`)
 
-Before building any UI primitive, check this table. Extend the existing component or add a prop — never roll a parallel implementation.
+**The rule:** before building any UI primitive, find out whether one already exists. Extend it or add a prop — never roll a parallel implementation.
 
-| Component / API | Use when… |
-|---|---|
-| `Dropdown` (`./Dropdown.tsx`) | Single-select picker. Supports search, keyboard nav, sm/md/lg/xl sizes, controlled or uncontrolled. |
-| `MultiSelectDropdown` (`./MultiSelectDropdown.tsx`) | Multi-select picker with checkboxes. Same shell + search as `Dropdown`. |
-| `MenuHandlerProvider` + `useMenuHandler` (`./MenuHandler.tsx`) | Stack-based modal / sheet system with backdrop, animations, Escape/Enter handling. |
-| `menuHandler` (`src/_functions/menuHandler.ts`) | Imperative API to open menus from non-React code. Includes `menuHandler.confirm({ title, content, input? })` returning `Promise<boolean>`. |
-| `ConfirmMenu` (`./ConfirmMenu.tsx`) | Renderable confirm form (used inside `menuHandler.confirm`). Render directly only for non-modal confirm forms. |
-| `Avatar` (`./Avatar.tsx`) | User avatar with image + first-letter fallback. Reads image-load status from `AvatarProvider`. |
-| `Navbar` (`./Navbar.tsx`) | Dashboard sidebar. Pass `items` prop (`NavbarItem[]`, `icon` is a FontAwesome `IconDefinition`) — do not edit the file. |
-| `ErrorPage` (`./ErrorPage.tsx`) | React Router error-boundary fallback. Already wired; extend rather than replace. |
-| `Middleware` (`./Middleware.tsx`) | Wraps protected pages. Runs the per-page `export const middleware` (from `page.tsx`) first, then falls back to a globally registered handler from `registerMiddlewareHandler`. Per-page is canonical; no central `_functions/middlewareHandler.ts` file is required. Part of the `dashboard` template. |
-| `TemplateProvider` (`./TemplateProvider.tsx`) | Selects a template (`'plain'` / `'dashboard'`) per page from its exported `template` const. Add new templates here and to the `Template` union. |
+**How to find out — ask the code, not this file.** There used to be a table of component names and paths here. It was wrong: it named three files that do not exist at the path given, and a template that never existed. An agent that trusts such a table fails to find the file and builds a second implementation — exactly what the table was for. Per rule 15c, the inventory is not written down, because the inventory is the code.
+
+1. `get_capability('<name>')` (MCP) — the generated inventory of every helper, component and export, with paths.
+2. `docs/AI_CAPABILITIES.md` / `docs/AI_PROJECT_INDEX.md` if you would rather read than query. Both are regenerated by `npm run ai:refresh`.
+3. Failing those, grep `src/_components/`.
+
+**What you must know before you look** (this is the part the code cannot tell you):
+
+- Primitives are **not flat**. Expect subfolders per family (dropdowns, inputs, templates, …) — a top-level `ls` is not the answer, and "not in `_components/` root" does not mean "does not exist".
+- Some primitives you would expect to be local are **framework exports** from `@luckystack/core/client`, not files in this project. If grep finds nothing, check the package before concluding it is missing.
+- `menuHandler` (`src/_functions/menuHandler.ts`) is the *imperative* half of the modal system — use it to open a menu from non-React code; `menuHandler.confirm({ title, content, input? })` returns `Promise<boolean>`. The React half is the provider + hook in the components tree.
+- The per-page `template` const is resolved by the template provider against a **closed union**. Read that union before inventing a template name; adding one means editing both the provider's map and the union.
 
 ### Tailwind Color Tokens (from `src/index.css`)
 
@@ -267,6 +298,8 @@ Two layers, both run by `npm run test` (which invokes the `@luckystack/test-runn
 
 After creating any new API or sync route, run `npm run scaffold:test <route>` autonomously and fill in at least one happy-path test case before declaring done. The auto-sweep already covers basic crash-resistance; your per-route cases should target assertions the sweep can't infer.
 
+**Run the narrowest suite that could fail (rule 11a).** While iterating, run the test file you are actually working on — not the whole suite after every edit. The full run (`npm run test:unit`, plus the live sweep `npm run test` where a dev server is up) belongs at the feature boundary, before you declare done.
+
 **Prioritize tests after new work, and flag untested existing code.** Tests for what you just built come before declaring done (a bug fix needs a regression test). Separately: when you touch or read a route that has NO per-route test (no sibling `_v<N>.tests.ts`), don't silently leave it — raise it with the user ("this route has no business-logic test; want me to add one?") and offer to write it. The `docs/AI_PROJECT_INDEX.md` "tested" indicator per route is your map of where coverage is missing. Don't bulk-add tests unasked; surface the gap and let the user choose.
 
 Full spec: `docs/ARCHITECTURE_TESTING.md`.
@@ -312,10 +345,9 @@ If inference fails, fix the typing source or regenerate the maps. Do not paper o
 
 ## Templates
 
-Pages export a `template` constant: `'plain'`, `'dashboard'`, or a project-specific addition wired into `TemplateProvider`.
+Every page exports a `template` constant. Its value must be a member of the `Template` union in this project's template provider — **read that union; do not assume the set**, it differs between the framework repo and a scaffolded project, and a name listed here would be the third place it could drift from (rule 15c).
 
-- `plain` — no UI chrome (login, register, docs pages).
-- `dashboard` — sidebar navigation + main content area.
+Adding a template means two edits in one place: the `Template` union, and the map from union member to component. A page selecting a name that isn't in the union is a type error, which is the intended failure.
 
 ---
 
@@ -409,8 +441,7 @@ upgrade tooling — a self-contained copy of the runbook in
 | `docs/AI_PROJECT_INDEX.md` | Auto-generated inventory of the consumer project's own code (routes, pages, helpers, components, cross-refs) |
 | `docs/AI_DECISIONS_INDEX.md` | Auto-generated index of `docs/decisions/` ADRs (title, status, tags, summary) |
 | `docs/AI_RUNBOOKS.md` | Auto-generated task-shaped golden paths (add API/page/sync/helper, verify, decide) grounded in this project's real files |
-| `docs/PRODUCT.md` | AI-maintained plain-language description of what the app is + for whom (the intent-layer source) |
-| `docs/AI_PRODUCT_OVERVIEW.md` | Auto-generated intent overview: app description (from `PRODUCT.md`) + each page's `//? intent:` purpose |
+| `docs/PRODUCT.md` | Hand-written plain-language description of what the app is + for whom (the app-level intent layer; per-page intent is a `//? intent:` line in `page.tsx`, surfaced in `AI_PROJECT_INDEX.md`) |
 | `luckystack.ai.json` | AI-tooling config — `docs.sharding` (`auto`/`single`/`per-folder`) controls when the read-whole indexes split per src folder |
 | `docs/AI_BOOST_OVERVIEW.md` | One-page catalog of every AI-tooling surface in LuckyStack |
 | `docs/AI_BROWSER_TESTING.md` | AI browser-testing tooling (agent-browser + Playwright/Chrome DevTools MCP): the cheapest-first ladder + suggest→approve protocol |

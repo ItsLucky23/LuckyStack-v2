@@ -78,3 +78,21 @@ packages/create-luckystack-app/ls-np/
 
 # Dev scratch scripts in server/ (should never be committed)
 server/**/*.py
+
+# AI-context artifacts — a LOCAL CACHE, deliberately not committed.
+# Every one of these is derived from the code, so a committed copy is a second
+# answer to a question the code already answers: the one that drifts. Nothing in
+# git means nothing to drift from — no drift gate, no hook staging generated
+# output, no index diff on every commit. Rebuild: `npm run ai:refresh`
+# (also run by `postinstall`, so a fresh clone and CI have working MCP lookups).
+# Sources stay committed: docs/decisions/, docs/lessons/, docs/examples/,
+# docs/PRODUCT.md and the hand-written docs/*.md.
+docs/AI_QUICK_INDEX.md
+docs/AI_CAPABILITIES.md
+docs/AI_PROJECT_INDEX.md
+docs/AI_DECISIONS_INDEX.md
+docs/AI_LESSONS_INDEX.md
+docs/AI_EXAMPLES_INDEX.md
+docs/AI_RUNBOOKS.md
+docs/AI_CONTEXT_BUDGET.md
+docs/ai-graph.json

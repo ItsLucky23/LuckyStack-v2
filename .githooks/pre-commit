@@ -1,76 +1,39 @@
 #!/bin/sh
-#? Regenerates the AI-facing snapshot files so they stay in sync with
-#? whatever this commit touches:
-#?   - docs/AI_QUICK_INDEX.md     (per-package CLAUDE.md, docs/*.md,
-#?                                 slash commands, skills, new packages)
-#?   - docs/AI_CAPABILITIES.md    (installed @luckystack/* packages, the
-#?                                 injection map from
-#?                                 src/_sockets/apiTypes.generated.ts, plus
-#?                                 local helpers/components/shared)
-#?   - docs/AI_PROJECT_INDEX.md   (consumer's own src/ — routes, pages,
-#?                                 helpers, components, cross-refs)
-#?   - docs/AI_DECISIONS_INDEX.md (docs/decisions/ ADRs — the committed,
-#?                                 shareable "why" record the AI auto-fills)
-#?   - docs/AI_RUNBOOKS.md        (task-shaped golden paths grounded in this
-#?                                 project's real routes/pages/helpers)
-#?   - docs/AI_PRODUCT_OVERVIEW.md (the intent layer — what the app + each page
-#?                                 is FOR, in plain language; from docs/PRODUCT.md
-#?                                 + page `//? intent:` lines)
-#?   - docs/ai-graph.json         (file/import dependency graph: blast-radius +
-#?                                 god-nodes; queried via @luckystack/mcp)
+#? Two pure-Node CHECKS. Nothing else.
 #?
-#? Both generators are deterministic (no timestamps), so when nothing
-#? relevant changed the resulting files are byte-identical and the
-#? `git add` lines below are no-ops for the working tree.
+#? This hook used to run ten generators and `git add` their output. Two things
+#? were wrong with that. It made every commit slow — and it made the commit
+#? UNTRUE: the generators read the whole working tree, not the staging area, so
+#? a commit could carry an index derived from code that wasn't in it.
 #?
-#? Active via `git config core.hooksPath .githooks` (set by the root
-#? `prepare` script at install time).
+#? The AI-context artifacts are now gitignored (see .gitignore) and rebuilt by
+#? `npm run ai:refresh` / `postinstall`. With nothing committed there is nothing
+#? to keep in sync, so this hook writes NOTHING to the working tree.
+#?
+#? Active via `git config core.hooksPath .githooks` (set by the root `prepare`
+#? script at install time).
 
 set -e
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "[pre-commit] npm not on PATH — skipping AI snapshot regeneration."
+if ! command -v node >/dev/null 2>&1; then
+  echo "[pre-commit] node not on PATH — skipping AI checks."
   exit 0
 fi
 
+#? Blocking: a duplicate/dangling ADR or lesson number is an identity collision.
+#? Left alone it gets "fixed" by renumbering, and every reference written under
+#? the old scheme then points at a real but WRONG record. ~125ms.
+echo "[pre-commit] Checking record-id identity (ADRs + lessons)..."
+node scripts/checkRecordIds.mjs
+
+#? Report-only by default; individual rules opt into blocking via
+#? luckystack.invariants.json.
 echo "[pre-commit] Checking CLAUDE.md invariants on staged changes..."
-npm run ai:lint --silent
+node scripts/lintInvariants.mjs
 
-echo "[pre-commit] Regenerating docs/AI_QUICK_INDEX.md..."
-npm run ai:index --silent
-
-echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
-npm run ai:capabilities --silent
-
-echo "[pre-commit] Regenerating docs/AI_PROJECT_INDEX.md..."
-npm run ai:project-index --silent
-
-echo "[pre-commit] Regenerating docs/AI_DECISIONS_INDEX.md..."
-npm run ai:decisions --silent
-
-echo "[pre-commit] Regenerating docs/AI_LESSONS_INDEX.md..."
-npm run ai:lessons --silent
-
-echo "[pre-commit] Regenerating docs/AI_EXAMPLES_INDEX.md..."
-npm run ai:examples --silent
-
-echo "[pre-commit] Regenerating docs/AI_RUNBOOKS.md..."
-npm run ai:runbooks --silent
-
-echo "[pre-commit] Regenerating docs/AI_PRODUCT_OVERVIEW.md..."
-npm run ai:product --silent
-
-echo "[pre-commit] Regenerating docs/ai-graph.json..."
-npm run ai:graph --silent
-
-echo "[pre-commit] Regenerating docs/AI_CONTEXT_BUDGET.md..."
-npm run ai:context-budget --silent
-
+#? Nudges, never blocking.
 echo "[pre-commit] Checking hand-written doc staleness (report-only)..."
-npm run ai:doc-staleness --silent || true
+node scripts/checkDocStaleness.mjs || true
 
 echo "[pre-commit] Checking CHANGELOG completeness (report-only)..."
-npm run ai:changelog-check --silent || true
-
-git add docs/AI_QUICK_INDEX.md docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_LESSONS_INDEX.md docs/AI_EXAMPLES_INDEX.md docs/AI_RUNBOOKS.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json docs/AI_CONTEXT_BUDGET.md
-git add docs/ai-product 2>/dev/null || true   # per-area product shards (only exist when docs.sharding splits)
+node scripts/checkChangelogs.mjs || true

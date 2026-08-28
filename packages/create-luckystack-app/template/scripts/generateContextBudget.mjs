@@ -39,7 +39,7 @@ const ARTIFACTS = [
   { id: "lessons", path: "docs/AI_LESSONS_INDEX.md", note: "Known pitfalls (what failed)." },
   { id: "runbooks", path: "docs/AI_RUNBOOKS.md", note: "Task-shaped golden paths." },
   { id: "examples", path: "docs/AI_EXAMPLES_INDEX.md", note: "Canonical example corpus index." },
-  { id: "product", path: "docs/AI_PRODUCT_OVERVIEW.md", note: "What the app + each page is FOR." },
+  { id: "product", path: "docs/PRODUCT.md", note: "What the app is + for whom (hand-written; per-page intent lives in the project index)." },
   { id: "graph", path: "docs/ai-graph.json", note: "Dependency graph — prefer the MCP tools over reading whole." },
 ];
 

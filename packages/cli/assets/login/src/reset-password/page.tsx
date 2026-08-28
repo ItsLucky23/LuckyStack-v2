@@ -1,3 +1,5 @@
+//? intent: Recover access — request a reset link, then set a new password with it.
+
 import { useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 

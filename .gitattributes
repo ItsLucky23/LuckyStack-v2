@@ -1,0 +1,5 @@
+#? Git hooks are executed by /bin/sh. A CRLF line ending turns the shebang into
+#? `#!/bin/sh\r`, which POSIX shells reject — the hook then fails or is skipped
+#? without a useful message. Windows checkouts default to CRLF, so pin these to
+#? LF explicitly. Same reason the hook is stored as mode 100755.
+.githooks/* text eol=lf
