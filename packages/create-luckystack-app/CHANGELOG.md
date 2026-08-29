@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-08-29
+
 ### Fixed
 
 - `scripts/lintInvariants.mjs` honors a `// luckystack-allow <rule>: <reason>` on the comment line directly above the flagged code, not only at the end of the line itself. A reason worth writing rarely fits after the code, so that is where authors put it — and there it silently did nothing, leaving a deliberate, documented deviation reported as a violation forever. The suppression carries only from a line that is nothing but a `//` comment, so a trailing allow on an unrelated statement can never widen to the line below, and the preceding line is read from disk so a suppression written in an earlier commit still counts.
+- The bundled framework docs a scaffold receives under `docs/luckystack/` no longer describe `npx luckystack update` as having only two per-file outcomes. A path listed in `.luckystackignore` gets nothing written — not even a `.new` sidecar — and stays out of the manifest so it cannot later re-plan as `unchanged` (ADR 0051). The same docs also stopped calling the generated AI-context artifacts "committed" (they are a gitignored cache since 0.9.0) and now name `@luckystack/cli` in the package tables it was missing from.
 
 ## [0.9.0] - 2026-08-28
 
