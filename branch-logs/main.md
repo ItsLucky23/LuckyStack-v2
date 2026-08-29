@@ -1337,3 +1337,22 @@ De Mongo-fout zelf is omgeving (`getaddrinfo ENOTFOUND mongo` — compose-hostna
 **Bekende beperking, bewust geaccepteerd:** de React-componenten (`Middleware.tsx`, `Router.tsx`) blijven onbetest — deze repo heeft geen jsdom/testing-library en `npm install` is niet autonoom. Daarom is de beslislogica uit beide componenten getrokken naar de pure, wél geteste `resolveMiddlewareOutcome`. De wijziging is additief: bestaande result-shapes gedragen zich identiek.
 
 **Files:** `packages/devkit/src/{loader,routingRules,routeNamingValidation}.ts` + `typeMap/discovery.ts`, `packages/server/src/{afterListen,createServer,types,index}.ts`, `packages/core/src/{middlewareRegistry,client}.ts` + `react/{Middleware,Router}.tsx`, template `server/server.ts`, `docs/ARCHITECTURE_ROUTING.md`, `packages/server/docs/create-server.md`, drie package-CLAUDE.md's, vier CHANGELOGs, ADR 0050, vijf nieuwe testbestanden.
+
+## 2026-08-29 17:15 — v0.9.0 gepubliceerd: AI-context-laag is een bevraagbare cache, geen gecommitte docs
+
+**User prompt (summary):** releasen via de GitHub-pipeline; alle tests draaien, alle scripts groen krijgen, publiceren.
+
+**Wat er in zit.** De AI-context-artifacts zijn nu een **gitignored lokale cache** in plaats van gecommitte bestanden: ze zijn afgeleid van de code, dus een gecommitte kopie is een tweede antwoord dat gaat afwijken. Eén commando (`npm run ai:refresh`) bouwt ze allemaal parallel; `postinstall` doet `--if-missing`, zodat een verse clone en CI werkende lookups hebben. De pre-commit hook regenereert daardoor niets meer en staged niets meer — hij draait alleen checks, met als enige bewuste schrijfactie het verversen van `AGENTS.md`. Nieuw en blokkerend: `ai:check-ids`, dat dubbele of dode ADR-/lesson-nummers vangt. Verder drie generatorbugs eruit (root-routes ontbraken in de index, de symbool-pass sloeg zichzelf over door een cap die `node_modules`-`.d.ts` meetelde, en de graph dekte alleen `src/`), en de scaffold levert niet langer de framework-eigen records mee aan consumenten.
+
+**De release zelf.** Deze branch was van een 16 commits verouderde main afgetakt; main erin gemerged (39 conflicten, records hernummerd naar ADR 0052–0056 en lessons 0018–0020). Daarna twee dingen die alleen door de pipeline zichtbaar werden:
+
+1. **`e2e-scaffold` was sinds v0.8.5 nooit groen geweest** en dat bleek geen CI-probleem: `isCliEntry()` vergeleek `process.argv[1]` met `__filename` als kale strings, terwijl npm een bin op macOS/Linux als symlink installeert — node meldt daar de symlink in `argv[1]` maar resolvet `import.meta.url` naar het doel. `npx create-luckystack-app` deed dus op élke macOS/Linux-machine niets, stil, met exit 0. Windows heeft die symlink niet, dus lokaal was alles altijd groen (lesson 0021).
+2. **`checkRecordIds` was groen op Windows en rood op CI voor dezelfde commit.** De frontmatter-parser splitste op `"\n"`; een CRLF-checkout laat een `\r` staan die `(.*)$` niet kan matchen, dus elk veld las als afwezig en de hele frontmatter-helft van de blokkerende guard deed niets op de machine waar de hook draait (lesson 0022).
+
+PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pull/N/merge`, en die ref bestaat niet zolang de PR conflicteert.
+
+**Publicatie.** Tag `v0.9.0` op de commit die de PR-run groen gaf; main erin gemerged met identieke tree (`006b4e7`), CI op main groen. `publish.yml` draaide de volledige gate en publiceerde 17 packages met SLSA-provenance. `@luckystack/mcp` was ~3 minuten na de rest pas leesbaar op de registry — ik las dat te vroeg als een mislukte publish en heb de run herstart; die bevestigde 17/17 al gepubliceerd en uploadde niets. Onschadelijk, maar de les is dat `time.modified` uit een stale packument komt en dus niet kan onderscheiden tussen "niet gepubliceerd" en "nog niet doorgekomen".
+
+**Verificatie:** PR-run 4/4 groen (`e2e-scaffold` ✓ 3m16 — voor het eerst ooit, `lint-build-test` node 20 + 22 ✓, `ai-records` ✓) · CI op main ✓ 7m06 · publish-gate 8/8 · unit **2083/2083 (200 files)** · `audit:production` 0/0/0 · 17/17 packages op npm geverifieerd via directe registry-fetch.
+
+**Files:** de merge (136 bestanden) + `scripts/{aiRefresh,checkRecordIds}.mjs` en hun template-tweelingen, `packages/create-luckystack-app/src/index.ts` + `src/cliEntry.test.ts`, `packages/cli/src/commands/update.ts`, `.githooks/pre-commit`, `.github/workflows/ci.yml`, `.gitignore` + template, `CLAUDE.md`, ADR 0052–0056, lessons 0021–0022, vier CHANGELOGs.
