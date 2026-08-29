@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `scripts/lintInvariants.mjs` honors a `// luckystack-allow <rule>: <reason>` on the comment line directly above the flagged code, not only at the end of the line itself. A reason worth writing rarely fits after the code, so that is where authors put it — and there it silently did nothing, leaving a deliberate, documented deviation reported as a violation forever. The suppression carries only from a line that is nothing but a `//` comment, so a trailing allow on an unrelated statement can never widen to the line below, and the preceding line is read from disk so a suppression written in an earlier commit still counts.
+
 ## [0.9.0] - 2026-08-28
 
 ### Fixed

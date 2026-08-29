@@ -6,7 +6,7 @@
 > Historical implementation plans are preserved by git history and ADRs, not mixed into this current
 > architecture reference.
 >
-> Last reviewed: 2026-08-15
+> Last reviewed: 2026-08-29
 
 ## Status
 
@@ -76,22 +76,23 @@ or Vite cannot discover from an uninstalled package:
 - `error-tracking` copies the consumer shim;
 - `secret-manager` wires the explicit config/server blocks.
 
+`error-tracking` and `docs-ui` appear in both lists on purpose, and the distinction is worth getting right:
+the *capability* self-registers on a plain `npm i`, so the feature works. What `add` contributes is the
+consumer-owned file you are meant to edit (the tracker shim, the docs page). Install it either way; reach
+for `add` when you want that file too. `docs/LUCKYSTACK_ADD_GUIDE.md` answers the same question from the
+capability side.
+
 `luckystack remove` reverses supported additions. It never deletes user-owned login pages automatically.
 
 ## 5. Scaffold and upgrade propagation
 
-`create-luckystack-app` bundles the framework's root `CLAUDE.md`, `docs/`, `skills/`,
-`.claude/commands/`, and `branch-logs/README.md` into its `framework-docs/` directory at package build time.
-A fresh scaffold receives those files under `docs/luckystack/` and the corresponding root locations.
+`create-luckystack-app` bundles the framework's docs at package build time; a fresh scaffold receives them
+under `docs/luckystack/` and the corresponding root locations. What is bundled, what is deliberately
+withheld (the framework's own records and the framework-only `CLAUDE.md` sections — and why that matters),
+and the three outcomes `npx luckystack update` can produce per file are one contract, described once in
+[`ARCHITECTURE_PACKAGING.md`](./ARCHITECTURE_PACKAGING.md) §9. It is not repeated here.
 
-Existing consumers update framework-owned copied files with:
-
-```sh
-npx luckystack update
-```
-
-Pristine files are updated; user-modified files receive `.new` sidecars for an AI-assisted merge. Upgrading
-an installed `@luckystack/*` package refreshes that package's own `CLAUDE.md` and deep docs in
+Upgrading an installed `@luckystack/*` package refreshes that package's own `CLAUDE.md` and deep docs in
 `node_modules/`.
 
 ## 6. Stable references

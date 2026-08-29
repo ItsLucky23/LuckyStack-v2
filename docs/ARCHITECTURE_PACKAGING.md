@@ -6,7 +6,7 @@
 > This document records stable contracts only. Historical migration logs belong in git history, branch logs,
 > ADRs, or dated findings — not in the current architecture reference.
 >
-> Last reviewed: 2026-08-16
+> Last reviewed: 2026-08-29
 
 ## 1. Source-of-truth rule
 
@@ -161,6 +161,19 @@ The bundle copies the root `CLAUDE.md`, `docs/`, `skills/`, `.claude/commands/`,
 `branch-logs/README.md` into `packages/create-luckystack-app/framework-docs/`. That directory is generated;
 do not edit it by hand.
 
+Two things are deliberately withheld from what a consumer receives, and both exist for the same reason —
+**a framework artifact that lands next to the consumer's own identically-named one is a second,
+authoritative-looking answer about the wrong codebase**:
+
+- **The framework's OWN records** (its generated indexes, its `decisions/`, its `lessons/`, the dependency
+  graph). The conventions ship — every protocol and `ARCHITECTURE_*` deep dive — the framework's answers do
+  not. Without this, an inherited reference to "ADR 0007" resolves to a real but unrelated decision.
+  Rationale: ADR 0056. The strip list lives in `create-luckystack-app`'s `src/index.ts` and is mirrored in
+  `scripts/bundleFrameworkDocs.mjs`.
+- **The framework-only sections of `CLAUDE.md`**, fenced in the source with `<!-- framework-only -->`. They
+  describe the monorepo a consumer does not have. An unbalanced fence throws rather than silently
+  truncating the contract.
+
 A fresh scaffold receives this bundle as `CLAUDE.md`, `docs/luckystack/`, `skills/`, and `.claude/commands/`.
 An existing consumer refreshes framework-owned copied files with:
 
@@ -168,7 +181,15 @@ An existing consumer refreshes framework-owned copied files with:
 npx luckystack update
 ```
 
-The update command preserves user edits by writing `.new` sidecars instead of overwriting modified files.
+The update command never overwrites a file the developer edited. Per path it does one of three things:
+replace it (the hash still matches the manifest baseline, so it is pristine), write a `<file>.new` sidecar
+next to it (edited — you merge), or write **nothing at all** when the path is listed in the project's
+`.luckystackignore`. That third outcome is a permanent opt-out, not a skip: an ignored path also stays out
+of the manifest, so it can never re-plan as `unchanged` later and quietly become overwritable again
+(ADR 0051). A file the new version no longer ships stays in place with a `<file>.removed` marker beside it —
+a signal to check what still references it, never an instruction to delete, and never something to merge
+into the file (the marker holds no content).
+
 Package-local `CLAUDE.md` and `docs/` are refreshed by upgrading the corresponding `@luckystack/*` package.
 
 Docker is a rendered project surface rather than a runtime package. Fresh scaffolds receive provider/router-aware Dockerfile, Compose, nginx, health, and preset assets; existing projects use `npx luckystack add docker`. `npm run docker:check` validates the rendered topology without printing secrets.

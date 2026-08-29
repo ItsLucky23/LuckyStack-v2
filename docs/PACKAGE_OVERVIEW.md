@@ -47,7 +47,8 @@
 | `@luckystack/devkit` | Dev-time file-based route discovery, hot reload, TypeScript-program-backed type-map + Zod schema emission (including the multi-directory function-injection map — spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`), supervisor process restart, and `luckystack-validate-deploy` CLI. | `typescript@>=5.7.3 <7.0.0`, `zod` | `@prisma/client` only when Prisma route types are present |
 | `@luckystack/test-runner` | Generated-type-driven sweep that walks every API endpoint and runs five progressive layers: contract smoke, auth enforcement, rate-limit, crash-resistance fuzz, and per-route custom tests. | `zod`, `socket.io-client` | `@luckystack/login`, `@luckystack/secret-manager` |
 | `@luckystack/docs-ui` | Dev-only Swagger-style browser at `/_docs` that renders `apiDocs.generated.json` with method, auth, rate limit, input/output shape, and optional inline try-it-out. | none | `@luckystack/server` |
-| `@luckystack/mcp` | Read-only MCP server exposing the project's committed AI context (decisions, lessons, dependency graph, routes, capabilities) to Claude Code as queryable tools (`blast_radius`, `who_imports`, `god_nodes`, `list_decisions`, `get_decision`, `find_route`, `find_lesson`, `get_capability`). Runs via `npx` (no app dependency); add a `luckystack` entry to `.mcp.json`. | none (uses `@modelcontextprotocol/sdk` + `zod`, bundled via `npx`) | none |
+| `@luckystack/mcp` | Read-only MCP server that makes the project's generated AI context (decisions, lessons, dependency graph, routes, capabilities) **queryable** by Claude Code instead of read whole — the artifacts are a gitignored local cache, so the tools are the intended access path. The tool list lives in `packages/mcp/CLAUDE.md`. Runs via `npx` (no app dependency); add a `luckystack` entry to `.mcp.json`. | none (uses `@modelcontextprotocol/sdk` + `zod`, bundled via `npx`) | none |
+| `@luckystack/cli` | The `luckystack` command for an EXISTING project: `add` / `remove` an optional package (installs the dep AND injects the `src/` assets a plain `npm i` cannot), `manage` for the interactive reconfiguration wizard, `update` to refresh framework-owned files from the installed version, `upgrade` to write a deterministic upgrade plan, plus `check-env` / `check-i18n` / `docker` helpers. | none (Node built-ins only) | none |
 
 ## Utilities
 
@@ -81,6 +82,7 @@ Quick lookup: feature -> which package(s) to suggest.
 | Resolve secrets from a central server (committed pointers) | `@luckystack/secret-manager` |
 | Hot-reload + type-map gen in dev | `@luckystack/devkit` |
 | Let Claude Code query the repo's AI context (blast-radius, decisions, routes) | `@luckystack/mcp` (add a `.mcp.json` entry; runs via `npx`) |
+| Add a package to an existing project, reconfigure it, or upgrade the framework | `@luckystack/cli` (`npx luckystack add <feature>` / `manage` / `update` / `upgrade`) |
 
 ## Decision Matrix
 
@@ -97,4 +99,4 @@ Quick lookup: feature -> which package(s) to suggest.
 
 ---
 
-> Voor consumers — exacte packageversies en peer-dependencies staan in de geïnstalleerde package manifests. Voor framework-owned docs gebruikt een bestaand project `npx luckystack update`; `npm run ai:index` regenereert alleen de lokale AI-index.
+> Voor consumers — exacte packageversies en peer-dependencies staan in de geïnstalleerde package manifests. Voor framework-owned docs gebruikt een bestaand project `npx luckystack update`; `npm run ai:refresh` herbouwt alleen de lokale, gitignorede AI-context-cache.

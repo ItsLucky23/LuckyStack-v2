@@ -9,9 +9,15 @@
 //
 // REPORT-ONLY by default (mirrors the audit-* skills — never auto-fixes). A
 // project opts a rule into *blocking* via a committed luckystack.invariants.json
-// (`{ "block": ["no-as-any"], "warn": ["i18n-jsx"] }`). Per-line escape hatch:
+// (`{ "block": ["no-as-any"], "warn": ["i18n-jsx"] }`). Per-line escape hatch —
+// EITHER at the end of the line, OR on a comment-only line directly above it:
 //   <code> // luckystack-allow <rule>: <reason>
+//   // luckystack-allow <rule>: <reason>
+//   <code>
 // documents a conscious deviation (Rule 3b) instead of disabling the hook.
+// Both positions are honored because a reason worth writing rarely fits after
+// the code: the same-line-only version silently did nothing for every
+// suppression an author put on the line above, which is where they land.
 //
 // Modes:
 //   (default)            scan ADDED lines of the staged git diff — only flags
@@ -24,7 +30,12 @@
 // fixture tests can assert them without a git context.
 //
 // KEEP IN SYNC with packages/create-luckystack-app/template/scripts/
-// lintInvariants.mjs (byte-for-byte duplicate ships to consumers).
+// lintInvariants.mjs — but NOT byte-for-byte, unlike this repo's other shipped
+// scripts. The consumer copy deliberately omits the H-TWIN transport-parity
+// check, which asserts things about `packages/` that a consumer project does not
+// have. Everything else — the rules, the escape hatch, the severity model — must
+// stay identical, so port a change to both by hand and re-run `--selftest` on
+// each; a blind copy would ship the framework-only check to every project.
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -175,6 +186,17 @@ export const suppressedRules = (text) => {
   for (const r of m[1].split(",")) out.add(r.trim());
   return out;
 };
+
+//? A suppression only carries from the line above when that line is nothing BUT
+//? a `//` comment. Otherwise a trailing `// luckystack-allow` on an unrelated
+//? statement would silently also cover the next line — a suppression must never
+//? widen by accident. (Only `//` is recognised: that is the one form the token
+//? is documented in, and accepting a JSDoc `*` continuation would invent a
+//? second syntax for the same thing.)
+const COMMENT_ONLY_RE = /^\s*\/\//;
+
+export const suppressedByCommentAbove = (above) =>
+  COMMENT_ONLY_RE.test(above ?? "") ? suppressedRules(above) : new Set();
 
 export const checkLine = (relPath, text) => {
   const suppressed = suppressedRules(text);
@@ -504,6 +526,9 @@ const runSelfTest = () => {
     ["as unknown as flagged", checkLine("src/foo.ts", "return z as unknown as Thing;").some((f) => f.rule === "no-as-any")],
     ["clean line ok", checkLine("src/foo.ts", "const total = a + b;").length === 0],
     ["suppression works", checkLine("src/foo.ts", "const x = y as any; // luckystack-allow no-as-any: legacy shim").length === 0],
+    ["suppression on the comment line above works", suppressedByCommentAbove("    // luckystack-allow no-as-any: the type FORBIDS this shape on purpose").has("no-as-any")],
+    ["a trailing suppression on a CODE line above does not leak down", suppressedByCommentAbove("const x = y as any; // luckystack-allow no-as-any: only mine").size === 0],
+    ["a plain comment above suppresses nothing", suppressedByCommentAbove("// just an explanation").size === 0],
     ["i18n jsx flagged", checkLine("src/p.tsx", "      <div>Welcome back to your dashboard</div>").some((f) => f.rule === "i18n-jsx")],
     ["translated jsx ok", checkLine("src/p.tsx", "      <div>{translate({ key: 'x' })}</div>").every((f) => f.rule !== "i18n-jsx")],
     ["arbitrary color flagged", checkLine("src/p.tsx", "className={`bg-[#ffffff] p-4`}").some((f) => f.rule === "no-arbitrary-color")],
@@ -533,9 +558,26 @@ const main = async () => {
     ? await wholeFileLines(argv.slice(pathsIdx + 1))
     : stagedAddedLines();
 
+  //? Read the preceding line from DISK rather than from the diff: a suppression
+  //? written in an earlier commit is not in the staged diff, but it still
+  //? applies to the line it sits above.
+  const fileLines = new Map();
+  const lineAbove = async (file, line) => {
+    if (line <= 1) return "";
+    if (!fileLines.has(file)) {
+      const [, raw] = await safe(fs.readFile(path.join(REPO_ROOT, file), "utf8"));
+      fileLines.set(file, raw === null ? [] : raw.split(/\r?\n/));
+    }
+    return fileLines.get(file)[line - 2] ?? "";
+  };
+
   const findings = [];
   for (const { file, line, text } of inputLines) {
-    for (const f of checkLine(file, text)) {
+    const raw = checkLine(file, text);
+    if (raw.length === 0) continue;
+    const above = suppressedByCommentAbove(await lineAbove(file, line));
+    for (const f of raw) {
+      if (above.has(f.rule) || above.has("*")) continue;
       const severity = config.block.includes(f.rule) ? "block" : "warn";
       findings.push({ file, line, rule: f.rule, message: f.message, severity });
     }
@@ -570,6 +612,7 @@ const main = async () => {
     console.log(`          ${f.message}`);
   }
   console.log("\n  Suppress a conscious deviation with:  // luckystack-allow <rule>: <reason>");
+  console.log("  — at the end of the flagged line, or on a comment-only line directly above it.");
   console.log("  Make a rule blocking in luckystack.invariants.json (\"block\": [\"<rule>\"]).");
 
   if (blocking.length > 0) process.exit(1);
