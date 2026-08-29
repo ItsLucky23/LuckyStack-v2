@@ -1375,3 +1375,17 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Verificatie:** `ai:lint` schoon (was 2 warnings) · `--selftest` 19/19 op beide kopieën, met drie nieuwe cases voor de hatch-positie · `ai:check-ids --backrefs` 80 records / 29 backrefs · `lint` + `lint:packages` exit 0 · `test:unit` **2083/2083 (200 files)** · scaffold-package 145/145 · `ai:changelog-check` groen · `ai:refresh` 7/7.
 
 **Files:** `docs/{PACKAGE_OVERVIEW,ARCHITECTURE_PACKAGING,DESIGN_OPTIONAL_SERVER_PACKAGES,HOSTING}.md`, `scripts/lintInvariants.mjs` + de template-kopie, `packages/create-luckystack-app/CHANGELOG.md`.
+
+## 2026-08-29 20:20 — v0.9.1 gepubliceerd: patch voor de escape-hatch en de verzoende docs
+
+**User prompt (summary):** doe de volgende release.
+
+**Scope en versiekeuze.** Sinds v0.9.0 is er precies één verzendbare wijziging: de escape-hatch-fix in `template/scripts/lintInvariants.mjs`. Geen nieuwe API, geen gedragsverandering in runtime-code, geen verschoven contract — dus patch, niet minor. De vier verzoende docs reizen mee omdat ze via `framework-docs/` in `create-luckystack-app` gebundeld worden en bij een scaffold onder `docs/luckystack/` landen; een consument krijgt dus ook de gecorrigeerde `update`-uitleg (drie uitkomsten, niet twee), "gitignored cache" in plaats van "committed", en `@luckystack/cli` dat in de packagetabellen ontbrak. Beide punten staan onder `[0.9.1]`.
+
+**Volgorde.** Anders dan bij v0.9.0 zat de release-prep al op main, dus tag en default branch wijzen naar dezelfde commit — geen PR-omweg en geen kans op een scheve release. Bewust gewacht op de `ci`-run vóór het taggen in plaats van meteen te taggen: `publish.yml` draait wél de build/lint/test-gate maar níét `e2e-scaffold`, en juist die job heeft deze release-lijn al twee keer voor een stille breuk behoed.
+
+**Registry-propagatie, tweede waarneming.** `@luckystack/mcp` was opnieuw als laatste leesbaar op npm — ~2 minuten na de andere zestien, exact hetzelfde patroon als bij v0.9.0. Toen las ik dat als een mislukte publish en herstartte ik de workflow voor niets. Nu eerst gepolld: check 1–4 gaven nog 0.9.0, check 5 gaf 0.9.1. **Regel voor de volgende keer: een ontbrekend package direct na een geslaagde publish is propagatie tot het tegendeel blijkt; poll een paar minuten voordat je iets herstart.** `time.modified` uit het packument is geen bewijs — dat veld komt uit hetzelfde verouderde document.
+
+**Verificatie:** `ci` op `03d854f` groen 4/4 (`e2e-scaffold` ✓ 4m05, node 20 ✓ 5m39, node 22 ✓ 7m02, `ai-records` ✓ 8s) · lokale publish-gate 8/8 met `test:unit` **2083/2083** en `audit:production` 0/0/0 · publish-run 33267394325 ✓ 10m20, `✅ published 17 packages` met provenance · **17/17 op npm geverifieerd via directe registry-fetch**. Lockfile-diff bij de bump: 47 regels, uitsluitend versiebumps.
+
+**Files:** alle 17 package-manifests + `package-lock.json`, `packages/create-luckystack-app/CHANGELOG.md`, deze branch-log en `branch-logs/INDEX.md`.
