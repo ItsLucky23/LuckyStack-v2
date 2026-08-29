@@ -79,12 +79,20 @@ const walkFiles = async (rootDir, predicate) => {
 //? Minimal YAML-frontmatter reader: only the shapes these records actually use
 //? (`key: value` and `key: [a, b]`). Anything richer belongs in a real parser,
 //? and a record that needs one is a record that has drifted from the template.
+//? Split on /\r?\n/, never on "\n" alone. A CRLF checkout leaves a trailing \r
+//? on every line, and `(.*)$` cannot match it (`.` excludes \r, and a
+//? non-multiline `$` is end-of-input), so EVERY field read as absent — which
+//? this checker cannot distinguish from a record that has no frontmatter. The
+//? whole frontmatter half of the guard was therefore dead on Windows while CI
+//? on Linux saw the truth, i.e. the platform that runs it on every commit was
+//? the one it did not work on. See docs/lessons/0022.
 const readFrontmatter = (text) => {
   if (!text.startsWith("---")) return {};
-  const end = text.indexOf("\n---", 3);
+  const lines = text.split(/\r?\n/);
+  const end = lines.indexOf("---", 1);
   if (end === -1) return {};
   const out = {};
-  for (const line of text.slice(3, end).split("\n")) {
+  for (const line of lines.slice(1, end)) {
     const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/);
     if (m) out[m[1]] = m[2].trim();
   }
@@ -148,6 +156,10 @@ const checkSet = (set, records) => {
 
   // 2. In-file number/slug that disagrees with the filename.
   for (const record of records) {
+    //? 0000 is the TEMPLATE, and its frontmatter is instructions to the author
+    //? ("name: short-kebab-slug"), not a claim about itself. It still takes part
+    //? in the duplicate-number check above — a second 0000 is a real collision.
+    if (record.number === 0) continue;
     const heading = record.text.match(/^#\s*(\d{4})\b/m);
     if (heading && Number.parseInt(heading[1], 10) !== record.number) {
       findings.push(`${record.file}: heading says ${heading[1]} but the filename says ${String(record.number).padStart(4, "0")}`);
