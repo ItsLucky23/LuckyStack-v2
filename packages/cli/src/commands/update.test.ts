@@ -3,13 +3,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  applyUpdate,
   choicesToFlags,
+  createIgnoreMatcher,
   hashFileContent,
   isSafeSurfacePath,
   isUpdatablePath,
   planUpdate,
+  readScaffoldIgnore,
   readScaffoldManifest,
   runUpdate,
+  IGNORE_FILE_NAME,
   MANIFEST_RELATIVE_PATH,
   type ScaffoldManifest,
 } from './update';
@@ -255,6 +259,90 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
     expect(report).toContain('AI merge instruction');
   });
 
+  it('flags a file the new version no longer ships with a .removed marker, never deleting it', () => {
+    //? Two retired framework files the consumer still has on disk: one the
+    //? developer edited, one pristine. Neither may be deleted by the update.
+    write(consumerDir, 'CLAUDE.md', 'old claude\n');
+    write(consumerDir, 'scripts/generateRunbooks.mjs', 'retired generator\n');
+    write(consumerDir, 'docs/luckystack/AI_RUNBOOKS.md', 'USER EDITED runbooks\n');
+    manifestFor(consumerDir, {
+      'CLAUDE.md': 'old claude\n',
+      'scripts/generateRunbooks.mjs': 'retired generator\n',
+      'docs/luckystack/AI_RUNBOOKS.md': 'old runbooks\n',
+    });
+
+    //? The fresh render no longer contains either retired file.
+    write(freshDir, 'CLAUDE.md', 'new claude\n');
+    manifestFor(freshDir, { 'CLAUDE.md': 'new claude\n' }, { luckystackVersion: '0.8.6' });
+
+    const result = runUpdate(project(), {
+      cliVersion: '0.8.6',
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    });
+    expect(result.ok).toBe(true);
+
+    //? The files themselves survive — an update never removes anything.
+    expect(fs.readFileSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs'), 'utf8')).toBe('retired generator\n');
+    expect(fs.readFileSync(path.join(consumerDir, 'docs/luckystack/AI_RUNBOOKS.md'), 'utf8')).toBe('USER EDITED runbooks\n');
+
+    //? Each gets a marker beside it, naming itself as a marker and not content.
+    const marker = fs.readFileSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'), 'utf8');
+    expect(marker).toContain('0.8.6');
+    expect(marker).toContain('scripts/generateRunbooks.mjs');
+    expect(marker).toContain('THIS IS A REMOVAL MARKER, NOT FILE CONTENT');
+    expect(fs.existsSync(path.join(consumerDir, 'docs/luckystack/AI_RUNBOOKS.md.removed'))).toBe(true);
+
+    //? The marker must never read as an order to delete — removing a file is
+    //? user-gated (CLAUDE.md Rule 8), so it has to route through the developer.
+    expect(marker).toContain('Rule 8');
+    expect(marker).toMatch(/propose|recommendation/i);
+
+    //? A retired file must never also get a `.new` twin — that is the exact
+    //? confusion the separate extension exists to prevent.
+    expect(fs.existsSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.new'))).toBe(false);
+    expect(fs.existsSync(path.join(consumerDir, 'docs/luckystack/AI_RUNBOOKS.md.new'))).toBe(false);
+
+    //? Report lists both and carries the cleanup instruction.
+    const dumpDir = path.join(consumerDir, 'dump');
+    const report = fs.readFileSync(
+      path.join(dumpDir, String(fs.readdirSync(dumpDir).filter((f) => f.startsWith('UPDATE_'))[0])),
+      'utf8',
+    );
+    expect(report).toContain('No longer shipped by this framework version');
+    expect(report).toContain('scripts/generateRunbooks.mjs');
+    expect(report).toContain('AI cleanup instruction');
+    //? The instruction must send the AI to the developer, batched, before any
+    //? deletion — not tell it to clean up on its own.
+    expect(report).toContain('WAIT for their decision');
+    expect(report).toContain('ONE batch');
+    expect(report).toContain('Rule 8');
+  });
+
+  it('re-flags an ignored removal on the next update, and stops once the file is gone', () => {
+    write(consumerDir, 'scripts/generateRunbooks.mjs', 'retired generator\n');
+    manifestFor(consumerDir, { 'scripts/generateRunbooks.mjs': 'retired generator\n' });
+    manifestFor(freshDir, {}, { luckystackVersion: '0.8.6' });
+
+    const opts = {
+      cliVersion: '0.8.6',
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    };
+    expect(runUpdate(project(), opts).ok).toBe(true);
+    expect(fs.existsSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'))).toBe(true);
+
+    //? Developer ignores it: the manifest keeps the entry, so a later update
+    //? flags it again rather than forgetting about it.
+    fs.rmSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'));
+    expect(runUpdate(project(), opts).ok).toBe(true);
+    expect(fs.existsSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'))).toBe(true);
+
+    //? Developer acts on it: file gone -> nothing left to flag.
+    fs.rmSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs'));
+    fs.rmSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'));
+    expect(runUpdate(project(), opts).ok).toBe(true);
+    expect(fs.existsSync(path.join(consumerDir, 'scripts/generateRunbooks.mjs.removed'))).toBe(false);
+  });
+
   it('stamp-less mode: nothing overwritten, no manifest fabricated', () => {
     write(consumerDir, 'CLAUDE.md', 'old claude\n');
     write(freshDir, 'CLAUDE.md', 'new claude\n');
@@ -352,5 +440,72 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
     expect(result.ok).toBe(true);
     expect(fs.readFileSync(path.join(consumerDir, 'src/login/page.tsx'), 'utf8')).toBe('old page\n');
     expect(fs.existsSync(path.join(consumerDir, 'src/login/page.tsx.new'))).toBe(false);
+  });
+});
+
+//? The opt-out exists because "just delete the file" does not work: a file
+//? missing locally plans as ADD, so the next update delivers it again. The
+//? real case was a project with its own `compose.yml` receiving the scaffold's
+//? `compose.yaml` — different name, no collision, no sidecar, and Docker
+//? Compose silently preferring the new one.
+describe('.luckystackignore opt-out', () => {
+  it('matches exact paths, directory subtrees, and single-segment globs', () => {
+    const matches = createIgnoreMatcher(['compose.yaml', 'docker/', '*.Dockerfile', 'docs/**/draft.md']);
+    expect(matches('compose.yaml')).toBe(true);
+    expect(matches('compose.yml')).toBe(false); //? a near-miss name must NOT match
+    expect(matches('docker/nginx.conf')).toBe(true);
+    expect(matches('docker')).toBe(false); //? `docker/` covers the subtree, not the entry itself
+    expect(matches('App.Dockerfile')).toBe(true);
+    expect(matches('build/App.Dockerfile')).toBe(false); //? `*` stays inside one segment
+    expect(matches('docs/a/b/draft.md')).toBe(true);
+    expect(matches('docs/draft.md')).toBe(false); //? `**` needs at least one segment here
+  });
+
+  it('reads patterns, skipping blanks and comments, and tolerates a missing file', () => {
+    expect(readScaffoldIgnore(consumerDir)).toEqual([]);
+    write(consumerDir, IGNORE_FILE_NAME, '# ours lives at compose.yml\ncompose.yaml\n\n  Dockerfile  \n');
+    expect(readScaffoldIgnore(consumerDir)).toEqual(['compose.yaml', 'Dockerfile']);
+  });
+
+  it('plans an ignored file as `ignored` instead of `add`, and writes nothing for it', () => {
+    write(consumerDir, IGNORE_FILE_NAME, 'compose.yaml\n');
+    write(consumerDir, 'CLAUDE.md', 'old claude\n');
+    const consumerManifest = manifestFor(consumerDir, { 'CLAUDE.md': 'old claude\n' });
+
+    write(freshDir, 'CLAUDE.md', 'new claude\n');
+    write(freshDir, 'compose.yaml', 'services: {}\n');
+    const freshManifest = manifestFor(freshDir, {
+      'CLAUDE.md': 'new claude\n',
+      'compose.yaml': 'services: {}\n',
+    }, { luckystackVersion: '0.9.0' });
+
+    const plan = planUpdate(consumerDir, consumerManifest, freshManifest, 'app');
+    expect(Object.fromEntries(plan.entries.map((e) => [e.path, e.action]))).toEqual({
+      'CLAUDE.md': 'overwrite',
+      'compose.yaml': 'ignored',
+    });
+
+    const { counts, reportPath } = applyUpdate(project(), plan, consumerManifest, freshDir, freshManifest, 'app');
+    expect(counts.ignored).toBe(1);
+    //? The whole point: not the file, and not a sidecar either.
+    expect(fs.existsSync(path.join(consumerDir, 'compose.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(consumerDir, 'compose.yaml.new'))).toBe(false);
+    //? But it must be visible in the report — a silent skip is indistinguishable
+    //? from the framework having dropped the file.
+    //? `writeDumpLog` returns the path relative to the project root.
+    expect(fs.readFileSync(path.join(consumerDir, reportPath), 'utf8')).toContain('compose.yaml');
+  });
+
+  it('keeps an ignored path out of the manifest baseline so it never re-plans as unchanged', () => {
+    write(consumerDir, IGNORE_FILE_NAME, 'compose.yaml\n');
+    const consumerManifest = manifestFor(consumerDir, {});
+    write(freshDir, 'compose.yaml', 'services: {}\n');
+    const freshManifest = manifestFor(freshDir, { 'compose.yaml': 'services: {}\n' });
+
+    const plan = planUpdate(consumerDir, consumerManifest, freshManifest, 'app');
+    applyUpdate(project(), plan, consumerManifest, freshDir, freshManifest, 'app');
+
+    const written = readScaffoldManifest(consumerDir);
+    expect(written?.files.some((entry) => entry.path === 'compose.yaml')).toBe(false);
   });
 });

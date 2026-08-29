@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-08-18
+
+### Added
+
+- `MiddlewareResult` gains a deny-in-place variant: `{ success: false, status: number }`. The contract previously only supported allow and redirect, so a route guard could not say "you are signed in but not allowed here" without sending the user somewhere else — losing the requested URL and explaining nothing. `<Middleware>` now keeps the URL and renders a deny state; pass `denied` (a node, or a function of the status) to supply your own, otherwise a minimal built-in view is used. Deliberately untranslated: `translate()` returns the KEY when it cannot resolve one, so a built-in with i18n keys would print `middleware.forbidden.title` in every project that upgrades without adding them.
+- `resolveMiddlewareOutcome(result)` + the `MiddlewareOutcome` type — one interpretation of a middleware result, shared by `<Middleware>` and `useRouter`.
+
+### Fixed
+
+- `Middleware.tsx` no longer carries a stray NUL byte in the `routeKey` template literal (`${location.pathname}\0${location.search}`). Harmless at runtime — the key is only used for change detection — but git classified the source file as BINARY, so `git diff` showed nothing for it and it could not be merged textually. Predates 0.8.3.
+- `useRouter` no longer silently does nothing when a guard denies. It branched separately from `<Middleware>` and returned without navigating for any result that was neither allow nor redirect, so a guarded button simply appeared broken. Both now route through `resolveMiddlewareOutcome`, and a `status` deny navigates so the target route can render the deny state at the requested URL.
+
+## [0.8.5] - 2026-08-17
+
+### Added
+
+- `isTestFile` / `isTestDirectory` (+ the `TEST_FILE_PATTERN` / `TEST_DIRECTORY_NAMES` they are built from) — one convention for every framework surface that discovers files on disk and then imports them. See ADR 0047.
+
 ## [0.8.4] - 2026-08-17
 
 ### Added

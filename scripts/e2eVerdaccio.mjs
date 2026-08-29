@@ -424,7 +424,23 @@ const main = async () => {
     process.exit(2);
   }
 
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-e2e-'));
+  //? NOT `os.tmpdir()`. Vite loads `vite.config.ts` by having esbuild walk UP
+  //? from the project directory; on Windows that walk reaches the system temp
+  //? root, which is large and full of files other processes hold open. The read
+  //? fails, vite SILENTLY falls back to a default config with no plugins, and
+  //? the build then dies on `import 'src/index.css'` — a symptom that looks
+  //? exactly like a scaffold bug and cost a full debugging session to trace.
+  //? (The first occurrence was louder: "Cannot read directory '../../..'".)
+  //? A dedicated, shallow work root keeps that walk short and clean. Override
+  //? with `LUCKYSTACK_E2E_WORK_DIR` if this location is unsuitable.
+  //?
+  //? It must also sit OUTSIDE the repo: this is an npm-workspaces root, so a
+  //? project scaffolded underneath it is swallowed by the workspace and the
+  //? scaffold produces no project directory at all.
+  const workRoot = process.env.LUCKYSTACK_E2E_WORK_DIR
+    ?? path.join(path.dirname(ROOT), '.luckystack-e2e-work');
+  fs.mkdirSync(workRoot, { recursive: true });
+  const work = fs.mkdtempSync(path.join(workRoot, 'ls-e2e-'));
   const storage = path.join(work, 'storage');
   const configPath = path.join(work, 'verdaccio.yaml');
   const projectParent = path.join(work, 'scaffold');
@@ -615,6 +631,11 @@ const main = async () => {
     );
 
     if (!fs.existsSync(projectDir)) {
+      //? Count the abort as a FAILED step. Without this the run skipped every
+      //? remaining check and still printed "ALL GREEN" with exit 0 — a gate
+      //? that reports success for a run it never performed is worse than no
+      //? gate, and it is exactly what would wave a broken publish through.
+      step('scaffold produced a project directory', () => false);
       console.error('[e2e] scaffold produced no project directory — aborting the remaining steps.');
     } else {
       //? Prove the CHOSEN package manager actually ran. The scaffolder skips the

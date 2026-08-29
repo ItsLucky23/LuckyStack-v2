@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-08-28
+## [0.8.5] - 2026-08-17
 
-### Fixed
+### Changed
 
-- The `runAllTests` characterization suite is no longer flaky under load. It mocked every dependency except `@luckystack/login`, which `buildAuthHeaders` pulls in through a runtime dynamic import; on a busy machine that real package load overran the test timeout and the aborted test's continuation then polluted the next test's mock calls. Runtime behaviour is unchanged — test-only.
+- Test-only: the `runAllTests` characterization suite now mocks `@luckystack/login`, so it no longer cold-loads that package (and its dependency graph) on every `authToken` case. This removes a timeout-under-load flake and adds the first assertions for the CSRF-header branch of `buildAuthHeaders`, which previously degraded to a warning on every run. No runtime behaviour change.
 
 ## [0.8.4] - 2026-08-17
 

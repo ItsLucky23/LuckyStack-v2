@@ -1,3 +1,5 @@
+import { isTestDirectory } from '@luckystack/core';
+
 //? Routing rule registry. Lets consumers customize the file-based routing
 //? conventions that devkit uses to discover APIs, sync events, and ignored
 //? folders.
@@ -132,6 +134,16 @@ export const isSyncFileName = (fileName: string): boolean => {
 export const isRouteTestFile = (fileNameOrPath: string): boolean => {
   return fileNameOrPath.endsWith('.tests.ts');
 };
+
+//? INSIDE a marker folder (`_api` / `_sync`), a `_`-prefixed directory is
+//? PRIVATE (co-located helpers, `_lib/`) and a `__tests__` / `__mocks__`
+//? directory holds tests. Neither is route surface.
+//?
+//? This applies only BELOW the marker. At page level the walk still has to
+//? descend into `_`-prefixed folders, because that is exactly where markers
+//? live (`src/_ai/_api/...`).
+export const isNonRouteDirectory = (directoryName: string): boolean =>
+  directoryName.startsWith(getRoutingRules().privateFolderPrefix) || isTestDirectory(directoryName);
 
 //? Re-export the core page-route validator + bind it to the active
 //? `RoutingRules` (so a consumer that calls `registerRoutingRules({

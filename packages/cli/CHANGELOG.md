@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `add login` / `add docs-ui` page assets carry a `//? intent:` line, matching the scaffold template (asset ↔ template parity).
 
+### Added
+
+- `luckystack update` now honours a `.luckystackignore` file at the project root:
+  a `.gitignore`-shaped list of scaffold paths this project refuses. Ignored paths
+  get nothing written — no file, no `.new` sidecar — stay out of the scaffold
+  manifest, and are listed in the update report under "Skipped — this project
+  opted out". Until now the only way to refuse a scaffold file was to delete it,
+  which does not stick: a file missing locally plans as `add`, so the next update
+  delivers it again. This matters most when a project solves the same job under a
+  DIFFERENT name, because then nothing collides and no sidecar warns you — the
+  case that prompted it was a project with its own `compose.yml` receiving the
+  scaffold's `compose.yaml`, which Docker Compose silently prefers.
+
+## [0.8.6] - 2026-08-18
+
+### Added
+
+- `luckystack update` now writes a `<file>.removed` marker next to every framework-owned file the new version no longer ships, and the `dump/UPDATE_<hash>.log` report gained a matching AI cleanup instruction. Previously these files were listed in the report only, so an agent applying the report merged the `.new` sidecars and silently left the retired files behind. Nothing is ever deleted — not by the update and not by the agent applying its report. The marker and the instruction both state what to check (does an npm script, the pre-commit hook, or another module still reference it?) and then require the findings to go to the developer in one batch with a per-file recommendation, waiting for a decision; deleting files is not an autonomous action. An ignored marker is re-created by the next update; once the file is gone, the flagging stops. Deliberately a distinct extension rather than a `.new`: the report instructs merging a `.new` INTO its file, which would destroy a file if the sidecar held a removal notice instead of replacement content.
+
 ## [0.8.4] - 2026-08-17
 
 ### Fixed

@@ -549,28 +549,13 @@ const renderUnused = (lookup, label) => {
 // Document assembly
 // ---------------------------------------------------------------------------
 
-// Ownership (from @docs owner tags) + test-coverage summary over all routes.
-// Git authorship is intentionally NOT shelled-out here (one `git log` per file
-// is slow + noisy in pre-commit); @docs owner is the primary, AI-maintained
-// signal (CLAUDE.md Rule 15b). The "Owner" column already shows per-route owner.
-const renderOwnershipAndCoverage = (routes) => {
+// Test-coverage summary over all routes. The optional per-route `@docs owner`
+// tag still renders in the "Owner" column above; no aggregate ownership table
+// is emitted — on a codebase where nobody sets the tag it is pure noise.
+const renderCoverage = (routes) => {
   // `method` exists on API rows, `serverFile` on sync rows — use it to label kind.
   const kindOf = (r) => ("serverFile" in r ? "sync" : "api");
   const out = [];
-
-  // Ownership: count routes per @docs owner.
-  const counts = new Map();
-  for (const r of routes) {
-    const owner = r.owner ?? "(unowned)";
-    counts.set(owner, (counts.get(owner) ?? 0) + 1);
-  }
-  const ownerRows = [...counts.entries()]
-    .sort((a, b) => (a[0] === "(unowned)" ? 1 : b[0] === "(unowned)" ? -1 : a[0].localeCompare(b[0])))
-    .map(([owner, n]) => [owner === "(unowned)" ? "_(unowned)_" : `\`${owner}\``, String(n)]);
-  out.push("**By owner** (from `@docs owner` tags — set them from day one, Rule 15b):");
-  out.push("");
-  out.push(renderTable(["Owner", "Routes"], ownerRows));
-  out.push("");
 
   // Coverage: routes with a sibling per-route `.tests.ts`.
   const untested = routes.filter((r) => !r.tested);
@@ -605,9 +590,9 @@ const buildDocument = (data) => {
   parts.push("");
   parts.push(renderSyncRoutes(data.syncRoutes));
   parts.push("");
-  parts.push("## Ownership & coverage");
+  parts.push("## Test coverage");
   parts.push("");
-  parts.push(renderOwnershipAndCoverage([...data.apiRoutes, ...data.syncRoutes]));
+  parts.push(renderCoverage([...data.apiRoutes, ...data.syncRoutes]));
   parts.push("");
   parts.push(`## Pages (${data.pages.length})`);
   parts.push("");

@@ -23,6 +23,11 @@ They are **not** a substitute for commit messages, PR descriptions, or architect
 
 ## 3. When to log
 
+> **Timing is governed by the Session Capture Protocol** (`CLAUDE.md`): entries are written at
+> **wrap-up** — end of session, just before a commit, or when the user asks — never per prompt, and
+> never while sparring. One entry covers the whole session; split it only when the session held
+> clearly separate pieces of work. The list below decides *whether* a session is loggable at all.
+
 ### Log it
 
 - A new feature, file, package, or module was added.
@@ -44,7 +49,9 @@ They are **not** a substitute for commit messages, PR descriptions, or architect
 
 ### When in doubt
 
-Log it. A 5-line entry is cheap. A missed handoff costs the next session 30 minutes of archaeology.
+If the session changed code, log it — a 5-line entry is cheap and a missed handoff costs the next
+session 30 minutes of archaeology. If it changed nothing, don't: a log entry for a conversation is
+noise, and the Session Capture Protocol exists precisely to keep discussion out of the record.
 
 ### Examples
 

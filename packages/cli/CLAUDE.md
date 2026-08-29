@@ -102,9 +102,15 @@ in the installed cli so it's readable even when the project's own docs predate i
 4. **Refresh in-tree files.** `npx luckystack update` (docs/scripts/CLAUDE.md) then
    `npx luckystack update --app` (framework `src/` UI + routes + `config.ts`). New files
    are delivered; files the developer edited get a `<file>.new` sidecar + an AI-merge note
-   in `dump/UPDATE_*.log` (never overwritten). No `.luckystack/scaffold.json` (pre-0.4.1
+   in `dump/UPDATE_*.log` (never overwritten). A file the new version no longer ships stays
+   in place with a `<file>.removed` marker beside it. No `.luckystack/scaffold.json` (pre-0.4.1
    project) → sidecar-only mode (every differing file gets a `.new` twin).
-5. **Merge the `.new` sidecars**, then adopt any opted-in feature: a NEW optional package →
+5. **Merge the `.new` sidecars. Then resolve the `.removed` markers**: check what still
+   references each file (npm scripts, `.githooks/pre-commit`, other modules), bring the list
+   to the developer in ONE batch with a per-file recommendation, and WAIT for their decision —
+   deleting files is never autonomous. On a yes, remove file + marker; on a no, keep the file
+   and drop only the marker. Never merge a marker into its file: it holds no content, so a
+   merge destroys the file. Then adopt any opted-in feature: a NEW optional package →
    `npx luckystack add <feature>` (`luckystack list` shows options); a feature TOGGLE on an
    installed package (2FA) → config flag + schema columns (manual, fails loudly) +
    prerequisites, per the feature runbook (`docs/luckystack/ARCHITECTURE_AUTH.md` for 2FA).
@@ -135,7 +141,7 @@ in the installed cli so it's readable even when the project's own docs predate i
 | `commands/addDocker.ts` | `addDocker` renders provider/router-aware assets from `assets/docker/` copy-if-absent and adds `docker:*` scripts; `checkDocker` verifies files, placeholders and invocation wiring without reading/printing secrets. Docker is a project surface, not a registry package. |
 | `commands/addAiDocs.ts` | Add `@luckystack/mcp` (devDep) + register the graph server in `.mcp.json`; `removeAiDocs` reverses. (The doc tree is NOT bundled — re-scaffold for that.) |
 | `commands/addBackendOnly.ts` | Generic handler for `sync` / `email`: add dep + install (self-wire at boot). |
-| `commands/update.ts` | `update` — framework-owned-files refresh (ADR 0021 phase 1a). Exports the pure pieces for tests/tooling: `readScaffoldManifest`, `choicesToFlags` (allowlisted recorded choices → scaffolder flags), `normalizeScaffoldProjectName` (byte-equivalent scaffold slug), `isSafeWindowsScaffoldArg`, `isSafeSurfacePath` (the bucket-(a) allow-list), `planUpdate` (add/overwrite/sidecar/unchanged classification), `applyUpdate` (writes + manifest refresh + dump/ report), `runUpdate` (orchestrator; `renderFreshScaffold` injectable — default runs `npx create-luckystack-app@<version>` into a temp dir with the Windows-safe cmd /s /c boundary). Hash logic mirrors the scaffolder's `scaffoldManifest.ts` (sha256, CRLF→LF for text) — verified by a cross-scaffold check. |
+| `commands/update.ts` | `update` — framework-owned-files refresh (ADR 0021 phase 1a). Exports the pure pieces for tests/tooling: `readScaffoldManifest`, `choicesToFlags` (allowlisted recorded choices → scaffolder flags), `normalizeScaffoldProjectName` (byte-equivalent scaffold slug), `isSafeWindowsScaffoldArg`, `isSafeSurfacePath` (the bucket-(a) allow-list), `planUpdate` (add/overwrite/sidecar/unchanged/ignored classification), `applyUpdate` (writes + manifest refresh + dump/ report), `readScaffoldIgnore` + `createIgnoreMatcher` + `IGNORE_FILE_NAME` (the `.luckystackignore` opt-out, ADR 0051 — a path listed there gets NOTHING written, not even a sidecar, and stays out of the manifest so it never re-plans as `unchanged`), `runUpdate` (orchestrator; `renderFreshScaffold` injectable — default runs `npx create-luckystack-app@<version>` into a temp dir with the Windows-safe cmd /s /c boundary). Hash logic mirrors the scaffolder's `scaffoldManifest.ts` (sha256, CRLF→LF for text) — verified by a cross-scaffold check. |
 | `commands/upgrade.ts` | `upgrade` — READ-ONLY plan generator. `readInstalledPackages` (node_modules `@luckystack/*` + versions + CHANGELOG paths), `buildUpgradePlan` (pure — installed/target/manifest + ordered CHANGELOG list + steps + gotchas), `runUpgrade` (writes `dump/UPGRADE_PLAN.md`, injectable `now` for tests). |
 | `commands/checkEnv.ts` | `check-env` — A: unused `.env` keys; B: env vars used but undefined. DEV_-aware; framework-key ignore list; env files via `getEnvFiles()` semantics (`LUCKYSTACK_ENV_FILES` else `.env`,`.env.local`). |
 | `commands/checkI18n.ts` | `check-i18n` — C: unused locale keys; D: used keys missing per-language. Used-set = literal `{ key: '...' }` + `errorCode: '...'` (dotted) harvested repo-wide; dynamic `key:<var>` sites listed for review. |

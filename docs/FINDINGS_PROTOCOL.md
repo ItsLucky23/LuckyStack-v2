@@ -8,9 +8,27 @@ Last updated: 2026-07-14
 
 ---
 
+## Rule 0 — a findings-set needs a REQUEST and a wrap-up
+
+Before any of the rules below apply, two gates must pass (**Session Capture Protocol**, `CLAUDE.md`):
+
+- **The user asked for it.** A findings-folder is created for a requested scan, audit, or sweep.
+  Analysis the AI performed on its own initiative — to answer a question, weigh options, or spar about
+  a design — belongs in the reply, not in a tracked backlog. This is the single biggest source of
+  findings-bloat: exploration that quietly turns into permanent open items nobody asked to track.
+- **It is written at wrap-up, not mid-scan.** Hold findings in the in-session capture buffer and write
+  the folder once at the end — autonomously, no permission prompt. The "was it requested" gate above is
+  what keeps findings rare, not an approval step.
+
+**Triage is part of writing it.** The ledger only grows, and the protocol forbids deleting a folder that
+still has an `open` item — so an untriaged dump becomes a permanent write-only backlog. When proposing
+the folder, cap it at the items actually worth tracking and mark the rest `wontfix` immediately.
+
+---
+
 ## The three rules
 
-1. **Every AI scan / findings-set / analysis goes under a DATE-LED folder.**
+1. **Every requested scan / findings-set goes under a DATE-LED folder.**
    `docs/findings/<YYYY-MM-DD>-<slug>/` where the date is **today** and `<slug>`
    is a short kebab-case topic (e.g. `security`, `bug-sweep`, `perf`,
    `feature-2fa`). One folder per scan-run — never append findings from a new run

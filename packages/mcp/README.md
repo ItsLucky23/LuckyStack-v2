@@ -31,7 +31,6 @@ server with your project root as the working directory.
 | `list_decisions(tag?)` | "What did we decide, and about what?" |
 | `get_decision(id)` | "Why did we decide X?" (full ADR) |
 | `find_route(query)` | "Which API/sync routes match this?" |
-| `get_runbook(task?)` | "How do I add an API/page/sync/helper here?" |
 | `get_capability(name)` | "Does a helper/component for this already exist?" |
 
 All tools are read-only and read committed artifacts (`docs/ai-graph.json`, `docs/decisions/`,

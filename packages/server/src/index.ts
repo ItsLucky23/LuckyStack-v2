@@ -11,7 +11,8 @@ export type {
   PostRoomLeavePayload,
   OnLocationUpdatePayload,
 } from './hookPayloads';
-export { bootstrapLuckyStack, registerOverlayLoader, OVERLAY_ORDER } from './bootstrap';
+export { bootstrapLuckyStack, registerOverlayLoader, OVERLAY_ORDER, collectOverlayEntries } from './bootstrap';
+export type { OverlayEntries } from './bootstrap';
 export type { BootstrapLuckyStackOptions } from './bootstrap';
 export { verifyBootstrap } from './verifyBootstrap';
 export type { BootstrapRequirements } from './verifyBootstrap';
@@ -52,6 +53,7 @@ export {
 } from './errorFormatterRegistry';
 export type { ErrorFormatter, ErrorFormatterContext } from './errorFormatterRegistry';
 export type {
+  AfterListenOptions,
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
   StopLuckyStackServerOptions,

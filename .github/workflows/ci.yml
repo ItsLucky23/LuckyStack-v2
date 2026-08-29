@@ -93,3 +93,42 @@ jobs:
             echo "Skipping e2e — @vercel-labs/agent-browser not installed."
           fi
         continue-on-error: true
+
+  # The ONLY gate that exercises the real consumer path: publish every package
+  # to a throwaway registry, scaffold against it, install with a real package
+  # manager, then typecheck + build the result. Unit tests cannot reach this —
+  # they never resolve an `@luckystack/*` tarball by semver from a registry.
+  #
+  # Deliberately NOT `continue-on-error`. It went unwired for months, and in
+  # that time it accumulated two defects of its own (a work root Vite could not
+  # load a config from, and an aborted run that still printed ALL GREEN). An
+  # advisory gate is what let that happen.
+  #
+  # Single Node version on purpose: this is an install/packaging check, not a
+  # runtime-matrix check, and it publishes 17 packages per run.
+  e2e-scaffold:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      # The harness builds + publishes the packages itself as its first steps,
+      # so no separate build:packages is needed here.
+      - name: Scaffold e2e (verdaccio, real install)
+        run: node scripts/e2eVerdaccio.mjs
+        env:
+          # Keep the work root off the runner's shared temp for the same reason
+          # it moved locally: Vite resolves `vite.config.ts` by walking UP from
+          # the project, and a crowded temp root makes that walk fail — silently
+          # falling back to a plugin-less config and breaking the build.
+          LUCKYSTACK_E2E_WORK_DIR: ${{ runner.temp }}/luckystack-e2e

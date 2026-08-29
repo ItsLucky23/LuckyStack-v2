@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-08-18
+
+### Fixed
+
+- Route discovery matches the `_api` / `_sync` marker EXACTLY instead of any folder name ending in "api"/"sync". A folder called `externalApi/`, `thisIsAFolderAPI/` or `dataSync/` was walked as a route folder, so every file inside it logged a red `[loader][api] invalid filename` at boot. The suffix test also hardcoded the marker word, silently ignoring a consumer who overrode `apiMarker` via `registerRoutingRules`.
+- The route walk no longer descends into private (`_lib/`) or test (`__tests__/`, `__mocks__/`) subfolders of a marker. The `_`-prefix convention already said these are not route surface, but only page-route validation applied it — the loader walked in and warned about every helper file.
+- Test files co-located with routes no longer produce filename warnings. Detection was `.tests.ts` only, so `.test.ts` and `.spec.ts` each produced a red line; it now uses core's `isTestFile`. Together these three fixes take a real consumer project from 33 boot warnings — none of them an actual problem — to zero.
+- Build-time type-map discovery applies the same route-surface rule as the dev loader (shared `isRouteSurfaceFile`), so the generator can no longer emit a type for a route the loader will never register.
+- Hot reload applies that rule too. Pruning private subtrees in the boot scan alone left the two disagreeing: `_api/_lib/handoff_v1.ts` still matched the `_v<N>` regex on save, so it registered `api/<page>/_lib/handoff/v1` — a route that worked until the next restart and then silently vanished.
+- Private-subtree detection anchors on the LAST `_api` / `_sync` segment instead of the first. Paths are absolute, so a checkout living under a folder literally named `_api` anchored there and every real marker below it read as a private segment — hiding every route in the project.
+
+## [0.8.5] - 2026-08-17
+
+### Added
+
+- `collectFunctionModules()` / `renderFunctionsMap()` — one shared source of truth for server-function discovery and `functions.*` key derivation, consumed by the dev loader, the type-map generator and `scripts/generateServerRequests.ts`. A cross-root duplicate key or a module/namespace collision now fails the build with a diagnostic naming both source files, instead of silently dropping one module from the generated map.
+
+### Fixed
+
+- Test files in a `serverFunctionDirs` root are excluded from function injection. `functions/db.tests.ts` used to be injected as `functions['db.tests']` — imported at boot by the dev loader, declared in the generated `Functions` interface, and baked into the production runtime map. `__tests__` / `__mocks__` folders are skipped too (ADR 0047).
+
+- Server-function discovery no longer diverges between layers. The type-map generator now honours the `RoutingRules.ignore` predicate on function roots (it previously only did so for routes), and both it and the dev loader derive key paths from the same walk that feeds the production map generator.
+
 ## [0.8.4] - 2026-08-17
 
 ### Changed

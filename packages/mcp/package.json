@@ -44,8 +44,8 @@
     "dist",
     "README.md",
     "CLAUDE.md",
-    "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",

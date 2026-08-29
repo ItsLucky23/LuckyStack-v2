@@ -1,14 +1,19 @@
 #!/bin/sh
-#? Two pure-Node CHECKS. Nothing else.
+#? Pure-Node CHECKS, plus the ONE generated file that is genuinely committed.
 #?
 #? This hook used to run ten generators and `git add` their output. Two things
 #? were wrong with that. It made every commit slow — and it made the commit
 #? UNTRUE: the generators read the whole working tree, not the staging area, so
 #? a commit could carry an index derived from code that wasn't in it.
 #?
-#? The AI-context artifacts are now gitignored (see .gitignore) and rebuilt by
+#? The AI-context INDEXES are now gitignored (see .gitignore) and rebuilt by
 #? `npm run ai:refresh` / `postinstall`. With nothing committed there is nothing
-#? to keep in sync, so this hook writes NOTHING to the working tree.
+#? to keep in sync, so this hook no longer regenerates or stages any of them.
+#?
+#? AGENTS.md is the deliberate exception and stays: it is not a queryable index
+#? but a COMMITTED convention file that other tools read straight from the repo,
+#? and CLAUDE.md is its only input — so regenerating it here is cheap and is the
+#? only thing that keeps the two from drifting.
 #?
 #? Active via `git config core.hooksPath .githooks` (set by the root `prepare`
 #? script at install time).
@@ -30,6 +35,10 @@ node scripts/checkRecordIds.mjs
 #? luckystack.invariants.json.
 echo "[pre-commit] Checking CLAUDE.md invariants on staged changes..."
 node scripts/lintInvariants.mjs
+
+echo "[pre-commit] Regenerating AGENTS.md from CLAUDE.md..."
+npm run ai:agents-md --silent
+git add AGENTS.md
 
 #? Nudges, never blocking.
 echo "[pre-commit] Checking hand-written doc staleness (report-only)..."

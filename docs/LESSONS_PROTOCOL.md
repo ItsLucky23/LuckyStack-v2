@@ -24,10 +24,14 @@ CLAUDE.md rule); if it's "don't do X because it silently breaks Y", that's a les
 
 ## AI MUST, on its own
 
-- **Record a lesson when a non-obvious dead-end is hit.** When a session burns real effort on a path that
-  failed for a reason that wasn't obvious up front (a leaky boundary, a platform footgun, a "static checks
-  passed but runtime broke" surprise), write `docs/lessons/NNNN-slug.md` (What happened / Root cause / How
-  to avoid) then regenerate `npm run ai:lessons`. Autonomous — a committed doc, like a branch-log append.
+- **Propose a lesson at wrap-up when a non-obvious dead-end was hit.** Qualifying bar: the session burned
+  **real effort** on a path that failed for a reason that wasn't obvious up front (a leaky boundary, a
+  platform footgun, a "static checks passed but runtime broke" surprise) **and** the trap would plausibly
+  repeat. A bug found and fixed in minutes is not a lesson; neither is anything an existing lesson already
+  covers. Timing follows the **Session Capture Protocol** (`CLAUDE.md`): hold the candidate in the
+  in-session capture buffer and write `docs/lessons/NNNN-slug.md` (What happened / Root cause / How to
+  avoid) at wrap-up, then regenerate `npm run ai:lessons`. Autonomous — no permission prompt, like a
+  branch-log append. The bar is what keeps lessons rare, not an approval step.
 - **Consult it before retrying something hard.** Before re-attempting a tricky integration or a previously
   abandoned approach, `find_lesson` first — don't rediscover a known pitfall.
 - **Offer to backfill on an existing project.** If at session start `docs/lessons/` is effectively empty

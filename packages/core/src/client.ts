@@ -137,6 +137,7 @@ export {
 export type {
   MiddlewareInput,
   MiddlewareResult,
+  MiddlewareOutcome,
   MiddlewareHandler,
   PageMiddleware,
 } from './middlewareRegistry';

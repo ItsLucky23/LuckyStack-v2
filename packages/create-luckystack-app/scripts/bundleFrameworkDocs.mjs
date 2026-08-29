@@ -25,6 +25,12 @@ const PKG_DIR = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(PKG_DIR, '..', '..');
 const OUT_DIR = path.join(PKG_DIR, 'framework-docs');
 
+//? Framework-internal doc folders that are NOT consumer documentation: retired
+//? one-off docs and in-flight planning notes. They would otherwise ride along in
+//? every npm tarball and land in every scaffolded project's docs/luckystack/.
+//? Matched against the top-level entry name under the repo's `docs/`.
+const EXCLUDED_DOC_DIRS = new Set(['_archive', 'plans']);
+
 //? [sourceRelativeToRepoRoot, destRelativeToOutDir, isDirectory]
 const ENTRIES = [
   ['CLAUDE.md', 'CLAUDE.md', false],
@@ -46,7 +52,12 @@ for (const [srcRel, dstRel, isDir] of ENTRIES) {
     continue;
   }
   if (isDir) {
-    fs.cpSync(src, dst, { recursive: true });
+    fs.cpSync(src, dst, {
+      recursive: true,
+      //? Only top-level entries directly under the copied dir are filtered —
+      //? a nested `plans/` inside a package's docs stays untouched.
+      filter: (from) => !(path.dirname(from) === src && EXCLUDED_DOC_DIRS.has(path.basename(from))),
+    });
   } else {
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.copyFileSync(src, dst);
@@ -69,14 +80,11 @@ const FRAMEWORK_OWN_RECORDS = [
   'AI_PROJECT_INDEX.md',
   'AI_DECISIONS_INDEX.md',
   'AI_LESSONS_INDEX.md',
-  'AI_EXAMPLES_INDEX.md',
-  'AI_RUNBOOKS.md',
-  'AI_CONTEXT_BUDGET.md',
+  'AI_PRODUCT_OVERVIEW.md',
   'ai-graph.json',
   'ai-product',
   'decisions',
   'lessons',
-  'examples',
 ];
 
 let stripped = 0;

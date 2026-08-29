@@ -6,12 +6,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from 'node:url';
-import { tryCatch, getServerFunctionDirs, getSrcDir, ROOT_DIR } from '@luckystack/core';
+import { tryCatch, getSrcDir, ROOT_DIR, isTestFile } from '@luckystack/core';
+import { collectFunctionModules, functionModuleFileName } from './functionRegistry';
 import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
-import { getRoutingRules, isRouteTestFile } from './routingRules';
-import { assertValidRouteNaming, collectDuplicatePageRoutes, formatDuplicatePageRouteIssues } from './routeNamingValidation';
+import { getRoutingRules, isNonRouteDirectory, apiMarkerSegment, syncMarkerSegment } from './routingRules';
+import { assertValidRouteNaming, collectDuplicatePageRoutes, formatDuplicatePageRouteIssues, isRouteSurfaceFile } from './routeNamingValidation';
 
 export const devApis: Record<string, unknown> = {};
 export const devSyncs: Record<string, unknown> = {};
@@ -52,6 +53,14 @@ const resolveApiRouteMetaFromPath = (filePath: string): { routeKey: string; abso
     return null;
   }
 
+  //? Must agree with the boot scan, which prunes private + test subtrees in
+  //? `collectTsFiles`. Without this guard `_api/_lib/handoff_v1.ts` still
+  //? matches the `_v<N>` regex here, so hot-reload would register
+  //? `api/<page>/_lib/handoff/v1` — a route that vanishes on the next restart.
+  if (!isRouteSurfaceFile(normalizedAbsolutePath)) {
+    return null;
+  }
+
   const rules = getRoutingRules();
   const relativePath = normalizePath(path.relative(getSrcDir(), absolutePath));
   const segments = relativePath.split('/');
@@ -85,6 +94,11 @@ const resolveSyncRouteMetaFromPath = (
   const normalizedSrcDir = normalizePath(getSrcDir());
 
   if (!normalizedAbsolutePath.startsWith(normalizedSrcDir) || !normalizedAbsolutePath.endsWith('.ts')) {
+    return null;
+  }
+
+  //? Same boot-scan agreement as the API twin above.
+  if (!isRouteSurfaceFile(normalizedAbsolutePath)) {
     return null;
   }
 
@@ -159,8 +173,13 @@ const collectTsFiles = (dir: string, relativeTo = ""): string[] => {
     if (isIgnoredPath(entryPath)) continue;
     const relPath = relativeTo ? `${relativeTo}/${entry}` : entry;
     if (fs.statSync(entryPath).isDirectory()) {
+      //? Called only for paths BELOW a marker folder, so private + test
+      //? directories are pruned here rather than walked and then warned about.
+      if (isNonRouteDirectory(entry)) continue;
       results.push(...collectTsFiles(entryPath, relPath));
-    } else if (entry.endsWith(".ts") && !isRouteTestFile(entry)) {
+    //? `isTestFile` already subsumes the `.tests.ts` form `isRouteTestFile`
+    //? matches, so one check covers both.
+    } else if (entry.endsWith(".ts") && !isTestFile(entry)) {
       results.push(relPath);
     }
   }
@@ -214,7 +233,7 @@ export const upsertApiFromFile = async (filePath: string): Promise<void> => {
   const routeMeta = resolveApiRouteMetaFromPath(filePath);
   if (!routeMeta) {
     const normalized = normalizePath(path.resolve(filePath));
-    if (normalized.includes('/_api/') && normalized.endsWith('.ts') && !isRouteTestFile(normalized)) {
+    if (normalized.endsWith('.ts') && normalized.includes(apiMarkerSegment()) && isRouteSurfaceFile(normalized)) {
       console.log(
         `[loader][api] invalid filename: ${normalized}. Expected <name>_v<number>.ts. File will not be loaded.`,
         'red'
@@ -274,7 +293,13 @@ const scanApiFolder = async (file: string, basePath = "") => {
   if (isIgnoredPath(fullPath)) return;
   if (!fs.statSync(fullPath).isDirectory()) return;
 
-  if (!file.toLowerCase().endsWith("api")) {
+  //? EXACT marker match. This used to be `file.toLowerCase().endsWith("api")`,
+  //? which swallowed any folder whose name merely ends in "api" —
+  //? `externalApi/`, `thisIsAFolderAPI/`, `legacyapi/` were all walked as route
+  //? folders and every file inside them logged a red "invalid filename".
+  //? Matching the configured marker also honours a consumer that overrode
+  //? `apiMarker` via `registerRoutingRules`, which the hardcoded suffix did not.
+  if (file !== getRoutingRules().apiMarker) {
     const subFolders = fs.readdirSync(fullPath);
     for (const sub of subFolders) {
       await scanApiFolder(sub, path.join(basePath, file));
@@ -349,7 +374,7 @@ export const upsertSyncFromFile = async (filePath: string): Promise<void> => {
   const routeMeta = resolveSyncRouteMetaFromPath(filePath);
   if (!routeMeta) {
     const normalized = normalizePath(path.resolve(filePath));
-    if (normalized.includes(`/${getRoutingRules().syncMarker}/`) && normalized.endsWith('.ts') && !isRouteTestFile(normalized)) {
+    if (normalized.endsWith('.ts') && normalized.includes(syncMarkerSegment()) && isRouteSurfaceFile(normalized)) {
       console.log(
         `[loader][sync] invalid filename: ${normalized}. Expected <name>_server_v<number>.ts or <name>_client_v<number>.ts. File will not be loaded.`,
         'red'
@@ -419,7 +444,9 @@ const scanSyncFolder = async (file: string, basePath = "") => {
   if (isIgnoredPath(fullPath)) return;
   if (!fs.statSync(fullPath).isDirectory()) return;
 
-  if (!file.toLowerCase().endsWith("sync")) {
+  //? EXACT marker match — see `scanApiFolder` for why. The suffix form caught
+  //? `dataSync/`, `autoSync/`, `websync/` as sync route folders.
+  if (file !== getRoutingRules().syncMarker) {
     const subFolders = fs.readdirSync(fullPath);
     for (const sub of subFolders) {
       await scanSyncFolder(sub, path.join(basePath, file));
@@ -477,85 +504,43 @@ const scanSyncFolder = async (file: string, basePath = "") => {
   }
 };
 
-//? Tracks which root directory claimed each key-path so we can detect
-//? cross-root collisions (e.g. `functions/sleep.ts` AND `shared/sleep.ts`)
-//? and surface the same error the codegen emits, instead of silently
-//? merging exports across roots.
-const functionClaimMap = new Map<string, string>();
-
+//? Discovery + key derivation live in `functionRegistry.ts`, shared with the
+//? type-map generator and the production map generator. Dev deliberately warns
+//? and skips on a collision instead of throwing — a running dev server should
+//? not hard-crash on a duplicate — while the build-time callers let the same
+//? collision throw. See ADR 0046.
 export const initializeFunctions = async () => {
   for (const key of Object.keys(devFunctions)) delete devFunctions[key];
-  functionClaimMap.clear();
 
-  const dirs = getServerFunctionDirs();
-  for (const dir of dirs) {
-    if (fs.existsSync(dir)) {
-      await scanFunctionsFolder(dir, dir);
-    }
-  }
-};
+  const modules = collectFunctionModules({
+    onConflict: (message) => {
+      console.log(`[loader][function] ${message} Skipping the second copy.`, 'red');
+    },
+  });
 
-const scanFunctionsFolder = async (dir: string, rootDir: string, basePath: string[] = []) => {
-  const entries = fs.readdirSync(dir);
+  for (const functionModule of modules) {
+    const absolutePath = path.resolve(ROOT_DIR, functionModule.sourcePath);
 
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry);
-    if (isIgnoredPath(fullPath)) continue;
-    const stat = fs.statSync(fullPath);
-
-    if (stat.isDirectory()) {
-      await scanFunctionsFolder(fullPath, rootDir, [...basePath, entry]);
-      continue;
-    }
-
-    if (!entry.endsWith(".ts")) {
-      continue;
-    }
-
-    const [err, module] = await tryCatch(async () => importFile(fullPath));
+    const [err, module] = await tryCatch(async () => importFile(absolutePath));
     if (err) {
-      console.log(`[loader][function] failed to import ${fullPath}:`, err, 'red');
+      console.log(`[loader][function] failed to import ${absolutePath}:`, err, 'red');
       continue;
     }
 
-    const fileName = entry.replace(".ts", "");
+    const fileName = functionModuleFileName(functionModule.keyPath);
     const resolvedFunctionModule = resolveFunctionModule(module, fileName);
     if (!isMergeable(resolvedFunctionModule)) continue;
-
-    const keyPath = [...basePath, fileName].join('.');
-    const previousRoot = functionClaimMap.get(keyPath);
-    if (previousRoot !== undefined && previousRoot !== rootDir) {
-      //? Cross-root collision. Mirror the codegen-time error so dev mode
-      //? surfaces the same diagnostic. Skip the import so the previous
-      //? claim wins; the next type-map regen will fail the build with the
-      //? full message.
-      console.log(
-        `[loader][function] Conflict at \`functions.${keyPath}\`: defined in both \`${previousRoot}\` and \`${rootDir}\`. Skipping the second copy; fix the duplicate (delete one — \`shared/\` is the canonical location for framework re-exports).`,
-        'red',
-      );
-      continue;
-    }
-    functionClaimMap.set(keyPath, rootDir);
 
     //? Walk into devFunctions tree, creating nested Record<string, unknown>
     //? subtrees on demand. Each level is structurally a record but typed as
     //? `unknown` after one level of indexing — re-narrow before descent.
     let target: Record<string, unknown> = devFunctions;
-    for (const part of basePath) {
+    for (const part of functionModule.keyPath.slice(0, -1)) {
       const existing = target[part];
       if (!existing || typeof existing !== 'object') {
         target[part] = {};
       }
       target = target[part] as Record<string, unknown>;
-    }
-
-    const existingAtFileName = target[fileName];
-    if (
-      existingAtFileName !== undefined
-      && isMergeable(resolvedFunctionModule)
-      && isMergeable(existingAtFileName)
-    ) {
-      Object.assign(resolvedFunctionModule, existingAtFileName);
     }
 
     target[fileName] = resolvedFunctionModule;

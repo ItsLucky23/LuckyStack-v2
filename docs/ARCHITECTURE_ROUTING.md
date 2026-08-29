@@ -90,12 +90,13 @@ import type { SessionLayout } from 'config';
 
 export const template = 'dashboard';
 
-//? Logged-out users → /login. Logged-in non-admins → toast + history-back.
+//? Logged-out → /login (that is where the problem gets solved).
+//? Logged-in non-admin → 403 on the SAME url, so the reason is visible and
+//? the address stays shareable.
 export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
   if (!session) return { success: false, redirect: '/login' };
   if (session.admin) return { success: true };
-  notify.error({ key: 'middleware.notAdmin' });
-  return; // navigate(-1)
+  return { success: false, status: 403 };
 };
 
 export default function AdminPage() { /* ... */ }
@@ -106,8 +107,22 @@ export default function AdminPage() { /* ... */ }
 | Return value | Effect |
 |---|---|
 | `{ success: true }` | Page renders. |
-| `{ success: false, redirect: '/some-path' }` | `navigate('/some-path')`. |
-| `undefined` (or no return) | `navigate(-1)` (browser history back). Pair with `notify.error(...)` for user feedback. |
+| `{ success: false, redirect: '/some-path' }` | `navigate('/some-path')`. Right for **unauthenticated** — send them where they can fix it. |
+| `{ success: false, status: 403 }` | Keeps the URL and renders a deny state in place. Right for **authenticated but not allowed** — a redirect there loses the URL and explains nothing. Any status works; `404` is the one to use when a resource's existence should stay hidden. |
+| `undefined` (or no return) | Navigates to `projectConfig.loginRedirectUrl ?? '/'`. Deliberately not `navigate(-1)`, which chains backwards out of the app on repeated denials. Pair with `notify.error(...)` for feedback. |
+
+Customize what a deny renders by passing `denied` to `<Middleware>` — a node, or a
+function of the status. Without it, a minimal built-in view is used.
+
+```tsx
+<Middleware denied={(status) => <ErrorState status={status} />}>
+  {children}
+</Middleware>
+```
+
+Programmatic navigation (`useRouter`) honours the same contract: on a `status`
+deny it still navigates, so the target route renders the deny state at the
+requested URL rather than the button appearing to do nothing.
 
 **Resolution order** (per route hit):
 
@@ -480,6 +495,30 @@ Any folder prefixed with `_` is private and excluded from routing:
 | `_providers/`  | React context providers                  |
 | `_sockets/`    | Socket.io client utilities               |
 | `_locales/`    | i18n translation JSON files              |
+
+### Inside `_api/` and `_sync/`
+
+The same `_` rule applies **below** a marker folder, and route discovery skips
+those subtrees entirely — no scan, no warning:
+
+```
+src/chat/_api/
+  sendMessage_v1.ts        -> route  api/chat/sendMessage/v1
+  threads/list_v1.ts       -> route  api/chat/threads/list/v1   (nested names work)
+  _lib/buildPrompt.ts      -> skipped: private helper
+  __tests__/send.test.ts   -> skipped: test folder
+  sendMessage.test.ts      -> skipped: test file
+```
+
+Two consequences worth knowing:
+
+- **The marker is matched exactly.** A folder named `externalApi/`, `legacyApi/`
+  or `dataSync/` is an ordinary folder, not a route folder. (Before 0.8.7 the
+  check was a suffix test, so those were scanned and every file inside them
+  logged an `invalid filename` warning.)
+- **The `invalid filename` warning is now meaningful.** It fires only for a file
+  that really is route surface — directly under the marker (or a normal nested
+  folder), not a test file — and genuinely misses the `_v<N>` suffix.
 
 ---
 

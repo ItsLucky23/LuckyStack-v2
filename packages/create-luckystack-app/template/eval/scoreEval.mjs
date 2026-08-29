@@ -5,7 +5,7 @@
 // Answers the question nothing else in this repo answers: do the committed
 // AI-context artifacts actually make the AI's output better? It is the hard
 // measurement ADR 0003 requires BEFORE any RAG rung is built — if the existing
-// structured rungs (graph + indexes + decisions + lessons + examples) already
+// structured rungs (graph + indexes + decisions + lessons) already
 // score well on natural-language recall, RAG is not justified yet.
 //
 // Design: deterministic, no LLM in the loop. A scenario (eval/scenarios/*.json)
@@ -87,7 +87,7 @@ const loadScenarios = async () => {
 const runSelfTest = () => {
   const scenario = {
     id: "selftest",
-    expects: { usesAnyTool: ["get_capability", "get_example"], reusedHelper: true, citedAdr: "7", addedTest: true },
+    expects: { usesAnyTool: ["get_capability", "find_route"], reusedHelper: true, citedAdr: "7", addedTest: true },
   };
   const good = scoreCandidate(scenario, { toolsUsed: ["get_capability"], reusedHelper: true, citedAdr: "0007", addedTest: true });
   const bad = scoreCandidate(scenario, { toolsUsed: [], reusedHelper: false, citedAdr: "0003", addedTest: false });

@@ -108,6 +108,39 @@ await server.listen();
 
 ---
 
+### `afterListen(task, options?): Promise<void>`
+
+Runs work that belongs **after** the server is accepting traffic — durable queue
+workers, warm-up passes, reconciliation jobs.
+
+```typescript
+await server.listen();
+
+await server.afterListen(async () => {
+  const { startWorkers } = await import('../src/jobs/workers');
+  await startWorkers();
+}, { label: 'job workers' });
+```
+
+**Why it exists.** The scaffolded `server/server.ts` wraps its boot in an IIFE
+whose `.catch` calls `process.exit(1)`. That is right for everything *before*
+`listen()` — a failure there means there is no server. Appending post-listen work
+to the same chain silently extends "fatal" to tasks that run while the server is
+already serving, so one unreachable dependency (a queue's database, say) kills a
+healthy process. Behind a supervisor that becomes a crash-loop: restart,
+dependency still down, repeat — while the log claims `failed to start` about a
+server that started fine.
+
+| Option | Default | Effect |
+|---|---|---|
+| `fatal` | `false` | `true` re-throws instead of swallowing. Use only when the process genuinely has no purpose without the task. |
+| `label` | `'post-listen task'` | Names the task in the failure log. |
+
+Never resolves to the task's value — it is fire-and-report, not a pipeline stage.
+Read whatever you need inside the callback.
+
+---
+
 ### `bootstrapLuckyStack(options?: BootstrapLuckyStackOptions): Promise<RunningLuckyStackServer>`
 
 **Signature:**

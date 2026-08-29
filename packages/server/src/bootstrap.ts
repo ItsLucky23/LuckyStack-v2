@@ -13,7 +13,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { ROOT_DIR, tryCatch } from '@luckystack/core';
+import { ROOT_DIR, tryCatch, getLogger, isTestFile, isTestDirectory } from '@luckystack/core';
 import { createLuckyStackServer } from './createServer';
 import { OPTIONAL_PACKAGES, canResolve, getLogin } from './capabilities';
 import type {
@@ -94,6 +94,56 @@ export const registerOverlayLoader = (loader: OverlayLoader): void => {
   registeredOverlayLoader = loader;
 };
 
+export interface OverlayEntries {
+  /** Files to import, in load order: `index.*` first, then the rest alphabetically. */
+  fileNames: string[];
+  /**
+   * Subdirectories the flat walk skipped, minus conventional test folders.
+   * The caller warns about these — silently dropping them meant overlay code
+   * one level down simply never ran, with nothing to point at.
+   */
+  ignoredDirectoryNames: string[];
+}
+
+/**
+ * Decide what a single overlay package folder contributes. Exported because
+ * both the runtime walk here and `scripts/bundleServer.mjs` must agree exactly:
+ * a file the bundler includes but the loader skips (or the reverse) is a
+ * dev/prod divergence, which is the defect class ADR 0046 exists for.
+ */
+export const collectOverlayEntries = (packageDir: string): OverlayEntries => {
+  const indexCandidates = ['index.ts', 'index.js'];
+  const entries = fs.readdirSync(packageDir, { withFileTypes: true })
+    .toSorted((left, right) => left.name.localeCompare(right.name));
+
+  const ignoredDirectoryNames: string[] = [];
+  const rest: string[] = [];
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      //? Conventional test folders are supposed to be ignored — no warning.
+      if (!isTestDirectory(entry.name)) ignoredDirectoryNames.push(entry.name);
+      continue;
+    }
+
+    if (indexCandidates.includes(entry.name)) continue;
+    if (!entry.name.endsWith('.ts') && !entry.name.endsWith('.js')) continue;
+    //? A test file here would be imported at boot AND bundled into the
+    //? production server. One that only performs side effects would quietly
+    //? change production behaviour rather than fail loudly.
+    if (isTestFile(entry.name)) continue;
+
+    rest.push(entry.name);
+  }
+
+  //? `index.*` first: it is the conventional place to register the things the
+  //? sibling files then extend.
+  const indexFileNames = indexCandidates.filter((candidate) =>
+    entries.some((entry) => entry.isFile() && entry.name === candidate));
+
+  return { fileNames: [...indexFileNames, ...rest], ignoredDirectoryNames };
+};
+
 const loadOverlayFolder = async (overlayRoot: string): Promise<void> => {
   const overlayAbs = path.isAbsolute(overlayRoot)
     ? overlayRoot
@@ -109,19 +159,18 @@ const loadOverlayFolder = async (overlayRoot: string): Promise<void> => {
     const packageDir = path.join(overlayAbs, packageName);
     if (!fs.existsSync(packageDir)) continue;
 
-    //? Load `index.ts` first if present, then any other `*.ts` files in
-    //? alphabetical order. Each file is responsible for its own
-    //? side-effect registration.
-    const indexCandidates = ['index.ts', 'index.js'];
-    for (const candidate of indexCandidates) {
-      await importIfExists(path.join(packageDir, candidate));
+    const { fileNames, ignoredDirectoryNames } = collectOverlayEntries(packageDir);
+
+    for (const directoryName of ignoredDirectoryNames) {
+      getLogger().warn(
+        `[luckystack:overlay] ignoring \`${overlayRoot}/${packageName}/${directoryName}/\` — `
+        + 'the overlay walk does not recurse. Move the file(s) up into '
+        + `\`${overlayRoot}/${packageName}/\`, or import them from a file that is there.`,
+      );
     }
 
-    const entries = fs.readdirSync(packageDir).toSorted();
-    for (const entry of entries) {
-      if (indexCandidates.includes(entry)) continue;
-      if (!entry.endsWith('.ts') && !entry.endsWith('.js')) continue;
-      await importIfExists(path.join(packageDir, entry));
+    for (const fileName of fileNames) {
+      await importIfExists(path.join(packageDir, fileName));
     }
   }
 };

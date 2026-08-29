@@ -1250,3 +1250,90 @@ Root README, HOSTING, packaging en create-app-deep-docs zijn opnieuw op de v0.8.
 **Verificatie:** 17/17 packages staan als 0.8.4/latest op npm; publish- en CI-workflows zijn success; root en Workspace worktrees waren schoon vóór deze releaseverslagupdate.
 
 **Files touched:** branch-log/index en de published-versionrollup in `docs/findings/README.md`.
+
+## 2026-08-21 — v0.8.5: function-injectie-fix, e2e-poort en testbestand-uitsluiting
+
+**User prompt (summary):** "als je het helemaal getest hebt mag je het pushen en bumpen en publishen."
+
+**Wat ik deed:** `fix/prod-function-map-divergence` fast-forward in `main` gemerged (4 commits) en alle 17 packages lockstep naar 0.8.5 gebumpt, interne ranges en lockfile ververst. Inhoud: de productie-function-map las `paths.serverFunctionDirs` niet en sloeg geneste sleutels plat, waardoor `functions.tryCatch` en `functions.sleep` in élke deployed build ontbraken (ADR 0046); de verdaccio-e2e is gerepareerd en als blokkerende CI-job gewired; en testbestanden worden nu uitgesloten van elke import-alles-plek — overlay-loader, beide bundlers en function-injectie (ADR 0047), met een waarschuwing bij genegeerde overlay-submappen.
+
+**Verificatie vóór release:** unit 2033/2033 (193 files); build:packages 17/17 twee keer achtereen reproduceerbaar; volledige build, root-lint, package-lint, ai:lint en changelog-check groen; `audit:production` pass (critical=0, high=0, moderate=0); **e2e 9/9 ALL GREEN op de gebumpte 0.8.5-versies**; `pack:dry` 17/17 en `publish:dry` 17/17.
+
+**Files:** 17 package.json-versies + interne ranges, `package-lock.json`, vier CHANGELOGs, ADR 0046 + 0047, lesson 0016, findingsledger, `.github/workflows/ci.yml`, branch-logs.
+
+**Notes:** Eén build-run meldde onderweg 9 gefaalde packages en was daarna twee keer achtereen groen — Windows-file-lock, hetzelfde patroon als de e2e-tempdir van vandaag; niet gereproduceerd, wel bewust nagelopen. Gedragswijziging in deze release: een project dat leunde op een overlay-testbestand dat bij boot draaide, verliest dat side effect (bedoeld, zie ADR 0047).
+
+## 2026-08-18 11:35 — Session Capture Protocol: sparren wordt schrijfvrij, vastleggen gebatcht
+
+**User prompt (summary):** consumer-devs klagen dat de AI te vaak en te vroeg documenteert — dingen die tijdens het sparren voorbijkomen en niet gewenst zijn, worden alsnog als findings/decisions vastgelegd; liefst alles pas aan het eind en sowieso minder vaak. Plus een doc-audit van `flexbuddy` met zes voorstellen. Vervolgprompt: `_archive`/`plans` niet meesturen bij elke install, `AGENTS.md` gelijktrekken, en géén toestemmingsvraag — vastleggen moet automatisch blijven, alleen minder vaak.
+
+**Wat ik deed:**
+- **Capture-gate.** Nieuwe sectie *Session Capture Protocol* in `CLAUDE.md` die alle vier de record-lagen bestuurt: sparren = schrijfvrij, werken = alleen een in-sessie capture-buffer, wrap-up = de hele batch in één keer wegschrijven en in één regel rapporteren. Autonoom, geen goedkeuringsprompt (eerste iteratie had die wél; door de user afgewezen en teruggedraaid). Per laag een harde lat: ADR alleen bij een geïmplementeerde of in woorden bevestigde keuze mét verworpen alternatief; lesson alleen bij een echt gekoste, niet-voor-de-hand-liggende doodlopende weg; findings alleen bij een *gevraagde* scan, met triage bij aanmaak. De vier protocol-docs (`BRANCH_LOG`, `DECISION_MEMORY`, `LESSONS`, `FINDINGS`) zijn hierop bijgesteld; `FINDINGS_PROTOCOL.md` kreeg een "Rule 0".
+- **Vier lagen gesnoeid.** `docs/examples/` + `AI_EXAMPLES_INDEX.md`, `AI_RUNBOOKS.md`, `AI_CONTEXT_BUDGET.md` weg inclusief generators, npm-scripts en beide pre-commit hooks; MCP-tools `get_runbook` / `list_examples` / `get_example` verwijderd (plus de daardoor wees geworden `sectionMatching`/`headings` helpers). Regel 15b (`@docs owner`) geschrapt uit `CLAUDE.md`, uit de `doc-coverage` lint-regel en uit de ownership-tabel in `generateProjectIndex.mjs`; de tag blijft optionele route-metadata.
+- **Twee scaffold-bugs.** `copyAiDocs` herschrijft framework-docverwijzingen in de consumer-`CLAUDE.md` naar `docs/luckystack/…`, gedreven door wat de bundle daadwerkelijk bevat, met een skip op regels die bewust beide paden noemen. `ai:index` is als framework-only gemarkeerd (bestond nooit in een gescaffold project). `docs/_archive/` en `docs/plans/` gaan niet meer mee in de tarball noch in de scaffold-kopie.
+- **AGENTS.md afgeleid.** Was handmatig onderhouden en ~3 maanden / 800+ regels achtergelopen. Nieuw `scripts/syncAgentsMd.mjs` (`npm run ai:agents-md`) genereert het uit `CLAUDE.md`; in de pre-commit hook gewired en gestaged.
+
+**Verificatie:** `lint` + `lint:packages` schoon; `ai:lint` geen violations; beide `lintInvariants` selftests 16/16; `build` en `build:packages` 17/17; volledige unit-suite 2034/2034 (194 files); `ai:changelog-check` schoon; nieuwe test `frameworkDocPaths.test.ts` (5 cases) plus een simulatie tegen de echte bundle: 46 regels herschreven, 8 dual-path-regels intact, **0 dode paden** in de consumer-`CLAUDE.md`.
+
+**Files touched:** `CLAUDE.md`, `AGENTS.md`, `.githooks/pre-commit`, `docs/{BRANCH_LOG,DECISION_MEMORY,LESSONS,FINDINGS}_PROTOCOL.md`, `docs/AI_BOOST_OVERVIEW.md`, `docs/PACKAGE_OVERVIEW.md`, `docs/decisions/0048-*.md`, `scripts/{syncAgentsMd,generateProjectIndex,lintInvariants,help}.mjs` (+ template-kopieën), `package.json` (+ template), `luckystack.invariants.json` (+ template), `eval/`, `packages/mcp/{src,CLAUDE.md,README.md,CHANGELOG.md,package.json}`, `packages/create-luckystack-app/{src/index.ts,src/aiScriptParity.test.ts,src/frameworkDocPaths.test.ts,scripts/bundleFrameworkDocs.mjs,CHANGELOG.md}`.
+
+**Notes:** ADR 0048 legt de rationale vast, inclusief het afgewezen goedkeuringsmodel. Niet aangeraakt (gemeld, niet gefixt): de "untested routes"-lijst in `AI_PROJECT_INDEX.md` en de commit-grootte van `docs/ai-graph.json`. `flexbuddy` pikt dit pas op na een release + `npx luckystack update` / `--app`, met een `CLAUDE.md.new` sidecar om te mergen.
+
+**Vervolg in dezelfde sessie (tot 16:10):**
+
+- **Lazy-Load Contract (regel 28).** De sessiestart-leeslijst is teruggebracht tot vier kleine bronnen; de grote indexen worden nu BEVRAAGD via `@luckystack/mcp` in plaats van integraal gelezen, met per artefact het tool en wanneer je het bestand tóch heel mag openen (`ai-graph.json`: nooit). Gemeten op `flexbuddy`: sessie-load van ~68k naar ~20k tokens. Regel 25 klopte niet — die beweerde dat het agent-playbook via slash commands geactiveerd wordt terwijl geen enkele command ernaar verwijst; vervangen door de fan-out-trigger.
+- **`AGENT_TEAM_PLAYBOOK.md` herschreven**: 424 → 157 regels. Verwijderd omdat het aantoonbaar niet meer klopte: herbestembare/idle agents (bestaan niet in de Agent-tool), het advies om `/compact` te vermijden, en een `.claude/handoff/`-pad dat nergens bestaat. Toegevoegd: `Agent` vs `Workflow`/ultracode incl. de opt-in-eis, scoping van fan-out, en één handoff-conventie (`handoffs/<datum>/`, wat `/save_handoff` daadwerkelijk schrijft). De "Tooling Decisions"-staart is verhuisd naar ADR 0049.
+- **`AGENTS.md` wordt afgeleid** van `CLAUDE.md` via nieuw `scripts/syncAgentsMd.mjs` (`npm run ai:agents-md`, ook in de pre-commit hook). Het was ~3 maanden en 800+ regels achtergelopen, waardoor Codex regels las die niet meer golden.
+- **`<file>.removed` markers bij `luckystack update`.** Teruggetrokken framework-bestanden bleven eerder alleen in het rapport staan, waardoor een agent de `.new` sidecars merget en de weesbestanden liet liggen. Bewust géén `.new`: het rapport instrueert letterlijk om een `.new` IN het bestand te mergen, dus een `.new` met een verwijderbericht zou een werkend script vervangen door proza. Eerste versie van de instructie zei "delete the file" — dat is autonoom `rm` en botst met Rule 8; omgedraaid naar: referenties checken, hele lijst in ÉÉN batch naar de developer met aanbeveling per bestand, wachten op de beslissing. De keten is op drie plekken gedicht die de AI vóór het rapport leest: `CLAUDE.md`, `docs/UPGRADING.md`, `packages/cli/CLAUDE.md`.
+- **Verificatie van het consumer-pad**, niet op aanname: een project gescaffold uit de gebouwde CLI en geïnspecteerd. 54/54 docverwijzingen resolven; de 7 resterende treffers zijn de dual-path regels die bewust worden overgeslagen. De manifest-hash van `CLAUDE.md` matcht de herschreven inhoud — zonder die check had élke consumer bij zijn eerste `update` onterecht een `.new` sidecar gekregen.
+- **Buiten scope gehouden** (gemeld, niet gebouwd): consumer-root artefacten als `docs/AI_RUNBOOKS.md` en de `ai:examples`-scripts in een consumer-`package.json` staan niet in het scaffold-manifest en krijgen dus géén marker. Dat vraagt om een aparte "retired artifacts"-lijst.
+
+**Verificatie (eindstand):** lint + lint:packages schoon · `ai:lint` schoon · `ai:changelog-check` schoon · unit 2036/2036 (194 files) · build + build:packages 17/17 · `pack:dry` 17/17 · `audit:production` critical=0 high=0 moderate=0. `publish:dry` faalde verwacht op "cannot publish over 0.8.5" — de bump moest eerst.
+
+**Extra files:** `scripts/syncAgentsMd.mjs`, `packages/create-luckystack-app/src/frameworkDocPaths.test.ts`, `docs/decisions/0049-*.md`, `packages/mcp/CHANGELOG.md`, plus CHANGELOG-entries voor `@luckystack/cli` en `create-luckystack-app`.
+
+## 2026-08-18 17:20 — Loader-ruis en crash-loop: exacte marker-match + `afterListen`
+
+**User prompt (summary):** serverlogs met 33 rode `[loader][api] invalid filename`-regels voor bestanden die geen routes zijn (`_lib/`, `__tests__/`, en een map `externalApi/`), gevolgd door een Mongo-fout die de server meteen liet crashen. Onderzoek beide, daarna: bouwen.
+
+**Wat ik deed:**
+
+*Probleem 1 — drie losse defecten in `packages/devkit/src/loader.ts`, samen goed voor 33 valse meldingen:*
+- **Suffix-match i.p.v. exacte marker.** `file.toLowerCase().endsWith("api")` behandelde `externalApi/`, `thisIsAFolderAPI/` en `legacyapi/` als route-mappen; sync had dezelfde bug (`dataSync/`). Nu `file !== getRoutingRules().apiMarker`, wat meteen ook een consumer respecteert die de marker via `registerRoutingRules` overschrijft — dat negeerde de hardcoded suffix volledig.
+- **Private submappen werden ingelopen.** `collectTsFiles` recursede door `_api/_lib/`; `privateFolderPrefix` bestond wel in de routing rules maar werd alleen door page-route-validatie gebruikt.
+- **Testdetectie te smal.** `isRouteTestFile` was letterlijk `endsWith('.tests.ts')`, dus `.test.ts` / `.spec.ts` leverden rode regels op. Nu core's `isTestFile` (sinds 0.8.5 beschikbaar, werd niet gebruikt).
+
+Tijdens het bouwen bleek `isInsidePrivateRouteSubfolder` (DEVKIT-5) al te bestaan en bijna hetzelfde te doen. In plaats van een tweede variant ernaast te zetten is die hergebruikt: nieuwe `isRouteSurfaceFile` = `!isInsidePrivateRouteSubfolder && !isTestFile`, gedeeld door de dev-loader én `typeMap/discovery.ts`. Die twee liepen namelijk uit elkaar — discovery accepteerde `_api/_lib/x_v1.ts` en genereerde er een type voor terwijl de loader 'm nu overslaat.
+
+*Probleem 2 — crash-loop (ADR 0050):*
+De Mongo-fout zelf is omgeving (`getaddrinfo ENOTFOUND mongo` — compose-hostname buiten Docker) en niet van het framework. Wél van het framework: het scaffold-template wikkelt de boot in een IIFE waarvan de `.catch` `process.exit(1)` doet, en post-listen werk in diezelfde keten wordt daarmee stilzwijgend fataal. Eén onbereikbare dependency sloopte een draaiende server; de supervisor herstartte, dependency nog steeds down, ~40s per ronde. Nieuw: `RunningLuckyStackServer.afterListen(task, options?)` — logt luid en gaat door, `{ fatal: true }` herstelt propagatie, `{ label }` benoemt de taak. Als losse module `afterListen.ts` zodat het testbaar is zonder volledige bootstrap. Template kreeg een expliciete slot met uitleg.
+
+**Verificatie:** lint + lint:packages schoon · `ai:lint` schoon · `ai:changelog-check` schoon · build + build:packages 17/17 · unit **2060/2060 (197 files)**. Nieuwe tests: `routeMarkerMatching.test.ts` (11), `typeMap/discoveryRouteSurface.test.ts` (5, echte directory-walk op een temp-boom met precies de gemelde mapstructuur), `server/src/afterListen.test.ts` (7, inclusief een assertie dat het template `afterListen` daadwerkelijk gebruikt — een groene unit-test op een ongebruikte helper zou hier niets waard zijn).
+
+**Files touched:** `packages/devkit/src/{loader,routingRules,routeNamingValidation}.ts`, `packages/devkit/src/typeMap/discovery.ts`, `packages/server/src/{afterListen,createServer,types,index}.ts`, `packages/create-luckystack-app/template/server/server.ts`, `docs/ARCHITECTURE_ROUTING.md`, `packages/server/docs/create-server.md`, `packages/server/CLAUDE.md`, drie CHANGELOGs, ADR 0050, plus drie nieuwe testbestanden.
+
+**Notes:** Eén stille fout onderweg die het vermelden waard is: een `node -e`-replace op de CHANGELOGs matchte niet door CRLF en meldde tóch "updated" — de bestanden bleven ongewijzigd. Gevangen door `ai:changelog-check`, daarna met de Edit-tool gedaan (wat regel 9 sowieso voorschrijft). Niet gedaan (gemeld aan de user, hoort bij flexbuddy): de cursor-paginatie in `attachmentQueue.ts` gebruikt `id: { gt: cursor }`, wat op UUIDv4 stil breekt bij een providerwissel.
+
+## 2026-08-18 18:05 — v0.8.7: loader-ruis, post-listen crash-loop, deny-in-place middleware
+
+**User prompt (summary):** onderzoek de loader-warnings en de Mongo-crash uit de serverlogs; daarna bouwen. Vervolgens: middleware-contract nakijken (andere AI claimde dat alleen allow/redirect bestaat), dat gat dichten, tweemaal een verse review op eigen werk, en bumpen + releasen als het klaar is.
+
+**Wat ik deed:**
+
+*Loader (devkit).* Drie defecten, samen 33 valse rode regels per boot in een echt project: suffix-match `endsWith("api")` behandelde `externalApi/` als route-map (sync idem met `dataSync/`); `collectTsFiles` liep private submappen in; testdetectie was alleen `.tests.ts`. Nu exacte marker-match uit `getRoutingRules()`, pruning van `_`-mappen en testmappen, en core's `isTestFile`. De bestaande `isInsidePrivateRouteSubfolder` (DEVKIT-5) is hergebruikt in een gedeelde `isRouteSurfaceFile`, óók toegepast op `typeMap/discovery.ts` — die accepteerde `_api/_lib/x_v1.ts` en genereerde er een type voor dat de loader nooit registreert.
+
+*Post-listen (server, ADR 0050).* De Mongo-fout uit de logs was omgeving (`ENOTFOUND mongo`, compose-hostname buiten Docker), maar het scaffold-template maakte 'm fataal: post-listen werk hing in dezelfde IIFE als `process.exit(1)`, dus één onbereikbare dependency sloopte een luisterende server en de supervisor loopte 'm elke ~40s. Nieuw `RunningLuckyStackServer.afterListen(task, opts)` — logt luid en blijft draaien, `{ fatal: true }` herstelt propagatie.
+
+*Middleware (core).* De claim klopte: `MiddlewareResult` kende alleen allow en redirect, dus een geauthenticeerde denial moest wegnavigeren. Nieuwe variant `{ success: false, status }` houdt de URL vast en rendert een deny-state; `denied`-prop voor eigen UI. Meegefixt: `useRouter` had een eigen branch-logica en deed *niets* bij een niet-herkend resultaat — knop leek kapot. Beide lopen nu door `resolveMiddlewareOutcome`.
+
+**Twee zelfreviews, vier eigen bugs gevonden:**
+1. Hot-reload en boot-scan liepen uit de pas — `_api/_lib/x_v1.ts` werd bij opslaan alsnog geregistreerd en verdween bij herstart.
+2. `isInsidePrivateRouteSubfolder` ankerde op de *eerste* marker; een checkout onder een map `_api` verborg élke route. Latent, maar mijn wijziging tilde het van "validatie overgeslagen" naar "niets geregistreerd".
+3. Het template shipte een **live lege** `afterListen`-callback → `require-await` / `no-empty-function` onder `strictTypeChecked`; elk nieuw project zou met een lint-fout starten. De e2e draait geen lint, dus niets anders had dit gevangen.
+4. `Middleware.tsx` bevatte een NUL-byte in de `routeKey`-literal, waardoor git het bestand als **binair** zag en de diff onzichtbaar was — pre-existing sinds ≤ v0.8.3, gevonden juist doordat mijn eigen diff er niet in te zien was.
+
+**Verificatie:** lint + lint:packages + `ai:lint` + `ai:changelog-check` schoon · build + build:packages 17/17 · unit **2073/2073 (199 files)** · `pack:dry` 17/17 · `audit:production` 0/0/0. Nieuwe tests: `routeMarkerMatching` (13), `hotReloadRouteSurface` (5), `discoveryRouteSurface` (5), `afterListen` (7), `middlewareOutcome` (7).
+
+**Bekende beperking, bewust geaccepteerd:** de React-componenten (`Middleware.tsx`, `Router.tsx`) blijven onbetest — deze repo heeft geen jsdom/testing-library en `npm install` is niet autonoom. Daarom is de beslislogica uit beide componenten getrokken naar de pure, wél geteste `resolveMiddlewareOutcome`. De wijziging is additief: bestaande result-shapes gedragen zich identiek.
+
+**Files:** `packages/devkit/src/{loader,routingRules,routeNamingValidation}.ts` + `typeMap/discovery.ts`, `packages/server/src/{afterListen,createServer,types,index}.ts`, `packages/core/src/{middlewareRegistry,client}.ts` + `react/{Middleware,Router}.tsx`, template `server/server.ts`, `docs/ARCHITECTURE_ROUTING.md`, `packages/server/docs/create-server.md`, drie package-CLAUDE.md's, vier CHANGELOGs, ADR 0050, vijf nieuwe testbestanden.

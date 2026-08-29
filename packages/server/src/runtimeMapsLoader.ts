@@ -137,9 +137,19 @@ const resolvePresets = (options: ProdRuntimeMapsLoaderOptions): string[] => {
 };
 
 //? @adr 0042
+//? @adr 0043
 //? Phase-1 scoped builds intentionally contain the complete function registry in
 //? every preset. ESM module caching makes equivalent entries share their exported
 //? values even though each generated preset creates a fresh wrapper object.
+//?
+//? The comparison RECURSES because the generated map is nested: a function in
+//? `shared/rbac/engine.ts` lands under a `rbac` namespace object, and every
+//? preset builds its own fresh namespace wrapper around the same shared module
+//? exports. A shallow `Object.is` per key would see two structurally identical
+//? namespaces as different implementations and reject the compose at boot —
+//? the exact failure ADR 0042 fixed, resurfacing one level deeper. Recursion
+//? bottoms out at the module exports, where `Object.is` is the real test, so a
+//? genuinely differing implementation still fails closed.
 const areEquivalentFunctionEntries = (left: unknown, right: unknown): boolean => {
   if (Object.is(left, right)) return true;
   if (!isRuntimeMapRecord(left) || !isRuntimeMapRecord(right)) return false;
@@ -147,7 +157,7 @@ const areEquivalentFunctionEntries = (left: unknown, right: unknown): boolean =>
   const leftKeys = Object.keys(left);
   const rightKeys = Object.keys(right);
   return leftKeys.length === rightKeys.length
-    && leftKeys.every((key) => Object.hasOwn(right, key) && Object.is(left[key], right[key]));
+    && leftKeys.every((key) => Object.hasOwn(right, key) && areEquivalentFunctionEntries(left[key], right[key]));
 };
 
 const mergeInto = (

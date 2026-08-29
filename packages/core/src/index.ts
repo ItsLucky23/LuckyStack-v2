@@ -10,6 +10,15 @@ export { ensurePeerDepInstalled, loadPeer } from './peerDeps';
 export type { PeerRequire } from './peerDeps';
 export * from './serviceRoute';
 export * from './socketEvents';
+// Shared by every surface that discovers files on disk and then imports them
+// (overlay loader, overlay bundler, server function injection) so they cannot
+// drift apart on what counts as a test file.
+export {
+  isTestFile,
+  isTestDirectory,
+  TEST_FILE_PATTERN,
+  TEST_DIRECTORY_NAMES,
+} from './testFileConvention';
 export {
   registerRoomNameFormatter,
   getRoomNameFormatter,

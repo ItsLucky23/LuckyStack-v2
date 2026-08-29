@@ -5,7 +5,7 @@
 > `docs/FINDINGS_PROTOCOL.md` for the rules. This index lists them all so open
 > items are never lost during a cleanup.
 
-Last updated: 2026-08-17
+Last updated: 2026-08-21
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
@@ -16,6 +16,7 @@ Last updated: 2026-08-17
 | 2026-08-16 | [2026-08-16-server-port-env-removal/](./2026-08-16-server-port-env-removal/) | Removal of the legacy backend-port env bridge | 4 | 0 open · 4 fixed |
 | 2026-08-16 | [2026-08-16-oauth-scaffold-port-contract/](./2026-08-16-oauth-scaffold-port-contract/) | OAuth callback port versus consumer scaffold `config.ports.ts` contract | 4 | 0 open · 4 fixed |
 | 2026-08-15 | [2026-08-15-ai-docs-audit/](./2026-08-15-ai-docs-audit/) | AI-context and documentation source-of-truth audit | 12 | 0 open · 12 fixed |
+| 2026-08-14 | [2026-08-14-prod-function-map-divergence/](./2026-08-14-prod-function-map-divergence/) | Deployed `functions.sleep` undefined: production map generator ignored `shared/` and flattened nested keys (+ the e2e gate that hid it) | 11 | 0 open · 10 fixed · 1 false-positive |
 | 2026-08-04 | [2026-08-04-keyv-cacheable-supply-chain/](./2026-08-04-keyv-cacheable-supply-chain/) | Exposure check for the active keyv/cacheable npm compromise — not exposed | 5 | 0 open · 5 false-positive |
 | 2026-07-27 | [2026-07-27-composed-preset-function-collision/](./2026-07-27-composed-preset-function-collision/) | Browser acceptance: composed atomic presets rejected their shared function registry | 2 | 1 open · 1 fixed |
 | 2026-07-27 | [2026-07-27-v080-dependency-audit/](./2026-07-27-v080-dependency-audit/) | v0.8.0 dependency audit: clean-scaffold and framework advisory assessment | 4 | 0 open · 1 fixed · 3 wontfix |

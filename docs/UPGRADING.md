@@ -106,18 +106,67 @@ Both re-render a fresh scaffold with your RECORDED choices
 - **file you never edited** (hash matches the manifest baseline) → refreshed.
 - **file you edited** → a `<file>.new` sidecar next to it — **never
   overwritten** — plus an AI-merge note in `dump/UPDATE_<hash>.log`.
+- **file the new version no longer ships** → left in place, flagged with a
+  `<file>.removed` marker beside it + a report entry. An update **never deletes**;
+  the marker tells you (and an agent) that the framework has dropped the file.
 
 Your own app code (never in the fresh render) is untouched. `prisma/`, `.env`,
 `.env.local`, and `package.json` are never touched, even by `--app`.
 
+> `.new` and `.removed` are **not** the same thing. A `.new` holds replacement
+> content to merge in. A `.removed` holds no content at all — merging one into
+> its file would destroy the file. Read the marker; it says so itself.
+
 ---
 
-## Step 3 — Merge the `.new` sidecars
+## Step 3 — Merge the `.new` sidecars, resolve the `.removed` markers
 
 For each `<file>.new` the report lists: merge its changes into `<file>`,
 preserving your local edits, then delete the `.new` sidecar. An AI can apply the
 `dump/UPDATE_<hash>.log` report directly. Review with `git diff` before
 committing.
+
+For each `<file>.removed`: check whether anything in the project still imports,
+runs, or references that file — an npm script, the `.githooks/pre-commit` hook,
+another module. Then bring the **whole list at once** to the developer with a
+per-file recommendation ("safe to remove, nothing references it" / "keep, the
+pre-commit hook still calls it") and wait for their decision. **Deleting files is
+never an autonomous action** (CLAUDE.md Rule 8) — the marker is a signal, not an
+order.
+
+On a yes: remove the file together with its marker. On a no: keep the file and
+delete only the marker — the project owns it from then on, the framework no
+longer maintains it. Doing nothing is also fine: an ignored marker is re-created
+by the next `update`, so the decision is never lost.
+
+### Refusing a scaffold file for good — `.luckystackignore`
+
+The reverse case: a file the framework ships that this project should never
+receive. Deleting it does **not** stick — a file missing locally plans as `add`,
+so the next `update` delivers it again.
+
+List it in `.luckystackignore` at the project root instead (`.gitignore`-shaped:
+one pattern per line, `#` comments, `*` inside a segment, `**` across segments,
+a trailing `/` for a whole subtree):
+
+```
+# our compose lives at compose.yml + docker/images/App.Dockerfile
+compose.yaml
+Dockerfile
+```
+
+Ignored paths get **nothing** written — not the file, not a `.new` sidecar — and
+they stay out of the scaffold manifest, so they never re-plan as `unchanged`
+either. The update report lists them under *"Skipped — this project opted out"*,
+because a silent skip is indistinguishable from the framework having dropped the
+file.
+
+Reach for this when the project already solves the same job under a **different
+name**, which is exactly when nothing collides and no sidecar warns you. The case
+it was built for: a project with its own `compose.yml` received the scaffold's
+`compose.yaml`; Docker Compose prefers `compose.yaml`, so a bare
+`docker compose up` silently started the wrong stack. When the names DO match,
+you want the normal sidecar flow — not this.
 
 ---
 

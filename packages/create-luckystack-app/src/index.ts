@@ -1408,6 +1408,85 @@ export const replacePlaceholders = (
   });
 };
 
+//? Docs the CONSUMER owns and regenerates at `docs/` — a CLAUDE.md reference to
+//? one of these means the project's own copy, never the bundled framework copy,
+//? so they must NOT be rewritten to `docs/luckystack/`. Everything else that
+//? exists in the framework docs bundle is framework documentation and lands
+//? under `docs/luckystack/` in a scaffolded project.
+const CONSUMER_OWNED_DOCS = new Set([
+  'decisions',
+  'lessons',
+  'findings',
+  'ai-product',
+  'PRODUCT.md',
+  'AI_DECISIONS_INDEX.md',
+  'AI_LESSONS_INDEX.md',
+  'AI_PRODUCT_OVERVIEW.md',
+  'AI_CAPABILITIES.md',
+  'AI_PROJECT_INDEX.md',
+  'ai-graph.json',
+]);
+
+//? The framework's CLAUDE.md is written against the framework repo layout, where
+//? its docs live at `docs/`. `copyAiDocs` puts those same docs under
+//? `docs/luckystack/` in a scaffolded project, so every in-body `docs/<X>`
+//? reference would otherwise point at a path that does not exist there (the
+//? historical "dead paths" defect: Rule 28 sent a consumer AI down ~26 of them
+//? every session). Rewrite them on copy, driven by what the bundle ACTUALLY
+//? contains rather than a hand-kept list.
+//?
+//? A line that already mentions `docs/luckystack/` is left alone — those are the
+//? spots that deliberately spell out BOTH paths (the Quick Links table, the
+//? "consumer copy: …" parentheticals) and are correct as written.
+//? Blocks of CLAUDE.md that only mean anything INSIDE the framework repo, fenced
+//? in the source so the list lives next to the content instead of in a
+//? hand-kept array here (which would silently drift the moment a section moves).
+//?
+//? WHY strip at all: the scaffolded CLAUDE.md is read on every prompt, so every
+//? line costs tokens forever. A consumer has no `packages/*` to write framework
+//? code in, no `ai:changelog-check`, no cross-repo quick index — and the Project
+//? Snapshot actively describes the WRONG project, telling a consumer's AI that
+//? this repo publishes 16 npm packages.
+const FRAMEWORK_ONLY_OPEN = '<!-- framework-only -->';
+const FRAMEWORK_ONLY_CLOSE = '<!-- /framework-only -->';
+
+export const stripFrameworkOnlyBlocks = (content: string): string => {
+  const out: string[] = [];
+  let depth = 0;
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === FRAMEWORK_ONLY_OPEN) { depth++; continue; }
+    if (trimmed === FRAMEWORK_ONLY_CLOSE) { depth = Math.max(0, depth - 1); continue; }
+    if (depth === 0) out.push(line);
+  }
+  //? An unbalanced fence would silently swallow the rest of the file, so say so
+  //? loudly rather than shipping a truncated contract.
+  if (depth !== 0) {
+    throw new Error(
+      `[create-luckystack-app] unbalanced ${FRAMEWORK_ONLY_OPEN} fence in CLAUDE.md — `
+      + 'every opener needs a matching closer, otherwise the rest of the file is dropped.',
+    );
+  }
+  return out.join('\n');
+};
+
+export const rewriteFrameworkDocPaths = (content: string, frameworkDocEntries: string[]): string => {
+  const rewritable = frameworkDocEntries.filter((e) => !CONSUMER_OWNED_DOCS.has(e));
+  if (rewritable.length === 0) return content;
+  const byLongestFirst = rewritable.toSorted((a, b) => b.length - a.length);
+  return content
+    .split('\n')
+    .map((line) => {
+      if (line.includes('docs/luckystack/')) return line;
+      let out = line;
+      for (const entry of byLongestFirst) {
+        out = out.replaceAll(`docs/${entry}`, `docs/luckystack/${entry}`);
+      }
+      return out;
+    })
+    .join('\n');
+};
+
 export const isTextFile = (filePath: string): boolean => {
   const textExts = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.css', '.html', '.prisma', '.yaml', '.yml', '.sh', '.conf'];
   if (textExts.includes(path.extname(filePath))) return true;
@@ -1542,17 +1621,18 @@ const runPrismaGenerate = (cwd: string): void => {
   }
 };
 
-//? Pre-commit hook installed into the consumer project: two pure-Node CHECKS,
+//? Pre-commit hook installed into the consumer project: pure-Node CHECKS only,
 //? no generators and no `git add`.
 //?
-//? It used to regenerate nine artifacts and stage them. That made every commit
+//? It used to regenerate six artifacts and stage them. That made every commit
 //? slow, and it made the commit UNTRUE — the generators read the whole working
 //? tree, not the staging area, so a commit could carry an index derived from
 //? code that wasn't in it. The artifacts are gitignored now (see the template's
 //? .gitignore) and rebuilt by `npm run ai:refresh` / `postinstall`, so there is
 //? nothing left to keep in sync and this hook never writes to the tree.
 //?
-//? Mirrors the framework repo's own .githooks/pre-commit — extend both together.
+//? Mirrors the framework repo's own .githooks/pre-commit, minus its AGENTS.md
+//? refresh (`ai:agents-md` is framework-only) — extend both together.
 //? Wired via a `prepare` script setting `core.hooksPath` at install time (no-op
 //? when the project isn't a git repo yet — the hook activates after `git init`).
 const AI_INDEX_HOOK = `#!/bin/sh
@@ -3337,14 +3417,11 @@ const FRAMEWORK_OWN_RECORDS = [
   'AI_PROJECT_INDEX.md',
   'AI_DECISIONS_INDEX.md',
   'AI_LESSONS_INDEX.md',
-  'AI_EXAMPLES_INDEX.md',
-  'AI_RUNBOOKS.md',
-  'AI_CONTEXT_BUDGET.md',
+  'AI_PRODUCT_OVERVIEW.md',
   'ai-graph.json',
   'ai-product',
   'decisions',
   'lessons',
-  'examples',
 ];
 
 const stripFrameworkOwnRecords = (docsDir: string): void => {
@@ -3374,6 +3451,11 @@ const copyAiDocs = (
   const fromBundle = fs.existsSync(bundledDir);
   const base = fromBundle ? bundledDir : path.resolve(__dirname, '..', '..', '..');
 
+  //? What the framework docs bundle actually contains — drives the CLAUDE.md
+  //? path rewrite below so it can never drift from the real doc set.
+  const frameworkDocsDir = path.join(base, 'docs');
+  const frameworkDocEntries = fs.existsSync(frameworkDocsDir) ? fs.readdirSync(frameworkDocsDir) : [];
+
   //? Only branch-logs/README.md is copied (not the framework's own log
   //? entries) — the consumer's first session initializes their own log file.
   const docsCopies: [string, string, boolean][] = [
@@ -3402,13 +3484,27 @@ const copyAiDocs = (
       //? consistently with the template tree. Binary files fall back to a raw
       //? byte copy.
       if (isTextFile(src)) {
-        const rendered = replacePlaceholders(fs.readFileSync(src, 'utf8'), vars);
+        let rendered = replacePlaceholders(fs.readFileSync(src, 'utf8'), vars);
+        //? Only the root CLAUDE.md needs the framework-docs path rewrite — the
+        //? docs themselves are copied verbatim into docs/luckystack/, so their
+        //? own relative cross-references stay valid inside that tree.
+        if (path.basename(dst) === 'CLAUDE.md') {
+          rendered = stripFrameworkOnlyBlocks(rewriteFrameworkDocPaths(rendered, frameworkDocEntries));
+        }
         fs.writeFileSync(dst, rendered);
       } else {
         fs.copyFileSync(src, dst);
       }
     }
     copiedCount++;
+  }
+
+  //? Framework-internal doc folders that are not consumer documentation —
+  //? retired one-offs and in-flight planning notes. `bundleFrameworkDocs.mjs`
+  //? already keeps them out of the npm tarball; this strip covers the monorepo
+  //? fallback path (`scaffold:test`), which copies the repo-root docs/ directly.
+  for (const dir of ['_archive', 'plans']) {
+    fs.rmSync(path.join(targetDir, 'docs', 'luckystack', dir), { recursive: true, force: true });
   }
 
   //? The framework's OWN dated finding-sets (docs/findings/<YYYY-MM-DD>-*/) are
@@ -3656,14 +3752,27 @@ const main = async (): Promise<void> => {
 //? installed `create-luckystack-app` bin). Importing it as a module — e.g. the
 //? unit tests that exercise the pure helpers — must NOT trigger the
 //? filesystem copy / `npm install` / prompts side-effects of `main()`.
-const isCliEntry = (): boolean => {
+//?
+//? Both sides MUST be realpath-resolved. On macOS/Linux npm installs a bin as a
+//? SYMLINK (`node_modules/.bin/create-luckystack-app` → `../create-luckystack-app/
+//? dist/index.js`); node then reports the symlink in `process.argv[1]` but
+//? resolves `import.meta.url` (hence `__filename`) to the link TARGET. Comparing
+//? the two raw paths is therefore always false there, and the CLI exits 0 having
+//? printed nothing and scaffolded nothing — indistinguishable from success.
+//? Windows has no symlink (npm writes a `.cmd` shim that passes the real path),
+//? which is why this only ever failed off-Windows.
+const realPath = (target: string): string => {
+  try {
+    return fs.realpathSync(path.resolve(target));
+  } catch {
+    return path.resolve(target);
+  }
+};
+
+export const isCliEntry = (): boolean => {
   const entry = process.argv[1];
   if (!entry) return false;
-  try {
-    return path.resolve(entry) === path.resolve(__filename);
-  } catch {
-    return false;
-  }
+  return realPath(entry) === realPath(__filename);
 };
 
 if (isCliEntry()) {

@@ -5,7 +5,7 @@
 //? `<Middleware>`-wrapped page renders.
 
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getMiddlewareHandler, getPageMiddleware } from '../middlewareRegistry';
+import { getMiddlewareHandler, getPageMiddleware, resolveMiddlewareOutcome } from '../middlewareRegistry';
 import { useSession } from './sessionContext';
 
 const getParams = (locationSearch: string) => {
@@ -32,11 +32,16 @@ export default function useRouter() {
     const handler = pageMw ?? getMiddlewareHandler();
     const result = await handler({ location: path, searchParams: queryObject, session });
 
-    if (result?.success) {
-      return navigateHandler(path);
+    const outcome = resolveMiddlewareOutcome(result);
+    if (outcome.kind === 'redirect') {
+      return navigateHandler(outcome.to);
     }
-    if (result && !result.success && result.redirect) {
-      return navigateHandler(result.redirect);
+    //? `allow` obviously navigates. So does `deny` — the target route's
+    //? `<Middleware>` renders the status state THERE, which keeps the URL and
+    //? shows why. Silently doing nothing (the old behaviour for anything that
+    //? was not allow-or-redirect) makes the button look broken.
+    if (outcome.kind === 'allow' || outcome.kind === 'deny') {
+      return navigateHandler(path);
     }
     return;
   };

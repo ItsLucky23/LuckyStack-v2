@@ -16,9 +16,36 @@ export interface MiddlewareInput {
 }
 
 export type MiddlewareResult =
-  | { success: true; redirect?: undefined }
-  | { success: false; redirect: string }
+  | { success: true; redirect?: undefined; status?: undefined }
+  //? Deny by sending the user somewhere else. Right for "you are not signed in"
+  //? — `/login` is where the problem gets solved.
+  | { success: false; redirect: string; status?: undefined }
+  //? Deny IN PLACE: keep the requested URL and render a status state (403 for
+  //? signed-in-but-not-allowed, 404 to hide a resource's existence). Redirecting
+  //? an authenticated user who simply lacks a permission sends them somewhere
+  //? that does not explain anything and loses the URL they were trying to reach.
+  | { success: false; redirect?: undefined; status: number }
   | undefined;
+
+/** Normalized decision derived from a {@link MiddlewareResult}. */
+export type MiddlewareOutcome =
+  | { kind: 'allow' }
+  | { kind: 'redirect'; to: string }
+  | { kind: 'deny'; status: number }
+  | { kind: 'fallback' };
+
+//? ONE interpretation of a middleware result, shared by the `<Middleware>`
+//? component (direct URL hits) and `useRouter` (programmatic navigation). They
+//? previously branched separately, which is how `useRouter` ended up silently
+//? doing nothing for any result it did not recognise.
+export const resolveMiddlewareOutcome = (result: MiddlewareResult): MiddlewareOutcome => {
+  if (result?.success) return { kind: 'allow' };
+  if (result?.redirect) return { kind: 'redirect', to: result.redirect };
+  if (typeof result?.status === 'number') return { kind: 'deny', status: result.status };
+  //? No result at all, or a malformed one — treat as "not allowed here" and let
+  //? the caller fall back to a safe destination.
+  return { kind: 'fallback' };
+};
 
 export type MiddlewareHandler = (input: MiddlewareInput) => MiddlewareResult | Promise<MiddlewareResult>;
 

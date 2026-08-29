@@ -31,6 +31,38 @@ import { ok, type ConsumerProject, type Result } from '../lib/project';
 import { writeDumpLog } from '../lib/scan';
 import { AUTH_MODES, EMAIL_PROVIDERS, MONITORING_PROVIDERS, OAUTH_PROVIDERS } from '../featureOptions';
 
+//? Marker written next to a file the framework USED to ship and no longer does.
+//?
+//? Deliberately NOT a `.new` sidecar: `.new` means "here is the new content of
+//? this file, merge it in", and the report says so literally. A `.new` holding
+//? prose would be merged INTO the real file by anyone (human or agent)
+//? following that instruction — a working script traded for a sentence. A
+//? distinct extension makes the two cases impossible to confuse by name alone.
+export const REMOVED_MARKER_SUFFIX = '.removed';
+
+export const removedMarkerBody = (relativePath: string, frameworkVersion: string): string =>
+  [
+    `LuckyStack ${frameworkVersion} no longer ships \`${relativePath}\`.`,
+    '',
+    'THIS IS A REMOVAL MARKER, NOT FILE CONTENT. Never merge it into the file it',
+    'sits next to — unlike a `.new` sidecar it carries no replacement content.',
+    '',
+    'What to do:',
+    `  1. Check whether anything in this project still imports, runs, or references`,
+    `     \`${relativePath}\` (an npm script, the pre-commit hook, another module).`,
+    '  2. Take the finding to the developer with a recommendation — remove it, or',
+    '     keep it because <reference> still needs it. Deleting a file is NEVER an',
+    '     autonomous action (CLAUDE.md Rule 8): propose, then wait for a yes.',
+    '  3. On a yes to remove: delete the file and this marker together. On a no:',
+    '     keep the file, delete only this marker — the project now owns it, the',
+    '     framework no longer maintains it.',
+    '',
+    '`luckystack update` never removes a file on its own, and neither should you.',
+    'Leaving this marker in place is harmless; it is re-created by the next update',
+    'until the file is gone.',
+    '',
+  ].join('\n');
+
 //? Mirrors create-luckystack-app's scaffoldManifest.ts shape (schemaVersion 1).
 export interface ScaffoldManifestFileEntry {
   path: string;
@@ -101,6 +133,83 @@ export const isUpdatablePath = (relativePath: string, scope: UpdateScope): boole
   if (isNeverUpdatedPath(relativePath)) return false;
   if (isSafeSurfacePath(relativePath)) return true; //? bucket B — both scopes
   return scope === 'app'; //? app scope — every other framework-authored file
+};
+
+//? ─────────────────────────── consumer opt-out ───────────────────────────
+//?
+//? A scaffold file a project genuinely does not want. Deleting it is not
+//? enough: a file missing locally plans as ADD, so the next update delivers it
+//? again — and the project must remember to delete it after every upgrade or
+//? silently regain it.
+//?
+//? The case that forced this: a project with its own `compose.yml` +
+//? `docker/images/<name>.Dockerfile` received the scaffold's `compose.yaml` +
+//? `Dockerfile`. Different names, so nothing collided and no sidecar was
+//? written — but Docker Compose PREFERS `compose.yaml`, so a bare
+//? `docker compose up` silently switched stacks. A file that is wrong for a
+//? project needs a way to stay gone.
+//?
+//? Deliberately a `.gitignore`-shaped file rather than a key in
+//? `.luckystack/scaffold.json`: that manifest is rewritten from the fresh
+//? render on every update, so anything hand-added there is lost. This one is
+//? owned by the project, lives in version control, and is obvious in a diff.
+export const IGNORE_FILE_NAME = '.luckystackignore';
+
+const normalizeIgnorePattern = (raw: string): string =>
+  raw.trim().replaceAll('\\', '/').replace(/^\.\//, '').replace(/^\/+/, '');
+
+//? Reads the patterns, dropping blanks and `#` comments. Missing file = no
+//? patterns; an unreadable one is treated the same, because failing an upgrade
+//? over an optional opt-out file would be worse than ignoring it.
+export const readScaffoldIgnore = (root: string): string[] => {
+  const absolute = path.join(root, IGNORE_FILE_NAME);
+  if (!fs.existsSync(absolute)) return [];
+  let raw: string;
+  try {
+    raw = fs.readFileSync(absolute, 'utf8');
+  } catch {
+    return [];
+  }
+  return raw
+    .split(/\r?\n/)
+    .map((line) => normalizeIgnorePattern(line))
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+};
+
+//? `*` stays inside one segment, `**` crosses them, everything else is
+//? literal. A trailing `/` (or a bare directory name that the caller wrote as
+//? `docs/`) matches the whole subtree.
+const ignorePatternToRegExp = (pattern: string): RegExp => {
+  const directoryOnly = pattern.endsWith('/');
+  const body = directoryOnly ? pattern.slice(0, -1) : pattern;
+  let source = '';
+  for (let index = 0; index < body.length; index++) {
+    //? `noUncheckedIndexedAccess` types a string index as possibly undefined;
+    //? the loop bound already rules that out.
+    const char = body[index] ?? '';
+    if (char === '*') {
+      if (body[index + 1] === '*') {
+        source += '.*';
+        index++;
+        continue;
+      }
+      source += '[^/]*';
+      continue;
+    }
+    source += char.replaceAll(/[.+?^${}()|[\]\\]/g, String.raw`\$&`);
+  }
+  //? A directory pattern only matches things BENEATH it; a file pattern
+  //? matches the file itself and, if it names a folder, its contents too.
+  return new RegExp(directoryOnly ? `^${source}/.*$` : `^${source}(?:/.*)?$`);
+};
+
+export const createIgnoreMatcher = (patterns: readonly string[]): ((relativePath: string) => boolean) => {
+  if (patterns.length === 0) return () => false;
+  const expressions = patterns.map((pattern) => ignorePatternToRegExp(pattern));
+  return (relativePath: string) => {
+    const normalized = normalizeIgnorePattern(relativePath);
+    return expressions.some((expression) => expression.test(normalized));
+  };
 };
 
 //? Same text-extension heuristic + CRLF normalization as the scaffolder's
@@ -188,7 +297,7 @@ export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
   return flags;
 };
 
-export type UpdateAction = 'add' | 'overwrite' | 'sidecar' | 'unchanged';
+export type UpdateAction = 'add' | 'overwrite' | 'sidecar' | 'unchanged' | 'ignored';
 
 export interface UpdatePlanEntry {
   path: string;
@@ -211,6 +320,7 @@ export const planUpdate = (
   consumerManifest: ScaffoldManifest | null,
   freshManifest: ScaffoldManifest,
   scope: UpdateScope = 'framework',
+  isIgnored: (relativePath: string) => boolean = createIgnoreMatcher(readScaffoldIgnore(consumerRoot)),
 ): UpdatePlan => {
   const recordedHashes = new Map(
     (consumerManifest?.files ?? []).map((entry) => [entry.path, entry.sha256]),
@@ -218,6 +328,13 @@ export const planUpdate = (
   const entries: UpdatePlanEntry[] = [];
   for (const fresh of freshManifest.files) {
     if (!isUpdatablePath(fresh.path, scope)) continue;
+    //? Opted out by the project. Recorded rather than skipped so the report can
+    //? say so — an opt-out that leaves no trace is indistinguishable from the
+    //? framework quietly dropping the file.
+    if (isIgnored(fresh.path)) {
+      entries.push({ path: fresh.path, action: 'ignored', freshSha256: fresh.sha256 });
+      continue;
+    }
     const localAbsolute = path.join(consumerRoot, fresh.path);
     if (!fs.existsSync(localAbsolute)) {
       entries.push({ path: fresh.path, action: 'add', freshSha256: fresh.sha256 });
@@ -252,25 +369,40 @@ export const applyUpdate = (
   freshManifest: ScaffoldManifest,
   scope: UpdateScope = 'framework',
 ): { reportPath: string; counts: Record<UpdateAction, number> } => {
-  const counts: Record<UpdateAction, number> = { add: 0, overwrite: 0, sidecar: 0, unchanged: 0 };
+  const counts: Record<UpdateAction, number> = { add: 0, overwrite: 0, sidecar: 0, unchanged: 0, ignored: 0 };
   const sidecars: string[] = [];
   const added: string[] = [];
   const overwritten: string[] = [];
+  const ignored: string[] = [];
   const written: UpdatePlanEntry[] = [];
 
   for (const entry of plan.entries) {
     counts[entry.action] += 1;
     const freshAbsolute = path.join(freshRoot, entry.path);
     const localAbsolute = path.join(project.root, entry.path);
-    if (entry.action === 'add' || entry.action === 'overwrite') {
-      fs.mkdirSync(path.dirname(localAbsolute), { recursive: true });
-      fs.copyFileSync(freshAbsolute, localAbsolute);
-      written.push(entry);
-      if (entry.action === 'add') added.push(entry.path);
-      else overwritten.push(entry.path);
-    } else if (entry.action === 'sidecar') {
-      fs.copyFileSync(freshAbsolute, `${localAbsolute}.new`);
-      sidecars.push(entry.path);
+    switch (entry.action) {
+      case 'add':
+      case 'overwrite': {
+        fs.mkdirSync(path.dirname(localAbsolute), { recursive: true });
+        fs.copyFileSync(freshAbsolute, localAbsolute);
+        written.push(entry);
+        if (entry.action === 'add') added.push(entry.path);
+        else overwritten.push(entry.path);
+        break;
+      }
+      case 'sidecar': {
+        fs.copyFileSync(freshAbsolute, `${localAbsolute}.new`);
+        sidecars.push(entry.path);
+        break;
+      }
+      case 'ignored': {
+        //? Nothing on disk — not the file, not a sidecar. That IS the opt-out.
+        ignored.push(entry.path);
+        break;
+      }
+      case 'unchanged': {
+        break;
+      }
     }
   }
 
@@ -293,18 +425,35 @@ export const applyUpdate = (
     );
   }
 
-  //? Report-only: manifest-recorded safe-surface files the NEW framework
-  //? version no longer ships. Deleting is the consumer's call — an update must
-  //? never remove files — but silently leaving them reads as "still current".
+  //? Manifest-recorded safe-surface files the NEW framework version no longer
+  //? ships. Deleting is the consumer's call — an update must never remove files
+  //? — but silently leaving them reads as "still current". Each one gets a
+  //? `<file>.removed` marker beside it (impossible to miss in `git status`,
+  //? impossible to confuse with a mergeable `.new`) plus a report entry.
+  //?
+  //? The manifest keeps the entry for a file we did not write, so an ignored
+  //? removal is re-reported on every later update until the file is gone.
   const freshPaths = new Set(freshManifest.files.map((entry) => entry.path));
+  //? An opted-out path is excluded here too: the project has already said it
+  //? does not want the framework's opinion on this file, so telling it the
+  //? framework stopped shipping one is noise, not news.
+  const ignoredPaths = new Set(ignored);
   const noLongerShipped = (consumerManifest?.files ?? [])
     .filter(
       (entry) =>
         isUpdatablePath(entry.path, scope) &&
         !freshPaths.has(entry.path) &&
+        !ignoredPaths.has(entry.path) &&
         fs.existsSync(path.join(project.root, entry.path)),
     )
     .map((entry) => entry.path);
+
+  for (const relativePath of noLongerShipped) {
+    fs.writeFileSync(
+      path.join(project.root, `${relativePath}${REMOVED_MARKER_SUFFIX}`),
+      removedMarkerBody(relativePath, freshManifest.luckystackVersion),
+    );
+  }
 
   const lines: string[] = [
     `luckystack update (${scope} scope) — ${consumerManifest?.luckystackVersion ?? 'unknown (no manifest)'} -> ${freshManifest.luckystackVersion}`,
@@ -313,8 +462,19 @@ export const applyUpdate = (
     `overwritten: ${String(counts.overwrite)} (pristine — hash matched the scaffold manifest)`,
     `sidecars:    ${String(counts.sidecar)} (user-modified — new version written as <file>.new)`,
     `unchanged:   ${String(counts.unchanged)}`,
+    `ignored:     ${String(counts.ignored)} (opted out via ${IGNORE_FILE_NAME})`,
     '',
   ];
+  if (ignored.length > 0) {
+    lines.push(
+      `Skipped — this project opted out in ${IGNORE_FILE_NAME}:`,
+      ...ignored.map((p) => `  - ${p}`),
+      '',
+      'Nothing was written for these: no file, no sidecar. Remove the pattern',
+      `from ${IGNORE_FILE_NAME} if you want the framework's version back.`,
+      '',
+    );
+  }
   if (added.length > 0) {
     lines.push(
       'New framework files delivered (did not exist in your project):',
@@ -333,8 +493,19 @@ export const applyUpdate = (
   }
   if (noLongerShipped.length > 0) {
     lines.push(
-      'No longer shipped by this framework version (left in place — delete manually if unused):',
+      `No longer shipped by this framework version (left in place, each flagged with a \`${REMOVED_MARKER_SUFFIX}\` marker):`,
       ...noLongerShipped.map((p) => `  - ${p}`),
+      '',
+      'AI cleanup instruction: these files are gone from the framework, not from',
+      'your project. For each one, check whether anything here still imports, runs,',
+      'or references it (npm scripts, the .githooks/pre-commit hook, other modules).',
+      'Then bring the whole list to the developer in ONE batch with a per-file',
+      'recommendation — "safe to remove, nothing references it" or "keep, <X> still',
+      'uses it" — and WAIT for their decision. Deleting files is never autonomous',
+      '(CLAUDE.md Rule 8). On a yes: remove the file together with its',
+      `\`${REMOVED_MARKER_SUFFIX}\` marker. On a no: keep the file and delete only the marker;`,
+      'the project owns it from now on. Never merge a marker into a file — it holds',
+      'no replacement content, and doing so would destroy the file.',
       '',
     );
   }

@@ -4,10 +4,11 @@
 
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
-| chore/ai-context-contract-2026-08-28 | (none) | 2026-08-28 15:45 | in progress — AI-context-laag herzien (3 generatorbugs, artifacts nu gitignored cache, hook/CI checks-only, feature-grens-gate, ADR 0046–0050) + v0.9.0 release voorbereid: 17 packages lockstep, volledige publish-gate 8/8 groen, flaky test-runner-suite en `bump --dry-run`-footgun gefixt (lesson 0019). | 2 |
+| chore/ai-context-contract-2026-08-28 | (none) | 2026-08-29 16:50 | in progress — AI-context-laag herzien (3 generatorbugs, artifacts nu gitignored cache, hook/CI checks-only, feature-grens-gate, ADR 0052–0056) + v0.9.0 release voorbereid: 17 packages lockstep, publish-gate 8/8 groen, flaky test-runner-suite en `bump --dry-run`-footgun gefixt. Daarna `origin/main` erin gemerged (39 conflicten, records hernummerd) en de sinds v0.8.5 rode `e2e-scaffold`-job opgelost: `isCliEntry` vergeleek symlink met realpath, waardoor `npx create-luckystack-app` op macOS/Linux stil niets deed (lesson 0021). | 3 |
 | feat/email-code-2fa | (none) | 2026-07-12 16:05 | merged 2026-07-12 — in v0.6.0 (merge 970d051; passwordless email-code login + 2FA TOTP/email-fallback/recovery [ADR 0024]; security-hardened via 5-lens scan + echte-Redis-harness) | 7 |
 | fix/unpushed-review-findings | (none) | 2026-07-16 16:10 | merged 2026-07-16 — v0.7.0 release-readiness fixes (merge 3f77de9) | 5 |
-| main | (none) | 2026-08-17 09:27 | completed — v0.8.4 gepubliceerd via GitHub Actions met npm/SLSA provenance; 17/17 packages op latest, CI en audit groen. | 78 |
+| main | (none) | 2026-08-18 18:05 | active — v0.8.6 gepubliceerd; v0.8.7 voorbereid: exacte `_api`/`_sync` marker-match (33 valse loader-warnings → 0), `afterListen` tegen de post-listen crash-loop (ADR 0050), en deny-in-place middleware (`{ success: false, status }`). Twee zelfreviews, vier eigen bugs gevangen. | 83 |
+| fix/prod-function-map-divergence | (none) | 2026-08-21 | merged 2026-08-21 in v0.8.5 — function-injection in één registry (ADR 0046), e2e-poort gerepareerd + in CI, testbestanden uitgesloten van elke import-alles-plek (ADR 0047); gerebased op v0.8.4, nog niet gepubliceerd. | 4 |
 | fix/routed-http-method-map-bootstrap | (none) | 2026-07-27 23:59 | completed — v0.8.3 met provenance gepubliceerd; registry-scaffold groen. | 3 |
 | fix/dropdown-positioning | (none) | 2026-07-22 21:17 | completed — v0.7.5 gepubliceerd via GitHub Actions met npm provenance. | 3 |
 | fix/boot-uuid-heartbeat | (none) | 2026-07-23 08:40 | merged — BU-01 uitgebracht in v0.7.6 met npm provenance. | 3 |

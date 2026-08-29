@@ -13,6 +13,24 @@ export {
   assertValidRouteNaming,
 } from './routeNamingValidation';
 
+// Server-function discovery + production-map rendering. Single source of truth
+// for the `functions.*` key paths, shared by the dev loader, the type-map
+// generator, and `scripts/generateServerRequests.ts` so the three can no longer
+// disagree about which modules exist or where they live (ADR 0046).
+export {
+  collectFunctionModules,
+  renderFunctionsMap,
+  formatFunctionKeyPath,
+  functionModuleFileName,
+  formatFunctionKeyConflict,
+  formatFunctionNamespaceConflict,
+} from './functionRegistry';
+export type {
+  FunctionModule,
+  RenderedFunctionsMap,
+  CollectFunctionModulesOptions,
+} from './functionRegistry';
+
 // Routing rules registry (Phase 1.5).
 export {
   registerRoutingRules,

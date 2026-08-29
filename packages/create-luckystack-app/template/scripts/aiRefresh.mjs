@@ -8,9 +8,8 @@
 // diff in 200 of 411 commits.
 //
 // The generators are independent (none reads another's output) and each is a
-// separate process, so stage 1 runs them CONCURRENTLY: wall-clock is the slowest
-// generator instead of the sum. `generateContextBudget.mjs` is the one exception
-// — it measures the other artifacts' sizes — so it runs afterwards, in stage 2.
+// separate process, so they all run CONCURRENTLY: wall-clock is the slowest
+// generator instead of the sum.
 //
 // Usage:
 //   node scripts/aiRefresh.mjs                rebuild everything
@@ -35,19 +34,15 @@ const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
 //? [generator script, the artifact it produces]. A generator that this project
 //? doesn't have (the framework-only ones) is skipped silently, so the same file
 //? serves the framework repo and every scaffold variant.
-const STAGE_1 = [
+const GENERATORS = [
   ["generateAiIndex.mjs", "docs/AI_QUICK_INDEX.md"],
   ["generateAiCapabilities.mjs", "docs/AI_CAPABILITIES.md"],
   ["generateProjectIndex.mjs", "docs/AI_PROJECT_INDEX.md"],
   ["generateDecisionsIndex.mjs", "docs/AI_DECISIONS_INDEX.md"],
   ["generateLessonsIndex.mjs", "docs/AI_LESSONS_INDEX.md"],
-  ["generateExamplesIndex.mjs", "docs/AI_EXAMPLES_INDEX.md"],
-  ["generateRunbooks.mjs", "docs/AI_RUNBOOKS.md"],
+  ["generateProductOverview.mjs", "docs/AI_PRODUCT_OVERVIEW.md"],
   ["generateGraph.mjs", "docs/ai-graph.json"],
 ];
-
-//? Reads the stage-1 artifacts to report their sizes — must run after them.
-const STAGE_2 = [["generateContextBudget.mjs", "docs/AI_CONTEXT_BUDGET.md"]];
 
 const safe = async (promise) => {
   try { return [null, await promise]; } catch (error) { return [error, null]; }
@@ -84,13 +79,8 @@ const plan = async (stage, ifMissing) => {
 
 const main = async () => {
   const ifMissing = process.argv.includes("--if-missing");
-  const results = [];
-
-  for (const stage of [STAGE_1, STAGE_2]) {
-    const scripts = await plan(stage, ifMissing);
-    if (scripts.length === 0) continue;
-    results.push(...await Promise.all(scripts.map(runGenerator)));
-  }
+  const scripts = await plan(GENERATORS, ifMissing);
+  const results = await Promise.all(scripts.map(runGenerator));
 
   if (results.length === 0) {
     console.log(ifMissing ? "[ai:refresh] all artifacts present — nothing to build." : "[ai:refresh] no generators found.");
