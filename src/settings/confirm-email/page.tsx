@@ -1,3 +1,5 @@
+//? intent: Landing spot for the email-change confirmation link — proves the new address is reachable.
+
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 

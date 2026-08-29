@@ -1,0 +1,8 @@
+{
+  "_note": "TEMPLATE SCENARIO — fill this in for THIS project. A scaffold inherits the eval scenarios but NOT the framework's ADRs, so a concrete `citedAdr` here would score agreement with a decision this project never made (that is exactly how a scenario ended up expecting a CORS ADR 0007 in a repo whose 0007 is about something else). Replace the prompt with a real fail-closed default of yours, then add `\"citedAdr\": \"NNNN\"` once the matching ADR exists in docs/decisions/.",
+  "id": "why-a-default-failclosed",
+  "prompt": "Pick a deliberately fail-closed default in this project and ask why it is that way, and whether it can be relaxed for local dev.",
+  "expects": {
+    "usesAnyTool": ["get_decision", "list_decisions"]
+  }
+}

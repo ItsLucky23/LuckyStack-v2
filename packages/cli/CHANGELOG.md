@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-28
+
+### Changed
+
+- `add login` / `add docs-ui` page assets carry a `//? intent:` line, matching the scaffold template (asset ↔ template parity).
+
 ### Added
 
 - `luckystack update` now honours a `.luckystackignore` file at the project root:

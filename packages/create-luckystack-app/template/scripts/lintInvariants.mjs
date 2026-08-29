@@ -114,9 +114,8 @@ const RULES = [
 const RULES_BY_ID = new Map(RULES.map((r) => [r.id, r]));
 
 // ---------------------------------------------------------------------------
-// Doc-coverage extractors (shared with generateProjectIndex.mjs /
-// generateProductOverview.mjs — kept inline here to preserve this script's
-// zero-import, pure-Node contract). A NEW route/page that lands without its
+// Doc-coverage extractors (mirror generateProjectIndex.mjs — kept inline here to
+// preserve this script's zero-import, pure-Node contract). A NEW route/page that lands without its
 // mandated doc lines (Rules 12 / 15a / 15b) is the silent-drift failure the
 // auto-generated indexes render as "—" but never block on. The coverage gate
 // turns that into a diff-time finding — but ONLY for files this change ADDS,

@@ -1,3 +1,5 @@
+//? intent: Sign in — the only way an existing user gets a session.
+
 import LoginForm from "src/_components/LoginForm";
 
 export const template = 'plain';

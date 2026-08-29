@@ -94,6 +94,10 @@ noise, and the Session Capture Protocol exists precisely to keep discussion out 
 - Markdown headers consistent: always `##` for entries.
 - New entries go at the **bottom** of the file. Never reorder or rewrite history.
 - Amending an entry is allowed only to correct factual errors or add a `Notes` line about a same-session revert.
+- **Log what happened and why that way — not what the code now looks like.** The diff already shows the
+  after-state, exactly and forever; a prose restatement of it is a second description that is wrong from
+  the next commit onward (CLAUDE.md rule 15c). Name files and routes as *pointers*; keep the prose for the
+  reasoning, the dead ends, and the things a future reader could not reconstruct from `git show`.
 
 ## 5. Filename sanitization
 

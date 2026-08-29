@@ -1,5 +1,5 @@
 ---
-name: stale-broken-dev-process-looks-like-a-per-route-bug
+name: a-stale-broken-dev-process-looks-like-a-per-route-bug
 title: "Alle input op _ai-routes geweigerd" was geen type-bug — het was een stale dev-proces met lege devApis
 severity: high
 area: packages/server

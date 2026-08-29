@@ -30,6 +30,8 @@
     "ai:lint": "node scripts/lintInvariants.mjs",
     "ai:doc-staleness": "node scripts/checkDocStaleness.mjs",
     "ai:eval": "node eval/scoreEval.mjs",
+    "ai:refresh": "node scripts/aiRefresh.mjs",
+    "ai:check-ids": "node scripts/checkRecordIds.mjs",
     "generateArtifacts": "tsx --tsconfig tsconfig.server.json scripts/generateTypeMaps.ts && tsx --tsconfig tsconfig.server.json scripts/generateServerRequests.ts",
     "test": "npm run generateArtifacts && tsx --tsconfig tsconfig.server.json scripts/testAll.ts",
     "scaffold:test": "node scripts/scaffoldRouteTest.mjs",
@@ -41,7 +43,8 @@
     "prisma:generate": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts generate",
     "prisma:db:push": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts db push",
     "prisma:migrate:dev": "tsx --tsconfig tsconfig.server.json scripts/prismaWithSecrets.ts migrate dev",
-    "help": "node scripts/help.mjs"
+    "help": "node scripts/help.mjs",
+    "postinstall": "node scripts/aiRefresh.mjs --if-missing"
   },
   "dependencies": {
     "@luckystack/api": "^{{LUCKYSTACK_VERSION}}",

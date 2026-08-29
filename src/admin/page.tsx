@@ -1,3 +1,5 @@
+//? intent: Operator surface for the sample app — admin-only actions behind the middleware gate.
+
 import { useTranslator, i18nNotify as notify } from '@luckystack/core/client';
 import type { PageMiddleware } from '@luckystack/core/client';
 import type { SessionLayout } from 'config';

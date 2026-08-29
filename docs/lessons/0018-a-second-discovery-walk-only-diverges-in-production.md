@@ -7,7 +7,7 @@ date: 2026-08-14
 tags: [function-injection, codegen, dev-prod-parity, runtime-maps, deploy]
 ---
 
-# 0016 — A second discovery walk only diverges in production
+# 0018 — A second discovery walk only diverges in production
 
 ## What happened
 

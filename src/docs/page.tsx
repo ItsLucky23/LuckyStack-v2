@@ -1,3 +1,4 @@
+//? intent: In-app API explorer — try this project's routes without leaving the browser.
 /* eslint-disable luckystack/no-raw-try-catch, luckystack/no-raw-fetch-in-src --
    This file is the LuckyStack API Explorer UI: a Swagger-like browser that lets
    users (a) test framework `/api/*` and `/sync/*` endpoints over both socket AND

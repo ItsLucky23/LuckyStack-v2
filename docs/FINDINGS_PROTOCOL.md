@@ -48,6 +48,22 @@ the folder, cap it at the items actually worth tracking and mark the rest `wontf
    absolute date). This matches the existing dated conventions: `branch-logs/`
    headings, ADR `date:` front-matter, lesson `date:` front-matter.
 
+4. **Triage while WRITING — a findings folder must be finite.** Rule 2 rightly
+   forbids throwing away a folder with open items. It does not license an
+   `open` list that only ever grows: a scan that emits 40 findings and triages
+   none is a write-only backlog, not a record, and the next scan re-finds the
+   same 40. So cap the folder as you create it — decide up front how many items
+   this run will actually track — and mark everything below the line `wontfix`
+   **in the same pass**, with the one-line reason. An item you are not going to
+   act on is a decision, and a decision recorded now costs one line; recorded
+   never, it costs every future reader a triage they cannot do. Observed in the
+   field: 91 findings folders with 146 `open` rows, scanned faster than anyone
+   could ever process.
+
+5. **Point, don't paste.** A finding is a claim plus a `file:line` pointer plus a
+   status — not a copy of the code. It gets read weeks later, and by then the
+   pasted copy is wrong while the pointer is still right (CLAUDE.md rule 15c).
+
 ---
 
 ## Status vocabulary (per item)

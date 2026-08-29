@@ -7,9 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-28
+
+### Fixed
+
+- **`npx create-luckystack-app <name>` now actually scaffolds on macOS and Linux.** The CLI's entry-point guard compared `process.argv[1]` against `__filename` as raw strings. npm installs a bin as a symlink on POSIX, and node reports the symlink in `argv[1]` while resolving `import.meta.url` to its target, so the guard was permanently false: the command loaded the module, ran nothing, printed nothing and exited 0 — indistinguishable from success. Windows was unaffected (npm writes a `.cmd` shim passing the real path), which is why every local run was green while the Linux `e2e-scaffold` CI job had never once passed. Both sides are now realpath-resolved, and `cliEntry.test.ts` pins the symlink case.
+- `scripts/checkRecordIds.mjs` reads frontmatter on a CRLF checkout. It split lines on `"\n"` and matched them with a `$`-anchored pattern, which a trailing `\r` makes unmatchable — so every field read as absent and the entire frontmatter half of the guard (name/slug, `id`, dangling `relates`/`supersedes`) was a no-op on Windows while it worked on CI. The `0000-template.md` placeholders are now exempt from the name/slug rule, since their frontmatter is instructions to the author rather than a claim about themselves; they still take part in the duplicate-number check.
+- `AI_PROJECT_INDEX.md` and the dependency graph no longer drop root-level routes. `src/_api/session_v1.ts` and `logout_v1.ts` ship with every scaffold but required a page segment to be indexed, so `find_route` reported the session route as non-existent from day one.
+- The dependency graph's symbol pass no longer skips itself. Its file cap counted every `.d.ts` pulled in from `node_modules`, so on any real project it silently emitted `symbols: 0` and `who_calls` always returned nothing.
+- The graph now covers `server/`, `shared/`, `functions/`, `luckystack/` and `config.ts` (repo-relative ids, version 3), not just `src/`. A missing node reads as "nothing depends on this file", which was exactly wrong for the heaviest nodes in a project.
+- The scaffold no longer copies the FRAMEWORK's own generated indexes, ADRs, lessons and dependency graph into `docs/luckystack/`. They described the framework repo and sat next to the project's identically-named files — including a `decisions/` folder that made an inherited eval scenario cite a real but unrelated ADR. The conventions (protocols, `ARCHITECTURE_*`, templates) still ship.
+
 ### Changed
 
+- Generated AI-context artifacts are now gitignored and rebuilt by `npm run ai:refresh` (all generators in parallel) and by `postinstall --if-missing`. They are derived from the code, so a committed copy is the answer that drifts.
+- The installed pre-commit hook regenerates no index and stages none. It runs checks (`checkRecordIds.mjs`, `lintInvariants.mjs`, plus the report-only nudges) and, as the one deliberate exception, still refreshes `AGENTS.md` — a committed convention file other tools read straight from the repo, not a queryable index. It used to regenerate eight artifacts and `git add` them, which made every commit slow and could stage an index derived from code that was not in the commit.
 - The scaffolded `CLAUDE.md` drops the sections that only mean something inside the framework repo: the Project Snapshot (which described LuckyStack's own 16-package layout, i.e. the wrong project for a consumer's AI), Rule 7a about `packages/*` framework code, the `ai:changelog-check` bullet, and two doc-table rows for framework-only surfaces. Marked with `<!-- framework-only -->` fences in the source so the list lives next to the content instead of in a hand-kept array that would drift the moment a section moves; an unbalanced fence throws rather than silently truncating the contract. Saves ~443 tokens (3.5%) on a file that is read on every prompt — modest, because most of the contract genuinely applies to consumers too.
+
+### Added
+
+- `scripts/checkRecordIds.mjs` + `npm run ai:check-ids` — blocking guard on ADR/lesson number identity (duplicates, filename/frontmatter mismatch, dangling `relates`/`supersedes`/`@adr`). A duplicate number merges clean as two additions and silently repoints every reference.
+- `scripts/aiRefresh.mjs` + `npm run ai:refresh` — one command that rebuilds every AI-context artifact, all generators in parallel.
+- Template `page.tsx` files carry a `//? intent:` line, which now also surfaces as an Intent column in `AI_PROJECT_INDEX.md`'s Pages table, so `find_route` reaches a page's purpose without a second artifact.
 
 ## [0.8.7] - 2026-08-18
 

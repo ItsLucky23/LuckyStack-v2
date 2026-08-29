@@ -1,3 +1,5 @@
+//? intent: Front door — decides where an arriving visitor belongs, signed in or not.
+
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 

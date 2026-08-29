@@ -65,4 +65,34 @@ for (const [srcRel, dstRel, isDir] of ENTRIES) {
   copied++;
 }
 
-console.log(`[bundleFrameworkDocs] bundled ${String(copied)}/${String(ENTRIES.length)} doc source(s) into framework-docs/`);
+//? The framework's OWN generated artifacts + record instances must not ride
+//? along in the tarball. They describe the FRAMEWORK repo, so in a consumer
+//? project they sit next to the identically-named files that project generates
+//? for itself — a second, authoritative-looking answer that is wrong about this
+//? codebase (an eval scenario citing "ADR 0007" finds a real-but-unrelated 0007).
+//? They are also gitignored here, so on a clean CI checkout they may not exist
+//? at all and the bundle must not depend on them. The CONVENTIONS still ship:
+//? every protocol, ARCHITECTURE_* deep-dive and findings/README.md is copied.
+//? Mirrors FRAMEWORK_OWN_RECORDS in src/index.ts — keep both in step.
+const FRAMEWORK_OWN_RECORDS = [
+  'AI_QUICK_INDEX.md',
+  'AI_CAPABILITIES.md',
+  'AI_PROJECT_INDEX.md',
+  'AI_DECISIONS_INDEX.md',
+  'AI_LESSONS_INDEX.md',
+  'AI_PRODUCT_OVERVIEW.md',
+  'ai-graph.json',
+  'ai-product',
+  'decisions',
+  'lessons',
+];
+
+let stripped = 0;
+for (const entry of FRAMEWORK_OWN_RECORDS) {
+  const target = path.join(OUT_DIR, 'docs', entry);
+  if (!fs.existsSync(target)) continue;
+  fs.rmSync(target, { recursive: true, force: true });
+  stripped++;
+}
+
+console.log(`[bundleFrameworkDocs] bundled ${String(copied)}/${String(ENTRIES.length)} doc source(s) into framework-docs/ (stripped ${String(stripped)} framework-own record artifact(s))`);

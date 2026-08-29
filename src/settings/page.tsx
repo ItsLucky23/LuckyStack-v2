@@ -1,3 +1,5 @@
+//? intent: Account self-service — change your own credentials, theme, or delete the account.
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {

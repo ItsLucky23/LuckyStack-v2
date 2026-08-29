@@ -4,8 +4,12 @@
 > AI (and you): kept current when features land. On a freshly-scaffolded project it starts as this stub;
 > the AI fills it in as the app takes shape, and on an existing/uploaded codebase it offers to backfill it
 > from history + a short interview (see `docs/luckystack/DECISION_MEMORY_PROTOCOL.md` §8 + `CLAUDE.md`).
-> Folded into the generated `docs/AI_PRODUCT_OVERVIEW.md` together with each page's `//? intent:` line.
-> No emojis; plain language. Replace everything below.
+> Per-page intent lives as a `//? intent:` line atop each `page.tsx` and surfaces in
+> `docs/AI_PROJECT_INDEX.md`.
+>
+> Per CLAUDE.md rule 15c this file carries **no fact the code already states** — no config values, no file
+> inventories, no feature checklists. Only what the code cannot say: what this is, who it is for, and what
+> a newcomer has to know before they start. No emojis; plain language. Replace everything below.
 
 ## What this is
 

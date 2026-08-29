@@ -41,8 +41,28 @@ CLAUDE.md rule); if it's "don't do X because it silently breaks Y", that's a les
   moeten leren in deze codebase?"). Mirror Decision Memory Protocol §8: offer once, early; act only on the
   user's go-ahead; never fabricate — unconfirmed inferences stay out until confirmed.
 
+## What belongs in a lesson (and what does not)
+
+A lesson records **what failed and why it wasn't obvious** — never how the fix works. See CLAUDE.md rule
+15c: *the code is the truth; a hand-written doc may not repeat it.*
+
+- **Write:** the symptom as it actually presented, why the obvious diagnosis was wrong, and the signal that
+  would have caught it sooner.
+- **Do not write:** a walkthrough of the fix. The fix lives in the code and will be refactored; **the
+  pitfall outlives the fix**, and a stale fix-description next to a live pitfall is worse than no lesson.
+- Point at file:line rather than pasting code — weeks later the paste is wrong and the pointer still works.
+
+## Numbering — a number is an IDENTITY
+
+Same rule as ADRs, same guard: **never reuse a number, never shift one.** On a collision the *unmerged*
+side moves to the next free number; published numbers stay put. Distinct slugs mean git merges a collision
+as two clean ADDITIONS with no signal, and renumbering afterwards silently repoints every reference written
+under the old scheme. `npm run ai:check-ids` blocks the collision. Full reasoning: Decision Memory Protocol
+§10.
+
 ## File format
 
-Frontmatter: `name`, `title`, `severity` (`low|medium|high|critical`), `area` (a path or subsystem),
-`date` (absolute), `tags` (inline array). Body sections: `## What happened`, `## Root cause`, `## How to
-avoid` (the takeaway the index surfaces). See `docs/lessons/0000-template.md`.
+Frontmatter: `name` (must equal the filename slug — `ai:check-ids` enforces it), `title`, `severity`
+(`low|medium|high|critical`), `area` (a path or subsystem), `date` (absolute), `tags` (inline array). Body
+sections: `## What happened`, `## Root cause`, `## How to avoid` (the takeaway the index surfaces). See
+`docs/lessons/0000-template.md`.

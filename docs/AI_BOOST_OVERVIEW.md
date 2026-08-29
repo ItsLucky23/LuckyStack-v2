@@ -21,10 +21,12 @@ This is a *map*, not the docs themselves. Follow the links to the artifact you a
 | Doc-staleness nudge | `scripts/checkDocStaleness.mjs` (`npm run ai:doc-staleness`) | Reports when a hand-written doc (one with an `<!-- @covers … -->` marker) falls behind its code (report-only) |
 | Code→ADR reverse link | `//? @adr NNNN` tags → `decision_for_file` | From a line of code back to the decision that governs it, so a deliberate construct isn't undone blindly |
 | Eval harness | `eval/` (`npm run ai:eval`) | Deterministic with/without measurement of whether the artifacts improve AI output — the gate ADR 0003 requires before RAG |
-| Product / intent layer | `docs/PRODUCT.md` + `docs/AI_PRODUCT_OVERVIEW.md` (`npm run ai:product`) | Plain-language "what the app + each page is FOR" (intent), distinct from the structural "what exists" |
+| Product / intent layer | `docs/PRODUCT.md` (hand-written) + `//? intent:` atop each `page.tsx` (surfaced in `AI_PROJECT_INDEX.md`) | Plain-language "what the app + each page is FOR" (intent), distinct from the structural "what exists" |
+| Record-id guard | `scripts/checkRecordIds.mjs` (`npm run ai:check-ids`) | **Blocking.** Duplicate/dangling ADR + lesson numbers, filename/frontmatter mismatch, `@adr` backrefs — a number is an identity, never reused or shifted |
+| Artifact refresh | `scripts/aiRefresh.mjs` (`npm run ai:refresh`) | Rebuilds every generated artifact in parallel (~4s). The artifacts are gitignored — a local cache, so there is nothing committed to drift |
 | Invariant linter | `scripts/lintInvariants.mjs` (`npm run ai:lint`) | Diff-time enforcement of the machine-checkable contract (no as-any, arbitrary colors, untranslated JSX, doc-coverage) |
 | Dependency graph | `docs/ai-graph.json` (`npm run ai:graph`) | File/import graph: transitive blast-radius (change-impact) + god-nodes |
-| Project MCP server | `@luckystack/mcp` (`.mcp.json` entry, runs via `npx`) | Exposes the committed artifacts above to Claude Code as queryable tools (blast_radius, who_imports, who_calls, god_nodes, graph_status, list/get_decision, decision_for_file, find_route, get_capability, find_lesson/get_lesson) |
+| Project MCP server | `@luckystack/mcp` (`.mcp.json` entry, runs via `npx`) | Exposes the generated artifacts above to Claude Code as queryable tools (blast_radius, who_imports, who_calls, god_nodes, graph_status, list/get_decision, decision_for_file, find_route, get_capability, find_lesson/get_lesson) |
 | Per-package contracts | `node_modules/@luckystack/*/CLAUDE.md` | Function INDEX + when-to-use guidance per installed framework package |
 | Architecture deep-dives | `docs/ARCHITECTURE_*.md` | Stable per-topic contracts for API, auth, sessions, sockets, sync, routing, packaging, deployment, extension points, and testing |
 | AI behavior contract | `CLAUDE.md` (repo root) | Always-on rules + inherited patterns (component table, color tokens, provider hierarchy, JSX micro-conventions) |
@@ -41,25 +43,44 @@ This is a *map*, not the docs themselves. Follow the links to the artifact you a
 ## The regen commands every AI session should know
 
 ```sh
+npm run ai:refresh           # ALL of the generators below, in parallel — the one you normally want
 npm run ai:index             # framework surfaces              → docs/AI_QUICK_INDEX.md
 npm run ai:capabilities      # installed packages + exports    → docs/AI_CAPABILITIES.md
 npm run ai:project-index     # consumer project structure      → docs/AI_PROJECT_INDEX.md
 npm run ai:decisions         # docs/decisions/ ADRs            → docs/AI_DECISIONS_INDEX.md
-npm run ai:lessons           # docs/lessons/ pitfalls           → docs/AI_LESSONS_INDEX.md
+npm run ai:lessons           # docs/lessons/ pitfalls          → docs/AI_LESSONS_INDEX.md
 npm run ai:product           # app + page intent               → docs/AI_PRODUCT_OVERVIEW.md
 npm run ai:graph             # file/import + symbol graph      → docs/ai-graph.json
-npm run ai:lint              # invariant check
+npm run ai:check-ids         # BLOCKING: ADR/lesson number identity (-- --backrefs for @adr tags)
+npm run ai:lint              # invariant check (report-only)
 npm run ai:doc-staleness     # report-only @covers check
 npm run ai:eval              # context-value measurement
 ```
 
-The generators are autonomous per root `CLAUDE.md` rule 8 (no permission prompt). `.githooks/pre-commit` regenerates all committed AI snapshots and runs the invariant checks on every commit as a safety net, but AI agents should refresh relevant artifacts in-session after changes so subsequent work in the same session sees the new state. Decisions are captured automatically by the AI during sessions (no slash command) — see `docs/DECISION_MEMORY_PROTOCOL.md`.
+The individual generators behind `ai:refresh` — reach for one only when you want just that artifact:
+
+```sh
+npm run ai:index             # framework surfaces              → docs/AI_QUICK_INDEX.md
+npm run ai:capabilities      # installed packages + exports    → docs/AI_CAPABILITIES.md
+npm run ai:project-index     # project structure + page intent → docs/AI_PROJECT_INDEX.md
+npm run ai:decisions         # docs/decisions/ ADRs            → docs/AI_DECISIONS_INDEX.md
+npm run ai:lessons           # docs/lessons/ pitfalls          → docs/AI_LESSONS_INDEX.md
+npm run ai:product           # app + page intent               → docs/AI_PRODUCT_OVERVIEW.md
+npm run ai:graph             # file/import + symbol graph      → docs/ai-graph.json
+```
+
+**These outputs are gitignored.** They are derived from the code, so a committed copy is a second answer
+that drifts — and with nothing in git there is nothing to drift from. `postinstall` runs
+`ai:refresh --if-missing`, so a fresh clone and CI still get working MCP lookups. The pre-commit hook runs
+**checks only** and writes nothing to your tree.
+
+The generators are autonomous per root `CLAUDE.md` rule 8 (no permission prompt). `.githooks/pre-commit` runs the record-id guard plus the report-only checks and writes nothing to your tree, so refreshing an artifact is the session's job: run `ai:refresh` at the feature boundary, before you rely on a lookup. Decisions are captured automatically by the AI during sessions (no slash command) — see `docs/DECISION_MEMORY_PROTOCOL.md`.
 
 ---
 
 ## Per-category detail
 
-### Auto-generated snapshots (deterministic, all committed)
+### Auto-generated snapshots (deterministic, all gitignored)
 
 `AI_QUICK_INDEX.md` covers the framework itself: root CLAUDE.md H2 sections, every `@luckystack/*` package's `CLAUDE.md` function INDEX, every `ARCHITECTURE_*.md`'s first-line summary, slash commands, and skills. Regen via `npm run ai:index`.
 
@@ -132,8 +153,8 @@ The devkit type-map emitter (`npm run generateArtifacts`) walks every `_api/` an
 
 The auto-generated indexes are deterministic markdown — they cover the vast majority of projects. Climb a rung only when the cheaper one stops fitting:
 
-1. **Default — the committed indexes + decision log (`AI_QUICK_INDEX` / `AI_CAPABILITIES` / `AI_PROJECT_INDEX` / `AI_DECISIONS_INDEX` / `AI_LESSONS_INDEX`).** Sufficient for most apps. Zero setup, regenerated on every commit, always in context.
-2. **Structural queries → the native dependency graph (`docs/ai-graph.json`) + `@luckystack/mcp`.** When the project sprawls and the AI needs transitive "what depends on this / blast-radius / god-nodes" rather than a flat inventory, `npm run ai:graph` emits a deterministic committed graph and the MCP server exposes `blast_radius` / `who_imports` / `who_calls` / `god_nodes` (plus decision/route/lesson lookups) as tools — no full-file reads. This is **native and shipped**: file/import-level (ADR 0004) plus symbol-level call edges via the TypeScript compiler (ADR 0002 + 0006). Built in TypeScript on `@luckystack/devkit`'s `ts.Program` — deliberately not the external Python graphify tool (ADR 0002 records that rejection).
+1. **Default — the generated indexes + decision log (`AI_QUICK_INDEX` / `AI_CAPABILITIES` / `AI_PROJECT_INDEX` / `AI_DECISIONS_INDEX` / `AI_LESSONS_INDEX`).** Sufficient for most apps. Zero setup, rebuilt by `ai:refresh`, queried through the MCP tools rather than read whole.
+2. **Structural queries → the native dependency graph (`docs/ai-graph.json`) + `@luckystack/mcp`.** When the project sprawls and the AI needs transitive "what depends on this / blast-radius / god-nodes" rather than a flat inventory, `npm run ai:graph` emits a deterministic graph and the MCP server exposes `blast_radius` / `who_imports` / `who_calls` / `god_nodes` (plus decision/route/lesson lookups) as tools — no full-file reads. This is **native and shipped**: file/import-level (ADR 0004) plus symbol-level call edges via the TypeScript compiler (ADR 0002 + 0006). Built in TypeScript on `@luckystack/devkit`'s `ts.Program` — deliberately not the external Python graphify tool (ADR 0002 records that rejection).
 3. **Escalate → a vector/RAG layer (optional, the last rung — ADR 0003).** Only when natural-language retrieval over a large corpus (docs, prior decisions, large data models) beats structured lookup — e.g. "find everywhere we handle refunds" across hundreds of files. It needs an external embeddings model/service and adds non-deterministic indexing plus per-development cost, so it stays gated: build it only after measuring that grep + the graph + the decision log fall short.
 
 > Rule of thumb: structured questions (routes, exports, deps, "what depends on X") → indexes + graph + the MCP server; fuzzy semantic questions over a big corpus → RAG (last rung). Don't add a vector store to dodge a stale index — regenerate the index.

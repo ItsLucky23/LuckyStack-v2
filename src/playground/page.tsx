@@ -1,3 +1,4 @@
+//? intent: Living reference — every framework capability exercised on one page, for developing and demoing LuckyStack itself.
 /* eslint-disable react/jsx-no-literals, luckystack/no-raw-try-catch, luckystack/no-raw-fetch-in-src --
    In-repo dev playground for exercising the framework's own core features. It
    uses raw fetch + try/catch deliberately to demonstrate fallback patterns and

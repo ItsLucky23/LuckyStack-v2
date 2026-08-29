@@ -29,7 +29,12 @@ const REFERENCE_PKG = path.join(ROOT, 'packages', 'core', 'package.json');
 const LEVELS = new Set(['patch', 'minor', 'major']);
 
 const args = process.argv.slice(2);
-const dryRun = args.includes('--dry-run');
+//? `npm run bump minor -- --dry-run` does NOT always reach us: `dry-run` is a
+//? real npm config key, so npm consumes the flag and exports it as
+//? `npm_config_dry_run` instead of forwarding it. Reading both means the
+//? documented invocation cannot silently perform a REAL bump — which is exactly
+//? what it did once, writing 0.10.0 over a release that was meant to be 0.9.0.
+const dryRun = args.includes('--dry-run') || process.env.npm_config_dry_run === 'true';
 const level = args.find((a) => !a.startsWith('-'));
 
 if (!level || !LEVELS.has(level)) {

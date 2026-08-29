@@ -78,6 +78,8 @@ const META = {
   'ai:decisions': { desc: 'Regenerate docs/AI_DECISIONS_INDEX.md from docs/decisions/ ADRs.', example: 'npm run ai:decisions' },
   'ai:lessons': { desc: 'Regenerate docs/AI_LESSONS_INDEX.md from docs/lessons/ pitfalls.', example: 'npm run ai:lessons' },
   'ai:product': { desc: 'Regenerate docs/AI_PRODUCT_OVERVIEW.md (intent layer).', example: 'npm run ai:product' },
+  'ai:refresh': { desc: 'Rebuild every AI-context artifact (gitignored local cache). Add --if-missing to build only what is absent.', example: 'npm run ai:refresh' },
+  'ai:check-ids': { desc: 'Guard ADR/lesson number identity (duplicates, dangling relates). --backrefs also checks @adr tags in source.', example: 'npm run ai:check-ids -- --backrefs' },
   'ai:graph': { desc: 'Regenerate docs/ai-graph.json (dependency + call graph).', example: 'npm run ai:graph' },
   'ai:lint': { desc: 'Run the CLAUDE.md invariant linter (no as-any / arbitrary colors / untranslated JSX).', example: 'npm run ai:lint' },
 
@@ -101,7 +103,7 @@ const GROUPS = [
   ['Lint', ['lint', 'lint:client', 'lint:server', 'lint:all', 'lint:packages']],
   ['Versioning & publish', ['bump', 'publish:packages', 'publish:dry']],
   ['Database (Prisma)', ['prisma:generate', 'prisma:db:push']],
-  ['AI indexes', ['ai:capabilities', 'ai:project-index', 'ai:decisions', 'ai:lessons', 'ai:product', 'ai:graph', 'ai:lint']],
+  ['AI indexes', ['ai:refresh', 'ai:capabilities', 'ai:project-index', 'ai:decisions', 'ai:lessons', 'ai:product', 'ai:graph', 'ai:lint', 'ai:check-ids']],
   ['Scaffolding', ['scaffold:test', 'scaffold:page']],
   ['Bun (experimental)', ['bun:check', 'bun:server', 'bun:prod']],
   ['Help', ['help']],

@@ -1,3 +1,4 @@
+//? intent: Front door — decides where an arriving visitor belongs, signed in or not.
 //? Root route (`/`). Sends visitors to the app's main surface — the dashboard
 //? when signed in, the login page otherwise. This is also where OAuth logins land
 //? after the callback redirects to the public origin; without it, `/` would fall

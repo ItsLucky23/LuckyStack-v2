@@ -299,8 +299,10 @@ interface ScaffoldChoices {
   /**
    * Copy LuckyStack's AI dev-context into the project (root `CLAUDE.md`, the
    * `docs/luckystack/` deep-dives, `skills/`, `.claude/commands/`, the
-   * `branch-logs/` protocol) AND install a pre-commit git hook that keeps the
-   * AI snapshot files fresh. Off = a clean project with no AI tooling.
+   * `branch-logs/` protocol) AND install a pre-commit git hook that CHECKS the
+   * record layers (it writes nothing — the generated artifacts are gitignored
+   * and rebuilt by `npm run ai:refresh` / `postinstall`). Off = a clean project
+   * with no AI tooling.
    */
   aiInstructions: boolean;
   /**
@@ -463,7 +465,7 @@ const runPromptsFallback = async (
     if (need('aiInstructions')) {
       answers.aiInstructions = (await askYesNo(
         rl,
-        'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, auto-index git hook)?',
+        'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, record-check git hook)?',
         true,
       )) ? 'Yes' : 'No';
     }
@@ -1004,10 +1006,12 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
       description: 'CLAUDE.md + docs + git hook + the @luckystack/mcp graph server for AI agents.',
       details: [
         'Copies LuckyStack\'s AI dev-context into the project: the root CLAUDE.md,',
-        'the docs/luckystack deep-dives, skills, and a pre-commit git hook that keeps',
-        'the AI index/graph fresh. Also registers @luckystack/mcp in .mcp.json so AI',
-        'agents can query your dependency graph (blast_radius / who_imports). No',
-        'app-runtime weight — pure dev tooling.',
+        'the docs/luckystack deep-dives, skills, and a pre-commit hook that checks',
+        'ADR/lesson numbering + CLAUDE.md invariants (checks only, writes nothing).',
+        'The indexes + dependency graph are a gitignored local cache, rebuilt by',
+        '`npm run ai:refresh` and by postinstall. Also registers @luckystack/mcp in',
+        '.mcp.json so AI agents can query the graph (blast_radius / who_imports).',
+        'No app-runtime weight — pure dev tooling.',
       ].join('\n'),
       options: ['Yes', 'No'], defaultValue: 'Yes',
     },
@@ -1617,47 +1621,43 @@ const runPrismaGenerate = (cwd: string): void => {
   }
 };
 
-//? Pre-commit hook that regenerates the consumer's AI snapshot files
-//? (docs/AI_CAPABILITIES.md + docs/AI_PROJECT_INDEX.md + docs/AI_DECISIONS_INDEX.md
-//? + docs/AI_LESSONS_INDEX.md + docs/AI_PRODUCT_OVERVIEW.md + docs/ai-graph.json)
-//? and stages them, so they never drift. Derived from the
-//? framework repo's own hook; extend here when new AI index scripts are added. Wired via a
-//? `prepare` script setting `core.hooksPath` at install time (no-op when the
-//? project isn't a git repo yet — the hook activates after `git init`).
+//? Pre-commit hook installed into the consumer project: pure-Node CHECKS only,
+//? no generators and no `git add`.
+//?
+//? It used to regenerate six artifacts and stage them. That made every commit
+//? slow, and it made the commit UNTRUE — the generators read the whole working
+//? tree, not the staging area, so a commit could carry an index derived from
+//? code that wasn't in it. The artifacts are gitignored now (see the template's
+//? .gitignore) and rebuilt by `npm run ai:refresh` / `postinstall`, so there is
+//? nothing left to keep in sync and this hook never writes to the tree.
+//?
+//? Mirrors the framework repo's own .githooks/pre-commit, minus its AGENTS.md
+//? refresh (`ai:agents-md` is framework-only) — extend both together.
+//? Wired via a `prepare` script setting `core.hooksPath` at install time (no-op
+//? when the project isn't a git repo yet — the hook activates after `git init`).
 const AI_INDEX_HOOK = `#!/bin/sh
-#? Auto-installed by create-luckystack-app. Regenerates LuckyStack's AI snapshot
-#? files so they stay in sync with this commit, then stages them. The generators
-#? are deterministic (no timestamps), so a no-op commit leaves them unchanged.
-if ! command -v npm >/dev/null 2>&1; then
-  echo "[pre-commit] npm not on PATH — skipping AI snapshot regeneration."
+#? Auto-installed by create-luckystack-app. Checks only — writes nothing.
+if ! command -v node >/dev/null 2>&1; then
+  echo "[pre-commit] node not on PATH — skipping AI checks."
   exit 0
 fi
 #? Skip gracefully before the first \`npm install\` so the very first commit on
-#? a fresh scaffold isn't hard-blocked. \`set -e\` is armed below, after the
-#? guards, so failures in the generators DO abort the commit.
+#? a fresh scaffold isn't hard-blocked.
 if [ ! -d node_modules ]; then
-  echo "[pre-commit] node_modules not found — skipping AI snapshot regeneration (run npm install first)."
+  echo "[pre-commit] node_modules not found — skipping AI checks (run npm install first)."
   exit 0
 fi
 set -e
+#? Blocking: a duplicate or dangling ADR/lesson number is an identity collision.
+#? Left alone it gets "fixed" by renumbering, and every reference written under
+#? the old scheme then silently points at a real but WRONG record.
+echo "[pre-commit] Checking record-id identity (ADRs + lessons)..."
+node scripts/checkRecordIds.mjs
+#? Report-only by default; rules opt into blocking via luckystack.invariants.json.
 echo "[pre-commit] Checking CLAUDE.md invariants on staged changes..."
-npm run ai:lint --silent
-echo "[pre-commit] Regenerating docs/AI_CAPABILITIES.md..."
-npm run ai:capabilities --silent
-echo "[pre-commit] Regenerating docs/AI_PROJECT_INDEX.md..."
-npm run ai:project-index --silent
-echo "[pre-commit] Regenerating docs/AI_DECISIONS_INDEX.md..."
-npm run ai:decisions --silent
-echo "[pre-commit] Regenerating docs/AI_LESSONS_INDEX.md..."
-npm run ai:lessons --silent
-echo "[pre-commit] Regenerating docs/AI_PRODUCT_OVERVIEW.md..."
-npm run ai:product --silent
-echo "[pre-commit] Regenerating docs/ai-graph.json..."
-npm run ai:graph --silent
+node scripts/lintInvariants.mjs
 echo "[pre-commit] Checking hand-written doc staleness (report-only)..."
-npm run ai:doc-staleness --silent || true
-git add docs/AI_CAPABILITIES.md docs/AI_PROJECT_INDEX.md docs/AI_DECISIONS_INDEX.md docs/AI_LESSONS_INDEX.md docs/AI_PRODUCT_OVERVIEW.md docs/ai-graph.json
-git add docs/ai-product 2>/dev/null || true
+node scripts/checkDocStaleness.mjs || true
 `;
 
 const installAiIndexHook = (targetDir: string): void => {
@@ -3405,6 +3405,32 @@ const buildTemplateVars = (
   };
 };
 
+//? The framework's OWN generated artifacts + record layers. They describe the
+//? FRAMEWORK repo, so in a consumer project they are a second, authoritative-
+//? looking answer next to the project's own identically-named files — and every
+//? number in them (`ADR 0007`) resolves to a decision the project never made.
+//? The CONVENTIONS ship (protocols, ARCHITECTURE_*, findings/README.md); the
+//? framework's instances of them do not.
+const FRAMEWORK_OWN_RECORDS = [
+  'AI_QUICK_INDEX.md',
+  'AI_CAPABILITIES.md',
+  'AI_PROJECT_INDEX.md',
+  'AI_DECISIONS_INDEX.md',
+  'AI_LESSONS_INDEX.md',
+  'AI_PRODUCT_OVERVIEW.md',
+  'ai-graph.json',
+  'ai-product',
+  'decisions',
+  'lessons',
+];
+
+const stripFrameworkOwnRecords = (docsDir: string): void => {
+  if (!fs.existsSync(docsDir)) return;
+  for (const entry of FRAMEWORK_OWN_RECORDS) {
+    fs.rmSync(path.join(docsDir, entry), { recursive: true, force: true });
+  }
+};
+
 //? Copy the framework AI docs (CLAUDE.md, docs/, skills/, .claude/commands/,
 //? branch-logs/README.md) into the scaffold, install the pre-commit AI-index hook,
 //? and wire the @luckystack/mcp server into .mcp.json. No-op when `aiInstructions`
@@ -3493,6 +3519,16 @@ const copyAiDocs = (
       }
     }
   }
+
+  //? Same reasoning, one level up: the framework's own GENERATED artifacts and
+  //? its own record layers describe the FRAMEWORK repo, not this project — and
+  //? they land next to the identically-named files the project generates for
+  //? itself. That is exactly the failure mode the docs rules exist to prevent: a
+  //? second, authoritative-looking answer to a question the project already
+  //? answers. (It is also how an eval scenario ends up citing "ADR 0007" and
+  //? finding a real-but-unrelated 0007 in docs/luckystack/decisions/.)
+  //? The CONVENTIONS stay — every protocol and ARCHITECTURE_* doc is copied.
+  stripFrameworkOwnRecords(path.join(targetDir, 'docs', 'luckystack'));
 
   installAiIndexHook(targetDir);
 
@@ -3662,8 +3698,8 @@ const main = async (): Promise<void> => {
 
     //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
     //? the framework's AI docs so the consumer's AI agents inherit full context,
-    //? and install a pre-commit hook that keeps the AI snapshot files fresh. When
-    //? disabled the project ships clean — no CLAUDE.md, no docs/luckystack, no hook.
+    //? and install a pre-commit hook that CHECKS the record layers (never writes).
+    //? When disabled the project ships clean — no CLAUDE.md, no docs/luckystack, no hook.
     if (choices.aiInstructions) {
       copyAiDocs(targetDir, vars, luckystackVersion);
       //? Register the @luckystack/mcp graph server in .mcp.json so AI agents can
@@ -3716,14 +3752,27 @@ const main = async (): Promise<void> => {
 //? installed `create-luckystack-app` bin). Importing it as a module — e.g. the
 //? unit tests that exercise the pure helpers — must NOT trigger the
 //? filesystem copy / `npm install` / prompts side-effects of `main()`.
-const isCliEntry = (): boolean => {
+//?
+//? Both sides MUST be realpath-resolved. On macOS/Linux npm installs a bin as a
+//? SYMLINK (`node_modules/.bin/create-luckystack-app` → `../create-luckystack-app/
+//? dist/index.js`); node then reports the symlink in `process.argv[1]` but
+//? resolves `import.meta.url` (hence `__filename`) to the link TARGET. Comparing
+//? the two raw paths is therefore always false there, and the CLI exits 0 having
+//? printed nothing and scaffolded nothing — indistinguishable from success.
+//? Windows has no symlink (npm writes a `.cmd` shim that passes the real path),
+//? which is why this only ever failed off-Windows.
+const realPath = (target: string): string => {
+  try {
+    return fs.realpathSync(path.resolve(target));
+  } catch {
+    return path.resolve(target);
+  }
+};
+
+export const isCliEntry = (): boolean => {
   const entry = process.argv[1];
   if (!entry) return false;
-  try {
-    return path.resolve(entry) === path.resolve(__filename);
-  } catch {
-    return false;
-  }
+  return realPath(entry) === realPath(__filename);
 };
 
 if (isCliEntry()) {

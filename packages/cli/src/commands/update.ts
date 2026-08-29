@@ -196,7 +196,7 @@ const ignorePatternToRegExp = (pattern: string): RegExp => {
       source += '[^/]*';
       continue;
     }
-    source += char.replace(/[.+?^${}()|[\]\\]/g, String.raw`\$&`);
+    source += char.replaceAll(/[.+?^${}()|[\]\\]/g, String.raw`\$&`);
   }
   //? A directory pattern only matches things BENEATH it; a file pattern
   //? matches the file itself and, if it names a folder, its contents too.
@@ -380,18 +380,29 @@ export const applyUpdate = (
     counts[entry.action] += 1;
     const freshAbsolute = path.join(freshRoot, entry.path);
     const localAbsolute = path.join(project.root, entry.path);
-    if (entry.action === 'add' || entry.action === 'overwrite') {
-      fs.mkdirSync(path.dirname(localAbsolute), { recursive: true });
-      fs.copyFileSync(freshAbsolute, localAbsolute);
-      written.push(entry);
-      if (entry.action === 'add') added.push(entry.path);
-      else overwritten.push(entry.path);
-    } else if (entry.action === 'sidecar') {
-      fs.copyFileSync(freshAbsolute, `${localAbsolute}.new`);
-      sidecars.push(entry.path);
-    } else if (entry.action === 'ignored') {
-      //? Nothing on disk — not the file, not a sidecar. That IS the opt-out.
-      ignored.push(entry.path);
+    switch (entry.action) {
+      case 'add':
+      case 'overwrite': {
+        fs.mkdirSync(path.dirname(localAbsolute), { recursive: true });
+        fs.copyFileSync(freshAbsolute, localAbsolute);
+        written.push(entry);
+        if (entry.action === 'add') added.push(entry.path);
+        else overwritten.push(entry.path);
+        break;
+      }
+      case 'sidecar': {
+        fs.copyFileSync(freshAbsolute, `${localAbsolute}.new`);
+        sidecars.push(entry.path);
+        break;
+      }
+      case 'ignored': {
+        //? Nothing on disk — not the file, not a sidecar. That IS the opt-out.
+        ignored.push(entry.path);
+        break;
+      }
+      case 'unchanged': {
+        break;
+      }
     }
   }
 
