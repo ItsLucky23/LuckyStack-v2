@@ -38,6 +38,8 @@ const syncEntry = (overrides: Partial<SyncTypeEntry> = {}): SyncTypeEntry => ({
   serverStream: 'never',
   clientStream: 'never',
   version: 'v1',
+  hasServer: true,
+  hasClient: true,
   ...overrides,
 });
 
@@ -188,5 +190,88 @@ describe('apiTypeDiagnostics — a THROWN extraction is a first-class reason', (
     const apis = new Map([['demo', new Map([['thing@v1', apiEntry()]])]]);
     const { diagnosticsData } = build({ apis });
     expect(diagnosticsData.fallbacks.filter((f) => f.field === 'output')).toEqual([]);
+  });
+});
+
+//? A sync `_client` handler is OPTIONAL by contract — it exists only when
+//? per-client logic is needed (ARCHITECTURE_SYNC.md). The generator defaults a
+//? missing side's output to `{ }`, which is byte-identical to the text a PRESENT
+//? side produces when it declares no shape, so the emitter reported every
+//? deliberately server-only route as `default-fallback`. In a real consumer that
+//? was 44 of 46 reported fallbacks — noise that pushes people toward writing
+//? no-op `_client` handlers, which the architecture avoids precisely because
+//? they cost one execution PER RECIPIENT.
+describe('apiTypeDiagnostics — a sync side that is absent by design is not a fallback', () => {
+  it('server-only sync: the missing clientOutput is not reported', () => {
+    const syncs = new Map([['demo', new Map([['tick@v1', syncEntry({
+      hasClient: false,
+      clientOutput: '{ }',
+    })]])]]);
+    const { diagnosticsData } = build({ syncs });
+
+    expect(diagnosticsData.fallbacks).toEqual([]);
+    expect(diagnosticsData.fallbackCount).toBe(0);
+  });
+
+  it('client-only sync: the missing serverOutput is not reported', () => {
+    const syncs = new Map([['demo', new Map([['tick@v1', syncEntry({
+      hasServer: false,
+      serverOutput: '{ }',
+    })]])]]);
+    const { diagnosticsData } = build({ syncs });
+
+    expect(diagnosticsData.fallbacks).toEqual([]);
+    expect(diagnosticsData.fallbackCount).toBe(0);
+  });
+
+  //? The exception is per-FIELD, not per-route: a server-only route still owes a
+  //? typed serverOutput, and the side it DOES have stays under the normal rules.
+  it('a PRESENT side that degrades to a default is still reported', () => {
+    const syncs = new Map([['demo', new Map([['tick@v1', syncEntry({
+      hasClient: false,
+      clientOutput: '{ }',
+      serverOutput: '{ status: string }',
+    })]])]]);
+    const { diagnosticsData } = build({ syncs });
+
+    expect(diagnosticsData.fallbacks).toEqual([
+      expect.objectContaining({ field: 'serverOutput', reason: 'default-fallback' }),
+    ]);
+  });
+
+  //? PINS THE ORDER. `findExtractionFailure` runs BEFORE the exception, so a real
+  //? extraction failure can never be swallowed by the absence flag — without that
+  //? ordering this fix would re-open the DEVKIT-1 blind spot it sits next to.
+  it('a recorded extraction failure wins over the absence flag', () => {
+    recordExtractionOutcome({ filePath: SYNC_FILE, kind: 'sync', field: 'clientOutput', error: new Error('kaboom') });
+
+    const syncs = new Map([['demo', new Map([['tick@v1', syncEntry({
+      hasClient: false,
+      clientOutput: '{ }',
+    })]])]]);
+    const { diagnosticsData } = build({ syncs });
+
+    expect(diagnosticsData.fallbacks).toEqual([
+      expect.objectContaining({ field: 'clientOutput', reason: 'extraction-error', detail: 'kaboom' }),
+    ]);
+  });
+
+  it('a fully typed sync pair produces no diagnostics', () => {
+    const syncs = new Map([['demo', new Map([['tick@v1', syncEntry()]])]]);
+    const { diagnosticsData } = build({ syncs });
+
+    expect(diagnosticsData.fallbacks).toEqual([]);
+  });
+
+  //? The suppression is scoped to sync sides only — an API route has no optional
+  //? half, so its defaults keep reporting even in the same emitter run.
+  it('API defaults keep reporting alongside a suppressed sync side', () => {
+    const apis = new Map([['demo', new Map([['thing@v1', apiEntry({ input: '{ }' })]])]]);
+    const syncs = new Map([['demo', new Map([['tick@v1', syncEntry({ hasClient: false, clientOutput: '{ }' })]])]]);
+    const { diagnosticsData } = build({ apis, syncs });
+
+    expect(diagnosticsData.fallbacks).toEqual([
+      expect.objectContaining({ kind: 'api', field: 'input', reason: 'default-fallback' }),
+    ]);
   });
 });

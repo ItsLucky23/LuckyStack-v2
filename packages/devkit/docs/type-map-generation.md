@@ -110,6 +110,10 @@ Per-file extractor map (`typeMap/extractors.ts`):
   string.
 - Extraction throws for API `stream` and sync `serverStream` / `clientStream` are
   persisted as `extraction-error` diagnostics just like input/output failures.
+- A sync side that does not exist on disk is not a diagnostic. Its default output
+  text is indistinguishable from a present-but-shapeless side, so the entry also
+  carries whether each side was found; only the missing side's own field is
+  suppressed, and only after the throw check has passed.
 
 Two of these are also exported from the package root for use by the dev loader:
 

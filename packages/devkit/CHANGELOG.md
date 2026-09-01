@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A sync route without the optional `_client` handler is no longer reported as
+  degraded type extraction. `apiTypeDiagnostics.generated.json` matched on the
+  fallback TEXT alone, and an absent side produces the same `{ }` as a side that
+  is present but declares no shape — so every deliberately server-only sync
+  landed in `fallbackCount` as a `default-fallback`. In a real project that was
+  44 of 46 reported fallbacks, and the only way to silence them was to add the
+  no-op `_client` handlers `ARCHITECTURE_SYNC.md` tells you not to write (they
+  cost one execution per recipient). The generator now carries which sides were
+  actually found and suppresses only the missing side's own field. A thrown
+  extraction is still checked first and always reported, and a side that IS
+  present keeps falling back exactly as before.
+
 ## [0.8.7] - 2026-08-18
 
 ### Fixed

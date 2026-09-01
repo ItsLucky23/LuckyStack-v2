@@ -71,6 +71,14 @@ export interface SyncTypeEntry {
 	serverStream: string;
 	clientStream: string;
 	version: string;
+	//? Generator-internal PROVENANCE, not part of the emitted type map: which
+	//? sides of the pair actually exist on disk. A sync route's `_client` file is
+	//? optional by contract (`docs/ARCHITECTURE_SYNC.md`), and a side that is
+	//? absent produces the same `{ }` text as a side that is present but declares
+	//? no shape. Without this flag `collectFallbacks` can only see the text, so it
+	//? reported every deliberately server-only route as degraded extraction.
+	hasServer: boolean;
+	hasClient: boolean;
 	meta?: DocsMetaSnapshot;
 }
 
@@ -255,6 +263,16 @@ export interface GeneratedDiagnosticsData {
 //? 3. `{ status: string }` on output — main function has no typed return shape.
 //? 4. `z.any()` in the Zod schema source — zodEmitter hit an unsupported TypeNode.
 //? These are not hard errors but lose type safety on the affected routes.
+//?
+//? Signal 2 has ONE exception: a sync side that does not exist. `_client` is
+//? optional by contract, so its `{ }` is the ABSENCE of a handler, not a lost
+//? shape — nothing degraded and there is nothing to fix. Reporting it pushed
+//? consumers toward writing no-op handlers purely to silence the diagnostic,
+//? which costs a per-recipient execution the architecture deliberately avoids.
+//? The exception is narrow on purpose: it applies only to the field belonging to
+//? the missing side, only to the default TEXT, and NEVER to signal 1 — a thrown
+//? extraction is checked first and always reported, so a real failure can never
+//? hide behind it.
 const collectFallbacks = (
 	typesByPage: Map<string, Map<string, ApiTypeEntry>>,
 	syncTypesByPage: Map<string, Map<string, SyncTypeEntry>>,
@@ -267,6 +285,9 @@ const collectFallbacks = (
 		field: string,
 		value: string,
 		checkZod = false,
+		//? "This field's handler is absent BY DESIGN" — see the exception in the
+		//? block comment above. Only suppresses the default-fallback branch.
+		intentionalDefault = false,
 	): void => {
 		const extractionError = findExtractionFailure(route, kind, field);
 		if (extractionError !== undefined) {
@@ -274,7 +295,9 @@ const collectFallbacks = (
 			return;
 		}
 		if (value === '{ }' || value === '{ status: string }') {
-			entries.push({ route, kind, field, fallback: value, reason: 'default-fallback' });
+			if (!intentionalDefault) {
+				entries.push({ route, kind, field, fallback: value, reason: 'default-fallback' });
+			}
 			return;
 		}
 		//? The generated Zod artifact contains API INPUT schemas only. Running
@@ -301,8 +324,8 @@ const collectFallbacks = (
 			const { name, version } = splitVersionedKey(syncKey);
 			const route = `${pagePath}/${name}@${version}`;
 			flagField(route, 'sync', 'clientInput', entry.clientInput);
-			flagField(route, 'sync', 'serverOutput', entry.serverOutput);
-			flagField(route, 'sync', 'clientOutput', entry.clientOutput);
+			flagField(route, 'sync', 'serverOutput', entry.serverOutput, false, !entry.hasServer);
+			flagField(route, 'sync', 'clientOutput', entry.clientOutput, false, !entry.hasClient);
 			flagField(route, 'sync', 'serverStream', entry.serverStream);
 			flagField(route, 'sync', 'clientStream', entry.clientStream);
 		}

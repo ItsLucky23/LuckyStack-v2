@@ -202,6 +202,8 @@ const collectSyncTypes = (
       serverStream: serverStreamType,
       clientStream: clientStreamType,
       version: syncVersion,
+      hasServer: serverFile !== undefined,
+      hasClient: clientFile !== undefined,
       ...(syncMeta ? { meta: syncMeta } : {}),
     });
   }
