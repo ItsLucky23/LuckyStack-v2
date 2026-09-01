@@ -1389,3 +1389,21 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Verificatie:** `ci` op `03d854f` groen 4/4 (`e2e-scaffold` ✓ 4m05, node 20 ✓ 5m39, node 22 ✓ 7m02, `ai-records` ✓ 8s) · lokale publish-gate 8/8 met `test:unit` **2083/2083** en `audit:production` 0/0/0 · publish-run 33267394325 ✓ 10m20, `✅ published 17 packages` met provenance · **17/17 op npm geverifieerd via directe registry-fetch**. Lockfile-diff bij de bump: 47 regels, uitsluitend versiebumps.
 
 **Files:** alle 17 package-manifests + `package-lock.json`, `packages/create-luckystack-app/CHANGELOG.md`, deze branch-log en `branch-logs/INDEX.md`.
+
+## 2026-09-01 09:40 — devkit: een bewust ontbrekende `_client`-handler is geen fallback meer (v0.9.2 prep)
+
+**User prompt (summary):** git pullen, daarna de handoff verwerken die vraagt om de false-positive sync-fallbacks in `@luckystack/devkit` te fixen en een patchrelease voor te bereiden — niet publiceren.
+
+**Het probleem was niet de telling maar de richting.** `apiTypeDiagnostics.generated.json` matchte op de fallback-TEKST, en de generator zet een sync-zijde die hij niet vindt op `{ }` — precies wat een zijde die er wél is maar geen shape declareert oplevert. Elke route zonder de optionele `_client` telde dus als degraded extraction. Het enige wat die meldingen wegnam was het schrijven van no-op `_client`-handlers, en juist die verbiedt `ARCHITECTURE_SYNC.md` omdat ze één executie per ontvanger kosten. De diagnostic duwde consumenten dus tegen de architectuur in die hij hoort te bewaken. Bij Flexbuddy 44 van de 46 meldingen; in deze repo 5 van de 6 (over 5 server-only playground-syncs).
+
+**De fix draagt provenance in plaats van tekst te herinterpreteren.** `SyncTypeEntry` krijgt `hasServer`/`hasClient` uit de werkelijke bestandsaanwezigheid; `flagField` krijgt een `intentionalDefault`-argument dat alleen het veld van de ontbrekende zijde overslaat. `findExtractionFailure` blijft als eerste staan, dus een echte throw wordt altijd gerapporteerd — met een test die die volgorde vastpint, want zonder die volgorde heropent deze fix precies de DEVKIT-1-blinde vlek waar hij naast ligt.
+
+**Bewust NIET per route onderdrukt.** Een server-only route is nog steeds een typed `serverOutput` verschuldigd. Dat blijkt in deze repo: `playground/throwSync@v1` blijft als enige `default-fallback` staan, wat meteen het bewijs is dat de uitzondering veldscoped is. `fallbackCount` ging van 6 naar 1.
+
+**Keuze voorgelegd, niet zelf gemaakt:** de alternatieve route was een eigen `intentional-default`-reden die wel in het artifact staat maar niet meetelt. User koos volledige onderdrukking — het diagnostics-bestand is een lijst van wat er mís is, en welke zijden bestaan staat al in de sync type map. Vastgelegd als ADR 0057.
+
+**Differentieel bewezen:** met de wiring tijdelijk teruggedraaid vallen 4 van de 6 nieuwe tests om; met de fix erin 16/16 groen in `extractionDiagnostics.test.ts`.
+
+**Verificatie:** `lint` + `lint:packages` exit 0 · `test:unit` **2089/2089 (200 files)** · `build` volledig groen incl. `build:packages` 17/17 · `ai:lint` schoon · `ai:changelog-check` groen · `ai:refresh` 7/7 · dist bevat de bronfix. Bump naar **0.9.2** lockstep over 17 packages, lockfile-diff 47 regels en uitsluitend versiebumps. **Niet gepubliceerd** — wacht op expliciete go.
+
+**Files:** `packages/devkit/src/typeMap/emitterArtifacts.ts`, `packages/devkit/src/typeMapGenerator.ts`, `packages/devkit/src/typeMap/extractionDiagnostics.test.ts`, `packages/devkit/CLAUDE.md`, `packages/devkit/docs/type-map-generation.md`, `packages/devkit/CHANGELOG.md`, `docs/decisions/0057-*.md`, alle 17 package-manifests + `package-lock.json`.
