@@ -1493,3 +1493,13 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Bewust gelaten.** `packages/server` leest de key `__luckystack_data` nog als literal in `apiRoute.ts` — kon `ROUTED_DATA_QUERY_KEY` importeren, maar server viel buiten de door de user gestelde scope. Kandidaat voor een latere opruimsessie. Voor Flexbuddy: bump naar `@luckystack/core` + `@luckystack/test-runner` 0.10.1 (zit op test-runner 0.8.7, dus CHANGELOG-gat 0.8.7 → 0.10.1 lezen), daarna `TEST_ONLY_CUSTOM=1 TEST_FILTER=admin/ai npm run test` → verwacht 57/57.
 
 **Files:** core `src/routedDataQuery.ts` (nieuw), `src/{routedHttpInvocation,index,client}.ts`, `CHANGELOG.md`; test-runner `src/customTests.ts`, `src/customTestsCallApi.test.ts` (nieuw), `docs/contract-tests.md`, `CHANGELOG.md`; 17 package-manifests; `package-lock.json`; `branch-logs/{main,INDEX}.md`.
+
+## 2026-09-03 22:30 — v0.10.1 gepubliceerd
+
+**User prompt (summary):** "je mag het nu publishen".
+
+**Publicatie.** Tag `v0.10.1` op `b71e849`, main + tag gepusht → `publish.yml` run 33800830370: elke stap `success` (lint, lint packages, build, unit, audit, pack dry-run, echte publish met provenance). Registry elke minuut gepold: 0/17 om 22:20, 5/17 om 22:22, 16/17 om 22:26 (`cron` als laatste, propagatie-lag), **17/17 om ~22:28**. Spotcheck op de registry-tarballs: `@luckystack/test-runner` 0.10.1 bevat `bodyless ? buildRoutedGetUrl(path, input ?? {}) : path`, `@luckystack/core` 0.10.1 exporteert `buildRoutedGetUrl`.
+
+**Voor Flexbuddy (DEV-400).** Bump `@luckystack/core` + `@luckystack/test-runner` naar 0.10.1, dan `TEST_ONLY_CUSTOM=1 TEST_FILTER=admin/ai npm run test` tegen een draaiende backend → verwacht custom laag 57/57.
+
+**Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.10.1`.
