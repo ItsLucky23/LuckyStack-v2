@@ -1467,3 +1467,15 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Verificatie (hele tree, beide sessies):** `lint` exit 0 · `build` groen · `test:unit` **2142/2142 (205 files, 1 skipped — bestaand)** · `ai:lint` schoon · `ai:changelog-check` groen · `ai:check-ids --backrefs` 87 records / 36 backrefs. **`package-lock.json` nog op 0.9.2** (`npm install --package-lock-only` is ask-first) en **niet gecommit, niet gepubliceerd** — de user koos eerder "nog niets" en beslist nu opnieuw.
 
 **Files:** `docs/decisions/0058-*.md`, `packages/core/CHANGELOG.md`, `packages/sync/CHANGELOG.md`, `branch-logs/{main,INDEX}.md`. Buiten deze repo: `C:\youcomm\flexbuddy\handoffs\2026-09-03\HANDOFF.md`.
+
+## 2026-09-03 13:55 — v0.10.0 gepubliceerd
+
+**User prompt (summary):** "go met publish".
+
+**Publish-gate, in de volgorde van 0.9.2.** `pack:dry` 17/17 · `publish:dry` 17/17 · `audit:production` **rood**: `fast-uri` 3.1.5 (transitief via `@luckystack/mcp` → `@modelcontextprotocol/sdk` → `ajv`) met vier nieuwe high-advisories (SSRF / host-confusion in URI-normalisatie, GHSA-5jgf-p345-68v8, -f65p-4m7j-42xc, -fph4-wmhf-6fwf, -jqff-g426-hqxp), allemaal gefixt in 3.1.6. De publish-workflow draait dezelfde audit, dus een tag op dat moment was rood geworden. Met go van de user `npm update fast-uri` → 3.1.7, lockfile-only (6 regels), audit weer `critical=0, high=0`, aparte commit `39942d2`. Daarna `e2e:verdaccio` **9/9 ALL GREEN** op de gebumpte packages (zelfde harness als de `e2e-scaffold`-job; `gh` staat niet op deze machine, dus lokaal vooraf gedraaid). Tag `v0.10.0` op `39942d2`, main + tag gepusht.
+
+**Publicatie.** Registry elke minuut gepold: 0/17 om 13:37, **17/17 om 13:52** (~15 min, langer dan de ~10 van 0.9.x). Spotcheck op de tarballs van de registry: `@luckystack/sync` bevat `stageResolveRecipients` en `SYNC_ERROR_CODES`, `@luckystack/core` bevat `resolveSocketAdapterKey`, `getRoomSockets` en de lintregel — die zit gebundeld in `dist/eslint/index.js`, niet als los `rules/`-bestand, wat even leek alsof hij ontbrak.
+
+**Bewust gelaten.** Drie `as unknown as`-casts in testbestanden die `ai:lint` als report-only waarschuwing meldt (`localSocketEnumerationGuard.test.ts:83`, `socketRedisAdapter.test.ts:23/27`): boundary-casts op test-doubles, wel met eslint-disable, nog zonder `// luckystack-allow no-as-any`-marker. Gemeld, niet gefixt.
+
+**Files:** `package-lock.json` (fast-uri), `branch-logs/{main,INDEX}.md`. Tag `v0.10.0`.
